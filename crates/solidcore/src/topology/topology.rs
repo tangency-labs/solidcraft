@@ -1136,4 +1136,183 @@ mod tests {
         assert_eq!(tracker.add_list(), vec![vertex.key]);
         assert!(context.sys_notify_callback().is_none());
     }
+
+    fn topo(kind: i64, k: u64) -> ObjectRef {
+        ObjectRef {
+            type_code: kind,
+            key: ObjectKey(k),
+        }
+    }
+
+    /// The base constructor has no upstream `bSmall` argument — nothing in the port
+    /// sets `m_bIsSmallTopology` — so the predicate is false for every object the API
+    /// can build. A `-> false` mutation is equivalent for that reason; `-> true` is
+    /// not.
+    #[test]
+    fn small_topology_predicate_is_false() {
+        assert!(!Topology::new().is_small_topology());
+    }
+
+    #[test]
+    fn tracker_key_and_brep_accessors() {
+        let t = TrackTopologyChanges::new(Some(BrepId::from_index(3)), 7, false, None);
+        assert_eq!(t.key(), 7);
+        assert_eq!(t.brep(), Some(BrepId::from_index(3)));
+        assert!(!t.last_notify_callback());
+    }
+
+    /// `with_owners` supplies the owner links a geometry walk follows: the event's
+    /// caller is the curve, the recorded change is its owner.
+    #[test]
+    fn change_tracker_uses_owner_metadata() {
+        let curve = topo(crate::curve::curve::p2::LINE_TYPE, 77);
+        let owner = topo(16021, 5);
+        let mut owners = BTreeMap::new();
+        owners.insert(curve.key, Some(owner));
+        let mut cb = TopologyChangeCallback::with_owners(1, owners);
+        cb.execute(NotifyOperation::PostEdit, curve, Some(curve), None, None)
+            .unwrap();
+        assert!(cb.failure().is_none());
+        let lists = cb.lists();
+        assert_eq!(lists.chg_list, vec![owner.key]);
+        assert_eq!(lists.notify_events.len(), 1);
+        let ev = lists.notify_events[0];
+        assert_eq!(ev.operation, NotifyOperation::PostEdit);
+        assert_eq!((ev.caller, ev.data1), (Some(curve), Some(curve)));
+    }
+
+    /// `ChangeOwner` maintains the owner map; other events must not invent entries.
+    #[test]
+    fn change_owner_maintains_owner_metadata() {
+        let mut cb = TopologyChangeCallback::new(1);
+        let curve = topo(crate::curve::curve::p2::LINE_TYPE, 77);
+        let owner = topo(16021, 5);
+        cb.execute(NotifyOperation::ChangeOwner, curve, Some(owner), None, None)
+            .unwrap();
+        cb.execute(NotifyOperation::PostEdit, curve, Some(curve), None, None)
+            .unwrap();
+        assert_eq!(cb.lists().chg_list, vec![owner.key]);
+        // the walk must not consume the owner entry
+        cb.execute(NotifyOperation::PostEdit, curve, Some(curve), None, None)
+            .unwrap();
+        assert_eq!(cb.lists().notify_events.len(), 2);
+        // an unrelated event does not invent metadata for its caller
+        let other_curve = topo(crate::curve::curve::p2::LINE_TYPE, 78);
+        let other_owner = topo(16021, 6);
+        cb.execute(
+            NotifyOperation::RmFromBrep,
+            other_curve,
+            Some(other_owner),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(cb
+            .execute(
+                NotifyOperation::PostEdit,
+                other_curve,
+                Some(other_curve),
+                None,
+                None,
+            )
+            .is_err());
+    }
+
+    /// `Destruction` drops the destroyed object's owner entry; a later walk needs it.
+    #[test]
+    fn destruction_removes_owner_metadata() {
+        let curve = topo(crate::curve::curve::p2::LINE_TYPE, 77);
+        let owner = topo(16021, 5);
+        let mut owners = BTreeMap::new();
+        owners.insert(curve.key, Some(owner));
+        let mut cb = TopologyChangeCallback::with_owners(1, owners);
+        cb.execute(NotifyOperation::Destruction, curve, Some(curve), None, None)
+            .unwrap();
+        assert!(cb
+            .execute(NotifyOperation::PostEdit, curve, Some(curve), None, None)
+            .is_err());
+    }
+
+    /// Every tracked operation maintains the lists and the event history.
+    #[test]
+    fn change_tracker_maintains_lists_and_events() {
+        let mut cb = TopologyChangeCallback::new(1);
+        let face = topo(16002, 1);
+        let e1 = topo(16016, 2);
+        let e2 = topo(16016, 3);
+        let e3 = topo(16016, 4);
+
+        // PostEdit/ChangeGeometry track the caller, not data1.
+        cb.execute(NotifyOperation::PostEdit, face, None, None, None)
+            .unwrap();
+        assert_eq!(cb.lists().rm_list, vec![face.key]);
+        assert_eq!(cb.lists().add_list, vec![face.key]);
+        cb.execute(NotifyOperation::ChangeGeometry, e1, None, None, None)
+            .unwrap();
+        assert_eq!(cb.lists().chg_list, vec![e1.key]);
+        assert_eq!(cb.lists().notify_events.len(), 2);
+
+        // SplitInBrep: remove data1 from add/chg, add data2/data3.
+        cb.execute(NotifyOperation::AddToBrep, e1, Some(e1), None, None)
+            .unwrap();
+        assert!(cb.lists().add_list.contains(&e1.key));
+        cb.execute(
+            NotifyOperation::SplitInBrep,
+            e2,
+            Some(e1),
+            Some(e2),
+            Some(e3),
+        )
+        .unwrap();
+        let lists = cb.lists();
+        assert!(lists.rm_list.contains(&e1.key));
+        assert!(!lists.add_list.contains(&e1.key));
+        assert!(!lists.chg_list.contains(&e1.key));
+        assert!(lists.add_list.contains(&e2.key) && lists.add_list.contains(&e3.key));
+        assert!(lists
+            .notify_events
+            .iter()
+            .any(|ev| ev.operation == NotifyOperation::SplitInBrep && ev.data1 == Some(e1)));
+
+        // TrimNoSplitInBrep: remove from chg, add it back.
+        cb.execute(NotifyOperation::ChangeGeometry, e2, None, None, None)
+            .unwrap();
+        assert!(cb.lists().chg_list.contains(&e2.key));
+        cb.execute(NotifyOperation::TrimNoSplitInBrep, e2, Some(e2), None, None)
+            .unwrap();
+        let lists = cb.lists();
+        assert!(!lists.chg_list.contains(&e2.key));
+        assert!(lists.add_list.contains(&e2.key));
+
+        // Destruction: drop the object from the add and change lists.
+        cb.execute(NotifyOperation::ChangeGeometry, e3, None, None, None)
+            .unwrap();
+        assert!(cb.lists().add_list.contains(&e3.key) && cb.lists().chg_list.contains(&e3.key));
+        cb.execute(NotifyOperation::Destruction, e3, Some(e3), None, None)
+            .unwrap();
+        let lists = cb.lists();
+        assert!(!lists.add_list.contains(&e3.key));
+        assert!(!lists.chg_list.contains(&e3.key));
+    }
+
+    /// The geometry owner walk stops at 64 links; the short chain covered above also
+    /// catches a bound that rejects early.
+    #[test]
+    fn change_tracker_bounds_long_owner_chains() {
+        let start = topo(crate::curve::curve::p2::LINE_TYPE, 1000);
+        let mut owners = BTreeMap::new();
+        for i in 0..70u64 {
+            owners.insert(
+                ObjectKey(1000 + i),
+                Some(topo(crate::curve::curve::p2::LINE_TYPE, 1001 + i)),
+            );
+        }
+        owners.insert(ObjectKey(1070), Some(topo(16021, 2000)));
+        let mut cb = TopologyChangeCallback::with_owners(1, owners);
+        let err = cb
+            .execute(NotifyOperation::PostEdit, start, Some(start), None, None)
+            .unwrap_err();
+        assert!(matches!(err, SolidError::InvalidInput { .. }));
+        assert!(cb.failure().is_some());
+    }
 }
