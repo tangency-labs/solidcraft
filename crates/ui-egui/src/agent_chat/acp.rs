@@ -68,6 +68,36 @@ impl McpBridge {
             "env": [],
         })
     }
+
+    /// The same bridge for an agent inside WSL: the CLI as WSL sees it. It still runs on the
+    /// Windows side (WSL starts Windows programs itself), so the port is the same.
+    pub fn in_wsl(&self) -> McpBridge {
+        McpBridge { cli: wsl_path(&self.cli), port: self.port }
+    }
+}
+
+/// The agent runs inside WSL: its program is `wsl` or `wsl.exe` (any case, with or without a
+/// folder). Such an agent can't use Windows paths, so the session hands it [`wsl_path`]s (#5546).
+pub fn runs_in_wsl(argv: &[String]) -> bool {
+    argv.first().is_some_and(|program| {
+        let name = program.rsplit(['\\', '/']).next().unwrap_or(program);
+        name.eq_ignore_ascii_case("wsl") || name.eq_ignore_ascii_case("wsl.exe")
+    })
+}
+
+/// A Windows drive path as WSL shows it under its default mount root: `C:\Users\u` is
+/// `/mnt/c/Users/u`. Anything else (a UNC share, a path already in that form) is kept.
+pub fn wsl_path(path: &std::path::Path) -> std::path::PathBuf {
+    let text = path.to_string_lossy();
+    let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+    let mut chars = text.chars();
+    match (chars.next(), chars.next(), chars.next()) {
+        (Some(drive), Some(':'), Some('\\' | '/') | None) if drive.is_ascii_alphabetic() => {
+            let rest: String = chars.map(|c| if c == '\\' { '/' } else { c }).collect();
+            format!("/mnt/{}/{rest}", drive.to_ascii_lowercase()).into()
+        }
+        _ => path.to_path_buf(),
+    }
 }
 
 /// What every session is told about where it is. Agents that don't read `_meta` ignore it.
@@ -511,6 +541,32 @@ mod tests {
         assert!(!text.contains("allow-any-path") && !text.contains("TOKEN") && !text.contains("token"), "{text}");
         assert!(p["_meta"]["claudeCode"]["options"]["disallowedTools"].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")));
         assert_eq!(session_new_params(std::path::Path::new("/tmp"), None)["mcpServers"], json!([]));
+    }
+
+    /// #5546: an agent started through `wsl.exe` gets the session's paths as WSL shows them.
+    #[test]
+    fn an_agent_inside_wsl_gets_wsl_paths() {
+        let argv = |line: &str| split_command(line);
+        assert!(runs_in_wsl(&argv("wsl.exe -d Ubuntu -e bash -lc claude-agent-acp")));
+        assert!(runs_in_wsl(&argv("WSL claude-agent-acp")));
+        assert!(runs_in_wsl(&argv(r#""C:\Windows\System32\wsl.exe" -e claude-agent-acp"#)));
+        assert!(!runs_in_wsl(&argv("claude-agent-acp")));
+        assert!(!runs_in_wsl(&argv("wslconfig /l")));
+        assert!(!runs_in_wsl(&[]));
+
+        let wsl = |p: &str| wsl_path(std::path::Path::new(p)).to_string_lossy().into_owned();
+        assert_eq!(wsl(r"C:\Users\u\AppData\Local\SolidCraft\agent-chat\work"), "/mnt/c/Users/u/AppData/Local/SolidCraft/agent-chat/work");
+        assert_eq!(wsl(r"\\?\D:\Program Files\SolidCraft\solidcraft-cli.exe"), "/mnt/d/Program Files/SolidCraft/solidcraft-cli.exe");
+        assert_eq!(wsl("E:/designs"), "/mnt/e/designs");
+        assert_eq!(wsl("C:"), "/mnt/c/");
+        assert_eq!(wsl("/home/u/designs"), "/home/u/designs");
+        assert_eq!(wsl(r"\\server\share\x"), r"\\server\share\x");
+
+        let b = McpBridge { cli: r"C:\Program Files\SolidCraft\solidcraft-cli.exe".into(), port: 41234 };
+        let p = session_new_params(&wsl_path(std::path::Path::new(r"C:\Users\u\work")), Some(&b.in_wsl()));
+        assert_eq!(p["cwd"], "/mnt/c/Users/u/work");
+        assert_eq!(p["mcpServers"][0]["command"], "/mnt/c/Program Files/SolidCraft/solidcraft-cli.exe");
+        assert_eq!(p["mcpServers"][0]["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
     }
 
     #[test]
