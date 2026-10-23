@@ -1141,21 +1141,47 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
                 .collect()
         })
         .collect();
+    // Every circle and ellipse edge on its NURBS form (an edge the caller gave a pcurve for keeps
+    // the parameter that pcurve is on).
+    let given_on: Vec<bool> = {
+        let mut g = vec![false; edges.len()];
+        for u in faces.iter().flat_map(|f| f.loops.iter().flatten()).filter(|u| u.given.is_some()) {
+            if let Some(slot) = g.get_mut(u.edge as usize) {
+                *slot = true;
+            }
+        }
+        g
+    };
+    let forms: Vec<Option<(b::Curve, [f64; 2])>> = edges
+        .iter()
+        .zip(&given_on)
+        .map(|(e, given)| match e.curve {
+            b::Curve::Circle { .. } | b::Curve::Ellipse { .. } if !given => {
+                b::form::curve(&e.curve, e.interval).ok_or_else(|| fail("an arc of more than one turn".into())).map(Some)
+            }
+            _ => Ok(None),
+        })
+        .collect::<Result<_>>()?;
+    // Each face on its NURBS form: a cylinder, cone, sphere or torus over the extent its label's
+    // pcurves give, then every pcurve again on the forms, exactly.
     let mut pcs: Vec<Vec<Vec<Curve2>>> = Vec::with_capacity(nf);
     let mut domains = Vec::with_capacity(nf);
+    let mut face_forms: Vec<Option<b::Surface>> = Vec::with_capacity(nf);
     for (fi, (f, ls)) in faces.iter().zip(&loops).enumerate() {
-        let mut uses = Vec::with_capacity(ls.len());
-        for l in ls {
-            let mut u = Vec::with_capacity(l.len());
-            for &(e, forward, given) in l {
-                let edge = edges.get(e as usize).ok_or_else(|| fail("edge reference".into()))?;
-                u.push(pcurve::EdgeUse { edge: e, curve: &edge.curve, interval: edge.interval, forward, tolerance: tol, given });
+        let failed = |e: pcurve::Error| KernelError::Failed(format!("sew: face {fi}: {e}"));
+        let form = match f.surface {
+            b::Surface::Cylinder { .. } | b::Surface::Cone { .. } | b::Surface::Sphere { .. } | b::Surface::Torus { .. } => {
+                let label = pcurve::pcurves(&f.surface, &uses_of(&edges, &forms, ls, false, tol)?, tol).map_err(failed)?;
+                let extent = domain_of(&f.surface, &label).ok_or_else(|| fail(format!("face {fi} has no area in its parameters")))?;
+                Some(b::form::surface(&f.surface, extent).ok_or_else(|| fail(format!("face {fi}: more than one turn")))?.0)
             }
-            uses.push(u);
-        }
-        let pc = pcurve::pcurves(&f.surface, &uses, tol).map_err(|e| KernelError::Failed(format!("sew: face {fi}: {e}")))?;
-        domains.push(domain_of(&f.surface, &pc).ok_or_else(|| fail(format!("face {fi} has no area in its parameters")))?);
+            _ => None,
+        };
+        let on = form.as_ref().unwrap_or(&f.surface);
+        let pc = pcurve::pcurves(on, &uses_of(&edges, &forms, ls, true, tol)?, tol).map_err(failed)?;
+        domains.push(domain_of(on, &pc).ok_or_else(|| fail(format!("face {fi} has no area in its parameters")))?);
         pcs.push(pc);
+        face_forms.push(form);
     }
     let users = edge_users(edges.len(), &faces)?;
     let (groups, _) = components(nf, &users);
@@ -1178,7 +1204,8 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
         let mut sum = 0.0;
         for &f in g {
             let (Some(face), Some(pc), Some(ls), Some(dom)) = (faces.get(f), pcs.get(f), loops.get(f), domains.get(f)) else { continue };
-            let s = SurfaceEval::new(&face.surface).map_err(|e| KernelError::Failed(format!("sew: face {f}: {e}")))?;
+            let on = face_forms.get(f).and_then(Option::as_ref).unwrap_or(&face.surface);
+            let s = SurfaceEval::new(on).map_err(|e| KernelError::Failed(format!("sew: face {f}: {e}")))?;
             let uses: Vec<Vec<(&Curve2, bool)>> = pc.iter().zip(ls).map(|(c, l)| c.iter().zip(l).map(|(c, u)| (c, u.1)).collect()).collect();
             let flux = face_flux(&s, dom[1][0], &uses, field).ok_or_else(|| KernelError::Failed(format!("sew: face {f} cannot be evaluated")))?;
             sum += if face.forward { flux } else { -flux };
@@ -1268,11 +1295,19 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
         if record_loops.is_empty() {
             return Err(fail(format!("face {f} has no loop")));
         }
-        record_faces.push(b::Face { nurbs: None, surface: face.surface.clone(), domain: *domain, loops: record_loops });
+        let nurbs = face_forms.get(f).cloned().flatten();
+        record_faces.push(b::Face { nurbs, surface: face.surface.clone(), domain: *domain, loops: record_loops });
     }
     let record_edges = edges
         .iter()
-        .map(|e| b::Edge { nurbs: None, curve: e.curve.clone(), interval: e.interval, vertices: e.vertices, tolerance: tol, uses: Vec::new() })
+        .zip(&forms)
+        .map(|(e, form)| {
+            let (nurbs, interval) = match form {
+                Some((c, i)) => (Some(c.clone()), *i),
+                None => (None, e.interval),
+            };
+            b::Edge { nurbs, curve: e.curve.clone(), interval, vertices: e.vertices, tolerance: tol, uses: Vec::new() }
+        })
         .collect();
     let record_vertices = vertices.iter().map(|point| b::Vertex { point: *point, tolerance: tol }).collect();
     let loose = b::Brep { version: b::VERSION, tolerance: tol, regions, shells, faces: record_faces, edges: record_edges, vertices: record_vertices };
@@ -1295,6 +1330,31 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
 /// A face's parameter box: around its pcurves' control points (a B-spline lies in their hull),
 /// held inside the surface's natural domain (one turn where periodic). None when it has no
 /// width in either direction.
+/// A face's edge uses for `pcurve::pcurves`: on each edge's NURBS form where it has one and
+/// `formed`, else on its curve as given.
+fn uses_of<'a>(
+    edges: &'a [PartEdge],
+    forms: &'a [Option<(b::Curve, [f64; 2])>],
+    ls: &[Vec<(u32, bool, Option<&'a Curve2>)>],
+    formed: bool,
+    tol: f64,
+) -> Result<Vec<Vec<pcurve::EdgeUse<'a>>>> {
+    ls.iter()
+        .map(|l| {
+            l.iter()
+                .map(|&(e, forward, given)| {
+                    let edge = edges.get(e as usize).ok_or_else(|| KernelError::Invalid("sew: edge reference".into()))?;
+                    let (curve, interval) = match forms.get(e as usize).and_then(Option::as_ref) {
+                        Some((c, i)) if formed => (c, *i),
+                        _ => (&edge.curve, edge.interval),
+                    };
+                    Ok(pcurve::EdgeUse { edge: e, curve, interval, forward, tolerance: tol, given })
+                })
+                .collect()
+        })
+        .collect()
+}
+
 fn domain_of(surface: &b::Surface, pcs: &[Vec<Curve2>]) -> Option<[[f64; 2]; 2]> {
     let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
     for c in pcs.iter().flatten() {
