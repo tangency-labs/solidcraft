@@ -936,6 +936,7 @@
   "cmd.frame_profile_insert": "Insertar perfil",
   "cmd.frame_profile_list": "Biblioteca de perfiles",
   "cmd.frame_profile_properties": "Propiedades del perfil",
+  "cmd.frame_trim": "Recortar/extender",
   "cmd.inspect_accessibility": "Análisis de accesibilidad",
   "cmd.inspect_center_of_mass": "Centro de masas",
   "cmd.inspect_clearance": "Holgura",

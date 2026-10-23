@@ -931,6 +931,7 @@
   "cmd.frame_profile_insert": "Wstaw profil",
   "cmd.frame_profile_list": "Biblioteka profili",
   "cmd.frame_profile_properties": "Właściwości profilu",
+  "cmd.frame_trim": "Przytnij/wydłuż",
   "cmd.inspect_accessibility": "Analiza dostępności",
   "cmd.inspect_center_of_mass": "Środek masy",
   "cmd.inspect_clearance": "Prześwit",

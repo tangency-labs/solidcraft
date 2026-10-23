@@ -240,6 +240,12 @@ frame_member
     Rotation = frame_member.angle (Angle)
   expressions: 40, 3, 40, frame_member.angle
 frame_member_sketch
+frame_trim
+  inputs:
+    Angle = frame_trim.angle (Angle)
+    Offset = frame_trim.offset (Length)
+    Gap = frame_trim.gap (Length)
+  expressions: frame_trim.angle, frame_trim.offset, frame_trim.gap
 emboss
   inputs:
     Depth = emboss.depth (Length)
