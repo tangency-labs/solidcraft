@@ -789,3 +789,97 @@ fn joins_into_a_moved_occurrence_meet_the_tool_where_it_is_shown() {
     let want = 10.0 * 10.0 * 10.0 - 4.0 * 4.0 * 10.0;
     assert!((volume(&s, "C") - want).abs() < 1e-6 * want, "C: {} vs {want}", volume(&s, "C"));
 }
+
+/// The stood-up nested STEP part of `a_stood_up_nested_step_part_is_cut_and_joined_from_its_face`,
+/// opened with its imported root active, and a sketch on the part's top face. Returns the
+/// session, the sketch, the middle of the top face in the root's frame, the face's outward
+/// normal and that middle in the sketch's coordinates.
+fn nested_part_face_sketch() -> (Session, u64, solidcraft_geom::Vec3, solidcraft_geom::Vec3, solidcraft_geom::Vec2) {
+    let dir = std::env::temp_dir().join(format!("solidcraft-nested-scope-{}-{:?}", std::process::id(), std::thread::current().id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("nested.step");
+    let mut src = Session::default();
+    let (_, carrier) = created(&mut src, "Carrier");
+    let (part, nested) = created(&mut src, "Nested Part");
+    run(&mut src, "solid.box", json!({"length": 40, "width": 24, "height": 10, "body_name": "NestedBlock"}));
+    run(&mut src, "occurrence.move", json!({"occurrence": carrier, "translate": [12, 7, 5], "axis": [0, 0, 1], "angle": "30 deg"}));
+    run(&mut src, "occurrence.move", json!({"occurrence": nested, "translate": [3, 11, 2], "axis": [0, 1, 0], "angle": "20 deg"}));
+    let top = solidcraft_doc::apply_point(&src.doc.component_transform(part), solidcraft_geom::Vec3::new(20.0, 12.0, 10.0));
+    run(&mut src, "file.export", json!({"path": path, "format": "step"}));
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": path, "up": "y"}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let at = solidcraft_doc::apply_point(&s.doc.component_transform(s.active_component), top);
+    let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": [at.x, at.y, at.z]}, "project_edges": false}))["sketch"].as_u64().unwrap();
+    let Some(solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Face { plane, .. }, .. }) =
+        s.doc.feature(sketch).map(|f| &f.kind)
+    else {
+        panic!("a sketch on the face")
+    };
+    let (normal, centre) = (plane.normal(), plane.to_local(top));
+    (s, sketch, top, normal, centre)
+}
+
+/// After a feature from the nested part's face: still one body, in one piece, `change` mm³
+/// bigger than the 40 × 24 × 10 block (within a thousandth: round profiles are faceted).
+fn assert_block_changed_by(s: &mut Session, change: f64) {
+    let st = s.model.state();
+    assert_eq!(st.bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["NestedBlock"]);
+    assert_eq!(st.body("NestedBlock").map(|b| b.body.shell_count()), Some(1));
+    let volume = run(s, "inspect.measure", json!({"bodies": ["NestedBlock"]}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 9600.0 - change).abs() < 1e-3 * change.abs(), "{volume}");
+}
+
+/// #3223 for Revolve: a ring revolved about a line on the nested part's face, with the imported
+/// root active, joins the part (the half above the face) instead of starting a body of its own.
+#[test]
+fn a_revolve_from_a_nested_step_parts_face_joins_it() {
+    let (mut s, _, _, _, c) = nested_part_face_sketch();
+    let axis = run(&mut s, "sketch.line", json!({"points": [[c.x, c.y - 5.0], [c.x, c.y + 5.0]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [c.x + 1.0, c.y - 2.0], "p1": [c.x + 3.0, c.y + 2.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": axis, "angle": "360 deg", "operation": "join"}));
+    assert_block_changed_by(&mut s, std::f64::consts::PI * (9.0 - 1.0) * 4.0 / 2.0);
+}
+
+/// #3223 for Loft: a loft from a circle on the nested part's face to one 5 mm above joins it.
+#[test]
+fn a_loft_from_a_nested_step_parts_face_joins_it() {
+    let (mut s, sketch, top, _, c) = nested_part_face_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    let at = solidcraft_doc::apply_point(&s.doc.component_transform(s.active_component), top);
+    let high =
+        run(&mut s, "sketch.create", json!({"plane": {"face": [at.x, at.y, at.z]}, "offset": 5, "project_edges": false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.loft", json!({"sections": [{"sketch": sketch}, {"sketch": high}], "operation": "join"}));
+    assert_block_changed_by(&mut s, std::f64::consts::PI * 9.0 * 5.0);
+}
+
+/// #3223 for Sweep: a circle on the nested part's face swept 5 mm out along its normal joins it.
+#[test]
+fn a_sweep_from_a_nested_step_parts_face_joins_it() {
+    let (mut s, sketch, top, n, c) = nested_part_face_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    let root = s.doc.component_transform(s.active_component);
+    let (a, b) = (solidcraft_doc::apply_point(&root, top), solidcraft_doc::apply_point(&root, top + n * 5.0));
+    let path = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let wire = run(&mut s, "sketch.line3d", json!({"points": [[a.x, a.y, a.z], [b.x, b.y, b.z]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.sweep", json!({"sketch": sketch, "path_sketch": path, "path": [wire], "operation": "join"}));
+    assert_block_changed_by(&mut s, std::f64::consts::PI * 9.0 * 5.0);
+}
+
+/// #3223 for Hole: a hole at a point sketched on the nested part's face, with the imported root
+/// active, drills the part instead of finding no body to cut.
+#[test]
+fn a_hole_at_a_point_on_a_nested_step_parts_face_drills_it() {
+    let (mut s, sketch, _, _, c) = nested_part_face_sketch();
+    run(&mut s, "sketch.point", json!({"point": [c.x, c.y]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": sketch, "diameter": 4, "depth": 5}));
+    assert_block_changed_by(&mut s, -std::f64::consts::PI * 4.0 * 5.0);
+}

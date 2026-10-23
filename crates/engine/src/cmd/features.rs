@@ -508,11 +508,12 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
     // A cut or intersect made where the active component has no body of its own (a sketch in
     // the assembly's root, cutting through the parts, #1234) would have nothing to work on: it
     // takes part in every body instead, which it changes only where it meets them. An extrude's
-    // own operation counts too: an automatic one that came out as a cut (#3223).
+    // own operation counts too: an automatic one that came out as a cut (#3223); and so does a
+    // hole, which is always a cut (one at the points of a sketch on a nested part's face).
     let participants = if participants.is_empty()
         && !primitive
         && (matches!(str_(p, "operation").and_then(Operation::parse), Some(Operation::Cut | Operation::Intersect))
-            || matches!(&kind, FeatureKind::Extrude { operation: Operation::Cut | Operation::Intersect, .. }))
+            || matches!(&kind, FeatureKind::Extrude { operation: Operation::Cut | Operation::Intersect, .. } | FeatureKind::Hole { .. }))
         && s.cut_takes_every_body(&s.model.state())
     {
         vec!["*".to_string()]
@@ -671,6 +672,16 @@ fn sketch_face_body(s: &Session, sketch: u64) -> Option<String> {
     };
     let st = s.model.state();
     active_scope(s, &st).into_iter().find(|b| b.name == anchor.target.body).map(|b| b.name.clone())
+}
+
+/// The bodies a Join named none for: the body whose face a profile sketch is on (the first
+/// sketch that is on one), as for an extrude. Explicit `targets` or `participants` keep theirs.
+fn face_join_targets(s: &Session, p: &Value, operation: Operation, sketches: &[u64]) -> Vec<BodyName> {
+    let mut targets = string_list(p, "targets");
+    if operation == Operation::Join && targets.is_empty() && string_list(p, "participants").is_empty() {
+        targets.extend(sketches.iter().find_map(|sk| sketch_face_body(s, *sk)));
+    }
+    targets.into_iter().map(BodyName).collect()
 }
 
 /// The bodies a feature of the active component works on when it names none: the component's
@@ -837,13 +848,14 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
         None => solidcraft_doc::RevolveConvention::SketchNormal,
         Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "`convention` must be sketch_normal or legacy_axis_start"))?,
     };
+    let operation = operation(p, cmd)?;
     let kind = FeatureKind::Revolve {
         sketch: SketchId(sketch),
         profiles,
         axis,
         angle,
-        operation: operation(p, cmd)?,
-        targets: string_list(p, "targets").into_iter().map(BodyName).collect(),
+        operation,
+        targets: face_join_targets(s, p, operation, &[sketch]),
         angle2,
         symmetric,
         convention,
@@ -2045,6 +2057,8 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let (orientation, twist, scale) = sweep_options(s, p, cmd)?;
     let (rails, rail_fit) = sweep_rails(s, p, cmd, path_sketch)?;
+    let operation = operation(p, cmd)?;
+    let targets = face_join_targets(s, p, operation, &[sketch]);
     add_feature(
         s,
         p,
@@ -2058,8 +2072,8 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
             scale,
             rails,
             rail_fit,
-            operation: operation(p, cmd)?,
-            targets: string_list(p, "targets").into_iter().map(BodyName).collect(),
+            operation,
+            targets,
         },
     )
 }
@@ -2180,17 +2194,10 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
         sections.push(solidcraft_doc::LoftSection { sketch: SketchId(sketch), profiles: profiles(sec, cmd)?, point: None });
     }
     let (rails, rail_fit) = guide_rails(s, p, cmd, "loft", None)?;
-    add_feature(
-        s,
-        p,
-        FeatureKind::Loft {
-            sections,
-            operation: operation(p, cmd)?,
-            targets: string_list(p, "targets").into_iter().map(BodyName).collect(),
-            rails,
-            rail_fit,
-        },
-    )
+    let operation = operation(p, cmd)?;
+    let sketches: Vec<u64> = sections.iter().map(|sec| sec.sketch.0).collect();
+    let targets = face_join_targets(s, p, operation, &sketches);
+    add_feature(s, p, FeatureKind::Loft { sections, operation, targets, rails, rail_fit })
 }
 
 fn thread(s: &mut Session, p: &Value) -> Result<Value> {
