@@ -15,8 +15,11 @@ use solidcraft_engine::geom::Vec3;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, edge_sel, face_sel, form_row, profile_indices};
-use crate::selection::{AXES, BODIES, CURVES, EDGES, PLANAR_FACES, PROFILES, SelInput, SelectionExt as _, items, point_value as pt};
+use crate::selection::{AXES, BODIES, CURVES, EDGES, FACES, PLANAR_FACES, PROFILES, SelInput, SelectionExt as _, items, point_value as pt};
 use crate::theme::Tokens;
+
+const PERFORATION_PATTERNS: [&str; 2] = ["staggered", "square"];
+const PERFORATION_LABELS: [&str; 2] = ["ui.perforate_staggered", "ui.perforate_square"];
 
 const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
@@ -44,6 +47,13 @@ const FLANGE_RELIEF_LABELS: [&str; 5] = ["Rule", "Notch", "Round", "Rectangular"
 crate::dialog_descriptor::dialog_descriptors! {
     #[derive(Clone, Debug)]
     pub enum Sm {
+        Perforate("sheet.perforate", "ui.perforate_title", [("Body (last if none)", BODIES | FACES, false)],
+            FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, .. }) {
+            diameter: String = "3 mm".into() => diameter.to_string(),
+            pitch: String = "6 mm".into() => pitch.to_string(),
+            margin: String = String::new() => margin.as_deref().map(str::to_string).unwrap_or_default(),
+            pattern: usize = 0 => pattern.as_deref().and_then(|p| PERFORATION_PATTERNS.iter().position(|x| *x == p)).unwrap_or(0),
+        } => json!({"diameter": diameter, "pitch": pitch, "pattern": PERFORATION_PATTERNS.get(*pattern).copied().unwrap_or("staggered")});
         Hem("sheet.hem", "HEM", [("Edges", EDGES, true)],
             FeatureKind::SheetHem { length, gap, flip, .. }) {
             length: String = "5 mm".into() => length.to_string(),
@@ -269,6 +279,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             } else {
                 crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
             }
+        }
+        Sm::Perforate { diameter, pitch, margin, pattern } => {
+            enter |= expr_row(ui, "ui.diameter", diameter);
+            enter |= expr_row(ui, "ui.perforate_pitch", pitch);
+            enter |= hint_row(ui, "Margin", margin, crate::i18n::tr_label("ui.perforate_margin_default"));
+            choice_row(ui, "Pattern", "sm_perforate_pattern", pattern, &PERFORATION_LABELS);
         }
         Sm::Hem { length, gap, flip } => {
             form_row(ui, "Type", |ui| {
@@ -547,6 +563,16 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             }
             ("sheet.fold", p)
         }
+        Sm::Perforate { margin, .. } => {
+            let mut p = json!({});
+            put(&mut p, &[("margin", margin)]);
+            match items(inputs, 0).first() {
+                Some(Sel::Body { name }) => p["body"] = json!(name),
+                Some(Sel::Face { body, .. }) => p["body"] = json!(body),
+                _ => {}
+            }
+            ("sheet.perforate", p)
+        }
         Sm::Unfold { refold } => {
             let mut p = json!({});
             if let Some(Sel::Body { name }) = items(inputs, 0).first() {
@@ -678,6 +704,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             return Some((Kind::Sheet(k), ins, extra));
         }
+        FeatureKind::SheetPerforate { body, .. } => (Sm::simple_restore(kind)?, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect()),
         FeatureKind::SheetUnfold { body, refold } => {
             (Sm::Unfold { refold: *refold }, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect())
         }
@@ -696,6 +723,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
     let id = match &k {
         Sm::Flange { .. } => "sheet.flange",
         Sm::Hem { .. } => "sheet.hem",
+        Sm::Perforate { .. } => "sheet.perforate",
         Sm::Unfold { refold: false } => "sheet.unfold",
         Sm::Unfold { .. } => "sheet.refold",
         _ => "sheet.convert",

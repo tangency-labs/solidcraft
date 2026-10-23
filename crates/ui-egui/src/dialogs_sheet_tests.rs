@@ -852,3 +852,72 @@ fn fit_and_home_frame_the_flat_pattern() {
         assert!(!app.flat_view.fitted);
     }
 }
+
+#[test]
+fn perforate_toolbar_opens_without_running_empty_parameters() {
+    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        let mut app = plate(mode);
+        app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        let features = app.session.doc.features.len();
+        app.start("sheet.perforate");
+        let dialog = app.dialog.as_ref().expect("Perforate opens a dialog");
+        assert!(dialog.previews());
+        assert_eq!(app.session.doc.features.len(), features);
+        assert!(!app.status.as_ref().is_some_and(|(_, _, error)| *error));
+        let commands = apply_commands(&app, dialog).unwrap();
+        assert_eq!(commands[0].0, "sheet.perforate");
+        assert_eq!(commands[0].1["diameter"], "3 mm");
+        assert_eq!(commands[0].1["pitch"], "6 mm");
+        assert_eq!(commands[0].1["pattern"], "staggered");
+        assert!(commands[0].1.get("margin").is_none());
+        let mut dialog = dialog.clone();
+        let ctx = crate::fonts::test_context();
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            if let Kind::Sheet(k) = &mut dialog.kind {
+                rows(&mut app, ui, k, &mut dialog.inputs);
+            }
+        });
+        let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text()).collect();
+        for label in ["Diameter", "Pitch", "Margin", "Pattern", "Staggered (60°)", "3 mm", "6 mm", "from the diameter"] {
+            assert!(texts.contains(&label), "missing field or default: {label}");
+        }
+    }
+}
+
+#[test]
+fn perforate_ok_targets_the_picked_sheet_and_updates_flat_data() {
+    for face in [false, true] {
+        let mut app = plate(crate::shell::LayoutMode::Docked);
+        app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        let body = app.session.model.state().sheets[0].body.clone();
+        app.session.selection =
+            vec![if face { face_sel(&app.session, Vec3::new(50.0, 30.0, 2.5)).unwrap() } else { Sel::Body { name: body.clone() } }];
+        app.start("sheet.perforate");
+        let dialog = app.dialog.as_ref().expect("Perforate opens a dialog");
+        let commands = apply_commands(&app, dialog).unwrap();
+        assert_eq!(commands[0].1["body"], body);
+        run_all(&mut app, commands);
+        let flat = app.session.execute("sheet.flat_pattern", &json!({"body": body})).unwrap();
+        let field = &flat["perforations"][0];
+        assert_eq!(field["diameter"], 3.0);
+        assert_eq!(field["pitch"], 6.0);
+        assert_eq!(field["margin"], 3.0);
+        assert!(field["count"].as_u64().unwrap() > 0);
+    }
+}
+
+#[test]
+fn perforate_edit_restores_dimensions_pattern_and_target() {
+    let mut app = plate(crate::shell::LayoutMode::Docked);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let body = app.session.model.state().sheets[0].body.clone();
+    app.run("sheet.perforate", json!({"body": body, "diameter": "4 mm", "pitch": "9 mm", "margin": "5 mm", "pattern": "square"})).unwrap();
+    let feature = app.session.doc.features.last().unwrap();
+    let dialog = edit_dialog(&app, feature.id, None).expect("Perforate can be edited");
+    let commands = apply_commands(&app, &dialog).unwrap();
+    assert_eq!(commands[0].0, "timeline.redefine");
+    let params = &commands[0].1["params"];
+    for (key, value) in [("body", body.as_str()), ("diameter", "4 mm"), ("pitch", "9 mm"), ("margin", "5 mm"), ("pattern", "square")] {
+        assert_eq!(params[key], value, "{key} is restored");
+    }
+}
