@@ -39,6 +39,10 @@
 //! - Degrees whose initial `p + 1` index cannot fit an `i64` return
 //!   [`SolidError::InvalidInput`]. Multiplicity sums are checked before comparison;
 //!   a sum that overflows is above `p` and returns [`NlibCode::Knot`].
+//! - [`basis_derivs_array`] checks its output and temporary storage, including
+//!   nested-vector metadata, against [`MAX_DERIVS_ARRAY_BYTES`] before allocating.
+//!   This prevents overcommitting allocators from accepting hostile dimensions.
+//!   Actual buffers are reserved fallibly; allocation failure is [`NlibCode::Memory`].
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::nurbs::basis_basic::{reparam, PTOL};
@@ -49,6 +53,10 @@ const OP_COMPAT_MULT: &str = "nurbs::basis_adv::compatible_knot_array_mult";
 const OP_INSERT: &str = "nurbs::basis_adv::insert_knots";
 const OP_INC_MULT: &str = "nurbs::basis_adv::increase_knot_mult";
 const OP_DERIVS_ARRAY: &str = "nurbs::basis_adv::basis_derivs_array";
+
+/// Maximum requested heap bytes for one [`basis_derivs_array`] call (64 MiB),
+/// including output values, nested-vector metadata, spans and temporary workspace.
+pub const MAX_DERIVS_ARRAY_BYTES: usize = 64 * 1024 * 1024;
 
 /// Error for an array access that upstream would make out of bounds.
 fn out_of_range(operation: &'static str) -> SolidError {
@@ -332,21 +340,69 @@ pub struct BasisDerivsArray {
     pub derivs: Vec<Vec<Vec<f64>>>,
 }
 
-/// A zero-filled `rows x cols x cnt` array; `InvalidInput` instead of an allocation
-/// abort when the size is absurd.
-fn zeros3(rows: usize, cols: usize, cnt: usize, op: &'static str) -> Result<Vec<Vec<Vec<f64>>>> {
+/// Check every output and workspace dimension before allocating, not by probing
+/// the allocator: virtual-memory reservations can succeed without enough RAM.
+fn derivs_array_dimensions(p: usize, der: usize, cnt: usize) -> Result<(usize, usize)> {
     let too_big = || SolidError::InvalidInput {
-        operation: op,
-        reason: "array size overflow",
+        operation: OP_DERIVS_ARRAY,
+        reason: "basis derivative storage exceeds MAX_DERIVS_ARRAY_BYTES",
     };
-    let total = rows
-        .checked_mul(cols)
-        .and_then(|v| v.checked_mul(cnt))
+    let rows = der.checked_add(1).ok_or_else(too_big)?;
+    let w = p.checked_add(1).ok_or_else(too_big)?;
+    let columns = rows.checked_mul(w).ok_or_else(too_big)?;
+    let values = columns.checked_mul(cnt).ok_or_else(too_big)?;
+    // ndu[w][w], left[w], right[w], and a[2][w].
+    let workspace = w
+        .checked_mul(w)
+        .and_then(|square| w.checked_mul(4).and_then(|v| square.checked_add(v)))
         .ok_or_else(too_big)?;
-    let mut probe: Vec<f64> = Vec::new();
-    probe.try_reserve_exact(total).map_err(|_| too_big())?;
-    drop(probe);
-    Ok(vec![vec![vec![0.0; cnt]; cols]; rows])
+    let workspace_rows = w.checked_add(2).ok_or_else(too_big)?;
+    let mut bytes = 0usize;
+    for (count, element_size) in [
+        (values, size_of::<f64>()),
+        (columns, size_of::<Vec<f64>>()),
+        (rows, size_of::<Vec<Vec<f64>>>()),
+        (workspace, size_of::<f64>()),
+        (workspace_rows, size_of::<Vec<f64>>()),
+        (cnt, size_of::<usize>()),
+        (p.min(der), size_of::<i32>()),
+    ] {
+        bytes = count
+            .checked_mul(element_size)
+            .and_then(|size| bytes.checked_add(size))
+            .ok_or_else(too_big)?;
+    }
+    if bytes > MAX_DERIVS_ARRAY_BYTES {
+        return Err(too_big());
+    }
+    Ok((rows, w))
+}
+
+/// Reserve the buffer actually used, rather than a temporary allocation probe.
+fn filled<T: Clone>(len: usize, value: T, op: &'static str) -> Result<Vec<T>> {
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(len)
+        .map_err(|_| nlib(op, NlibCode::Memory))?;
+    result.resize(len, value);
+    Ok(result)
+}
+
+fn zeros2(rows: usize, cols: usize, op: &'static str) -> Result<Vec<Vec<f64>>> {
+    let mut result = filled(rows, Vec::new(), op)?;
+    for row in &mut result {
+        *row = filled(cols, 0.0, op)?;
+    }
+    Ok(result)
+}
+
+/// A zero-filled array whose dimensions have passed [`derivs_array_dimensions`].
+fn zeros3(rows: usize, cols: usize, cnt: usize, op: &'static str) -> Result<Vec<Vec<Vec<f64>>>> {
+    let mut result = filled(rows, Vec::new(), op)?;
+    for row in &mut result {
+        *row = zeros2(cols, cnt, op)?;
+    }
+    Ok(result)
 }
 
 /// All non-vanishing basis functions of degree `p` and their derivatives up to order
@@ -363,7 +419,8 @@ fn zeros3(rows: usize, cols: usize, cnt: usize, op: &'static str) -> Result<Vec<
 /// Errors of [`KnotVector::find_span`]; `InvalidInput` when `u` is empty, where
 /// upstream would index out of bounds (an inner parameter at or past the domain end
 /// with [`Side::Left`], or past it with [`Side::Right`]), or overflow its `int`
-/// derivative factor.
+/// derivative factor, or the output and workspace exceed [`MAX_DERIVS_ARRAY_BYTES`].
+/// [`NlibCode::Memory`] if a buffer cannot be reserved.
 pub fn basis_derivs_array(
     knt: &KnotVector<'_>,
     p: usize,
@@ -375,10 +432,11 @@ pub fn basis_derivs_array(
     let uk = knt.knots();
     let n = last_index(u, OP)?;
     let cnt = u.len();
+    let (rows, w) = derivs_array_dimensions(p, der, cnt)?;
     let ps = sgn(p, OP)?;
 
     // Compute span array.
-    let mut spn = vec![0usize; cnt];
+    let mut spn = filled(cnt, 0usize, OP)?;
     let un = rdi(u, n, OP)?;
     let last = knt.find_span(p, un, side)?;
     let first = knt.find_span(p, rdi(u, 0, OP)?, side)?;
@@ -410,8 +468,6 @@ pub fn basis_derivs_array(
 
     // Get maximum derivative index; rows above p stay zero.
     let mder = sgn(p.min(der), OP)?;
-    let rows = der.checked_add(1).ok_or_else(|| out_of_range(OP))?;
-    let w = p.checked_add(1).ok_or_else(|| out_of_range(OP))?;
     let mut nd = zeros3(rows, w, cnt, OP)?;
 
     // Derivative factors p!/(p-k)! (an `int` upstream, formed one step past the last
@@ -421,6 +477,9 @@ pub fn basis_derivs_array(
         reason: "derivative factor overflows upstream int",
     };
     let mut factors = Vec::new();
+    factors
+        .try_reserve_exact(p.min(der))
+        .map_err(|_| nlib(OP, NlibCode::Memory))?;
     let mut fac = i32::try_from(p).map_err(|_| overflow())?;
     for kk in 1..=mder {
         factors.push(fac);
@@ -428,10 +487,10 @@ pub fn basis_derivs_array(
         fac = fac.checked_mul(pk).ok_or_else(overflow)?;
     }
 
-    let mut left = vec![0.0; w];
-    let mut right = vec![0.0; w];
-    let mut ndu = vec![vec![0.0; w]; w];
-    let mut a = vec![vec![0.0; w]; 2];
+    let mut left = filled(w, 0.0, OP)?;
+    let mut right = filled(w, 0.0, OP)?;
+    let mut ndu = zeros2(w, w, OP)?;
+    let mut a = zeros2(2, w, OP)?;
 
     // Compute the basis functions.
     for (j, (&uj, &l)) in u.iter().zip(&spn).enumerate() {
@@ -664,6 +723,70 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn derivs_array_refuses_runaway_derivative_storage() {
+        // The saved fuzz input reached a successful virtual reservation, then
+        // tried to materialize billions of nested vectors on macOS.
+        let knots = [
+            -0.6825879003318405,
+            1.7695994926457606,
+            4.848088756954498,
+            6.2545297135587035,
+            18.924315562186447,
+            19.636574334775027,
+            22.704326541087685,
+            26.36179241269924,
+        ];
+        let u = [
+            4.848088756954498,
+            11.33749281771211,
+            17.706121534281504,
+            18.584008024367456,
+            18.924315562186447,
+            19.63657433477503,
+        ];
+        for der in [1usize << 31, usize::MAX] {
+            assert!(matches!(
+                basis_derivs_array(&kv(&knots), 3, &u, Side::Right, der),
+                Err(SolidError::InvalidInput {
+                    operation: OP_DERIVS_ARRAY,
+                    reason: "basis derivative storage exceeds MAX_DERIVS_ARRAY_BYTES",
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn derivs_array_budget_includes_vector_metadata_and_square_workspace() {
+        // Values alone would fit, but the two levels of vector headers do not.
+        let rows = MAX_DERIVS_ARRAY_BYTES / size_of::<Vec<f64>>();
+        assert!(rows * size_of::<f64>() < MAX_DERIVS_ARRAY_BYTES);
+        assert!(matches!(
+            basis_derivs_array(&kv(&[0.0, 1.0]), 0, &[0.5], Side::Left, rows - 1),
+            Err(SolidError::InvalidInput { .. })
+        ));
+
+        // One output row is small; the degree-squared temporary matrix is not.
+        let degree = 4096;
+        let mut knots = vec![0.0; degree + 1];
+        knots.extend(vec![1.0; degree + 1]);
+        assert!(matches!(
+            basis_derivs_array(&kv(&knots), degree, &[0.5], Side::Left, 0),
+            Err(SolidError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn derivs_array_storage_allocation_fails_softly() {
+        assert!(matches!(
+            filled(usize::MAX, 0.0f64, OP_DERIVS_ARRAY),
+            Err(SolidError::Nlib {
+                code: NlibCode::Memory,
+                ..
+            })
+        ));
     }
 
     #[test]
