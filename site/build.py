@@ -36,6 +36,7 @@ import units as plan_units  # noqa: E402  (the shared plan loader)
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "tangency-labs/solidcore")
 REPO_URL = f"https://github.com/{REPO}"
+VIEWER_URL = "https://tangency-labs.github.io/solidcore-viewer/"
 UPSTREAM_URL = "https://github.com/NVIDIA-Omniverse/usd-brep"
 UPSTREAM_COMMIT = "c9c5979f04cea8c38213004d4f04df0dcfb40d05"
 STATUSES = ["green", "partial", "claimed", "blocked", "todo"]
@@ -520,7 +521,7 @@ def page(title, body, depth, nav, head_sha, head_date, description="", path="", 
 <body>
 <header class="top"><div class="wrap">
 <a class="brand" href="{up}index.html"><img src="{up}assets/logo.svg" alt="" width="28" height="28">solidcore</a>
-<nav>{navhtml}<a href="{REPO_URL}">GitHub</a></nav>
+<nav>{navhtml}<a href="{VIEWER_URL}">Model viewer</a><a href="{REPO_URL}">GitHub</a></nav>
 </div></header>
 <main class="wrap">
 {body}
@@ -899,6 +900,7 @@ Rust and C++ are compared where the Rust path is ported: {par.get('compared', 0)
 <li><a href="graph.html">Dependency graph</a>: what is ready to claim and what blocks the most.</li>
 <li><a href="solids.html">Solids</a>: {f"{s_built}/{s_total} primitives build, {s_passed}/{s_total} pass" if solids else "no data yet"}, and what blocks each.</li>
 <li><a href="issues.html">{len(issues)} upstream issues</a> found while porting.</li>
+<li><a href="{VIEWER_URL}">Model viewer</a>: the upstream test models rendered by SMLib and by solidcore, side by side.</li>
 <li><a href="{REPO_URL}">Repository</a>: <a href="{REPO_URL}/blob/main/AGENTS.md">how to port a unit</a>,
 <a href="{REPO_URL}/blob/main/plan/PROGRESS.md">checklist</a>.</li>
 </ul>
