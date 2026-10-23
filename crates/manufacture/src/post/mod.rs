@@ -46,10 +46,7 @@ pub fn post_toolpath(segments: &[PathSegment], profile: &PostProfile, tool: &Too
                 let code = if *clockwise { "G2" } else { "G3" };
                 let i = center[0] - pos[0];
                 let j = center[1] - pos[1];
-                out.push_str(&format!(
-                    "{code} X{:.4} Y{:.4} Z{:.4} I{:.4} J{:.4} F{:.1}{eol}",
-                    to[0], to[1], to[2], i, j, feed
-                ));
+                out.push_str(&format!("{code} X{:.4} Y{:.4} Z{:.4} I{:.4} J{:.4} F{:.1}{eol}", to[0], to[1], to[2], i, j, feed));
                 pos = *to;
             }
         }
@@ -66,10 +63,7 @@ pub fn post_toolpath(segments: &[PathSegment], profile: &PostProfile, tool: &Too
 
 pub(crate) fn write_spindle_or_probe_note(out: &mut String, tool: &Tool, eol: &str) {
     if tool.kind == ToolKind::Probe {
-        out.push_str(&format!(
-            "(Probe T{num} — use manufacture.probe.snippet for Inspection Plus cycles){eol}",
-            num = tool.number
-        ));
+        out.push_str(&format!("(Probe T{num}: use manufacture.probe.snippet for Inspection Plus cycles){eol}", num = tool.number));
     } else {
         out.push_str(&format!("M3 S10000{eol}"));
     }
@@ -97,12 +91,7 @@ mod tests {
         vec![
             PathSegment::Rapid { to: [0.0, 0.0, 5.0] },
             PathSegment::Linear { to: [10.0, 0.0, -1.0], feed: 800.0 },
-            PathSegment::Arc {
-                center: [10.0, 5.0, -1.0],
-                to: [10.0, 10.0, -1.0],
-                feed: 600.0,
-                clockwise: true,
-            },
+            PathSegment::Arc { center: [10.0, 5.0, -1.0], to: [10.0, 10.0, -1.0], feed: 600.0, clockwise: true },
         ]
     }
 
