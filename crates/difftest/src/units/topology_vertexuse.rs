@@ -1343,8 +1343,9 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
 }
 
 /// Recomputes, in arena order, every vertex use's cached vertex/face gap the import
-/// marked as set (see [`run_rust`]).
-fn refill_face_gaps(b: &mut Brep) -> Result<(), SolidError> {
+/// marked as set (see [`run_rust`]). Other runners that import through
+/// [`import_with_types`] and read the cache call it too.
+pub(crate) fn refill_face_gaps(b: &mut Brep) -> Result<(), SolidError> {
     let k = Kernel::default();
     let set: Vec<VertexuseId> = b
         .vertexuses()

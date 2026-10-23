@@ -125,7 +125,7 @@ use solidcore::topology::{
 use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::offset_offset_geometry_creation::{self as ffi, Op};
 
-use super::topology_vertexuse::import_with_types;
+use super::topology_vertexuse::{import_with_types, refill_face_gaps};
 use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -2401,6 +2401,9 @@ struct Prepared {
     two: Two,
     hdr: RHeader,
     ops: Vec<ROp>,
+    /// The failure of [`refill_face_gaps`] on either B-rep, which only the Rust side
+    /// reports.
+    refill: Option<SolidError>,
 }
 
 /// Exports and imports the B-reps and resolves the script; `Err(Ok(output))` is the
@@ -2416,6 +2419,11 @@ fn prepare(i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
     let (mut brep_a, mut exact_a, types_a) = import_with_types(&a).map_err(|e| Box::new(Err(e)))?;
     read_face_surfaces(&mut brep_a, &mut exact_a, &types_a, &surfaces_a)
         .map_err(|e| Box::new(Err(e)))?;
+    // The export says which vertex uses have their vertex/face gap cached, not its
+    // values (the importer leaves the face UV at SM_UNDEF_DOUBLE): recompute them on
+    // the restored face surfaces, as the topology.vertexuse runner does, before the
+    // cache tree states are seeded (the native gaps were computed before its export).
+    let mut refill = refill_face_gaps(&mut brep_a).err();
     let [states_a, states_b] = ffi::split_cache_tree_states(&ex)
         .ok_or_else(|| Box::new(Err(harness("cache states"))))?;
     seed_cache_tree_states(&brep_a, &states_a).map_err(|e| Box::new(Err(e)))?;
@@ -2425,6 +2433,9 @@ fn prepare(i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
                 import_with_types(b).map_err(|e| Box::new(Err(e)))?;
             read_face_surfaces(&mut brep, &mut exact, &types, &surfaces_b)
                 .map_err(|e| Box::new(Err(e)))?;
+            if refill.is_none() {
+                refill = refill_face_gaps(&mut brep).err();
+            }
             seed_cache_tree_states(&brep, &states_b).map_err(|e| Box::new(Err(e)))?;
             (Some(brep), exact)
         }
@@ -2449,7 +2460,12 @@ fn prepare(i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
         Ok(r) => r,
         Err(name) => return Err(Box::new(Ok(Output::err(name)))),
     };
-    Ok(Prepared { two, hdr, ops })
+    Ok(Prepared {
+        two,
+        hdr,
+        ops,
+        refill,
+    })
 }
 
 fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
@@ -2655,7 +2671,9 @@ fn is_bspline_kind(c: &SmCurve) -> bool {
 #[allow(clippy::too_many_lines)]
 fn run_rust_script(i: &Inputs, p: Prepared) -> Result<Vec<f64>, Fail> {
     let k = Kernel::default();
-    let Prepared { mut two, hdr, ops } = p;
+    let Prepared {
+        mut two, hdr, ops, ..
+    } = p;
     let mut o = Vec::new();
     o.push(0.0);
 
@@ -3280,6 +3298,12 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(p) => p,
         Err(r) => return *r,
     };
+    if let Some(e) = &p.refill {
+        return match Output::unported(e) {
+            Some(o) => Ok(o),
+            None => Err(harness(format!("rust: vertex/face gap refill: {e}"))),
+        };
+    }
     match run_rust_script(i, p) {
         Ok(o) => Ok(Output::new().values("state", o)),
         Err(Fail::Solid(e)) => match Output::unported(&e) {
