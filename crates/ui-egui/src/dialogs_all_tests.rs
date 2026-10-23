@@ -2,6 +2,38 @@
 use super::*;
 use crate::scenario::{self, Harness};
 
+#[test]
+fn measure_input_fits_external_sketch_geometry() {
+    let mut h = Harness::new();
+    let curve = Sel::ExternalSketchCurve { sketch: 17, id: "line1".into() };
+    let point = Sel::ExternalSketchPoint { sketch: 17, id: "p1".into() };
+    h.app.session.selection = vec![curve.clone(), point.clone()];
+    let mut d = Dialog::for_command(&h.app, "inspect.measure").unwrap();
+    let accept = d.inputs.first().unwrap().accept;
+    assert!(fits(accept, &curve));
+    assert!(fits(accept, &point));
+    assert_eq!(d.items(), vec![curve.clone(), point.clone()]);
+    assert_eq!(d.candidate(&h.app.session, &Hit::SketchCurve { sketch: 17, id: "line1".into(), straight: true }), Some(curve.clone()));
+    assert_eq!(
+        d.candidate(&h.app.session, &Hit::SketchPoint { sketch: 17, id: "p1".into(), at: solidcraft_engine::geom::Vec2::new(0.0, 0.0) }),
+        Some(point.clone())
+    );
+    d.take_box(&h.app.session, vec![curve.clone(), point.clone()], false);
+    assert_eq!(d.items(), vec![curve, point]);
+}
+
+#[test]
+fn feature_inputs_reject_external_sketch_geometry() {
+    let h = Harness::new();
+    for (command, sel) in [
+        ("solid.pipe", Sel::ExternalSketchCurve { sketch: 17, id: "line1".into() }),
+        ("solid.hole", Sel::ExternalSketchPoint { sketch: 17, id: "p1".into() }),
+    ] {
+        let d = Dialog::for_command(&h.app, command).unwrap();
+        assert!(!fits(d.inputs.first().unwrap().accept, &sel), "{command}");
+    }
+}
+
 fn fixture() -> Harness {
     let mut h = Harness::new();
     for (name, x) in [("A", 0), ("B", 30), ("C", 60), ("D", 90)] {
