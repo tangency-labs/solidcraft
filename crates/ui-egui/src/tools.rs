@@ -280,6 +280,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             let hit = hits.iter().find_map(|h| match h {
                 Hit::SketchPoint { id, .. } => Some((id.clone(), false)),
                 Hit::SketchCurve { id, .. } => Some((id.clone(), true)),
+                Hit::Axis { name } => sketch_axis_of(app, name).map(|a| (a.to_string(), true)),
                 _ => None,
             });
             let fresh = |tool: &Tool, id: &String| !tool.picks.contains(id) && tool.picks.len() < 2;
@@ -541,7 +542,7 @@ pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> O
 
 /// `x` or `y` when the origin axis `name` is the active sketch's own x or y axis: along it, and
 /// through the sketch's origin.
-fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str> {
+pub(crate) fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str> {
     use solidcraft_engine::geom::Vec3;
     let dir = match name {
         "X" => Vec3::X,

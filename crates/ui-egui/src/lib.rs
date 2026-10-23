@@ -1077,6 +1077,7 @@ impl SolveApp {
                     .iter()
                     .filter_map(|s| match s {
                         solidcraft_engine::Sel::SketchCurve { id } | solidcraft_engine::Sel::SketchPoint { id } => Some(id.clone()),
+                        solidcraft_engine::Sel::Axis { name } => tools::sketch_axis_of(self, name).map(str::to_string),
                         _ => None,
                     })
                     .take(2)

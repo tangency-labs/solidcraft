@@ -237,3 +237,65 @@ fn bad_line_references_are_errors_and_change_nothing() {
     assert_eq!(s.doc.to_json(), before_redundant);
     assert!(axis_lines(&sketch(&s)).is_empty());
 }
+
+/// #2364: a dimension takes `x` / `y` too. A line parallel to the axis gets its distance to it,
+/// a point its distance to it, and both share the one axis line.
+#[test]
+fn issue_2364_dimension_to_a_sketch_axis() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[5, 0], [5, 10]], "ids": ["a"]}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "a"}));
+    let r = run(&mut s, "sketch.dimension", json!({"entities": ["a", "y"], "value": 12}));
+    assert!(r["sketch"]["solved"].as_bool().unwrap(), "{r}");
+    let sk = sketch(&s);
+    for end in ["a.start", "a.end"] {
+        let p = pt(&sk, end);
+        assert!((p.x.abs() - 12.0).abs() < 1e-7, "{end} is 12 from the y axis: {p:?}");
+    }
+    let axes = axis_lines(&sk);
+    assert_eq!(axes.len(), 1, "{axes:?}");
+    assert_eq!(axes[0].0, "y");
+    assert_axis_line(&sk, &axes[0].1, Vec2::Y);
+
+    // A point to the other axis; the y axis line is not made again.
+    let r = run(&mut s, "sketch.dimension", json!({"entities": ["a.end", "x"], "value": 7}));
+    assert!(r["sketch"]["solved"].as_bool().unwrap(), "{r}");
+    let r = run(&mut s, "sketch.dimension", json!({"entities": ["y", "a.start"], "value": 12, "driven": true}));
+    assert!(r["sketch"]["solved"].as_bool().unwrap(), "{r}");
+    let sk = sketch(&s);
+    assert!((pt(&sk, "a.end").y.abs() - 7.0).abs() < 1e-7, "{:?}", pt(&sk, "a.end"));
+    let mut names: Vec<String> = axis_lines(&sk).into_iter().map(|(n, _)| n).collect();
+    names.sort();
+    assert_eq!(names, ["x", "y"], "one line per axis");
+}
+
+/// #2364: a real curve named like an axis is still the curve, not the axis.
+#[test]
+fn issue_2364_a_curve_named_like_an_axis_wins_in_a_dimension() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [8, 0]], "ids": ["y"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["y"], "value": 20}));
+    let sk = sketch(&s);
+    let (a, b) = (pt(&sk, "y.start"), pt(&sk, "y.end"));
+    assert!(((b - a).len() - 20.0).abs() < 1e-7, "the line `y` is 20 long: {a:?} {b:?}");
+    assert!(axis_lines(&sk).is_empty(), "no axis line was made");
+}
+
+/// #3137: a dimension takes `x` / `y` for the sketch's axes too, from a circle's centre point,
+/// and both dimensions share the axis line.
+#[test]
+fn issue_3137_dimensions_from_a_circle_centre_to_the_sketch_axes() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 20], "radius": 5, "id": "c"}));
+    let r = run(&mut s, "sketch.dimension", json!({"entities": ["c.center", "y"], "value": 40}));
+    let line = strs(&r["created"]["curves"]);
+    assert_eq!(line.len(), 1, "the y axis line is created: {r}");
+    run(&mut s, "sketch.dimension", json!({"entities": ["c.center", "x"], "value": 15}));
+    let sk = sketch(&s);
+    let o = pt(&sk, "c.center");
+    assert!((o.x - 40.0).abs() < 1e-7 && (o.y - 15.0).abs() < 1e-7, "the centre is 40 from y and 15 from x: {o:?}");
+    let axes = axis_lines(&sk);
+    assert_eq!(axes.len(), 2, "{axes:?}");
+    assert_axis_line(&sk, &line[0], Vec2::Y);
+    assert!(sk.radius(sk.curve_index("c").unwrap()).is_some_and(|r| (r - 5.0).abs() < 1e-7), "the circle keeps its radius");
+}

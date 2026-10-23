@@ -2153,6 +2153,18 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     let start = s.doc.clone();
     let ((param, kind_name, current), info) = edit(s, p, cmd, true, |sk, doc| {
         before = Some(dof_now(sk));
+        let ents: Vec<String> = ents
+            .iter()
+            .map(|r| -> Result<String> {
+                if sk.curve_index(r).is_none()
+                    && matches!(r.as_str(), "x" | "y")
+                    && let Some(id) = sk.sketch_axis_line(r)?.and_then(|c| sk.curves.get(c)).map(|cu| cu.id.clone())
+                {
+                    return Ok(id);
+                }
+                Ok(r.clone())
+            })
+            .collect::<Result<_>>()?;
         let ent = |r: &str| -> Result<(Option<usize>, Option<usize>)> {
             if let Some(c) = sk.curve_index(r) {
                 return Ok((None, Some(c)));

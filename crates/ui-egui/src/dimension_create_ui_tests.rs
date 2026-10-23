@@ -815,3 +815,63 @@ fn type_first_switching_between_aligned_horizontal_and_vertical_keeps_the_picked
         }
     }
 }
+
+/// #3137: the Dimension tool takes the origin axis along the sketch's x or y as its second
+/// pick: a circle's centre, or the circle itself, is then dimensioned from that axis.
+#[test]
+fn a_circle_centre_is_dimensioned_from_a_sketch_axis() {
+    for (picks, typed, centre) in [(vec![[30., 20.], [0., 3.]], "40 mm", [40., 20.]), (vec![[30., 20.], [3., 0.]], "12 mm", [30., 12.])] {
+        crate::dim_view::cancel();
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[30,20],"radius":5})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.0;
+        h.app.cam.target = solidcraft_engine::geom::Vec3::new(15., 10., 0.);
+        h.settle();
+        h.step(&json!({"start":"sketch.dimension"})).unwrap();
+        for p in &picks {
+            h.step(&json!({"move":{"world":[p[0],p[1],0]}})).unwrap();
+            h.step(&json!({"click":{"world":[p[0],p[1],0]}})).unwrap();
+        }
+        type_value(&mut h, typed);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        let state = h.app.session.world_state();
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let o = sk.point(sk.resolve_point("c1.center").unwrap()).unwrap();
+        assert!((o.x - centre[0]).abs() < 1e-6 && (o.y - centre[1]).abs() < 1e-6, "{picks:?}: {o:?} {:?}", h.app.status);
+    }
+}
+
+/// #3320: after a line or a line's end, the X axis is the second pick: an angle from the axis,
+/// and a distance from it.
+#[test]
+fn a_line_is_dimensioned_against_the_sketch_x_axis() {
+    for (picks, typed) in [(vec![[10., 10.], [3., 0.]], "30 deg"), (vec![[20., 20.], [3., 0.]], "12 mm")] {
+        crate::dim_view::cancel();
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[20,20]]})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.0;
+        h.app.cam.target = solidcraft_engine::geom::Vec3::new(10., 10., 0.);
+        h.settle();
+        h.step(&json!({"start":"sketch.dimension"})).unwrap();
+        for p in &picks {
+            h.step(&json!({"move":{"world":[p[0],p[1],0]}})).unwrap();
+            h.step(&json!({"click":{"world":[p[0],p[1],0]}})).unwrap();
+        }
+        assert_eq!(h.app.tool.as_ref().unwrap().picks.last().map(String::as_str), Some("x"), "the axis is the second pick");
+        type_value(&mut h, typed);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        let state = h.app.session.world_state();
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let (a, b) = (sk.point(sk.resolve_point("l1.start").unwrap()).unwrap(), sk.point(sk.resolve_point("l1.end").unwrap()).unwrap());
+        if typed.ends_with("deg") {
+            let angle = (b - a).angle().to_degrees();
+            assert!((angle - 30.0).abs() < 1e-6, "the line is at 30° to x: {angle}");
+        } else {
+            assert!((b.y - 12.0).abs() < 1e-6, "the end is 12 from x: {b:?}");
+        }
+    }
+}
