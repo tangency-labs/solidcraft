@@ -1649,7 +1649,17 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         if cos < 0.15 && tangent.is_none() {
             return Err(unsupported("an end face almost along the edge"));
         }
-        let width = at.q1.dist(*p).max(at.q2.dist(*p)).max(at.c.dist(*p)) + vradius.get(*k).copied().unwrap_or(scale);
+        let width = match size_law {
+            // A chamfer's sections are set back further along one side than the other: how far
+            // each point lies behind the end face is what the run has to cross, not its distance
+            // from the vertex (a chamfer 7 down a wall square to the end face is past it as soon
+            // as its top contact is). A longer run leaves the faces it is solved on.
+            Size::Sides { .. } => {
+                let behind = [at.c, at.q1, at.q2].iter().map(|x| (*x - *p).dot(ng).abs()).fold(0.0, f64::max);
+                behind + at.q1.dist(at.q2).min(at.c.dist(at.q1).min(at.c.dist(at.q2)))
+            }
+            _ => at.q1.dist(*p).max(at.q2.dist(*p)).max(at.c.dist(*p)) + vradius.get(*k).copied().unwrap_or(scale),
+        };
         let reach = 1.5 * width / if tangent.is_some() { 1.0 } else { cos };
         let out = if *k == 0 { -*t } else { *t };
         // The run on past the end only gives the fit its context (the end face cuts it back), but
