@@ -30,6 +30,19 @@
 //                         run: a surface element needs a real SmSurface / SmSurfaceCache)
 //   10 e6                 AddElement(SM_GE_SURFACE): ints: -2 (not run: needs a real
 //                         surface subdivision tree node)
+// Explicit, unit-local cache extension (legacy opcodes above are unchanged):
+//   11 id origin3 u3 v3 domain4 spans2   define/build a real affine B-spline cache
+//   12 id tol e6                      add its real SmSurfaceHierarchyElement
+//   13 h                              call that hierarchy's real ExpandHierarchy
+//   14 id leaf_ordinal e6              AddElement(actual cache node, SM_GE_SURFACE)
+//   15                                observe caches, surface pool and voxel lists
+// Ops 11–14 return their status (construction 0 only after a valid cache exists).
+// 15 ints: surface count, (input id, eligible-node count)...; hierarchy count and
+// real owner ids (-1 for legacy); surface-pool count, (owner id, leaf ordinal)...;
+// then x-major voxels: element count/-1, (legacy type/id, surface-pool index/-1)...,
+// hierarchy count/-1 and hierarchy indices. Floats: each cache leaf's domain4/box6,
+// then each pool entry's sphere4/base box6 and 51 leaf values (domain4, node box6,
+// midpoint/DU/DV/normal12, pseudo basis9/intervals6, polar state1/domain4/basis9).
 // dda dump: ints address, then per axis with next_t < SM_BIG_DOUBLE: step out; floats ray
 // point, ray vector, ray t, current point, next_t, delta_t, the three delta vectors, then
 // per axis with next_t < SM_BIG_DOUBLE: next plane point.
@@ -37,13 +50,22 @@
 // reported as (type code, object id).
 #include "sc_shim.h"
 
+#include <SmBSplineSurface.h>
 #include <SmContext.h>
+#include <SmExtent1d.h>
+#include <SmExtent2d.h>
 #include <SmExtent3d.h>
 #include <SmGrid.h>
+#include <SmNurbsSrf.h>
+#include <SmSurfaceCache.h>
 #include <SmTArray.h>
+#include <nurbs.h>
 
 #include <map>
+#include <memory>
 #include <set>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace
@@ -87,6 +109,11 @@ int64_t op_size(int op)
     case 8: return 0;
     case 9: return 1;
     case 10: return 6;
+    case 11: return 16;
+    case 12: return 8;
+    case 13: return 1;
+    case 14: return 8;
+    case 15: return 0;
     default: return -1;
     }
 }
@@ -98,6 +125,16 @@ class ShimGrid : public SmGrid
     ShimGrid(const SmExtent3d& b, ULONG lSize[3]) : SmGrid(b, lSize) {}
 
     long size(int i) const { return m_lSize[i]; }
+
+    std::vector<SmSurfaceGridElement*> surface_elements()
+    {
+        SmTArray<void*> active;
+        m_sSurfaceElementMgr.GetActiveElements(active);
+        std::vector<SmSurfaceGridElement*> out;
+        for (ULONG i = 0; i < active.GetSize(); ++i)
+            out.push_back(static_cast<SmSurfaceGridElement*>(active[i]));
+        return out;
+    }
 
     void dump_dda(std::vector<int64_t>& oi, std::vector<double>& of) const
     {
@@ -153,13 +190,17 @@ void put_sphere_box(std::vector<double>& of, const SmGridElement& e)
     put_ext(of, e.GetBoundingBox());
 }
 
+#include "geom_grid_native.inc"
+
 int32_t run(const double* p, int64_t n, std::vector<int64_t>& oi, std::vector<double>& of)
 {
     if (n < 10 || (int)p[0] != 0)
         return SC_ERR_ARG;
     SmContext sCtx;
+    NativeCaches caches;
     ULONG lSize[3] = {(ULONG)p[7], (ULONG)p[8], (ULONG)p[9]};
-    ShimGrid* g = new (sCtx) ShimGrid(ext(p + 1), lSize);
+    std::unique_ptr<ShimGrid> owned_grid(new (sCtx) ShimGrid(ext(p + 1), lSize));
+    ShimGrid* g = owned_grid.get();
     std::vector<SmHierarchyElement*> hier;
     std::map<const SmHierarchyElement*, int64_t> hidx;
     bool ready = false;
@@ -351,6 +392,43 @@ int32_t run(const double* p, int64_t n, std::vector<int64_t>& oi, std::vector<do
         case 10:
             oi.push_back(-2);
             break;
+        case 11:
+            caches.define(sCtx, a);
+            oi.push_back(0);
+            break;
+        case 12:
+        {
+            NativeSurface& s = caches.find((int64_t)a[0]);
+            SmHierarchyElement* h = new (sCtx) SmSurfaceHierarchyElement(s.surface.get(), a[1]);
+            hidx[h] = (int64_t)hier.size();
+            hier.push_back(h);
+            caches.hierarchies[h] = s.id;
+            oi.push_back(st(g->AddHierarchyElement(h, ext(a + 2))));
+            break;
+        }
+        case 13:
+        {
+            SmHierarchyElement* h = hier.at((size_t)a[0]);
+            if (caches.hierarchies.count(h) != 1)
+                return SC_ERR_ARG;
+            oi.push_back(st(h->ExpandHierarchy(g)));
+            break;
+        }
+        case 14:
+        {
+            NativeSurface& s = caches.find((int64_t)a[0]);
+            // The ordinal is checked against this actual cache, not a fake node id.
+            if (a[1] < 0 || a[1] >= (double)s.leaves.size())
+                return SC_ERR_ARG;
+            SmTreeNode* node = s.leaves.at((size_t)a[1]);
+            if (node->GetOwnerObject() != s.surface.get())
+                return SC_ERR_ARG;
+            oi.push_back(st(g->AddElement(node, SM_GE_SURFACE, ext(a + 2))));
+            break;
+        }
+        case 15:
+            caches.observe(g, hier, hidx, oi, of);
+            break;
         default:
             rc = SC_ERR_ARG;
             break;
@@ -359,7 +437,9 @@ int32_t run(const double* p, int64_t n, std::vector<int64_t>& oi, std::vector<do
             break;
         i += 1 + sz;
     }
-    delete g;
+    // Grid elements/hierarchies refer to the surfaces. Destroy the grid first;
+    // surfaces then destroy their own caches before sCtx goes out of scope.
+    owned_grid.reset();
     return rc;
 }
 } // namespace

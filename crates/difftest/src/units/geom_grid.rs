@@ -18,13 +18,26 @@
 //! surface hierarchy element and `add_surface` need surface subdivision caches:
 //! the shim does not run them and the Rust side is deferred (they appear only in
 //! fixtures). Every run has at least [`MIN_GENERATED`] generated cases.
+//!
+//! New `define_surface` / `add_cached_hier` / `expand_cached` /
+//! `add_cached_leaf` / `observe_cached` fixtures opt into real, explicitly defined
+//! surface caches. They do not resolve the legacy opaque object/node labels.
+//! The observer records cache leaf order, surface identities, pool order, voxel
+//! memberships and all surface-leaf fields, in addition to the original dumps.
+
+#[path = "geom_grid/native.rs"]
+mod native;
+
+#[cfg(test)]
+#[path = "geom_grid/tests.rs"]
+mod native_tests;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::geom::extent3d::Extent3d;
 use solidcore::geom::grid::{
-    ElementId, ElementSource, Grid, GridItem, HierarchyElement, HierarchyId,
+    ElementId, ElementSource, Grid, GridItem, HierarchyElement, HierarchyId, SurfaceGridElement,
 };
 use solidcore::geom::tree::NodeId;
 use solidcore::math::{Point3, Vec3, BIG_DOUBLE};
@@ -94,6 +107,28 @@ enum Op {
     AddSurface {
         bbox: E6,
     },
+    DefineSurface {
+        id: i64,
+        origin: P3,
+        u: P3,
+        v: P3,
+        domain: [f64; 4],
+        spans: [usize; 2],
+    },
+    AddCachedHier {
+        surface: i64,
+        tol: f64,
+        bbox: E6,
+    },
+    ExpandCached {
+        h: usize,
+    },
+    AddCachedLeaf {
+        surface: i64,
+        leaf: usize,
+        bbox: E6,
+    },
+    ObserveCached,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +212,35 @@ fn prog(i: &Inputs) -> Vec<f64> {
                 v.push(10.0);
                 v.extend(bbox);
             }
+            Op::DefineSurface {
+                id,
+                origin,
+                u,
+                v: axis_v,
+                domain,
+                spans,
+            } => {
+                v.extend([11.0, *id as f64]);
+                v.extend(origin);
+                v.extend(u);
+                v.extend(axis_v);
+                v.extend(domain);
+                v.extend(spans.map(|n| n as f64));
+            }
+            Op::AddCachedHier { surface, tol, bbox } => {
+                v.extend([12.0, *surface as f64, *tol]);
+                v.extend(bbox);
+            }
+            Op::ExpandCached { h } => v.extend([13.0, *h as f64]),
+            Op::AddCachedLeaf {
+                surface,
+                leaf,
+                bbox,
+            } => {
+                v.extend([14.0, *surface as f64, *leaf as f64]);
+                v.extend(bbox);
+            }
+            Op::ObserveCached => v.push(15.0),
         }
     }
     v
@@ -231,8 +295,26 @@ struct Stats {
 }
 
 fn run_rust(i: &Inputs, st: &mut Stats) -> solidcore::Result<(Vec<i64>, Vec<f64>)> {
+    run_rust_controlled(i, st, true, |leaf| leaf)
+}
+
+// Unit-local mutation controls are used only by the native integration tests.
+// Normal runs always expand and preserve every field. No kernel path is changed.
+fn run_rust_controlled(
+    i: &Inputs,
+    st: &mut Stats,
+    expand: bool,
+    mut leaf_control: impl FnMut(SurfaceGridElement<i64>) -> SurfaceGridElement<i64>,
+) -> solidcore::Result<(Vec<i64>, Vec<f64>)> {
+    if i.ops
+        .iter()
+        .any(|op| matches!(op, Op::DefineSurface { .. }))
+    {
+        ffi::validate(&prog(i)).map_err(|_| native::invalid("invalid explicit cache program"))?;
+    }
     let size = i.grid.size.map(|s| s as usize);
     let mut g: Grid<i64> = Grid::new(&ext(i.grid.bbox), size)?;
+    let mut caches = native::Caches::default();
     let (mut oi, mut of) = (Vec::new(), Vec::new());
     let mut ready = false;
     for op in &i.ops {
@@ -332,6 +414,36 @@ fn run_rust(i: &Inputs, st: &mut Stats) -> solidcore::Result<(Vec<i64>, Vec<f64>
                 g.add_element(ElementSource::Surface(NodeId(0)), &ext(*bbox))?;
                 oi.push(0);
             }
+            Op::DefineSurface {
+                id,
+                origin,
+                u,
+                v,
+                domain,
+                spans,
+            } => {
+                caches.define(*id, *origin, *u, *v, *domain, *spans)?;
+                oi.push(0);
+            }
+            Op::AddCachedHier { surface, tol, bbox } => {
+                caches.add_hierarchy(&mut g, *surface, *tol, &ext(*bbox))?;
+                oi.push(0);
+            }
+            Op::ExpandCached { h } => {
+                if expand {
+                    caches.expand(&mut g, HierarchyId(*h), &mut leaf_control)?;
+                }
+                oi.push(0);
+            }
+            Op::AddCachedLeaf {
+                surface,
+                leaf,
+                bbox,
+            } => {
+                caches.add_leaf(&mut g, *surface, *leaf, &ext(*bbox), &mut leaf_control)?;
+                oi.push(0);
+            }
+            Op::ObserveCached => caches.observe(&g, &mut oi, &mut of)?,
         }
     }
     Ok((oi, of))
