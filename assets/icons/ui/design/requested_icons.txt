@@ -131,6 +131,7 @@ list	false
 loft	false
 lookat	false
 material	false
+manufacture	false
 measure	false
 mesh_export	false
 min_radius	false
@@ -275,6 +276,7 @@ web	false
 ws_animate	false
 ws_design	false
 ws_drawing	false
+ws_manufacture	false
 ws_render	false
 zebra	false
 zoom	false
