@@ -58,17 +58,21 @@ impl CamSettings {
     }
 }
 
-/// One machining setup: work offset, optional tool axis / origin, optional stock, and operations.
+/// One machining setup: ISO 841 work frame, RS-274 work offset, optional stock, and operations.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CamSetup {
     pub name: String,
     /// Work offset 1…6 (`G54`…`G59`).
     #[serde(default = "one")]
     pub work_offset: u8,
-    /// Tool axis in work coordinates. Default `[0, 0, 1]` (from +Z). Reserved for later 3+2 work.
+    /// Programmed +Z (spindle) in model coordinates. Default `[0, 0, 1]`.
     #[serde(default = "tool_axis_z", skip_serializing_if = "is_tool_axis_z")]
     pub tool_axis: [f64; 3],
-    /// Work origin in model coordinates (mm). Default origin. Reserved for later WCS mapping.
+    /// Optional programmed +X in model coordinates. Omitted, derived from [`Self::tool_axis`].
+    /// Must be square to the tool axis. Y is tool_axis × x_axis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_axis: Option<[f64; 3]>,
+    /// Part zero in model coordinates (mm). Default origin.
     #[serde(default, skip_serializing_if = "is_origin")]
     pub work_origin: [f64; 3],
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -99,7 +103,15 @@ fn profile_all() -> ProfileSel {
 
 impl CamSetup {
     pub fn new(name: impl Into<String>) -> CamSetup {
-        CamSetup { name: name.into(), work_offset: 1, tool_axis: [0.0, 0.0, 1.0], work_origin: [0.0, 0.0, 0.0], stock: None, operations: Vec::new() }
+        CamSetup {
+            name: name.into(),
+            work_offset: 1,
+            tool_axis: [0.0, 0.0, 1.0],
+            x_axis: None,
+            work_origin: [0.0, 0.0, 0.0],
+            stock: None,
+            operations: Vec::new(),
+        }
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -114,6 +126,18 @@ impl CamSetup {
         }
         if self.work_origin.iter().any(|x| !x.is_finite() || x.abs() > 1.0e6) {
             return Err(DocError::Invalid("the work origin must be finite and within 1e6 mm".into()));
+        }
+        if let Some(x) = self.x_axis {
+            if x.iter().any(|v| !v.is_finite()) || x == [0.0, 0.0, 0.0] {
+                return Err(DocError::Invalid("the X axis must be a finite non-zero vector".into()));
+            }
+            let z = self.tool_axis_vec();
+            let xv = Vec3::new(x[0], x[1], x[2]);
+            let zlen = (z.x * z.x + z.y * z.y + z.z * z.z).sqrt();
+            let xlen = (xv.x * xv.x + xv.y * xv.y + xv.z * xv.z).sqrt();
+            if zlen > 0.0 && xlen > 0.0 && (z.dot(xv) / (zlen * xlen)).abs() > 1e-6 {
+                return Err(DocError::Invalid("the X axis must be square to the tool axis".into()));
+            }
         }
         if self.operations.len() > MAX_OPS {
             return Err(DocError::Invalid(format!("a CAM setup has at most {MAX_OPS} operations")));

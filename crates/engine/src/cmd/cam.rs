@@ -28,8 +28,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("cam.tool.remove", "Remove Tool", tool_remove).icon("delete").params("number"),
     CommandSpec::new("cam.setup", "CAM Setup", setup_cmd).icon("settings").params(
-        "name; work_offset?: 1…6 (G54…G59, default 1); tool_axis?: [x,y,z] (default [0,0,1]); \
-         work_origin?: [x,y,z] mm (default [0,0,0]); stock?: {min:[x,y,z], max:[x,y,z]}; delete?: bool",
+        "name; work_offset?: 1…6 (G54…G59, default 1); tool_axis?: [x,y,z] (programmed +Z, default [0,0,1]); \
+         x_axis?: [x,y,z] (programmed +X, square to the tool axis; omitted, derived); \
+         work_origin?: [x,y,z] mm part zero in the model (default [0,0,0]); \
+         stock?: {min:[x,y,z], max:[x,y,z]}; delete?: bool",
     ),
     CommandSpec::new("cam.op.contour", "2D Contour", contour_cmd).icon("cut").params(
         "setup; name; tool (number); sketch?: id or name, with profiles?: as solid.extrude; faces?: [{body, name, at?}]; \
@@ -136,6 +138,13 @@ fn setup_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         }
         None => existing.as_ref().map(|e| e.work_origin).unwrap_or([0.0, 0.0, 0.0]),
     };
+    let x_axis = match p.get("x_axis") {
+        Some(v) => {
+            let a = vec3(v).ok_or_else(|| bad(cmd, "`x_axis` must be [x, y, z]"))?;
+            Some([a.x, a.y, a.z])
+        }
+        None => existing.as_ref().and_then(|e| e.x_axis),
+    };
     let stock = match p.get("stock") {
         None => existing.as_ref().and_then(|e| e.stock),
         Some(v) => Some(stock_box(cmd, v)?),
@@ -143,6 +152,7 @@ fn setup_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let mut setup = CamSetup::new(&name);
     setup.work_offset = work_offset;
     setup.tool_axis = tool_axis;
+    setup.x_axis = x_axis;
     setup.work_origin = work_origin;
     setup.stock = stock;
     if let Some(existing) = &existing {
@@ -157,6 +167,7 @@ fn setup_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         Some(slot) => {
             slot.work_offset = setup.work_offset;
             slot.tool_axis = setup.tool_axis;
+            slot.x_axis = setup.x_axis;
             slot.work_origin = setup.work_origin;
             slot.stock = setup.stock;
         }
@@ -482,7 +493,19 @@ fn axes(axis: Vec3) -> Option<(Vec3, Vec3, Vec3)> {
 }
 
 fn work_frame(setup: &CamSetup) -> std::result::Result<WorkFrame, String> {
-    let (x, y, z) = axes(setup.tool_axis_vec()).ok_or("the setup's tool axis is not a direction")?;
+    let z = setup.tool_axis_vec().normalized().filter(|z| z.is_finite()).ok_or("the setup's tool axis is not a direction")?;
+    let x = match setup.x_axis {
+        Some(a) => {
+            let x = Vec3::new(a[0], a[1], a[2]).normalized().filter(|x| x.is_finite()).ok_or("the setup's X axis is not a direction")?;
+            if x.dot(z).abs() > 1e-6 {
+                return Err("the setup's X axis must be square to the tool axis".into());
+            }
+            x
+        }
+        None => axes(z).ok_or("the setup's tool axis is not a direction")?.0,
+    };
+    let y = z.cross(x);
+    let y = y.normalized().filter(|y| y.is_finite()).ok_or("the setup's axes do not form a frame")?;
     Ok(WorkFrame { o: setup.work_origin_vec(), x, y, z })
 }
 
@@ -682,6 +705,7 @@ fn setup_json(setup: &CamSetup) -> Value {
         "name": setup.name,
         "work_offset": setup.work_offset,
         "tool_axis": setup.tool_axis,
+        "x_axis": setup.x_axis,
         "work_origin": setup.work_origin,
         "stock": setup.stock,
         "operations": setup.operations.iter().map(|op| match op {
@@ -758,13 +782,67 @@ mod tests {
     #[test]
     fn setup_keeps_room_for_tool_axis_and_work_origin() {
         let mut s = Session::default();
-        run(&mut s, "cam.setup", json!({"name": "Side", "tool_axis": [1, 0, 0], "work_origin": [10, 20, 30]}));
+        run(&mut s, "cam.setup", json!({"name": "Side", "tool_axis": [1, 0, 0], "x_axis": [0, 1, 0], "work_origin": [10, 20, 30]}));
         assert_eq!(s.doc.cam.setups[0].tool_axis, [1.0, 0.0, 0.0]);
+        assert_eq!(s.doc.cam.setups[0].x_axis, Some([0.0, 1.0, 0.0]));
         assert_eq!(s.doc.cam.setups[0].work_origin, [10.0, 20.0, 30.0]);
         let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
         assert_eq!(cold.doc.cam.setups[0].tool_axis, [1.0, 0.0, 0.0]);
+        assert_eq!(cold.doc.cam.setups[0].x_axis, Some([0.0, 1.0, 0.0]));
         assert_eq!(cold.doc.cam.setups[0].work_origin, [10.0, 20.0, 30.0]);
         assert!(s.execute("cam.setup", &json!({"name": "Bad", "tool_axis": [0, 0, 0]})).is_err());
+        assert!(s.execute("cam.setup", &json!({"name": "Skew", "x_axis": [0, 0, 1]})).is_err());
+    }
+
+    fn gcode_x_words(gcode: &str) -> Vec<i64> {
+        gcode
+            .split_whitespace()
+            .filter_map(|w| w.strip_prefix('X'))
+            .filter_map(|n| n.parse::<f64>().ok())
+            .map(|x| (x * 100.0).round() as i64)
+            .collect()
+    }
+
+    fn sketch_outside_gcode(s: &mut Session, setup: Value) -> String {
+        run(s, "sketch.create", json!({"plane": "XY"}));
+        run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+        let sketch = s.active_sketch.expect("sketch");
+        run(s, "sketch.finish", json!({}));
+        run(s, "cam.tool.define", json!({"number": 1, "diameter": 6, "flute_length": 20, "feed": 600, "plunge_feed": 200, "stepdown": 3}));
+        run(s, "cam.setup", setup);
+        run(
+            s,
+            "cam.op.contour",
+            json!({
+                "setup": "Top", "name": "Outside", "tool": 1,
+                "sketch": sketch, "side": "outside", "bottom": -3, "stepdown": 3,
+            }),
+        );
+        run(s, "cam.post", json!({"setup": "Top"}))["gcode"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn work_origin_shifts_sketch_xy_and_offset_writes_g55() {
+        let g0 = sketch_outside_gcode(&mut Session::default(), json!({"name": "Top"}));
+        let g10 = sketch_outside_gcode(&mut Session::default(), json!({"name": "Top", "work_origin": [10, 0, 0]}));
+        let g55 = sketch_outside_gcode(&mut Session::default(), json!({"name": "Top", "work_offset": 2}));
+        assert!(g0.contains("G54"), "{g0}");
+        assert!(g55.contains("G55"), "{g55}");
+        assert!(!g55.contains("G54"), "{g55}");
+        let x0 = gcode_x_words(&g0);
+        let x10 = gcode_x_words(&g10);
+        assert!(!x0.is_empty(), "{g0}");
+        assert_ne!(x0, x10, "origin must move posted X\n{g0}\n{g10}");
+        let shifted: Vec<i64> = x0.iter().map(|x| x - 1000).collect();
+        assert_eq!(shifted, x10, "X(origin 10) should be X(origin 0) minus 10 mm\n{g0}\n{g10}");
+    }
+
+    #[test]
+    fn x_axis_rotates_work_xy() {
+        let g = sketch_outside_gcode(&mut Session::default(), json!({"name": "Top"}));
+        let r = sketch_outside_gcode(&mut Session::default(), json!({"name": "Top", "x_axis": [0, 1, 0]}));
+        assert_ne!(gcode_x_words(&g), gcode_x_words(&r), "a work X along model Y must change posted X\n{g}\n{r}");
+        assert!(r.contains("G54"), "{r}");
     }
 
     #[test]
