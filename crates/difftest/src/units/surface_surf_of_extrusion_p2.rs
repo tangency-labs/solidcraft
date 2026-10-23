@@ -16,11 +16,11 @@
 //! Rust side for an error upstream cannot produce.
 //!
 //! Deferred cases: `IntersectWithPlane` of a linear or coplanar generator whose
-//! plane/plane intersection gives a line (`SmSurface::CurveOnClassify`,
-//! `intersect.curve_class_p2`; a bounded plane the swept plane misses compares);
-//! `GlobalSurfaceIntersect` needing the general intersector (run by the C++ side; the
-//! Rust one needs a surface of extrusion as a `Surface`, which it is not yet: the
-//! `SmSurface` dispatch, `surface.surface_p2`).
+//! plane/plane intersection gives a line, while `SmSurface::CurveOnClassify`
+//! (`intersect.curve_class_p2`) is unported (a bounded plane the swept plane misses
+//! compares). `GlobalSurfaceIntersect` runs through the common `Surface` dispatch (a plane not
+//! `as_surface` through the typed `SurfOfExtrusion::global_surface_intersect`), which
+//! takes the general intersector where a special case needs more.
 
 use std::path::Path;
 
@@ -781,25 +781,19 @@ fn rust_op(
             tol,
             ang,
         } => {
+            // SmSurfOfExtrusion::GlobalSurfaceIntersect: its special cases, else the
+            // general intersection (SmSurface::GlobalSurfaceIntersect) of both surfaces.
+            // A plane not `as_surface` takes the typed entry; every other target goes
+            // through the common Surface dispatch.
             let d = dom.map_or_else(|| natural(s), dom4);
-            let r = match target {
+            let this = Surface::from(s.clone());
+            let (other, od) = match target {
                 TargetIn::Plane { plane, as_surface } => {
                     o.push(0.0);
                     let pl = rust_plane(plane);
                     let od = other_dom.map_or_else(|| pl.natural_uv_domain(), dom4);
-                    if *as_surface {
-                        let srf = Surface::from(pl);
-                        s.global_surface_intersect(
-                            k,
-                            &d,
-                            IntersectTarget::Surface(&srf),
-                            &od,
-                            [true, true],
-                            *tol,
-                            *ang,
-                        )
-                    } else {
-                        s.global_surface_intersect(
+                    if !*as_surface {
+                        let r = s.global_surface_intersect(
                             k,
                             &d,
                             IntersectTarget::Plane(&pl),
@@ -807,8 +801,10 @@ fn rust_op(
                             [true, true],
                             *tol,
                             *ang,
-                        )
+                        );
+                        return Ok(tsect(o, r));
                     }
+                    (Surface::from(pl), od)
                 }
                 TargetIn::Cone { cone } => {
                     match sub(o, rust_cone(k, cone).map_err(|e| stop(&e))) {
@@ -819,15 +815,7 @@ fn rust_op(
                                 || c.rev().base().natural_uv_domain(),
                                 dom4,
                             );
-                            s.global_surface_intersect(
-                                k,
-                                &d,
-                                IntersectTarget::Cone(&c),
-                                &od,
-                                [true, true],
-                                *tol,
-                                *ang,
-                            )
+                            (Surface::from(c), od)
                         }
                     }
                 }
@@ -836,15 +824,7 @@ fn rust_op(
                     Ok(None) => return Ok(Ok(())),
                     Ok(Some(e)) => {
                         let od = other_dom.map_or_else(|| natural(&e), dom4);
-                        s.global_surface_intersect(
-                            k,
-                            &d,
-                            IntersectTarget::SurfOfExtrusion(&e),
-                            &od,
-                            [true, true],
-                            *tol,
-                            *ang,
-                        )
+                        (Surface::from(e), od)
                     }
                 },
                 TargetIn::Bspline { other } => match sub(o, rust_src(k, other)?) {
@@ -853,19 +833,20 @@ fn rust_op(
                     Ok(Some(e)) => {
                         let b = nurb_surface(&e)?;
                         let od = other_dom.map_or_else(|| b.natural_uv_domain(), dom4);
-                        let srf = Surface::from(b);
-                        s.global_surface_intersect(
-                            k,
-                            &d,
-                            IntersectTarget::Surface(&srf),
-                            &od,
-                            [true, true],
-                            *tol,
-                            *ang,
-                        )
+                        (Surface::from(b), od)
                     }
                 },
             };
+            let r = this
+                .global_surface_intersect(k, &d, &other, &od, [true, true], *tol, *ang)
+                .map(|x| ExtrusionIntersection {
+                    needs_more_intersections: false,
+                    curves_3d: x.curves_3d,
+                    surface1_uv_curves: x.surface1_uv_curves,
+                    surface2_uv_curves: x.surface2_uv_curves,
+                    curve_types: x.curve_types,
+                    deviations: x.deviations,
+                });
             tsect(o, r)
         }
         OpIn::Trim { dom } => match s.trim_with_domain(k, &dom4(*dom)) {

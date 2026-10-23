@@ -20,9 +20,9 @@
 //! Deviations:
 //! - **Free surfaces.** `GlobalSurfaceIntersect` takes its other surface as an
 //!   [`IntersectTarget`] (a plane, a cone, a surface of extrusion, or a [`Surface`] of
-//!   any kind); `IntersectWithPlane`'s classification runs on an ownerless [`Surface`]
-//!   stand-in of this surface, and its general intersection stays a named dispatch gap
-//!   (`surface.surface_p2`; see plan/findings.md). Through
+//!   any kind); `IntersectWithPlane`'s classification and the general intersection
+//!   run on ownerless [`Surface`] stand-ins of the surfaces (no face reaches them).
+//!   Through
 //!   [`crate::surface::surface::SurfaceKind::SurfOfExtrusion`] the `SmSurface` dispatch
 //!   passes the real surfaces instead (`global_surface_intersect_on`,
 //!   `intersect_with_plane_on`, with the plane's face tolerance for its boxes and the
@@ -34,8 +34,9 @@
 //!   `pOpt3DCurves` and `pOptCurveTypes` present upstream's choices do not depend on
 //!   the others). The UV curves upstream adds are `NULL` (`None`). `SmContext`
 //!   arguments and the arguments upstream marks `NotUsed` are dropped; the
-//!   approximation tolerance is converted as upstream's `SmApproxTol3d` parameter (its
-//!   magnitude; `SM_USE_DEFAULT` is half the zone tolerance).
+//!   approximation tolerance is the caller's `double`, converted as upstream's
+//!   `SmApproxTol3d` parameter (its magnitude; `SM_USE_DEFAULT` is half the zone
+//!   tolerance) by each special case and before the general intersection.
 //! - **Statuses.** Calls whose status upstream ignores keep upstream's values, except
 //!   that [`SolidError::Unported`] always propagates and a failure whose output
 //!   upstream would read uninitialised (the generator's evaluation at a plane
@@ -97,6 +98,7 @@ use crate::surface::surface::p1::SurfaceIntersectContext;
 use crate::surface::surface::p2::{
     base_global_surface_intersect_in, SurfaceIntersection, TsectCurveType, CONE_TYPE,
 };
+use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::volume::Volume;
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
@@ -293,9 +295,9 @@ impl SurfOfExtrusion {
     ///
     /// # Errors
     ///
-    /// Those of the special cases; [`SolidError::Unported`] from the general
-    /// intersection (`SmAdvSurfaceIntersector`, which needs this surface as a
-    /// `SurfaceKind`: a dispatch gap of `surface.surface_p2`).
+    /// Those of the special cases and of the general intersection
+    /// (`SmAdvSurfaceIntersector`, on ownerless [`Surface`] stand-ins of both
+    /// surfaces).
     #[allow(clippy::too_many_arguments)] // upstream's signature
     pub fn global_surface_intersect(
         &self,
@@ -338,16 +340,45 @@ impl SurfOfExtrusion {
                 return Ok(r);
             }
         }
-        // DISPATCH GAP (#76): SmSurface::GlobalSurfaceIntersect of a free extrusion. The
-        // general intersector runs on ownerless stand-ins of both surfaces in principle,
-        // but on surface.surf_of_extrusion_p2 gen0413/gen0448/gen0732 it returns no curves
-        // where the C++ finds some (plan/findings.md); the SmSurface dispatch
-        // (`global_surface_intersect_on`) runs it on the real surfaces.
-        let _ = (other, use_surface_edges, ang_tol_rad);
-        Err(SolidError::unported(
-            "SmAdvSurfaceIntersector (free SmSurfOfExtrusion)",
-            "surface.surface_p2",
-        ))
+        // SmSurface::GlobalSurfaceIntersect of a free extrusion: the general intersection
+        // of ownerless stand-ins of both surfaces (no face reaches them, as upstream for
+        // free surfaces); it replaces the special case's curves
+        let this = Surface::from(self.clone());
+        let stand_in;
+        let other = match other {
+            IntersectTarget::Surface(s) => s,
+            IntersectTarget::Plane(p) => {
+                stand_in = Surface::from(p.clone());
+                &stand_in
+            }
+            IntersectTarget::Cone(c) => {
+                stand_in = Surface::from(c.clone());
+                &stand_in
+            }
+            IntersectTarget::SurfOfExtrusion(s) => {
+                stand_in = Surface::from(s.clone());
+                &stand_in
+            }
+        };
+        let r = base_global_surface_intersect_in::<NoObject>(
+            k,
+            &this,
+            uv_domain,
+            other,
+            other_uv_domain,
+            use_surface_edges,
+            approx_tol_3d.map(|t| approx_tol3d(k, t)),
+            ang_tol_rad,
+            None,
+        )?;
+        Ok(ExtrusionIntersection {
+            needs_more_intersections: false,
+            curves_3d: r.curves_3d,
+            surface1_uv_curves: r.surface1_uv_curves,
+            surface2_uv_curves: r.surface2_uv_curves,
+            curve_types: r.curve_types,
+            deviations: r.deviations,
+        })
     }
 
     /// [`Self::global_surface_intersect`] of the surface `this` holding this extrusion
@@ -397,7 +428,8 @@ impl SurfOfExtrusion {
             }
         }
         // (SmSurfaceIntersector::DoIntersection resets the output arrays: the special
-        // case's curves are dropped)
+        // case's curves are dropped; the tolerance is the SmApproxTol3d upstream passes
+        // on, already converted)
         base_global_surface_intersect_in(
             k,
             this,
@@ -405,7 +437,7 @@ impl SurfOfExtrusion {
             other,
             other_uv_domain,
             use_surface_edges,
-            approx_tol_3d,
+            approx_tol_3d.map(|t| approx_tol3d(k, t)),
             ang_tol_rad,
             context,
         )
