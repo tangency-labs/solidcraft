@@ -12,10 +12,6 @@
   "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry ('there is no body to cut or intersect' on a cut extrude from an enclosure face)"
  },
  {
-  "source": "tangency-labs/solidcraft#3411",
-  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (join of three bodies, 'Union: no result')"
- },
- {
   "source": "tangency-labs/solidcraft#3426",
   "why": "UI only: the extrude preview's initial direction on a picked face, no wrong geometry"
  },

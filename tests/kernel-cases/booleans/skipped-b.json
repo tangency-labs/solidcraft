@@ -326,13 +326,5 @@
  {
   "source": "tangency-labs/solidcraft#3374",
   "why": "other area: import (mesh body from an imported file: a boolean needs a solid body, by design)"
- },
- {
-  "source": "tangency-labs/solidcraft#3396",
-  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
- },
- {
-  "source": "tangency-labs/solidcraft#3403",
-  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
  }
 ]

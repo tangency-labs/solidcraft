@@ -1,0 +1,555 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 37,
+    "height": 3.6,
+    "base": [
+     0,
+     0,
+     -3.6
+    ],
+    "body_name": "Body1"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 80,
+    "width": 3,
+    "height": 2.8,
+    "corner": [
+     -40,
+     8,
+     -4
+    ],
+    "operation": "cut",
+    "targets": [
+     "Body1"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 80,
+    "width": 3,
+    "height": 2.8,
+    "corner": [
+     -40,
+     24,
+     -4
+    ],
+    "operation": "cut",
+    "targets": [
+     "Body1"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 80,
+    "width": 5,
+    "height": 2.8,
+    "corner": [
+     -40,
+     -13,
+     -4
+    ],
+    "operation": "cut",
+    "targets": [
+     "Body1"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 80,
+    "width": 5,
+    "height": 2.8,
+    "corner": [
+     -40,
+     -29,
+     -4
+    ],
+    "operation": "cut",
+    "targets": [
+     "Body1"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 37,
+    "height": 2,
+    "base": [
+     0,
+     0,
+     -5.6
+    ],
+    "body_name": "Body2"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 35,
+    "height": 2.8,
+    "base": [
+     0,
+     0,
+     -6
+    ],
+    "operation": "cut",
+    "targets": [
+     "Body2"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 37,
+    "height": 2.4,
+    "base": [
+     0,
+     0,
+     -8
+    ],
+    "body_name": "Body3"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 29.5,
+    "height": 4,
+    "base": [
+     0,
+     0,
+     -8.8
+    ],
+    "body_name": "Ring"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 28.3,
+    "height": 4.8,
+    "base": [
+     0,
+     0,
+     -9.2
+    ],
+    "operation": "cut",
+    "targets": [
+     "Ring"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 68,
+    "width": 8,
+    "height": 4.8,
+    "corner": [
+     -34,
+     -5,
+     -9.2
+    ],
+    "body_name": "Band0"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 33,
+    "height": 3.2,
+    "base": [
+     0,
+     0,
+     -8.4
+    ],
+    "operation": "intersect",
+    "targets": [
+     "Band0"
+    ]
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band0",
+    "tools": [
+     "Ring"
+    ],
+    "operation": "cut",
+    "keep_tools": true
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Body3",
+    "tools": [
+     "Band0",
+     "Band0 (1)",
+     "Band0 (2)"
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 68,
+    "width": 3,
+    "height": 4.8,
+    "corner": [
+     -34,
+     16,
+     -9.2
+    ],
+    "body_name": "Band1"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 33,
+    "height": 3.2,
+    "base": [
+     0,
+     0,
+     -8.4
+    ],
+    "operation": "intersect",
+    "targets": [
+     "Band1"
+    ]
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band1",
+    "tools": [
+     "Ring"
+    ],
+    "operation": "cut",
+    "keep_tools": true
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Body3",
+    "tools": [
+     "Band1",
+     "Band1 (1)",
+     "Band1 (2)"
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 68,
+    "width": 6,
+    "height": 4.8,
+    "corner": [
+     -34,
+     27,
+     -9.2
+    ],
+    "body_name": "Band2"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 33,
+    "height": 3.2,
+    "base": [
+     0,
+     0,
+     -8.4
+    ],
+    "operation": "intersect",
+    "targets": [
+     "Band2"
+    ]
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band2",
+    "tools": [
+     "Ring"
+    ],
+    "operation": "cut",
+    "keep_tools": true
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Body3",
+    "tools": [
+     "Band2",
+     "Band2 (1)"
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 68,
+    "width": 5,
+    "height": 4.8,
+    "corner": [
+     -34,
+     -21,
+     -9.2
+    ],
+    "body_name": "Band3"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 33,
+    "height": 3.2,
+    "base": [
+     0,
+     0,
+     -8.4
+    ],
+    "operation": "intersect",
+    "targets": [
+     "Band3"
+    ]
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band3",
+    "tools": [
+     "Ring"
+    ],
+    "operation": "cut",
+    "keep_tools": true
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Body3",
+    "tools": [
+     "Band3",
+     "Band3 (1)",
+     "Band3 (2)"
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 68,
+    "width": 4,
+    "height": 4.8,
+    "corner": [
+     -34,
+     -33,
+     -9.2
+    ],
+    "body_name": "Band4"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 33,
+    "height": 3.2,
+    "base": [
+     0,
+     0,
+     -8.4
+    ],
+    "operation": "intersect",
+    "targets": [
+     "Band4"
+    ]
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band4",
+    "tools": [
+     "Ring"
+    ],
+    "operation": "cut",
+    "keep_tools": false
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Body3",
+    "tools": [
+     "Band4"
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 37,
+    "height": 2.2,
+    "base": [
+     0,
+     0,
+     -10.2
+    ],
+    "body_name": "Body4"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 33,
+    "height": 3,
+    "base": [
+     0,
+     0,
+     -10.6
+    ],
+    "operation": "cut",
+    "targets": [
+     "Body4"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 29.5,
+    "height": 12,
+    "base": [
+     0,
+     0,
+     -20
+    ],
+    "body_name": "Body5"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 28.3,
+    "height": 12.8,
+    "base": [
+     0,
+     0,
+     -20.4
+    ],
+    "operation": "cut",
+    "targets": [
+     "Body5"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 37,
+    "height": 12,
+    "base": [
+     0,
+     0,
+     -20
+    ],
+    "body_name": "Body6"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 35,
+    "height": 12.8,
+    "base": [
+     0,
+     0,
+     -20.4
+    ],
+    "operation": "cut",
+    "targets": [
+     "Body6"
+    ]
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Body1",
+    "tools": [
+     "Body2"
+    ],
+    "operation": "join"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Body1",
+    "tools": [
+     "Body3"
+    ],
+    "operation": "join"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Body1",
+    "tools": [
+     "Body4"
+    ],
+    "operation": "join"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Body1",
+    "tools": [
+     "Body5"
+    ],
+    "operation": "join"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Body1",
+    "tools": [
+     "Body6"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

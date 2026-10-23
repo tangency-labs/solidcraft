@@ -1,0 +1,25 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3403",
+  "tangency-labs/solidcraft#3396",
+  "tangency-labs/solidcraft#3411"
+ ],
+ "what": "the same six flush layers drawn as sketch regions (an r37 circle, an r33 circle and 18 horizontal chords of the r37 circle) and extruded, a ring added by a To-Object Join, then joined to the top layer one at a time",
+ "source": "analytic",
+ "method": "F(R,y) = y*sqrt(R^2-y^2) + R^2*asin(y/R); S_R(a,b) = F(R,b)-F(R,a) (the r R disc between y=a and y=b). Body1 = pi*37^2*3.6 - 2.4*(S37(8,11)+S37(24,27)+S37(-13,-8)+S37(-29,-24)) = 13114.140297; Body2 = 2*pi*(37^2-35^2) = 904.778684; Body3 = 2.4*(pi*37^2 - sum over (a,b) in (-5,3),(16,19),(27,33),(-21,-16),(-33,-29) of (S33-S29.5+S28.3)(a,b)) = 7600.682057; Body4 = 2.2*pi*(37^2-33^2) = 1935.221075; Body5 = 12*pi*(29.5^2-28.3^2) = 2614.810397; Body6 = 12*pi*(37^2-35^2) = 5428.672105. Interiors are disjoint except Body4 and Body6 (2.2*pi*(37^2-35^2) = 995.256553), so V = sum - overlap = 30603.048063. Otherwise the layers only touch, flush at z = -3.6, -5.6 and -8; the space inside r35 between Body1 and Body3 opens to the side through Body1's full-width slots, so the union is one solid with one shell (no sealed void). Same solid as booleans/3396-layers-joined-flush-one-at-a-time and tangency-labs/solidcore#501 (fixtures/solidcraft/3396-flush-stacked-layers.json); radii and band edges are generic dimensions, no user file. Here each layer is an extrude of sketch regions: Rings (circles r37, r35, r29.5, r28.3) and Bands (circles r37, r33 and chords of the r37 circle at y = -32, -29, -24, -21, -16, -13, -8, -5, 0, 3, 8, 11, 16, 19, 24, 27, 32, 35: 53 regions, picked by points). Body1 = Rings z -1.2..0 joined with the Bands regions outside the four full-width bands, z -3.6..-1.2; Body3 = the Bands regions except the five bands' parts inside r33, z -8..-5.6, plus the ring r28.3..29.5 by a To-Object Join from its top face to its bottom face (filling the ring where it crosses the bands); Body4 = the Bands regions outside r33, z -10.2..-8; Body5, Body6 = Rings annuli r28.3..29.5 and r35..37, z -20..-8. Then Body1+Body2, +Body3, +Body4, +Body5, +Body6",
+ "body_count": 1,
+ "shells": 1,
+ "volume_mm3": 30603.048063,
+ "bbox": {
+  "min": [
+   -37,
+   -37,
+   -20
+  ],
+  "max": [
+   37,
+   37,
+   0
+  ]
+ }
+}
