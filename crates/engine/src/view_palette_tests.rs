@@ -63,6 +63,18 @@ fn the_headless_grid_fades_out_with_the_distance() {
     assert!(farthest < cut, "the grid fades out at {farthest}, short of the cut at {cut}");
 }
 
+/// #4214: the grid's half size, the one the picture and the window share: the grid reaches as far
+/// on its plane as the view is wide, and further as the plane is seen at a slant.
+#[test]
+fn the_grid_reaches_further_as_its_plane_is_seen_at_a_slant() {
+    let major = grid_step(40.0).1;
+    let flat = grid_ext(40.0, major, 1.0);
+    assert_eq!(flat, (40.0 * 3.0 / major).ceil() * major, "seen face on, the grid reaches as far as the view is wide");
+    assert!(grid_ext(40.0, major, 0.5) > flat, "seen at a slant, the grid reaches further on its plane");
+    // A plane seen edge-on keeps a usable size.
+    assert!(grid_ext(40.0, major, 0.0).is_finite());
+}
+
 /// No colour here is one of [`colors`] or an appearance below, and each field has its own.
 const MARK: Palette = Palette {
     background: (Rgb(1, 2, 3), Rgb(4, 5, 6)),
