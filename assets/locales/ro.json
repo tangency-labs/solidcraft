@@ -1305,7 +1305,7 @@
   "ui.ai_permissions": "Permisiuni",
   "ui.ai_preset": "Presetare",
   "ui.ai_remove": "Elimină",
-  "ui.ai_request_limit": "oprit după 24 de cereri pentru un mesaj; trimiteți alt mesaj pentru a continua",
+  "ui.ai_request_limit": "oprit după 100 de cereri pentru un mesaj; trimiteți alt mesaj pentru a continua",
   "ui.ai_reset": "Resetează",
   "ui.ai_settings": "Setări AI…",
   "ui.ai_show_features": "Afișează funcțiile AI",

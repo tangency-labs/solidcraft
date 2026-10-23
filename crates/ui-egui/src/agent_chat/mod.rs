@@ -35,6 +35,8 @@ pub mod paste;
 #[cfg(not(target_arch = "wasm32"))]
 mod process;
 pub mod settings;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod skills;
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
@@ -708,29 +710,104 @@ fn solidcraft_tool(title: &str) -> bool {
     title.to_ascii_lowercase().contains("solidcraft")
 }
 
-/// `solidcraft-cli` next to this program, else on the search path.
+/// The folder the chat installs skills in, inside the agent's working folder. ACP agents find
+/// them there through their own skill system; API agents read them with `list_skills`/
+/// `read_skill` (see [`skills`]).
+#[cfg(not(target_arch = "wasm32"))]
+fn skills_dir(work_dir: &std::path::Path) -> std::path::PathBuf {
+    work_dir.join(".claude").join("skills")
+}
+
+/// `solidcraft-cli` next to this program, else on the search path, else the app binary itself
+/// (which handles `--mcp-bridge PORT` as a headless MCP server mode on non-Windows).
 #[cfg(not(target_arch = "wasm32"))]
 fn find_cli() -> Option<std::path::PathBuf> {
     let name = if cfg!(windows) { "solidcraft-cli.exe" } else { "solidcraft-cli" };
     if let Some(p) = solidcraft_engine::geom::env::var("CLI").map(std::path::PathBuf::from).filter(|p| p.is_file()) {
         return Some(p);
     }
-    std::env::current_exe()
+    let found = std::env::current_exe()
         .ok()
         .and_then(|e| e.parent().map(|d| d.join(name)))
         .filter(|p| p.is_file())
-        .or_else(|| discover::find_in("solidcraft-cli", &discover::search_dirs()))
+        .or_else(|| discover::find_in("solidcraft-cli", &discover::search_dirs()));
+    if let Some(p) = found {
+        return Some(p);
+    }
+    // On non-Windows the app binary itself can serve as the MCP bridge (--mcp-bridge mode).
+    #[cfg(not(windows))]
+    {
+        std::env::current_exe().ok().filter(|p| p.is_file())
+    }
+    #[cfg(windows)]
+    {
+        None
+    }
 }
 
 /// The agent's working folder: an empty folder of SolidCraft's own, so an agent's own file tools
-/// (where it has them) see nothing of the user's.
+/// (where it has them) see nothing of the user's. Skills are installed into `.claude/skills/`
+/// inside it so the agent discovers them via the standard cwd mechanism.
 fn working_dir() -> std::path::PathBuf {
     let d = solidcraft_engine::recovery::data_dir()
         .map(|d| d.join("agent-chat").join("work"))
         .unwrap_or_else(|| std::env::temp_dir().join("solidcraft-agent-chat"));
     #[cfg(not(target_arch = "wasm32"))]
     let _ = std::fs::create_dir_all(&d);
+    #[cfg(not(target_arch = "wasm32"))]
+    install_skills(&d);
     d
+}
+
+/// Install the bundled `solidcraft-*` skills into `work_dir/.claude/skills/`, refreshing them on
+/// every call so app updates propagate automatically. Custom skills with other name prefixes in
+/// the same directory are left untouched.
+#[cfg(not(target_arch = "wasm32"))]
+fn install_skills(work_dir: &std::path::Path) {
+    let dst = skills_dir(work_dir);
+    let Some(src) = find_bundled_skills() else { return };
+    let _ = std::fs::create_dir_all(&dst);
+    let Ok(entries) = std::fs::read_dir(&src) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if entry.path().is_dir() && name.to_string_lossy().starts_with("solidcraft-") {
+            let skill_dst = dst.join(&name);
+            let _ = std::fs::remove_dir_all(&skill_dst);
+            copy_dir(&entry.path(), &skill_dst);
+        }
+    }
+}
+
+/// The bundled `skills/` directory: next to the executable (production) or up to 5 levels above
+/// it (development, where the executable is in `target/release/` and skills are at the root).
+#[cfg(not(target_arch = "wasm32"))]
+fn find_bundled_skills() -> Option<std::path::PathBuf> {
+    let mut dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    for _ in 0..5 {
+        let skills = dir.join("skills");
+        if skills.is_dir() && skills.join("solidcraft-modeling").is_dir() {
+            return Some(skills);
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    None
+}
+
+/// Recursively copy `src` into `dst`, creating `dst` if needed. Errors are silently ignored.
+#[cfg(not(target_arch = "wasm32"))]
+fn copy_dir(src: &std::path::Path, dst: &std::path::Path) {
+    let _ = std::fs::create_dir_all(dst);
+    let Ok(entries) = std::fs::read_dir(src) else { return };
+    for entry in entries.flatten() {
+        let dst_path = dst.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_dir(&entry.path(), &dst_path);
+        } else {
+            let _ = std::fs::copy(entry.path(), dst_path);
+        }
+    }
 }
 
 /// Start the agent: the chat's control endpoint for its MCP bridge if needed, the process.
@@ -769,12 +846,22 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     let cli = find_cli();
     if chat.tools_port.is_none() {
         chat.notice(tr("ui.agent_chat_no_control"), true);
-    } else if cli.is_none() {
+    } else if cli.is_none() && entry.kind == agents::Kind::Acp {
+        // API agents use in-process tools (no CLI needed); ACP agents still need a CLI.
         chat.notice(tr("ui.agent_chat_no_cli"), true);
     }
-    let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port });
+    // ACP agents get the MCP bridge so the agent can start its own server process.
+    // API agents skip this: their tool loop runs in-process via StartContext::tools.
+    let bridge = if entry.kind == agents::Kind::Acp { cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port }) } else { None };
     let wake = ctx.clone();
-    let start = backend::StartContext { cwd: working_dir(), bridge, tools: chat.tools_tx.clone(), wake: Box::new(move || wake.request_repaint()) };
+    let work = working_dir();
+    let start = backend::StartContext {
+        skills: Some(skills_dir(&work)),
+        cwd: work,
+        bridge,
+        tools: chat.tools_tx.clone(),
+        wake: Box::new(move || wake.request_repaint()),
+    };
     let started: Result<Box<dyn ChatBackend>, String> = match entry.kind {
         agents::Kind::Acp if entry.argv.is_empty() => Err(tr("ui.agent_chat_none_found").to_string()),
         agents::Kind::Acp => acp_client::AcpBackend::start(&entry.argv, start).map(|b| Box::new(b) as Box<dyn ChatBackend>),

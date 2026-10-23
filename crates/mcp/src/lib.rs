@@ -13,7 +13,7 @@ mod backend;
 mod server;
 mod tools;
 
-pub use backend::{Backend, Headless, Remote};
+pub use backend::{Backend, FnBackend, Headless, Remote};
 pub use server::{PROTOCOL_VERSION, SUPPORTED_VERSIONS, Server};
 pub use tools::{call_tool, tool_definitions};
 

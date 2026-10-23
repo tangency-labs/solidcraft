@@ -545,6 +545,22 @@ const APP_ID: &str = solidcraft_engine::io::APP_ID;
 
 fn main() -> eframe::Result {
     mark("main");
+    // --mcp-bridge HOST:PORT: headless MCP bridge mode, used as a fallback when solidcraft-cli is
+    // not beside the app. Runs the MCP server on stdin/stdout, bridged to the running app at
+    // HOST:PORT via its control channel. Not available on Windows (no console in release builds).
+    #[cfg(not(windows))]
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if let Some(pos) = args.iter().position(|a| a == "--mcp-bridge") {
+            if let Some(addr) = args.get(pos + 1) {
+                let scope = solidcraft_mcp::agent_scope(std::iter::empty());
+                let remote = solidcraft_mcp::Remote::new(addr, None);
+                let mut server = solidcraft_mcp::Server::new(Box::new(remote)).with_path_scope(Some(scope));
+                let _ = server.serve(std::io::BufReader::new(std::io::stdin()), std::io::stdout());
+                return Ok(());
+            }
+        }
+    }
     adopt_legacy_settings();
     let mut safe_mode = startup::env_on(std::env::var(startup::SAFE_MODE_ENV).ok().as_deref());
     let mut control_port: Option<u16> = solidcraft_engine::geom::env::var("CONTROL_PORT").and_then(|p| p.parse().ok());

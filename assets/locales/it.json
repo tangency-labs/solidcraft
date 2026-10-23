@@ -1309,7 +1309,7 @@
   "ui.ai_permissions": "Autorizzazioni",
   "ui.ai_preset": "Preimpostazione",
   "ui.ai_remove": "Rimuovi",
-  "ui.ai_request_limit": "arrestato dopo 24 richieste per un messaggio; invia un altro messaggio per proseguire",
+  "ui.ai_request_limit": "arrestato dopo 100 richieste per un messaggio; invia un altro messaggio per proseguire",
   "ui.ai_reset": "Reimposta",
   "ui.ai_settings": "Impostazioni IA…",
   "ui.ai_show_features": "Mostra funzioni IA",

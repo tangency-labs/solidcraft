@@ -1306,7 +1306,7 @@
   "ui.ai_permissions": "Kebenaran",
   "ui.ai_preset": "Pratetap",
   "ui.ai_remove": "Buang",
-  "ui.ai_request_limit": "berhenti selepas 24 permintaan untuk satu mesej; hantar mesej lain untuk meneruskan",
+  "ui.ai_request_limit": "berhenti selepas 100 permintaan untuk satu mesej; hantar mesej lain untuk meneruskan",
   "ui.ai_reset": "Set Semula",
   "ui.ai_settings": "Tetapan AI…",
   "ui.ai_show_features": "Papar ciri AI",

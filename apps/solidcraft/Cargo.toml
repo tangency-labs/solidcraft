@@ -24,6 +24,7 @@ neg_cmp_op_on_partial_ord = "allow"
 solidcraft-engine = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
 solidcraft-space-mouse = { workspace = true }
+solidcraft-mcp = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
 egui = { workspace = true }
 serde_json = { workspace = true }

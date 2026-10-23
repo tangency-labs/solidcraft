@@ -1306,7 +1306,7 @@
   "ui.ai_permissions": "Permisos",
   "ui.ai_preset": "Preajuste",
   "ui.ai_remove": "Eliminar",
-  "ui.ai_request_limit": "se ha detenido tras 24 solicitudes en un mensaje; envía otro para continuar",
+  "ui.ai_request_limit": "se ha detenido tras 100 solicitudes en un mensaje; envía otro para continuar",
   "ui.ai_reset": "Restablecer",
   "ui.ai_settings": "Ajustes de IA…",
   "ui.ai_show_features": "Mostrar funciones de IA",

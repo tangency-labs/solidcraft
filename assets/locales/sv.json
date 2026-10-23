@@ -1305,7 +1305,7 @@
   "ui.ai_permissions": "Behörigheter",
   "ui.ai_preset": "Förinställning",
   "ui.ai_remove": "Ta bort",
-  "ui.ai_request_limit": "stoppades efter 24 förfrågningar för ett meddelande; skicka ett nytt meddelande för att fortsätta",
+  "ui.ai_request_limit": "stoppades efter 100 förfrågningar för ett meddelande; skicka ett nytt meddelande för att fortsätta",
   "ui.ai_reset": "Återställ",
   "ui.ai_settings": "AI-inställningar…",
   "ui.ai_show_features": "Visa AI-funktioner",

@@ -1306,7 +1306,7 @@
   "ui.ai_permissions": "Uprawnienia",
   "ui.ai_preset": "Ustawienie wstępne",
   "ui.ai_remove": "Usuń",
-  "ui.ai_request_limit": "zatrzymano po 24 żądaniach dla jednej wiadomości; wyślij kolejną wiadomość, aby kontynuować",
+  "ui.ai_request_limit": "zatrzymano po 100 żądaniach dla jednej wiadomości; wyślij kolejną wiadomość, aby kontynuować",
   "ui.ai_reset": "Resetuj",
   "ui.ai_settings": "Ustawienia AI…",
   "ui.ai_show_features": "Pokaż funkcje AI",

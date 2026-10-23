@@ -1306,7 +1306,7 @@
   "ui.ai_permissions": "Tilladelser",
   "ui.ai_preset": "Forudindstilling",
   "ui.ai_remove": "Fjern",
-  "ui.ai_request_limit": "stoppet efter 24 anmodninger for én besked; send en ny besked for at fortsætte",
+  "ui.ai_request_limit": "stoppet efter 100 anmodninger for én besked; send en ny besked for at fortsætte",
   "ui.ai_reset": "Nulstil",
   "ui.ai_settings": "AI-indstillinger…",
   "ui.ai_show_features": "Vis AI-funktioner",

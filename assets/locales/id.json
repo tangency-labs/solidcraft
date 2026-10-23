@@ -1305,7 +1305,7 @@
   "ui.ai_permissions": "Izin",
   "ui.ai_preset": "Preset",
   "ui.ai_remove": "Hapus",
-  "ui.ai_request_limit": "dihentikan setelah 24 permintaan untuk satu pesan; kirim pesan lain untuk melanjutkan",
+  "ui.ai_request_limit": "dihentikan setelah 100 permintaan untuk satu pesan; kirim pesan lain untuk melanjutkan",
   "ui.ai_reset": "Reset",
   "ui.ai_settings": "Pengaturan AI…",
   "ui.ai_show_features": "Tampilkan fitur AI",

@@ -220,10 +220,6 @@ impl AgentProcess {
         self.child.pid()
     }
 
-    pub fn handle(&self) -> ProcessHandle {
-        self.child.clone()
-    }
-
     /// End the agent and its helpers. `wait`: block until they are gone (quitting the app);
     /// otherwise the ending runs on a thread of its own and this returns at once.
     pub fn shutdown(&mut self, wait: bool) {

@@ -1424,7 +1424,7 @@
   "ui.ai_permissions": "Berechtigungen",
   "ui.ai_preset": "Vorlage",
   "ui.ai_remove": "Entfernen",
-  "ui.ai_request_limit": "nach 24 Anfragen für eine Nachricht angehalten; senden Sie eine weitere Nachricht, um fortzufahren",
+  "ui.ai_request_limit": "nach 100 Anfragen für eine Nachricht angehalten; senden Sie eine weitere Nachricht, um fortzufahren",
   "ui.ai_reset": "Zurücksetzen",
   "ui.ai_settings": "KI-Einstellungen…",
   "ui.ai_show_features": "KI-Funktionen anzeigen",

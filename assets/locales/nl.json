@@ -1305,7 +1305,7 @@
   "ui.ai_permissions": "Machtigingen",
   "ui.ai_preset": "Voorinstelling",
   "ui.ai_remove": "Verwijderen",
-  "ui.ai_request_limit": "gestopt na 24 verzoeken voor één bericht; stuur nog een bericht om verder te gaan",
+  "ui.ai_request_limit": "gestopt na 100 verzoeken voor één bericht; stuur nog een bericht om verder te gaan",
   "ui.ai_reset": "Herstellen",
   "ui.ai_settings": "AI-instellingen…",
   "ui.ai_show_features": "AI-functies tonen",

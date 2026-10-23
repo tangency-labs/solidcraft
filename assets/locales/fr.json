@@ -1312,7 +1312,7 @@
   "ui.ai_permissions": "Autorisations",
   "ui.ai_preset": "Préréglage",
   "ui.ai_remove": "Retirer",
-  "ui.ai_request_limit": "arrêté après 24 requêtes pour un message ; envoyez un autre message pour poursuivre",
+  "ui.ai_request_limit": "arrêté après 100 requêtes pour un message ; envoyez un autre message pour poursuivre",
   "ui.ai_reset": "Réinitialiser",
   "ui.ai_settings": "Réglages IA…",
   "ui.ai_show_features": "Afficher les fonctionnalités IA",

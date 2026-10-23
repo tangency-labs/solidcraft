@@ -71,6 +71,10 @@ pub struct StartContext {
     pub tools: Option<std::sync::mpsc::Sender<crate::ControlRequest>>,
     /// Wakes the window when something arrives.
     pub wake: Box<dyn Fn() + Send + Sync>,
+    /// The folder skills were installed in (`<cwd>/.claude/skills`), for API agents, which read
+    /// them through the `list_skills` and `read_skill` tools instead of a skill system of their
+    /// own. `None` when no skills are installed.
+    pub skills: Option<std::path::PathBuf>,
 }
 
 /// A chat backend. Methods never block the frame; replies arrive through [`ChatBackend::poll`].

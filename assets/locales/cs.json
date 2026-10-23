@@ -1306,7 +1306,7 @@
   "ui.ai_permissions": "Oprávnění",
   "ui.ai_preset": "Předvolba",
   "ui.ai_remove": "Odebrat",
-  "ui.ai_request_limit": "zastaveno po 24 požadavcích na jednu zprávu; pro pokračování pošlete další zprávu",
+  "ui.ai_request_limit": "zastaveno po 100 požadavcích na jednu zprávu; pro pokračování pošlete další zprávu",
   "ui.ai_reset": "Obnovit",
   "ui.ai_settings": "Nastavení AI…",
   "ui.ai_show_features": "Zobrazit funkce AI",

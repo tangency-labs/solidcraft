@@ -692,11 +692,25 @@ fn tool_calls_stay_inside_the_agents_folders() {
             ("screenshot", json!({"path": p, "width": 64, "height": 64})),
             ("execute", json!({"command": "file.save_as", "params": {"path": p}})),
             ("batch", json!({"commands": [{"command": "file.export", "params": {"path": p}}]})),
+            ("run_script", json!({"commands": [], "design": p})),
+            (
+                "run_script",
+                json!({"commands": [
+                    {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}},
+                    {"command": "file.export", "params": {"path": p}},
+                ]}),
+            ),
+            ("compare_shapes", json!({"actual": p, "expected": p})),
         ] {
             let r = raw_tool(&mut s, name, args);
             assert_eq!(r["result"]["isError"], json!(true), "{name} {p}: {r}");
             assert!(r.to_string().contains("outside the folders this agent may use"), "{name} {p}: {r}");
         }
+        // A `run_script` save outside the folders is refused at its last step, and the report
+        // says so rather than claiming a file it did not write.
+        let r = raw_tool(&mut s, "run_script", json!({"commands": [], "save": p}));
+        assert!(r.to_string().contains("outside the folders this agent may use"), "{p}: {r}");
+        assert!(!r.to_string().contains("\"saved\""), "{p}: {r}");
     }
     assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0, "nothing written outside");
     let _ = std::fs::remove_dir_all(&base);
@@ -1657,4 +1671,118 @@ fn describe_command_and_strict_parameter_checking() {
     assert!(text.contains("unknown key `operaton`; did you mean `operation`?"), "{text}");
     let m = tool(&mut s, "measure", json!({}));
     assert_eq!(m["body_count"], json!(0), "{m}");
+}
+
+/// The text of a tool result that failed, as JSON.
+fn failed_json(r: &Value) -> Value {
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    let text = r["result"]["content"][0]["text"].as_str().unwrap_or_default();
+    serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.to_string()))
+}
+
+#[test]
+fn run_script_builds_in_a_scratch_session_and_leaves_the_design_alone() {
+    let mut s = server();
+    let r = tool(
+        &mut s,
+        "run_script",
+        json!({"commands": [{"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "body_name": "Block"}}]}),
+    );
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["completed"], 1, "{r}");
+    assert_eq!(r["report"]["clean"], true, "{r}");
+    let volume = r["report"]["bodies"][0]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 1000.0).abs() < 1.0, "{volume}");
+    // The session's own design never sees the script's bodies.
+    let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert_eq!(d["bodies"].as_array().map(Vec::len), Some(0), "{d}");
+}
+
+#[test]
+fn run_script_reports_a_sketch_left_unconstrained() {
+    let mut s = server();
+    let r = tool(
+        &mut s,
+        "run_script",
+        json!({"commands": [
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.line", "params": {"points": [[0, 0], [20, 0]]}},
+            {"command": "sketch.finish", "params": {}}
+        ]}),
+    );
+    assert_eq!(r["report"]["clean"], false, "{r}");
+    let sketch = &r["report"]["sketches"][0];
+    assert!(sketch["dof"].as_u64().unwrap_or(0) > 0, "{r}");
+    assert!(sketch["name"].as_str().is_some_and(|n| !n.is_empty()), "{r}");
+}
+
+#[test]
+fn run_script_stops_at_the_first_failing_step() {
+    let mut s = server();
+    let r = raw_tool(
+        &mut s,
+        "run_script",
+        json!({"commands": [
+            {"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}},
+            {"command": "solid.no_such_command", "params": {}}
+        ]}),
+    );
+    let v = failed_json(&r);
+    assert_eq!(v["completed"], 1, "{v}");
+    assert_eq!(v["failed"]["index"], 1, "{v}");
+    assert_eq!(v["failed"]["command"], "solid.no_such_command", "{v}");
+    // What was built before the failure is still reported.
+    let volume = v["report"]["bodies"][0]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 1.0).abs() < 0.01, "{volume}");
+}
+
+#[test]
+fn compare_shapes_needs_two_files_and_compares_what_they_hold() {
+    let mut s = server();
+    // A missing required argument is refused by the protocol, before the tool runs.
+    let missing = raw_tool(&mut s, "compare_shapes", json!({"actual": "a.step"}));
+    assert!(missing["error"]["message"].as_str().is_some_and(|m| m.contains("expected")), "{missing}");
+
+    // Two exports of the same box are identical; a larger box differs and says where.
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-compare-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (same, bigger) = (dir.join("same.step"), dir.join("bigger.step"));
+    for (path, length) in [(&same, 20.0), (&bigger, 26.0)] {
+        let r = tool(
+            &mut s,
+            "run_script",
+            json!({"commands": [
+                {"command": "solid.box", "params": {"length": length, "width": 10, "height": 5, "body_name": "Part"}},
+                {"command": "file.export", "params": {"path": path.to_string_lossy()}}
+            ]}),
+        );
+        assert_eq!(r["ok"], true, "{r}");
+    }
+    let r = tool(&mut s, "compare_shapes", json!({"actual": same.to_string_lossy(), "expected": same.to_string_lossy()}));
+    assert_eq!(r["comparison"]["identical"], true, "{r}");
+    assert_eq!(r["summary"]["identical"], true, "{r}");
+    assert_eq!(r["summary"]["volume_mm3"]["actual_minus_expected"], json!(0.0), "{r}");
+    assert_eq!(r["summary"]["regions"], 0, "{r}");
+    let r = tool(&mut s, "compare_shapes", json!({"actual": bigger.to_string_lossy(), "expected": same.to_string_lossy()}));
+    assert_eq!(r["comparison"]["identical"], false, "{r}");
+    // 26 mm against 20 mm is 6 × 10 × 5 mm3 more material, given as b − a.
+    let difference = r["comparison"]["difference"]["volume_mm3"].as_f64().unwrap_or(0.0);
+    assert!((difference + 300.0).abs() < 1.0, "{difference}");
+    // The region volume is integrated from sampled lines, so it is close rather than exact.
+    let only_in_actual = r["comparison"]["only_in_a"]["volume_mm3"].as_f64().unwrap_or(0.0);
+    assert!((only_in_actual - 300.0).abs() < 10.0, "{only_in_actual}");
+    // The summary names the sides, so a reader never has to work out that `a` is `actual` and
+    // that the engine's own difference runs the other way: the part under test is the bigger one.
+    let summary = &r["summary"];
+    assert_eq!(summary["identical"], false, "{r}");
+    assert_eq!(summary["volume_mm3"]["actual"], json!(1300.0), "{r}");
+    assert_eq!(summary["volume_mm3"]["expected"], json!(1000.0), "{r}");
+    assert_eq!(summary["volume_mm3"]["actual_minus_expected"], json!(300.0), "{r}");
+    assert_eq!(summary["only_in_expected_mm3"], json!(0.0), "{r}");
+    let only_in_actual = summary["only_in_actual_mm3"].as_f64().unwrap_or(0.0);
+    assert!((only_in_actual - 300.0).abs() < 10.0, "{}", summary["only_in_actual_mm3"]);
+    assert_eq!(summary["regions"], 1, "{r}");
+    assert!(summary["verdict"].as_str().is_some_and(|v| v.contains("Part")), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

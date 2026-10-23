@@ -1305,7 +1305,7 @@
   "ui.ai_permissions": "權限",
   "ui.ai_preset": "預設",
   "ui.ai_remove": "移除",
-  "ui.ai_request_limit": "每條訊息 24 次請求後已停止；再傳送一條訊息即可繼續",
+  "ui.ai_request_limit": "每條訊息 100 次請求後已停止；再傳送一條訊息即可繼續",
   "ui.ai_reset": "重設",
   "ui.ai_settings": "AI 設定…",
   "ui.ai_show_features": "顯示 AI 功能",

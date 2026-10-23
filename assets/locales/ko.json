@@ -1310,7 +1310,7 @@
   "ui.ai_permissions": "권한",
   "ui.ai_preset": "프리셋",
   "ui.ai_remove": "제거",
-  "ui.ai_request_limit": "메시지 하나에 24번 요청 후 멈췄습니다. 계속하려면 메시지를 하나 더 보내세요",
+  "ui.ai_request_limit": "메시지 하나에 100번 요청 후 멈췄습니다. 계속하려면 메시지를 하나 더 보내세요",
   "ui.ai_reset": "재설정",
   "ui.ai_settings": "AI 설정…",
   "ui.ai_show_features": "AI 기능 표시",

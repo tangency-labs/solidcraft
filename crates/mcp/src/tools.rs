@@ -4,6 +4,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Map, Value, json};
+use solidcraft_engine::Session;
 use solidcraft_engine::io::vfs;
 use solidcraft_engine::timing;
 
@@ -11,6 +12,10 @@ use crate::backend::Backend;
 
 /// Most commands in one `batch` call.
 const MAX_BATCH: usize = 10_000;
+/// Most steps in one `run_script` call.
+const MAX_SCRIPT: usize = 10_000;
+/// Longest warning or error text a `run_script` report keeps.
+const MAX_REPORT_TEXT: usize = 160;
 /// Largest image returned by `screenshot`.
 const MAX_IMAGE_BYTES: usize = 32 << 20;
 
@@ -125,6 +130,58 @@ pub fn tool_definitions() -> Vec<Value> {
                 &["commands"],
             ),
             Effect::Files,
+        ),
+        tool(
+            "run_script",
+            "Run a script in a scratch session",
+            "Run a command script in a throwaway session, so the design open in the app is not touched and its undo history \
+             stays as it was. It starts from an empty design, or from `design` (a .solidcraft design, or a STEP/IGES/3MF/STL file). \
+             Nothing it does appears in the user's viewport: **to build the part the user asked for, use `batch`, which runs in the \
+             open design so they can watch it take shape, undo it and keep it.** Use this one to look, test or walk a parameter \
+             without disturbing what they have open: a script is the same command list `batch` takes, and `file.export`/`file.save_as` \
+             inside it write real files. Stops at the first failing step. Then reports the end state: timeline warnings and errors, \
+             sketches not at dof 0 (they can solve to a different shape after a parameter change, with no error), and every body's \
+             volume, area, bounding box and centre of mass. A `document.inspect` step in the script adds its own report for that step. \
+             `clean: true` in the report means none of that needs looking at.",
+            obj(
+                json!({
+                    "commands": {
+                        "type": "array",
+                        "description": "Steps: [{\"command\": id, \"params\": {...}}, ...]",
+                        "items": {"type": "object", "properties": {"command": {"type": "string"}, "params": {"type": "object"}}, "required": ["command"]},
+                    },
+                    "design": string("Start from this design or CAD file instead of an empty one"),
+                    "save": string("Save the resulting design here when every step succeeds"),
+                    "measure": {"type": "boolean", "description": "Measure the bodies in the final report (default true; false is faster on big designs)"},
+                    "verbose": {"type": "boolean", "description": "true: each step's full result instead of the compact one (default false)"},
+                }),
+                &["commands"],
+            ),
+            Effect::Files,
+        ),
+        tool(
+            "compare_shapes",
+            "Compare two CAD files",
+            "Compare two CAD files: imports both into a throwaway session (STEP, IGES, FreeCAD or Rhino) and compares their \
+             surfaces in world placement, so near-identical parts compare too. `summary` is the short answer: `identical`, \
+             both volumes, their difference with its sign (`actual_minus_expected`: positive when the part under test holds \
+             more material), the sampled volume that only one side has, and the region count. `comparison` is the detail, \
+             and there the two sides are called `a` and `b`: **`a` is `actual` and `b` is `expected`**, so `only_in_a` is \
+             material the part under test has and the reference does not. Every region where only one side has material \
+             comes with its volume, largest deviation and where it is, and the whole thing ends in a verdict. Use it to check \
+             an exported STEP against a reference part. Each file must hold one body, or name the body to use with \
+             actual_body/expected_body.",
+            obj(
+                json!({
+                    "actual": string("The file to check (STEP, IGES, .FCStd or .3dm)"),
+                    "expected": string("The reference file to check it against"),
+                    "tolerance": {"type": "number", "description": "Millimetres: surfaces closer than this agree (0.001 to 10, default 0.01)"},
+                    "actual_body": string("Which body of `actual` to compare, when it holds more than one"),
+                    "expected_body": string("Which body of `expected` to compare, when it holds more than one"),
+                }),
+                &["actual", "expected"],
+            ),
+            Effect::ReadOnly,
         ),
         tool(
             "inspect_design",
@@ -378,6 +435,8 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> Value {
     let r = match name {
         "screenshot" => return screenshot(b, a),
         "batch" => return batch(b, a),
+        "run_script" => return run_script(a),
+        "compare_shapes" => return compare_shapes(a),
         _ => dispatch(b, name, a),
     };
     match r {
@@ -612,6 +671,206 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
     start.finish(b);
     let reply = json!({"ok": true, "completed": results.len(), "results": results});
     text_result(&with_timings(reply, timed, rows, clock.ms()), false)
+}
+
+/// A warning's, an error's or a status line's text, cut to what a report keeps.
+fn clip(s: &str) -> String {
+    s.chars().take(MAX_REPORT_TEXT).collect()
+}
+
+/// `x` without the binary-noise tail a subtraction leaves (`12304.000000000002`).
+fn round6(x: f64) -> f64 {
+    let r = (x * 1e6).round() / 1e6;
+    if r == 0.0 { 0.0 } else { r }
+}
+
+/// What a `run_script` report says about one design state: the timeline problems, the sketches
+/// that are not fully constrained, and each body's size. The same facts `solidcraft-checking`
+/// tells an agent to look for after every parameter change.
+fn state_report(inspection: &Value) -> Value {
+    let features: Vec<Value> = inspection.get("timeline").and_then(Value::as_array).cloned().unwrap_or_default();
+    let named = |f: &Value, key: &str| {
+        f.get(key).and_then(Value::as_str).map(|t| json!({"feature": f.get("name").cloned().unwrap_or(Value::Null), key: clip(t)}))
+    };
+    let warnings: Vec<Value> = features.iter().filter_map(|f| named(f, "warning")).collect();
+    let errors: Vec<Value> = features.iter().filter_map(|f| named(f, "error")).collect();
+    // A sketch above dof 0 can solve to a different shape after a parameter change, with no error.
+    let sketches: Vec<Value> = inspection
+        .get("sketches")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|s| s.get("dof").and_then(Value::as_u64).unwrap_or(0) > 0 || s.get("status").and_then(Value::as_str) != Some("solved"))
+        .map(|s| {
+            json!({
+                "name": s.get("name").cloned().unwrap_or(Value::Null),
+                "dof": s.get("dof").cloned().unwrap_or(Value::Null),
+                "status": s.get("status").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect();
+    let bodies: Vec<Value> = inspection
+        .get("bodies")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|b| {
+            json!({
+                "name": b.get("name").cloned().unwrap_or(Value::Null),
+                "volume_mm3": b.get("volume_mm3").cloned().unwrap_or(Value::Null),
+                "area_mm2": b.get("area_mm2").cloned().unwrap_or(Value::Null),
+                "bbox": b.get("bbox").cloned().unwrap_or(Value::Null),
+                "center_of_mass": b.get("center_of_mass").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect();
+    json!({
+        "clean": warnings.is_empty() && errors.is_empty() && sketches.is_empty(),
+        "warnings": warnings,
+        "errors": errors,
+        "sketches": sketches,
+        "bodies": bodies,
+    })
+}
+
+/// The bodies `path` added to `s`.
+fn insert_step(s: &mut Session, path: &str) -> Result<Vec<String>, String> {
+    let r = s.execute("file.insert_step", &json!({"path": path})).map_err(|e| format!("{path}: {e}"))?;
+    let names = r
+        .get("created_bodies")
+        .or_else(|| r.get("bodies"))
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default();
+    Ok(names)
+}
+
+/// `run_script`: a command script in a throwaway session, so the user's design is never touched.
+fn run_script(a: &Map<String, Value>) -> Value {
+    let Some(steps) = a.get("commands").and_then(Value::as_array) else {
+        return text_result(&json!("`commands` must be an array of {command, params}"), true);
+    };
+    if steps.len() > MAX_SCRIPT {
+        return text_result(&json!(format!("script too long ({} steps, at most {MAX_SCRIPT})", steps.len())), true);
+    }
+    let verbose = a.get("verbose").and_then(Value::as_bool).unwrap_or(false);
+    let measure = a.get("measure").and_then(Value::as_bool).unwrap_or(true);
+    let mut s = Session::default();
+    if let Some(design) = str_arg(a, "design")
+        && let Err(e) = s.execute("doc.open", &json!({"path": design}))
+    {
+        return text_result(&json!(format!("{design}: {e}")), true);
+    }
+    let mut results = Vec::with_capacity(steps.len());
+    let mut step_reports = Vec::new();
+    let mut failed = None;
+    for (i, step) in steps.iter().enumerate() {
+        let Some(id) = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str) else {
+            failed = Some(json!({"index": i, "command": Value::Null, "error": "missing `command`"}));
+            break;
+        };
+        let params = step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}));
+        match s.execute(id, &params) {
+            Ok(v) => {
+                if id == "document.inspect" || id == "inspect.measure" {
+                    step_reports.push(json!({"step": i, "report": state_report(&v)}));
+                }
+                results.push(if verbose { v } else { compact(v) });
+            }
+            Err(e) => {
+                failed = Some(json!({"index": i, "command": id, "error": e.to_string()}));
+                break;
+            }
+        }
+    }
+    let report = s.execute("document.inspect", &json!({"measure": measure})).map(|v| state_report(&v)).unwrap_or(Value::Null);
+    let mut reply = json!({
+        "ok": failed.is_none(),
+        "completed": results.len(),
+        "results": results,
+        "report": report,
+        "step_reports": step_reports,
+    });
+    if let Some(f) = failed {
+        reply["failed"] = f;
+    } else if let Some(path) = str_arg(a, "save") {
+        // Saved only when every step ran: a failed timeline is not worth writing.
+        match s.execute("file.save_as", &json!({"path": path})) {
+            Ok(_) => reply["saved"] = json!(path),
+            Err(e) => reply["save_error"] = json!(e.to_string()),
+        }
+    }
+    text_result(&reply, reply["ok"] != json!(true))
+}
+
+/// `compare_shapes`: import both files into one throwaway session and compare their surfaces.
+fn compare_shapes(a: &Map<String, Value>) -> Value {
+    let (Some(actual), Some(expected)) = (str_arg(a, "actual"), str_arg(a, "expected")) else {
+        return text_result(&json!("`actual` and `expected` are the two files to compare"), true);
+    };
+    let tolerance = a.get("tolerance").and_then(Value::as_f64).unwrap_or(0.01);
+    let mut s = Session::default();
+    let actual_bodies = match insert_step(&mut s, actual) {
+        Ok(b) => b,
+        Err(e) => return text_result(&Value::String(e), true),
+    };
+    let expected_bodies = match insert_step(&mut s, expected) {
+        Ok(b) => b,
+        Err(e) => return text_result(&Value::String(e), true),
+    };
+    let pick = |given: Option<&str>, names: &[String], side: &str| -> Result<String, String> {
+        if let Some(n) = given {
+            return Ok(n.to_string());
+        }
+        match names {
+            [only] => Ok(only.clone()),
+            [] => Err(format!("`{side}` holds no body")),
+            _ => Err(format!("`{side}` holds {} bodies ({}): name one with `{side}_body`", names.len(), names.join(", "))),
+        }
+    };
+    let (pa, pb) = match (pick(str_arg(a, "actual_body"), &actual_bodies, "actual"), pick(str_arg(a, "expected_body"), &expected_bodies, "expected"))
+    {
+        (Ok(a), Ok(b)) => (a, b),
+        (Err(e), _) | (_, Err(e)) => return text_result(&Value::String(e), true),
+    };
+    match s.execute("inspect.compare", &json!({"a": pa, "b": pb, "tolerance": tolerance})) {
+        Ok(v) => {
+            let reply = json!({
+                "actual": actual,
+                "expected": expected,
+                "actual_bodies": actual_bodies,
+                "expected_bodies": expected_bodies,
+                "summary": comparison_summary(&v),
+                "comparison": v,
+            });
+            text_result(&reply, false)
+        }
+        Err(e) => text_result(&Value::String(e.to_string()), true),
+    }
+}
+
+/// The short answer `compare_shapes` puts above `comparison`, in names that say which file is
+/// which. `inspect.compare` calls its two sides `a` and `b`, and nothing in its reply ties `a`
+/// back to the file the caller called `actual`, so `only_in_b` reads as the wrong part unless the
+/// reader knows the mapping.
+fn comparison_summary(v: &Value) -> Value {
+    let volume = |side: &Value| side.get("volume_mm3").and_then(Value::as_f64);
+    let only = |key: &str| v.get(key).and_then(|o| o.get("volume_mm3")).and_then(Value::as_f64);
+    let (actual, expected) = (volume(&v["a"]), volume(&v["b"]));
+    json!({
+        "identical": v.get("identical").cloned().unwrap_or(Value::Bool(false)),
+        // Positive when the part under test holds more material than the reference.
+        "volume_mm3": {
+            "actual": actual,
+            "expected": expected,
+            "actual_minus_expected": match (actual, expected) { (Some(a), Some(b)) => json!(round6(a - b)), _ => Value::Null },
+        },
+        // Sampled from lines across the surfaces, so close to the exact difference above, not equal to it.
+        "only_in_actual_mm3": only("only_in_a"),
+        "only_in_expected_mm3": only("only_in_b"),
+        "regions": v.get("regions").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+        "verdict": v.get("verdict").cloned().unwrap_or(Value::Null),
+    })
 }
 
 /// `reply` with `timings` and `total_ms` when they were asked for.

@@ -1,9 +1,8 @@
 //! The API backend (desktop only): a model behind an OpenAI-compatible chat completions endpoint
 //! (Ollama, LM Studio, OpenAI, any URL the user gives). SolidCraft runs the tool loop itself, with
-//! the same tools the ACP agents get: it starts the same MCP server (`solidcraft-cli mcp
-//! --connect` to the chat's own endpoint) and is its client, so every tool call passes the same
-//! gate, limits and folder checks. The key, when there is one, comes from the system keychain for
-//! this connection only.
+//! the same MCP tools ACP agents get, reached in-process through the chat's own control channel
+//! so no `solidcraft-cli` subprocess is needed. The key, when there is one, comes from the system
+//! keychain for this connection only.
 //!
 //! The loop runs on a thread of its own: a model request can take a while.
 
@@ -16,16 +15,21 @@ use serde_json::{Value, json};
 
 use super::acp::ModelInfo;
 use super::backend::{ChatBackend, Event, HttpFn, HttpRequest, PromptPart, StartContext, ToolStatus};
-use super::process::{AgentProcess, FromAgent, ProcessHandle};
 
-/// Model requests for one message, at most (each answer with tool calls is one).
-pub const MAX_REQUESTS_PER_TURN: usize = 24;
+/// Model requests for one message, at most (each answer with tool calls is one). A model that
+/// plans in many small calls needs more than a few: 24 stopped a capable one mid-build on four
+/// steps of the eval sheet. What actually bounds the work is the change limit
+/// (`agent_chat_turn_limit`, a preference); this only stops a loop that never settles.
+pub const MAX_REQUESTS_PER_TURN: usize = 100;
 /// Longest tool result handed back to the model.
 const MAX_TOOL_TEXT: usize = 20_000;
 /// Messages kept in the conversation (the system note stays).
 const MAX_HISTORY: usize = 240;
-/// How long one model request may take.
-const REQUEST_TIMEOUT_S: u64 = 300;
+/// Longest one request may take. A slow model writing a large batch of tool calls can need
+/// minutes: 300 s cut off a build after it had read its skills and started to answer. The host
+/// caps this at 900 s, and Stop cancels at once, so this is a backstop against an endpoint that
+/// never answers rather than a working limit.
+const REQUEST_TIMEOUT_S: u64 = 900;
 /// How long one tool call may take (it may wait for the user's Allow).
 const TOOL_TIMEOUT: Duration = Duration::from_secs(330);
 /// How often a waiting request or tool call looks at the cancel flag.
@@ -52,7 +56,6 @@ pub struct ApiBackend {
     cmds: Option<Sender<Cmd>>,
     events: Receiver<Event>,
     cancel: Arc<AtomicBool>,
-    mcp: Option<ProcessHandle>,
 }
 
 impl ApiBackend {
@@ -60,25 +63,28 @@ impl ApiBackend {
         if cfg.key.is_some() && !super::agents::key_safe_for(&cfg.base_url) {
             return Err(crate::i18n::tr("ui.ai_key_needs_https").to_string());
         }
-        // The same MCP server an ACP agent would get.
-        let mcp = match &ctx.bridge {
-            Some(b) => {
-                let argv = vec![b.cli.to_string_lossy().into_owned(), "mcp".into(), "--connect".into(), format!("127.0.0.1:{}", b.port)];
-                Some(AgentProcess::spawn(&argv, &ctx.cwd, &["SOLIDCRAFT_CONTROL_TOKEN"], || {})?)
-            }
-            None => None,
-        };
-        let handle = mcp.as_ref().map(AgentProcess::handle);
+        let wake: Arc<dyn Fn() + Send + Sync> = Arc::from(ctx.wake);
+        // Build an in-process MCP backend through the chat's control channel (no subprocess).
+        let mcp_backend = ctx.tools.map(|tools_tx| {
+            let w = Arc::clone(&wake);
+            solidcraft_mcp::FnBackend::new(move |method: &str, params: Value| {
+                let (req, rx) = crate::control::ControlRequest::new(method, params);
+                if tools_tx.send(req).is_err() {
+                    return json!({"ok": false, "error": "the design channel closed"});
+                }
+                w(); // trigger repaint so the main thread processes the request
+                rx.recv_timeout(TOOL_TIMEOUT).unwrap_or_else(|_| json!({"ok": false, "error": "timed out waiting for the design"}))
+            })
+        });
         let (cmd_tx, cmd_rx) = channel::<Cmd>();
         let (ev_tx, events) = channel::<Event>();
         let cancel = Arc::new(AtomicBool::new(false));
         let stop = cancel.clone();
-        let wake: Arc<dyn Fn() + Send + Sync> = Arc::from(ctx.wake);
         std::thread::spawn(move || {
             let mut w = Worker {
                 cfg,
-                mcp,
-                next: 0,
+                mcp_backend,
+                skills: ctx.skills,
                 tools: Vec::new(),
                 history: Vec::new(),
                 events: ev_tx,
@@ -88,7 +94,7 @@ impl ApiBackend {
             };
             w.run(cmd_rx);
         });
-        Ok(ApiBackend { cmds: Some(cmd_tx), events, cancel, mcp: handle })
+        Ok(ApiBackend { cmds: Some(cmd_tx), events, cancel })
     }
 }
 
@@ -119,15 +125,9 @@ impl ChatBackend for ApiBackend {
     }
     fn answer_permission(&mut self, _key: u64, _option: Option<&str>) {}
     fn authenticate(&mut self, _method: &str) {}
-    fn pid(&self) -> Option<u32> {
-        self.mcp.as_ref().and_then(ProcessHandle::pid)
-    }
-    fn shutdown(&mut self, wait: bool) {
+    fn shutdown(&mut self, _wait: bool) {
         self.cancel.store(true, Ordering::Relaxed);
         self.cmds = None;
-        if let Some(h) = self.mcp.take() {
-            h.shutdown(wait);
-        }
     }
 }
 
@@ -139,8 +139,8 @@ impl Drop for ApiBackend {
 
 struct Worker {
     cfg: ApiConfig,
-    mcp: Option<AgentProcess>,
-    next: u64,
+    mcp_backend: Option<solidcraft_mcp::FnBackend>,
+    skills: Option<std::path::PathBuf>,
     /// The MCP tools as OpenAI function tools.
     tools: Vec<Value>,
     history: Vec<Value>,
@@ -158,11 +158,14 @@ impl Worker {
     }
 
     fn run(&mut self, cmds: Receiver<Cmd>) {
-        if let Err(e) = self.start_mcp() {
-            self.emit(Event::Error(e));
+        self.start_mcp();
+        let mut system = super::acp::SYSTEM_NOTE.to_string();
+        if let Some(index) = self.skills.as_deref().and_then(super::skills::prompt_index) {
+            system.push_str("\n\n");
+            system.push_str(&index);
         }
-        self.history.push(json!({"role": "system", "content": super::acp::SYSTEM_NOTE}));
-        self.emit(Event::Ready { agent: format!("{} · {}", self.cfg.name, self.cfg.model), images: true });
+        self.history.push(json!({"role": "system", "content": system}));
+        self.emit(Event::Ready { agent: format!("{} \u{b7} {}", self.cfg.name, self.cfg.model), images: true });
         // The endpoint's models for the picker; an endpoint that does not list them shows none.
         if let Ok(list) = model_list(&self.cfg.http, &self.cfg.base_url, self.cfg.key.as_deref()) {
             let mut available = list;
@@ -180,61 +183,21 @@ impl Worker {
                 Cmd::NewChat => {
                     self.history.truncate(1);
                     self.cancel.store(false, Ordering::Relaxed);
-                    self.emit(Event::Ready { agent: format!("{} · {}", self.cfg.name, self.cfg.model), images: true });
+                    self.emit(Event::Ready { agent: format!("{} \u{b7} {}", self.cfg.name, self.cfg.model), images: true });
                 }
-            }
-        }
-        if let Some(mut m) = self.mcp.take() {
-            m.shutdown(false);
-        }
-    }
-
-    /// One MCP request to the server; its `result`.
-    fn mcp_call(&mut self, method: &str, params: Value) -> Result<Value, String> {
-        let Some(m) = self.mcp.as_ref() else { return Err("no SolidCraft tools in this session".into()) };
-        self.next += 1;
-        let id = self.next;
-        m.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
-        let deadline = std::time::Instant::now() + TOOL_TIMEOUT;
-        loop {
-            // Wait in short slices so Stop and Send now do not wait for a slow tool: its late
-            // answer is skipped later (its id no longer matches).
-            if self.cancel.load(Ordering::Relaxed) {
-                return Err("cancelled by the user".into());
-            }
-            let left = deadline.saturating_duration_since(std::time::Instant::now()).min(CANCEL_POLL);
-            match m.from_agent.recv_timeout(left) {
-                Ok(FromAgent::Line(l)) => {
-                    let Ok(v) = serde_json::from_str::<Value>(l.trim()) else { continue };
-                    if v.get("id").and_then(Value::as_u64) != Some(id) {
-                        continue;
-                    }
-                    if let Some(e) = v.get("error") {
-                        return Err(e.get("message").and_then(Value::as_str).unwrap_or("error").to_string());
-                    }
-                    return Ok(v.get("result").cloned().unwrap_or(Value::Null));
-                }
-                Ok(FromAgent::Exited(_)) => return Err("the SolidCraft tools stopped".into()),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) if std::time::Instant::now() < deadline => {}
-                Err(_) => return Err("the SolidCraft tools did not answer".into()),
             }
         }
     }
 
-    fn start_mcp(&mut self) -> Result<(), String> {
-        if self.mcp.is_none() {
-            return Ok(());
+    fn start_mcp(&mut self) {
+        if self.mcp_backend.is_some() {
+            let mut defs = solidcraft_mcp::tool_definitions();
+            // Skills are readable here: an API agent has no skill system of its own.
+            if self.skills.is_some() {
+                defs.extend(super::skills::tool_definitions());
+            }
+            self.tools = openai_tools(&json!({"tools": defs}));
         }
-        self.mcp_call(
-            "initialize",
-            json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "solidcraft-agent-chat", "version": env!("CARGO_PKG_VERSION")}}),
-        )?;
-        if let Some(m) = &self.mcp {
-            m.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
-        }
-        let list = self.mcp_call("tools/list", json!({}))?;
-        self.tools = openai_tools(&list);
-        Ok(())
     }
 
     fn turn(&mut self, parts: Vec<PromptPart>) {
@@ -283,7 +246,14 @@ impl Worker {
             }
             self.history.push(kept);
             if calls.is_empty() {
-                self.emit(Event::TurnEnded { reason: String::new() });
+                // An endpoint occasionally answers a long prompt with nothing at all: no text and
+                // no tool call. Ending the turn in silence reads as the agent simply stopping.
+                if msg.get("content").and_then(Value::as_str).is_none_or(|t| t.trim().is_empty()) {
+                    self.emit(Event::Error(crate::i18n::tr("ui.agent_chat_empty_reply").to_string()));
+                    self.emit(Event::TurnEnded { reason: "error".into() });
+                } else {
+                    self.emit(Event::TurnEnded { reason: String::new() });
+                }
                 return;
             }
             for (i, c) in calls.iter().enumerate().take(32) {
@@ -292,7 +262,7 @@ impl Worker {
                 let parsed = tool_arguments(c.pointer("/function/arguments"));
                 let args = parsed.clone().unwrap_or_else(|_| json!({}));
                 let title = tool_title(&name, &args);
-                let tool_id = format!("{id}-{}", self.next);
+                let tool_id = format!("{id}-{i}");
                 self.emit(Event::Tool {
                     id: tool_id.clone(),
                     title: Some(title),
@@ -309,10 +279,12 @@ impl Worker {
                     || !self.tools.iter().any(|t| t.pointer("/function/name").and_then(Value::as_str) == Some(name.as_str()))
                 {
                     (format!("unknown tool `{name}`"), true)
+                } else if let Some(r) = self.skills.as_deref().and_then(|dir| super::skills::call(&name, &args, dir)) {
+                    tool_text(&r)
                 } else {
-                    match self.mcp_call("tools/call", json!({"name": name, "arguments": args})) {
-                        Ok(r) => tool_text(&r),
-                        Err(e) => (e, true),
+                    match self.mcp_backend.as_mut() {
+                        Some(backend) => tool_text(&solidcraft_mcp::call_tool(backend, &name, &args)),
+                        None => ("no SolidCraft tools in this session".to_string(), true),
                     }
                 };
                 let shown: String = text.chars().take(2000).collect();
@@ -508,6 +480,13 @@ fn tool_title(name: &str, args: &Value) -> String {
                 .unwrap_or_default();
             format!("batch: {}", ids.join(", "))
         }
+        "read_skill" => {
+            let name = args.get("name").and_then(Value::as_str).unwrap_or("?");
+            match args.get("path").and_then(Value::as_str) {
+                Some(p) => format!("read_skill: {name}/{p}"),
+                None => format!("read_skill: {name}"),
+            }
+        }
         _ => name.to_string(),
     }
 }
@@ -596,7 +575,7 @@ mod tests {
             Ok((200, a.to_string().into_bytes()))
         });
         let cfg = ApiConfig { name: "Test".into(), base_url: "http://localhost:1/v1".into(), model: "m".into(), key: None, http };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, skills: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("measure it".into())]);
         let mut events = Vec::new();
@@ -642,7 +621,7 @@ mod tests {
             Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": "Steered."}}]}).to_string().into_bytes()))
         });
         let cfg = ApiConfig { name: "Test".into(), base_url: "http://localhost:1/v1".into(), model: "m".into(), key: None, http };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, skills: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         let wait = |b: &mut ApiBackend, events: &mut Vec<Event>| {
             let start = std::time::Instant::now();
@@ -675,6 +654,34 @@ mod tests {
         b.shutdown(true);
     }
 
+    /// An endpoint that answers a prompt with nothing at all — no text, no tool call — ends the
+    /// turn with an error the user can see, rather than stopping in silence as if it had finished.
+    #[test]
+    fn an_empty_answer_is_reported_instead_of_ending_the_turn_silently() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let log = seen.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            if r.method == "GET" {
+                return Ok((200, b"{\"data\":[]}".to_vec()));
+            }
+            log.lock().unwrap().push(serde_json::from_slice(r.body.as_deref().unwrap_or(b"null")).unwrap());
+            Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": ""}}]}).to_string().into_bytes()))
+        });
+        let cfg = ApiConfig { name: "Test".into(), base_url: "http://localhost:1/v1".into(), model: "m".into(), key: None, http };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, skills: None, wake: Box::new(|| {}) };
+        let mut b = ApiBackend::start(cfg, ctx).unwrap();
+        b.prompt(&[PromptPart::Text("build it".into())]);
+        let mut events = Vec::new();
+        let start = std::time::Instant::now();
+        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
+            events.extend(b.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(events.iter().any(|e| matches!(e, Event::Error(text) if !text.is_empty())), "the empty answer must be reported: {events:?}");
+        assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason == "error"), "{events:?}");
+        b.shutdown(true);
+    }
+
     /// New chat resets the model's history to the system note: the next request carries nothing
     /// of the conversation before it.
     #[test]
@@ -689,7 +696,7 @@ mod tests {
             Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": "ok"}}]}).to_string().into_bytes()))
         });
         let cfg = ApiConfig { name: "Test".into(), base_url: "http://localhost:1/v1".into(), model: "m".into(), key: None, http };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, skills: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         let run = |b: &mut ApiBackend, f: &dyn Fn(&mut ApiBackend), want: usize| {
             f(b);
@@ -727,7 +734,7 @@ mod tests {
             Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": "ok"}}]}).to_string().into_bytes()))
         });
         let cfg = ApiConfig { name: "Test".into(), base_url: "http://localhost:1/v1".into(), model: "local".into(), key: None, http };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, skills: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         let mut events = Vec::new();
         let start = std::time::Instant::now();
@@ -776,7 +783,7 @@ mod tests {
             Ok((200, answers.lock().unwrap().pop().unwrap_or(json!({})).to_string().into_bytes()))
         });
         let cfg = ApiConfig { name: "Test".into(), base_url: "http://localhost:1/v1".into(), model: "m".into(), key: None, http };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, skills: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("go".into())]);
         let mut events = Vec::new();
@@ -802,7 +809,7 @@ mod tests {
         let http: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, b"{}".to_vec())));
         assert!(test_endpoint(&http, "http://10.0.0.2:11434/v1", Some("k"), "m").is_err());
         let cfg = ApiConfig { name: "x".into(), base_url: "http://10.0.0.2/v1".into(), model: "m".into(), key: Some("k".into()), http };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, skills: None, wake: Box::new(|| {}) };
         assert!(ApiBackend::start(cfg, ctx).is_err());
     }
 
@@ -821,8 +828,8 @@ mod tests {
         let (events, _rx) = channel();
         let w = Worker {
             cfg,
-            mcp: None,
-            next: 0,
+            mcp_backend: None,
+            skills: None,
             tools: vec![json!({"type": "function", "function": {"name": "measure"}})],
             history: vec![json!({"role": "user", "content": "hi"})],
             events,

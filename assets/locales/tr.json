@@ -1305,7 +1305,7 @@
   "ui.ai_permissions": "İzinler",
   "ui.ai_preset": "Şablon",
   "ui.ai_remove": "Kaldır",
-  "ui.ai_request_limit": "bir mesaj için 24 istekten sonra durduruldu; devam etmek için başka bir mesaj gönderin",
+  "ui.ai_request_limit": "bir mesaj için 100 istekten sonra durduruldu; devam etmek için başka bir mesaj gönderin",
   "ui.ai_reset": "Sıfırla",
   "ui.ai_settings": "AI ayarları…",
   "ui.ai_show_features": "AI özelliklerini göster",

@@ -1306,7 +1306,7 @@
   "ui.ai_permissions": "Quyền hạn",
   "ui.ai_preset": "Mẫu cấu hình sẵn",
   "ui.ai_remove": "Xóa",
-  "ui.ai_request_limit": "đã dừng sau 24 yêu cầu cho một tin nhắn; gửi tin nhắn khác để tiếp tục",
+  "ui.ai_request_limit": "đã dừng sau 100 yêu cầu cho một tin nhắn; gửi tin nhắn khác để tiếp tục",
   "ui.ai_reset": "Đặt lại",
   "ui.ai_settings": "AI cài đặt…",
   "ui.ai_show_features": "Hiển thị các tính năng AI",

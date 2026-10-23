@@ -319,3 +319,37 @@ impl Backend for Headless {
         true
     }
 }
+
+/// An in-process backend: routes control-channel calls through a closure rather than TCP or a
+/// subprocess. The closure receives `(method, params)` and returns the control-channel response
+/// JSON (`{"ok": true, "result": …}` or `{"ok": false, "error": …}`). Used by the in-app agent
+/// chat so API agents reach the design without spawning `solidcraft-cli`.
+pub struct FnBackend {
+    call_fn: Box<dyn FnMut(&str, Value) -> Value + Send>,
+}
+
+impl FnBackend {
+    pub fn new(call_fn: impl FnMut(&str, Value) -> Value + Send + 'static) -> Self {
+        Self { call_fn: Box::new(call_fn) }
+    }
+}
+
+impl Backend for FnBackend {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        let r = (self.call_fn)(method, params);
+        if r.get("ok").and_then(Value::as_bool) == Some(true) {
+            Ok(r.get("result").cloned().unwrap_or(Value::Null))
+        } else {
+            Err(r.get("error").and_then(Value::as_str).unwrap_or("the SolidCraft app did not answer").to_string())
+        }
+    }
+    fn has_ui(&self) -> bool {
+        true
+    }
+    fn describe(&self) -> String {
+        "in-process bridge to the running SolidCraft app".into()
+    }
+    fn in_process(&self) -> bool {
+        true
+    }
+}

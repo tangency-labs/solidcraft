@@ -1305,7 +1305,7 @@
   "ui.ai_permissions": "Jogosultságok",
   "ui.ai_preset": "Előbeállítás",
   "ui.ai_remove": "Eltávolítás",
-  "ui.ai_request_limit": "egy üzenetre eső 24 kérés után leállt; küldjön újabb üzenetet a folytatáshoz",
+  "ui.ai_request_limit": "egy üzenetre eső 100 kérés után leállt; küldjön újabb üzenetet a folytatáshoz",
   "ui.ai_reset": "Visszaállítás",
   "ui.ai_settings": "AI-beállítások…",
   "ui.ai_show_features": "AI-funkciók megjelenítése",
