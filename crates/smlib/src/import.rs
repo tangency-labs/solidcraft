@@ -221,11 +221,11 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool) -> R<Arrays> {
 
     let any_edge_form = brep.edges.iter().any(|e| e.nurbs.is_some());
     for (e, (interval, _)) in brep.edges.iter().zip(&intervals) {
-        // A circle on its NURBS form: what it is (its circle entry), then the NURBS it is
-        // parameterised on (EDGE_NURBS_FORM). Another curve on a NURBS form is written as that
+        // A circle or ellipse on its NURBS form: what it is (its conic entry), then the NURBS it
+        // is parameterised on (EDGE_NURBS_FORM). Another curve on a NURBS form is written as that
         // NURBS, whose parameter the edge's interval and trims are in.
         let form = match (&e.curve, &e.nurbs) {
-            (b::Curve::Circle { .. }, Some(n)) => {
+            (b::Curve::Circle { .. } | b::Curve::Ellipse { .. }, Some(n)) => {
                 curve(&mut a, &e.curve)?;
                 edge_nurbs_block(&mut a, n)?;
                 true
