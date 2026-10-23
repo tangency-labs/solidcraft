@@ -93,6 +93,7 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
     let mut bounds = Aabb3::EMPTY;
     let (mut faces, mut edges, mut vertices) = (0, 0, 0);
     let mut placement_count = 0;
+    let mut skipped = 0;
     let selected_placements = if selected.is_empty() {
         if descendants { placements(doc, cmd)? } else { vec![(0, Vec::new(), solidcraft_doc::IDENTITY)] }
     } else {
@@ -121,18 +122,24 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
             let measured = solidcraft_kernel::measure(&placed)?;
             let density = doc.density(&body.name);
             let body_mass = measured.volume * density / 1000.0;
-            volume += measured.volume;
+            let closed = crate::cmd::inspect::encloses_volume(&placed);
+            if closed {
+                volume += measured.volume;
+                mass += body_mass;
+                moment += measured.centroid * body_mass;
+            } else {
+                skipped += 1;
+            }
             area += measured.area;
-            mass += body_mass;
-            moment += measured.centroid * body_mass;
             bounds = bounds.union(&measured.bbox);
             faces += measured.merged.faces;
             edges += measured.merged.edges;
             vertices += measured.merged.vertices;
             bodies.push(json!({"name": body.name, "component": component, "path": path,
                 "material": doc.materials.get(&body.name).map(String::as_str).unwrap_or("Default"),
-                "density_g_cm3": density, "mass_g": body_mass, "volume_mm3": measured.volume,
-                "area_mm2": measured.area, "center_of_mass": measured.centroid,
+                "closed": closed, "density_g_cm3": closed.then_some(density),
+                "mass_g": closed.then_some(body_mass), "volume_mm3": closed.then_some(measured.volume),
+                "area_mm2": measured.area, "center_of_mass": closed.then_some(measured.centroid),
                 "bbox": {"min": measured.bbox.min, "max": measured.bbox.max}}));
         }
     }
@@ -146,7 +153,7 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
     let bbox = if bodies.is_empty() { Value::Null } else { json!({"min": bounds.min, "max": bounds.max}) };
     Ok(json!({"path": selected, "coordinate_frame": "world", "descendants": descendants,
         "placement_count": placement_count, "body_count": bodies.len(), "bodies": bodies,
-        "total": {"volume_mm3": volume, "area_mm2": area, "mass_g": mass,
+        "total": {"open_bodies_skipped": skipped, "volume_mm3": volume, "area_mm2": area, "mass_g": mass,
             "center_of_mass": centroid, "bbox": bbox, "faces": faces, "edges": edges, "vertices": vertices}}))
 }
 

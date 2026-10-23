@@ -331,10 +331,12 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
             Some(Item { geo: Geo::Tris(tris), dir: planar.map(Vec3::from), json, shape, slot })
         }
         Sel::Body { name } => {
-            let m = st.body(name)?.mesh();
+            let body = st.body(name)?;
+            let closed = crate::cmd::inspect::encloses_volume(&body.body);
+            let m = body.mesh();
             let tris: Vec<[Vec3; 3]> = m.triangles.iter().filter_map(|t| m.tri(t)).collect();
             let v = m.measure().volume;
-            plain(Geo::Tris(tris), None, json!({"type": "body", "name": name, "volume_mm3": v}))
+            plain(Geo::Tris(tris), None, json!({"type": "body", "name": name, "closed": closed, "volume_mm3": closed.then_some(v)}))
         }
         Sel::SketchCurve { id } => sketch_curve(sketch_of(s, &st, None, |sk| sk.curve_index(id).is_some())?, id),
         Sel::ExternalSketchCurve { sketch, id } => sketch_curve(sketch_of(s, &st, Some(*sketch), |_| true)?, id),

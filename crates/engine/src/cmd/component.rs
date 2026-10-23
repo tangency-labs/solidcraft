@@ -38,10 +38,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("component.properties", "Component Physical Properties", properties::component)
         .icon("measure").noundo()
-        .params("component?: id or name (default active); descendants?: bool (default true). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates"),
+        .params("component?: id or name (default active); descendants?: bool (default true). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates; volume, density, mass and center of mass only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals"),
     CommandSpec::new("occurrence.properties", "Occurrence Physical Properties", properties::occurrence)
         .icon("measure").noundo()
-        .params("occurrence: id or name; path?: [occurrence ids] (required if nested under multiple instances); descendants?: bool (default true). Physical properties of this placement in world coordinates, including pending moves"),
+        .params("occurrence: id or name; path?: [occurrence ids] (required if nested under multiple instances); descendants?: bool (default true). Physical properties of this placement in world coordinates, including pending moves; volume, density, mass and center of mass only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals"),
     CommandSpec::new("component.rename", "Rename Component", rename).icon("rename").params("component, name"),
     CommandSpec::new("component.delete", "Delete Component", delete).icon("delete").params("component: deletes it, its subcomponents, occurrences and features"),
     CommandSpec::new("component.unlock", "Unlock Contents", unlock).icon("rigid_group").params(

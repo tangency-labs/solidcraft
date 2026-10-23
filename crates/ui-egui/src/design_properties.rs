@@ -135,12 +135,22 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     let mut rows: Vec<(&str, String)> = Vec::new();
     let total = &v["total"];
     let bodies = v["bodies"].as_array().cloned().unwrap_or_default();
-    if let [b] = bodies.as_slice() {
+    let skipped = total["open_bodies_skipped"].as_u64().unwrap_or(0);
+    if let [b] = bodies.as_slice()
+        && b["closed"] == true
+    {
         rows.push(("Material", b["material"].as_str().unwrap_or("Default").to_string()));
         rows.push(("Density", format!("{:.3} g/cm³", number(b, "density_g_cm3"))));
     }
-    rows.push(("Mass", format!("{:.3} g", number(total, "mass_g"))));
-    rows.push(("Volume", crate::prefs::show_mm(app, number(total, "volume_mm3"), 3)));
+    if !bodies.is_empty() && skipped == bodies.len() as u64 {
+        rows.push(("", crate::i18n::tr_label("Open surface — no volume").to_string()));
+    } else {
+        rows.push(("Mass", format!("{:.3} g", number(total, "mass_g"))));
+        rows.push(("Volume", crate::prefs::show_mm(app, number(total, "volume_mm3"), 3)));
+    }
+    if skipped > 0 && skipped < bodies.len() as u64 {
+        rows.push(("Open bodies (no volume)", skipped.to_string()));
+    }
     rows.push(("Area", crate::prefs::show_mm(app, number(total, "area_mm2"), 2)));
     let geometry = if total.get("center_of_mass").is_some() { Some(total) } else { bodies.first().filter(|_| bodies.len() == 1) };
     if let Some(b) = geometry {
@@ -173,6 +183,35 @@ mod tests {
     use serde_json::json;
 
     use crate::scenario::Harness;
+
+    #[test]
+    fn open_surface_properties_show_area_without_volume_rows() {
+        let mut h = Harness::new();
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY", "name": "Profile"})),
+            ("sketch.line", json!({"points": [[30, 0], [30, 40]], "ids": ["side"]})),
+            ("sketch.finish", json!({})),
+            ("surface.revolve", json!({"sketch": "Profile", "curves": ["side"], "axis": "y", "angle": "270 deg", "body_name": "OpenTube"})),
+        ] {
+            h.app.run(command, params).unwrap();
+        }
+        let measured = h.app.run("inspect.measure", json!({"bodies": ["OpenTube"]})).unwrap();
+        h.app.menu.props = Some(("OpenTube".into(), measured));
+        h.frames(2);
+        assert!(h.widget("Open surface — no volume").is_some());
+        assert!(h.widget("Area").is_some());
+        for label in ["Volume", "Density", "Mass", "Center of mass"] {
+            assert!(h.widget(label).is_none(), "{label} must not be shown for an open surface");
+        }
+        assert!(h.widget("Open bodies (no volume)").is_none());
+        h.app.run("solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Box"})).unwrap();
+        let both = h.app.run("inspect.measure", json!({})).unwrap();
+        h.app.menu.props = Some(("2 bodies".into(), both));
+        h.frames(2);
+        for label in ["Volume", "Mass", "Open bodies (no volume)"] {
+            assert!(h.widget(label).is_some(), "{label} is shown for a solid with an open surface");
+        }
+    }
 
     #[test]
     fn the_window_edits_properties_in_one_undo_step_and_keeps_other_tools_data() {
