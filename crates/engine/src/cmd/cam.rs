@@ -17,12 +17,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         "number (1…9999); kind?: flat_endmill|ball_endmill|drill (default flat_endmill); diameter (mm); flute_length (mm); \
          description?; flutes?; spindle_rpm?; feed?; plunge_feed?; stepdown?; stepover?; delete?: bool",
     ),
-    CommandSpec::new("cam.setup", "CAM Setup", setup_cmd)
-        .icon("settings")
-        .params(
-            "name; work_offset?: 1…6 (G54…G59, default 1); tool_axis?: [x,y,z] (default [0,0,1]); \
-             work_origin?: [x,y,z] mm (default [0,0,0]); stock?: {min:[x,y,z], max:[x,y,z]}; delete?: bool",
-        ),
+    CommandSpec::new("cam.setup", "CAM Setup", setup_cmd).icon("settings").params(
+        "name; work_offset?: 1…6 (G54…G59, default 1); tool_axis?: [x,y,z] (default [0,0,1]); \
+         work_origin?: [x,y,z] mm (default [0,0,0]); stock?: {min:[x,y,z], max:[x,y,z]}; delete?: bool",
+    ),
     CommandSpec::new("cam.contour", "2D Contour", contour_cmd).icon("cut").params(
         "setup; name; tool (number); outer: [[x,y],…] (or regions: [{outer, holes?}]); holes?: [[[x,y],…]]; \
          side?: outside|inside|on (default outside); climb?: bool (default true); stock_to_leave?; tolerance?; \
