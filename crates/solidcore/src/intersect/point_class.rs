@@ -57,7 +57,8 @@
 //! | [`object_zone_tol_3d`]                            | `SmTol::GetZoneTol3d(const SmObject*)`           |
 //! | [`PointClassification::xsect_tol_3d`]             | `SmTol::GetXSectTol3d(const SmPointClassification*)` |
 //! | [`PointClassification::set_src_zone_tol_3d`]      | `SetSrcZoneTol3d`                                |
-//! | [`PointClassification::combine`], [`Precedence`]  | `Combine`                                        |
+//! | [`PointClassification::combine`], [`PointClassification::combine_in_brep`], [`Precedence`] | `Combine` |
+//! | [`CombineBrep`]                                   | the arena behind the classified object           |
 //! | [`PointClassification::compute_point_parameters`] | `ComputePointParameters`                         |
 //! | [`PointClassification::find_obj_point_3d`]        | `FindObjPoint3d`                                 |
 //! | [`PointClassification::load_from_intersection`]   | `LoadFromIntersection`                           |
@@ -69,10 +70,12 @@
 //!
 //! Deviations:
 //! - **Mutable topology.** [`BrepMerge`] supplies an arena, resolved target,
-//!   handle mapping and notification environment for [`PointClassification::merge_into_brep`].
-//!   The older opaque-handle entrypoint cannot resolve an edge's arena and returns
-//!   an `Unported(topology.brep_p1)` deferral until the caller supplies that
-//!   context. Region/face owner queries retain their own blockers.
+//!   handle mapping and notification environment for [`PointClassification::merge_into_brep`],
+//!   and [`CombineBrep`] the arena and notifications
+//!   [`PointClassification::combine_in_brep`] writes a propagated vertex point to.
+//!   The older opaque-handle entrypoints cannot resolve their object's arena and return
+//!   an `Unported(topology.brep_p1)` / `Unported(topology.vertex)` deferral until the
+//!   caller supplies that context. Region/face owner queries retain their own blockers.
 //! - **Object handles.** `m_pObject` and `m_cpFace` are caller-chosen handles `O`
 //!   ([`ClassObject`]): equal handles are the same object, and
 //!   [`ClassObject::class_kind`] answers `GetType` / `IsKindOf`. The geometry behind a
@@ -169,10 +172,24 @@ pub struct BrepMerge<'a, 'env, O> {
     pub curve_ref: &'a dyn Fn(EdgeId, i64) -> ObjectRef,
 }
 
+/// The arena [`PointClassification::combine_in_brep`] writes a propagated surf/surf/surf
+/// point to.
+pub struct CombineBrep<'a, 'env, O> {
+    /// Arena graph containing the classified object.
+    pub brep: &'a mut Brep,
+    /// Resolved target in that graph (a vertex for an `SM_PC_VERTEX` classification).
+    pub target: EntityRef,
+    /// Classification handle corresponding to a topology id in this B-rep.
+    pub handle: &'a dyn Fn(EntityRef) -> O,
+    /// Notification storage/identities shared with the caller's other mutations.
+    pub notifications: &'a mut edge::NotifyEnv<'env>,
+}
+
 const OP_GAP: &str = "intersect::point_class::PointClassification::gap_3d";
 const OP_COMPUTE: &str = "intersect::point_class::PointClassification::compute_point_parameters";
 const OP_FIND: &str = "intersect::point_class::PointClassification::find_obj_point_3d";
 const OP_MERGE: &str = "intersect::point_class::PointClassification::merge_into_object";
+const OP_COMBINE: &str = "intersect::point_class::PointClassification::combine";
 const OP_LOAD: &str = "intersect::point_class::PointClassification::load_from_intersection";
 const OP_GEOMETRY: &str = "intersect::point_class::ClassGeometry";
 
@@ -994,9 +1011,34 @@ impl<O: ClassObject> PointClassification<O> {
     /// # Errors
     ///
     /// [`SolidError::Unported`] when the surf/surf/surf point is copied to a vertex
-    /// classification (`SmVertex::SetPoint`, unit `topology.vertex`); `self` has the
-    /// point by then.
+    /// classification and no arena is available ([`Self::combine_in_brep`] writes it);
+    /// `self` has the point by then.
     pub fn combine(&mut self, other: &Self) -> Result<Precedence> {
+        self.combine_with(other, None)
+    }
+
+    /// `Combine(other)` with the arena `self`'s topology handle names: a surf/surf/surf
+    /// point propagated to a vertex classification is written to that vertex
+    /// (`SmVertex::SetPoint`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::combine`]; [`SolidError::InvalidInput`] when `target` is not a
+    /// vertex; those of `SmVertex::SetPoint`.
+    pub fn combine_in_brep(
+        &mut self,
+        other: &Self,
+        context: CombineBrep<'_, '_, O>,
+    ) -> Result<Precedence> {
+        self.combine_with(other, Some(context))
+    }
+
+    /// [`Self::combine`] with an optional arena for the propagated vertex point.
+    fn combine_with(
+        &mut self,
+        other: &Self,
+        arena: Option<CombineBrep<'_, '_, O>>,
+    ) -> Result<Precedence> {
         use PointClassType as Pc;
         let this_class = self.point_class;
         let other_class = other.point_class;
@@ -1043,11 +1085,40 @@ impl<O: ClassObject> PointClassification<O> {
 
             // set vertex position when appropriate
             if self.point_class == Pc::Vertex {
-                // UNPORTED(topology.vertex): SmVertex::SetPoint
-                return Err(SolidError::unported(
-                    "SmVertex::SetPoint",
-                    "topology.vertex",
-                ));
+                let Some(arena) = arena else {
+                    // UNPORTED(topology.vertex): SmVertex::SetPoint
+                    return Err(SolidError::unported(
+                        "SmVertex::SetPoint",
+                        "topology.vertex",
+                    ));
+                };
+                if self
+                    .object
+                    .is_some_and(|object| (arena.handle)(arena.target) != object)
+                {
+                    return Err(SolidError::invalid_input(
+                        OP_COMBINE,
+                        "target does not resolve classification object",
+                    ));
+                }
+                let EntityRef::Vertex(v) = arena.target else {
+                    return Err(SolidError::invalid_input(
+                        OP_COMBINE,
+                        "combine target is not a vertex",
+                    ));
+                };
+                let key_of = arena.notifications.key_of;
+                let this = key_of(EntityRef::Vertex(v));
+                vertex::set_point(
+                    arena.brep,
+                    v,
+                    self.sss_point,
+                    arena.notifications.records,
+                    arena.notifications.attributes,
+                    arena.notifications.context.as_deref_mut(),
+                    this,
+                    &|vu| key_of(EntityRef::Vertexuse(vu)),
+                )?;
             }
         }
 

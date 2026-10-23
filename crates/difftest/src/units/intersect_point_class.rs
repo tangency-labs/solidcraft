@@ -17,9 +17,14 @@
 //! [`BareTopology`]): their zone tolerances and the curve / surface of
 //! `ComputePointParameters` come from the ported topology members.
 //!
+//! `MergeIntoObject` and `Combine` on a vertex run on the pool's B-rep
+//! (`merge_into_brep`, `combine_in_brep`): the merge compares its status, new-topology
+//! counts and repointed classification, and combine writes the propagated surf/surf/surf
+//! point to the vertex; a vertex's new position is not part of the record.
+//!
 //! Deferred cases: every op that reaches the other topology members (`SmVertex`, `SmEdge`,
-//! `SmFace`, ...: `IsConnectedTo`, `GetBrep`, `GetPoint` / `SetPoint`, `GetCurve` of
-//! `FindObjPoint3d`, `MergeIntoObject` on a vertex), the surface and volume point solves of
+//! `SmFace`, ...: `IsConnectedTo`, `GetBrep`, `GetPoint` / `SetPoint` of `FindObjPoint3d`,
+//! `GetCurve`), the surface and volume point solves of
 //! `ComputePointParameters` and `GetGap3d` (units `surface.surface_p4`,
 //! `surface.volume_p2`), and stand-in regions and edgeuses whose
 //! tolerance upstream takes from the system (the port asks their topology units).
@@ -40,8 +45,8 @@ use solidcore::geom::solution_array::SolutionEnd;
 use solidcore::geom::tol::zone_tol3d;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::intersect::point_class::{
-    space_bend_type, space_unbend_type, ClassGeometry, ClassObject, ClassObjectKind,
-    PointClassType, PointClassification, Precedence, SPACE_BEND_TYPE_STRING,
+    space_bend_type, space_unbend_type, BrepMerge, ClassGeometry, ClassObject, ClassObjectKind,
+    CombineBrep, PointClassType, PointClassification, Precedence, SPACE_BEND_TYPE_STRING,
     SPACE_UNBEND_TYPE_STRING,
 };
 use solidcore::kernel::Kernel;
@@ -52,7 +57,7 @@ use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::volume::Volume;
-use solidcore::topology::Brep;
+use solidcore::topology::{Brep, EdgeId};
 use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::intersect_point_class::{self as ffi, kind, op};
 
@@ -628,6 +633,17 @@ impl Pool {
         o.and_then(|h| self.kinds.get(h.0).copied())
     }
 
+    /// Each B-rep entity's pool handle (the inverse of
+    /// [`ClassGeometry::topology_entity`]).
+    fn entity_handles(&self) -> Vec<(EntityRef, H)> {
+        self.topo
+            .ents
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| e.and_then(|e| self.handles.get(i).map(|h| (e, *h))))
+            .collect()
+    }
+
     /// The pool id of curve `c` (by address; an edge's curve is the pool curve the shim's
     /// edge shares), `-2` for one outside the pool.
     fn id_of_curve(&self, c: &Curve) -> f64 {
@@ -771,8 +787,8 @@ fn push_str(o: &mut Vec<f64>, s: &str) {
 }
 
 fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
-    let k = Kernel::default();
-    let pool = build_pool(&s.objects)?;
+    let mut k = Kernel::default();
+    let mut pool = build_pool(&s.objects)?;
     let mut pcs: [PointClassification<H>; 2] = [
         // SmPointClassification(SmZoneTol3d(tol)): the conversion happens once, in the
         // argument
@@ -864,7 +880,45 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     if class == PointClassType::Vertex && ok != Some(kind::VERTEX) {
                         return Err(rejected());
                     }
-                    let which = st(pc.combine(&other))?.map_err(|_| harness("combine failed"))?;
+                    // A vertex classification writes a propagated surf/surf/surf point
+                    // to its vertex: run Combine on the pool's B-rep, as upstream does
+                    // through the object pointer.
+                    let object = pc.object();
+                    let target = object.and_then(|h| pool.topo.ents.get(h.0).copied().flatten());
+                    let combined = match (object, target) {
+                        (Some(object), Some(t @ EntityRef::Vertex(_))) => {
+                            let mapping = pool.entity_handles();
+                            let handle = move |e: EntityRef| {
+                                mapping
+                                    .iter()
+                                    .find(|(m, _)| *m == e)
+                                    .map_or(object, |(_, h)| *h)
+                            };
+                            let key_of = |e: EntityRef| {
+                                super::boolean_topology_intersector_p1::p9_entity_ref(e)
+                            };
+                            let mut records = std::collections::BTreeMap::new();
+                            let mut attributes =
+                                solidcore::geom::attribute::AttributeStore::default();
+                            let mut env = solidcore::topology::edge::NotifyEnv {
+                                records: &mut records,
+                                attributes: &mut attributes,
+                                context: None,
+                                key_of: &key_of,
+                            };
+                            pc.combine_in_brep(
+                                &other,
+                                CombineBrep {
+                                    brep: &mut pool.topo.brep,
+                                    target: t,
+                                    handle: &handle,
+                                    notifications: &mut env,
+                                },
+                            )
+                        }
+                        _ => pc.combine(&other),
+                    };
+                    let which = st(combined)?.map_err(|_| harness("combine failed"))?;
                     o.push(0.0);
                     o.push(if which == Precedence::This { 0.0 } else { 1.0 });
                 }
@@ -937,7 +991,60 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     ) {
                         return Err(rejected());
                     }
-                    match st(pc.merge_into_object(&k, v3(*p)))? {
+                    // A vertex classification merges into the pool's real B-rep vertex:
+                    // upstream mutates that vertex and repoints the classification, so
+                    // run the merge on the arena the classification handles name. Other
+                    // classification objects (stand-ins, curves, ...) have no entity
+                    // here; the opaque path reports upstream's SM_ERR for them.
+                    let object = pc.object();
+                    let target = object.and_then(|h| pool.topo.ents.get(h.0).copied().flatten());
+                    let merged = match (object, target) {
+                        (Some(object), Some(t @ EntityRef::Vertex(_))) => {
+                            // `ClassGeometry` cannot hand out the arena mutably: map the
+                            // entity back to its pool handle here, where the B-rep is
+                            // borrowed mutably and the handles are a local copy.
+                            let mapping = pool.entity_handles();
+                            let handle = move |e: EntityRef| {
+                                mapping
+                                    .iter()
+                                    .find(|(m, _)| *m == e)
+                                    .map_or(object, |(_, h)| *h)
+                            };
+                            let key_of = |e: EntityRef| {
+                                super::boolean_topology_intersector_p1::p9_entity_ref(e)
+                            };
+                            let curve_ref = |e: EdgeId, type_code: i64| {
+                                solidcore::geom::object::ObjectRef {
+                                    key: solidcore::geom::attribute::ObjectKey(
+                                        ((type_code as u64) << 32) | u64::from(e.index()),
+                                    ),
+                                    type_code,
+                                }
+                            };
+                            let mut records = std::collections::BTreeMap::new();
+                            let mut attributes =
+                                solidcore::geom::attribute::AttributeStore::default();
+                            let mut env = solidcore::topology::edge::NotifyEnv {
+                                records: &mut records,
+                                attributes: &mut attributes,
+                                context: None,
+                                key_of: &key_of,
+                            };
+                            pc.merge_into_brep(
+                                &mut k,
+                                v3(*p),
+                                BrepMerge {
+                                    brep: &mut pool.topo.brep,
+                                    target: t,
+                                    handle: &handle,
+                                    notifications: &mut env,
+                                    curve_ref: &curve_ref,
+                                },
+                            )
+                        }
+                        _ => pc.merge_into_object(&k, v3(*p)),
+                    };
+                    match st(merged)? {
                         Ok(m) => {
                             o.extend([0.0, m.new_edges.len() as f64, m.new_vertices.len() as f64]);
                         }
