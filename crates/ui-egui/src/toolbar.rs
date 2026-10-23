@@ -2427,9 +2427,10 @@ fn dropdown_grid(
             let text = crate::i18n::tr_label(heading).to_uppercase();
             let clip = ui.clip_rect().intersect(Rect::from_min_size(origin + at.to_vec2(), vec2(*w, GRID_HEADING)));
             let painter = ui.painter().with_clip_rect(clip);
+            // Centred over its group's icons.
             painter.text(
-                origin + at.to_vec2() + vec2(6.0, GRID_HEADING / 2.0),
-                Align2::LEFT_CENTER,
+                origin + at.to_vec2() + vec2(w / 2.0, GRID_HEADING / 2.0),
+                Align2::CENTER_CENTER,
                 text,
                 crate::fonts::semibold(t.font_small),
                 t.text_dim,
