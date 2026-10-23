@@ -2287,20 +2287,22 @@ fn face_intersect(
     approx_tol_3d: f64,
     crv_angle_tolerance_deg: f64,
 ) -> Result<(Vec<Option<Curve>>, Vec<Point3>)> {
-    let _ = (
+    // (only the 3D curves and points are given; no coincidence flag)
+    let options = crate::topology::face::p3::FaceIntersectOptions {
+        want_points: true,
+        ..Default::default()
+    };
+    let out = crate::topology::face::p3::face_intersect_breps(
         k,
-        b,
-        this_face,
-        other,
-        other_face,
+        (b, this_face),
+        (other, other_face),
         approx_tol_3d,
         crv_angle_tolerance_deg,
-    );
-    // UNPORTED(topology.face_p3): SmFace::FaceIntersect -- justified: findings.md topology.face_p3 "Stubs left for this unit"
-    // (the two faces belong to different B-reps; the ported routine takes both from one)
-    Err(SolidError::unported(
-        "SmFace::FaceIntersect",
-        "topology.face_p3",
+        &options,
+    )?;
+    Ok((
+        out.curves_3d.into_iter().map(Some).collect(),
+        out.points_3d.unwrap_or_default(),
     ))
 }
 

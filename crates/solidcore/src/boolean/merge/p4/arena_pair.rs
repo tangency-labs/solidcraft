@@ -866,36 +866,32 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
         face2: H,
         approx_tol_3d: f64,
         ang_tol_deg: f64,
+        wants: ti::FaceIntersectWants,
         opt_coincidence_flag: Option<bool>,
     ) -> crate::Result<ti::FaceIntersection<H>> {
         if face1.kind != K_FACE || face2.kind != K_FACE {
             return Err(invalid("FaceIntersect needs two faces"));
         }
-        if face1.b != face2.b {
-            // UNPORTED(topology.face_p3): SmFace::FaceIntersect of faces of two B-reps --
-            // justified: topology::face::p3::face_intersect takes one B-rep arena
-            return Err(SolidError::unported(
-                "SmFace::FaceIntersect (faces of two B-reps)",
-                "topology.face_p3",
-            ));
-        }
         let options = FaceIntersectOptions {
             want_this_classes: true,
             want_other_classes: true,
             want_cc_curves: true,
+            want_this_uv_curves: wants.this_uv_curves,
+            want_other_uv_curves: wants.other_uv_curves,
+            want_points: wants.points_3d,
             coincidence: opt_coincidence_flag,
-            ..FaceIntersectOptions::default()
         };
-        let out = fp3::face_intersect(
+        // the faces may be of the two operands (`face_intersect_breps`)
+        let out = fp3::face_intersect_breps(
             k,
-            self.brep_r(face1)?,
-            fid(face1),
-            fid(face2),
+            (self.brep_r(face1)?, fid(face1)),
+            (self.brep_r(face2)?, fid(face2)),
             approx_tol_3d,
             ang_tol_deg,
             &options,
         )?;
-        let bi = face1.b;
+        // the B-rep of a classification object of `side` (see `IntersectObject`)
+        let brep_of = |side: bool| if side { face2.b } else { face1.b };
 
         // every curve the call made gets a handle in the curve store
         let mut curves_3d = Vec::new();
@@ -909,6 +905,8 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
         )?;
         let uv1 = self.register_curves(out.cc_this_uv_curves.unwrap_or_default())?;
         let uv2 = self.register_curves(out.cc_other_uv_curves.unwrap_or_default())?;
+        let this_uv_curves = self.register_curves(out.this_uv_curves.unwrap_or_default())?;
+        let other_uv_curves = self.register_curves(out.other_uv_curves.unwrap_or_default())?;
 
         // the classifications name their objects by handle
         let mut map = |o: IntersectObject| -> crate::Result<H> {
@@ -917,15 +915,17 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
                 IntersectObject::Curve(i) => cc3d.get(i).copied().flatten().ok_or_else(bad),
                 IntersectObject::UvCurve(i, false) => uv1.get(i).copied().flatten().ok_or_else(bad),
                 IntersectObject::UvCurve(i, true) => uv2.get(i).copied().flatten().ok_or_else(bad),
-                IntersectObject::Surface(f) => Ok(hd(bi, K_FACE_SURFACE, f.index())),
-                IntersectObject::EdgeCurve(e) => self
-                    .edge_curve_h(hd(bi, K_EDGE, e.index()))
+                IntersectObject::Surface(f, side) => {
+                    Ok(hd(brep_of(side), K_FACE_SURFACE, f.index()))
+                }
+                IntersectObject::EdgeCurve(e, side) => self
+                    .edge_curve_h(hd(brep_of(side), K_EDGE, e.index()))
                     .flatten()
                     .ok_or_else(bad),
-                IntersectObject::Trim(eu) => Ok(hd(bi, K_TRIM_CURVE, eu.index())),
-                IntersectObject::Topology(e) => match e {
-                    EntityRef::Vertexuse(vu) => Ok(hd(bi, K_VERTEXUSE, vu.index())),
-                    other => Self::entity_h(bi, other).ok_or_else(bad),
+                IntersectObject::Trim(eu, side) => Ok(hd(brep_of(side), K_TRIM_CURVE, eu.index())),
+                IntersectObject::Topology(e, side) => match e {
+                    EntityRef::Vertexuse(vu) => Ok(hd(brep_of(side), K_VERTEXUSE, vu.index())),
+                    other => Self::entity_h(brep_of(side), other).ok_or_else(bad),
                 },
             }
         };
@@ -946,6 +946,9 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
                 uv1.into_iter().flatten().collect(),
                 uv2.into_iter().flatten().collect(),
             ],
+            this_uv_curves: this_uv_curves.into_iter().flatten().collect(),
+            other_uv_curves: other_uv_curves.into_iter().flatten().collect(),
+            points_3d: out.points_3d.unwrap_or_default(),
         })
     }
     fn editing_enabled(&self, brep: H) -> crate::Result<bool> {

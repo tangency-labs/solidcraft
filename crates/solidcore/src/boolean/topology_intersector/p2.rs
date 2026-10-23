@@ -1345,6 +1345,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let mut int_pts: Vec<Point3> = Vec::new();
                 let mut fi = face_face_intersect_curves(
                     k,
+                    brep,
                     f1,
                     f2,
                     tol,

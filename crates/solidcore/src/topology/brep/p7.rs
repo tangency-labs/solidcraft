@@ -446,7 +446,7 @@ fn classify_on_faces(
             opt_data_size: 16,
             is_curve_owned: false,
             is_curve_current: true,
-            surface1: Some(IntersectObject::Surface(face)),
+            surface1: Some(IntersectObject::Surface(face, false)),
             surface2: None,
             uv_curve2: None,
             ti: None,
@@ -472,7 +472,7 @@ fn set_curve_and_merge(
         .faces
         .into_iter()
         .map(|o| match o {
-            IntersectObject::Topology(EntityRef::Face(f)) => Ok(f),
+            IntersectObject::Topology(EntityRef::Face(f), _) => Ok(f),
             _ => Err(null("merged face is not a face")),
         })
         .collect()
@@ -482,7 +482,7 @@ fn set_curve_and_merge(
 /// edge (upstream dereferences the result).
 fn mid_edge(ivl: &CurveInterval<IntersectObject>) -> Result<EdgeId> {
     match ivl.mid.object() {
-        Some(IntersectObject::Topology(EntityRef::Edge(e))) => Ok(e),
+        Some(IntersectObject::Topology(EntityRef::Edge(e), _)) => Ok(e),
         _ => Err(null("interval middle on an edge without edge")),
     }
 }
@@ -1838,6 +1838,8 @@ pub fn merge_self_intersection_curves(
         let curve_3d = IntersectObject::Curve(i);
         let objects = IntersectObjects {
             b: &*b,
+            other: &*b,
+            side: false,
             curves_3d: &curves_3d,
             uv1: &uv1,
             uv2: &uv2,
@@ -1863,6 +1865,8 @@ pub fn merge_self_intersection_curves(
             let e1 = mid_edge(ivl)?;
             let objects = IntersectObjects {
                 b: &*b,
+                other: &*b,
+                side: false,
                 curves_3d: &curves_3d,
                 uv1: &uv1,
                 uv2: &uv2,

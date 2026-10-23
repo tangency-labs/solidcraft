@@ -102,11 +102,13 @@
 //!   default arguments) go through [`IntersectorBrep::face_brep`],
 //!   [`IntersectorBrep::face_vertices`] and [`IntersectorBrep::face_edges`], which the B-rep
 //!   owner implements with `topology::face::p4`.
+//! - **`SmFace::FaceIntersect`** (`topology.face_p3`) goes through
+//!   [`IntersectorBrep::face_intersect`] (`face_intersect_breps`, faces of one or both
+//!   operands), with the UV curve and point outputs part 2's
+//!   `face_face_intersect_curves` asks for ([`FaceIntersectWants`]).
 //! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
 //!   each tagged `UNPORTED(<unit>)`: `SmBrep::MakeVertexLoop` / `MakeVertexSplitEdge`
 //!   (`topology.brep_p9`), `MakeEdgeInFace` (`topology.brep_p5`),
-//!   `SmFace::FaceIntersect` with UV curve and point outputs (`topology.face_p3`; part
-//!   2's `face_face_intersect_curves`, which [`IntersectorBrep`] does not cover),
 //!   `SmFace::Point3DClassify` (`query.face_p1`; `SmFace::CalculateBoundingBox` goes
 //!   through [`IntersectorBrep::face_calculate_bounding_box`] since the `query.face_p1`
 //!   port). The
@@ -396,17 +398,19 @@ pub trait IntersectorBrep<O>:
         uv: Point2,
         pc: &mut PointClassification<O>,
     ) -> Result<()>;
-    /// `pFace1->FaceIntersect(ctx, pFace2, tol, angTolDeg, 3DCurves, NULL, NULL, NULL,
-    /// &CC1, &CC2, &CC3D, &CCUV1, &CCUV2, &bAreCoincident)`
-    /// (`topology::face::p3::face_intersect`) of two faces of one B-rep, with every
-    /// curve and classification object given a handle. `opt_coincidence_flag` is
-    /// `pbOptCoincidenceFlag`, an input ("known coincident or not") that makes
-    /// `FaceIntersect` skip its own `CoincidenceCheck`.
+    /// `pFace1->FaceIntersect(ctx, pFace2, tol, angTolDeg, 3DCurves, pOptThisUVCurves,
+    /// pOptOtherUVCurves, pOpt3DPoints, &CC1, &CC2, &CC3D, &CCUV1, &CCUV2,
+    /// &bAreCoincident)` (`topology::face::p3::face_intersect_breps`) of two faces of
+    /// one or two B-reps, with every curve and classification object given a handle;
+    /// the first three optional outputs are given as `wants` says (all `NULL` by
+    /// default). `opt_coincidence_flag` is `pbOptCoincidenceFlag`, an input ("known
+    /// coincident or not") that makes `FaceIntersect` skip its own `CoincidenceCheck`.
     ///
     /// # Errors
     ///
-    /// Those of `face_intersect`; [`SolidError::InvalidInput`] for faces of different
-    /// B-reps or unknown handles.
+    /// Those of `face_intersect_breps`; [`SolidError::InvalidInput`] for unknown
+    /// handles.
+    #[allow(clippy::too_many_arguments)] // upstream's FaceIntersect arguments
     fn face_intersect(
         &mut self,
         k: &Kernel,
@@ -414,6 +418,7 @@ pub trait IntersectorBrep<O>:
         face2: O,
         approx_tol_3d: f64,
         ang_tol_deg: f64,
+        wants: FaceIntersectWants,
         opt_coincidence_flag: Option<bool>,
     ) -> Result<FaceIntersection<O>>;
     /// Sets a B-rep's `m_bEditingEnabled` and returns its previous value
@@ -649,6 +654,25 @@ pub struct FaceIntersection<O> {
     pub cc2: Vec<CurveClassification<O>>,
     /// `sCC3DCrvs`, `sCCUVCrvs1`, `sCCUVCrvs2`.
     pub cc_curves: [Vec<O>; 3],
+    /// `pOptThisUVCurves`: the UV curves of `curves_3d` on the first face (empty unless
+    /// asked for in [`FaceIntersectWants`]).
+    pub this_uv_curves: Vec<O>,
+    /// `pOptOtherUVCurves`: their UV curves on the second face (when asked).
+    pub other_uv_curves: Vec<O>,
+    /// `pOpt3DPoints`: the single-point intersections (when asked).
+    pub points_3d: Vec<Point3>,
+}
+
+/// Which of the first three optional outputs of `SmFace::FaceIntersect` are given
+/// (`pOptThisUVCurves`, `pOptOtherUVCurves`, `pOpt3DPoints`; `NULL` by default).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FaceIntersectWants {
+    /// `pOptThisUVCurves`.
+    pub this_uv_curves: bool,
+    /// `pOptOtherUVCurves`.
+    pub other_uv_curves: bool,
+    /// `pOpt3DPoints`.
+    pub points_3d: bool,
 }
 
 /// Which of the curve-classification out-pointers of `SmFace::FaceIntersect` are given
@@ -671,35 +695,70 @@ pub(super) struct FaceIntersectOutputs {
 /// `SmFace::FaceIntersect(crContext, pFace2, tol, angTolDeg, r3DCurves,
 /// pOptThisUVCurves, pOptOtherUVCurves, pOpt3DPoints, pOptThisCrvClasses,
 /// pOptOtherCrvClasses, pOptCC3DCrvs, pOptThisCCUVCrvs, pOptOtherCCUVCrvs,
-/// pbOptCoincidenceFlag)`; the first three optional outputs are `opt_this_uv_curves`,
-/// `opt_other_uv_curves` and `opt_3d_points`, the other five are chosen by `outputs`.
-/// `opt_coincidence_flag` is `pbOptCoincidenceFlag`, an input ("known coincident or
-/// not") that makes `FaceIntersect` skip its own `CoincidenceCheck`.
+/// pbOptCoincidenceFlag)` through [`IntersectorBrep::face_intersect`]; the first three
+/// optional outputs are `opt_this_uv_curves`, `opt_other_uv_curves` and `opt_3d_points`
+/// (appended to), the other five are chosen by `outputs` (the arrays not given come
+/// back empty). `opt_coincidence_flag` is `pbOptCoincidenceFlag`, an input ("known
+/// coincident or not") that makes `FaceIntersect` skip its own `CoincidenceCheck`.
+///
+/// # Errors
+///
+/// Those of [`IntersectorBrep::face_intersect`].
+#[allow(clippy::too_many_arguments)] // upstream's FaceIntersect arguments
 pub(super) fn face_face_intersect_curves<O>(
-    _k: &Kernel,
-    _face1: O,
-    _face2: O,
-    _approx_tol_3d: f64,
-    _ang_tol_deg: f64,
-    _opt_this_uv_curves: Option<&mut Vec<O>>,
-    _opt_other_uv_curves: Option<&mut Vec<O>>,
-    _opt_3d_points: Option<&mut Vec<Point3>>,
+    k: &Kernel,
+    brep: &mut impl IntersectorBrep<O>,
+    face1: O,
+    face2: O,
+    approx_tol_3d: f64,
+    ang_tol_deg: f64,
+    opt_this_uv_curves: Option<&mut Vec<O>>,
+    opt_other_uv_curves: Option<&mut Vec<O>>,
+    opt_3d_points: Option<&mut Vec<Point3>>,
     outputs: &FaceIntersectOutputs,
-    _opt_coincidence_flag: Option<bool>,
+    opt_coincidence_flag: Option<bool>,
 ) -> Result<FaceIntersection<O>> {
-    let _ = (
-        outputs.this_crv_classes,
-        outputs.other_crv_classes,
-        outputs.cc_3d_crvs,
-        outputs.this_cc_uv_crvs,
-        outputs.other_cc_uv_crvs,
-    );
-    // UNPORTED(topology.face_p3): SmFace::FaceIntersect -- justified: part 2 needs the UV
-    // curve and point outputs, which IntersectorBrep::face_intersect does not return.
-    Err(SolidError::unported(
-        "SmFace::FaceIntersect",
-        "topology.face_p3",
-    ))
+    let wants = FaceIntersectWants {
+        this_uv_curves: opt_this_uv_curves.is_some(),
+        other_uv_curves: opt_other_uv_curves.is_some(),
+        points_3d: opt_3d_points.is_some(),
+    };
+    let mut fi = brep.face_intersect(
+        k,
+        face1,
+        face2,
+        approx_tol_3d,
+        ang_tol_deg,
+        wants,
+        opt_coincidence_flag,
+    )?;
+    if let Some(v) = opt_this_uv_curves {
+        v.append(&mut fi.this_uv_curves);
+    }
+    if let Some(v) = opt_other_uv_curves {
+        v.append(&mut fi.other_uv_curves);
+    }
+    if let Some(v) = opt_3d_points {
+        v.append(&mut fi.points_3d);
+    }
+    // the classification arrays and curves of a NULL out-pointer are not returned
+    if !outputs.this_crv_classes {
+        fi.cc1.clear();
+    }
+    if !outputs.other_crv_classes {
+        fi.cc2.clear();
+    }
+    let [cc_3d, cc_uv1, cc_uv2] = &mut fi.cc_curves;
+    for (given, list) in [
+        (outputs.cc_3d_crvs, cc_3d),
+        (outputs.this_cc_uv_crvs, cc_uv1),
+        (outputs.other_cc_uv_crvs, cc_uv2),
+    ] {
+        if !given {
+            list.clear();
+        }
+    }
+    Ok(fi)
 }
 
 /// `pSurf->GlobalCurveIntersect(domain, *pCurve, interval, tol, solutions)` of the
@@ -2525,6 +2584,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     face2,
                     self.this_approx_tol_3d,
                     ang_tol_deg,
+                    FaceIntersectWants::default(),
                     Some(are_coincident),
                 ))?
                 .unwrap_or_else(|| FaceIntersection {
@@ -2532,6 +2592,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     cc1: Vec::new(),
                     cc2: Vec::new(),
                     cc_curves: [Vec::new(), Vec::new(), Vec::new()],
+                    this_uv_curves: Vec::new(),
+                    other_uv_curves: Vec::new(),
+                    points_3d: Vec::new(),
                 });
                 let _ = (&fi.curves_3d, &fi.cc_curves); // deleted by SmObjsDelete
 
