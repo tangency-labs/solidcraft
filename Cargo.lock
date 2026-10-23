@@ -4227,6 +4227,7 @@ dependencies = [
  "solidcraft-derive",
  "solidcraft-geom",
  "solidcraft-kernel",
+ "solidcraft-manufacture",
  "solidcraft-render",
  "solidcraft-sketch",
  "thiserror 2.0.21",
@@ -4246,6 +4247,7 @@ dependencies = [
  "solidcraft-geom",
  "solidcraft-io",
  "solidcraft-kernel",
+ "solidcraft-manufacture",
  "solidcraft-render",
  "solidcraft-sketch",
  "thiserror 2.0.21",
@@ -4322,6 +4324,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-manufacture"
+version = "0.20.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "solidcraft-mcp"
 version = "0.20.0"
 dependencies = [
@@ -4380,6 +4391,7 @@ dependencies = [
  "sha2 0.10.9",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-manufacture",
  "solidcraft-space-mouse",
  "syn 2.0.119",
  "tiny-skia",
