@@ -198,7 +198,9 @@ struct GeomRecorder : SmNotifyCallback
     std::array<SmObject*, 4> last_ptrs{};
     std::array<Ref, 4> last_refs{};
     const void* pending_destruction = nullptr;
-    int64_t edges_destroyed = 0; // SM_NO_DESTRUCTION notifications of an edge (~SmEdge)
+    // SM_NO_DESTRUCTION notifications by caller kind: edge, edge use, face, shell
+    // (~SmEdge, ~SmEdgeuse, ~SmFace, ~SmShell)
+    int64_t destroyed[4] = {0, 0, 0, 0};
 
     Ref ref(const void* a) const
     {
@@ -245,8 +247,17 @@ struct GeomRecorder : SmNotifyCallback
         have_last = true;
         if (op == SM_NO_DESTRUCTION && caller != nullptr)
             pending_destruction = (const void*)caller;
-        if (op == SM_NO_DESTRUCTION && caller != nullptr && caller->IsKindOf(SmEdge_TYPE))
-            edges_destroyed++;
+        if (op == SM_NO_DESTRUCTION && caller != nullptr)
+        {
+            if (caller->IsKindOf(SmEdge_TYPE))
+                destroyed[0]++;
+            if (caller->IsKindOf(SmEdgeuse_TYPE))
+                destroyed[1]++;
+            if (caller->IsKindOf(SmFace_TYPE))
+                destroyed[2]++;
+            if (caller->IsKindOf(SmShell_TYPE))
+                destroyed[3]++;
+        }
         // (a user callback installed before this one still sees every notification)
         return previous != nullptr ? previous->Execute(op, caller, d1, d2, d3) : SM_SUCCESS;
     }
@@ -796,9 +807,11 @@ void run(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         trk->StopTracking();
         const size_t tracker_at = o.size();
         put_tracker(o, *trk, tracked, rec);
-        // the edges the op destroyed (~SmEdge's SM_NO_DESTRUCTION), after the tracker
+        // the edges, edge uses, faces and shells the op destroyed (their destructors'
+        // SM_NO_DESTRUCTION), after the tracker
         if (op == P3_DELETE_FACE)
-            o.push_back((double)rec.edges_destroyed);
+            for (int64_t n : rec.destroyed)
+                o.push_back((double)n);
         if (op == P3_ORIENT)
         {
             // the trailer the runner splits on: for each face before the op the number of

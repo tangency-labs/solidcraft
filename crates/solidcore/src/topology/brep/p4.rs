@@ -60,11 +60,14 @@
 //!   shell runs its destructor, which notifies `SM_NO_DESTRUCTION` (`~SmFace`,
 //!   `SmFace.cpp:94`; `~SmEdge`, `SmEdge.cpp:85`, which also sets and restores the
 //!   context's boolean flag around it; `~SmEdgeuse`, `SmEdgeuse.cpp:76`; `~SmShell`,
-//!   `SmShell.cpp:55`). `DeleteEdge` deletes its edge with
-//!   [`crate::topology::edge::destroy`] (the notification, the flag toggle and the
-//!   attribute cleanup of `~SmAObject`). The other record removals do not send these
-//!   notifications (not modelled): attributes the caller's store holds for a deleted
-//!   face, edge use or shell stay there.
+//!   `SmShell.cpp:55`). `DeleteEdge` and `DeleteVertex` delete their edges, edge uses,
+//!   merged-away faces and vertex shells with [`crate::topology::edge::destroy`],
+//!   [`crate::topology::edgeuse::p2::destroy`], [`crate::topology::face::p3::destroy`]
+//!   and [`crate::topology::shell::destroy`] (the notification, `~SmEdge`'s flag
+//!   toggle and `~SmAObject`'s attribute cleanup). Records without a notifying
+//!   destructor (face uses, loops, loop uses, vertices, vertex uses, regions) are
+//!   removed without `ClearAttributes` (not modelled), and [`destroy`]'s whole-B-rep
+//!   teardown removes its records without them.
 //! - **`TBB`.** `ShrinkGeometry`'s `CreateUVTrimCurvesParallel` (`SM_USE_TBB`,
 //!   `SmBrep.cpp:32253`) is not compiled in the reference build and not ported.
 //! - **Loops.** A loop made by splitting a loop gets the split face as
@@ -103,6 +106,7 @@ use crate::topology::brep::p1::{self as brep1, LockBrepBox};
 use crate::topology::brep::p2::{self as brep2, NotifyArg};
 use crate::topology::edge::{self, NotifyEnv};
 use crate::topology::edgeuse::p1 as eu1;
+use crate::topology::edgeuse::p2 as eu2;
 use crate::topology::edgeuse::p3 as eu3;
 use crate::topology::face::p1 as face1;
 use crate::topology::face::p2 as face2;
@@ -640,9 +644,45 @@ fn destroy_edge(k: &mut Kernel, b: &mut Brep, env: &mut DeleteEnv<'_>, e: EdgeId
     edge::destroy(k, b, e, &mut n)
 }
 
-/// Deletes an edge use record (`delete pEU`).
-fn delete_edgeuse(b: &mut Brep, eu: EdgeuseId) -> Result<()> {
-    b.remove_edgeuse_record(eu).map(|_| ())
+/// `delete pFace` ([`face3::destroy`]) under the deletion's notification records,
+/// attributes and identities.
+fn destroy_face(k: &mut Kernel, b: &mut Brep, env: &mut DeleteEnv<'_>, f: FaceId) -> Result<()> {
+    let mut n = NotifyEnv {
+        records: &mut *env.records,
+        attributes: &mut *env.attributes,
+        context: env.context.as_deref_mut(),
+        key_of: env.key_of,
+    };
+    face3::destroy(k, b, f, &mut n)
+}
+
+/// `delete pShell` ([`shell::destroy`]) under the deletion's notification records,
+/// attributes and identities.
+fn destroy_shell(k: &mut Kernel, b: &mut Brep, env: &mut DeleteEnv<'_>, s: ShellId) -> Result<()> {
+    let mut n = NotifyEnv {
+        records: &mut *env.records,
+        attributes: &mut *env.attributes,
+        context: env.context.as_deref_mut(),
+        key_of: env.key_of,
+    };
+    shell::destroy(k, b, s, &mut n)
+}
+
+/// `delete pEU` ([`eu2::destroy`]) under the deletion's notification records,
+/// attributes and identities.
+fn delete_edgeuse(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut DeleteEnv<'_>,
+    eu: EdgeuseId,
+) -> Result<()> {
+    let mut n = NotifyEnv {
+        records: &mut *env.records,
+        attributes: &mut *env.attributes,
+        context: env.context.as_deref_mut(),
+        key_of: env.key_of,
+    };
+    eu2::destroy(k, b, eu, &mut n)
 }
 
 // ---- DeleteEdge ----------------------------------------------------------------------------
@@ -994,7 +1034,7 @@ fn delete_manifold_edge(
     }
 
     for x in [eu, eu_mate, eu_rad, eu_rad_mate] {
-        delete_edgeuse(b, x)?;
+        delete_edgeuse(k, b, env, x)?;
     }
     destroy_edge(k, b, env, e)?;
 
@@ -1090,7 +1130,7 @@ fn delete_manifold_edge(
     ignore_status(shell_remove_faceuse(b, s, fu_del_mate, OP))?;
     b.remove_faceuse_record(fu_del)?;
     b.remove_faceuse_record(fu_del_mate)?;
-    b.remove_face_record(del_f)?;
+    destroy_face(k, b, env, del_f)?;
     Ok(())
 }
 
@@ -1180,8 +1220,8 @@ fn delete_lamina_edge(
         ignore_status(loopuse::set_edgeuse(b, lu_mate, c))?;
     }
 
-    delete_edgeuse(b, eu)?;
-    delete_edgeuse(b, eu_mate)?;
+    delete_edgeuse(k, b, env, eu)?;
+    delete_edgeuse(k, b, env, eu_mate)?;
     destroy_edge(k, b, env, e)?;
     Ok(())
 }
@@ -1250,8 +1290,8 @@ fn delete_wire_edge(
             let head = vertexuse::edgeuse(b, vu)?;
             set_shell_head(b, shell, eu_head(head), None)?;
         }
-        delete_edgeuse(b, eu)?;
-        delete_edgeuse(b, eu_mate)?;
+        delete_edgeuse(k, b, env, eu)?;
+        delete_edgeuse(k, b, env, eu_mate)?;
         return Ok(());
     }
 
@@ -1261,8 +1301,8 @@ fn delete_wire_edge(
         // give V1 to the existing shell and create a new shell for V2
         set_shell_head(b, shell, vu_head(vu1), Some(ShellType::Vertex))?;
         new_vertex_shell(b, shell, vu2)?;
-        delete_edgeuse(b, eu)?;
-        delete_edgeuse(b, eu_mate)?;
+        delete_edgeuse(k, b, env, eu)?;
+        delete_edgeuse(k, b, env, eu_mate)?;
         return Ok(());
     }
     if v1_shell != v2_shell {
@@ -1279,13 +1319,13 @@ fn delete_wire_edge(
                 set_shell_head(b, shell, vu_head(head), Some(ShellType::Vertex))?;
             }
         }
-        delete_edgeuse(b, eu)?;
-        delete_edgeuse(b, eu_mate)?;
+        delete_edgeuse(k, b, env, eu)?;
+        delete_edgeuse(k, b, env, eu_mate)?;
         return Ok(());
     }
 
     let mut lock = MarkLock::new(core::slice::from_mut(&mut k.context), 0, ALL_MARKS)?;
-    let r = wire_split_shell(k, b, &lock, shell, v1, v2, eu, eu_mate);
+    let r = wire_split_shell(k, b, env, &lock, shell, v1, v2, eu, eu_mate);
     lock.release(core::slice::from_mut(&mut k.context))?;
     r
 }
@@ -1294,6 +1334,7 @@ fn delete_wire_edge(
 fn wire_split_shell(
     k: &mut Kernel,
     b: &mut Brep,
+    env: &mut DeleteEnv<'_>,
     lock: &MarkLock,
     shell: ShellId,
     v1: VertexId,
@@ -1366,8 +1407,8 @@ fn wire_split_shell(
         }
         b.shell_mut(shell)?.shell_type = ShellType::Wire;
     }
-    delete_edgeuse(b, eu)?;
-    delete_edgeuse(b, eu_mate)?;
+    delete_edgeuse(k, b, env, eu)?;
+    delete_edgeuse(k, b, env, eu_mate)?;
     Ok(())
 }
 
@@ -1442,7 +1483,7 @@ pub fn delete_vertex(
         {
             let region = deref(shell_region(b, shell)?, OP)?;
             ignore_status(shell::region_remove_shell(b, region, shell))?;
-            b.remove_shell_record(shell)?;
+            destroy_shell(k, b, env, shell)?;
         }
         ignore_status(vertex_remove(b, v, vu, OP))?;
         b.remove_vertex_record(v)?;
@@ -1703,7 +1744,7 @@ fn destroy_records(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     // edges
     for e in brep1::edges(b, None)? {
         for eu in b.edge(e)?.edgeuses.clone() {
-            delete_edgeuse(b, eu)?;
+            b.remove_edgeuse_record(eu)?;
         }
         b.remove_edge_record(e)?;
     }
@@ -1733,6 +1774,99 @@ fn destroy_records(k: &mut Kernel, b: &mut Brep) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `delete pEU` / `delete pShell` / `delete pFace` (#556): each destructor notifies
+    /// `SM_NO_DESTRUCTION` once per installed callback, the record leaves its arena and
+    /// the object leaves its attributes while the other users stay.
+    #[test]
+    fn edgeuse_shell_and_face_destructors_notify_and_clear_attributes() {
+        use crate::curve::curve::Curve;
+        use crate::geom::attribute::{Attribute, Behavior};
+        use crate::topology::edge::notification_test_support as callbacks;
+        use crate::topology::loopuse::notify_ref as key_of;
+
+        let mut k = Kernel::default();
+        let events = callbacks::install(&mut k.context);
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        b.set_editing_enabled(true);
+        let line = crate::curve::line::Line::from_points(Vec3::ZERO, Vec3::X, 3);
+        let interval = line.natural_interval();
+        let e = crate::topology::brep::p5::create_wire_edge_from_curve(
+            &mut k,
+            &mut b,
+            Curve::from(line),
+            interval,
+        )
+        .unwrap();
+        let eu = b.edge(e).unwrap().edgeuses[0];
+        let shell = eu1::shell(&b, eu).unwrap().unwrap();
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let plane = crate::surface::plane::Plane::create_canonical(
+            &crate::geom::axis2_placement::Axis2Placement::IDENTITY,
+        )
+        .unwrap();
+        let mut records = BTreeMap::new();
+        let mut attributes = AttributeStore::default();
+        let face = {
+            let mut marks = Marks::default();
+            let this_face = |f: FaceId| key_of(EntityRef::Face(f));
+            let mut env = NotifyEnv {
+                records: &mut records,
+                attributes: &mut attributes,
+                context: None,
+                key_of: &key_of,
+            };
+            let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
+                env: &mut env,
+                marks: &mut marks,
+                this_face: &this_face,
+            };
+            crate::topology::brep::p8::create_face_from_surface(
+                &mut k,
+                &mut b,
+                Some(crate::surface::surface::Surface::from(plane)),
+                &domain,
+                &mut fenv,
+            )
+            .unwrap()
+        };
+        let targets = [
+            key_of(EntityRef::Edgeuse(eu)),
+            key_of(EntityRef::Shell(shell)),
+            key_of(EntityRef::Face(face)),
+        ];
+        let survivor = key_of(EntityRef::Edge(e));
+        let shared = attributes
+            .insert(Attribute::long(81, 912, Behavior::Reference))
+            .unwrap();
+        attributes.add_attribute(survivor.key, shared).unwrap();
+        for t in targets {
+            attributes.add_attribute(t.key, shared).unwrap();
+        }
+        events.lock().unwrap().clear();
+        let mut env = NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key_of,
+        };
+        eu2::destroy(&mut k, &mut b, eu, &mut env).unwrap();
+        shell::destroy(&mut k, &mut b, shell, &mut env).unwrap();
+        face3::destroy(&mut k, &mut b, face, &mut env).unwrap();
+        assert!(b.edgeuse(eu).is_err() && b.shell(shell).is_err() && b.face(face).is_err());
+        assert_eq!(attributes.users(shared).unwrap(), vec![survivor.key]);
+        let destroyed: Vec<_> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|ev| ev.operation == NotifyOperation::Destruction)
+            .map(|ev| ev.caller)
+            .collect();
+        // (the user and the system callback, in that order, for each object)
+        let expected: Vec<_> = targets.iter().flat_map(|&t| [t, t]).collect();
+        assert_eq!(destroyed, expected);
+        assert!(!k.context.doing_boolean());
+    }
 
     #[test]
     fn stitch_of_an_empty_brep_stitches_nothing() {

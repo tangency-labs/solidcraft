@@ -793,6 +793,40 @@ pub fn check_and_set_uv_trim_curve(
 
 // ---- notification -------------------------------------------------------------------------
 
+/// `delete pEU`: `~SmEdgeuse` notifies `SM_NO_DESTRUCTION` (`Notify(op, this, NULL,
+/// NULL)` through the edge use's context, `GetContext()`: the environment's, else
+/// `k`'s), whose status it ignores ([`SolidError::Unported`] propagates); its UV trim
+/// and drop-failure curves are dropped with its record; `~SmAObject`
+/// (`ClearAttributes`) removes it from every attribute it uses.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; the notification's
+/// [`SolidError::Unported`]; those of `ClearAttributes`.
+pub fn destroy(
+    k: &mut Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    env: &mut crate::topology::edge::NotifyEnv<'_>,
+) -> Result<()> {
+    b.edgeuse(eu)?;
+    let this = (env.key_of)(crate::error::EntityRef::Edgeuse(eu));
+    crate::topology::edge::with_object_context(k, env, |n| {
+        crate::error::ignore_status(notify(
+            b,
+            eu,
+            &mut *n.records,
+            &mut *n.attributes,
+            n.context.as_deref_mut(),
+            NotifyOperation::Destruction,
+            this,
+            [Some(this), None, None],
+        ))
+    })?;
+    b.remove_edgeuse_record(eu)?;
+    env.attributes.clear_attributes(this.key)
+}
+
 /// `Notify`: a split (`SplitInBrep`, `Split`) or a geometry change (`ChangeGeometry`)
 /// deletes the UV trim curve and resets the cached edge/face gaps of the edge use and
 /// its mate; then the notification goes to [`topo::notify`] (`SmTopology::Notify`)

@@ -502,6 +502,40 @@ pub fn wire_edges(kernel: &mut Kernel, brep: &Brep, id: ShellId) -> Result<Vec<E
     Ok(output)
 }
 
+/// `delete pShell`: `~SmShell` notifies `SM_NO_DESTRUCTION` (`Notify(op, this, NULL,
+/// NULL)`, which `SmShell` passes to `SmTopology::Notify`, through the shell's context,
+/// `GetContext()`: the environment's, else `k`'s), whose status it ignores
+/// ([`SolidError::Unported`] propagates); `~SmAObject` (`ClearAttributes`) removes it
+/// from every attribute it uses.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; the notification's
+/// [`SolidError::Unported`]; those of `ClearAttributes`.
+pub fn destroy(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    id: ShellId,
+    env: &mut crate::topology::edge::NotifyEnv<'_>,
+) -> Result<()> {
+    brep.shell(id)?;
+    let this = (env.key_of)(crate::error::EntityRef::Shell(id));
+    crate::topology::edge::with_object_context(k, env, |n| {
+        crate::error::ignore_status(crate::topology::topology::notify(
+            &mut *n.records,
+            &mut *n.attributes,
+            n.context.as_deref_mut(),
+            crate::geom::object::NotifyOperation::Destruction,
+            this,
+            Some(this),
+            None,
+            None,
+        ))
+    })?;
+    brep.remove_shell_record(id)?;
+    env.attributes.clear_attributes(this.key)
+}
+
 /// `pRegion->Remove(pShell)` (`SmOwningTopology::Remove`, inline in
 /// `SmOwningTopology.h`): takes the shell off the region's list and clears its
 /// owner, leaving every other shell's relative order.

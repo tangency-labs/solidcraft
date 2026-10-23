@@ -450,7 +450,8 @@ fn faceuse_remove_loopuse(b: &mut Brep, fu: FaceuseId, lu: LoopuseId) -> Result<
 
 /// `m_pFaceListHead->Remove(pFace); delete pFace`: takes the face off the B-rep's face
 /// list, notifies its destruction (`~SmFace`: `SmFace::Notify`, unit
-/// `topology.face_p3`) and drops the surface it owns.
+/// `topology.face_p3`), drops the surface it owns and removes it from every attribute
+/// it uses (`~SmAObject`'s `ClearAttributes`).
 fn destroy_face(b: &mut Brep, env: &mut NotifyEnv<'_>, f: FaceId) -> Result<()> {
     b.remove_from_face_list(f);
     ignore_soft(face_notify(
@@ -460,6 +461,8 @@ fn destroy_face(b: &mut Brep, env: &mut NotifyEnv<'_>, f: FaceId) -> Result<()> 
         NotifyOperation::Destruction,
         [arg(EntityRef::Face(f)), None, None],
     ))?;
+    env.attributes
+        .clear_attributes((env.key_of)(EntityRef::Face(f)).key)?;
     let face = b.face_mut(f)?;
     face.faceuse = None;
     let owned = face
@@ -1982,6 +1985,7 @@ fn delete_face_in(
             return Err(ser()); // Should not happen
         }
         ignore_soft(shell::region_remove_shell(b, del_region, os))?;
+        shell::destroy(k, b, os, env)?;
         other_shell = None;
         for s in region_shells(b, del_region)? {
             ignore_soft(shell::region_remove_shell(b, del_region, s))?;
@@ -2083,6 +2087,10 @@ fn delete_face_in(
                     vertex_remove_vertexuse(b, v1, vu1)?;
                     let (vu2, v2) = eu_vertex(b, mate)?;
                     vertex_remove_vertexuse(b, v2, vu2)?;
+                    // delete pEU; delete pEUMate (the vertex uses' destructors notify
+                    // nothing)
+                    crate::topology::edgeuse::p2::destroy(k, b, eu, env)?;
+                    crate::topology::edgeuse::p2::destroy(k, b, mate, env)?;
                     if any_edgeuse == Some(eu) {
                         any_edgeuse = None;
                     }
@@ -2124,6 +2132,7 @@ fn delete_face_in(
         let res = delete_face_nesting(
             k,
             b,
+            env,
             marks,
             &mut lock,
             shell,
@@ -2164,6 +2173,7 @@ fn delete_face_in(
 fn delete_face_nesting(
     k: &mut Kernel,
     b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
     marks: &mut Marks,
     lock: &mut MarkLock,
     shell: ShellId,
@@ -2177,6 +2187,8 @@ fn delete_face_nesting(
     if any_edgeuse.is_none() && remaining(*vertex_count) == 0 {
         let r = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
         ignore_soft(shell::region_remove_shell(b, r, shell))?;
+        // delete pShell
+        shell::destroy(k, b, shell, env)?;
     } else {
         // See if shell is now a wire shell - if it is point it to an edgeuse
         if shell::shell_list_size(b, shell)? == 0 {
@@ -2309,7 +2321,7 @@ fn delete_face_nesting(
     let r = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
     ignore_soft(shell::transfer_children(k, b, last, shell, None))?;
     ignore_soft(shell::region_remove_shell(b, r, last))?;
-    Ok(())
+    shell::destroy(k, b, last, env)
 }
 
 /// `delete pFU` for each face use (the arena keeps the record): `SmTopology`'s destructor

@@ -1150,7 +1150,7 @@ pub fn glue_with_notifications(
             .region
             .ok_or_else(|| SolidError::null_pointer(OP))?;
         crate::error::ignore_status(remove_region_shell(b, region, shell))?;
-        destroy_topology_record(b, crate::error::EntityRef::Shell(shell))?;
+        destroy_shell(k, b, notifications.as_deref_mut(), shell)?;
         first = None;
         remove_vertexuse(b, survivor, vu)?;
         destroy_topology_record(b, crate::error::EntityRef::Vertexuse(vu))?;
@@ -1186,7 +1186,7 @@ pub fn glue_with_notifications(
             .region
             .ok_or_else(|| SolidError::null_pointer(OP))?;
         crate::error::ignore_status(remove_region_shell(b, region, last))?;
-        destroy_topology_record(b, crate::error::EntityRef::Shell(last))?;
+        destroy_shell(k, b, notifications, last)?;
     }
     Ok(())
 }
@@ -1283,16 +1283,28 @@ fn shell_vertexuse(b: &Brep, shell: ShellId) -> Result<Option<VertexuseId>> {
 fn remove_region_shell(b: &mut Brep, region: RegionId, shell: ShellId) -> Result<()> {
     crate::topology::shell::region_remove_shell(b, region, shell)
 }
+/// `delete pShell` after detachment from its region ([`crate::topology::shell::destroy`]:
+/// `~SmShell`'s `SM_NO_DESTRUCTION` and `~SmAObject`'s `ClearAttributes`) under the
+/// edit's notification environment.
+fn destroy_shell(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: Option<&mut EditNotifyEnv<'_>>,
+    shell: ShellId,
+) -> Result<()> {
+    let env = env.ok_or_else(|| SolidError::null_pointer(OP))?;
+    crate::topology::shell::destroy(k, b, shell, env)
+}
+
 /// A plain `delete` after detachment from the topology graph: the record leaves its
 /// arena (`topology.brep_p4`'s record removal, which keeps every other typed id
 /// valid). It does not call `DeleteVertex` (that would repeat the notifications and
-/// list removals) and deletes only the named record. The destructors'
-/// `SM_NO_DESTRUCTION` notifications are not modelled (as in
-/// [`crate::topology::brep::p4`]).
+/// list removals) and deletes only the named record. Vertex and vertex use
+/// destructors send no notification upstream; their `~SmAObject` attribute cleanup is
+/// not modelled.
 fn destroy_topology_record(b: &mut Brep, entity: crate::error::EntityRef) -> Result<()> {
     use crate::error::EntityRef as E;
     match entity {
-        E::Shell(id) => b.remove_shell_record(id).map(drop),
         E::Vertexuse(id) => b.remove_vertexuse_record(id).map(drop),
         E::Vertex(id) => b.remove_vertex_record(id).map(drop),
         _ => Err(SolidError::invalid_input(

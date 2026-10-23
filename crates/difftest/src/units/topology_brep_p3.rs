@@ -994,8 +994,9 @@ fn wrap_in_offsets(k: &Kernel, b: &mut Brep, faces: &[FaceId], d: f64) -> Result
     Ok(())
 }
 
-/// `SmEdge_TYPE`, the type code of an edge's identity.
-const EDGE_TYPE_CODE: i64 = 16016;
+/// The type codes of the identities whose destructions the recorders count:
+/// `SmEdge_TYPE`, `SmEdgeuse_TYPE`, `SmFace_TYPE`, `SmShell_TYPE`.
+const DESTROYED_KINDS: [i64; 4] = [16016, 16005, 16002, 16013];
 
 /// Whether `key` is a geometry identity (the kernel context's range,
 /// `Context::new_geometry_key`; every [`key_of`] key is below it).
@@ -1005,11 +1006,12 @@ const fn is_geometry_key(key: ObjectKey) -> bool {
 
 /// The shim's `GeomRecorder`: a user notify callback that keeps every geometry key a
 /// notification names (the shim's tells geometry from topology while it is live), and
-/// counts the `SM_NO_DESTRUCTION` notifications whose caller is an edge (`~SmEdge`).
+/// counts the `SM_NO_DESTRUCTION` notifications by caller kind: edge, edge use, face,
+/// shell (`~SmEdge`, `~SmEdgeuse`, `~SmFace`, `~SmShell`).
 #[derive(Debug, Default)]
 struct GeomRecorder(
     std::sync::Arc<std::sync::Mutex<Vec<ObjectKey>>>,
-    std::sync::Arc<std::sync::Mutex<u64>>,
+    std::sync::Arc<std::sync::Mutex<[u64; 4]>>,
 );
 
 impl solidcore::geom::context::NotifyCallback for GeomRecorder {
@@ -1021,13 +1023,16 @@ impl solidcore::geom::context::NotifyCallback for GeomRecorder {
         data2: Option<ObjectRef>,
         data3: Option<ObjectRef>,
     ) -> Result<(), SolidError> {
-        if operation == solidcore::geom::object::NotifyOperation::Destruction
-            && caller.type_code == EDGE_TYPE_CODE
-        {
-            *self
-                .1
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+        if operation == solidcore::geom::object::NotifyOperation::Destruction {
+            if let Some(i) = DESTROYED_KINDS.iter().position(|&t| t == caller.type_code) {
+                let mut destroyed = self
+                    .1
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(n) = destroyed.get_mut(i) {
+                    *n += 1;
+                }
+            }
         }
         let mut seen = self
             .0
@@ -1236,11 +1241,12 @@ fn run_rust_op(
     let tracker_at = out.len();
     put_tracker(&mut out, &lists, &mut t);
     if matches!(op, OpIn::DeleteFace { .. }) {
-        // the shim's trailer: the edges destroyed (`~SmEdge`'s SM_NO_DESTRUCTION)
+        // the shim's trailer: the edges, edge uses, faces and shells destroyed (their
+        // destructors' SM_NO_DESTRUCTION)
         let destroyed = *edges_destroyed
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        out.push(destroyed as f64);
+        out.extend(destroyed.iter().map(|&n| n as f64));
     }
     if matches!(op, OpIn::Orient { .. }) {
         // the shim's trailer: each pre-op face's SmFace::SwapUV POST_EDIT count, the

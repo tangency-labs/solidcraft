@@ -2427,6 +2427,27 @@ pub fn notify(
     )
 }
 
+/// Runs `body` with `env` bound to the object's context (`GetContext()`): the
+/// environment's context, else `k`'s, as a destructor's `Notify` reaches it.
+pub(crate) fn with_object_context<T>(
+    k: &mut Kernel,
+    env: &mut NotifyEnv<'_>,
+    body: impl FnOnce(&mut NotifyEnv<'_>) -> T,
+) -> T {
+    let key_of = env.key_of;
+    let context: &mut Context = match env.context.as_deref_mut() {
+        Some(context) => context,
+        None => &mut k.context,
+    };
+    let mut n = NotifyEnv {
+        records: &mut *env.records,
+        attributes: &mut *env.attributes,
+        context: Some(context),
+        key_of,
+    };
+    body(&mut n)
+}
+
 /// `delete pEdge`: `~SmEdge` sets the context's `DoingBoolean` (`GetContext()`: the
 /// environment's context, else `k`'s) for the duration of its
 /// `Notify(SM_NO_DESTRUCTION, this, NULL, NULL)`, whose status it ignores
@@ -2440,32 +2461,26 @@ pub fn notify(
 /// [`SolidError::Unported`] and of `ClearAttributes`.
 pub fn destroy(k: &mut Kernel, b: &mut Brep, e: EdgeId, env: &mut NotifyEnv<'_>) -> Result<()> {
     b.edge(e)?;
-    let key_of = env.key_of;
-    let this = key_of(EntityRef::Edge(e));
-    let context: &mut Context = match env.context.as_deref_mut() {
-        Some(context) => context,
-        None => &mut k.context,
-    };
-    let doing_boolean = context.doing_boolean();
-    // set its DoingBoolean state to TRUE - delays SurfaceCache construction
-    context.set_doing_boolean(true);
-    let mut n = NotifyEnv {
-        records: &mut *env.records,
-        attributes: &mut *env.attributes,
-        context: Some(context),
-        key_of,
-    };
-    let notified = crate::error::ignore_status(notify(
-        b,
-        e,
-        &mut n,
-        NotifyOperation::Destruction,
-        [Some(this), None, None],
-    ));
-    // restore the context DoingBoolean state
-    if let Some(context) = n.context.as_deref_mut() {
-        context.set_doing_boolean(doing_boolean);
-    }
+    let this = (env.key_of)(EntityRef::Edge(e));
+    let notified = with_object_context(k, env, |n| {
+        let doing_boolean = n.context.as_deref().is_some_and(Context::doing_boolean);
+        // set its DoingBoolean state to TRUE - delays SurfaceCache construction
+        if let Some(context) = n.context.as_deref_mut() {
+            context.set_doing_boolean(true);
+        }
+        let notified = crate::error::ignore_status(notify(
+            b,
+            e,
+            n,
+            NotifyOperation::Destruction,
+            [Some(this), None, None],
+        ));
+        // restore the context DoingBoolean state
+        if let Some(context) = n.context.as_deref_mut() {
+            context.set_doing_boolean(doing_boolean);
+        }
+        notified
+    });
     notified?;
     b.remove_edge_record(e)?;
     env.attributes.clear_attributes(this.key)

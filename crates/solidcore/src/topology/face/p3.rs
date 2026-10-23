@@ -363,6 +363,33 @@ pub fn set_tolerance(
     Ok(())
 }
 
+/// `delete pFace`: `~SmFace` notifies `SM_NO_DESTRUCTION` (`Notify(op, this, NULL,
+/// NULL)` through the face's context, `GetContext()`: the environment's, else `k`'s;
+/// no trim cache), whose status it ignores ([`SolidError::Unported`] propagates); the
+/// surface it owns is dropped with its record; `~SmAObject` (`ClearAttributes`)
+/// removes it from every attribute it uses.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; the notification's
+/// [`SolidError::Unported`]; those of `ClearAttributes`.
+pub fn destroy(k: &mut Kernel, b: &mut Brep, f: FaceId, env: &mut NotifyEnv<'_>) -> Result<()> {
+    b.face(f)?;
+    let this = (env.key_of)(EntityRef::Face(f));
+    edge::with_object_context(k, env, |n| {
+        ignore_status(notify(
+            b,
+            f,
+            n,
+            None,
+            NotifyOperation::Destruction,
+            [Some(this), None, None],
+        ))
+    })?;
+    b.remove_face_record(f)?;
+    env.attributes.clear_attributes(this.key)
+}
+
 /// `Notify`: `PreEdit` resets the rectangular-trim flag to `UNSURE` and marks the
 /// surface's trimmed surface cache (`trim_cache`) as modified; `PostEdit`,
 /// `SplitInBrep`, `ChangeGeometry` and `Split` are passed to every edge use and vertex
