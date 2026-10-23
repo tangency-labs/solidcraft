@@ -232,7 +232,7 @@ form_case!(boundary_fill, "solid.boundary_fill", ["Cells", "Operation"]);
 form_case!(align, "solid.align", ["From Snap", "To Snap"]);
 form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing"]);
-form_case!(pipe, "solid.pipe", ["Diameter", "Wall"]);
+form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
 form_case!(thread, "solid.thread", ["Profile", "Size", "Pitch", "Designation"]);
 form_case!(primitive_box, "solid.box", ["length", "width", "height", "Operation"]);

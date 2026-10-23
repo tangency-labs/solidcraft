@@ -126,10 +126,11 @@ crate::dialog_descriptor::dialog_descriptors! {
             margin: String = "2 mm".into() => margin.to_string(),
         } => json!({"margin": margin});
         Pipe("solid.pipe", "PIPE", [("Path", CURVES, true)],
-            FeatureKind::Pipe { diameter, wall, .. }) {
+            FeatureKind::Pipe { diameter, wall, operation, .. }) {
             diameter: String = "5 mm".into() => diameter.to_string(),
             wall: String = String::new() => wall.as_deref().map(str::to_string).unwrap_or_default(),
-        } => json!({"diameter": diameter});
+            operation: usize = 0 => op_index(operation),
+        } => json!({"diameter": diameter, "operation": OPS.get(*operation).copied().unwrap_or("new")});
         Emboss("solid.emboss", "EMBOSS", [("Profiles", PROFILES, true), ("Target Face (optional)", FACES, false)],
             FeatureKind::Emboss { depth, deboss, .. }) {
             depth: String = "1 mm".into() => depth.to_string(),
@@ -4767,13 +4768,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Pipe { path, operation, targets, .. } => {
+        FeatureKind::Pipe { path, targets, .. } => {
             let mut d = start("solid.pipe")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = path.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
             }
-            d.extra.insert("operation".into(), json!(OPS.get(op_index(operation)).copied().unwrap_or("new")));
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));
             }

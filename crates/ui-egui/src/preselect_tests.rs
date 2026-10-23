@@ -2272,3 +2272,37 @@ fn hovering_a_large_body_does_not_wait_for_its_pick_index() {
     assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })), "{:?}", h.app.viewport.hover);
     assert!(hover_ms < index_ms / 3.0, "the first hover took {hover_ms:.1} ms; making the index takes {index_ms:.1} ms");
 }
+
+/// #2820: the Pipe window has an Operation row, so a pipe can cut; editing a cutting pipe keeps
+/// its operation.
+#[test]
+fn a_pipe_cuts_from_its_window_and_keeps_the_cut_when_edited() {
+    let mut app = app_with(json!([
+        {"command": "solid.box", "params": {"corner": [-30, -30, -5], "length": 60, "width": 60, "height": 10}},
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Path"}},
+        {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 20, "id": "c"}},
+        {"command": "sketch.finish", "params": {}},
+    ]));
+    let mut d = start(&mut app, vec![Sel::SketchCurve { id: "c".into() }], "solid.pipe");
+    let Kind::Pipe { operation, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!(*operation, 0, "a pipe makes a new body unless told otherwise");
+    *operation = 2;
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["operation"], "cut", "{:?}", cmds[0].1);
+    let volume = |app: &SolveApp| {
+        let st = app.session.world_state();
+        assert_eq!(st.bodies.len(), 1, "one body: {:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+        solidcraft_engine::doc::kernel::measure(&st.bodies[0].body).unwrap().volume
+    };
+    let before = volume(&app);
+    for (cmd, p) in cmds {
+        app.run(&cmd, p).unwrap();
+    }
+    assert!(volume(&app) < before - 1.0, "the pipe cut a groove into the box");
+    let pipe = app.session.doc.features.last().unwrap().id;
+    let d = crate::dialogs::for_feature(&app, pipe, None).unwrap();
+    assert!(matches!(d.kind, Kind::Pipe { operation: 2, .. }), "{:?}", d.kind);
+    let (edit, p) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(edit, "timeline.redefine");
+    assert_eq!(p["params"]["operation"], "cut", "{p}");
+}

@@ -704,9 +704,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 enter |= expr_row(ui, l, v);
             }
         }
-        Kind::Pipe { diameter, wall } => {
+        Kind::Pipe { diameter, wall, operation } => {
             enter |= expr_row(ui, "Diameter", diameter);
             enter |= hint_row(ui, "Wall", wall, tr("solid"));
+            choice_row(ui, "Operation", "pp_op", operation, &OP_LABELS);
         }
         Kind::Stock { margin } => {
             enter |= expr_row(ui, "Margin", margin);
