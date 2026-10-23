@@ -1828,6 +1828,7 @@ fn c_collinear(s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.midpoint";
+    let p = &line_stays(s, p, cmd);
     constrain(s, p, cmd, |sk| {
         if p.get("a").is_none() && p.get("b").is_none() {
             return Ok(ConstraintKind::Midpoint { p: point_ref(sk, p.get("point"), cmd, "point")?, l: curve_ref(sk, p.get("line"), cmd, "line")? });
@@ -1862,6 +1863,26 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
             _ => Err(bad(cmd, "MidPoint needs a point and a line, or two lines")),
         }
     })
+}
+
+/// A point and a line picked for MidPoint, the point first: the line first instead, so the point
+/// goes to the line's middle and the line stays (the first pick stays, see `apply_in_order`).
+/// Picked the other way, the line turned about its far end to bring its middle to the point (an
+/// end of another line clicked, then the line it should sit in the middle of). The line still
+/// moves when the point can't.
+fn line_stays(s: &Session, p: &Value, cmd: &str) -> Value {
+    let swapped = (|| {
+        let sk = s.doc.sketch(target_sketch(s, p, cmd).ok()?).ok()?;
+        let (a, b) = (p.get("a")?.as_str()?, p.get("b")?.as_str()?);
+        let line = sk.curve_index(b).filter(|c| matches!(sk.curves.get(*c).map(|c| &c.kind), Some(CurveKind::Line { .. })));
+        (sk.curve_index(a).is_none() && sk.resolve_point(a).is_some() && line.is_some()).then(|| {
+            let mut q = p.clone();
+            q["a"] = json!(b);
+            q["b"] = json!(a);
+            q
+        })
+    })();
+    swapped.unwrap_or_else(|| p.clone())
 }
 
 /// Point `q` is already tied to the middle of line `l`.

@@ -888,3 +888,28 @@ fn undoing_a_defining_dimension_removes_the_parameter_too() {
     assert_eq!(param_row(&mut s, "w")["expression"], "20");
     assert!((line_length(&s, "la") - 20.0).abs() < 1e-6);
 }
+
+/// MidPoint on a point and a line, picked either way round: the point goes to the line's
+/// middle and the line stays. Picked point first, the line used to turn about its far end to
+/// bring its middle to the point (the end of another line clicked, then the line).
+#[test]
+fn midpoint_moves_the_point_whichever_is_picked_first() {
+    for (a, b) in [("l2.start", "l1"), ("l1", "l2.start")] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points":[[0,0],[20,0]],"infer":false,"connect":false}));
+        run(&mut s, "sketch.line", json!({"points":[[5,5],[15,15]],"infer":false,"connect":false}));
+        let stays = line_ends(&sketch(&s), "l1");
+        run(&mut s, "sketch.constraint.midpoint", json!({"a": a, "b": b}));
+        let sk = sketch(&s);
+        assert_eq!(line_ends(&sk, "l1"), stays, "{a}, {b}: the line stays");
+        let (start, _) = line_ends(&sk, "l2");
+        assert!(start.dist(Vec2::new(10.0, 0.0)) < 1e-6, "{a}, {b}: the point is at the middle: {start:?}");
+    }
+    // A point that can't move: the line comes to it instead.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[20,0]],"infer":false,"connect":false}));
+    run(&mut s, "sketch.point", json!({"point":[5,5],"id":"p"}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["p"],"fixed":true}));
+    run(&mut s, "sketch.constraint.midpoint", json!({"a":"p","b":"l1"}));
+    assert!(line_midpoint(&sketch(&s), "l1").dist(Vec2::new(5.0, 5.0)) < 1e-6);
+}
