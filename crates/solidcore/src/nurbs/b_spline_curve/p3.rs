@@ -1828,6 +1828,113 @@ mod tests {
         ));
     }
 
+    // C(t) = (width * (t - 1/2), (t - 1/2)^2, 0), with minimum
+    // curvature radius width^2 / 2 at t = 1/2 and nonzero speed width.
+    fn curvature_test_parabola(dim: u64, width: f64) -> BSplineCurve {
+        let mut c = curve(
+            2,
+            &[
+                [-width / 2.0, 0.25, 0.0],
+                [0.0, -0.25, 0.0],
+                [width / 2.0, 0.25, 0.0],
+            ],
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        );
+        c.dim = dim;
+        c
+    }
+
+    #[test]
+    fn assert_valid_reports_tiny_curvature_radius_in_2d_and_3d() {
+        let mut k = Kernel::default();
+        k.fixes.bspline_check_min_radius = true;
+        let width = 0.001;
+        for (dim, test_index) in [(2, 13), (3, 14)] {
+            let c = curvature_test_parabola(dim, width);
+            for level_given in [true, false] {
+                let mut default_list = AssertArray::new();
+                assert!(c
+                    .assert_valid(
+                        &Kernel::default(),
+                        Some(&mut default_list),
+                        level_given,
+                        ObjectKey(42)
+                    )
+                    .unwrap());
+                assert!(default_list.is_empty(), "{default_list:?}");
+                let mut list = AssertArray::new();
+                assert!(!c
+                    .assert_valid(&k, Some(&mut list), level_given, ObjectKey(42))
+                    .unwrap());
+                let reports: Vec<_> = list
+                    .reports()
+                    .iter()
+                    .filter(|r| r.test_index == test_index)
+                    .collect();
+                assert_eq!(reports.len(), 1);
+                let report = reports[0];
+                let radius = width * width / 2.0;
+                assert!((report.value - radius).abs() <= 1e-9 * radius, "{report:?}");
+                assert!((report.owner_param.x - 0.5).abs() <= 1e-9, "{report:?}");
+                assert!(report.value < report.tol3d);
+                assert_eq!(report.owner_param.y, 0.0);
+                // This curve is regular: only the curvature check should fail.
+                assert_eq!(list.len(), 1, "{list:?}");
+            }
+            assert!(!c.assert_valid(&k, None, true, ObjectKey(42)).unwrap());
+        }
+    }
+
+    #[test]
+    fn assert_valid_accepts_regular_curvature_and_linear_empty_analysis() {
+        let mut k = Kernel::default();
+        k.fixes.bspline_check_min_radius = true;
+        for dim in [2, 3] {
+            let c = curvature_test_parabola(dim, 0.02);
+            let mut list = AssertArray::new();
+            assert!(c
+                .assert_valid(&k, Some(&mut list), true, ObjectKey(1))
+                .unwrap());
+            assert!(list.is_empty());
+            let mut line = curve(
+                1,
+                &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                &[0.0, 0.0, 1.0, 1.0],
+            );
+            line.dim = dim;
+            assert!(line
+                .assert_valid(&k, Some(&mut list), true, ObjectKey(1))
+                .unwrap());
+            assert!(list.is_empty());
+        }
+    }
+
+    #[test]
+    fn assert_valid_accepts_straight_span_joined_to_regular_bend() {
+        let mut k = Kernel::default();
+        k.fixes.bspline_check_min_radius = true;
+        // A straight quadratic span followed by a C1 quadratic bend. The radius
+        // is infinite on the straight span and at least 1/2 on the bend.
+        let c = curve(
+            2,
+            &[
+                [0.0, 0.0, 0.0],
+                [0.5, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.5, 0.0, 0.0],
+                [2.0, 1.0, 0.0],
+            ],
+            &[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+        );
+        let mut list = AssertArray::new();
+        assert!(
+            c.assert_valid(&k, Some(&mut list), true, ObjectKey(1))
+                .unwrap(),
+            "{list:?}"
+        );
+        assert!(list.is_empty());
+    }
+
     #[test]
     fn assert_valid_reports_bad_knots() {
         let k = Kernel::default();
