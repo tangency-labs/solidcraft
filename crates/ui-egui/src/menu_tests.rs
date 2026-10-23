@@ -151,6 +151,33 @@ fn face_menu_hides_and_finds_the_body() {
     assert_eq!(app.session.visibility.hidden_bodies, vec![b]);
 }
 
+/// #4936: a face of an inserted STEP body finds its body in the browser, as its edges do,
+/// though the feature that made the face can't be traced.
+#[test]
+fn face_menu_finds_an_inserted_step_body_in_the_browser() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-menu-step-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("block.step").to_string_lossy().to_string();
+    // An assembly: the inserted STEP brings its part in as a component, as in the report.
+    let mut src = Session::default();
+    src.execute("component.create", &json!({"name": "Bracket"})).unwrap();
+    src.execute("solid.box", &json!({"length": 30, "width": 30, "height": 10, "body_name": "Block"})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("file.insert_step", json!({"path": path})).unwrap();
+    let b = body(&app);
+    app.run("select.set", json!({"items": [{"type": "face", "body": b, "index": 0, "point": [15, 15, 10]}]})).unwrap();
+    let items = context_menu::items(&app, &Target::Viewport);
+    // The face's own feature can't be traced (what greyed Find in Browser out) ...
+    assert!(!find(&items, "Find in Timeline").enabled, "precondition: the face's feature is unknown");
+    // ... but its body is, as on an edge.
+    assert!(find(&items, "Find in Browser").enabled, "a face of an inserted body");
+    context_menu::run_item(&mut app, &find(&items, "Find in Browser"), pos2(0.0, 0.0));
+    assert_eq!(app.tree.reveal.as_deref(), Some(b.as_str()), "the browser opens on the body");
+    assert!(app.ui.show_browser);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn body_menu_isolates_renames_locks_and_deletes() {
     let mut app = sample_app();
@@ -933,7 +960,10 @@ fn contribution_unresolvable_face_does_not_edit_the_body_creator() {
     let items = context_menu::items(&app, &Target::Viewport);
     assert!(!find(&items, "Edit Feature").enabled);
     assert!(!find(&items, "Find in Timeline").enabled);
-    assert!(!find(&items, "Find in Browser").enabled);
+    // The body is still known, so the browser can find it (#4936); no feature is passed.
+    let browser = find(&items, "Find in Browser");
+    assert!(browser.enabled);
+    assert_eq!(browser.params.as_ref().unwrap()["feature"], json!(null));
 }
 
 #[test]

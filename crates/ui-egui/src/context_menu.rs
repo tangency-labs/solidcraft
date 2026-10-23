@@ -516,7 +516,10 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.delete", "Delete", "delete").key("Del"));
         v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [face] })));
         v.push(Item::sep());
-        v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": face, "feature": feature })).on(feature.is_some()));
+        // The face's body is enough to find it in the browser, as on an edge, also when the
+        // feature that made the face can't be traced (an inserted STEP's faces, #4936).
+        let known = app.session.world_state().body(&face).is_some();
+        v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": face, "feature": feature })).on(feature.is_some() || known));
         v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": feature })).on(feature.is_some()));
         v.push(Item::sep());
         v.push(cmd(app, "solid.press_pull", "Press Pull"));
