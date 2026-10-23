@@ -226,7 +226,9 @@ fn start_uv(s: &Solution<NoObject>) -> Point2 {
 }
 
 /// `GlobalPointSolve(domain, op, point, tol, pdMaxDropDist, requested, sols)`: the
-/// start parameters of the solutions in order.
+/// start parameters of the solutions in order. `DoTrace` runs with the surface
+/// cache's point testing off (`SmSurfaceDropCurve.cpp:1629`), so the solve must not
+/// build (or classify against) a face-owned surface's trimmed cache.
 #[allow(clippy::too_many_arguments)] // upstream's argument list
 fn surface_global_point_solve(
     k: &Kernel,
@@ -238,7 +240,7 @@ fn surface_global_point_solve(
     max_drop_dist: Option<f64>,
     requested: SolutionRequested,
 ) -> Result<Vec<Point2>> {
-    let sols = surface.global_point_solve::<NoObject>(
+    let sols = surface.global_point_solve_point_test_off::<NoObject>(
         k,
         Some(NoObject),
         uv_domain,
@@ -1628,7 +1630,7 @@ impl<'s> SurfaceDropCurve<'s> {
         let active = self.base.start_points.clone();
         for tsp in active {
             self.base.curve_trace_direction = 1.0;
-            self.trace_curve_2(k, tsp, &mut out)?;
+            self.trace_curve_2_in(k, tsp, &mut out, Some(cache))?;
         }
 
         // trace dropCurve segments that don't start on a BreakPoint
@@ -1652,6 +1654,19 @@ impl<'s> SurfaceDropCurve<'s> {
         start: TracePointId,
         out: &mut TraceOutput,
     ) -> Result<()> {
+        self.trace_curve_2_in::<crate::surface::surface::p4::NoObject>(k, start, out, None)
+    }
+
+    /// [`SurfaceDropCurve::trace_curve_2`] with the cache `DoTrace` checked out
+    /// (`TraceCurve2` reads `GetDomainWithContinuity` through
+    /// `smsurf_GetSurfaceCache`, the same cache the drop holds); `None` builds one.
+    fn trace_curve_2_in<O: Copy + PartialEq>(
+        &mut self,
+        k: &Kernel,
+        start: TracePointId,
+        out: &mut TraceOutput,
+        cache: Option<&SurfaceCache<O>>,
+    ) -> Result<()> {
         self.base.curve_points.push(start);
         let breaks = self
             .curve_breaks
@@ -1670,12 +1685,20 @@ impl<'s> SurfaceDropCurve<'s> {
             }
 
             // let WorkingDomain = Surface G1 continuous SubDomain that contains the StartPoint
-            self.working_uv_domain = surface.domain_with_continuity(
-                k,
-                ContinuityType::G1,
-                start_pnt.curve_uv[0],
-                start_pnt.curve_uv[1],
-            )?;
+            self.working_uv_domain = match cache {
+                Some(cache) => surface.domain_with_continuity_from_cache(
+                    ContinuityType::G1,
+                    start_pnt.curve_uv[0],
+                    start_pnt.curve_uv[1],
+                    cache,
+                )?,
+                None => surface.domain_with_continuity(
+                    k,
+                    ContinuityType::G1,
+                    start_pnt.curve_uv[0],
+                    start_pnt.curve_uv[1],
+                )?,
+            };
 
             // exit case - working domain does not overlap the domain of interest
             if self

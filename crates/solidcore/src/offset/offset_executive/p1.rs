@@ -1327,9 +1327,10 @@ impl OffsetExecutive {
                 let original_face = original.face(face_id)?;
                 let uv_domain = original_face.uv_domain;
                 let original_surface = required(original_face.surface.as_ref())?;
-                // Upstream disables the surface cache's point test here; the solver
-                // defers for face-owned surfaces until that switch exists.
-                let solutions = original_surface.global_point_solve(
+                // Upstream turns the surface cache's point test off here so the solve
+                // keeps all solutions without classifying them against the trim
+                // boundaries (`SmOffsetExecutive.cpp:3730-3734`).
+                let solutions = original_surface.global_point_solve_point_test_off(
                     kernel,
                     Some(NoObject),
                     &uv_domain,

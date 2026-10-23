@@ -33,7 +33,7 @@
 //! | [`Surface::create_silhouette_curves`]             | `CreateSilhouetteCurves`                         |
 //! | [`Surface::evaluate_1st_derivatives`], [`Surface::evaluate_2nd_derivatives`] | `Evaluate1stDerivatives`, `Evaluate2ndDerivatives` |
 //! | [`Surface::evaluate_step`], [`Surface::evaluate_step_point`], [`Surface::evaluate_simple`] | `EvaluateSTEP`, `EvaluateSTEPPoint`, `EvaluateSimple` |
-//! | [`Surface::domain_with_continuity`]               | `GetDomainWithContinuity`                        |
+//! | [`Surface::domain_with_continuity`], [`Surface::domain_with_continuity_from_cache`] | `GetDomainWithContinuity`                        |
 //! | [`Surface::convert_domain_from_step_to_nurbs`], [`Surface::convert_domain_from_nurbs_to_step`] | `ConvertDomainFromSTEPToNURBS`, `ConvertDomainFromNURBSToSTEP` |
 //! | [`Surface::is_periodic`]                          | `IsPeriodic`                                     |
 //! | [`Surface::is_degenerate_point`], [`base_is_degenerate_point`] | `IsDegeneratePoint`                 |
@@ -1609,7 +1609,37 @@ impl Surface {
             Some(context) => context.build_surface_cache(k, self, handle),
             None => get_surface_cache::<O>(k, self, None),
         }?;
+        self.domain_with_continuity_using(min_continuity, uv, uv_vector, &cache)
+    }
 
+    /// [`Surface::domain_with_continuity`] over a caller-held surface cache
+    /// (`DomainWithContinuity`): upstream's `smsurf_GetSurfaceCache(this)` returns
+    /// the one cache of the surface, including the trimmed cache of a face-owned
+    /// surface. The continuity arrays come from that cache's tree build.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an unknown knot position.
+    pub fn domain_with_continuity_from_cache<O: Copy + PartialEq>(
+        &self,
+        min_continuity: ContinuityType,
+        uv: Point2,
+        uv_vector: Vec2,
+        cache: &SurfaceCache<O>,
+    ) -> Result<Extent2d> {
+        if let SurfaceKind::Step(s) = self.kind() {
+            return s.domain_with_continuity();
+        }
+        self.domain_with_continuity_using(min_continuity, uv, uv_vector, cache)
+    }
+
+    fn domain_with_continuity_using<O: Copy + PartialEq>(
+        &self,
+        min_continuity: ContinuityType,
+        uv: Point2,
+        uv_vector: Vec2,
+        cache: &SurfaceCache<O>,
+    ) -> Result<Extent2d> {
         // Start out with natural domain and then shrink it if needed
         let ret_domain = self.natural_uv_domain();
         let mut min = ret_domain.min();
@@ -3853,6 +3883,24 @@ mod tests {
         assert_eq!(s.evaluate_step_point(k, uv).unwrap(), p);
         let step = s.evaluate_step(k, uv, 1, 1, upper_flags(false)).unwrap();
         assert_eq!(at(&step, 1, 0), du);
+    }
+
+    /// The caller-held cache overload of `GetDomainWithContinuity` returns the same
+    /// domain as the one that builds the cache itself.
+    #[test]
+    fn domain_with_continuity_from_cache_matches_direct() {
+        let k = &Kernel::default();
+        let s = bilinear();
+        let uv = Point2::new(0.5, 0.5);
+        let dir = Vec2::new(1.0, 0.0);
+        let cache =
+            get_surface_cache::<crate::surface::surface::p4::NoObject>(k, &s, None).unwrap();
+        assert_eq!(
+            s.domain_with_continuity(k, ContinuityType::G1, uv, dir)
+                .unwrap(),
+            s.domain_with_continuity_from_cache(ContinuityType::G1, uv, dir, &cache)
+                .unwrap()
+        );
     }
 
     fn same_points(a: &Surface, b: &Surface) {

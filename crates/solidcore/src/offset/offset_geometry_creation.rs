@@ -756,10 +756,14 @@ fn surface_global_curve_intersect<O: ClassObject + SolutionObject>(
 ) -> Result<SolutionArray<O>> {
     let c = curve_of(geometry, curve)?.clone_for_evaluation()?;
     let s = surface_of(geometry, surface)?.clone_for_evaluation()?;
+    // `GlobalCurveIntersect` reaches the surface's cache through
+    // `smsurf_GetSurfaceCache`; prepare the face-bound cache once and hand it to the
+    // coincidence/drop path as well as the numerical solves.
+    let mut cache = geometry.prepare_surface_solve_cache(k, &s, Some(surface))?;
     s.global_curve_intersect_with_context(
         k,
         [Some(curve), Some(surface)],
-        None,
+        Some(&mut cache),
         &mut OffsetSurfaceSolveContext(geometry),
         domain,
         &c,

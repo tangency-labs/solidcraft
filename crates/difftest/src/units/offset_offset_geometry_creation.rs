@@ -778,6 +778,35 @@ impl Two {
         }
     }
 
+    /// Finds the imported face whose surface reaches `owner`. An offset copy keeps
+    /// its base face's owner key, but its handle is not a face-surface handle; the
+    /// imported face records still carry that key.
+    fn face_handle_for_owner(&self, owner: ObjectRef) -> solidcore::Result<Option<H>> {
+        let mut found = None;
+        for (b, brep) in self.breps.iter().enumerate() {
+            let Some(brep) = brep else {
+                continue;
+            };
+            for f in brep.faces().ids() {
+                let Some(surface) = brep.face(f)?.surface.as_ref() else {
+                    continue;
+                };
+                if surface.face()? != Some(owner) {
+                    continue;
+                }
+                if found.is_some() {
+                    return Err(invalid("surface owner names faces in both B-reps"));
+                }
+                found = Some(hd(
+                    i8::try_from(b).map_err(|_| invalid("B-rep index"))?,
+                    K_FACE,
+                    f.index(),
+                ));
+            }
+        }
+        Ok(found)
+    }
+
     fn brep(&self, h: H) -> Option<&Brep> {
         self.breps.get(usize::try_from(h.b).ok()?)?.as_ref()
     }
@@ -1103,9 +1132,18 @@ impl OffsetBrep<H> for Two {
             return get_surface_cache(k, surface, handle);
         };
         // The surface handle selects its arena. ObjectRef keys alone deliberately
-        // cannot distinguish equal face indices of these independent B-reps.
-        let Some(h) = handle.filter(|h| h.kind == K_FACE_SURFACE && (h.b == 0 || h.b == 1)) else {
-            return get_surface_cache(k, surface, handle);
+        // cannot distinguish equal face indices of these independent B-reps. An
+        // offset copy keeps its base face's owner key but is not a face-surface
+        // handle; resolve that key against the imported face records instead of
+        // deferring the whole solve.
+        let h = if let Some(h) = handle.filter(|h| h.kind == K_FACE_SURFACE && (h.b == 0 || h.b == 1))
+        {
+            h
+        } else {
+            let Some(h) = self.face_handle_for_owner(owner)? else {
+                return get_surface_cache(k, surface, handle);
+            };
+            h
         };
         let b = self.brep_m(h)?;
         // The typed surface handle already names its face; the imported owner
