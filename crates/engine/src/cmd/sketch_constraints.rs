@@ -126,8 +126,8 @@ fn try_add(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, k: ConstraintKin
     let saved = sk.clone();
     let param = if dim {
         let v = k.value()?;
-        let e = if k.is_angle() { format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6) } else { format!("{} mm", (v * 1e6).round() / 1e6) };
-        Some(doc.new_model_param(&e, if k.is_angle() { "deg" } else { "mm" }))
+        let (unit, e) = if k.is_angle() { ("deg".into(), format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6)) } else { doc.design_length(v) };
+        Some(doc.new_model_param(&e, &unit))
     } else {
         None
     };
@@ -383,13 +383,10 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
             slot.driven = true;
             slot.param = None;
         } else {
-            let (unit, e) = if c.kind.is_angle() {
-                ("deg", format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6))
-            } else {
-                ("mm", format!("{} mm", (v * 1e6).round() / 1e6))
-            };
+            let (unit, e) =
+                if c.kind.is_angle() { ("deg".into(), format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6)) } else { doc.design_length(v) };
             slot.driven = false;
-            slot.param = Some(doc.new_model_param(&e, unit));
+            slot.param = Some(doc.new_model_param(&e, &unit));
             before = None;
         }
         Ok(driven)

@@ -2271,8 +2271,8 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
             before = None;
             return Ok((String::new(), name, measured(is_angle, cur)));
         }
-        let (unit, default_expr) =
-            if is_angle { ("deg", format!("{} deg", round6(cur.to_degrees()))) } else { ("mm", format!("{} mm", round6(cur))) };
+        // With no value, the dimension restates what it measures, in the design's units (#3812).
+        let (unit, default_expr) = if is_angle { ("deg".into(), format!("{} deg", round6(cur.to_degrees()))) } else { doc.design_length(cur) };
         let kind = if is_angle { Kind::Angle } else { Kind::Length };
         if let Some((name, rhs)) = &defines {
             // The new user parameter reads a bare number as the dimension would (the design's
@@ -2288,7 +2288,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
             doc.add_user_param(name, &rhs, Some(&unit), None).map_err(|e| bad(cmd, format!("value: {e}")))?;
         }
         let e = value.as_ref().map(|e| doc.with_design_unit(e, kind)).unwrap_or(default_expr);
-        let pname = doc.new_model_param(&e, unit);
+        let pname = doc.new_model_param(&e, &unit);
         // The value must evaluate.
         let (vals, errs) = doc.param_values();
         if let Some(err) = errs.get(&pname) {
