@@ -24,8 +24,6 @@ use crate::geom::{Axis1, Curve, P3, Placement, Surface};
 
 /// Margin around a face's parameters on a profile, as a fraction of their span.
 const MARGIN: f64 = 0.1;
-/// Most sweep of one rational quadratic conic piece.
-const CONIC_PIECE: f64 = FRAC_PI_2;
 /// Most parameter step of one rational quadratic hyperbola piece (its weight `cosh(step / 2)`
 /// stays near 1).
 const HYPERBOLA_STEP: f64 = 1.0;
@@ -43,31 +41,6 @@ pub(super) struct Extent {
 
 fn p3(v: Vec3) -> P3 {
     [v.x, v.y, v.z]
-}
-
-/// The ellipse of `radii` in `p` from angle `t0` over `sweep` > 0 as rational quadratic pieces
-/// whose knots are the pieces' end angles.
-pub(super) fn conic_spline(p: &Placement, radii: [f64; 2], t0: f64, sweep: f64) -> BCurve {
-    let n = ((sweep / CONIC_PIECE).ceil() as usize).clamp(1, 8);
-    let dt = sweep / n as f64;
-    let w = (0.5 * dt).cos();
-    let at = |c: f64, s: f64| p.at(radii[0] * c, radii[1] * s, 0.0);
-    let mut knots = vec![t0; 3];
-    let first = at(t0.cos(), t0.sin());
-    let mut homogeneous = vec![[first[0], first[1], first[2], 1.0]];
-    for i in 0..n {
-        let ta = t0 + dt * i as f64;
-        let (tm, tb) = (ta + 0.5 * dt, ta + dt);
-        // The meeting point of the end tangents, weighted cos of the half sweep.
-        let m = at(tm.cos() / w, tm.sin() / w);
-        homogeneous.push([m[0] * w, m[1] * w, m[2] * w, w]);
-        let b = at(tb.cos(), tb.sin());
-        homogeneous.push([b[0], b[1], b[2], 1.0]);
-        let k = if i + 1 == n { t0 + sweep } else { tb };
-        knots.extend([k, k]);
-    }
-    knots.push(t0 + sweep);
-    BCurve::RationalSpline { knots, homogeneous }
 }
 
 /// The hyperbola branch `a cosh t X + b sinh t Y` from `t0` to `t1` (t0 < t1) as rational
@@ -212,6 +185,11 @@ fn span(ts: &[f64], seam: &[f64], closed: bool) -> R<Span> {
     Ok(Span::Open { inner: (lo, hi), outer: (lo - m, hi + m) })
 }
 
+/// A conic's NURBS form over `[lo, hi]` in angle.
+fn form(c: BCurve, lo: f64, hi: f64) -> R<BCurve> {
+    Ok(solidcraft_geom::brep::form::curve(&c, [lo, hi]).ok_or_else(|| unsupported("a conic profile of more than one turn"))?.0)
+}
+
 /// The profile over its span as an exact spline (B-spline and polyline profiles whole).
 fn bounded(c: &Curve, s: Span) -> R<BCurve> {
     let (lo, hi) = match s {
@@ -223,8 +201,12 @@ fn bounded(c: &Curve, s: Span) -> R<BCurve> {
     }
     Ok(match c {
         Curve::Line { origin, direction, magnitude } => line_spline(*origin, *direction, *magnitude, lo, hi),
-        Curve::Circle { position, radius } => conic_spline(position, [*radius; 2], lo, hi - lo),
-        Curve::Ellipse { position, semi_axis_1, semi_axis_2 } => conic_spline(position, [*semi_axis_1, *semi_axis_2], lo, hi - lo),
+        // A circle or ellipse as its NURBS form (`form::curve`), the one its edges carry: the swept
+        // surface's parameter along the profile is then theirs, and their pcurves are straight.
+        Curve::Circle { position, radius } => form(BCurve::Circle { frame: super::frame(position), radius: *radius }, lo, hi)?,
+        Curve::Ellipse { position, semi_axis_1, semi_axis_2 } => {
+            form(BCurve::Ellipse { frame: super::frame(position), radii: [*semi_axis_1, *semi_axis_2] }, lo, hi)?
+        }
         Curve::Hyperbola { position, semi_axis, semi_imag_axis } => {
             if hi - lo > HYPERBOLA_STEP * MAX_PIECES as f64 {
                 return Err(unsupported("a hyperbola profile that long"));
