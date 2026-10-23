@@ -73,8 +73,18 @@ pub fn expr(p: &Value, k: &str) -> Option<Expr> {
     }
 }
 
+/// Why `v` isn't an expression parameter, for the message: a number out of range or a text too
+/// long says so, rather than that it isn't a number or an expression at all.
+pub fn expr_problem(v: Option<&Value>) -> &'static str {
+    match v {
+        Some(Value::Number(n)) if n.as_f64().is_some_and(f64::is_finite) => "must be a number between -1e9 and 1e9",
+        Some(Value::String(s)) if s.len() > 4096 => "must be an expression of at most 4096 characters",
+        _ => "must be a number or an expression",
+    }
+}
+
 pub fn req_expr(cmd: &str, p: &Value, k: &str) -> Result<Expr> {
-    expr(p, k).ok_or_else(|| bad(cmd, format!("`{k}` must be a number or an expression")))
+    expr(p, k).ok_or_else(|| bad(cmd, format!("`{k}` {}", expr_problem(p.get(k)))))
 }
 
 pub fn string_list(p: &Value, k: &str) -> Vec<String> {

@@ -10,7 +10,7 @@ use solidcraft_doc::{Dir, FacePick, Position};
 use solidcraft_geom::Vec3;
 
 use super::{CommandSpec, not_in_sketch};
-use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec2, vec3};
+use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec2, vec3};
 use crate::schema::features::{BoxParams, ExtrudeParams, FeatureResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -2070,7 +2070,7 @@ fn hole_reference_params(s: &Session, p: &Value, cmd: &str) -> Result<Vec<solidc
             .get("edge")
             .and_then(vec3)
             .ok_or_else(|| bad(cmd, format!("`references[{i}].edge` must be a point [x, y, z] on a straight edge of the face")))?;
-        let distance = expr(r, "distance").ok_or_else(|| bad(cmd, format!("`references[{i}].distance` must be a number or an expression")))?;
+        let distance = expr(r, "distance").ok_or_else(|| bad(cmd, format!("`references[{i}].distance` {}", expr_problem(r.get("distance")))))?;
         check_expr(s, &distance, Kind::Length, cmd, "references")?;
         out.push(solidcraft_doc::HoleReference { edge: Position(edge), distance });
     }
@@ -2239,7 +2239,7 @@ pub(super) fn sweep_options(s: &Session, p: &Value, cmd: &str) -> Result<(SweepO
     let scale = match p.get("scale") {
         None | Some(Value::Null) => None,
         Some(_) => {
-            let k = expr(p, "scale").ok_or_else(|| bad(cmd, "`scale` must be a number or an expression"))?;
+            let k = req_expr(cmd, p, "scale")?;
             let v = s.doc.eval(&k, Kind::Unitless).map_err(|e| bad(cmd, format!("scale: {e}")))?;
             let range = solidcraft_kernel::SweepControl::MIN_SCALE..=solidcraft_kernel::SweepControl::MAX_SCALE;
             if !(v.is_finite() && range.contains(&v)) {
