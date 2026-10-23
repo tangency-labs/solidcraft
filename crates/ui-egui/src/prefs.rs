@@ -700,6 +700,10 @@ pub struct PrefsWindow {
     font_filter: String,
     /// Search text on the Plugins page.
     pub(crate) plugin_query: String,
+    /// The GitHub link typed on the Plugins page.
+    pub(crate) plugin_url: String,
+    /// A GitHub install running in the background. The page polls it.
+    pub(crate) plugin_job: Option<std::sync::mpsc::Receiver<Result<crate::plugins::Installed, String>>>,
 }
 
 /// Open the dialog at a page.
