@@ -402,12 +402,17 @@ if kind_s == "sprocket" {
     }
 }
 
+// Sketches the macro draws for the solid to consume: hidden at the end so the browser
+// and viewport show the gear, not its scaffolding.
+let hidden = [];
 if internal {
     run("sketch.create", #{ plane: "XY", name: "Rim" });
+    hidden.push("Rim");
     run("sketch.circle.center", #{ center: [0.0, 0.0], radius: rim_n / 2.0 });
     run("sketch.finish");
     run("solid.extrude", #{ sketch: "Rim", distance: t, name: "Gear" });
     run("sketch.create", #{ plane: "XY", name: "ToothCut" });
+    hidden.push("ToothCut");
     draw_curves(curves);
     run("sketch.finish");
     run("solid.extrude", #{ sketch: "ToothCut", distance: t, operation: "cut", name: "ToothCut" });
@@ -418,15 +423,20 @@ if internal {
     }
     // A loft through rotated copies of the profile, not a twisted sweep: a sweep that
     // twists rebuilds every wall at sixteen stations in the kernel, which costs minutes
-    // whatever the profile, while a loft of four sections is seconds and, at a few
-    // degrees per span, its ruled walls stay within microns of the true helix.
+    // whatever the profile, while a loft is seconds and, at a few degrees per span, its
+    // ruled walls stay within microns of the true helix. One span per ~3 degrees of
+    // twist: enough accuracy, and few enough faces that big gears stay quick and clean.
     let twist = h * tan(helix_n * pi / 180.0) / r_pitch;
-    let n_sec = 4;
+    let twist_deg = twist * 180.0 / pi;
+    let n_sec = floor(twist_deg / 3.0) + 1;
+    if n_sec < 2 { n_sec = 2; }
+    if n_sec > 6 { n_sec = 6; }
     let sections = [];
     let i = 0;
     while i < n_sec {
         let u = (i * 1.0) / ((n_sec - 1.0) * 1.0);
         run("sketch.create", #{ plane: #{ origin: [0.0, 0.0, h * u], x_dir: [1.0, 0.0, 0.0], y_dir: [0.0, 1.0, 0.0] }, name: "Sec" + i });
+        hidden.push("Sec" + i);
         draw_curves(rot_curves(curves, twist * u));
         run("sketch.finish");
         sections.push(#{ sketch: "Sec" + i });
@@ -438,6 +448,7 @@ if internal {
     }
 } else {
     run("sketch.create", #{ plane: "XY", name: "Gear" });
+    hidden.push("Gear");
     draw_curves(curves);
     run("sketch.finish");
     run("solid.extrude", #{ sketch: "Gear", distance: t, name: "Gear", body_name: "Gear" });
@@ -473,4 +484,8 @@ if !internal && bore_d > 0.0 {
         z_hole = t + hub_len;
     }
     run("solid.hole", #{ position: [0.0, 0.0, z_hole], diameter: bore_d });
+}
+
+if hidden.len() > 0 {
+    run("browser.visibility", #{ visible: false, items: hidden });
 }
