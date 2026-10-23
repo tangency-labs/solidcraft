@@ -37,14 +37,7 @@ const SM_ERR: i64 = 1001;
 /// `SM_ERR_INVALID_INPUT`.
 const SM_ERR_INVALID_INPUT: i64 = 1007;
 
-/// Why an engine produced no [`RawOutput`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EngineFailure {
-    /// A surface could not be built (the corpus runner's exit code 3).
-    Build(String),
-    /// Anything else (bad input, C++ exception): a crash for scoring.
-    Other(String),
-}
+pub use super::EngineFailure;
 
 fn ffi_surface(spec: &SurfaceSpec, domain: Option<[f64; 4]>) -> SsiSurfaceIn {
     let surface = match spec.clone() {

@@ -42,7 +42,7 @@ nice -n 10 cargo test -p difftest --features cpp                     # harness s
 | `--report-dir D` / `--no-report` | report location (default `reports/difftest/`) / skip writing |
 | `--fuzz N` | with `--unit`: probe the unit's FFI guard with N mutated cases, each run in a child process (below). No report written. |
 | `--fuzz-out D` | where `--fuzz` writes failing inputs (default `bin/fuzz/`; files go to `D/<unit>/`) |
-| `--ssi-corpus [--tol T] [--jobs N] [glob]` | score both engines against the SSI corpus (see [below](#--ssi-corpus-exact-ground-truth-ssi-corpus)); not a gate |
+| `--ssi-corpus [--tol T] [--jobs N] [glob]` | score the engines against the SSI corpus (see [below](#--ssi-corpus-exact-ground-truth-ssi-corpus)); not a gate; without the `cpp` feature, the `ssi` engine alone |
 | `--solidcraft-cases [glob]` | score the Rust port on SolidCraft's whole-operation regression cases (see [below](#--solidcraft-cases-solidcraft-regression-cases)); not a gate, no `cpp` feature needed |
 
 Exit status: `0` no failures (deferred cases are not failures), `1` any
@@ -532,8 +532,8 @@ PR instead. Then set `status` in `plan/units/foo.bar.toml` to what
 ## `--ssi-corpus`: exact ground-truth SSI corpus
 
 A correctness report, separate from the gate: it never changes a unit's status, and
-CI's gating `difftest` job does not run it. It grades **both** engines' surface/surface
-intersection against [jyviko's SSI corpus](https://github.com/jyviko/ssi-corpus) (commit
+CI's gating `difftest` job does not run it. It grades the C++, the port and the `ssi`
+crate's surface/surface intersection against [jyviko's SSI corpus](https://github.com/jyviko/ssi-corpus) (commit
 `b04c8a6`, MIT OR Apache-2.0; issue #17): 119 cases (plane, quadrics, torus, B-spline and
 NURBS pairs, 25 of them from Yang, Jia & Yan, ACM TOG 42(6) 211, 2023), each with the dense
 exact intersection and the expected topology.
@@ -543,6 +543,7 @@ scripts/fetch-ssi-corpus.sh               # clones the corpus into corpus/ssi/ (
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --ssi-corpus             # all cases, tol 1e-6
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --ssi-corpus 'c3_*'      # case ids matching a glob (`*`, `?`)
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --ssi-corpus --tol default --jobs 4
+nice -n 10 cargo run --profile difftest -p difftest -- --ssi-corpus                         # the ssi engine only, no C++
 ```
 
 Without `corpus/ssi/` it prints how to fetch it and exits `0`. The corpus is data only:
@@ -551,8 +552,9 @@ pins the full commit SHA and checks the checkout's origin and `HEAD` against it.
 errors (unreadable case, report not writable); verdicts never fail the run.
 
 * **Engines.** Each case runs in a child process per engine (`difftest --ssi-case <case>
-  <tol> <cpp|rust> <out.json>`), so a C++ segfault or a 300 s timeout is a `CRASH`
+  <tol> <cpp|rust|ssi> <out.json>`), so a C++ segfault or a 300 s timeout is a `CRASH`
   verdict, as with the corpus' runner. `--jobs N` (default 2) children run at once.
+  `cpp` and `rust` need the `cpp` feature.
   * `cpp`: shim `harness/cpp/shim/ssi_corpus.cpp` mirrors the corpus'
     `runner/ssi_runner.cpp` in its `gsi` mode: real `SmPlane`, `SmCylinder`, `SmCone`
     (`CreateCanonical`), `SmSphere`, `SmTorus`, and `SmBSplineSurface` over an NLib net
@@ -567,6 +569,14 @@ errors (unreadable case, report not writable); verdicts never fail the run.
     and evaluate each surface at its UV samples, and write the runner's JSON
     (`{xyz, uv1, uv2, s1_at_uv, s2_at_uv, type}` per curve) to
     `bin/ssi-corpus/raw/<engine>_<tol>/<id>.json`.
+  * `ssi` (`src/ssi/ssi_engine.rs`): the `ssi` crate (`crates/ssi`, a method of its own,
+    not a port; see its README), as its own corpus runner runs it. Each surface becomes
+    the crate's exact patch (`ssi::shapes`, or the NURBS net as given),
+    `ssi::intersect_bodies` intersects them, and the curves are filled in to 0.01 rad
+    by `ssi::densify` after the timer. Curves are written as marched, with both patches'
+    parameters and each patch evaluated there; the points are the touch points, then
+    the curves' vertices. A refusal is status `SM_ERR` named by its code
+    (`BOOLEAN_TANGENT (...)`). Never compared for parity.
 * **Scorer** (`src/ssi/score.rs`, `polyset.rs`, `geom.rs`): a port of the corpus'
   `scoring/score.py` and the distance helpers of `ssi_geom.py` (not the truth
   generators). Accuracy tolerance `10 * tol`. Verdicts, most severe first: `CRASH`,
@@ -578,18 +588,20 @@ errors (unreadable case, report not writable); verdicts never fail the run.
 * **Parity.** Where both engines answered, their outputs are compared with the gate's
   rule (status, curve count, types, every sample within `1e-9` relative); mismatches are
   listed per case. A faithful port should also score the same verdicts as the C++.
-* **Output.** One line per case (`cpp` verdict, `rust` verdict, parity, the C++ flags),
-  then
+* **Output.** One line per case (each engine's verdict, parity, the flags of the first
+  engine run: the C++ when it runs), then
 
   ```
   SSI-CORPUS cpp: PASS=… INACCURATE=… WRONG_TOPOLOGY=… INCOMPLETE=… ERROR=… CRASH=… (cases=119)
   SSI-CORPUS rust: PASS=… DEFERRED=… (cases=119)
+  SSI-CORPUS ssi: PASS=… (cases=119)
   SSI-CORPUS parity: compared=… identical=… mismatched=… same_verdict=…
   ```
 
   and `reports/ssi-corpus.json` (`reports/ssi-corpus_<tol>_<glob>.json` for other
-  tolerances or a glob): per case both grades with their flags, distances and topology
-  signatures, the deferral reason and the parity result. No timings, so it is
+  tolerances or a glob; `reports/ssi-corpus_ssi.json` from a build without `cpp`, so it
+  never overwrites the full report): per case every grade with its flags, distances and
+  topology signatures, the deferral reason and the parity result. No timings, so it is
   deterministic.
 * **Cross-check with the corpus' own scorer.** `scripts/ssi-corpus-runner.sh` is an
   `SSI_RUNNER` for `score.py` (Python 3, numpy):

@@ -12,6 +12,7 @@
 //!          --jobs N (-j; default 1, 0 = all cores)   # units in N child processes (`difftest::jobs`)
 //! cargo run -p difftest --features cpp -- --unit <id> --fuzz N [--fuzz-out <dir>]   # FFI guard probing
 //! cargo run -p difftest --features cpp -- --ssi-corpus [--tol 1e-6|default] [--jobs N] [glob]
+//! cargo run -p difftest -- --ssi-corpus [glob]   # the `ssi` engine only; no `cpp` feature needed
 //! cargo run -p difftest -- --solidcraft-cases [glob]   # Rust only; no `cpp` feature needed
 //! cargo run -p difftest --features cpp -- --green --digest-dir <dir> [--digest-debug]   # Rust side
 //!          only, one `<dir>/<unit>.digest` per unit (native vs wasm32: scripts/wasm-digest.sh)
@@ -132,13 +133,7 @@ fn main() -> ExitCode {
         difftest::jobs::watch_parent();
     }
     if raw.first().map(String::as_str) == Some("--ssi-case") {
-        #[cfg(feature = "cpp")]
         return difftest::ssi::run_child(raw.get(1..).unwrap_or(&[]));
-        #[cfg(not(feature = "cpp"))]
-        {
-            eprintln!("difftest: --ssi-case needs feature `cpp`");
-            return ExitCode::from(2);
-        }
     }
     // Child of `--fuzz`: one batch of fuzz cases (see `difftest::fuzz::run_child`).
     if raw.first().map(String::as_str) == Some("--fuzz-exec") {
@@ -185,14 +180,7 @@ fn main() -> ExitCode {
         return difftest::solidcraft::run_cases(&root, &opts);
     }
 
-    if !solidcore_ffi::LINKED {
-        eprintln!(
-            "difftest: built without the C++ kernel; run with \
-             `cargo run -p difftest --features cpp -- ...`"
-        );
-        return ExitCode::from(2);
-    }
-
+    // Without the C++ kernel it runs the `ssi` engine alone.
     if args.ssi_corpus {
         let opts = difftest::ssi::CorpusOptions {
             tol: args
@@ -205,6 +193,14 @@ fn main() -> ExitCode {
             no_report: args.no_report,
         };
         return difftest::ssi::run_corpus(&root, &opts);
+    }
+
+    if !solidcore_ffi::LINKED {
+        eprintln!(
+            "difftest: built without the C++ kernel; run with \
+             `cargo run -p difftest --features cpp -- ...`"
+        );
+        return ExitCode::from(2);
     }
     if args.tol.is_some() {
         eprintln!("difftest: --tol only applies to --ssi-corpus");
