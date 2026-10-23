@@ -2222,6 +2222,9 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                 }
                 _ if !shown => {}
+                // Close the design shown (asking first when it is unsaved); closing the last one
+                // shows the start page (#5366).
+                Key::W if !mods.shift && !mods.alt => crate::documents::close(app, app.docs.active, false),
                 Key::Z => {
                     if !crate::tools::undo_spline_point(app) {
                         drop(app.run("edit.undo", json!({})));
