@@ -403,7 +403,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 if let Some(r) = res {
                     tip += &format!("\n{:.1} ms", r.ms);
                 }
-                tip += "\nDouble-click to edit · drag to reorder · right-click for more";
+                tip.push('\n');
+                tip.push_str(crate::i18n::tr("timeline.feature_hint"));
                 if resp.drag_started() {
                     drag = Some(Drag::Feature(*id));
                 }

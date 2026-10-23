@@ -1398,6 +1398,7 @@
   "thread.designation": "ねじの呼び",
   "thread.iso_metric": "ISOメートルねじ",
   "thread.select_size": "サイズを選択",
+  "timeline.feature_hint": "ダブルクリックで編集 · ドラッグで並べ替え · 右クリックでその他の操作",
   "timeline.group": "フィーチャーフォルダを新規作成",
   "timeline.move_many": "タイムライン項目を移動",
   "timeline.move_to_group": "フィーチャーをフォルダへ移動",

@@ -1109,6 +1109,7 @@
   "thread.designation": "호칭",
   "thread.iso_metric": "ISO 미터",
   "thread.select_size": "크기 선택",
+  "timeline.feature_hint": "두 번 클릭하여 편집 · 드래그하여 순서 변경 · 마우스 오른쪽 버튼을 클릭하여 더 보기",
   "timeline.group": "새 특성 폴더",
   "timeline.move_many": "타임라인 항목 이동",
   "timeline.move_to_group": "특성을 폴더로 이동",

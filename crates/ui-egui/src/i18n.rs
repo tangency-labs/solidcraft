@@ -248,6 +248,22 @@ pub fn tr_name(text: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn timeline_feature_hint_comes_from_the_catalog() {
+        let id = "timeline.feature_hint";
+        let english = "Double-click to edit · drag to reorder · right-click for more";
+        assert_eq!(ENGLISH.messages().get(id).map(String::as_str), Some(english));
+        for language in ["en", "ja", "zh", "de", "ko", "es"] {
+            let _scope = scope(language);
+            let hint = tr(id);
+            assert_eq!(hint, Locale::for_language(language).text(id));
+            assert_ne!(hint, id);
+            if ["ja", "zh", "de", "ko"].contains(&language) {
+                assert_ne!(hint, english, "{language}: the hint must be translated");
+            }
+        }
+    }
+
     /// English first, then by id, so adding a locale edits only its own line.
     #[test]
     fn locales_are_listed_english_first_then_by_id() {

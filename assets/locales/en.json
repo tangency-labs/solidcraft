@@ -1398,6 +1398,7 @@
   "thread.designation": "Designation",
   "thread.iso_metric": "ISO metric",
   "thread.select_size": "Select size",
+  "timeline.feature_hint": "Double-click to edit · drag to reorder · right-click for more",
   "timeline.group": "New Feature Folder",
   "timeline.move_many": "Move Timeline Items",
   "timeline.move_to_group": "Move Features to Folder",

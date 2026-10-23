@@ -1223,6 +1223,7 @@
   "thread.designation": "Bezeichnung",
   "thread.iso_metric": "ISO metrisch",
   "thread.select_size": "Größe wählen",
+  "timeline.feature_hint": "Doppelklicken zum Bearbeiten · Ziehen zum Neuordnen · Rechtsklicken für weitere Optionen",
   "timeline.group": "Neuen Merkmalsordner anlegen",
   "timeline.move_many": "Zeitleistenelemente verschieben",
   "timeline.move_to_group": "Merkmale in Ordner verschieben",
