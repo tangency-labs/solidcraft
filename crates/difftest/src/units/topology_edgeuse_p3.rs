@@ -45,8 +45,8 @@ use solidcore_ffi::units::topology_edgeuse_p1 as ffi1;
 use solidcore_ffi::units::topology_edgeuse_p3::{self as ffi, Op};
 
 use super::topology_edgeuse_p1::{
-    brep_block_of, domain, gen_brep, gen_surface, harness, import_with_types, path_of, sel, BrepIn,
-    SrfIn, FILES,
+    brep_block_of, domain, gen_brep, gen_surface, harness, import_with_types, path_of,
+    seed_cache_tree_states, sel, BrepIn, SrfIn, FILES,
 };
 use super::topology_edgeuse_p2::{flag, inexact_geometry, put_eu_state, Setup};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -403,6 +403,8 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     if let Some(o) = inexact_geometry(&s) {
         return Ok(o);
     }
+    // the face surfaces' caches as the C++ build left them
+    seed_cache_tree_states(&s.brep, &s.path, &s.block)?;
     match run_rust_op(&i.op, &mut s.brep, s.eu) {
         Ok(body) => Ok(output_of(i, body)),
         Err(e) => {

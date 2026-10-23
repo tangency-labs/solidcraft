@@ -56,6 +56,7 @@
 #include <SmShell.h>
 #include <SmSolutionArray.h>
 #include <SmSurface.h>
+#include <SmSurfaceCache.h>
 #include <SmTArray.h>
 #include <SmVector2d.h>
 #include <SmVector3d.h>
@@ -246,7 +247,26 @@ enum Op : int32_t
     OP_DISTDEV = 9,
     OP_SEAM = 10,
     OP_SET_ORIENT = 11,
+    OP_CACHE_STATES = 12,
 };
+
+// Read access to a surface cache's protected tree pointer.
+struct CacheTreePeek : SmSurfaceCache
+{
+    static bool built(const SmSurfaceCache* c) { return c->*(&CacheTreePeek::m_pTree) != nullptr; }
+};
+
+// The state of a surface's cache slot (`m_pCacheObj`, a trimmed surface cache or a
+// surface cache): 0 none, 1 a cache whose tree is not built, 2 a cache whose tree is
+// built. Reading a file builds the B-rep while doing a Boolean operation, so its
+// healing can leave face surfaces with caches whose trees were never built; the Rust
+// import restores this state (`solidcore::surface::surface::CacheTreeState`).
+double cache_tree_state(const SmSurface* s)
+{
+    if (s == nullptr || s->GetCacheObj() == nullptr)
+        return 0.0;
+    return CacheTreePeek::built(static_cast<const SmSurfaceCache*>(s->GetCacheObj())) ? 2.0 : 1.0;
+}
 
 // SetUVTrimCurve argument kinds.
 const int64_t UV_NULL = 0;     // SetUVTrimCurve(NULL, ...)
@@ -525,6 +545,14 @@ void run_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         o.insert(o.end(), vals.begin(), vals.end());
         break;
     }
+    case OP_CACHE_STATES:
+    {
+        // the cache slot state of every face's surface, in export order
+        o.push_back((double)g.faces.size());
+        for (SmFace* p : g.faces)
+            o.push_back(cache_tree_state(p->GetSurface()));
+        break;
+    }
     case OP_SET_ORIENT:
     {
         SmEdgeuse* p = g.edgeuses[(size_t)rd.idx()];
@@ -675,7 +703,7 @@ SC_EXPORT int32_t sc_topology_edgeuse_p1_eval(int32_t op, const char* path, cons
     SC_TRY
     Rd rd{in, 0};
     std::vector<double> o;
-    if (op <= OP_GAPS || op == OP_SET_ORIENT)
+    if (op <= OP_GAPS || op == OP_SET_ORIENT || op == OP_CACHE_STATES)
         run_brep_op(op, rd, path, o);
     else
         run_geom_op(op, rd, o);

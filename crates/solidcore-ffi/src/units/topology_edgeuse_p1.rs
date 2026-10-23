@@ -36,6 +36,7 @@
 //! | `SetUv`     | `eu kind [curve] dmax delete has_fail fail_status` | `0` or `-2`, then the edge use's and its mate's state, the edge tolerance, the argument record's B-rep flag |
 //! | `Gaps`      | `eu which flag want_out`                | per `which` (`0` `GetMaxEdgeFaceGap`, `1` `GetEdgeCCWEdgeGap`, `2` `CalcMaxEdgeFaceGap`, `3` `CalcEdgeCCWEdgeGap`) |
 //! | `SetOrient` | `eu orientation`                        | `orient mate radial` |
+//! | `CacheStates` |                                       | `n state*n`: per face (export order), its surface's cache slot: `0` none, `1` a cache whose tree is not built, `2` a cache whose tree is built ([`cache_states`]) |
 //!
 //! The graph export ends with a versioned extension: `3 infinite_region`, then
 //! one raw void flag per region and one raw wire-edge-use/vertex-use head index
@@ -95,6 +96,7 @@ pub enum Op {
     DistDev = 9,
     Seam = 10,
     SetOrient = 11,
+    CacheStates = 12,
 }
 
 impl Op {
@@ -435,6 +437,35 @@ pub fn counts(export: &[f64]) -> Option<[usize; 10]> {
     Some(c)
 }
 
+/// The per-face cache slot states of a `CacheStates` output (after the build status
+/// `0`): `0` no cache, `1` a cache whose tree is not built, `2` a cache whose tree is
+/// built, in export face order. `None` for a failed build or a malformed output.
+#[must_use]
+pub fn cache_states(out: &[f64]) -> Option<Vec<u8>> {
+    let (status, rest) = out.split_first()?;
+    if *status != 0.0 {
+        return None;
+    }
+    let (n, states) = rest.split_first()?;
+    if n.fract() != 0.0 || *n < 0.0 || *n > states.len() as f64 || (*n as usize) != states.len() {
+        return None;
+    }
+    states
+        .iter()
+        .map(|&v| {
+            if v == 0.0 {
+                Some(0)
+            } else if v == 1.0 {
+                Some(1)
+            } else if v == 2.0 {
+                Some(2)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 /// `SmTopoTypes.h` codes `IsConnectedTo` dispatches on, with the export slot of their
 /// kind.
 const TARGET_TYPES: [(i64, usize); 10] = [
@@ -454,7 +485,7 @@ const TARGET_TYPES: [(i64, usize); 10] = [
 fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError> {
     let [_, _, n_fu, _, _, n_loop, n_eu, _, _, n_v] = c;
     match op {
-        Op::Export => {}
+        Op::Export | Op::CacheStates => {}
         Op::EuQuery => {
             rd.below(n_eu)?;
             rd.below_or_none(n_v)?;
@@ -595,7 +626,11 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     // Export constructs the graph but does not run an edge-use geometry
     // operation. Actual native shell probes cover plane domains through 1e6;
     // retain the existing 1e4 bound for the other edge-use operations.
-    let plane_domain_limit = if op == Op::Export { 1e6 } else { 1e4 };
+    let plane_domain_limit = if matches!(op, Op::Export | Op::CacheStates) {
+        1e6
+    } else {
+        1e4
+    };
     brep_block_with_plane_limit(&mut rd, path, plane_domain_limit)?;
     let block = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
     let export = raw(Op::Export, path, block)?;
