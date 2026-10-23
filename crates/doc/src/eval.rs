@@ -5312,14 +5312,22 @@ fn replay(
             format!("{list} suppressed and not copied")
         });
     }
+    // The copies are made in timeline order, whatever order the features were picked in: a
+    // chamfer picked before the hole it blends would otherwise find no edge to copy.
+    let mut sources = Vec::new();
     for name in features.iter().filter(|n| !suppressed.contains(n)) {
         // A sketch and its extrude often share a name; the feature that makes geometry wins.
-        let src = doc
+        let at = doc
             .features
             .iter()
-            .find(|x| &x.name == name && !matches!(x.kind, FeatureKind::Sketch { .. } | FeatureKind::ConstructionPlane { .. }))
-            .or_else(|| doc.find_feature(name))
+            .position(|x| &x.name == name && !matches!(x.kind, FeatureKind::Sketch { .. } | FeatureKind::ConstructionPlane { .. }))
+            .or_else(|| doc.features.iter().position(|x| &x.name == name))
             .ok_or_else(|| DocError::Unknown(format!("feature `{name}`")))?;
+        sources.push(at);
+    }
+    sources.sort_unstable();
+    sources.dedup();
+    for src in sources.into_iter().filter_map(|at| doc.features.get(at)) {
         // A fillet or chamfer repeats at the copied edges.
         if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
             let r = val(vals, radius, Kind::Length)?;

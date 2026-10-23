@@ -604,3 +604,44 @@ fn copies_of_a_join_that_merged_its_targets_join_the_merged_body() {
         assert!(rel(volume(&mut s), v0 + n * (v1 - v0)) < 1e-3, "{id}: {} vs {}", volume(&mut s), v0 + n * (v1 - v0));
     }
 }
+
+/// A disc with an off-centre hole whose top and bottom edges are chamfered.
+fn disc_with_chamfered_hole() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 30, "height": 10, "name": "Disc"}));
+    run(&mut s, "solid.hole", json!({"position": [20, 0, 10], "diameter": 6, "name": "Bore"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[23, 0, 10]], "distance": 0.5, "name": "TopChamfer"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[23, 0, 0]], "distance": 0.5, "name": "BottomChamfer"}));
+    s
+}
+
+#[test]
+fn circular_pattern_of_a_hole_and_its_chamfers_copies_all_of_them() {
+    let mut one = disc_with_chamfered_hole();
+    let v1 = volume(&mut one);
+    let mut s = disc_with_chamfered_hole();
+    let v0 = volume(&mut s);
+    assert!(rel(v0, v1) < 1e-9);
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Bore", "TopChamfer", "BottomChamfer"], "axis": "Z", "count": 6, "angle": 360}));
+    let v = volume(&mut s);
+    println!("{v1} -> {v}");
+    assert!(v < v1 - 5.0 * 0.9 * (std::f64::consts::PI * 9.0 * 10.0), "pattern had no effect: {v1} -> {v}");
+}
+
+/// The features are copied in timeline order, not in the order they were picked in: a chamfer
+/// picked before its hole used to find no edge ("no edge near ...").
+#[test]
+fn pattern_of_features_picked_in_any_order_copies_them_in_timeline_order() {
+    let mut reference = disc_with_chamfered_hole();
+    run(
+        &mut reference,
+        "solid.pattern.circular",
+        json!({"features": ["Bore", "TopChamfer", "BottomChamfer"], "axis": "Z", "count": 6, "angle": 360}),
+    );
+    let expected = volume(&mut reference);
+    for picked in [["BottomChamfer", "TopChamfer", "Bore"], ["TopChamfer", "Bore", "BottomChamfer"]] {
+        let mut s = disc_with_chamfered_hole();
+        run(&mut s, "solid.pattern.circular", json!({"features": picked, "axis": "Z", "count": 6, "angle": 360}));
+        assert!(rel(volume(&mut s), expected) < 1e-9, "{picked:?}");
+    }
+}
