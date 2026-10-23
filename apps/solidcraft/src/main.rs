@@ -73,9 +73,12 @@ fn mark(step: &str) {
 
 struct App {
     solve: SolveApp,
-    /// The settings folder whose start marker the first frame clears (`startup::started`).
+    /// The settings folder whose start marker a settled startup clears.
     starting: Option<std::path::PathBuf>,
-    /// Frames begun; the second one means the first was drawn (startup is over).
+    startup_complete: bool,
+    first_presented: Option<std::time::Instant>,
+    recovery: startup::Recovery,
+    /// Frames begun, for the first two: fitting the window, then asking for the foreground.
     frames: u32,
     /// Started over the control channel: the window doesn't ask for the foreground.
     take_focus_unwanted: bool,
@@ -85,6 +88,14 @@ struct App {
     space_mouse: space_mouse::SpaceMouse,
     #[cfg(target_os = "macos")]
     native_menu: Option<native_menu::NativeMenu>,
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        // Painting and control commands can change a design after logic ran. Check on
+        // unwind too: a replacement process must never discard an unsaved document.
+        self.recovery.observe(None, solidcraft_ui_egui::documents::any_dirty(&self.solve));
+    }
 }
 
 impl eframe::App for App {
@@ -108,10 +119,38 @@ impl eframe::App for App {
                 if !self.take_focus_unwanted {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
+            }
+        }
+        if !self.startup_complete {
+            let interacted = ctx.input(|i| {
+                i.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::PointerButton { .. }
+                            | egui::Event::Key { .. }
+                            | egui::Event::Text(_)
+                            | egui::Event::Paste(_)
+                            | egui::Event::Touch { .. }
+                            | egui::Event::MouseWheel { .. }
+                    )
+                })
+            });
+            self.recovery.observe(self.first_presented.map(|at| at.elapsed()), interacted || solidcraft_ui_egui::documents::any_dirty(&self.solve));
+            if eframe::egui_wgpu::winit::has_presented_frame() {
+                self.first_presented.get_or_insert_with(std::time::Instant::now);
+            }
+            if !self.recovery.eligible() {
+                self.startup_complete = true;
+                // Deliberately keep the failed-start marker and crash phase through the
+                // settling interval: the affected driver reports failure after presenting.
+                // A clean quit clears the marker below; killing an unsettled launch counts
+                // as a failed start. Control clients can already connect during this time.
                 solidcraft_engine::crash::phase(solidcraft_engine::crash::RUNNING);
                 if let Some(dir) = self.starting.take() {
                     startup::started(&dir);
                 }
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
             }
         }
         self.watch_device();
@@ -685,15 +724,14 @@ fn main() -> eframe::Result {
     // Files opened from Finder and the Dock arrive as events, not arguments.
     #[cfg(target_os = "macos")]
     open_documents::install();
-    let created = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let created_in_app = created.clone();
     let starting = settings.clone();
     mark("run_native");
-    let result = eframe::run_native(
+    let recovery = startup::Recovery::new();
+    let app_recovery = recovery.clone();
+    let result = startup::run_native(
         "SolidCraft",
         options,
         Box::new(move |cc| {
-            created_in_app.store(true, std::sync::atomic::Ordering::SeqCst);
             solidcraft_engine::crash::phase("app setup");
             mark("window and device ready");
             solidcraft_ui_egui::fonts::setup_bundled_fonts(&cc.egui_ctx);
@@ -742,8 +780,7 @@ fn main() -> eframe::Result {
             }
             mark("viewport pipelines");
             if let Some(port) = control_port {
-                let rx = control_server::start(port, cc.egui_ctx.clone());
-                app = app.with_control(rx);
+                app = app.with_control(control_server::start(port, cc.egui_ctx.clone()));
             }
             // The agent chat's MCP bridge reaches the app through an endpoint of its own, started
             // on a free port the first time the chat connects (docs/agent-chat.md).
@@ -810,6 +847,9 @@ fn main() -> eframe::Result {
             Ok(Box::new(App {
                 solve: app,
                 starting,
+                startup_complete: false,
+                first_presented: None,
+                recovery: app_recovery,
                 frames: 0,
                 take_focus_unwanted: control_port.is_some(),
                 gpu,
@@ -820,9 +860,18 @@ fn main() -> eframe::Result {
             }))
         }),
     );
-    control_server::remove_token_file();
+    // Release listeners and connected clients before launching the software child,
+    // which must bind the same --control port and own its token file.
+    control_server::shutdown();
     match result {
-        Err(e) if !created.load(std::sync::atomic::Ordering::SeqCst) => no_window(e, cpu_renderer, settings.as_deref()),
+        Err(e) if recovery.eligible() => no_window(e, cpu_renderer, settings.as_deref()),
+        Ok(()) => {
+            // A normal quit within the settling interval is not a failed launch.
+            if let Some(dir) = settings.as_deref() {
+                startup::started(dir);
+            }
+            Ok(())
+        }
         r => r,
     }
 }
@@ -868,10 +917,8 @@ fn no_window(error: eframe::Error, tried_cpu: bool, settings: Option<&std::path:
     eprintln!("SolidCraft: the window could not open: {error}");
     if !tried_cpu && let Ok(exe) = std::env::current_exe() {
         eprintln!("SolidCraft: trying again with the software renderer ({}=cpu)", startup::RENDERER_ENV);
-        match std::process::Command::new(exe).args(std::env::args_os().skip(1)).env(startup::RENDERER_ENV, "cpu").status() {
-            Ok(status) if status.success() => return Ok(()),
-            // The second try showed its own message.
-            Ok(_) => return Err(error),
+        match startup::launch_software_retry(&exe, std::env::args_os().skip(1)) {
+            Ok(()) => return Ok(()),
             Err(e) => log::error!("could not start again with the software renderer: {e}"),
         }
     }
