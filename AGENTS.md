@@ -255,6 +255,29 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
 with just that so others can see it. Never sit on a draft PR you have stopped working
 on: close it, and say where the WIP is.
 
+### Completion evidence
+
+For new ports and completion changes, include the [completion evidence checklist](docs/completion-evidence.md)
+in the PR description. The evidence table is required for `wire:` PRs that remove
+`UNPORTED` stubs, including when existing fixtures do not reach the continuation. Identify the owned functions and branches implemented, which
+operations actually complete successfully against C++, and which remain unreachable.
+A passing status or empty result is evidence for that case, not proof that the
+operation's successful construction or mutation path works.
+
+A dependency stub replaces the missing call only. Port the upstream logic following
+it as well, preserving control flow and operation order; do not omit the continuation
+and present the function as complete. If an incremental PR deliberately leaves an
+owned body or continuation missing, list the exact symbols and remaining work.
+Report that limitation even if existing fixtures never reach it. Unit status follows
+the existing gate; it does not certify complete function or branch coverage.
+
+When a dependency is wired, rerun the affected callers and add cases that reach the
+previously blocked continuations. Keep newly exposed mismatches visible. Review
+runner skips, stand-in geometry and absent-entity cases before claiming coverage.
+Record independent harness follow-ups with reproducible evidence and check existing
+PRs before implementing them. This checklist supplements the existing correctness
+gate; it does not change tolerances, outcomes or status accounting.
+
 ## 4a. Cycles, back-edges and the merge lock
 
 The kernel core is one big call cycle, so the plan dropped ~2,300 calls as *back-edges*
