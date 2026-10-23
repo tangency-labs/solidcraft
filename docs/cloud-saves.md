@@ -41,6 +41,25 @@ Browser integration must persist connection metadata and pending saves in Indexe
 
 `solidcraft_io::cloud::NativeHost` runs native operations on workers and retains the caller's allowed-folder scope. Give it the app's private cloud recovery directory. Each connection has its own outbox under the SHA-256 of its identifier, preventing case-insensitive filesystem aliases. Save persists its captured objects and queue record before starting Git. Listing combines queued destinations with the checkout; opening prefers the latest queued revision and needs neither connectivity nor a working Git executable for that revision. Competing local tips remain intact and return a conflict rather than opening an arbitrary version. Synchronization retries captured revisions in dependency order; a failed predecessor blocks its children but not unrelated captures. A Save operation reports only its requested capture's publication result. The local queue/process locks are implementation coordination, separate from the future advisory editing leases described in the collaboration plan.
 
+### Browser recovery store
+
+`apps/solidcraft-web/src/cloud_storage.rs` implements the browser store, separately from its still-pending worker and settings integration. Each connection has an IndexedDB database containing `pending`, `cached`, and `receipts`, and an OPFS directory under `cloud/<SHA-256 of connection id>`. Stored object paths match those used by the outbox and repository snapshots. The shared OPFS adapter bounds reads before allocating buffers, writes owned browser bytes, and awaits stream close. It aborts failed writes; a retry can complete an empty file left by interrupted initial creation.
+
+Local Web Locks serialize storage changes across tabs, with no network waits inside those locks or IndexedDB transactions. Queue and cache metadata are committed with strict durability after all object writes finish. Publication confirmation updates its receipt and cache location and removes the pending record in one transaction. Confirming a parent never replaces a newer queued child; a conflict copy is cached under its actual destination. Opening a newer local database, queue, cache, or receipt format requests an upgrade. Queue listing is bounded to 10,000 records and 128 MiB of metadata.
+
+A failed commit acknowledgement does not prove no record exists: a browser can finish committing while the caller receives an error. Do not report that capture as saved; retain and recognize its stable identity on retry. Persistent-storage denial is recorded in `Store::persistent` for the host to display; it does not masquerade as granted persistence.
+
+The `cloud-recovery` example exercises the actual store without starting the renderer. With a matching `wasm-bindgen` CLI installed, run:
+
+```sh
+cargo build -p solidcraft-web --example cloud-recovery --target wasm32-unknown-unknown
+wasm-bindgen --target web --out-dir /tmp/solidcraft-cloud-browser-site \
+  target/wasm32-unknown-unknown/debug/examples/cloud_recovery.wasm
+cargo xtask cloud-storage-test --site /tmp/solidcraft-cloud-browser-site
+```
+
+Set `CC_wasm32_unknown_unknown` to a WASM-capable Clang when required by Zstd. The test reuses the repository's Chrome/DevTools harness (`CHROME` overrides the browser path), creates an isolated profile and origin, and terminates/restarts Chrome with the same profile. It covers queued and confirmed recovery, simultaneous tabs, failed closes, uncertain/aborted commits, future formats, corrupt chunks, and a 101 MiB asset with deduplication. Publication acknowledgements in this fixture are stubs: it does not authenticate or upload to a host. Full browser worker, credential, and application checks remain necessary.
+
 ## Engine command interface
 
 The embedding application installs its asynchronous adapter through
@@ -72,8 +91,8 @@ Saving to an explicit native path or adopting a native Save As detaches that
 binding and prevents an old asynchronous capture from reattaching it.
 `file.export` remains available for an independent native copy.
 
-These foundations, commands, and the native worker adapter are implemented.
-Application installation of that adapter, browser workers and persistence,
+These foundations, commands, the native worker adapter, and browser recovery storage are implemented.
+Application installation of that adapter, browser workers and connection persistence,
 credential entry, guided setup, Home/Preferences
 integration, and end-to-end application evidence remain unfinished. User-facing
 documentation must remain marked unreleased until those paths have been
