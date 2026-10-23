@@ -2272,3 +2272,19 @@ fn hovering_a_large_body_does_not_wait_for_its_pick_index() {
     assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })), "{:?}", h.app.viewport.hover);
     assert!(hover_ms < index_ms / 3.0, "the first hover took {hover_ms:.1} ms; making the index takes {index_ms:.1} ms");
 }
+
+/// #3763: a new Fillet or Chamfer opens at its usual size in the design's units (an inch design
+/// showed "1 mm"); a millimetre design keeps "2 mm" and "1 mm".
+#[test]
+fn fillet_and_chamfer_open_in_the_design_units() {
+    let radius = |app: &mut SolveApp, id: &str| match start(app, vec![], id).kind {
+        Kind::Fillet { radius, .. } => radius,
+        k => panic!("{k:?}"),
+    };
+    let mut app = boxed();
+    assert_eq!((radius(&mut app, "solid.fillet"), radius(&mut app, "solid.chamfer")), ("2 mm".to_string(), "1 mm".to_string()));
+    for (unit, fillet, chamfer) in [("in", "0.079 in", "0.039 in"), ("cm", "0.2 cm", "0.1 cm")] {
+        app.session.doc_mut().units = unit.into();
+        assert_eq!((radius(&mut app, "solid.fillet"), radius(&mut app, "solid.chamfer")), (fillet.to_string(), chamfer.to_string()), "{unit}");
+    }
+}

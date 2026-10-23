@@ -637,8 +637,8 @@ impl Dialog {
                 Kind::Revolve { angle: "360 deg".into(), operation: 0, axis: None },
                 vec![SelInput::new("Profile", PROFILES, true), SelInput::new("Axis", AXES, false)],
             ),
-            "solid.fillet" => Dialog::new(fillet_kind("2 mm", false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
-            "solid.chamfer" => Dialog::new(fillet_kind("1 mm", true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            "solid.fillet" => Dialog::new(fillet_kind(&small_length_default(s, 2.0), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            "solid.chamfer" => Dialog::new(fillet_kind(&small_length_default(s, 1.0), true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.shell" => {
                 let (kind, inputs) = Kind::simple_start(id)?;
                 let mut d = Dialog::new(kind, inputs);
@@ -2755,6 +2755,23 @@ pub(crate) const CHAMFER_TYPES: [&str; 3] = ["Equal Distance", "Two Distances", 
 /// A new Fillet or Chamfer dialog's values.
 fn fillet_kind(size: &str, chamfer: bool) -> Kind {
     Kind::Fillet { radius: size.into(), chamfer, chain: true, ctype: 0, distance2: size.into(), angle: "45 deg".into(), flip: false }
+}
+
+/// A small length's first text: `mm` millimetres in the design's units, to two significant
+/// figures ("2 mm", "0.079 in", "0.2 cm"), so a new Fillet or Chamfer opens at about the same
+/// size, in the unit the design works in, whatever that is (#3763).
+pub(crate) fn small_length_default(s: &Session, mm: f64) -> String {
+    let unit = s.doc.units.trim();
+    match solidcraft_engine::doc::expr::unit_info(unit) {
+        Some((ValueKind::Length, scale)) if unit != "mm" && scale > 0.0 => {
+            let v = mm / scale;
+            let digits = usize::try_from(1 - v.abs().log10().floor() as i64).unwrap_or(0);
+            let text = format!("{v:.digits$}");
+            let text = if text.contains('.') { text.trim_end_matches('0').trim_end_matches('.') } else { &text };
+            format!("{text} {unit}")
+        }
+        _ => format!("{mm} mm"),
+    }
 }
 
 /// A length field's first text: `number` in the design's units, with the unit written out so the
