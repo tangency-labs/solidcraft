@@ -50,6 +50,13 @@ mod sys {
             cap: i64,
             out_len: *mut i64,
         ) -> i32;
+        pub fn sc_blend_fillet_intersector_probe_next(
+            input: *const f64,
+            n_in: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
     }
 }
 
@@ -522,6 +529,44 @@ pub fn run(prog: &Program) -> Result<Vec<f64>, FfiError> {
         // is a valid i64; nothing is retained.
         unsafe {
             sys::sc_blend_fillet_intersector_run(
+                input.as_ptr(),
+                n_in,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}
+
+/// Diagnostic companion for a non-through-point-clipped [`Op::Next`].
+///
+/// Calls the genuine C++ operation on fresh objects, with copy-only virtual-call
+/// observers. Its original flat record is returned first as `length, values...`,
+/// followed by `tag, length, values...` actual-call observations only. Tags 1/2
+/// observe the plane solve (12/82 values), 3 observes the post-`StepSolve` point
+/// and rescaled step (81 values), and 4 observes `ComputePointValues` output
+/// (81 values). No supplemental geometry evaluations or reconstruction run.
+/// Internal intersection, Hermite and span calculations are not observed.
+/// This does not replace [`run`] or add comparison values to the corpus.
+///
+/// # Errors
+///
+/// The validation errors of [`encode`], or a shim failure. Other operations and
+/// through-point clipping are outside this diagnostic's scope.
+pub fn probe_next(prog: &Program) -> Result<Vec<f64>, FfiError> {
+    if !matches!(prog.op, Op::Next { .. }) || prog.clipped {
+        return Err(bad("probe requires Next without through-point clipping"));
+    }
+    let input = encode(prog)?;
+    let n_in = i64::try_from(input.len()).map_err(|_| bad("program too long"))?;
+    // The fixed fixture's complete record and checkpoints fit without a retry
+    // (call_with_buffer may otherwise rerun a shim to grow its output buffer).
+    call_with_buffer(4096, |buf: &mut [f64], len| {
+        // SAFETY: same validated input/output ownership contract as run; no
+        // observer or pointer survives this call.
+        unsafe {
+            sys::sc_blend_fillet_intersector_probe_next(
                 input.as_ptr(),
                 n_in,
                 buf.as_mut_ptr(),

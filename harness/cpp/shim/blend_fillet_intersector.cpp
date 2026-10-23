@@ -700,3 +700,6 @@ SC_EXPORT int32_t sc_blend_fillet_intersector_run(const double* in, int64_t n_in
         return SC_ERR_EXCEPTION;
     }
 }
+
+// Diagnostic companion only: the original entry point and run_op stay unchanged.
+#include "blend_fillet_intersector_span_probe.inc"

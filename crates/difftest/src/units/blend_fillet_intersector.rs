@@ -1395,3 +1395,9 @@ impl UnitDiff for Runner {
         rust(&case.parse()?)
     }
 }
+
+// Separate from the corpus and its 189-value Next record. Runs only in the
+// existing native-feature runner tests; no tracing in ordinary comparisons.
+#[cfg(test)]
+#[path = "blend_fillet_intersector/span_probe.rs"]
+mod span_probe;
