@@ -65,7 +65,6 @@ Examples live in [examples/macros](../examples/macros). Open the `.rhai` file, t
 | `example_fixtureplate.rhai` | after setup | 500×350×8 mm tray, six Ø8 holes chamfered 1 mm both ends, C cut patterned `nx`×`ny` at `spacing_x`/`spacing_y`, centered on the tray |
 | `chamfer_holes.rhai` | a part with holes | Query holes, chamfer by size |
 | `batch_export_stl.rhai` | empty | Folder of STEP → STL |
-| `gear_generator.rhai` | empty | full-depth involute spur gear, typed params (Machinery's Handbook) |
 | `gear_universal.rhai` | empty | one macro, many forms: external/internal spur, helical and herringbone gears (module or DP), ANSI #25–#160 sprockets with ISO 606 tooth form, hubs and bores — gated params show only what the current form uses |
 
 The browser plays Rhai in the same engine. `list_dir` / `write_file` are desktop only.
