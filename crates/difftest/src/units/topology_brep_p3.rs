@@ -994,6 +994,9 @@ fn wrap_in_offsets(k: &Kernel, b: &mut Brep, faces: &[FaceId], d: f64) -> Result
     Ok(())
 }
 
+/// `SmEdge_TYPE`, the type code of an edge's identity.
+const EDGE_TYPE_CODE: i64 = 16016;
+
 /// Whether `key` is a geometry identity (the kernel context's range,
 /// `Context::new_geometry_key`; every [`key_of`] key is below it).
 const fn is_geometry_key(key: ObjectKey) -> bool {
@@ -1001,19 +1004,31 @@ const fn is_geometry_key(key: ObjectKey) -> bool {
 }
 
 /// The shim's `GeomRecorder`: a user notify callback that keeps every geometry key a
-/// notification names (the shim's tells geometry from topology while it is live).
+/// notification names (the shim's tells geometry from topology while it is live), and
+/// counts the `SM_NO_DESTRUCTION` notifications whose caller is an edge (`~SmEdge`).
 #[derive(Debug, Default)]
-struct GeomRecorder(std::sync::Arc<std::sync::Mutex<Vec<ObjectKey>>>);
+struct GeomRecorder(
+    std::sync::Arc<std::sync::Mutex<Vec<ObjectKey>>>,
+    std::sync::Arc<std::sync::Mutex<u64>>,
+);
 
 impl solidcore::geom::context::NotifyCallback for GeomRecorder {
     fn execute(
         &mut self,
-        _operation: solidcore::geom::object::NotifyOperation,
+        operation: solidcore::geom::object::NotifyOperation,
         caller: ObjectRef,
         data1: Option<ObjectRef>,
         data2: Option<ObjectRef>,
         data3: Option<ObjectRef>,
     ) -> Result<(), SolidError> {
+        if operation == solidcore::geom::object::NotifyOperation::Destruction
+            && caller.type_code == EDGE_TYPE_CODE
+        {
+            *self
+                .1
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+        }
         let mut seen = self
             .0
             .lock()
@@ -1181,6 +1196,7 @@ fn run_rust_op(
     let brep = solidcore::topology::brep::p2::brep_ref(b).key;
     let recorder = GeomRecorder::default();
     let seen = std::sync::Arc::clone(&recorder.0);
+    let edges_destroyed = std::sync::Arc::clone(&recorder.1);
     ctx.set_user_notify_callback(Some(Box::new(recorder)));
     let mut tracker =
         TrackTopologyChanges::new(Some(BrepId::from_index(0)), 7, true, Some(&mut ctx));
@@ -1219,6 +1235,13 @@ fn run_rust_op(
     };
     let tracker_at = out.len();
     put_tracker(&mut out, &lists, &mut t);
+    if matches!(op, OpIn::DeleteFace { .. }) {
+        // the shim's trailer: the edges destroyed (`~SmEdge`'s SM_NO_DESTRUCTION)
+        let destroyed = *edges_destroyed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        out.push(destroyed as f64);
+    }
     if matches!(op, OpIn::Orient { .. }) {
         // the shim's trailer: each pre-op face's SmFace::SwapUV POST_EDIT count, the
         // face count and where the tracker's values start (see split_orient)

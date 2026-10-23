@@ -1600,9 +1600,10 @@ pub fn glue_edges_general(
             ed::set_tolerance(b, surv, radius, true, true)?;
         }
 
-        // Upstream destroys the deleted edge once its last pair has moved.
+        // Upstream destroys the deleted edge once its last pair has moved
+        // (`delete pDeleteEdge`: its destruction notification and attribute cleanup).
         if b.edge(del)?.edgeuses.is_empty() {
-            b.remove_edge_record(del)?;
+            ed::destroy(k, b, del, env)?;
         }
         jj -= 2;
     }
@@ -2272,6 +2273,81 @@ mod tests {
         assert!(b.edge(deleted).is_err());
         assert_eq!(b.edges().len(), 3);
         assert_eq!(ed::edgeuses(&b, surviving, None, None).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn glue_destruction_notifies_and_clears_the_deleted_edges_attribute_users() {
+        // `delete pDeleteEdge`: ~SmEdge notifies SM_NO_DESTRUCTION with DoingBoolean set,
+        // ~SmAObject removes the edge from its attributes (issue #556).
+        use crate::geom::attribute::{Attribute, Behavior};
+        use crate::topology::edge::notification_test_support as callbacks;
+        let mut k = Kernel::default();
+        let events = callbacks::install(&mut k.context);
+        let (mut b, surviving, deleted, _) = glue_notification_fixture();
+        let ends = b.edge(deleted).unwrap().vertices;
+        let shared_ends = [ends[1], ends[0]];
+        let wire_uses = ed::edgeuses(&b, surviving, None, None).unwrap();
+        for (eu, vertex) in wire_uses.into_iter().zip(shared_ends) {
+            let vu = eu1::vertexuse(&b, eu).unwrap().unwrap();
+            let old_vertex = b.vertexuse(vu).unwrap().vertex.unwrap();
+            b.vertex_mut(old_vertex)
+                .unwrap()
+                .vertexuses
+                .retain(|&candidate| candidate != vu);
+            b.vertex_mut(vertex).unwrap().vertexuses.push(vu);
+            b.vertexuse_mut(vu).unwrap().vertex = Some(vertex);
+        }
+        b.edge_mut(surviving).unwrap().vertices = shared_ends;
+        b.edge_mut(surviving).unwrap().curve =
+            Some(Curve::from(crate::curve::line::Line::from_points(
+                b.vertex(shared_ends[0]).unwrap().point,
+                b.vertex(shared_ends[1]).unwrap().point,
+                3,
+            )));
+        // distinct identities per entity (the module's `key_of` names every edge alike)
+        let key_of = crate::topology::loopuse::notify_ref;
+        let surviving_ref = key_of(EntityRef::Edge(surviving));
+        let deleted_ref = key_of(EntityRef::Edge(deleted));
+        let mut records = std::collections::BTreeMap::new();
+        let mut attributes = AttributeStore::default();
+        let shared = attributes
+            .insert(Attribute::long(81, 912, Behavior::Reference))
+            .unwrap();
+        attributes.add_attribute(surviving_ref.key, shared).unwrap();
+        attributes.add_attribute(deleted_ref.key, shared).unwrap();
+        glue_edges_general(
+            &mut k,
+            &mut b,
+            Some(surviving),
+            OrientType::Opposite,
+            0.0,
+            false,
+            Some(deleted),
+            None,
+            &mut ed::NotifyEnv {
+                records: &mut records,
+                attributes: &mut attributes,
+                context: None,
+                key_of: &key_of,
+            },
+        )
+        .unwrap();
+        assert!(b.edge(deleted).is_err());
+        assert_eq!(attributes.users(shared).unwrap(), vec![surviving_ref.key]);
+        assert!(!k.context.doing_boolean());
+        // one SM_NO_DESTRUCTION of the deleted edge for each installed callback
+        let mut destructions: Vec<_> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e.operation == NotifyOperation::Destruction)
+            .map(|e| (e.callback, e.caller))
+            .collect();
+        destructions.sort_by_key(|(callback, _)| *callback);
+        assert_eq!(
+            destructions,
+            vec![("system", deleted_ref), ("user", deleted_ref)]
+        );
     }
 
     #[test]

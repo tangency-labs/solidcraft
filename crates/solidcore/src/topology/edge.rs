@@ -74,9 +74,10 @@
 //!   cache (the caller-held `SM_OC_BREP` cache is not threaded through
 //!   [`NotifyEnv`]; no Rust caller can build one yet); in `Notify(SM_NO_CHANGE_GEOMETRY)` the B-rep's
 //!   `data3` (`this->GetCurve()`) is the old curve's identity, as in `SetCurve`.
-//!   The constructor's and destructor's notifications and the destructor's context
-//!   `DoingBoolean` toggling are not modelled; the record owns its curve, which is
-//!   dropped with it.
+//!   The constructor's notifications are not modelled; the record owns its curve,
+//!   which is dropped with it. [`destroy`] is `delete pEdge`: the destructor's
+//!   `SM_NO_DESTRUCTION` under the context's `DoingBoolean` toggle and `~SmAObject`'s
+//!   `ClearAttributes` (used by `DeleteEdge` and `GlueEdgesGeneral`).
 //! - **`SetCurve`** takes the new curve by value and returns the old one when it is not
 //!   deleted (its owner cleared when it was this edge, as upstream); a new curve can
 //!   never be the current one, so the early return only applies when both are `None`.
@@ -2424,6 +2425,50 @@ pub fn notify(
         d2,
         d3,
     )
+}
+
+/// `delete pEdge`: `~SmEdge` sets the context's `DoingBoolean` (`GetContext()`: the
+/// environment's context, else `k`'s) for the duration of its
+/// `Notify(SM_NO_DESTRUCTION, this, NULL, NULL)`, whose status it ignores
+/// ([`SolidError::Unported`] propagates), then restores it; the curve the edge owns is
+/// dropped with its record; `~SmTopology` takes it off its owning list; `~SmAObject`
+/// (`ClearAttributes`) removes the edge from every attribute it uses.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of the notification's
+/// [`SolidError::Unported`] and of `ClearAttributes`.
+pub fn destroy(k: &mut Kernel, b: &mut Brep, e: EdgeId, env: &mut NotifyEnv<'_>) -> Result<()> {
+    b.edge(e)?;
+    let key_of = env.key_of;
+    let this = key_of(EntityRef::Edge(e));
+    let context: &mut Context = match env.context.as_deref_mut() {
+        Some(context) => context,
+        None => &mut k.context,
+    };
+    let doing_boolean = context.doing_boolean();
+    // set its DoingBoolean state to TRUE - delays SurfaceCache construction
+    context.set_doing_boolean(true);
+    let mut n = NotifyEnv {
+        records: &mut *env.records,
+        attributes: &mut *env.attributes,
+        context: Some(context),
+        key_of,
+    };
+    let notified = crate::error::ignore_status(notify(
+        b,
+        e,
+        &mut n,
+        NotifyOperation::Destruction,
+        [Some(this), None, None],
+    ));
+    // restore the context DoingBoolean state
+    if let Some(context) = n.context.as_deref_mut() {
+        context.set_doing_boolean(doing_boolean);
+    }
+    notified?;
+    b.remove_edge_record(e)?;
+    env.attributes.clear_attributes(this.key)
 }
 
 /// The optional arguments of [`set_curve`].

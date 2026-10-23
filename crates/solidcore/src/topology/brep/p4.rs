@@ -60,9 +60,11 @@
 //!   shell runs its destructor, which notifies `SM_NO_DESTRUCTION` (`~SmFace`,
 //!   `SmFace.cpp:94`; `~SmEdge`, `SmEdge.cpp:85`, which also sets and restores the
 //!   context's boolean flag around it; `~SmEdgeuse`, `SmEdgeuse.cpp:76`; `~SmShell`,
-//!   `SmShell.cpp:55`). The record removals do not send these notifications (not
-//!   modelled): attributes the caller's store holds for a deleted record stay there,
-//!   and the destructor's flag toggle is not observable after it returns.
+//!   `SmShell.cpp:55`). `DeleteEdge` deletes its edge with
+//!   [`crate::topology::edge::destroy`] (the notification, the flag toggle and the
+//!   attribute cleanup of `~SmAObject`). The other record removals do not send these
+//!   notifications (not modelled): attributes the caller's store holds for a deleted
+//!   face, edge use or shell stay there.
 //! - **`TBB`.** `ShrinkGeometry`'s `CreateUVTrimCurvesParallel` (`SM_USE_TBB`,
 //!   `SmBrep.cpp:32253`) is not compiled in the reference build and not ported.
 //! - **Loops.** A loop made by splitting a loop gets the split face as
@@ -626,6 +628,18 @@ fn notify_edge(k: &mut Kernel, b: &mut Brep, env: &mut DeleteEnv<'_>, e: EdgeId)
     )
 }
 
+/// `delete pEdge` ([`edge::destroy`]) under the deletion's notification records,
+/// attributes and identities.
+fn destroy_edge(k: &mut Kernel, b: &mut Brep, env: &mut DeleteEnv<'_>, e: EdgeId) -> Result<()> {
+    let mut n = NotifyEnv {
+        records: &mut *env.records,
+        attributes: &mut *env.attributes,
+        context: env.context.as_deref_mut(),
+        key_of: env.key_of,
+    };
+    edge::destroy(k, b, e, &mut n)
+}
+
 /// Deletes an edge use record (`delete pEU`).
 fn delete_edgeuse(b: &mut Brep, eu: EdgeuseId) -> Result<()> {
     b.remove_edgeuse_record(eu).map(|_| ())
@@ -694,7 +708,7 @@ pub fn delete_edge(
     } else if edge::is_lamina(b, e)? {
         delete_lamina_edge(k, b, env, e, eu, eu_mate)
     } else {
-        delete_wire_edge(k, b, e, eu, eu_mate)
+        delete_wire_edge(k, b, env, e, eu, eu_mate)
     }
 }
 
@@ -982,7 +996,7 @@ fn delete_manifold_edge(
     for x in [eu, eu_mate, eu_rad, eu_rad_mate] {
         delete_edgeuse(b, x)?;
     }
-    b.remove_edge_record(e)?;
+    destroy_edge(k, b, env, e)?;
 
     if v_is_strut || v_rad_is_strut {
         if !v_is_strut {
@@ -1168,7 +1182,7 @@ fn delete_lamina_edge(
 
     delete_edgeuse(b, eu)?;
     delete_edgeuse(b, eu_mate)?;
-    b.remove_edge_record(e)?;
+    destroy_edge(k, b, env, e)?;
     Ok(())
 }
 
@@ -1190,6 +1204,7 @@ fn new_vertex_shell(b: &mut Brep, shell: ShellId, vu: Option<VertexuseId>) -> Re
 fn delete_wire_edge(
     k: &mut Kernel,
     b: &mut Brep,
+    env: &mut DeleteEnv<'_>,
     e: EdgeId,
     eu: EdgeuseId,
     eu_mate: EdgeuseId,
@@ -1222,7 +1237,7 @@ fn delete_wire_edge(
         }
     }
 
-    b.remove_edge_record(e)?;
+    destroy_edge(k, b, env, e)?;
 
     if v1 == v2 {
         if vertex::is_shell_vertex(b, v1)? {
