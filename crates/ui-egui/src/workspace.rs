@@ -33,7 +33,7 @@ pub fn tab_name(tab: &str) -> String {
     solidcraft_ui_text::tr_label(&cased).to_string()
 }
 
-pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"];
+pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "MACRO", "VIEW"];
 
 /// Every tab's exact registry name with its accent: the contextual and specialty tabs, and the
 /// legacy Render sub-tabs that still share the Render accent. Theme files key their per-tab
@@ -280,7 +280,12 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "INSERT", panel: "2D", promoted: 2, ids: &["sketch.insert_dxf", "sketch.insert_svg"] },
     Section { tab: "INSERT", panel: "LIBRARY", promoted: 3, ids: &["parts.fastener", "parts.library", "parts.resize", "parts.insert"] },
     Section { tab: "INSERT", panel: "LINKS", promoted: 2, ids: &["component.update_links", "component.break_link"] },
-    Section { tab: "INSPECT", panel: "MEASURE", promoted: 3, ids: &["inspect.measure", "inspect.center_of_mass", "component.properties"] },
+    Section {
+        tab: "INSPECT",
+        panel: "MEASURE",
+        promoted: 4,
+        ids: &["inspect.measure", "inspect.center_of_mass", "inspect.find_holes", "component.properties"],
+    },
     Section { tab: "INSPECT", panel: "SECTION", promoted: 1, ids: &["inspect.section"] },
     Section {
         tab: "INSPECT",
@@ -323,6 +328,8 @@ pub const SECTIONS: &[Section] = &[
         promoted: 2,
         ids: &["document.units", "timeline.compute_all", "edit.checkpoint", "edit.restore_checkpoint"],
     },
+    Section { tab: "MACRO", panel: "RECORD", promoted: 4, ids: &["macro.record", "macro.pause", "macro.resume", "macro.stop"] },
+    Section { tab: "MACRO", panel: "PLAYBACK", promoted: 4, ids: &["macro.play", "macro.open", "macro.save", "macro.clear"] },
     Section {
         tab: "VIEW",
         panel: "VIEWS",
@@ -733,6 +740,7 @@ pub fn tab_icon(tab: &str) -> &'static str {
         "INSERT" => "import",
         "INSPECT" => "measure",
         "MANAGE" => "params",
+        "MACRO" => "record",
         "VIEW" => "camera",
         _ => SPECIALTY_TABS.iter().find(|o| o.tab == tab).map_or("", |o| o.icon),
     }
@@ -1280,7 +1288,7 @@ mod tests {
         let rows: Vec<_> = crate::toolbar_custom::toolbar_items(&h.app).into_iter().filter(|i| i.id == "ui.toolbarTab").collect();
         assert_eq!(
             rows.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(),
-            ["Model", "Surface", "Assemble", "Insert", "Inspect", "Manage", "View", "Sheet Metal", "Weldments"]
+            ["Model", "Surface", "Assemble", "Insert", "Inspect", "Manage", "Macro", "View", "Sheet Metal", "Weldments"]
         );
         assert!(rows.iter().all(|i| i.shortcut == "current"), "all existing tabs stay on by default");
         h.step(&json!({"click":{"handle":"ribbon:add_tab"}})).unwrap();

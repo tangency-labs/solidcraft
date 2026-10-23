@@ -533,7 +533,7 @@ fn unknown_command_suggests_the_closest_id() {
     let output = cli().args(["exec", "file.open"]).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open` or `panel.open`?"),
+        String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open`, `panel.open` or `macro.open`?"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );

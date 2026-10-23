@@ -119,6 +119,8 @@ mod linked_source;
 mod loft_rails_dialog_tests;
 #[cfg(test)]
 mod look_at_tests;
+mod macro_run;
+mod macro_ui;
 #[cfg(test)]
 mod manage_dialogs_tests;
 mod material_card_review;
@@ -627,6 +629,8 @@ pub struct SolveApp {
     pub(crate) remembered_commands: Vec<dialogs::RememberedCommand>,
     /// The Change Parameters window, when open.
     pub params: Option<params_dialog::ParamsDialog>,
+    /// The Play Macro prompt, when a loaded macro asks for values.
+    pub macro_run: Option<macro_run::MacroRun>,
     /// The Design Properties window, when open.
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
@@ -927,6 +931,7 @@ impl SolveApp {
             snaps: Default::default(),
             remembered_commands: Vec::new(),
             params: None,
+            macro_run: None,
             design_properties: None,
             sketch_report: None,
             bom: None,
@@ -2032,6 +2037,12 @@ impl SolveApp {
         }
         if id == "library.export" {
             dialogs_library::start_export(self);
+            return;
+        }
+        // MACRO tab: record, pause and play. The commands live in the engine, so the CLI and
+        // the control channel reach the same behaviour without any of this (docs/macros.md).
+        if matches!(id, "macro.record" | "macro.pause" | "macro.resume" | "macro.stop" | "macro.play" | "macro.open" | "macro.save" | "macro.clear") {
+            macro_ui::toolbar(self, id);
             return;
         }
         if id == "view.layout" {
@@ -3556,6 +3567,7 @@ impl SolveApp {
         if !self.embedded && !self.embed_editor {
             toolbar::app_bar(self, ui);
         }
+        macro_ui::chip(self, ui.ctx());
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
@@ -3709,6 +3721,7 @@ impl SolveApp {
         view_confirm::show(self, ui.ctx());
         dialog_tree::show(self, ui.ctx());
         dialogs::show(self, ui.ctx());
+        macro_run::show(self, ui.ctx());
         issue_report::CadInput::block(self, ui, report_input);
         if !self.universal_panel_host_enabled() {
             sketch_palette::show(self, ui.ctx());

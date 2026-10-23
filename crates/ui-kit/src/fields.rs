@@ -251,7 +251,7 @@ pub fn scrub_text(number: f64, step: f64, literal: &Literal) -> String {
     if literal.comma {
         text = text.replace('.', ",");
     }
-    text + &literal.unit
+    text + literal.unit.as_str()
 }
 
 /// An ongoing label drag: the value and pointer x it is measured from, and the speed in use.

@@ -1,9 +1,9 @@
 use serde_json::{Value, json};
 
 use super::{
-    BodyFeaturesParams, BodyListParams, CommandEntry, CommandsParams, DescribeParams, DocumentInspectParams, DocumentInspectResult,
-    MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, ModelBodyFeatures, ModelEdges,
-    ModelFaces, ModelThreads, ModelThreadsParams, SketchInspectParams, SketchInspected,
+    BodyFeaturesParams, BodyListParams, CommandEntry, CommandsParams, DescribeParams, DocumentInspectParams, DocumentInspectResult, FindHolesParams,
+    FindHolesResult, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams, MeasureResult,
+    ModelBodyFeatures, ModelEdges, ModelFaces, ModelThreads, ModelThreadsParams, SketchInspectParams, SketchInspected,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -15,6 +15,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<BodyListParams>(), &["body"]);
     assert_keys(input_schema_for::<ModelThreadsParams>(), &[]);
     assert_keys(input_schema_for::<BodyFeaturesParams>(), &["body"]);
+    assert_keys(input_schema_for::<FindHolesParams>(), &["bodies", "feature", "holes_only", "max_diameter", "min_diameter", "type"]);
 }
 
 #[test]
@@ -28,6 +29,10 @@ fn strict_keeps_todays_errors() {
         ("model.faces", json!({})),
         ("model.faces", json!({"body": "Nope"})),
         ("model.body_features", json!({"body": "Nope"})),
+        ("inspect.find_holes", json!({})),
+        ("inspect.find_holes", json!({"feature": "NoSuch"})),
+        ("inspect.find_holes", json!({"bodies": ["Nope"]})),
+        ("inspect.find_holes", json!({"max_diameter": -5})),
     ]);
 }
 
@@ -552,4 +557,27 @@ fn body_features_list_what_built_each_body() {
     let warned = run(&mut s, "model.body_features", json!({"bdy": "A"}));
     assert!(warned.get("param_warnings").is_some(), "{warned}");
     assert!(s.execute("model.body_features", &json!({"body": "Nope"})).is_err());
+}
+
+/// #5651: `inspect.find_holes` replies as its output schema says, and warns in Warn for a
+/// misspelt key. A drilled hole answers with its diameter, axis and the edges that close it.
+#[test]
+fn find_holes_replies_with_its_schema() {
+    let schema = output_schema_for::<FindHolesResult>();
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let run = |s: &mut Session, id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    run(&mut s, "solid.hole", json!({"position": [10, 10, 10], "diameter": "6 mm", "name": "Bore"}));
+    let schema = schema.as_value();
+    let r = run(&mut s, "inspect.find_holes", json!({"max_diameter": "8 mm"}));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    assert!(r.get("param_warnings").is_none(), "{r}");
+    assert_eq!(r["count"], 1, "{r}");
+    assert_eq!(r["holes"][0]["feature"]["name"], "Bore", "{r}");
+    assert_eq!(r["holes"][0]["concave"], true, "{r}");
+    assert_eq!(r["max_diameter"], 8.0, "the filter echoes back in millimetres: {r}");
+    assert!(r["holes"][0]["edges"].as_array().is_some_and(|e| !e.is_empty()), "{r}");
+    assert_eq!(r["edges"].as_array().unwrap().len(), r["holes"][0]["edges"].as_array().unwrap().len(), "{r}");
+    let warned = run(&mut s, "inspect.find_holes", json!({"max_diameter": "8 mm", "bdy": 1}));
+    assert!(warned.get("param_warnings").is_some(), "{warned}");
 }
