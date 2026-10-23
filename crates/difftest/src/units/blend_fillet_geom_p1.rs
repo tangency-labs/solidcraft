@@ -80,7 +80,9 @@ use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
-pub const MIN_GENERATED: usize = 300;
+// Keep the larger corpus canonical: it covers additional failed center trims,
+// disjoint rail intervals and unset edge intervals from #483.
+pub const MIN_GENERATED: usize = 2000;
 
 /// `blend.fillet_geom_p1` runner.
 pub struct Runner;
