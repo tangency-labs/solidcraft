@@ -194,3 +194,107 @@ fn a_dense_spot_is_capped_per_kind_and_reports_the_total() {
     assert!(total >= 30, "the total counts every candidate, not just the rows: {total}");
     assert!((total as usize) < rows.len() + 30, "the list is truncated: {total} total, {} rows", rows.len());
 }
+
+#[test]
+fn long_press_picks_hidden_profiles_behind_a_body_without_revealing_them() {
+    let mut h = Harness::new();
+    h.app.ui.show_origin = false;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Buried profile"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Buried profile").unwrap().id;
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[-5,-5,1],"body_name":"Cover"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.app.session.visibility.hidden_sketches.push(sketch);
+    h.app.start("solid.extrude");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.settle();
+    let before = h.app.session.visibility.hidden_sketches.clone();
+    h.step(&json!({"hold":{"world":[5,5,0]}})).unwrap();
+    let popup = h.app.viewport.select_other.popup.as_ref().unwrap();
+    let row = popup.rows.iter().position(|r| r.sel == Sel::Profile { sketch, index: 0 }).unwrap();
+    h.call("ui.selectOther", json!({"pick":row}));
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, [Sel::Profile { sketch, index: 0 }]);
+    assert_eq!(h.app.session.visibility.hidden_sketches, before);
+    assert!(!crate::viewport::visible_sketches(&h.app).contains(&sketch));
+    assert!(h.app.session.selection.is_empty());
+}
+
+#[test]
+fn see_through_includes_hidden_bodies_and_occluded_edges_but_normal_picks_do_not() {
+    let mut h = Harness::new();
+    h.app.ui.show_origin = false;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Hidden"})).unwrap();
+    h.app.run("solid.box", json!({"length":30,"width":30,"height":10,"corner":[-10,-10,20],"body_name":"Cover"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    let point = h.at(&json!({"world":[5,0,10]})).unwrap();
+    let pos = egui::pos2(point[0] as f32, point[1] as f32);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let edge = |hit: &crate::viewport::Hit| matches!(hit, crate::viewport::Hit::Edge { body, .. } if body == "Hidden");
+    assert!(crate::viewport::pick_through(&h.app, &proj, pos).iter().any(edge));
+    assert!(!crate::viewport::pick_all(&h.app, &proj, pos).iter().any(edge));
+    h.app.session.visibility.hidden_bodies.push("Hidden".into());
+    let hidden = h.app.session.visibility.hidden_bodies.clone();
+    h.call("ui.selectOther", json!({"x":pos.x,"y":pos.y}));
+    let i = h.app.viewport.select_other.popup.as_ref().unwrap().rows.iter().position(|r| r.sel == Sel::Body { name: "Hidden".into() }).unwrap();
+    h.call("ui.selectOther", json!({"pick":i}));
+    assert_eq!(h.app.session.selection, [Sel::Body { name: "Hidden".into() }]);
+    assert_eq!(h.app.session.visibility.hidden_bodies, hidden);
+    assert!(
+        !crate::viewport::pick_all(&h.app, &proj, pos).iter().any(|hit| matches!(hit, crate::viewport::Hit::Face { body, .. } if body == "Hidden"))
+    );
+}
+
+#[test]
+fn approximate_long_click_reaches_profiles_and_popup_scrolls_after_five_rows() {
+    let mut h = Harness::new();
+    h.app.ui.show_origin = false;
+    let mut sketches = Vec::new();
+    for i in 0..8 {
+        h.app.run("sketch.create", json!({"plane":"XY","name":format!("Layer{i}")})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        sketches.push(h.app.session.doc.find_feature(&format!("Layer{i}")).unwrap().id);
+    }
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.app.session.visibility.hidden_sketches = sketches.clone();
+    h.app.start("solid.extrude");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.settle();
+    let at = h.at(&json!({"world":[10,5,0]})).unwrap();
+    let pos = egui::pos2(at[0] as f32 + 3.0, at[1] as f32);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    assert!(crate::viewport::pick_all(&h.app, &proj, pos).iter().all(|x| !matches!(x, crate::viewport::Hit::Profile { .. })));
+    h.step(&json!({"hold":[pos.x,pos.y]})).unwrap();
+    assert_eq!(h.app.viewport.select_other.popup.as_ref().unwrap().rows.len(), 8);
+    h.frames(3);
+    let rect = crate::scenario::rect_of("select_other").unwrap();
+    assert!(rect.height() <= 160.0, "five rows plus header and margins: {rect:?}");
+    let first = crate::scenario::handle_at("select_other:0").unwrap();
+    let sixth = crate::scenario::handle_at("select_other:5").unwrap();
+    assert!(rect.contains(first));
+    assert!(!rect.contains(sixth), "the sixth row must scroll: {rect:?} {sixth:?}");
+    h.app.synthetic.push(egui::Event::PointerMoved(rect.center()));
+    h.app.synthetic.push(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -240.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"select_other:7"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, [Sel::Profile { sketch: sketches[7], index: 0 }]);
+}
+
+#[test]
+fn see_through_control_rejects_out_of_range_coordinates() {
+    let mut h = Harness::new();
+    h.settle();
+    for x in [1e300, -1e300, 1e7] {
+        let reply = h.call("ui.selectOther", json!({"x":x,"y":10}));
+        assert_eq!(reply["ok"], false, "{reply}");
+    }
+}

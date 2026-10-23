@@ -22,10 +22,13 @@
   reach something under something else (two lines drawn on top of each other, coincident points,
   an edge in front of a face, overlapping bodies), hold the left button still for half a second
   (long-press on a touch screen) or right-click › **Select Other…**: a list of everything under
-  the cursor opens there, the sketch being edited first. Hovering a row lights it up; clicking it
+  the cursor opens there, including hidden bodies and sketches near the pointer.
+  The popup shows five rows at a time; scroll for more. Picking a hidden object leaves its
+  visibility unchanged, so an Extrude profile can be chosen through a covering body.
+  The sketch being edited comes first. Hovering a row lights it up; clicking it
   selects it (Shift or Ctrl adds), and in a command's dialog it goes to the active selection box.
   Esc or a click elsewhere closes the list. Clicking again on the same spot, with nothing changed
-  in between, selects the next thing in that list. The
+  in between, cycles through visible candidates at that point. The
   wheel zooms at the cursor, the middle button pans and right-drag orbits freely (the mouse
   preset in Preferences switches to SolidWorks, Inventor, Alias, Blender, Tinkercad, OpenSCAD or Touchpad style). On a
   trackpad, pinch zooms and two-finger scroll pans (Navigation › Two-finger scroll pans;
