@@ -1,17 +1,19 @@
 //! The Play Macro prompt: the values a macro asks for, then `macro.play`.
 //!
-//! A Rhai macro declares `// @param name Label [kind] [options] | default` (docs/macros.md).
-//! Playing one shows one row per parameter, in the control its kind asks for — text, whole
-//! number, number, length, angle, toggle or dropdown — prefilled with its default, and runs
-//! the macro with what is typed. The engine checks every value again (`cmd::macros`), so a
-//! headless caller gets the same rules without any of this window.
+//! A Rhai macro declares `// @param name Label [kind] [options] | default [@if gate]`
+//! (docs/macros.md). Playing one shows one row per parameter, in the control its kind asks
+//! for — text, whole number, number, length, angle, toggle or dropdown — prefilled with its
+//! default, and runs the macro with what is typed. A parameter gated with `@if name=v1,v2`
+//! stays hidden until the watched parameter holds one of those values. The engine checks
+//! every value again (`cmd::macros`), so a headless caller gets the same rules without any
+//! of this window.
 
 use serde_json::{Value, json};
 
 use crate::SolveApp;
 use crate::i18n::{tr, tr_label};
 use crate::ui_kit;
-use solidcraft_engine::cmd::macros::{MacroParam, ParamKind};
+use solidcraft_engine::cmd::macros::{MacroParam, ParamGate, ParamKind};
 use solidcraft_engine::doc::expr::Kind;
 
 /// One parameter's draft value, in the shape its kind asks for.
@@ -31,8 +33,8 @@ pub enum Draft {
 pub struct MacroRun {
     pub name: String,
     pub description: Option<String>,
-    /// One row per declared parameter: name, label and typed draft.
-    pub fields: Vec<(String, String, Draft)>,
+    /// One row per declared parameter: name, label, typed draft and `@if` gate.
+    pub fields: Vec<(String, String, Draft, Option<ParamGate>)>,
     pub error: Option<String>,
 }
 
@@ -42,7 +44,7 @@ pub fn open(app: &mut SolveApp) {
     app.macro_run = Some(MacroRun {
         name: m.name.clone().unwrap_or_default(),
         description: m.description.clone(),
-        fields: m.params.iter().map(|p| (p.name.clone(), p.label.clone().unwrap_or_else(|| p.name.clone()), draft(app, p))).collect(),
+        fields: m.params.iter().map(|p| (p.name.clone(), p.label.clone().unwrap_or_else(|| p.name.clone()), draft(app, p), p.gate.clone())).collect(),
         error: None,
     });
 }
@@ -101,6 +103,30 @@ fn value(draft: &Draft) -> Value {
     }
 }
 
+/// The text an `@if` gate compares a draft against.
+fn shown(draft: &Draft) -> String {
+    match value(draft) {
+        Value::String(s) => s,
+        other => other.to_string(),
+    }
+}
+
+/// A parameter shows when it has no gate, or the parameter its gate watches is itself
+/// visible and holds one of the gate's values (so hiding `hand` also hides the hub rows
+/// that watch it). A gate watching an unknown parameter shows the row — the body guards
+/// itself. The depth cap breaks a cyclic gate (a watches b, b watches a): a cycle hides
+/// both rows rather than looping.
+fn visible(fields: &[(String, String, Draft, Option<ParamGate>)], idx: usize, depth: usize) -> bool {
+    let Some(gate) = &fields[idx].3 else { return true };
+    if depth > fields.len() {
+        return false;
+    }
+    match fields.iter().position(|f| f.0 == gate.name) {
+        Some(w) => gate.values.iter().any(|v| *v == shown(&fields[w].2)) && visible(fields, w, depth + 1),
+        None => true,
+    }
+}
+
 /// Draw the prompt when it is open. Called once per frame.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut d) = app.macro_run.take() else { return };
@@ -113,7 +139,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             if let Some(text) = &d.description {
                 ui_kit::text(ui, text, ui_kit::Text::Note("macro_run.description"));
             }
-            for (_, label, draft) in &mut d.fields {
+            for i in 0..d.fields.len() {
+                if !visible(&d.fields, i, 0) {
+                    continue;
+                }
+                let (_, label, draft, _) = &mut d.fields[i];
                 match draft {
                     Draft::Text(value) => {
                         ui_kit::row(ui, label, |ui| ui_kit::field(ui, value));
@@ -146,8 +176,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut keep = matches!(action, ui_kit::Action::None) && !closed;
     if matches!(action, ui_kit::Action::Ok) {
         let mut params = json!({});
-        for (name, _, draft) in &d.fields {
-            params[name] = value(draft);
+        for i in 0..d.fields.len() {
+            if visible(&d.fields, i, 0) {
+                params[&d.fields[i].0] = value(&d.fields[i].2);
+            }
         }
         match app.run("macro.play", json!({"params": params})) {
             Ok(r) => {

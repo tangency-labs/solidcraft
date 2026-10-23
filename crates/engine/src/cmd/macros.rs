@@ -17,7 +17,13 @@ use crate::{EngineError, Result, Session};
 pub const MAX_STEPS: usize = 10_000;
 const MAX_MACRO_BYTES: usize = 4 << 20;
 const MAX_LISTED: usize = 200;
-const MAX_OPS: u64 = 100_000;
+/// Rhai's runaway-loop guard for one macro play. Generous because a macro that computes its
+/// own geometry (a gear's involute is ~30k steps per flank pass) is doing real work; even at
+/// this cap a `while true {}` stops in well under a second.
+const MAX_OPS: u64 = 1_000_000;
+/// Rhai's own default (64) is too tight for real generated macros — a gear's involute loop
+/// trips it — but the limit stays bounded so hostile input still fails cleanly at parse time.
+const MAX_EXPR_DEPTH: usize = 512;
 
 /// A recorded or loaded Rhai macro.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -60,6 +66,15 @@ impl ParamKind {
     }
 }
 
+/// A `@if name=v1,v2` visibility gate on a parameter: the Play dialog hides the row until
+/// the watched parameter holds one of the listed values. The macro body guards itself, so
+/// the engine still binds a gated-out parameter from its default.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ParamGate {
+    pub name: String,
+    pub values: Vec<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MacroParam {
     pub name: String,
@@ -73,6 +88,9 @@ pub struct MacroParam {
     pub options: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
+    /// The `@if` gate that hides this parameter until another one holds a listed value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<ParamGate>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -312,6 +330,25 @@ fn param_kind(word: &str) -> Option<ParamKind> {
     })
 }
 
+/// Split a trailing `@if name=v1,v2` visibility gate off a `@param` fragment. The gate is
+/// whitespace-delimited so it never eats a label or default that merely contains `@if`.
+fn split_gate(cmd: &str, text: &str) -> Result<(String, Option<ParamGate>)> {
+    let Some((at, _)) = text.match_indices("@if").find(|(i, _)| *i == 0 || text[..*i].ends_with(char::is_whitespace)) else {
+        return Ok((text.to_string(), None));
+    };
+    let head = text[..at].trim().to_string();
+    let (gname, gvals) = text[at + 3..].trim().split_once('=').ok_or_else(|| bad(cmd, "an `@if` gate needs `@if name=value`"))?;
+    let gname = gname.trim();
+    if !is_param_name(gname) {
+        return Err(bad(cmd, "an `@if` gate needs a parameter name to watch"));
+    }
+    let values: Vec<String> = gvals.split(',').map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).collect();
+    if values.is_empty() || values.len() > 64 || values.iter().any(|v| v.chars().count() > 128 || v.chars().any(|c| c.is_control())) {
+        return Err(bad(cmd, format!("the `@if` gate watching `{gname}` needs 1 to 64 plain values")));
+    }
+    Ok((head, Some(ParamGate { name: gname.to_string(), values })))
+}
+
 /// Check a value against a parameter's kind and turn it into the JSON type Rhai sees.
 /// Lengths and angles stay expressions ("5 mm", `width + 2`): the command that receives
 /// them evaluates and unit-checks them, exactly as if the value came from the UI.
@@ -383,27 +420,33 @@ pub(crate) fn parse_rhai_macro(cmd: &str, text: &str) -> Result<Macro> {
         let rest = rest.trim();
         if let Some(spec) = rest.strip_prefix("@param") {
             let spec = spec.trim();
-            let (left, default) = match spec.split_once('|') {
-                Some((l, r)) => (l.trim(), Some(r.trim().to_string())),
-                None => (spec, None),
+            // A trailing `@if name=v1,v2` gate hides the parameter in the Play dialog until
+            // the watched parameter holds one of the listed values; it rides after the default.
+            let (left, default, gate) = match spec.split_once('|') {
+                Some((l, r)) => {
+                    let (d, g) = split_gate(cmd, r.trim())?;
+                    (l.trim().to_string(), Some(d), g)
+                }
+                None => {
+                    let (l, g) = split_gate(cmd, spec)?;
+                    (l, None, g)
+                }
             };
-            let mut bits = left.split_whitespace();
-            let n = bits.next().unwrap_or("").trim();
-            if !is_param_name(n) {
-                return Err(bad(cmd, "every @param needs a name (letters, digits, `_` and `-`)"));
-            }
-            if params.iter().any(|q: &MacroParam| q.name == n) {
-                return Err(bad(cmd, format!("parameter `{n}` is given twice")));
-            }
             // `name [label words] [kind] [choice, list]`: the option list is a trailing bracket
-            // group (spaces inside allowed) and the kind token sits just before it, so
-            // `nx Count in X int` and `mat Material choice [steel, brass]` both parse.
+            // group (spaces inside allowed) — `[a, b]`, or the `{a, b}` shape community macros
+            // use — and the kind token sits just before it, so `nx Count in X int` and
+            // `mat Material choice [steel, brass]` both parse.
             // Older macros (no kind token) keep working as text.
-            let (left, options) = match (left.find('['), left.ends_with(']')) {
-                (Some(from), true) if from + 1 < left.len() => {
+            let open = match (left.ends_with(']'), left.ends_with('}')) {
+                (true, _) => left.find('['),
+                (_, true) => left.rfind('{'),
+                (false, false) => None,
+            };
+            let (left, options) = match open {
+                Some(from) if from + 1 < left.len() => {
                     let list = &left[from + 1..left.len() - 1];
                     let options = list.split(',').map(|o| o.trim().to_string()).filter(|o| !o.is_empty()).collect();
-                    (left[..from].trim(), options)
+                    (left[..from].trim().to_string(), options)
                 }
                 _ => (left, Vec::new()),
             };
@@ -416,13 +459,18 @@ pub(crate) fn parse_rhai_macro(cmd: &str, text: &str) -> Result<Macro> {
                 return Err(bad(cmd, format!("parameter `{n}` is given twice")));
             }
             let mut tail: Vec<&str> = bits.collect();
+            // Options make it a choice, and a literal `choice` token is then just the kind
+            // word, not part of the label. Without options a trailing kind word (`int`,
+            // `length`, …) types the parameter — but a label word like "Pressure angle"
+            // must survive untouched.
             let mut kind = if options.is_empty() { ParamKind::Text } else { ParamKind::Choice };
-            if let Some(k) = tail.last().copied().and_then(param_kind) {
-                kind = k;
+            if options.is_empty() {
+                if let Some(k) = tail.last().copied().and_then(param_kind) {
+                    kind = k;
+                    tail.pop();
+                }
+            } else if tail.last().copied() == Some("choice") {
                 tail.pop();
-            }
-            if !options.is_empty() && kind != ParamKind::Choice {
-                return Err(bad(cmd, format!("parameter `{n}`: only a `choice` parameter lists options")));
             }
             if kind == ParamKind::Choice && options.is_empty() {
                 return Err(bad(cmd, format!("choice parameter `{n}` needs its options: `choice [a, b, …]`")));
@@ -443,7 +491,7 @@ pub(crate) fn parse_rhai_macro(cmd: &str, text: &str) -> Result<Macro> {
                 .map(|d| coerce_param(kind, &options, &Value::String(d)))
                 .transpose()
                 .map_err(|why| bad(cmd, format!("parameter `{n}` default: {why}")))?;
-            params.push(MacroParam { name: n.to_string(), label: if label.is_empty() { None } else { Some(label) }, kind, options, default });
+            params.push(MacroParam { name: n.to_string(), label: if label.is_empty() { None } else { Some(label) }, kind, options, default, gate });
             if params.len() > 100 {
                 return Err(bad(cmd, "a macro asks for at most 100 parameters"));
             }
@@ -546,6 +594,7 @@ fn eval_rhai(s: &mut Session, source: &str, bound: &[(String, Value)]) -> Result
     let eval = {
         let mut engine = Engine::new();
         engine.set_max_operations(MAX_OPS);
+        engine.set_max_expr_depths(MAX_EXPR_DEPTH, MAX_EXPR_DEPTH);
         let sh = Rc::clone(&shared);
         engine.register_fn("run", move |cmd: ImmutableString, params: Dynamic| -> std::result::Result<Dynamic, Box<EvalAltResult>> {
             let json_params: Value = rhai::serde::from_dynamic(&params).unwrap_or(Value::Null);

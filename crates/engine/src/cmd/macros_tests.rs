@@ -311,6 +311,120 @@ fn param_declarations_read_kind_and_options() {
 }
 
 #[test]
+fn brace_choices_and_if_gates_read_the_community_dialect() {
+    let m = super::macros::parse_rhai_macro(
+        "macro.open",
+        "// Universal\n// @param kind Kind {gear, sprocket} | gear\n\
+         // @param pa Pressure angle {14.5, 20, 25} | 20 @if kind=gear\n\
+         // @param helix Helix angle (deg) | 15 @if form=helical,herringbone\n\
+         let k = kind;\n",
+    )
+    .unwrap();
+    assert_eq!(m.params.len(), 3);
+    assert_eq!(m.params[0].label.as_deref(), Some("Kind"));
+    assert_eq!(m.params[0].options, vec!["gear".to_string(), "sprocket".to_string()]);
+    assert!(m.params[0].gate.is_none());
+    // The gate rides after the default and never leaks into its value.
+    assert_eq!(m.params[1].default, Some(json!("20")));
+    let gate = m.params[1].gate.as_ref().unwrap();
+    assert_eq!(gate.name, "kind");
+    assert_eq!(gate.values, vec!["gear".to_string()]);
+    // A gate may watch a parameter the macro never declared — the body guards it itself.
+    assert_eq!(m.params[2].default, Some(json!("15")));
+    assert_eq!(m.params[2].gate.as_ref().unwrap().values, vec!["helical".to_string(), "herringbone".to_string()]);
+    // A malformed gate is refused when the macro opens, not when it plays.
+    assert!(super::macros::parse_rhai_macro("macro.open", "// T\n// @param a A | 1 @if b\n").is_err());
+    assert!(super::macros::parse_rhai_macro("macro.open", "// T\n// @param a A | 1 @if 1!=x\n").is_err());
+    // A gated parameter still plays from its clean default.
+    let mut s = Session::default();
+    let src = "// S\n// @param kind Kind {box, sphere} | box\n// @param side Side | 2 @if kind=sphere\nrun(\"solid.box\", #{ length: side, width: 1, height: 1 });\n";
+    let r = run(&mut s, "macro.play", json!({"source": src}));
+    assert_eq!(r["ran"], true, "{r}");
+}
+
+#[test]
+fn deep_expressions_compile_within_their_bound() {
+    let mut s = Session::default();
+    // Rhai's own depth default (64) is too tight for generated macros — the universal gear
+    // example trips it — so SolidCraft raises the bound (MAX_EXPR_DEPTH) but keeps it finite.
+    let deep = format!("let x = 1{};\nrun(\"solid.box\", #{{ length: x, width: 1, height: 1 }});\n", " + 1".repeat(120));
+    let r = run(&mut s, "macro.play", json!({"source": &deep}));
+    assert_eq!(r["ran"], true, "{r}");
+    // Hostile nesting still fails cleanly at parse time — no hang, no panic.
+    let hostile = format!("let x = 1{};\n", " + 1".repeat(100_000));
+    let err = error(&mut s, "macro.play", json!({"source": &hostile}));
+    assert!(err.contains("complexity"), "{err}");
+}
+
+#[test]
+fn the_universal_gear_plays_every_form() {
+    // One macro, every extruded form: external and internal spur gears, a hub, and a
+    // sprocket, each building a sane solid. The swept forms are the ignored test below.
+    let (ra, rf, bore_r, thick) = (14.0, 9.5, 4.0, 8.0);
+    let max = std::f64::consts::PI * (ra * ra - bore_r * bore_r) * thick;
+    let min = std::f64::consts::PI * (rf * rf - bore_r * bore_r) * thick;
+
+    let mut spur = Session::default();
+    let r = play_example(&mut spur, "gear_universal.rhai", json!({}));
+    assert_eq!(r["ran"], true, "{r}");
+    let v = volume(&mut spur);
+    assert!(v > min && v < max, "spur gear sits between root and blank: {v}");
+
+    let mut hub = Session::default();
+    let r = play_example(&mut hub, "gear_universal.rhai", json!({"params": { "hub": "one", "hub_od": 20, "hub_length": 8 }}));
+    assert_eq!(r["ran"], true, "{r}");
+    let v_hub = volume(&mut hub);
+    assert!(v_hub > v, "the hub adds a collar above the gear: {v_hub} > {v}");
+
+    let mut internal = Session::default();
+    let r = play_example(&mut internal, "gear_universal.rhai", json!({"params": { "hand": "internal", "rim": 80 }}));
+    assert_eq!(r["ran"], true, "{r}");
+    let v = volume(&mut internal);
+    let rim = std::f64::consts::PI * 40.0 * 40.0 * thick;
+    assert!(v > 0.0 && v < rim, "the tooth ring is cut from the 80 mm rim disc: {v} < {rim}");
+
+    let mut spr = Session::default();
+    let r = play_example(&mut spr, "gear_universal.rhai", json!({"params": { "kind": "sprocket", "chain": "40", "edge_chamfer": "no" }}));
+    assert_eq!(r["ran"], true, "{r}");
+    let m = run(&mut spr, "inspect.measure", json!({}));
+    assert_eq!(m["body_count"], 1, "{m}");
+    let v = volume(&mut spr);
+    // ANSI 40 on 12 teeth: pitch dia 12.7/sin(15°) ≈ 49.2 mm, face 7.2 mm — under a
+    // 25 mm-radius disc of that face, well above the 20 mm-radius one.
+    assert!(v > std::f64::consts::PI * 20.0 * 20.0 * 7.0 && v < std::f64::consts::PI * 25.0 * 25.0 * 7.4, "sprocket volume: {v}");
+}
+
+/// The swept forms. A twisted sweep rebuilds every profile wall at each station along the
+/// path, which costs minutes whatever the profile — so the macro lofts rotated sections
+/// instead. Each form must build inside a 90 s budget; a regression past it fails the test.
+#[test]
+fn the_universal_gear_sweeps_helical_forms() {
+    let (ra, rf, bore_r, thick) = (14.0, 9.5, 4.0, 8.0);
+    let max = std::f64::consts::PI * (ra * ra - bore_r * bore_r) * thick;
+    let min = std::f64::consts::PI * (rf * rf - bore_r * bore_r) * thick;
+
+    let mut hel = Session::default();
+    let t = std::time::Instant::now();
+    let r = play_example(&mut hel, "gear_universal.rhai", json!({"params": { "form": "helical", "helix": 15 }}));
+    assert_eq!(r["ran"], true, "{r}");
+    let hel_secs = t.elapsed();
+    eprintln!("helical: {hel_secs:?}");
+    assert!(hel_secs < std::time::Duration::from_secs(90), "helical gear took {hel_secs:?} (budget 90 s)");
+    let v = volume(&mut hel);
+    assert!(v > min && v < max, "helical gear: {v}");
+
+    let mut hb = Session::default();
+    let t = std::time::Instant::now();
+    let r = play_example(&mut hb, "gear_universal.rhai", json!({"params": { "form": "herringbone", "helix": 15 }}));
+    assert_eq!(r["ran"], true, "{r}");
+    let hb_secs = t.elapsed();
+    eprintln!("herringbone: {hb_secs:?}");
+    assert!(hb_secs < std::time::Duration::from_secs(90), "herringbone gear took {hb_secs:?} (budget 90 s)");
+    let v = volume(&mut hb);
+    assert!(v > min && v < max * 1.01, "herringbone gear: {v}");
+}
+
+#[test]
 fn a_macro_that_changes_nothing_adds_no_undo_step() {
     let mut s = Session::default();
     let r = run(&mut s, "macro.play", json!({"source": "run(\"engine.commands\", #{});\n"}));

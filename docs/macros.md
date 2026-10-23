@@ -16,7 +16,7 @@ Save writes a `.rhai` file. Open loads one. Play runs it. A macro can ask for va
 Play shows one row per parameter, prefilled with its default:
 
 ```text
-// @param name Label [kind] [choice, options] | default
+// @param name Label [kind] [choice, options] | default [@if watch=v1,v2]
 ```
 
 | kind | Play shows | Rhai sees | example |
@@ -28,6 +28,15 @@ Play shows one row per parameter, prefilled with its default:
 | `angle` | an angle field (degrees) | a number or an expression | `// @param tilt Tilt angle | 90 deg` |
 | `bool` | a toggle | a bool | `// @param both Chamfer both ends bool | yes` |
 | `choice` | a dropdown | one of the options | `// @param mat Material choice [steel, brass] | steel` |
+
+A choice's options may also be written `{steel, brass}` — the braces make it a choice on
+their own, no `choice` token needed.
+
+A `@if watch=v1,v2` gate hides the row in the Play dialog until the parameter `watch`
+holds one of the listed values, so a gear macro can show its hub rows only for external
+teeth and its sprocket rows only for chain mode. Hidden rows are not sent; the engine
+binds their defaults. The gate is a dialog convenience only — the macro body should guard
+itself, and a headless caller may pass any parameter regardless.
 
 A `length` or `angle` default may be an expression (`5 mm`, `width + 2`); a plain number is the
 design's own unit, so a macro can compute with it. The engine checks every value again when
@@ -57,5 +66,6 @@ Examples live in [examples/macros](../examples/macros). Open the `.rhai` file, t
 | `chamfer_holes.rhai` | a part with holes | Query holes, chamfer by size |
 | `batch_export_stl.rhai` | empty | Folder of STEP → STL |
 | `gear_generator.rhai` | empty | full-depth involute spur gear, typed params (Machinery's Handbook) |
+| `gear_universal.rhai` | empty | one macro, many forms: external/internal spur, helical and herringbone gears (module or DP), ANSI #25–#160 sprockets with ISO 606 tooth form, hubs and bores — gated params show only what the current form uses |
 
 The browser plays Rhai in the same engine. `list_dir` / `write_file` are desktop only.
