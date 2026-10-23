@@ -463,6 +463,9 @@ pub struct Session {
     /// Edits and Save are refused until that revision is restored as the working model, saved
     /// as a new file, or another design is opened.
     pub revision_view: Option<u64>,
+    /// Whether saves keep model snapshots, and the size and revision caps. Off by default.
+    /// A preference, like `auto_project`: it belongs to the user, not the design.
+    pub revision_limits: solidcraft_doc::document_history::RevisionHistoryOptions,
     /// One-shot display-only notification during doc.open, before authoritative evaluation.
     /// Interactive loaders may show it provisionally; it never becomes model state.
     pub open_preview: Option<Box<dyn Fn(solidcraft_io::DesignPreview) + Send + Sync>>,
@@ -718,6 +721,7 @@ impl Session {
             read_only: false,
             user_named: false,
             revision_view: None,
+            revision_limits: Default::default(),
             open_preview: None,
             log: Vec::new(),
             revision: 1,
@@ -782,6 +786,7 @@ impl Session {
     pub fn replace_design(&mut self, fresh: Session) {
         let auto_project = self.auto_project;
         let single_surface_analysis = self.single_surface_analysis;
+        let revision_limits = self.revision_limits;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let render_viewport = self.render_viewport.clone();
@@ -796,6 +801,7 @@ impl Session {
         self.crash_journal = crash_journal;
         self.auto_project = auto_project;
         self.set_single_surface_analysis(single_surface_analysis);
+        self.revision_limits = revision_limits;
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
         self.render_viewport = render_viewport;
@@ -1728,6 +1734,7 @@ impl Session {
             read_only: self.read_only,
             user_named: self.user_named,
             revision_view: self.revision_view,
+            revision_limits: self.revision_limits,
             open_preview: None,
             saved: self.saved.clone(),
             log: Vec::new(),

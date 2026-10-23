@@ -1150,6 +1150,7 @@ impl SolveApp {
             .and_then(Value::as_array)
             .map(|a| a.iter().filter_map(|c| serde_json::from_value::<[u8; 3]>(c.clone()).ok()).take(recent_colors::MAX_RECENT_COLORS).collect())
             .unwrap_or_default();
+        prefs::apply_revision_history(self);
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {

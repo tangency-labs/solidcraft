@@ -258,6 +258,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     // Preferences the session holds go with the user, not the tab (#680).
     app.session.auto_project = out.session.auto_project;
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
+    app.session.revision_limits = out.session.revision_limits;
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
     app.session.invalidate_view(out_rev);

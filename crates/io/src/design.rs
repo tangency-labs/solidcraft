@@ -2550,8 +2550,9 @@ mod tests {
     #[test]
     fn revision_snapshots_share_import_blobs_and_reopen() {
         let mut doc = Document::from_json(&document().to_json()).unwrap();
-        let snapshot = solidcraft_doc::document_history::DocumentHistory::model_snapshot(&doc).unwrap();
-        doc.document_history.record_save_with(Some(snapshot));
+        let limits = solidcraft_doc::document_history::SnapshotLimits::standard();
+        let snapshot = solidcraft_doc::document_history::DocumentHistory::model_snapshot(&doc, limits.max_bytes).unwrap();
+        doc.document_history.record_save_with(Some(snapshot), limits);
         let bytes = write_design_container(&doc).unwrap();
         let entries = parts(&bytes);
         assert_eq!(entries.keys().filter(|n| n.ends_with(".step")).count(), 1, "the snapshot's STEP is the live import's blob");

@@ -64,6 +64,21 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                 }
             });
+            ui_kit::settings_block_hint(ui, app.tr("prefs.revision_history"), app.tr("prefs.revision_history_note"), labels, |ui| {
+                ui_kit::checkbox(ui, app.tr("prefs.revision_history_on"), &mut app.preferences.revision_history);
+                ui.add_enabled_ui(app.preferences.revision_history, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(app.tr("prefs.revision_history_size"));
+                        ui_kit::settings_number(ui, &mut app.preferences.revision_history_mb, 1..=128, 1.0);
+                        ui.label(app.tr("prefs.megabytes"));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(app.tr("prefs.revision_history_versions"));
+                        ui_kit::settings_number(ui, &mut app.preferences.revision_history_versions, 1..=64, 1.0);
+                    });
+                });
+                apply_revision_history(app);
+            });
         });
         ui_kit::settings_section(ui, "files", app.tr("FILES"), |ui| {
             file_size_rows(app, ui, labels);

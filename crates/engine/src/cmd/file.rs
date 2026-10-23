@@ -557,13 +557,28 @@ fn write_bytes(
         return Err(bad("file.save", "format must be container or json"));
     }
     // Count this save in the file. A failed write puts the count back, so a retry is the next
-    // number and an unsaved design does not look saved. The snapshot is the model before this
-    // entry is attached, so it does not nest the history it belongs to.
+    // number and an unsaved design does not look saved. Snapshots are opt-in
+    // (`revision_limits`, off by default). The snapshot is the model before this entry is
+    // attached, so it does not nest the history it belongs to. Caps still prune bodies already
+    // in the file.
     let previous = s.doc.document_history.clone();
-    let snapshot = solidcraft_doc::document_history::DocumentHistory::model_snapshot(&s.design_at(Some(path)));
-    s.doc_mut().document_history.record_save_with(snapshot);
+    let options = s.revision_limits;
+    let limits = options.limits();
+    let snapshot = if options.enabled {
+        solidcraft_doc::document_history::DocumentHistory::model_snapshot(&s.design_at(Some(path)), limits.max_bytes)
+    } else {
+        None
+    };
+    let shared = match &snapshot {
+        Some(value) => solidcraft_doc::document_history::shared_payloads(value),
+        None if previous.entries.iter().any(|entry| entry.snapshot.is_some()) => {
+            serde_json::to_value(s.design_at(Some(path))).map(|value| solidcraft_doc::document_history::shared_payloads(&value)).unwrap_or_default()
+        }
+        None => std::collections::HashSet::new(),
+    };
+    s.doc_mut().document_history.record_save_shared(snapshot, limits, &shared);
     if format == "json" {
-        s.doc_mut().document_history.prune_inline_snapshots();
+        s.doc_mut().document_history.prune_inline_snapshots(limits.max_bytes);
     }
     let produced = if format == "container" {
         s.design_container_at(Some(path), compression, preview, cache).map_err(EngineError::from)
@@ -2308,6 +2323,7 @@ mod tests {
         for (format, file) in [("container", "part.solidcraft"), ("json", "part.json")] {
             let path = dir.join(file);
             let mut s = Session::default();
+            s.revision_limits.enabled = true;
             s.execute("solid.box", &json!({"length": 40, "width": 20, "height": 10})).unwrap();
             let missing = dir.join("missing").join(file);
             let err = s.execute("file.save_as", &json!({"path": &missing, "format": format})).unwrap_err();
@@ -2371,6 +2387,7 @@ mod tests {
         let old = dir.join("old.solidcraft");
         std::fs::write(&old, r#"{"format":"solidcraft/1","name":"old","units":"mm","params":[],"features":[],"next_id":1}"#).unwrap();
         let mut opened = Session::default();
+        opened.revision_limits.enabled = true;
         opened.execute("doc.open", &json!({"path": &old})).unwrap();
         assert_eq!(opened.doc.document_history.revision, 0);
         assert!(opened.doc.document_history.entries.first().is_some_and(|e| e.snapshot.is_none()));
@@ -2386,6 +2403,42 @@ mod tests {
         let again = solidcraft_io::read_design(&std::fs::read(&old).unwrap()).unwrap();
         assert_eq!(again.document_history.revision, 1);
         assert_eq!(again.name, "old");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Snapshots stay off until the preference is on. The version cap then keeps only the newest
+    /// models, and a byte cap smaller than the model stores none.
+    #[test]
+    fn revision_history_is_off_until_enabled_and_obeys_the_caps() {
+        let dir = name_dir("revisions-off");
+        let path = dir.join("part.solidcraft");
+        let mut s = Session::default();
+        assert!(!s.revision_limits.enabled);
+        assert_eq!(s.revision_limits.max_bytes, 128 << 20);
+        assert_eq!(s.revision_limits.max_versions, 16);
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("file.save_as", &json!({"path": &path})).unwrap();
+        assert_eq!(s.doc.document_history.revision, 1);
+        assert!(s.doc.document_history.entries.first().is_some_and(|e| e.snapshot.is_none()));
+
+        s.revision_limits.enabled = true;
+        s.revision_limits.max_versions = 1;
+        s.execute("solid.box", &json!({"length": 4, "width": 4, "height": 4, "corner": [30, 0, 0]})).unwrap();
+        s.execute("file.save", &json!({})).unwrap();
+        assert_eq!(s.doc.document_history.revision, 2);
+        assert!(s.doc.document_history.entries[0].snapshot.is_none());
+        assert!(s.doc.document_history.entries[1].snapshot.is_some());
+        s.execute("solid.box", &json!({"length": 2, "width": 2, "height": 2, "corner": [60, 0, 0]})).unwrap();
+        s.execute("file.save", &json!({})).unwrap();
+        assert_eq!(s.doc.document_history.revision, 3);
+        assert_eq!(s.doc.document_history.entries.iter().filter(|e| e.snapshot.is_some()).count(), 1);
+        assert!(s.doc.document_history.entries.last().is_some_and(|e| e.snapshot.is_some()));
+
+        s.revision_limits.max_versions = 16;
+        s.revision_limits.max_bytes = 8;
+        s.execute("file.save", &json!({})).unwrap();
+        assert_eq!(s.doc.document_history.revision, 4);
+        assert!(s.doc.document_history.entries.iter().all(|e| e.snapshot.is_none()), "a cap smaller than the model keeps no snapshot");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

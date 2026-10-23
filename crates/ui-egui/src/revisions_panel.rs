@@ -3,10 +3,11 @@
 //! File view, the File menu, and `ui.start` of `doc.revisions` open it. `engine.execute` of
 //! `doc.revisions` still returns the JSON list and does not open this window. This is not the
 //! feature timeline. Restore and Open read-only call `doc.restore`. A snapshot is the parametric
-//! model at that save. The newest 16 revisions can keep one.
+//! model at that save. Keeping one is off until Preferences turns it on. The default then is
+//! the newest 16 revisions, within 128 MB.
 
 use serde_json::{Value, json};
-use solidcraft_engine::doc::document_history::{DocumentHistory, MAX_SNAPSHOTS};
+use solidcraft_engine::doc::document_history::{DocumentHistory, RevisionHistoryOptions};
 
 use crate::SolveApp;
 use crate::i18n;
@@ -58,6 +59,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let save_count = history.revision;
     let format_version = history.format_version;
     let readonly = app.session.revision_view;
+    let limits = app.session.revision_limits;
     let Some(mut state) = app.revisions.take() else { return };
     if state.selected.is_some_and(|revision| !rows.iter().any(|row| row.revision == revision)) {
         state.selected = None;
@@ -68,12 +70,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // One and a half cards, the kit window default. Another command closes this window, so it
     // is not on screen beside a command dialog.
     let closed = crate::ui_kit::Window::new(egui::Id::new("sc_revisions"), "restore", title).cards(1.5).show_body(ctx, |ui| {
-        draw_header(ui, save_count, format_version, &rows, readonly);
+        draw_header(ui, save_count, format_version, &rows, readonly, limits);
         ui.add_space(4.0);
         if rows.is_empty() {
             ui.label(i18n::tr("ui.revisions.empty"));
         } else {
-            draw_rows(ui, &mut state, &rows);
+            draw_rows(ui, &mut state, &rows, limits.max_versions);
         }
         if let Some(error) = &state.error {
             ui.add_space(4.0);
@@ -123,17 +125,23 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-fn draw_header(ui: &mut egui::Ui, save_count: u64, format_version: u32, rows: &[Row], readonly: Option<u64>) {
+fn draw_header(ui: &mut egui::Ui, save_count: u64, format_version: u32, rows: &[Row], readonly: Option<u64>, limits: RevisionHistoryOptions) {
     let t = Tokens::get();
     let count = save_count.to_string();
     ui.label(i18n::format("ui.revisions.save_count", &[("count", &count)]));
     let version = format_version.to_string();
     ui.label(egui::RichText::new(i18n::format("ui.revisions.format", &[("version", &version)])).small().color(t.text_dim));
-    let kept = MAX_SNAPSHOTS.to_string();
-    ui.label(egui::RichText::new(i18n::format("ui.revisions.cap", &[("count", &kept)])).small().color(t.text_dim));
+    if limits.enabled {
+        let kept = limits.max_versions.to_string();
+        ui.label(egui::RichText::new(i18n::format("ui.revisions.cap", &[("count", &kept)])).small().color(t.text_dim));
+        let megabytes = (limits.max_bytes >> 20).to_string();
+        ui.label(egui::RichText::new(i18n::format("ui.revisions.cap_size", &[("megabytes", &megabytes)])).small().color(t.text_dim));
+    } else {
+        ui.label(egui::RichText::new(i18n::tr("ui.revisions.cap_off")).small().color(t.text_dim));
+    }
     if !rows.is_empty() {
-        let considered = rows.iter().filter(|row| row.rank < MAX_SNAPSHOTS).count();
-        let restorable = rows.iter().filter(|row| row.rank < MAX_SNAPSHOTS && row.has_snapshot).count();
+        let considered = rows.iter().filter(|row| row.rank < limits.max_versions).count();
+        let restorable = rows.iter().filter(|row| row.rank < limits.max_versions && row.has_snapshot).count();
         let kept = restorable.to_string();
         let considered = considered.to_string();
         ui.label(i18n::format("ui.revisions.restorable", &[("kept", &kept), ("considered", &considered)]));
@@ -145,12 +153,12 @@ fn draw_header(ui: &mut egui::Ui, save_count: u64, format_version: u32, rows: &[
     }
 }
 
-fn draw_rows(ui: &mut egui::Ui, state: &mut RevisionsPanel, rows: &[Row]) {
+fn draw_rows(ui: &mut egui::Ui, state: &mut RevisionsPanel, rows: &[Row], max_versions: usize) {
     let t = Tokens::get();
     for row in rows {
         let selected = state.selected == Some(row.revision);
         let state_kind = snapshot_state(&row.action, row.has_snapshot);
-        let status = status_text(state_kind, row.rank);
+        let status = status_text(state_kind, row.rank, max_versions);
         let revision = row.revision.to_string();
         let background = ui.painter().add(egui::Shape::Noop);
         let inner = ui.vertical(|ui| {
@@ -265,12 +273,12 @@ fn snapshot_state(action: &str, has_snapshot: bool) -> SnapshotState {
     }
 }
 
-fn status_text(state: SnapshotState, rank: usize) -> String {
-    let count = MAX_SNAPSHOTS.to_string();
+fn status_text(state: SnapshotState, rank: usize, max_versions: usize) -> String {
+    let count = max_versions.to_string();
     match state {
         SnapshotState::Restorable => i18n::tr("ui.revisions.snapshot.restorable").to_string(),
         SnapshotState::OlderFile => i18n::tr("ui.revisions.snapshot.older").to_string(),
-        SnapshotState::Dropped if rank >= MAX_SNAPSHOTS => i18n::format("ui.revisions.snapshot.dropped", &[("count", &count)]),
+        SnapshotState::Dropped if rank >= max_versions => i18n::format("ui.revisions.snapshot.dropped", &[("count", &count)]),
         SnapshotState::Dropped => i18n::tr("ui.revisions.snapshot.none").to_string(),
     }
 }
@@ -304,14 +312,15 @@ fn feature_line(total: usize) -> String {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use solidcraft_engine::doc::document_history::{DocumentHistory, MAX_SNAPSHOTS};
+    use solidcraft_engine::doc::document_history::{DocumentHistory, MAX_SNAPSHOTS, SnapshotLimits};
 
     use super::open;
     use crate::scenario::Harness;
 
     fn save_snapshot(app: &mut crate::SolveApp) {
-        let snapshot = DocumentHistory::model_snapshot(&app.session.design());
-        app.session.doc_mut().document_history.record_save_with(snapshot);
+        let limits = SnapshotLimits { max_versions: app.session.revision_limits.max_versions, max_bytes: app.session.revision_limits.max_bytes };
+        let snapshot = DocumentHistory::model_snapshot(&app.session.design(), limits.max_bytes);
+        app.session.doc_mut().document_history.record_save_with(snapshot, limits);
     }
 
     #[test]
@@ -421,6 +430,8 @@ mod tests {
     fn a_worker_save_adopts_the_revision_onto_the_open_session() {
         let mut h = Harness::new();
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.preferences.revision_history = true;
+        h.app.session.revision_limits.enabled = true;
         let path = h.dir.join("Plate.solidcraft");
         assert!(crate::save_job::start(&mut h.app, "file.save_as", json!({"path": path.to_string_lossy()})));
         h.frame();

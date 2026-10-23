@@ -370,7 +370,7 @@ feature follows its edges when the part changes.
 
 One recorded save of a design, kept in the design file, oldest first.
 
-The save count starts at 0 for a file that has not been saved by a build that records revisions. A saved revision can keep a snapshot: the parametric model at that save, without the revision list and without the evaluated solid. The newest 16 snapshots are kept. Restoring one replaces the working model and leaves the save count where it is, so the next save is the next revision. Opening one read-only shows that model and refuses edits and Save until Save As or another restore. A revision whose snapshot was dropped, or that never had one, stays in the list and cannot be restored.
+The save count starts at 0 for a file that has not been saved by a build that records revisions. A saved revision can keep a snapshot: the parametric model at that save, without the revision list and without the evaluated solid. Keeping snapshots is off until it is turned on in Preferences (General, Start and save). The default limits are the newest 16 revisions and 128 MB of snapshot payload; both can be lowered, and neither can be raised past 64 revisions or 128 MB. Restoring one replaces the working model and leaves the save count where it is, so the next save is the next revision. Opening one read-only shows that model and refuses edits and Save until Save As or another restore. A revision whose snapshot was dropped, or that never had one, stays in the list and cannot be restored.
 
 - **In SolidCraft:** `doc.revisions`, `doc.restore`; the Revisions window (File view and the File menu); the `document_history` design-file key.
 - **Don't use:** history (that is undo, or the timeline), version (that is a design property or a file from a server).

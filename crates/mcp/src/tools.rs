@@ -452,7 +452,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "revisions",
             "List revisions",
-            "Revisions stored in the open design: the save count, the format number, and each entry's action and whether it still has a model snapshot. A snapshot is the parametric model at that save, not a second boundary representation.",
+            "Revisions stored in the open design: the save count, the format number, and each entry's action and whether it still has a model snapshot. A snapshot is the parametric model at that save, not a second boundary representation. Snapshots are off unless revision history is turned on.",
             obj(json!({}), &[]),
             Effect::ReadOnly,
         ),
