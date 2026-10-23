@@ -23,3 +23,5 @@ __pycache__/
 # Solids report: the primitives example's --json output, uploaded by CI from main
 # (artifact solids-report, scripts/fetch-solids.sh); never committed
 /reports/solids/
+# Mutation-testing reports (scripts/mutants.sh); never committed
+/reports/mutants/
