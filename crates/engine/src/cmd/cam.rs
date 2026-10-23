@@ -3,17 +3,17 @@
 //! Geometry is a sketch profile or planar face (or explicit polylines); depths and feeds are
 //! expressions evaluated when posting.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use solidcraft_cam::{
-    contour, emit, pocket, readback, ContourParams, Cut, Feeds, Heights, Operation, PocketParams, Post, Program, Side, Tool, ToolKind,
+    ContourParams, Cut, Feeds, Heights, Operation, PocketParams, Post, Program, Side, Tool, ToolKind, contour, emit, pocket, readback,
 };
 use solidcraft_doc::cam::{
-    default_contour_params, default_cut, default_pocket_params, CamContourParams, CamCut, CamFaceRef, CamGeometry, CamOperation, CamPocketParams,
-    CamSettings, CamSetup, CamSide, PolygonRegion, StockBox, MAX_OPS, MAX_SETUPS, MAX_TOOLS,
+    CamContourParams, CamCut, CamFaceRef, CamGeometry, CamOperation, CamPocketParams, CamSettings, CamSetup, CamSide, MAX_OPS, MAX_SETUPS, MAX_TOOLS,
+    PolygonRegion, StockBox, default_contour_params, default_cut, default_pocket_params,
 };
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::project::resolve_face_indices;
-use solidcraft_doc::{select_profiles, Expr, FeatureKind};
+use solidcraft_doc::{Expr, FeatureKind, select_profiles};
 use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_sketch::{LinkGeom, LinkKind};
 
