@@ -3303,7 +3303,7 @@ mod tests {
         // `status, counts[4], has offset B-rep`: no counts, the offset B-rep kept
         let plain = |status: i64| [status, 0, 0, 0, 0, 1];
         for (branch, dependency, record) in [
-            (Probe::ReplaceEmpty, None, plain(1000)),
+            (Probe::ReplaceEmpty, None::<&str>, plain(1000)),
             (Probe::RemoveNoMerge, None, plain(1000)),
             (Probe::RemoveEmpty, None, plain(1000)),
             (Probe::SideWallNull, None, plain(1000)),

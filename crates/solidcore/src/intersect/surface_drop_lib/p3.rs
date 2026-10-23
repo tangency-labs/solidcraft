@@ -56,9 +56,8 @@
 //!   [`SolidError::Unported`], so every drop that reaches a non-degenerate curve tangent
 //!   in `SetProperties` is unported.
 //! - **Curve on surface.** The final distance check builds an `SmCrvOnSurf` of each UV
-//!   curve on the surface; the ported [`CrvOnSurf`] holds a B-spline surface only, so
-//!   for the other kinds (whose evaluators override the B-spline ones) the check is
-//!   [`SolidError::Unported`] (`curve.crv_on_surf`, dispatch gap).
+//!   curve on an evaluation copy of the surface (`clone_for_evaluation`, which keeps
+//!   the owner and so the face tolerance).
 //! - **Bounded subdivision.** The span stack of the subdivision loop is at most
 //!   [`MAX_SPAN_DEPTH`] drop points deep (upstream fixtures reach about 15: a span
 //!   passes once shorter than `1/8000` of the interval; upstream is unbounded,
@@ -296,16 +295,14 @@ fn uv_curve_gap(
     curve: &Curve,
     approx_tol_3d: f64,
 ) -> Result<(f64, f64)> {
-    let SurfaceKind::BSpline(bs) = surface.kind() else {
-        // UNPORTED(curve.crv_on_surf): SmCrvOnSurf over a non-B-spline SmSurface; justified: findings.md intersect.surface_drop_lib_p3
-        // (dispatch gap: the ported curve holds a B-spline surface only)
-        return Err(SolidError::unported(
-            "SmSurface (non-B-spline) in SmCrvOnSurf",
-            "curve.crv_on_surf",
-        ));
-    };
     let ivl = uv_curve.natural_interval();
-    let crv_on_surf = CrvOnSurf::new(k, Curve::from(uv_curve.clone()), bs.clone(), None, 0)?;
+    let crv_on_surf = CrvOnSurf::new(
+        k,
+        Curve::from(uv_curve.clone()),
+        surface.clone_for_evaluation()?,
+        None,
+        0,
+    )?;
     let gap = ignored(crv_on_surf.surface_curve_max_distance_between(
         k,
         &ivl,
@@ -390,8 +387,7 @@ impl Surface {
     /// `SM_ERR` for a degenerate surface domain, a domain outside the natural domain
     /// or a start point that drops nowhere; those of the checked callees (see the
     /// module notes); [`SolidError::NotConverged`] past [`MAX_SPAN_DEPTH`];
-    /// [`SolidError::Unported`] (the offset surface, a face-owned surface, the curve on
-    /// a non-B-spline surface).
+    /// [`SolidError::Unported`] (the offset surface, a face-owned surface).
     pub fn drop_curve_base<O: SolutionObject>(
         &self,
         k: &Kernel,

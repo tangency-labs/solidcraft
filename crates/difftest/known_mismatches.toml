@@ -15,3 +15,138 @@
 unit = "blend.fillet_intersector"
 case = "rv_next_clipped_step"
 why = "StepSolve clipped branch differs by a few ULP from C++; suspected p3 evaluating offset-surface copies vs the solver's own objects; pre-existing, newly reachable via #212 (plan/findings.md: blend.fillet_intersector rv_next_clipped_step)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "adversarial_b33_eu33_binormal_out"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "review_Endcap_eu0_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "review_Endcap_eu1_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "review_Endcap_eu2_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "review_Endcap_eu3_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "review_Endcap_eu4_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "review_Endcap_eu5_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "review_Endcap_eu6_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "review_Endcap_eu7_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b2_eu0_binormal_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b2_eu0_binormal_out"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b2_eu1_binormal_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b2_eu1_binormal_out"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b2_eu5_binormal_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b2_eu5_binormal_out"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b2_eu9_binormal_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b2_eu9_binormal_out"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b3_eu2_binormal_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b3_eu2_binormal_out"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b3_eu7_binormal_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b3_eu7_binormal_out"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b31_eu3_binormal_3d"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.edgeuse_p3"
+case = "upstream_files_b31_eu3_binormal_out"
+why = "EvaluateBinormal state len C++ 33 vs Rust 44, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.edgeuse_p3)"
+
+[[mismatch]]
+unit = "topology.face_p3"
+case = "cyl_bspline_uv_trim_plain"
+why = "out[2] C++ 9.1e-17 vs Rust 0 on the B-spline cylinder UV trim, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.face_p3)"
+
+[[mismatch]]
+unit = "topology.face_p3"
+case = "cyl_bspline_uv_trim_own"
+why = "out[2] C++ 9.1e-17 vs Rust 0 on the B-spline cylinder UV trim, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.face_p3)"
+
+[[mismatch]]
+unit = "blend.fillet_solver_p4"
+case = "gen0512"
+why = "Rust makes 1 fillet geometry where C++ makes 0, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, blend.fillet_solver_p4)"
+
+[[mismatch]]
+unit = "boolean.merge_p2"
+case = "make_faceuse_sphere"
+why = "merged topology len C++ 278 vs Rust 274, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, boolean.merge_p2)"

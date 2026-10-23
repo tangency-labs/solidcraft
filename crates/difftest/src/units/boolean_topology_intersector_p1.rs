@@ -1279,15 +1279,6 @@ impl solidcore::topology::proto_topology::p3::BrepGlue<H> for Two {
         {
             return Err(invalid("glue vertex owner mismatch"));
         }
-        if v2.b != brep.b {
-            // VertexFaceIntersect glues the vertex its imprint made in the face's B-rep
-            // onto the other B-rep's vertex (`pV->GetBrep()->GlueVertices(pV,
-            // pNewVertex)`); the two operand arenas cannot share a vertex
-            return Err(SolidError::unported(
-                "SmBrep::GlueVertices (vertex of the other B-rep)",
-                "harness:cross-brep-glue",
-            ));
-        }
         let wires = opt_wire_edges_in_brep
             .map(|edges| {
                 edges

@@ -73,9 +73,7 @@
 //!   markers). `SmSurface::DropCurve` is the plane override for planes and the base
 //!   body ([`Surface::drop_curve_base`]) otherwise. The surface point solves defer
 //!   inside their own units
-//!   (`LocalPointSolve_1`, `GlobalPointSolve_1`). An
-//!   `SmCrvOnSurf` over a surface that is not a B-spline surface is a dispatch gap
-//!   of `curve.crv_on_surf` (the ported curve holds an `SmBSplineSurface`).
+//!   (`LocalPointSolve_1`, `GlobalPointSolve_1`).
 //! - The `SM_DEBUG_CODE` drawing blocks and `Dump` are not ported. No recursion
 //!   depends on input; the seam search loop is bounded (19 steps) as upstream.
 

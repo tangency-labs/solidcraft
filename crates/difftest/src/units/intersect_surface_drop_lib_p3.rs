@@ -84,13 +84,6 @@ fn ffi_drop(i: &Inputs) -> ffi::Drop {
 }
 
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
-    // the FFI refuses a plane whose domain has no positive extent (UB-68: upstream
-    // dereferences its missing NURB), so such a fixture cannot establish parity
-    if let SurfIn::Plane { domain, .. } = &i.surface {
-        if !(domain[2] > domain[0] && domain[3] > domain[1]) {
-            return Ok(Output::rejected("plane domain without positive extent (UB-68)"));
-        }
-    }
     match ffi::run(&ffi_drop(i)) {
         Ok(rec) => Ok(Output::new().values("rec", rec)),
         Err(e) => Err(harness(format!("C++: {e}"))),

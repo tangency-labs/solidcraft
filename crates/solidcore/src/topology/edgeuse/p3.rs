@@ -65,8 +65,7 @@
 //! - **Drop curves.** `SmSurface::DropCurve` is wired (`intersect.surface_drop_lib_p3`;
 //!   a plane runs its own override): the UV curves keep their kind (`Vec<Curve>`),
 //!   and only the two-singular-end-points stitch takes their `SmBSplineCurve` parts.
-//! - **Unported callees.** `SmFace::CreateUVTrimCurves`
-//!   (`topology.face_p3`, through the face's surface cache) and the paths of
+//! - **Unported callees.** The paths of
 //!   `SmSurface::DropPoint` / `LocalPointSolve` that reach `LocalPointSolve_1`
 //!   (`surface.surface_point_solve_p3`) return [`SolidError::Unported`];
 //!   `GlobalPointSolve` of a non-plane surface is `surface.surface_point_solve_p3`

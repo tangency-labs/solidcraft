@@ -153,6 +153,11 @@ const HANG_26: &str = "upstream:HANG-26";
 /// shim's HANG-27 bound (`plan/upstream-issues.md`): upstream's rail approximation does
 /// not return in time there, so neither side runs the op.
 const HANG_27: &str = "upstream:HANG-27";
+/// The deferral label of a `LiftCurve` whose C1 domain around a UV point off the
+/// surface's natural domain is empty: upstream returns the whole domain or this empty
+/// one depending on whether an earlier call built the surface cache's tree, which the
+/// port does not model (`plan/findings.md`, "surface cache history").
+const CACHE_HISTORY: &str = "upstream:cache-history";
 /// The shim's `SURFACE_DB_VERSION`: the database version of concrete surface records.
 const SURFACE_DB_VERSION: u64 = 33;
 /// The shim's `MAX_EDGEUSE_OFFSET_DISTANCE` (HANG-27): a bound chosen for the fuzz
@@ -2425,6 +2430,13 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             o.push(0.0);
             Ok(Some(v))
         }
+        Err(SolidError::Upstream {
+            operation: solidcore::surface::surface::p11::OP_LIFT_OFF_DOMAIN,
+            ..
+        }) => Err(Fail::Solid(SolidError::Unported {
+            upstream: "SmSurface::GetDomainWithContinuity off the surface domain (surface cache history)",
+            unit: CACHE_HISTORY,
+        })),
         Err(SolidError::Upstream { code, .. }) => {
             o.push(f64::from(code));
             Ok(None)

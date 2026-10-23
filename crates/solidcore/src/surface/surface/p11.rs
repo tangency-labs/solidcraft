@@ -57,6 +57,16 @@
 //!   array (UB-121; the port always returns the curves); `LocalSurfaceIntersect`'s
 //!   boundary retries bind `!bFoundSolution` to the minimum test only (WR-99;
 //!   reproduced).
+//! - **Surface cache history.** `LiftCurve` asks `GetDomainWithContinuity` for the C1
+//!   domain around each segment's start point. Upstream reads the surface cache's
+//!   continuity arrays there without building its tree (`GetTree` builds lazily), so
+//!   while no earlier call has built it the arrays are empty and the whole natural
+//!   domain comes back; the port's caches are always built, so the knot continuities
+//!   always apply. They agree for points in the domain; for a point outside it the
+//!   continuities can shrink the domain to nothing, which upstream returns only when
+//!   the tree happened to be built. That `SM_ERR` is reported under
+//!   [`OP_LIFT_OFF_DOMAIN`] so callers can tell it apart (`plan/findings.md`,
+//!   "surface cache history").
 //! - Debug-only work (`SM_ASSERT`, `SM_DEBUG_CODE` drawing) is not ported.
 
 use crate::curve::composite_curve::CompositeCurve;
@@ -102,6 +112,10 @@ const OP_LSI: &str = "surface::surface::p11::Surface::local_surface_intersect";
 const OP_CS: &str = "surface::surface::p11::CsGlobalSolver::local_solve_branch";
 const OP_SS: &str = "surface::surface::p11::SsGlobalSolver::local_solve_branch";
 const OP_LIFT: &str = "surface::surface::p11::Surface::lift_curve";
+/// The operation of `LiftCurve`'s `SM_ERR` for an empty C1 domain around a UV point
+/// outside the surface's natural domain, the case whose upstream result depends on
+/// whether the surface cache tree was built earlier (see the module's deviations).
+pub const OP_LIFT_OFF_DOMAIN: &str = "surface::surface::p11::Surface::lift_curve::off_domain";
 const OP_ISB: &str = "surface::surface::p11::Surface::intersect_surface_boundaries";
 
 /// The deepest `LocalSurfaceIntersect` self call accepted (upstream reaches 1).
@@ -2091,7 +2105,14 @@ impl Surface {
 
             // If we don't get some sort of a domain then error out.
             if seg_domain.size().length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP_LIFT));
+                // (off the natural domain upstream's answer depends on the cache's
+                // history: see the module's deviations)
+                let op = if self.natural_uv_domain().contains_point(pnt, 0.0) {
+                    OP_LIFT
+                } else {
+                    OP_LIFT_OFF_DOMAIN
+                };
+                return Err(SolidError::sm_err(op));
             }
 
             // define 3DCurve = SmCrvOnSurf(segment, thisSurface)
