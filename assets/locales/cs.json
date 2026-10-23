@@ -936,6 +936,7 @@
   "cmd.frame_profile_insert": "Vložit profil",
   "cmd.frame_profile_list": "Knihovna profilů",
   "cmd.frame_profile_properties": "Vlastnosti profilu",
+  "cmd.frame_trim": "Oříznout/prodloužit",
   "cmd.inspect_accessibility": "Analýza přístupnosti",
   "cmd.inspect_center_of_mass": "Těžiště",
   "cmd.inspect_clearance": "Vůle",

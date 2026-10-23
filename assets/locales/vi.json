@@ -944,6 +944,7 @@
   "cmd.frame_profile_insert": "Chèn tiết diện",
   "cmd.frame_profile_list": "Thư viện tiết diện",
   "cmd.frame_profile_properties": "Thuộc tính tiết diện",
+  "cmd.frame_trim": "Cắt/Kéo dài",
   "cmd.inspect_accessibility": "Phân tích khả năng gia công tiếp cận",
   "cmd.inspect_center_of_mass": "Trọng tâm",
   "cmd.inspect_clearance": "Khoảng cách an toàn",

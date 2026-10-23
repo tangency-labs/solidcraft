@@ -936,6 +936,7 @@
   "cmd.frame_profile_insert": "插入型材",
   "cmd.frame_profile_list": "型材庫",
   "cmd.frame_profile_properties": "型材屬性",
+  "cmd.frame_trim": "修剪/延伸",
   "cmd.inspect_accessibility": "可達性分析",
   "cmd.inspect_center_of_mass": "質心",
   "cmd.inspect_clearance": "間隙",

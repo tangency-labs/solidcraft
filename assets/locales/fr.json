@@ -936,6 +936,7 @@
   "cmd.frame_profile_insert": "Insérer un profilé",
   "cmd.frame_profile_list": "Bibliothèque de profilés",
   "cmd.frame_profile_properties": "Propriétés du profilé",
+  "cmd.frame_trim": "Ajuster/prolonger",
   "cmd.inspect_accessibility": "Analyse d'accessibilité",
   "cmd.inspect_center_of_mass": "Centre de gravité",
   "cmd.inspect_clearance": "Jeu",

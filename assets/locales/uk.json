@@ -936,6 +936,7 @@
   "cmd.frame_profile_insert": "Вставити профіль",
   "cmd.frame_profile_list": "Бібліотека профілів",
   "cmd.frame_profile_properties": "Властивості профілю",
+  "cmd.frame_trim": "Обрізати/подовжити",
   "cmd.inspect_accessibility": "Аналіз доступності",
   "cmd.inspect_center_of_mass": "Центр мас",
   "cmd.inspect_clearance": "Зазор",

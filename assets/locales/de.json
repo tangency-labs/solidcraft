@@ -936,6 +936,7 @@
   "cmd.frame_profile_insert": "Profil einfügen",
   "cmd.frame_profile_list": "Profilbibliothek",
   "cmd.frame_profile_properties": "Profileigenschaften",
+  "cmd.frame_trim": "Trimmen/Verlängern",
   "cmd.inspect_accessibility": "Zugänglichkeitsanalyse",
   "cmd.inspect_center_of_mass": "Massenschwerpunkt",
   "cmd.inspect_clearance": "Freiraum",

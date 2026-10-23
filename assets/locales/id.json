@@ -936,6 +936,7 @@
   "cmd.frame_profile_insert": "Sisipkan Profil",
   "cmd.frame_profile_list": "Pustaka Profil",
   "cmd.frame_profile_properties": "Properti Profil",
+  "cmd.frame_trim": "Pangkas/Perpanjang",
   "cmd.inspect_accessibility": "Analisis Aksesibilitas",
   "cmd.inspect_center_of_mass": "Pusat Massa",
   "cmd.inspect_clearance": "Kelonggaran",

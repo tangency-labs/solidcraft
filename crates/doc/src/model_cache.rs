@@ -250,6 +250,7 @@ impl Writer {
             "reserved_body_names": st.reserved_body_names.iter().collect::<Vec<_>>(),
             "sheets": sheets, "construct": serde_json::to_value(&st.construct).ok()?,
             "threads": serde_json::to_value(&st.threads).ok()?,
+            "frame_members": serde_json::to_value(&st.frame_members).ok()?,
             "sketch_key_set": self.sketch_key_set(&st.sketch_keys),
             "blend_edges": serde_json::to_value(&st.blend_edges).ok()?, "fitted": serde_json::to_value(&st.fitted).ok()?,
             "tapered": serde_json::to_value(&st.tapered).ok()?,
@@ -443,6 +444,11 @@ impl SavedModel {
                     .collect::<Result<Vec<_>>>()?,
                 construct: serde_json::from_value(field("construct")?).map_err(invalid)?,
                 threads: serde_json::from_value(field("threads")?).map_err(invalid)?,
+                // Kept since frame trims (#4003); a model saved before keeps no members.
+                frame_members: match s.get("frame_members") {
+                    None => Vec::new(),
+                    v => serde_json::from_value(parse(v)?).map_err(invalid)?,
+                },
                 sketch_keys,
                 blend_edges: serde_json::from_value(field("blend_edges")?).map_err(invalid)?,
                 fitted: serde_json::from_value(field("fitted")?).map_err(invalid)?,

@@ -936,6 +936,7 @@
   "cmd.frame_profile_insert": "Profil Ekle",
   "cmd.frame_profile_list": "Profil Kitaplığı",
   "cmd.frame_profile_properties": "Profil Özellikleri",
+  "cmd.frame_trim": "Kırp/Uzat",
   "cmd.inspect_accessibility": "Erişilebilirlik analizi",
   "cmd.inspect_center_of_mass": "Kütle merkezi",
   "cmd.inspect_clearance": "Açıklık",
