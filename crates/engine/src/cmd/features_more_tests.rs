@@ -1618,3 +1618,86 @@ fn loft_through_coplanar_sections_is_refused() {
     assert!(e.contains("same plane"), "{e}");
     assert!(s.model.state().bodies.is_empty());
 }
+
+fn placed_bounds(s: &Session, name: &str) -> solidcraft_geom::Aabb3 {
+    s.world_state().body(name).unwrap_or_else(|| panic!("no {name}")).mesh().bounds()
+}
+
+fn about(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-6
+}
+
+/// A part placed twice, the copy turned a quarter about X and set at x = 100: `Blade` at
+/// x 0…20, y 0…8, z 0…30 and its copy at x 100…120, y −30…0, z 0…8.
+fn twice_placed_blade(s: &mut Session) -> (String, String) {
+    let made = run(s, "component.create", json!({"name": "Blade"}));
+    run(s, "solid.box", json!({"length": 20, "width": 8, "height": 30, "body_name": "Blade"}));
+    run(s, "component.activate", json!({"component": 0}));
+    let copy = run(s, "occurrence.copy", json!({"occurrence": made["occurrence"]}));
+    run(s, "occurrence.move", json!({"occurrence": copy["occurrence"], "axis": [1, 0, 0], "angle": "90 deg"}));
+    run(s, "occurrence.move", json!({"occurrence": copy["occurrence"], "translate": [100, 0, 0], "space": "world"}));
+    let names: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    (names[0].clone(), names[1].clone())
+}
+
+fn shifted(a: solidcraft_geom::Aabb3, b: solidcraft_geom::Aabb3, by: [f64; 3]) -> bool {
+    [
+        (a.min.x, b.min.x, by[0]),
+        (a.max.x, b.max.x, by[0]),
+        (a.min.y, b.min.y, by[1]),
+        (a.max.y, b.max.y, by[1]),
+        (a.min.z, b.min.z, by[2]),
+        (a.max.z, b.max.z, by[2]),
+    ]
+    .iter()
+    .all(|(was, now, d)| about(was + d, *now))
+}
+
+/// #4768: every placement of a part placed twice, moved together, goes exactly the way asked,
+/// however each placement is turned: the shared part was moved once per placement listed, each
+/// turning the move its own way, so the turned copy went down Z instead of along Y. One undo
+/// step puts both back.
+#[test]
+fn placements_of_one_part_moved_together_each_go_the_way_asked() {
+    let mut s = Session::default();
+    let (a, b) = twice_placed_blade(&mut s);
+    let (a0, b0) = (placed_bounds(&s, &a), placed_bounds(&s, &b));
+    let undo = s.undo.len();
+    let r = run(&mut s, "solid.move", json!({"bodies": [a.clone(), b.clone()], "translate": ["240 mm", "-100 mm", "0 mm"]}));
+    assert_eq!(r["placements"].as_array().map(Vec::len), Some(2), "{r}");
+    assert!(shifted(a0, placed_bounds(&s, &a), [240.0, -100.0, 0.0]), "{a}: {:?}", placed_bounds(&s, &a));
+    assert!(shifted(b0, placed_bounds(&s, &b), [240.0, -100.0, 0.0]), "{b}: {:?}", placed_bounds(&s, &b));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(shifted(a0, placed_bounds(&s, &a), [0.0; 3]) && shifted(b0, placed_bounds(&s, &b), [0.0; 3]), "undone");
+    // A quarter turn about Z moves each placement about the world origin, as Move turns a body.
+    run(&mut s, "solid.move", json!({"bodies": [a.clone(), b.clone()], "axis": [0, 0, 1], "angle": 90}));
+    let turned = placed_bounds(&s, &a);
+    assert!(about(turned.min.x, -8.0) && about(turned.max.x, 0.0) && about(turned.min.y, 0.0) && about(turned.max.y, 20.0), "{turned:?}");
+    let turned = placed_bounds(&s, &b);
+    assert!(about(turned.min.x, 0.0) && about(turned.max.x, 30.0) && about(turned.min.y, 100.0) && about(turned.max.y, 120.0), "{turned:?}");
+}
+
+/// The same part inserted from a STEP assembly, where a rigid group holds the placements in the
+/// imported component: the move goes to the placement of the whole import, once.
+#[test]
+fn an_imported_assembly_with_a_repeated_part_moves_as_one() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-4768-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("rep.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    twice_placed_blade(&mut src);
+    run(&mut src, "file.export", json!({"path": path}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let names: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    let before: Vec<_> = names.iter().map(|n| placed_bounds(&s, n)).collect();
+    let r = run(&mut s, "solid.move", json!({"bodies": names, "translate": [240, -100, 0]}));
+    assert_eq!(r["placements"].as_array().map(Vec::len), Some(1), "the import's placement, once: {r}");
+    for (n, b) in names.iter().zip(before) {
+        assert!(shifted(b, placed_bounds(&s, n), [240.0, -100.0, 0.0]), "{n}: {:?}", placed_bounds(&s, n));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

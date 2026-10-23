@@ -1287,6 +1287,57 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(plan) = crate::frames::placements_moved(s, p) {
+        return move_placements(s, p, plan);
+    }
+    move_body_feature(s, p)
+}
+
+/// A move of several placements of one part (`frames::placements_moved`, #4768): each placement
+/// moved in the world by the move's translation and turn (about the world origin, as the Move
+/// feature turns bodies), and the root component's bodies listed moved as bodies, in one step.
+fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMove) -> Result<Value> {
+    let cmd = "solid.move";
+    let length = |v: &Value| -> Result<f64> {
+        match v {
+            Value::Number(n) => n.as_f64().ok_or_else(|| bad(cmd, "translate entries must be numbers or expressions")),
+            Value::String(e) => s.doc.eval(e, Kind::Length).map_err(|e| bad(cmd, format!("translate: {e}"))),
+            _ => Err(bad(cmd, "translate entries must be numbers or expressions")),
+        }
+    };
+    let translate = match p.get("translate") {
+        Some(Value::Array(a)) if a.len() == 3 => a.iter().map(length).collect::<Result<Vec<f64>>>()?,
+        None => vec![0.0; 3],
+        _ => return Err(bad(cmd, "`translate` must be [x, y, z]")),
+    };
+    let angle = match expr(p, "angle") {
+        Some(a) => Some(s.doc.eval(&a, Kind::Angle).map_err(|e| bad(cmd, format!("angle: {e}")))?),
+        None => None,
+    };
+    let spec = super::find_command("occurrence.move").ok_or_else(|| EngineError::UnknownCommand("occurrence.move".into()))?;
+    let mut moved = Vec::new();
+    for path in &plan.paths {
+        let Some(&occurrence) = path.last() else { continue };
+        let mut q = json!({"occurrence": occurrence, "path": path, "space": "world", "translate": translate});
+        if let Some(axis) = p.get("axis") {
+            q["axis"] = axis.clone();
+        }
+        if let Some(angle) = angle {
+            q["angle"] = json!(angle);
+        }
+        spec.run_nested(s, &q)?;
+        moved.push(occurrence);
+    }
+    let mut out = json!({"placements": moved});
+    if !plan.bodies.is_empty() {
+        let mut rest = p.clone();
+        rest["bodies"] = json!(plan.bodies);
+        out["bodies"] = move_body_feature(s, &rest)?;
+    }
+    Ok(out)
+}
+
+fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.move";
     let bodies = string_list(p, "bodies");
     if bodies.is_empty() {

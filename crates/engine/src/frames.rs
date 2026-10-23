@@ -351,6 +351,11 @@ impl Drop for Nested {
 
 /// `params` with world picks mapped into component frames (`None`: nothing to change).
 pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
+    // Several placements of one part moved together are moved as placements, in the world
+    // (`placements_moved`): their names and vectors stay as given.
+    if id == "solid.move" && placements_moved(s, params).is_some() {
+        return None;
+    }
     if id == "timeline.redefine" {
         let cmd = params.get("command")?.as_str()?;
         let key = params.get("feature").and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|id| id.to_string())))?;
@@ -470,3 +475,56 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
 #[cfg(test)]
 #[path = "frames_tests.rs"]
 mod tests;
+
+/// What a `solid.move` of the placed model moves as placements (#4768). A part placed more than
+/// once (an imported assembly's screws or fan corners) is one body: moving it once per placement
+/// listed moved it that many times, each placement turning the move its own way, so the copies
+/// flew apart. When `bodies` name one part through two or more placements, each listed body's
+/// placement is moved instead, in the world, as `occurrence.move` moves it. A placement held by
+/// a rigid group (an imported assembly) moves with the outermost placement that holds it, and one
+/// inside another placement being moved is not moved again. Bodies of the root component, which
+/// have no placement, are moved as bodies (`bodies`). `None`: an ordinary move of bodies (no part
+/// named through two placements, or a copy).
+pub(crate) struct PlacementMove {
+    /// Occurrence paths (root first) to move.
+    pub paths: Vec<Vec<u64>>,
+    /// Root-component bodies listed, moved as bodies.
+    pub bodies: Vec<String>,
+}
+
+pub(crate) fn placements_moved(s: &Session, params: &Value) -> Option<PlacementMove> {
+    if params.get("copy").and_then(Value::as_bool) == Some(true) || !placed(s) {
+        return None;
+    }
+    let names: Vec<&str> = params.get("bodies")?.as_array()?.iter().filter_map(Value::as_str).collect();
+    let st = s.model.state();
+    let doc = s.placed_document();
+    let frames = doc.body_frames_with_source(&st);
+    let listed: Vec<&(String, String, u64, Vec<u64>, Mat)> = names.iter().filter_map(|n| frames.iter().find(|f| f.0 == *n)).collect();
+    // One part (a component's body) named through two different placements.
+    let repeated = listed.iter().enumerate().any(|(i, a)| listed[..i].iter().any(|b| b.1 == a.1 && b.2 == a.2 && b.3 != a.3));
+    if !repeated {
+        return None;
+    }
+    let mut paths: Vec<Vec<u64>> = Vec::new();
+    let mut bodies = Vec::new();
+    for (world, _, _, path, _) in listed {
+        if path.is_empty() {
+            bodies.push(world.clone());
+            continue;
+        }
+        // Up through the rigid groups that hold it (as `occurrence.move` asks for).
+        let mut k = path.len();
+        while k > 1 && path.get(k - 1).is_some_and(|o| s.held_by_rigid_group(*o).is_some()) {
+            k -= 1;
+        }
+        let target = path[..k].to_vec();
+        if !paths.contains(&target) {
+            paths.push(target);
+        }
+    }
+    // A placement inside another one being moved goes with it.
+    let all = paths.clone();
+    paths.retain(|p| !all.iter().any(|q| q.len() < p.len() && p.starts_with(q)));
+    Some(PlacementMove { paths, bodies })
+}
