@@ -16,12 +16,12 @@
 //! fields taking what is left. Rows are lettered from the top without I and O and columns numbered
 //! from the left, on the sides [`LabelSides::Iso`] gives: the top and right of an A4 sheet, every
 //! side of the others. The labels sit between the drawing border and the grid reference border,
-//! 5 mm outside it. A centring mark runs from the grid reference border to the drawing border at
-//! each end of the sheet's centre lines, never into the drawing area.
+//! 5 mm outside it. A centring mark runs across the whole margin, from the trimmed sheet's edge to
+//! the drawing border, at each end of the sheet's centre lines, never into the drawing area.
 //!
 //! The rest of ISO 5457's border is a choice in the profile: the 20 mm filing margin on the left,
-//! for drawings that get bound; centring marks that reach inside the drawing border (10 mm in the
-//! standard's figure); and a trimming mark at each corner, outside the grid reference border, of
+//! for drawings that get bound; centring marks that start at the grid reference border and reach
+//! inside the drawing border (10 mm in the standard's figure); and a trimming mark at each corner, outside the grid reference border, of
 //! two overlapping 10 x 5 mm rectangles. The built-in profile leaves the trimming marks out, as
 //! they take a lot of ink.
 //!
@@ -231,10 +231,25 @@ pub struct DrawingBorderProfile {
     /// How far each centring mark reaches inside the drawing border, 0 to stop it on the drawing
     /// border (`None`: no centring marks).
     pub centring_mark_mm: Option<f64>,
+    /// Where each centring mark starts outside the drawing border. The trimmed sheet's edge when not
+    /// given.
+    #[serde(default)]
+    pub centring_mark_start: CentringMarkStart,
     /// The trimming mark's rectangles: their length along the sheet border and their width into
     /// the sheet, which must leave them outside the grid reference border (`None`: no trimming
     /// marks).
     pub trimming_mark_mm: Option<[f64; 2]>,
+}
+
+/// Where a centring mark starts, outside the drawing border.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CentringMarkStart {
+    /// The trimmed sheet's edge, so the mark runs across the whole margin (the built-in sheet's).
+    #[default]
+    SheetEdge,
+    /// The grid reference border, as ISO 5457's figure 5 draws it.
+    GridBorder,
 }
 
 /// One reference field along its axis: `from_mm < to_mm` in sheet coordinates.
@@ -311,6 +326,7 @@ impl DrawingBorderProfile {
             label_sides: LabelSides::Iso,
             grid_border_mm: 5.0,
             centring_mark_mm: Some(0.0),
+            centring_mark_start: CentringMarkStart::SheetEdge,
             trimming_mark_mm: None,
         }
     }
@@ -349,7 +365,11 @@ impl DrawingBorderProfile {
         if let Some(reach) = self.centring_mark_mm {
             require(reach.is_finite() && reach >= 0.0, "a centring mark ends on the drawing border or inside it")?;
             // Else it would start and end on the drawing border.
-            require(g > 0.0 || reach > 0.0, "a centring mark needs a grid reference border to start from or a reach inside the drawing border")?;
+            let outside = match self.centring_mark_start {
+                CentringMarkStart::SheetEdge => narrowest,
+                CentringMarkStart::GridBorder => g,
+            };
+            require(outside > 0.0 || reach > 0.0, "a centring mark needs room outside the drawing border to start from, or a reach inside it")?;
         }
         if let Some([length, width]) = self.trimming_mark_mm {
             require(length.is_finite() && width > 0.0 && width <= length, "a trimming mark is finite, above 0 and no wider than it is long")?;
@@ -383,9 +403,14 @@ impl DrawingBorderProfile {
         for (i, row) in rows.iter_mut().enumerate() {
             row.label = letters(i, self.skip_i_and_o);
         }
+        let sheet_border = Aabb2 { min: Vec2::ZERO, max: size };
         let grid_border = drawing_border.inflated(self.grid_border_mm);
+        let start = match self.centring_mark_start {
+            CentringMarkStart::SheetEdge => sheet_border,
+            CentringMarkStart::GridBorder => grid_border,
+        };
         let centring_marks = match self.centring_mark_mm {
-            Some(reach) => centring_marks(grid_border, drawing_border, size, reach)?,
+            Some(reach) => centring_marks(start, drawing_border, size, reach)?,
             None => Vec::new(),
         };
         let trimming_marks = match self.trimming_mark_mm {
@@ -393,7 +418,7 @@ impl DrawingBorderProfile {
             None => Vec::new(),
         };
         Ok(SheetLayout {
-            sheet_border: Aabb2 { min: Vec2::ZERO, max: size },
+            sheet_border,
             drawing_border,
             drawing_border_line_mm: self.drawing_border_line_mm,
             columns,
@@ -406,18 +431,18 @@ impl DrawingBorderProfile {
     }
 }
 
-/// The four centring marks: on the sheet's centre lines, from the grid reference border to
-/// `reach` inside the drawing border, which must not take them past the centre.
-fn centring_marks(grid_border: Aabb2, drawing_border: Aabb2, size: Vec2, reach: f64) -> Result<Vec<[Vec2; 2]>> {
+/// The four centring marks: on the sheet's centre lines, from the edges of `start` to `reach`
+/// inside the drawing border, which must not take them past the centre.
+fn centring_marks(start: Aabb2, drawing_border: Aabb2, size: Vec2, reach: f64) -> Result<Vec<[Vec2; 2]>> {
     let (cx, cy) = (size.x / 2.0, size.y / 2.0);
     let (lo, hi) = (drawing_border.min, drawing_border.max);
     let room = (cx - lo.x).min(hi.x - cx).min(cy - lo.y).min(hi.y - cy);
     require(reach <= room, "a centring mark stops at the sheet's centre lines")?;
     Ok(vec![
-        [Vec2::new(cx, grid_border.min.y), Vec2::new(cx, lo.y + reach)],
-        [Vec2::new(cx, grid_border.max.y), Vec2::new(cx, hi.y - reach)],
-        [Vec2::new(grid_border.min.x, cy), Vec2::new(lo.x + reach, cy)],
-        [Vec2::new(grid_border.max.x, cy), Vec2::new(hi.x - reach, cy)],
+        [Vec2::new(cx, start.min.y), Vec2::new(cx, lo.y + reach)],
+        [Vec2::new(cx, start.max.y), Vec2::new(cx, hi.y - reach)],
+        [Vec2::new(start.min.x, cy), Vec2::new(lo.x + reach, cy)],
+        [Vec2::new(start.max.x, cy), Vec2::new(hi.x - reach, cy)],
     ])
 }
 

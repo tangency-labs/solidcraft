@@ -10,10 +10,15 @@ fn with_filing_margin() -> DrawingBorderProfile {
     DrawingBorderProfile { filing_margin: true, ..DrawingBorderProfile::iso() }
 }
 
-/// ISO 5457's border with every choice on: the filing margin, centring marks 10 mm inside the
-/// drawing border and trimming marks.
+/// ISO 5457's border with every choice on: the filing margin, centring marks from the grid
+/// reference border to 10 mm inside the drawing border, and trimming marks.
 fn full_iso_5457() -> DrawingBorderProfile {
-    DrawingBorderProfile { centring_mark_mm: Some(10.0), trimming_mark_mm: Some([10.0, 5.0]), ..with_filing_margin() }
+    DrawingBorderProfile {
+        centring_mark_mm: Some(10.0),
+        centring_mark_start: CentringMarkStart::GridBorder,
+        trimming_mark_mm: Some([10.0, 5.0]),
+        ..with_filing_margin()
+    }
 }
 
 fn lengths(fields: &[Field]) -> Vec<f64> {
@@ -95,21 +100,26 @@ fn a3_landscape_has_a_400_by_277_drawing_border_and_8_by_6_fields() {
 }
 
 #[test]
-fn a3_landscape_has_a_grid_border_and_centring_marks_that_stop_at_the_drawing_border() {
+fn a3_landscape_has_a_grid_border_and_centring_marks_across_the_margin() {
     let layout = iso_layout(PaperSize::A3, Orientation::Landscape);
     // 5 mm outside the drawing border (10, 10)-(410, 287).
     assert_eq!(layout.grid_border, Aabb2 { min: Vec2::new(5.0, 5.0), max: Vec2::new(415.0, 292.0) });
-    // On the centre lines x = 210 and y = 148.5, from the grid reference border to the drawing border.
+    // On the centre lines x = 210 and y = 148.5, from the sheet's edge to the drawing border.
     let mark = |a: (f64, f64), b: (f64, f64)| [Vec2::new(a.0, a.1), Vec2::new(b.0, b.1)];
     assert_eq!(
         layout.centring_marks,
         [
-            mark((210.0, 5.0), (210.0, 10.0)),
-            mark((210.0, 292.0), (210.0, 287.0)),
-            mark((5.0, 148.5), (10.0, 148.5)),
-            mark((415.0, 148.5), (410.0, 148.5))
+            mark((210.0, 0.0), (210.0, 10.0)),
+            mark((210.0, 297.0), (210.0, 287.0)),
+            mark((0.0, 148.5), (10.0, 148.5)),
+            mark((420.0, 148.5), (410.0, 148.5))
         ]
     );
+    // From the grid reference border instead, when the profile asks.
+    let iso_start = DrawingBorderProfile { centring_mark_start: CentringMarkStart::GridBorder, ..DrawingBorderProfile::iso() };
+    let from_grid = iso_start.layout(&Sheet::standard(PaperSize::A3, Orientation::Landscape)).unwrap();
+    assert_eq!(from_grid.centring_marks[0], mark((210.0, 5.0), (210.0, 10.0)));
+    assert_eq!(from_grid.centring_marks[3], mark((415.0, 148.5), (410.0, 148.5)));
     assert!(layout.trimming_marks.is_empty());
     // On the sheet's centre lines, not the drawing border's: a deeper bottom margin leaves them at 148.5.
     let sheet = Sheet::standard(PaperSize::A3, Orientation::Landscape);
@@ -162,8 +172,9 @@ fn a3_landscape_with_iso_5457s_full_border_has_its_filing_margin_and_every_mark(
 }
 
 /// On every standard size either way, the marks are where the profile puts them: the built-in
-/// centring marks end exactly on the drawing border and there are no trimming marks; ISO 5457's
-/// full border reaches 10 mm inside and has its trimming marks in the corners.
+/// centring marks run from the sheet's edge and end exactly on the drawing border, and there are no
+/// trimming marks; ISO 5457's full border starts them at the grid reference border, reaches 10 mm
+/// inside and has its trimming marks in the corners.
 #[test]
 fn every_sheet_has_centring_marks_on_its_centre_lines_and_trimming_marks_only_when_asked() {
     for (profile, reach, trimming_marks) in [(DrawingBorderProfile::iso(), 0.0, 0), (full_iso_5457(), 10.0, 8)] {
@@ -172,12 +183,16 @@ fn every_sheet_has_centring_marks_on_its_centre_lines_and_trimming_marks_only_wh
                 let layout = profile.layout(&Sheet::standard(size, orientation)).unwrap();
                 let (size_mm, drawing, grid) = (layout.sheet_border.max, layout.drawing_border, layout.grid_border);
                 let centre = Vec2::new(size_mm.x / 2.0, size_mm.y / 2.0);
-                // Bottom, top, left and right, from the grid reference border.
+                let start = match profile.centring_mark_start {
+                    CentringMarkStart::SheetEdge => layout.sheet_border,
+                    CentringMarkStart::GridBorder => grid,
+                };
+                // Bottom, top, left and right, from where the profile starts them.
                 let expected = [
-                    [Vec2::new(centre.x, grid.min.y), Vec2::new(centre.x, drawing.min.y + reach)],
-                    [Vec2::new(centre.x, grid.max.y), Vec2::new(centre.x, drawing.max.y - reach)],
-                    [Vec2::new(grid.min.x, centre.y), Vec2::new(drawing.min.x + reach, centre.y)],
-                    [Vec2::new(grid.max.x, centre.y), Vec2::new(drawing.max.x - reach, centre.y)],
+                    [Vec2::new(centre.x, start.min.y), Vec2::new(centre.x, drawing.min.y + reach)],
+                    [Vec2::new(centre.x, start.max.y), Vec2::new(centre.x, drawing.max.y - reach)],
+                    [Vec2::new(start.min.x, centre.y), Vec2::new(drawing.min.x + reach, centre.y)],
+                    [Vec2::new(start.max.x, centre.y), Vec2::new(drawing.max.x - reach, centre.y)],
                 ];
                 assert_eq!(layout.centring_marks, expected, "{size:?} {orientation:?} {reach}");
                 assert_eq!(layout.trimming_marks.len(), trimming_marks, "{size:?} {orientation:?}");
@@ -347,8 +362,10 @@ fn hostile_sizes_and_profiles_are_refused() {
         DrawingBorderProfile { centring_mark_mm: Some(-10.0), ..iso },
         DrawingBorderProfile { centring_mark_mm: Some(f64::NAN), ..iso },
         DrawingBorderProfile { centring_mark_mm: Some(f64::INFINITY), ..iso },
-        // ...and is longer than 0: one that stops on the drawing border needs a grid reference border.
-        DrawingBorderProfile { grid_border_mm: 0.0, ..iso },
+        // ...and is longer than 0: one that stops on the drawing border needs room outside it on
+        // the side it starts from, a grid reference border or every margin.
+        DrawingBorderProfile { grid_border_mm: 0.0, centring_mark_start: CentringMarkStart::GridBorder, ..iso },
+        DrawingBorderProfile { grid_border_mm: 0.0, ..with_margins(0.0, 10.0, 10.0, 10.0) },
         // A trimming mark is finite, above 0 and no wider than it is long...
         DrawingBorderProfile { trimming_mark_mm: Some([4.0, 5.0]), ..iso },
         DrawingBorderProfile { trimming_mark_mm: Some([10.0, 0.0]), ..iso },
@@ -398,8 +415,10 @@ fn hostile_sizes_and_profiles_are_refused() {
         DrawingBorderProfile { grid_border_mm: 0.0, centring_mark_mm: None, ..with_margins(0.0, 0.0, 0.0, 0.0) },
         DrawingBorderProfile { grid_border_mm: 10.0, ..iso },
         DrawingBorderProfile { centring_mark_mm: Some(138.5), ..iso },
-        // With no grid reference border, a centring mark that reaches inside has a length.
-        DrawingBorderProfile { grid_border_mm: 0.0, centring_mark_mm: Some(10.0), ..iso },
+        // With no grid reference border, a centring mark that reaches inside has a length, and so
+        // does one from the sheet's edge.
+        DrawingBorderProfile { grid_border_mm: 0.0, centring_mark_mm: Some(10.0), centring_mark_start: CentringMarkStart::GridBorder, ..iso },
+        DrawingBorderProfile { grid_border_mm: 0.0, ..iso },
         // A centre line on the drawing border's left side: a mark that stops on the border fits.
         DrawingBorderProfile { grid: GridRule::Equal { columns: 2, rows: 2 }, ..with_margins(210.0, 10.0, 10.0, 10.0) },
         // The filing margin stands in for a left margin too narrow for the grid reference border.
@@ -436,6 +455,14 @@ fn names_round_trip_and_unknown_fields_are_refused() {
     assert_eq!(value["grid"], serde_json::json!({"from_centre": {"field_mm": 50.0}}));
     assert_eq!(value["label_sides"], serde_json::json!("iso"));
     assert_eq!(value["centring_mark_mm"], serde_json::json!(0.0));
+    assert_eq!(value["centring_mark_start"], serde_json::json!("sheet_edge"));
+    // Not given, it is the sheet's edge; an unknown start is refused.
+    let mut without = value.clone();
+    without.as_object_mut().unwrap().remove("centring_mark_start");
+    assert_eq!(serde_json::from_value::<DrawingBorderProfile>(without).unwrap(), profile);
+    let mut unknown = value.clone();
+    unknown["centring_mark_start"] = serde_json::json!("middle");
+    assert!(serde_json::from_value::<DrawingBorderProfile>(unknown).is_err());
     assert_eq!(value["trimming_mark_mm"], serde_json::json!(null));
     assert_eq!(serde_json::to_value(GridRule::None).unwrap(), serde_json::json!("none"));
     assert_eq!(serde_json::from_value::<DrawingBorderProfile>(value.clone()).unwrap(), profile);
@@ -515,6 +542,7 @@ fn fields_tile_every_drawing_border_exactly() {
                     label_sides: LabelSides::Fixed(Sides::ALL),
                     grid_border_mm: 0.0,
                     centring_mark_mm: None,
+                    centring_mark_start: CentringMarkStart::SheetEdge,
                     trimming_mark_mm: None,
                 };
                 let Ok(layout) = profile.layout(sheet) else { continue };
