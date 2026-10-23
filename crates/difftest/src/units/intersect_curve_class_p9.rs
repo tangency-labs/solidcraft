@@ -468,12 +468,20 @@ fn rust(i: &Input) -> ScResult<Output> {
         {
             pool.vertices.push(a * i.scale);
             pool.edge_zones.push(0.);
-            pool.edges
-                .push(Curve::from(BSplineCurve::create_line_segment(
-                    3,
-                    a * i.scale,
-                    b * i.scale,
-                )?));
+            let curve = Curve::from(BSplineCurve::create_line_segment(
+                3,
+                a * i.scale,
+                b * i.scale,
+            )?);
+            pool.edges.push(curve.clone());
+            let wire = solidcore::topology::brep::p5::create_wire_edge_from_curve(
+                &mut k,
+                &mut pool.wires,
+                curve,
+                Extent1d::from_min_max(0., 1.),
+            )?;
+            solidcore::topology::edge::set_tolerance(&mut pool.wires, wire, 0., false, true)?;
+            pool.wire_edges.push(wire);
             pool.trims
                 .push(Curve::from(BSplineCurve::create_line_segment(2, a, b)?));
             lp.vertices.push(BoundaryVertex {
