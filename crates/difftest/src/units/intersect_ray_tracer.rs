@@ -9,12 +9,14 @@
 //! leaf's domain, boxes and polar vectors as data and the mid-point data computed from the
 //! surface as `SmSurfaceGridElement::Init` does), `fire` (`SmRayTracer::FireRay`), `local`
 //! (`SmLSI3LocalSolver::LocalSolve` on one leaf) and `add_surface`
-//! (`SmRayTracer::AddSurfaceToGrid`, not run in C++: it needs the surface cache). Both sides
-//! produce the flat record documented in the ffi module, reported as the values `rec`.
+//! (`SmRayTracer::AddSurfaceToGrid`: builds the surface cache and expands the surface into
+//! its subdivision leaves; the record holds each leaf's domain, box, mid-point data, pseudo box
+//! and polar box). Both sides produce the flat record documented in the ffi module, reported
+//! as the values `rec`. The grid elements of a ray walk are reported as positions among the
+//! `add_leaf` leaves (`-1` for a leaf `add_surface` made).
 //!
 //! Deferred cases: every ray or solve that gets past the leaf's pseudo box test reaches
-//! `SmSurface::LocalLineIntersect` (`surface.surface_p8`); `add_surface` builds the surface cache and
-//! then needs `SmSurface::CalculateContinuities` (`surface.surface_p6`). The generator makes mostly cases whose rays are rejected before
+//! `SmSurface::LocalLineIntersect` (`surface.surface_p8`). The generator makes mostly cases whose rays are rejected before
 //! that (grid miss, element box rejection by parameter, skipped element, pseudo box miss) and
 //! checks that with the Rust side, plus free cases that defer.
 
@@ -24,8 +26,8 @@ use serde_json::Value;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::extent3d::Extent3d;
-use solidcore::geom::grid::{ElementId, Grid, SurfaceGridElement};
-use solidcore::geom::polar_box::PolarBox;
+use solidcore::geom::grid::{ElementId, Grid, GridItem, SurfaceGridElement};
+use solidcore::geom::polar_box::{PolarBox, PolarBoxState};
 use solidcore::geom::pseudo_box::PseudoBox;
 use solidcore::geom::solution_array::Solution;
 use solidcore::geom::vector2d::Vec2;
@@ -362,14 +364,16 @@ fn status_of(e: &SolidError) -> f64 {
     }
 }
 
-fn put_solution(o: &mut Vec<f64>, s: &Solution<RayObject>) {
+/// `surface_of` maps the tracer's surface list to the runner's surfaces: `add_surface`
+/// lists a surface a second time.
+fn put_solution(o: &mut Vec<f64>, s: &Solution<RayObject>, surface_of: &[usize]) {
     o.push(f64::from(s.solution_type.code()));
     o.push(s.num_variables as f64);
     o.push(s.num_objects as f64);
     o.push(s.start.solution_value);
     o.extend(s.start.parameters);
     o.push(match s.objects.first().copied().flatten() {
-        Some(RayObject::Surface(i)) => i as f64,
+        Some(RayObject::Surface(i)) => surface_of.get(i).map_or(-2.0, |s| *s as f64),
         Some(_) => -2.0,
         None => -1.0,
     });
@@ -429,9 +433,12 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
     let grid = Grid::new(&ext3(i.grid.bbox), i.grid.size)?;
     let mut tracer_slot = Some(RayTracer::new(grid, i.grid.ray_tol, i.grid.ray_acc));
     let mut renderer: Option<RayRenderer> = None;
+    // the runner surface of each entry of the tracer's surface list
+    let mut surface_of: Vec<usize> = Vec::new();
     if let Some(t) = tracer_slot.as_mut() {
-        for s in &surfaces {
+        for (n, s) in surfaces.iter().enumerate() {
             t.register_surface(s);
+            surface_of.push(n);
         }
     }
     // the tracer lives in the renderer once there is one
@@ -450,6 +457,9 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
         };
     }
     let mut leaves: Vec<SurfaceGridElement<usize>> = Vec::new();
+    // the grid element of each `add_leaf` leaf, in `leaves` order: the ids a ray walk
+    // reports are positions in this list (`-1` for the elements `add_surface` makes)
+    let mut leaf_ids: Vec<ElementId> = Vec::new();
     let mut rec: Vec<f64> = Vec::new();
     let bad_index = |what: &'static str| SolidError::InvalidInput {
         operation: "difftest::intersect_ray_tracer",
@@ -492,9 +502,10 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
                     },
                     &polar_box,
                 )?;
-                tracer!()
+                let id = tracer!()
                     .grid_mut()
                     .add_surface_element(leaf, &ext3(*elem_box))?;
+                leaf_ids.push(id);
                 leaves.push(leaf);
             }
             OpIn::Fire {
@@ -506,15 +517,20 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
             } => {
                 let tracer = tracer!();
                 tracer.hit_any_thing = *hit_any;
-                tracer.skip_element = skip.map(ElementId);
+                tracer.skip_element = match skip {
+                    Some(s) => Some(*leaf_ids.get(*s).ok_or_else(|| bad_index("skip"))?),
+                    None => None,
+                };
                 st.fires += 1;
                 match tracer.fire_ray(k, v3(*p), v3(*v), *max_t) {
                     Ok(hit) => {
                         rec.push(0.0);
                         rec.push(f64::from(u8::from(hit.hits_something)));
-                        put_solution(&mut rec, &hit.solution);
+                        put_solution(&mut rec, &hit.solution, &surface_of);
                         rec.push(hit.grid_elements.len() as f64);
-                        rec.extend(hit.grid_elements.iter().map(|e| e.0 as f64));
+                        rec.extend(hit.grid_elements.iter().map(|e| {
+                            leaf_ids.iter().position(|l| l == e).map_or(-1.0, |p| p as f64)
+                        }));
                         rec.extend(&hit.min_distances);
                         rec.extend(&hit.max_distances);
                         st.walks += 1;
@@ -529,7 +545,7 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
                         st.errors += 1;
                         rec.push(status_of(&e));
                         rec.push(0.0);
-                        put_solution(&mut rec, &Solution::new());
+                        put_solution(&mut rec, &Solution::new(), &surface_of);
                         rec.push(0.0);
                     }
                 }
@@ -573,11 +589,70 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
                 }
                 rec.push(f64::from(u8::from(r.found_intersection)));
                 rec.push(f64::from(u8::from(r.needs_more_subdivision)));
-                put_solution(&mut rec, &r.solution);
+                put_solution(&mut rec, &r.solution, &surface_of);
             }
             OpIn::AddSurface { surface } => {
                 let surf = surfaces.get(*surface).ok_or_else(|| bad_index("surface"))?;
-                tracer!().add_surface_to_grid(&Kernel::default(), surf)?;
+                let tracer = tracer!();
+                surface_of.push(*surface);
+                let before = tracer.grid_mut().elements().len();
+                let status = match tracer.add_surface_to_grid(k, surf) {
+                    Ok(()) => 0.0,
+                    Err(e @ SolidError::Unported { .. }) => return Err(e),
+                    Err(e) => status_of(&e),
+                };
+                // the surface leaves it made (a failed expansion keeps the ones before
+                // the failure, as upstream's grid does): count, then per leaf the
+                // domain, box and mid-point data
+                let made: Vec<_> = tracer
+                    .grid_mut()
+                    .elements()
+                    .iter()
+                    .skip(before)
+                    .filter_map(|e| match e.item() {
+                        GridItem::Surface(leaf) => Some(leaf),
+                        _ => None,
+                    })
+                    .collect();
+                rec.push(status);
+                rec.push(made.len() as f64);
+                for l in &made {
+                    let (u0, u1) = (l.uv_domain.min(), l.uv_domain.max());
+                    rec.extend([u0.x, u0.y, u1.x, u1.y]);
+                    let (b0, b1) = (l.bbox.min(), l.bbox.max());
+                    rec.extend([b0.x, b0.y, b0.z, b1.x, b1.y, b1.z]);
+                    for v in [l.mid_point, l.mid_du, l.mid_dv, l.mid_normal] {
+                        rec.extend([v.x, v.y, v.z]);
+                    }
+                    for j in 0..3 {
+                        let b = l.pseudo_box.basis_vector(j).unwrap_or(Vec3::new(0.0, 0.0, 0.0));
+                        rec.extend([b.x, b.y, b.z]);
+                    }
+                    for j in 0..3 {
+                        let iv = l.pseudo_box.interval(j).unwrap_or_else(Extent1d::new);
+                        rec.extend([iv.min(), iv.max()]);
+                    }
+                    let polar = &l.polar_box;
+                    let state = match polar.state() {
+                        PolarBoxState::Uninitialized => 0.0,
+                        PolarBoxState::PointWithBasis => 1.0,
+                        PolarBoxState::SinglePoint => 2.0,
+                        PolarBoxState::Arc => 3.0,
+                        PolarBoxState::Region => 4.0,
+                        PolarBoxState::Unbounded => 5.0,
+                    };
+                    rec.push(state);
+                    let bounded = (2.0..=4.0).contains(&state);
+                    let pd = polar.domain();
+                    rec.extend(if bounded {
+                        [pd.min().x, pd.min().y, pd.max().x, pd.max().y]
+                    } else {
+                        [0.0; 4]
+                    });
+                    for b in polar.basis() {
+                        rec.extend(if bounded { [b.x, b.y, b.z] } else { [0.0; 3] });
+                    }
+                }
             }
             OpIn::Renderer {
                 origin,
@@ -944,6 +1019,12 @@ fn gen_case(rng: &mut Rng, safe: bool) -> Inputs {
     }
     let n_leaves = leaf_ops.len();
     ops.extend(leaf_ops);
+    // a surface expanded into the grid by `AddSurfaceToGrid`, before the rays fired below
+    if rng.chance(0.2) {
+        ops.push(OpIn::AddSurface {
+            surface: rng.range_i64(0, ns as i64 - 1) as usize,
+        });
+    }
 
     // a point of a random leaf box
     let leaf_target = |rng: &mut Rng, ops: &[OpIn]| -> P3 {

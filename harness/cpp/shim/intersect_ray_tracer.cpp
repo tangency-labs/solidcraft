@@ -8,12 +8,12 @@
 // crates/solidcore-ffi/src/units/intersect_ray_tracer.rs, which validates every input; reads are
 // bounds checked here too (a bad program is SC_ERR_ARG).
 //
-// Surface leaves: SmSurfaceGridElement::Init needs a surface subdivision tree node
-// (SmBezierPatch), which the Rust port does not have yet. ADD_LEAF therefore fills an
-// SmSurfaceGridElement the way SmGrid::AddElement + Init do, from the leaf's domain, box,
-// pseudo box and polar box given as data, computing the mid-point data from the real surface
-// exactly as Init does. SmGrid's protected members are reached by exposing them while SmGrid.h
-// is included.
+// Surface leaves: ADD_LEAF fills an SmSurfaceGridElement the way SmGrid::AddElement + Init do,
+// from the leaf's domain, box, pseudo box and polar box given as data, computing the mid-point
+// data from the real surface exactly as Init does (a case can give leaves the surface's own
+// subdivision does not have). ADD_SURFACE runs the real SmRayTracer::AddSurfaceToGrid, which
+// builds the surface cache and makes the leaves from its tree. SmGrid's protected members are
+// reached by exposing them while SmGrid.h is included.
 #include "sc_shim.h"
 
 #include <SmAxis2Placement.h>
@@ -347,9 +347,62 @@ int32_t run(const double* p, int64_t n, std::vector<double>& o)
                 break;
             }
             case OP_ADD_SURFACE:
-                // needs the surface cache; the Rust side is deferred, nothing to compare
-                rd.idx(0, nsurf - 1);
+            {
+                SmSurface* surf = surfs.at((size_t)rd.idx(0, nsurf - 1));
+                SmTArray<void*> before;
+                g->m_sSurfaceElementMgr.GetActiveElements(before);
+                SmStatus s = rt->AddSurfaceToGrid(surf);
+                SmTArray<void*> after;
+                g->m_sSurfaceElementMgr.GetActiveElements(after);
+                // status, the number of surface leaves it made, and per leaf (51 values, layout in
+                // the ffi module) the domain, box, mid-point data, pseudo box and polar box (the
+                // leaves are not in `leaves`: ids of a ray walk say -1)
+                o.push_back(st(s));
+                o.push_back((double)(after.GetSize() - before.GetSize()));
+                for (ULONG i = before.GetSize(); i < after.GetSize(); i++)
+                {
+                    SmSurfaceGridElement* e = (SmSurfaceGridElement*)after[i];
+                    o.push_back(e->m_sUVDomain.GetMin().x);
+                    o.push_back(e->m_sUVDomain.GetMin().y);
+                    o.push_back(e->m_sUVDomain.GetMax().x);
+                    o.push_back(e->m_sUVDomain.GetMax().y);
+                    put3(o, e->m_sBBox.GetMin());
+                    put3(o, e->m_sBBox.GetMax());
+                    put3(o, e->m_sMidPoint);
+                    put3(o, e->m_sMidDU);
+                    put3(o, e->m_sMidDV);
+                    put3(o, e->m_sMidNormal);
+                    // the pseudo box: basis and intervals
+                    SmVector3d b[3];
+                    e->m_sPseudoBox.GetBasis(b[0], b[1], b[2]);
+                    for (int j = 0; j < 3; j++)
+                        put3(o, b[j]);
+                    SmExtent1d iv[3];
+                    e->m_sPseudoBox.GetIntervals(iv[0], iv[1], iv[2]);
+                    for (int j = 0; j < 3; j++)
+                    {
+                        o.push_back(iv[j].GetMin());
+                        o.push_back(iv[j].GetMax());
+                    }
+                    // the polar box: state, and domain and basis once it has a bound
+                    int ps = (int)e->m_sPolarBox.GetPolarBoxState();
+                    o.push_back((double)ps);
+                    bool bounded = ps >= SM_PS_SINGLE_POINT && ps <= SM_PS_REGION;
+                    SmExtent2d pd = e->m_sPolarBox.GetDomain();
+                    o.push_back(bounded ? pd.GetMin().x : 0.0);
+                    o.push_back(bounded ? pd.GetMin().y : 0.0);
+                    o.push_back(bounded ? pd.GetMax().x : 0.0);
+                    o.push_back(bounded ? pd.GetMax().y : 0.0);
+                    for (ULONG j = 0; j < 3; j++)
+                    {
+                        if (bounded)
+                            put3(o, *e->m_sPolarBox.GetBasis(j));
+                        else
+                            put3(o, SmVector3d(0.0, 0.0, 0.0));
+                    }
+                }
                 break;
+            }
             case OP_RENDERER:
             {
                 if (renderer != nullptr)

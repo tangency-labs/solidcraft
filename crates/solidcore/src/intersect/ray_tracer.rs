@@ -48,10 +48,16 @@
 //! - **Grid elements of other types.** `FireRay` asserts (debug builds only) that a
 //!   non-polygon element is a surface element and casts it regardless; an element
 //!   of another type (user data, hierarchy) is [`SolidError::InvalidInput`] here.
-//! - **Surface leaf data.** `SmSurfaceGridElement::Init` is unported
-//!   (`geom::grid`), so surface leaves enter the grid through
+//! - **Surface leaf data.** `SmSurfaceGridElement::Init` is [`surface_leaf`] (the part
+//!   after the Bezier patch data), so surface leaves enter the grid through
 //!   [`Grid::add_surface_element`] with their data filled in
 //!   ([`SurfaceGridElement`] is co-ported by this unit).
+//!   [`RayTracer::add_surface_to_grid`] makes them as `ExpandHierarchy` does
+//!   ([`Grid::expand_hierarchy_with`] over the surface cache's tree, with the patch
+//!   data and polar box of each leaf node read from the cache). The cache's nodes hold
+//!   the surface by its index in the tracer's list, and the tree is cloned before the
+//!   expansion so the closure can ask the cache for the polar box (`GetPolarBox`
+//!   builds it on first use).
 //! - **`SE` in `SmSurfaceGridElement::Init`.** Upstream signals an error and carries
 //!   on. [`surface_leaf`] retries a failed `Evaluate` without `non_zero_tangents`
 //!   (the failure comes after the plain NLib derivatives are in `sEval`, before the
@@ -70,7 +76,7 @@
 //!   upstream leaves unset before `DoRender` are black; the hit node `RenderRay`
 //!   passes as the skip element is `m_apNodes[0]`, which `FireRay` always clears, so
 //!   no element is skipped; unsigned products wrap as upstream's `ULONG`.
-//! - **Unported callees.** `SmFace::PointClassify` (`query.face_p2`), `Grid::expand_hierarchy` and the poly
+//! - **Unported callees.** `SmFace::PointClassify` (`query.face_p2`) and the poly
 //!   types return [`SolidError::Unported`] (see the `UNPORTED` markers). The surface
 //!   cache and its tree (`smsurf_GetSurfaceCache`, `GetTree`) are ported.
 //! - `SM_ERR` results the upstream ignores or `SER`s keep their behaviour; the
@@ -89,7 +95,9 @@ use crate::geom::geom_utility::p1::{
     circle_coplanar_circle_intersect, line_closest_point, line_coplanar_circle_intersect,
     line_plane_intersect_uv, CircleCircle,
 };
-use crate::geom::grid::{ElementId, Grid, GridItem, HierarchyElement, SurfaceGridElement};
+use crate::geom::grid::{
+    ElementId, Grid, GridItem, HierarchyElement, HierarchyId, SurfaceGridElement,
+};
 use crate::geom::object::ObjectRef;
 use crate::geom::polar_box::PolarBox;
 use crate::geom::pseudo_box::PseudoBox;
@@ -1121,17 +1129,41 @@ impl<'s> RayTracer<'s> {
     /// # Errors
     ///
     /// `SM_ERR` when the surface cache or its tree is missing (or has no top node),
-    /// and those of the cache and tree builds and of
-    /// [`RayTracer::add_surface_with_bbox`] (its [`Grid::expand_hierarchy`] is
-    /// [`SolidError::Unported`] today).
+    /// and those of the cache and tree builds, of
+    /// [`RayTracer::add_surface_with_bbox`], of [`surface_leaf`] and of the patch and
+    /// polar box lookups of the cache.
     pub fn add_surface_to_grid(&mut self, k: &Kernel, surface: &'s Surface) -> Result<()> {
         const OP: &str = "intersect::ray_tracer::add_surface_to_grid";
-        // build the surface spatial decomposition by building the surface cache
-        let mut cache = surface_cache::<usize>(k, surface, None)?;
-        let tree = cache.get_tree(k)?;
+        // build the surface spatial decomposition by building the surface cache; its
+        // nodes refer to the surface (`mBA_pSurface`) by the index the tracer lists it
+        // under below
+        let mut cache = surface_cache::<usize>(k, surface, Some(self.surfaces.len()))?;
+        // Upstream's `ExpandHierarchy` reads the tree and calls `GetPolarBox` on the
+        // cache at once; the clone lets the closure below borrow the cache mutably.
+        let tree = cache.get_tree(k)?.clone();
         let top = tree.top_node().ok_or(SolidError::sm_err(OP))?;
         let bbox = tree.node(top)?.bbox;
-        self.add_surface_with_bbox(surface, &bbox)
+        let id = self.add_surface_with_bbox(surface, &bbox)?;
+
+        // Expand the hierarchy element to avoid recomputing the surface cache a 2nd
+        // time: every lowest Bezier leaf becomes `SmSurfaceGridElement::Init`
+        self.grid
+            .expand_hierarchy_with(id, &tree, |surface_index, node| {
+                let (uv_domain, pseudo_box) = {
+                    let patch = cache.patch(node)?;
+                    (patch.aux.uv_domain, *patch.pseudo_box())
+                };
+                let polar_box = cache.polar_box(k, node)?;
+                surface_leaf(
+                    k,
+                    surface_index,
+                    surface,
+                    &uv_domain,
+                    &tree.node(node)?.bbox,
+                    &pseudo_box,
+                    &polar_box,
+                )
+            })
     }
 
     /// Embeds the faces of a poly B-rep in the grid (`AddPolyBrepToGrid`).
@@ -1149,20 +1181,20 @@ impl<'s> RayTracer<'s> {
         Err(SolidError::unported("SmPolyBrep::Notify", "query.poly"))
     }
 
-    /// `AddSurfaceToGrid` from the point where the top node of the surface cache's
-    /// tree is known: `top_node_bbox` is that node's box. Lists the surface, adds a
-    /// surface hierarchy element for it over the box grown by a twentieth of its
-    /// bounding sphere radius, and expands it.
+    /// `AddSurfaceToGrid` up to the expansion, from the point where the top node of
+    /// the surface cache's tree is known: `top_node_bbox` is that node's box. Lists
+    /// the surface and adds a surface hierarchy element for it over the box grown by
+    /// a twentieth of its bounding sphere radius. The element is still to be expanded
+    /// ([`Grid::expand_hierarchy_with`] over the cache's tree).
     ///
     /// # Errors
     ///
-    /// Those of [`Grid::add_hierarchy_element`] and [`Grid::expand_hierarchy`]
-    /// (the latter is [`SolidError::Unported`] today).
+    /// Those of [`Grid::add_hierarchy_element`].
     pub fn add_surface_with_bbox(
         &mut self,
         surface: &'s Surface,
         top_node_bbox: &Extent3d,
-    ) -> Result<()> {
+    ) -> Result<HierarchyId> {
         // set the bounding box = cached normal box increased by a small amount
         let mut surf_bbox = *top_node_bbox;
 
@@ -1175,11 +1207,7 @@ impl<'s> RayTracer<'s> {
 
         // add the surface to the grid's hierarchical element list
         let hierarchy = HierarchyElement::new_surface(index, self.ray_tolerance);
-        let id = self.grid.add_hierarchy_element(hierarchy, &surf_bbox)?;
-
-        // Expand the hierarchy element to avoid recomputing the surface cache a 2nd
-        // time
-        self.grid.expand_hierarchy(id)
+        self.grid.add_hierarchy_element(hierarchy, &surf_bbox)
     }
 }
 
@@ -1549,7 +1577,7 @@ mod tests {
     }
 
     #[test]
-    fn adding_a_surface_needs_the_surface_cache() {
+    fn adding_a_surface_expands_it_into_surface_leaves() {
         let plane = Surface::from(crate::surface::plane::Plane::new(
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(1.0, 0.0, 0.0),
@@ -1558,9 +1586,46 @@ mod tests {
             &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
         ));
         let mut t = RayTracer::new(grid(), 1e-4, 1e-8);
+        t.add_surface_to_grid(&Kernel::default(), &plane).unwrap();
+        let leaves: Vec<_> = t
+            .grid_mut()
+            .elements()
+            .iter()
+            .filter_map(|e| match e.item() {
+                GridItem::Surface(leaf) => Some(leaf),
+                _ => None,
+            })
+            .collect();
+        assert!(!leaves.is_empty());
+        assert!(leaves.iter().all(|l| l.surface == 0));
+        // a plane's normals are one vector: the leaf's polar box has it
+        assert!(leaves
+            .iter()
+            .all(|l| l.polar_box.state() == crate::geom::polar_box::PolarBoxState::SinglePoint));
+    }
+
+    #[test]
+    fn a_face_owned_surface_needs_the_trimmed_cache_of_its_face() {
+        use crate::geom::assert_array::labels::FACE_TYPE;
+        use crate::geom::attribute::ObjectKey;
+        let mut plane = Surface::from(crate::surface::plane::Plane::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ));
+        plane.set_owner(Some(ObjectRef {
+            type_code: FACE_TYPE,
+            key: ObjectKey(1),
+        }));
+        let mut t = RayTracer::new(grid(), 1e-4, 1e-8);
         assert!(matches!(
             t.add_surface_to_grid(&Kernel::default(), &plane),
             Err(SolidError::Unported { .. })
         ));
+        // nothing was added: upstream's leaves would be the trimmed ones
+        assert!(t.surfaces().is_empty());
+        assert!(t.grid_mut().elements().is_empty());
     }
 }

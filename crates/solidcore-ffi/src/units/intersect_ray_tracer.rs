@@ -10,10 +10,15 @@
 //!
 //! * `Fire`: `status hits <solution> n_elements ids(n) mins(n) maxs(n)`;
 //! * `Local`: `status found needs_subdivision <solution>`;
+//! * `AddSurface`: `status n_leaves leaf(n)`, 51 values per surface leaf it made:
+//!   `u_min v_min u_max v_max`, the box `min(3) max(3)`, the mid-point data `point(3) du(3)
+//!   dv(3) normal(3)`, the pseudo box `basis(9) interval_min_max(6)` and the polar box `state
+//!   domain(4) basis(9)` (domain and basis only for a bounded state, else zeros);
 //!
 //! where `<solution>` is `type num_variables num_objects solution_value p[0..10] surface
 //! object1 node0` (`surface` the surface index or `-1`, `object1` `-1` for null, `node0` `1`
-//! when `m_apNodes[0]` is set). `SolverTol`, `AddLeaf` and `AddSurface` add nothing.
+//! when `m_apNodes[0]` is set). The ids of a `Fire` are positions among the `AddLeaf` leaves, `-1`
+//! for an element `AddSurface` made. `SolverTol` and `AddLeaf` add nothing.
 //!
 //! | [`Op`]       | upstream                                                                    |
 //! |--------------|-----------------------------------------------------------------------------|
@@ -21,7 +26,7 @@
 //! | `AddLeaf`    | `SmGrid::AddElement(SM_GE_SURFACE)` with `SmSurfaceGridElement::Init` (the box data given, the mid-point data computed from the surface) |
 //! | `Fire`       | `SmRayTracer::FireRay`                                                      |
 //! | `Local`      | `SmLSI3LocalSolver::LocalSolve` on a leaf                                   |
-//! | `AddSurface` | `SmRayTracer::AddSurfaceToGrid` (not run: needs the surface cache)          |
+//! | `AddSurface` | `SmRayTracer::AddSurfaceToGrid`                                             |
 //!
 //! [`run`] accepts only finite inputs of magnitude at most [`MAX_COORD`] (ray parameters and
 //! tolerances: any finite value); planes with independent axes and positive scales; Bezier
@@ -181,7 +186,7 @@ pub enum Op {
     Fire(FireIn),
     /// `LocalSolve`.
     Local(LocalIn),
-    /// `AddSurfaceToGrid` of a surface index (not run).
+    /// `AddSurfaceToGrid` of a surface index.
     AddSurface(usize),
     /// `SmRayRenderer(tracer, SmAxis2Placement(origin, x, y), view, nx, ny)` taking over the
     /// tracer, then `SetSampleRate`; once per program.

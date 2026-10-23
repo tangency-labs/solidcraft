@@ -1905,8 +1905,8 @@
    }
   },
   {
-   "name": "add_surface_to_grid_defers",
-   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:1711 AddSurfaceToGrid",
+   "name": "add_surface_to_grid_then_fire",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:1711 AddSurfaceToGrid, then FireRay through the leaves it made",
    "inputs": {
     "surfaces": [
      {
@@ -1959,6 +1959,38 @@
      {
       "op": "add_surface",
       "surface": 0
+     },
+     {
+      "op": "fire",
+      "p": [
+       2,
+       2,
+       -0.5
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     },
+     {
+      "op": "fire",
+      "p": [
+       -0.5,
+       3,
+       -0.5
+      ],
+      "v": [
+       0.5,
+       -0.25,
+       0.75
+      ],
+      "max_t": 1e+20,
+      "hit_any": true,
+      "skip": null
      }
     ]
    }
