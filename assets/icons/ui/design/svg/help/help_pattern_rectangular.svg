@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Rectangular pattern: one hole repeated in a grid</title>
+  <path d="M2 35.21 L21.71 41.63 L21.71 39.55 L2 33.12 Z" fill="#b8c3cf" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28.4 30.88 L21.71 41.63 L21.71 39.55 L28.4 28.79 Z" fill="#8e9faf" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.69 22.37 L28.4 28.79 L21.71 39.55 L2 33.12 Z" fill="#e2e8ef" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10.69 26.22 L25.2 30.95" fill="none" stroke="#6f879c" stroke-width="0.9" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1 2"/>
+  <path d="M26.99 31.54 L23.68 32.22 L24.72 29.03 Z" fill="#6f879c" stroke="#6f879c" stroke-width="0.7" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10.69 26.22 L6.4 33.13" fill="none" stroke="#6f879c" stroke-width="0.9" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1 2"/>
+  <path d="M5.4 34.73 L5.53 31.35 L8.38 33.12 Z" fill="#6f879c" stroke="#6f879c" stroke-width="0.7" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.82 26.5A1.9 1.46 -8.52 1 0 12.57 25.94A1.9 1.46 -8.52 1 0 8.82 26.5Z" fill="#8e9faf" stroke="#236ead" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M9.53 26.97A1.18 0.9 -8.52 1 0 11.86 26.62A1.18 0.9 -8.52 1 0 9.53 26.97Z" fill="#34465b"/>
+  <path d="M35.6 35.21 L55.31 41.63 L55.31 39.55 L35.6 33.12 Z" fill="#b8c3cf" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M62 30.88 L55.31 41.63 L55.31 39.55 L62 28.79 Z" fill="#8e9faf" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M42.29 22.37 L62 28.79 L55.31 39.55 L35.6 33.12 Z" fill="#e2e8ef" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M39.04 31.94A1.9 1.46 -8.52 1 0 42.79 31.38A1.9 1.46 -8.52 1 0 39.04 31.94Z" fill="#b9ddf8" stroke="#328bd3" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M39.75 32.4A1.18 0.9 -8.52 1 0 42.08 32.06A1.18 0.9 -8.52 1 0 39.75 32.4Z" fill="#34465b"/>
+  <path d="M48.61 28.52A1.9 1.46 -8.52 1 0 52.37 27.96A1.9 1.46 -8.52 1 0 48.61 28.52Z" fill="#b9ddf8" stroke="#328bd3" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M49.33 28.99A1.18 0.9 -8.52 1 0 51.65 28.64A1.18 0.9 -8.52 1 0 49.33 28.99Z" fill="#34465b"/>
+  <path d="M45.23 33.96A1.9 1.46 -8.52 1 0 48.99 33.4A1.9 1.46 -8.52 1 0 45.23 33.96Z" fill="#b9ddf8" stroke="#328bd3" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M45.95 34.42A1.18 0.9 -8.52 1 0 48.27 34.08A1.18 0.9 -8.52 1 0 45.95 34.42Z" fill="#34465b"/>
+  <path d="M54.81 30.54A1.9 1.46 -8.52 1 0 58.56 29.98A1.9 1.46 -8.52 1 0 54.81 30.54Z" fill="#b9ddf8" stroke="#328bd3" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M55.52 31.01A1.18 0.9 -8.52 1 0 57.85 30.66A1.18 0.9 -8.52 1 0 55.52 31.01Z" fill="#34465b"/>
+  <path d="M51.43 35.98A1.9 1.46 -8.52 1 0 55.18 35.42A1.9 1.46 -8.52 1 0 51.43 35.98Z" fill="#b9ddf8" stroke="#328bd3" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M52.14 36.44A1.18 0.9 -8.52 1 0 54.47 36.1A1.18 0.9 -8.52 1 0 52.14 36.44Z" fill="#34465b"/>
+  <path d="M42.42 26.5A1.9 1.46 -8.52 1 0 46.17 25.94A1.9 1.46 -8.52 1 0 42.42 26.5Z" fill="#8e9faf" stroke="#236ead" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M43.13 26.97A1.18 0.9 -8.52 1 0 45.46 26.62A1.18 0.9 -8.52 1 0 43.13 26.97Z" fill="#34465b"/>
+  <path d="M28.9 29.9 L31.8 29.9 L31.8 27.6 L35.4 32 L31.8 36.4 L31.8 34.1 L28.9 34.1 Z" fill="#236ead" stroke="#236ead" stroke-width="0.8" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
