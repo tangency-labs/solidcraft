@@ -27,6 +27,34 @@ fn curves(h: &Harness) -> Vec<String> {
     h.app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id } = s { Some(id.clone()) } else { None }).collect()
 }
 
+/// Two lines of the sketch's own apart from each other (`l1` on x 0–15, `l2` on x 25–40, at
+/// y 10): screen points on each.
+fn two_lines_apart() -> (Harness, Value, Value) {
+    let mut h = Harness::new();
+    h.app.ui.show_origin = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    for (x0, x1) in [(0, 15), (25, 40)] {
+        h.app.run("sketch.line", json!({"points":[[x0,10],[x1,10]],"infer":false,"connect":false})).unwrap();
+    }
+    h.app.cam.distance = 100.0;
+    h.settle();
+    let at = |h: &mut Harness, x: f64| h.call("ui.at", json!({"sketch":[x,10]}))["result"].clone();
+    let (at_a, at_b) = (at(&mut h, 7.0), at(&mut h, 33.0));
+    (h, at_a, at_b)
+}
+
+/// The open list's row of sketch curve `id`.
+fn row_of(h: &Harness, id: &str) -> usize {
+    let rows = crate::select_other::describe(&h.app)["rows"].clone();
+    let sels: Vec<Sel> = rows.as_array().into_iter().flatten().filter_map(|r| serde_json::from_value(r["sel"].clone()).ok()).collect();
+    sels.iter().position(|s| matches!(s, Sel::SketchCurve { id: x } if x == id)).unwrap_or_else(|| panic!("no row for {id}: {rows}"))
+}
+
+fn sorted(mut v: Vec<String>) -> Vec<String> {
+    v.sort();
+    v
+}
+
 #[test]
 fn holding_still_lists_both_coincident_lines_and_picks_the_one_underneath() {
     let (mut h, at) = two_lines();
@@ -193,4 +221,31 @@ fn a_dense_spot_is_capped_per_kind_and_reports_the_total() {
     let total = d["total"].as_u64().expect("total");
     assert!(total >= 30, "the total counts every candidate, not just the rows: {total}");
     assert!((total as usize) < rows.len() + 30, "the list is truncated: {total} total, {} rows", rows.len());
+}
+
+#[test]
+fn select_other_opened_with_shift_adds_its_choice_to_the_selection() {
+    // From the viewport menu, opened by a Shift right-click: the right-click's own pick doesn't
+    // stay, and the choice adds without Shift still held.
+    let (mut h, at_a, at_b) = two_lines_apart();
+    h.step(&json!({"click": at_a})).unwrap();
+    assert_eq!(curves(&h), ["l1"]);
+    h.frames(30);
+    h.step(&json!({"click": at_b, "button": "right", "shift": true})).unwrap();
+    let r = h.call("ui.menuPick", json!({"item": "ui.selectOther"}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(curves(&h), ["l1"], "opening the list put the selection back");
+    let i = row_of(&h, "l2");
+    h.step(&json!({"click": {"handle": format!("select_other:{i}")}})).unwrap();
+    assert_eq!(sorted(curves(&h)), ["l1", "l2"]);
+    // By press and hold with Shift.
+    h.frames(30);
+    h.step(&json!({"click": at_a})).unwrap();
+    assert_eq!(curves(&h), ["l1"]);
+    h.frames(30);
+    h.step(&json!({"hold": at_b, "shift": true})).unwrap();
+    assert!(crate::select_other::is_open(&h.app));
+    let i = row_of(&h, "l2");
+    h.step(&json!({"click": {"handle": format!("select_other:{i}")}})).unwrap();
+    assert_eq!(sorted(curves(&h)), ["l1", "l2"]);
 }

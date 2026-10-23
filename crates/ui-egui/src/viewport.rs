@@ -2929,7 +2929,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if app.tool.is_some() {
                 crate::tools::finish(app);
             } else if app.dialog.is_none() {
-                crate::context_menu::open(app, p);
+                crate::context_menu::open(app, p, held_mods);
             }
         }
     }

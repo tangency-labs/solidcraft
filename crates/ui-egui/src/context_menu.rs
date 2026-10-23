@@ -222,6 +222,12 @@ pub struct MenuState {
     pub over_geometry: bool,
     /// The plane under the cursor when the viewport menu opened: it offers a sketch on it.
     pub plane: Option<String>,
+    /// Where the viewport menu opened and the keys held at that click (Select Other adds with
+    /// them).
+    opened: Option<(Pos2, crate::tool_modifiers::Held)>,
+    /// The viewport menu's right-click selected what was under it: where the menu opened, the
+    /// selection before and the one it made. Select Other puts the one before back.
+    picked: Option<(Pos2, Vec<Sel>, Vec<Sel>)>,
     /// The button that opened the menu, when it toggles it: a press there is not a press outside,
     /// so its click closes the menu instead of closing and reopening it (#1522).
     opener: Option<Rect>,
@@ -988,7 +994,15 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             app.repeat_last();
         }
         "ui.selectOther" => {
-            crate::select_other::open(app, at);
+            // The list picks instead of the right-click.
+            if let Some((opened, before, made)) = app.menu.picked.take()
+                && opened == at
+                && app.session.selection == made
+            {
+                let _ = app.run("select.set", json!({ "items": before }));
+            }
+            let held = app.menu.opened.filter(|(opened, _)| *opened == at).map(|(_, held)| held).unwrap_or_default();
+            crate::select_other::open(app, at, held);
         }
         "ui.delete" if item.params.is_some() => crate::delete::request(app, p),
         "ui.delete" => delete(app),
@@ -1473,8 +1487,12 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) {
 // ---------------------------------------------------------------------------------------------
 
 /// Open the viewport menu at a screen position. A right-click on something not selected
-/// selects it first, so the menu is about what is under the cursor.
-pub fn open(app: &mut SolveApp, at: Pos2) {
+/// selects it first, so the menu is about what is under the cursor. `held`: the keys held at
+/// that click.
+pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
+    app.menu.opened = Some((at, held));
+    app.menu.picked = None;
+    let before = app.session.selection.clone();
     app.menu.over_geometry = app.viewport.hover.is_some();
     // A right-click leaves a plane unselected, but the menu offers a sketch on it.
     app.menu.plane = app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).and_then(|(_, sel)| match sel {
@@ -1489,6 +1507,7 @@ pub fn open(app: &mut SolveApp, at: Pos2) {
         && !matches!(sel, Sel::Plane { .. } | Sel::Axis { .. })
     {
         let _ = app.run("select.set", json!({ "items": [sel] }));
+        app.menu.picked = Some((at, before, app.session.selection.clone()));
     } else if app.session.active_sketch.is_some()
         && let Some(h) = app.viewport.hover.clone()
         && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
@@ -1496,6 +1515,7 @@ pub fn open(app: &mut SolveApp, at: Pos2) {
         && !app.session.selection.contains(&sel)
     {
         let _ = app.run("select.set", json!({ "items": [sel] }));
+        app.menu.picked = Some((at, before, app.session.selection.clone()));
     }
     open_for(app, at, Target::Viewport);
 }
@@ -1679,7 +1699,7 @@ fn track_hold(app: &mut SolveApp, ctx: &egui::Context) {
             app.menu.press = None;
         } else if time - t0 > 0.35 {
             app.menu.press = None;
-            open(app, p0);
+            open(app, p0, crate::tool_modifiers::Held::from_modifiers(ctx.input(|i| i.modifiers)));
             app.menu.flick = true;
         } else {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
@@ -1707,7 +1727,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         && app.synthetic.is_empty()
     {
         app.menu.pending = None;
-        if target == Target::Viewport { open(app, at) } else { open_for(app, at, target) }
+        if target == Target::Viewport { open(app, at, crate::tool_modifiers::Held::default()) } else { open_for(app, at, target) }
     }
     crate::browser::dims_overlay(app, ctx);
     track_hold(app, ctx);

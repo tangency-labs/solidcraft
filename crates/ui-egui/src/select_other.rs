@@ -10,7 +10,8 @@
 //!   so at most [`MAX_PER_KIND`] rows are kept per kind, nearest first, and the list reports how
 //!   many things there were in all.
 //! - Hovering a row lights its entity up in the viewport; clicking it selects it (Shift/Ctrl add,
-//!   as clicks do) or, with a dialog open, gives it to the dialog's active selection input.
+//!   as clicks do, held then or at the click or press that opened the list) or, with a dialog
+//!   open, gives it to the dialog's active selection input.
 //!   Esc or a click elsewhere closes the list.
 //! - Clicking again on the same spot with nothing changed selects the next thing in that list
 //!   (click cycling). The second click of a double-click keeps its own actions.
@@ -26,6 +27,7 @@ use std::hash::{Hash, Hasher};
 
 use crate::SolveApp;
 use crate::theme::Tokens;
+use crate::tool_modifiers::Held;
 use crate::viewport::{Hit, Proj};
 
 /// How long the left button stays down, without moving, before the list opens.
@@ -60,6 +62,8 @@ pub struct Popup {
     dialog: bool,
     /// The browser's body highlight is ours to clear.
     lit_body: bool,
+    /// The keys held at the press or click that opened it.
+    held: Held,
 }
 
 /// The last plain click, for cycling.
@@ -74,8 +78,8 @@ struct Cycle {
 #[derive(Default)]
 pub struct State {
     pub popup: Option<Popup>,
-    /// A left press that may become a hold: where and when.
-    hold: Option<(Pos2, f64)>,
+    /// A left press that may become a hold: where, when and with which keys.
+    hold: Option<(Pos2, f64, Held)>,
     /// The current press belongs to Select Other (it opened or closed the list): the viewport
     /// doesn't also click, drag or box-select with it.
     held: bool,
@@ -289,13 +293,14 @@ fn projection_now(app: &SolveApp) -> Option<Proj> {
     app.viewport.rect.map(|r| crate::viewport::projection(app, r))
 }
 
-/// Open the list at a screen point; false (with a status message) when nothing is there.
-pub fn open(app: &mut SolveApp, at: Pos2) -> bool {
+/// Open the list at a screen point; false (with a status message) when nothing is there. `held`:
+/// the keys held at the click that opened it.
+pub fn open(app: &mut SolveApp, at: Pos2, held: Held) -> bool {
     let Some(proj) = projection_now(app) else { return false };
-    open_with(app, &proj, at)
+    open_with(app, &proj, at, held)
 }
 
-fn open_with(app: &mut SolveApp, proj: &Proj, at: Pos2) -> bool {
+fn open_with(app: &mut SolveApp, proj: &Proj, at: Pos2, held: Held) -> bool {
     let (rows, total) = rows_capped(app, proj, at);
     if rows.is_empty() {
         app.set_status("Nothing to select here", false);
@@ -303,7 +308,7 @@ fn open_with(app: &mut SolveApp, proj: &Proj, at: Pos2) -> bool {
     }
     close(app);
     app.viewport.select_other.popup =
-        Some(Popup { at, rows, total, hovered: None, revision: app.session.revision, dialog: app.dialog.is_some(), lit_body: false });
+        Some(Popup { at, rows, total, hovered: None, revision: app.session.revision, dialog: app.dialog.is_some(), lit_body: false, held });
     true
 }
 
@@ -322,10 +327,12 @@ pub fn is_open(app: &SolveApp) -> bool {
 /// Pick row `i` of the open list and close it.
 ///
 /// `add` / `toggle` match viewport selection (Shift pure-add, Primary toggle when
-/// `selection_shift_add_only` is on).
+/// `selection_shift_add_only` is on); the keys held when the list opened add too.
 pub fn choose(app: &mut SolveApp, i: usize, add: bool, toggle: bool) -> Result<Row, String> {
     let Some(p) = app.viewport.select_other.popup.as_ref() else { return Err("Select Other is not open".into()) };
     let at = p.at;
+    let (opened_add, opened_toggle) = crate::tool_modifiers::selection_click(p.held, app.preferences.selection_shift_add_only);
+    let (add, toggle) = (add || opened_add, toggle || opened_toggle);
     let row = p.rows.get(i).cloned().ok_or_else(|| format!("no row {i} (the list has {})", p.rows.len()))?;
     close(app);
     apply(app, &row, add, toggle);
@@ -370,7 +377,7 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
         if app.viewport.rect.is_none() {
             return Err("no viewport".into());
         }
-        open(app, pos2(x as f32, y as f32));
+        open(app, pos2(x as f32, y as f32), Held::default());
         return Ok(describe(app));
     }
     if let Some(i) = p.get("hover").and_then(Value::as_u64) {
@@ -414,16 +421,17 @@ pub fn track_hold(
         && app.dialog.as_ref().is_none_or(|d| d.wants_picks())
         && app.viewport.point_drag.is_none();
     if pressed && inside && free && !navigating {
-        app.viewport.select_other.hold = hover.map(|p| (p, now));
+        let held = Held::from_modifiers(ctx.input(|i| i.modifiers));
+        app.viewport.select_other.hold = hover.map(|p| (p, now, held));
     }
     let mut opened = false;
-    if let Some((p0, t0)) = app.viewport.select_other.hold {
+    if let Some((p0, t0, held)) = app.viewport.select_other.hold {
         let slop = ctx.options(|o| o.input_options.max_click_dist);
         if !down || navigating || !free || hover.is_some_and(|p| p.distance(p0) > slop) {
             app.viewport.select_other.hold = None;
         } else if now - t0 >= HOLD_SECS {
             app.viewport.select_other.hold = None;
-            opened = open_with(app, proj, p0);
+            opened = open_with(app, proj, p0, held);
             app.viewport.select_other.held = true;
         } else {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
@@ -569,7 +577,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let (pressed, pointer, mods) = ctx.input(|i| (i.pointer.any_pressed(), i.pointer.interact_pos(), i.modifiers));
     if let Some(i) = picked {
-        let held = crate::tool_modifiers::Held::from_modifiers(mods);
+        let held = Held::from_modifiers(mods);
         let (add, toggle) = crate::tool_modifiers::selection_click(held, app.preferences.selection_shift_add_only);
         let _ = choose(app, i, add, toggle);
     } else if pressed && !pointer.is_some_and(|q| resp.response.rect.contains(q)) {
