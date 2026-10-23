@@ -308,6 +308,17 @@ pub fn grid_far_reach(cam: &Camera, far: f64, c: Vec3, n: Vec3) -> f64 {
     (far - depth) / len
 }
 
+/// The grid's half size for a view of the given half height, seen at the given slant (the cosine
+/// of the angle between the view and the grid's plane): the grid reaches as far on its plane as
+/// the view is wide, which stretches as the plane is seen at a slant (#3087).
+///
+/// The picture and the window share it, so that they draw the same grid (#4214).
+pub fn grid_ext(half_height: f64, major: f64, slant: f64) -> f64 {
+    let major = major.max(1e-3);
+    let ext = (half_height * 3.0 / major).ceil() * major;
+    (ext / slant.abs().max(0.25) / major).ceil() * major
+}
+
 /// Sketch curves as world polylines with their colour.
 pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool]) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     sketch_lines_with_sampler(sk, plane, active, determined, world_curve_parts)
@@ -596,10 +607,7 @@ fn build_scene(
         // The grid reaches as far on the ground as the view is wide (the ground stretches as it
         // is seen at a slant) and fades out with the distance, so that it dissolves into the
         // distance instead of ending in a cut (#4214).
-        let ext = {
-            let ext = (cam.half_height() * 3.0 / major).ceil() * major;
-            (ext / slant.abs().max(0.25) / major).ceil() * major
-        };
+        let ext = grid_ext(cam.half_height(), major, slant);
         let far_reach = grid_far_reach(cam, cam.clip(sc.radius).1, w(c), w(u.cross(v)));
         let fade = GridFade::new(cam.half_height(), slant, ext, far_reach);
         let n = ((fade.end / minor) as i64).clamp(1, 400);

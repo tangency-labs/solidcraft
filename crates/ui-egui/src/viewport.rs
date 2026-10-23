@@ -9,7 +9,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::geom::{Vec2, Vec3};
 use solidcraft_engine::render::{Camera, Mat4, Rgb};
 use solidcraft_engine::sketch::CurveKind;
-use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_plane, grid_step, sketch_lines_with_sampler};
+use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_ext, grid_plane, grid_step, sketch_lines_with_sampler};
 use std::hash::{Hash, Hasher};
 
 use crate::gpu::{Frame, GpuScene, GpuTarget, SceneSlot, ViewportCallback};
@@ -1106,19 +1106,19 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     let sketch_plane = solidcraft_engine::view::open_sketch_plane(s);
     if sketch_plane.is_some() || (app.ui.show_grid && !active_view(app).hide_grid) {
         let (minor, major) = grid_step(app.cam.half_height());
-        let mut ext = (app.cam.half_height() * 3.0 / major).ceil() * major;
         // An open sketch always has its grid on its own plane; otherwise the ground plane: XY with
         // Z up, XZ with Y up (laid out in the camera's Z-up frame), or the upright origin plane
         // facing the view when the ground is seen edge-on.
-        let (c, u, v, slant, far_reach, w3): (Vec3, Vec3, Vec3, f64, f64, Box<dyn Fn(Vec3) -> [f32; 3]>) = if let Some(pl) = &sketch_plane {
+        let (c, u, v, slant, ext, far_reach, w3): (Vec3, Vec3, Vec3, f64, f64, f64, Box<dyn Fn(Vec3) -> [f32; 3]>) = if let Some(pl) = &sketch_plane {
             let (c, u, v) = solidcraft_engine::view::sketch_grid_frame(pl, app.cam.target, major);
             // How steeply the sketch's plane is seen: the grid reaches as far on it as the view
             // is wide, so the fade with the distance does too (#4214). The sketch's plane is in
             // the world, as the camera's direction is.
             let n = u.cross(v);
             let slant = app.cam.back().dot(n);
+            let ext = grid_ext(app.cam.half_height(), major, slant);
             let far_reach = solidcraft_engine::view::grid_far_reach(&proj.cam, proj.cam.clip(scene_radius(app)).1, c, n);
-            (c, u, v, slant, far_reach, Box::new(|p| p.to_f32()))
+            (c, u, v, slant, ext, far_reach, Box::new(|p| p.to_f32()))
         } else {
             let tf = app.cam.to_frame(app.cam.target);
             // On the ground (XY) unless the Grid follows the view preference is on (#1470); then on
@@ -1139,14 +1139,14 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             let back = app.cam.to_frame(app.cam.back());
             let n = u.cross(v);
             let slant = back.dot(n);
-            ext = (ext / slant.abs().max(0.25) / major).ceil() * major;
+            let ext = grid_ext(app.cam.half_height(), major, slant);
             let centre = grid_centre(tf, back, n, ext);
             let snap = |a: Vec3| a * ((centre.dot(a) / major).round() * major);
             let c = snap(u) + snap(v);
             // The far plane cuts the ground, and the grid's plane is the camera's frame's.
             let far_reach =
                 solidcraft_engine::view::grid_far_reach(&proj.cam, proj.cam.clip(scene_radius(app)).1, app.cam.from_frame(c), app.cam.from_frame(n));
-            (c, u, v, slant, far_reach, Box::new(|p| app.cam.from_frame(p).to_f32()))
+            (c, u, v, slant, ext, far_reach, Box::new(|p| app.cam.from_frame(p).to_f32()))
         };
         // The grid fades out with the distance from the middle of the view (#4214): it used to
         // stop at a fixed distance, so its edge showed as a cut across the picture. Each line is
@@ -9252,6 +9252,47 @@ mod grid_plane_tests {
         let cut = (app.cam.half_height() * 3.0 / major).ceil() * major;
         let farthest = pieces.last().map(|(d, _)| *d).unwrap_or(0.0);
         assert!(farthest < cut, "the grid fades out at {farthest}, short of the cut at {cut}");
+    }
+
+    /// #4214: the picture and the window draw the same grid. On a sketch's plane the headless
+    /// render's grid used to reach further than the viewport's (the picture stretched the grid
+    /// with the slant, the window did not), so a picture saved from the command line and the
+    /// window the user sees showed different grids.
+    #[test]
+    fn the_picture_and_the_window_draw_the_same_grid_on_a_sketch_plane() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        app.ui.perspective = false;
+        app.cam.fov = 0.0;
+        app.cam.yaw = 0.0;
+        app.cam.pitch = 35.0_f64.to_radians();
+        app.cam.target = Vec3::ZERO;
+        app.cam.distance = 100.0;
+        // The grid's centre, as both draw it: the sketch plane's, round the view's target.
+        let plane = solidcraft_engine::view::open_sketch_plane(&app.session).unwrap();
+        let (_, major) = grid_step(app.cam.half_height());
+        let (centre, _, _) = solidcraft_engine::view::sketch_grid_frame(&plane, app.cam.target, major);
+        // How far the picture's grid reaches from that centre.
+        let scene = solidcraft_engine::view::scene(&app.session, &app.cam);
+        let picture = scene.grid.iter().flat_map(|l| l.points.iter()).map(|p| (*p - centre).len()).fold(0.0_f64, f64::max);
+        // How far the window's grid reaches: the same points, as bytes.
+        let under = build_sketch_scene(&app, &projection(&app, rect)).under;
+        let window = under
+            .as_chunks::<32>()
+            .0
+            .iter()
+            .flat_map(|l| [&l[0..12], &l[12..24]])
+            .map(|b| {
+                let p = [0, 4, 8].map(|i| f64::from(f32::from_le_bytes(b[i..i + 4].try_into().unwrap())));
+                (Vec3::new(p[0], p[1], p[2]) - centre).len()
+            })
+            .fold(0.0_f64, f64::max);
+        assert!(picture > 0.0, "the picture draws a grid");
+        assert!(
+            (picture - window).abs() <= 1e-3 * picture.max(window),
+            "the picture's grid reaches {picture} mm from the middle of the view, the window's {window} mm"
+        );
     }
 
     /// #4214: the grid fades in the picture as well. The same grid drawn at full strength is
