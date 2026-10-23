@@ -460,7 +460,7 @@ fn build_volume(v: &Vol) -> Result<Volume, HarnessError> {
             }
             k => return Err(harness(format!("bad map kind {k}"))),
         };
-        next = Some(Volume::with_maps(kind, m.orient.map(transform_of), next));
+        next = Some(Volume::with_maps(kind, m.orient.map(transform_of), next).map_err(|e| HarnessError::new(e.to_string()))?);
     }
     next.ok_or_else(|| harness("volume without maps"))
 }

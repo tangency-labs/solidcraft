@@ -16065,6 +16065,167 @@ reconciliation with main's `surface.offset_surface`. With both, the affected dif
   Not committed as a fixture (it fails the unit); tracking it down is a follow-up in
   `surface.offset_surface`.
 
+## audit.recursion: merged snapshot and follow-up limits (PR #273, 2026-10-21)
+
+The audit covers the code merged through main `67e321cd` plus the review fixes
+in this PR. Wrapper constructors and setters check owned curves, surfaces and
+volume chains with a non-recursive walk before
+adding another ownership edge (maximum depth 64 at first, 32 since main's #308; root at depth 0). The base global
+solver limits traversal to `MAX_SOLVE_DEPTH + 1` nested calls (main later set
+`MAX_SOLVE_DEPTH` to 1000 and checks tree heights up front in `solve_it`; the counter
+covers overrides and direct callers); the advanced intersector uses the same ceiling. Spatial-tree top-box rebuilds are limited to one nested rebuild,
+and tessellation refuses a missing-tree build re-entry. Numeric formulas and
+child visitation order are retained.
+
+The readiness review found two ways to bypass the constructor checks:
+`ProjectedCurve::set_canonical` accepted an arbitrarily nested replacement, and
+`CompositeCurve::segments_mut` exposed unchecked segment replacement. The former
+now checks before changing any field; the latter is replaced by the checked
+`set_segment` method. Regression tests cover rejection without partial mutation,
+valid replacement and solver depth-counter restoration after a recursive error.
+The advanced intersector's guard now rejects before entering call 2049, matching
+the base solver's ceiling; a regression test checks that no branch state is
+changed by that rejection.
+`audit.recursion` has no C++ counterpart or standalone difftest runner;
+`--green` excludes exactly this audit id and continues to fail ordinary ports
+without registered runners.
+
+The follow-up review of main `0fb5bc7e..67e321cd` screened all 77 changed kernel
+files for new self-calls and call cycles, then checked the new dispatch and
+ownership-construction paths manually. This is a source review, not a formally
+resolved call graph. The eight new ports are `blend.fillet_executive_p2`,
+`blend.fillet_executive_p3`, `boolean.merge_p3`, `boolean.merge_p4`,
+`query.face_p1`, `query.face_p3`, `query.face_p4` and `topology.brep_p2`.
+No new unbounded recursion path was found. Boolean-tree evaluation uses an
+explicit stack; fillet tangent-chain walks are iterative and bounded by the
+solver count plus one; face-loop containment uses explicit stacks and the
+existing depth-bounded `Looptree::find_item`. Wrapper construction still uses
+the checked constructors. The solver state reconstruction retains `solve_depth`.
+The merge keeps the new difftest wildcard and process-parallel execution options
+alongside the exact-id audit exemption.
+
+Validation before the main merges: at `726d2d60`, `difftest --green` completed
+222 units (114 passed, 108 partial, 0 failed). Every unit summary (including case
+counts and `max_rel_err`) matched the baseline; this compares summaries, not the
+complete before/after numeric reports. After six more ports and the review fixes,
+CI at `e8520b7c` passed all checks, including C++-feature clippy and
+`difftest: 228 unit(s), 114 passed, 114 partial, 0 failed`
+([run 39362924279](https://github.com/tangency-labs/solidcore/actions/runs/39362924279)).
+The new merge through `67e321cd` selects 236 port runners (114 green, 122 partial
+in the manifest); its full C++ differential run belongs to the fresh PR checks
+and is not covered by that earlier run. Local merged-tree validation passes
+1554 solidcore tests, 31 difftest unit tests and the JSON float-roundtrip
+integration test. Formatting, workspace clippy and the wasm target check are
+recorded in the PR description.
+
+Re-audit through main `7b57d8de` (2026-10-21): the merge brought #282, #284, #285,
+#286, #287, #289, #291, #293 and #298 (31 changed kernel files, no new port units).
+Every function they add or change was screened for self-calls; each hit forwards
+to a same-named function on another type or path (`SurfaceIntersector::flush_curve`,
+the merge_p4 adapter, `topology::brep::p5`/`p9` helpers), and the new merge_p3 ->
+adapter -> `merge::p4::manifold_boolean` chain cannot re-enter merge_p3 (p4 has no
+reference to it). The NURBS evaluation rewrite (#298) is loop-based. No new curve,
+surface or volume variant or wrapper constructor was added. No new bound was
+needed; fmt, workspace clippy, 1556 solidcore tests and the wasm check pass.
+
+Re-audit through main `ca3bbd2b` (2026-10-21): the merge brought two new ports,
+#229 `boolean.merge_p2` and #239 `topology.face_p4`, plus follow-ups (28 changed
+kernel files). Neither new file has an intra-file call cycle, and their same-name
+calls forward to other modules (`topology::brep::p2`, `query::face::p3`, `loopuse`,
+the classification adapter's `inner`). The one self-call, `face_p4::has_seam_problem`
+-> `FaceProps::set_props_stage2_with` -> `has_seam_problem`, is depth 1: the stage is
+set to `Stage2A` before the callback, and the nested call passes those props, so
+it skips the re-run. No new curve, surface or volume variant or wrapper
+constructor. No new bound needed; fmt, workspace clippy, 1562 solidcore tests and
+the wasm check pass.
+
+Re-audit through main `7e3f324e` (2026-10-22): 31 PRs, 202 changed kernel files,
+including #267 `blend.fillet_executive_p2`, #363 `topology.brep_p6` (make face
+topology), the #281/#317 co-ports and the #313 surface-dispatch refactor, which adds
+`SurfaceKind::Cone` and threads `Kernel` through evaluation. Main independently
+bounded `SolveBranch` with an up-front tree-height check (`MAX_SOLVE_DEPTH` = 1000).
+The merge keeps it and keeps this audit's per-call counter (it also covers overrides
+and direct callers), allowing `MAX_SOLVE_DEPTH + 1` nested calls so every tree set
+the check accepts still runs. The advanced intersector's cap is now the same. The shared
+nesting walker follows the cone's generator curve; cones are built from parameters
+only, so no constructor check is needed. Main's deep-wrapper evaluation test, which
+built 70-deep STEP and curve-bounded chains, now builds until a constructor refuses
+(at most 64), because such chains can no longer be constructed. No new self-recursion
+was found: the hits in new functions (`Curve::approximate_polar_box`,
+`Curve::is_periodic`) forward to free functions. Validation: fmt, workspace clippy,
+1625 solidcore tests, 38 difftest tests and the wasm check pass locally; C++-feature
+clippy passes, and difftest of the 12 touched units (`geom.global_solver`,
+`intersect.adv_surface_intersector`, `surface.offset_surface`, `surface.surface_p2`,
+`surface.volume_p2`, `curve.offset_curve`, `surface.cone_p1`-`p3`, `geom.tree`,
+`query.tess`, `intersect.topology_solver_p1`) gives 4 passed, 8 partial, 0 failed,
+`max_rel_err` 0 throughout.
+
+Re-audit through main `ea10fd3e` (2026-10-22): 19 PRs, 124 changed kernel files
+(about 28,000 lines), with the new ports #201 `offset.offset_executive_p2`, #247
+`blend.fillet_geom_p6`, #264 `blend.fillet_geom_p5`, #329 `query.brep`, #222
+`sweep.topology_sweep` and #233/#250 `primitive.primitive_creation_p3`/`p2`.
+- **Nesting bound to 32.** #308 measured that a 64-deep offset chain read from a
+  file overflows the 1 MiB wasm32 stack unoptimised, and lowered `MAX_READ_NESTING`
+  to 32. Geometry built in memory recurses through the same dispatch, so
+  `MAX_GEOMETRY_NESTING` (and `MAX_SURFACE_NESTING`, tied to it) is now 32 as well.
+- **Checked segment replacement.** `primitive.primitive_creation_p2`'s taper wrote
+  B-spline generators back through `CompositeCurve::segments_mut`, which this audit
+  removed. It now uses the checked `set_segment`; a B-spline cannot nest, so
+  results are unchanged.
+- **Screen.** The new functions' same-name calls forward to other modules or free
+  functions (`fillet_intersector`, `topology_sweep::engine` local helpers). The one
+  intra-module cycle, `fillet_geom::p3` `corner_vert_geom` <-> `mate_geom`, is
+  already bounded by its port (`MAX_MATE_DEPTH` = 64, depth parameter, `SolidError`
+  past it). The blend `OffsetSurface` struct literals are
+  `blend::fillet_custom_solver::OffsetSurface`, a solver record rather than the
+  wrapper surface. No new curve, surface or volume variant, no new nesting reader
+  and no new boxed geometry field.
+- **Checks.** fmt, workspace clippy, 1772 solidcore tests, 38 difftest tests and the
+  wasm check pass locally. C++-feature clippy passes, and difftest of the 17 units
+  holding a wrapper constructor or the taper change (`primitive.primitive_creation_p1`-`p3`,
+  `curve.composite_curve_p1`/`p2`, `curve.crv_in_volume`, `curve.crv_on_surf`,
+  `curve.iso_curve`, `curve.offset_curve`, `curve.projected_curve`,
+  `surface.curve_bounded_surface`, `surface.offset_surface`, `surface.srf_in_volume`,
+  `surface.surface_p1`/`p2`, `surface.volume_p1`/`p2`) gives 8 passed, 9 partial,
+  0 failed, `max_rel_err` 0 throughout.
+
+The green audit status applies to this merged snapshot. Direct audit dependency
+`blend.fillet_corner_p2` remains unported (`offset.offset_executive_p2` landed in #201 and is covered by the re-audit through `ea10fd3e`);
+their implementations, other open port PRs and future geometry variants need a
+follow-up sweep when they land.
+The current manifest's 122 partial units retain deferred dependency paths that
+need review and differential testing when wired.
+Native guard tests and a wasm compile check do not measure worst-case wasm stack
+use at the solver ceiling; no runtime stack-exhaustion benchmark was run.
+Constructor APIs that were infallible now return `Result`, and callers using
+`segments_mut` must move to checked segment replacement.
+
+## audit.recursion: re-audit through main `7c74a05f` (PR #273, 2026-10-22)
+
+The merge brought 18 PRs and 122 changed kernel files (about 17,000 lines). New ports:
+#439 `blend.fillet_standard_solver_p2`, #236 `blend.fillet_solver_p3`, #213
+`primitive.primitive_creation_p1`, #242 `blend.fillet_geom_p3`, and
+`topology.brep_p3`/`p8` (via the shepherd batch). #436 adds `SurfaceKind::Sphere` and
+`SurfaceKind::Torus`, and #462 splits the plan into `plan/units/<id>.toml`. This
+branch's notes moved there with `scripts/units-migrate-branch.sh`, and the `--green`
+exemption for `audit.recursion` now runs on the per-unit loader.
+- **Sphere and torus.** Both wrap a `SurfOfRevolution`, whose generator must be a
+  B-spline curve (`gen_base` rejects anything else), so neither can nest. The
+  shared nesting walker follows their generator anyway.
+- **Screen.** No new self-call in the new or changed functions. The two call cycles
+  found are bounded as before: the heal cascade (`update_target_lists` ->
+  `heal_targets` -> the `fix_*` methods) by `MAX_TARGET_UPDATE_DEPTH` = 32, and the
+  advanced intersector's `solve_branch` <-> `solve_branch_at_depth` by its solve
+  counter. No unchecked install of nested geometry, no new nesting reader and no new
+  boxed geometry field. The merged code compiled without changes against the
+  checked constructors, so it uses none of the removed or now-fallible APIs unchecked.
+- **Checks.** fmt, workspace clippy, 1827 solidcore tests, 39 difftest tests, the wasm
+  check and `harness/plan/units.py check` (261 units) pass locally. C++-feature clippy
+  passes, and difftest of the 9 units the walker reaches (`surface.sphere`,
+  `surface.torus`, `surface.surface_p2`, `surface.offset_surface`, `curve.iso_curve`,
+  `surface.surf_of_revolution_p1`/`p3`, `surface.curve_bounded_surface`,
+  `surface.srf_in_volume`) gives 7 passed, 2 partial, 0 failed, `max_rel_err` 0.
+
 ## blend.fillet_standard_solver_p1: circular FSG centre line dispatch (2026-10-22)
 
 - `SmCircularCrossSectionFSG::CreateSurfaceFromCurves` now takes the centre line as a
@@ -16178,6 +16339,11 @@ blockers of the seam cases (generic-surface `SmCrvOnSurf`: open PR #307). Left u
 `topology::trimming_tools::face_has_seam_problem` (its `SeamObject` handles name loops and
 vertices only, and its `SplitAtSeam` geometry resolves no curve; no difftest case
 reaches it).
+- **Follow-up merge through `339740fe`.** #446, #477, #484 and #486 landed during the
+  run. They touch six kernel files (`blend::fillet_executive::p3`, `heal::face_props`,
+  `topology::brep::p1`, `topology::face::p1`/`p4`) with no new self-call, call cycle
+  or nested-geometry install; fmt, clippy, 1832 solidcore tests, 39 difftest tests
+  and the wasm check pass.
 
 ## Fuzz-corpus replay: Rust-side hangs, aborts and one difference (fix/fuzz-rust-side-guards, 2026-10-22)
 
@@ -16366,6 +16532,34 @@ deviation far above anything upstream or the fixtures build. Each reduced input 
 `crates/difftest/tests/fuzz_corpus/` case (`issue: #505`); replayed with and without a
 4 GiB address-space limit, all 17 return in under 0.02 s and none maps more than 1 GiB.
 
+## audit.recursion: re-audit through main `339bd2c9` (PR #273, 2026-10-22)
+
+The merge brought 24 PRs and 108 changed kernel files (about 8,900 lines). New ports:
+#208 `blend.fillet_solver_p5` and #211 `boolean.topology_intersector_p3`. Others add
+`SurfaceKind::SurfOfExtrusion` (#490), a crate-wide allocation ceiling (#505/#513,
+`limits.rs`) and loop bounds (#514).
+- **Solver.** #514 caps the total work of `SolveBranch` (`branches_visited` <=
+  `MAX_SOLVE_BRANCHES` = 2^20 per solve). That is a work bound, not a depth bound,
+  so the merge keeps both it and this audit's nesting counter (`solve_depth` <=
+  `MAX_SOLVE_DEPTH + 1`). The topology solver's state rebuild carries both fields.
+- **Extrusion.** Its generator must be a B-spline-based curve (`gen_base`: B-spline,
+  ellipse, line, hyperbola, parabola), so it cannot nest; the shared walker follows
+  it anyway.
+- **Screen.** No new self-recursion: `Sphere`/`Torus::convert_uv_from_nurbs_to_step`
+  forward to free functions, and the `OffsetSurface` literal in
+  `blend::fillet_solver::p5::recovery` is the fillet solver's record type. No new
+  call cycle, unchecked nested-geometry install, nesting reader or boxed geometry field.
+- **Checks.** fmt, workspace clippy, 1887 solidcore tests, 39 difftest tests, the wasm
+  check and `harness/plan/units.py check` (261 units) pass locally. C++-feature clippy
+  passes, and difftest of the 8 touched units (`geom.global_solver`,
+  `intersect.adv_surface_intersector`, `intersect.topology_solver_p1`, `query.tess`,
+  `surface.surf_of_extrusion_p1`/`p2`, `surface.surface_p2`, `surface.offset_surface`)
+  gives 3 passed, 5 partial, 0 failed, `max_rel_err` 0.
+- **Follow-up merge through `16192513`.** #517 wires `Surface::point_based_surface_intersect`
+  to `SurfaceIntersector::do_point_intersection` (three kernel files). That path was
+  audited before: its re-entry through `join_from_singular_point` is limited to depth
+  2. No new self-call, cycle or nested-geometry install. fmt, clippy, 1887 solidcore
+  tests, 39 difftest tests and the wasm check pass.
 ## A one-ULP face domain difference leaves a sliver span on one of four symmetric rounds (issue #472)
 
 `nurbs.b_spline_surface_n_lib_p2` (`TrimWithDomain`), reached from `SmFace::ShrinkGeometry`
@@ -16490,6 +16684,13 @@ when `skip_self_intersection` is false. Both sides retain that predicate; it is 
 reported as the upstream limitation rather than a fictitious missing surface import.
 HANG-27 and the seeded extension-cache policy are unchanged. This remains a partial
 creator port, not complete constructive offset/shell or returned-B-rep certification.
+- **Follow-up merge through `ceb85b2a`.** #522 (offset analytic import) and #523 (trim
+  snap round-off) touch four kernel files. The new `Surface::trim_with_domain_with`
+  dispatches like `trim_with_domain`, and its wrapper arms call the existing
+  `trim_with_domain`, so construction still bounds the nesting at
+  `MAX_GEOMETRY_NESTING`. `face::p1::shrink_geometry_with` calls it once. No new
+  self-call, cycle or nested-geometry install. fmt, clippy, 1890 solidcore tests,
+  39 difftest tests and the wasm check pass.
 
 ## surface.trim_srf_cache — face-owned trimmed caches (owning-face handle, 2026-10-22)
 
@@ -16666,6 +16867,34 @@ Possibly the same latent gap: `query.face_p1`'s `make_trim_srf_cache_with_face(.
 also leaves node surfaces unnamed (its point solve runs with point testing off; no
 failing case).
 
+## audit.recursion: re-audit through main `6d3bc74f` (PR #273, 2026-10-23)
+
+The merge brought 18 PRs and 101 changed kernel files (about 17,000 lines), including
+#466 `blend.fillet_solver_p2`, the #531 fillet batch (`blend.fillet_corner_p1`) and
+#535 (`topology.brep_p6` closure split), plus new files for the sweep store and the
+surface-cache face context.
+- **One walker, one bound.** Main added its own non-recursive evaluation-copy walker
+  (`check_owned_evaluation_copy_depth`, 64 levels) with curve and volume entry points.
+  Those entry points now wrap this audit's `check_geometry_nesting`, so construction and
+  evaluation copies share `MAX_GEOMETRY_NESTING` = 32. Construction already refuses
+  anything deeper, so no buildable geometry changes behaviour. Main's two new tests that
+  built 62-level chains now build until a constructor refuses. Its composite-segment
+  test uses the checked `set_segment` with an exact `clone_for_evaluation` copy, because
+  `Clone` resets the owner and applies the knot fix-up.
+- **Screen.** No new self-recursion: `query::face::p2::point_classify` forwards to the
+  free function, `topology_traverser`'s trait methods call `Marks`' inherent methods,
+  and the sweep store's `object` forwards to its provider. The only cycle,
+  `trim_srf_cache` `implant_edgeuse` <-> `subdivide_node`, is limited to depth 2 as
+  before. The new composite `clone_for_evaluation_depth` builds copies of curves already
+  checked at entry. No new nesting reader, boxed geometry field or unchecked install.
+- **Checks.** fmt, workspace clippy, 1959 solidcore tests, 41 difftest tests, the wasm
+  check and `harness/plan/units.py check` (261 units) pass locally. C++-feature clippy
+  passes, and difftest of the 13 units that make evaluation copies or hold the
+  changed tests (`curve.curve_p2`, `curve.composite_curve_p1`, `curve.crv_in_volume`,
+  `curve.crv_on_surf`, `curve.iso_curve`, `curve.offset_curve`, `curve.projected_curve`,
+  `surface.srf_in_volume`, `surface.surface_p2`, `surface.surface_point_solve_p3`,
+  `surface.surf_of_extrusion_p1`, `surface.surf_of_revolution_p1`,
+  `blend.fillet_corner_p3`) gives 9 passed, 4 partial, 0 failed, `max_rel_err` 0.
 ## topology.brep_p4: the last stubs (PR #441)
 
 Follow-up on PR #441 (oursland/solidcore#1, on top of 55b9202), 2026-10-22.
@@ -16900,3 +17129,49 @@ These A measurements are before #463 (`intersect.surface_drop_lib_p3`); re-test 
 #463 before pursuing it. A follow-up should compare `SmBSplineCurve::CreateExtendedCurve`
 / `RemoveExtraKnots` for a degree-1 line and the `LiftCurve` iso branch, then remove the
 guard.
+
+## audit.recursion: re-audit through main `27b7613a` (PR #273, 2026-10-23)
+
+Two merges: 21 PRs through `422f7132` (111 changed kernel files), including #441
+`topology.brep_p4`, #463 `intersect.surface_drop_lib_p3`, #244
+`blend.fillet_executive_p3`, #280 `topology.brep_p7` and #554 (CrvOnSurf over any
+surface kind), then #572 (offset face-cache solves).
+- **Shared bound.** Main's new depth checks used 64 levels. `CrvOnSurf` now holds a
+  general `Surface`, and its constructors and `set_uv_curve` check both children through
+  `Surface::check_*_evaluation_copy_depth`. That check now wraps `check_geometry_nesting`,
+  which follows a curve-on-surface's surface as well as its UV curve. The leaf
+  B-spline/plane fast path keeps the walker's boundary (`<= MAX_GEOMETRY_NESTING`).
+  `Volume::transform_simple`'s depth-aware append refused at 63 and now refuses at
+  `MAX_GEOMETRY_NESTING` (32). Main's new tests that built 63-level chains now build to
+  the shared bound.
+- **Screen.** The `boolean::merge::p5` stage `delete_edge`/`delete_vertex` hits are
+  trait methods forwarding to free functions. The `surface_intersector` cycle
+  (`do_point_intersection_body` <-> `join_from_singular_point`) is held to depth 1 by
+  the `inside_me` flag. The `CrvOnSurf` `Clone`, `CompositeCurve::clone_exact_bounded`
+  and the evaluation copies copy geometry that was checked when it was built. There is
+  no new nesting reader, and no unchecked boxed geometry field or install
+  (`PendingExtension` predates this merge and holds a leaf extension). #572 adds
+  `Surface::domain_with_continuity_from_cache`, which only forwards. No new recursion.
+- **Checks.** fmt, workspace clippy, the wasm check, 45 difftest tests and
+  `harness/plan/units.py check` (261 units) pass locally. 2040 of 2041 solidcore tests
+  pass. The exception, `primitive::api_primitives::tests::solids_run_primitive_creation_until_the_next_unported_call`,
+  fails only on Windows: it fails on a clean `main` there too (stopping at
+  `topology.edge` `SmEdge::GetTolerance` instead of `geom.tol`) and passes on the Linux
+  runner. On the runner, C++-feature clippy passes, and difftest of `curve.crv_on_surf`,
+  `curve.crv_in_volume`, `curve.curve_p2`, `surface.surface_p2`, `surface.volume_p1`,
+  `surface.volume_p2`, `surface.curve_bounded_surface`, `surface.srf_in_volume` and
+  `surface.surf_of_extrusion_p1` gives 7 passed, 2 partial, 0 failed, with
+  `max_rel_err` 0.
+
+## audit.recursion: final re-audit through main `ed6d93d8` (PR #273, 2026-10-23)
+
+#541 wires `SmFace::PointClassify` and the vertex/edge zone tolerances into the topology
+solver's face solves (`topology_solver::p1::face_point_classify` calls
+`query::face::p2::point_classify_prepared`). No code in `query::face`,
+`intersect::point_class` or `intersect::curve_class` reaches the topology solver, so this
+adds no cycle. The new `TopologyObjects` methods (`edge_tolerance`, `face_entity`) are
+lookups. The merge was clean and changed no kernel code of this PR's. Locally, fmt,
+clippy, the wasm check, 45 difftest tests, the plan check (261 units) and 2041 of 2042
+solidcore tests pass. The exception is the Windows-only
+`solids_run_primitive_creation_until_the_next_unported_call` (see the previous entry).
+Every unit is now green or partial. The open PRs #563, #178 and #270 add no units.

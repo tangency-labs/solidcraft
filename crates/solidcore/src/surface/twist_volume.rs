@@ -239,7 +239,7 @@ impl TwistVolume {
 
         // build TwistCoordinates into m_pOrientMap
         let orient = Transform::new(origin, twist_mid_dir, twist_binormal, Some(twist_axis));
-        Volume::with_maps(VolumeKind::Twist(twist), Some(orient), None)
+        Volume::oriented(VolumeKind::Twist(twist), Some(orient))
     }
 
     /// `m_dTwistPeriodDist` (`GetTwistPeriodDist`).

@@ -27,6 +27,10 @@
 //! | [`CurveBoundedSurface::read_from_db`]                 | `ReadFromDB`                                   |
 //!
 //! Deviations:
+//! - **Nesting.** `new` return `InvalidInput` when the basis and every boundary curve would nest
+//!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
+//!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
+//!   cloning and dropping of nested geometry (no limit upstream).
 //! - Compound evaluation copies carry a depth counter capped at 64 by `Surface`.
 //! - **Ownership.** The surface owns its basis surface and boundary curves, as
 //!   upstream (whose destructor deletes them): they are moved into
@@ -63,9 +67,13 @@ use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
-use crate::surface::surface::p2::{self as surface_p2, GeometricProperties, Surface, SurfaceKind};
+use crate::surface::surface::p2::{
+    self as surface_p2, check_geometry_nesting, GeometricProperties, NestedGeometry, Surface,
+    SurfaceKind,
+};
 use crate::topology::database_io::{DatabaseReader, FileType};
 
+const OP_NEW: &str = "surface::curve_bounded_surface::CurveBoundedSurface::new";
 const OP_READ: &str = "surface::curve_bounded_surface::CurveBoundedSurface::read_from_db";
 
 /// `SmCurveBoundedSurface_TYPE`.
@@ -132,7 +140,7 @@ impl CurveBoundedSurface {
         }
     }
 
-    /// An evaluation copy retaining exact basis data, with Surface's 64-level bound.
+    /// An evaluation copy retaining exact basis data, with Surface's `MAX_GEOMETRY_NESTING` bound.
     pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
         Ok(Self {
             basis: Box::new(self.basis.clone_for_evaluation_depth(depth)?),
@@ -152,19 +160,27 @@ impl CurveBoundedSurface {
 
     /// A surface owning `basis` and the boundary curves (the constructor; the curves
     /// are assumed valid).
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when the basis or a boundary curve nests deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1.
     pub fn new(
         basis: Surface,
         boundaries_3d: Vec<Curve>,
         boundaries_uv: Vec<Curve>,
         implicit_outer: bool,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        check_geometry_nesting(NestedGeometry::Surface(&basis), 1, OP_NEW)?;
+        for c in boundaries_3d.iter().chain(&boundaries_uv) {
+            check_geometry_nesting(NestedGeometry::Curve(c), 1, OP_NEW)?;
+        }
+        Ok(Self {
             basis: Box::new(basis),
             boundaries_3d,
             boundaries_uv,
             implicit_outer,
-        }
+        })
     }
 
     /// The basis surface.
@@ -574,12 +590,7 @@ fn read_body(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<CurveB
     }
 
     // all done (the implicit-outer flag read above is not passed on)
-    Ok(CurveBoundedSurface::new(
-        basis_surface,
-        s3d_curves,
-        suv_curves,
-        false,
-    ))
+    CurveBoundedSurface::new(basis_surface, s3d_curves, suv_curves, false)
 }
 
 #[cfg(test)]
@@ -616,6 +627,7 @@ mod tests {
             )],
             true,
         )
+        .unwrap()
     }
 
     #[test]

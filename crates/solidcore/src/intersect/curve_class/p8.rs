@@ -1262,7 +1262,8 @@ mod tests {
             .mid
             .set_class_object(PointClassType::Nothing, None);
         let before = cc.intervals().to_vec();
-        let volume = Volume::with_maps(VolumeKind::Transform(Transform::default()), None, None);
+        let volume =
+            Volume::with_maps(VolumeKind::Transform(Transform::default()), None, None).unwrap();
         cc.intersect_volume_discontinuities(&k, &g, &volume, H::Volume, true)
             .unwrap();
         assert_eq!(before, cc.intervals());

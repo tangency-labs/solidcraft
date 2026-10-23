@@ -25,6 +25,10 @@
 //! | [`OffsetCurve::is_kind_of`]                  | `IsKindOf`                                       |
 //!
 //! Deviations:
+//! - **Nesting.** `new` return `InvalidInput` when the base curve would nest
+//!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
+//!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
+//!   cloning and dropping of nested geometry (no limit upstream).
 //! - **Base curve.** Upstream keeps a pointer to the base curve, owned (deleted with
 //!   the offset, deep-copied by the copy constructor) or shared (`bOwnsCurve =
 //!   FALSE`). The port always owns its base curve by value ([`Box<Curve>`]): a
@@ -73,6 +77,7 @@ use crate::geom::tol::is_zero;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, UNDEF_DOUBLE};
+use crate::surface::surface::p2::{check_geometry_nesting, NestedGeometry};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
 const OP_EVAL: &str = "curve::offset_curve::OffsetCurve::evaluate";
@@ -131,7 +136,7 @@ impl OffsetCurve {
     }
 
     /// An exact evaluation copy, retaining raw flags and the base curve's owner.
-    /// `depth` is the base's depth in the shared 64-level geometry traversal.
+    /// `depth` is the base's depth in the shared `MAX_GEOMETRY_NESTING` (32) geometry traversal.
     pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
         Ok(Self {
             dim: self.dim,
@@ -154,7 +159,11 @@ impl OffsetCurve {
     /// The offset of `base` over `interval` at `distance` in the plane with normal
     /// `normal` (unitised; a zero vector becomes `(0, 0, 1)` as upstream), of image
     /// dimension `dim`. `owns_curve` is upstream's `bOwnsCurve` (default `FALSE`).
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when `base` nests deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1.
     pub fn new(
         dim: u64,
         base: Curve,
@@ -162,8 +171,9 @@ impl OffsetCurve {
         normal: Vec3,
         distance: f64,
         owns_curve: bool,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        check_geometry_nesting(NestedGeometry::Curve(&base), 1, OP_BASE)?;
+        Ok(Self {
             dim,
             base: Some(Box::new(base)),
             // SE(m_vOffsetPlaneNorm.Unitize()): status ignored
@@ -172,7 +182,7 @@ impl OffsetCurve {
             interval,
             reversed: 0,
             owns_curve: i32::from(owns_curve),
-        }
+        })
     }
 
     /// The empty curve built for reading (`SmOffsetCurve()`): dimension 3, no base
@@ -747,6 +757,7 @@ mod tests {
             d,
             true,
         )
+        .unwrap()
     }
 
     #[test]
@@ -847,7 +858,8 @@ mod tests {
             Vec3::new(0.0, 0.0, 1.0),
             -core::f64::consts::SQRT_2,
             false,
-        );
+        )
+        .unwrap();
         let exact = c.evaluate(k, 0.75, 2, true, false).unwrap();
         assert!(exact[1].length() < 1e-13);
         let fixed = c.evaluate(k, 0.75, 2, true, true).unwrap();
@@ -870,7 +882,8 @@ mod tests {
             Vec3::new(1.0, 0.0, 0.0),
             0.5,
             false,
-        );
+        )
+        .unwrap();
         assert!(c.evaluate_point(k, 0.5).is_err());
         assert!(c.evaluate(k, 0.5, 2, true, true).is_err());
     }

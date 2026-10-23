@@ -76,12 +76,22 @@ fn current_curve(
 }
 
 /// Write the edited B-spline generators back into the composite's segments.
-fn sync_generators(composite: &mut CompositeCurve, generators: &[BSplineCurve]) {
-    for (segment, generator) in composite.segments_mut().iter_mut().zip(generators) {
+/// (A B-spline cannot nest, so the checked replacement never refuses one.)
+fn sync_generators(composite: &mut CompositeCurve, generators: &[BSplineCurve]) -> Result<()> {
+    for (index, generator) in generators.iter().enumerate() {
+        let Some(segment) = composite.segment(index) else {
+            break;
+        };
+        if !matches!(segment.curve.kind(), CurveKind::BSpline(_)) {
+            continue;
+        }
+        let mut segment = segment.clone();
         if let CurveKind::BSpline(curve) = segment.curve.kind_mut() {
             *curve = generator.clone();
         }
+        composite.set_segment(index, segment)?;
     }
+    Ok(())
 }
 
 /// One ruled surface between an offset curve and its generating curve
@@ -495,7 +505,7 @@ fn surface_intersection_method(
     a.set_brep_tolerance(intersections, brep_tol)?;
 
     // offset the composite curve without trimming
-    sync_generators(composite, &state.generators);
+    sync_generators(composite, &state.generators)?;
     let untrimmed = ignored(composite.create_trimmed_offsets(
         a.kernel(brep)?,
         direction,

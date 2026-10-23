@@ -621,7 +621,7 @@ fn cbs_of(b: &CbsIn) -> Result<Surface, HarnessError> {
         c3d,
         cuv,
         b.implicit,
-    )))
+    ).map_err(|e| HarnessError::new(e.to_string()))?))
 }
 
 fn p2(p: [f64; 2]) -> Point2 {

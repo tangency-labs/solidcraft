@@ -53,7 +53,8 @@
 //!   virtual dispatch).
 //!   Its unused UV argument is kept. The fixed array of eight singular directions
 //!   is kept: a ninth direction (upstream writes past the array) is
-//!   [`SolidError::InvalidInput`].
+//!   [`SolidError::InvalidInput`], as is nesting past the base solver's
+//!   [`MAX_SOLVE_DEPTH`](crate::geom::global_solver::MAX_SOLVE_DEPTH).
 //! - **Arguments.** Out-params become return values ([`Dupin`],
 //!   [`InteriorCurves`], the `(index, swap)` pair). `MakeDupin`'s conics are owned
 //!   [`Conic`]s instead of context-allocated pointers.
@@ -67,7 +68,8 @@
 //!   (`GetNewElement`, [`TsectPnt::zeroed`]).
 //! - **Recursion.** `SolveBranch` nests at most once per tree node; deeper nesting
 //!   (cyclic tree links, which recurse forever upstream) is
-//!   [`SolidError::InvalidInput`].
+//!   [`SolidError::InvalidInput`], as is nesting past the base solver's
+//!   [`MAX_SOLVE_DEPTH`](crate::geom::global_solver::MAX_SOLVE_DEPTH).
 //! - **Not ported.** `Dump` and the `SM_DEBUG_CODE` drawing blocks; `SM_ASSERT`s.
 
 use crate::curve::conic::{Conic, ConicType};
@@ -744,8 +746,9 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for AdvSurfaceIntersector<'_
             .flatten()
             .map(|t| t.nodes().len())
             .sum::<usize>()
-            + 2;
-        if self.solve_depth > limit {
+            .saturating_add(2)
+            .min(global_solver::MAX_SOLVE_DEPTH + 1);
+        if self.solve_depth >= limit {
             return Err(SolidError::invalid_input(OP_SOLVE, "tree links are cyclic"));
         }
         self.solve_depth += 1;
@@ -1613,6 +1616,28 @@ mod tests {
         assert_eq!(si.solver.solution_requested, SolutionRequested::Nodes);
         assert!(si.is_kind_of(TYPE));
         assert!(!si.is_kind_of(7));
+    }
+
+    #[test]
+    fn solve_depth_guard_rejects_before_touching_branch_state() {
+        let s = plane();
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut tree = crate::geom::tree::Tree::new(None);
+        for _ in 0..global_solver::MAX_SOLVE_DEPTH {
+            tree.add_node(TreeNode::new());
+        }
+        let k = &Kernel::default();
+        let mut si: AdvSurfaceIntersector<'_, '_, H> =
+            AdvSurfaceIntersector::new(k, &s, &d, &s, &d, false).unwrap();
+        si.solver.trees[0] = Some(&tree);
+        si.solve_depth = global_solver::MAX_SOLVE_DEPTH + 1;
+        si.separate_gauss_maps = false;
+        assert!(matches!(
+            si.solve_branch(&[None; global_solver::MAX_SOLVER_TREES]),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert_eq!(si.solve_depth, global_solver::MAX_SOLVE_DEPTH + 1);
+        assert!(!si.separate_gauss_maps);
     }
 
     #[test]

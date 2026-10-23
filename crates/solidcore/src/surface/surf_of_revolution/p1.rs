@@ -364,7 +364,7 @@ pub struct SurfOfRevolution {
 
 impl SurfOfRevolution {
     /// An evaluation copy with an exact, owner-preserving generator. `depth` is
-    /// the generator's depth in the shared 64-level geometry traversal.
+    /// the generator's depth in the shared `MAX_GEOMETRY_NESTING` (32) geometry traversal.
     pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
         let gen_curve = self
             .gen_curve
@@ -1246,7 +1246,7 @@ impl SurfOfRevolution {
                 crate::surface::surface::p1::StepSurface::new(
                     crate::surface::surface::Surface::from(self.clone_exact()),
                     false,
-                ),
+                )?,
             );
             let point_3d = self.base.evaluate_point(nurbs_uv)?;
             let domain = step_surface.natural_uv_domain();

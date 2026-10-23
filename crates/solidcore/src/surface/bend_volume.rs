@@ -254,7 +254,7 @@ impl BendVolume {
 
         // build BendCoordinates into m_pOrientMap
         let orient = Transform::new(center, bend_mid_dir, bend_binormal, Some(bend_axis));
-        Volume::with_maps(VolumeKind::Bend(bend), Some(orient), None)
+        Volume::oriented(VolumeKind::Bend(bend), Some(orient))
     }
 
     /// `m_dBendNeutralDist` (`GetBendNeutralDist`).

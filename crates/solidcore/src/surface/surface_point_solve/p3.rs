@@ -14,7 +14,7 @@
 //! handles. Direct local solutions retain the default variable count; the existing
 //! `LocalPointSolve` dispatcher sets it to two, as upstream does. Out-of-bounds
 //! evaluation uses a private surface copy, restoring the caller's state by
-//! construction. Copying checks every owned geometry branch against a 64-level
+//! construction. Copying checks every owned geometry branch against the `MAX_GEOMETRY_NESTING` (32)
 //! depth bound. `CheckCrease` returns immediately because upstream disables it with
 //! `constexpr sbDoCreaseSubdomains = FALSE`. The local driver is iterative with
 //! upstream's fixed bound of 35.

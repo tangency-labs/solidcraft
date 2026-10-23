@@ -248,7 +248,7 @@ impl UnbendVolume {
 
         // build UnbendCoordinates into m_pOrientMap
         let orient = Transform::new(center, unbend_mid_dir, unbend_binormal, Some(unbend_axis));
-        Volume::with_maps(VolumeKind::Unbend(unbend), Some(orient), None)
+        Volume::oriented(VolumeKind::Unbend(unbend), Some(orient))
     }
 
     /// `m_dUnbendNeutralDist` (`GetUnbendNeutralDist`).
@@ -645,7 +645,7 @@ impl UnbendVolume {
                         volume.clone(),
                         0,
                         1,
-                    ));
+                    )?);
 
                     // Get mapped line's bounding box (status ignored upstream)
                     if let Some(boxes) =

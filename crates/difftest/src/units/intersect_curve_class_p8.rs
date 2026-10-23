@@ -170,7 +170,7 @@ fn geometry(k: &Kernel, r: &[f64; 23]) -> solidcore::Result<Geometry> {
         BSplineSurface::from_nurb(s, false).into()
     };
     let volume = if r[3] < 2. {
-        Volume::with_maps(VolumeKind::Transform(Transform::default()), None, None)
+        Volume::with_maps(VolumeKind::Transform(Transform::default()), None, None)?
     } else {
         let mut s = allocate_nurb_volume([2; 3], [1; 3], [4; 3])?;
         for axis in 0..3 {
@@ -184,7 +184,7 @@ fn geometry(k: &Kernel, r: &[f64; 23]) -> solidcore::Result<Geometry> {
                 1.,
             );
         }
-        Volume::with_maps(VolumeKind::BSpline(BSplineVolume::new(s)), None, None)
+        Volume::with_maps(VolumeKind::BSpline(BSplineVolume::new(s)), None, None)?
     };
     Ok(Geometry {
         curve,

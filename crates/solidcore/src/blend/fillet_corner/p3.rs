@@ -2001,7 +2001,8 @@ mod tests {
             Vec3::new(0.0, 0.0, 1.0),
             1.0,
             false,
-        );
+        )
+        .unwrap();
         b.edge_mut(e_side).unwrap().curve = Some(Curve::from(offset));
         let add_eu = |b: &mut Brep,
                       e: EdgeId,

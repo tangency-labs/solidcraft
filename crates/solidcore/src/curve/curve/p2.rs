@@ -723,7 +723,7 @@ impl Curve {
         self.clone_for_evaluation_depth(0)
     }
 
-    /// Copy every owned geometry branch within Surface's shared 64-level bound.
+    /// Copy every owned geometry branch within Surface's shared `MAX_GEOMETRY_NESTING` (32) bound.
     pub(crate) fn clone_for_evaluation_depth(&self, depth: usize) -> Result<Self> {
         crate::surface::surface::p2::Surface::check_curve_evaluation_copy_depth(self, depth)?;
         let kind = match &self.kind {
@@ -1595,7 +1595,8 @@ impl Curve {
     /// # Errors
     ///
     /// `SM_ERR` for kinds without the edit; those of [`BSplineCurve::transform`].
-    /// A volume append is refused if it would exceed 64 whole-geometry levels.
+    /// A volume append is refused if it would nest deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING).
     pub fn transform(
         &mut self,
         k: &Kernel,
@@ -3953,18 +3954,22 @@ mod tests {
             Vec3::Z,
             0.125,
             true,
-        );
+        )
+        .unwrap();
         let _ = offset.reverse_parameterization(&Extent1d::from_raw(0.0, 1.0));
         let mut offset = Curve::from(offset);
         let _ = offset.set_owner(Some(evaluation_owner(2)), None);
-        let mut source = Curve::from(ProjectedCurve::new(
-            offset,
-            Some(Vec3::ZERO),
-            Some(Vec3::Z),
-            Some(Vec3::X),
-            ProjectionType::Parallel,
-            OwnsCurve::Unsure,
-        ));
+        let mut source = Curve::from(
+            ProjectedCurve::new(
+                offset,
+                Some(Vec3::ZERO),
+                Some(Vec3::Z),
+                Some(Vec3::X),
+                ProjectionType::Parallel,
+                OwnsCurve::Unsure,
+            )
+            .unwrap(),
+        );
         let _ = source.set_owner(Some(evaluation_owner(3)), None);
         let copy = source.clone_for_evaluation().unwrap();
         assert_eq!(copy.owner(), source.owner());
@@ -4013,8 +4018,18 @@ mod tests {
             Some(&[0.125, 0.25]),
         )
         .unwrap();
-        composite.segments_mut()[0].transition = ContinuityType::C1;
-        composite.segments_mut()[0].owns_curve = true;
+        // (set_segment takes a whole segment; a plain Clone would reset the curve's
+        // owner and fix up its knots, so copy the curve exactly)
+        let mut first = composite.segment(0).unwrap().clone();
+        first.curve = composite
+            .segment(0)
+            .unwrap()
+            .curve
+            .clone_for_evaluation()
+            .unwrap();
+        first.transition = ContinuityType::C1;
+        first.owns_curve = true;
+        composite.set_segment(0, first).unwrap();
         let source = Curve::from(composite);
         let copy = source.clone_for_evaluation().unwrap();
         let CurveKind::Composite(composite) = copy.kind() else {
@@ -4107,10 +4122,11 @@ mod tests {
         use crate::surface::volume::{Volume, VolumeKind};
         let mut volume = Volume::new(VolumeKind::Base);
         let _ = volume.set_owner(Some(evaluation_owner(5)));
-        for _ in 0..62 {
-            volume = Volume::with_maps(VolumeKind::Base, None, Some(volume));
+        // the longest chain a curve in a volume may hold (the volume sits at depth 1)
+        for _ in 0..crate::surface::surface::p2::MAX_GEOMETRY_NESTING - 1 {
+            volume = Volume::with_maps(VolumeKind::Base, None, Some(volume)).unwrap();
         }
-        let mut c = CrvInVolume::new(noncanonical_evaluation_curve(3), true, volume, 0, 7);
+        let mut c = CrvInVolume::new(noncanonical_evaluation_curve(3), true, volume, 0, 7).unwrap();
         c.set_breaks_cache(true, vec![0.25], vec![ContinuityType::C1]);
         let source = Curve::from(c);
         let copy = source.clone_for_evaluation().unwrap();
@@ -4131,55 +4147,57 @@ mod tests {
             last = next;
         }
         assert_eq!(last.owner(), Some(evaluation_owner(5)));
-        let source = Curve::from(OffsetCurve::new(
-            3,
-            source,
-            Extent1d::from_raw(0.0, 1.0),
-            Vec3::Z,
-            0.0,
-            true,
-        ));
+        // One more wrapper would nest past the bound: construction refuses it, so a
+        // too-deep chain never reaches the evaluation copy (or its drop).
         assert!(matches!(
-            source.clone_for_evaluation(),
+            OffsetCurve::new(3, source, Extent1d::from_raw(0.0, 1.0), Vec3::Z, 0.0, true),
             Err(SolidError::InvalidInput { .. })
         ));
-        // Only 64-level fixtures are built, so dropping a rejected input is bounded too.
     }
 
     #[test]
     fn evaluation_copy_depth_bound_spans_curve_and_surface_branches() {
         use crate::surface::surf_of_extrusion::SurfOfExtrusion;
+        use crate::surface::surface::p2::MAX_GEOMETRY_NESTING;
         use crate::surface::surface::Surface;
+        // Alternate curve and surface wrappers (two nesting levels per iso curve over
+        // an extrusion) until the iso constructor refuses, then top up with offsets
+        // until those refuse: construction bounds the mixed chain at the shared limit.
         let mut curve = hermite();
-        for _ in 0..31 {
+        let mut levels = 0;
+        loop {
             let mut s = SurfOfExtrusion::empty();
-            s.gen_curve = Some(curve);
-            curve = Curve::from(
-                IsoCurve::from_surface(Surface::from(s), SurfParamType::U, 0.0, true, false)
-                    .unwrap(),
-            );
+            s.gen_curve = Some(curve.clone());
+            match IsoCurve::from_surface(Surface::from(s), SurfParamType::U, 0.0, true, false) {
+                Ok(iso) => curve = Curve::from(iso),
+                Err(e) => {
+                    assert!(matches!(e, SolidError::InvalidInput { .. }));
+                    break;
+                }
+            }
+            levels += 2;
+            assert!(levels <= MAX_GEOMETRY_NESTING);
         }
-        curve = Curve::from(OffsetCurve::new(
-            3,
-            curve,
-            Extent1d::from_raw(0.0, 1.0),
-            Vec3::Z,
-            0.0,
-            true,
-        ));
+        loop {
+            match OffsetCurve::new(
+                3,
+                curve.clone(),
+                Extent1d::from_raw(0.0, 1.0),
+                Vec3::Z,
+                0.0,
+                true,
+            ) {
+                Ok(off) => curve = Curve::from(off),
+                Err(e) => {
+                    assert!(matches!(e, SolidError::InvalidInput { .. }));
+                    break;
+                }
+            }
+            levels += 1;
+            assert!(levels <= MAX_GEOMETRY_NESTING);
+        }
+        // the deepest buildable chain still copies; one level more is refused above
         assert!(curve.clone_for_evaluation().is_ok());
-        curve = Curve::from(OffsetCurve::new(
-            3,
-            curve,
-            Extent1d::from_raw(0.0, 1.0),
-            Vec3::Z,
-            0.0,
-            true,
-        ));
-        assert!(matches!(
-            curve.clone_for_evaluation(),
-            Err(SolidError::InvalidInput { .. })
-        ));
         // Exercise extreme initial counters without overflowing depth + 1.
         assert!(hermite().clone_for_evaluation_depth(usize::MAX).is_err());
     }

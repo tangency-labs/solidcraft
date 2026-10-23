@@ -616,7 +616,7 @@ fn build(c: &CurveIn) -> Result<Curve, HarnessError> {
                 v3(o.n),
                 o.dist,
                 false,
-            )))
+            ).map_err(|e| HarnessError::new(e.to_string()))?))
         }
         CurveIn::Circle(_) | CurveIn::Segment(_) | CurveIn::Canon(_) => {
             Err(harness("unresolved curve"))

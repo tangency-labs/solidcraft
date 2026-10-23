@@ -515,9 +515,13 @@ fn surface_of(k: &Kernel, s: &SrfIn) -> Result<Option<Surface>, HarnessError> {
                 .ok()
                 .map(Surface::from)
         }
-        SrfIn::Bounded { basis, implicit } => surface_of(k, basis)?.map(|basis| {
-            Surface::from(CurveBoundedSurface::new(basis, Vec::new(), Vec::new(), *implicit))
-        }),
+        SrfIn::Bounded { basis, implicit } => match surface_of(k, basis)? {
+            Some(basis) => Some(Surface::from(
+                CurveBoundedSurface::new(basis, Vec::new(), Vec::new(), *implicit)
+                    .map_err(|e| harness(e.to_string()))?,
+            )),
+            None => None,
+        },
         SrfIn::Plane { o, n } => Some(Surface::from(Plane::from_normal(v3(*o), v3(*n)))),
         SrfIn::Bspline(bs) => {
             let net = bs

@@ -237,19 +237,20 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
                 }
             };
             let make = |c: &Curve| {
-                Curve::from(ProjectedCurve::new(
+                ProjectedCurve::new(
                     c.clone(),
                     Some(point),
                     Some(unit),
                     Some(aux),
                     self.projection_type,
                     OwnsCurve::No,
-                ))
+                )
+                .map(Curve::from)
             };
 
             // pay attention - when working with projections, redefine Curve1 and
             // Curve2 to be the projected curves
-            projected = Some([make(parent_curve1), make(parent_curve2)]);
+            projected = Some([make(parent_curve1)?, make(parent_curve2)?]);
 
             // project the bounding boxes to the common plane
             project_in_place(&mut expanded_box, &proj);

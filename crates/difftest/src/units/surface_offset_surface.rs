@@ -602,16 +602,11 @@ fn rust_srf(k: &Kernel, s: &SrfIn) -> Result<solidcore::Result<Surface>, Harness
         SrfIn::Bspline(b) => Ok(Surface::from(bss_of(b)?)),
         SrfIn::Sms(path) => Ok(Surface::from(bss_of(&read_sms(path)?)?)),
         SrfIn::Plane { o, n } => Ok(Surface::from(Plane::from_normal(v3(*o), v3(*n)))),
-        SrfIn::Bounded { basis, implicit } => rust_srf(k, basis)?.map(|b| {
-            Surface::from(CurveBoundedSurface::new(
-                b,
-                Vec::new(),
-                Vec::new(),
-                *implicit,
-            ))
+        SrfIn::Bounded { basis, implicit } => rust_srf(k, basis)?.and_then(|b| {
+            CurveBoundedSurface::new(b, Vec::new(), Vec::new(), *implicit).map(Surface::from)
         }),
         SrfIn::Step { base } => {
-            rust_srf(k, base)?.map(|b| Surface::from(StepSurface::new(b, true)))
+            rust_srf(k, base)?.and_then(|b| StepSurface::new(b, true).map(Surface::from))
         }
         SrfIn::Revolution(r) => rev::rust_surf(k, r)?.map(Surface::from),
         SrfIn::Offset(o) => rust_off(k, o)?.map(Surface::from),

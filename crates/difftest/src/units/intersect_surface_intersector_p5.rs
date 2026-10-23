@@ -269,7 +269,7 @@ fn rust_surface(s: &SurfaceIn) -> Result<Surface, HarnessError> {
             Vec::new(),
             Vec::new(),
             true,
-        ))),
+        ).map_err(|e| HarnessError::new(e.to_string()))?)),
     }
 }
 

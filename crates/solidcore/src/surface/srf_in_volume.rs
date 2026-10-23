@@ -34,6 +34,10 @@
 //! | [`SrfInVolume::read_from_db`]                  | `ReadFromDB`                                      |
 //!
 //! Deviations:
+//! - **Nesting.** `new`, `set_base_surface` and `set_volume` return `InvalidInput` when the surface and the volume would nest
+//!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
+//!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
+//!   cloning and dropping of nested geometry (no limit upstream).
 //! - Compound evaluation copies carry a depth counter capped at 64 by `Surface`.
 //! - **Volumes.** The volume is a [`Volume`] (unit `surface.volume_p1`).
 //!   `InvEvaluatePoint`, `InvMapPoint` and `ReadFromDB` are wired to
@@ -85,7 +89,8 @@ use crate::nurbs::b_spline_surface::{BSplineSurface, LocationType, SurfParamType
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::{
-    is_kind_of as surface_is_kind_of, Surface, SurfaceKind, SRF_IN_VOLUME_TYPE,
+    check_geometry_nesting, is_kind_of as surface_is_kind_of, NestedGeometry, Surface, SurfaceKind,
+    SRF_IN_VOLUME_TYPE,
 };
 use crate::surface::volume::p1::{
     lift_first_derivative_srf, lift_second_derivative_srf, lift_third_derivative_srf,
@@ -191,7 +196,7 @@ impl SrfInVolume {
         }
     }
 
-    /// An evaluation copy retaining exact basis data, with Surface's 64-level bound.
+    /// An evaluation copy retaining exact basis data, with Surface's `MAX_GEOMETRY_NESTING` bound.
     pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
         Surface::check_volume_evaluation_copy_depth(&self.volume, depth)?;
         Ok(Self {
@@ -213,7 +218,9 @@ impl SrfInVolume {
     ///
     /// The failure of copying the surface (upstream ignores the status and keeps the
     /// shared surface; the port propagates it only for [`SolidError::Unported`]),
-    /// [`SolidError::Unported`] from copying an unported volume kind.
+    /// [`SolidError::Unported`] from copying an unported volume kind; `InvalidInput`
+    /// when `surface` or `volume` nests deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1.
     pub fn new(
         k: &Kernel,
         surface: Surface,
@@ -222,6 +229,8 @@ impl SrfInVolume {
         copy_flag: u64,
         owner_flag: u64,
     ) -> Result<Self> {
+        check_geometry_nesting(NestedGeometry::Surface(&surface), 1, OP)?;
+        check_geometry_nesting(NestedGeometry::Volume(&volume), 1, OP)?;
         let mut owner_flag = owner_flag;
         let mut surface = surface;
         let mut volume = volume;
@@ -448,7 +457,9 @@ impl SrfInVolume {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from copying an unported surface kind.
+    /// [`SolidError::Unported`] from copying an unported surface kind; `InvalidInput`
+    /// when `surface` nests deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1 (nothing is changed).
     pub fn set_base_surface(
         &mut self,
         k: &Kernel,
@@ -457,6 +468,7 @@ impl SrfInVolume {
         copy_surface: bool,
         owns_surface: bool,
     ) -> Result<()> {
+        check_geometry_nesting(NestedGeometry::Surface(&surface), 1, OP)?;
         *self.surface = surface;
         self.in_param_space = in_param_space;
         self.owner_flag &= 2; // clear owns surface bit
@@ -477,8 +489,11 @@ impl SrfInVolume {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from copying an unported volume kind.
+    /// [`SolidError::Unported`] from copying an unported volume kind; `InvalidInput`
+    /// when `volume` nests deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1 (nothing is changed).
     pub fn set_volume(&mut self, volume: Volume, copy: bool, owns_volume: bool) -> Result<()> {
+        check_geometry_nesting(NestedGeometry::Volume(&volume), 1, OP)?;
         self.volume = volume;
         self.owner_flag &= 1; // clear owns volume bit
         if copy {

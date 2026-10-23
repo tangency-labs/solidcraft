@@ -49,6 +49,12 @@
 //!   a memory manager clears its arena. Block-size arguments have no counterpart.
 //! - Objects are a caller-chosen `Copy + PartialEq` handle `O` (upstream
 //!   `SmObject*`); a null object pointer is `None`.
+//! - **Recursion.** `AddToSpatialTree` re-inserts every object after growing the top
+//!   box around all of them, so a re-insertion never rebuilds again (NaN sides
+//!   compare as contained). The nesting is still capped at
+//!   [`MAX_SPATIAL_REBUILD_DEPTH`] (1: each level re-inserts every object); a deeper
+//!   rebuild is [`SolidError::InvalidInput`], ignored by the re-inserting caller as
+//!   upstream ignores its status.
 //! - `SmTreeNode::m_pData` is [`NodeData`]: the head of an object list, the
 //!   [`SurfaceAux`] subdivision data, or nothing. Code that would cast `m_pData` to
 //!   the wrong type (undefined behaviour upstream) returns
@@ -84,6 +90,10 @@ use crate::math::{Point3, EFF_ZERO, EFF_ZERO_SQ};
 
 /// `SmTree_TYPE` (`CONT_BASE_TYPE + 150`).
 const SM_TREE_TYPE: i32 = 12150;
+
+/// Deepest nesting of top-box rebuilds in [`Tree::add_to_spatial_tree`] (see the
+/// module's Deviations).
+pub const MAX_SPATIAL_REBUILD_DEPTH: usize = 1;
 
 /// Index of a node in [`Tree::nodes`] (upstream `SmTreeNode*`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -886,11 +896,28 @@ impl<O: Copy + PartialEq> Tree<O> {
         object: Option<O>,
         geom_type: NodeGeomType,
     ) -> Result<()> {
+        self.add_to_spatial_tree_at(extent, object, geom_type, 0)
+    }
+
+    /// [`Tree::add_to_spatial_tree`] nested `depth` rebuilds deep.
+    fn add_to_spatial_tree_at(
+        &mut self,
+        extent: &Extent3d,
+        object: Option<O>,
+        geom_type: NodeGeomType,
+        depth: usize,
+    ) -> Result<()> {
         const OP: &str = "geom::tree::Tree::add_to_spatial_tree";
         let top = self.top_id(OP)?;
 
         // rebuild the tree with a larger box when the extent sticks out
         if !extent.is_contained_by(&self.node(top)?.bbox, EFF_ZERO) {
+            if depth >= MAX_SPATIAL_REBUILD_DEPTH {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "re-inserted box outside the rebuilt top box",
+                ));
+            }
             let all = self.object_list()?;
             let mut union = *extent;
             let mut objects = Vec::with_capacity(all.len());
@@ -921,7 +948,7 @@ impl<O: Copy + PartialEq> Tree<O> {
 
             for (bbox, obj) in extents.iter().zip(objects) {
                 // upstream ignores the status of the re-insertions
-                let _status = self.add_to_spatial_tree(bbox, obj, geom_type);
+                let _status = self.add_to_spatial_tree_at(bbox, obj, geom_type, depth + 1);
             }
         }
 
@@ -1556,6 +1583,18 @@ mod tests {
         t.add_to_spatial_tree(&ext([-9.0; 3], [0.0; 3]), None, NodeGeomType::Default)
             .unwrap();
         assert_eq!(t.object_list().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn non_finite_boxes_rebuild_at_most_once() {
+        let mut t: Tree<u32> = Tree::new_spatial(&unit_box());
+        t.add_to_spatial_tree(&unit_box(), Some(1), NodeGeomType::Default)
+            .unwrap();
+        let nan = ext([f64::NAN, 0.0, 0.0], [1.0, 1.0, 1.0]);
+        let _ = t.add_to_spatial_tree(&nan, Some(2), NodeGeomType::Default);
+        let inf = ext([f64::NEG_INFINITY; 3], [f64::INFINITY; 3]);
+        let _ = t.add_to_spatial_tree(&inf, Some(3), NodeGeomType::Default);
+        assert!(t.object_list().is_ok());
     }
 
     #[test]

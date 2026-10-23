@@ -349,7 +349,7 @@ fn build_base(c: &BaseIn) -> Result<Curve, HarnessError> {
     }
 }
 
-fn build_offset(base: Curve, s: &SpecIn) -> Curve {
+fn build_offset(base: Curve, s: &SpecIn) -> solidcore::Result<Curve> {
     let mut c = Curve::from(OffsetCurve::new(
         s.dim,
         base,
@@ -357,13 +357,13 @@ fn build_offset(base: Curve, s: &SpecIn) -> Curve {
         v3(s.normal),
         s.dist,
         s.owns,
-    ));
+    )?);
     for _ in 0..s.nrev {
         let ivl = c.natural_interval();
         // (status ignored by the shim; the offset reversal cannot fail)
         let _ = c.reverse_parameterization(&Kernel::default(), &ivl);
     }
-    c
+    Ok(c)
 }
 
 /// Most reversals the runner applies (`ffi::MAX_REVERSALS`, the guard's bound): the
@@ -383,10 +383,11 @@ fn build(i: &Inputs) -> Result<(Curve, Curve), HarnessError> {
     }
     let base = build_base(i.base.as_ref().ok_or_else(|| harness("no base"))?)?;
     let spec = i.spec.as_ref().ok_or_else(|| harness("no spec"))?;
-    let inner = build_offset(base.clone(), spec);
+    let built = |base: Curve, spec: &SpecIn| build_offset(base, spec).map_err(|e| harness(e.to_string()));
+    let inner = built(base.clone(), spec)?;
     Ok(match &i.outer {
         None => (base, inner),
-        Some(o) => (inner.clone(), build_offset(inner, o)),
+        Some(o) => (inner.clone(), built(inner, o)?),
     })
 }
 
@@ -569,7 +570,7 @@ fn rust_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
                 })?;
                 let mut s = s.clone();
                 s.owns = false;
-                let c2 = build_offset(under, &s);
+                let c2 = build_offset(under, &s)?;
                 o.push(b(c.approx_eq(k, &c2)?));
                 o.push(b(c2.approx_eq(k, &c)?));
             }

@@ -488,7 +488,7 @@ fn build(pc: &PcIn) -> Result<(ProjectedCurve, f64), HarnessError> {
                 pc.aux.map(v3),
                 ptype,
                 owns,
-            ),
+            ).map_err(|e| HarnessError::new(e.to_string()))?,
             0.0,
         ))
     } else {
@@ -500,7 +500,7 @@ fn build(pc: &PcIn) -> Result<(ProjectedCurve, f64), HarnessError> {
             None,
             ProjectionType::Unknown,
             OwnsCurve::No,
-        );
+        ).map_err(|e| HarnessError::new(e.to_string()))?;
         let undef = Vec3::UNDEF;
         let st = match c.set_canonical(
             base,

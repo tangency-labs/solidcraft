@@ -103,7 +103,8 @@
 //!   `SetOwnerFlag`, `GetRootCurve`, `GetMemoryUsed`, `WriteToDB`, `Dump` and
 //!   `AssertValid` belong to other units or are out of scope.
 //! - **Geometry depth.** Every construction path, including `empty`, database
-//!   loading and `set_uv_curve`, checks both children with the shared 64-level
+//!   loading and `set_uv_curve`, checks both children with the shared
+//!   [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) (32)
 //!   geometry visitor before any recursive domain or copy operation. The children
 //!   are private and exposed only immutably, so infallible `Clone` and temporary
 //!   evaluation snapshots can safely copy this validated graph exactly.
@@ -308,7 +309,8 @@ impl Clone for CrvOnSurf {
 
 impl CrvOnSurf {
     /// An exact evaluation copy retaining both NURBS objects and all cache flags.
-    /// `depth` is the UV curve's depth in the shared 64-level geometry traversal.
+    /// `depth` is the UV curve's depth in the shared `MAX_GEOMETRY_NESTING` (32)
+    /// geometry traversal.
     pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
         Ok(Self {
             uv_curve: Box::new(self.uv_curve.clone_for_evaluation_depth(depth)?),
@@ -349,7 +351,8 @@ impl CrvOnSurf {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` if the complete geometry would exceed 64 levels, checked
+    /// `InvalidInput` if the complete geometry would nest deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING), checked
     /// before querying the domain or copying either part; otherwise those of the
     /// UV curve's `Copy` (owner flags 1 and 2) and surface's `Copy` (owner flag 2).
     pub fn new(
@@ -387,7 +390,8 @@ impl CrvOnSurf {
     /// # Errors
     ///
     /// `InvalidInput` when the two points coincide (upstream then dereferences a
-    /// null line), or the complete geometry would exceed 64 levels.
+    /// null line), or the complete geometry would nest deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING).
     pub fn from_uv_line(
         k: &Kernel,
         start_uv: Point2,
@@ -421,7 +425,8 @@ impl CrvOnSurf {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` if the complete geometry would exceed 64 levels.
+    /// `InvalidInput` if the complete geometry would nest deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING).
     pub fn empty(uv_curve: Curve, surface: Surface) -> Result<Self> {
         Self::bare(uv_curve, surface, 0)
     }
@@ -541,7 +546,8 @@ impl CrvOnSurf {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` if the replacement would exceed 64 geometry levels; leaves
+    /// `InvalidInput` if the replacement would nest deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING); leaves
     /// the curve and its caches unchanged on failure.
     pub fn set_uv_curve(&mut self, uv_curve: Curve) -> Result<()> {
         Surface::check_curve_evaluation_copy_depth(&uv_curve, 1)?;
@@ -1402,7 +1408,9 @@ impl CrvOnSurf {
     /// # Errors
     ///
     /// Those of the surface's transform, including `InvalidInput` when a growing
-    /// volume map would exceed 64 whole-geometry levels. Earlier cache edits remain.
+    /// volume map would nest deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING).
+    /// Earlier cache edits remain.
     pub fn transform(
         &mut self,
         k: &Kernel,
@@ -1819,6 +1827,7 @@ mod tests {
     use super::*;
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+    use crate::surface::surface::p2::MAX_GEOMETRY_NESTING;
 
     /// A bilinear patch over `[0, 1]^2`: `S(u, v) = (u, v, u * v)`.
     fn patch() -> BSplineSurface {
@@ -1928,7 +1937,7 @@ mod tests {
         let k = Kernel::default();
         let plane = || Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
         let mut nested = uv();
-        for _ in 0..63 {
+        for _ in 0..MAX_GEOMETRY_NESTING {
             nested = Curve::from(CrvOnSurf::new(&k, nested, plane(), None, 0).unwrap());
         }
         let expected = nested.evaluate_point(&k, 0.25).unwrap();
@@ -2003,8 +2012,10 @@ mod tests {
         // Exercise both direct SrfInVolume and the owned OffsetSurface path.
         for offset in [false, true] {
             let twist = TwistVolume::create(Vec3::ZERO, Vec3::Z, Vec3::X, 10.0, 1e-6);
-            // Crv depth 0, surface depth 1 (+1 for an offset), volume tail 63.
-            let mut curve = volume_mapped_curve(&k, twist, 61 - usize::from(offset), offset);
+            // Crv depth 0, surface depth 1 (+1 for an offset), volume tail at
+            // MAX_GEOMETRY_NESTING.
+            let prefix_maps = MAX_GEOMETRY_NESTING - 2 - usize::from(offset);
+            let mut curve = volume_mapped_curve(&k, twist, prefix_maps, offset);
             let sample = 0.25;
             let before = curve.evaluate(&k, sample, 1, true, false).unwrap();
             curve
@@ -2061,13 +2072,13 @@ mod tests {
             let absorb = volume_mapped_curve(
                 &k,
                 Volume::new(VolumeKind::Transform(Transform::IDENTITY)),
-                61 - depth_adjustment,
+                MAX_GEOMETRY_NESTING - 2 - depth_adjustment,
                 offset,
             );
             let append = volume_mapped_curve(
                 &k,
                 TwistVolume::create(Vec3::ZERO, Vec3::Z, Vec3::X, 10.0, 1e-6),
-                60 - depth_adjustment,
+                MAX_GEOMETRY_NESTING - 3 - depth_adjustment,
                 offset,
             );
             for mut curve in [absorb, append] {

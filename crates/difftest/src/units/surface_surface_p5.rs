@@ -533,7 +533,7 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
             Vec::new(),
             Vec::new(),
             *implicit,
-        ))),
+        ).map_err(|e| HarnessError::new(e.to_string()))?)),
         SrfIn::Plane { o, n } => Ok(Surface::from(Plane::from_normal(v3(*o), v3(*n)))),
         SrfIn::Bspline(bs) => {
             let net = bs

@@ -563,7 +563,7 @@ fn add_corner(
         p.plane_normal,
         signed_distance,
         false,
-    ));
+    )?);
     let curr_off = Curve::from(OffsetCurve::new(
         3,
         site.this.clone(),
@@ -571,7 +571,7 @@ fn add_corner(
         p.plane_normal,
         signed_distance,
         false,
-    ));
+    )?);
 
     // get offset curveEnd positions and tangents
     let pv1 = prev_off.evaluate(k, site.prev_ivl.max(), 1, true, true)?;
@@ -684,7 +684,7 @@ fn raw_offset(
         p.plane_normal,
         signed_distance,
         false,
-    ));
+    )?);
 
     // discard degenerate offsets
     if off.is_degenerate(k, EFF_ZERO, None)? && p.trim_results {

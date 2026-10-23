@@ -243,7 +243,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 pub(crate) fn wrapped_of(wrap: bool, s: &SurfIn) -> Result<Surface, HarnessError> {
     let s = surface_in(s)?;
     Ok(if wrap {
-        Surface::from(StepSurface::new(s, true))
+        Surface::from(StepSurface::new(s, true).map_err(|e| HarnessError::new(e.to_string()))?)
     } else {
         s
     })

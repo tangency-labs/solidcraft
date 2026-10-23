@@ -344,7 +344,7 @@ fn build(c: &CivIn) -> Result<CrvInVolume, HarnessError> {
         Volume::new(VolumeKind::Transform(Transform::IDENTITY)),
         c.copy,
         c.owner,
-    );
+    ).map_err(|e| HarnessError::new(e.to_string()))?;
     if let Some(k) = &c.cache {
         let conts = k
             .conts

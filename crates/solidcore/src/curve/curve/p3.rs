@@ -1443,7 +1443,7 @@ impl Curve {
             Some(aux_data),
             ProjectionType::Parallel,
             OwnsCurve::No,
-        ));
+        )?);
         let proj2 = Self::from(ProjectedCurve::new(
             other.clone(),
             Some(origin),
@@ -1451,7 +1451,7 @@ impl Curve {
             Some(aux_data),
             ProjectionType::Parallel,
             OwnsCurve::No,
-        ));
+        )?);
 
         // find projected curve intersections
         let isect = local_curve_intersect(

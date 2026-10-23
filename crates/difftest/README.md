@@ -6,6 +6,11 @@ compares the results. A unit may be marked `status = "green"` in
 `plan/units/<id>.toml` only when `difftest --status-of <id>` prints `green`, and
 `status = "partial"` only when it prints `partial` (AGENTS.md section 4a).
 
+`audit.recursion` is a crate-wide audit rather than a port: it has no standalone
+C++ counterpart or runner and is excluded from `--green`. Its plan status records
+the audit of the current merged code; its numerical regression check reruns the
+ported units with `--green`. Future ports still need their own recursion review.
+
 ## Quick start
 
 ```sh
@@ -26,7 +31,7 @@ nice -n 10 cargo test -p difftest --features cpp                     # harness s
 |---|---|
 | `--unit <id>` | run one unit (repeatable; `*` and `?` match several registered runners, e.g. `--unit 'nlib.*'`) |
 | `--jobs N` / `-j N` | run N units at a time, each in its own child process (default `1`: one process, in order; `0`: every core). Output, reports and exit status are the same as with `1` (below) |
-| `--green` | all units with `status = "green"` or `"partial"` in `plan/units/*.toml` (one without a runner FAILS; a `green` unit that comes out partial FAILS) |
+| `--green` | all port units with `status = "green"` or `"partial"` in `plan/units/*.toml`, excluding `audit.recursion` (a crate-wide audit with no runner; a port without a runner FAILS; a `green` port that comes out partial FAILS) |
 | `--status-of <id>` | run the unit (no report) and print only `green`, `partial` or `fail`; exit `1` on `fail` (also when no runner is registered) |
 | `--all` | every registered runner |
 | `--list` | registered runners, their plan status and case counts |

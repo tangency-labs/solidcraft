@@ -969,7 +969,8 @@ fn rust_surface(s: &SrfIn) -> Result<Surface, HarnessError> {
             Vec::new(),
             Vec::new(),
             *implicit,
-        ))),
+        )
+        .map_err(|e| harness(e.to_string()))?)),
         SrfIn::Plane { o, n } => Ok(Surface::from(Plane::from_normal(v3(*o), v3(*n)))),
         SrfIn::Bspline(b) => {
             let net = b

@@ -397,7 +397,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 fn wrapped_of(wrap: bool, s: &SurfIn) -> Result<Surface, HarnessError> {
     let s = surface_in(s)?;
     Ok(if wrap {
-        Surface::from(StepSurface::new(s, true))
+        Surface::from(StepSurface::new(s, true).map_err(|e| HarnessError::new(e.to_string()))?)
     } else {
         s
     })
@@ -729,7 +729,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             .map(|()| o)
         }
         OpIn::Step { v, ivl } => {
-            let s = StepSurface::new(surface_in(&i.surf)?, true);
+            let s = StepSurface::new(surface_in(&i.surf)?, true).map_err(|e| HarnessError::new(e.to_string()))?;
             let mut o = vec![0.0];
             push_dom(&mut o, &s.natural_uv_domain());
             match s.domain_with_continuity() {

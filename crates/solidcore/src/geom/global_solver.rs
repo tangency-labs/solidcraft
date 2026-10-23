@@ -74,6 +74,11 @@
 //!   handle only prints a message upstream and falls through to `TRUE`; here
 //!   it is silently `true`. `SM_ASSERT`s, `Dump` and the `SM_DEBUG_CODE`
 //!   drawing blocks are not ported.
+//! - **Recursion counter.** The tree check above runs only in `solve_it`; overrides
+//!   and direct callers of `SolveBranch` skip it. The base traversal therefore also
+//!   counts its nesting in [`GlobalSolver::solve_depth`] and returns
+//!   [`SolidError::InvalidInput`] past `MAX_SOLVE_DEPTH + 1` nested calls (the top
+//!   call plus one per level, so every tree set the check accepts still runs).
 //! - `SM_SO_SURFACE_PROJECTED_INTERSECT` samples an `SmCrvOnSurf` owner of the
 //!   second tree, which is not ported yet: once the box tests cannot decide,
 //!   a tree without an owner object answers `false` (as upstream) and any
@@ -400,6 +405,9 @@ pub struct GlobalSolver<'t, O> {
     pub opt_vectors: Vec<Vec3>,
     /// `*m_pSolutions`: the sorted solutions.
     pub solutions: SolutionArray<O>,
+    /// (port) Current nesting of the base [`solve_branch`], bounded by
+    /// `MAX_SOLVE_DEPTH + 1`.
+    pub solve_depth: usize,
     /// Branches [`solve_branch`] visited since the solve started (not upstream;
     /// reset by [`GlobalSolve::solve_it`] and the topology solver's `SolveTrees`):
     /// bounded by [`MAX_SOLVE_BRANCHES`].
@@ -494,6 +502,7 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
             at_distance_sq: 0.0,
             opt_vectors: Vec::new(),
             solutions: SolutionArray::new(),
+            solve_depth: 0,
             branches_visited: 0,
         }
     }
@@ -1497,8 +1506,28 @@ fn combine_min_max<O: SolutionObject>(
 ///
 /// # Errors
 ///
-/// Those of the hooks.
+/// Those of the hooks; [`SolidError::InvalidInput`] past `MAX_SOLVE_DEPTH + 1`
+/// nested calls.
 pub fn solve_branch<'t, O, S>(solver: &mut S, branch: &Branch) -> Result<()>
+where
+    O: SolutionObject + 't,
+    S: GlobalSolve<'t, O> + ?Sized,
+{
+    let depth = solver.solver().solve_depth;
+    if depth > MAX_SOLVE_DEPTH {
+        return Err(SolidError::invalid_input(
+            "geom::global_solver::solve_branch",
+            "solve nesting exceeds MAX_SOLVE_DEPTH",
+        ));
+    }
+    solver.solver_mut().solve_depth = depth + 1;
+    let result = solve_branch_body(solver, branch);
+    solver.solver_mut().solve_depth = depth;
+    result
+}
+
+/// The body of [`solve_branch`] at one nesting level.
+fn solve_branch_body<'t, O, S>(solver: &mut S, branch: &Branch) -> Result<()>
 where
     O: SolutionObject + 't,
     S: GlobalSolve<'t, O> + ?Sized,
@@ -2093,6 +2122,55 @@ mod tests {
         assert_eq!(SolutionRequested::Nodes.code(), 3);
         assert_eq!(OperationCategory::Other.code(), 3);
         assert_eq!(SolutionPairType::DiffParameters.code(), 3);
+    }
+
+    #[test]
+    fn solve_depth_is_restored_after_a_recursive_error() {
+        struct Repeating {
+            base: GlobalSolver<'static, Obj>,
+            stop: bool,
+        }
+        impl GlobalSolve<'static, Obj> for Repeating {
+            fn solver(&self) -> &GlobalSolver<'static, Obj> {
+                &self.base
+            }
+
+            fn solver_mut(&mut self) -> &mut GlobalSolver<'static, Obj> {
+                &mut self.base
+            }
+
+            fn branch_may_contain_answers(&mut self, _: &Branch) -> Result<bool> {
+                Ok(!self.stop)
+            }
+
+            fn are_ready_for_local_solve(&self, _: &Branch) -> Result<bool> {
+                Ok(false)
+            }
+
+            fn subdivide(&mut self, branch: &Branch) -> Result<(Branch, Branch)> {
+                Ok((*branch, *branch))
+            }
+        }
+
+        let mut solver = Repeating {
+            base: GlobalSolver::new(),
+            stop: false,
+        };
+        // Exercise the last two recursion levels without filling the test
+        // thread's stack. A cyclic branch must return an error and unwind both.
+        solver.base.solve_depth = MAX_SOLVE_DEPTH - 1;
+        let branch = [None; MAX_SOLVER_TREES];
+        assert!(matches!(
+            solver.solve_branch(&branch),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert_eq!(solver.base.solve_depth, MAX_SOLVE_DEPTH - 1);
+
+        // The same solver remains usable after the error.
+        solver.base.solve_depth = 0;
+        solver.stop = true;
+        solver.solve_branch(&branch).unwrap();
+        assert_eq!(solver.base.solve_depth, 0);
     }
 
     #[test]

@@ -176,7 +176,7 @@ fn geometry(k: &Kernel, i: &Inputs) -> Result<Surface, HarnessError> {
         Geometry::Rev { rev } => {
             let surface = Surface::from(rev_rust(k, rev)?.map_err(|e| harness(e.to_string()))?);
             Ok(if i.wrap {
-                Surface::from(StepSurface::new(surface, true))
+                Surface::from(StepSurface::new(surface, true).map_err(|e| HarnessError::new(e.to_string()))?)
             } else {
                 surface
             })

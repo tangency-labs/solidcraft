@@ -310,13 +310,14 @@ fn build(v: &VolIn) -> Result<Volume, HarnessError> {
             VolumeKind::Transform(transform_of(*t)),
             None,
             next,
-        ));
+        ).map_err(|e| HarnessError::new(e.to_string()))?);
     }
-    Ok(Volume::with_maps(
+    Volume::with_maps(
         VolumeKind::BSpline(BSplineVolume::new(rec)),
         v.orient.map(transform_of),
         next,
-    ))
+    )
+    .map_err(|e| HarnessError::new(e.to_string()))
 }
 
 fn bsv(v: &Volume) -> Result<&BSplineVolume, HarnessError> {

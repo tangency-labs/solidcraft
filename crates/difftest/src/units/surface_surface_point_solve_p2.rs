@@ -618,7 +618,7 @@ fn any_surface(k: &Kernel, wrap: bool, s: &AnySurf) -> Result<Surface, HarnessEr
                 .map_err(|e| harness(format!("surface of revolution: {e}")))?;
             let r = Surface::from(r);
             Ok(if wrap {
-                Surface::from(StepSurface::new(r, true))
+                Surface::from(StepSurface::new(r, true).map_err(|e| HarnessError::new(e.to_string()))?)
             } else {
                 r
             })
