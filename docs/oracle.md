@@ -9,7 +9,7 @@ Where the expected values come from (the **Source** column):
 
 No expected value comes from a commercial CAD product.
 
-**83 / 83 cases pass**; sources: 62 analytic, 21 freecad. 0 known failure(s) tracked in issues; 0 case(s) without expected values yet.
+**84 / 84 cases pass**; sources: 63 analytic, 21 freecad. 0 known failure(s) tracked in issues; 0 case(s) without expected values yet.
 
 | Case | Source | Result | Surface distance mm (max / mean) | Method | Notes |
 |---|---|---|---|---|---|
@@ -96,6 +96,7 @@ No expected value comes from a commercial CAD product.
 | 81-fillet-spline-radius | analytic | pass |  | box 40x30x20 with its top front edge (y=0, z=20) rounded at a radius that is a clamped cubic B-spline in u = x/40, knots 0,0,0,0,0.25,0.6,1,1,1,1, control radii 2, 5, 1.5, 4, 1, 3 (r(0) = 2, r(40) = 3). Sections are quarter rounds; V, moments and areas integrated along the edge, exactly per knot span |  |
 | 82-thin-extrude-frame | analytic | pass |  | square frame: the lines' 40 mm square walled 3 mm inside and 1 mm outside (mitred corners) is 42 x 42 less 34 x 34, 10 mm tall: V = (42^2 - 34^2) * 10, A = 2 (42^2 - 34^2) + 4 * 42 * 10 + 4 * 34 * 10 |  |
 | 83-boundary-loop-thicken | analytic | pass |  | region = 10 x 10 square + half disc r 5 on its top side: A = 100 + 12.5 pi, centroid by moments (half disc's at 4r / (3 pi) above its diameter); slab of thickness 2 over it (symmetric about z = 0): V = 2A, area = 2A + 2 (30 + 5 pi) |  |
+| 96-frame-tower | analytic | pass |  | 18 separate 45 x 45 bars (boxes): 4 uprights of 1500, 12 rails and 2 cross members of 600 - 2 x 45 = 510; V = 2025 (4 x 1500 + 14 x 510); area = sum of 4 x 45 L + 2 x 2025 per bar; centre of mass by moments (rails centred at z = 22.5, 722.5, 1477.5, cross members at x = 200 and 400 in the middle ring) |  |
 
 ## Not covered by a reference case
 
