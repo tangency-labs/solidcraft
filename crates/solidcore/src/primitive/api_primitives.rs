@@ -956,8 +956,8 @@ mod tests {
         }
         // partial solids sweep a profile (topology sweep) past SmBrep::DeleteEdge and
         // the axis' SmFace::CurveOnClassify, until SmFace::FindVertexSector (sphere,
-        // cylinder) or the torus' SmFace::Point3DClassify
-
+        // cylinder); the torus, whose point classification runs and whose later ray
+        // fires classify against the prepared trimmed surface cache, completes
         for (r, unit) in [
             (
                 create_partial_sphere(k, o(), 5.0, 0.0, 90.0),
@@ -967,13 +967,11 @@ mod tests {
                 create_partial_cylinder(k, o(), 5.0, 10.0, 0.0, 90.0),
                 "topology.face_p4",
             ),
-            (
-                create_partial_torus(k, o(), 10.0, 2.0, 0.0, 90.0),
-                "query.face_p1",
-            ),
         ] {
             assert_eq!(deferred_at(&r), Some(unit));
         }
+        let torus = create_partial_torus(k, o(), 10.0, 2.0, 0.0, 90.0).unwrap();
+        assert!(crate::topology::brep::p2::is_manifold_solid(&torus).unwrap());
         // edges without an edge use on their face
         let mut brep = Brep::new_with_infinite_region().unwrap();
         let (edge, face) = (EdgeId::from_index(0), FaceId::from_index(0));
