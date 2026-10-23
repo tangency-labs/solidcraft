@@ -8,7 +8,7 @@ use std::sync::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{Connection, Destination, Error, Result, Snapshot, StagedSave};
+use crate::{Connection, Destination, Error, Published, Result, Snapshot, StagedSave};
 
 static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 
@@ -46,6 +46,10 @@ pub struct JobStatus {
     pub revision: Option<String>,
     pub message: Option<String>,
     pub result: Option<Value>,
+    /// Confirmed captures, including partial success before a later failure or cancellation.
+    /// A connection synchronization job can publish several independent Save operations.
+    #[serde(default)]
+    pub publications: Vec<Published>,
 }
 
 struct State {
@@ -77,6 +81,7 @@ impl Job {
                 revision: None,
                 message: None,
                 result: None,
+                publications: Vec::new(),
             },
             cancelled: false,
             opened: None,

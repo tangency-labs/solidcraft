@@ -99,6 +99,74 @@ fn ordinary_save_uses_the_bound_destination_and_previous_local_revision() {
 }
 
 #[test]
+fn confirmed_conflict_copy_redirects_only_its_matching_binding() {
+    let (mut session, host, destination) = configured();
+    session.execute("cloud.save", &json!({"destination":destination})).unwrap();
+    host.saved(0);
+    session.poll_cloud().unwrap();
+    let conflict = Destination { file: "conflicts/parts/bracket-copy".into(), ..destination.clone() };
+    host.job(0)
+        .update(|status| {
+            status.destination = Some(conflict.clone());
+            status.phase = Phase::Synced;
+        })
+        .unwrap();
+    session.poll_cloud().unwrap();
+    assert_eq!(session.cloud_binding().unwrap().destination, conflict);
+    assert!(!session.is_dirty());
+    session.doc_mut().name = "Continue conflict copy".into();
+    session.execute("file.save", &json!({})).unwrap();
+    let records = host.0.lock().unwrap();
+    let Operation::Save { save, .. } = &records[1].1 else { panic!("expected save") };
+    assert_eq!(save.record.destination, conflict);
+    drop(records);
+    host.saved(1);
+    session.poll_cloud().unwrap();
+    assert_eq!(session.cloud_binding().unwrap().destination, conflict);
+
+    // A different local revision must not follow a delayed result from an earlier save.
+    let (mut session, host, destination) = configured();
+    session.execute("cloud.save", &json!({"destination":destination})).unwrap();
+    host.saved(0);
+    session.poll_cloud().unwrap();
+    session.doc_mut().name = "Newer queued edit".into();
+    session.execute("file.save", &json!({})).unwrap();
+    host.saved(1);
+    session.poll_cloud().unwrap();
+    host.job(0)
+        .update(|status| {
+            status.destination = Some(conflict);
+            status.phase = Phase::Synced;
+        })
+        .unwrap();
+    session.poll_cloud().unwrap();
+    assert_eq!(session.cloud_binding().unwrap().destination, destination);
+}
+
+#[test]
+fn partial_synchronization_confirms_an_older_offline_save_and_its_conflict_destination() {
+    let (mut session, host, destination) = configured();
+    session.execute("cloud.save", &json!({"destination":destination})).unwrap();
+    host.saved(0);
+    session.poll_cloud().unwrap();
+    let revision = session.cloud_binding().unwrap().revision.clone().unwrap();
+    let conflict = Destination { file: "conflicts/parts/bracket-copy".into(), ..destination };
+    session.execute("cloud.sync", &json!({})).unwrap();
+    host.job(1)
+        .update(|status| {
+            status.publications.push(solidcraft_cloud::Published { destination: conflict.clone(), revision, commit: "a".repeat(40), conflict: true });
+            status.phase = Phase::Failed;
+            status.message = Some("Another queued file could not be published".into());
+        })
+        .unwrap();
+    session.poll_cloud().unwrap();
+    assert_eq!(host.job(0).status().unwrap().phase, Phase::Synced);
+    assert_eq!(session.cloud_binding().unwrap().destination, conflict);
+    assert!(!session.is_dirty());
+    assert_eq!(host.job(1).status().unwrap().phase, Phase::Failed);
+}
+
+#[test]
 fn offline_operation_history_does_not_limit_the_number_of_durable_saves() {
     let (mut session, host, destination) = configured();
     for index in 0..140 {

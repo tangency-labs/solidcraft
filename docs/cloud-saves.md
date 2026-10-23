@@ -39,6 +39,8 @@ Desktop Git must preserve credential helpers, SSH agents/configuration, signing,
 
 Browser integration must persist connection metadata and pending saves in IndexedDB, with assets and recovery data in OPFS. Restart recovery must retry the captured snapshot rather than silently substituting later unsaved edits. Quota and credential failures leave the requested save recoverable.
 
+`solidcraft_io::cloud::NativeHost` runs native operations on workers and retains the caller's allowed-folder scope. Give it the app's private cloud recovery directory. Each connection has its own outbox under the SHA-256 of its identifier, preventing case-insensitive filesystem aliases. Save persists its captured objects and queue record before starting Git. Listing combines queued destinations with the checkout; opening prefers the latest queued revision and needs neither connectivity nor a working Git executable for that revision. Competing local tips remain intact and return a conflict rather than opening an arbitrary version. Synchronization retries captured revisions in dependency order; a failed predecessor blocks its children but not unrelated captures. A Save operation reports only its requested capture's publication result. The local queue/process locks are implementation coordination, separate from the future advisory editing leases described in the collaboration plan.
+
 ## Engine command interface
 
 The embedding application installs its asynchronous adapter through
@@ -70,8 +72,9 @@ Saving to an explicit native path or adopting a native Save As detaches that
 binding and prevents an old asynchronous capture from reattaching it.
 `file.export` remains available for an independent native copy.
 
-These foundations and commands are implemented. Application-owned worker
-adapters, browser persistence, credential entry, guided setup, Home/Preferences
+These foundations, commands, and the native worker adapter are implemented.
+Application installation of that adapter, browser workers and persistence,
+credential entry, guided setup, Home/Preferences
 integration, and end-to-end application evidence remain unfinished. User-facing
 documentation must remain marked unreleased until those paths have been
 exercised in the app.
