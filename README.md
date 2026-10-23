@@ -112,20 +112,24 @@ so they are cached like the Rust crates.
 
 ## Contributing
 
-Contributions go through pull requests, and AI agents are welcome. Current work
-includes connecting calls between ported units, resolving deferred differential
-cases, adding operation regressions and fixing bugs.
+Contributions go through pull requests, and AI agents are welcome. Useful work includes
+connecting ported units, resolving deferred comparisons, adding operation regressions
+and fixing bugs.
 
 1. Check the [live unit results](https://tangency-labs.github.io/solidcore/units/index.html),
    [open issues](https://github.com/tangency-labs/solidcore/issues) and
-   [open PRs](https://github.com/tangency-labs/solidcore/pulls) before choosing work.
-   Many remaining paths already have an active contributor.
-2. Follow [AGENTS.md](AGENTS.md) for branching, coordination and validation. For a
-   new port unit, claim it with a draft PR titled `port: <unit id>`; the
-   lowest-numbered open PR for that unit wins.
-3. Verify changed behavior against the C++ reference, rerun the differential units
-   affected by the change, and include their summary lines in the PR. CI is the
-   merge gate; passing cases must retain the existing tolerances and coverage.
+   [open PRs](https://github.com/tangency-labs/solidcore/pulls). Choose an unclaimed
+   unit or a specific completion task: a missing function, back-edge, exact import,
+   coverage gap or parity bug. Green reports do not prove every branch is exercised.
+2. Search PR titles and bodies for the unit, symbols and paths. Claim the specific
+   work in a draft PR; initial ports use `port: <unit id>`. A claim covers its stated
+   scope, leaving independent tasks in the same unit available. Coordinate overlapping
+   functions or shared interfaces in the existing PR before editing them.
+3. Describe the intended behavior, affected paths, related PRs and validation, and
+   list independent follow-ups others can take. Compare against C++ and rerun affected
+   units with existing tolerances and coverage. CI is the merge gate. See
+   [AGENTS.md, section 4](AGENTS.md#4-porting-a-unit-pr-workflow) for the claim template,
+   handoffs and inactivity rules.
 
 To keep parallel PRs from conflicting: edit only your unit's `plan/units/<unit id>.toml`,
 never commit `reports/difftest/` (CI generates them), and put each finding or upstream issue
