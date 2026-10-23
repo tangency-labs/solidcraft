@@ -70,6 +70,14 @@
 //!   visits since the solve started ([`GlobalSolver::branches_visited`]) and returns [`SolidError::InvalidInput`]
 //!   past [`MAX_SOLVE_BRANCHES`] (upstream fixtures and the committed difftest
 //!   cases visit at most 56,753 branches in one solve).
+//! - **Owner objects.** A tree node's owner object is a solution handle, not the
+//!   curve, so the `SM_SO_SURFACE_PROJECTED_INTERSECT` test
+//!   ([`GlobalSolver::surface_projected_may_contain_answers`]) takes the second
+//!   curve from its caller (the curve/curve solver); the base solver without one
+//!   returns [`SolidError::InvalidInput`] where the owner object is set. The
+//!   ignored statuses of its `EvaluatePoint`/`EvaluateSurfaceNormal` keep the
+//!   previous sample's point or normal; a failure on the first sample (an
+//!   uninitialised value upstream) is returned.
 //! - The `ERR(SM_ERR)` of `BranchMayContainAnswers` for operations it does not
 //!   handle only prints a message upstream and falls through to `TRUE`; here
 //!   it is silently `true`. `SM_ASSERT`s, `Dump` and the `SM_DEBUG_CODE`
@@ -84,6 +92,7 @@
 //!   a tree without an owner object answers `false` (as upstream) and any
 //!   owner object returns [`SolidError::Unported`] (see the `UNPORTED` marker).
 
+use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::error::{Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{line_closest_point, point_project_to_plane};
@@ -91,8 +100,9 @@ use crate::geom::solution_array::{
     EndClass, Solution, SolutionArray, SolutionObject, SolutionType, SortKey,
 };
 use crate::geom::tol::is_zero;
-use crate::geom::tree::{AuxDataType, NodeId, Tree, TreeNode};
+use crate::geom::tree::{AuxDataType, NodeData, NodeId, Tree, TreeNode};
 use crate::geom::vector3d::sqrt;
+use crate::kernel::Kernel;
 use crate::math::{max2, max3, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, UNDEF_DOUBLE};
 
 /// `SM_GS_MAX_TREES`: most trees a global solver traverses together.
@@ -857,7 +867,7 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
             }
 
             SolverOperation::SurfaceProjectedIntersect => {
-                self.surface_projected_may_contain_answers(branch)
+                self.surface_projected_may_contain_answers(branch, None)
             }
 
             // SM_SO_NORMALIZE, SM_SO_FIND: no optimization here yet.
@@ -1082,7 +1092,25 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
 
     /// The box and offset-box tests of `BranchMayContainAnswers` for
     /// [`SolverOperation::SurfaceProjectedIntersect`].
-    fn surface_projected_may_contain_answers(&self, branch: &Branch) -> Result<bool> {
+    ///
+    /// `owner` resolves the second tree's owner object (upstream
+    /// `SM_CAST_PTR(SmCrvOnSurf, apBranch[1]->GetOwnerObject())`): the kernel and
+    /// the second curve as a curve on a surface (`None` when it is not one). The
+    /// base solver cannot reach the curve and passes `None`; the curve/curve
+    /// solver passes its curves.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a null node, an owner object that `owner`
+    /// does not resolve, or span data that is not curve data; the errors of the
+    /// curve-on-surface evaluations upstream would leave its first sample
+    /// undefined with; [`SolidError::Unported`] from those evaluations.
+    pub fn surface_projected_may_contain_answers(
+        &self,
+        branch: &Branch,
+        owner: Option<(&Kernel, Option<&CrvOnSurf>)>,
+    ) -> Result<bool> {
+        const OP: &str = "geom::global_solver::GlobalSolver::branch_may_contain_answers";
         let tol = self.tolerance_3d;
 
         // If the boxes actually intersect, then we can return True.
@@ -1097,23 +1125,80 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
             return Ok(true);
         }
 
+        // Now we have to see about offsetting sBBox2 along the surface normal.
+        // We can find a reasonable offset distance by comparing BBoxes.
+        let max_dist = bbox1.max_distance(&bbox2);
+
         // If we create a new box by offsetting the surface-curve points
         // along the normal by both the min and max distances,
         // then we will catch any case that could 'intersect'.
         // But we have to sample the surface curve.
-        let node2 = branch.get(1).copied().flatten().ok_or(null_node(
-            "geom::global_solver::GlobalSolver::branch_may_contain_answers",
-        ))?;
-        match self.tree(1)?.node_owner_object(node2)? {
-            None => Ok(false),
-            Some(_) => {
-                // UNPORTED(curve.crv_on_surf): SmCrvOnSurf::EvaluatePoint
-                Err(SolidError::Unported {
-                    upstream: "SmCrvOnSurf::EvaluatePoint",
-                    unit: "curve.crv_on_surf",
-                })
-            }
+        let node2 = branch.get(1).copied().flatten().ok_or(null_node(OP))?;
+        if self.tree(1)?.node_owner_object(node2)?.is_none() {
+            return Ok(false);
         }
+        let Some((k, cos)) = owner else {
+            return Err(SolidError::InvalidInput {
+                operation: OP,
+                reason: "the base solver cannot reach the second tree's owner curve",
+            });
+        };
+        let Some(cos) = cos else {
+            return Ok(false);
+        };
+
+        // Get the vector from the surface box to the 3d curve box.
+        // We'll use that to decide which surface normal (+/-) to use.
+        let diff_vec = bbox1.mid() - bbox2.mid();
+
+        let tree2 = self.tree(1)?;
+        let node = tree2.node(node2)?;
+        if matches!(node.data, NodeData::None) {
+            return Ok(false);
+        }
+        let ivl2 = *tree2.curve_aux(node)?.interval();
+
+        let mut off_box = Extent3d::new();
+        // Upstream's out-parameters keep their previous value when an
+        // evaluation fails (its status is ignored).
+        let mut srf_pt: Option<Point3> = None;
+        let mut norm: Option<Vec3> = None;
+
+        let num_samples: u32 = 10;
+        let d_num_samples = f64::from(num_samples);
+        for ii in 0..=num_samples {
+            let frac = f64::from(ii) / d_num_samples;
+            let t = ivl2.evaluate(frac);
+            match cos.evaluate_point(k, t) {
+                Ok(p) => srf_pt = Some(p),
+                Err(e) if e.is_unported() || srf_pt.is_none() => return Err(e),
+                Err(_) => {}
+            }
+            match cos.evaluate_surface_normal(k, t, false) {
+                Ok(eval) => norm = Some(eval.normal),
+                Err(e) if e.is_unported() || norm.is_none() => return Err(e),
+                Err(_) => {}
+            }
+            let (Some(pt), Some(n)) = (srf_pt, norm.as_mut()) else {
+                return Err(null_node(OP));
+            };
+            if n.dot(diff_vec) < 0.0 {
+                *n *= -1.0;
+            }
+            let n = *n;
+
+            off_box.add_point(pt + min_dist * n);
+            off_box.add_point(pt + max_dist * n);
+        }
+
+        // Expand offset box to account for sampling.
+        off_box.expand_absolute(2.0 * tol);
+
+        if off_box.are_disjoint(&bbox1, 0.0) {
+            return Ok(false);
+        }
+
+        Ok(true) // possible answers in this branch
     }
 
     /// `SmGlobalSolver::AreReadyForLocalSolve`: true when every node of
