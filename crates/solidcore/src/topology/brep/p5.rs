@@ -118,10 +118,6 @@ impl<T> Drop for PendingTopology<'_, T> {
 
 const OP: &str = "topology::brep::p5";
 
-fn missing<T>(symbol: &'static str, unit: &'static str) -> Result<T> {
-    Err(SolidError::unported(symbol, unit))
-}
-
 /// Runs `f` with the caller's notification environment, or, for a plain entry point
 /// (`notifications` is `None`: the caller keeps no notification state of its own),
 /// with an [`brep_p2::ArenaNotifyState`] of `b` notifying through `context`. `f`'s last
@@ -2225,7 +2221,14 @@ fn squeeze_face_in(
         // DoRegionNesting, FastEdgeCompare, IgnoreProblems, ValidateResult,
         // SqueezeSmallEdges, MakingManifoldSolid, RemoveLaminarSlivers.
         // SplitEdgesWithVertices retains the manager's native default TRUE.
-        let mut stitch = squeeze_stitch(tolerance, [false, true, true, false, true, false, false])?;
+        let mut callback = crate::heal::stitch::p1::DefaultStitchCallback::new();
+        let mut stitch =
+            crate::heal::stitch::p1::Stitch::new(&mut callback, tolerance, false, false);
+        stitch.fast_edge_compare = true;
+        stitch.ignore_problems = true;
+        stitch.squeeze_small_edges = true;
+        stitch.making_manifold_solid = false;
+        stitch.remove_laminar_slivers = false;
         let mut vertices: Vec<_> = face_vertices(b, face)?.into_iter().map(Some).collect();
         let mut edges: Vec<_> = face_edges(b, face)?.into_iter().map(Some).collect();
         let (shell1, shell2) = face_shells(b, face)?;
@@ -2259,61 +2262,42 @@ fn squeeze_face_in(
         // After face deletion, ordinary stitch failures record SM_ERR but do
         // not suppress the remaining cleanup calls or their partially filled outputs.
         let mut failed = false;
-        let mut surviving = Vec::new();
-        let mut deleted_vertices = Vec::new();
-        let mut deleted_edges = Vec::new();
-        // `dMaxVertexGap, dMinUnStitchVertGap`: uninitialised upstream, written by
-        // each stitch step and passed on to the next.
-        let mut max_vertex_gap = 0.0;
-        let mut min_unstitched_vertex_gap = 0.0;
-        cleanup_status(
-            stitch_vertex_pairs(
-                &mut stitch,
-                b,
-                &mut vertices,
-                &mut surviving,
-                &mut deleted_vertices,
-                &mut deleted_edges,
-                &mut max_vertex_gap,
-                &mut min_unstitched_vertex_gap,
-            ),
-            &mut failed,
-        )?;
+        let vlist_opt = crate::error::ignored(stitch.stitch_vertex_list(k, b, &mut vertices))?;
+        let (surviving, deleted_vertices, deleted_edges) = if let Some(vlist) = vlist_opt {
+            (
+                vlist.surviving.into_iter().map(Some).collect::<Vec<_>>(),
+                vlist.deleted,
+                vlist.deleted_edges,
+            )
+        } else {
+            failed = true;
+            (Vec::new(), Vec::new(), Vec::new())
+        };
         edges.retain(|edge| !edge.is_some_and(|e| deleted_edges.contains(&e)));
         output.deleted_edges.extend_from_slice(&deleted_edges);
         vertices.clone_from(&surviving);
-        deleted_edges.clear();
-        let mut processed = Vec::new();
-        let mut split = Vec::new();
-        let mut new_edges = Vec::new();
-        cleanup_status(
-            split_edges_with_vertices(
-                &mut stitch,
-                b,
-                &mut vertices,
-                &mut edges,
-                &mut processed,
-                &mut split,
-                &mut new_edges,
-                &mut max_vertex_gap,
-                &mut min_unstitched_vertex_gap,
-            ),
-            &mut failed,
-        )?;
-        let mut glued = Vec::new();
-        cleanup_status(
-            stitch_edges_of_vertices(
-                &mut stitch,
-                b,
-                &surviving,
-                &mut glued,
-                &mut deleted_edges,
-                &mut processed,
-                &mut max_vertex_gap,
-                &mut min_unstitched_vertex_gap,
-            ),
-            &mut failed,
-        )?;
+
+        let split_opt = crate::error::ignored(stitch.split_edges_with_vertices(
+            k,
+            b,
+            &mut vertices,
+            &mut edges,
+        ))?;
+        let mut new_edges = if let Some(res) = split_opt {
+            res.new_edges
+        } else {
+            failed = true;
+            Vec::new()
+        };
+
+        let edge_opt = crate::error::ignored(stitch.stitch_edges_of_vertices(k, b, &surviving))?;
+        let mut deleted_edges = if let Some(res) = edge_opt {
+            res.deleted
+        } else {
+            failed = true;
+            Vec::new()
+        };
+
         let temporary: Vec<_> = new_edges
             .iter()
             .copied()
@@ -2343,55 +2327,7 @@ fn region_is_infinite(b: &Brep, region: RegionId) -> Result<bool> {
     Ok(b.region(region)?.is_infinite_region(b, region))
 }
 
-// Type boundary only: this is never constructed as a substitute manager. Wiring
-// the constructor requires the actual SmStitch owner/type, shared across all
-// three subsequent calls; constructing a fresh manager per call changes state.
-struct SqueezeStitch;
-/// `SmStitch sStitch(sCallBack, dXSectTol3d)` with a default `SmStitchCallback`.
-fn squeeze_stitch(_tolerance: f64, _flags: [bool; 7]) -> Result<SqueezeStitch> {
-    // UNPORTED(heal.stitch_p1): SmStitch::SmStitch
-    missing("SmStitch::SmStitch", "heal.stitch_p1")
-}
-fn stitch_vertex_pairs(
-    _stitch: &mut SqueezeStitch,
-    _b: &mut Brep,
-    _vertices: &mut Vec<Option<VertexId>>,
-    _surviving: &mut Vec<Option<VertexId>>,
-    _deleted_vertices: &mut Vec<VertexId>,
-    _deleted_edges: &mut Vec<EdgeId>,
-    _max_vertex_gap: &mut f64,
-    _min_unstitched_vertex_gap: &mut f64,
-) -> Result<()> {
-    // UNPORTED(heal.stitch_p2): SmStitch::StitchVertexPairs
-    missing("SmStitch::StitchVertexPairs", "heal.stitch_p2")
-}
-fn split_edges_with_vertices(
-    _stitch: &mut SqueezeStitch,
-    _b: &mut Brep,
-    _vertices: &mut Vec<Option<VertexId>>,
-    _edges: &mut Vec<Option<EdgeId>>,
-    _processed: &mut Vec<VertexId>,
-    _split: &mut Vec<EdgeId>,
-    _new: &mut Vec<EdgeId>,
-    _max_vertex_gap: &mut f64,
-    _min_unstitched_vertex_gap: &mut f64,
-) -> Result<()> {
-    // UNPORTED(heal.stitch_p2): SmStitch::SplitEdgesWithVertices
-    missing("SmStitch::SplitEdgesWithVertices", "heal.stitch_p2")
-}
-fn stitch_edges_of_vertices(
-    _stitch: &mut SqueezeStitch,
-    _b: &mut Brep,
-    _vertices: &[Option<VertexId>],
-    _glued: &mut Vec<EdgeId>,
-    _deleted: &mut Vec<EdgeId>,
-    _processed: &mut Vec<VertexId>,
-    _max_edge_gap: &mut f64,
-    _min_unstitched_edge_gap: &mut f64,
-) -> Result<()> {
-    // UNPORTED(heal.stitch_p1): SmStitch::StitchEdgesOfVertices
-    missing("SmStitch::StitchEdgesOfVertices", "heal.stitch_p1")
-}
+#[cfg(test)]
 fn cleanup_status(result: Result<()>, failed: &mut bool) -> Result<()> {
     // After deleting the face, every native stitch failure sets SM_ERR but
     // continues cleanup and output appends. Only missing implementation defers.

@@ -1002,14 +1002,7 @@ mod tests {
         let face = b
             .add_face_record(Face::new(ShellId::from_index(0)))
             .unwrap();
-        assert!(matches!(
-            api_heal_brep(&mut k, Some(&mut b)),
-            Err(SolidError::Unported {
-                upstream: "SmStitch::SmStitch",
-                unit: "heal.stitch_p1",
-                ..
-            })
-        ));
+        assert!(api_heal_brep(&mut k, Some(&mut b)).is_ok());
         let r = h.heal_brep(
             &mut k,
             Some(&mut b),
@@ -1017,14 +1010,7 @@ mod tests {
             HealBrepTargets::default(),
             false,
         );
-        assert!(matches!(
-            r,
-            Err(SolidError::Unported {
-                upstream: "SmStitch::SmStitch",
-                unit: "heal.stitch_p1",
-                ..
-            })
-        ));
+        assert!(matches!(r, Err(SolidError::InvalidInput { .. })));
         assert_eq!(b.face(face).unwrap().tolerance, 1e-5);
         assert_eq!(h.tgt_faces, vec![face]);
         let (v, e, f) = ids();
