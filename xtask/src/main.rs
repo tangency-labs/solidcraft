@@ -62,9 +62,11 @@ commands:
   lists [--fix]   check that files many changes add to are sorted one item per line (the
                   message catalogs in assets/locales); --fix sorts them
   test [CARGO ARGS] [-- TEST ARGS]
-                  build the tests with the ci profile, then run every test binary at once
-                  (and the doc tests alongside); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
-                  and side commands for test/ci; inherited per-test/worker overrides are unchanged
+                  build the tests with the ci profile, then run every test binary, a pool of
+                  them at a time (a quarter of the cores, or what SOLIDCRAFT_TEST_JOBS says),
+                  each with RUST_TEST_THREADS, with the doc tests alongside; the bound covers
+                  the concurrent test and side commands for test/ci; other per-test/worker
+                  overrides are unchanged
   wasm            cargo check every library crate and the web app for wasm32-unknown-unknown
   web-offline [DIR]
                   write the web build's service worker (sw.js: offline use, updates); run by

@@ -1,6 +1,7 @@
 //! `cargo xtask test`: build the workspace's tests once, then run every test binary.
-//! By default they all run at once, with sequential doc/wasm `side` jobs alongside.
-//! SOLIDCRAFT_TEST_JOBS opts into a shared bound for test binaries and those side jobs.
+//! The binaries run in a pool of `jobs` at a time (a quarter of the cores, or what
+//! `SOLIDCRAFT_TEST_JOBS` says), and each one gets `RUST_TEST_THREADS`, so the suite keeps about
+//! one running thread per core. The sequential doc/wasm `side` jobs share the same bound.
 
 use std::ffi::OsStr;
 use std::process::{Command, Stdio};
@@ -8,6 +9,12 @@ use std::sync::{Mutex, mpsc};
 use std::time::Instant;
 
 use crate::{cargo, root};
+
+/// The environment variable that says how many commands may run at the same time.
+const JOBS_ENV: &str = "SOLIDCRAFT_TEST_JOBS";
+
+/// The most jobs a caller may ask for.
+const MAX_JOBS: usize = 1024;
 
 /// A test executable from `cargo test --no-run`.
 struct TestBin {
@@ -17,23 +24,17 @@ struct TestBin {
 }
 
 /// Build the tests with `cargo_args` (e.g. `--locked`), run each binary with `test_args`, and run
-/// the `side` jobs in order. A configured job bound includes the sequential side-job worker.
+/// the `side` jobs in order. The job bound includes the sequential side-job worker.
 /// Each prints a line when it ends; a failure prints its whole output and does not cancel work.
 pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>) -> Result<(), String> {
-    let limit = job_limit(std::env::var_os("SOLIDCRAFT_TEST_JOBS").as_deref())?;
+    let nproc = nproc();
+    let limit = job_limit(std::env::var_os(JOBS_ENV).as_deref(), nproc)?;
     let bins = build(cargo_args)?;
     let start = Instant::now();
     let side_count = side.len();
-    let mut batches = Vec::with_capacity(bins.len() + 1);
-    if !side.is_empty() {
-        batches.push(side);
-    }
-    for b in &bins {
-        let mut c = Command::new(&b.exe);
-        c.args(test_args).current_dir(&b.dir).env("CARGO_MANIFEST_DIR", &b.dir);
-        batches.push(vec![(b.label.clone(), c)]);
-    }
-    let jobs = limit.unwrap_or(batches.len()).min(batches.len());
+    let threads = test_threads(nproc, limit).to_string();
+    let batches = test_batches(&bins, test_args, side, &threads);
+    let jobs = limit.min(batches.len());
     eprintln!("test: {} binaries, {side_count} side jobs; at most {jobs} concurrent top-level commands", bins.len());
     let mut failed = Vec::new();
     run_bounded(
@@ -57,15 +58,42 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
     if failed.is_empty() { Ok(()) } else { Err(format!("failed: {}", failed.join(", "))) }
 }
 
-/// An absent limit preserves the existing unbounded default; invalid input fails before the test build.
-fn job_limit(value: Option<&OsStr>) -> Result<Option<usize>, String> {
-    let Some(value) = value else { return Ok(None) };
+/// The batches the pool runs: the `side` jobs first, in order, then one batch per test binary.
+/// Every binary gets `RUST_TEST_THREADS`, so the threads in flight add up to about one per core.
+fn test_batches(bins: &[TestBin], test_args: &[&str], side: Vec<(String, Command)>, threads: &str) -> Vec<Vec<(String, Command)>> {
+    let mut batches = Vec::with_capacity(bins.len() + 1);
+    if !side.is_empty() {
+        batches.push(side);
+    }
+    for b in bins {
+        let mut c = Command::new(&b.exe);
+        c.args(test_args).current_dir(&b.dir).env("CARGO_MANIFEST_DIR", &b.dir);
+        c.env("RUST_TEST_THREADS", threads);
+        batches.push(vec![(b.label.clone(), c)]);
+    }
+    batches
+}
+
+/// How many commands may run at the same time: what `SOLIDCRAFT_TEST_JOBS` says, else a quarter of
+/// the cores, at least two. Invalid input fails before the test build.
+fn job_limit(value: Option<&OsStr>, nproc: usize) -> Result<usize, String> {
+    let Some(value) = value else { return Ok((nproc / 4).max(2)) };
     value
         .to_str()
         .and_then(|v| v.parse::<usize>().ok())
         .filter(|n| *n > 0)
-        .map(Some)
-        .ok_or_else(|| "SOLIDCRAFT_TEST_JOBS must be a positive integer".into())
+        .map(|n| n.min(MAX_JOBS))
+        .ok_or_else(|| format!("{JOBS_ENV} must be a positive integer"))
+}
+
+/// The threads each test binary may use: the cores shared between the binaries in flight.
+fn test_threads(nproc: usize, jobs: usize) -> usize {
+    (nproc / jobs.max(1)).max(1)
+}
+
+/// The cores this machine has.
+fn nproc() -> usize {
+    std::thread::available_parallelism().map_or(1, |n| n.get())
 }
 
 /// Workers only hold the queue lock while taking a job. Reporting remains live, and neither
@@ -145,20 +173,119 @@ pub fn doc_tests(cargo_args: &[&str], test_args: &[&str]) -> (String, Command) {
 
 #[cfg(test)]
 mod tests {
-    use super::{job_limit, run_bounded};
+    use super::{MAX_JOBS, TestBin, finish, job_limit, run_bounded, test_batches, test_threads};
     use std::ffi::OsStr;
     use std::sync::Barrier;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Instant;
 
+    /// The marker a fake binary looks for: without it the test binary does nothing when the test
+    /// suite runs it.
+    const FAKE_MARKER: &str = "fake-marker";
+    /// Where the fake binaries say that they started, that they ended and how many threads they got.
+    const FAKE_LOG: &str = "fake.log";
+    /// How long a fake binary runs, so that several of them overlap.
+    const FAKE_SLEEP: std::time::Duration = std::time::Duration::from_millis(400);
+
+    /// The job bound: what `SOLIDCRAFT_TEST_JOBS` says, else a quarter of the cores. Invalid values
+    /// fail instead of falling back.
     #[test]
-    fn job_limit_is_opt_in_and_rejects_invalid_values() {
-        assert_eq!(job_limit(None).unwrap(), None);
-        for value in [1, 2, usize::MAX] {
-            assert_eq!(job_limit(Some(OsStr::new(&value.to_string()))).unwrap(), Some(value));
-        }
+    fn job_limit_follows_the_environment_variable_and_rejects_invalid_values() {
+        assert_eq!(job_limit(None, 16).unwrap(), 4, "a quarter of the cores");
+        assert_eq!(job_limit(None, 1).unwrap(), 2, "at least two jobs");
+        assert_eq!(job_limit(None, 64).unwrap(), 16);
+        assert_eq!(job_limit(Some(OsStr::new("1")), 16).unwrap(), 1);
+        assert_eq!(job_limit(Some(OsStr::new("8")), 16).unwrap(), 8);
+        assert_eq!(job_limit(Some(OsStr::new("99999")), 16).unwrap(), MAX_JOBS, "the count is capped");
         for value in ["", "0", "-1", "two", "1.5", " 2", "2 ", "184467440737095516150"] {
-            assert!(job_limit(Some(OsStr::new(value))).is_err(), "{value:?}");
+            assert!(job_limit(Some(OsStr::new(value)), 16).is_err(), "{value:?}");
         }
+    }
+
+    /// The threads each binary may use: the cores shared between the binaries in flight.
+    #[test]
+    fn test_threads_share_the_cores_between_the_binaries_in_flight() {
+        assert_eq!(test_threads(16, 4), 4);
+        assert_eq!(test_threads(16, 2), 8);
+        assert_eq!(test_threads(16, 100), 1, "a binary always gets a thread");
+        assert_eq!(test_threads(3, 4), 1, "a binary always gets a thread");
+    }
+
+    /// The pool keeps the number of binaries running at the same time under its limit, and every
+    /// binary gets the shared thread count.
+    #[test]
+    fn pool_runs_at_most_jobs_binaries_at_once() {
+        let jobs = 2;
+        let count = 6;
+        let dir = std::env::temp_dir().join(format!("xtask-pool-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(FAKE_MARKER), b"").unwrap();
+        let exe = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+        let dir = dir.to_string_lossy().into_owned();
+        let bins: Vec<TestBin> = (0..count).map(|i| TestBin { label: format!("fake {i}"), exe: exe.clone(), dir: dir.clone() }).collect();
+        let threads = test_threads(16, jobs).to_string();
+        let batches = test_batches(&bins, &["fake_test_binary"], vec![], &threads);
+        let mut failed = Vec::new();
+        run_bounded(
+            batches,
+            jobs,
+            |batch, tx| {
+                for (label, c) in batch {
+                    let t0 = Instant::now();
+                    let _ = tx.send((label, finish(c), t0.elapsed().as_secs_f64()));
+                }
+            },
+            |(label, result, _)| {
+                if let Err(output) = result {
+                    failed.push((label, output));
+                }
+            },
+        );
+        assert!(failed.is_empty(), "the fake binaries failed: {failed:?}");
+        let log = std::fs::read_to_string(std::path::Path::new(&dir).join(FAKE_LOG)).unwrap();
+        let mut running = 0;
+        let mut peak = 0;
+        for line in log.lines() {
+            match line {
+                "start" => {
+                    running += 1;
+                    peak = peak.max(running);
+                }
+                "end" => running -= 1,
+                l if l.starts_with("threads ") => {
+                    assert_eq!(l, format!("threads {threads}"), "the binary got the shared thread count");
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(log.lines().filter(|l| *l == "start").count(), count, "every binary ran");
+        assert!(peak <= jobs, "{peak} binaries ran at once, the pool allows {jobs}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A stand-in for a test binary: it says when it starts and when it ends, so that the test
+    /// can count how many of them ran at the same time, and it records the `RUST_TEST_THREADS` it
+    /// was given.
+    #[test]
+    fn fake_test_binary() {
+        let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        if !std::path::Path::new(&dir).join(FAKE_MARKER).is_file() {
+            return;
+        }
+        let log = std::path::Path::new(&dir).join(FAKE_LOG);
+        let threads = std::env::var("RUST_TEST_THREADS").unwrap_or_default();
+        append_line(&log, &format!("threads {threads}"));
+        append_line(&log, "start");
+        std::thread::sleep(FAKE_SLEEP);
+        append_line(&log, "end");
+    }
+
+    /// Write one line to the log, so that several processes can share it.
+    fn append_line(path: &std::path::Path, line: &str) {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
+        f.write_all(format!("{line}\n").as_bytes()).unwrap();
     }
 
     #[test]
