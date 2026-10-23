@@ -70,7 +70,7 @@ pub mod op {
     pub const TRACK_STOP: i64 = 17;
     /// `[t]`: `IsTracking`.
     pub const TRACK_IS: i64 = 18;
-    /// `[t]`: `GetRmList`, `GetAddList`.
+    /// `[t]`: `GetRmList`, `GetAddList`, `GetChgList`, `GetNotifyEvents`.
     pub const TRACK_LISTS: i64 = 19;
     /// `[t]`: `ReSetArrays`.
     pub const TRACK_RESET: i64 = 20;
@@ -80,8 +80,13 @@ pub mod op {
     pub const SYS_FOREIGN: i64 = 22;
     /// `[o]`: delete the object.
     pub const DESTROY: i64 = 23;
+    /// `[o, type]`: give the object a stand-in type code (`SmTopology` storage) so
+    /// the change tracker's `IsKindOf` classification can be exercised: 16001
+    /// `SmTopology`, 16002 `SmFace`, 16005 `SmEdgeuse`, 16016 `SmEdge`, 16021
+    /// `SmVertex`.
+    pub const SET_KIND: i64 = 24;
     /// Largest op code.
-    pub const LAST: i64 = 23;
+    pub const LAST: i64 = 24;
 }
 
 /// Largest object pool.

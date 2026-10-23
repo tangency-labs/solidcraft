@@ -4,6 +4,10 @@
 //! callbacks, `GetTolerance`, `IsConnectedTo`, destruction) and
 //! `SmTrackTopologyChanges` trackers of an empty B-rep (start / stop / is-tracking /
 //! lists / reset / destruction, also with the system callback slot occupied).
+//! `TRACK_LISTS` compares the rm, add and chg lists and the captured notify events;
+//! `SET_KIND` gives a pool object a stand-in topology type code so the tracker's
+//! `IsKindOf` classification is exercised (the object keeps `SmTopology` storage and
+//! the final state dump asks the base class explicitly).
 //!
 //! C++: `solidcore_ffi::units::topology_topology` (upstream `SmTopology.cpp`,
 //! `SmTrackTopologyChanges.cpp`). Rust: `solidcore::topology::topology`.
@@ -112,11 +116,23 @@ impl NotifyCallback for Recorder {
     }
 }
 
-fn obj_ref(k: usize) -> ObjectRef {
+/// The handle of pool object `k` with its stand-in type code (see `SET_KIND`).
+fn obj_ref(k: usize, kind: i64) -> ObjectRef {
     ObjectRef {
-        type_code: topo::TYPE,
+        type_code: kind,
         key: ObjectKey(k as u64),
     }
+}
+
+/// A captured list as `length, keys...` (the shim's object indices; `-1` null).
+fn put_keys(out: &mut Vec<i64>, keys: &[ObjectKey]) {
+    out.push(keys.len() as i64);
+    out.extend(keys.iter().map(|k| k.0 as i64));
+}
+
+/// One captured event reference (the shim's object index; `-1` null).
+fn put_event_ref(out: &mut Vec<i64>, object: Option<ObjectRef>) {
+    out.push(object.map_or(-1, |o| o.key.0 as i64));
 }
 
 fn mark_type(m: i64) -> Result<MarkType, HarnessError> {
@@ -130,6 +146,9 @@ struct State {
     ctxs: Vec<Context>,
     recs: BTreeMap<ObjectKey, Topology>,
     n: usize,
+    /// Per object: its stand-in type code (`SET_KIND`; `SmTopology_TYPE` initially).
+    /// The change tracker classifies notification objects by this code only.
+    kinds: Vec<i64>,
     store: AttributeStore,
     locks: Vec<MarkLock>,
     trackers: Vec<Option<TrackTopologyChanges>>,
@@ -207,6 +226,16 @@ impl State {
                 let o = need!(live!(a[1], false));
                 self.rec_mut(o)?.set_all_flags(a[2] as u64);
             }
+            op::SET_KIND => {
+                let o = need!(live!(a[1], false));
+                let kind = a[2];
+                if !matches!(kind, topo::TYPE | 16002 | 16005 | 16016 | 16021) {
+                    return Err(harness("set kind type"));
+                }
+                if let Some(k) = self.kinds.get_mut(o) {
+                    *k = kind;
+                }
+            }
             op::GET_FLAGS => {
                 let o = need!(live!(a[1], false));
                 out.push(self.rec(o)?.all_flags() as i64);
@@ -278,10 +307,12 @@ impl State {
                     .ok()
                     .and_then(NotifyOperation::from_code)
                     .ok_or_else(|| harness("notify operation"))?;
+                let kind_of = |k: usize| self.kinds.get(k).copied().unwrap_or(topo::TYPE);
                 let t = need!(live!(a[2], false));
-                let d1 = live!(a[3], true).map(obj_ref);
-                let d2 = live!(a[4], true).map(obj_ref);
-                let d3 = live!(a[5], true).map(obj_ref);
+                let caller = obj_ref(t, kind_of(t));
+                let d1 = live!(a[3], true).map(|k| obj_ref(k, kind_of(k)));
+                let d2 = live!(a[4], true).map(|k| obj_ref(k, kind_of(k)));
+                let d3 = live!(a[5], true).map(|k| obj_ref(k, kind_of(k)));
                 self.rec.lock().map_err(harness)?.clear();
                 let ctx = self.ctxs.first_mut();
                 if let Err(e) = topo::notify(
@@ -289,7 +320,7 @@ impl State {
                     &mut self.store,
                     ctx,
                     opn,
-                    obj_ref(t),
+                    caller,
                     d1,
                     d2,
                     d3,
@@ -350,10 +381,18 @@ impl State {
                     op::TRACK_STOP => t.stop_tracking(Some(self.ctx()?)),
                     op::TRACK_IS => out.push(i64::from(t.is_tracking(Some(self.ctx_ref()?)))),
                     op::TRACK_LISTS => {
-                        out.push(t.rm_list().len() as i64);
-                        out.extend(t.rm_list().iter().map(|k| k.0 as i64));
-                        out.push(t.add_list().len() as i64);
-                        out.extend(t.add_list().iter().map(|k| k.0 as i64));
+                        let lists = t.lists();
+                        put_keys(&mut out, &lists.rm_list);
+                        put_keys(&mut out, &lists.add_list);
+                        put_keys(&mut out, &lists.chg_list);
+                        out.push(lists.notify_events.len() as i64);
+                        for ev in &lists.notify_events {
+                            out.push(i64::from(ev.operation.code()));
+                            put_event_ref(&mut out, ev.caller);
+                            put_event_ref(&mut out, ev.data1);
+                            put_event_ref(&mut out, ev.data2);
+                            put_event_ref(&mut out, ev.data3);
+                        }
                     }
                     op::TRACK_RESET => t.reset_arrays(),
                     _ => keep = false,
@@ -454,6 +493,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             .map(|k| (ObjectKey(k as u64), Topology::new()))
             .collect(),
         n,
+        kinds: vec![topo::TYPE; n],
         store: AttributeStore::new(),
         locks: Vec::new(),
         trackers: Vec::new(),
