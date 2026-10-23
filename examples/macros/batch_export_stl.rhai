@@ -3,10 +3,10 @@
 // @param out_dir Output folder | export
 let files = list_dir(dir);
 for path in files {
-    let p = path;
-    if p.contains(".step") || p.contains(".stp") || p.contains(".STEP") || p.contains(".STP") {
-        run("doc.open", #{ path: p });
-        let stem = file_stem(p);
+    let upper = path.to_upper();
+    if upper.ends_with(".STEP") || upper.ends_with(".STP") {
+        run("doc.open", #{ path: path });
+        let stem = file_stem(path);
         run("file.export", #{ path: out_dir + "/" + stem + ".stl" });
     }
 }

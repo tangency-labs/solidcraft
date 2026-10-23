@@ -11,18 +11,18 @@
 // @param pa Pressure angle {14.5, 20, 25} | 20 @if kind=gear
 // @param depth Depth {full, stub} | full @if kind=gear
 // @param form Form {spur, helical, herringbone} | spur @if kind=gear
-// @param helix Helix angle (deg) | 15 @if form=helical,herringbone
-// @param gear_module Module | 2 @if sizing=module
-// @param dp Diametral pitch | 16 @if sizing=DP
-// @param rim Internal rim OD | 80 @if hand=internal
+// @param helix Helix angle (deg) number | 15 @if form=helical,herringbone
+// @param gear_module Module number | 2 @if sizing=module
+// @param dp Diametral pitch number | 16 @if sizing=DP
+// @param rim Internal rim OD number | 80 @if hand=internal
 // @param chain ANSI {25, 35, 40, 41, 50, 60, 80, 100, 120, 140, 160} | 40 @if kind=sprocket
-// @param teeth Teeth count | 12
-// @param thickness Thickness | 8 @if kind=gear
+// @param teeth Teeth count number | 12
+// @param thickness Thickness number | 8 @if kind=gear
 // @param edge_chamfer Edge chamfer {yes, no} | yes @if kind=sprocket
-// @param bore Bore diameter | 8 @if hand=external
+// @param bore Bore diameter number | 8 @if hand=external
 // @param hub Hub {none, one, both} | none @if hand=external
-// @param hub_od Hub OD | 20 @if hub=one,both
-// @param hub_length Hub length | 8 @if hub=one,both
+// @param hub_od Hub OD number | 20 @if hub=one,both
+// @param hub_length Hub length number | 8 @if hub=one,both
 fn as_n(v) {
     if type_of(v) == "string" { parse_float(v) } else { v }
 }
