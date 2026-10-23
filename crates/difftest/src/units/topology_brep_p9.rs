@@ -152,6 +152,14 @@ fn rust(i: &Inputs, initial: &[f64]) -> Result<Output, HarnessError> {
             .get(2..)
             .ok_or_else(|| error("missing initial export"))?,
     )?;
+    // As the native B-rep: each edge owns its curve and each face its surface, under the
+    // arena keys op 0's `BrepQuery::default()` names them by (the import leaves curves
+    // unowned and owns face f's surface as `1 + f`), and a face-owned surface carries the
+    // face's tolerance. Without it the B-rep cache trees hold no edges or faces.
+    crate::util::own_arena_geometry(&mut b);
+    for f in b.faces().ids().collect::<Vec<_>>() {
+        b.sync_face_surface_tolerance(f).map_err(|e| error(&e))?;
+    }
     // As the shim, after setup and export: `b->m_bEditingEnabled = editing`.
     b.set_editing_enabled(i.editing);
     let mut k = Kernel::default();
