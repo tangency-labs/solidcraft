@@ -22,6 +22,13 @@
 //! leave a dangling member), `CalculateBoundingBox` asked for a pseudo box without a
 //! point array (upstream dereferences the null pointer), labels outside `1..=3`, and
 //! mutations that touch an already deleted object.
+//!
+//! [`Op::OwnerDegenerate`] puts explicit real face records immediately after `op`,
+//! before the otherwise unchanged poly B-rep block:
+//! `n_owners`, then `label surface_kind` (`0` no surface, `1` plane, `2` Bezier).
+//! A plane is `origin[3] x[3] y[3] scale[2] domain[4]`; a non-rational Bezier
+//! patch is `nu nv` followed by `nu * nv` XYZ control points, u rows first.
+//! This new op does not change any legacy input or output layout.
 
 use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
@@ -91,6 +98,131 @@ pub struct PolyDesc {
     pub ok_back_ptrs: bool,
 }
 
+/// Explicit geometry attached to a real `SmFace` by the owner-aware op.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OwnerSurface {
+    /// An actual `SmPlane`, with its axes, scales and natural UV domain.
+    Plane {
+        /// Placement origin.
+        origin: [f64; 3],
+        /// Placement x axis.
+        x: [f64; 3],
+        /// Placement y axis.
+        y: [f64; 3],
+        /// Parameter scales.
+        scale: [f64; 2],
+        /// `[u_min, v_min, u_max, v_max]`.
+        domain: [f64; 4],
+    },
+    /// A non-rational single-span B-spline on `[0, 1]^2`, with 2..=4 points
+    /// in each direction. Every row is one u index; columns are v indices.
+    Bezier {
+        /// XYZ control net (not homogeneous coordinates).
+        net: Vec<Vec<[f64; 3]>>,
+    },
+}
+
+/// A real original face, explicitly distinguished from an unresolved legacy label.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnerFace {
+    /// Existing original-face label, in `1..=3`.
+    pub label: i64,
+    /// `None` constructs a real face with a null surface, not an unresolved owner.
+    pub surface: Option<OwnerSurface>,
+}
+
+/// Validates only the new explicit owner geometry, without calling C++.
+///
+/// # Errors
+///
+/// Rejects duplicate/out-of-range labels, non-finite geometry, reversed plane
+/// domains, or a non-rectangular/unsupported Bezier net. No legacy guard changes.
+pub fn check_owner_faces(owners: &[OwnerFace]) -> Result<(), FfiError> {
+    let finite = |xs: &[f64]| -> Result<(), FfiError> {
+        if xs.iter().all(|x| x.is_finite()) {
+            Ok(())
+        } else {
+            Err(bad("non-finite owner geometry"))
+        }
+    };
+    let mut seen = Vec::new();
+    for owner in owners {
+        label(owner.label)?;
+        if seen.contains(&owner.label) {
+            return Err(bad("duplicate owner label"));
+        }
+        seen.push(owner.label);
+        match &owner.surface {
+            None => {}
+            Some(OwnerSurface::Plane {
+                origin,
+                x,
+                y,
+                scale,
+                domain,
+            }) => {
+                finite(origin)?;
+                finite(x)?;
+                finite(y)?;
+                finite(scale)?;
+                finite(domain)?;
+                if domain[0] > domain[2] || domain[1] > domain[3] {
+                    return Err(bad("reversed owner plane domain"));
+                }
+            }
+            Some(OwnerSurface::Bezier { net }) => {
+                let nv = net.first().map_or(0, Vec::len);
+                if !(2..=4).contains(&net.len())
+                    || !(2..=4).contains(&nv)
+                    || net.iter().any(|row| row.len() != nv)
+                {
+                    return Err(bad(
+                        "owner Bezier net must be rectangular, 2..=4 per direction",
+                    ));
+                }
+                for point in net.iter().flatten() {
+                    finite(point)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn encode_owner_faces(v: &mut Vec<f64>, owners: &[OwnerFace]) -> Result<(), FfiError> {
+    check_owner_faces(owners)?;
+    v.push(owners.len() as f64);
+    for owner in owners {
+        v.push(label(owner.label)?);
+        match &owner.surface {
+            None => v.push(0.0),
+            Some(OwnerSurface::Plane {
+                origin,
+                x,
+                y,
+                scale,
+                domain,
+            }) => {
+                v.push(1.0);
+                v.extend_from_slice(origin);
+                v.extend_from_slice(x);
+                v.extend_from_slice(y);
+                v.extend_from_slice(scale);
+                v.extend_from_slice(domain);
+            }
+            Some(OwnerSurface::Bezier { net }) => {
+                v.push(2.0);
+                v.push(net.len() as f64);
+                v.push(net.first().map_or(0, Vec::len) as f64);
+                for point in net.iter().flatten() {
+                    v.extend_from_slice(point);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// One contains query.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ContainsQuery {
@@ -155,6 +287,14 @@ pub enum Op {
     Contains(Vec<ContainsQuery>),
     /// `IsDegenerate(opt xsect tol)` calls.
     Degenerate(Vec<(usize, Option<f64>)>),
+    /// Real-face `IsDegenerate` calls plus independent raw/mapped endpoint and
+    /// midpoint samples, natural domains and parameter classifications.
+    OwnerDegenerate {
+        /// Explicit owner provenance; omitted labels stay unresolved.
+        owners: Vec<OwnerFace>,
+        /// `(edge, optional intersection tolerance)` calls.
+        calls: Vec<(usize, Option<f64>)>,
+    },
     /// `Transform(SmAxis2Placement(o, x, y), opt scale)`.
     Transform {
         /// Origin.
@@ -218,8 +358,17 @@ fn encode(d: &PolyDesc, op: &Op) -> Result<Vec<f64>, FfiError> {
         Op::Transform { .. } => 6.0,
         Op::Mutate(_) => 7.0,
         Op::Kinds(_) => 8.0,
+        Op::OwnerDegenerate { .. } => 9.0,
     };
     v.push(op_code);
+    if let Op::OwnerDegenerate { owners, .. } = op {
+        // Construct genuine owners before poly faces, without transient fake
+        // pointers for any explicitly resolved label. Legacy bytes are unchanged.
+        encode_owner_faces(&mut v, owners)?;
+        if d.vertices.iter().flatten().any(|x| !x.is_finite()) {
+            return Err(bad("non-finite owner-op poly vertex"));
+        }
+    }
     v.push(d.tol);
     v.push(d.regions.len() as f64);
     let mut n_shells = 0usize;
@@ -397,6 +546,14 @@ fn encode(d: &PolyDesc, op: &Op) -> Result<Vec<f64>, FfiError> {
                 v.push(t.unwrap_or(0.0));
             }
         }
+        Op::OwnerDegenerate { calls, .. } => {
+            v.push(calls.len() as f64);
+            for &(e, t) in calls {
+                v.push(idx(e, n_edges, "edge")?);
+                v.push(b(t.is_some()));
+                v.push(t.unwrap_or(0.0));
+            }
+        }
         Op::Transform {
             origin,
             x,
@@ -525,4 +682,42 @@ pub fn run(d: &PolyDesc, op: &Op) -> Result<Vec<Section>, FfiError> {
         at += 3 + n;
     }
     Ok(secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_owner_guards_are_bounded_and_do_not_invent_geometry() {
+        let bare = OwnerFace {
+            label: 1,
+            surface: None,
+        };
+        assert!(check_owner_faces(&[]).is_ok()); // unresolved is not a null surface
+        assert!(check_owner_faces(std::slice::from_ref(&bare)).is_ok());
+        assert!(check_owner_faces(&[bare.clone(), bare]).is_err());
+        for label in [0, 4, i64::MAX] {
+            assert!(check_owner_faces(&[OwnerFace {
+                label,
+                surface: None
+            }])
+            .is_err());
+        }
+        let patch = |net| OwnerFace {
+            label: 2,
+            surface: Some(OwnerSurface::Bezier { net }),
+        };
+        assert!(check_owner_faces(&[patch(vec![vec![[0.0; 3]; 2]; 3])]).is_ok());
+        for net in [
+            Vec::new(),
+            vec![vec![[0.0; 3]; 2]],
+            vec![vec![[0.0; 3]; 2]; 5],
+            vec![vec![[0.0; 3]; 5]; 2],
+            vec![vec![[0.0; 3]; 2], vec![[0.0; 3]; 3]],
+            vec![vec![[f64::NAN, 0.0, 0.0]; 2]; 2],
+        ] {
+            assert!(check_owner_faces(&[patch(net)]).is_err());
+        }
+    }
 }

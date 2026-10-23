@@ -15,20 +15,26 @@
 
 #include "StdAfx.h"
 #include <SmAxis2Placement.h>
+#include <SmBSplineSurface.h>
 #include <SmContext.h>
 #include <SmCoreTypes.h>
 #include <SmExtent3d.h>
+#include <SmFace.h>
 #include <SmMapPtrToPtr.h>
 #include <SmMemBlockMgr.h>
+#include <SmNurbsSrf.h>
 #include <SmOwningTopology.h>
+#include <SmPlane.h>
 #include <SmPseudoBox.h>
 #include <SmSAGObject.h>
+#include <SmSurface.h>
 #include <SmTArray.h>
 #include <SmTol.h>
 #include <SmTopoTypes.h>
 #include <SmTypes.h>
 #include <SmVector2d.h>
 #include <SmVector3d.h>
+#include <nurbs.h>
 
 // The poly classes are final; read their protected members (and set the radial rings,
 // the vertex list and the back pointer flag) by opening the access of this header only.
@@ -39,6 +45,7 @@
 #undef protected
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "sc_sm.h"
@@ -58,6 +65,7 @@ enum : int32_t
     OP_TRANSFORM = 6,
     OP_MUTATE = 7,
     OP_KINDS = 8,
+    OP_OWNER_DEGEN = 9,
 };
 
 // Section keys (keep in sync with crates/difftest/src/units/query_poly.rs).
@@ -88,6 +96,8 @@ enum : int32_t
     K_NORMALS = 23,
     K_SPHERES = 25,
     K_RESULTS = 26,
+    K_OWNER_POINTS = 27,
+    K_OWNER_TOPO = 28,
 };
 
 struct Rd
@@ -157,6 +167,32 @@ int64_t unfake(const void* p)
     return p == NULL ? 0 : (int64_t)((uintptr_t)p >> 4);
 }
 
+// Exposes only the protected constructor/destructor of a real SmFace. No virtual
+// geometry operation is replaced. SetSurface establishes the real surface owner.
+struct OwnerFace : SmFace
+{
+    // SmTopology hides the context allocator; SmObject's full overload sets also
+    // contain private entries. Forward only the public, matching allocation pair.
+    static void* operator new(size_t size, const SmContext& ctx)
+    {
+        return SmObject::operator new(size, ctx);
+    }
+    static void operator delete(void* ptr)
+    {
+        SmObject::operator delete(ptr);
+    }
+    static void operator delete(void* ptr, const SmContext& ctx)
+    {
+        SmObject::operator delete(ptr, ctx);
+    }
+    explicit OwnerFace(SmSurface* surface)
+    {
+        if (surface != NULL)
+            SetSurface(surface);
+    }
+    ~OwnerFace() override = default;
+};
+
 struct Model
 {
     SmPolyBrep* brep = NULL;
@@ -169,6 +205,23 @@ struct Model
     std::vector<bool> edge_alive;
     std::vector<SmPolyVertex*> vertices;
     std::vector<SmPolyVertAuxData*> aux;
+    std::vector<int64_t> owner_labels;
+    std::vector<std::unique_ptr<OwnerFace>> owners;
+
+    SmFace* owner(int64_t label) const
+    {
+        for (size_t i = 0; i < owner_labels.size(); ++i)
+            if (owner_labels[i] == label)
+                return owners[i].get();
+        return NULL;
+    }
+    int64_t face_label(const SmFace* face) const
+    {
+        for (size_t i = 0; i < owners.size(); ++i)
+            if (owners[i].get() == face)
+                return owner_labels[i];
+        return unfake(face);
+    }
 };
 
 void build(Rd& rd, const SmContext& ctx, Model& m)
@@ -298,7 +351,8 @@ void build(Rd& rd, const SmContext& ctx, Model& m)
     {
         int64_t f = rd.idx();
         int64_t label = rd.idx();
-        m.faces[f]->SetOriginalFace((SmFace*)fake(label), FALSE);
+        SmFace* owner = m.owner(label);
+        m.faces[f]->SetOriginalFace(owner ? owner : (SmFace*)fake(label), FALSE);
     }
     int64_t noe = rd.idx();
     for (int64_t i = 0; i < noe; ++i)
@@ -354,7 +408,8 @@ void dump(Model& m, Out& out)
     for (int64_t label = 1; label <= 3; ++label)
     {
         SmTArray<SmPolyFace*> fs;
-        b->GetPolyFaces(fs, (SmFace*)fake(label));
+        SmFace* common = m.owner(label);
+        b->GetPolyFaces(fs, common ? common : (SmFace*)fake(label));
         o.push_back((double)fs.GetSize());
         for (ULONG j = 0; j < fs.GetSize(); ++j)
             o.push_back(ix(m.faces, fs[j]));
@@ -380,7 +435,7 @@ void dump(Model& m, Out& out)
         o.push_back(ix(m.faces, f->m_pCPolyFace));
         o.push_back(f->m_pCPolyFace == f ? -1.0 : ix(m.shells, f->GetPolyShell()));
         o.push_back(f->GetOKBackPtrs() ? 1.0 : 0.0);
-        o.push_back((double)unfake(f->GetOriginalFace()));
+        o.push_back((double)m.face_label(f->GetOriginalFace()));
         o.push_back(ix(m.loops, f->GetOuterPolyLoop()));
         o.push_back((double)ls.GetSize());
         for (ULONG j = 0; j < ls.GetSize(); ++j)
@@ -700,6 +755,110 @@ void op_degen(Rd& rd, Model& m, Out& out)
     out.ints(K_RESULTS, o);
 }
 
+// Only OP_OWNER_DEGEN consumes these records. Legacy labels remain opaque and
+// their old -9 output is untouched. The FFI bounds Bezier nets to 2..=4 per axis.
+SmSurface* read_owner_surface(Rd& rd, const SmContext& ctx)
+{
+    int64_t kind = rd.idx();
+    if (kind == 0)
+        return NULL;
+    if (kind == 1)
+    {
+        SmPoint3d origin = rd.vec();
+        SmVector3d x = rd.vec(), y = rd.vec();
+        double sx = rd.num(), sy = rd.num();
+        double u0 = rd.num(), v0 = rd.num(), u1 = rd.num(), v1 = rd.num();
+        return new (ctx) SmPlane(origin, x, y, SmVector2d(sx, sy), SmExtent2d(u0, v0, u1, v1), &ctx);
+    }
+    gw_INDEX nu = (gw_INDEX)rd.idx(), nv = (gw_INDEX)rd.idx();
+    gw_DEGREE p = (gw_DEGREE)(nu - 1), q = (gw_DEGREE)(nv - 1);
+    gw_SURFACE* s = sm_AllocateNurbSurface(nu - 1, nv - 1, p, q, 2 * nu - 1, 2 * nv - 1);
+    for (gw_INDEX i = 0; i < nu; ++i)
+        for (gw_INDEX j = 0; j < nv; ++j)
+        {
+            SmVector3d point = rd.vec();
+            s->net->Pw[i][j].x = point.x;
+            s->net->Pw[i][j].y = point.y;
+            s->net->Pw[i][j].z = point.z;
+            s->net->Pw[i][j].w = NL_NOW;
+        }
+    for (gw_INDEX i = 0; i < 2 * nu; ++i)
+        s->knu->U[i] = i < nu ? 0.0 : 1.0;
+    for (gw_INDEX i = 0; i < 2 * nv; ++i)
+        s->knv->U[i] = i < nv ? 0.0 : 1.0;
+    return new (ctx) SmBSplineSurface(s, FALSE, &ctx);
+}
+
+void read_owners(Rd& rd, const SmContext& ctx, Model& m)
+{
+    int64_t no = rd.idx();
+    for (int64_t i = 0; i < no; ++i)
+    {
+        int64_t label = rd.idx();
+        std::unique_ptr<OwnerFace> face(new (ctx) OwnerFace(read_owner_surface(rd, ctx)));
+        m.owner_labels.push_back(label);
+        m.owners.push_back(std::move(face));
+    }
+}
+
+bool op_owner_degen(Rd& rd, Model& m, Out& out)
+{
+    int64_t n = rd.idx();
+    std::vector<double> results, topo, points;
+    for (int64_t i = 0; i < n; ++i)
+    {
+        int64_t e = rd.idx();
+        bool has = rd.flag();
+        double t = rd.num();
+        SmPolyEdge* pe = m.edges[e];
+        SmPolyFace* pf = pe->GetPolyFace();
+        SmFace* original = pf ? pf->GetOriginalFace() : NULL;
+        int64_t label = m.face_label(original);
+        SmFace* face = m.owner(label);
+        SmSurface* surface = face ? face->GetSurface() : NULL;
+        bool back = pe->GetOKBackPtrs() != FALSE;
+        bool mapping = back && surface && pe->Is2dOrZero();
+        topo.insert(topo.end(), {(double)e, (double)label, face ? 1.0 : 0.0,
+                                 surface ? 1.0 : 0.0, back ? 1.0 : 0.0, mapping ? 1.0 : 0.0});
+        SmPoint3d start = pe->GetStartPoint(), end = pe->GetEndPoint();
+        put(points, start);
+        put(points, end);
+        if (mapping)
+        {
+            SmPoint2d a(start.x, start.y), b(end.x, end.y);
+            SmExtent2d domain = surface->GetNaturalUVDomain();
+            SmExtentPointType su, sv, eu, ev;
+            domain.ClassifyPoint2d(a, su, sv, SM_EFF_ZERO_PARAM);
+            domain.ClassifyPoint2d(b, eu, ev, SM_EFF_ZERO_PARAM);
+            topo.insert(topo.end(), {(double)su, (double)sv, (double)eu, (double)ev});
+            points.insert(points.end(), {domain.GetMin().x, domain.GetMin().y,
+                                         domain.GetMax().x, domain.GetMax().y});
+            // Independent probes of the declared face surface, not a hand-written
+            // replacement for the native IsDegenerate decision below.
+            for (const SmPoint2d& uv : {a, b, (a + b) / 2.0})
+            {
+                SmPoint3d point;
+                if (surface->EvaluatePoint(uv, point) != SM_SUCCESS)
+                    return false; // upstream IsDegenerate ignores this status
+                put(points, point);
+            }
+        }
+        else
+            topo.insert(topo.end(), 4, -1.0);
+        if (original && back && face == NULL)
+            results.push_back(-9.0); // unresolved, never dereference a legacy label
+        else
+        {
+            SmXSectTol3d xs(t);
+            results.push_back(pe->IsDegenerate(has ? &xs : NULL) ? 1.0 : 0.0);
+        }
+    }
+    out.ints(K_RESULTS, results);
+    out.ints(K_OWNER_TOPO, topo);
+    out.floats(K_OWNER_POINTS, points);
+    return true;
+}
+
 void op_transform(Rd& rd, Model& m, Out& out)
 {
     SmVector3d org = rd.vec();
@@ -808,6 +967,8 @@ SC_EXPORT int32_t sc_query_poly_eval(const double* in, int64_t n_in, double* out
     Rd rd{in, 0};
     int32_t op = (int32_t)rd.idx();
     Model m;
+    if (op == OP_OWNER_DEGEN)
+        read_owners(rd, ctx, m);
     build(rd, ctx, m);
     switch (op)
     {
@@ -825,6 +986,13 @@ SC_EXPORT int32_t sc_query_poly_eval(const double* in, int64_t n_in, double* out
         break;
     case OP_DEGEN:
         op_degen(rd, m, o);
+        break;
+    case OP_OWNER_DEGEN:
+        if (!op_owner_degen(rd, m, o))
+        {
+            delete m.brep;
+            return SC_ERR_ARG;
+        }
         break;
     case OP_TRANSFORM:
         op_transform(rd, m, o);
