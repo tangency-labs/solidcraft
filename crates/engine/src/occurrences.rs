@@ -41,6 +41,51 @@ pub(crate) struct RemovedLaterCache {
 }
 
 impl Session {
+    /// Visibility stays outside undo history, but its names follow the same body and exact
+    /// occurrence path through a rename in either direction. Never parse display labels:
+    /// ambiguous labels and names containing slashes use the document's canonical naming.
+    pub(crate) fn remap_hidden_bodies(
+        &mut self,
+        previous: &solidcraft_doc::Document,
+        state: &solidcraft_doc::ModelState,
+        rename: Option<(&str, &str)>,
+    ) {
+        if self.visibility.hidden_bodies.is_empty() {
+            return;
+        }
+        if rename.is_none() {
+            if previous.occurrences == self.doc.occurrences {
+                return;
+            }
+            let old_names: std::collections::BTreeMap<_, _> = previous.occurrences.iter().map(|o| (o.id, &o.name)).collect();
+            if !self.doc.occurrences.iter().any(|o| old_names.get(&o.id).is_some_and(|name| **name != o.name)) {
+                return;
+            }
+        }
+        let mut renamed = state.clone();
+        if let Some((old, new)) = rename {
+            for body in renamed.bodies.iter_mut().filter(|body| body.name == old) {
+                body.name = new.to_string();
+            }
+        }
+        let hidden: std::collections::BTreeSet<_> = self.visibility.hidden_bodies.iter().map(String::as_str).collect();
+        let mut names = std::collections::BTreeMap::new();
+        for (component, path, _) in previous.placements() {
+            for body in state.bodies.iter().filter(|body| previous.model_body_component(body) == component) {
+                let old = previous.world_body_name(state, &body.name, component, &path);
+                if hidden.contains(old.as_str()) {
+                    let source = rename.filter(|(old, _)| *old == body.name).map_or(body.name.as_str(), |(_, new)| new);
+                    names.insert(old, self.doc.world_body_name(&renamed, source, component, &path));
+                }
+            }
+        }
+        for hidden in &mut self.visibility.hidden_bodies {
+            if let Some(new) = names.get(hidden) {
+                hidden.clone_from(new);
+            }
+        }
+    }
+
     /// Document with uncaptured occurrence positions applied, without changing saved geometry.
     pub fn placed_document(&self) -> std::borrow::Cow<'_, solidcraft_doc::Document> {
         if self.pending_moves.is_empty() {

@@ -150,11 +150,13 @@ pub enum Sel {
 }
 
 /// A body rename between two designs (see `Session::body_renames`).
+#[derive(Clone)]
 struct BodyRename {
     before: std::sync::Weak<Document>,
     after: std::sync::Weak<Document>,
     old: String,
     new: String,
+    names_only: bool,
 }
 
 /// One undo step.
@@ -668,7 +670,10 @@ impl Session {
     /// a body or a feature (or undid or redid such a rename) renames it in the model instead,
     /// which keeps every result and mesh (#3044).
     fn refresh_from(&mut self, previous: &Arc<Document>) {
-        if let Some((old, new)) = self.body_rename(previous)
+        let rename = self.body_rename(previous);
+        self.remap_hidden_bodies(previous, &self.model.state(), rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str())));
+        if let Some((old, new, names_only)) = rename
+            && names_only
             && self.model.rename_body(&self.doc, &old, &new)
         {
             self.revision += 1;
@@ -687,29 +692,48 @@ impl Session {
         self.refresh();
     }
 
-    /// The body rename that turned `previous` into the design (old name, new name), if that is
-    /// the whole change: one this session made (either way round), else one the designs show.
-    fn body_rename(&mut self, previous: &Arc<Document>) -> Option<(String, String)> {
+    /// The body rename that turned `previous` into the design (old name, new name, whether
+    /// only names changed): one this session made (either way round), else one the designs show.
+    fn body_rename(&mut self, previous: &Arc<Document>) -> Option<(String, String, bool)> {
         let holds = |w: &std::sync::Weak<Document>, d: &Arc<Document>| w.upgrade().is_some_and(|x| Arc::ptr_eq(&x, d));
         self.body_renames.retain(|r| r.before.strong_count() > 0 && r.after.strong_count() > 0);
         for r in &self.body_renames {
             if holds(&r.before, previous) && holds(&r.after, &self.doc) {
-                return Some((r.old.clone(), r.new.clone()));
+                return Some((r.old.clone(), r.new.clone(), r.names_only));
             }
             if holds(&r.after, previous) && holds(&r.before, &self.doc) {
-                return Some((r.new.clone(), r.old.clone()));
+                return Some((r.new.clone(), r.old.clone(), r.names_only));
             }
         }
-        let model = &self.model;
-        let made = |id: u64| -> Vec<String> {
-            model.result(id).map(|r| r.state.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect()).unwrap_or_default()
-        };
-        let (old, new) = self.doc.body_rename_from(previous, made)?;
-        self.body_renames.push(BodyRename { before: Arc::downgrade(previous), after: Arc::downgrade(&self.doc), old: old.clone(), new: new.clone() });
+        let (old, new) = self.inferred_body_rename(previous)?;
+        self.record_body_rename(previous, &old, &new, true);
+        Some((old, new, true))
+    }
+
+    fn inferred_body_rename(&self, previous: &Document) -> Option<(String, String)> {
+        self.doc.body_rename_from(previous, |id| {
+            self.model.result(id).map(|r| r.state.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect()).unwrap_or_default()
+        })
+    }
+
+    /// Remember explicit renames too: features that refer to the body also change their
+    /// parameters, so the document-only fast-path proof may not recognize their undo/redo.
+    fn remember_body_rename(&mut self, previous: &Arc<Document>, old: &str, new: &str) {
+        let names_only = self.inferred_body_rename(previous).is_some();
+        self.record_body_rename(previous, old, new, names_only);
+    }
+
+    fn record_body_rename(&mut self, previous: &Arc<Document>, old: &str, new: &str, names_only: bool) {
+        self.body_renames.push(BodyRename {
+            before: Arc::downgrade(previous),
+            after: Arc::downgrade(&self.doc),
+            old: old.into(),
+            new: new.into(),
+            names_only,
+        });
         if self.body_renames.len() > MAX_UNDO {
             self.body_renames.remove(0);
         }
-        Some((old, new))
     }
 
     /// Only persistent render intent, or only part properties, changed. Never evaluate or clear
@@ -966,7 +990,7 @@ impl Session {
             occurrence_visibility_cache: Default::default(),
             removed_later_cache: Default::default(),
             clearance_cache: self.clearance_cache.clone(),
-            body_renames: Vec::new(),
+            body_renames: self.body_renames.clone(),
             contact_meshes: self.contact_meshes.clone(),
             clipboard: self.clipboard.clone(),
             sketch_clipboard: self.sketch_clipboard.clone(),
@@ -1011,6 +1035,11 @@ impl Session {
     /// saved state, view state, checkpoints or earlier undo steps.
     pub fn accept_computed(&mut self, mut computed: Session) {
         let previous_revision = self.revision;
+        let rename = computed.body_rename(&self.doc);
+        computed.visibility.hidden_bodies.clone_from(&self.visibility.hidden_bodies);
+        computed.remap_hidden_bodies(&self.doc, &self.model.state(), rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str())));
+        self.visibility.hidden_bodies = std::mem::take(&mut computed.visibility.hidden_bodies);
+        self.body_renames = computed.body_renames;
         self.doc = computed.doc;
         self.model = computed.model;
         self.world_cache = computed.world_cache;

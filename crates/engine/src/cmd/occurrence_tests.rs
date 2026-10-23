@@ -53,6 +53,55 @@ fn component_create_rejects_unknown_keys_and_accepts_documented_keys() {
 }
 
 #[test]
+fn body_and_component_renames_keep_hidden_copies_through_history() {
+    let mut s = Session::default();
+    let (component, first) = created(&mut s, "Knob");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Knob"}));
+    let second = run(&mut s, "occurrence.copy", json!({"component": component, "translate": [20, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let name = |s: &Session, path: &[u64]| s.occurrence_placement(path).unwrap().bodies[0].world.clone();
+    let hidden = name(&s, &[second]);
+    run(&mut s, "browser.visibility", json!({"items": [hidden], "visible": false}));
+    for (command, params) in [
+        ("body.rename", json!({"body": "Knob", "name": "Grip"})),
+        ("component.rename", json!({"component": component, "name": "Dial"})),
+        ("edit.undo", json!({})),
+        ("edit.undo", json!({})),
+        ("edit.redo", json!({})),
+        ("edit.redo", json!({})),
+    ] {
+        run(&mut s, command, params);
+        assert!(s.body_visible(&name(&s, &[first])), "{command}: the first copy stays visible");
+        assert!(!s.body_visible(&name(&s, &[second])), "{command}: the hidden copy stays hidden");
+        assert_eq!(s.visibility.hidden_bodies, [name(&s, &[second])], "no stale names after {command}");
+    }
+}
+
+#[test]
+fn renaming_a_parent_preserves_hidden_nested_copies_with_ambiguous_labels() {
+    let mut s = Session::default();
+    let (parent, first_parent) = created(&mut s, "Assembly");
+    let (_, child) = created(&mut s, "Knob");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Knob"}));
+    let second_parent = run(&mut s, "occurrence.copy", json!({"component": parent, "translate": [20, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let name = |s: &Session, path: &[u64]| s.occurrence_placement(path).unwrap().bodies[0].world.clone();
+    let hidden = name(&s, &[second_parent, child]);
+    run(&mut s, "browser.visibility", json!({"items": [hidden], "visible": false}));
+    for (command, params) in [
+        ("component.rename", json!({"component": parent, "name": "Assembly/Other"})),
+        ("body.rename", json!({"body": "Knob", "name": "Grip (@occ[custom])"})),
+        ("edit.undo", json!({})),
+        ("edit.undo", json!({})),
+        ("edit.redo", json!({})),
+        ("edit.redo", json!({})),
+    ] {
+        run(&mut s, command, params);
+        assert!(s.body_visible(&name(&s, &[first_parent, child])), "{command}");
+        assert!(!s.body_visible(&name(&s, &[second_parent, child])), "{command}");
+        assert_eq!(s.visibility.hidden_bodies, [name(&s, &[second_parent, child])]);
+    }
+}
+
+#[test]
 fn instance_copy_uses_selected_source_transform() {
     let mut s = Session::default();
     let (component, first) = created(&mut s, "Block");
