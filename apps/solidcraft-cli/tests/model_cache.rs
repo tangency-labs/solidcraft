@@ -149,6 +149,50 @@ fn imported_assemblies_open_from_their_model_as_evaluated() {
     check("imported hinge", s);
 }
 
+/// A design whose boolean needed a retry keeps that retry's diagnostics in its model, and opens
+/// from it (#4443): an empty list of rejected candidates is left out of the file and read back
+/// as empty.
+#[test]
+fn a_design_whose_boolean_needed_a_retry_opens_from_its_model() {
+    // A ring joined to a sloped floor through its bore: the join needs a common-bore retry
+    // (the geometry of boolean_retry_warning_and_details_survive_cache_undo_and_reopen).
+    let slope = 1f64.to_radians().tan();
+    let mut s = Session::default();
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XZ", "name": "Floor section"})),
+        ("sketch.line", json!({"points": [[0, 0], [100, 0], [100, -10. - slope * 100.], [0, -10.]], "closed": true})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch": "Floor section", "distance": 80, "body_name": "Floor"})),
+        ("solid.cylinder", json!({"base": [50, 40, -5], "radius": 10, "height": 30, "operation": "cut"})),
+        ("sketch.create", json!({"plane": "XY", "name": "Ring section"})),
+        ("sketch.circle.center", json!({"center": [50, 40], "radius": 20})),
+        ("sketch.circle.center", json!({"center": [50, 40], "radius": 10})),
+        ("sketch.finish", json!({})),
+        (
+            "solid.extrude",
+            json!({"sketch": "Ring section", "profiles": [{"point": [65, 40]}], "start_offset": -5, "distance": 7, "body_name": "Ring"}),
+        ),
+        ("solid.combine", json!({"target": "Floor", "tools": ["Ring"], "operation": "join"})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let retried = s.model.results.last().unwrap();
+    assert!(!retried.boolean_diagnostics.events.is_empty(), "the join needs a retry: {:?}", retried.boolean_diagnostics);
+    assert!(retried.boolean_diagnostics.rejected.is_empty(), "no rejected candidates, so the file leaves the list out");
+    // Read as Open reads it. The in-process evaluation cache would hand an evaluation the same
+    // results, so the check is the model itself being taken.
+    let path = temp("boolean-retry");
+    s.execute("file.save_as", &json!({"path": path.to_string_lossy()})).unwrap();
+    let (doc, saved) = solidcraft_engine::io::read_design_file(&path.to_string_lossy(), None::<fn(solidcraft_engine::io::DesignPreview)>).unwrap();
+    let saved = saved.expect("the save keeps the model");
+    if let Err(e) = solidcraft_engine::doc::Model::adopt(&doc, &saved) {
+        panic!("the saved model is not used: {e}");
+    }
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+    check("boolean retry", s);
+}
+
 /// Opened from its model, a design evaluates only from the first feature an edit changes: the
 /// saved states before it are kept as they were read (the same states, not evaluated again).
 #[test]

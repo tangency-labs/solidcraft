@@ -79,8 +79,9 @@ pub struct BooleanDiagnostics {
     pub truncated: bool,
     /// Why candidates of the retries that led to the result were discarded before they were
     /// measured (#3020: a coarse candidate whose edges run far outside the operands, which
-    /// meshing never finished). Left out of the report when there are none.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// meshing never finished). Left out of the report when there are none, and read back as
+    /// none when it is missing (#4443: a saved model with retries was never read).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rejected: Vec<String>,
 }
 
