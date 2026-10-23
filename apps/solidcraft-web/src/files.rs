@@ -495,6 +495,57 @@ pub fn pick_from_disk(files: &Rc<Files>, intent: Intent) {
     }
 }
 
+/// A command's own file (Insert DXF, Insert SVG, a canvas image): an `<input type=file>` that
+/// offers only `extensions`. The answer is the file's engine path under [`UPLOAD`]; `None` when
+/// the picker is closed or the file can't be read (#5471).
+pub fn pick_upload(files: &Rc<Files>, extensions: &[&str]) -> impl std::future::Future<Output = Option<String>> + use<> {
+    let accept = disk::accept_list(extensions);
+    let files = files.clone();
+    let chosen = (|| {
+        let doc = web_sys::window()?.document()?;
+        let input = doc.create_element("input").ok()?.unchecked_into::<web_sys::HtmlInputElement>();
+        input.set_type("file");
+        input.set_accept(&accept);
+        // Attached (hidden) while it is open: some browsers ignore a click on a detached input.
+        let _ = input.set_attribute("style", "display:none");
+        doc.body()?.append_child(&input).ok()?;
+        let el = input.clone();
+        // Resolves with the picked file, or with nothing when the picker is closed.
+        let promise = js_sys::Promise::new(&mut |resolve: Function, _reject: Function| {
+            let (on_change, on_cancel) = (resolve.clone(), resolve);
+            let el2 = el.clone();
+            let change = Closure::once_into_js(move || {
+                el2.remove();
+                let file = el2.files().and_then(|l| l.get(0)).map_or(JsValue::NULL, JsValue::from);
+                let _ = on_change.call1(&JsValue::NULL, &file);
+            });
+            let el3 = el.clone();
+            let cancel = Closure::once_into_js(move || {
+                el3.remove();
+                let _ = on_cancel.call1(&JsValue::NULL, &JsValue::NULL);
+            });
+            el.set_onchange(Some(change.unchecked_ref()));
+            let _ = el.add_event_listener_with_callback("cancel", cancel.unchecked_ref());
+        });
+        input.click();
+        Some(promise)
+    })();
+    async move {
+        let file: web_sys::File = JsFuture::from(chosen?).await.ok()?.dyn_into().ok()?;
+        match blob_bytes(&file).await {
+            Ok(bytes) => {
+                let path = format!("{UPLOAD}{}", file.name());
+                vfs::insert(&path, bytes);
+                Some(path)
+            }
+            Err(e) => {
+                files.say(format!("{}: {e}", file.name()), true);
+                None
+            }
+        }
+    }
+}
+
 fn input_picker(files: &Rc<Files>, intent: Intent) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
     let Ok(input) = doc.create_element("input").map(|e| e.unchecked_into::<web_sys::HtmlInputElement>()) else { return };

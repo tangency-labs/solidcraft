@@ -114,6 +114,17 @@ pub fn opens_design(extensions: &[&str]) -> bool {
     extensions.is_empty() || extensions.iter().any(|e| solidcraft_engine::io::DESIGN_EXTS.contains(e))
 }
 
+/// Does a command ask for its own kind of file (Insert DXF, Insert SVG, a canvas image), not a
+/// design, STEP or mesh? Those get a picker for just that type (#5471).
+pub fn own_file_type(extensions: &[&str]) -> bool {
+    !opens_design(extensions)
+}
+
+/// The `accept` list of a file input for these extensions: `["dxf"]` → `.dxf`.
+pub fn accept_list(extensions: &[&str]) -> String {
+    extensions.iter().map(|e| format!(".{}", e.trim_start_matches('.'))).collect::<Vec<_>>().join(",")
+}
+
 /// The file type a Save As dialog offers for `name`: (description, MIME type, extension).
 pub fn save_type(name: &str) -> (&'static str, &'static str, &'static str) {
     let json = std::path::Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("json"));
@@ -537,6 +548,20 @@ mod web {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #5471: Insert DXF / SVG and canvas images get a picker for their own type; opening a
+    /// design (or the default list) keeps the dialog or the files window.
+    #[test]
+    fn a_command_s_own_file_type_gets_its_own_picker() {
+        for own in [&["dxf"][..], &["svg"], &["png", "jpg", "jpeg"]] {
+            assert!(own_file_type(own), "{own:?}");
+        }
+        for not in [&[][..], &[solidcraft_engine::io::DESIGN_EXT]] {
+            assert!(!own_file_type(not), "{not:?}");
+        }
+        assert_eq!(accept_list(&["dxf"]), ".dxf");
+        assert_eq!(accept_list(&["png", ".jpg", "jpeg"]), ".png,.jpg,.jpeg");
+    }
 
     #[test]
     fn a_disk_path_round_trips_its_handle_id_and_name() {

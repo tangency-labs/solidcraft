@@ -576,11 +576,16 @@ mod web {
                         let (restorable, restorer) = (files.clone(), files.clone());
                         let services = Services {
                             // Open shows the browser's open dialog for a design where it has one
-                            // (the file keeps its handle, so Save writes back to it); otherwise,
-                            // and for inserting STEP or meshes, the browser's files window.
+                            // (the file keeps its handle, so Save writes back to it); a command
+                            // that asks for its own file type (Insert DXF, Insert SVG, a canvas
+                            // image) gets a picker for that type (#5471); otherwise, and for
+                            // inserting STEP or meshes, the browser's files window.
                             pick_open: Some(Box::new(move |exts: &[&str]| {
                                 if disk::handles_open(exts) {
                                     return Box::pin(disk::pick_open(&opener));
+                                }
+                                if disk::own_file_type(exts) {
+                                    return Box::pin(files::pick_upload(&opener, exts));
                                 }
                                 panel.panel.set(true);
                                 Box::pin(std::future::ready(None))
