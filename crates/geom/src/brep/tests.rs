@@ -38,7 +38,7 @@ fn fit_pcurves(b: &mut Brep) {
                         let e = &b.edges[u.edge as usize];
                         pcurve::EdgeUse {
                             edge: u.edge,
-                            curve: &e.curve,
+                            curve: e.parameters(),
                             interval: e.interval,
                             forward: u.forward,
                             tolerance: e.tolerance,
@@ -49,7 +49,7 @@ fn fit_pcurves(b: &mut Brep) {
                 Loop::Vertex { .. } => vec![],
             })
             .collect();
-        let fitted = pcurve::pcurves(&f.surface, &loops, 1e-7).unwrap();
+        let fitted = pcurve::pcurves_within(f.parameters(), &loops, 1e-7, Some(f.domain)).unwrap();
         for (l, pcs) in f.loops.iter_mut().zip(fitted) {
             if let Loop::Edges { edges } = l {
                 for (u, pc) in edges.iter_mut().zip(pcs) {
@@ -193,18 +193,19 @@ fn one_face(surface: Surface, domain: [[f64; 2]; 2], edges: Vec<(Curve, [f64; 2]
     fit_pcurves(&mut b);
     b
 }
-/// A ring of a torus as a rational spline closed in u (first and last control rows the same),
-/// as SMLib writes the fillet round a hole's rim: bounded by its two circles and the tube's
-/// quarter at u = 0, a seam used twice.
+/// A ring of a torus on its NURBS form, closed in u (first and last control rows the same), as
+/// SMLib holds the fillet round a hole's rim: bounded by its two circles and the tube's quarter
+/// at u = 0, a seam used twice, each on its form.
 fn closed_band() -> Brep {
-    let w = std::f64::consts::FRAC_1_SQRT_2;
     let (big, small) = (5., 1.);
-    let surface = pcurve::tests::closed_ring(&[[big + small, 0., 1.], [big + small, small, w], [big, small, 1.]], &[0., 0., 0., 1., 1., 1.]);
+    let torus =
+        Surface::Torus { frame: Frame { origin: [0., 0., 0.], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }, major_radius: big, minor_radius: small };
+    let (form, domain) = form::surface(&torus, [[0., TAU], [0., FRAC_PI_2]]).unwrap();
     let about = |z: f64| Frame { origin: [0., 0., z], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
     let quarter = Curve::Circle { frame: Frame { origin: [big, 0., 0.], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] }, radius: small };
-    one_face(
-        surface,
-        [[0., 1.], [0., 1.]],
+    let mut b = one_face(
+        torus,
+        domain,
         vec![
             (Curve::Circle { frame: about(0.), radius: big + small }, [0., TAU], [0, 0]),
             (quarter, [0., FRAC_PI_2], [0, 1]),
@@ -212,7 +213,15 @@ fn closed_band() -> Brep {
         ],
         &[[big + small, 0., 0.], [big, 0., small]],
         &[(0, true), (1, true), (2, false), (1, false)],
-    )
+    );
+    b.faces[0].nurbs = Some(form);
+    for e in &mut b.edges {
+        if let Some((nurbs, interval)) = form::curve(&e.curve, e.interval) {
+            (e.nurbs, e.interval) = (Some(nurbs), interval);
+        }
+    }
+    fit_pcurves(&mut b);
+    b
 }
 /// A whole sphere bounded by one meridian from pole to pole, used twice: a closed shell.
 fn ball() -> Brep {
@@ -549,10 +558,11 @@ fn geometric_defects_are_refused_by_record() {
         (
             "seam uses of a closed spline on one line",
             Record::Use { face: 0, r#loop: 0, position: 1 },
-            Box::new(|p: &Problem| *p == Problem::Period { gap: 1., period: 1. }),
+            // On the ring's NURBS form one turn is four quarters.
+            Box::new(|p: &Problem| *p == Problem::Period { gap: 4., period: 4. }),
             {
                 let mut b = closed_band();
-                shift(pcurve_of(&mut b, 0, 1), [-1., 0.]);
+                shift(pcurve_of(&mut b, 0, 1), [-4., 0.]);
                 b
             },
         ),
