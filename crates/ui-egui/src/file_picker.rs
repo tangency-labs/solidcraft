@@ -365,4 +365,36 @@ mod tests {
         finish(&mut h.app, &answer, None);
         assert!(h.app.tool.is_none(), "cancelling does not resume the old placement");
     }
+
+    /// A canvas and a decal clicked onto a face of a design with many curved faces land on it.
+    /// The click sent only the point, and the engine's search of every face of every body for it
+    /// gave up ("face capture work limit exceeded"), as on an imported trophy of nine bodies.
+    #[test]
+    fn a_canvas_and_a_decal_clicked_onto_a_face_of_a_large_design_land_on_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 200, "width": 120, "height": 40, "corner": [20, 20, 0]})).unwrap();
+        for i in 0..8 {
+            let center = [60 + 45 * (i % 4), 50 + 60 * (i / 4), 60];
+            h.app.run("solid.torus", json!({"major": 30, "minor": 8, "center": center, "operation": "new_body"})).unwrap();
+        }
+        assert!(h.app.run("sketch.create", json!({"plane": {"face": [30, 30, 40]}})).is_err(), "a point alone still gives up here");
+        for command in ["canvas.insert", "canvas.decal"] {
+            for step in [
+                json!({"make_image": "pic.png"}),
+                json!({"choose_file": "pic.png"}),
+                json!({"call": "ui.view", "params": {"view": "iso"}}),
+                json!({"start": command}),
+                json!({"click": {"world": [30, 30, 40]}}),
+            ] {
+                h.step(&step).unwrap();
+            }
+        }
+        let doc = &h.app.session.doc;
+        assert_eq!(doc.canvases.len(), 2, "both images are placed");
+        let (vals, _) = doc.param_values();
+        for canvas in &doc.canvases {
+            let plane = doc.canvas_plane(&vals, canvas).unwrap();
+            assert!(plane.normal().z.abs() > 0.99 && (plane.origin.z - 40.0).abs() < 1e-6, "{} lies on {plane:?}", canvas.name);
+        }
+    }
 }
