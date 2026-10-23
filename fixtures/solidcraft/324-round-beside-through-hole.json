@@ -1,0 +1,227 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/324",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/1885",
+ "test": "crates/kernel/src/issue_324_tests.rs: the_radius_offered_beside_a_hole_fits (the round offered for R4, at most 2.5 mm, builds and measures the block less the hole and the round's corner; the PR also built R2.5 at 7663.611 against 7663.606). The R4 case that contours the hole is not fixed on truck, which refuses that round",
+ "summary": "A round on a block's top edge beside a through hole. On truck an R4 round that would run into the hole is refused, and the refusal offered 2.721 mm, which was refused the same way: the hole's wall reaches y = 17.5, so any radius over 2.5 mm runs into it. Geometry is the PR test's: a 40 x 20 x 10 block, a through hole of radius 3 at (20, 14.5), the round on the top edge at y = 20. The cases are the block and hole alone (control), an R2 round clear of the hole, the R2.5 round whose edge on the top face touches the hole's rim, and the R4 round contouring the hole as #324 asks. Volumes are closed form, the R4 overlap a 1D integral of closed-form terms (mpmath, 30 digits). Tolerances are 0.1 % of the round's volume.",
+ "cases": [
+  {
+   "name": "block_with_hole",
+   "note": "Control: the block and its through hole, no round (same tolerance as the R2 round).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      20,
+      10
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "drill",
+     "origin": [
+      20,
+      14.5,
+      -1
+     ],
+     "radius": 3,
+     "height": 12
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "drill"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 7717.256661176919,
+     "tol": 0.034336293856408275,
+     "formula": "40*20*10 - pi*3^2*10 (tol: 0.1 % of the R2 round)"
+    }
+   }
+  },
+  {
+   "name": "round_2_clear_of_hole",
+   "note": "R2: the round's edge on the top face is at y = 18, 0.5 mm clear of the hole's wall.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      20,
+      10
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "drill",
+     "origin": [
+      20,
+      14.5,
+      -1
+     ],
+     "radius": 3,
+     "height": 12
+    },
+    {
+     "op": "difference",
+     "id": "body",
+     "a": "block",
+     "b": "drill"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "body",
+     "edges": [
+      [
+       10,
+       20,
+       10
+      ]
+     ],
+     "radius": 2
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 7682.92036732051,
+     "tol": 0.034336293856408275,
+     "formula": "40*20*10 - pi*3^2*10 - 40*(1 - pi/4)*2^2 (tol: 0.1 % of the round)"
+    }
+   }
+  },
+  {
+   "name": "round_2_5_tangent_to_hole",
+   "note": "R2.5, the largest round that stays clear: its edge on the top face (y = 17.5) touches the hole's rim at (20, 17.5, 10). On truck the refusal of R4 offered 2.721, which ran into the hole; #1885 makes the offer fit.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      20,
+      10
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "drill",
+     "origin": [
+      20,
+      14.5,
+      -1
+     ],
+     "radius": 3,
+     "height": 12
+    },
+    {
+     "op": "difference",
+     "id": "body",
+     "a": "block",
+     "b": "drill"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "body",
+     "edges": [
+      [
+       10,
+       20,
+       10
+      ]
+     ],
+     "radius": 2.5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 7663.606202026281,
+     "tol": 0.05365045915063793,
+     "formula": "40*20*10 - pi*3^2*10 - 40*(1 - pi/4)*2.5^2 (tol: 0.1 % of the round)"
+    }
+   }
+  },
+  {
+   "name": "round_4_over_hole",
+   "note": "#324's own request: an R4 round that runs into the hole and contours it, i.e. the block less the hole and the round's corner. Not fixed on truck, which refuses it; SMLib returns a body that is not a closed manifold solid (tangency-labs/solidcore#422).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      20,
+      10
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "drill",
+     "origin": [
+      20,
+      14.5,
+      -1
+     ],
+     "radius": 3,
+     "height": 12
+    },
+    {
+     "op": "difference",
+     "id": "body",
+     "a": "block",
+     "b": "drill"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "body",
+     "edges": [
+      [
+       10,
+       20,
+       10
+      ]
+     ],
+     "radius": 4
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 7580.287315387334,
+     "tol": 0.1373451754256331,
+     "formula": "40*20*10 - pi*3^2*10 - 40*(1 - pi/4)*4^2 + O, O = int_16^17.5 2*sqrt(3^2 - (y - 14.5)^2)*(4 - sqrt(4^2 - (y - 16)^2)) dy = 0.3758296360, the part of the round's corner inside the hole (tol: 0.1 % of the round)"
+    }
+   }
+  }
+ ]
+}
