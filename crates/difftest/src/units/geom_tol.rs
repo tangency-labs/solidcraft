@@ -11,9 +11,9 @@
 //! result is `r` (floats; booleans as `1.0`/`0.0`).
 //!
 //! A relation case (`op = "relation"`) runs a script of `RelatePair` /
-//! `RelateToMany` / `RemoveAll` steps on objects identified by index and reports, as
+//! `RelateToMany` / `RemoveAll` / `RemovePair` steps on objects identified by index and reports, as
 //! integers `r`, every step's `SmStatus` (`SM_SUCCESS` = 1000; `RemoveAll` reports 0) and then every query (`GetSecond`,
-//! `GetSeconds`, `GetAllFirsts`, `GetAllSeconds`). Upstream returns the sets in
+//! `GetSeconds`, `GetFirsts`, `GetAllFirsts`, `GetAllSeconds`). Upstream returns the sets in
 //! hash (address) order, which is unspecified, so both sides report them sorted
 //! (see `plan/findings.md`).
 //!
@@ -109,6 +109,7 @@ enum Step {
     Pair(i64, i64),
     Many(i64, Vec<i64>),
     RemoveAll,
+    RemovePair(i64, i64),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -204,6 +205,7 @@ fn steps_ffi(i: &Inputs) -> Vec<RelationStep> {
             Step::Pair(f, s) => RelationStep::Pair(*f, *s),
             Step::Many(f, ss) => RelationStep::Many(*f, ss.clone()),
             Step::RemoveAll => RelationStep::RemoveAll,
+            Step::RemovePair(f, s) => RelationStep::RemovePair(*f, *s),
         })
         .collect()
 }
@@ -433,6 +435,7 @@ fn rust_relation(i: &Inputs) -> Result<Output, HarnessError> {
         out.push(match step {
             Step::Pair(f, s) => status(&rel.relate_pair(*f, *s)),
             Step::Many(f, ss) => status(&rel.relate_to_many(*f, ss)),
+            Step::RemovePair(f, s) => status(&rel.remove_pair(*f, *s)),
             Step::RemoveAll => {
                 rel.remove_all();
                 0
@@ -450,6 +453,9 @@ fn rust_relation(i: &Inputs) -> Result<Output, HarnessError> {
     for f in 0..i.n1 {
         out.push(rel.second(f).unwrap_or(-1));
         push_list(&mut out, rel.seconds(f));
+    }
+    for s in 0..i.n2 {
+        push_list(&mut out, rel.firsts(s));
     }
     push_list(&mut out, rel.all_firsts());
     push_list(&mut out, rel.all_seconds());

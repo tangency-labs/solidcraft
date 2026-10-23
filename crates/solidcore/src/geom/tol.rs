@@ -56,8 +56,10 @@
 //! | [`Relation::relate_pair`]              | `RelatePair`                                   |
 //! | [`Relation::relate_to_many`]           | `RelateToMany`                                 |
 //! | [`Relation::remove_all`]               | `RemoveAll`                                    |
+//! | [`Relation::remove_pair`]              | `RemovePair`                                   |
 //! | [`Relation::second`]                   | `GetSecond`                                    |
 //! | [`Relation::seconds`]                  | `GetSeconds`                                   |
+//! | [`Relation::firsts`]                   | `GetFirsts`                                    |
 //! | [`Relation::all_firsts`]               | `GetAllFirsts`                                 |
 //! | [`Relation::all_seconds`]              | `GetAllSeconds`                                |
 //! | [`Cardinality`]                        | `SmRelationCardinalityType`                    |
@@ -1036,6 +1038,33 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
         self.second_to_first.clear();
     }
 
+    /// Removes a pair from both directions (`RemovePair`). Empty keys are removed.
+    /// As upstream, succeeds without changing anything when both keys exist but
+    /// belong to different pairs.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when either key is absent; nothing is changed then.
+    pub fn remove_pair(&mut self, first: A, second: B) -> Result<()> {
+        if !self.first_to_second.contains_key(&first) || !self.second_to_first.contains_key(&second)
+        {
+            return Err(SolidError::sm_err("geom::tol::Relation::remove_pair"));
+        }
+        if let Some(seconds) = self.first_to_second.get_mut(&first) {
+            seconds.remove(&second);
+            if seconds.is_empty() {
+                self.first_to_second.remove(&first);
+            }
+        }
+        if let Some(firsts) = self.second_to_first.get_mut(&second) {
+            firsts.remove(&first);
+            if firsts.is_empty() {
+                self.second_to_first.remove(&second);
+            }
+        }
+        Ok(())
+    }
+
     /// The only second related to `first`, or `None` when there is none or more than
     /// one (`GetSecond`).
     #[must_use]
@@ -1057,6 +1086,15 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
             .unwrap_or_default()
     }
 
+    /// Every first related to `second`, sorted (`GetFirsts`).
+    #[must_use]
+    pub fn firsts(&self, second: B) -> Vec<A> {
+        self.second_to_first
+            .get(&second)
+            .map(|s| s.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
     /// Every first that is in a pair, sorted (`GetAllFirsts`).
     #[must_use]
     pub fn all_firsts(&self) -> Vec<A> {
@@ -1073,6 +1111,30 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relation_removal_preserves_other_pairs_and_releases_empty_keys() {
+        let mut relation = Relation::default();
+        for (first, second) in [(0, 10), (0, 11), (1, 10), (2, 12)] {
+            relation.relate_pair(first, second).unwrap();
+        }
+        assert_eq!(relation.firsts(10), vec![0, 1]);
+        relation.remove_pair(0, 10).unwrap();
+        assert_eq!(relation.seconds(0), vec![11]);
+        assert_eq!(relation.firsts(10), vec![1]);
+        // Both keys exist, but are not paired: native RemovePair succeeds.
+        relation.remove_pair(0, 12).unwrap();
+        assert_eq!(relation.seconds(0), vec![11]);
+        assert_eq!(relation.firsts(12), vec![2]);
+        assert!(relation.remove_pair(9, 10).is_err());
+        assert!(relation.remove_pair(0, 19).is_err());
+        relation.remove_pair(1, 10).unwrap();
+        assert!(!relation.all_firsts().contains(&1));
+        assert!(!relation.all_seconds().contains(&10));
+        assert!(relation.firsts(10).is_empty());
+        relation.relate_pair(1, 10).unwrap();
+        assert_eq!(relation.second(1), Some(10));
+    }
 
     fn test_line(len: f64) -> Curve {
         use crate::curve::line::{BoundedLineOptions, Line};

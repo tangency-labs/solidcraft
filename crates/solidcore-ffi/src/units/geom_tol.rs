@@ -186,13 +186,15 @@ pub enum RelationStep {
     Many(i64, Vec<i64>),
     /// `RemoveAll()`.
     RemoveAll,
+    /// `RemovePair(first, second)`.
+    RemovePair(i64, i64),
 }
 
 /// Runs `steps` on an upstream `SmRelation<int, int>` with cardinality `card` over
 /// `n_first` first and `n_second` second objects. Returns the flat result of
 /// `sc_geom_tol_relation`: the status of each step, then per first object
 /// `GetSecond` (index or -1), `count`, sorted `GetSeconds`; then `count` + sorted
-/// `GetAllFirsts` and `count` + sorted `GetAllSeconds`.
+/// `GetFirsts` per second object, `GetAllFirsts` and `GetAllSeconds`.
 pub fn relation(
     card: i32,
     n_first: i64,
@@ -224,6 +226,12 @@ pub fn relation(
                 script.extend(ss.iter().copied());
             }
             RelationStep::RemoveAll => script.push(2),
+            RelationStep::RemovePair(f, s) => {
+                if !f_ok(*f) || !s_ok(*s) {
+                    return Err(FfiError::InvalidArgument("remove pair index".into()));
+                }
+                script.extend([3, *f, *s]);
+            }
         }
     }
     let n_script = script.len() as i64;

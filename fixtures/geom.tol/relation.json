@@ -555,6 +555,14 @@
      }
     ]
    }
-  }
+  },
+  {"name": "relation_remove_pair_0_mixed","upstream_ref": "source/SMLib/inc/SmRelation.h:129,269 (GetFirsts, RemovePair)","inputs": {"op": "relation","card": 0,"n1": 3,"n2": 3,"steps": [{"pair": [0,0]},{"pair": [0,1]},{"pair": [1,0]},{"pair": [2,2]},{"remove_pair": [1,1]},{"remove_pair": [0,0]},{"remove_pair": [0,0]},{"remove_pair": [0,1]},{"remove_pair": [1,0]},{"pair": [0,0]}]}},
+  {"name": "relation_remove_pair_0_empty","upstream_ref": "source/SMLib/inc/SmRelation.h:129,269 (GetFirsts, RemovePair)","inputs": {"op": "relation","card": 0,"n1": 3,"n2": 3,"steps": [{"remove_pair": [0,0]},{"pair": [0,0]},{"remove_pair": [0,0]},{"remove_pair": [0,0]}]}},
+  {"name": "relation_remove_pair_1_mixed","upstream_ref": "source/SMLib/inc/SmRelation.h:129,269 (GetFirsts, RemovePair)","inputs": {"op": "relation","card": 1,"n1": 3,"n2": 3,"steps": [{"pair": [0,0]},{"pair": [0,1]},{"pair": [1,0]},{"pair": [2,2]},{"remove_pair": [1,1]},{"remove_pair": [0,0]},{"remove_pair": [0,0]},{"remove_pair": [0,1]},{"remove_pair": [1,0]},{"pair": [0,0]}]}},
+  {"name": "relation_remove_pair_1_empty","upstream_ref": "source/SMLib/inc/SmRelation.h:129,269 (GetFirsts, RemovePair)","inputs": {"op": "relation","card": 1,"n1": 3,"n2": 3,"steps": [{"remove_pair": [0,0]},{"pair": [0,0]},{"remove_pair": [0,0]},{"remove_pair": [0,0]}]}},
+  {"name": "relation_remove_pair_2_mixed","upstream_ref": "source/SMLib/inc/SmRelation.h:129,269 (GetFirsts, RemovePair)","inputs": {"op": "relation","card": 2,"n1": 3,"n2": 3,"steps": [{"pair": [0,0]},{"pair": [0,1]},{"pair": [1,0]},{"pair": [2,2]},{"remove_pair": [1,1]},{"remove_pair": [0,0]},{"remove_pair": [0,0]},{"remove_pair": [0,1]},{"remove_pair": [1,0]},{"pair": [0,0]}]}},
+  {"name": "relation_remove_pair_2_empty","upstream_ref": "source/SMLib/inc/SmRelation.h:129,269 (GetFirsts, RemovePair)","inputs": {"op": "relation","card": 2,"n1": 3,"n2": 3,"steps": [{"remove_pair": [0,0]},{"pair": [0,0]},{"remove_pair": [0,0]},{"remove_pair": [0,0]}]}},
+  {"name": "relation_remove_pair_3_mixed","upstream_ref": "source/SMLib/inc/SmRelation.h:129,269 (GetFirsts, RemovePair)","inputs": {"op": "relation","card": 3,"n1": 3,"n2": 3,"steps": [{"pair": [0,0]},{"pair": [0,1]},{"pair": [1,0]},{"pair": [2,2]},{"remove_pair": [1,1]},{"remove_pair": [0,0]},{"remove_pair": [0,0]},{"remove_pair": [0,1]},{"remove_pair": [1,0]},{"pair": [0,0]}]}},
+  {"name": "relation_remove_pair_3_empty","upstream_ref": "source/SMLib/inc/SmRelation.h:129,269 (GetFirsts, RemovePair)","inputs": {"op": "relation","card": 3,"n1": 3,"n2": 3,"steps": [{"remove_pair": [0,0]},{"pair": [0,0]},{"remove_pair": [0,0]},{"remove_pair": [0,0]}]}}
  ]
 }

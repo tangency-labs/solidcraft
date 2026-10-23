@@ -64,6 +64,9 @@
 //! null-pointer error, a null blended face is `RelatePair`'s invalid input, and any
 //! failed `CreateCornerBlend` is `SM_ERR` (`SER(SM_ERR)`), unported callees aside.
 //! No new input-driven recursion; existing topology walks are cycle-bounded.
+//! Issue #368: as tangency-labs/smlib 5fe723c, removed offset faces leave all four
+//! correspondence maps before `RemoveFaces`; deleted blends also lose their outgoing
+//! pairs. The pinned reference retains stale faces that `PiecewiseMerge` later reads.
 //! The lamina clean-up's `DeleteFaces` runs through merge p4's arena intersector over
 //! the offset B-rep alone (both upstream operands are that B-rep); it notifies under
 //! `DELETE_FACES_NAMESPACE` rather than the caller's offset keys.
@@ -645,7 +648,7 @@ impl OffsetExecutive {
     /// Removes excess faces using the result's actual editing flag and kernel marks.
     /// An empty deletion list still calls the landed `RemoveFaces` implementation.
     pub fn remove_excess_faces_with_kernel_context(
-        &self,
+        &mut self,
         kernel: &mut Kernel,
         original: &mut Brep,
         result: &mut Brep,
@@ -653,6 +656,7 @@ impl OffsetExecutive {
         let Some(delete_faces) = self.excess_faces(kernel, original, result)? else {
             return Ok(());
         };
+        self.forget_faces(&delete_faces)?;
         let editing_enabled = result.editing_enabled();
         // cpp:2099–2102 ignores ordinary RemoveFaces failures but still executes
         // its editing guard and traversal-mark effects. Missing work must defer.
@@ -662,6 +666,30 @@ impl OffsetExecutive {
             editing_enabled,
             &delete_faces,
         ))
+    }
+
+    /// Forgets correspondence to faces about to be removed (SolidCraft change, #368).
+    fn forget_faces(&mut self, faces: &[FaceId]) -> Result<()> {
+        fn forget_second<A: Ord + Copy>(
+            relation: &mut Relation<A, FaceId>,
+            face: FaceId,
+        ) -> Result<()> {
+            for first in relation.firsts(face) {
+                relation.remove_pair(first, face)?;
+            }
+            Ok(())
+        }
+
+        for &face in faces {
+            forget_second(&mut self.faceuse_to_faces, face)?;
+            forget_second(&mut self.edge_to_faces, face)?;
+            forget_second(&mut self.vertex_to_faces, face)?;
+            forget_second(&mut self.blend_to_faces, face)?;
+            for second in self.blend_to_faces.seconds(face) {
+                self.blend_to_faces.remove_pair(face, second)?;
+            }
+        }
+        Ok(())
     }
 
     fn excess_faces(
@@ -3381,6 +3409,61 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.edges().len(), 2);
+    }
+
+    #[test]
+    fn removed_offset_faces_leave_every_correspondence_in_both_directions() {
+        let mut exec = executive();
+        let gone = FaceId::from_index(0);
+        let kept = FaceId::from_index(1);
+        let blend = FaceId::from_index(2);
+        let faceuses = [FaceuseId::from_index(0), FaceuseId::from_index(1)];
+        let edges = [EdgeId::from_index(0), EdgeId::from_index(1)];
+        let vertices = [VertexId::from_index(0), VertexId::from_index(1)];
+        for face in [gone, kept] {
+            for source in faceuses {
+                exec.relate_faceuse(source, face);
+            }
+            for source in edges {
+                exec.relate_edge_face(source, face);
+            }
+            for source in vertices {
+                exec.relate_vertex_face(source, face);
+            }
+            exec.relate_blend_face(blend, face);
+        }
+        exec.relate_blend_face(gone, kept);
+        exec.relate_blend_face(gone, gone);
+        exec.relate_blend_face(kept, gone);
+
+        // Duplicate candidates and repeated cleanup are harmless. Original ids can
+        // have the same numeric indices as result ids, but must remain related to kept.
+        exec.forget_faces(&[gone, gone]).unwrap();
+        exec.forget_faces(&[gone]).unwrap();
+        for source in faceuses {
+            assert_eq!(exec.offset_faces(source), vec![kept]);
+        }
+        for source in edges {
+            assert_eq!(exec.edge_to_faces.seconds(source), vec![kept]);
+        }
+        for source in vertices {
+            assert_eq!(exec.vertex_to_faces.seconds(source), vec![kept]);
+        }
+        assert_eq!(exec.blend_to_faces.seconds(blend), vec![kept]);
+        assert!(exec.blend_to_faces.seconds(gone).is_empty());
+        assert!(exec.blend_to_faces.seconds(kept).is_empty());
+        assert!(exec.faceuse_to_faces.firsts(gone).is_empty());
+        assert!(exec.edge_to_faces.firsts(gone).is_empty());
+        assert!(exec.vertex_to_faces.firsts(gone).is_empty());
+        assert!(exec.blend_to_faces.firsts(gone).is_empty());
+        assert_eq!(exec.blend_to_faces.firsts(kept), vec![blend]);
+
+        exec.forget_faces(&[kept]).unwrap();
+        assert!(exec.faceuse_to_faces.all_firsts().is_empty());
+        assert!(exec.edge_to_faces.all_firsts().is_empty());
+        assert!(exec.vertex_to_faces.all_firsts().is_empty());
+        assert!(exec.blend_to_faces.all_firsts().is_empty());
+        assert!(exec.blend_to_faces.all_seconds().is_empty());
     }
 
     #[test]
