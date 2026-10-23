@@ -1,0 +1,46 @@
+[
+  {
+    "note": "MACRO records what you build, and Pause skips the commands in between."
+  },
+  {
+    "start": "macro.record"
+  },
+  {
+    "expect": { "status": "Recording" }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "solid.box",
+      "params": { "length": 40, "width": 30, "height": 10 }
+    }
+  },
+  {
+    "start": "macro.pause"
+  },
+  {
+    "expect": { "status": "Paused" }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "solid.sphere",
+      "params": { "radius": 5 }
+    }
+  },
+  {
+    "start": "macro.resume"
+  },
+  {
+    "start": "macro.stop"
+  },
+  {
+    "expect": { "status": "Recording stopped" }
+  },
+  {
+    "start": "macro.play"
+  },
+  {
+    "expect": { "bodies": 3, "features": 3 }
+  }
+]

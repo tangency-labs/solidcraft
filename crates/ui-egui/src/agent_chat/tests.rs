@@ -2568,7 +2568,10 @@ fn an_agents_markdown_is_drawn_as_blocks() {
     assert!(h.widget("Copy").is_some(), "the code block has its Copy button");
     assert!(h.widget("↗ example.com").is_some(), "the link is a button that names where it goes");
     // A hostile reply draws too (no panic, bounded work).
-    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "*".repeat(50_000) + &"[".repeat(5_000) + &"`a".repeat(5_000) });
+    let mut hostile = "*".repeat(50_000);
+    hostile.push_str(&"[".repeat(5_000));
+    hostile.push_str(&"`a".repeat(5_000));
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: hostile });
     h.frames(3);
 }
 

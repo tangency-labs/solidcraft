@@ -892,12 +892,13 @@ fn hostile_params_never_panic() {
                                 if k == "path"
                                     && (id.starts_with("parameters.")
                                         || id == "timeline.export_script"
+                                        || id.starts_with("macro.")
                                         || matches!(
                                             id,
                                             "file.export_3mf" | "file.export_obj" | "file.export_step" | "file.export_stl" | "file.export_urdf"
                                         ))
                                 {
-                                    continue; // parameter, script and export files: covered by their own tests (no stray files)
+                                    continue; // parameter, script, macro and export files: covered by their own tests (no stray files)
                                 }
                                 let mut s = Session::default();
                                 // A model with a sketch, a body and an active sketch, so most commands get far.
@@ -981,7 +982,7 @@ fn only_own_ids_name_commands() {
 fn unknown_commands_suggest_the_closest_ids() {
     let mut s = Session::default();
     let mut msg = |id: &str| s.execute(id, &serde_json::json!({})).unwrap_err().to_string();
-    assert_eq!(msg("file.open"), "unknown command `file.open` (did you mean `doc.open`?)");
+    assert_eq!(msg("file.open"), "unknown command `file.open` (did you mean `doc.open` or `macro.open`?)");
     assert!(msg("solid.extrud").starts_with("unknown command `solid.extrud` (did you mean `solid.extrude`"), "{}", msg("solid.extrud"));
     assert!(msg("Extrude").contains("`solid.extrude`"), "{}", msg("Extrude"));
     assert_eq!(msg("FusionFilletEdgesCommand"), "unknown command `FusionFilletEdgesCommand`");
