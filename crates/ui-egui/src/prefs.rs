@@ -524,6 +524,8 @@ preference_settings! {
     trackpad_pan: bool = true, PAGE_NAVIGATION;
     /// Horizontal trackpad and thumb-wheel scrolling pans the view the other way (#2007).
     pan_reverse_x: bool = false, PAGE_NAVIGATION => check("Reverse horizontal pan direction", "Horizontal two-finger scrolling and the thumb wheel pan the other way");
+    /// Vertical trackpad scrolling pans the view the other way (#5240).
+    pan_reverse_y: bool = false, PAGE_NAVIGATION => check("Reverse vertical pan direction", "Vertical two-finger scrolling pans the other way");
     /// View changes (axis view, Look At, Home) animate; `look_at_speed` scales how fast.
     look_at_anim: bool = true, PAGE_NAVIGATION => check("Animate view changes", "Axis view, Look At, Home and Fit");
     look_at_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => enabled_slider(look_at_anim, "Animation speed", 0.5..=3.0, 0.25, |v| format!("{v:.2}×"));
@@ -974,6 +976,11 @@ pub fn nav_mode(app: &SolveApp, button: NavButton, mods: Modifiers) -> Option<Na
 /// +1, or −1 when horizontal scrolling pans the other way (#2007).
 pub fn pan_sign_x(app: &SolveApp) -> f32 {
     if app.preferences.pan_reverse_x { -1.0 } else { 1.0 }
+}
+
+/// +1, or −1 when vertical scrolling pans the other way.
+pub fn pan_sign_y(app: &SolveApp) -> f32 {
+    if app.preferences.pan_reverse_y { -1.0 } else { 1.0 }
 }
 
 /// Whether the configured suppress-snap chord is held.
@@ -2091,6 +2098,23 @@ mod tests {
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
         assert!(other.preferences.pan_reverse_x);
+    }
+
+    #[test]
+    fn pan_reverse_y_defaults_off_persists_and_flips_the_sign() {
+        assert!(!serde_json::from_value::<Prefs>(json!({})).unwrap().pan_reverse_y);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert_eq!(pan_sign_y(&app), 1.0);
+        set(&mut app, &json!({"pan_reverse_y": true})).unwrap();
+        assert_eq!(pan_sign_y(&app), -1.0);
+        assert_eq!(pan_sign_x(&app), 1.0);
+        set(&mut app, &json!({"pan_reverse_x": true, "pan_reverse_y": false})).unwrap();
+        assert_eq!(pan_sign_x(&app), -1.0);
+        assert_eq!(pan_sign_y(&app), 1.0);
+        set(&mut app, &json!({"pan_reverse_y": true})).unwrap();
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        other.load_prefs(&app.prefs());
+        assert!(other.preferences.pan_reverse_y);
     }
 
     #[test]

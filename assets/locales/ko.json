@@ -1738,6 +1738,8 @@
   "ui.restore_defaults": "기본값 복원",
   "ui.reverse_horizontal_pan_direction": "수평 이동 방향 반전",
   "ui.reverse_horizontal_pan_tip": "두 손가락 수평 스크롤과 엄지 휠이 반대 방향으로 이동합니다",
+  "ui.reverse_vertical_pan_direction": "수직 이동 방향 반전",
+  "ui.reverse_vertical_pan_tip": "두 손가락 수직 스크롤이 반대 방향으로 이동합니다",
   "ui.reverse_zoom_direction": "확대/축소 방향 반전",
   "ui.revolve": "회전",
   "ui.ribbon_exit": "종료",
