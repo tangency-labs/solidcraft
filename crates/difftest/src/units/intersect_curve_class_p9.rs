@@ -1,5 +1,8 @@
 //! Part-9 differential tests: real native topology, full interval and point records,
 //! both cache traversal branches and explicit dependency deferrals. No absolute floors.
+//! The `IntersectEdges` target edges are real wire edges of a Rust B-rep, made as the
+//! shim makes them (`CreateWireEdgeFromCurve`, `SetTolerance(zone, FALSE)`), so the
+//! classification reaches their curves and vertices through `topology_entity`.
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -34,7 +37,8 @@ use solidcore::surface::surface_cache::p1::{
 };
 use solidcore::surface::trim_srf_cache::TrimSrfCache;
 use solidcore::surface::volume::Volume;
-use solidcore::{Result as ScResult, SolidError};
+use solidcore::topology::{Brep, EdgeId, VertexId};
+use solidcore::{EntityRef, Result as ScResult, SolidError};
 use solidcore_ffi::units::intersect_curve_class_p9 as ffi;
 
 /// Differential runner for the two part-9 methods.
@@ -142,12 +146,15 @@ enum H {
     Surface,
     Vu(usize),
     Eu(usize),
+    /// A vertex of a target wire edge (the shim's `CreateWireEdgeFromCurve`), by its
+    /// index in [`Pool::wires`]; the shim's records name it `-2`.
+    WireVertex(u32),
 }
 impl ClassObject for H {
     fn class_kind(&self) -> ClassObjectKind {
         match self {
             Self::Source | Self::EdgeCurve(_) | Self::Trim(_) => ClassObjectKind::Curve,
-            Self::Vertex(_) => ClassObjectKind::Vertex,
+            Self::Vertex(_) | Self::WireVertex(_) => ClassObjectKind::Vertex,
             Self::Edge(_) => ClassObjectKind::Edge,
             Self::Surface => ClassObjectKind::Surface,
             Self::Vu(_) => ClassObjectKind::Vertexuse,
@@ -163,8 +170,29 @@ struct Pool {
     surface: Surface,
     zone: f64,
     edge_zones: Vec<f64>,
+    /// The target edges as the shim makes them: wire edges of a B-rep
+    /// (`CreateWireEdgeFromCurve` over the edge's curve and interval, then
+    /// `SetTolerance(zone, FALSE)`), so `SmEdge::GetCurve`, `GetVertex`, ... of a
+    /// target edge read a real edge.
+    wires: Brep,
+    /// `H::Edge(j)` of target edge `j` is wire edge `wire_edges[j]` of [`Pool::wires`].
+    wire_edges: Vec<EdgeId>,
 }
 impl ClassGeometry<H> for Pool {
+    fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+        match o {
+            H::Edge(j) => Some((&self.wires, EntityRef::Edge(*self.wire_edges.get(j)?))),
+            H::WireVertex(v) => Some((&self.wires, EntityRef::Vertex(VertexId::from_index(v)))),
+            _ => None,
+        }
+    }
+    fn topology_handle(&self, entity: EntityRef) -> Option<H> {
+        match entity {
+            EntityRef::Edge(e) => self.wire_edges.iter().position(|x| *x == e).map(H::Edge),
+            EntityRef::Vertex(v) => Some(H::WireVertex(v.index())),
+            _ => None,
+        }
+    }
     fn classification_vertex_point(&self, o: H) -> Option<Vec3> {
         if let H::Vertex(j) = o {
             self.vertices.get(j).copied()
@@ -356,7 +384,7 @@ fn cache(i: &Input, pool: &Pool, loops: &[BoundaryLoop<H>]) -> TrimSrfCache<H> {
 fn loop_vertex_uv(k: &Kernel, surface: &Surface, point: Vec3, zone: f64) -> ScResult<Vec2> {
     use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use solidcore::topology::{
-        Brep, Face, Faceuse, Loopuse, LoopuseStart, Vertex, Vertexuse, VertexuseOwner,
+        Face, Faceuse, Loopuse, LoopuseStart, Vertex, Vertexuse, VertexuseOwner,
     };
     let mut b = Brep::new();
     let shell = b.add_shell()?;
@@ -392,7 +420,7 @@ fn loop_vertex_uv(k: &Kernel, surface: &Surface, point: Vec3, zone: f64) -> ScRe
     solidcore::topology::vertexuse::compute_uv_point(k, &mut b, vu, true)
 }
 fn rust(i: &Input) -> ScResult<Output> {
-    let k = Kernel::default();
+    let mut k = Kernel::default();
     let factor = if i.op == 1 { 1. } else { i.scale };
     let mut pool = Pool {
         source: line(
@@ -406,6 +434,8 @@ fn rust(i: &Input) -> ScResult<Output> {
         surface: surface(i)?,
         zone: i.zone,
         edge_zones: Vec::new(),
+        wires: Brep::new_with_infinite_region()?,
+        wire_edges: Vec::new(),
     };
     let mut loops = Vec::new();
     for (j, p) in i.vertices.iter().enumerate() {
@@ -471,6 +501,20 @@ fn rust(i: &Input) -> ScResult<Output> {
     for (j, e) in i.edges.iter().enumerate() {
         pool.edges.push(line(v(e.a) * i.scale, v(e.b) * i.scale, 3));
         pool.edge_zones.push(e.zone);
+        // the shim's wire edge: the source line itself for a shared curve
+        let curve = if e.same {
+            pool.source.clone()
+        } else {
+            line(v(e.a) * i.scale, v(e.b) * i.scale, 3)
+        };
+        let wire = solidcore::topology::brep::p5::create_wire_edge_from_curve(
+            &mut k,
+            &mut pool.wires,
+            curve,
+            Extent1d::from_min_max(e.interval[0], e.interval[1]),
+        )?;
+        solidcore::topology::edge::set_tolerance(&mut pool.wires, wire, e.zone, false, true)?;
+        pool.wire_edges.push(wire);
         edges.push(BoundaryEdge {
             edge: H::Edge(j),
             curve: if e.same { H::Source } else { H::EdgeCurve(j) },

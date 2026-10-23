@@ -25,6 +25,7 @@
 //! | [`Solution::point_of`]                        | `SmSolution::GetPoint(const SmObject*, ...)`               |
 //! | [`Solution::object_index_for_parameter_index`] | `SmSolution::GetObjectIndexForParameterIndex`             |
 //! | [`Solution::parameter_interval`]              | `SmSolution::GetParameterInterval`                         |
+//! | [`Solution::parameter_interval_in`], [`ParameterDomains`] | `SmSolution::GetParameterInterval` (object domains read through a caller's resolver) |
 //! | [`Solution::object_tolerance`]                | `SmSolution::GetObjectTolerance`                           |
 //! | [`Solution::object_tolerance_with`]           | `SmSolution::GetObjectTolerance` (caller-resolved handle)   |
 //! | [`Solution::is_equal`]                        | `SmSolution::IsEqual`                                      |
@@ -56,7 +57,10 @@
 //!   [`ObjectKind`], which answers the `IsKindOf` tests made here, and, when it
 //!   can reach its object, the geometry read here (natural intervals and domains,
 //!   points, an edge's curve and interval, a face's surface and UV domain: the
-//!   [`SolutionObject`] hooks). Tree nodes (`m_apNodes`) are opaque [`NodeId`]s.
+//!   [`SolutionObject`] hooks). A caller holding the geometry behind opaque handles
+//!   reads parameter domains through its own [`ParameterDomains`] instead
+//!   ([`Solution::parameter_interval_in`]). Tree nodes (`m_apNodes`) are opaque
+//!   [`NodeId`]s.
 //!   Solves whose caller gives no handle name `OperandObject` stand-ins internally
 //!   (upstream's solutions always name the solve's curves and surfaces, whose
 //!   natural intervals and domains `IdenticalSolutions` / `IsEqual` read) and hand
@@ -352,6 +356,38 @@ pub trait SolutionObject: Copy + PartialEq {
         None
     }
 }
+
+/// Where `GetParameterInterval` reads the parameter domain of a solution object
+/// ([`Solution::parameter_interval_in`]). Upstream dereferences the `SmObject*`
+/// (`SmEdge::GetInterval`, `SmCurve::GetNaturalInterval`, `SmFace::GetUVDomain`,
+/// `SmSurface::GetNaturalUVDomain`); each method answers for one kind, `None` when
+/// the handle cannot be resolved. The defaults ask the handle itself
+/// ([`SolutionObject::edge_interval`], ...); a caller holding the geometry behind
+/// opaque handles (a topology solver's objects) answers from that geometry instead.
+pub trait ParameterDomains<O: SolutionObject> {
+    /// `SmEdge::GetInterval` of edge handle `edge`.
+    fn edge_interval(&self, edge: &O) -> Option<Extent1d> {
+        edge.edge_interval()
+    }
+    /// `SmCurve::GetNaturalInterval` of curve handle `curve`.
+    fn natural_interval(&self, curve: &O) -> Option<Extent1d> {
+        curve.natural_interval()
+    }
+    /// `SmFace::GetUVDomain` of face handle `face`.
+    fn face_uv_domain(&self, face: &O) -> Option<crate::geom::extent2d::Extent2d> {
+        face.face_uv_domain()
+    }
+    /// `SmSurface::GetNaturalUVDomain` of surface handle `surface`.
+    fn natural_uv_domain(&self, surface: &O) -> Option<crate::geom::extent2d::Extent2d> {
+        surface.natural_uv_domain()
+    }
+}
+
+/// [`ParameterDomains`] that asks each handle itself (the trait's defaults).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OwnDomains;
+
+impl<O: SolutionObject> ParameterDomains<O> for OwnDomains {}
 
 /// The solution object a solve names internally when its caller gives no handle
 /// (`None`): upstream's solutions always name the solve's operands (`this` curve or
@@ -974,6 +1010,20 @@ impl<O: SolutionObject> Solution<O> {
     /// fixed arrays;
     /// [`SolidError::Unported`] for the parameter domain of the object.
     pub fn parameter_interval(&self, param_index: usize) -> Result<Option<Extent1d>> {
+        self.parameter_interval_in(param_index, &OwnDomains)
+    }
+
+    /// [`Solution::parameter_interval`] reading the objects' parameter domains through
+    /// `domains`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Solution::parameter_interval`].
+    pub fn parameter_interval_in(
+        &self,
+        param_index: usize,
+        domains: &dyn ParameterDomains<O>,
+    ) -> Result<Option<Extent1d>> {
         const OP: &str = "geom::solution_array::Solution::parameter_interval";
 
         // get the object and associated domain dir
@@ -987,18 +1037,18 @@ impl<O: SolutionObject> Solution<O> {
 
         // Get the parameter interval from pObject
         let ivl = if kind.is_kind_of(ObjectKind::Edge) {
-            edge_interval(&object)?
+            edge_interval(domains, &object)?
         } else if kind.is_kind_of(ObjectKind::Curve) {
-            curve_natural_interval(&object)?
+            curve_natural_interval(domains, &object)?
         } else if kind.is_kind_of(ObjectKind::Face) {
-            let domain = face_uv_domain(&object)?;
+            let domain = face_uv_domain(domains, &object)?;
             if domain_dir == 0 {
                 domain.u_interval()
             } else {
                 domain.v_interval()
             }
         } else if kind.is_kind_of(ObjectKind::Surface) {
-            let domain = surface_natural_uv_domain(&object)?;
+            let domain = surface_natural_uv_domain(domains, &object)?;
             if domain_dir == 0 {
                 domain.u_interval()
             } else {
@@ -1154,9 +1204,12 @@ fn edge_curve<O: SolutionObject>(edge: &O) -> Result<O> {
     })
 }
 
-/// `SmEdge::GetInterval`: the handle's [`SolutionObject::edge_interval`].
-fn edge_interval<O: SolutionObject>(edge: &O) -> Result<Extent1d> {
-    if let Some(ivl) = edge.edge_interval() {
+/// `SmEdge::GetInterval`: [`ParameterDomains::edge_interval`].
+fn edge_interval<O: SolutionObject>(
+    domains: &dyn ParameterDomains<O>,
+    edge: &O,
+) -> Result<Extent1d> {
+    if let Some(ivl) = domains.edge_interval(edge) {
         return Ok(ivl);
     }
     // UNPORTED(topology.edge): SmEdge::GetInterval (a handle that cannot reach its edge)
@@ -1180,9 +1233,12 @@ fn evaluate_curve<O: SolutionObject>(curve: &O, t: f64) -> Result<Point3> {
     })
 }
 
-/// `SmCurve::GetNaturalInterval`: the handle's [`SolutionObject::natural_interval`].
-fn curve_natural_interval<O: SolutionObject>(curve: &O) -> Result<Extent1d> {
-    if let Some(ivl) = curve.natural_interval() {
+/// `SmCurve::GetNaturalInterval`: [`ParameterDomains::natural_interval`].
+fn curve_natural_interval<O: SolutionObject>(
+    domains: &dyn ParameterDomains<O>,
+    curve: &O,
+) -> Result<Extent1d> {
+    if let Some(ivl) = domains.natural_interval(curve) {
         return Ok(ivl);
     }
     // UNPORTED(curve.curve_p2): SmCurve::GetNaturalInterval (a handle that cannot
@@ -1206,9 +1262,12 @@ fn face_surface<O: SolutionObject>(face: &O) -> Result<O> {
     })
 }
 
-/// `SmFace::GetUVDomain`: the handle's [`SolutionObject::face_uv_domain`].
-fn face_uv_domain<O: SolutionObject>(face: &O) -> Result<crate::geom::extent2d::Extent2d> {
-    if let Some(d) = face.face_uv_domain() {
+/// `SmFace::GetUVDomain`: [`ParameterDomains::face_uv_domain`].
+fn face_uv_domain<O: SolutionObject>(
+    domains: &dyn ParameterDomains<O>,
+    face: &O,
+) -> Result<crate::geom::extent2d::Extent2d> {
+    if let Some(d) = domains.face_uv_domain(face) {
         return Ok(d);
     }
     // UNPORTED(topology.face_p2): SmFace::GetUVDomain (a handle that cannot reach its
@@ -1233,13 +1292,12 @@ fn evaluate_surface<O: SolutionObject>(surface: &O, u: f64, v: f64) -> Result<Po
     })
 }
 
-/// `SmSurface::GetNaturalUVDomain`. The surface is ported
-/// (`surface::surface::p2::Surface::natural_uv_domain`), but a solution object is an
-/// opaque handle `O` with no way to reach it yet.
+/// `SmSurface::GetNaturalUVDomain`: [`ParameterDomains::natural_uv_domain`].
 fn surface_natural_uv_domain<O: SolutionObject>(
+    domains: &dyn ParameterDomains<O>,
     surface: &O,
 ) -> Result<crate::geom::extent2d::Extent2d> {
-    if let Some(domain) = surface.natural_uv_domain() {
+    if let Some(domain) = domains.natural_uv_domain(surface) {
         return Ok(domain);
     }
     // UNPORTED(surface.surface_p2): SmSurface::GetNaturalUVDomain (a handle that

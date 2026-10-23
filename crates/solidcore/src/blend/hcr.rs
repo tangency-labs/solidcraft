@@ -176,6 +176,26 @@ impl ClassGeometry<HcrObject> for Geometry<'_> {
             HcrObject::Region(_) => None,
         }
     }
+    /// The vertex, edge and region handles name entities of the scene B-rep, so the
+    /// classification reaches their members (`SmEdge::GetVertex`, ...) as upstream's
+    /// pointers do; a curve handle names no topology.
+    fn topology_entity(&self, o: HcrObject) -> Option<(&Brep, EntityRef)> {
+        let t = match o {
+            HcrObject::Vertex(v) => EntityRef::Vertex(v),
+            HcrObject::Edge(e) => EntityRef::Edge(e),
+            HcrObject::Region(r) => EntityRef::Region(r),
+            HcrObject::Curve(_) => return None,
+        };
+        Some((self.brep, t))
+    }
+    fn topology_handle(&self, entity: EntityRef) -> Option<HcrObject> {
+        match entity {
+            EntityRef::Vertex(v) => Some(HcrObject::Vertex(v)),
+            EntityRef::Edge(e) => Some(HcrObject::Edge(e)),
+            EntityRef::Region(r) => Some(HcrObject::Region(r)),
+            _ => None,
+        }
+    }
 }
 
 /// The solution handle of the unit's curve solves.

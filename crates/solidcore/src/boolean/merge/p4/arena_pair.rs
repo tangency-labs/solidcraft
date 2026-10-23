@@ -322,6 +322,33 @@ impl ClassGeometry<H> for ArenaPair<'_> {
             _ => None,
         }
     }
+    // Topology handles name entities of their operand's arena, so the classification
+    // reaches their members (`SmEdge::GetVertex`, `SmEdge::GetCurve`, ...) as upstream's
+    // pointers do.
+    fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+        let t = match o.kind {
+            K_VERTEX => EntityRef::Vertex(vid(o)),
+            K_EDGE => EntityRef::Edge(eid(o)),
+            K_FACE => EntityRef::Face(fid(o)),
+            K_LOOP => EntityRef::Loop(LoopId::from_index(o.i)),
+            K_EDGEUSE => EntityRef::Edgeuse(EdgeuseId::from_index(o.i)),
+            K_VERTEXUSE => EntityRef::Vertexuse(VertexuseId::from_index(o.i)),
+            K_REGION => EntityRef::Region(crate::topology::RegionId::from_index(o.i)),
+            _ => return None,
+        };
+        Some((self.brep(o)?, t))
+    }
+    fn topology_handle_in(&self, brep: &Brep, entity: EntityRef) -> Option<H> {
+        let b = self
+            .breps
+            .iter()
+            .position(|x| x.as_deref().is_some_and(|x| std::ptr::eq(x, brep)))?;
+        let b = i8::try_from(b).ok()?;
+        match entity {
+            EntityRef::Vertexuse(vu) => Some(hd(b, K_VERTEXUSE, vu.index())),
+            _ => Self::entity_h(b, entity),
+        }
+    }
 }
 
 impl ProtoGeometry<H> for ArenaPair<'_> {

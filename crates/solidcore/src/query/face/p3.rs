@@ -640,6 +640,23 @@ impl<O: LoopObject + PartialEq> ClassGeometry<O> for LoopObjectCurves<'_, O> {
             _ => None,
         }
     }
+
+    /// The face handle and the topology handles ([`LoopObject::as_topology`]) name
+    /// entities of `b`, so the classification reaches their members (`SmEdge::GetCurve`,
+    /// `SmEdge::GetVertex`, ...) as upstream's pointers do.
+    fn topology_entity(&self, object: O) -> Option<(&Brep, EntityRef)> {
+        if object == self.face {
+            return Some((self.b, EntityRef::Face(self.f)));
+        }
+        object.as_topology().map(|t| (self.b, t))
+    }
+
+    fn topology_handle(&self, entity: EntityRef) -> Option<O> {
+        match entity {
+            EntityRef::Face(f) if f == self.f => Some(self.face),
+            _ => O::from_topology(entity),
+        }
+    }
 }
 
 impl<O: LoopObject + PartialEq> CurveOnClassifyObjects<O> for LoopObjectCurves<'_, O> {

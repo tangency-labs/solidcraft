@@ -32,6 +32,7 @@
 //! | `combine_min_max` (private)                  | `sm_CombineMinMax`                               |
 //! | [`GlobalSolve::add_sorted_solution`]         | `SmGlobalSolver::AddSortedSolution`              |
 //! | [`GlobalSolve::identical_solutions`], [`GlobalSolver::identical_solutions`] | `SmGlobalSolver::IdenticalSolutions` |
+//! | [`GlobalSolver::identical_solutions_in`]     | `SmGlobalSolver::IdenticalSolutions` (object domains read through a caller's resolver) |
 //!
 //! Deviations:
 //! - **Virtual methods.** Derived solvers (curve/curve, surface/surface, ...)
@@ -97,7 +98,8 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{line_closest_point, point_project_to_plane};
 use crate::geom::solution_array::{
-    EndClass, Solution, SolutionArray, SolutionObject, SolutionType, SortKey,
+    EndClass, OwnDomains, ParameterDomains, Solution, SolutionArray, SolutionObject, SolutionType,
+    SortKey,
 };
 use crate::geom::tol::is_zero;
 use crate::geom::tree::{AuxDataType, NodeData, NodeId, Tree, TreeNode};
@@ -1377,6 +1379,21 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
         sol1: &Solution<O>,
         sol2: &Solution<O>,
     ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
+        self.identical_solutions_in(sol1, sol2, &OwnDomains)
+    }
+
+    /// [`GlobalSolver::identical_solutions`] reading the parameter intervals of the
+    /// solutions' objects through `domains` ([`Solution::parameter_interval_in`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`GlobalSolver::identical_solutions`].
+    pub fn identical_solutions_in(
+        &self,
+        sol1: &Solution<O>,
+        sol2: &Solution<O>,
+        domains: &dyn ParameterDomains<O>,
+    ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
         const OP: &str = "geom::global_solver::GlobalSolver::identical_solutions";
 
         // different ObjectCounts, VariableCounts, SolutionValues, SolutionTypes
@@ -1403,8 +1420,8 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
 
         // ParameterValues off by more than ScaledZero or more than 1/10000th of the parameter length
         for i in 0..sol1.num_variables {
-            let ivl1 = sol1.parameter_interval(i)?;
-            let ivl2 = sol2.parameter_interval(i)?;
+            let ivl1 = sol1.parameter_interval_in(i, domains)?;
+            let ivl2 = sol2.parameter_interval_in(i, domains)?;
             let length1 = ivl1.map_or(0.0, |ivl| 0.0001 * ivl.length());
             let length2 = ivl2.map_or(0.0, |ivl| 0.0001 * ivl.length());
 

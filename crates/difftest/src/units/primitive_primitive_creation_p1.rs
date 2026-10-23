@@ -416,13 +416,15 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 Err(solidcore::SolidError::Upstream { code, .. }) => code,
                 Err(_) => solidcore::error::SM_ERR,
             };
+            // `GetFaces` / `GetEdges` / `GetVertices` as the shim reads them (a traversal
+            // of the B-rep, not every record in the arenas)
             record.extend([
                 f64::from(status),
                 f64::from(brep.editing_enabled()),
                 primitive.maps.to_same.len() as f64,
-                brep.faces().len() as f64,
-                brep.edges().len() as f64,
-                brep.vertices().len() as f64,
+                solidcore::topology::brep::p1::faces(&brep, None)?.len() as f64,
+                solidcore::topology::brep::p1::edges(&brep, None)?.len() as f64,
+                solidcore::topology::brep::p1::vertices(&brep, None)?.len() as f64,
             ]);
         }
         5 => {

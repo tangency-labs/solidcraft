@@ -24,6 +24,7 @@
 //! | [`TopologySolver::solve_two_trees`]               | `SmTopologySolver::SolveTwoTrees`                |
 //! | [`TopologySolver::best_answer_so_far`], [`best_answer_so_far`] | `SmTopologySolver::GetBestAnswerSoFar`  |
 //! | `GlobalSolve::are_ready_for_local_solve` for [`TopologySolver`] | `SmTopologySolver::AreReadyForLocalSolve` |
+//! | `GlobalSolve::identical_solutions` for [`TopologySolver`], `TopologyDomains` (private) | `SmGlobalSolver::IdenticalSolutions` (not overridden upstream: the solutions' `SmObject*` resolve through [`TopologyObjects`]) |
 //!
 //! Deviations:
 //! - **Objects.** Tree objects and solution objects are a caller-chosen handle `O`
@@ -85,12 +86,12 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::{Extent3d, LineHit};
 use crate::geom::geom_utility::p1::{line_closest_point, point_project_to_plane};
 use crate::geom::global_solver::{
-    Branch, GlobalSolve, GlobalSolver, ObjectZoneTol, OperationCategory, SolutionRequested,
-    SolverOperation, MAX_SOLVER_TREES,
+    Branch, GlobalSolve, GlobalSolver, ObjectZoneTol, OperationCategory, PreferredSolution,
+    SolutionPairType, SolutionRequested, SolverOperation, MAX_SOLVER_TREES,
 };
 use crate::geom::object::{Shape, ShapeMember};
 use crate::geom::solution_array::{
-    Solution, SolutionArray, SolutionObject, SolutionType, SortKey, MAX_TREES,
+    ParameterDomains, Solution, SolutionArray, SolutionObject, SolutionType, SortKey, MAX_TREES,
 };
 use crate::geom::tol::{zone_tol_3d, SmallTopoType};
 use crate::geom::tree::Tree;
@@ -856,6 +857,54 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for TopologySolver<'t, '_, O
     fn local_solve(&mut self, branch: &Branch) -> Result<bool> {
         let k = self.kernel;
         self.local_solve_branch(k, branch)
+    }
+
+    /// `SmGlobalSolver::IdenticalSolutions` (upstream does not override it); the
+    /// parameter intervals of the solutions' objects, which upstream reads through
+    /// their `SmObject*`, resolve through the solver's [`TopologyObjects`] when the
+    /// handle itself cannot reach them.
+    fn identical_solutions(
+        &self,
+        sol1: &Solution<O>,
+        sol2: &Solution<O>,
+    ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
+        let domains = TopologyDomains {
+            objects: self.objects,
+        };
+        self.base.identical_solutions_in(sol1, sol2, &domains)
+    }
+}
+
+/// [`ParameterDomains`] of a topology solver's handles: the handle's own hooks, else
+/// the edge interval, curve, face UV domain or surface its [`TopologyObjects`] give.
+struct TopologyDomains<'a, O> {
+    objects: &'a dyn TopologyObjects<O>,
+}
+
+impl<O: SolutionObject> ParameterDomains<O> for TopologyDomains<'_, O> {
+    fn edge_interval(&self, edge: &O) -> Option<Extent1d> {
+        edge.edge_interval()
+            .or_else(|| self.objects.edge_interval(*edge).ok())
+    }
+
+    fn natural_interval(&self, curve: &O) -> Option<Extent1d> {
+        curve
+            .natural_interval()
+            .or_else(|| self.objects.curve(*curve).ok().map(Curve::natural_interval))
+    }
+
+    fn face_uv_domain(&self, face: &O) -> Option<Extent2d> {
+        face.face_uv_domain()
+            .or_else(|| self.objects.face_uv_domain(*face).ok())
+    }
+
+    fn natural_uv_domain(&self, surface: &O) -> Option<Extent2d> {
+        surface.natural_uv_domain().or_else(|| {
+            self.objects
+                .surface(*surface)
+                .ok()
+                .map(Surface::natural_uv_domain)
+        })
     }
 }
 
