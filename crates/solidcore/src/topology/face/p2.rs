@@ -388,13 +388,19 @@ pub(crate) struct UvLineObjects<'a> {
     b: &'a Brep,
     f: FaceId,
     line: Option<Curve>,
+    resolve_topology: bool,
 }
 
 impl<'a> UvLineObjects<'a> {
     /// The objects of face `f` of `b`, before `sm_FaceClassifyUVLine` makes its line
     /// (also used by `topology::face::p4`'s `GlobalLineIntersect`).
     pub(crate) const fn new(b: &'a Brep, f: FaceId) -> Self {
-        Self { b, f, line: None }
+        Self {
+            b,
+            f,
+            line: None,
+            resolve_topology: true,
+        }
     }
 }
 
@@ -430,6 +436,36 @@ impl ClassGeometry<UvLineHandle> for UvLineObjects<'_> {
             UvLineHandle::Vertex(v) => self.b.vertex(v).ok().map(|v| v.tolerance),
             UvLineHandle::Edge(e) => self.b.edge(e).ok().map(|e| e.tolerance),
             UvLineHandle::Face => self.b.face(self.f).ok().map(|f| f.tolerance),
+            _ => None,
+        }
+    }
+    fn topology_entity(&self, o: UvLineHandle) -> Option<(&Brep, EntityRef)> {
+        if !self.resolve_topology {
+            return None;
+        }
+        let e = match o {
+            UvLineHandle::Face => EntityRef::Face(self.f),
+            UvLineHandle::Vertex(v) => EntityRef::Vertex(v),
+            UvLineHandle::Edge(e) => EntityRef::Edge(e),
+            UvLineHandle::Vertexuse(vu) => EntityRef::Vertexuse(vu),
+            UvLineHandle::Edgeuse(eu) => EntityRef::Edgeuse(eu),
+            UvLineHandle::Surface
+            | UvLineHandle::Line
+            | UvLineHandle::EdgeCurve(_)
+            | UvLineHandle::Trim(_) => return None,
+        };
+        Some((self.b, e))
+    }
+    fn topology_handle(&self, e: EntityRef) -> Option<UvLineHandle> {
+        if !self.resolve_topology {
+            return None;
+        }
+        match e {
+            EntityRef::Face(f) if f == self.f => Some(UvLineHandle::Face),
+            EntityRef::Vertex(v) => Some(UvLineHandle::Vertex(v)),
+            EntityRef::Edge(e) => Some(UvLineHandle::Edge(e)),
+            EntityRef::Vertexuse(vu) => Some(UvLineHandle::Vertexuse(vu)),
+            EntityRef::Edgeuse(eu) => Some(UvLineHandle::Edgeuse(eu)),
             _ => None,
         }
     }
@@ -1079,7 +1115,12 @@ pub fn calculate_an_internal_point(k: &Kernel, b: &Brep, f: FaceId) -> Result<Po
     }
 
     let mut classification: CurveClassification<UvLineHandle> = CurveClassification::new(k);
-    let mut uv_objects = UvLineObjects { b, f, line: None };
+    let mut uv_objects = UvLineObjects {
+        b,
+        f,
+        line: None,
+        resolve_topology: false,
+    };
 
     // first for constant U then V isoparameter lines
     for ii in 0..2 {
