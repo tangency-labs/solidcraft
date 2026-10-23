@@ -23,6 +23,7 @@
 mod app_icon;
 #[cfg(test)]
 mod clipboard_tests;
+mod cloud;
 mod come_forward;
 mod control_server;
 #[cfg(target_os = "linux")]
@@ -825,7 +826,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let file_parent = parent.clone();
     let folder_parent = parent.clone();
     let (open_folder, file_folder, save_folder, browse_folder) = (folder.clone(), folder.clone(), folder.clone(), folder.clone());
-    Services {
+    let mut services = Services {
+        cloud_host: None,
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The chooser that opens may not be the desktop's own (#10159).
             #[cfg(target_os = "linux")]
@@ -955,7 +957,9 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         })),
         open_path: Some(Box::new(open_with::open_with_default_app)),
         open_bytes: None,
-    }
+    };
+    cloud::install(&mut services);
+    services
 }
 
 /// HTTPS GET for the update check (docs/updates.md): certificates from the operating system, a

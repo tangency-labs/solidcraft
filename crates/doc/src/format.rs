@@ -330,12 +330,6 @@ pub fn pending_names() -> Vec<String> {
     DESIGN.pending_names()
 }
 
-/// Whether the design reader recognizes a development-format change, including changes
-/// folded into released formats. Storage adapters check this before fetching payloads.
-pub fn supports_change(version: u32, name: &str) -> bool {
-    DESIGN.newer(version.min(FORMAT), Some(&[name.to_owned()])).is_none()
-}
-
 pub fn format_string(n: u32) -> String {
     DESIGN.format_string(n)
 }

@@ -29,6 +29,7 @@ mod browser_search_tests;
 pub mod canvas;
 mod card_resize;
 pub mod cli_link;
+mod cloud;
 #[cfg(test)]
 mod colour_tokens_tests;
 #[cfg(test)]
@@ -549,6 +550,8 @@ pub struct Services {
     /// Whether a recent design that is not in memory can be brought back by the host (the browser
     /// build remembers files it saved to the disk); None: it can't.
     pub can_restore: Option<Box<dyn Fn(&str) -> bool>>,
+    /// Asynchronous repository storage, injected by the desktop or browser app.
+    pub cloud_host: Option<std::sync::Arc<dyn solidcraft_cloud::jobs::Host>>,
     /// The desktop's dark (`Some(true)`) or light preference as the host reads it, for Theme:
     /// System where the window toolkit does not report it (Linux desktops, #7944). Called every
     /// frame, so it only reads a value kept up to date elsewhere. None, or `None` from it: the
@@ -719,6 +722,7 @@ pub struct SolveApp {
     /// A feature dialog waiting while the sketch it asked for is drawn (New Sketch, #6383).
     pub inline_sketch: Option<command_sketch::InlineSketch>,
     pub services: Services,
+    pub(crate) cloud: cloud::State,
     file_picker: Option<file_picker::Pending>,
     /// A slicer started alone and waited for before the file is sent (Send to Slicer).
     pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
@@ -1076,6 +1080,12 @@ impl SolveApp {
         workspace::install_tabs();
         // The navigation slots stored bars are read against, likewise.
         navigation_slots::install();
+        if let Some(host) = &services.cloud_host {
+            session.set_cloud_host(Some(host.clone()));
+            if let Err(error) = session.execute("cloud.settings", &serde_json::json!({"reload":true})) {
+                log::error!("cloud settings: {error}");
+            }
+        }
         #[cfg(test)]
         solidcraft_engine::use_import_cache_dir(std::env::temp_dir().join(format!("solidcraft-ui-test-imports-{}", std::process::id())));
         #[cfg(test)]
@@ -1121,6 +1131,7 @@ impl SolveApp {
             pre_edit_component: None,
             inline_sketch: None,
             services,
+            cloud: Default::default(),
             file_picker: None,
             slicer_wait: None,
             easyprint: Default::default(),
@@ -1724,6 +1735,9 @@ impl SolveApp {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
         self.session.set_validation(self.preferences.validation);
+        if let Some(error) = cloud::configuration::refusal(self, id, &params) {
+            return Err(error.into());
+        }
         workspace::command_receiver(self, id, &params)?;
         print_face_ui::sync(&mut self.session, &self.preferences);
         if id == "timeline.play" {
@@ -2185,7 +2199,7 @@ impl SolveApp {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
                 }
-                if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                if matches!(id, "file.new" | "doc.open" | "doc.recover" | "cloud.open.finish") {
                     documents::reset_chat(self);
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
@@ -4333,6 +4347,7 @@ impl SolveApp {
         save_job::tick(self, false);
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
+        cloud::tick(self, ctx);
         edit_in_place::tick(self);
         browser_links::refresh(self, ctx);
         let typing = ctx.egui_wants_keyboard_input();

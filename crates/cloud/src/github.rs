@@ -256,12 +256,23 @@ impl GitHub {
         snapshot: impl Fn() -> Result<Snapshot>,
         check_document: impl Fn(&[u8]) -> Result<()>,
     ) -> Result<Published> {
+        self.publish_async(save, || std::future::ready(snapshot()), check_document).await
+    }
+
+    /// Browser recovery is asynchronous. Re-read captured objects for a retry instead of
+    /// retaining and cloning another entire snapshot during each upload attempt.
+    pub async fn publish_async<F: std::future::Future<Output = Result<Snapshot>>>(
+        &self,
+        save: &PendingSave,
+        snapshot: impl Fn() -> F,
+        check_document: impl Fn(&[u8]) -> Result<()>,
+    ) -> Result<Published> {
         save.check_connection(&self.endpoint)?;
         if save.destination.connection != self.connection {
             return Err(invalid("repository connection mismatch"));
         }
         for _ in 0..3 {
-            let snapshot = snapshot()?;
+            let snapshot = snapshot().await?;
             check_document(&snapshot.document)?;
             let tree = self.tree().await?;
             let marker = self.read(&tree, &format!("{}/{PROJECT_MARKER}", save.destination.project), crate::MAX_MANIFEST_BYTES).await?;

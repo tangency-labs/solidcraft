@@ -508,6 +508,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         crate::select_other::close(app);
     }
     let reveals = crate::browser::take_reveals(app);
+    slot.session.inherit_cloud_services(&app.session);
     if !presenting {
         crate::select_other::close(app);
         crate::semantic_content::leave_document(app);
@@ -1942,7 +1943,13 @@ pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
 /// Is the active design an untouched new one (it can be replaced instead of opening a tab)?
 pub fn active_is_blank(app: &SolveApp) -> bool {
     let s = &app.session;
-    s.path.is_none() && s.doc.features.is_empty() && s.doc.params.is_empty() && s.doc.components.is_empty() && !s.is_dirty()
+    s.path.is_none()
+        && s.cloud_binding().is_none()
+        && !s.cloud_save_pending()
+        && s.doc.features.is_empty()
+        && s.doc.params.is_empty()
+        && s.doc.components.is_empty()
+        && !s.is_dirty()
 }
 
 /// Show `session` (a design built or read elsewhere): in place of a blank active design,
@@ -2269,6 +2276,15 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
     }
     if !force && dirty(app, i) {
         app.docs.closing = Some(i);
+        let pending = if i == app.docs.active {
+            app.session.cloud_save_pending()
+        } else {
+            app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|slot| slot.session.cloud_save_pending())
+        };
+        if pending {
+            switch(app, i);
+            app.docs.saving = true;
+        }
         return;
     }
     app.docs.closing = None;
@@ -2426,6 +2442,7 @@ fn quit_step(app: &mut SolveApp) {
         Some(i) => {
             switch(app, i);
             app.docs.closing = Some(i);
+            app.docs.saving |= app.session.cloud_save_pending();
         }
         None => {
             // Don't Save means discard: no recovery copy is kept for the next launch either.
@@ -2463,9 +2480,10 @@ pub fn open_sessions(app: &SolveApp) -> Vec<&Session> {
 }
 
 /// Closing tab `i` asks to save first: it has changes, and is not a STEP, IGES or mesh file
-/// opened and only looked at (#15111), whose file still holds all of it.
+/// opened and only looked at (#15111), whose file still holds all of it, or a cloud save it
+/// accepted is still being recorded.
 fn dirty(app: &SolveApp, i: usize) -> bool {
-    let asks = |s: &Session| s.is_dirty() && !s.unchanged_import();
+    let asks = |s: &Session| (s.is_dirty() && !s.unchanged_import()) || s.cloud_save_pending();
     if i == app.docs.active || app.docs.slots.is_empty() {
         return asks(&app.session);
     }
@@ -3525,6 +3543,9 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
         Answer::Save => {
             switch(app, i);
             app.docs.saving = true;
+            if app.session.cloud_save_pending() {
+                return;
+            }
             crate::toolbar::save(app);
             if !app.file_picker_busy() {
                 saved_for_close(app);
@@ -3552,9 +3573,8 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
 
 /// Resume Close/Quit only after Save As has answered and the write succeeded.
 pub(crate) fn saved_for_close(app: &mut SolveApp) {
-    // Save asks the Capture Position question first while a move isn't captured (#9736): the
-    // close waits for its answer.
-    if app.tree.capture_prompt.is_some() {
+    // Close waits for Capture Position and for the accepted cloud save to finish.
+    if app.tree.capture_prompt.is_some() || app.session.cloud_save_pending() {
         return;
     }
     if !std::mem::take(&mut app.docs.saving) || app.docs.closing.is_none() {

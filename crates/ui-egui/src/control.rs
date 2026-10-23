@@ -283,9 +283,11 @@ const MAX_BATCH: usize = 10_000;
 /// bypass.
 const LOADS_A_FILE: [&str; 5] = ["doc.open", "file.insert_step", "file.insert_mesh", "pointcloud.insert", "pointcloud.reload"];
 
-/// Edit in Place, Finish Edit, the next or previous tab and Show Design go to another design's
-/// tab: a batch's rollback, or a script's later steps, would land in the wrong design.
-const SWITCHES_DESIGN: [&str; 5] = ["component.edit_in_place", "component.finish_edit", "view.next_tab", "view.previous_tab", "document.activate"];
+/// Cloud opening, Edit in Place, Finish Edit, the next or previous tab and Show Design go to
+/// another design's tab: a batch's rollback, or a script's later steps, would land in the wrong
+/// design.
+const SWITCHES_DESIGN: [&str; 6] =
+    ["cloud.open.finish", "component.edit_in_place", "component.finish_edit", "view.next_tab", "view.previous_tab", "document.activate"];
 
 /// Commands that open a design in a tab of its own, and show it, when `new_tab` is true.
 const OPENS_A_TAB: [&str; 2] = ["file.new", "doc.open"];
@@ -445,6 +447,9 @@ fn script(app: &mut SolveApp, p: &Value) -> Outcome {
     }
     if steps.is_some_and(|steps| has_plugin_management_steps(steps)) {
         return err(solidcraft_ui_text::tr("ui.plugin_management_standalone"));
+    }
+    if let Some(error) = crate::cloud::configuration::script_refusal(app, p) {
+        return err(error);
     }
     let steps = match solidcraft_engine::script_steps(p) {
         Ok(steps) => steps,

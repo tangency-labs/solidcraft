@@ -127,4 +127,18 @@ mod tests {
         assert!(conflict.files.keys().all(|p| !p.starts_with("Robot/parts/bracket/")));
         assert!(conflict.destination.file.starts_with("conflicts/parts/bracket-"));
     }
+
+    #[test]
+    fn unknown_file_kinds_block_publication_instead_of_becoming_conflict_copies() {
+        let snapshot = Snapshot::prepare(b"{}".to_vec(), BTreeMap::new()).unwrap();
+        let staged = PendingSave::stage(&Connection::default(), "Robot", "drawings/bracket", None, snapshot).unwrap();
+        let mut existing = staged.record.manifest.clone();
+        // Illustrative future capability, not a drawing schema definition. Unknown required
+        // capabilities must be checked before revision comparison or any write batch exists.
+        existing.required.push("drawing/1".into());
+        let bytes = serde_json::to_vec(&existing).unwrap();
+        let snapshot = staged.record.recover(|p| Ok(staged.objects[p].clone())).unwrap();
+        assert!(matches!(Publication::prepare(&staged.record, snapshot, None, Some(&bytes)), Err(Error::UpgradeRequired(_))));
+        assert!(matches!(existing.write(), Err(Error::UpgradeRequired(_))));
+    }
 }

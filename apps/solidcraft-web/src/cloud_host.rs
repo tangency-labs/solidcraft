@@ -1,0 +1,282 @@
+//! Browser tasks implement the same asynchronous command boundary as native Git workers.
+use std::collections::{BTreeMap, BTreeSet};
+
+use solidcraft_cloud::{
+    Connection, Destination, Error, PendingSave, Result, Snapshot,
+    github::GitHub,
+    jobs::{Host, Job, Operation, Phase},
+};
+
+use crate::{
+    cloud_settings::LocalSettings,
+    cloud_storage::{Store, with_lock},
+};
+
+pub struct BrowserHost;
+
+fn storage(error: impl std::fmt::Display) -> Error {
+    Error::Storage(error.to_string())
+}
+
+fn check_cancelled(job: &Job) -> Result<()> {
+    if job.cancelled()? { Err(storage("operation cancelled; local captures retained")) } else { Ok(()) }
+}
+
+async fn repository(connection: &Connection, job: &Job) -> Result<GitHub> {
+    if connection.provider != "github" {
+        return Err(storage("this browser supports GitHub repositories; use the desktop app for other Git remotes"));
+    }
+    let token = if connection.credential.is_empty() { None } else { LocalSettings::open().await?.credential(&connection.credential).await? };
+    let client = crate::cloud_client::client_for_job(token.as_deref(), Some(job.clone()))
+        .map_err(|_| storage("GitHub client unavailable; reconnect this repository"))?;
+    GitHub::new(client, connection)
+}
+
+async fn recovered(store: &Store, save: &PendingSave) -> Result<Snapshot> {
+    store.recover_checked(save, solidcraft_engine::io::cloud::check_document).await
+}
+
+async fn pending_tip(store: &Store, destination: &Destination) -> Result<Option<PendingSave>> {
+    let pending: Vec<_> = store.pending().await?.into_iter().filter(|save| &save.destination == destination).collect();
+    let parents: BTreeSet<_> = pending.iter().filter_map(|save| save.expected_revision.as_deref()).collect();
+    let tips: Vec<_> = pending.iter().filter(|save| !parents.contains(save.id.as_str())).collect();
+    if tips.len() > 1 {
+        return Err(Error::Conflict);
+    }
+    Ok(tips.first().map(|save| (*save).clone()))
+}
+
+async fn open(store: &Store, connection: &Connection, destination: &Destination, job: &Job) -> Result<()> {
+    destination.validate()?;
+    if destination.connection != connection.id {
+        return Err(storage("repository connection mismatch"));
+    }
+    if let Some(save) = pending_tip(store, destination).await? {
+        let snapshot = recovered(store, &save).await?;
+        check_cancelled(job)?;
+        job.update(|status| {
+            status.destination = Some(destination.clone());
+            status.revision = Some(save.id);
+        })?;
+        return job.opened(snapshot);
+    }
+    let remote = async { repository(connection, job).await?.open(destination, solidcraft_engine::io::cloud::check_document).await }.await;
+    match remote {
+        Ok(snapshot) => {
+            check_cancelled(job)?;
+            store.cache_remote(destination.clone(), snapshot).await?;
+        }
+        Err(error @ Error::Storage(_)) => {
+            if store.cached(destination).await?.is_none() {
+                return Err(error);
+            }
+            job.update(|status| status.message = Some(error.to_string()))?;
+        }
+        Err(error) => return Err(error),
+    }
+    // A local save can have arrived during the download. cache_remote preserves that head;
+    // read the selected cache instead of replacing it with our older in-flight response.
+    let cached = store.cached(destination).await?.ok_or_else(|| storage("cached design missing"))?;
+    let snapshot = recovered(store, &cached.save).await?;
+    check_cancelled(job)?;
+    job.update(|status| {
+        status.destination = Some(cached.destination);
+        status.revision = cached.revision;
+    })?;
+    job.opened(snapshot)
+}
+
+async fn synchronize(connection: Connection, store: Store, job: Job, target: Option<PendingSave>) -> Result<()> {
+    let lock = format!("solidcraft-cloud-sync-{}", solidcraft_cloud::digest(connection.id.as_bytes()));
+    with_lock(&lock, async move {
+        check_cancelled(&job)?;
+        let mut pending = store.pending().await?;
+        if let Some(target) = &target
+            && !pending.iter().any(|save| save.id == target.id)
+        {
+            if let Some(published) = store.receipt(&target.id).await? {
+                job.update(|status| {
+                    status.destination = Some(published.destination.clone());
+                    status.result = Some(serde_json::json!(published));
+                    status.publications.push(published);
+                    status.phase = Phase::Synced;
+                })?;
+                return Ok(());
+            }
+            pending.push(target.clone());
+            pending = PendingSave::ordered(pending)?;
+        }
+        if pending.is_empty() {
+            return job.update(|status| {
+                status.result = Some(serde_json::json!([]));
+                status.phase = Phase::Synced;
+            });
+        }
+        let repository = repository(&connection, &job).await?;
+        job.update(|status| status.phase = Phase::Syncing)?;
+        let mut blocked = BTreeSet::new();
+        let mut first_error = None;
+        let mut results = Vec::new();
+        for save in pending {
+            check_cancelled(&job)?;
+            if save.expected_revision.as_ref().is_some_and(|parent| blocked.contains(parent)) {
+                blocked.insert(save.id);
+                continue;
+            }
+            let result = async {
+                save.check_connection(&connection)?;
+                let published = repository
+                    .publish_async(
+                        &save,
+                        || recovered(&store, &save),
+                        |bytes| {
+                            check_cancelled(&job)?;
+                            solidcraft_engine::io::cloud::check_document(bytes)
+                        },
+                    )
+                    .await?;
+                // Finish this acknowledgement even if Cancel raced a successful ref update.
+                store.confirm(save.clone(), published.clone()).await?;
+                Ok(published)
+            }
+            .await;
+            match result {
+                Ok(published) => {
+                    let value = serde_json::json!(published);
+                    job.update(|status| status.publications.push(published.clone()))?;
+                    if target.as_ref().is_some_and(|target| target.id == save.id) {
+                        job.update(|status| {
+                            status.destination = Some(published.destination);
+                            status.revision = Some(published.revision);
+                            status.result = Some(value);
+                            status.phase = Phase::Synced;
+                        })?;
+                        return Ok(());
+                    }
+                    results.push(value);
+                }
+                Err(error) => {
+                    blocked.insert(save.id);
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+        job.update(|status| status.result = Some(serde_json::json!(results)))?;
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+        job.update(|status| status.phase = Phase::Synced)
+    })
+    .await
+}
+
+async fn run(operation: Operation, job: &Job) -> Result<()> {
+    check_cancelled(job)?;
+    let operation = match operation {
+        Operation::LoadSettings => {
+            let settings = LocalSettings::open().await?.settings().await?;
+            return job.update(|status| {
+                status.result = Some(serde_json::json!(settings));
+                status.phase = Phase::Ready;
+            });
+        }
+        Operation::Configure(settings) => {
+            LocalSettings::open().await?.configure(settings.clone()).await?;
+            return job.update(|status| {
+                status.result = Some(serde_json::json!(settings));
+                status.phase = Phase::Synced;
+            });
+        }
+        operation => operation,
+    };
+    let connection = match &operation {
+        Operation::Test(connection)
+        | Operation::List(connection)
+        | Operation::Synchronize(connection)
+        | Operation::Open { connection, .. }
+        | Operation::Save { connection, .. } => connection.clone(),
+        _ => return Err(storage("invalid repository operation")),
+    };
+    let store = Store::open(connection.clone()).await?;
+    job.update(|status| status.storage_persistent = Some(store.persistent))?;
+    check_cancelled(job)?;
+    match operation {
+        Operation::Save { connection, save, synchronize: publish } => {
+            save.record.check_connection(&connection)?;
+            let document =
+                save.objects.get(&format!("documents/{}", save.record.manifest.document_hash)).ok_or_else(|| storage("captured document missing"))?;
+            solidcraft_engine::io::cloud::check_document(document)?;
+            let record = store.stage(*save).await?;
+            job.update(|status| {
+                status.saved_locally = true;
+                status.phase = if publish { Phase::Syncing } else { Phase::SavedLocally };
+                status.destination = Some(record.destination.clone());
+                status.revision = Some(record.id.clone());
+            })?;
+            if publish {
+                synchronize(connection, store, job.clone(), Some(record)).await?;
+            }
+        }
+        Operation::Synchronize(connection) => synchronize(connection, store, job.clone(), None).await?,
+        Operation::Test(connection) => {
+            repository(&connection, job).await?.test_connection().await?;
+            check_cancelled(job)?;
+            job.update(|status| status.phase = Phase::Ready)?;
+        }
+        Operation::List(connection) => {
+            let mut destinations = BTreeMap::new();
+            for destination in store.cached_destinations().await? {
+                destinations.insert(destination.design_path()?, destination);
+            }
+            for save in store.pending().await? {
+                destinations.insert(save.destination.design_path()?, save.destination);
+            }
+            match async { repository(&connection, job).await?.list().await }.await {
+                Ok(entries) => {
+                    for destination in entries {
+                        destinations.insert(destination.design_path()?, destination);
+                    }
+                }
+                Err(error @ Error::Storage(_)) if !destinations.is_empty() => job.update(|status| status.message = Some(error.to_string()))?,
+                Err(error) => return Err(error),
+            }
+            check_cancelled(job)?;
+            job.update(|status| {
+                status.result = Some(serde_json::json!(destinations.into_values().collect::<Vec<_>>()));
+                status.phase = Phase::Ready;
+            })?;
+        }
+        Operation::Open { connection, destination } => open(&store, &connection, &destination, job).await?,
+        _ => return Err(storage("invalid repository operation")),
+    }
+    Ok(())
+}
+
+impl Host for BrowserHost {
+    fn submit(&self, operation: Operation, _: String) -> Result<Job> {
+        let connection = match &operation {
+            Operation::LoadSettings | Operation::Configure(_) => None,
+            Operation::Test(connection)
+            | Operation::List(connection)
+            | Operation::Synchronize(connection)
+            | Operation::Open { connection, .. }
+            | Operation::Save { connection, .. } => Some(connection),
+        };
+        if let Some(connection) = connection {
+            connection.validate()?;
+        }
+        if let Operation::Configure(settings) = &operation {
+            settings.validate()?;
+        }
+        let job = Job::new(connection.map(|c| c.id.clone()).unwrap_or_default())?;
+        let worker = job.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Err(error) = run(operation, &worker).await {
+                let _ = worker.fail(error);
+            }
+        });
+        Ok(job)
+    }
+}
