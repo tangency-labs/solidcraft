@@ -339,6 +339,8 @@ pub struct BlockBytes {
     pub glass: Vec<u8>,
     pub lines: Vec<u8>,
     pub hidden: Vec<u8>,
+    /// Lines over everything, drawn after the glass (a see-through style's edges).
+    pub overlay: Vec<u8>,
 }
 
 impl GpuScene {
@@ -790,6 +792,7 @@ struct BlockGpu {
     trans: Option<Batch>,
     lines: Option<Batch>,
     hidden: Option<Batch>,
+    overlay: Option<Batch>,
 }
 
 /// The blocks' buffers, then the scene's own, as one batch (the blocks' buffers are shared,
@@ -862,6 +865,7 @@ impl Batches {
                         trans: upload(device, "sc_trans", &block.bytes.trans, TRI_SIZE),
                         lines: upload(device, "sc_lines", &block.bytes.lines, LINE_SIZE),
                         hidden: upload(device, "sc_hidden", &block.bytes.hidden, LINE_SIZE),
+                        overlay: upload(device, "sc_overlay", &block.bytes.overlay, LINE_SIZE),
                     },
                 };
                 self.blocks.insert(block.key, gpu);
@@ -880,7 +884,7 @@ impl Batches {
             self.glass_sorted_for = None;
             self.lines = joined(blocks.iter().map(|b| &b.lines), upload(device, "sc_lines", &sc.lines, LINE_SIZE));
             self.hidden = joined(blocks.iter().map(|b| &b.hidden), upload(device, "sc_hidden", &sc.hidden, LINE_SIZE));
-            self.overlays = upload(device, "sc_overlay", &sc.overlay, LINE_SIZE);
+            self.overlays = joined(blocks.iter().map(|b| &b.overlay), upload(device, "sc_overlay", &sc.overlay, LINE_SIZE));
             self.ghost = upload(device, "sc_ghost", &sc.ghost, TRI_SIZE);
             self.xray = upload(device, "sc_xray", &sc.xray, TRI_SIZE);
             self.under = upload(device, "sc_under", &sc.under, LINE_SIZE);
@@ -1492,6 +1496,8 @@ impl Renderer {
             })
         };
         let alpha = Some(wgpu::BlendState::ALPHA_BLENDING);
+        // Glass takes its own fragment entry: `fs_glass` adds the silhouettes that `solid`
+        // gives an opaque surface, so a curved face seen through the body keeps its shape.
         let glass = |label: &str, cull: wgpu::Face| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
@@ -1507,7 +1513,7 @@ impl Renderer {
                 multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
-                    entry_point: Some("fs_tri"),
+                    entry_point: Some("fs_glass"),
                     targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: alpha, write_mask: wgpu::ColorWrites::ALL })],
                     compilation_options: Default::default(),
                 }),
@@ -1517,7 +1523,7 @@ impl Renderer {
         };
         // See-through instanced meshes: blended, depth tested, not written; `cull` for glass.
         let placed_see_through = [Some(shared_layout()), Some(instance_layout())];
-        let see_through = |label: &str, source: TriSource, cull: Option<wgpu::Face>| {
+        let see_through = |label: &str, source: TriSource, cull: Option<wgpu::Face>, fs: &str| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&layout),
@@ -1532,7 +1538,7 @@ impl Renderer {
                 multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
-                    entry_point: Some(&source.fragment("fs_tri")),
+                    entry_point: Some(&source.fragment(fs)),
                     targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: alpha, write_mask: wgpu::ColorWrites::ALL })],
                     compilation_options: Default::default(),
                 }),
@@ -1540,12 +1546,13 @@ impl Renderer {
                 cache: None,
             })
         };
-        let both = |label: &str, cull: Option<wgpu::Face>| {
-            (see_through(label, TriSource::Instanced, cull), see_through(&format!("{label}_flat"), TriSource::InstancedFlat, cull))
+        let both = |label: &str, cull: Option<wgpu::Face>, fs: &str| {
+            (see_through(label, TriSource::Instanced, cull, fs), see_through(&format!("{label}_flat"), TriSource::InstancedFlat, cull, fs))
         };
-        let glass_far_instanced = both("sc_glass_far_instanced", Some(wgpu::Face::Front));
-        let glass_near_instanced = both("sc_glass_near_instanced", Some(wgpu::Face::Back));
-        let trans_instanced = both("sc_trans_instanced", None);
+        // Glass carries the silhouettes an opaque surface gets; `trans` (faded previews) does not.
+        let glass_far_instanced = both("sc_glass_far_instanced", Some(wgpu::Face::Front), "fs_glass");
+        let glass_near_instanced = both("sc_glass_near_instanced", Some(wgpu::Face::Back), "fs_glass");
+        let trans_instanced = both("sc_trans_instanced", None, "fs_tri");
         let image_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sc_image"),
             entries: &[

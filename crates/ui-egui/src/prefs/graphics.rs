@@ -136,8 +136,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
             ui_kit::row(ui, app.tr_label("Visual style"), |ui| {
-                let mut selected = usize::from(app.ui.visual_style.min(3));
-                ui_kit::dropdown(ui, "pref_style", &mut selected, &["Shaded with edges", "Shaded", "Wireframe", "Shaded with hidden edges"]);
+                let mut selected = usize::from(app.ui.visual_style.min(crate::viewport::LAST_VISUAL_STYLE));
+                ui_kit::dropdown(ui, "pref_style", &mut selected, &crate::viewport::VISUAL_STYLES);
                 app.ui.visual_style = selected as u8;
             });
         });

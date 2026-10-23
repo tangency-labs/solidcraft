@@ -242,6 +242,8 @@ mod ui_kit_guard_tests;
 pub mod update;
 pub mod viewport;
 mod viewport_layout;
+#[cfg(test)]
+mod visual_style_tests;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
@@ -277,7 +279,8 @@ pub struct UiState {
     pub pick_off: Vec<String>,
     /// A click on a face picks its whole body.
     pub pick_bodies: bool,
-    /// 0: shaded with edges, 1: shaded, 2: wireframe, 3: shaded with hidden edges.
+    /// 0: shaded with edges, 1: shaded, 2: wireframe, 3: shaded with hidden edges,
+    /// 4: translucent (see [`viewport::VISUAL_STYLES`]).
     pub visual_style: u8,
     /// A soft shadow on the ground under the model (seen from above).
     pub ground_shadow: bool,
@@ -722,7 +725,7 @@ impl SolveApp {
             self.autosave_minutes = m.clamp(0.0, 600.0);
         }
         if let Some(s) = v.get("visual_style").and_then(Value::as_u64) {
-            self.ui.visual_style = u8::try_from(s.min(3)).unwrap_or(0);
+            self.ui.visual_style = u8::try_from(s.min(u64::from(viewport::LAST_VISUAL_STYLE))).unwrap_or(0);
         }
         // Browser folders the user opened or closed.
         let keys = |k: &str| -> std::collections::BTreeSet<String> {

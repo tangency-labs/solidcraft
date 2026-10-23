@@ -168,14 +168,15 @@ fn oit(c: vec4<f32>, z: f32) -> Oit {
 
 @fragment
 fn fs_oit(i: TOut) -> Oit {
+    let c = glass_shade(i);
     if (clipped(i.wp)) { discard; }
-    return oit(shade(i), i.pos.z);
+    return oit(c, i.pos.z);
 }
 
 @fragment
 fn fs_oit_flat(i: FOut, @builtin(front_facing) front: bool) -> Oit {
     let t = flat_fragment(i, front);
-    let o = oit(shade(t), t.pos.z);
+    let o = oit(glass_shade(t), t.pos.z);
     if (clipped(t.wp)) { discard; }
     return o;
 }
@@ -420,6 +421,39 @@ fn stripe(i: TOut, c: vec3<f32>) -> vec3<f32> {
 fn fs_tri(i: TOut) -> @location(0) vec4<f32> {
     if (clipped(i.wp)) { discard; }
     return shade(i);
+}
+
+/// `shade` with the silhouettes `solid` gives an opaque surface. A curved face seen through a
+/// body -- a bore's wall, a boss behind a wall -- has no edge of its own to draw, so without
+/// this it reads as a smooth gradient and the shape is lost. The line is opaque where it is
+/// strongest, or the very transparency that makes it necessary would wash it out.
+/// Call it before any `discard`: it takes derivatives, which need uniform control flow.
+fn glass_shade(i: TOut) -> vec4<f32> {
+    let ndv = dot(normalize(i.n), normalize(u.back.xyz));
+    let fw = fwidth(ndv);
+    let c = shade(i);
+    if (u.screen.w > 0.5 && length(i.n) > 0.5 && fw > 1e-6) {
+        let a = 1.0 - smoothstep(fw * 0.8, fw * 2.0, abs(ndv));
+        return vec4<f32>(mix(c.rgb, out_color(vec4<f32>(0.07, 0.08, 0.10, 1.0)).rgb, a), mix(c.a, 1.0, a));
+    }
+    return c;
+}
+
+/// See-through bodies where the device has no order-independent transparency.
+@fragment
+fn fs_glass(i: TOut) -> @location(0) vec4<f32> {
+    let c = glass_shade(i);
+    if (clipped(i.wp)) { discard; }
+    return c;
+}
+
+/// `fs_glass` for instanced meshes with flat triangles.
+@fragment
+fn fs_glass_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let t = flat_fragment(i, front);
+    let c = glass_shade(t);
+    if (clipped(t.wp)) { discard; }
+    return c;
 }
 
 /// Reference planes: shaded like `fs_tri`, but never cut by the section plane.

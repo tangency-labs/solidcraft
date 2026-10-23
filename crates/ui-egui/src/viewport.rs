@@ -622,18 +622,27 @@ struct BodyDraw {
 
 impl BodyDraw {
     /// Everything [`BodyDraw::build`] reads.
-    fn key(&self, shaded: bool, edges: bool, hidden_edges: bool, edge_col: [u8; 4], hidden_col: [u8; 4]) -> u64 {
+    fn key(&self, shaded: bool, edges: bool, hidden_edges: bool, on_top: bool, edge_col: [u8; 4], hidden_col: [u8; 4]) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (std::sync::Arc::as_ptr(&self.mesh) as usize).hash(&mut h);
         self.place.iter().flatten().flatten().for_each(|v| v.to_bits().hash(&mut h));
-        (self.col, self.faded, self.opacity.to_bits(), self.on_gpu, shaded, edges, hidden_edges, edge_col, hidden_col).hash(&mut h);
+        (self.col, self.faded, self.opacity.to_bits(), self.on_gpu, shaded, edges, hidden_edges, on_top, edge_col, hidden_col).hash(&mut h);
         let mut looks: Vec<_> = self.face_looks.iter().map(|(f, l)| (*f, l.color, l.opacity.to_bits())).collect();
         looks.sort_unstable();
         looks.hash(&mut h);
         h.finish()
     }
 
-    fn build(&self, sc: &mut crate::gpu::BlockBytes, shaded: bool, edges: bool, hidden_edges: bool, edge_col: [u8; 4], hidden_col: [u8; 4]) {
+    fn build(
+        &self,
+        sc: &mut crate::gpu::BlockBytes,
+        shaded: bool,
+        edges: bool,
+        hidden_edges: bool,
+        on_top: bool,
+        edge_col: [u8; 4],
+        hidden_col: [u8; 4],
+    ) {
         let m = &self.mesh;
         let mut out = GpuScene::default();
         for (ti, t) in m.triangles.iter().enumerate().filter(|_| shaded && !self.on_gpu) {
@@ -668,7 +677,7 @@ impl BodyDraw {
             }
             for w in e.windows(2) {
                 let (a, b) = (at(w[0]), at(w[1]));
-                out.line(a, b, edge_col, 1.3, false);
+                out.line(a, b, edge_col, 1.3, on_top);
                 if hidden_edges {
                     out.hidden_line(a, b, hidden_col, 1.0);
                 }
@@ -679,6 +688,7 @@ impl BodyDraw {
         sc.glass.extend_from_slice(&out.glass);
         sc.lines.extend_from_slice(&out.lines);
         sc.hidden.extend_from_slice(&out.hidden);
+        sc.overlay.extend_from_slice(&out.overlay);
     }
 }
 
@@ -812,12 +822,17 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     let (shaded, edges) = match app.ui.visual_style {
         1 => (true, false),
         2 => (false, true),
+        // Translucent keeps its edges: they are what reads the shape through the faces.
         _ => (true, true),
     };
     let edge_col = if shaded { c4(tk.body_edge) } else { c4(tk.text) };
     // Shaded with hidden edges: edges behind the model show faintly.
     let hidden_edges = app.ui.visual_style == 3;
     let hidden_col = c4(tk.text.gamma_multiply(0.35));
+    // The glass is drawn after the lines, so an edge under it washes out to the body's own
+    // colour. Translucent sends its edges to the overlay pass instead: it draws after the
+    // glass and tests depth with Always, so every edge, front and back, keeps the model's ink.
+    let edges_on_top = app.ui.visual_style == TRANSLUCENT;
     // The blocks the last scene built, reused when their bodies come back as they were.
     let mut kept = app.viewport.blocks.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
     let mut made: std::collections::HashMap<u64, CachedBlock> = std::collections::HashMap::new();
@@ -834,7 +849,8 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         let base = body_color(&s.doc, b).unwrap_or(tk.body);
         let col = if faded { c4(base.gamma_multiply(0.35)) } else { c4(base) };
         // Appearances: the body's opacity, and faces with looks of their own.
-        let opacity = s.doc.model_body_opacity(b);
+        let opacity =
+            if app.ui.visual_style == TRANSLUCENT { TRANSLUCENT_OPACITY.min(s.doc.model_body_opacity(b)) } else { s.doc.model_body_opacity(b) };
         let face_looks: std::collections::HashMap<usize, solidcraft_engine::doc::appearance::Look> =
             if shaded { s.doc.face_colors(b).into_iter().collect() } else { Default::default() };
         let opaque = !faded && opacity >= 0.999 && face_looks.values().all(|l| l.opacity >= 0.999);
@@ -868,7 +884,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
             Some((mesh, place)) => BodyDraw { mesh, place: Some(place), col, faded, opacity, face_looks, on_gpu: true },
             None => BodyDraw { mesh: drawn_mesh(app, b), place: None, col, faded, opacity, face_looks, on_gpu },
         };
-        let key = body.key(shaded, edges, hidden_edges, edge_col, hidden_col);
+        let key = body.key(shaded, edges, hidden_edges, edges_on_top, edge_col, hidden_col);
         key.hash(&mut run_key);
         run.push(body);
         // Blocks end where a body's own key says, so a body added or removed changes only its
@@ -876,11 +892,15 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         if key.is_multiple_of(16) || run.len() >= 64 {
             let draws = std::mem::take(&mut run);
             let block_key = std::mem::replace(&mut run_key, std::collections::hash_map::DefaultHasher::new()).finish();
-            push_block(&mut sc, &mut kept, &mut made, block_key, draws, |d, out| d.build(out, shaded, edges, hidden_edges, edge_col, hidden_col));
+            push_block(&mut sc, &mut kept, &mut made, block_key, draws, |d, out| {
+                d.build(out, shaded, edges, hidden_edges, edges_on_top, edge_col, hidden_col)
+            });
         }
     }
     if !run.is_empty() {
-        push_block(&mut sc, &mut kept, &mut made, run_key.finish(), run, |d, out| d.build(out, shaded, edges, hidden_edges, edge_col, hidden_col));
+        push_block(&mut sc, &mut kept, &mut made, run_key.finish(), run, |d, out| {
+            d.build(out, shaded, edges, hidden_edges, edges_on_top, edge_col, hidden_col)
+        });
     }
     if let Ok(mut b) = app.viewport.blocks.lock() {
         *b = made;
@@ -2713,7 +2733,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             analysis: analysis_uniform(app),
             analysis_colors: crate::gpu::analysis_colors(&t.analysis),
             access: crate::access::map(app),
-            outline: matches!(app.ui.visual_style, 0 | 3),
+            outline: matches!(app.ui.visual_style, 0 | 3 | 4),
             ao_radius: if app.preferences.ambient_occlusion && app.ui.visual_style != 2 {
                 (model_bounds(app).diagonal() * 0.04).clamp(1e-4, 1e6) as f32
             } else {
@@ -4034,6 +4054,15 @@ pub fn look_at_selection(app: &mut SolveApp) {
     }
 }
 
+/// The visual styles, in the order `UiState::visual_style` numbers them. Shown in the
+/// navigation bar's style menu and in Preferences.
+pub const VISUAL_STYLES: [&str; 5] = ["Shaded with edges", "Shaded", "Wireframe", "Shaded with hidden edges", "Translucent"];
+/// The last valid `UiState::visual_style`.
+pub const LAST_VISUAL_STYLE: u8 = VISUAL_STYLES.len() as u8 - 1;
+/// Translucent: every body is drawn see-through, whatever its appearance says.
+pub(crate) const TRANSLUCENT: u8 = 4;
+const TRANSLUCENT_OPACITY: f64 = 0.35;
+
 fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if app.viewport.layout.as_ref().is_some_and(|l| !l.navigation.is_positive()) {
         return;
@@ -4059,11 +4088,13 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         ("lookat", "Look At the selected face or plane (or the active sketch)"),
         ("home", "Home view"),
         ("perspective", "Perspective / orthographic"),
-        ("style", "Visual style: shaded with edges, shaded, wireframe, shaded with hidden edges"),
+        ("style", "Visual style: shaded with edges, shaded, wireframe, shaded with hidden edges, translucent"),
         ("settings", "View settings: grid, ground shadow, ambient occlusion, agent cursor"),
     ];
     let menu_id = ui.id().with("nav_view_menu");
     let mut menu_open = ui.data(|d| d.get_temp::<bool>(menu_id)).unwrap_or(false);
+    let style_id = ui.id().with("nav_style_menu");
+    let mut style_open = ui.data(|d| d.get_temp::<bool>(style_id)).unwrap_or(false);
     let w = items.len() as f32 * 30.0 + 10.0;
     let bar = app.viewport.layout.as_ref().map(|l| l.navigation).unwrap_or_else(|| {
         let available = crate::shell::bottom_overlay_rect(app, rect);
@@ -4076,7 +4107,8 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         || app.viewport.nav.is_some()
         || app.viewport.modifier_nav.is_some()
         || app.viewport.spin
-        || menu_open;
+        || menu_open
+        || style_open;
     let mut painter = ui.painter_at(rect);
     painter.set_opacity(if active || app.preferences.navigator_style == crate::prefs::NavigatorStyle::Axes { 1.0 } else { 0.45 });
     let surface = Container::new(ui.ctx(), Surface::Navigation).frame(ui.ctx(), t.overlay, crate::frame::Side::Left);
@@ -4094,6 +4126,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             "zoom" => app.viewport.nav == Some(NavMode::Zoom),
             "perspective" => app.ui.perspective,
             "settings" => menu_open,
+            "style" => style_open,
             "spin" => app.viewport.spin,
             _ => false,
         };
@@ -4114,7 +4147,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 }
                 "home" => app.animate_view("home"),
                 "lookat" => look_at_selection(app),
-                "style" => app.ui.visual_style = (app.ui.visual_style + 1) % 4,
+                "style" => style_open = !style_open,
                 "perspective" => app.ui.perspective = !app.ui.perspective,
                 _ => menu_open = !menu_open,
             }
@@ -4125,8 +4158,43 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 menu_open = view_menu(app, ui, br);
             }
         }
+        if *icon == "style" {
+            crate::scenario::publish_handle("nav:style", br.center());
+            if style_open {
+                style_open = style_menu(app, ui, br);
+            }
+        }
     }
     ui.data_mut(|d| d.insert_temp(menu_id, menu_open));
+    ui.data_mut(|d| d.insert_temp(style_id, style_open));
+}
+
+/// The visual styles above the navigation bar's style button, so a style is picked rather than
+/// cycled to. False once it should close (a click outside it).
+fn style_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
+    let t = crate::theme::Tokens::get();
+    let area = Container::new(ui.ctx(), Surface::Popup)
+        .area(egui::Id::new("sc_style_menu"))
+        .order(egui::Order::Foreground)
+        .pivot(Align2::RIGHT_BOTTOM)
+        .fixed_pos(button.right_top() - vec2(0.0, 6.0));
+    let r = area.show(ui.ctx(), |ui| {
+        Container::popup_frame(ui.style()).show(ui, |ui| {
+            ui.set_width(220.0);
+            ui.label(egui::RichText::new(crate::i18n::tr_label("DISPLAY")).semibold().color(t.text).size(t.font_caption));
+            for (i, style) in VISUAL_STYLES.iter().enumerate() {
+                let value = i as u8;
+                let picked = crate::ui_kit::list_picker(ui, style, crate::i18n::tr_label(style), app.ui.visual_style == value);
+                crate::scenario::publish_handle(&format!("nav:style:{style}"), picked.rect.center());
+                if picked.clicked() {
+                    app.ui.visual_style = value;
+                }
+            }
+        });
+    });
+    let clicked_out = ui.input(|i| i.pointer.any_pressed())
+        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !r.response.rect.contains(p) && !button.contains(p));
+    !clicked_out
 }
 
 /// The View settings above the navigation bar's last button: grid, ground shadow and the agent
