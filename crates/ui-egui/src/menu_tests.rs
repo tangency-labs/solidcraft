@@ -684,11 +684,12 @@ fn toolbar_pins_removes_reorders_and_keeps_its_layout() {
     // Remove a default button.
     act(&mut app, &Target::ToolbarCommand { id: create[0].into() }, "Remove from Toolbar");
     assert!(!ids(&app, "CREATE").contains(&create[0]));
-    // Reorder: the pinned one before the second default; then into another panel.
+    // Reorder within the panel; a move into another panel leaves the layout unchanged.
     tc::reorder(&mut app, "MODEL", extra, "CREATE", Some(create[1]));
     assert_eq!(ids(&app, "CREATE")[0], extra);
+    let prefs = app.toolbar_custom.prefs();
     tc::reorder(&mut app, "MODEL", extra, "MODIFY", None);
-    assert!(!ids(&app, "CREATE").contains(&extra) && ids(&app, "MODIFY").last() == Some(&extra));
+    assert_eq!(app.toolbar_custom.prefs(), prefs);
     // Pin to Shortcuts goes to the S box's favourites.
     act(&mut app, &Target::ToolbarCommand { id: "solid.extrude".into() }, "Pin to Shortcuts");
     assert!(app.sbox.pinned.iter().any(|p| p == "solid.extrude"));

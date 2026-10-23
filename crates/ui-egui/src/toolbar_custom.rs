@@ -1,7 +1,7 @@
 //! Toolbar customisation: which commands each panel shows as buttons, per workspace and tab.
 //! A command's menu (right-click on a toolbar button, a panel drop-down row or an S box row)
 //! pins it to the toolbar, removes it, or pins it to the S box's favourites; buttons are dragged
-//! to reorder them within and between panels; a drop-down row dragged onto the toolbar pins it
+//! to reorder them within their panel; a drop-down row dragged onto its panel pins it
 //! there, a button dragged off the toolbar (or back into the drop-down) leaves it; the pin icon
 //! on a hovered drop-down row pins or unpins; the toolbar's own menu (right-click its empty
 //! space) has Customize Toolbar… (a window listing every command of the tab with a check box)
@@ -190,8 +190,16 @@ pub fn remove(app: &mut SolveApp, tab: &str, id: &str) {
     app.toolbar_custom.panels.insert(key(tab, panel), ids);
 }
 
-/// Move a button before another one (`before`: None puts it at the end of `panel`).
+/// Whether a toolbar drag can place a command in this panel of the tab.
+pub fn accepts_drop(tab: &str, id: &str, panel: &str) -> bool {
+    panel_lists(tab).iter().any(|(p, cmds, _)| *p == panel && cmds.iter().any(|c| c.id == id))
+}
+
+/// Move a button within its panel (`before`: None puts it at the end of `panel`).
 pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Option<&str>) {
+    if !accepts_drop(tab, id, panel) {
+        return;
+    }
     if let Some(from) = pinned_on(app, tab, id) {
         let mut ids = own(app, tab, from);
         ids.retain(|x| x != id);
