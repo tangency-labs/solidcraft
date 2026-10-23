@@ -392,16 +392,20 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
         p.get(key).map(|_| super::features::plane_param(s, p.get(key), cmd)).transpose()
     };
     let (from_plane, to_plane) = (plane(s, "from_plane")?, plane(s, "to_plane")?);
-    let pick = |s: &Session, pk: &str, fk: &str, plane: &Option<solidcraft_doc::PlaneRef>| -> Result<(Vec3, Option<Vec3>)> {
-        if plane.is_some() {
-            if p.get(pk).is_some() || p.get(fk).is_some() {
-                return Err(bad(cmd, format!("give `{pk}_plane` or `{pk}`/`{fk}`, not both")));
-            }
-            // Worked out from the plane when the feature is evaluated.
-            return Ok((Vec3::ZERO, None));
-        }
+    // Picks and snaps are where the view shows them (the world); the feature moves the bodies
+    // in their component's frame, so both ends go into the first moved body's frame. A body
+    // picked in another placed component (aligning two imported parts) is found where it
+    // is shown, not where its own frame has it.
+    let frame = s
+        .placed_document()
+        .body_frames_with_source(&s.model.state())
+        .into_iter()
+        .find(|(world, own, ..)| *world == bodies[0] || *own == bodies[0])
+        .map(|(.., m)| m);
+    let inverse = frame.and_then(|m| solidcraft_doc::mat_inverse(&m)).unwrap_or(solidcraft_doc::IDENTITY);
+    let world_pick = |s: &Session, pk: &str, fk: &str| -> Result<(Vec3, Option<Vec3>)> {
         if let Some(fp) = p.get(fk).and_then(vec3) {
-            let n = super::face::face_normal(s, fp).ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face")))?;
+            let n = super::face::face_normal_world(s, fp).ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face")))?;
             return Ok((fp, Some(n)));
         }
         // The origin point.
@@ -418,6 +422,17 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             .and_then(vec3)
             .map(|v| (v, None))
             .ok_or_else(|| bad(cmd, format!("give `{pk}`, `{fk}` or `{pk}_plane` ([x, y, z], \"origin\", or a plane)")))
+    };
+    let pick = |s: &Session, pk: &str, fk: &str, plane: &Option<solidcraft_doc::PlaneRef>| -> Result<(Vec3, Option<Vec3>)> {
+        if plane.is_some() {
+            if p.get(pk).is_some() || p.get(fk).is_some() {
+                return Err(bad(cmd, format!("give `{pk}_plane` or `{pk}`/`{fk}`, not both")));
+            }
+            // Worked out from the plane when the feature is evaluated.
+            return Ok((Vec3::ZERO, None));
+        }
+        let (at, n) = world_pick(s, pk, fk)?;
+        Ok((solidcraft_doc::apply_point(&inverse, at), n.and_then(|n| solidcraft_doc::apply_vector(&inverse, n).normalized())))
     };
     let (from, from_normal) = pick(s, "from", "from_face", &from_plane)?;
     let (to, to_normal) = pick(s, "to", "to_face", &to_plane)?;

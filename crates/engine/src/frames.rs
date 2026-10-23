@@ -26,6 +26,9 @@ enum K {
     Make,
     /// A direction: turned with the command's frame.
     Dir,
+    /// A point the command's bodies move about: into the frame of those bodies (the command's
+    /// frame, as its directions are).
+    Moved,
     /// An arbitrary axis object in the authoring frame: {origin, dir}.
     Axis,
     /// A plane object (`{face}`, `{origin, normal}`, `{origin, x_dir, y_dir}`) or a plane name.
@@ -61,7 +64,10 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
         "solid.press_pull" => &[("face", Pick), ("edges", Picks)],
         "solid.replace_face" => &[("faces", Picks), ("target_face", Pick), ("target", Plane), ("body", Body)],
-        "solid.align" => &[("from", Pick), ("from_face", Pick), ("to", Pick), ("to_face", Pick), ("bodies", Body)],
+        // Align finds its picks where they are shown and takes both ends into the moved bodies'
+        // frame itself: a pick mapped into the frame of the body under it would put the two ends
+        // in different frames when they lie on separately placed components.
+        "solid.align" => &[("bodies", Body)],
         // A mirror keeps the placement its bodies were picked at (`cmd::features::placed_bodies`);
         // its plane is in the active component, where the copies go.
         "solid.mirror" => &[("plane", HerePlane)],
@@ -83,7 +89,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "inspect.curvature_comb" | "inspect.minimum_radius" | "inspect.isocurve" => &[("edges", Picks), ("faces", Picks)],
         "parts.insert" | "parts.fastener" => &[("at", Pick), ("point", Make), ("direction", Dir)],
         "appearance.assign" => &[("faces", Picks), ("bodies", Body), ("body", Body)],
-        "solid.move" => &[("bodies", Body), ("translate", Dir), ("axis", Dir), ("origin", Make)],
+        "solid.move" => &[("bodies", Body), ("translate", Dir), ("axis", Dir), ("origin", Moved)],
         "solid.combine" => &[("target", Body), ("tools", Body)],
         "solid.remove" | "solid.bounding_solid" | "material.assign" => &[("bodies", Body)],
         _ => &[],
@@ -409,7 +415,19 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
         command_frames.active = frame;
         command_frames.sketch = frame;
     }
-    let mut m = Mapper { s, f: command_frames, first: None, changed: false, here: false };
+    // A move has no picks: its vector, axis and pivot are in the world and turn with the frame
+    // of the bodies it moves (an imported part stood upright moved up goes up, not along its
+    // own frame's z). A turn with no pivot is about the world origin.
+    let first = (id == "solid.move")
+        .then(|| obj.get("bodies").and_then(Value::as_array)?.first()?.as_str())
+        .flatten()
+        .and_then(|b| command_frames.bodies.iter().find(|(world, own, _)| world == b || own == b).map(|(.., m)| *m));
+    let mut obj = obj.clone();
+    if first.is_some() && obj.contains_key("axis") && !obj.contains_key("origin") {
+        obj.insert("origin".into(), serde_json::json!([0.0, 0.0, 0.0]));
+    }
+    let obj = &obj;
+    let mut m = Mapper { s, f: command_frames, first, changed: false, here: false };
     let body = obj.get("body").or_else(|| obj.get("face_body")).and_then(Value::as_str).map(str::to_string);
     let mut out: Map<String, Value> = obj.clone();
     // Picks first: their frame turns the directions.
@@ -425,6 +443,10 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
                 Picks => m.picks(v, body.as_deref()),
                 Make => m.make(v),
                 Dir => m.dir(v),
+                Moved => {
+                    let frame = m.first.unwrap_or(m.f.active);
+                    vec3(v).and_then(|p| m.local_point(&frame, p))
+                }
                 Axis => {
                     if let Some(axis) = v.as_object() {
                         let mut axis = axis.clone();

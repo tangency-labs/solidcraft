@@ -436,7 +436,9 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
 /// error. Other features: their whole preview ([`compute`]).
 fn compute_tool(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
     let Some((alt, op)) = as_new_body(cmds) else { return compute(s, cmds, colors) };
-    let tool = match s.preview(&alt) {
+    // Where the view shows it: in a component placed away from its own frame (an imported
+    // part stood upright) the model's frame would draw the tool at right angles to the face.
+    let tool = match s.preview_world(&alt) {
         Ok(t) => t,
         Err(e) => return Err(s.preview(cmds).err().map_or_else(|| e.to_string(), |r| r.to_string())),
     };
@@ -1021,6 +1023,23 @@ mod tests {
             let built = compute(&s, &[cmd], colors()).unwrap_or_else(|e| panic!("{op}: {e}"));
             assert!(built.error.is_none(), "{op}: {:?}", built.error);
         }
+    }
+
+    /// A plate in its own component, stood up by its placement (an imported part set upright)
+    /// and edited with that component active: the extrusion's tool is drawn where the plate is
+    /// shown, on its top face, not at right angles to it in the component's own frame.
+    #[test]
+    fn a_tool_on_a_turned_component_previews_where_it_is_shown() {
+        let mut s = Session::default();
+        let made = s.execute("component.create", &json!({"name": "Plate"})).unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 8, "height": 30, "corner": [0, 0, -30], "body_name": "Plate"})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": made["occurrence"], "axis": [1, 0, 0], "angle": "90 deg"})).unwrap();
+        s.execute("component.activate", &json!({"component": made["component"], "occurrence": made["occurrence"], "path": [made["occurrence"]]}))
+            .unwrap();
+        // Shown lying flat: 20 × 30, 8 high. Its top face pulled up 10.
+        let cmd = ("solid.extrude".to_string(), json!({"face": [10, 15, 8], "face_body": "Plate", "distance": "10 mm", "operation": "join"}));
+        let b = compute_tool(&s, &[cmd], colors()).unwrap().bounds;
+        assert!((b.max.z - 18.0).abs() < 1e-6 && (b.max.y - 30.0).abs() < 1e-6, "on top, not at right angles: {b:?}");
     }
 
     fn count(bytes: &[u8], stride: usize, col: [u8; 4]) -> usize {

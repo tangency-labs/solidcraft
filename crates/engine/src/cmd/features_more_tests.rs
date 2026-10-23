@@ -1618,3 +1618,64 @@ fn loft_through_coplanar_sections_is_refused() {
     assert!(e.contains("same plane"), "{e}");
     assert!(s.model.state().bodies.is_empty());
 }
+
+/// A 20 × 30 × 8 plate made in its own component and stood up by its placement (turned
+/// `angle` degrees about X), the way an imported part set upright is: in the world it lies
+/// flat at `x0`..`x0 + 20`, y 0..30, z 0..8. The design is active again afterwards.
+fn placed_plate(s: &mut Session, name: &str, x0: f64, angle: f64) {
+    let made = run(s, "component.create", json!({"name": name}));
+    // Turned +90° about X a point goes (x, y, z) → (x, −z, y); turned −90°, (x, z, −y).
+    let corner = if angle > 0.0 { json!([x0, 0, -30]) } else { json!([x0, -8, 0]) };
+    let (width, height) = (8, 30);
+    run(s, "solid.box", json!({"length": 20, "width": width, "height": height, "corner": corner, "body_name": name}));
+    run(s, "occurrence.move", json!({"occurrence": made["occurrence"], "axis": [1, 0, 0], "angle": format!("{angle} deg")}));
+    run(s, "component.activate", json!({"component": 0}));
+    let b = world_bounds(s, name);
+    for (got, want) in [(b.min.x, x0), (b.max.x, x0 + 20.0), (b.min.y, 0.0), (b.max.y, 30.0), (b.min.z, 0.0), (b.max.z, 8.0)] {
+        assert!((got - want).abs() < 1e-6, "{name} placed at {b:?}");
+    }
+}
+
+fn world_bounds(s: &Session, name: &str) -> solidcraft_geom::Aabb3 {
+    s.world_state().body(name).unwrap_or_else(|| panic!("no {name}")).mesh().bounds()
+}
+
+fn near(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-6
+}
+
+/// Move's vector, axis and pivot are where the view shows them, whatever frame the moved
+/// body's component has: a plate stood up by its placement and moved up goes up.
+#[test]
+fn a_move_goes_the_way_it_is_shown_on_a_placed_component() {
+    let mut s = Session::default();
+    placed_plate(&mut s, "Plate", 0.0, 90.0);
+    run(&mut s, "solid.move", json!({"bodies": ["Plate"], "translate": [0, 0, 10]}));
+    let b = world_bounds(&s, "Plate");
+    assert!(near(b.min.z, 10.0) && near(b.max.z, 18.0) && near(b.min.y, 0.0) && near(b.max.y, 30.0), "moved up: {b:?}");
+    // A quarter turn about the world's Z through the origin: (x, y) → (−y, x).
+    run(&mut s, "solid.move", json!({"bodies": ["Plate"], "axis": [0, 0, 1], "angle": 90}));
+    let b = world_bounds(&s, "Plate");
+    assert!(near(b.min.x, -30.0) && near(b.max.x, 0.0) && near(b.min.y, 0.0) && near(b.max.y, 20.0) && near(b.min.z, 10.0), "turned: {b:?}");
+}
+
+/// Align between two parts placed in different frames: both ends are taken where they are
+/// shown, so the plate lands on the other one rather than at right angles to it.
+#[test]
+fn align_takes_both_ends_where_they_are_shown_across_placed_components() {
+    let mut s = Session::default();
+    placed_plate(&mut s, "A", 0.0, 90.0);
+    placed_plate(&mut s, "B", 50.0, -90.0);
+    // Corner to corner: a plain move.
+    run(&mut s, "solid.align", json!({"bodies": ["A"], "from": [0, 0, 8], "to": [50, 0, 8]}));
+    let a = world_bounds(&s, "A");
+    assert!(near(a.min.x, 50.0) && near(a.max.x, 70.0) && near(a.min.z, 0.0) && near(a.max.z, 8.0), "{a:?}");
+    // Snapped corners, then the top face onto B's top face: A turns over and sits on B.
+    run(&mut s, "solid.align", json!({"bodies": ["A"], "from": {"snap": "vertex", "at": [50, 0, 8]}, "to": {"snap": "vertex", "at": [70, 30, 8]}}));
+    let a = world_bounds(&s, "A");
+    assert!(near(a.min.x, 70.0) && near(a.min.y, 30.0) && near(a.max.z, 8.0), "snapped: {a:?}");
+    run(&mut s, "solid.align", json!({"bodies": ["A"], "from_face": [80, 45, 8], "to_face": [60, 15, 8]}));
+    let a = world_bounds(&s, "A");
+    assert!(near(a.min.z, 8.0) && near(a.max.z, 16.0), "on B's top, not across it: {a:?}");
+    assert!(near(0.5 * (a.min.x + a.max.x), 60.0) && near(0.5 * (a.min.y + a.max.y), 15.0), "centred on the picked point: {a:?}");
+}

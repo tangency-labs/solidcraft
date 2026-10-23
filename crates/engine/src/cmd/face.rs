@@ -38,6 +38,22 @@ pub(super) fn face_normal_in(s: &Session, p: Vec3, body: Option<&str>) -> Option
         .find_map(|[a, b, c]| (b - a).cross(c - a).normalized())
 }
 
+/// The outward normal of the planar face at the world point `p`: on the model as the view
+/// places it (moved components where they are shown).
+pub(super) fn face_normal_world(s: &Session, p: Vec3) -> Option<Vec3> {
+    let (m, f, d, _) = face_at_state(&s.world_state(), p, None).ok().flatten()?;
+    let tol = (m.bounds().diagonal() * 1e-3).max(1e-3);
+    if d > tol * 10.0 {
+        return None;
+    }
+    m.triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter(|(_, tf)| **tf == f)
+        .filter_map(|(t, _)| m.tri(t))
+        .find_map(|[a, b, c]| (b - a).cross(c - a).normalized())
+}
+
 /// Is the body face at `p` planar (`None`: no face there)?
 pub(super) fn face_is_planar(s: &Session, p: Vec3) -> Option<bool> {
     let (m, f, d, _) = face_at(s, p)?;
