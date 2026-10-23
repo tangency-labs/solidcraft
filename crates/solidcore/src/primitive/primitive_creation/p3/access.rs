@@ -15,11 +15,17 @@ use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
+use crate::geom::geom_utility::p2::ContinuityType;
+use crate::geom::object::ObjectRef;
 use crate::heal::stitch::p2::MinGapRequest;
+use crate::kernel::Kernel;
 use crate::surface::surface::Surface;
 use crate::sweep::topology_sweep::access::{FaceRef, RegionRef, SweepAccess, SweepStitchCallback};
 use crate::sweep::topology_sweep::TopologySweep;
-use crate::topology::{BrepId, EdgeId, FaceId};
+use crate::topology::brep::p3::DeleteFaceOptions;
+use crate::topology::brep::p8::FaceBuildEnv;
+use crate::topology::topology_traverser::Marks;
+use crate::topology::{Brep, BrepId, EdgeId, FaceId};
 
 /// Topology adapters used by primitive construction. Contexts, record ids and
 /// resolver identities are shared with `SweepAccess`; construction tails never
@@ -30,12 +36,13 @@ pub trait PrimitiveAccess: SweepAccess {
     fn with_primitive_brep<T>(
         &mut self,
         brep: BrepId,
-        body: impl FnOnce(&mut crate::kernel::Kernel, &mut crate::topology::Brep) -> Result<T>,
+        body: impl FnOnce(&mut Kernel, &mut Brep) -> Result<T>,
     ) -> Result<T>
     where
         Self: Sized;
 
-    /// Create planar faces, retaining partial outputs and consumed curve slots.
+    /// Create planar faces, retaining partial outputs and consumed curve slots
+    /// (`SmBrep::CreatePlanarFacesWith3DCurves`; the curves are consumed on success).
     fn planar_faces(
         &mut self,
         region: RegionRef,
@@ -43,14 +50,25 @@ pub trait PrimitiveAccess: SweepAccess {
         tolerance: f64,
         faces: &mut Vec<FaceId>,
     ) -> Result<()> {
-        let _ = (region, curves, tolerance, faces);
-        // UNPORTED(topology.brep_p8): SmBrep::CreatePlanarFacesWith3DCurves
-        Err(SolidError::unported(
-            "SmBrep::CreatePlanarFacesWith3DCurves",
-            "topology.brep_p8",
-        ))
+        let input: Vec<Curve> = curves.iter().flatten().cloned().collect();
+        *faces = with_face_env(self, region.0, |kernel, model, fenv| {
+            crate::topology::brep::p8::create_planar_faces_with_3d_curves(
+                kernel,
+                model,
+                Some(region.1),
+                &input,
+                tolerance,
+                fenv,
+            )
+        })?;
+        // consumed on success: the B-rep owns every curve, each slot stays empty
+        for slot in curves.iter_mut() {
+            *slot = None;
+        }
+        Ok(())
     }
-    /// Create one planar face from its boundary curves.
+    /// Create one planar face from its boundary curves
+    /// (`SmBrep::CreatePlanarFaceWith3DCurves`).
     fn planar_face(
         &mut self,
         region: RegionRef,
@@ -58,12 +76,17 @@ pub trait PrimitiveAccess: SweepAccess {
         tolerance: f64,
         face: &mut Option<FaceId>,
     ) -> Result<()> {
-        let _ = (region, curves, tolerance, face);
-        // UNPORTED(topology.brep_p8): SmBrep::CreatePlanarFaceWith3DCurves
-        Err(SolidError::unported(
-            "SmBrep::CreatePlanarFaceWith3DCurves",
-            "topology.brep_p8",
-        ))
+        *face = with_face_env(self, region.0, |kernel, model, fenv| {
+            crate::topology::brep::p8::create_planar_face_with_3d_curves(
+                kernel,
+                model,
+                Some(region.1),
+                &curves,
+                tolerance,
+                fenv,
+            )
+        })?;
+        Ok(())
     }
     /// Create a wire, consuming its curve on success.
     fn wire(&mut self, brep: BrepId, curve: &mut Option<Curve>) -> Result<EdgeId> {
@@ -78,7 +101,8 @@ pub trait PrimitiveAccess: SweepAccess {
         *curve = None;
         Ok(edge)
     }
-    /// Split a surface at G1 discontinuities and append its faces.
+    /// Split a surface at G1 discontinuities and append its faces
+    /// (`SmBrep::CreateFacesFromSurface` with `SM_CT_G1`, as at every call site).
     fn surface_faces(
         &mut self,
         brep: BrepId,
@@ -86,14 +110,21 @@ pub trait PrimitiveAccess: SweepAccess {
         domain: Extent2d,
         faces: &mut Vec<FaceId>,
     ) -> Result<()> {
-        let _ = (brep, surface, domain, faces);
-        // UNPORTED(topology.brep_p8): SmBrep::CreateFacesFromSurface
-        Err(SolidError::unported(
-            "SmBrep::CreateFacesFromSurface",
-            "topology.brep_p8",
-        ))
+        let made = with_face_env(self, brep, |kernel, model, fenv| {
+            crate::topology::brep::p8::create_faces_from_surface(
+                kernel,
+                model,
+                Some(surface),
+                &domain,
+                ContinuityType::G1,
+                fenv,
+            )
+        })?;
+        faces.extend(made);
+        Ok(())
     }
-    /// Create a face, retaining the output slot on failure.
+    /// Create a face, retaining the output slot on failure
+    /// (`SmBrep::CreateFaceFromSurface`).
     fn surface_face(
         &mut self,
         brep: BrepId,
@@ -101,21 +132,32 @@ pub trait PrimitiveAccess: SweepAccess {
         domain: Extent2d,
         face: &mut Option<FaceId>,
     ) -> Result<()> {
-        let _ = (brep, surface, domain, face);
-        // UNPORTED(topology.brep_p8): SmBrep::CreateFaceFromSurface
-        Err(SolidError::unported(
-            "SmBrep::CreateFaceFromSurface",
-            "topology.brep_p8",
-        ))
+        *face = Some(with_face_env(self, brep, |kernel, model, fenv| {
+            crate::topology::brep::p8::create_face_from_surface(
+                kernel,
+                model,
+                Some(surface),
+                &domain,
+                fenv,
+            )
+        })?);
+        Ok(())
     }
-    /// Delete a face without its connected edges/vertices; do region nesting.
+    /// Delete a face without its connected edges/vertices; do region nesting
+    /// (`SmBrep::DeleteFace(face, FALSE, TRUE)`).
     fn delete_primitive_face(&mut self, face: FaceRef) -> Result<()> {
-        let _ = face;
-        // UNPORTED(topology.brep_p3): SmBrep::DeleteFace
-        Err(SolidError::unported(
-            "SmBrep::DeleteFace",
-            "topology.brep_p3",
-        ))
+        self.with_brep_mut(face.0, |kernel, model, _, notifications| {
+            let mut marks = Marks::default();
+            crate::topology::brep::p3::delete_face(
+                kernel,
+                model,
+                notifications,
+                &mut marks,
+                face.1,
+                DeleteFaceOptions::default(),
+            )
+            .map(drop)
+        })
     }
     /// Topology-intersector deletion, retaining the supplied face order.
     /// Implementations invoke the ported `TopologyIntersector::delete_faces`
@@ -159,7 +201,14 @@ pub trait PrimitiveAccess: SweepAccess {
     }
     /// Run `query::face::p2::curve_on_classify` with caller-resolved object handles;
     /// report whether any interval midpoint is `SM_PC_FACE`.
-    fn axis_inside_face(&mut self, face: FaceRef, axis: &Curve) -> Result<bool>;
+    fn axis_inside_face(&mut self, face: FaceRef, axis: &Curve) -> Result<bool> {
+        crate::sweep::topology_sweep::store::classification::axis_inside_face(
+            self.kernel(face.0)?,
+            self.brep(face.0)?,
+            face.1,
+            axis,
+        )
+    }
     /// Linear cap stitch: callback, fast edge compare, no vertex-edge splits,
     /// non-manifold mode, region nesting, default targets and tolerance.
     fn stitch_linear_caps(
@@ -183,4 +232,26 @@ pub trait PrimitiveAccess: SweepAccess {
                 .map(|_| ())
         })
     }
+}
+
+/// Run `body` on `brep` with the face-construction environment of
+/// `SmBrep::Create*Face*`: the caller's face identities and notification records,
+/// with fresh topology marks.
+fn with_face_env<A: SweepAccess + ?Sized, T>(
+    access: &mut A,
+    brep: BrepId,
+    body: impl FnOnce(&mut Kernel, &mut Brep, &mut FaceBuildEnv<'_, '_>) -> Result<T>,
+) -> Result<T> {
+    access.with_brep_mut(
+        brep,
+        |kernel, model, this_face: &dyn Fn(FaceId) -> ObjectRef, env| {
+            let mut marks = Marks::default();
+            let mut fenv = FaceBuildEnv {
+                env,
+                marks: &mut marks,
+                this_face,
+            };
+            body(kernel, model, &mut fenv)
+        },
+    )
 }

@@ -907,14 +907,24 @@ mod tests {
         ] {
             assert_eq!(deferred_at(&r), Some(unit));
         }
-        // partial solids sweep a profile (topology sweep) past SmFace::FindVertexSector
-        // and SmBrep::DeleteEdge until SmFace::CurveOnClassify
-        for r in [
-            create_partial_sphere(k, o(), 5.0, 0.0, 90.0),
-            create_partial_cylinder(k, o(), 5.0, 10.0, 0.0, 90.0),
-            create_partial_torus(k, o(), 10.0, 2.0, 0.0, 90.0),
+        // partial solids sweep a profile (topology sweep) past SmBrep::DeleteEdge and
+        // the axis' SmFace::CurveOnClassify, until SmFace::FindVertexSector (sphere,
+        // cylinder) or the torus' SmFace::Point3DClassify
+        for (r, unit) in [
+            (
+                create_partial_sphere(k, o(), 5.0, 0.0, 90.0),
+                "topology.face_p4",
+            ),
+            (
+                create_partial_cylinder(k, o(), 5.0, 10.0, 0.0, 90.0),
+                "topology.face_p4",
+            ),
+            (
+                create_partial_torus(k, o(), 10.0, 2.0, 0.0, 90.0),
+                "query.face_p1",
+            ),
         ] {
-            assert_eq!(deferred_at(&r), Some("query.face_p2"));
+            assert_eq!(deferred_at(&r), Some(unit));
         }
         // the sphere without poles (a negative radius) gets through SmSurface::DropCurve
         // and the edge tolerances of its degeneracy check, to the face-bound trimmed

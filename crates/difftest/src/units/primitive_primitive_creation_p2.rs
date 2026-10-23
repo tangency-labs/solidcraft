@@ -102,6 +102,8 @@ struct EmptyModel {
         solidcore::topology::topology::Topology,
     >,
     notification_attributes: solidcore::geom::attribute::AttributeStore,
+    // `SmAObject` tag attributes of the swept topology (none on the fresh B-rep).
+    tags: std::collections::BTreeMap<SweepEntity, TagData>,
     b: Brep,
 }
 fn unavailable<T>() -> Result<T> {
@@ -123,6 +125,7 @@ impl EmptyModel {
             k: Kernel::default(),
             notification_records: std::collections::BTreeMap::default(),
             notification_attributes: solidcore::geom::attribute::AttributeStore::default(),
+            tags: std::collections::BTreeMap::default(),
             b,
         })
     }
@@ -238,14 +241,21 @@ impl SweepAccess for EmptyModel {
     fn piecewise_merge(&mut self, _: SweepMergeId, _: bool, _: bool) -> Result<BrepId> { unavailable() }
     fn union(&mut self, _: SweepMergeId) -> Result<BrepId> { unavailable() }
     fn delete_merge(&mut self, _: SweepMergeId) {}
-    fn tag(&self, _: SweepEntity) -> Result<Option<TagData>> {
-        unavailable()
+    fn tag(&self, e: SweepEntity) -> Result<Option<TagData>> {
+        Ok(self.tags.get(&e).copied())
     }
-    fn add_tag(&mut self, _: SweepEntity, _: TagData) -> Result<()> {
-        unavailable()
+    fn add_tag(&mut self, e: SweepEntity, tag: TagData) -> Result<()> {
+        self.tags.insert(e, tag);
+        Ok(())
     }
-    fn curve_tag(&self, _: EdgeRef) -> Result<Option<TagData>> {
-        unavailable()
+    fn curve_tag(&self, edge: EdgeRef) -> Result<Option<TagData>> {
+        // The fixture's curves carry no tag attributes.
+        self.brep(edge.0)?
+            .edge(edge.1)?
+            .curve
+            .as_ref()
+            .ok_or_else(|| SolidError::null_pointer("primitive_p2_fixture"))?;
+        Ok(None)
     }
     fn set_editing(&mut self, _: BrepId, value: bool) -> Result<bool> {
         let previous = self.b.editing_enabled();
@@ -278,9 +288,6 @@ impl PrimitiveAccess for EmptyModel {
         body: impl FnOnce(&mut Kernel, &mut Brep) -> Result<T>,
     ) -> Result<T> {
         body(&mut self.k, &mut self.b)
-    }
-    fn axis_inside_face(&mut self, _: FaceRef, _: &Curve) -> Result<bool> {
-        unavailable()
     }
 }
 impl PrimitiveCreationAccess for EmptyModel {

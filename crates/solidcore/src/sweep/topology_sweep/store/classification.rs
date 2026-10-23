@@ -176,7 +176,7 @@ impl CurveOnClassifyObjects<Handle> for Geometry<'_> {
     }
 }
 
-pub(super) fn axis_inside_face(k: &Kernel, b: &Brep, face: FaceId, axis: &Curve) -> Result<bool> {
+pub(crate) fn axis_inside_face(k: &Kernel, b: &Brep, face: FaceId, axis: &Curve) -> Result<bool> {
     let tolerance = b.face(face)?.tolerance;
     let geometry = Geometry {
         kernel: k,

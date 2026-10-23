@@ -179,6 +179,11 @@ SC_EXPORT int32_t sc_primitive_primitive_creation_p3_eval(int32_t op,const doubl
         }
         out={double(status==SM_SUCCESS?0:status),double(brep.m_bEditingEnabled!=FALSE),double(the_context().GetDoingBoolean()!=FALSE),
             double(starts.GetSize()),double(sides.GetSize()),double(ends.GetSize())};
+        // The topology the entry point left in the B-rep.
+        SmTArray<SmFace*> faces;SmTArray<SmEdge*> edges;SmTArray<SmVertex*> vertices;
+        brep.GetFaces(faces);brep.GetEdges(edges);brep.GetVertices(vertices);
+        out.push_back(double(faces.GetSize()));out.push_back(double(edges.GetSize()));
+        out.push_back(double(vertices.GetSize()));
         // Only non-consuming entry points retain caller ownership of these curves.
         for(ULONG i=0;i<curves.GetSize();i++)
             if(curves[i] && (op>=4 || curves[i]->GetOwner()==NULL)) delete curves[i];

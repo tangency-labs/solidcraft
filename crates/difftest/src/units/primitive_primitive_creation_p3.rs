@@ -169,6 +169,8 @@ struct EmptyModel {
         solidcore::topology::topology::Topology,
     >,
     notification_attributes: solidcore::geom::attribute::AttributeStore,
+    // `SmAObject` tag attributes of the swept topology (none on the fresh B-rep).
+    tags: std::collections::BTreeMap<SweepEntity, TagData>,
     b: Brep,
 }
 fn unavailable<T>() -> Result<T> {
@@ -176,6 +178,20 @@ fn unavailable<T>() -> Result<T> {
         "primitive_p3_fixture",
         "fixture has no topology/service for this call",
     ))
+}
+// The fixture owns this face-key namespace, including future allocations.
+fn fixture_face(face: FaceId) -> solidcore::geom::object::ObjectRef {
+    solidcore::geom::object::ObjectRef {
+        type_code: solidcore::geom::assert_array::labels::FACE_TYPE,
+        key: solidcore::geom::attribute::ObjectKey(100_000 + u64::from(face.index()) * 97),
+    }
+}
+fn fixture_key(entity: solidcore::EntityRef) -> solidcore::geom::object::ObjectRef {
+    if let solidcore::EntityRef::Face(face) = entity {
+        fixture_face(face)
+    } else {
+        super::boolean_topology_intersector_p1::p9_entity_ref(entity)
+    }
 }
 impl EmptyModel {
     fn new() -> Result<Self> {
@@ -189,6 +205,7 @@ impl EmptyModel {
             k: Kernel::default(),
             notification_records: std::collections::BTreeMap::default(),
             notification_attributes: solidcore::geom::attribute::AttributeStore::default(),
+            tags: std::collections::BTreeMap::default(),
             b,
         })
     }
@@ -219,25 +236,13 @@ impl SweepAccess for EmptyModel {
         if id != BrepId::from_index(0) {
             return unavailable();
         }
-        // The fixture owns this face-key namespace, including future allocations.
-        let face_objects = |face: FaceId| solidcore::geom::object::ObjectRef {
-            type_code: solidcore::geom::assert_array::labels::FACE_TYPE,
-            key: solidcore::geom::attribute::ObjectKey(100_000 + u64::from(face.index()) * 97),
-        };
-        let key_of = |entity: solidcore::EntityRef| {
-            if let solidcore::EntityRef::Face(face) = entity {
-                face_objects(face)
-            } else {
-                super::boolean_topology_intersector_p1::p9_entity_ref(entity)
-            }
-        };
         let mut notifications = solidcore::topology::edge::NotifyEnv {
             records: &mut self.notification_records,
             attributes: &mut self.notification_attributes,
             context: None,
-            key_of: &key_of,
+            key_of: &fixture_key,
         };
-        body(&mut self.k, &mut self.b, &face_objects, &mut notifications)
+        body(&mut self.k, &mut self.b, &fixture_face, &mut notifications)
     }
     fn with_breps_mut<T>(
         &mut self,
@@ -264,23 +269,11 @@ impl SweepAccess for EmptyModel {
         if id != BrepId::from_index(0) {
             return unavailable();
         }
-        let key_of = |entity: solidcore::EntityRef| {
-            if let solidcore::EntityRef::Face(face) = entity {
-                solidcore::geom::object::ObjectRef {
-                    type_code: solidcore::geom::assert_array::labels::FACE_TYPE,
-                    key: solidcore::geom::attribute::ObjectKey(
-                        100_000 + u64::from(face.index()) * 97,
-                    ),
-                }
-            } else {
-                super::boolean_topology_intersector_p1::p9_entity_ref(entity)
-            }
-        };
         let mut env = solidcore::topology::edge::NotifyEnv {
             records: &mut self.notification_records,
             attributes: &mut self.notification_attributes,
             context: Some(&mut self.k.context),
-            key_of: &key_of,
+            key_of: &fixture_key,
         };
         body(&mut self.b, &mut env)
     }
@@ -304,14 +297,21 @@ impl SweepAccess for EmptyModel {
         Err(SolidError::invalid_input("fixture", "no merge engine"))
     }
     fn delete_merge(&mut self, _: SweepMergeId) {}
-    fn tag(&self, _: SweepEntity) -> Result<Option<TagData>> {
-        unavailable()
+    fn tag(&self, e: SweepEntity) -> Result<Option<TagData>> {
+        Ok(self.tags.get(&e).copied())
     }
-    fn add_tag(&mut self, _: SweepEntity, _: TagData) -> Result<()> {
-        unavailable()
+    fn add_tag(&mut self, e: SweepEntity, tag: TagData) -> Result<()> {
+        self.tags.insert(e, tag);
+        Ok(())
     }
-    fn curve_tag(&self, _: EdgeRef) -> Result<Option<TagData>> {
-        unavailable()
+    fn curve_tag(&self, edge: EdgeRef) -> Result<Option<TagData>> {
+        // The fixture's curves carry no tag attributes.
+        self.brep(edge.0)?
+            .edge(edge.1)?
+            .curve
+            .as_ref()
+            .ok_or_else(|| SolidError::null_pointer("primitive_p3_fixture"))?;
+        Ok(None)
     }
     fn set_editing(&mut self, _: BrepId, value: bool) -> Result<bool> {
         let previous = self.b.editing_enabled();
@@ -335,8 +335,19 @@ impl SweepAccess for EmptyModel {
     }
 }
 impl PrimitiveAccess for EmptyModel {
-    fn delete_primitive_faces(&mut self, _: BrepId, _: &[FaceId]) -> Result<()> {
-        unavailable()
+    fn delete_primitive_faces(&mut self, id: BrepId, faces: &[FaceId]) -> Result<()> {
+        if id != BrepId::from_index(0) {
+            return unavailable();
+        }
+        // `SmTopologyIntersector::DeleteFaces` under the fixture's own face keys.
+        solidcore::boolean::merge::p4::KernelManifoldIntersector::delete_faces_with_keys(
+            &mut self.k,
+            &mut self.b,
+            faces,
+            &mut self.notification_records,
+            &mut self.notification_attributes,
+            &fixture_key,
+        )
     }
     fn with_primitive_brep<T>(
         &mut self,
@@ -344,9 +355,6 @@ impl PrimitiveAccess for EmptyModel {
         body: impl FnOnce(&mut Kernel, &mut Brep) -> Result<T>,
     ) -> Result<T> {
         body(&mut self.k, &mut self.b)
-    }
-    fn axis_inside_face(&mut self, _: FaceRef, _: &Curve) -> Result<bool> {
-        unavailable()
     }
 }
 fn entry(i: &Inputs) -> Result<Vec<f64>> {
@@ -475,6 +483,10 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
         starts.len() as f64,
         sides.len() as f64,
         ends.len() as f64,
+        // The topology the entry point left in the B-rep.
+        solidcore::topology::brep::p1::faces(&model.b, None)?.len() as f64,
+        solidcore::topology::brep::p1::edges(&model.b, None)?.len() as f64,
+        solidcore::topology::brep::p1::vertices(&model.b, None)?.len() as f64,
     ])
 }
 impl UnitDiff for Runner {
