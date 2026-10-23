@@ -197,6 +197,24 @@ impl ClassGeometry<EntityRef> for Objects<'_> {
             _ => None,
         }
     }
+    fn topology_entity(&self, o: EntityRef) -> Option<(&Brep, EntityRef)> {
+        match o {
+            EntityRef::Face(_)
+            | EntityRef::Vertex(_)
+            | EntityRef::Edge(_)
+            | EntityRef::Vertexuse(_)
+            | EntityRef::Edgeuse(_)
+            | EntityRef::Loop(_)
+            | EntityRef::Faceuse(_)
+            | EntityRef::Loopuse(_)
+            | EntityRef::Shell(_)
+            | EntityRef::Region(_)
+            | EntityRef::Brep(_) => Some((self.target, o)),
+        }
+    }
+    fn topology_handle(&self, entity: EntityRef) -> Option<EntityRef> {
+        Some(entity)
+    }
 }
 impl CurveOnClassifyObjects<EntityRef> for Objects<'_> {
     fn face(&self, f: FaceId) -> EntityRef {
