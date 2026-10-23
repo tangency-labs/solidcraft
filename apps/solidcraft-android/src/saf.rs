@@ -203,10 +203,15 @@ pub(crate) fn with_ext(name: &str, ext: Option<&str>) -> String {
 
 /// The file name a document provider shows for a document, as far as the uri itself says:
 /// the last path segment of the percent-decoded uri, after its last `/` or `:` (a documents
-/// provider keeps names like `primary:Download/part.step` in one segment).
+/// provider keeps names like `primary:Download/part.step` in one segment). A segment that is
+/// only digits (`48`, and `msf:48` from the Downloads provider) is the provider's document
+/// id, not a name: `None` so the caller can use its own.
 pub(crate) fn display_from_uri(uri: &str) -> Option<String> {
     let decoded = percent_decode(uri);
     let segment = decoded.rsplit(['/', ':']).next()?;
+    if segment.trim().bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
     let name = sanitize_name(segment, "", MAX_NAME);
     (!name.is_empty()).then_some(name)
 }
@@ -501,7 +506,7 @@ mod imp {
                 return None;
             }
             self.seen = request.count;
-            let shown = shown_name(app, &request.uri, "");
+            let shown = shown_name(app, &request.uri, "imported");
             // The name of the document says its format; the type the browser sent says it too,
             // when the name carries no extension of its own.
             let exts: Vec<String> = mime_ext(&request.mime).map(|e| vec![e.to_string()]).unwrap_or_default();
@@ -701,8 +706,13 @@ mod imp {
 
     /// The `_display_name` the provider shows for the document. `None` when the provider has
     /// no such column — the caller then falls back to the uri's own path segment.
+    ///
+    /// `ContentResolver` has no `query(Uri, String[])` overload: the platform's shortest one
+    /// takes the selection, its arguments and the sort order (or a `Bundle` instead of the
+    /// three), so the two-argument call this once made failed to resolve and every document
+    /// fell back to its id (`msf:48` showed as "48").
     fn query_display_name(app: &AndroidApp, uri: &str) -> Option<String> {
-        with_env(app, |env| -> jni::errors::Result<Option<String>> {
+        let name = with_env(app, |env| -> jni::errors::Result<Option<String>> {
             let resolver = content_resolver(env, app)?;
             let uri_obj = parse_uri(env, uri)?;
             let projection = env.new_object_array(1, jni_str!("java/lang/String"), JObject::null())?;
@@ -712,8 +722,16 @@ mod imp {
                 .call_method(
                     &resolver,
                     jni_str!("query"),
-                    jni_sig!("(Landroid/net/Uri;[Ljava/lang/String;)Landroid/database/Cursor;"),
-                    &[JValue::Object(&uri_obj), JValue::Object(&projection)],
+                    jni_sig!(
+                        "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;"
+                    ),
+                    &[
+                        JValue::Object(&uri_obj),
+                        JValue::Object(&projection),
+                        JValue::Object(&JObject::null()),
+                        JValue::Object(&JObject::null()),
+                        JValue::Object(&JObject::null()),
+                    ],
                 )?
                 .l()?;
             let mut name = None;
@@ -731,9 +749,13 @@ mod imp {
                 let _ = env.call_method(&cursor, jni_str!("close"), jni_sig!("()V"), &[]);
             }
             Ok(name)
-        })
-        .ok()
-        .flatten()
+        });
+        match &name {
+            Ok(Some(_)) => {}
+            Ok(None) => log::warn!("Android: {uri} reports no {DISPLAY_NAME}; using the uri's own name"),
+            Err(e) => log::warn!("Android: could not ask {uri} for its {DISPLAY_NAME}: {e}"),
+        }
+        name.ok().flatten()
     }
 
     /// The document's bytes, at most `cap` of them (a provider is not ours: it may claim a
@@ -970,7 +992,9 @@ mod tests {
             display_from_uri("content://com.android.providers.documents/document/primary%3ADownload%2Fwidget.step"),
             Some("widget.step".into())
         );
-        assert_eq!(display_from_uri("content://media/external/file/42"), Some("42".into()));
+        // A provider's document id is no name: the Downloads provider's `msf:48` showed as "48".
+        assert_eq!(display_from_uri("content://media/external/file/42"), None);
+        assert_eq!(display_from_uri("content://com.android.providers.downloads.documents/document/msf%3A48"), None);
         assert_eq!(display_from_uri("content://x/..%2F..%2Fetc%2Fpasswd"), Some("passwd".into()));
         assert_eq!(display_from_uri("content://x/"), None);
         assert_eq!(display_from_uri(""), None);
