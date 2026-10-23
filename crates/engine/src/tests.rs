@@ -3462,6 +3462,30 @@ fn extruding_a_sketch_on_a_side_face_takes_the_whole_drawn_profile() {
     }
 }
 
+/// A pick on a region of a drawn profile that reference geometry bounds from inside (the rim of
+/// a hole in the face) takes only that region: the rim is a real boundary of the material, and
+/// the drawn outline around it is not cut by it (#5302).
+#[test]
+fn a_pick_bounded_by_a_projected_rim_takes_only_that_region() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Base"}));
+    run(&mut s, "solid.hole", json!({"position": [20, 15, 20], "diameter": 10}));
+    let id = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 5, 20]}}))["sketch"].as_u64().unwrap();
+    // The square around the hole: the hole's rim is projected into the sketch and bounds an
+    // inner region of it, but does not cut the square.
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 5], "p1": [30, 25]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let mut s2 = Session::new((*s.doc).clone());
+    run(&mut s2, "solid.extrude", json!({"sketch": id, "distance": 5, "operation": "new", "body_name": "Pad", "profiles": [{"point": [12, 7]}]}));
+    let state = s2.model.state();
+    let pad = state.bodies.iter().find(|b| b.name == "Pad").unwrap();
+    let v = pad.body.tessellate(1e-2).unwrap().measure().volume;
+    // The square with the hole's rim cut out of it, not the whole square. The mesh measures the
+    // round rim as a polygon, so the volume is a little under the analytic one.
+    let want = (400.0 - PI * 25.0) * 5.0;
+    assert!(rel(v, want) < 5e-3, "{v} vs {want}");
+}
+
 /// An explicit pick of a drawn hole still fills only that hole (#5176).
 #[test]
 fn an_explicit_pick_of_a_drawn_hole_fills_only_that_hole() {
