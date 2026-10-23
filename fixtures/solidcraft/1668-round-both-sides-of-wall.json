@@ -1,0 +1,183 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/1668",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/1720",
+ "test": "crates/kernel/src/issue_1080_tests.rs: rounds_on_both_sides_of_a_wall_build_as_one_fillet",
+ "summary": "A 104 x 64 x 42 block less a 100 x 60 x 41 cavity open at the bottom (2 mm walls and roof), as in the test (the issue's 100 x 60 x 40 box shelled outward 2 mm). R5 on the outer top edge (y = 32, z = 42, length 104) together with R5 on the concave inner roof/wall edge below it (y = 30, z = 40, length 100) in one fillet was refused as too large (largest 4 mm), although the two built one after the other; #1720 made the fit check count the material the inner round adds. The outer round removes 25(1-pi/4) mm^2 along 104 mm, the inner one adds it along 100 mm: the cavity corner (30, 40) lies 3*sqrt(2) = 4.24 mm from the outer round's ball centre (27, 37), inside its radius, so the removed region stays in material and misses the added one. #1720's test also refused R5 on the outer edge alone; SolidCraft PR #2852 later let it build (it leaves the inner corner 0.76 mm inside the round and reaches it only past 2*sqrt(2)/(sqrt(2)-1) = 6.83 mm), and the test on main builds it. The R7 refusals (outer edge alone, and both edges) are not expressible in the runner. Tolerances are 0.1 % of the outer round's volume. Volumes are closed form.",
+ "cases": [
+  {
+   "name": "shelled_block",
+   "note": "Control: 2 mm walls and roof, open bottom, no rounds.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "outer",
+     "origin": [
+      -52,
+      -32,
+      0
+     ],
+     "size": [
+      104,
+      64,
+      42
+     ]
+    },
+    {
+     "op": "box",
+     "id": "cavity",
+     "origin": [
+      -50,
+      -30,
+      -1
+     ],
+     "size": [
+      100,
+      60,
+      41
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "outer",
+     "b": "cavity"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 39552.0,
+     "tol": 0.01,
+     "formula": "104*64*42 - 100*60*40"
+    }
+   }
+  },
+  {
+   "name": "round_5_outer_edge_alone",
+   "note": "R5 on the outer top edge only: refused when #1668 was fixed, builds since SolidCraft PR #2852 (the inner corner stays 0.76 mm inside the round).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "outer",
+     "origin": [
+      -52,
+      -32,
+      0
+     ],
+     "size": [
+      104,
+      64,
+      42
+     ]
+    },
+    {
+     "op": "box",
+     "id": "cavity",
+     "origin": [
+      -50,
+      -30,
+      -1
+     ],
+     "size": [
+      100,
+      60,
+      41
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "body",
+     "a": "outer",
+     "b": "cavity"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "body",
+     "edges": [
+      [
+       0,
+       32,
+       42
+      ]
+     ],
+     "radius": 5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 38994.035224833366,
+     "tol": 0.5579647751666345,
+     "formula": "104*64*42 - 100*60*40 - 25*(1-pi/4)*104 (tol: 0.1 % of the outer round)"
+    }
+   }
+  },
+  {
+   "name": "round_5_both_sides_of_wall",
+   "note": "#1668: R5 on the outer top edge and the inner roof/wall edge in one fillet call, refused before #1720.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "outer",
+     "origin": [
+      -52,
+      -32,
+      0
+     ],
+     "size": [
+      104,
+      64,
+      42
+     ]
+    },
+    {
+     "op": "box",
+     "id": "cavity",
+     "origin": [
+      -50,
+      -30,
+      -1
+     ],
+     "size": [
+      100,
+      60,
+      41
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "body",
+     "a": "outer",
+     "b": "cavity"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "body",
+     "edges": [
+      [
+       0,
+       32,
+       42
+      ],
+      [
+       0,
+       30,
+       40
+      ]
+     ],
+     "radius": 5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 39530.53981633975,
+     "tol": 0.5579647751666345,
+     "formula": "104*64*42 - 100*60*40 - 25*(1-pi/4)*104 + 25*(1-pi/4)*100 (tol: 0.1 % of the outer round)"
+    }
+   }
+  }
+ ]
+}
