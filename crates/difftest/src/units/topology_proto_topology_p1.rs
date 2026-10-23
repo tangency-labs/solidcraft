@@ -28,8 +28,11 @@
 //! records of one B-rep ([`TopoRecords`]), so point classifications on them reach the
 //! ported topology members (`SmVertex::GetPoint`, `SmEdge::GetCurve`,
 //! `SmFace::GetSurface`, the zone tolerances) through the [`ClassGeometry`] hooks.
-//! Deferred: `SmBrep::Transform`, the manager's fallback tolerance and what needs a real
-//! B-rep (`SmBrep::GetVertices`, `Point3DClassify`, UV domains from trim curves).
+//! The manager retains the same two default B-reps as the shim, including their
+//! infinite regions. Point classifications query those bodies; objects outside the
+//! script pool serialize as `-2`, matching the native pool's unknown-object marker.
+//! Deferred: `SmBrep::Transform`, the manager's fallback tolerance, `SmBrep::GetVertices`
+//! and UV domains from trim curves.
 //! `ProtoBrep::brep_squeeze_edge` (`SmBrep::SqueezeEdge`) defers under
 //! `harness:proto-pool-brep-edit`: the pool has no B-rep it can edit, so that is a gap
 //! of this harness, not of a plan unit (no case reaches it).
@@ -1236,6 +1239,10 @@ pub(super) struct Pool {
     pub(super) alive: Vec<bool>,
     /// The vertex, edge and face stand-ins as records of one B-rep ([`TopoRecords`]).
     pub(super) topo: TopoRecords,
+    /// The actual default-constructed B-reps supplied to the native manager.
+    breps: Vec<(H, Brep)>,
+    /// Query results outside the script pool, with their actual owning body.
+    external_topology: Vec<(H, usize, EntityRef)>,
 }
 
 /// The shim's vertex, edge and face stand-ins as records of one B-rep, so that topology
@@ -1568,18 +1575,50 @@ impl ProtoBrep<H> for Pool {
 
     fn brep_point_3d_classify(
         &mut self,
-        _k: &Kernel,
-        _brep: H,
-        _point: Point3,
-        _tolerance: f64,
-        _boundary_intersections: bool,
+        k: &Kernel,
+        brep: H,
+        point: Point3,
+        tolerance: f64,
+        boundary_intersections: bool,
     ) -> solidcore::Result<PointClassification<H>> {
-        // The pool's handles name no B-rep (the native side classifies against real
-        // ones), so the classification is a harness limitation.
-        Err(SolidError::unported(
-            "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
-            "harness:proto-topology-pool",
-        ))
+        let op = "difftest::proto_topology::brep_point_3d_classify";
+        let body = self
+            .breps
+            .iter()
+            .position(|(handle, _)| *handle == brep)
+            .ok_or_else(|| SolidError::invalid_input(op, "unknown manager B-rep"))?;
+        let (_, b) = self
+            .breps
+            .get_mut(body)
+            .ok_or_else(|| SolidError::invalid_input(op, "missing manager B-rep"))?;
+        let result = solidcore::query::brep::BrepQuery::default().point_3d_classify(
+            k,
+            b,
+            point,
+            tolerance,
+            boundary_intersections,
+        )?;
+        result.map_objects(&mut |entity| {
+            if let Some((handle, _, _)) = self
+                .external_topology
+                .iter()
+                .find(|(_, owner, stored)| *owner == body && *stored == entity)
+            {
+                return Ok(*handle);
+            }
+            let kind = match entity {
+                EntityRef::Region(_) => ClassObjectKind::Region,
+                EntityRef::Face(_) => ClassObjectKind::Face,
+                EntityRef::Edge(_) => ClassObjectKind::Edge,
+                EntityRef::Vertex(_) => ClassObjectKind::Vertex,
+                _ => return Err(SolidError::invalid_input(op, "unexpected query object")),
+            };
+            // Registered query-only handles cannot collide with script objects or
+            // the manager's reserved handles. The body remains part of identity.
+            let handle = H(usize::MAX - self.external_topology.len(), kind);
+            self.external_topology.push((handle, body, entity));
+            Ok(handle)
+        })
     }
 }
 
@@ -1623,6 +1662,11 @@ impl Pool {
         match h {
             None => -1.0,
             Some(h) => {
+                if self.external_topology.iter().any(|(handle, _, _)| *handle == h) {
+                    // The shim's pool.id returns -2 for an actual object that is
+                    // not registered among script input objects.
+                    return -2.0;
+                }
                 if self.alive.get(h.0).copied().unwrap_or(false) {
                     h.0 as f64
                 } else {
@@ -2184,6 +2228,8 @@ fn run_proto(
         kinds: Vec::new(),
         alive: Vec::new(),
         topo: TopoRecords::default(),
+        breps: Vec::new(),
+        external_topology: Vec::new(),
     };
     for ob in objects {
         let (obj, kd) = match ob {
@@ -2258,7 +2304,8 @@ fn run_proto(
     let ti = H(100_002, ClassObjectKind::Other);
     let ti_tol = approx_tol;
     // two empty B-reps, as the shim's
-    let (b1, b2) = (Brep::new(), Brep::new());
+    let b1 = Brep::new_with_infinite_region().map_err(|e| harness(e.to_string()))?;
+    let b2 = Brep::new_with_infinite_region().map_err(|e| harness(e.to_string()))?;
     let mgr = match st(ProtoTopologyManager::new(
         &k,
         (brep1, &b1),
@@ -2282,6 +2329,8 @@ fn run_proto(
         n_pe: 0,
         n_pf: 0,
     };
+    r.pool.breps.push((brep1, b1));
+    r.pool.breps.push((brep2, b2));
     let mut o = Vec::new();
 
     for opv in ops {
@@ -6593,6 +6642,46 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manager_classifications_keep_the_actual_body_in_region_identity() {
+        let k = Kernel::default();
+        let first = H(100_000, ClassObjectKind::Other);
+        let second = H(100_001, ClassObjectKind::Other);
+        let mut pool = Pool {
+            objs: Vec::new(),
+            kinds: Vec::new(),
+            alive: Vec::new(),
+            topo: TopoRecords::default(),
+            breps: vec![
+                (first, Brep::new_with_infinite_region().unwrap()),
+                (second, Brep::new_with_infinite_region().unwrap()),
+            ],
+            external_topology: Vec::new(),
+        };
+        let classify = |pool: &mut Pool, body| {
+            pool.brep_point_3d_classify(&k, body, Vec3::new(2.0, -3.0, 7.0), 1e-5, true)
+                .unwrap()
+        };
+        let a = classify(&mut pool, first);
+        let b = classify(&mut pool, second);
+        assert_eq!(a.point_class(), PointClassType::Region);
+        assert_eq!(b.point_class(), PointClassType::Region);
+        assert_ne!(a.object(), b.object());
+        assert_eq!(a.object(), classify(&mut pool, first).object());
+        assert_eq!(pool.id(a.object()), -2.0);
+        assert_eq!(pool.id(b.object()), -2.0);
+        assert!(matches!(
+            pool.brep_point_3d_classify(
+                &k,
+                H(100_002, ClassObjectKind::Other),
+                Vec3::ZERO,
+                1e-5,
+                true,
+            ),
+            Err(SolidError::InvalidInput { .. })
+        ));
+    }
 
     /// Generated scripts are accepted by the ffi checks, and most of them are comparable
     /// (not deferred) and get past their first few ops.
