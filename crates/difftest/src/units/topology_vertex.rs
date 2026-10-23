@@ -13,7 +13,11 @@
 //! as traversal indices, flags, statuses and values. `init_gaps` has the C++ side compute the cached
 //! gaps before the op, so that cached gaps and their resets are observable. A B-rep
 //! whose edges share a curve object, or whose edge curves are not B-splines or lines,
-//! is a harness error (the Rust side could not represent it).
+//! is a harness error (the Rust side could not represent it). An analytic face surface
+//! (cone, sphere, ...) travels exactly as its upstream database record when that record
+//! is lossless (`sc_analytic_export.h`, read by [`crate::util::read_exact_surface`]);
+//! any other `SmBSplineSurface` subclass is held only as its B-spline part, and the
+//! solving ops on such a B-rep are deferred.
 //!
 //! The vertex selector is taken modulo the vertex count (so generated cases need no
 //! counts); other selectors likewise, `-1` selecting null.
@@ -518,6 +522,27 @@ fn read_curve(rd: &mut Rd<'_>, uv: bool) -> Result<Option<SmCurve>, HarnessError
     Ok(Some(SmCurve::from(base)))
 }
 
+/// A face's surface block: an exact analytic head (`2 ...`,
+/// [`crate::util::read_exact_surface`]) and the regular block after it, or the regular
+/// block alone. A surface rebuilt exactly does not mark the B-rep inexact.
+fn read_face_surface(rd: &mut Rd<'_>) -> Result<Option<Surface>, HarnessError> {
+    if rd.v.get(rd.at) != Some(&2.0) {
+        return read_surface(rd);
+    }
+    rd.at += 1;
+    let exact = crate::util::read_exact_surface(&mut || rd.num())?;
+    let before = rd.inexact;
+    let fallback = read_surface(rd)?;
+    match exact {
+        Some(s) => {
+            crate::util::check_exact_base(&s, fallback.as_ref())?;
+            rd.inexact = before;
+            Ok(Some(s))
+        }
+        None => Ok(fallback),
+    }
+}
+
 fn read_surface(rd: &mut Rd<'_>) -> Result<Option<Surface>, HarnessError> {
     let kind = rd.num()?;
     if kind == -1.0 {
@@ -627,7 +652,7 @@ fn import(ex: &[f64]) -> Result<(Brep, Option<i64>), HarnessError> {
     }
     let mut surfaces = Vec::new();
     for _ in 0..n_f {
-        let surface = read_surface(&mut rd)?;
+        let surface = read_face_surface(&mut rd)?;
         // `GetUVDomain` and `GetTolerance`
         let (u0, v0, u1, v1) = (rd.num()?, rd.num()?, rd.num()?, rd.num()?);
         let tolerance = rd.num()?;

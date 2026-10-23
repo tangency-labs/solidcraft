@@ -10,16 +10,15 @@
 //! compared as flags, statuses, tolerances, edge use / vertex use states and sampled
 //! curve points (see the FFI module docs for each op's output).
 //!
-//! **Inexact geometry.** The import holds an analytic `SmBSplineSurface` subclass other
-//! than `SmPlane` (cylinder, cone, sphere, torus, surface of revolution or extrusion) and
-//! an `SmBSplineCurve` subclass other than `SmLine` (ellipse, ...) only as its B-spline
-//! part. A geometric op (`LoopOrient` and later) on a B-rep holding such a kind is
-//! deferred to the unit that gives the kind its Rust representation: the `SurfaceKind`
-//! dispatch of `surface.surface_p2` for `SmCone` / `SmCylinder` / `SmSphere` / `SmTorus`
-//! (their own units are ported, but no `Surface` can hold them yet),
-//! `surface.surf_of_extrusion_p2` for the extrusion, `topology.brep_p7`
-//! (`SmBrep::ReadFromFile`) otherwise; the topological ops (`Lamina`, `SetTol`, `Notify`)
-//! are compared on every B-rep.
+//! **Inexact geometry.** The shared export carries an analytic face surface (surface of
+//! revolution, cone, cylinder, sphere, torus, extrusion) exactly, as its upstream database
+//! record, when that record is lossless (`sc_analytic_export.h`); the import then holds
+//! the real `SurfaceKind`. Any other `SmBSplineSurface` subclass than `SmPlane`, and an
+//! `SmBSplineCurve` subclass other than `SmLine` (ellipse, ...), is held only as its
+//! B-spline part. A geometric op (`LoopOrient` and later) on a B-rep holding such a kind is
+//! deferred (the labels of `inexact_geometry`; `topology.brep_p7`, `SmBrep::ReadFromFile`,
+//! for curves); the topological ops (`Lamina`, `SetTol`, `Notify`) are compared on every
+//! B-rep.
 //!
 //! Face, loop and other-face selectors are taken modulo the B-rep's counts, so
 //! generated cases need no counts; a B-rep without faces gives `no face` on both sides.
@@ -464,14 +463,19 @@ fn is_vertex_loop(b: &Brep, l: LoopId) -> bool {
 
 /// The deferral of a geometric op on a B-rep holding a kind the import has only as its
 /// B-spline part (see the module docs).
-fn inexact_geometry(types: &[f64]) -> Result<Option<Output>, HarnessError> {
+fn inexact_geometry(types: &[f64], exact: &[bool]) -> Result<Option<Output>, HarnessError> {
     let bad = || harness("bad types export");
     let n_f = *types.get(1).ok_or_else(bad)? as usize;
     let surfaces = types.get(2..2 + n_f).ok_or_else(bad)?;
     let n_e = *types.get(2 + n_f).ok_or_else(bad)? as usize;
     let curves = types.get(3 + n_f..3 + n_f + n_e).ok_or_else(bad)?;
-    for &t in surfaces {
+    for (i, &t) in surfaces.iter().enumerate() {
         let t = t as i64;
+        // a face surface the shared export carried exactly (its upstream record, read
+        // by the ported `ReadFromDB`) is the real analytic kind on the Rust side
+        if exact.get(i).copied().unwrap_or(false) {
+            continue;
+        }
         if t >= 0 && !EXACT_SURFACES.contains(&t) {
             // The analytic kinds' own units (`surface.cone_p1`, `surface.sphere`,
             // `surface.torus`) are ported; what is missing is their `SurfaceKind`
@@ -559,7 +563,7 @@ fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(b) => b,
         Err(out) => return Ok(out),
     };
-    let (mut b, _) = shared::import(&built.export)?;
+    let (mut b, exact) = shared::import(&built.export)?;
     let Some(a) = args(&i.op, &built, |f| first_loop(&b, f)) else {
         return Ok(Output::err("no face"));
     };
@@ -570,7 +574,7 @@ fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
     if op as i32 >= Op::LoopOrient as i32 && !vertex_loop {
         let types = ffi::eval(Op::Types, &built.path, &built.block, &[])
             .map_err(|e| harness(format!("c++ types: {e}")))?;
-        if let Some(o) = inexact_geometry(&types)? {
+        if let Some(o) = inexact_geometry(&types, &exact)? {
             return Ok(o);
         }
     }

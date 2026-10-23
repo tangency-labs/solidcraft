@@ -646,7 +646,7 @@ pub(super) fn inexact(t: &Topo, edges: &[EdgeId], eus: &[EdgeuseId]) -> Option<O
             let st = eu1::face(b, e)
                 .ok()
                 .flatten()
-                .and_then(|f| t.types.face_surface_types.get(f.index() as usize).copied())
+                .and_then(|f| t.types.inexact_surface(f.index() as usize))
                 .unwrap_or(-1);
             if st >= 0 && !EXACT_SURFACES.contains(&st) {
                 let (unit, symbol) = match st {

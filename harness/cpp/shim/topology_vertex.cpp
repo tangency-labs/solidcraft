@@ -23,6 +23,7 @@
 // would dereference null (or read an uninitialised value) output -2 instead of calling it.
 #include "sc_shim.h"
 #include "support/topology_fixture.h"
+#include "sc_analytic_export.h"
 
 
 #include "StdAfx.h"
@@ -661,6 +662,10 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
     }
     for (SmFace* p : g.faces)
     {
+        // an analytic face surface whose record is lossless travels exactly first
+        // (sc_analytic_export.h: `2 type version surf_oob gen_oob nbytes bytes`), then
+        // its regular block as for any face
+        sc_analytic_export::put_exact_head(o, p->GetSurface(), the_context());
         put_surface(o, p->GetSurface());
         // the face's UV domain and tolerance (the vertex/face gaps solve against them)
         SmExtent2d d = p->GetUVDomain();
