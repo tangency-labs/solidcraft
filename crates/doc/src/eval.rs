@@ -2515,6 +2515,7 @@ fn apply_traced(state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Ope
                 for t in &tools {
                     let t = &tool_in(t, into)?;
                     acc = match acc {
+                        Some(a) if bop == BoolOp::Intersect => kernel::intersect_by_pieces(&a.body, &t.body)?.map(|r| Traced::step(r, &[&a, t])),
                         Some(a) => kernel::boolean(&a.body, &t.body, bop)?.map(|r| Traced::step(r, &[&a, t])),
                         None => None,
                     };

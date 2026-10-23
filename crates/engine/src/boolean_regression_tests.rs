@@ -1223,3 +1223,34 @@ fn extrude_cut_into_a_rounded_block_top() {
     let v = before - volume(&cut, "Body1");
     assert!((v - taken).abs() < 0.05, "took {v}, expected {taken}");
 }
+
+/// Two spheres joined into one body while apart, intersected with a box that holds the bottom
+/// half of each (#3526). The intersect removed the whole body without an error; it keeps both
+/// half spheres now.
+#[test]
+fn intersect_keeps_every_lump_of_a_target() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    s.execute("solid.sphere", &json!({"radius": 4, "center": [0, 0, 0], "operation": "new", "body_name": "Balls"})).unwrap();
+    s.execute("solid.sphere", &json!({"radius": 4, "center": [30, 0, 0], "operation": "join", "targets": ["Balls"]})).unwrap();
+    assert_eq!(s.model.state().body("Balls").map(|b| b.body.shell_count()), Some(2));
+    s.execute("solid.box", &json!({"length": 50, "width": 20, "height": 10, "corner": [-10, -10, -10], "operation": "new", "body_name": "K"}))
+        .unwrap();
+    let reply = s.execute("solid.combine", &json!({"target": "Balls", "tools": ["K"], "operation": "intersect", "keep_tools": true})).unwrap();
+    assert_eq!(reply["removed_bodies"], json!([]), "{reply}");
+    {
+        let state = s.model.state();
+        let body = &state.body("Balls").unwrap().body;
+        assert_eq!(body.shell_count(), 2);
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+    }
+    let want = 2.0 * 2.0 / 3.0 * PI * 64.0;
+    let got = volume(&s, "Balls");
+    println!("two spheres in one body, intersected: {got:.6} mm³, expected {want:.6}");
+    assert!((got - want).abs() < 1e-3 * want, "{got} vs {want}");
+    // A box clear of both spheres still leaves nothing.
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [10, 20, 0], "operation": "new", "body_name": "Clear"}))
+        .unwrap();
+    let reply = s.execute("solid.combine", &json!({"target": "Balls", "tools": ["Clear"], "operation": "intersect"})).unwrap();
+    assert_eq!(reply["removed_bodies"], json!(["Balls", "Clear"]), "{reply}");
+}

@@ -876,6 +876,8 @@ thread_local! {
     static BORES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The intersections left to the booleans running under [`with_attempt_budget`], if any.
     static ATTEMPTS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    /// Set by [`intersect_by_pieces`] for its own boolean only: the first [`boolean_via`] takes it.
+    static EMPTY_BY_PIECES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// `f`, with the booleans it runs on this thread allowed `attempts` of the kernel's own
@@ -908,6 +910,18 @@ fn take_attempt() -> bool {
             true
         }
     })
+}
+
+/// The intersect of a feature (Combine, an extrude's intersect): as [`boolean`], and bodies in
+/// several pieces whose whole comes out empty are tried a piece at a time too, as an empty cut
+/// always is. The whole of two spheres apart, met by one box, came out empty (#3526). The
+/// kernel's own intersects (a shell's opening trim, a planar split) keep the empty whole: their
+/// fallbacks expect it, and taken apart there it split a shell's wall in two.
+pub fn intersect_by_pieces(a: &Body, b: &Body) -> Result<Option<Body>> {
+    EMPTY_BY_PIECES.with(|c| c.set(true));
+    let r = boolean(a, b, BoolOp::Intersect);
+    EMPTY_BY_PIECES.with(|c| c.set(false));
+    r
 }
 
 /// Boolean of two bodies. The result may be empty (`Ok(None)`) for a cut that removes
@@ -963,11 +977,14 @@ fn conical_cut_junction(a: &Body, b: &Body) -> bool {
 
 /// [`boolean`], the boolean of the whole bodies taken by `whole`.
 fn boolean_via(a: &Body, b: &Body, op: BoolOp, whole: &dyn Fn(&Body, &Body, BoolOp) -> Result<Option<Body>>) -> Result<Option<Body>> {
+    let empty_by_pieces = EMPTY_BY_PIECES.with(|c| c.replace(false));
     let (mut r, mut diagnostics) = capture_boolean_diagnostics(|| whole(a, b, op));
     // Bodies in several pieces: when the whole failed (or came out empty), a piece at a time.
+    // An empty intersect only for a feature's own ([`intersect_by_pieces`]); the pieces still
+    // say empty where no piece meets another.
     let retry = match &r {
         Err(_) => true,
-        Ok(None) => op != BoolOp::Intersect,
+        Ok(None) => op != BoolOp::Intersect || empty_by_pieces,
         Ok(Some(_)) => false,
     };
     if retry && (a.solid.boundaries().len() > 1 || b.solid.boundaries().len() > 1) {
