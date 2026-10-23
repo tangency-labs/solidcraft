@@ -48,6 +48,8 @@ test('missing: short reports without steps are asked, with the version when it i
 test('missing: empty app reports are asked to paste the copied report', () => {
   assert.deepEqual(info.missing('EXTRUDE: operation failed', ''), ['paste']);
   assert.deepEqual(info.missing('Modeling: unexpected result', '  '), ['paste']);
+  assert.deepEqual(info.missing('Sketch: line vanishes after trimming', ''), ['paste']);
+  assert.deepEqual(info.missing('Sheet Metal: operation failed', ''), ['paste']);
 });
 
 test('missing: reproducible, long, app-filed and non-bug issues are left alone', () => {

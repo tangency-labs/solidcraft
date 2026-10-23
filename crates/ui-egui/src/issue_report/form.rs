@@ -136,7 +136,14 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                         ui_kit::text(ui, tr_label("Reports are public. A GitHub account is required."), ui_kit::Text::Note("public"));
                         ui_kit::divider(ui, "report");
                         ui_kit::text(ui, tr_label("Summary"), ui_kit::Text::Heading("Summary"));
-                        let response = ui_kit::bounded_cell_editor(ui, Id::new("issue_report_title"), &mut draft.title, "", false, 160);
+                        let response = ui_kit::bounded_cell_editor(
+                            ui,
+                            Id::new("issue_report_title"),
+                            &mut draft.title,
+                            "A short title for the problem (optional)",
+                            false,
+                            160,
+                        );
                         if response.changed() {
                             draft.opened_github = false;
                         }

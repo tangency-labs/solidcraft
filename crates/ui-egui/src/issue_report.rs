@@ -103,6 +103,7 @@ pub struct ReportState {
 
 pub struct Draft {
     pub title: String,
+    title_prefix: String,
     /// Collected technical context, separately reviewable and editable.
     pub body: String,
     description: String,
@@ -121,6 +122,7 @@ impl Draft {
     fn new(title: String, body: String, source_signature: u64) -> Self {
         Self {
             title,
+            title_prefix: String::new(),
             body,
             description: String::new(),
             steps: String::new(),
@@ -137,7 +139,8 @@ impl Draft {
 
     fn report_title(&self) -> String {
         if self.title.trim().is_empty() {
-            limited(self.description.trim().lines().next().unwrap_or_default(), 160)
+            let summary = limited(self.description.trim().lines().next().unwrap_or_default(), 160);
+            limited(&format!("{}{summary}", self.title_prefix), 160)
         } else {
             limited(&self.title, 160)
         }
@@ -296,7 +299,7 @@ fn feature_context(feature: &solidcraft_engine::doc::Feature) -> String {
 /// Read-only context excludes whole documents, sketch geometry and imported file contents.
 pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option<&str>) -> Draft {
     let mut context = String::new();
-    let label = dialog.map(dialogs::report_title).unwrap_or_else(|| "Modeling".into());
+    let label = dialog.map(dialogs::report_title).unwrap_or_else(|| crate::mouse_gesture::Studio::of(app).label().into());
     if let Some(d) = dialog {
         match dialogs::apply_commands(app, d) {
             Ok(commands) => context.push_str(&block(&json_context(&commands, 10_000))),
@@ -346,9 +349,11 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
         truncate(&mut body, MAX_BODY - 32);
         body.push_str("\n[report context truncated]\n");
     }
-    let mut title = format!("{label}: {}", if error.is_some() { "operation failed" } else { "unexpected result" });
+    let mut title = if error.is_some() { format!("{label}: operation failed") } else { String::new() };
     truncate(&mut title, 160);
-    Draft::new(title, body, source_signature(app, dialog))
+    let mut draft = Draft::new(title, body, source_signature(app, dialog));
+    draft.title_prefix = format!("{label}: ");
+    draft
 }
 
 /// A draft from a crash report (`solidcraft_engine::crash`): what happened, where, the command
@@ -632,6 +637,28 @@ mod tests {
             commands.extend(h.output.commands.clone());
         }
         commands
+    }
+
+    #[test]
+    fn issue_report_title_uses_sketch_workspace_and_description() {
+        let mut app = app();
+        app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let mut draft = draft_for(&app, None, None);
+        assert!(draft.title.is_empty());
+        draft.description = "  Line disappears after drawing\nMore details".into();
+        assert_eq!(draft.report_title(), "Sketch: Line disappears after drawing");
+        assert!(!draft.report_title().contains("unexpected result"));
+        draft.title = "Custom summary".into();
+        assert_eq!(draft.report_title(), "Custom summary");
+    }
+
+    #[test]
+    fn issue_report_title_preserves_recorded_failure() {
+        let mut app = app();
+        app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let mut draft = draft_for(&app, None, Some("Synthetic command error"));
+        draft.description = "Line could not be drawn".into();
+        assert_eq!(draft.report_title(), "Sketch: operation failed");
     }
 
     #[test]

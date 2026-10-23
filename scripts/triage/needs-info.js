@@ -24,9 +24,10 @@ function fromApp(body) {
 
 // Requests and plans, which aren't reproduced. Crash reports carry the crash folder's contents.
 const NOT_A_BUG = /^\s*\[(feat|feature|change|enhancement)|feature request|suggestion|\?\s*$|^\s*(tracker|refactor|support|add|allow|crash|how|why|request|missing)\b/i;
-// The app's report title. A long report opens the browser without its body and is copied to
-// the clipboard instead (crates/ui-egui/src/issue_report.rs, draft_url), so an empty one wasn't pasted.
-const APP_TITLE = /^[A-Z][A-Z ]+:\s*(operation failed|unexpected result)\b|^Modeling: unexpected result/;
+// The app's report title: the open dialog (`EXTRUDE: …`) or the workspace (`Sketch: …`), then the
+// reporter's summary. A long report opens the browser without its body and is copied to the
+// clipboard instead (crates/ui-egui/src/issue_report.rs, draft_url), so an empty one wasn't pasted.
+const APP_TITLE = /^([A-Z][A-Z ]+|Modeling|Part|Sketch|Surface|Sheet Metal|Plastic|Mesh|Render):\s*\S/;
 // A report this long describes what it saw; only short ones are asked.
 const SHORT = 300;
 const ATTACHMENT = /user-attachments\/|\.solidcraft\b|repro\.json|\.(step|stp|3mf|stl)\b/i;
