@@ -12,9 +12,8 @@
 use std::sync::{Arc, Mutex};
 
 use solidcraft_geom::Vec3;
-use wgpu::util::DeviceExt;
 
-use crate::pbr;
+use crate::{Result, buffer_init, pbr};
 
 mod ao;
 mod oit;
@@ -625,24 +624,22 @@ enum SharedGpu {
 }
 
 impl SharedGpu {
-    fn new(device: &wgpu::Device, tris: &SharedTris) -> Option<SharedGpu> {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, tris: &SharedTris) -> Result<Option<SharedGpu>> {
         let limit = device.limits().max_buffer_size;
         let index_bytes = (tris.indices.len() * 4) as u64;
         if tris.vertices.is_empty() || tris.indices.is_empty() {
-            return None;
+            return Ok(None);
         }
         if tris.vertices.len() as u64 > limit || index_bytes > limit {
-            return upload(device, "sc_instanced_unshared", &tris.unshared(), SHARED_SIZE).map(SharedGpu::Unshared);
+            return upload(device, queue, "sc_instanced_unshared", &tris.unshared(), SHARED_SIZE).map(|b| b.map(SharedGpu::Unshared));
         }
-        let buffer = |label: &str, contents: &[u8], usage: wgpu::BufferUsages| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents, usage })
-        };
+        let buffer = |label: &str, contents: &[u8], usage: wgpu::BufferUsages| buffer_init(device, queue, label, contents, usage);
         let indices: Vec<u8> = tris.indices.iter().flat_map(|i| i.to_le_bytes()).collect();
-        Some(SharedGpu::Indexed {
-            vertices: buffer("sc_instanced_vertices", &tris.vertices, wgpu::BufferUsages::VERTEX),
-            indices: buffer("sc_instanced_indices", &indices, wgpu::BufferUsages::INDEX),
+        Ok(Some(SharedGpu::Indexed {
+            vertices: buffer("sc_instanced_vertices", &tris.vertices, wgpu::BufferUsages::VERTEX)?,
+            indices: buffer("sc_instanced_indices", &indices, wgpu::BufferUsages::INDEX)?,
             count: u32::try_from(tris.indices.len()).unwrap_or(u32::MAX),
-        })
+        }))
     }
 }
 
@@ -841,16 +838,23 @@ struct Batches {
 impl Batches {
     /// Upload a new scene. Planned bodies not yet on the GPU are evaluated there: their
     /// dispatches go into `encoder`, ahead of this frame's render pass.
-    fn take(&mut self, device: &wgpu::Device, key: u64, slot: &SceneSlot, tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>) {
+    fn take(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        key: u64,
+        slot: &SceneSlot,
+        tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
+    ) -> Result<()> {
         if self.key == Some(key) {
-            return;
+            return Ok(());
         }
         if let Some(sc) = slot.lock().ok().and_then(|mut s| s.take()) {
             self.planned = match tess {
-                Some((tess, encoder)) => self.planned(device, tess, encoder, &sc.planned),
+                Some((tess, encoder)) => self.planned(device, queue, tess, encoder, &sc.planned)?,
                 None => Vec::new(),
             };
-            self.instanced = self.instanced(device, &sc.instanced);
+            self.instanced = self.instanced(device, queue, &sc.instanced)?;
             let mut kept = std::mem::take(&mut self.blocks);
             let mut blocks: Vec<&BlockGpu> = Vec::with_capacity(sc.blocks.len());
             for block in &sc.blocks {
@@ -858,10 +862,10 @@ impl Batches {
                     Some(g) => g,
                     None => BlockGpu {
                         bytes: block.bytes.clone(),
-                        tris: upload(device, "sc_tris", &block.bytes.tris, TRI_SIZE),
-                        trans: upload(device, "sc_trans", &block.bytes.trans, TRI_SIZE),
-                        lines: upload(device, "sc_lines", &block.bytes.lines, LINE_SIZE),
-                        hidden: upload(device, "sc_hidden", &block.bytes.hidden, LINE_SIZE),
+                        tris: upload(device, queue, "sc_tris", &block.bytes.tris, TRI_SIZE)?,
+                        trans: upload(device, queue, "sc_trans", &block.bytes.trans, TRI_SIZE)?,
+                        lines: upload(device, queue, "sc_lines", &block.bytes.lines, LINE_SIZE)?,
+                        hidden: upload(device, queue, "sc_hidden", &block.bytes.hidden, LINE_SIZE)?,
                     },
                 };
                 self.blocks.insert(block.key, gpu);
@@ -871,28 +875,29 @@ impl Batches {
                     blocks.push(g);
                 }
             }
-            self.tris = joined(blocks.iter().map(|b| &b.tris), upload(device, "sc_tris", &sc.tris, TRI_SIZE));
-            self.pbr = upload(device, "sc_pbr", &sc.pbr, PBR_SIZE);
-            self.trans = joined(blocks.iter().map(|b| &b.trans), upload(device, "sc_trans", &sc.trans, TRI_SIZE));
-            self.shadow = upload(device, "sc_shadow", &sc.shadow, TRI_SIZE);
-            self.glass = upload_with(device, "sc_glass", &sc.glass, TRI_SIZE, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST);
+            self.tris = joined(blocks.iter().map(|b| &b.tris), upload(device, queue, "sc_tris", &sc.tris, TRI_SIZE)?);
+            self.pbr = upload(device, queue, "sc_pbr", &sc.pbr, PBR_SIZE)?;
+            self.trans = joined(blocks.iter().map(|b| &b.trans), upload(device, queue, "sc_trans", &sc.trans, TRI_SIZE)?);
+            self.shadow = upload(device, queue, "sc_shadow", &sc.shadow, TRI_SIZE)?;
+            self.glass = upload_with(device, queue, "sc_glass", &sc.glass, TRI_SIZE, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST)?;
             self.glass_cpu = sc.glass;
             self.glass_sorted_for = None;
-            self.lines = joined(blocks.iter().map(|b| &b.lines), upload(device, "sc_lines", &sc.lines, LINE_SIZE));
-            self.hidden = joined(blocks.iter().map(|b| &b.hidden), upload(device, "sc_hidden", &sc.hidden, LINE_SIZE));
-            self.overlays = upload(device, "sc_overlay", &sc.overlay, LINE_SIZE);
-            self.ghost = upload(device, "sc_ghost", &sc.ghost, TRI_SIZE);
-            self.xray = upload(device, "sc_xray", &sc.xray, TRI_SIZE);
-            self.under = upload(device, "sc_under", &sc.under, LINE_SIZE);
-            self.guide_trans = upload(device, "sc_guide_trans", &sc.guide_trans, TRI_SIZE);
-            self.guide_lines = upload(device, "sc_guide_lines", &sc.guide_lines, LINE_SIZE);
+            self.lines = joined(blocks.iter().map(|b| &b.lines), upload(device, queue, "sc_lines", &sc.lines, LINE_SIZE)?);
+            self.hidden = joined(blocks.iter().map(|b| &b.hidden), upload(device, queue, "sc_hidden", &sc.hidden, LINE_SIZE)?);
+            self.overlays = upload(device, queue, "sc_overlay", &sc.overlay, LINE_SIZE)?;
+            self.ghost = upload(device, queue, "sc_ghost", &sc.ghost, TRI_SIZE)?;
+            self.xray = upload(device, queue, "sc_xray", &sc.xray, TRI_SIZE)?;
+            self.under = upload(device, queue, "sc_under", &sc.under, LINE_SIZE)?;
+            self.guide_trans = upload(device, queue, "sc_guide_trans", &sc.guide_trans, TRI_SIZE)?;
+            self.guide_lines = upload(device, queue, "sc_guide_lines", &sc.guide_lines, LINE_SIZE)?;
             self.key = Some(key);
         }
+        Ok(())
     }
 
     /// The instanced meshes on the GPU: triangles uploaded once per key (kept while the key comes
     /// back with the same bytes), placements every time.
-    fn instanced(&mut self, device: &wgpu::Device, meshes: &[InstancedMesh]) -> Vec<InstancedDraw> {
+    fn instanced(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, meshes: &[InstancedMesh]) -> Result<Vec<InstancedDraw>> {
         let mut kept = std::mem::take(&mut self.instanced_tris);
         let mut out = Vec::with_capacity(meshes.len());
         for m in meshes {
@@ -906,17 +911,13 @@ impl Batches {
                 let key = Arc::as_ptr(tris) as usize;
                 let gpu = match kept.remove(&key).or_else(|| self.instanced_tris.remove(&key)).filter(|(b, _)| Arc::ptr_eq(b, tris)) {
                     Some(t) => t,
-                    None => match SharedGpu::new(device, tris) {
+                    None => match SharedGpu::new(device, queue, tris)? {
                         Some(g) => (tris.clone(), Arc::new(g)),
                         None => continue,
                     },
                 };
                 // Until the first cull, every placement is drawn in full.
-                let instances = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("sc_instances"),
-                    contents: &placements,
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                });
+                let instances = buffer_init(device, queue, "sc_instances", &placements, wgpu::BufferUsages::VERTEX)?;
                 let count = if i == 0 { count } else { 0 };
                 levels.push(LevelDraw { tris: gpu.1.clone(), flat: tris.flat, error, instances, count });
                 self.instanced_tris.insert(key, gpu);
@@ -925,7 +926,7 @@ impl Batches {
                 out.push(InstancedDraw { look: m.look, levels, bounds: m.tris.bounds, placements, shown: None });
             }
         }
-        out
+        Ok(out)
     }
 
     /// Keep only the placements of the instanced meshes that may be seen in the view `vp` (see
@@ -992,10 +993,11 @@ impl Batches {
     fn planned(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         tess: &crate::TessGpu,
         encoder: &mut wgpu::CommandEncoder,
         bodies: &[PlannedBody],
-    ) -> Vec<PlannedDraw> {
+    ) -> Result<Vec<PlannedDraw>> {
         // Chunks end where a body's own plan says (or when full), so a body whose plan changes
         // (an edit, or a refinement as the view zooms in, #1320) re-evaluates only its own
         // chunk, not the whole scene.
@@ -1044,11 +1046,11 @@ impl Batches {
                 let faces = mesh.vertex_face.get(part.vertices.start as usize..part.vertices.end as usize).unwrap_or_default();
                 bytes.extend(faces.iter().flat_map(|f| b.face_colors.get(*f as usize).copied().unwrap_or(last)));
             }
-            if let Some((colors, _)) = upload(device, "sc_planned_colors", &bytes, 4).and_then(|c| c.parts.into_iter().next()) {
+            if let Some((colors, _)) = upload(device, queue, "sc_planned_colors", &bytes, 4)?.and_then(|c| c.parts.into_iter().next()) {
                 out.push(PlannedDraw { mesh, colors });
             }
         }
-        out
+        Ok(out)
     }
 }
 
@@ -1881,24 +1883,31 @@ pub const FACE_SLOPE: f32 = 1.0;
 /// shape, so twice [`FACE_BIAS`].
 const GHOST_BIAS: wgpu::DepthBiasState = wgpu::DepthBiasState { constant: 2 * FACE_STEPS, slope_scale: 2.0 * FACE_SLOPE, clamp: 0.0 };
 
-fn upload(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize) -> Option<Batch> {
-    upload_with(device, label, bytes, stride, wgpu::BufferUsages::VERTEX)
+fn upload(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, bytes: &[u8], stride: usize) -> Result<Option<Batch>> {
+    upload_with(device, queue, label, bytes, stride, wgpu::BufferUsages::VERTEX)
 }
 
-fn upload_with(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize, usage: wgpu::BufferUsages) -> Option<Batch> {
+fn upload_with(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    bytes: &[u8],
+    stride: usize,
+    usage: wgpu::BufferUsages,
+) -> Result<Option<Batch>> {
     if bytes.len() < stride || stride == 0 {
-        return None;
+        return Ok(None);
     }
     let chunk = buffer_chunk(stride, device.limits().max_buffer_size);
     let parts = bytes
         .chunks(chunk)
         .filter(|part| part.len() >= stride)
         .map(|part| {
-            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: part, usage });
-            (buffer, u32::try_from(part.len() / stride).unwrap_or(0))
+            let buffer = buffer_init(device, queue, label, part, usage)?;
+            Ok((buffer, u32::try_from(part.len() / stride).unwrap_or(0)))
         })
-        .collect();
-    Some(Batch { parts, chunk })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(Batch { parts, chunk }))
 }
 
 /// Bytes per GPU buffer for vertices of `stride` bytes: within the device's limit and a
@@ -2037,6 +2046,18 @@ impl Renderer {
     /// content is the same as the picture drawn last is not drawn again: that picture is blitted
     /// instead, so pointer moves and UI animations over a still view cost no scene work.
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
+        if let Err(e) = self.try_prepare(device, queue, encoder, frame) {
+            log::error!("geometry upload failed: {e}");
+        }
+    }
+
+    pub(crate) fn try_prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: &Frame,
+    ) -> Result<()> {
         let res = self;
         let cb = frame;
         let key = frame_key(cb);
@@ -2045,23 +2066,23 @@ impl Renderer {
             if res.ss_scaled && res.cached.is_none() {
                 res.cache_picture(device, encoder, cb.size_px);
             }
-            return;
+            return Ok(());
         }
         res.cached = None;
         if cb.product {
-            res.product.take(device, cb.key, &cb.slot, None);
+            res.product.take(device, queue, cb.key, &cb.slot, None)?;
             res.product.sort_glass(queue, cb.back);
             queue.write_buffer(&res.uniform, 0, &uniform_bytes(cb, cb.size_px[0], cb.size_px[1], res.linear_out, res.target.reversed_depth()));
             // The product picture goes through the window's pass too: offscreen when the targets
             // differ or it is drawn smaller, else straight into the window's pass.
             res.ss_ready = (res.window_differs() || cb.ssaa != 1.0) && res.supersample(device, encoder, cb, false);
             res.ss_key = res.ss_ready.then_some(key);
-            return;
+            return Ok(());
         }
-        res.model.take(device, cb.key, &cb.slot, res.tess.as_ref().map(|t| (t, &mut *encoder)));
-        res.sketch.take(device, cb.sketch_key, &cb.sketch_slot, None);
-        res.highlight.take(device, cb.hl_key, &cb.hl_slot, None);
-        res.preview.take(device, cb.pv_key, &cb.pv_slot, None);
+        res.model.take(device, queue, cb.key, &cb.slot, res.tess.as_ref().map(|t| (t, &mut *encoder)))?;
+        res.sketch.take(device, queue, cb.sketch_key, &cb.sketch_slot, None)?;
+        res.highlight.take(device, queue, cb.hl_key, &cb.hl_slot, None)?;
+        res.preview.take(device, queue, cb.pv_key, &cb.pv_slot, None)?;
         // See-through surfaces are drawn without sorting where the device can (order-independent
         // transparency, in an offscreen frame); else their triangles are sorted for the view.
         let see_through = res.oit.is_some() && res.model.see_through();
@@ -2122,12 +2143,13 @@ impl Renderer {
                     bytes.extend_from_slice(&v.to_le_bytes());
                 }
             }
-            if let Some(b) = upload(device, "sc_image_quad", &bytes, IMG_SIZE) {
+            if let Some(b) = upload(device, queue, "sc_image_quad", &bytes, IMG_SIZE)? {
                 res.quads.push((img.id, b));
             }
         }
         res.ss_ready = (cb.ssaa != 1.0 || see_through || res.window_differs()) && res.supersample(device, encoder, cb, see_through);
         res.ss_key = res.ss_ready.then_some(key);
+        Ok(())
     }
 
     /// Draw the frame into `pass` within `viewport` (x, y, width, height in physical pixels):

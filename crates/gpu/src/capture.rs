@@ -13,10 +13,9 @@ use std::sync::{Arc, Mutex};
 
 use solidcraft_geom::Vec3;
 use solidcraft_render::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene};
-use wgpu::util::DeviceExt;
 
 use crate::view::{AccessMap, Frame, GpuScene, GpuTarget, Renderer, analysis_colors, analysis_uniform};
-use crate::{GpuError, Result, popped};
+use crate::{GpuError, Result, caught, error_scopes};
 
 /// The colour format pictures are drawn in: sRGB bytes as they are, like the viewport's usual
 /// (non-sRGB) target.
@@ -209,9 +208,18 @@ impl Capturer {
         let (resolved_view, depth_view) = (resolved.create_view(&Default::default()), depth.create_view(&Default::default()));
         let multisampled_view = multisampled.as_ref().map(|t| t.create_view(&Default::default()));
         let (top, bottom) = scene.background.unwrap_or(BACKGROUND);
-        let background = background_vertices(device, top, bottom);
+        let background = match background_vertices(device, queue, top, bottom) {
+            Ok(b) => b,
+            Err(e) => {
+                let _ = caught(scopes);
+                return Err(e);
+            }
+        };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_capture") });
-        state.renderer.prepare(device, queue, &mut encoder, &frame);
+        if let Err(e) = state.renderer.try_prepare(device, queue, &mut encoder, &frame) {
+            let _ = caught(scopes);
+            return Err(e);
+        }
         {
             let (view, resolve_target, store) = match &multisampled_view {
                 Some(ms) => (ms, Some(&resolved_view), wgpu::StoreOp::Discard),
@@ -439,22 +447,6 @@ fn watch_lost(device: &wgpu::Device) -> Arc<AtomicBool> {
     lost
 }
 
-/// Error scopes catching what a picture's GPU work may raise (popped by [`caught`]).
-fn error_scopes(device: &wgpu::Device) -> [wgpu::ErrorScopeGuard; 3] {
-    [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation].map(|f| device.push_error_scope(f))
-}
-
-/// The first error the scopes caught.
-fn caught(scopes: [wgpu::ErrorScopeGuard; 3]) -> Option<String> {
-    let mut failed = None;
-    for scope in scopes.into_iter().rev() {
-        if let Some(e) = popped(scope.pop()) {
-            failed.get_or_insert(e.to_string());
-        }
-    }
-    failed
-}
-
 /// The background gradient: the viewport's top colour at the top, its bottom one at the bottom,
 /// mixed in sRGB as the window paints it.
 const BACKGROUND_SHADER: &str = r#"
@@ -475,7 +467,7 @@ fn fs(i: O) -> @location(0) vec4<f32> {
 /// Background vertex: NDC position (2 × f32) and sRGB colour (4 × u8).
 const BACKGROUND_VERTEX: u64 = 12;
 
-fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> wgpu::Buffer {
+fn background_vertices(device: &wgpu::Device, queue: &wgpu::Queue, top: Rgb, bottom: Rgb) -> Result<wgpu::Buffer> {
     let mut bytes = Vec::with_capacity(6 * BACKGROUND_VERTEX as usize);
     let corner = |x: f32, y: f32| (x, y, if y > 0.0 { top } else { bottom });
     for (x, y, c) in [corner(-1.0, 1.0), corner(1.0, 1.0), corner(1.0, -1.0), corner(-1.0, 1.0), corner(1.0, -1.0), corner(-1.0, -1.0)] {
@@ -483,11 +475,7 @@ fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> wgpu::Bu
         bytes.extend_from_slice(&y.to_le_bytes());
         bytes.extend_from_slice(&[c.0, c.1, c.2, 255]);
     }
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("sc_capture_background"),
-        contents: &bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    })
+    crate::buffer_init(device, queue, "sc_capture_background", &bytes, wgpu::BufferUsages::VERTEX)
 }
 
 fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::TextureFormat) -> wgpu::RenderPipeline {
@@ -537,6 +525,45 @@ mod tests {
     use solidcraft_geom::Mesh;
     use solidcraft_render::SceneMesh;
     use std::sync::Arc;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn test_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+        match crate::open_headless() {
+            Ok(d) => Some(d),
+            Err(e) => {
+                assert!(std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "a GPU is required here: {e}");
+                eprintln!("skipping: {e}");
+                None
+            }
+        }
+    }
+
+    /// The device refuses the background's buffer (72 bytes past a 64-byte limit stands in for a
+    /// GPU out of memory): an error, not the panic `create_buffer_init` raised (#4791).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn refused_background_buffer_is_an_error() {
+        let Some((adapter, _, _)) = test_device() else { return };
+        let limits = wgpu::Limits { max_buffer_size: 64, ..wgpu::Limits::downlevel_defaults() };
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { required_limits: limits, ..Default::default() })).unwrap();
+        let result = background_vertices(&device, &queue, BACKGROUND.0, BACKGROUND.1);
+        assert!(matches!(result, Err(GpuError::Render(_))), "an invalid buffer must return an error");
+        // Odd-sized uploads are padded for queue writes and leave the device usable.
+        let valid = crate::buffer_init(&device, &queue, "sc_capture_valid", &[1, 2, 3], wgpu::BufferUsages::VERTEX).unwrap();
+        assert_eq!(valid.size(), 4);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn capture_on_a_destroyed_device_is_an_error() {
+        let Some((adapter, device, queue)) = test_device() else { return };
+        let capturer = Capturer::new(&adapter, device.clone(), queue).unwrap();
+        device.destroy();
+        let result = capturer.rgba(&Scene::default(), &Camera::default(), 32, 32);
+        assert!(matches!(result, Err(GpuError::Render(_))), "a failed capture must return an error");
+        assert!(!capturer.state.is_poisoned(), "a failed capture must not unwind through its state lock");
+    }
 
     /// One triangle facing the camera.
     fn sheet() -> Arc<Mesh> {
