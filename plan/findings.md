@@ -11852,6 +11852,17 @@ listed mutation, sharing, opaque-adapter and reader coverage limits still apply.
   `curve.curve_p6`'s notes. The old B-spline-only `CrvOnSurf` gate is removed:
   `MakeFaceWithCurves` now retains the actual surface with checked exact snapshots
   and native owning-copy semantics.
+- **Resolved optional-surface endpoint gap (2026-10-22).**
+  `Curve::deform_to_end_point_targets_on_surface` restores the optional surface and
+  orientation branch; `MakeFaceWithCurves` passes its actual surface. It drops target
+  points using the current UV endpoint guesses and edits the UV B-spline, retaining
+  native default tangents and replacing derived UV curves when required. The original
+  `face_curves_cos_open_loop` now compares 10 values with C++ (status 0, max relative
+  error 0). Against exact-main `3e811d0c7`, this is the only existing-case outcome
+  change; no cases were removed. Ten new scaled/oriented plane/B-spline fixtures add
+  three comparisons and seven honest `SmSurface::DropCurve` deferrals. Native direct
+  endpoint samples on B-spline and derived-line UV curves match the Rust regression
+  for absent, same and opposite orientation. No tolerance or FFI guard was changed.
 - **MakeFace with a square loop** (`kind 1`): the shim builds the loop with
   `MakeShellVertex`, `MakeWireEdgeVertex` and `MakeWireEdge`. The Rust side mirrors its
   `-3` when `CreateLineSegment` fails for the side, and otherwise defers at

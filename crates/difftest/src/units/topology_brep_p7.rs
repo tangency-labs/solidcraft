@@ -1783,8 +1783,6 @@ impl UnitDiff for Runner {
             &mut v,
             "face_curves_cos_open_loop".to_string(),
             &Inputs::MakeFaceWithCurves {
-                // (a B-spline patch: a curve on surface over a plane defers earlier, to
-                // curve.crv_on_surf)
                 surface: patch(10.0),
                 dom: [0.0, 0.0, 10.0, 10.0],
                 orient: 1,
@@ -1797,6 +1795,24 @@ impl UnitDiff for Runner {
                 points: Vec::new(),
             },
         )?;
+        // A missing closing side requires UV endpoint deformation, rather than
+        // approximating the 3D curve on surface. Exercise both surface kinds,
+        // both face orientations and distinct scales around the original case.
+        for (surface_kind, scale) in [("plane", 0.1), ("plane", 1.0),
+            ("bspline", 0.1), ("bspline", 1.0), ("bspline", 10.0)] {
+            for orient in [1, 2] {
+                let surface = if surface_kind == "plane" { plane.clone() }
+                    else { patch(10.0 * scale) };
+                let curves = square(scale, scale, 8.0 * scale, true)
+                    .into_iter().take(3).collect();
+                push(&mut v, format!("face_curves_cos_gap_{surface_kind}_{scale}_orient{orient}"),
+                    &Inputs::MakeFaceWithCurves {
+                        surface, dom: [0.0, 0.0, 10.0 * scale, 10.0 * scale],
+                        orient, region_null: false, crv_on_surf: 2, loops: vec![3],
+                        has3d: false, has_uv: true, curves, points: Vec::new(),
+                    })?;
+            }
+        }
         // a square too small for its lines (CreateLineSegment fails: -3 on both sides) and
         // the smallest side that still makes a face in C++
         for (name, side) in [

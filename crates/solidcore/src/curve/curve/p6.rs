@@ -17,7 +17,10 @@
 //! | [`Curve::global_coincidence_checker`], [`Coincidence`]  | `SmCurve::GlobalCoincidenceChecker`   |
 //! | [`Curve::deform_to_end_point_targets`]                  | `SmCurve::DeformToEndPointTargets`    |
 //!
-//! Deviations:
+//! Deviations: endpoint deformation rejects non-B-spline UV curves with
+//! `InvalidInput`; ordinary UV-drop errors use `Vec2::UNDEF` rather than preserving
+//! partially written native out-params; UV replacement can fail on the Rust-only
+//! evaluation-copy depth guard. Other deviations:
 //! - **Out-params.** Every function returns its outputs ([`DroppedPoint`],
 //!   [`MaxDistance`], [`Coincidence`], the solution list of
 //!   [`Curve::simple_coincidence_checker`], the new curve of
@@ -38,13 +41,10 @@
 //! - **Bad `DropPoint` operation.** Upstream warns and uses `SM_SO_MINIMIZE`; so does
 //!   the port (without the warning).
 //! - **Object identity.** `&crOtherCurve == this` is [`core::ptr::eq`].
-//! - **`DeformToEndPointTargets`.** `ppOptNewCurve` is `want_new_curve`; the new curve
-//!   is returned. The `SmCrvOnSurf` branch (editing the UV curve when
-//!   `pOptSurfCrvOnSurf` is its base surface) is not here: it is taken only with
-//!   that surface argument, which the port drops with `pOptCrvOrientation` (every
-//!   caller here passes `NULL`), and it needs `SmSurface::DropPoint` (unit
-//!   `surface.surface_p5`). A curve on surface takes the approximation path, through
-//!   its `ApproximateCurve` override.
+//! - **`DeformToEndPointTargets`.** The legacy entry point omits the optional
+//!   surface; [`Curve::deform_to_end_point_targets_on_surface`] retains it and the
+//!   optional orientation. Matching surfaces edit the UV B-spline in place,
+//!   replacing derived analytic UV curves with their deformed B-spline.
 //! - **Handles.** The global point solves of `DropPoint` and `CurveMaxDistanceBetween`
 //!   name a private handle of the curve (with its natural interval, as upstream's
 //!   `this`); those solutions are not returned.
@@ -1874,6 +1874,42 @@ impl Curve {
         end_tan: Option<Vec3>,
         end_tan_type: InValueType,
     ) -> Result<Option<Self>> {
+        self.deform_to_end_point_targets_on_surface(
+            k,
+            tgt_start,
+            tgt_end,
+            want_new_curve,
+            start_tan,
+            start_tan_type,
+            end_tan,
+            end_tan_type,
+            None,
+        )
+    }
+
+    /// Deforms endpoints, retaining a curve on a matching `surface` by editing its
+    /// parameter-space curve. `orientation` reverses the UV target assignment when
+    /// it is opposite. This is the optional-surface branch of the upstream method.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::deform_to_end_point_targets`], surface comparison and point
+    /// dropping; `InvalidInput` when the UV curve does not derive from a B-spline.
+    pub fn deform_to_end_point_targets_on_surface(
+        &mut self,
+        k: &Kernel,
+        tgt_start: Option<Point3>,
+        tgt_end: Option<Point3>,
+        want_new_curve: bool,
+        start_tan: Option<Vec3>,
+        start_tan_type: InValueType,
+        end_tan: Option<Vec3>,
+        end_tan_type: InValueType,
+        surface: Option<(
+            &crate::surface::surface::Surface,
+            Option<crate::nurbs::b_spline_surface_n_lib::p2::OrientType>,
+        )>,
+    ) -> Result<Option<Self>> {
         let same_or_free =
             |t: InValueType| t == InValueType::Same || t == InValueType::Unconstrained;
 
@@ -1884,6 +1920,68 @@ impl Curve {
             && same_or_free(end_tan_type)
         {
             return Ok(None);
+        }
+
+        if let (Some((surface, orientation)), CurveKind::CrvOnSurf(curve)) =
+            (surface, self.kind_mut())
+        {
+            if !want_new_curve {
+                return Err(SolidError::invalid_input(
+                    OP_DEFORM,
+                    "ppOptNewCurve must be NonNULL for non SmBSplineCurve_TYPE curves",
+                ));
+            }
+            if surface.approx_eq(k, curve.surface())? {
+                let ends = curve.uv_curve().ends(k)?;
+                let domain = surface.natural_uv_domain();
+                let drop_target = |target: Option<Point3>,
+                                   current: Point3|
+                 -> Result<Option<Point3>> {
+                    let Some(target) = target else {
+                        return Ok(None);
+                    };
+                    let options = crate::surface::surface::p5::DropPointOptions {
+                        guess_uv: Some(crate::math::Vec2::new(current.x, current.y)),
+                        ..Default::default()
+                    };
+                    let uv = ignored(surface.drop_point::<crate::surface::surface::p4::NoObject>(
+                        k, target, &domain, &options,
+                    ))?
+                    .map_or(crate::math::Vec2::UNDEF, |result| result.result_uv);
+                    Ok(Some(Point3::new(uv.x, uv.y, 0.0)))
+                };
+                let start = drop_target(tgt_start, ends.start)?;
+                let end = drop_target(tgt_end, ends.end)?;
+                let (start, end) = if orientation
+                    == Some(crate::nurbs::b_spline_surface_n_lib::p2::OrientType::Opposite)
+                {
+                    (end, start)
+                } else {
+                    (start, end)
+                };
+                let uv = curve.uv_curve_mut();
+                if !uv.is_kind_of(crate::curve::curve::p2::BSPLINE_CURVE_TYPE) {
+                    return Err(SolidError::invalid_input(
+                        OP_DEFORM,
+                        "the UV curve must derive from SmBSplineCurve",
+                    ));
+                }
+                let replacement = uv.deform_to_end_point_targets(
+                    k,
+                    start,
+                    end,
+                    true,
+                    None,
+                    InValueType::Same,
+                    None,
+                    InValueType::Same,
+                )?;
+                if let Some(mut replacement) = replacement {
+                    ignore_status(replacement.convert_to_2d(k))?;
+                    curve.set_uv_curve(replacement)?;
+                }
+                return Ok(None);
+            }
         }
 
         let dim = self.dim();
@@ -1924,10 +2022,6 @@ impl Curve {
                     "ppOptNewCurve must be NonNULL for non SmBSplineCurve_TYPE curves",
                 ));
             }
-
-            // NOT PORTED (this unit's own limit, see plan/findings.md, surface.surface_p5): the
-            // SmCrvOnSurf branch needs the dropped pOptSurfCrvOnSurf and pOptCrvOrientation
-            // arguments of SmSurface::DropPoint
 
             // for derived BSpline types: copy the Nurb curve as a plain BSplineCurve
             CurveKind::Hyperbola(h) => {
@@ -2237,6 +2331,73 @@ mod tests {
             .unwrap();
         assert_eq!(sols.len(), 1);
         assert_eq!(sols[0].solution_type, SolutionType::RangeOfValues);
+    }
+
+    #[test]
+    fn surface_deformation_edits_uv_and_honors_opposite_orientation() {
+        use crate::curve::crv_on_surf::CrvOnSurf;
+        use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+        use crate::surface::plane::Plane;
+        use crate::surface::surface::Surface;
+        let k = Kernel::default();
+        let surface = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)));
+        for derived in [false, true] {
+            for orientation in [None, Some(OrientType::Same), Some(OrientType::Opposite)] {
+                let uv = Curve::from(
+                    BSplineCurve::create_line_segment(
+                        2,
+                        Vec3::new(0.0, 0.0, 0.0),
+                        Vec3::new(1.0, 0.0, 0.0),
+                    )
+                    .unwrap(),
+                );
+                let uv = if derived {
+                    Curve::from(crate::curve::line::Line::from_points(
+                        Vec3::ZERO,
+                        Vec3::new(1.0, 0.0, 0.0),
+                        2,
+                    ))
+                } else {
+                    uv
+                };
+                let mut curve = Curve::from(
+                    CrvOnSurf::new(&k, uv, surface.clone_for_evaluation().unwrap(), None, 0)
+                        .unwrap(),
+                );
+                let start_uv = crate::math::Vec2::new(0.25, 0.5);
+                let end_uv = crate::math::Vec2::new(0.75, 0.5);
+                let start = surface.evaluate_point(&k, start_uv).unwrap();
+                let end = surface.evaluate_point(&k, end_uv).unwrap();
+                let replacement = curve
+                    .deform_to_end_point_targets_on_surface(
+                        &k,
+                        Some(start),
+                        Some(end),
+                        true,
+                        None,
+                        InValueType::Unconstrained,
+                        None,
+                        InValueType::Unconstrained,
+                        Some((&surface, orientation)),
+                    )
+                    .unwrap();
+                assert!(replacement.is_none());
+                let CurveKind::CrvOnSurf(result) = curve.kind() else {
+                    panic!("changed curve kind")
+                };
+                assert!(matches!(result.uv_curve().kind(), CurveKind::BSpline(_)));
+                let ends = result.uv_curve().ends(&k).unwrap();
+                let (expected_start, expected_end) = if orientation == Some(OrientType::Opposite) {
+                    (end_uv, start_uv)
+                } else {
+                    (start_uv, end_uv)
+                };
+                assert!((ends.start.x - expected_start.x).abs() < 1e-12);
+                assert!((ends.start.y - expected_start.y).abs() < 1e-12);
+                assert!((ends.end.x - expected_end.x).abs() < 1e-12);
+                assert!((ends.end.y - expected_end.y).abs() < 1e-12);
+            }
+        }
     }
 
     #[test]

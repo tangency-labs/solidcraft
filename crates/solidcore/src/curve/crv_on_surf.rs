@@ -487,6 +487,11 @@ impl CrvOnSurf {
         &self.uv_curve
     }
 
+    /// Mutable parameter curve for faithful in-place B-spline base editing.
+    pub(crate) fn uv_curve_mut(&mut self) -> &mut Curve {
+        &mut self.uv_curve
+    }
+
     /// The base surface (`GetBaseSurface`).
     #[must_use]
     pub fn surface(&self) -> &Surface {
