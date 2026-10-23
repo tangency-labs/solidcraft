@@ -7,6 +7,8 @@ use solidcraft_cloud::{Error, Manifest, Result, Snapshot, digest};
 use solidcraft_doc::Document;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod catalog;
+#[cfg(not(target_arch = "wasm32"))]
 mod git;
 #[cfg(not(target_arch = "wasm32"))]
 mod process;
@@ -36,11 +38,13 @@ pub fn check_document(bytes: &[u8]) -> Result<()> {
         return Err(invalid("document metadata too large"));
     }
     let value: serde_json::Value = serde_json::from_slice(bytes).map_err(invalid)?;
-    let version = value
-        .get("format")
-        .and_then(serde_json::Value::as_str)
-        .and_then(solidcraft_doc::format::version_of)
-        .ok_or_else(|| invalid("missing or invalid document format"))?;
+    let format = value.get("format").and_then(serde_json::Value::as_str).ok_or_else(|| invalid("missing document format"))?;
+    // Drawings have a separate schema and session kind (#3890). Never deserialize one as
+    // a design: serde's defaults could otherwise turn it into an empty, writable model.
+    if format.starts_with("solidcraft-drawing/") {
+        return Err(Error::UpgradeRequired(format!("drawing schema {format}")));
+    }
+    let version = solidcraft_doc::format::version_of(format).ok_or_else(|| invalid("missing or invalid document format"))?;
     if version > solidcraft_doc::format::FORMAT {
         return Err(Error::UpgradeRequired(format!("document schema solidcraft/{version}")));
     }
@@ -154,6 +158,7 @@ mod document_tests {
         let snapshot = Snapshot::prepare(br#"{"format":"solidcraft/4294967295"}"#.to_vec(), BTreeMap::new()).unwrap();
         assert!(matches!(open_document(&snapshot.manifest, &snapshot.document, |_| panic!("must not fetch assets")), Err(Error::UpgradeRequired(_))));
     }
+
     #[test]
     fn released_pending_capabilities_remain_compatible_with_cloud_storage() {
         // A development build wrote these names before they folded into format 36.
@@ -171,149 +176,31 @@ mod document_tests {
         }
     }
 
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-mod native {
-    use std::fs;
-    use std::path::{Path, PathBuf};
-
-    use solidcraft_cloud::{Error, PendingSave, Result, Snapshot, StagedSave};
-
-    pub struct LocalOutbox {
-        root: PathBuf,
+    #[test]
+    fn unknown_pending_capabilities_require_upgrade_before_assets_are_read() {
+        let mut document: serde_json::Value = serde_json::from_str(&Document::new("future capabilities").to_json()).unwrap();
+        document["format_pending"] = serde_json::json!(["future-cloud-document-capability"]);
+        let snapshot = Snapshot::prepare(serde_json::to_vec(&document).unwrap(), BTreeMap::from([("blob".into(), vec![42; 100])])).unwrap();
+        assert!(matches!(
+            open_document(&snapshot.manifest, &snapshot.document, |_| panic!("must not read unsupported payloads")),
+            Err(Error::UpgradeRequired(_))
+        ));
     }
 
-    fn storage(e: impl std::fmt::Display) -> Error {
-        Error::Storage(e.to_string())
-    }
-
-    impl LocalOutbox {
-        pub fn new(root: PathBuf) -> Result<Self> {
-            crate::vfs::check(&root.to_string_lossy()).map_err(storage)?;
-            fs::create_dir_all(&root).map_err(storage)?;
-            Ok(Self { root: fs::canonicalize(root).map_err(storage)? })
-        }
-
-        fn path(&self, name: &str) -> Result<PathBuf> {
-            solidcraft_cloud::check_path(name)?;
-            let mut path = self.root.clone();
-            for part in name.split('/') {
-                path.push(part);
-                if fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
-                    return Err(storage("outbox paths must not be symbolic links"));
-                }
-            }
-            crate::vfs::check(&path.to_string_lossy()).map_err(storage)?;
-            Ok(path)
-        }
-
-        fn read(&self, name: &str) -> Result<Vec<u8>> {
-            let max = if name.starts_with("objects/") { solidcraft_cloud::CHUNK_BYTES } else { solidcraft_cloud::MAX_MANIFEST_BYTES };
-            crate::vfs::read(&self.path(name)?.to_string_lossy(), max).map_err(storage)
-        }
-
-        fn store(&self, name: &str, bytes: &[u8]) -> Result<()> {
-            let path = self.path(name)?;
-            if path.exists() {
-                if self.read(name)? != bytes {
-                    return Err(storage("existing outbox object differs; local copy retained"));
-                }
-                return Ok(());
-            }
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).map_err(storage)?;
-            }
-            crate::safe_write::write_atomic(&path, bytes, false).map_err(storage)
-        }
-
-        pub fn stage(&self, save: &StagedSave) -> Result<()> {
-            save.validate()?;
-            // Verify completeness before the first write, then persist the commit record last.
-            for (path, bytes) in &save.objects {
-                self.store(path, bytes)?;
-            }
-            self.store(&save.record_path, &save.record_bytes)
-        }
-
-        pub fn pending(&self) -> Result<Vec<PendingSave>> {
-            let path = self.path("pending")?;
-            if !path.exists() {
-                return Ok(Vec::new());
-            }
-            let mut records = Vec::new();
-            for entry in fs::read_dir(path).map_err(storage)? {
-                let entry = entry.map_err(storage)?;
-                if entry.path().extension().is_none_or(|e| e != "json") {
-                    continue;
-                }
-                if records.len() >= 10_000 {
-                    return Err(storage("too many queued saves"));
-                }
-                let name = entry.file_name().to_string_lossy().to_string();
-                let record = PendingSave::read(&self.read(&format!("pending/{name}"))?)?;
-                if name != format!("{}.json", record.id) {
-                    return Err(storage("pending save identifier mismatch"));
-                }
-                records.push(record);
-            }
-            PendingSave::ordered(records)
-        }
-
-        pub fn recover(&self, save: &PendingSave) -> Result<Snapshot> {
-            save.recover(|p| self.read(p))
-        }
-
-        /// Call only after the repository adapter confirms this captured save was published.
-        pub fn published(&self, save: &PendingSave) -> Result<()> {
-            PendingSave::read(&serde_json::to_vec(save).map_err(storage)?)?;
-            let path = self.path(&format!("pending/{}.json", save.id))?;
-            let current = PendingSave::read(&crate::vfs::read(&path.to_string_lossy(), solidcraft_cloud::MAX_MANIFEST_BYTES).map_err(storage)?)?;
-            if current.manifest.document_hash != save.manifest.document_hash {
-                return Err(Error::Conflict);
-            }
-            fs::remove_file(path).map_err(storage)
-        }
-
-        pub fn root(&self) -> &Path {
-            &self.root
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-        use std::collections::BTreeMap;
-        #[test]
-        fn local_save_survives_reopening_until_publication_is_confirmed() {
-            let root = std::env::temp_dir().join(format!(
-                "solidcraft-outbox-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-            ));
-            let save = PendingSave::stage(
-                &Default::default(),
-                "project",
-                "parts/design",
-                None,
-                Snapshot::prepare(b"{}".to_vec(), BTreeMap::from([("blob".into(), vec![42; 100])])).unwrap(),
-            )
-            .unwrap();
-            LocalOutbox::new(root.clone()).unwrap().stage(&save).unwrap();
-            let reopened = LocalOutbox::new(root.clone()).unwrap();
-            let pending = reopened.pending().unwrap();
-            assert_eq!(pending.len(), 1);
-            assert_eq!(reopened.recover(&pending[0]).unwrap().document, b"{}");
-            // A failed or skipped upload leaves the queued record. Retrying stage is idempotent.
-            reopened.stage(&save).unwrap();
-            assert_eq!(reopened.pending().unwrap().len(), 1);
-            reopened.published(&pending[0]).unwrap();
-            assert!(reopened.pending().unwrap().is_empty());
-            assert!(reopened.recover(&pending[0]).is_ok());
-            fs::remove_dir_all(root).unwrap();
-        }
+    #[test]
+    fn separate_drawings_cannot_be_opened_as_empty_designs() {
+        let snapshot = Snapshot::prepare(br#"{"format":"solidcraft-drawing/1","sheets":[]}"#.to_vec(), BTreeMap::new()).unwrap();
+        let error = open_document(&snapshot.manifest, &snapshot.document, |_| panic!("must not fetch drawing resources")).unwrap_err();
+        assert!(matches!(error, Error::UpgradeRequired(_)));
+        assert!(error.to_string().starts_with("Upgrade SolidCraft to open or save this design"));
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::LocalOutbox;
+mod local;
+#[cfg(not(target_arch = "wasm32"))]
+pub use local::LocalOutbox;
+#[cfg(not(target_arch = "wasm32"))]
+mod host;
+#[cfg(not(target_arch = "wasm32"))]
+pub use host::NativeHost;

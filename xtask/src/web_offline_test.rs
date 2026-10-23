@@ -63,6 +63,9 @@ use serde_json::{Value, json};
 
 use crate::web_offline;
 
+mod cloud_storage_test;
+pub use cloud_storage_test::run as run_cloud_storage;
+
 const PREFIX: &str = "/solidcraft/app/";
 /// Another copy of the app on the same origin.
 const ELSEWHERE: &str = "/solidcraft/elsewhere/";

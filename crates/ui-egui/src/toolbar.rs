@@ -781,7 +781,9 @@ pub fn save(app: &mut SolveApp) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;
     }
-    if app.session.path.is_some() {
+    if app.session.cloud_binding().is_some() {
+        crate::save_job::start(app, "file.save", json!({}));
+    } else if app.session.path.is_some() {
         // Read-only, or changed on disk since it was opened: Save As, or a question, instead.
         if crate::open_elsewhere::check_save(app) {
             crate::save_job::start(app, "file.save", json!({}));

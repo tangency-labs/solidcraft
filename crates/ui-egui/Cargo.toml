@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+solidcraft-cloud = { workspace = true }
 solidcraft-engine = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
