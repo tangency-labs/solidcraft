@@ -628,6 +628,8 @@ pub fn test_and_split_edge(
 pub struct Stitch<'c> {
     /// Picks the kept and the deleted object of a glued pair (`m_rStitchCallback`).
     callback: &'c mut dyn StitchCallback,
+    /// Geometry-owner identities for the final region-nesting query.
+    pub(crate) query_identity: Option<crate::query::brep::BrepIdentity<'c>>,
     /// Max 3d distance between coincident edges and vertices (`m_dStitchTol3d`).
     tol_3d: f64,
     /// Find and set the infinite region after gluing (`m_bDoRegionNesting`).
@@ -718,6 +720,7 @@ impl<'c> Stitch<'c> {
     ) -> Self {
         Self {
             callback,
+            query_identity: None,
             tol_3d: stitch_tol_3d,
             do_region_nesting,
             validate_result,

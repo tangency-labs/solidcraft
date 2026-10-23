@@ -2081,6 +2081,15 @@ pub fn stitch_and_orient(
     b: &mut Brep,
     options: &StitchAndOrientOptions,
 ) -> Result<()> {
+    stitch_and_orient_with_identity(k, b, options, None)
+}
+
+pub(crate) fn stitch_and_orient_with_identity(
+    k: &mut Kernel,
+    b: &mut Brep,
+    options: &StitchAndOrientOptions,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+) -> Result<()> {
     let mut lamina = 0;
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
     crate::error::ignore_status(stitch_faces(
@@ -2089,6 +2098,7 @@ pub fn stitch_and_orient(
         tolerance,
         options.allow_spine_edges,
         &mut lamina,
+        identity,
     ))?;
     if lamina > 1 {
         tolerance = if options.stitch_tolerance <= 0.0 {
@@ -2102,6 +2112,7 @@ pub fn stitch_and_orient(
             tolerance,
             options.allow_spine_edges,
             &mut lamina,
+            identity,
         ))?;
     }
     plain_edit(k, b, |k, b, env| {
@@ -2125,8 +2136,16 @@ fn stitch_faces(
     tolerance: f64,
     allow_spine: bool,
     lamina: &mut usize,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
 ) -> Result<()> {
-    let out = crate::topology::brep::p4::stitch_faces(k, b, tolerance, None, allow_spine)?;
+    let out = crate::topology::brep::p4::stitch_faces_with_identity(
+        k,
+        b,
+        tolerance,
+        None,
+        allow_spine,
+        identity,
+    )?;
     *lamina = usize::try_from(out.lamina_edges)
         .map_err(|_| SolidError::invalid_input(OP, "lamina edge count"))?;
     Ok(())

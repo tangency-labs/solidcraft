@@ -431,10 +431,15 @@ pub fn create_pyramid(
         )?;
     }
 
-    crate::topology::brep::p5::stitch_and_orient(
+    let keys = |object| crate::topology::brep::p2::caller_cache_key(env.key_of, object);
+    crate::topology::brep::p5::stitch_and_orient_with_identity(
         k,
         &mut brep,
         &crate::topology::brep::p5::StitchAndOrientOptions::default(),
+        Some(crate::query::brep::BrepIdentity {
+            keys: &keys,
+            ..crate::query::brep::BrepIdentity::default()
+        }),
     )?;
     Ok(brep)
 }
@@ -937,6 +942,10 @@ mod tests {
             (create_sphere_no_pole(k, o(), 5.0), (4, 6, 4)),
             (create_sphere_no_pole(k, o(), -5.0), (4, 6, 4)),
             (create_torus(k, o(), 10.0, 2.0), (1, 2, 1)),
+            (
+                create_cylindrical_box(k, o(), 10.0, 2.0, 5.0, 0.0, 90.0),
+                (6, 12, 8),
+            ),
         ] {
             let b = built.unwrap();
             let faces = crate::topology::brep::p1::faces(&b, None).unwrap().len();
@@ -945,16 +954,23 @@ mod tests {
             assert_eq!((faces, edges, vertices), counts);
             assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
         }
-        assert_eq!(
-            deferred_at(&create_cylindrical_box(k, o(), 10.0, 2.0, 5.0, 0.0, 90.0)),
-            Some("curve.curve_p2")
-        );
-        // partial solids sweep a profile (topology sweep) past SmFace::FindVertexSector
-        // and SmBrep::DeleteEdge until SmFace::CurveOnClassify
-        for r in [
-            create_partial_sphere(k, o(), 5.0, 0.0, 90.0),
-            create_partial_cylinder(k, o(), 5.0, 10.0, 0.0, 90.0),
-            create_partial_torus(k, o(), 10.0, 2.0, 0.0, 90.0),
+        // partial solids sweep a profile (topology sweep) past SmBrep::DeleteEdge and
+        // the axis' SmFace::CurveOnClassify, until SmFace::FindVertexSector (sphere,
+        // cylinder) or the torus' SmFace::Point3DClassify
+
+        for (r, unit) in [
+            (
+                create_partial_sphere(k, o(), 5.0, 0.0, 90.0),
+                "topology.face_p4",
+            ),
+            (
+                create_partial_cylinder(k, o(), 5.0, 10.0, 0.0, 90.0),
+                "topology.face_p4",
+            ),
+            (
+                create_partial_torus(k, o(), 10.0, 2.0, 0.0, 90.0),
+                "query.face_p1",
+            ),
         ] {
             assert_eq!(deferred_at(&r), Some(unit));
         }
@@ -1040,7 +1056,7 @@ mod tests {
             owner_of: &|_| None,
         });
         let shell = bp1::shells(&mut k, &b, None).unwrap()[0];
-        // Native results: miss, side-face hit, then the apex creates the last trims.
+        // A miss and side hit leave the trims lazy; the apex needs the last two.
         for (start, direction, class, count) in [
             (
                 Vec3::new(1000.0, 1000.0, 1000.0),

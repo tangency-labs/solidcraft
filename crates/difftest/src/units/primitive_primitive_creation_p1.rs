@@ -279,14 +279,17 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 };
                 match made {
                     Err(e) if e.is_unported() => return Err(e),
-                    Ok(b) => record.extend([
-                        0.0,
-                        f64::from(b.editing_enabled()),
-                        0.0,
-                        solidcore::topology::brep::p1::faces(&b, None)?.len() as f64,
-                        solidcore::topology::brep::p1::edges(&b, None)?.len() as f64,
-                        solidcore::topology::brep::p1::vertices(&b, None)?.len() as f64,
-                    ]),
+                    Ok(b) => {
+                        record.extend([
+                            0.0,
+                            f64::from(b.editing_enabled()),
+                            0.0,
+                            solidcore::topology::brep::p1::faces(&b, None)?.len() as f64,
+                            solidcore::topology::brep::p1::edges(&b, None)?.len() as f64,
+                            solidcore::topology::brep::p1::vertices(&b, None)?.len() as f64,
+                        ]);
+                        crate::util::primitive::append(&k, &b, &mut record)?;
+                    }
                     Err(_) => record.extend([
                         f64::from(solidcore::error::SM_ERR),
                         -1.0,
@@ -426,6 +429,9 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 solidcore::topology::brep::p1::edges(&brep, None)?.len() as f64,
                 solidcore::topology::brep::p1::vertices(&brep, None)?.len() as f64,
             ]);
+            if status == 0 {
+                crate::util::primitive::append(&k, &brep, &mut record)?;
+            }
         }
         5 => {
             let mut brep = solidcore::topology::brep::p3::new_brep(
@@ -506,8 +512,17 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
     }
     Ok(record)
 }
-fn output(op: i32, data: Vec<f64>) -> Result<Output, HarnessError> {
-    if op == 0 || op == 4 || op == 5 || op == 6 {
+fn output(input: &Inputs, data: Vec<f64>) -> Result<Output, HarnessError> {
+    let op = input.op;
+    if op == 4 {
+        let prefix = if value(&input.data, 0) == 10.0 { 7 } else { 6 };
+        let head = data
+            .get(..prefix)
+            .ok_or_else(|| HarnessError::new("missing primitive topology record"))?;
+        Ok(Output::new()
+            .ints("maps", head.iter().map(|v| *v as i64).collect::<Vec<_>>())
+            .values("geometry", data.get(prefix..).unwrap_or_default().to_vec()))
+    } else if op == 0 || op == 5 || op == 6 {
         Ok(Output::new().ints(
             "maps",
             data.into_iter().map(|v| v as i64).collect::<Vec<_>>(),
@@ -539,7 +554,7 @@ impl UnitDiff for Runner {
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
         match ffi::eval(i.op, &i.data) {
-            Ok(data) => output(i.op, data),
+            Ok(data) => output(&i, data),
             Err(solidcore_ffi::FfiError::Status(-1010)) => Ok(Output::rejected(
                 "native fixture preflight rejected undefined construction",
             )),
@@ -550,7 +565,7 @@ impl UnitDiff for Runner {
         let i: Inputs = case.parse()?;
         ffi::validate(i.op, &i.data).map_err(|e| HarnessError::new(e.to_string()))?;
         match rust(&i) {
-            Ok(data) => output(i.op, data),
+            Ok(data) => output(&i, data),
             Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
         }
     }

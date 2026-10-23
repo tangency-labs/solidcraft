@@ -16,6 +16,10 @@
 //! curve count and seven-number curve blocks. Op 6 builds up to four faces per
 //! operand (planes or unit spheres) for `Boolean2D` validation; its layout is in
 //! `fixtures/primitive.primitive_creation_p1/README.md`.
+//! Op 4 returns status, edit/boolean flags and reachable face/edge/vertex counts
+//! (selector 10 adds its output flag), followed on success by the geometry record
+//! in `support/primitive_record.h`: vertices and tolerances, per-edge intervals,
+//! samples and stored trim counts, then face domains, tolerances and samples.
 
 use crate::{call_with_buffer, FfiError};
 

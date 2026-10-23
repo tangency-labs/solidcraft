@@ -10,15 +10,9 @@
 //! produce), then on success `has` and the surface or B-rep record, reported as the values
 //! `rec`.
 //!
-//! The surface overloads (plane, cylinder, cone, torus) are compared in full. Every B-rep
-//! entry point but the pyramid is deferred on the Rust side once its inputs pass
-//! validation (`SmPrimitiveCreation`, units `primitive.primitive_creation_p1..p3`); its
-//! validation (box, sphere, cylinder, cone, cylindrical box, pole-free sphere, pyramid)
-//! is compared. The pyramid builds its faces (`topology.brep_p8`) and stitches them;
-//! a base whose plane fit hits UB-119 defers as `cpp-guard:ub-119` (see
-//! [`pyramid_out`]). `SmApiCreateBlendPrimitive` takes a B-rep with faces and
-//! edges, which the Rust side cannot build yet, and is not run. Every run has at least
-//! [`MIN_GENERATED`] generated cases.
+//! Surface overloads compare their parameterizations. Successful B-reps additionally
+//! compare reachable vertices, sampled curves/surfaces, tolerances and UV trim counts.
+//! A pyramid plane fit that reaches UB-119 remains deferred by the existing guard.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
@@ -365,7 +359,23 @@ fn finish<T>(r: solidcore::Result<T>, put: impl Fn(&mut Vec<f64>, &T)) -> Output
 }
 
 fn brep_out(r: solidcore::Result<Brep>) -> Output {
-    finish(r, put_brep)
+    brep_record(r, false)
+}
+
+fn brep_record(r: solidcore::Result<Brep>, rays: bool) -> Output {
+    finish(
+        r.and_then(|mut brep| {
+            let mut record = Vec::new();
+            put_brep(&mut record, &brep);
+            let mut k = Kernel::default();
+            crate::util::primitive::append(&k, &brep, &mut record)?;
+            if rays {
+                crate::util::primitive::append_pyramid_rays(&mut k, &mut brep, &mut record)?;
+            }
+            Ok(record)
+        }),
+        |out, record| out.extend(record),
+    )
 }
 
 /// [`brep_out`] for the pyramid: a face whose plane fit hits `FindOuterLoops`' zero-area
@@ -379,7 +389,7 @@ fn pyramid_out(r: solidcore::Result<Brep>) -> Output {
             operation: "topology::trimming_tools",
             ..
         }) => Output::deferred("cpp-guard:ub-119", "SmTrimmingTools::FindOuterLoops"),
-        r => brep_out(r),
+        r => brep_record(r, true),
     }
 }
 

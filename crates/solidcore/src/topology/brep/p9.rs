@@ -42,8 +42,8 @@ use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, EFF_ZERO_PARAM};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::brep::BrepQuery;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
-use crate::query::brep::{BrepIdentity, BrepQuery};
 use crate::surface::surface::Surface;
 use crate::topology::edge;
 use crate::topology::vertex;
@@ -349,16 +349,7 @@ fn brep_ray_fire<O>(
     tolerance: f64,
     state: &mut crate::topology::shell::ShellRayState<O>,
 ) -> Result<bool> {
-    let BrepIdentity {
-        brep_id,
-        keys,
-        owner_of,
-    } = query.identity();
-    let fired = query.cache(k, b).and_then(|cache| {
-        crate::topology::brep::p2::ray_fire(
-            k, b, brep_id, cache, keys, owner_of, start, direction, tolerance, None,
-        )
-    });
+    let fired = query.ray_fire_live(k, b, start, direction, tolerance);
     match crate::error::ignored(fired)? {
         Some(hit) => {
             state.region = hit.region;

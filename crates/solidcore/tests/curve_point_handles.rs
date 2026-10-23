@@ -5,7 +5,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::global_solver::{GlobalSolve, SolutionPairType};
 use solidcore::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
-use solidcore::geom::tree::Tree;
+use solidcore::geom::tree::{Tree, TreeOwner};
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::Kernel;
@@ -24,7 +24,9 @@ fn opaque_curve_comparison_uses_natural_not_query_interval() {
     let k = Kernel::default();
     let curve = Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap());
     let point_tree = Tree::from_point(Vec3::ZERO, 0.0, true);
-    let curve_tree = Tree::from_point(Vec3::ZERO, 0.0, true);
+    let mut curve_tree = Tree::from_point(Vec3::ZERO, 0.0, true);
+    curve_tree.set_owner_object(Some(TreeOwner::CurveCache));
+    curve_tree.set_curve_data(Vec::new(), Vec::new(), Some(ArenaCurve(7)));
     let mut solver = CpGlobalSolver::new(
         &k,
         &point_tree,

@@ -34,17 +34,17 @@ use crate::topology::{
 pub type Result<T, E = SolidError> = core::result::Result<T, E>;
 
 /// The value of a call whose failing status upstream ignores: `Some` on success,
-/// `None` on failure; [`SolidError::Unported`] still propagates.
+/// `None` on failure; unported dependencies and preparation requests still propagate.
 pub(crate) fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported() || matches!(e, SolidError::PreparationRequired { .. }) => Err(e),
         Err(_) => Ok(None),
     }
 }
 
 /// The status of a call upstream ignores: `Ok` for any result but
-/// [`SolidError::Unported`].
+/// [`SolidError::Unported`] or [`SolidError::PreparationRequired`].
 pub(crate) fn ignore_status<T>(r: Result<T>) -> Result<()> {
     ignored(r).map(|_| ())
 }
@@ -166,6 +166,14 @@ pub enum SolidError {
         operation: &'static str,
         /// Upstream NLib error number.
         code: NlibCode,
+    },
+
+    /// An operation-local read-only solve needs its mutable caller to prepare geometry.
+    /// This control signal is not an unported dependency or a native status.
+    #[error("{operation}: geometry preparation required")]
+    PreparationRequired {
+        /// The read-only operation that must be resumed after preparation.
+        operation: &'static str,
     },
 
     /// The operation needs an upstream routine whose unit is not ported yet (a
@@ -292,7 +300,7 @@ impl SolidError {
     /// Use as `.map_err(SolidError::nl_ser(OP))`.
     pub(crate) fn nl_ser(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
-            Self::Unported { .. } => e,
+            Self::Unported { .. } | Self::PreparationRequired { .. } => e,
             _ => Self::sm_err(operation),
         }
     }
@@ -311,8 +319,7 @@ impl SolidError {
         Self::Unported { upstream, unit }
     }
 
-    /// True for [`SolidError::Unported`], the one error a status upstream ignores
-    /// still propagates.
+    /// True only for a genuinely unported dependency; preparation requests return false.
     #[must_use]
     pub const fn is_unported(&self) -> bool {
         matches!(self, Self::Unported { .. })
@@ -336,7 +343,8 @@ impl SolidError {
             | Self::NotConverged { operation, .. }
             | Self::Unsupported { operation, .. }
             | Self::Upstream { operation, .. }
-            | Self::Nlib { operation, .. } => operation,
+            | Self::Nlib { operation, .. }
+            | Self::PreparationRequired { operation } => operation,
             Self::Unported { upstream, .. } => upstream,
         }
     }
@@ -351,7 +359,8 @@ impl SolidError {
             | Self::NotConverged { .. }
             | Self::Unsupported { .. }
             | Self::Nlib { .. }
-            | Self::Unported { .. } => None,
+            | Self::Unported { .. }
+            | Self::PreparationRequired { .. } => None,
         }
     }
 }
@@ -359,6 +368,18 @@ impl SolidError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preparation_requests_are_never_ignored_or_reported_as_unported() {
+        let request = SolidError::PreparationRequired { operation: "ray" };
+        assert!(!request.is_unported());
+        assert_eq!(ignored::<()>(Err(request.clone())), Err(request.clone()));
+        assert_eq!(
+            ignore_status::<()>(Err(request.clone())),
+            Err(request.clone())
+        );
+        assert_eq!(SolidError::nl_ser("native")(request.clone()), request);
+    }
 
     #[test]
     fn display_includes_operation_and_entity() {

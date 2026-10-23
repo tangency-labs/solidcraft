@@ -37,7 +37,8 @@
 //! The swung curves are `SmApiCreateArc(C, r, a0, a1)` B-splines.
 //!
 //! The output is the API status (`0` = `SM_SUCCESS`, else the `SmStatus`), then on success
-//! `has` and the result record. A B-rep's record is its face, edge and vertex counts. A
+//! `has` and the result record. A B-rep's record contains its face, edge and vertex counts, then the geometry/trim
+//! record in `crates/difftest/src/util/primitive.rs`. A
 //! surface's record is its `GetType`, position (`O X Y Z`), STEP UV domain, the kind's
 //! values (plane: the UV scale; cylinder / cone: bottom and top radius, inside-out and
 //! swap-UV flags; torus: major and minor radius, inside-out and swap-UV flags), its NURB

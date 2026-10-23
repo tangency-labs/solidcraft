@@ -1339,6 +1339,42 @@ pub fn ray_fire(
     ray_zone_tol_3d: f64,
     answer_limit: Option<f64>,
 ) -> Result<RayFireResult> {
+    ray_fire_with_solver(
+        k,
+        b,
+        start,
+        direction,
+        ray_zone_tol_3d,
+        answer_limit,
+        |b, point, options| {
+            let objects = BrepObjects {
+                preparation: None,
+                brep: b,
+                brep_id,
+                cache: Some(cache),
+                keys,
+                owner_of,
+            };
+            TopologySolver::brep_point_solve(k, &objects, Some(CacheObject::Brep), point, options)
+        },
+    )
+}
+
+/// Shared numeric ray selection and sector classification; the caller supplies the
+/// solve's geometry access, including mutable lazy preparation when available.
+pub(crate) fn ray_fire_with_solver(
+    k: &Kernel,
+    b: &mut Brep,
+    start: Point3,
+    direction: Vec3,
+    ray_zone_tol_3d: f64,
+    answer_limit: Option<f64>,
+    solve: impl FnOnce(
+        &mut Brep,
+        Point3,
+        TopologySolveOptions<'_>,
+    ) -> Result<crate::geom::solution_array::SolutionArray<CacheObject>>,
+) -> Result<RayFireResult> {
     // get Brep BoundingBox and BoundingSphere
     let bbox = qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
     let sphere = bbox.sphere_bound();
@@ -1351,18 +1387,8 @@ pub fn ray_fire(
     // cast ray through Brep
     let best_sq = answer_limit.map_or(BIG_DOUBLE, |l| l * l);
     let vectors = [ray];
-    let objects = BrepObjects {
-        preparation: None,
-        brep: b,
-        brep_id,
-        cache: Some(cache),
-        keys,
-        owner_of,
-    };
-    let solutions = TopologySolver::brep_point_solve(
-        k,
-        &objects,
-        Some(CacheObject::Brep),
+    let solutions = solve(
+        b,
         start,
         TopologySolveOptions {
             operation: SolverOperation::Rayfire,

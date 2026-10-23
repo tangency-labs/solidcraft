@@ -120,8 +120,26 @@ fn create_face(k: &mut Kernel, b: &mut Brep, surface: Surface, domain: Extent2d)
 }
 
 fn stitch(k: &mut Kernel, b: &mut Brep) -> Result<()> {
-    use crate::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
-    stitch_and_orient(k, b, &StitchAndOrientOptions::default())
+    stitch_with_keys(k, b, &crate::topology::loopuse::notify_ref)
+}
+
+fn stitch_with_keys(
+    k: &mut Kernel,
+    b: &mut Brep,
+    key_of: &dyn Fn(crate::error::EntityRef) -> crate::geom::object::ObjectRef,
+) -> Result<()> {
+    use crate::query::brep::BrepIdentity;
+    use crate::topology::brep::p5::{stitch_and_orient_with_identity, StitchAndOrientOptions};
+    let keys = |object| crate::topology::brep::p2::caller_cache_key(key_of, object);
+    stitch_and_orient_with_identity(
+        k,
+        b,
+        &StitchAndOrientOptions::default(),
+        Some(BrepIdentity {
+            keys: &keys,
+            ..BrepIdentity::default()
+        }),
+    )
 }
 
 /// `CreatePlanarFaceWith3DCurves`; `None` when the curves bound no face.
@@ -201,6 +219,25 @@ fn create_face_id(
         crate::topology::brep::p8::create_face_from_surface(k, b, Some(surface), &domain, fenv)
     })
 }
+/// Face construction under the same caller identities as its trimmed neighbours.
+fn create_face_with_notifications(
+    k: &mut Kernel,
+    b: &mut Brep,
+    surface: Surface,
+    domain: Extent2d,
+    notifications: &mut NotifyEnv<'_>,
+) -> Result<FaceId> {
+    let key_of = notifications.key_of;
+    let mut marks = crate::topology::topology_traverser::Marks::default();
+    let this_face = |face| key_of(crate::error::EntityRef::Face(face));
+    let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
+        env: notifications,
+        marks: &mut marks,
+        this_face: &this_face,
+    };
+    crate::topology::brep::p8::create_face_from_surface(k, b, Some(surface), &domain, &mut fenv)
+}
+
 /// `SmFace::GetEdges(rEdges)` with its defaults (`topology::face::p4::edges`).
 fn face_edges(_k: &Kernel, b: &Brep, face: FaceId) -> Result<Vec<crate::topology::EdgeId>> {
     crate::topology::face::p4::edges(b, face, None, false, None)
@@ -494,21 +531,28 @@ impl PrimitiveCreation {
                 plane.adjust_step_uv_domain(&Extent2d::from_bounds(inner, 0.0, outer, length)),
             )?;
             let domain = plane.natural_uv_domain();
-            ignore_status(create_face(k, brep, Surface::from(plane), domain))?;
+            ignore_status(create_face_with_notifications(
+                k,
+                brep,
+                Surface::from(plane),
+                domain,
+                notifications,
+            ))?;
         }
         for radius in [inner, outer] {
             let mut cylinder = Cone::create_canonical_cylinder(k, frame, radius)?;
             ignore_status(
                 cylinder.adjust_step_uv_domain(k, &Extent2d::from_bounds(start, 0.0, end, length)),
             )?;
-            ignore_status(cone_face(
+            ignore_status(create_face_with_notifications(
                 k,
                 brep,
-                &cylinder,
+                Surface::from(cylinder.clone()),
                 cylinder.rev.base().natural_uv_domain(),
+                notifications,
             ))?;
         }
-        ignore_status(stitch(k, brep))?;
+        ignore_status(stitch_with_keys(k, brep, notifications.key_of))?;
         brep.set_editing_enabled(false);
         Ok(())
     }
@@ -878,20 +922,22 @@ impl PrimitiveCreation {
         )?;
         let mut patch = revolved_srf(&mut arc, Vec3::ZERO, Vec3::Y, 180.0, ConicType::Quadratic)?;
         let first_surface = BSplineSurface::from_gw_nurb(&patch);
-        let first = create_face_id(
+        let first = create_face_with_notifications(
             k,
             brep,
             Surface::from(first_surface.clone()),
             first_surface.natural_uv_domain(),
+            notifications,
         )?;
         let first_edges = face_edges(k, brep, first)?;
         patch.rotate_at_pt(Vec3::ZERO, Vec3::Y, 180.0)?;
         let second_surface = BSplineSurface::from_gw_nurb(&patch);
-        let second = create_face_id(
+        let second = create_face_with_notifications(
             k,
             brep,
             Surface::from(second_surface.clone()),
             second_surface.natural_uv_domain(),
+            notifications,
         )?;
         let second_edges = face_edges(k, brep, second)?;
         let mut dropped = Vec::new();
@@ -946,7 +992,22 @@ impl PrimitiveCreation {
                 notifications,
             ))?;
         }
-        let status = match stitch_faces(k, brep, 10.0 * tolerance) {
+        let keys =
+            |object| crate::topology::brep::p2::caller_cache_key(notifications.key_of, object);
+        let identity = crate::query::brep::BrepIdentity {
+            keys: &keys,
+            ..crate::query::brep::BrepIdentity::default()
+        };
+        let status = match crate::topology::brep::p4::stitch_faces_with_identity(
+            k,
+            brep,
+            10.0 * tolerance,
+            None,
+            false,
+            Some(identity),
+        )
+        .map(drop)
+        {
             Err(e) if e.is_unported() => return Err(e),
             other => other,
         };

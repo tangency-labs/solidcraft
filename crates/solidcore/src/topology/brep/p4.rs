@@ -1586,6 +1586,17 @@ pub fn stitch_faces(
     faces: Option<&[Option<FaceId>]>,
     allow_spine_edges: bool,
 ) -> Result<StitchOutcome> {
+    stitch_faces_with_identity(k, b, xsect_tol_3d, faces, allow_spine_edges, None)
+}
+
+pub(crate) fn stitch_faces_with_identity(
+    k: &mut Kernel,
+    b: &mut Brep,
+    xsect_tol_3d: f64,
+    faces: Option<&[Option<FaceId>]>,
+    allow_spine_edges: bool,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+) -> Result<StitchOutcome> {
     // lock brep bounding box, until goes out of scope
     let mut lockit = LockBrepBox::new(k, b)?;
     let b = lockit.brep();
@@ -1594,6 +1605,7 @@ pub fn stitch_faces(
     let mut callback = DefaultStitchCallback::new();
     // construct Stitch manager using default coincident keep/delete logic
     let mut stitch = Stitch::new(&mut callback, xsect_tol_3d, true, true);
+    stitch.query_identity = identity;
     stitch.fast_edge_compare = true;
     stitch.ignore_problems = true;
     stitch.squeeze_small_edges = true;

@@ -10,6 +10,7 @@
 #include "sc_shim.h"
 
 #include "StdAfx.h"
+#include "support/primitive_record.h"
 #include <SmApiCurves.h>
 #include <SmApiGeneral.h>
 #include <SmApiPrimitives.h>
@@ -234,7 +235,7 @@ void put_torus(std::vector<double>& o, SmTorus* t)
 // taken by reference: call sites pass the out-parameter of the call that is their status
 // argument, and a by-value `b` could be read before that call writes it (unspecified
 // argument evaluation order).
-void put_brep(std::vector<double>& o, SmApiStatus s, SmBrep*& b)
+void put_brep(std::vector<double>& o, SmApiStatus s, SmBrep*& b, bool rays=false)
 {
     o.push_back(st(s));
     if (s != SM_SUCCESS)
@@ -248,6 +249,8 @@ void put_brep(std::vector<double>& o, SmApiStatus s, SmBrep*& b)
         o.push_back((double)b->GetNumFaces());
         o.push_back((double)b->GetNumEdges());
         o.push_back((double)b->GetNumVertices());
+        primitive_record::append(o, b);
+        if(rays) primitive_record::pyramid_rays(o, b);
     }
     delete b;
 }
@@ -405,7 +408,7 @@ void run(Rd& rd, std::vector<double>& o)
         SmVector3d org = rd.vec();
         double l = rd.num();
         double h = rd.num();
-        put_brep(o, SmApiCreatePyramid(org, l, h, b), b);
+        put_brep(o, SmApiCreatePyramid(org, l, h, b), b, true);
         return;
     }
     case OP_CYLINDRICAL_BOX:

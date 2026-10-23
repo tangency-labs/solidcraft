@@ -164,6 +164,9 @@ fn prepared_trim(
     if eu1::uv_trim_curve(b, eu)?.0.is_none() {
         if let Some(preparation) = preparation {
             preparation.request_trim(eu);
+            return Err(SolidError::PreparationRequired {
+                operation: "topology::loopuse::prepared_trim",
+            });
         }
         return Err(SolidError::unported(
             "SmEdgeuse::GetOrCreateUVTrimCurve (unprepared read-only topology)",
@@ -1813,8 +1816,7 @@ mod tests {
         let mut preparation = crate::query::brep::RayPreparation::default();
         assert!(QueryTopology::Requested(&b, &preparation)
             .ensure_trim_curve(&k, edgeuse)
-            .unwrap_err()
-            .is_unported());
+            .is_err_and(|e| matches!(e, SolidError::PreparationRequired { .. })));
         assert_eq!(
             preparation.take_request(),
             Some(crate::query::brep::PreparationRequest::UvTrim(edgeuse))

@@ -1,10 +1,21 @@
-//! Lazy topology preparation for a shell's read-only ray solver.
+//! Operation-local face services for shell ray solvers.
 //!
 //! Upstream: `source/SMLib/src/SmShell.cpp`, `SmFace.cpp`, `SmTrimSrfCache.cpp`.
 //!
-//! Deviations: a missing trim or owning-face cache is requested during the solve
-//! and built after its immutable B-rep view is released. Each request is attempted
-//! once. Cache handles are mapped explicitly; no B-rep copy is retained.
+//! | Rust | Upstream |
+//! |------|----------|
+//! | [`RayPreparation`] | Lazy `GetOrCreateUVTrimCurve` / `smsurf_GetSurfaceCache` |
+//! | `RaySurfaceContext` | Owning-face services during a shell ray solve |
+//!
+//! Deviations: production shell rays and region-nesting B-rep rays use `live`'s
+//! single-pass mutable services. The generic read-only fallback requests missing
+//! trims or caches, releases its immutable view and restarts after preparation.
+//! Each request is attempted once per edge use or face. That fallback can revisit
+//! earlier candidates with raised tolerances and has quadratic worst-case work in
+//! the number of requests. Cache handles are mapped explicitly; no B-rep copy is kept.
+
+mod live;
+pub(crate) use live::{solve_mutable_brep_point, solve_mutable_ray};
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,7 +38,7 @@ use crate::topology::{Brep, EdgeuseId, FaceId};
 const OP: &str = "query::brep::ray";
 
 /// Geometry requested by a shell ray solve and prepared by its mutable caller.
-/// Keeps operation-local caches, not topology. Each request is attempted once.
+/// Keeps operation-local caches, not topology. Each edge-use/face request is attempted once.
 #[derive(Debug, Default)]
 pub struct RayPreparation {
     pending: Cell<Option<PreparationRequest>>,
@@ -57,10 +68,11 @@ impl RayPreparation {
         }
         self.pending
             .set(Some(PreparationRequest::SurfaceCache(face)));
-        Err(SolidError::unported(
-            "requested owning-face surface solve cache",
-            "surface.trim_srf_cache",
-        ))
+        Err(SolidError::PreparationRequired { operation: OP })
+    }
+
+    pub(crate) fn prepared_cache(&self, face: FaceId) -> Option<&SurfaceCache<CacheObject>> {
+        self.surface_caches.get(&face)
     }
 
     pub(crate) fn take_request(&self) -> Option<PreparationRequest> {
@@ -123,7 +135,7 @@ fn prepare_surface_cache(
         .as_ref()
         .ok_or(SolidError::null_pointer(OP))?
         .clone_for_evaluation()?;
-    let entities: Vec<EntityRef> = b
+    let entities: BTreeMap<_, _> = b
         .loopuses()
         .iter()
         .map(|(id, _)| EntityRef::Loopuse(id))
@@ -133,15 +145,15 @@ fn prepare_surface_cache(
                 .iter()
                 .map(|(id, _)| EntityRef::Vertexuse(id)),
         )
+        .map(|entity| (notify_ref(entity), entity))
         .collect();
     let entity_of = |handle| match handle {
         CacheObject::Face(f) => Ok(EntityRef::Face(f)),
         CacheObject::Edge(e) => Ok(EntityRef::Edge(e)),
         CacheObject::Vertex(v) => Ok(EntityRef::Vertex(v)),
         CacheObject::Other(key) => entities
-            .iter()
+            .get(&key)
             .copied()
-            .find(|e| notify_ref(*e) == key)
             .ok_or_else(|| SolidError::invalid_input(OP, "unknown cache topology handle")),
         _ => Err(SolidError::invalid_input(
             OP,
@@ -152,7 +164,12 @@ fn prepare_surface_cache(
     let mut cache =
         get_surface_cache_with_face(k, &surface, Some(CacheObject::Surface(face)), &mut mapped)?;
     // A Boolean operation can defer the factory's tree build until GetTree.
-    if cache.base().tree().is_none() {
+    if cache.base().tree().is_none()
+        || (!cache.base().have_t_surface_cache
+            && surface.face()?.is_some()
+            && cache.base().face_containment_done
+                != crate::surface::surface_cache::p1::FaceContainment::UnderConstruction)
+    {
         cache.build_tree_with_face(k, &mut mapped)?;
     }
     Ok(cache.into_base())
@@ -170,11 +187,36 @@ impl core::fmt::Debug for RaySurfaceContext<'_> {
 }
 
 impl RaySurfaceContext<'_> {
-    fn queries(&self, face: CacheObject) -> Result<PreparedFaceQueries<'_, CacheObject>> {
+    fn classify(
+        &self,
+        k: &Kernel,
+        face: CacheObject,
+        uv: Point2,
+        src_tol: f64,
+        fast_drop: bool,
+    ) -> Result<(i32, Option<CacheObject>)> {
         let CacheObject::Face(face) = face else {
             return Err(SolidError::invalid_input(OP, "expected face"));
         };
-        PreparedFaceQueries::new(self.brep, face, &cache_handle)
+        let mut pc = crate::intersect::point_class::PointClassification::new(src_tol);
+        crate::query::face::p2::point_classify_requested(
+            k,
+            self.brep,
+            face,
+            uv,
+            &mut pc,
+            crate::query::face::p2::PointClassifyOptions {
+                src_zone_tol_3d: src_tol,
+                do_boundary_intersections: fast_drop,
+                use_uv_classification: !fast_drop,
+                ..Default::default()
+            },
+            self.preparation,
+        )?;
+        Ok((
+            pc.point_class().code(),
+            pc.object().map(cache_handle).transpose()?,
+        ))
     }
 }
 
@@ -208,7 +250,10 @@ impl SurfaceSolveContext<CacheObject> for RaySurfaceContext<'_> {
 
 impl FaceQueries<CacheObject> for RaySurfaceContext<'_> {
     fn face_zone_tol_3d(&self, face: CacheObject) -> Result<f64> {
-        self.queries(face)?.face_zone_tol_3d(face)
+        let CacheObject::Face(id) = face else {
+            return Err(SolidError::invalid_input(OP, "expected face"));
+        };
+        PreparedFaceQueries::new(self.brep, id, &cache_handle)?.face_zone_tol_3d(face)
     }
 
     fn face_point_classify(
@@ -218,8 +263,7 @@ impl FaceQueries<CacheObject> for RaySurfaceContext<'_> {
         uv: Point2,
         src_tol: f64,
     ) -> Result<(i32, Option<CacheObject>)> {
-        self.queries(face)?
-            .face_point_classify(k, face, uv, src_tol)
+        self.classify(k, face, uv, src_tol, false)
     }
 
     fn face_point_classify_fast_drop(
@@ -229,14 +273,87 @@ impl FaceQueries<CacheObject> for RaySurfaceContext<'_> {
         uv: Point2,
         src_tol: f64,
     ) -> Result<(i32, Option<CacheObject>)> {
-        self.queries(face)?
-            .face_point_classify_fast_drop(k, face, uv, src_tol)
+        self.classify(k, face, uv, src_tol, true)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classification_reads_the_prepared_cache_before_vertex_fallback() {
+        use crate::geom::tree::{NodeClass, NodeData, NodeId};
+        use crate::intersect::point_class::PointClassType;
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_torus(
+            &mut k,
+            crate::math::Vec3::ZERO,
+            5.0,
+            1.5,
+        )
+        .unwrap();
+        let face = crate::topology::brep::p1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                matches!(
+                    b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                    crate::surface::surface::SurfaceKind::Torus(_)
+                )
+            })
+            .unwrap();
+        let mut preparation = RayPreparation::default();
+        preparation
+            .prepare(&k, &mut b, PreparationRequest::SurfaceCache(face))
+            .unwrap();
+        let cache = preparation.prepared_cache(face).unwrap();
+        let (index, _) = cache
+            .tree()
+            .unwrap()
+            .nodes()
+            .iter()
+            .enumerate()
+            .find(|(_, node)| {
+                node.child1.is_none()
+                    && matches!(node.data,
+                NodeData::Surface(aux) if aux.node_class == NodeClass::Inside)
+            })
+            .unwrap();
+        let uv = cache
+            .aux(NodeId(index))
+            .unwrap()
+            .uv_domain
+            .evaluate(0.5, 0.5);
+        // An oversized source tolerance makes the uncached fallback snap to a
+        // vertex. Native cache-first classification returns the interior face.
+        let query = RaySurfaceContext {
+            brep: &b,
+            preparation: &preparation,
+        };
+        assert_eq!(
+            query
+                .face_point_classify(&k, CacheObject::Face(face), uv, 100.0)
+                .unwrap(),
+            (PointClassType::Face.code(), Some(CacheObject::Face(face)))
+        );
+        preparation
+            .surface_caches
+            .get_mut(&face)
+            .unwrap()
+            .face_was_modified = true;
+        let query = RaySurfaceContext {
+            brep: &b,
+            preparation: &preparation,
+        };
+        assert_eq!(
+            query
+                .face_point_classify(&k, CacheObject::Face(face), uv, 100.0)
+                .unwrap()
+                .0,
+            PointClassType::Vertex.code()
+        );
+    }
 
     #[test]
     fn surface_cache_requests_are_scoped_and_bounded() {
@@ -259,7 +376,10 @@ mod tests {
             })
             .unwrap();
         let mut preparation = RayPreparation::default();
-        assert!(preparation.surface_cache(face).unwrap_err().is_unported());
+        assert!(matches!(
+            preparation.surface_cache(face),
+            Err(SolidError::PreparationRequired { .. })
+        ));
         let request = PreparationRequest::SurfaceCache(face);
         assert_eq!(preparation.take_request(), Some(request));
         preparation.prepare(&k, &mut b, request).unwrap();

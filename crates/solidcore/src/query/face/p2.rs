@@ -120,7 +120,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::query::r#loop::{contains_uv_point_with_topology, UvContainment};
 use crate::surface::surface::p1::{get_surface_cache_with_face, get_trim_surface_cache};
 use crate::surface::surface::{Surface, SurfaceKind};
-use crate::surface::surface_cache::p1::{FaceContainment, SurfaceCacheOptions};
+use crate::surface::surface_cache::p1::{FaceContainment, SurfaceCache, SurfaceCacheOptions};
 use crate::surface::trim_srf_cache::{CacheFace, TrimSrfCache};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as fp2;
@@ -470,7 +470,7 @@ pub fn point_classify(
     pc: &mut PointClassification<EntityRef>,
     opts: PointClassifyOptions<'_>,
 ) -> Result<()> {
-    point_classify_with_topology(k, &mut QueryTopology::Mutable(b), f, uv, pc, opts)
+    point_classify_with_topology(k, &mut QueryTopology::Mutable(b), f, uv, pc, opts, None)
 }
 
 /// Classify `uv` against face `f` without mutating its prepared topology.
@@ -492,7 +492,7 @@ pub fn point_classify_prepared(
     pc: &mut PointClassification<EntityRef>,
     opts: PointClassifyOptions<'_>,
 ) -> Result<()> {
-    point_classify_with_topology(k, &mut QueryTopology::Prepared(b), f, uv, pc, opts)
+    point_classify_with_topology(k, &mut QueryTopology::Prepared(b), f, uv, pc, opts, None)
 }
 
 pub(crate) fn point_classify_requested(
@@ -511,7 +511,60 @@ pub(crate) fn point_classify_requested(
         uv,
         pc,
         opts,
+        None,
     )
+}
+
+pub(crate) fn point_classify_live(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    uv: Point2,
+    pc: &mut PointClassification<EntityRef>,
+    opts: PointClassifyOptions<'_>,
+    cache: Option<&SurfaceCache<crate::topology::brep_cache::CacheObject>>,
+) -> Result<()> {
+    point_classify_with_topology(k, &mut QueryTopology::Mutable(b), f, uv, pc, opts, cache)
+}
+
+fn cache_is_current<O: Copy + PartialEq>(cache: &SurfaceCache<O>) -> bool {
+    cache.have_t_surface_cache
+        && cache.face_containment_done == FaceContainment::Done
+        && !cache.face_was_modified
+}
+
+fn classify_trim_cache<O: Copy + PartialEq>(
+    k: &Kernel,
+    cache: &SurfaceCache<O>,
+    uv: Point2,
+    pc: &mut PointClassification<EntityRef>,
+    entity_of: impl Fn(O) -> Result<EntityRef>,
+) -> Result<bool> {
+    let nodes = cache.find_uv_nodes_built(k, &Extent2d::from_point(uv), false)?;
+    let tree = cache
+        .tree()
+        .ok_or_else(|| null(OP_CLASSIFY, "trimmed surface cache without tree"))?;
+    for node in nodes {
+        let node = tree.node(node)?;
+        if node.child1.is_some() {
+            continue;
+        }
+        let NodeData::Surface(aux) = &node.data else {
+            return Err(null(OP_CLASSIFY, "leaf node without surface data"));
+        };
+        if aux.node_class == NodeClass::Outside {
+            pc.set_class_object(PointClassType::Unknown, None);
+            return Ok(true);
+        }
+        if aux.node_class == NodeClass::Inside {
+            pc.set_class_object(PointClassType::Face, aux.face.map(&entity_of).transpose()?);
+            pc.set_gap_3d(0.0);
+            pc.set_pre_snap_param(BIG_DOUBLE);
+            pc.set_uv_param(uv);
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn point_classify_with_topology(
@@ -521,6 +574,7 @@ fn point_classify_with_topology(
     uv: Point2,
     pc: &mut PointClassification<EntityRef>,
     opts: PointClassifyOptions<'_>,
+    prepared_cache: Option<&SurfaceCache<crate::topology::brep_cache::CacheObject>>,
 ) -> Result<()> {
     let PointClassifyOptions {
         tgt_loops_only,
@@ -546,6 +600,30 @@ fn point_classify_with_topology(
     // locals
     let surface = face.surface.as_ref();
 
+    // The operation cache is the same cache the preceding surface solve built.
+    // Consult its native fast path before the vertex/loop fallback.
+    if !tgt_loops_only && surface.map_or(Ok(false), |s| s.face().map(|f| f.is_some()))? {
+        let cache = prepared_cache.or_else(|| match &*b {
+            QueryTopology::Requested(_, preparation) => preparation.prepared_cache(f),
+            _ => None,
+        });
+        if let Some(cache) = cache {
+            if cache_is_current(cache)
+                && classify_trim_cache(k, cache, uv, pc, |object| match object {
+                    crate::topology::brep_cache::CacheObject::Face(face) => {
+                        Ok(EntityRef::Face(face))
+                    }
+                    _ => Err(SolidError::invalid_input(
+                        OP_CLASSIFY,
+                        "trim cache leaf without face",
+                    )),
+                })?
+            {
+                return Ok(());
+            }
+        }
+    }
+
     // when doing all loops
     if !tgt_loops_only {
         // 1. try fast point TrimSrfCache classification.
@@ -558,7 +636,6 @@ fn point_classify_with_topology(
                 && surface.map_or(Ok(false), |s| s.face().map(|o| o.is_some()))?
             {
                 // get every TrimSrfCache leaf node intersecting the UVPoint
-                let uv_ext = Extent2d::from_point(uv);
                 if tsc.base().tree().is_none() {
                     if matches!(b, QueryTopology::Prepared(_) | QueryTopology::Requested(..)) {
                         return Err(SolidError::Unported {
@@ -569,40 +646,9 @@ fn point_classify_with_topology(
                     }
                     tsc.build_tree(k)?;
                 }
-                let nodes = tsc.base().find_uv_nodes_built(k, &uv_ext, false)?;
-                let tree = tsc
-                    .base()
-                    .tree()
-                    .ok_or_else(|| null(OP_CLASSIFY, "trimmed surface cache without tree"))?;
-                let mut leaf_nodes = Vec::new();
-                for n in nodes {
-                    if tree.node(n)?.child1.is_some() {
-                        continue;
-                    }
-                    leaf_nodes.push(n);
-                } // end selecting intersecting leafNodes
-
-                // search for a INSIDE/OUTSIDE classified intersecting leaf node
-                for n in leaf_nodes {
-                    let NodeData::Surface(aux) = &tree.node(n)?.data else {
-                        return Err(null(OP_CLASSIFY, "leaf node without surface data"));
-                    };
-
-                    // when leaf node is classified OUTSIDE of surface->Face
-                    if aux.node_class == NodeClass::Outside {
-                        pc.set_class_object(PointClassType::Unknown, None);
-                        return Ok(());
-                    }
-
-                    // when leaf node is classified INSIDE of surface->Face
-                    if aux.node_class == NodeClass::Inside {
-                        pc.set_class_object(PointClassType::Face, aux.face);
-                        pc.set_gap_3d(0.0);
-                        pc.set_pre_snap_param(BIG_DOUBLE);
-                        pc.set_uv_param(uv);
-                        return Ok(());
-                    }
-                } // end iter every leaf node containing UVPoint
+                if classify_trim_cache(k, tsc.base(), uv, pc, Ok)? {
+                    return Ok(());
+                }
             } // end up-to-date TrimSrfCache check
         }
     } // end when doing all loops

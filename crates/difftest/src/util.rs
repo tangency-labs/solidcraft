@@ -1,5 +1,7 @@
 //! Small conversions shared by the unit runners in [`crate::units`].
 
+pub mod primitive;
+
 use solidcore::geom::object::ObjectRef;
 use solidcore::math::{Point2, Vec3};
 use solidcore::topology::brep_cache::{arena_identity, CacheObject};

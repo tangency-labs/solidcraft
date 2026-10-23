@@ -140,6 +140,30 @@ pub trait TopologyObjects<O> {
         None
     }
 
+    /// An optional live topology classifier for callers that can prepare trims in place.
+    fn classify_face_point(
+        &self,
+        _k: &Kernel,
+        _face: O,
+        _uv: crate::math::Point2,
+        _tolerance: f64,
+        _boundaries: bool,
+        _use_uv: bool,
+    ) -> Option<Result<i32>> {
+        None
+    }
+
+    /// Optional live `Point3DClassify` test, including the native tolerance retry.
+    fn classifies_on_face(
+        &self,
+        _k: &Kernel,
+        _face: O,
+        _point: Point3,
+        _tolerance: f64,
+    ) -> Option<Result<bool>> {
+        None
+    }
+
     /// Optional operation-local request for a UV trim needed by classification.
     fn uv_trim_preparation(&self) -> Option<&crate::query::brep::RayPreparation> {
         None
@@ -2061,7 +2085,7 @@ pub(super) fn curve_zone_tol_3d<O>(
 /// may also record the visited edge use for its mutable caller to prepare. No trimmed
 /// surface cache is passed (the solver's objects expose none), so upstream's cache
 /// fast path is skipped and the loops classify the point.
-pub(super) fn face_point_classify<O>(
+pub(super) fn face_point_classify<O: Copy>(
     k: &Kernel,
     objects: &dyn TopologyObjects<O>,
     face: O,
@@ -2070,6 +2094,11 @@ pub(super) fn face_point_classify<O>(
     do_boundaries: bool,
     use_uv: bool,
 ) -> Result<i32> {
+    if let Some(result) =
+        objects.classify_face_point(k, face, uv, src_zone_tol, do_boundaries, use_uv)
+    {
+        return result;
+    }
     let Some((b, f)) = objects.face_entity(face) else {
         // DISPATCH GAP: SmFace::PointClassify is ported (`query::face::p2`, query.face_p2
         // partial; no UNPORTED marker), but this adapter cannot resolve the face handle
@@ -2091,7 +2120,11 @@ pub(super) fn face_point_classify<O>(
         None => point_classify_prepared(k, b, f, uv, &mut pc, options),
     };
     match result {
-        Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::InvalidInput { .. }
+            | SolidError::PreparationRequired { .. }),
+        ) => Err(e),
         // (status ignored, as upstream)
         Ok(()) | Err(_) => Ok(pc.point_class().code()),
     }
@@ -2107,7 +2140,7 @@ pub(super) fn face_point_classify<O>(
 /// objects shared; upstream's `const` member may add UV trim curves and a trimmed
 /// surface cache to the B-rep, which the copy does not keep). Both tries classify on
 /// the same copy, as upstream's on the same face.
-fn face_classifies_on_face<O>(
+fn face_classifies_on_face<O: Copy>(
     k: &Kernel,
     objects: &dyn TopologyObjects<O>,
     face: O,
@@ -2117,6 +2150,9 @@ fn face_classifies_on_face<O>(
     use crate::error::EntityRef;
     use crate::intersect::point_class::PointClassType;
     use crate::query::face::p1::{point_3d_classify, Point3dClassifyOptions};
+    if let Some(result) = objects.classifies_on_face(k, face, point, tol) {
+        return result;
+    }
     let Some((b, f)) = objects.face_entity(face) else {
         // DISPATCH GAP: this adapter cannot resolve the face handle to its `Brep` and
         // `FaceId` (`TopologyObjects::face_entity`).

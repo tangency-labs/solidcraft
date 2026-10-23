@@ -2245,14 +2245,27 @@ fn find_and_set_infinite_region(
     });
     // SmBrep::FindAndSetInfiniteRegion() with its defaults (topology.brep_p5): no shell
     // to test, SM_VS_INFINITEREGION_SWAP, no box
-    super::p5::find_and_set_infinite_region(
+    let status = super::p5::find_and_set_infinite_region(
         k,
         b,
         &query,
         None,
         p1::SetRegionVoidType::InfiniteRegionSwap,
         None,
-    )
+    );
+    // Lazy face queries attach new curves to typed edge-use slots. Complete the
+    // native SetUVTrimCurve owner binding under the construction caller's names.
+    // Keep existing owners so a foreign or incorrect owner remains detectable.
+    for edge in p1::edges(b, None)? {
+        for id in b.edge(edge)?.edgeuses.clone() {
+            if let Some(curve) = b.edgeuse_mut(id)?.uv_trim_curve.as_mut() {
+                if curve.owner().is_none() {
+                    curve.set_owner(Some(key_of(EntityRef::Edgeuse(id))), None);
+                }
+            }
+        }
+    }
+    status
 }
 
 /// `GetMate()->GetRadial()`: the next edge use pair around the edge in the same

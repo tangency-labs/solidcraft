@@ -638,9 +638,10 @@ impl Stitch<'_> {
         if self.do_region_nesting && bp1::regions(b, None)?.len() > 1 {
             let old = b.editing_enabled();
             b.set_editing_enabled(false);
-            let r = find_and_set_infinite_region(
+            let r = find_and_set_infinite_region_with_identity(
                 k,
                 b,
+                self.query_identity,
                 None,
                 SetRegionVoidType::InfiniteRegionSwap,
                 None,
@@ -1496,10 +1497,21 @@ pub(crate) fn find_and_set_infinite_region(
     void_setting: SetRegionVoidType,
     brep_bbox: Option<&Extent3d>,
 ) -> Result<()> {
+    find_and_set_infinite_region_with_identity(k, b, None, shell_to_test, void_setting, brep_bbox)
+}
+
+fn find_and_set_infinite_region_with_identity(
+    k: &mut Kernel,
+    b: &mut Brep,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+    shell_to_test: Option<ShellId>,
+    void_setting: SetRegionVoidType,
+    brep_bbox: Option<&Extent3d>,
+) -> Result<()> {
     crate::topology::brep::p5::find_and_set_infinite_region(
         k,
         b,
-        &crate::query::brep::BrepQuery::default(),
+        &crate::query::brep::BrepQuery::new(identity.unwrap_or_default()),
         shell_to_test,
         void_setting,
         brep_bbox,

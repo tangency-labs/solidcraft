@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Include renamed upstream implementation to call its file-local helpers exactly.
 #include "sc_topology_fixture.h"
+#include "support/primitive_record.h"
 #include <SmTopologySweep.h>
 #include <SmPrimitiveCreation.h>
 #include <SmTransSweepGeometry.h>
@@ -219,6 +220,7 @@ SC_EXPORT int32_t sc_primitive_primitive_creation_p1_eval(int32_t op, const doub
             SmTArray<SmFace*> faces; SmTArray<SmEdge*> edges; SmTArray<SmVertex*> vertices;
             if(b) { b->GetFaces(faces);b->GetEdges(edges);b->GetVertices(vertices); }
             values.insert(values.end(),{st(status),b?flg(b->m_bEditingEnabled):-1.0,p?(double)p->GetMapToSame()->Count():0.0,(double)faces.GetSize(),(double)edges.GetSize(),(double)vertices.GetSize()});
+            if(status==SM_SUCCESS && b) primitive_record::append(values,b);
         };
         if(shape<=1) {
             SmBrep* b=shape==0 ? sc_pc1_PrimitiveCreation::CreateRectangle(the_context(),data[7],data[1],data[2],frame) : sc_pc1_PrimitiveCreation::CreateCircle(the_context(),data[7],data[1],frame);

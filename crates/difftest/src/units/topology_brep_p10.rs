@@ -693,10 +693,10 @@ impl Graph {
             vertexuses: Reg::new(),
             vertices: Reg::new(),
         };
-        for (id, r) in b.regions().iter() {
-            if r.in_brep {
-                g.regions.add(Some(id), RegionId::index);
-            }
+        // GetRegions starts at the owning list head, which ResetInfiniteRegion
+        // changes without reallocating the region records.
+        for id in solidcore::topology::brep::p1::regions(b, None)? {
+            g.regions.add(Some(id), RegionId::index);
         }
         let (mut r, mut s, mut fu, mut lu, mut eu, mut vu, mut l, mut e, mut v) =
             (0, 0, 0, 0, 0, 0, 0, 0, 0);
