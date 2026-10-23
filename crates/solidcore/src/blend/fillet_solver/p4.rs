@@ -3745,6 +3745,7 @@ fn do_point_intersection(
     ];
     // offsets the solver set since the last call (`DoPointIntersection` evaluates the
     // surfaces before its first solver call)
+    sync_solver_extensions(&*ops, trace)?;
     sync_trace_offsets(&*ops, trace)?;
     let mut solver = IntersectorSolver { ops, trace };
     let r = fi.do_point_intersection(&mut solver, &mut *cx.fillets, k, &ids, &opts);
@@ -3758,7 +3759,7 @@ fn do_point_intersection(
 /// fillet intersector's [`FilletSolverOps`](crate::blend::fillet_intersector::FilletSolverOps)
 /// over this solver's virtuals. `FlushCurve`'s writes into the fillet geometry go to
 /// the pseudo B-rep the intersector's dispatch passes in.
-struct IntersectorSolver<'b> {
+pub(crate) struct IntersectorSolver<'b> {
     /// The solver (`this`).
     ops: &'b mut dyn FilletSolverOps,
     /// The intersector's surfaces (copies of the solver's offset surfaces), kept at
@@ -3771,18 +3772,53 @@ struct IntersectorSolver<'b> {
 /// `SetOffsetDistance` the solver makes (`SetSurfacesToZeroOffset`,
 /// `ReloadSurfaceOffsets`, `SetupOffsetValues` under `ComputePointValues`,
 /// `ComputeSurfaceValues`, `StepSolve`) changes the surfaces it traces; here the trace
-/// surfaces are copies, which take the solver's distances. A trace surface that is not
-/// an offset surface (only tests build one) has no distance to follow.
+/// surfaces are copies, which take the solver's distances, and the base extension the
+/// solver's evaluations made (`m_pExtendedSurface` of the one object upstream). A trace
+/// surface that is not an offset surface (only tests build one) has nothing to follow.
 fn sync_trace_offsets(ops: &dyn FilletSolverOps, trace: [&Surface; 2]) -> Result<()> {
     for (rail, surface) in trace.into_iter().enumerate() {
         if let SurfaceKind::OffsetSurface(copy) = surface.kind() {
-            copy.set_offset_distance(offset_surface(ops, rail)?.offset_distance());
+            let own = &offset_surface(ops, rail)?.surface;
+            copy.set_offset_distance(own.offset_distance());
+            copy.follow_extension_of(own);
         }
     }
     Ok(())
 }
 
-impl IntersectorSolver<'_> {
+/// The other direction of [`sync_trace_offsets`], before a solver call: the solver's
+/// offset surfaces take the base extension the intersector's evaluations of the trace
+/// surfaces made since the last call (the intersector's constructor, its span tests and
+/// flush evaluate them; upstream they are the solver's own objects).
+fn sync_solver_extensions(ops: &dyn FilletSolverOps, trace: [&Surface; 2]) -> Result<()> {
+    for (rail, surface) in trace.into_iter().enumerate() {
+        if let SurfaceKind::OffsetSurface(copy) = surface.kind() {
+            offset_surface(ops, rail)?.surface.follow_extension_of(copy);
+        }
+    }
+    Ok(())
+}
+
+impl<'b> IntersectorSolver<'b> {
+    /// The solver `ops` as an `SmFilletIntersector` over the trace surfaces `trace`
+    /// (copies of the solver's offset surfaces) uses it; the trace surfaces take the
+    /// solver's current offset distances first. Used by the other solvers that run a
+    /// fillet intersector on themselves (`SmVariableRadiusFS::ReCalcFilletGeom`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a solver without its offset surfaces.
+    pub(crate) fn new(ops: &'b mut dyn FilletSolverOps, trace: [&'b Surface; 2]) -> Result<Self> {
+        sync_solver_extensions(&*ops, trace)?;
+        sync_trace_offsets(&*ops, trace)?;
+        Ok(Self { ops, trace })
+    }
+
+    /// [`sync_solver_extensions`] before a solver call.
+    fn pre(&self) -> Result<()> {
+        sync_solver_extensions(&*self.ops, self.trace)
+    }
+
     /// [`sync_trace_offsets`] after a solver call, whatever its result (a failing call
     /// may have set distances before failing, and the intersector ignores some
     /// failures).
@@ -3814,6 +3850,7 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         point: &mut TsectPnt,
         previous: Option<&TsectPnt>,
     ) -> Result<()> {
+        self.pre()?;
         let r = FilletSolver::compute_point_values(
             &mut *self.ops,
             k,
@@ -3834,6 +3871,7 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         uv_values: [Point2; 2],
         point: &mut TsectPnt,
     ) -> Result<()> {
+        self.pre()?;
         let r = FilletSolver::compute_surface_values(k, &mut *self.ops, uv_values, point);
         self.synced(r)
     }
@@ -3856,6 +3894,7 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         flags: &mut StepSolveFlags,
         next: &mut TsectPnt,
     ) -> Result<()> {
+        self.pre()?;
         let r = step_solve(
             &mut *self.ops,
             k,
@@ -3870,11 +3909,13 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
     }
 
     fn set_surfaces_to_zero_offset(&mut self) -> Result<()> {
+        self.pre()?;
         let r = self.ops.solver_mut().set_surfaces_to_zero_offset();
         self.synced(r)
     }
 
     fn reload_surface_offsets(&mut self) -> Result<()> {
+        self.pre()?;
         let r = self.ops.solver_mut().reload_surface_offsets();
         self.synced(r)
     }
@@ -3888,11 +3929,13 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         rail: usize,
         uv: Point2,
     ) -> Result<(Point3, Vec3, Vec3)> {
-        crate::blend::fillet_custom_solver::offset_evaluate_1st(
+        self.pre()?;
+        let r = crate::blend::fillet_custom_solver::offset_evaluate_1st(
             k,
             offset_surface_mut(&mut *self.ops, rail)?,
             uv,
-        )
+        );
+        self.synced(r)
     }
 
     /// `SetStatus` (the intersector's co-ported `SmFilStatus` mapped onto the
@@ -3909,6 +3952,7 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         uv2: Point2,
         point: &mut TsectPnt,
     ) -> Result<bool> {
+        self.pre()?;
         let r = self.ops.point_on_plane_solve(
             k,
             plane_origin,
@@ -3973,6 +4017,7 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         // the virtual m_pFSG->CreateSurface(*this, pCenterLine, pCurve1, pCurve2,
         // sPnts, pSur[0], pUV1, pSur[1], pUV2, ..) with pSur[i] = GetSurface(i)
         let solver_type = self.ops.solver_type()?;
+        self.pre()?;
         let sur0 = Surface::from(offset_surface(&*self.ops, 0)?.surface.clone());
         let sur1 = Surface::from(offset_surface(&*self.ops, 1)?.surface.clone());
         let solver = self.ops.solver();

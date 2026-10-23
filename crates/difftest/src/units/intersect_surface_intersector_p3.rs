@@ -30,12 +30,13 @@
 //! (`SmSurface::LocalSurfaceSolve`), `FindBoundaryStartPoints` with a boundary box
 //! meeting the intersection box (`SmSurface::GlobalCurveIntersect`), on a plane
 //! (`SmPlane::CreateIsoParametricCurve`) or with a curve-bounded surface (the cache
-//! build's `CalculateContinuities`), and `SplitSpan` with a valid plane
-//! (`SmFilletLaw::Evaluate`).
+//! build's `CalculateContinuities`). `SplitSpan` with a valid plane evaluates the
+//! shim's default-constructed base `SmFilletLaw` (`SM_ERR`, compared).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use solidcore::blend::fillet_standard_solver::p1::{FilletLaw, FilletLawKind};
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::line::Line;
 use solidcore::geom::extent1d::{Extent1d, ExtentPointType};
@@ -1182,7 +1183,6 @@ fn run_op(k: &Kernel, run: &mut Run<'_>, si: &mut SurfaceIntersector<'_>, op: &O
                 .get(s.curve)
                 .ok_or_else(|| harness("curve index"))?;
             let opts = LawPointOptions {
-                law: &(),
                 law_orient: s.orient,
                 point_curve: curve,
                 point_curve_interval: Extent1d::from_min_max(s.interval[0], s.interval[1]),
@@ -1192,7 +1192,9 @@ fn run_op(k: &Kernel, run: &mut Run<'_>, si: &mut SurfaceIntersector<'_>, op: &O
             };
             pt_of(si, s.curr)?;
             pt_of(si, s.next)?;
-            let r = si.split_span(k, id(s.curr), id(s.next), s.delta, &opts);
+            // the shim's default-constructed base `SmFilletLaw`
+            let mut law = FilletLaw::new(FilletLawKind::Base);
+            let r = si.split_span(k, id(s.curr), id(s.next), s.delta, &opts, &mut law);
             if let Some(new_id) = st(o, r)? {
                 let p = pt_of(si, new_id.index())?;
                 put_point(o, &p);

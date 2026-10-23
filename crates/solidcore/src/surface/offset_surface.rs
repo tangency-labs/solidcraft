@@ -520,6 +520,24 @@ impl OffsetSurface {
         }
     }
 
+    /// Takes the current extension (pending, else stored) of `other`, another copy of
+    /// the same upstream object, when it covers a different domain than this one's
+    /// current extension (`other` having none leaves this one's): the copies stand for
+    /// one `SmOffsetSurface`, whose `m_pExtendedSurface` the last extension made sets.
+    /// The extension is copied into the pending slot.
+    pub(crate) fn follow_extension_of(&self, other: &Self) {
+        let theirs = other.with_current_extension(|e| e.map(Surface::natural_uv_domain));
+        if theirs.is_none() {
+            return;
+        }
+        let mine = self.with_current_extension(|e| e.map(Surface::natural_uv_domain));
+        if theirs != mine {
+            let copy =
+                other.with_current_extension(|e| e.map(|e| Box::new(e.clone_keeping_owner())));
+            self.pending_extension.0.set(copy);
+        }
+    }
+
     /// Takes over an extension `other` (a copy of this offset that ran an inherited
     /// `SmSurface` body) made since it was copied: upstream runs that body on this
     /// object, whose `m_pExtendedSurface` it sets.

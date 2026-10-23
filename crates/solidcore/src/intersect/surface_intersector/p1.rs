@@ -59,8 +59,9 @@
 //!   it) are not modelled.
 //! - **Arguments.** Out-params become return values. `ComputeStepSize`'s unused point,
 //!   `TestSpanAccuracy`'s unused mid point and `EvaluateLawPoint`'s unset curve
-//!   parameter are dropped. `SmFilletLaw` is not ported, so
-//!   [`SurfaceIntersector::evaluate_law_point`] takes the law as an opaque argument.
+//!   parameter are dropped. [`SurfaceIntersector::evaluate_law_point`] takes the
+//!   law as `&mut FilletLaw`: upstream's `const SmFilletLaw&` caches a B-spline law's
+//!   extension through a `const` cast.
 //!   An out-param upstream leaves unset is `None` ([`SpanAccuracy::deviation_found`]).
 //! - **Boolean methods.** `IsPointOnCurve` and `sm_IsPointOnCurve` return a
 //!   `SmBoolean` but use `SER`: a failing call returns its (non-zero) status, which
@@ -71,14 +72,14 @@
 //! - **Surface calls.** `SmSurface::IsClosed`, `SmSurface::EvaluateNormal` and
 //!   `SmSurface::Evaluate1stDerivatives` go through `surface::surface::p7` (the
 //!   last co-ported there from unit `surface.surface_p1`).
-//! - **Unported callees.** `SmFilletLaw::Evaluate` (`blend.fillet_executive_p1`) and
-//!   `SmOffsetSurface::SetOffsetDistance` through the intersector's shared surfaces
-//!   (a dispatch gap left to `blend.fillet_executive_p1`) return
-//!   [`SolidError::Unported`]. Statuses upstream ignores are ignored, except
-//!   `Unported`, which always propagates.
+//! - **Offset distances.** `EvaluateLawPoint` sets the offset distances of the
+//!   intersector's surfaces, which it shares with its owner as upstream does
+//!   (`OffsetSurface::set_offset_distance` takes `&self`). Statuses upstream ignores
+//!   are ignored, except `Unported`, which always propagates.
 //! - **Not ported here.** `SmTsectPnt::Dump` / `Draw` (debug output) and the
 //!   `SM_DEBUG_CODE` blocks (graphics and jump statistics).
 
+use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
@@ -1424,14 +1425,22 @@ impl<'s> SurfaceIntersector<'s> {
     /// (`EvaluateLawPoint`). Both surfaces must be offset surfaces; their offsets are
     /// set to the radius times `surface_orientations`.
     ///
-    /// The fillet law (`SmFilletLaw`) is not ported; `law` is opaque.
-    pub fn evaluate_law_point<L: ?Sized>(
+    /// `law` is `const` upstream, but its evaluation caches a B-spline law's extension
+    /// through a `const` cast; here it is `&mut`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FilletLaw::evaluate`] (`SM_ERR` for the base `SmFilletLaw`);
+    /// `SM_ERR_NULL_POINTER` for a surface that is not an offset surface (a `NULL`
+    /// dereference upstream); those of `LocalPlaneSurfaceIntersect`; `SM_ERR` when it
+    /// finds no answer.
+    pub fn evaluate_law_point(
         &self,
         k: &Kernel,
         parameter: f64,
         uv0: Point2,
         uv1: Point2,
-        law: &L,
+        law: &mut FilletLaw,
         law_orient: bool,
         point_curve_interval: &Extent1d,
         surface_orientations: [f64; 2],
@@ -1439,7 +1448,7 @@ impl<'s> SurfaceIntersector<'s> {
         plane_normal: Vec3,
     ) -> Result<[Point2; 2]> {
         // get fillet radius and its derivatives at a point along a fillet edge
-        let offsets = fillet_law_evaluate(law, parameter, point_curve_interval, law_orient)?;
+        let offsets = law.evaluate(parameter, point_curve_interval, law_orient)?;
 
         // set Offset Surface Offset signed distances
         let [o0, o1] = surface_orientations;
@@ -1931,36 +1940,15 @@ fn surface_local_plane_surface_intersect(
     )
 }
 
-/// `crLawCurve.Evaluate(parameter, interval, orient, values)`: the fillet radius and
-/// its first two derivatives.
-fn fillet_law_evaluate<L: ?Sized>(
-    _law: &L,
-    _parameter: f64,
-    _interval: &Extent1d,
-    _orient: bool,
-) -> Result<[f64; 3]> {
-    // UNPORTED(blend.fillet_executive_p1): SmFilletLaw::Evaluate
-    Err(SolidError::unported(
-        "SmFilletLaw::Evaluate",
-        "blend.fillet_executive_p1",
-    ))
-}
-
 /// `SM_CAST_PTR(SmOffsetSurface, surface)->SetOffsetDistance(distance)` (`NULL`
-/// dereferenced upstream for a surface that is not an offset).
-fn set_offset_distance(surface: &Surface, _distance: f64) -> Result<()> {
+/// dereferenced upstream for a surface that is not an offset). The intersector shares
+/// the surface with its owner, as upstream (the offset distance is a `Cell`).
+fn set_offset_distance(surface: &Surface, distance: f64) -> Result<()> {
     match surface.kind() {
-        // DISPATCH GAP: SmOffsetSurface::SetOffsetDistance is ported
-        // (OffsetSurface::set_offset_distance, surface.offset_surface), but upstream
-        // sets it through the intersector's shared surface pointers, which are
-        // `&Surface` here. The only caller first needs SmFilletLaw::Evaluate
-        // (blend.fillet_executive_p1), whose porter decides how a fillet holds its
-        // offset surfaces.
-        // UNPORTED(blend.fillet_executive_p1): SmOffsetSurface::SetOffsetDistance through a shared surface
-        SurfaceKind::OffsetSurface(_) => Err(SolidError::unported(
-            "SmOffsetSurface::SetOffsetDistance through a shared surface",
-            "blend.fillet_executive_p1",
-        )),
+        SurfaceKind::OffsetSurface(o) => {
+            o.set_offset_distance(distance);
+            Ok(())
+        }
         _ => Err(SolidError::null_pointer(
             "intersect::surface_intersector::p1::set_offset_distance",
         )),

@@ -14,12 +14,12 @@
 //
 // The solver is a real SmVariableRadiusFS (its surfaces constructor over A, B, the centre
 // curve and an SmLinearFilletLaw); its offsets are then replaced by offsets of A and B at the
-// given distances (allowing extension, as the constructor makes them) so the Rust side, which
-// cannot evaluate the unported law, builds the same solver, and its first fillet geometry
-// (the constructor's default SmFilletGeom(this), deleted) by the Model's.
-// ReCalcFilletGeom(FALSE, NULL, ref) runs on it. Output: `-2` (refused: no fillet geometry, which upstream reads out of
-// bounds), else `status  extend_before extend_after`, then for every edge of the Model and
-// both its edge uses the vertex use's intersection point `t crv_pos[3] uv0[2] uv1[2]`.
+// given distances (allowing extension, as the constructor makes them), and its first fillet
+// geometry (the constructor's default SmFilletGeom(this), deleted) by the Model's geometry `g`;
+// with `g = -1` the default geometry (no rails) stays.
+// ReCalcFilletGeom(FALSE, NULL, ref) runs on it. Output: `status  extend_before extend_after`,
+// then for every edge of the Model and both its edge uses the vertex use's intersection point
+// `t crv_pos[3] uv0[2] uv1[2]`.
 
 #include <SmFilletExecutive.h>
 #include <SmFilletStandardSolver.h>
@@ -27,8 +27,6 @@
 
 namespace
 {
-const double P2R_REFUSE = -2.0;
-
 struct P2VrPeek : SmVariableRadiusFS
 {
     P2VrPeek(const SmContext& ctx, double tol, double ang, double tan, SmSurface* a, SmSurface* b, double o0,
@@ -124,12 +122,8 @@ int32_t p2r_run(Rd& rd, std::vector<double>& o)
         delete ref;
         return SC_ERR_ARG;
     }
+    // no Model geometry (g = -1): the constructor's default first geometry stays
     SmFilletGeom* geom = M.geom(g);
-    if (geom == NULL)
-    {
-        o.push_back(P2R_REFUSE);
-    }
-    else
     {
         SmLinearFilletLaw law(r0, r1);
         {
@@ -139,9 +133,11 @@ int32_t p2r_run(Rd& rd, std::vector<double>& o)
             s0->SetAllowExtension(TRUE);
             s1->SetAllowExtension(TRUE);
             vr.set_offsets(s0, s1);
-            vr.set_first_geom(geom);
+            if (geom != NULL)
+                vr.set_first_geom(geom);
             SmStatus st = vr.ReCalcFilletGeom(FALSE, NULL, ref);
-            vr.release_geoms();
+            if (geom != NULL)
+                vr.release_geoms();
             o.push_back(st == SM_SUCCESS ? 0.0 : (double)st);
             o.push_back(vr.extend_before() ? 1.0 : 0.0);
             o.push_back(vr.extend_after() ? 1.0 : 0.0);

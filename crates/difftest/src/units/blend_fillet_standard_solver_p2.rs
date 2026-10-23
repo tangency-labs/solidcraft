@@ -1428,9 +1428,6 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- ReCalcFilletGeom ----------------------------------------------------------------
 
-/// The shim refused the case: `m_vFilletGeoms[0]` of an empty array.
-const REFUSED: f64 = -2.0;
-const NO_GEOM: &str = "upstream reads m_vFilletGeoms[0] out of bounds";
 
 fn recalc_input(ri: &RecalcIn) -> Result<Vec<f64>, HarnessError> {
     let mut o = Vec::new();
@@ -1462,10 +1459,7 @@ fn recalc_input(ri: &RecalcIn) -> Result<Vec<f64>, HarnessError> {
 
 /// `status extend_before extend_after` and the vertex uses' points.
 fn recalc_output(flat: &[f64]) -> Output {
-    match flat.first() {
-        Some(&f) if f == REFUSED => Output::rejected(NO_GEOM),
-        _ => to_output(flat),
-    }
+    to_output(flat)
 }
 
 fn cpp_recalc(ri: &RecalcIn) -> Result<Output, HarnessError> {
@@ -1506,10 +1500,6 @@ fn rust_recalc(ri: &RecalcIn) -> Result<Output, HarnessError> {
         *tp.uv_pos_mut(SrfIndex::First) = p2(t.uv0);
         *tp.uv_pos_mut(SrfIndex::Second) = p2(t.uv1);
     }
-    let Ok(gi) = usize::try_from(ri.g) else {
-        return Ok(Output::rejected(NO_GEOM));
-    };
-    let geom = rm.geom(gi)?;
     let k = Kernel::default();
     let a = gp1_surface_of(&ri.a)?;
     let b = gp1_surface_of(&ri.b)?;
@@ -1520,8 +1510,18 @@ fn rust_recalc(ri: &RecalcIn) -> Result<Output, HarnessError> {
         .map(|c| curve_of(c).map(Curve::from))
         .transpose()?;
 
-    // the surfaces constructor's members, with the offsets the shim installs
-    let mut curve_based = CurveBasedFs::new(ri.tol, ri.ang, ri.tan);
+    // the surfaces constructor's members, with the offsets the shim installs; its
+    // default first fillet geometry (`SmFilletSolver()` adds `new SmFilletGeom(this)`)
+    // stays when the case has no Model geometry to put in its place
+    let mut curve_based = match usize::try_from(ri.g) {
+        Ok(gi) => {
+            let mut cb = CurveBasedFs::new(ri.tol, ri.ang, ri.tan);
+            cb.solver.fillet_geoms.push(rm.geom(gi)?);
+            cb
+        }
+        Err(_) => CurveBasedFs::new_in(&k, &mut rm.fb, FilletSolverId(0), ri.tol, ri.ang, ri.tan)
+            .map_err(|e| he(&e))?,
+    };
     let law_interval = center.natural_interval();
     curve_based.original = Some(center);
     curve_based.solver.orientations = ri.o;
@@ -1540,7 +1540,6 @@ fn rust_recalc(ri: &RecalcIn) -> Result<Output, HarnessError> {
         Some(OffsetSurfaceSlot { key: 0, surface: s0 }),
         Some(OffsetSurfaceSlot { key: 1, surface: s1 }),
     ];
-    curve_based.solver.fillet_geoms.push(geom);
     let mut vr = VariableRadiusFs {
         curve_based,
         law: FilletLaw::new(FilletLawKind::Linear {
@@ -2211,11 +2210,8 @@ mod tests {
             "too few found Guess cases"
         );
         // ReCalcFilletGeom: compared statuses (the rail walk's and DoLawIntersection's
-        // early exits) and cases reaching the unported fillet law
+        // early exits, and the law traces through the fillet intersector), none deferred
         assert!(count("Recalc", "status:") > 20, "too few compared Recalc cases");
-        assert!(
-            count("Recalc", "deferred:SmFilletLaw::Evaluate") > 3,
-            "too few Recalc cases reaching the fillet law"
-        );
+        assert_eq!(count("Recalc", "deferred:"), 0, "deferred Recalc cases");
     }
 }

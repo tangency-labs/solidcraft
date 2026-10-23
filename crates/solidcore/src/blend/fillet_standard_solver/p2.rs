@@ -23,6 +23,7 @@
 //! | [`VariableRadiusFs::load_jacobian`]                      | `SmVariableRadiusFS::LoadJacobian`                    |
 //! | [`VariableRadiusFs::load_initial_values`]                | `SmVariableRadiusFS::LoadInitialValues`               |
 //! | [`VariableRadiusFs::is_kind_of`]                         | `SmVariableRadiusFS::IsKindOf`                        |
+//! | `impl FilletSolverOps for VariableRadiusFs`              | the `SmVariableRadiusFS` virtuals (`GetJacobianSize`, `SetupOffsetValues`, `OffsetRadiiCanChange`, `LoadJacobian`, `LoadInitialValues`, `GetType`, `IsKindOf`, `GetSolverType`) |
 //! | [`CircularCrossSectionFsg::create_surface`]              | `SmCircularCrossSectionFSG::CreateSurface`            |
 //! | [`BlendCurveCrossSectionFsg::create_surface`]            | `SmBlendCurveCrossSectionFSG::CreateSurface`          |
 //! | [`SurfaceSurfaceFs::new`]                                | `SmSurfaceSurfaceFS::SmSurfaceSurfaceFS`              |
@@ -72,13 +73,17 @@
 //!   (`blend.fillet_standard_solver_p1`'s `GuessSphereSolve` holds it as a
 //!   `dyn FilletSolverOps`, which cannot be cast back for the qualified
 //!   `SmConstantRadiusFS::LoadJacobian`).
-//! - **Unported callees.** `SmFilletSolver::StepSolve` (`blend.fillet_solver_p3`),
-//!   `SmFilletGeom::GetRail` (`blend.fillet_geom_p1`, partial, but the solver holds
-//!   fillet-geometry handles without data; see `plan/findings.md`) and
-//!   `SmFilletLaw::SetEdgeArcLength` / `Evaluate` (`blend.fillet_executive_p1`) return
-//!   [`SolidError::Unported`] at the call site. `ReCalcFilletGeom` stops at its first
-//!   fillet-geometry call (everything after it walks the unported pseudo-B-rep),
-//!   `CalcFilletGeom` at `StepSolve` (the rest of it is ported but unreachable).
+//! - **`ReCalcFilletGeom`** runs `DoLawIntersection` on its `SmFilletIntersector`
+//!   (`FilletIntersector::do_law_intersection`), whose overrides step through this
+//!   solver's virtuals (`blend.fillet_solver_p4`'s `IntersectorSolver`: the
+//!   intersector's surfaces are copies of the solver's offsets, kept at the same offset
+//!   distances and base extensions as upstream's one object). The law argument is a copy
+//!   of the solver's law (`SmFilletIntersector::EvaluateLawPoint` does not read it).
+//!   `SetExtensionFlags` through the `FilletSolverOps` hook (which has no kernel) is
+//!   [`SolidError::InvalidInput`]; call [`VariableRadiusFs::set_extension_flags`].
+//! - **Unported callees.** `SmFilletSolver::StepSolve` (`blend.fillet_solver_p3`)
+//!   returns [`SolidError::Unported`] at the call site: `CalcFilletGeom` stops at
+//!   `StepSolve` (the rest of it is ported but unreachable).
 //! - **Arguments.** Out-params become return values (`rbFoundSolution` /
 //!   `rTsectPnt`: `Some` point when found). `SmContext` arguments are dropped or become
 //!   the [`Kernel`]. The generators' `CreateSurface` take the solver's tolerance and
@@ -92,7 +97,7 @@
 use crate::blend::fillet_custom_solver::{
     offset_compute_inward_vector, offset_evaluate_1st, offset_evaluate_point,
     offset_local_point_solve, surface_global_point_solve, ConstantRadiusAssistedFs, InitialValues,
-    OffsetSurface, SurfaceId,
+    JacobianLoad, OffsetSurface, SurfaceId,
 };
 use crate::blend::fillet_geom::p1::{
     FilStatus, FilletBrep, FilletGeomId, FilletSolverId, FilletVertexType,
@@ -101,6 +106,7 @@ use crate::blend::fillet_intersector::FilletIntersector;
 use crate::blend::fillet_solver::p1::{
     FilletSolver, FilletSolverOps, FilletSphereSolveEnfo, OffsetSurfaceSlot,
 };
+use crate::blend::fillet_solver::p4::IntersectorSolver;
 use crate::blend::fillet_standard_solver::p1::SolverRails;
 use crate::blend::fillet_standard_solver::p1::{
     constant_radius_is_kind_of, BlendCurveCrossSectionFsg, BoundaryTrimmingType,
@@ -1268,19 +1274,6 @@ impl ConstantDistanceFs {
 
 // ---- SmVariableRadiusFS -----------------------------------------------------------------------
 
-/// `rFilletLaw.SetEdgeArcLength(dEdgeArcLength)`.
-///
-/// # Errors
-///
-/// [`SolidError::Unported`] (`blend.fillet_executive_p1`).
-fn set_edge_arc_length(_law: &mut FilletLaw, _edge_arc_length: f64) -> Result<()> {
-    // UNPORTED(blend.fillet_executive_p1): SmFilletLaw::SetEdgeArcLength
-    Err(SolidError::unported(
-        "SmFilletLaw::SetEdgeArcLength",
-        "blend.fillet_executive_p1",
-    ))
-}
-
 /// `if (m_pOriginal->GetDegree() > 1)`: `SE(m_pOriginal->Length(m_vLawInterval,
 /// dThisApproxTol3d * 10, dEdgeArcLength))` (a failure leaves `0.0`) and
 /// `rFilletLaw.SetEdgeArcLength(dEdgeArcLength)`.
@@ -1294,7 +1287,7 @@ fn set_law_arc_length(
     if curve.degree()? > 1 {
         let accuracy = approx_tol_3d * 10.0;
         let edge_arc_length = ignored(curve.length(k, interval, accuracy))?.unwrap_or(0.0);
-        set_edge_arc_length(law, edge_arc_length)?;
+        law.edge_arc_length = edge_arc_length;
     }
     Ok(())
 }
@@ -1316,8 +1309,7 @@ impl VariableRadiusFs {
     ///
     /// [`SolidError::InvalidInput`] for an edge use without radial, edge, curve, face
     /// use or face surface (upstream dereferences `NULL`); [`SolidError::Unported`] from
-    /// the fillet law (`SetEdgeArcLength`, `Evaluate`: `blend.fillet_executive_p1`) and
-    /// `SmEdgeuse::EvaluateBinormal`; those of [`OffsetSurface::new`],
+    /// `SmEdgeuse::EvaluateBinormal`; those of the law evaluation, [`OffsetSurface::new`],
     /// [`CurveBasedFs::new_in`] and [`FilletSolver::finish_construction`].
     #[allow(clippy::too_many_arguments)]
     pub fn from_edgeuse(
@@ -1417,9 +1409,7 @@ impl VariableRadiusFs {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from the fillet law (`SetEdgeArcLength`, `Evaluate`:
-    /// `blend.fillet_executive_p1`); those of [`OffsetSurface::new`] and
-    /// [`CurveBasedFs::new_in`].
+    /// Those of the law evaluation, [`OffsetSurface::new`] and [`CurveBasedFs::new_in`].
     #[allow(clippy::too_many_arguments)]
     pub fn from_surfaces(
         k: &Kernel,
@@ -1493,8 +1483,8 @@ impl VariableRadiusFs {
     /// `SM_ERR_NULL_POINTER` without reference curve, rail or original curve; `SM_ERR`
     /// for a rail without exactly two edge uses, a projection without exactly one
     /// solution or a point with a negative curve parameter; those of the projection,
-    /// `SetupOffsetExtension` and the law intersection ([`SolidError::Unported`] from
-    /// the law, `SmFilletLaw::Evaluate`, unit `blend.fillet_executive_p1`);
+    /// `SetupOffsetExtension` and the law intersection (its overrides through this
+    /// solver);
     /// [`SolidError::InvalidInput`] for a solver without fillet geometry or surfaces, or
     /// a rail edge use without vertex use or fillet vertex (upstream reads out of
     /// bounds or dereferences `NULL`).
@@ -1628,25 +1618,36 @@ impl VariableRadiusFs {
 
         // (bUseNormalAveraging and bUniformSteps are TRUE; the uniform-steps flag and
         // the angle tolerance are unused by DoLawIntersection)
+        let orientations = solver.orientations;
         let original = self
             .curve_based
             .original
-            .as_ref()
+            .clone()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
         let opts = LawIntersectionOptions {
-            law: &self.law,
             law_orient: self.law_orientation,
-            point_curve: original,
+            point_curve: &original,
             point_curve_interval: self.law_interval,
-            surface_orientations: solver.orientations,
+            surface_orientations: orientations,
             use_normal_plane_averaging: true,
             approx_tol_3d: Some(tol),
         };
-        // DISPATCH GAP: upstream runs DoLawIntersection on the SmFilletIntersector, so
-        // its ComputeNextPoint / FlushCurve / ComputePointValues / TestSpanAccuracy
-        // overrides apply; the base intersector here calls its own versions
-        // (plan/findings.md, blend.fillet_intersector "Virtual overrides").
-        let traced = fi.base.base.do_law_intersection(k, &ids, &opts);
+        // `*m_rLaw` is also the solver's own law (SetupOffsetValues evaluates it while
+        // the solver is borrowed as the intersector's); SmFilletIntersector's
+        // EvaluateLawPoint does not read its law argument, so a copy stands in for it.
+        let mut law = self.law.clone();
+        // DoLawIntersection runs on the SmFilletIntersector: its EvaluateLawPoint,
+        // ComputePointValuesDelta, TestSpanAccuracy and FlushCurve overrides step
+        // through this solver's virtuals (the intersector's surfaces are copies of the
+        // solver's offsets, kept at its offset distances)
+        let trace = [
+            fi.base.base.surface(SrfIndex::First),
+            fi.base.base.surface(SrfIndex::Second),
+        ];
+        let traced = match IntersectorSolver::new(self, trace) {
+            Ok(mut fs) => fi.do_law_intersection(&mut fs, pseudo, k, &ids, &opts, &mut law),
+            Err(e) => Err(e),
+        };
         // the points are SmTsectPnt references upstream: copy them back
         for (&vu, &id) in tsect_pnts.iter().zip(&ids) {
             let p = fi.base.base.point(id)?.clone();
@@ -1672,8 +1673,7 @@ impl VariableRadiusFs {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from the law evaluation (`blend.fillet_executive_p1`);
-    /// `SM_ERR` for a zero first derivative; those of the evaluations and
+    /// Those of the law evaluation; `SM_ERR` for a zero first derivative; those of the evaluations and
     /// unitizations; [`SolidError::InvalidInput`] for an out-of-range index or a
     /// missing surface or curve.
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -1822,9 +1822,8 @@ impl VariableRadiusFs {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` when the curve drop finds no single solution; [`SolidError::Unported`]
-    /// from `SetupOffsetValues` (the fillet law, `blend.fillet_executive_p1`); those of
-    /// the evaluations and solves; [`SolidError::InvalidInput`] for an out-of-range
+    /// `SM_ERR` when the curve drop finds no single solution; those of
+    /// `SetupOffsetValues` (the fillet law), the evaluations and solves; [`SolidError::InvalidInput`] for an out-of-range
     /// index, a rail index above 1, a missing surface or curve, or edge uses without
     /// `brep`.
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -2020,6 +2019,145 @@ fn at3(v: &[Vec3], i: usize, op: &'static str) -> Result<Vec3> {
     v.get(i)
         .copied()
         .ok_or_else(|| SolidError::invalid_input(op, "evaluation shorter than requested"))
+}
+
+// ---- SmVariableRadiusFS virtuals ----------------------------------------------------------------
+
+/// The virtuals of `SmVariableRadiusFS` (the class `ReCalcFilletGeom` runs its
+/// `SmFilletIntersector` on): its overrides of `GetJacobianSize`, `SetupOffsetValues`,
+/// `OffsetRadiiCanChange`, `LoadJacobian`, `LoadInitialValues`, `SetExtensionFlags`,
+/// `GetType`, `IsKindOf` and `GetSolverType`; the rest is the `SmFilletSolver` base
+/// (`SmCurveBasedFS` overrides none of these but `GetSolverType`, which
+/// `SmVariableRadiusFS` overrides again).
+impl FilletSolverOps for VariableRadiusFs {
+    fn solver(&self) -> &FilletSolver {
+        &self.curve_based.solver
+    }
+
+    fn solver_mut(&mut self) -> &mut FilletSolver {
+        &mut self.curve_based.solver
+    }
+
+    /// `SmVariableRadiusFS::GetJacobianSize`: 5.
+    fn jacobian_size(&self) -> Result<usize> {
+        Ok(VariableRadiusFs::jacobian_size(self))
+    }
+
+    /// `SmVariableRadiusFS::SetupOffsetValues`.
+    fn setup_offset_values(
+        &mut self,
+        tsect: &TsectPnt,
+        offset_dist: Option<&mut f64>,
+    ) -> Result<()> {
+        let d = VariableRadiusFs::setup_offset_values(self, tsect)?;
+        if let Some(out) = offset_dist {
+            *out = d;
+        }
+        Ok(())
+    }
+
+    /// `SmVariableRadiusFS::OffsetRadiiCanChange`.
+    fn offset_radii_can_change(&self) -> Result<bool> {
+        VariableRadiusFs::offset_radii_can_change(self)
+    }
+
+    /// `SmVariableRadiusFS::LoadJacobian` ([`VariableRadiusFs::load_jacobian`], which
+    /// leaves the in/out offsets as they are).
+    fn load_jacobian(
+        &mut self,
+        k: &Kernel,
+        num_equations: &mut usize,
+        num_parameters: &mut usize,
+        load: &mut JacobianLoad<'_>,
+        f: &mut [f64],
+        jacobian: Option<&mut Matrix>,
+    ) -> Result<bool> {
+        let offsets = [load.surf1_offset, load.surf2_offset];
+        VariableRadiusFs::load_jacobian(
+            self,
+            k,
+            num_equations,
+            num_parameters,
+            load.rail_index,
+            [load.surface1, load.surface2],
+            &offsets,
+            load.x,
+            f,
+            jacobian,
+        )
+    }
+
+    /// `SmVariableRadiusFS::LoadInitialValues` ([`VariableRadiusFs::load_initial_values`]).
+    ///
+    /// Every upstream caller passes `*GetSurface(lRailIndex)` as `crSurface1`, so the
+    /// offset distances `SetupOffsetValues` sets in the call change it: the call runs
+    /// on the solver's own rail surface, which is then copied into `surface1` (the
+    /// callers' copy of it). `rlSurface2Index` is `2` on entry (the callers that pass
+    /// `rbDoSurf2Calcs == 0` set it so; the others leave it to this call).
+    fn load_initial_values(
+        &mut self,
+        k: &Kernel,
+        brep: Option<&Brep>,
+        do_surf2_calcs: bool,
+        rail_index: usize,
+        surface1: &mut OffsetSurface,
+        surface1_index: usize,
+        intervals: &mut ExtentNd,
+        periodicities: &mut Vec<bool>,
+        guess_t: &mut Vec<f64>,
+    ) -> Result<Option<InitialValues>> {
+        self.curve_based
+            .solver
+            .rail_mut(rail_index)?
+            .clone_from(surface1);
+        let r = VariableRadiusFs::load_initial_values(
+            self,
+            k,
+            brep,
+            do_surf2_calcs,
+            rail_index,
+            None,
+            surface1_index,
+            2,
+            intervals,
+            periodicities,
+            guess_t,
+        );
+        surface1.clone_from(self.curve_based.solver.rail(rail_index)?);
+        let v = r?;
+        Ok(v.surface2_rail.map(|surface2_rail| InitialValues {
+            surface2_rail,
+            surface2_index: v.surface2_index,
+        }))
+    }
+
+    /// `SmVariableRadiusFS::SetExtensionFlags` needs the kernel to extend the edge
+    /// curve ([`VariableRadiusFs::set_extension_flags`]); the hook has none.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`]: call [`VariableRadiusFs::set_extension_flags`].
+    fn set_extension_flags(&mut self, _b: &Brep) -> Result<()> {
+        Err(SolidError::invalid_input(
+            OP_VR_RECALC,
+            "SmVariableRadiusFS::SetExtensionFlags needs the kernel: call VariableRadiusFs::set_extension_flags",
+        ))
+    }
+
+    /// `SmVariableRadiusFS::GetType`.
+    fn type_code(&self) -> Result<i64> {
+        Ok(VariableRadiusFs::TYPE)
+    }
+
+    /// `SmVariableRadiusFS::IsKindOf`.
+    fn is_kind_of(&self, t: i64) -> Result<bool> {
+        Ok(VariableRadiusFs::is_kind_of(self, t))
+    }
+
+    /// `SmVariableRadiusFS::GetSolverType`.
+    fn solver_type(&self) -> Result<FilletSolverType> {
+        Ok(VariableRadiusFs::solver_type(self))
+    }
 }
 
 // ---- surface generators -------------------------------------------------------------------------
@@ -2626,7 +2764,7 @@ mod tests {
             law.clone(),
             false,
         );
-        // the fillet law evaluates (blend.fillet_executive_p1)
+        // the fillet law evaluates
         assert!(vr.is_ok());
         let mut vr = VariableRadiusFs {
             curve_based: CurveBasedFs::new(1e-6, 0.5, 0.03),

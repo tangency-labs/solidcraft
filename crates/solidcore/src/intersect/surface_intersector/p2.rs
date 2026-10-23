@@ -10,7 +10,7 @@
 //! | [`SurfaceIntersector::do_boundary_plane_test`], [`BoundaryPlaneTestResult`] | `DoBoundaryPlaneTest`, `SmBoundaryPlaneTestResult` |
 //! | [`SurfaceIntersector::compute_point_values`]                   | `ComputePointValues`                                  |
 //! | [`SurfaceIntersector::flush_curve`], [`TsectCurves`]           | `FlushCurve` and its output arrays                    |
-//! | [`SurfaceIntersector::compute_law_point_values`], [`LawPointOptions`] | `ComputeLawPointValues`                        |
+//! | [`SurfaceIntersector::compute_law_point_values`], [`compute_law_point_values_with`], [`LawPointOptions`] | `ComputeLawPointValues`                        |
 //! | [`SurfaceIntersector::classify_boundary_start_point_intersection`] | `ClassifyBoundaryStartPointIntersection`          |
 //! | [`is_point_unique`]                                            | `sm_IsPointUnique` (static)                           |
 //!
@@ -39,10 +39,14 @@
 //!   `ContainsPoint2d` treats a NaN point as inside, so upstream never ends. It stops
 //!   with `SM_ERR` after [`MAX_GAP_SAMPLES`] samples (upstream classifies a side in a
 //!   handful).
-//! - **Fillet laws.** `SmFilletLaw` is not ported: the law is an opaque argument
-//!   passed to [`SurfaceIntersector::evaluate_law_point`]. The curve parameter
-//!   `EvaluateLawPoint` never sets (an uninitialised `double` upstream) is stored as
-//!   `SM_UNDEF_DOUBLE`.
+//! - **Fillet laws.** The law is passed separately from [`LawPointOptions`] as
+//!   `&mut FilletLaw` (its evaluation caches a B-spline law's extension, through a
+//!   `const` cast upstream). `ComputeLawPointValues` is the driver
+//!   [`compute_law_point_values_with`]: its `EvaluateLawPoint` and
+//!   `ComputePointValuesDelta` calls are virtual (`IntersectorVirtuals`, part 4). The
+//!   curve parameter the basic `EvaluateLawPoint` never sets (an uninitialised
+//!   `double` upstream) is stored as `SM_UNDEF_DOUBLE`. A failing
+//!   `ComputePointValuesDelta` retries, except `Unported`, which propagates.
 //! - **Unported callees.** `SmSurface::IsSingularity` of a surface that is not a
 //!   plane and `SmSurface::LocalPointSolve` (`surface.surface_p5`) return
 //!   [`SolidError::Unported`], which always propagates (also where upstream ignores
@@ -52,6 +56,7 @@
 
 use core::cmp::Ordering;
 
+use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
@@ -76,6 +81,7 @@ use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::surface_cache::PatchBoundaryBoundingPlanes;
 
 use super::p1::{flush_crv, IntersectionPointType, SrfIndex, SurfaceIntersector, TsectPnt};
+use super::p4::IntersectorVirtuals;
 
 const OP_CPV: &str = "intersect::surface_intersector::p2::SurfaceIntersector::compute_point_values";
 const OP_SING: &str =
@@ -137,11 +143,22 @@ pub struct TsectCurves {
     pub deviations: Vec<f64>,
 }
 
-/// The fillet-law inputs of [`SurfaceIntersector::compute_law_point_values`].
+/// The guess UV points `crUV0`, `crUV1` of [`compute_law_point_values_with`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LawGuess {
+    /// Points of their own (`SplitSpan`, a caller's values).
+    Given([Point2; 2]),
+    /// `rTsectPnt.UVPos(0)`, `rTsectPnt.UVPos(1)` of the point being computed, as
+    /// `DoLawIntersection` passes them: references upstream, so a try whose
+    /// `ComputePointValuesDelta` fails after writing the point's UV points (the
+    /// fillet intersector's does) changes the guesses of the next try.
+    PointUvs,
+}
+
+/// The fillet-law inputs of [`SurfaceIntersector::compute_law_point_values`] (the
+/// law itself, `crLawCurve`, is passed separately as `&mut FilletLaw`).
 #[derive(Debug, Clone, Copy)]
-pub struct LawPointOptions<'a, L: ?Sized> {
-    /// `crLawCurve`: the fillet radius law (opaque; `SmFilletLaw` is not ported).
-    pub law: &'a L,
+pub struct LawPointOptions<'a> {
     /// `bLawOrient`: the parameters run from the interval end to its start.
     pub law_orient: bool,
     /// `crPointCurve`: the fillet edge curve (arc length parameterised).
@@ -918,103 +935,30 @@ impl SurfaceIntersector<'_> {
     /// `InvalidInput` for a zero plane normal; those of
     /// [`SurfaceIntersector::evaluate_law_point`]; `SM_ERR` when no try succeeds;
     /// [`SolidError::Unported`] from unported callees.
-    pub fn compute_law_point_values<L: ?Sized>(
-        &self,
+    #[allow(clippy::too_many_arguments)]
+    pub fn compute_law_point_values(
+        &mut self,
         k: &Kernel,
         parameter: f64,
         uv0: Point2,
         uv1: Point2,
         delta_step: f64,
-        law: &LawPointOptions<'_, L>,
+        law: &LawPointOptions<'_>,
+        law_curve: &mut FilletLaw,
         skip_computing_uvs: bool,
         point: &mut TsectPnt,
     ) -> Result<()> {
-        let mut delta_step = delta_step;
-        let ivl = &law.point_curve_interval;
-
-        // for 6 iterations
-        for _ in 0..6 {
-            // the plane and delta plane to intersect (statuses ignored)
-            let delta_param = parameter + delta_step;
-            let mut pv = [Vec3::UNDEF; 2];
-            let mut pv_delta = [Vec3::UNDEF; 2];
-            if let Some(v) = ignored(law.point_curve.evaluate(k, parameter, 1, true, true))? {
-                for (d, s) in pv.iter_mut().zip(v) {
-                    *d = s;
-                }
-            }
-            if let Some(v) = ignored(law.point_curve.evaluate(k, delta_param, 1, true, true))? {
-                for (d, s) in pv_delta.iter_mut().zip(v) {
-                    *d = s;
-                }
-            }
-
-            if law.average_normals {
-                let [n0, n1] = law.normals;
-                let t = ivl.inversion(parameter).parameter.unwrap_or(UNDEF_DOUBLE);
-                pv[1] = n0 * (1.0 - t) + n1 * t;
-                let t = ivl.inversion(delta_param).parameter.unwrap_or(UNDEF_DOUBLE);
-                pv_delta[1] = n0 * (1.0 - t) + n1 * t;
-            }
-
-            // unitize the plane normals
-            pv[1] = pv[1].unitize()?;
-            pv_delta[1] = pv_delta[1].unitize()?;
-
-            // the surface/surface/plane intersections
-            let uvs = if skip_computing_uvs {
-                [
-                    point.uv_pos(SrfIndex::First),
-                    point.uv_pos(SrfIndex::Second),
-                ]
-            } else {
-                let uvs = self.evaluate_law_point(
-                    k,
-                    parameter,
-                    uv0,
-                    uv1,
-                    law.law,
-                    law.law_orient,
-                    ivl,
-                    law.surface_orientations,
-                    pv[0],
-                    pv[1],
-                )?;
-                // the curve parameter EvaluateLawPoint never sets
-                if let Some(u) = point.user_doubles.get_mut(0) {
-                    *u = UNDEF_DOUBLE;
-                }
-                uvs
-            };
-            let _uv_deltas = self.evaluate_law_point(
-                k,
-                delta_param,
-                uv0,
-                uv1,
-                law.law,
-                law.law_orient,
-                ivl,
-                law.surface_orientations,
-                pv_delta[0],
-                pv_delta[1],
-            )?;
-            let _ = uvs;
-
-            // the delta point (its values are only used by ComputePointValuesDelta)
-            let mut delta_pnt = TsectPnt::new();
-            delta_pnt.curve_parameter = point.curve_parameter + delta_step;
-            delta_pnt.user_doubles[0] = UNDEF_DOUBLE;
-            delta_pnt.user_doubles[1] = delta_param;
-
-            // surface and curve values for both parameters
-            if self.compute_point_values_delta().is_ok() {
-                return Ok(());
-            }
-
-            // next iteration with a bigger delta step
-            delta_step *= 10.0;
-        }
-        Err(SolidError::sm_err(OP_LAW))
+        compute_law_point_values_with(
+            self,
+            k,
+            parameter,
+            LawGuess::Given([uv0, uv1]),
+            delta_step,
+            law,
+            law_curve,
+            skip_computing_uvs,
+            point,
+        )
     }
 
     /// Whether the boundary start point `point` is degenerate: not part of an
@@ -1624,6 +1568,125 @@ fn surface_local_surface_solve_normalize(
             other_guess,
         )?
         .map(|s| [s.uv.x, s.uv.y, s.other_uv.x, s.other_uv.y]))
+}
+
+/// [`SurfaceIntersector::compute_law_point_values`] on the intersector of `v`, its
+/// virtual calls (`EvaluateLawPoint`, `ComputePointValuesDelta`) dispatched to `v`,
+/// with the guess UV points `guess`.
+///
+/// # Errors
+///
+/// As [`SurfaceIntersector::compute_law_point_values`], with the errors of `v`'s
+/// overrides.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    parameter: f64,
+    guess: LawGuess,
+    delta_step: f64,
+    law: &LawPointOptions<'_>,
+    law_curve: &mut FilletLaw,
+    skip_computing_uvs: bool,
+    point: &mut TsectPnt,
+) -> Result<()> {
+    let mut delta_step = delta_step;
+    let ivl = &law.point_curve_interval;
+
+    // for 6 iterations
+    for _ in 0..6 {
+        // the guesses (read through the references on every try)
+        let [uv0, uv1] = match guess {
+            LawGuess::Given(uvs) => uvs,
+            LawGuess::PointUvs => [
+                point.uv_pos(SrfIndex::First),
+                point.uv_pos(SrfIndex::Second),
+            ],
+        };
+
+        // the plane and delta plane to intersect (statuses ignored)
+        let delta_param = parameter + delta_step;
+        let mut pv = [Vec3::UNDEF; 2];
+        let mut pv_delta = [Vec3::UNDEF; 2];
+        if let Some(r) = ignored(law.point_curve.evaluate(k, parameter, 1, true, true))? {
+            for (d, s) in pv.iter_mut().zip(r) {
+                *d = s;
+            }
+        }
+        if let Some(r) = ignored(law.point_curve.evaluate(k, delta_param, 1, true, true))? {
+            for (d, s) in pv_delta.iter_mut().zip(r) {
+                *d = s;
+            }
+        }
+
+        if law.average_normals {
+            let [n0, n1] = law.normals;
+            let t = ivl.inversion(parameter).parameter.unwrap_or(UNDEF_DOUBLE);
+            pv[1] = n0 * (1.0 - t) + n1 * t;
+            let t = ivl.inversion(delta_param).parameter.unwrap_or(UNDEF_DOUBLE);
+            pv_delta[1] = n0 * (1.0 - t) + n1 * t;
+        }
+
+        // unitize the plane normals
+        pv[1] = pv[1].unitize()?;
+        pv_delta[1] = pv_delta[1].unitize()?;
+
+        // the surface/surface/plane intersections
+        let uvs = if skip_computing_uvs {
+            [
+                point.uv_pos(SrfIndex::First),
+                point.uv_pos(SrfIndex::Second),
+            ]
+        } else {
+            let (curve_param, uvs) = v.evaluate_law_point(
+                k,
+                parameter,
+                uv0,
+                uv1,
+                law_curve,
+                law.law_orient,
+                ivl,
+                law.surface_orientations,
+                pv[0],
+                pv[1],
+            )?;
+            // (an override that leaves the curve parameter unset: undefined)
+            if let Some(u) = point.user_doubles.get_mut(0) {
+                *u = curve_param.unwrap_or(UNDEF_DOUBLE);
+            }
+            uvs
+        };
+        let (curve_delta_param, uv_deltas) = v.evaluate_law_point(
+            k,
+            delta_param,
+            uv0,
+            uv1,
+            law_curve,
+            law.law_orient,
+            ivl,
+            law.surface_orientations,
+            pv_delta[0],
+            pv_delta[1],
+        )?;
+
+        // build the delta point
+        let mut delta_pnt = TsectPnt::new();
+        delta_pnt.curve_parameter = point.curve_parameter + delta_step;
+        delta_pnt.user_doubles[0] = curve_delta_param.unwrap_or(UNDEF_DOUBLE);
+        delta_pnt.user_doubles[1] = delta_param;
+
+        // surface and curve values for both parameters (any failure retries;
+        // `Unported` propagates)
+        match v.compute_point_values_delta(k, uvs, uv_deltas, point, &mut delta_pnt) {
+            Ok(()) => return Ok(()),
+            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(_) => {}
+        }
+
+        // next iteration with a bigger delta step
+        delta_step *= 10.0;
+    }
+    Err(SolidError::sm_err(OP_LAW))
 }
 
 #[cfg(test)]

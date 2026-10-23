@@ -13,7 +13,7 @@
 //! | [`SurfaceIntersector::compute_next_point`], [`NextPoint`] | `ComputeNextPoint`                     |
 //! | [`SurfaceIntersector::update_tsect_point`], [`update_tsect_point_with`] | `sm_UpdateTsectPoint` (static) |
 //! | [`SurfaceIntersector::test_point`], [`test_point_with`] | `TestPoint`                              |
-//! | [`SurfaceIntersector::split_span`]                    | `SplitSpan`                                |
+//! | [`SurfaceIntersector::split_span`], [`split_span_with`] | `SplitSpan`                              |
 //! | [`TsectPnt::zeroed`]                                  | a point fresh from `m_vTSPntMgr` (zero-filled) |
 //!
 //! Deviations:
@@ -21,7 +21,8 @@
 //!   intersector (`intersect::surface_intersector::p4::IntersectorVirtuals`), so the
 //!   `ComputePointValues` of `sm_UpdateTsectPoint` is the derived intersector's when
 //!   `TraceCurve` runs on one ([`test_point_with`], [`update_tsect_point_with`]); the
-//!   methods run them on the basic intersector.
+//!   methods run them on the basic intersector. `SplitSpan` is generic the same way
+//!   ([`split_span_with`]), for the virtual calls of `ComputeLawPointValues`.
 //! - **Points.** Points are arena ids ([`TsectId`]), as in part 1: `rNextTSP`, the
 //!   previous point and the snap targets of `TestPoint` / `sm_UpdateTsectPoint` are
 //!   points of the arena (`TraceCurve` takes `rNextTSP` from `m_vTSPntMgr` too). A next
@@ -75,6 +76,7 @@
 //!   `SM_ASSERT`s (no-ops in release builds) and the user pointers
 //!   (`m_apUserPointer`, not modelled by [`TsectPnt`]).
 
+use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
@@ -1054,48 +1056,68 @@ impl SurfaceIntersector<'_> {
     /// Those of [`SurfaceIntersector::compute_law_point_values`] (the basic
     /// intersector's `ComputePointValuesDelta` always fails); `InvalidInput` for an
     /// unknown id.
-    pub fn split_span<L: ?Sized>(
+    pub fn split_span(
         &mut self,
         k: &Kernel,
         curr: TsectId,
         next: TsectId,
         delta_step: f64,
-        law: &LawPointOptions<'_, L>,
+        law: &LawPointOptions<'_>,
+        law_curve: &mut FilletLaw,
     ) -> Result<TsectId> {
-        let curr_tsp = self.point(curr)?.clone();
-        let next_tsp = self.point(next)?.clone();
-
-        let mut new_tsp = TsectPnt::zeroed();
-        new_tsp.point_type = IntersectionPointType::Crossing;
-
-        // the law parameters of the span ends and their mean
-        let curr_param = curr_tsp.user_doubles[1];
-        let next_param = next_tsp.user_doubles[1];
-        let mid_param = (curr_param + next_param) / 2.0;
-        new_tsp.user_doubles[1] = mid_param;
-
-        let uv0 = (curr_tsp.uv_pos(SrfIndex::First) + next_tsp.uv_pos(SrfIndex::First)) / 2.0;
-        let uv1 = (curr_tsp.uv_pos(SrfIndex::Second) + next_tsp.uv_pos(SrfIndex::Second)) / 2.0;
-
-        new_tsp.curve_parameter = (curr_tsp.curve_parameter + next_tsp.curve_parameter) / 2.0;
-
-        self.compute_law_point_values(
-            k,
-            mid_param,
-            uv0,
-            uv1,
-            delta_step,
-            law,
-            false,
-            &mut new_tsp,
-        )?;
-
-        let dist = curr_tsp.crv_pos().distance(new_tsp.crv_pos());
-        if dist > ZONE_TOL_3D * (next_param - curr_param) {
-            new_tsp.curve_parameter = curr_tsp.curve_parameter + dist;
-        }
-        Ok(self.alloc_point(new_tsp))
+        split_span_with(self, k, curr, next, delta_step, law, law_curve)
     }
+}
+
+/// [`SurfaceIntersector::split_span`] on the intersector of `v`, the virtual calls of
+/// `ComputeLawPointValues` dispatched to `v`.
+///
+/// # Errors
+///
+/// As [`SurfaceIntersector::split_span`], with the errors of `v`'s overrides.
+pub fn split_span_with<'s, V: super::p4::IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    curr: TsectId,
+    next: TsectId,
+    delta_step: f64,
+    law: &LawPointOptions<'_>,
+    law_curve: &mut FilletLaw,
+) -> Result<TsectId> {
+    let curr_tsp = v.intersector().point(curr)?.clone();
+    let next_tsp = v.intersector().point(next)?.clone();
+
+    let mut new_tsp = TsectPnt::zeroed();
+    new_tsp.point_type = IntersectionPointType::Crossing;
+
+    // the law parameters of the span ends and their mean
+    let curr_param = curr_tsp.user_doubles[1];
+    let next_param = next_tsp.user_doubles[1];
+    let mid_param = (curr_param + next_param) / 2.0;
+    new_tsp.user_doubles[1] = mid_param;
+
+    let uv0 = (curr_tsp.uv_pos(SrfIndex::First) + next_tsp.uv_pos(SrfIndex::First)) / 2.0;
+    let uv1 = (curr_tsp.uv_pos(SrfIndex::Second) + next_tsp.uv_pos(SrfIndex::Second)) / 2.0;
+
+    new_tsp.curve_parameter = (curr_tsp.curve_parameter + next_tsp.curve_parameter) / 2.0;
+
+    super::p2::compute_law_point_values_with(
+        v,
+        k,
+        mid_param,
+        super::p2::LawGuess::Given([uv0, uv1]),
+        delta_step,
+        law,
+        law_curve,
+        false,
+        &mut new_tsp,
+    )?;
+
+    let dist = curr_tsp.crv_pos().distance(new_tsp.crv_pos());
+    if dist > ZONE_TOL_3D * (next_param - curr_param) {
+        new_tsp.curve_parameter = curr_tsp.curve_parameter + dist;
+    }
+    Ok(v.intersector_mut().alloc_point(new_tsp))
 }
 
 /// [`SurfaceIntersector::update_tsect_point`] on the intersector of `v`, its

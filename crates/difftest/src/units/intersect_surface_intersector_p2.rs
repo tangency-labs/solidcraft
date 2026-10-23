@@ -17,12 +17,13 @@
 //! B-spline surface or `SmSurface::LocalSurfaceSolve` (normals within 3 degrees of a
 //! known previous point), `ClassifyBoundaryStartPointIntersection` sampling a tangent
 //! boundary (`SmSurface::LocalPointSolve`), `DoBoundaryPlaneTest` on a plane
-//! (`SmPlane::CreateIsoParametricCurve`), and `ComputeLawPointValues` with a valid
-//! plane (`SmFilletLaw::Evaluate`).
+//! (`SmPlane::CreateIsoParametricCurve`). `ComputeLawPointValues` with a valid plane
+//! evaluates the shim's default-constructed base `SmFilletLaw` (`SM_ERR`, compared).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use solidcore::blend::fillet_standard_solver::p1::{FilletLaw, FilletLawKind};
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::line::Line;
 use solidcore::geom::extent1d::{Extent1d, ExtentPointType};
@@ -686,7 +687,6 @@ fn run_op(
                 .get(l.curve)
                 .ok_or_else(|| harness("curve index"))?;
             let opts = LawPointOptions {
-                law: &(),
                 law_orient: l.orient,
                 point_curve: curve,
                 point_curve_interval: Extent1d::from_min_max(l.interval[0], l.interval[1]),
@@ -700,6 +700,8 @@ fn run_op(
                 p2(l.uv1),
                 l.delta,
                 &opts,
+                // the shim's default-constructed base `SmFilletLaw`
+                &mut FilletLaw::new(FilletLawKind::Base),
                 l.skip,
                 &mut p,
             );
@@ -1237,7 +1239,7 @@ fn gen_ops(rng: &mut Rng, g: &GenCtx) -> Vec<OpIn> {
 }
 
 fn gen_law(rng: &mut Rng, g: &GenCtx) -> OpIn {
-    // mostly a zero plane normal (compared); else deferred at the fillet law
+    // mostly a zero plane normal; else the base fillet law's SM_ERR
     let zero = rng.chance(0.85);
     let normals = if zero {
         [[0.0; 3], [0.0; 3]]

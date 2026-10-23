@@ -33,6 +33,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use solidcore::blend::fillet_standard_solver::p1::{FilletLaw, FilletLawKind};
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::line::Line;
 use solidcore::geom::extent1d::{Extent1d, ExtentPointType};
@@ -1098,7 +1099,6 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
             } else {
                 let ids: Vec<TsectId> = points.iter().map(|&i| id(i)).collect();
                 let opts = LawIntersectionOptions {
-                    law: &(),
                     law_orient: *orient,
                     point_curve: curve,
                     point_curve_interval: Extent1d::from_min_max(interval[0], interval[1]),
@@ -1106,7 +1106,9 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
                     use_normal_plane_averaging: *average,
                     approx_tol_3d: *tol,
                 };
-                let r = si.do_law_intersection(&k, &ids, &opts);
+                // the shim's default-constructed base `SmFilletLaw`
+                let mut law = FilletLaw::new(FilletLawKind::Base);
+                let r = si.do_law_intersection(&k, &ids, &opts, &mut law);
                 if let Some(c) = st(o, r)? {
                     put_single(o, &c)?;
                 }

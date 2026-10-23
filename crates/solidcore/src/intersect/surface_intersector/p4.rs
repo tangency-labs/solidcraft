@@ -13,7 +13,7 @@
 //! | [`SurfaceIntersector::do_point_intersection`], [`PointIntersectionOptions`] | `DoPointIntersection` |
 //! | [`SurfaceIntersector::do_law_intersection`], [`LawIntersectionOptions`] | `DoLawIntersection` |
 //! | [`IntersectionCurve`]                                 | the curve, type and deviation out-params of both drivers |
-//! | [`IntersectorVirtuals`], [`do_point_intersection_with`], [`trace_curve_with`] | the virtual calls of `DoPointIntersection` / `TraceCurve` (`this->ComputePointValues(..)`, ..) on a derived intersector |
+//! | [`IntersectorVirtuals`], [`do_point_intersection_with`], [`trace_curve_with`], [`do_law_intersection_with`] | the virtual calls of `DoPointIntersection` / `TraceCurve` / `DoLawIntersection` (`this->ComputePointValues(..)`, ..) on a derived intersector |
 //!
 //! Deviations:
 //! - **Points.** Points are arena ids ([`TsectId`]), as in parts 1 to 3: the start
@@ -22,7 +22,10 @@
 //!   builds on the stack (`sTempTSP`, `sTempEndTSP`: default points; the end point
 //!   `sEndTSP` of the singular-point retry becomes an arena point). Linking a point
 //!   that is already on a list (undefined upstream) is
-//!   [`SolidError::InvalidInput`], as in part 1.
+//!   [`SolidError::InvalidInput`], as in part 1. `DoLawIntersection` passes the end
+//!   points' own `UVPos` to `ComputeLawPointValues` as its guesses, by reference: they
+//!   are re-read on every try ([`LawGuess::PointUvs`]), so a failed try that wrote them
+//!   changes the next try's guesses as upstream.
 //! - **Outputs.** Out-params become return values: the drivers return an
 //!   [`IntersectionCurve`] whose members are `None` where upstream leaves the
 //!   out-param `NULL` or unset (more or fewer than one curve flushed). On an error
@@ -34,8 +37,10 @@
 //!   the base part and the virtuals they call (`ComputePointValues`,
 //!   `ComputeNextPoint`, `FlushCurve`); the [`SurfaceIntersector`] methods run them on
 //!   the basic intersector, `blend::fillet_intersector::FilletDispatch` on the fillet
-//!   intersector's overrides. `FindInteriorCurves` and `DoLawIntersection` call the
-//!   basic bodies (`TestSpanAccuracy` included).
+//!   intersector's overrides. `DoLawIntersection` is the driver
+//!   [`do_law_intersection_with`], whose virtual calls (`EvaluateLawPoint`,
+//!   `ComputePointValuesDelta`, `TestSpanAccuracy`, `FlushCurve`) go through the same
+//!   trait. `FindInteriorCurves` calls the basic bodies.
 //! - **Bounded loops.** `TraceCurve`'s step loops end on finite step sizes within a
 //!   few thousand halvings or growths, and the trace on its 5000th point (`SM_ERR`
 //!   upstream); a NaN step (from NaN tolerances) would loop forever upstream. Here
@@ -50,8 +55,8 @@
 //! - **Unused arguments.** `DoPointIntersection`'s context (only stored in
 //!   `m_cpContext`, not modelled) and `DoLawIntersection`'s context, uniform-steps
 //!   flag and angle tolerance (unused upstream) are dropped. `DoLawIntersection`
-//!   takes the fillet law (`SmFilletLaw`, not ported) as an opaque argument, as part
-//!   2 does.
+//!   takes the fillet law as `&mut FilletLaw` (upstream's `const` law caches a
+//!   B-spline law's extension through a `const` cast), as part 2 does.
 //! - **Interior node pairs.** `FindInteriorCurves` walks the tree node pairs of an
 //!   `SM_SR_NODES` global surface solve, reading each node's box and Bezier patch UV
 //!   domain: [`Surface::global_surface_solve_with`] returns them with the solutions,
@@ -62,8 +67,6 @@
 //!   appends curves, whose caches are built when first visited.
 //! - **Offset surfaces.** `DoLawIntersection` needs both surfaces to be
 //!   `SmOffsetSurface`s ([`SurfaceKind::OffsetSurface`], else `SM_ERR_NULL_POINTER`).
-//!   Past that check its law points wait on `SmFilletLaw::Evaluate`
-//!   (`blend.fillet_executive_p1`).
 //! - **Unported callees.** `SmSurface::IsSingularity` of a surface that is not a plane
 //!   (`surface.surface_p5`) and the callees of `SmSurface::LocalSurfaceIntersect` and of
 //!   the global surface solve's leaf solve that are not ported yet (`surface.surface_p3`,
@@ -72,6 +75,7 @@
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks (graphics, dumps), the
 //!   `SM_ASSERT`s and the point-count warnings (`MSG`).
 
+use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::p5::make_curve_cache;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::curve_cache::CurveCache;
@@ -83,18 +87,19 @@ use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::geom::vector2d::Point2;
-use crate::geom::vector3d::Vec3;
+use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQRT};
 use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::{Surface, SurfaceKind};
 
+use super::p1::SpanAccuracy;
 use super::p1::{
     surface_local_surface_intersect, IntersectionPointType, SrfIndex, SurfaceIntersector, TsectId,
     TsectPnt,
 };
-use super::p2::{LawPointOptions, TsectCurves};
-use super::p3::{test_point_with, NextPoint};
+use super::p2::{compute_law_point_values_with, LawGuess, LawPointOptions, TsectCurves};
+use super::p3::{split_span_with, test_point_with, NextPoint};
 
 const OP_TRACE: &str = "intersect::surface_intersector::p4::SurfaceIntersector::trace_curve";
 const OP_FIC: &str = "intersect::surface_intersector::p4::SurfaceIntersector::find_interior_curves";
@@ -173,9 +178,7 @@ pub struct PointIntersectionOptions {
 
 /// The options of [`SurfaceIntersector::do_law_intersection`].
 #[derive(Debug, Clone, Copy)]
-pub struct LawIntersectionOptions<'a, L: ?Sized> {
-    /// `crLawCurve`: the fillet law (`SmFilletLaw`, opaque: not ported).
-    pub law: &'a L,
+pub struct LawIntersectionOptions<'a> {
     /// `bLawOrient`: the law runs from the interval end to its start.
     pub law_orient: bool,
     /// `crPointCurve`: the edge curve (arc length parameterised).
@@ -212,19 +215,23 @@ impl SolutionObject for SolveSurface {
     }
 }
 
-/// The `SmSurfaceIntersector` virtuals that `DoPointIntersection` reaches: its own
-/// `ComputePointValues` and `FlushCurve`, `TraceCurve`'s `ComputeNextPoint`, and
-/// `TestPoint`'s `ComputePointValues` (through `sm_UpdateTsectPoint`). The drivers
-/// [`do_point_intersection_with`], [`trace_curve_with`] and (part 3)
-/// `test_point_with` / `update_tsect_point_with` run on any implementor, calling
+/// The `SmSurfaceIntersector` virtuals that `DoPointIntersection` and
+/// `DoLawIntersection` reach: their own `ComputePointValues`, `FlushCurve` and
+/// `TestSpanAccuracy`, `TraceCurve`'s `ComputeNextPoint`, `TestPoint`'s
+/// `ComputePointValues` (through `sm_UpdateTsectPoint`) and `ComputeLawPointValues`'
+/// `EvaluateLawPoint` and `ComputePointValuesDelta`. The drivers
+/// [`do_point_intersection_with`], [`trace_curve_with`],
+/// [`do_law_intersection_with`] and (part 3) `test_point_with` /
+/// `update_tsect_point_with` / `split_span_with` run on any implementor, calling
 /// these methods where upstream makes a virtual call and the
 /// [`SurfaceIntersector`] (the base class part) for everything else.
 ///
 /// [`SurfaceIntersector`] implements it with the basic bodies (its inherent methods
 /// call the drivers on itself); `blend::fillet_intersector::FilletDispatch`
-/// implements it with the `SmFilletIntersector` overrides. The other virtuals are not
-/// reached from a derived intersector's overrides of these: `TestSpanAccuracy` and
-/// `ComputeSingularityPoint` are only called by the basic `ComputeNextPoint` /
+/// implements it with the `SmFilletIntersector` overrides. The law methods default to
+/// the basic bodies. The other virtual calls are not reached from a derived
+/// intersector's overrides of these: `ComputeSingularityPoint` (and `TestSpanAccuracy`
+/// from `ComputeNextPoint`) are only called by the basic `ComputeNextPoint` /
 /// `ComputePointValues` bodies, so each implementor's overrides call their own.
 pub trait IntersectorVirtuals<'s> {
     /// The `SmSurfaceIntersector` base part.
@@ -267,6 +274,79 @@ pub trait IntersectorVirtuals<'s> {
     ///
     /// The override's.
     fn flush_curve(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()>;
+
+    /// `EvaluateLawPoint(dParameter, crUV0, crUV1, crLawCurve, bLawOrient,
+    /// crPointCurveInterval, dSurfaceOrientations, rPlaneOrigin, rPlaneNormal,
+    /// rdCurveParam, sUVs)`: the curve parameter (`None` where the override leaves it
+    /// unset, as the basic body does) and the UV points of the surface / surface /
+    /// plane intersection. The default is the basic body
+    /// ([`SurfaceIntersector::evaluate_law_point`]).
+    ///
+    /// # Errors
+    ///
+    /// The override's.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_law_point(
+        &mut self,
+        k: &Kernel,
+        parameter: f64,
+        uv0: Point2,
+        uv1: Point2,
+        law: &mut FilletLaw,
+        law_orient: bool,
+        point_curve_interval: &Extent1d,
+        surface_orientations: [f64; 2],
+        plane_origin: Point3,
+        plane_normal: Vec3,
+    ) -> Result<(Option<f64>, [Point2; 2])> {
+        let uvs = self.intersector().evaluate_law_point(
+            k,
+            parameter,
+            uv0,
+            uv1,
+            law,
+            law_orient,
+            point_curve_interval,
+            surface_orientations,
+            plane_origin,
+            plane_normal,
+        )?;
+        Ok((None, uvs))
+    }
+
+    /// `ComputePointValuesDelta(aUVValues, aUVValuesDelta, rTsectPnt, rDeltaPnt)`. The
+    /// default is the basic body ([`SurfaceIntersector::compute_point_values_delta`],
+    /// always `SM_ERR`).
+    ///
+    /// # Errors
+    ///
+    /// The override's.
+    fn compute_point_values_delta(
+        &mut self,
+        _k: &Kernel,
+        _uv_values: [Point2; 2],
+        _uv_values_delta: [Point2; 2],
+        _point: &mut TsectPnt,
+        _delta: &mut TsectPnt,
+    ) -> Result<()> {
+        self.intersector().compute_point_values_delta()
+    }
+
+    /// `TestSpanAccuracy(rTsectPnt, rNextTSP, pOptMidPnt, ..)`. The default is the
+    /// basic body ([`SurfaceIntersector::test_span_accuracy`], which ignores `mid`).
+    ///
+    /// # Errors
+    ///
+    /// The override's.
+    fn test_span_accuracy(
+        &mut self,
+        k: &Kernel,
+        point: TsectId,
+        next: TsectId,
+        _mid: Option<TsectId>,
+    ) -> Result<SpanAccuracy> {
+        self.intersector_mut().test_span_accuracy(k, point, next)
+    }
 }
 
 /// The basic `SmSurfaceIntersector` bodies.
@@ -576,174 +656,196 @@ impl SurfaceIntersector<'_> {
     /// surfaces are offset surfaces; those of the law point evaluations, the splits,
     /// the span tests and the flush; `InvalidInput` for an unknown id or a subdivision
     /// that does not terminate; [`SolidError::Unported`] from unported callees.
-    #[allow(clippy::too_many_lines)]
-    pub fn do_law_intersection<L: ?Sized>(
+    pub fn do_law_intersection(
         &mut self,
         k: &Kernel,
         points: &[TsectId],
-        opts: &LawIntersectionOptions<'_, L>,
+        opts: &LawIntersectionOptions<'_>,
+        law: &mut FilletLaw,
     ) -> Result<IntersectionCurve> {
-        let [first, last] = points else {
-            return Err(SolidError::sm_err(OP_DLI));
+        do_law_intersection_with(self, k, points, opts, law)
+    }
+}
+
+/// [`SurfaceIntersector::do_law_intersection`] on the intersector of `v`, its virtual
+/// calls (`EvaluateLawPoint` and `ComputePointValuesDelta` through
+/// `ComputeLawPointValues`, `TestSpanAccuracy`, `FlushCurve`) dispatched to `v`.
+///
+/// # Errors
+///
+/// As [`SurfaceIntersector::do_law_intersection`], with the errors of `v`'s
+/// overrides.
+#[allow(clippy::too_many_lines)]
+pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    points: &[TsectId],
+    opts: &LawIntersectionOptions<'_>,
+    law_curve: &mut FilletLaw,
+) -> Result<IntersectionCurve> {
+    let [first, last] = points else {
+        return Err(SolidError::sm_err(OP_DLI));
+    };
+    let (first, last) = (*first, *last);
+
+    // the point curve tolerance
+    v.intersector_mut().this_approx_tol_3d = opts.approx_tol_3d.unwrap_or(1.0e-3);
+
+    let delta_step = 1.0e-8;
+
+    // the offset surfaces
+    if !is_offset_surface(v.intersector().surface(SrfIndex::First)) {
+        return Err(SolidError::null_pointer(OP_DLI));
+    }
+    if !is_offset_surface(v.intersector().surface(SrfIndex::Second)) {
+        return Err(SolidError::null_pointer(OP_DLI));
+    }
+
+    let normals = [
+        v.intersector().point(first)?.crv_deriv(),
+        v.intersector().point(last)?.crv_deriv(),
+    ];
+    let ivl = opts.point_curve_interval;
+    {
+        let p = v.intersector_mut().point_mut(first)?;
+        p.user_doubles[1] = ivl.min();
+        p.user_doubles[0] = p.user_doubles[1];
+    }
+    {
+        let p = v.intersector_mut().point_mut(last)?;
+        p.user_doubles[1] = ivl.max();
+        p.user_doubles[0] = p.user_doubles[1];
+    }
+
+    let law = LawPointOptions {
+        law_orient: opts.law_orient,
+        point_curve: opts.point_curve,
+        point_curve_interval: ivl,
+        normals,
+        average_normals: opts.use_normal_plane_averaging,
+        surface_orientations: opts.surface_orientations,
+    };
+
+    for (id, delta) in [(first, delta_step), (last, -delta_step)] {
+        let mut p = v.intersector().point(id)?.clone();
+        let r = compute_law_point_values_with(
+            v,
+            k,
+            p.user_doubles[1],
+            // (references to the point's own UV points upstream)
+            LawGuess::PointUvs,
+            delta,
+            &law,
+            law_curve,
+            false,
+            &mut p,
+        );
+        *v.intersector_mut().point_mut(id)? = p;
+        r?;
+    }
+
+    v.intersector_mut().point_mut(first)?.curve_parameter = 0.0;
+    let first_pos = v.intersector().point(first)?.crv_pos();
+    let d = first_pos.distance(v.intersector().point(last)?.crv_pos());
+    v.intersector_mut().point_mut(last)?.curve_parameter = d;
+
+    let mut stack = vec![last, first];
+    let mut curve_pnts = vec![first];
+
+    while stack.len() > 1 {
+        if stack.len() + curve_pnts.len() > MAX_LAW_POINTS {
+            return Err(too_many(OP_DLI));
+        }
+        let curr = stack
+            .pop()
+            .ok_or_else(|| SolidError::invalid_input(OP_DLI, "empty stack"))?;
+        let next = *stack
+            .last()
+            .ok_or_else(|| SolidError::invalid_input(OP_DLI, "empty stack"))?;
+
+        let (curr_param, curr_pos) = {
+            let p = v.intersector().point(curr)?;
+            (p.curve_parameter, p.crv_pos())
         };
-        let (first, last) = (*first, *last);
+        let next_pos = v.intersector().point(next)?.crv_pos();
+        v.intersector_mut().point_mut(next)?.curve_parameter =
+            curr_param + curr_pos.distance(next_pos);
 
-        // the point curve tolerance
-        self.this_approx_tol_3d = opts.approx_tol_3d.unwrap_or(1.0e-3);
+        // the new mid point
+        let new_tsp = split_span_with(v, k, curr, next, delta_step, &law, law_curve)?;
 
-        let delta_step = 1.0e-8;
-
-        // the offset surfaces
-        if !is_offset_surface(self.surface(SrfIndex::First)) {
-            return Err(SolidError::null_pointer(OP_DLI));
+        let acc = v.test_span_accuracy(k, curr, next, Some(new_tsp))?;
+        if acc.found_good_point {
+            // accept the point
+            curve_pnts.push(next);
+        } else {
+            // subdivide more
+            stack.push(new_tsp);
+            stack.push(curr);
         }
-        if !is_offset_surface(self.surface(SrfIndex::Second)) {
-            return Err(SolidError::null_pointer(OP_DLI));
-        }
+    }
 
-        let normals = [
-            self.point(first)?.crv_deriv(),
-            self.point(last)?.crv_deriv(),
-        ];
-        let ivl = opts.point_curve_interval;
-        {
-            let p = self.point_mut(first)?;
-            p.user_doubles[1] = ivl.min();
-            p.user_doubles[0] = p.user_doubles[1];
-        }
-        {
-            let p = self.point_mut(last)?;
-            p.user_doubles[1] = ivl.max();
-            p.user_doubles[0] = p.user_doubles[1];
-        }
-
-        let law = LawPointOptions {
-            law: opts.law,
-            law_orient: opts.law_orient,
-            point_curve: opts.point_curve,
-            point_curve_interval: ivl,
-            normals,
-            average_normals: opts.use_normal_plane_averaging,
-            surface_orientations: opts.surface_orientations,
-        };
-
-        for (id, delta) in [(first, delta_step), (last, -delta_step)] {
-            let mut p = self.point(id)?.clone();
-            let r = self.compute_law_point_values(
-                k,
-                p.user_doubles[1],
-                p.uv_pos(SrfIndex::First),
-                p.uv_pos(SrfIndex::Second),
-                delta,
-                &law,
-                false,
-                &mut p,
-            );
-            *self.point_mut(id)? = p;
-            r?;
-        }
-
-        self.point_mut(first)?.curve_parameter = 0.0;
-        let first_pos = self.point(first)?.crv_pos();
-        let d = first_pos.distance(self.point(last)?.crv_pos());
-        self.point_mut(last)?.curve_parameter = d;
-
-        let mut stack = vec![last, first];
-        let mut curve_pnts = vec![first];
-
-        while stack.len() > 1 {
-            if stack.len() + curve_pnts.len() > MAX_LAW_POINTS {
+    // split spans much longer than their neighbours
+    let split_factor = 2.7;
+    let mut done = false;
+    while !done {
+        done = true;
+        let mut ip = 1;
+        while ip < curve_pnts.len() {
+            if curve_pnts.len() > MAX_LAW_POINTS {
                 return Err(too_many(OP_DLI));
             }
-            let curr = stack
-                .pop()
-                .ok_or_else(|| SolidError::invalid_input(OP_DLI, "empty stack"))?;
-            let next = *stack
-                .last()
-                .ok_or_else(|| SolidError::invalid_input(OP_DLI, "empty stack"))?;
-
-            let (curr_param, curr_pos) = {
-                let p = self.point(curr)?;
-                (p.curve_parameter, p.crv_pos())
+            let at = |i: usize| {
+                curve_pnts
+                    .get(i)
+                    .copied()
+                    .ok_or_else(|| SolidError::invalid_input(OP_DLI, "point index"))
             };
-            let next_pos = self.point(next)?.crv_pos();
-            self.point_mut(next)?.curve_parameter = curr_param + curr_pos.distance(next_pos);
-
-            // the new mid point
-            let new_tsp = self.split_span(k, curr, next, delta_step, &law)?;
-
-            let acc = self.test_span_accuracy(k, curr, next)?;
-            if acc.found_good_point {
-                // accept the point
-                curve_pnts.push(next);
-            } else {
-                // subdivide more
-                stack.push(new_tsp);
-                stack.push(curr);
+            let curr = at(ip - 1)?;
+            let next = at(ip)?;
+            let curr_param = v.intersector().point(curr)?.curve_parameter;
+            let next_param = v.intersector().point(next)?.curve_parameter;
+            let curr_param_range = next_param - curr_param;
+            let mut split = false;
+            if ip > 1 {
+                let prev = at(ip - 2)?;
+                let prev_param_range = curr_param - v.intersector().point(prev)?.curve_parameter;
+                if curr_param_range > prev_param_range * split_factor {
+                    split = true;
+                }
             }
-        }
-
-        // split spans much longer than their neighbours
-        let split_factor = 2.7;
-        let mut done = false;
-        while !done {
-            done = true;
-            let mut ip = 1;
-            while ip < curve_pnts.len() {
-                if curve_pnts.len() > MAX_LAW_POINTS {
-                    return Err(too_many(OP_DLI));
+            if ip + 1 < curve_pnts.len() {
+                let next_next = at(ip + 1)?;
+                let next_param_range =
+                    v.intersector().point(next_next)?.curve_parameter - next_param;
+                if curr_param_range > next_param_range * split_factor {
+                    split = true;
                 }
-                let at = |i: usize| {
-                    curve_pnts
-                        .get(i)
-                        .copied()
-                        .ok_or_else(|| SolidError::invalid_input(OP_DLI, "point index"))
-                };
-                let curr = at(ip - 1)?;
-                let next = at(ip)?;
-                let curr_param = self.point(curr)?.curve_parameter;
-                let next_param = self.point(next)?.curve_parameter;
-                let curr_param_range = next_param - curr_param;
-                let mut split = false;
-                if ip > 1 {
-                    let prev = at(ip - 2)?;
-                    let prev_param_range = curr_param - self.point(prev)?.curve_parameter;
-                    if curr_param_range > prev_param_range * split_factor {
-                        split = true;
-                    }
-                }
-                if ip + 1 < curve_pnts.len() {
-                    let next_next = at(ip + 1)?;
-                    let next_param_range = self.point(next_next)?.curve_parameter - next_param;
-                    if curr_param_range > next_param_range * split_factor {
-                        split = true;
-                    }
-                }
-                if split {
-                    let new_tsect = self.split_span(k, curr, next, delta_step, &law)?;
-                    curve_pnts.insert(ip, new_tsect);
-                    done = false;
-                }
-                ip += 1;
             }
-        }
-
-        for &id in &curve_pnts {
-            // (status ignored, but linking a linked point is undefined upstream)
-            if let Err(e @ (SolidError::InvalidInput { .. } | SolidError::Unported { .. })) =
-                self.add_point_to_curve(id)
-            {
-                return Err(e);
+            if split {
+                let new_tsect = split_span_with(v, k, curr, next, delta_step, &law, law_curve)?;
+                curve_pnts.insert(ip, new_tsect);
+                done = false;
             }
+            ip += 1;
         }
-
-        self.through_points.clear();
-        self.start_points.clear();
-
-        let mut out = TsectCurves::default();
-        self.flush_curve(k, &mut out)?;
-        Ok(IntersectionCurve::from_single(out))
     }
+
+    for &id in &curve_pnts {
+        // (status ignored, but linking a linked point is undefined upstream)
+        if let Err(e @ (SolidError::InvalidInput { .. } | SolidError::Unported { .. })) =
+            v.intersector_mut().add_point_to_curve(id)
+        {
+            return Err(e);
+        }
+    }
+
+    v.intersector_mut().through_points.clear();
+    v.intersector_mut().start_points.clear();
+
+    let mut out = TsectCurves::default();
+    v.flush_curve(k, &mut out)?;
+    Ok(IntersectionCurve::from_single(out))
 }
 
 /// One `ComputeNextPoint` call of `TraceCurve`: updates `step` (the deviation and
@@ -1491,7 +1593,6 @@ mod tests {
             .unwrap(),
         );
         let opts = LawIntersectionOptions {
-            law: &(),
             law_orient: false,
             point_curve: &curve,
             point_curve_interval: Extent1d::from_min_max(0.0, 1.0),
@@ -1501,15 +1602,16 @@ mod tests {
         };
         let p = si.alloc_point(TsectPnt::new());
         let q = si.alloc_point(TsectPnt::new());
+        let mut law = FilletLaw::new(crate::blend::fillet_standard_solver::p1::FilletLawKind::Base);
         assert!(matches!(
-            si.do_law_intersection(k, &[p], &opts),
+            si.do_law_intersection(k, &[p], &opts, &mut law),
             Err(SolidError::Upstream {
                 code: crate::error::SM_ERR,
                 ..
             })
         ));
         assert!(matches!(
-            si.do_law_intersection(k, &[p, q], &opts),
+            si.do_law_intersection(k, &[p, q], &opts, &mut law),
             Err(SolidError::Upstream {
                 code: crate::error::SM_ERR_NULL_POINTER,
                 ..

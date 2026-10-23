@@ -19,6 +19,7 @@
 //! | [`find_guess_mid_tsect_pnt`]                            | `sm_FindGuessMidTsectPnt` (static)              |
 //! | [`FilletIntersector::flush_curve`]                      | `FlushCurve`                                    |
 //! | [`FilletIntersector::evaluate_law_point`]               | `EvaluateLawPoint`                              |
+//! | [`FilletIntersector::do_point_intersection`], [`FilletIntersector::do_law_intersection`], [`FilletDispatch`] | `DoPointIntersection`, `DoLawIntersection` (inherited) run on `*this` |
 //! | [`FilletIntersector::curr_fillet_geom`], [`FilletIntersector::curr_fillet_touch_boundary`], [`FilletIntersector::is_curr_fillet_touch_boundary`], [`FilletIntersector::self_intersect`] | `GetCurrFilletGeom`, `GetCurrFilletTouchBoundary`, `IsCurrFilletTouchBoundary`, `GetSelfIntersect` |
 //! | [`FilletIntersector::set_self_intersect`]               | `SetSelfIntersect`                              |
 //! | [`FilletIntersector::is_kind_of`], [`TYPE`]             | `IsKindOf`, `SmFilletIntersector_TYPE`          |
@@ -46,13 +47,14 @@
 //!   `FlushCurve` makes to the geometry, its rails and their mate edge uses go to
 //!   the pseudo B-rep ([`FilletBrep`]) its caller passes (upstream reaches it through
 //!   the geometry pointer).
-//! - **Virtual overrides (DISPATCH GAP).** `ComputeNextPoint`, `FlushCurve`,
-//!   `ComputePointValues` and `TestSpanAccuracy` are inherent methods here, not
-//!   overrides: the base intersector's drivers (`TraceCurve`, `DoPointIntersection`,
-//!   `DoLawIntersection`, `intersect.surface_intersector_p4`) run on a
-//!   [`FilletIntersector`]'s `base` still call the basic intersector's versions. The
-//!   solver units (`blend.fillet_solver_p1..p4`) that drive a fillet trace need a hook
-//!   trait in `intersect::surface_intersector` (recorded in `plan/findings.md`).
+//! - **Virtual overrides.** `ComputeNextPoint`, `FlushCurve`, `ComputePointValues`,
+//!   `ComputePointValuesDelta`, `EvaluateLawPoint` and `TestSpanAccuracy` are
+//!   inherent methods here that take the solver; [`FilletDispatch`] implements the
+//!   base drivers' hook trait (`intersect::surface_intersector::p4::IntersectorVirtuals`)
+//!   with them, so [`FilletIntersector::do_point_intersection`] and
+//!   [`FilletIntersector::do_law_intersection`] run the base drivers on the overrides.
+//!   A driver run directly on a [`FilletIntersector`]'s `base` calls the basic
+//!   intersector's versions.
 //! - **Surfaces.** Upstream every caller builds `SmFilletIntersector` over the
 //!   solver's own `SmOffsetSurface`s, so `SetSurfacesToZeroOffset` changes the
 //!   intersector's `m_cpSurface` too (the span tests and `ComputeNextPoint` rely on
@@ -91,6 +93,7 @@ use crate::blend::fillet_custom_solver::{offset_evaluate_1st, ConstantRadiusAssi
 use crate::blend::fillet_geom::p1::{set_rail_curve, FilletBrep, FilletGeomId};
 use crate::blend::fillet_solver::p1::{compute_uv_vectors, FilletSolver};
 use crate::blend::fillet_solver::p3::StepSolveOutcome;
+use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
@@ -110,7 +113,8 @@ use crate::intersect::surface_intersector::p1::{
 use crate::intersect::surface_intersector::p2::TsectCurves;
 use crate::intersect::surface_intersector::p3::NextPoint;
 use crate::intersect::surface_intersector::p4::{
-    do_point_intersection_with, IntersectionCurve, IntersectorVirtuals, PointIntersectionOptions,
+    do_law_intersection_with, do_point_intersection_with, IntersectionCurve, IntersectorVirtuals,
+    LawIntersectionOptions, PointIntersectionOptions,
 };
 use crate::kernel::Kernel;
 use crate::math::{max2, max4, min2, EFF_ZERO, EFF_ZERO_SQ};
@@ -1895,6 +1899,39 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             opts,
         )
     }
+
+    /// `DoLawIntersection` (the `SmSurfaceIntersector` method, not overridden) run on
+    /// this intersector: the base driver of `intersect::surface_intersector::p4` with
+    /// its virtual calls dispatched to this class's overrides ([`FilletDispatch`]):
+    /// `EvaluateLawPoint` solves the solver's point on each section plane (the law is
+    /// not evaluated), `ComputePointValuesDelta` and `TestSpanAccuracy` evaluate
+    /// through `solver`, and `FlushCurve` stores the traced curve in the current (else
+    /// the solver's last) fillet geometry of `pseudo`.
+    ///
+    /// # Errors
+    ///
+    /// As the base `DoLawIntersection`, with the errors of the overrides.
+    pub fn do_law_intersection<S: FilletSolverOps<FilletGeom = G>>(
+        &mut self,
+        solver: &mut S,
+        pseudo: &mut FilletBrep,
+        k: &Kernel,
+        points: &[TsectId],
+        opts: &LawIntersectionOptions<'_>,
+        law: &mut FilletLaw,
+    ) -> Result<IntersectionCurve> {
+        do_law_intersection_with(
+            &mut FilletDispatch {
+                intersector: self,
+                solver,
+                pseudo,
+            },
+            k,
+            points,
+            opts,
+            law,
+        )
+    }
 }
 
 /// `SmFilletIntersector` seen through its `SmSurfaceIntersector` virtuals: the fillet
@@ -1955,6 +1992,67 @@ where
     fn flush_curve(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
         self.intersector
             .flush_curve(self.solver, k, self.pseudo, out)
+    }
+
+    /// [`FilletIntersector::evaluate_law_point`] (the law arguments are unused).
+    fn evaluate_law_point(
+        &mut self,
+        k: &Kernel,
+        parameter: f64,
+        uv0: Point2,
+        uv1: Point2,
+        law: &mut FilletLaw,
+        law_orient: bool,
+        point_curve_interval: &Extent1d,
+        surface_orientations: [f64; 2],
+        plane_origin: Point3,
+        plane_normal: Vec3,
+    ) -> Result<(Option<f64>, [Point2; 2])> {
+        let (curve_param, uvs) = self.intersector.evaluate_law_point(
+            self.solver,
+            k,
+            parameter,
+            uv0,
+            uv1,
+            &*law,
+            law_orient,
+            point_curve_interval,
+            surface_orientations,
+            plane_origin,
+            plane_normal,
+        )?;
+        Ok((Some(curve_param), uvs))
+    }
+
+    /// [`FilletIntersector::compute_point_values_delta`].
+    fn compute_point_values_delta(
+        &mut self,
+        k: &Kernel,
+        uv_values: [Point2; 2],
+        uv_values_delta: [Point2; 2],
+        point: &mut TsectPnt,
+        delta: &mut TsectPnt,
+    ) -> Result<()> {
+        self.intersector.compute_point_values_delta(
+            self.solver,
+            k,
+            uv_values,
+            uv_values_delta,
+            point,
+            delta,
+        )
+    }
+
+    /// [`FilletIntersector::test_span_accuracy`].
+    fn test_span_accuracy(
+        &mut self,
+        k: &Kernel,
+        point: TsectId,
+        next: TsectId,
+        mid: Option<TsectId>,
+    ) -> Result<SpanAccuracy> {
+        self.intersector
+            .test_span_accuracy(self.solver, k, point, next, mid)
     }
 }
 

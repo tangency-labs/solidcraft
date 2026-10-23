@@ -59,8 +59,8 @@
 //! and `has_ref [ref curve]`: an `SmVariableRadiusFS` over A, B, the centre curve and an
 //! `SmLinearFilletLaw(r0, r1)` whose offsets are then replaced by offsets of A and B at
 //! `d_i * o_i` (allowing extension) and whose first fillet geometry (the constructor's
-//! default) by geometry `g`. Output `-2` without geometry (upstream reads
-//! `m_vFilletGeoms[0]` out of bounds), else `status extend_before extend_after` and per
+//! default) by geometry `g` (`-1`: the default geometry stays). Output
+//! `status extend_before extend_after` and per
 //! edge of the block and edge use `which` its vertex use's intersection point `t crv_pos[3]
 //! uv0[2] uv1[2]`. [`recalc`] accepts what the block validator accepts, edge indices inside
 //! the block, finite values, `tol > 0` and well-formed curves and surfaces.
