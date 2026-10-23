@@ -17,6 +17,7 @@ pub use design::{
     read_design_preview, read_design_thumbnail, read_design_thumbnail_file, write_design_container, write_design_container_with_cache,
     write_design_container_with_compression, write_design_container_with_preview, write_design_container_with_thumbnail,
 };
+pub use design::{SHARED_DESIGN_EXT, is_shared_design_path, shared_design_name};
 mod legacy_dir;
 #[cfg(test)]
 mod mutate;

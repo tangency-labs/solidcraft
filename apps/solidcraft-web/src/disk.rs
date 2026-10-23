@@ -294,7 +294,7 @@ mod web {
         let options = Object::new();
         let _ = Reflect::set(&options, &"multiple".into(), &JsValue::FALSE);
         let extensions = Array::new();
-        for e in [".solidcraft", ".solvecraft", ".json", ".step", ".stp", ".3mf", ".stl", ".obj", ".glb", ".gltf"] {
+        for e in [".solidcraft", ".solvecraft", ".json", ".zip", ".step", ".stp", ".3mf", ".stl", ".obj", ".glb", ".gltf"] {
             extensions.push(&e.into());
         }
         let accept = Object::new();
