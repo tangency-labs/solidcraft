@@ -38,6 +38,11 @@ made. Contact sets stop motion where bodies would pass through each other,
 **Motion Study** keys joint values along a timeline, and **Interference** shows overlapping
 volumes in red, lists the pairs closer than its **Clearance** and each body's nearest neighbour.
 
+Picking a face in the Joint dialog selects the occurrence clicked, including a second instance
+of a component whose first instance already has a joint. The snap, preview and OK use that
+occurrence's ID in the joint origin parameters. Two instances of one component can be joined
+to each other; offsets across a picked face retain the selected occurrence too.
+
 A joint origin on a face or a hole keeps the turn it had when it was picked: when the face tilts
 (a bend angle or a rotation changing with a parameter) the part on it tilts with the face but
 doesn't spin about it.

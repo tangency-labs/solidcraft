@@ -386,12 +386,10 @@ pub struct SnapPt {
     pub param: Value,
 }
 
-/// The occurrence placing a body (0: the root design), when the body is its primary instance.
+/// The occurrence placing the picked world body (0: the root design). Resolve its exact
+/// placement path: copies share a component, so its first occurrence may be a different pick.
 pub(crate) fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
-    let st = s.world_state();
-    let b = st.body(body)?;
-    let comp = s.doc.model_body_component(b);
-    if comp == 0 { Some(0) } else { s.doc.occurrence_of(comp).map(|o| o.id) }
+    s.doc.body_frames(&s.model.state()).into_iter().find(|(name, ..)| name == body).map(|(_, _, path, _)| path.last().copied().unwrap_or(0))
 }
 
 /// Centre and unit normal of the circle through a polyline's points, if it lies on one.

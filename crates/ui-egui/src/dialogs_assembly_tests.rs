@@ -60,6 +60,85 @@ fn joint_from_two_snaps() {
     assert_eq!(app.session.doc.assembly.joints.len(), 1);
 }
 
+/// A face on the second instance keeps that occurrence through snap, preview and OK, even
+/// when the first instance already has a joint.
+#[test]
+fn joint_from_second_instance_keeps_picked_occurrence() {
+    let mut app = two_boxes();
+    let (a, first) = (occ(&app, "A"), occ(&app, "B"));
+    app.run("joint.as_built", json!({"type": "rigid", "a": a, "b": first})).unwrap();
+    let second = app.run("occurrence.copy", json!({"occurrence": first, "translate": [30, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    let second_body = app.session.occurrence_bodies(&[second], false).unwrap()[0].clone();
+    let first_bounds = app.session.world_state().body("Body2").unwrap().mesh().bounds();
+    let picked = face_sel(&app.session, Vec3::new(70.0, 10.0, 0.0)).unwrap();
+    assert_eq!(body_of(&picked), Some(second_body.as_str()));
+    let snap = snap_of(&app.session, &picked).unwrap();
+    assert_eq!(snap.param["occurrence"], second);
+    assert!(snap.at.dist(Vec3::new(70.0, 10.0, 0.0)) < 1e-6 && snap.z.dist(-Vec3::Z) < 1e-9, "{snap:?}");
+
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, picked);
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "joint.create");
+    assert_eq!(cmds[0].1["a"]["occurrence"], a);
+    assert_eq!(cmds[0].1["b"]["occurrence"], second);
+    assert_eq!(cmds[0].1["b"]["face"], json!([70.0, 10.0, 0.0]));
+    let preview = preview_commands(&app, &d).unwrap();
+    assert_eq!(preview, cmds, "preview and OK use the same instance");
+    let colors = crate::preview::Colors {
+        body: [1, 1, 1, 255],
+        added: [2, 2, 2, 255],
+        new_body: [2, 2, 2, 255],
+        removed: [3, 3, 3, 100],
+        edge: [0, 0, 0, 255],
+    };
+    let built = world_preview(&app.session, &preview, colors).unwrap().unwrap();
+    assert_eq!(built.replaced, vec![second_body], "only the picked instance moves");
+    assert_eq!(app.session.doc.assembly.joints.len(), 1, "preview leaves the design unchanged");
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    let joint = app.session.doc.assembly.joints.last().unwrap();
+    assert_eq!((joint.a.occurrence, joint.b.occurrence), (a, second));
+    let solidcraft_engine::doc::joints::Snap::FaceCenter { pick, .. } = &joint.b.snap else { panic!("{:?}", joint.b.snap) };
+    assert!(pick.dist(Vec3::new(40.0, 10.0, 0.0)) < 1e-6, "the bottom face pick is in the second occurrence's local frame");
+    let bounds = app.session.world_state().body("Body2").unwrap().mesh().bounds();
+    assert!(bounds.min.dist(first_bounds.min) < 1e-6 && bounds.max.dist(first_bounds.max) < 1e-6, "the first instance stays on its existing joint");
+}
+
+/// Shared component ownership must not reject two distinct occurrences. A cross-face offset
+/// turns the first pick into a frame without changing which instance it belongs to.
+#[test]
+fn joint_between_instances_keeps_occurrences_with_offsets() {
+    let mut app = two_boxes();
+    let first = occ(&app, "B");
+    let second = app.run("occurrence.copy", json!({"occurrence": first, "translate": [30, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    let picks = [face_sel(&app.session, Vec3::new(40.0, 10.0, 10.0)).unwrap(), face_sel(&app.session, Vec3::new(70.0, 10.0, 0.0)).unwrap()];
+    for (order, expected) in [([0, 1], [first, second]), ([1, 0], [second, first])] {
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        for i in order {
+            d.pick(&app.session, picks[i].clone());
+        }
+        let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("{:?}", d.kind) };
+        f.offset[0] = "2 mm".into();
+        let Kind::Assembly(k) = &d.kind else { panic!("{:?}", d.kind) };
+        assert!(joint_problem(&app, k, &d.inputs).is_none(), "distinct instances are valid picks");
+        let cmds = apply_commands(&app, &d).unwrap();
+        let p = &cmds[0].1;
+        assert_eq!(p["a"]["occurrence"], expected[0]);
+        assert_eq!(p["b"]["occurrence"], expected[1]);
+        assert!(p["a"]["frame"].is_object() && p["b"]["face"].is_array(), "{p}");
+        assert_eq!(preview_commands(&app, &d).unwrap(), cmds);
+        let mut scratch = app.session.scratch();
+        scratch.execute(&cmds[0].0, p).unwrap();
+        let joint = scratch.doc.assembly.joints.last().unwrap();
+        assert_eq!((joint.a.occurrence, joint.b.occurrence), (expected[0], expected[1]));
+    }
+}
+
 /// The preview moves B where the joint puts it and plays the motion while animating.
 #[test]
 fn joint_and_drive_preview_on_the_placed_model() {
