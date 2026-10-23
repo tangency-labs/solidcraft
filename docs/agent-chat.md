@@ -133,14 +133,18 @@ conversation starts with), its own permission setting, and **Remove** for the on
 SolidCraft looks for agents that speak the [Agent Client Protocol](https://agentclientprotocol.com)
 on your `PATH` and in the usual install folders a desktop app's `PATH` often misses (npm's
 global folder, nvm, Volta, bun, `~/.local/bin`, `~/.grok/bin`, Homebrew, `%APPDATA%\npm`). For each one it
-shows its **version** (from `--version`, given three seconds) and whether it looks **signed in**.
+shows its **version** (from `--version`, given three seconds) and whether a **login was found**.
 Version checks and agent sessions also use those folders on their `PATH`, so adapters can find
 runtimes such as Node when SolidCraft is opened from Finder or the Dock. Existing absolute
 `PATH` entries keep their order; no shell startup files are run.
 SolidCraft only checks whether the agent's own login file (`~/.claude/.credentials.json`,
 `~/.codex/auth.json`, `~/.gemini/oauth_creds.json`, …) or one of its key variables exists. It never
 reads the file and never starts the agent to find out. On macOS Claude Code keeps its login in
-the keychain, so SolidCraft doesn't guess there.
+the keychain, so SolidCraft doesn't guess there. A found login file may be expired: **Test** or a
+chat connection verifies it. A successful ACP connection shows **signed in**; an authentication
+rejection shows **not signed in**. These results apply to that agent until a newer connection
+result or **Refresh**, which checks the installed agents again. An unrelated connection error
+doesn't change the last known login state.
 
 | Agent | What to install |
 |---|---|

@@ -7,6 +7,97 @@ fn chat() -> AgentChat {
     c
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn app_with_discovered_login() -> SolveApp {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.detection = Some(discover::Detection {
+        found: vec![discover::Found {
+            id: "qwen",
+            name: "Qwen Code",
+            argv: vec!["qwen".into(), "--acp".into()],
+            version: None,
+            login: discover::Login::LooksLoggedIn,
+        }],
+        ..Default::default()
+    });
+    app.agent_chat.running_id = "qwen".into();
+    app
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn agent_login_file_does_not_claim_a_verified_sign_in() {
+    let app = app_with_discovered_login();
+    assert_eq!(agents::current(&app).unwrap().login, "login_found");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn agent_login_follows_chat_authentication_results() {
+    let mut app = app_with_discovered_login();
+    app.preferences.agents.push(agents::AgentConfig { id: "other".into(), name: "Other agent".into(), ..Default::default() });
+    app.agent_chat.on_event(Event::AuthRequired { methods: vec![] });
+    assert_eq!(agents::current(&app).unwrap().login, "signed_out");
+    assert_eq!(agents::entries(&app).iter().find(|e| e.id == "other").unwrap().login, "");
+    app.agent_chat.settings.tests.insert("qwen".into(), settings::Test::Done(Err(backend::TestError::AuthRequired)));
+    app.agent_chat.on_event(Event::Ready { agent: "Qwen Code".into(), images: false });
+    assert_eq!(agents::current(&app).unwrap().login, "signed_in");
+    assert!(!app.agent_chat.settings.tests.contains_key("qwen"), "a newer chat clears the stale test error");
+    app.agent_chat.on_event(Event::AuthRequired { methods: vec![] });
+    assert_eq!(agents::current(&app).unwrap().login, "signed_out");
+}
+
+#[cfg(unix)]
+#[test]
+fn agent_login_test_results_override_discovery() {
+    // A real local ACP subprocess: initialize succeeds, session/new rejects the expired login.
+    let script = r#"
+read -r initialize
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentInfo":{"name":"fake","version":"1"}}}'
+read -r session
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"credentials expired"}}'
+while IFS= read -r line; do :; done
+"#;
+    let argv = vec!["sh".into(), "-c".into(), script.into()];
+    let result = acp_client::test_agent(&argv, &std::env::temp_dir());
+    assert_eq!(result, Err(backend::TestError::AuthRequired), "keep the protocol error, not translated text");
+    let mut app = app_with_discovered_login();
+    let complete = |app: &mut SolveApp, result| {
+        let (tx, rx) = channel();
+        app.agent_chat.settings.tests.insert("qwen".into(), settings::Test::Running(rx));
+        tx.send(result).unwrap();
+        frame(app);
+    };
+    complete(&mut app, result);
+    assert_eq!(agents::current(&app).unwrap().login, "signed_out");
+    complete(&mut app, Err(backend::TestError::Other("connection failed".into())));
+    assert_eq!(agents::current(&app).unwrap().login, "signed_out", "transport errors aren't login evidence");
+    let success = script.replace(r#""error":{"code":-32000,"message":"credentials expired"}"#, r#""result":{"sessionId":"test"}"#);
+    let result = acp_client::test_agent(&["sh".into(), "-c".into(), success], &std::env::temp_dir());
+    assert!(result.is_ok(), "{result:?}");
+    complete(&mut app, result);
+    assert_eq!(agents::current(&app).unwrap().login, "signed_in");
+    complete(&mut app, Err(backend::TestError::Other("connection failed".into())));
+    assert_eq!(agents::current(&app).unwrap().login, "signed_in");
+    app.agent_chat.on_event(Event::AuthRequired { methods: vec![] });
+    frame(&mut app);
+    assert_eq!(agents::current(&app).unwrap().login, "signed_out", "an old test cannot overwrite newer chat evidence");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn agent_login_refresh_returns_to_unverified_discovery() {
+    let mut app = app_with_discovered_login();
+    app.agent_chat.on_event(Event::AuthRequired { methods: vec![] });
+    app.agent_chat.settings.tests.insert("qwen".into(), settings::Test::Done(Err(backend::TestError::AuthRequired)));
+    let (tx, rx) = channel();
+    app.agent_chat.detecting = Some(rx);
+    tx.send(app.agent_chat.detection.clone().unwrap()).unwrap();
+    frame(&mut app);
+    assert_eq!(agents::current(&app).unwrap().login, "login_found");
+    assert!(!app.agent_chat.settings.tests.contains_key("qwen"));
+}
+
 #[test]
 fn streamed_text_joins_and_tool_updates_change_their_call() {
     let mut c = chat();

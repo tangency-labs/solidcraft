@@ -379,6 +379,8 @@ pub struct AgentChat {
     tools_tx: Option<Sender<ControlRequest>>,
     /// Settings → AI: the Add agent dialog and connection tests.
     pub settings: settings::State,
+    /// Latest authentication evidence from a connection test or a chat, per agent; never saved.
+    login_results: std::collections::HashMap<String, bool>,
     /// Desktop host hook: start the endpoint on demand.
     pub control_starter: Option<ControlStarter>,
     /// The picker is unfolded (it folds to one line once an agent is connected).
@@ -516,6 +518,18 @@ impl AgentChat {
 
     /// Take in what the backend reported.
     fn on_event(&mut self, e: Event) -> Option<Outcome> {
+        let signed_in = match &e {
+            Event::Ready { .. } => Some(true),
+            Event::AuthRequired { .. } => Some(false),
+            _ => None,
+        };
+        if let Some(signed_in) = signed_in
+            && !self.running_id.is_empty()
+        {
+            self.login_results.insert(self.running_id.clone(), signed_in);
+            // A newer chat result supersedes the old test, including one still in flight.
+            self.settings.tests.remove(&self.running_id);
+        }
         match e {
             Event::Documents(documents) => self.documents = documents,
             Event::Ready { agent, images } => {
@@ -1421,10 +1435,15 @@ pub(crate) fn take_loaded(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
+    settings::poll_tests(&mut app.agent_chat);
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(rx) = &app.agent_chat.detecting
         && let Ok(d) = rx.try_recv()
     {
+        for found in &d.found {
+            app.agent_chat.login_results.remove(found.id);
+            app.agent_chat.settings.tests.remove(found.id);
+        }
         app.agent_chat.detection = Some(d);
         app.agent_chat.detecting = None;
     }

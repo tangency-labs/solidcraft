@@ -10,6 +10,22 @@ use serde_json::Value;
 
 pub use super::acp::{AuthMethod, PermissionOption, ToolStatus};
 
+/// A connection test keeps authentication failures distinct from transport or protocol errors.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TestError {
+    AuthRequired,
+    Other(String),
+}
+
+impl TestError {
+    pub fn message(&self) -> &str {
+        match self {
+            Self::AuthRequired => crate::i18n::tr("ui.agent_chat_state_auth"),
+            Self::Other(message) => message,
+        }
+    }
+}
+
 /// One part of a message to the agent.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PromptPart {
