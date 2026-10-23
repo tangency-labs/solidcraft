@@ -935,10 +935,15 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
     }
     report_import(2);
     let mut slots = std::collections::HashMap::<(String, [u64; 10]), usize>::new();
+    // The file a reference lands on, once a missing `….wrl` has been answered by the `….step`
+    // beside it: a footprint that names both forms of one model has one model, built once.
+    let mut files = std::collections::HashMap::<(std::path::PathBuf, [u64; 10]), usize>::new();
     let mut totals = (0usize, 0usize);
     if options.components {
         for footprint in &board.footprints {
             let back = footprint.layer.starts_with("B.");
+            // A model is placed once per footprint, however many of its references name it.
+            let mut placed_here = std::collections::HashSet::new();
             for model in &footprint.models {
                 let ext = Path::new(&model.path).extension().and_then(|e| e.to_str()).unwrap_or("");
                 if !ext.eq_ignore_ascii_case("step") && !ext.eq_ignore_ascii_case("stp") && !ext.eq_ignore_ascii_case("wrl") {
@@ -950,111 +955,118 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                     continue;
                 }
                 let key = (model.path.clone(), model_transform_key(model, back));
-                let slot = if let Some(slot) = slots.get(&key).copied() {
-                    slot
-                } else {
-                    let file = match load(&model.path) {
-                        Ok(file) => file,
-                        Err(reason) => {
-                            warnings.push(format!("{}: {reason}", model.path));
-                            continue;
-                        }
-                    };
-                    let KicadModelFile { path: model_path, bytes: model_bytes } = file;
-                    // The format follows the file that was read, not the reference: a board can
-                    // name a `….wrl` that the library installed here only has as a `….step`.
-                    let format = Path::new(&model_path).extension().and_then(|e| e.to_str()).unwrap_or("");
-                    let (imported_meshes, reason) = if format.eq_ignore_ascii_case("wrl") {
-                        if model_bytes.len() > crate::MAX_VRML_BYTES {
-                            (Vec::new(), Some("model file exceeds the VRML size limit".to_string()))
-                        } else {
-                            match crate::vrml_in::read_vrml(&model_bytes, &model_path) {
-                                Ok(m) => {
-                                    warnings.extend(m.warnings.iter().map(|w| format!("{model_path}: {w}")));
-                                    match solidcraft_kernel::mesh_body(&m.positions, &m.triangles) {
-                                        Ok(_) => (vec![mesh_data(component_name(footprint, &model.path), m.positions, m.triangles, m.color)], None),
-                                        Err(e) => (Vec::new(), Some(e.to_string())),
-                                    }
-                                }
-                                Err(e) => (Vec::new(), Some(e.to_string())),
-                            }
-                        }
+                if let Some(slot) = slots.get(&key).copied() {
+                    place_model(&mut plan, &mut placed_here, slot, footprint, back, thickness);
+                    continue;
+                }
+                let file = match load(&model.path) {
+                    Ok(file) => file,
+                    Err(reason) => {
+                        warnings.push(format!("{}: {reason}", model.path));
+                        continue;
+                    }
+                };
+                let KicadModelFile { path: model_path, bytes: model_bytes } = file;
+                // The format follows the file that was read, not the reference: a board can name a
+                // `….wrl` that the library installed here only has as a `….step` — and such a
+                // footprint usually names the `….step` as well, which is still one model.
+                let file_key = (file_id(&model_path), key.1);
+                if let Some(slot) = files.get(&file_key).copied() {
+                    slots.insert(key, slot);
+                    place_model(&mut plan, &mut placed_here, slot, footprint, back, thickness);
+                    continue;
+                }
+                let format = Path::new(&model_path).extension().and_then(|e| e.to_str()).unwrap_or("");
+                let (imported_meshes, reason) = if format.eq_ignore_ascii_case("wrl") {
+                    if model_bytes.len() > crate::MAX_VRML_BYTES {
+                        (Vec::new(), Some("model file exceeds the VRML size limit".to_string()))
                     } else {
-                        if model_bytes.len() > crate::MAX_STEP_BYTES {
-                            (Vec::new(), Some("model file exceeds the STEP size limit".to_string()))
-                        } else {
-                            let text = String::from_utf8_lossy(&model_bytes);
-                            match solidcraft_kernel::step_import_shared(&text) {
-                                Ok(imported) => {
-                                    let mut out = Vec::new();
-                                    let mut failed = None;
-                                    for body in &imported.bodies {
-                                        let parts = match model_body_meshes(&body.name, &body.body, body.color) {
-                                            Ok(parts) => parts,
-                                            Err(error) => {
-                                                failed = Some(error.to_string());
-                                                break;
-                                            }
-                                        };
-                                        for mesh in parts {
-                                            totals.0 = totals.0.saturating_add(mesh.positions.len());
-                                            totals.1 = totals.1.saturating_add(mesh.triangles.len());
-                                            if totals.0 > MAX_MODEL_VERTICES || totals.1 > MAX_MODEL_TRIANGLES {
-                                                failed = Some("KiCad model geometry exceeds the import limits".into());
-                                                break;
-                                            }
-                                            out.push(mesh);
-                                        }
-                                        if failed.is_some() {
+                        match crate::vrml_in::read_vrml(&model_bytes, &model_path) {
+                            Ok(m) => {
+                                warnings.extend(m.warnings.iter().map(|w| format!("{model_path}: {w}")));
+                                match solidcraft_kernel::mesh_body(&m.positions, &m.triangles) {
+                                    Ok(_) => (vec![mesh_data(component_name(footprint, &model.path), m.positions, m.triangles, m.color)], None),
+                                    Err(e) => (Vec::new(), Some(e.to_string())),
+                                }
+                            }
+                            Err(e) => (Vec::new(), Some(e.to_string())),
+                        }
+                    }
+                } else {
+                    if model_bytes.len() > crate::MAX_STEP_BYTES {
+                        (Vec::new(), Some("model file exceeds the STEP size limit".to_string()))
+                    } else {
+                        let text = String::from_utf8_lossy(&model_bytes);
+                        match solidcraft_kernel::step_import_shared(&text) {
+                            Ok(imported) => {
+                                let mut out = Vec::new();
+                                let mut failed = None;
+                                for body in &imported.bodies {
+                                    let parts = match model_body_meshes(&body.name, &body.body, body.color) {
+                                        Ok(parts) => parts,
+                                        Err(error) => {
+                                            failed = Some(error.to_string());
                                             break;
                                         }
+                                    };
+                                    for mesh in parts {
+                                        totals.0 = totals.0.saturating_add(mesh.positions.len());
+                                        totals.1 = totals.1.saturating_add(mesh.triangles.len());
+                                        if totals.0 > MAX_MODEL_VERTICES || totals.1 > MAX_MODEL_TRIANGLES {
+                                            failed = Some("KiCad model geometry exceeds the import limits".into());
+                                            break;
+                                        }
+                                        out.push(mesh);
                                     }
-                                    (out, failed)
+                                    if failed.is_some() {
+                                        break;
+                                    }
                                 }
-                                Err(error) => (Vec::new(), Some(error.to_string())),
+                                (out, failed)
                             }
+                            Err(error) => (Vec::new(), Some(error.to_string())),
                         }
-                    };
-                    if let Some(reason) = reason {
-                        warnings.push(format!("{model_path}: {reason}"));
-                        continue;
                     }
-                    if imported_meshes.is_empty() {
-                        warnings.push(format!("{model_path}: no solid bodies found"));
-                        continue;
-                    }
-                    let slot = plan.slots.len();
-                    plan.slots.push(component_name(footprint, &model.path));
-                    let transform = model_local_matrix(model, back);
-                    let mut failed = None;
-                    let mut placed = Vec::with_capacity(imported_meshes.len());
-                    for mesh in imported_meshes {
-                        let positions: Vec<Vec3> = mesh
-                            .positions
-                            .as_chunks::<3>()
-                            .0
-                            .iter()
-                            .map(|p| solidcraft_doc::apply_point(&transform, Vec3::new(p[0], p[1], p[2])))
-                            .collect();
-                        let triangles: Vec<[u32; 3]> = mesh.triangles.as_chunks::<3>().0.to_vec();
-                        if let Err(error) = solidcraft_kernel::mesh_body(&positions, &triangles) {
-                            failed = Some(error.to_string());
-                            break;
-                        }
-                        placed.push(mesh_data(mesh.name, positions, triangles, mesh.color));
-                    }
-                    if let Some(reason) = failed {
-                        warnings.push(format!("{model_path}: {reason}"));
-                        continue;
-                    }
-                    for mesh in placed {
-                        meshes.push(mesh);
-                        plan.bodies.push(Some(slot));
-                    }
-                    slots.insert(key, slot);
-                    slot
                 };
-                plan.places.push(crate::PlanPlace { slot, parent: None, transform: footprint_place(footprint, back, thickness) });
+                if let Some(reason) = reason {
+                    warnings.push(format!("{model_path}: {reason}"));
+                    continue;
+                }
+                if imported_meshes.is_empty() {
+                    warnings.push(format!("{model_path}: no solid bodies found"));
+                    continue;
+                }
+                let slot = plan.slots.len();
+                plan.slots.push(component_name(footprint, &model.path));
+                let transform = model_local_matrix(model, back);
+                let mut failed = None;
+                let mut placed = Vec::with_capacity(imported_meshes.len());
+                for mesh in imported_meshes {
+                    let positions: Vec<Vec3> = mesh
+                        .positions
+                        .as_chunks::<3>()
+                        .0
+                        .iter()
+                        .map(|p| solidcraft_doc::apply_point(&transform, Vec3::new(p[0], p[1], p[2])))
+                        .collect();
+                    let triangles: Vec<[u32; 3]> = mesh.triangles.as_chunks::<3>().0.to_vec();
+                    if let Err(error) = solidcraft_kernel::mesh_body(&positions, &triangles) {
+                        failed = Some(error.to_string());
+                        break;
+                    }
+                    placed.push(mesh_data(mesh.name, positions, triangles, mesh.color));
+                }
+                if let Some(reason) = failed {
+                    warnings.push(format!("{model_path}: {reason}"));
+                    continue;
+                }
+                for mesh in placed {
+                    meshes.push(mesh);
+                    plan.bodies.push(Some(slot));
+                }
+                slots.insert(key, slot);
+                files.insert(file_key, slot);
+                place_model(&mut plan, &mut placed_here, slot, footprint, back, thickness);
             }
         }
     }
@@ -1087,6 +1099,28 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
 fn component_name(footprint: &KicadFootprint, path: &str) -> String {
     let label = footprint.reference.trim();
     if label.is_empty() { path.to_string() } else { label.to_string() }
+}
+
+/// A model file's identity for the `files` cache. One file can arrive spelled two ways — the
+/// reference's own separators against the ones a fallback candidate is joined with — so a file is
+/// named by its path components.
+fn file_id(path: &str) -> std::path::PathBuf {
+    Path::new(path).components().collect()
+}
+
+/// Place a built model in a footprint, once per footprint: a footprint that names one model more
+/// than once (both formats of the same file, say) shows it once.
+fn place_model(
+    plan: &mut crate::MeshPlan,
+    placed_here: &mut std::collections::HashSet<usize>,
+    slot: usize,
+    footprint: &KicadFootprint,
+    back: bool,
+    thickness: f64,
+) {
+    if placed_here.insert(slot) {
+        plan.places.push(crate::PlanPlace { slot, parent: None, transform: footprint_place(footprint, back, thickness) });
+    }
 }
 
 /// Where a footprint's models sit in the world: the board position (KiCad's Y down to SolidCraft's
