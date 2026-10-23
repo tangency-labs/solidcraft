@@ -44,6 +44,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .doc_only()
         .params("Closes a version that was only being viewed and shows the workspace again"),
+    CommandSpec::new("version.rename", "Rename", rename).icon("checkpoint").doc_only().params(
+        "name; version?: id, or workspace?: id. The other names in the graph stay unique",
+    ),
+    CommandSpec::new("version.delete", "Delete", delete).icon("checkpoint").doc_only().params(
+        "version?: id, or workspace?: id. Main, and the workspace that is open, cannot be deleted. A version's children start from the version before it",
+    ),
+    CommandSpec::new("version.merge", "Merge into here", merge)
+        .icon("checkpoint")
+        .doc_only()
+        .params("workspace: id. Brings that workspace into the open one. The same change on both sides is refused"),
 ];
 
 fn graph(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -89,6 +99,47 @@ fn switch(s: &mut Session, p: &Value) -> Result<Value> {
     s.doc_mut().switch_workspace(id).map_err(into_engine)?;
     leave(s);
     Ok(json!({ "workspace": id }))
+}
+
+fn rename(s: &mut Session, p: &Value) -> Result<Value> {
+    let name = required(p, "name")?;
+    let id = one_of(p)?;
+    s.doc_mut().rename_node(id, name).map_err(into_engine)?;
+    Ok(json!({ "id": id, "name": name }))
+}
+
+fn delete(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(id) = str_(p, "version").filter(|text| !text.trim().is_empty()) {
+        s.doc_mut().delete_version(id).map_err(into_engine)?;
+        return Ok(json!({ "version": id }));
+    }
+    let id = required(p, "workspace")?;
+    s.doc_mut().delete_workspace(id).map_err(into_engine)?;
+    Ok(json!({ "workspace": id }))
+}
+
+fn merge(s: &mut Session, p: &Value) -> Result<Value> {
+    let id = required(p, "workspace")?;
+    let kept = s.doc.clone();
+    let outcome = s.doc_mut().merge_workspace(id).map_err(into_engine)?;
+    if outcome == solidcraft_doc::versions::MergeOutcome::Already {
+        s.doc = kept;
+    } else {
+        leave(s);
+    }
+    let result = match outcome {
+        solidcraft_doc::versions::MergeOutcome::BroughtIn => "brought",
+        solidcraft_doc::versions::MergeOutcome::Merged => "merged",
+        solidcraft_doc::versions::MergeOutcome::Already => "already",
+    };
+    Ok(json!({ "workspace": id, "result": result }))
+}
+
+fn one_of<'a>(p: &'a Value) -> Result<&'a str> {
+    str_(p, "version")
+        .filter(|text| !text.trim().is_empty())
+        .or_else(|| str_(p, "workspace").filter(|text| !text.trim().is_empty()))
+        .ok_or_else(|| bad("version", "`version` or `workspace` is required"))
 }
 
 fn restore(s: &mut Session, p: &Value) -> Result<Value> {

@@ -28,6 +28,10 @@ pub(super) fn rows(
     ui_kit_hint(ui);
     let (enter, _) = crate::ui_kit::text_field(ui, name, crate::i18n::tr("ui.versions_name"));
     ui.add_space(t.space_4);
+    let point = selected.as_deref().and_then(|id| app.session.doc.versions.layout().into_iter().find(|point| point.id == id));
+    let version = point.as_ref().is_some_and(|point| point.kind == GraphKind::Version);
+    let other_workspace = point.as_ref().is_some_and(|point| point.kind == GraphKind::Workspace && !point.current);
+    let from_here = !version;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = t.space_4;
         let editing = viewing.is_none();
@@ -37,10 +41,6 @@ pub(super) fn rows(
                 name.clear();
             }
         }
-        let point = selected.as_deref().and_then(|id| app.session.doc.versions.layout().into_iter().find(|point| point.id == id));
-        let version = point.as_ref().is_some_and(|point| point.kind == GraphKind::Version);
-        let other_workspace = point.as_ref().is_some_and(|point| point.kind == GraphKind::Workspace && !point.current);
-        let from_here = !version;
         if button_enabled(ui, "View version", version).clicked()
             && let Some(id) = selected.clone()
         {
@@ -86,6 +86,62 @@ pub(super) fn rows(
             && let Some(id) = selected.clone()
         {
             act(app, notice, error, "version.restore", serde_json::json!({ "version": id }));
+        }
+    });
+    ui.add_space(t.space_4);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = t.space_4;
+        let editing = viewing.is_none();
+        let selected_id = selected.clone();
+        let can_rename = editing && selected_id.is_some() && !name.trim().is_empty();
+        let can_delete = editing
+            && point
+                .as_ref()
+                .is_some_and(|item| item.kind == GraphKind::Version || (item.kind == GraphKind::Workspace && !item.current && item.id != "main"));
+        if button_enabled(ui, "Rename", can_rename).clicked()
+            && let Some(id) = selected_id.clone()
+        {
+            let params = if version {
+                serde_json::json!({ "name": name.trim(), "version": id })
+            } else {
+                serde_json::json!({ "name": name.trim(), "workspace": id })
+            };
+            if act(app, notice, error, "version.rename", params).is_some() {
+                *notice = Some(crate::i18n::format("ui.versions_renamed", &[("name", name.trim())]));
+                name.clear();
+            }
+        }
+        if button_enabled(ui, "Delete", can_delete).clicked()
+            && let Some(id) = selected.clone()
+        {
+            let label = point.as_ref().map(|item| item.name.clone()).unwrap_or_default();
+            let params = if version { serde_json::json!({ "version": id }) } else { serde_json::json!({ "workspace": id }) };
+            if act(app, notice, error, "version.delete", params).is_some() {
+                *selected = None;
+                *notice = Some(crate::i18n::format("ui.versions_deleted", &[("name", label.as_str())]));
+            }
+        }
+        if button_enabled(ui, "Merge into here", other_workspace && editing).clicked()
+            && let Some(id) = selected.clone()
+        {
+            let label = point.as_ref().map(|item| item.name.clone()).unwrap_or_default();
+            let current = app
+                .session
+                .doc
+                .versions
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.id == app.session.doc.versions.current)
+                .map(|workspace| workspace.name.clone())
+                .unwrap_or_else(|| "Main".into());
+            if let Some(value) = act(app, notice, error, "version.merge", serde_json::json!({ "workspace": id })) {
+                let key = match value.get("result").and_then(|item| item.as_str()) {
+                    Some("brought") => "ui.versions_brought",
+                    Some("already") => "ui.versions_merge_none",
+                    _ => "ui.versions_merged",
+                };
+                *notice = Some(crate::i18n::format(key, &[("name", label.as_str()), ("current", current.as_str())]));
+            }
         }
     });
     if let Some(text) = notice {
