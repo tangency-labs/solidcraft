@@ -8,7 +8,7 @@
 //! washer, the top of a set screw or pin); the shank runs down −z.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::{UnitVec3, Vec3};
 
 use super::CommandSpec;
 use crate::params::{bad, num, str_, vec3};
@@ -414,13 +414,8 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
         out["joint"] = j["joint"].clone();
     } else if let Some(pt) = p.get("point").and_then(vec3) {
         // Placed at a point, its +z along `direction`.
-        let dir = p.get("direction").and_then(vec3).and_then(|d| d.normalized()).unwrap_or(Vec3::Z);
-        let m = solidcraft_doc::rigid(
-            Vec3::ZERO,
-            Vec3::ZERO,
-            Vec3::Z.cross(dir).normalized().unwrap_or(Vec3::X),
-            Vec3::Z.dot(dir).clamp(-1.0, 1.0).acos(),
-        );
+        let dir = p.get("direction").and_then(vec3).and_then(|d| d.unit()).unwrap_or(UnitVec3::Z);
+        let m = solidcraft_doc::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z.cross(dir).normalized().unwrap_or(Vec3::X), UnitVec3::Z.angle_to(dir));
         let mut m = m;
         m[3] = [pt.x, pt.y, pt.z, 1.0];
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {

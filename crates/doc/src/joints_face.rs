@@ -66,7 +66,7 @@ impl NamedFace<'_> {
     pub fn plane(&self) -> Result<Option<(Vec3, Vec3)>> {
         let tol = (self.body.body.size() * 2e-3).max(1e-3);
         let faces = self.body.body.faces(tol)?;
-        Ok(faces.get(self.face).and_then(|f| f.plane_normal.map(|n| (apply_point(&self.offset, f.centroid), apply_vector(&self.offset, n)))))
+        Ok(faces.get(self.face).and_then(|f| f.plane_normal.map(|n| (apply_point(&self.offset, f.centroid), apply_vector(&self.offset, *n)))))
     }
 }
 

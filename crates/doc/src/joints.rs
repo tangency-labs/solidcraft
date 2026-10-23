@@ -735,8 +735,8 @@ fn nearest_plane(doc: &Document, st: &ModelState, o: &JointOrigin, pick: Vec3) -
         for f in b.body.faces(tol)? {
             let Some(n) = f.plane_normal else { continue };
             let (c, n) = match offset {
-                Some(m) => (apply_point(m, f.centroid), apply_vector(m, n)),
-                None => (f.centroid, n),
+                Some(m) => (apply_point(m, f.centroid), apply_vector(m, *n)),
+                None => (f.centroid, *n),
             };
             let d = (pick - c).dot(n).abs() + 1e-3 * (pick - c).len();
             if best.as_ref().is_none_or(|(bd, _, _)| d < *bd) {

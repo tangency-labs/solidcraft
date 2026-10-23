@@ -1,5 +1,5 @@
 use serde::Serialize;
-use solidcraft_geom::{Aabb3, Mesh, Vec3};
+use solidcraft_geom::{Aabb3, Mesh, UnitVec3, Vec3};
 use truck_meshalgo::prelude::*;
 use truck_modeling as mt;
 
@@ -243,7 +243,7 @@ pub struct FaceInfo {
     pub area: f64,
     pub centroid: Vec3,
     /// Unit normal if the face is planar.
-    pub plane_normal: Option<Vec3>,
+    pub plane_normal: Option<UnitVec3>,
 }
 
 type MeshedShell = truck_topology::Shell<mt::Point3, PolylineCurve<mt::Point3>, Option<PolygonMesh>>;
@@ -1639,7 +1639,7 @@ impl Body {
     pub fn faces(&self, tol: f64) -> Result<Vec<FaceInfo>> {
         let m = self.tessellate(tol)?;
         let nf = self.face_count();
-        let mut acc: Vec<(f64, Vec3, Vec3, bool)> = vec![(0.0, Vec3::ZERO, Vec3::ZERO, true); nf];
+        let mut acc: Vec<(f64, Vec3, Option<UnitVec3>, bool)> = vec![(0.0, Vec3::ZERO, None, true); nf];
         for (t, f) in m.triangles.iter().zip(&m.tri_face) {
             let Some([a, b, c]) = m.tri(t) else { continue };
             let cr = (b - a).cross(c - a);
@@ -1647,11 +1647,11 @@ impl Body {
             if let Some(slot) = acc.get_mut(*f as usize) {
                 slot.0 += ar;
                 slot.1 += (a + b + c) * (ar / 3.0);
-                if let Some(n) = cr.normalized() {
-                    if slot.2 == Vec3::ZERO {
-                        slot.2 = n;
-                    } else if slot.2.dot(n) < 1.0 - 1e-6 {
-                        slot.3 = false;
+                if let Some(n) = cr.unit() {
+                    match slot.2 {
+                        None => slot.2 = Some(n),
+                        Some(first) if first.dot(n) < 1.0 - 1e-6 => slot.3 = false,
+                        Some(_) => {}
                     }
                 }
             }
@@ -1663,7 +1663,7 @@ impl Body {
                 index,
                 area,
                 centroid: if area > 0.0 { c / area } else { Vec3::ZERO },
-                plane_normal: (planar && n != Vec3::ZERO).then_some(n),
+                plane_normal: n.filter(|_| planar),
             })
             .collect())
     }

@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use solidcraft_geom::{Aabb3, Mesh, Vec3};
+use solidcraft_geom::{Aabb3, Mesh, UnitVec3, Vec3};
 use truck_modeling::{self as mt, builder};
 
 use crate::body::{Body, Solid, edge_order, from_p3, p3};
@@ -19,7 +19,7 @@ const MAX_POLYS: usize = 200_000;
 
 #[derive(Clone, Copy, Debug)]
 struct PlaneEq {
-    n: Vec3,
+    n: UnitVec3,
     w: f64,
 }
 
@@ -320,7 +320,7 @@ fn faceted_polys(b: &Body, tol: f64, operand: usize) -> Option<Vec<Poly>> {
         let plane = match planes.get(*fi as usize)? {
             Some(pl) => *pl,
             None => {
-                let Some(n) = (bb - a).cross(c - a).normalized() else { continue };
+                let Some(n) = (bb - a).cross(c - a).unit() else { continue };
                 PlaneEq { n, w: n.dot(a) }
             }
         };
@@ -357,7 +357,7 @@ fn faceted_boolean_untimed(a: &Body, b: &Mesh, op: BoolOp, tol: f64) -> Result<O
     let mut pb = Vec::with_capacity(b.triangles.len());
     for (face, t) in b.triangles.iter().enumerate() {
         let Some([p, q, r]) = b.tri(t) else { continue };
-        let Some(n) = (q - p).cross(r - p).normalized() else { continue };
+        let Some(n) = (q - p).cross(r - p).unit() else { continue };
         pb.push(Poly { v: vec![p, q, r], plane: PlaneEq { n, w: n.dot(p) }, src: FaceOrigin::Face { operand: 1, face } });
     }
     let edges = OperandEdges::of(a);
@@ -469,7 +469,7 @@ pub(crate) fn sliced_planar_boolean(a: &Body, b: &Body, op: BoolOp) -> Option<Re
     // Each face's plane normal where it is planar (see [`curved_kind`]): a small round meshed
     // flat is no plane, and taken for one the middle piece would rebuild it as a chamfer.
     let surface_tol = kind_tol(a);
-    let planes: Vec<Option<Vec3>> =
+    let planes: Vec<Option<UnitVec3>> =
         a.solid.face_iter().zip(&infos).map(|(f, info)| info.plane_normal.filter(|_| curved_kind(f, true, surface_tol).is_none())).collect();
     let mut curved: BTreeMap<u32, solidcraft_geom::Aabb3> = BTreeMap::new();
     for (t, fi) in mesh.triangles.iter().zip(&mesh.tri_face) {
@@ -492,7 +492,7 @@ pub(crate) fn sliced_planar_boolean(a: &Body, b: &Body, op: BoolOp) -> Option<Re
     let at = |v: Vec3, k: usize| [v.x, v.y, v.z].get(k).copied().unwrap_or(0.0);
     let axes = [Vec3::X, Vec3::Y, Vec3::Z];
     // Planar faces of `a` square to an axis: a cut must not land in one of their planes.
-    let flat: Vec<(Vec3, Vec3)> = planes.iter().zip(&infos).filter_map(|(n, f)| Some(((*n)?, f.centroid))).collect();
+    let flat: Vec<(UnitVec3, Vec3)> = planes.iter().zip(&infos).filter_map(|(n, f)| Some(((*n)?, f.centroid))).collect();
     let gap = size * 1e-4;
     let place = |k: usize, near: f64, far: f64| -> Option<f64> {
         let axis = *axes.get(k)?;

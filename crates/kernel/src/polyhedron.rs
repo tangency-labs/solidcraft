@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use solidcraft_geom::{Plane, Vec3};
+use solidcraft_geom::{Plane, UnitVec3, Vec3};
 use truck_modeling::{self as mt, builder};
 
 use crate::body::{Body, Solid, from_p3, p3, v3};
@@ -16,7 +16,7 @@ use crate::{KernelError, Result, guard};
 /// A half-space `n · x <= d` (n is the outward unit normal).
 #[derive(Clone, Copy, Debug)]
 pub struct HalfSpace {
-    pub n: Vec3,
+    pub n: UnitVec3,
     pub d: f64,
 }
 
@@ -38,7 +38,7 @@ fn combinatorics(hs: &[HalfSpace]) -> Result<(Vec<Vec3>, Vec<(usize, Vec<usize>)
         for j in (i + 1)..hs.len() {
             for k in (j + 1)..hs.len() {
                 let (a, b, c) = (hs[i], hs[j], hs[k]);
-                let den = det3(a.n, b.n, c.n);
+                let den = det3(*a.n, *b.n, *c.n);
                 if den.abs() < 1e-12 {
                     continue;
                 }
@@ -268,7 +268,7 @@ pub fn draft(b: &Body, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) 
             return Err(KernelError::Failed("not supported yet: drafting faces that aren't parallel to the pull direction".into()));
         }
         // Hinge: the face's line on the neutral plane; rotate the normal toward the pull.
-        let n2 = (h.n * angle.cos() + pull * angle.sin()).normalized().ok_or_else(|| KernelError::Failed("draft".into()))?;
+        let n2 = (h.n * angle.cos() + pull * angle.sin()).unit().ok_or_else(|| KernelError::Failed("draft".into()))?;
         let hinge_pt =
             neutral.intersect_ray(*c, pull).ok_or_else(|| KernelError::Failed("the neutral plane is parallel to the pull direction".into()))?;
         out.push(HalfSpace { n: n2, d: n2.dot(hinge_pt) });
@@ -329,7 +329,7 @@ pub fn round_all_edges(b: &Body, r: f64) -> Result<Body> {
     if faces.len() != hs.len() {
         return Err(KernelError::Failed("not supported yet: the rounding is larger than a face".into()));
     }
-    let normal = |hi: usize| hs.get(hi).map(|h| h.n).unwrap_or(Vec3::Z);
+    let normal = |hi: usize| hs.get(hi).map(|h| h.n).unwrap_or(UnitVec3::Z);
     // Edges of the inner polyhedron: (vertex a, vertex b) → (face left, face right).
     let mut edge_faces: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
     for (hi, lp) in &faces {
@@ -419,9 +419,8 @@ pub fn round_all_edges(b: &Body, r: f64) -> Result<Body> {
         // Corner sphere patches: the faces around each inner vertex, counter-clockwise.
         for (qi, c) in q.iter().enumerate() {
             let mut around: Vec<usize> = faces.iter().filter(|(_, lp)| lp.contains(&qi)).map(|(h, _)| *h).collect();
-            let axis = around.iter().fold(Vec3::ZERO, |acc, h| acc + normal(*h)).normalized().unwrap_or(Vec3::Z);
-            let u = axis.any_perp();
-            let w2 = axis.cross(u);
+            let axis = around.iter().fold(Vec3::ZERO, |acc, h| acc + normal(*h)).unit().unwrap_or(UnitVec3::Z);
+            let (u, w2) = axis.perp_pair();
             around.sort_by(|x, y| {
                 let ang = |h: usize| normal(h).dot(w2).atan2(normal(h).dot(u));
                 ang(*x).total_cmp(&ang(*y))
@@ -433,8 +432,8 @@ pub fn round_all_edges(b: &Body, r: f64) -> Result<Body> {
             let (np, sp, back) = (*c + side * r, *c - side * r, *c - axis * r);
             let meridian = builder::circle_arc(&builder::vertex(p3(np)), &builder::vertex(p3(sp)), p3(back));
             let surf =
-                mt::Surface::RevolutedCurve(mt::Processor::new(mt::RevolutedCurve::by_revolution(meridian.oriented_curve(), p3(*c), v3(side))));
-            let surf = orient(surf, *c + axis * r, axis);
+                mt::Surface::RevolutedCurve(mt::Processor::new(mt::RevolutedCurve::by_revolution(meridian.oriented_curve(), p3(*c), v3(*side))));
+            let surf = orient(surf, *c + axis * r, *axis);
             out.push(mt::Face::try_new(vec![w.into()], surf).map_err(|e| KernelError::Failed(format!("rounded corner: {e}")))?);
             let mut corner: Vec<FaceOrigin> =
                 (0..k).filter_map(|i| Some((*around.get(i)?, *around.get((i + 1) % k)?))).flat_map(|(f, g)| along(f, g)).collect();
@@ -705,12 +704,12 @@ fn opening_overreach(healed: &Body, cavity: &Body, opened: &[usize], thickness: 
     let faces: Vec<mt::Face> = healed.solid.face_iter().cloned().collect();
     // Each open face's plane (outward normal, offset) and its triangles.
     let mesh = healed.tessellate((size * 1e-3).max(1e-3))?;
-    let mut open: Vec<(&mt::Face, Vec3, f64, Vec<[Vec3; 3]>)> = Vec::new();
+    let mut open: Vec<(&mt::Face, UnitVec3, f64, Vec<[Vec3; 3]>)> = Vec::new();
     for fi in opened {
         let Some(f) = faces.get(*fi) else { return Ok(None) };
         let mt::Surface::Plane(pl) = f.oriented_surface() else { return Ok(None) };
         let n = pl.normal();
-        let Some(n) = Vec3::new(n.x, n.y, n.z).normalized() else { return Ok(None) };
+        let Some(n) = Vec3::new(n.x, n.y, n.z).unit() else { return Ok(None) };
         let d = n.dot(from_p3(pl.origin()));
         let tris: Vec<[Vec3; 3]> =
             mesh.triangles.iter().zip(&mesh.tri_face).filter(|(_, f)| **f as usize == *fi).filter_map(|(t, _)| mesh.tri(t)).collect();
@@ -741,9 +740,9 @@ fn opening_overreach(healed: &Body, cavity: &Body, opened: &[usize], thickness: 
     for (f, n, d, _) in &open {
         let c = *n * *d;
         let mut hs = vec![HalfSpace { n: *n, d: *d }];
-        for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+        for axis in [UnitVec3::X, UnitVec3::Y, UnitVec3::Z] {
             hs.push(HalfSpace { n: axis, d: axis.dot(c) + reach });
-            hs.push(HalfSpace { n: axis * -1.0, d: -axis.dot(c) + reach });
+            hs.push(HalfSpace { n: -axis, d: -axis.dot(c) + reach });
         }
         let (side, _) = polyhedron(&hs)?;
         // In front of the face: its prism, from half a wall inside the body (overlapping `side`

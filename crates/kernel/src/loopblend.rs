@@ -159,8 +159,8 @@ fn seg_of(e: &mt::Edge, tol: f64) -> Option<Seg> {
     if axis.cross(a - centre).dot(t_a) < 0.0 {
         axis = -axis;
     }
-    let (ra, rb) = ((a - centre).normalized()?, (b - centre).normalized()?);
-    let mut angle = ra.dot(rb).clamp(-1.0, 1.0).acos();
+    let (ra, rb) = ((a - centre).unit()?, (b - centre).unit()?);
+    let mut angle = ra.angle_to(rb);
     if ra.cross(rb).dot(axis) < 0.0 {
         angle = std::f64::consts::TAU - angle;
     }

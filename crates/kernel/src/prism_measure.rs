@@ -206,11 +206,10 @@ fn wall_supports_cap(surface: &mt::Surface, edge: &mt::Edge, plane: &Plane, leve
         let mt::Curve::Line(line) = r.entity_curve() else { return None };
         let o = from_p3(r.origin());
         let axis = r.axis();
-        let axis = Vec3::new(axis.x, axis.y, axis.z).normalized()?;
+        let axis = Vec3::new(axis.x, axis.y, axis.z).unit()?;
         let delta = from_p3(line.0) - o;
         let radial = (delta - axis * delta.dot(axis)).len();
-        let u = axis.any_perp();
-        let v = axis.cross(u);
+        let (u, v) = axis.perp_pair();
         let matrix = *processor.transform();
         let place = |p: Vec3, w: f64| {
             let q = matrix * mt::Vector4::new(p.x, p.y, p.z, w);
@@ -222,7 +221,7 @@ fn wall_supports_cap(surface: &mt::Surface, edge: &mt::Edge, plane: &Plane, leve
         if ha.min(hb) > levels.0 + tol * 8. || ha.max(hb) < levels.1 - tol * 8. {
             return Some(false);
         }
-        let (pu, pv) = (place(u, 0.)?, place(v, 0.)?);
+        let (pu, pv) = (place(*u, 0.)?, place(*v, 0.)?);
         let radius = pu.len() * radial;
         if (pu.len() - pv.len()).abs() * radial > tol
             || pu.dot(pv).abs() * radial > tol

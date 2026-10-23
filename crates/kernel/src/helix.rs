@@ -1,7 +1,7 @@
 //! Helical sweeps (coils, springs) and lofts to a point (pyramids, cones).
 
 use mt::builder;
-use solidcraft_geom::{Grid, Loop2, Mesh, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Grid, Loop2, Mesh, Plane, Region2, Seg2, UnitVec3, Vec2, Vec3};
 use truck_modeling as mt;
 
 use crate::body::{Body, Solid, p3};
@@ -10,18 +10,13 @@ use crate::numbered::NumberedLoop;
 use crate::record::{self, Side};
 use crate::{KernelError, Result, guard};
 
-/// Rotate `v` about the unit axis `k` by `ang` (Rodrigues).
-fn rot(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
-    v * ang.cos() + k.cross(v) * ang.sin() + k * (k.dot(v) * (1.0 - ang.cos()))
-}
-
 /// Sweep a planar region's outer loop along a helix about `axis` through `axis_origin`:
 /// `turns` revolutions (right-handed about `axis`), rising `pitch` per turn. The profile keeps
 /// its attitude relative to the axis, as a screw motion does. The walls are B-spline surfaces
 /// (one per profile segment); if those cannot be built, ruled walls between stations 3° apart
 /// stand in.
 pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec3, pitch: f64, turns: f64) -> Result<Body> {
-    let k = axis.normalized().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
+    let k = axis.unit().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
     if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= 200.0 && pitch.abs() < 1e7 && axis_origin.is_finite()) {
         return Err(KernelError::Invalid("helix: turns must be in (0, 200] and the pitch finite".into()));
     }
@@ -48,8 +43,8 @@ pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec
     for i in 0..=n {
         let a = total * i as f64 / n as f64;
         let lift = k * (pitch * a / std::f64::consts::TAU);
-        let o = axis_origin + rot(plane.origin - axis_origin, k, a) + lift;
-        let pl = Plane { origin: o, x: rot(plane.x, k, a), y: rot(plane.y, k, a) };
+        let o = axis_origin + (plane.origin - axis_origin).rotated_about(k, a) + lift;
+        let pl = Plane { origin: o, x: plane.x.rotated_about(k, a), y: plane.y.rotated_about(k, a) };
         wires.push(uniform_wire(&pl, lp)?);
     }
     guard("helix sweep", || {
@@ -69,7 +64,7 @@ pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec
 /// wound outward: `stations` sections per turn, flat end caps. Watertight by construction, for
 /// faceted booleans (modelled threads).
 pub fn sweep_helix_mesh(plane: &Plane, polygon: &[Vec2], axis_origin: Vec3, axis: Vec3, pitch: f64, turns: f64, stations: usize) -> Result<Mesh> {
-    let k = axis.normalized().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
+    let k = axis.unit().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
     let m = polygon.len();
     if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= 200.0 && (3..=64).contains(&m) && (8..=720).contains(&stations)) {
         return Err(KernelError::Invalid("helix mesh: turns in (0, 200], 3…64 corners, 8…720 stations".into()));
@@ -81,7 +76,7 @@ pub fn sweep_helix_mesh(plane: &Plane, polygon: &[Vec2], axis_origin: Vec3, axis
         let a = total * i as f64 / n as f64;
         for q in polygon {
             let w = plane.to_world(*q);
-            mesh.positions.push(axis_origin + rot(w - axis_origin, k, a) + k * (pitch * a / std::f64::consts::TAU));
+            mesh.positions.push(axis_origin + (w - axis_origin).rotated_about(k, a) + k * (pitch * a / std::f64::consts::TAU));
         }
     }
     let id = |i: usize, j: usize| u32::try_from(i * m + j % m).unwrap_or(0);
@@ -110,7 +105,7 @@ const STATIONS_PER_TURN: f64 = 12.0;
 
 /// Helical walls as B-spline surfaces: each profile segment, sampled at every station of the
 /// screw motion, interpolated by cubics across the profile and then along the helix.
-fn smooth_helix(plane: &Plane, profile: &NumberedLoop, o: Vec3, k: Vec3, pitch: f64, turns: f64) -> Result<Body> {
+fn smooth_helix(plane: &Plane, profile: &NumberedLoop, o: Vec3, k: UnitVec3, pitch: f64, turns: f64) -> Result<Body> {
     let lp = &profile.lp;
     let nseg = lp.segs.len();
     if nseg == 0 || nseg > 64 {
@@ -121,7 +116,7 @@ fn smooth_helix(plane: &Plane, profile: &NumberedLoop, o: Vec3, k: Vec3, pitch: 
     let at = |i: usize, q: solidcraft_geom::Vec2| {
         let a = total * i as f64 / n as f64;
         let w = plane.to_world(q);
-        o + rot(w - o, k, a) + k * (pitch * a / std::f64::consts::TAU)
+        o + (w - o).rotated_about(k, a) + k * (pitch * a / std::f64::consts::TAU)
     };
     let fail = |w: &str| KernelError::Failed(format!("smooth helix: {w}"));
     // Per segment: the wall surface through its samples at every station.
@@ -174,7 +169,7 @@ fn smooth_helix(plane: &Plane, profile: &NumberedLoop, o: Vec3, k: Vec3, pitch: 
 }
 
 /// Pappus estimate of a screw sweep's volume: section area × the centroid's path around the axis.
-fn lp_area_path(plane: &Plane, lp: &Loop2, o: Vec3, k: Vec3, turns: f64) -> f64 {
+fn lp_area_path(plane: &Plane, lp: &Loop2, o: Vec3, k: UnitVec3, turns: f64) -> f64 {
     let c = plane.to_world(lp.centroid());
     let d = c - o;
     let r = (d - k * d.dot(k)).len();

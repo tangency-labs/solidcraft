@@ -1583,7 +1583,7 @@ pub fn planar_face(s: &Session, body: &str, face: usize) -> Option<(Vec3, Vec3)>
     let found = st.body(body).and_then(|b| {
         let tol = (b.body.size() * 1e-3).max(1e-3);
         let f = b.body.faces(tol).ok()?.into_iter().find(|f| f.index == face)?;
-        Some((f.centroid, f.plane_normal?))
+        Some((f.centroid, *f.plane_normal?))
     });
     FACE_PLANES.with(|c| {
         let mut c = c.borrow_mut();

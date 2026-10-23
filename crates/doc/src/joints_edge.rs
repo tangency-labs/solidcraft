@@ -55,7 +55,7 @@ fn face_of(b: &ModelBody, i: usize, name: Option<&str>, pick: Vec3) -> Result<(u
         }
         None => beside.iter().filter_map(|f| planar(*f)).max_by(|a, b| a.3.total_cmp(&b.3)),
     };
-    chosen.map(|(f, n, c, _)| (f, n, c)).ok_or_else(|| DocError::Invalid("joint origin: no planar face beside that edge".into()))
+    chosen.map(|(f, n, c, _)| (f, *n, c)).ok_or_else(|| DocError::Invalid("joint origin: no planar face beside that edge".into()))
 }
 
 /// Edge `i`'s middle (along its polyline) and the direction it runs there.

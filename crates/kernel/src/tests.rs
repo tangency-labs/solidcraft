@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Loop2, Plane, Region2, Seg2, UnitVec3, Vec2, Vec3};
 
 use crate::*;
 
@@ -684,10 +684,10 @@ fn polyhedra_shell_and_draft() {
     let t = 30.0 * 5f64.to_radians().tan();
     assert!(rel(measure(&d).unwrap().volume, 40.0 * 30.0 * (50.0 + 50.0 - 2.0 * t) / 2.0) < 1e-6, "{}", measure(&d).unwrap().volume);
     let tet = convex_polyhedron(&[
-        HalfSpace { n: Vec3::new(0.0, 0.0, -1.0), d: 0.0 },
-        HalfSpace { n: Vec3::new(-1.0, 0.0, 0.0), d: 0.0 },
-        HalfSpace { n: Vec3::new(0.0, -1.0, 0.0), d: 0.0 },
-        HalfSpace { n: Vec3::new(1.0, 1.0, 1.0).normalized().unwrap(), d: 6.0 / 3f64.sqrt() },
+        HalfSpace { n: -UnitVec3::Z, d: 0.0 },
+        HalfSpace { n: -UnitVec3::X, d: 0.0 },
+        HalfSpace { n: -UnitVec3::Y, d: 0.0 },
+        HalfSpace { n: Vec3::new(1.0, 1.0, 1.0).unit().unwrap(), d: 6.0 / 3f64.sqrt() },
     ])
     .unwrap();
     assert!(rel(measure(&tet).unwrap().volume, 36.0) < 1e-9);
@@ -766,7 +766,7 @@ fn moving_a_body_with_an_intersection_curve_edge_ends() {
 fn drain_pads_flush_under_a_floor_with_a_hole() {
     let t = 1f64.to_radians().tan();
     let hs = |n: Vec3, p: Vec3| {
-        let n = n.normalized().unwrap();
+        let n = n.unit().unwrap();
         HalfSpace { n, d: n.dot(p) }
     };
     let slab = convex_polyhedron(&[
@@ -822,7 +822,7 @@ fn drain_pads_flush_under_a_floor_with_a_hole() {
 #[test]
 fn round_pads_crossing_a_shallow_fall() {
     let hs = |n: Vec3, p: Vec3| {
-        let n = n.normalized().unwrap();
+        let n = n.unit().unwrap();
         HalfSpace { n, d: n.dot(p) }
     };
     let walls = |floor: &[HalfSpace]| {
@@ -916,13 +916,13 @@ fn planar_fallback_names_the_curved_faces() {
     let e = planar_boolean(&ball, &pad, BoolOp::Cut).unwrap_err().to_string();
     assert!(e.contains("the target has 6 curved faces (sphere) and the tool has 2 curved faces (cylinder)"), "{e}");
     // All-planar bodies, a face of one at a shallow angle (1°): the fallback takes them.
-    let slope = Vec3::new(-1f64.to_radians().tan(), 0.0, 1.0).normalized().unwrap();
+    let slope = Vec3::new(-1f64.to_radians().tan(), 0.0, 1.0).unit().unwrap();
     let wedge = convex_polyhedron(&[
-        HalfSpace { n: Vec3::X, d: 30.0 },
-        HalfSpace { n: -Vec3::X, d: -10.0 },
-        HalfSpace { n: Vec3::Y, d: 20.0 },
-        HalfSpace { n: -Vec3::Y, d: -10.0 },
-        HalfSpace { n: -Vec3::Z, d: -5.0 },
+        HalfSpace { n: UnitVec3::X, d: 30.0 },
+        HalfSpace { n: -UnitVec3::X, d: -10.0 },
+        HalfSpace { n: UnitVec3::Y, d: 20.0 },
+        HalfSpace { n: -UnitVec3::Y, d: -10.0 },
+        HalfSpace { n: -UnitVec3::Z, d: -5.0 },
         HalfSpace { n: slope, d: slope.dot(Vec3::new(10.0, 0.0, 11.0)) },
     ])
     .unwrap();
@@ -2742,7 +2742,7 @@ fn shell_where_four_faces_meet_at_a_corner() {
     // Drain depth: the long facets fall 1°.
     let h = 30.0 * 1f64.to_radians().tan();
     let facet = |n: Vec3, p: Vec3| {
-        let n = n.normalized().unwrap();
+        let n = n.unit().unwrap();
         HalfSpace { n, d: n.dot(p) }
     };
     let facets = [
@@ -2752,11 +2752,11 @@ fn shell_where_four_faces_meet_at_a_corner() {
         facet(Vec3::new(h, 0.0, -50.0), Vec3::new(w, 0.0, 0.0)),
     ];
     let mut hs = vec![
-        HalfSpace { n: -Vec3::X, d: 0.0 },
-        HalfSpace { n: Vec3::X, d: w },
-        HalfSpace { n: -Vec3::Y, d: 0.0 },
-        HalfSpace { n: Vec3::Y, d: l },
-        HalfSpace { n: Vec3::Z, d: ht },
+        HalfSpace { n: -UnitVec3::X, d: 0.0 },
+        HalfSpace { n: UnitVec3::X, d: w },
+        HalfSpace { n: -UnitVec3::Y, d: 0.0 },
+        HalfSpace { n: UnitVec3::Y, d: l },
+        HalfSpace { n: UnitVec3::Z, d: ht },
     ];
     hs.extend(facets);
     let trough = convex_polyhedron(&hs).unwrap();
@@ -2790,7 +2790,7 @@ fn shell_of_a_pocket_whose_floor_falls_to_a_drain() {
     let h = 30.0 * 1f64.to_radians().tan();
     let z0 = top - depth;
     let facet = |n: Vec3, p: Vec3| {
-        let n = n.normalized().unwrap();
+        let n = n.unit().unwrap();
         HalfSpace { n, d: n.dot(p) }
     };
     let facets = [
@@ -2800,11 +2800,11 @@ fn shell_of_a_pocket_whose_floor_falls_to_a_drain() {
         facet(Vec3::new(h, 0.0, -50.0), Vec3::new(px + pw, py, z0)),
     ];
     let mut hs = vec![
-        HalfSpace { n: -Vec3::X, d: -px },
-        HalfSpace { n: Vec3::X, d: px + pw },
-        HalfSpace { n: -Vec3::Y, d: -py },
-        HalfSpace { n: Vec3::Y, d: py + pl },
-        HalfSpace { n: Vec3::Z, d: top + 10.0 },
+        HalfSpace { n: -UnitVec3::X, d: -px },
+        HalfSpace { n: UnitVec3::X, d: px + pw },
+        HalfSpace { n: -UnitVec3::Y, d: -py },
+        HalfSpace { n: UnitVec3::Y, d: py + pl },
+        HalfSpace { n: UnitVec3::Z, d: top + 10.0 },
     ];
     hs.extend(facets);
     let pocket = convex_polyhedron(&hs).unwrap();

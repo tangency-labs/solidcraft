@@ -1,7 +1,7 @@
 //! Building bodies: extrude and revolve planar regions, primitives.
 
 use mt::builder;
-use solidcraft_geom::{Grid, Loop2, Plane, Region2, Ring, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Grid, Loop2, Plane, Region2, Ring, Seg2, UnitVec3, Vec2, Vec3};
 use truck_modeling as mt;
 
 use crate::body::{Body, Solid, from_p3, p3, v3};
@@ -2230,7 +2230,7 @@ impl PathSeg {
                 Some((t, t))
             }
             PathSeg::Arc { a, center, axis, angle } => {
-                let k = axis.normalized()?;
+                let k = axis.unit()?;
                 let end = rotate_about(a, center, k, angle);
                 Some((k.cross(a - center).normalized()?, k.cross(end - center).normalized()?))
             }
@@ -2242,7 +2242,7 @@ impl PathSeg {
         match *self {
             PathSeg::Line { b, .. } => vec![b],
             PathSeg::Arc { a, center, axis, angle } => {
-                let Some(k) = axis.normalized() else { return vec![a] };
+                let Some(k) = axis.unit() else { return vec![a] };
                 let r = (a - center).len();
                 let step = if r > tol { 2.0 * (1.0 - tol / r).acos() } else { angle.abs() };
                 let n = ((angle.abs() / step.max(1e-6)).ceil() as usize).clamp(1, 512);
@@ -2253,10 +2253,8 @@ impl PathSeg {
 }
 
 /// `p` turned by `angle` about the unit axis `k` through `center` (right hand).
-pub(crate) fn rotate_about(p: Vec3, center: Vec3, k: Vec3, angle: f64) -> Vec3 {
-    let v = p - center;
-    let (s, c) = angle.sin_cos();
-    center + v * c + k.cross(v) * s + k * (k.dot(v) * (1.0 - c))
+pub(crate) fn rotate_about(p: Vec3, center: Vec3, k: UnitVec3, angle: f64) -> Vec3 {
+    center + (p - center).rotated_about(k, angle)
 }
 
 /// The path as a polyline: its first point, then each segment's points (arcs within 0.01 mm of
@@ -2375,18 +2373,18 @@ pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> 
 /// A connected, single turn about one centre and axis, possibly split into sketch arcs.
 fn full_circle(path: &[PathSeg]) -> Option<(Vec3, Vec3, f64)> {
     let PathSeg::Arc { a: first, center, axis, .. } = *path.first()? else { return None };
-    let axis = axis.normalized()?;
+    let axis = axis.unit()?;
     let mut end = first;
     let mut total = 0.0;
     for seg in path {
         let PathSeg::Arc { a, center: c, axis: k, angle } = *seg else { return None };
-        if a.dist(end) > 1e-7 || c.dist(center) > 1e-7 || k.normalized()?.dist(axis) > 1e-9 || !angle.is_finite() {
+        if a.dist(end) > 1e-7 || c.dist(center) > 1e-7 || k.normalized()?.dist(*axis) > 1e-9 || !angle.is_finite() {
             return None;
         }
         total += angle;
         end = rotate_about(a, c, axis, angle);
     }
-    ((total.abs() - std::f64::consts::TAU).abs() < 1e-9).then_some((center, axis, total))
+    ((total.abs() - std::f64::consts::TAU).abs() < 1e-9).then_some((center, *axis, total))
 }
 
 /// Cox–de Boor basis values N_{j,3}(u) for all j.

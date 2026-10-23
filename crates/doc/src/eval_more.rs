@@ -5,7 +5,7 @@ use super::*;
 use crate::EmbossFace;
 use crate::apply_point;
 use crate::sheet;
-use solidcraft_geom::{Aabb3, Loop2, Ring, Seg2};
+use solidcraft_geom::{Aabb3, Loop2, Ring, Seg2, UnitVec3};
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
     match &f.kind {
@@ -179,7 +179,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
 /// Unit outward normal of the planar face through `p`: of the planar faces whose plane runs
 /// through it, the one nearest it. A face elsewhere in such a plane (the wall of a notch, the end
 /// of a rib, in line with a rim) is no pick of `p`, though its plane runs through it as exactly.
-fn planar_normal_at(b: &Body, p: Vec3) -> Option<Vec3> {
+fn planar_normal_at(b: &Body, p: Vec3) -> Option<UnitVec3> {
     let tol = (b.size() * 2e-3).max(1e-3);
     let faces = b.faces(tol).ok()?;
     let mesh = b.tessellate(tol).ok()?;
@@ -1416,13 +1416,13 @@ fn parted_note(sh: &sheet::SheetBody, material: &[Region2], before: &sheet::Shee
 
 /// Outline loops (in `plane` coordinates) of the mesh triangles lying in the plane at distance
 /// `level` from `at` along `n`: the edges used by one of them only, chained.
-fn face_loops(mesh: &solidcraft_geom::Mesh, plane: &Plane, at: Vec3, n: Vec3, level: f64, tol: f64) -> Vec<Ring<Vec2>> {
+fn face_loops(mesh: &solidcraft_geom::Mesh, plane: &Plane, at: Vec3, n: UnitVec3, level: f64, tol: f64) -> Vec<Ring<Vec2>> {
     face_outline(mesh, plane, at, n, level, tol).into_iter().map(|l| l.into_iter().map(|(p, _)| p).collect()).collect()
 }
 
 /// [`face_loops`] with each point's B-rep face across the outline from it to the next point (the
 /// wall the outline runs along there): the face off the plane that meets both points.
-fn face_outline(mesh: &solidcraft_geom::Mesh, plane: &Plane, at: Vec3, n: Vec3, level: f64, tol: f64) -> Vec<Vec<(Vec2, Option<u32>)>> {
+fn face_outline(mesh: &solidcraft_geom::Mesh, plane: &Plane, at: Vec3, n: UnitVec3, level: f64, tol: f64) -> Vec<Vec<(Vec2, Option<u32>)>> {
     let on_plane = |t: &[u32; 3]| t.iter().all(|k| mesh.positions.get(*k as usize).is_some_and(|p| ((*p - at).dot(n) - level).abs() < tol));
     let on: Vec<[u32; 3]> = mesh.triangles.iter().copied().filter(on_plane).collect();
     let pos = |k: u32| mesh.positions.get(k as usize).copied().unwrap_or_default();
@@ -1548,7 +1548,7 @@ struct LevelFace {
 /// before: a bent part, whose legs' faces lie inside its extent. Recesses are taken in one face
 /// only, up to half the thickness deep, and no larger than the face they are cut into (a plate
 /// raised in places is no plate of the raised thickness).
-fn plate_recesses(body: &Body, mesh: &Mesh, plane: &Plane, at: Vec3, n: Vec3, (lo, hi): (f64, f64), tol: f64) -> Result<Recesses> {
+fn plate_recesses(body: &Body, mesh: &Mesh, plane: &Plane, at: Vec3, n: UnitVec3, (lo, hi): (f64, f64), tol: f64) -> Result<Recesses> {
     let t = hi - lo;
     let eps = t * 1e-3;
     let level = |p: Vec3| (p - at).dot(n);

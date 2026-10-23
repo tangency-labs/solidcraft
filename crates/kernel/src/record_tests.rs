@@ -170,7 +170,7 @@ fn primitives_report_their_construction() {
         let n = f.plane_normal.unwrap();
         let want = [(-Vec3::Y, P(0)), (Vec3::X, P(1)), (Vec3::Y, P(2)), (-Vec3::X, P(3)), (-Vec3::Z, START), (Vec3::Z, END)]
             .into_iter()
-            .find(|(d, _)| d.dist(n) < 1e-9)
+            .find(|(d, _)| d.dist(*n) < 1e-9)
             .unwrap()
             .1;
         assert_eq!(o, &[want]);

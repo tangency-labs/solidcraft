@@ -153,7 +153,7 @@ pub fn revolve_sheet(plane: &Plane, chains: &[Vec<Seg2>], axis_origin: Vec2, axi
     let side = |p: Vec2| d.cross(p - axis_origin);
     let on_axis = |p: Vec2| side(p).abs() < 1e-7;
     let (origin, n) = (plane.to_world(axis_origin), plane.normal());
-    let axis = plane.dir_to_world(d).normalized().ok_or_else(|| KernelError::Invalid("revolve frame has no axis".into()))?;
+    let axis = plane.dir_to_world(d).unit().ok_or_else(|| KernelError::Invalid("revolve frame has no axis".into()))?;
     let mut sides = Vec::new();
     let mut offset = 0;
     for chain in chains {
@@ -176,7 +176,7 @@ pub fn revolve_sheet(plane: &Plane, chains: &[Vec<Seg2>], axis_origin: Vec2, axi
         }
         // The chain starts `start` round: its sketch frame turned there, so the wire's own edges
         // are the ones swept (and its faces can be followed back to them).
-        let turn = |v: Vec3| crate::build::rotate_about(v, Vec3::ZERO, a, start);
+        let turn = |v: Vec3| v.rotated_about(a, start);
         let turned = Plane { origin: crate::build::rotate_about(plane.origin, origin, a, start), x: turn(plane.x), y: turn(plane.y) };
         let (wire, seeds) = crate::build::chain_wire_seeds(&turned, chain)?;
         let fixed: Vec<mt::VertexID> = [(on_axis(first), wire.front_vertex()), (on_axis(last), wire.back_vertex())]
@@ -185,9 +185,9 @@ pub fn revolve_sheet(plane: &Plane, chains: &[Vec<Seg2>], axis_origin: Vec2, axi
             .collect();
         let walls: mt::Shell = guard("surface revolve", || {
             Ok(match (on_axis(first), on_axis(last)) {
-                (true, _) => mt::builder::cone(&wire, crate::body::v3(a), mt::Rad(sweep)),
-                (false, true) => mt::builder::cone(&wire.inverse(), crate::body::v3(a), mt::Rad(sweep)),
-                (false, false) => mt::builder::rsweep(&wire, p3(origin), crate::body::v3(a), mt::Rad(sweep)),
+                (true, _) => mt::builder::cone(&wire, crate::body::v3(*a), mt::Rad(sweep)),
+                (false, true) => mt::builder::cone(&wire.inverse(), crate::body::v3(*a), mt::Rad(sweep)),
+                (false, false) => mt::builder::rsweep(&wire, p3(origin), crate::body::v3(*a), mt::Rad(sweep)),
             })
         })?;
         sides.extend(swept_sides(&walls, &numbered(&seeds, offset), &fixed));
@@ -230,8 +230,8 @@ pub fn sweep_sheet(plane: &Plane, chains: &[Vec<Seg2>], path: &[crate::PathSeg])
                     (guard("surface sweep", || Ok(mt::builder::tsweep(&cur, crate::body::v3(b - a))))?, Box::new(move |p| p + (b - a)))
                 }
                 PathSeg::Arc { center, axis, angle, .. } => {
-                    let k = axis.normalized().ok_or_else(|| KernelError::Invalid("a path arc has no axis".into()))?;
-                    let part = guard("surface sweep", || Ok(mt::builder::rsweep(&cur, p3(center), crate::body::v3(k), mt::Rad(angle))))?;
+                    let k = axis.unit().ok_or_else(|| KernelError::Invalid("a path arc has no axis".into()))?;
+                    let part = guard("surface sweep", || Ok(mt::builder::rsweep(&cur, p3(center), crate::body::v3(*k), mt::Rad(angle))))?;
                     (part, Box::new(move |p| crate::build::rotate_about(p, center, k, angle)))
                 }
             };

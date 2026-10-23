@@ -235,11 +235,11 @@ pub(crate) fn fine_between(s: &EvalSurface, rules: &Rules, h: f64, a: [f64; 2], 
     }
     // At a pole the normal is undefined: take it from just inside the segment.
     let normal = |q: [f64; 2], toward: [f64; 2]| {
-        let n = |q: [f64; 2]| at(q).and_then(|(_, su, sv)| su.cross(sv).normalized());
+        let n = |q: [f64; 2]| at(q).and_then(|(_, su, sv)| su.cross(sv).unit());
         n(q).or_else(|| n([q[0] + 1e-4 * (toward[0] - q[0]), q[1] + 1e-4 * (toward[1] - q[1])]))
     };
     match (rules.turn, normal(a, b), normal(b, a)) {
-        (Some(t), Some(na), Some(nb)) => !t.exceeds(na.dot(nb).clamp(-1.0, 1.0).acos(), sag),
+        (Some(t), Some(na), Some(nb)) => !t.exceeds(na.angle_to(nb), sag),
         _ => true,
     }
 }
@@ -255,7 +255,7 @@ fn limits<'a>(s: &'a EvalSurface, d: usize, across: (f64, f64), rules: &'a Rules
     };
     let normal = move |x: f64, y: f64| {
         let (u, v) = uv(x, y);
-        s.derivs(u, v).and_then(|(_, su, sv)| su.cross(sv).normalized())
+        s.derivs(u, v).and_then(|(_, su, sv)| su.cross(sv).unit())
     };
     const ACROSS: usize = 5;
     let ys: Vec<f64> = (0..ACROSS).map(|k| across.0 + (across.1 - across.0) * k as f64 / (ACROSS - 1) as f64).collect();
@@ -273,7 +273,7 @@ fn limits<'a>(s: &'a EvalSurface, d: usize, across: (f64, f64), rules: &'a Rules
             let na = normal(a, y).or_else(|| normal(a + 1e-4 * (b - a), y));
             let nb = normal(b, y).or_else(|| normal(b - 1e-4 * (b - a), y));
             match (rules.turn, na, nb) {
-                (Some(t), Some(na), Some(nb)) => !t.exceeds(na.dot(nb).clamp(-1.0, 1.0).acos(), sag),
+                (Some(t), Some(na), Some(nb)) => !t.exceeds(na.angle_to(nb), sag),
                 _ => true,
             }
         })

@@ -5242,11 +5242,6 @@ fn seg_len(s: &kernel::PathSeg) -> f64 {
     }
 }
 
-/// Rotate `v` about the unit axis `k` by `ang` (Rodrigues).
-fn rotate_vec(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
-    v * ang.cos() + k.cross(v) * ang.sin() + k * (k.dot(v) * (1.0 - ang.cos()))
-}
-
 /// Point and unit tangent `t` mm along a segment.
 fn seg_at(s: &kernel::PathSeg, t: f64) -> (Vec3, Vec3) {
     match *s {
@@ -5255,11 +5250,11 @@ fn seg_at(s: &kernel::PathSeg, t: f64) -> (Vec3, Vec3) {
             (a + d * t, d)
         }
         kernel::PathSeg::Arc { a, center, axis, angle } => {
-            let k = axis.normalized().unwrap_or(Vec3::Z);
+            let k = axis.unit().unwrap_or(UnitVec3::Z);
             let r = (a - center).len().max(1e-12);
             // Sweeps turn right-handed about `axis` (angles are positive).
             let s = if angle < 0.0 { -1.0 } else { 1.0 };
-            let v = rotate_vec(a - center, k, s * t / r);
+            let v = (a - center).rotated_about(k, s * t / r);
             (center + v, k.cross(v).normalized().unwrap_or(Vec3::X) * s)
         }
     }
@@ -5269,8 +5264,8 @@ fn reverse_seg(s: &kernel::PathSeg) -> kernel::PathSeg {
     match *s {
         kernel::PathSeg::Line { a, b } => kernel::PathSeg::Line { a: b, b: a },
         kernel::PathSeg::Arc { a, center, axis, angle } => {
-            let k = axis.normalized().unwrap_or(Vec3::Z);
-            let end = center + rotate_vec(a - center, k, angle);
+            let k = axis.unit().unwrap_or(UnitVec3::Z);
+            let end = center + (a - center).rotated_about(k, angle);
             kernel::PathSeg::Arc { a: end, center, axis: k * -1.0, angle }
         }
     }

@@ -449,7 +449,7 @@ pub(crate) fn planar_surfaces(shell: &mt::Shell, tol: f64) -> Option<mt::Shell> 
         // The plane through the points (normal from the surface).
         let (um, vm) = ((u0 + u1) / 2.0, (v0 + v1) / 2.0);
         let nn = surf.normal(um, vm);
-        let Some(n) = Vec3::new(nn.x, nn.y, nn.z).normalized() else {
+        let Some(n) = Vec3::new(nn.x, nn.y, nn.z).unit() else {
             faces.push(f.clone());
             continue;
         };
@@ -458,8 +458,7 @@ pub(crate) fn planar_surfaces(shell: &mt::Shell, tol: f64) -> Option<mt::Shell> 
             faces.push(f.clone());
             continue;
         }
-        let u = n.any_perp();
-        let w = n.cross(u);
+        let (u, w) = n.perp_pair();
         let plane = mt::Plane::new(crate::body::p3(o), crate::body::p3(o + u), crate::body::p3(o + w));
         match mt::Face::try_new(f.absolute_boundaries().clone(), mt::Surface::Plane(plane)) {
             Ok(mut nf) => {

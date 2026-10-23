@@ -5,7 +5,7 @@ use solidcraft_geom::{Loop2, Plane, Region2, Seg2, UnitVec3, Vec2, Vec3};
 fn fixture() -> (Body, Body, Vec3, f64) {
     let slope = 1f64.to_radians().tan();
     let hs = |normal: Vec3, point: Vec3| {
-        let n = normal.normalized().unwrap();
+        let n = normal.unit().unwrap();
         HalfSpace { n, d: n.dot(point) }
     };
     let stock = convex_polyhedron(&[

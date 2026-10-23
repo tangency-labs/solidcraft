@@ -100,8 +100,7 @@ fn classify(pts: &[Vec3], nrm: &[Vec3], tol: f64, id: usize) -> Surf {
     if let Some(axis) = n0.cross(far).unit()
         && nrm.iter().all(|n| n.dot(axis).abs() < 2e-3)
     {
-        let u = axis.any_perp();
-        let v = axis.cross(u);
+        let (u, v) = axis.perp_pair();
         let pl: Vec<(f64, f64)> = pts.iter().map(|p| (p.dot(u), p.dot(v))).collect();
         if let Some((cu, cv, r)) = fit_circle(&pl)
             && pl.iter().all(|(x, y)| ((x - cu).hypot(y - cv) - r).abs() < tol.max(r * 2e-3))

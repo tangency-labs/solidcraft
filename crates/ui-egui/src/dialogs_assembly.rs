@@ -437,7 +437,7 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
             let tol = (b.body.size() * 2e-3).max(1e-3);
             let f = b.body.faces(tol).ok()?.into_iter().find(|f| f.index == *index)?;
             match f.plane_normal {
-                Some(n) => (body, SnapPt { at: f.centroid, z: n, kind: SnapKind::FaceCenter, param: json!({"face": pt(*point)}) }),
+                Some(n) => (body, SnapPt { at: f.centroid, z: *n, kind: SnapKind::FaceCenter, param: json!({"face": pt(*point)}) }),
                 None => {
                     let c = solidcraft_engine::kernel::cylinder_face_at(&b.body, *point)?;
                     let sv = (*point - c.axis_point).dot(c.axis);

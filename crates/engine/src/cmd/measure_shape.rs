@@ -83,8 +83,7 @@ pub(crate) fn cylinder(origin: Vec3, axis: UnitVec3, radius: f64, pts: &[Vec3]) 
 
 /// The angle around the axis the points cover: a whole turn less the widest gap between them.
 pub(crate) fn coverage(center: Vec3, axis: UnitVec3, pts: &[Vec3]) -> f64 {
-    let x = axis.any_perp();
-    let y = axis.cross(x);
+    let (x, y) = axis.perp_pair();
     let mut angles: Vec<f64> = pts
         .iter()
         .filter_map(|p| {

@@ -209,8 +209,8 @@ fn rotated_wire(wire: &mt::Wire, offset: usize) -> mt::Wire {
 }
 
 fn turn(a: Vec3, b: Vec3) -> f64 {
-    match (a.normalized(), b.normalized()) {
-        (Some(a), Some(b)) => a.dot(b).clamp(-1.0, 1.0).acos(),
+    match (a.unit(), b.unit()) {
+        (Some(a), Some(b)) => a.angle_to(b),
         _ => 0.0,
     }
 }
