@@ -19,15 +19,8 @@
 //! before its first unported callee. With `props` both sides also pass face properties
 //! with the given seam verdicts and closed flags.
 //!
-//! Deferred: every mutating op (`SmFace::Notify`, `topology.face_p3`; `SwapUV`'s
-//! `GetBrep`, `topology.face_p4`), `CalculateUVDomainFromUVTrimCurves` of a face with a
-//! surface (`CreateUVTrimCurves`, `topology.face_p3`), `CreateOrientedTrimBoundary` of a
-//! face with edge loops (`NormalizedEvaluate`, `topology.edgeuse_p3`; or
-//! `CreateUVTrimCurves`), `FindIfRectangularTrim` of a one-loop face with two to four
-//! edges, `ShrinkGeometry` of a face with an owned surface, and the seam ops past their
-//! early returns (`GetUpwardLoopuses`, `HasSeamProblem`, `topology.face_p4`;
-//! `IsCrossedByEdge`, `intersect.curve_class_p7`; the callees `MergeIntervals` of unit
-//! `intersect.curve_class_p5` still defers to).
+//! Deferred: the seam calls behind the C++ crash guard (below) and the cone
+//! `TrimWithDomain` callbacks of `ShrinkGeometry` (`surface.surface_p2`).
 //!
 //! **C++ crash guard.** Upstream `SplitAtSeam`'s U-then-V branch recurses on the wrong
 //! face and crashes (`plan/upstream-issues.md` UB-137). The shim skips (`-3`) every seam

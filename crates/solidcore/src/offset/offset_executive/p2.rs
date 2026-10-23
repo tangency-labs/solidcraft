@@ -2566,20 +2566,20 @@ mod tests {
             Surface::from(Plane::from_normal(Vec3::Z, Vec3::Z)),
         );
         exec.set_offset_brep(result);
-        assert_dependency(
+        assert_eq!(
             exec.extend_result_faces_prefix(&mut kernel, MarkType::Mark, &mut fixture.context()),
-            "SmFace::Notify",
-            "topology.face_p3",
+            Ok(())
         );
-        // ReplaceSurface's PRE_EDIT ran; SetSurface's remaining geometry-identity
-        // boundary failed before swapping the surface or calculating a trim domain.
+        // ReplaceSurface ran in full: PRE_EDIT, SetSurface's CHANGE_GEOMETRY (with the
+        // surfaces' identities) and POST_EDIT, then the extended surface replaced the
+        // face's surface and its trim domain was chosen
         let result = exec.offset_brep().unwrap();
         assert_eq!(result.faces().len(), 1);
         assert_eq!(
             result.face(face).unwrap().rectangular_trim,
             crate::topology::face::p2::UNSURE
         );
-        assert_eq!(result.face(face).unwrap().uv_domain, old_domain);
+        assert_ne!(result.face(face).unwrap().uv_domain, old_domain);
         let record_after = fixture.records.get(&face_ref.key).unwrap();
         assert_eq!(record_after.user_index1(), 912);
         assert!(record_after.is_marked(&kernel.context, MarkType::Mark));
@@ -2591,10 +2591,22 @@ mod tests {
             .unwrap()
             .downcast_ref::<NotificationLog>()
             .unwrap();
-        assert_eq!(
-            log.0,
-            vec![(NotifyOperation::PreEdit, face_ref, Some(face_ref))]
-        );
+        // two ReplaceSurface calls, each PRE_EDIT, CHANGE_GEOMETRY (the new plane's
+        // identity as data 1) and POST_EDIT on the face
+        let ops: Vec<_> = log.0.iter().map(|(op, caller, _)| (*op, *caller)).collect();
+        let round = [
+            (NotifyOperation::PreEdit, face_ref),
+            (NotifyOperation::ChangeGeometry, face_ref),
+            (NotifyOperation::PostEdit, face_ref),
+        ];
+        assert_eq!(ops, [round, round].concat());
+        for (op, _, data1) in &log.0 {
+            if *op == NotifyOperation::ChangeGeometry {
+                assert_eq!(data1.map(|d| d.type_code), Some(15011));
+            } else {
+                assert_eq!(*data1, Some(face_ref));
+            }
+        }
     }
 
     #[test]
@@ -2641,7 +2653,7 @@ mod tests {
     }
 
     #[test]
-    fn extended_face_is_marked_before_real_replace_surface_defers() {
+    fn extended_face_is_marked_before_real_replace_surface() {
         let mut kernel = Kernel::default();
         let (result, face_id) = one_face(true);
         let key = result_key(EntityRef::Face(face_id));
@@ -2655,10 +2667,9 @@ mod tests {
             Surface::from(Plane::from_normal(Vec3::Z, Vec3::Z)),
         );
         exec.set_offset_brep(result);
-        assert_dependency(
+        assert_eq!(
             exec.extend_result_faces_prefix(&mut kernel, MarkType::Mark, &mut fixture.context()),
-            "SmFace::Notify",
-            "topology.face_p3",
+            Ok(())
         );
         let record = fixture.records.get(&key.key).unwrap();
         assert_eq!(record.user_index1(), 654);

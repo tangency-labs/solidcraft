@@ -48,6 +48,10 @@
 //! - `ReplaceSurface` edits `pTopFace = pOld->GetFace()` (`SmBrep.cpp:26316`), the owner of
 //!   the face's surface, which can differ from `pFace` when faces share a surface upstream;
 //!   in the arena model every face owns its own surface, so the port edits `f`.
+//! - `ReplaceSurface`'s `SmFace::SetSurface` notifies `SM_NO_CHANGE_GEOMETRY` with the
+//!   new and the old surface's identities issued by the caller's context
+//!   ([`crate::topology::face::p1::set_surface_notified`]); a caller without a context
+//!   (whose notifications reach no callback) passes null surfaces.
 //! - `MakeShellVertexTopology` / `MakeEdgeVertexTopology` / `MakeEdgeTopology` add their
 //!   records to the arenas as they link them, not all up front; `MakeEdgeTopology`'s
 //!   `TransferChildrenTo` (the one shell call that can fail) runs before any new record
@@ -1471,7 +1475,7 @@ pub enum OldSurface {
 /// [`SolidError::InvalidInput`] for a face without surface (upstream dereferences it);
 /// [`SolidError::Unported`] from the callees of `SmFace::Notify` ([`face3::notify`]:
 /// `GetUpwardEdgeuses`, `topology.face_p4`, for `POST_EDIT`), also reached through
-/// [`face1::set_surface`] and [`face1::remove_uv_trim_curves`], and of
+/// [`face1::set_surface_notified`] and [`face1::remove_uv_trim_curves`], and of
 /// `SmFace::CreateUVTrimCurves` ([`face3::create_uv_trim_curves`]).
 #[allow(clippy::too_many_arguments)] // one upstream routine
 pub fn replace_surface(
@@ -1497,9 +1501,22 @@ pub fn replace_surface(
 
     // change surface<->owner pointers
     let _ = new_surface.set_owner(Some(face_ref));
+    // the surfaces as the notification names them (issued by the caller's context)
+    let surface_refs = match env.context.as_deref_mut() {
+        Some(ctx) => {
+            let new_ref = surface_identity(ctx, &mut new_surface)?;
+            let old_ref = match b.face_mut(top_face)?.surface.as_mut() {
+                Some(s) => Some(surface_identity(ctx, s)?),
+                None => None,
+            };
+            [Some(new_ref), old_ref]
+        }
+        None => [None, None],
+    };
     // calls SmFace::Notify(SM_NO_CHANGE_GEOMETRY, ..) which tells all Face SmEdgeuses
     // and SmVertexuses to delete all their cached data
-    let old_surface = face1::set_surface(b, top_face, face_ref, new_surface, false)?;
+    let old_surface =
+        face1::set_surface_notified(b, env, top_face, face_ref, new_surface, false, surface_refs)?;
 
     // default faceDomain to NewSurface Domain
     face2::set_uv_domain(b, top_face, &new_domain)?;
@@ -1532,6 +1549,19 @@ pub fn replace_surface(
 
     // all done
     Ok((kept, modified))
+}
+
+/// The identity `surface` is notified under through `context` ([`Surface::notify_key`];
+/// issued by `context` when it has none of its domain).
+fn surface_identity(
+    context: &mut crate::geom::context::Context,
+    surface: &mut Surface,
+) -> Result<ObjectRef> {
+    let key = context.geometry_key(surface.notify_identity_slot())?;
+    Ok(ObjectRef {
+        type_code: surface.type_code(),
+        key,
+    })
 }
 
 // ---- topology construction ----------------------------------------------------------------

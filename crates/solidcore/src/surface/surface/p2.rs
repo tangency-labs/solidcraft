@@ -184,7 +184,7 @@ use crate::geom::assert_array::labels::DERIV_SURF_DEFINITION_TYPE;
 use crate::geom::assert_array::{AssertArray, AssertReport, ObjectKey, ReportSpec};
 use crate::geom::attribute::AttributeStore;
 use crate::geom::axis2_placement::Axis2Placement;
-use crate::geom::context::Context;
+use crate::geom::context::{Context, IdentitySlot};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{
@@ -340,6 +340,9 @@ pub struct Surface {
     /// The state of the surface's cache slot (`SmAObject::m_pCacheObj`), shared with
     /// its evaluation copies ([`CacheSlot`]).
     cache_slot: CacheSlot,
+    /// The identity a context issued this surface object for its notifications
+    /// (upstream passes the object itself, known by address); a copy has none.
+    notify_identity: IdentitySlot,
 }
 
 /// What a surface's cache slot (`SmAObject::m_pCacheObj`) holds, as far as a reader of
@@ -415,6 +418,7 @@ impl Clone for Surface {
             owner_chain_face: None,
             owner_zone_tol_3d: None,
             cache_slot: CacheSlot::default(),
+            notify_identity: IdentitySlot::new(),
         };
         s.update_owned_bases();
         s
@@ -654,6 +658,7 @@ impl Surface {
             owner_chain_face: self.owner_chain_face,
             owner_zone_tol_3d: self.owner_zone_tol_3d,
             cache_slot: self.cache_slot.share(),
+            notify_identity: IdentitySlot::new(),
         })
     }
 
@@ -699,6 +704,7 @@ impl Surface {
             owner_chain_face: self.owner_chain_face,
             owner_zone_tol_3d: self.owner_zone_tol_3d,
             cache_slot: self.cache_slot.share(),
+            notify_identity: IdentitySlot::new(),
         }
     }
 }
@@ -824,6 +830,21 @@ pub struct PlaneWith3dCurves {
 }
 
 impl Surface {
+    /// The key this surface object is notified under, once a context has issued it one
+    /// (the kernel issues it; there is no setter).
+    #[must_use]
+    pub fn notify_key(&self) -> Option<crate::geom::attribute::ObjectKey> {
+        self.notify_identity
+            .value()
+            .map(crate::geom::attribute::ObjectKey)
+    }
+
+    /// The slot of this surface object's notification identity, for the context that
+    /// issues it.
+    pub(crate) fn notify_identity_slot(&mut self) -> &mut IdentitySlot {
+        &mut self.notify_identity
+    }
+
     /// A surface of the given kind without owner (and without cache).
     #[must_use]
     pub fn new(kind: SurfaceKind) -> Self {
@@ -833,6 +854,7 @@ impl Surface {
             owner_chain_face: None,
             owner_zone_tol_3d: None,
             cache_slot: CacheSlot::default(),
+            notify_identity: IdentitySlot::new(),
         }
     }
 
@@ -2068,7 +2090,16 @@ impl Surface {
                 Ok((Self::from(l), Self::from(r)))
             }
             SurfaceKind::SurfOfExtrusion(s) => {
-                let (l, r) = s.base().split_at(param, surf_param)?;
+                // GetOrCreateGwNurbPointer: the virtual MakeNurb when the NURB is missing
+                // (as the extrusion recogniser leaves it), here on a temporary copy;
+                // its status is not checked upstream, so a failure splits the NURB-less
+                // base (SM_ERR)
+                let base = match s.base_with_nurb(k) {
+                    Ok(b) => b,
+                    Err(e) if e.is_unported() => return Err(e),
+                    Err(_) => std::borrow::Cow::Borrowed(s.base()),
+                };
+                let (l, r) = base.split_at(param, surf_param)?;
                 Ok((Self::from(l), Self::from(r)))
             }
             SurfaceKind::OffsetSurface(s) => s.split_at(k, param, surf_param),

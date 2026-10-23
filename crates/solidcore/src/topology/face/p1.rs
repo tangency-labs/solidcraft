@@ -14,7 +14,7 @@
 //! | [`create_oriented_trim_boundary`], [`OrientedTrimBoundary`] | `SmFace::CreateOrientedTrimBoundary` |
 //! | [`find_if_rectangular_trim`], [`RectangularTrim`] | `SmFace::FindIfRectangularTrim`          |
 //! | [`flip_face_orientation`]                    | `SmFace::FlipFaceOrientation`                |
-//! | [`set_surface`]                              | `SmFace::SetSurface`                         |
+//! | [`set_surface`], [`set_surface_notified`]    | `SmFace::SetSurface`                         |
 //! | [`insert_loop`]                              | `SmFace::InsertLoop`                         |
 //! | [`remove_loop`]                              | `SmFace::RemoveLoop`                         |
 //! | [`remove_uv_trim_curves`]                    | `SmFace::RemoveUVTrimCurves`                 |
@@ -92,9 +92,15 @@
 //! - **Notifications** (`SmFace::Notify`, `topology.face_p3`) run with the empty
 //!   notification environment a B-rep face carries (as `topology::loopuse`'s do):
 //!   `SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT` / `SM_NO_DESTRUCTION` with the face as the
-//!   first data argument. Only `SetSurface`'s `SM_NO_CHANGE_GEOMETRY` (its data are the
-//!   new and the old surface, which have no identity in the B-rep model) stays
-//!   [`SolidError::Unported`], justified in `plan/findings.md` (`topology.face_p3`).
+//!   first data argument. `SetSurface`'s `SM_NO_CHANGE_GEOMETRY` has two forms:
+//!   [`set_surface`] runs it in that empty environment with null data (upstream: the
+//!   new surface, `SM_NO_GET_BREP(this)` (null) and the old surface). Upstream the
+//!   surfaces only reach `SmTopology::Notify`, which copies the old surface's
+//!   attributes to the new one (`SmAObject::Notify`) and hands them to the context's
+//!   callbacks; the empty environment has no attribute store or callbacks to give them
+//!   to. [`set_surface_notified`] (`SmBrep::ReplaceSurface`'s call) runs it in the
+//!   caller's environment with the surfaces' identities ([`Surface::notify_key`]) the
+//!   caller's context issued, so a change tracker sees the same event as upstream.
 //!   `CreateUVTrimCurves` is `topology::face::p3::create_uv_trim_curves`.
 //! - **`HasSeamProblem`** (`topology.face_p4`) runs on the face's own B-rep objects
 //!   ([`crate::topology::face::p4::has_seam_problem_in_brep`]), so the classification
@@ -192,14 +198,13 @@ fn face_notify(b: &mut Brep, f: FaceId, operation: NotifyOperation) -> Result<()
     lu1::face_notify_edit(b, f, operation)
 }
 
-/// `Notify(SM_NO_CHANGE_GEOMETRY, pSurface, SM_NO_GET_BREP(this), m_pSurface)`: the
-/// notification carries the new and the old surface as its first and third data
-/// arguments.
-fn face_notify_change_geometry(_b: &mut Brep, _f: FaceId) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::Notify -- justified: findings.md topology.face_p3 "Stubs left for this unit"
-    // (a surface owned by a face has no object identity in the B-rep model, so the
-    // data arguments cannot be formed)
-    Err(SolidError::unported("SmFace::Notify", "topology.face_p3"))
+/// `Notify(SM_NO_CHANGE_GEOMETRY, pSurface, SM_NO_GET_BREP(this), m_pSurface)`:
+/// [`fp3::notify`] under the empty notification environment of
+/// [`lu1::face_notify_data`]. The new and the old surface (data 1 and 3) have no object
+/// identity in the B-rep model and the B-rep (data 2) none either, so all three data
+/// arguments are null (see the Deviations).
+fn face_notify_change_geometry(b: &mut Brep, f: FaceId) -> Result<()> {
+    lu1::face_notify_data(b, f, NotifyOperation::ChangeGeometry, [None; 3])
 }
 
 /// `SmFace::CreateUVTrimCurves(FALSE, NULL, NULL, ..)`.
@@ -907,21 +912,64 @@ pub fn flip_face_orientation(b: &mut Brep, f: FaceId) -> Result<()> {
 
 /// `SetSurface`: gives the face `surface` (owned by the face, `this`) and its natural
 /// domain. The previous surface is dropped with `delete_current`, else returned.
+/// The `SM_NO_CHANGE_GEOMETRY` notification runs with the empty notification
+/// environment of a B-rep face and null data (see [`set_surface_notified`] for a
+/// caller's environment and the surfaces' identities).
 ///
 /// # Errors
 ///
-/// [`SolidError::NotFound`] for a dangling id; [`SolidError::Unported`]
-/// (`SmFace::Notify`).
+/// [`SolidError::NotFound`] for a dangling id; those of the `SM_NO_CHANGE_GEOMETRY`
+/// notification ([`fp3::notify`]).
 pub fn set_surface(
+    b: &mut Brep,
+    f: FaceId,
+    this: ObjectRef,
+    surface: Surface,
+    delete_current: bool,
+) -> Result<Option<Surface>> {
+    // inform the public
+    face_notify_change_geometry(b, f)?;
+    store_surface(b, f, this, surface, delete_current)
+}
+
+/// [`set_surface`] notified through the caller's `env`: `SM_NO_CHANGE_GEOMETRY` carries
+/// `surface_refs` (the new and the old surface's identities, `None` for a surface
+/// without one) as its first and third data arguments; the second
+/// (`SM_NO_GET_BREP(this)`) is null, as upstream's macro.
+///
+/// # Errors
+///
+/// As [`set_surface`].
+pub fn set_surface_notified(
+    b: &mut Brep,
+    env: &mut crate::topology::edge::NotifyEnv<'_>,
+    f: FaceId,
+    this: ObjectRef,
+    surface: Surface,
+    delete_current: bool,
+    surface_refs: [Option<ObjectRef>; 2],
+) -> Result<Option<Surface>> {
+    let [new_ref, old_ref] = surface_refs;
+    // inform the public
+    fp3::notify(
+        b,
+        f,
+        env,
+        None,
+        NotifyOperation::ChangeGeometry,
+        [new_ref, None, old_ref],
+    )?;
+    store_surface(b, f, this, surface, delete_current)
+}
+
+/// `SetSurface` after its notification.
+fn store_surface(
     b: &mut Brep,
     f: FaceId,
     this: ObjectRef,
     mut surface: Surface,
     delete_current: bool,
 ) -> Result<Option<Surface>> {
-    // inform the public
-    face_notify_change_geometry(b, f)?;
-
     // when asked - delete current surface
     let face = b.face_mut(f)?;
     let mut old = face.surface.take();
@@ -2141,14 +2189,6 @@ mod tests {
         assert_eq!(r.uv_domain, Extent2d::new());
     }
 
-    /// The unit that owns the stub an error names (`None` for a real status).
-    fn unported_unit(e: &SolidError) -> Option<&'static str> {
-        match e {
-            SolidError::Unported { unit, .. } => Some(unit),
-            _ => None,
-        }
-    }
-
     fn is_null_pointer(e: &SolidError) -> bool {
         matches!(
             e,
@@ -2217,12 +2257,18 @@ mod tests {
         assert_eq!(b.faceuse(top).unwrap().orientation, OrientType::Opposite);
         assert_eq!(b.faceuse(bot).unwrap().orientation, OrientType::Same);
 
-        // SetSurface: the change-geometry notification's data arguments cannot be
-        // formed (a surface owned by a face has no object identity), see findings.md
-        let (mut b, f) = plane_face();
-        let s = b.face(f).unwrap().surface.clone().unwrap();
-        let e = set_surface(&mut b, f, me(f), s, true).unwrap_err();
-        assert_eq!(unported_unit(&e), Some("topology.face_p3"));
+        // SetSurface: the change-geometry notification (null data) runs through
+        // `GetUpwardEdgeuses`, then the surface and its natural domain are stored and the
+        // old surface is dropped (`bDeleteCurrFace`) or handed back
+        let (mut b, f, _, _) = plane_face_with_faceuses();
+        let s = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::X));
+        let domain = s.natural_uv_domain();
+        assert!(set_surface(&mut b, f, me(f), s, true).unwrap().is_none());
+        let face = b.face(f).unwrap();
+        assert_eq!(face.uv_domain, domain);
+        assert_eq!(face.surface.as_ref().unwrap().owner(), Some(me(f)));
+        let s = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Y));
+        assert!(set_surface(&mut b, f, me(f), s, false).unwrap().is_some());
 
         // SwapUV starts at `GetBrep()->GetContext()`: null without a B-rep
         let (mut b, f) = plane_face();
