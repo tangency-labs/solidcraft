@@ -3,6 +3,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod configuration;
 #[cfg(feature = "github")]
 pub mod github;
 pub mod jobs;
@@ -11,6 +12,7 @@ mod project;
 mod publication;
 mod settings;
 mod snapshot;
+pub use configuration::{Configuration, MAX_SETTINGS_BYTES};
 pub use outbox::{PendingSave, StagedSave};
 pub use project::{Destination, PROJECT_MARKER, Project, check_path};
 pub use publication::{Publication, Published, revision};

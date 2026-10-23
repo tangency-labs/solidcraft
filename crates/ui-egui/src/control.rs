@@ -271,9 +271,9 @@ const MAX_BATCH: usize = 10_000;
 /// bypass.
 const LOADS_A_FILE: [&str; 5] = ["doc.open", "file.insert_step", "file.insert_mesh", "pointcloud.insert", "pointcloud.reload"];
 
-/// Edit in Place, Finish Edit and the next or previous tab go to another design's tab: a batch's
+/// Cloud opening, Edit in Place, Finish Edit and tab navigation replace the active design: a batch's
 /// rollback, or a script's later steps, would land in the wrong design.
-const SWITCHES_DESIGN: [&str; 4] = ["component.edit_in_place", "component.finish_edit", "view.next_tab", "view.previous_tab"];
+const SWITCHES_DESIGN: [&str; 5] = ["cloud.open.finish", "component.edit_in_place", "component.finish_edit", "view.next_tab", "view.previous_tab"];
 
 /// `command` names the command `id`, in any of the spellings the engine takes.
 fn is_command(command: Option<&str>, id: &str) -> bool {
@@ -410,6 +410,9 @@ fn batch(app: &mut SolveApp, q: params::Batch) -> Outcome {
 /// and the steps before it stay. Its words are the engine script's, or the panel error when a step
 /// is a panel command.
 fn script(app: &mut SolveApp, p: &Value) -> Outcome {
+    if let Some(error) = crate::cloud::configuration::script_refusal(app, p) {
+        return err(error);
+    }
     let steps = match solidcraft_engine::script_steps(p) {
         Ok(steps) => steps,
         Err(e) => return err(e),

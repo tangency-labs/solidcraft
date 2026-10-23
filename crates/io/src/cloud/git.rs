@@ -73,11 +73,9 @@ impl GitRepository {
         .map_err(|error| storage(format!("Git {}: {error}; check the connection and checkout state", args.first().copied().unwrap_or("command"))))
     }
 
-    fn lock(&self) -> Result<fs::File> {
+    pub(super) fn lock(&self) -> Result<super::local::ProcessLock> {
         let path = self.checkout.join(self.text(&["rev-parse", "--git-path", "solidcraft-cloud.lock"])?);
-        let lock = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(path).map_err(storage)?;
-        lock.try_lock().map_err(|_| storage("another SolidCraft process is synchronizing this checkout; try again shortly"))?;
-        Ok(lock)
+        super::local::ProcessLock::acquire(&path, "another SolidCraft process is synchronizing this checkout; try again shortly")
     }
 
     fn text(&self, args: &[&str]) -> Result<String> {
@@ -432,8 +430,8 @@ mod tests {
             "Bracket"
         );
         let good = GitRepository::open(fixture.connection(), "").unwrap();
-        good.publish(&save.record, outbox.recover(&save.record).unwrap()).unwrap();
-        outbox.published(&save.record).unwrap();
+        let published = good.publish(&save.record, outbox.recover(&save.record).unwrap()).unwrap();
+        outbox.published(&save.record, &published).unwrap();
         assert!(outbox.pending().unwrap().is_empty());
         let other = Connection { id: "other".into(), credential: "cloud:other".into(), ..fixture.connection() };
         assert!(GitRepository::open(other, "").unwrap().publish(&save.record, Snapshot::prepare(b"{}".to_vec(), BTreeMap::new()).unwrap()).is_err());

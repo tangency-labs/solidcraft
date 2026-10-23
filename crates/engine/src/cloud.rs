@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use solidcraft_cloud::{
-    Destination, Settings,
+    Destination, Published, Settings,
     jobs::{Host, Job, JobStatus, Phase},
 };
 
@@ -31,6 +31,8 @@ pub(crate) struct State {
     pub jobs: BTreeMap<String, Job>,
     pub captures: BTreeMap<String, Capture>,
     pub binding: Option<Binding>,
+    pub configuration: Option<String>,
+    pub settings_changed: bool,
 }
 
 impl State {
@@ -51,6 +53,24 @@ impl Session {
     pub fn cloud_settings(&self) -> &Settings {
         &self.cloud.settings
     }
+
+    /// Host preferences are shared by tabs, while bindings and captured saves stay per design.
+    pub fn inherit_cloud_services(&mut self, source: &Session) {
+        self.cloud.settings = source.cloud.settings.clone();
+        self.cloud.host = source.cloud.host.clone();
+    }
+
+    pub fn take_cloud_settings_change(&mut self) -> Option<Settings> {
+        std::mem::take(&mut self.cloud.settings_changed).then(|| self.cloud.settings.clone())
+    }
+
+    pub fn cloud_configuring(&self) -> bool {
+        self.cloud.configuration.is_some()
+    }
+
+    pub fn cloud_save_pending(&self) -> bool {
+        !self.cloud.captures.is_empty()
+    }
     pub fn cloud_binding(&self) -> Option<&Binding> {
         self.cloud.binding.as_ref()
     }
@@ -62,6 +82,29 @@ impl Session {
     /// A captured save may become the saved baseline after later edits. Adopting the captured
     /// Arc instead of calling mark_saved keeps those newer edits dirty.
     pub fn poll_cloud(&mut self) -> Result<()> {
+        self.poll_cloud_with_publications(&[])
+    }
+
+    /// Share confirmed host results across tabs without sharing undo, bindings or captures.
+    /// Only a matching connection and captured revision can follow a publication.
+    pub fn poll_cloud_with_publications(&mut self, confirmed: &[Published]) -> Result<()> {
+        if let Some(id) = self.cloud.configuration.as_ref() {
+            let status =
+                self.cloud.jobs.get(id).ok_or_else(|| EngineError::Other("cloud settings operation missing".into()))?.status().map_err(error)?;
+            match status.phase {
+                Phase::Ready | Phase::Synced => {
+                    let settings: Settings =
+                        serde_json::from_value(status.result.ok_or_else(|| EngineError::Other("cloud settings missing".into()))?)
+                            .map_err(|e| EngineError::Other(e.to_string()))?;
+                    settings.validate().map_err(error)?;
+                    self.cloud.settings = settings;
+                    self.cloud.settings_changed = true;
+                    self.cloud.configuration = None;
+                }
+                Phase::Failed | Phase::Cancelled => self.cloud.configuration = None,
+                _ => {}
+            }
+        }
         let ids: Vec<String> = self.cloud.captures.keys().cloned().collect();
         for id in ids {
             let status =
@@ -73,6 +116,63 @@ impl Session {
                 self.cloud.binding = Some(capture.binding);
             } else if matches!(status.phase, Phase::Failed | Phase::Cancelled) {
                 self.cloud.captures.remove(&id);
+            }
+        }
+        // A later explicit synchronization can finish older offline Save operations. Apply
+        // each confirmed capture even when another file in the same synchronization failed.
+        let statuses = self.cloud.jobs.iter().map(|(id, job)| Ok((id.clone(), job.status().map_err(error)?))).collect::<Result<Vec<_>>>()?;
+        let mut publications = BTreeMap::new();
+        for (_, status) in &statuses {
+            for publication in &status.publications {
+                publication.destination.validate().map_err(error)?;
+                if publication.destination.connection != status.connection {
+                    return Err(EngineError::Other("publication belongs to another connection".into()));
+                }
+            }
+        }
+        for publication in statuses.iter().flat_map(|(_, status)| &status.publications).chain(confirmed) {
+            publication.destination.validate().map_err(error)?;
+            let key = (&publication.destination.connection, &publication.revision);
+            if let Some(previous) = publications.insert(key, publication)
+                && previous.destination != publication.destination
+            {
+                return Err(EngineError::Other("conflicting publication destinations".into()));
+            }
+        }
+        for (id, status) in &statuses {
+            if status.saved_locally
+                && status.phase != Phase::Synced
+                && let Some(revision) = &status.revision
+                && let Some(publication) = publications.get(&(&status.connection, revision))
+                && let Some(job) = self.cloud.jobs.get(id)
+            {
+                let result = serde_json::to_value(publication).map_err(|e| EngineError::Other(e.to_string()))?;
+                job.update(|status| {
+                    status.destination = Some(publication.destination.clone());
+                    status.result = Some(result);
+                    status.message = None;
+                    status.phase = Phase::Synced;
+                })
+                .map_err(error)?;
+            }
+        }
+        if let Some(binding) = &mut self.cloud.binding
+            && let Some(revision) = &binding.revision
+            && let Some(publication) = publications.get(&(&binding.destination.connection, revision))
+        {
+            binding.destination = publication.destination.clone();
+        }
+        // Publication can preserve an external competing edit by redirecting this capture
+        // to a conflict copy. Only its matching current binding follows that result; a later
+        // save, a newly opened file, or a native Save As must keep its own destination.
+        for (_, status) in statuses {
+            if status.phase == Phase::Synced
+                && let Some(binding) = &mut self.cloud.binding
+                && binding.revision.is_some()
+                && binding.revision == status.revision
+                && let Some(destination) = status.destination
+            {
+                binding.destination = destination;
             }
         }
         Ok(())
