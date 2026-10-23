@@ -437,8 +437,10 @@ impl UnitDiff for Runner {
             2 => a
                 .fix_end_point_class(&k, &g, i.index, Vec3::new(x, y, z))
                 .map(|changed| (Some(changed), None)),
+            // the shim's SetFilletData names `other` (Handle(7) here): pass it so the
+            // fillet geometry step reads that classification
             _ => a
-                .merge_interval(&k, &g, i.index, i.flags & 1 != 0)
+                .merge_interval_with(&k, &g, i.index, i.flags & 1 != 0, Some(&b))
                 .map(|merged| (None, Some(merged))),
         };
         match result {
