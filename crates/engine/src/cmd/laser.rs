@@ -14,8 +14,8 @@ use crate::params::{bad, str_};
 use crate::{EngineError, Result, Session};
 
 pub const COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("laser.profiles", "Laser Profiles", profiles).noundo().doc_only().params("{}"),
-    CommandSpec::new("laser.exportPackage", "Export LightBurn Package", export_package).noundo().params(
+    CommandSpec::new("laser.profiles", "Laser Profiles", profiles).icon("list").noundo().doc_only().params("{}"),
+    CommandSpec::new("laser.exportPackage", "Export LightBurn Package", export_package).icon("export").noundo().params(
         "profile?: commarker-60w-mopa; field_mm?: number; path?: stem or path without extension \
 (writes .dxf .svg .laser-job.json); sketch?: name|id; polylines?: [{points:[[x,y],…], closed?, layer?}]",
     ),
