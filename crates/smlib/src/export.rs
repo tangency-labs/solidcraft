@@ -409,8 +409,9 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
     Ok(out)
 }
 
-/// A circle's frame turned (y reversed) where needed so that its angle grows along `form`, the
-/// NURBS the edge runs on over `range`: what [`b::Edge::curve_interval`] reads.
+/// A circle's or ellipse's frame turned (y reversed) where needed so that its angle grows along
+/// `form`, the NURBS the edge runs on over `range`: what [`b::Edge::curve_interval`] reads (an
+/// ellipse's radii scale its axes, not the way its angle turns).
 fn along(f: b::Frame, form: &b::Curve, range: [f64; 2]) -> Res<b::Frame> {
     let eval = b::eval::CurveEval::new(form).map_err(|e| invalid(format!("circle NURBS form: {e}")))?;
     let [t0, t1] = range;
@@ -461,7 +462,7 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, Option<b::Curve>, [
     }
     let (mut nurbs, mut lines, mut circles, mut ellipses) = (0usize, 0usize, 0usize, 0usize);
     let (mut cv, mut kn) = (0usize, 0usize);
-    // The next NURBS block, in edge order: a NURBS edge's curve or a circle's NURBS form.
+    // The next NURBS block, in edge order: a NURBS edge's curve or a circle's or ellipse's form.
     let mut next_nurbs = || -> Res<Nurbs> {
         let n = count(at(flat.i(EDGE_NURBS_VERTEX_COUNT), nurbs, "NURBS edge")?, "NURBS edge")?;
         let o = count(at(flat.i(EDGE_NURBS_ORDER), nurbs, "NURBS edge")?, "NURBS edge")?;
@@ -512,7 +513,13 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, Option<b::Curve>, [
                 );
                 let radii = [at(flat.f(EDGE_ELLIPSE_X_RADIUS), ellipses, "ellipse")?, at(flat.f(EDGE_ELLIPSE_Y_RADIUS), ellipses, "ellipse")?];
                 ellipses += 1;
-                (b::Curve::Ellipse { frame: f, radii }, None, r, None)
+                // Like a circle: on its NURBS form, the trims on it carry over as they are.
+                if forms.get(e) == Some(&1) {
+                    let form = next_nurbs()?.record();
+                    (b::Curve::Ellipse { frame: along(f, &form, r)?, radii }, Some(form), r, Some([1.0, 0.0]))
+                } else {
+                    (b::Curve::Ellipse { frame: f, radii }, None, r, None)
+                }
             }
             CURVE_NURBS => {
                 let c = next_nurbs()?;

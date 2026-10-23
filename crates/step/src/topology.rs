@@ -322,6 +322,8 @@ struct EdgeB {
     interval: [f64; 2],
     vertices: [u32; 2],
     tolerance: f64,
+    /// The curve's NURBS form and its interval there (`form::edge`), set before the pcurves.
+    form: Option<(BCurve, [f64; 2])>,
 }
 
 enum LoopB {
@@ -433,7 +435,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             self.raise_vertex(v, gap, id)?;
         }
         let i = index(self.edges.len())?;
-        self.edges.push(EdgeB { curve: mapped.curve, interval: mapped.interval, vertices, tolerance: self.tol });
+        self.edges.push(EdgeB { curve: mapped.curve, interval: mapped.interval, vertices, tolerance: self.tol, form: None });
         self.edge_ids.insert(id, (i, mapped.with_step));
         Ok((i, mapped.with_step))
     }
@@ -667,14 +669,36 @@ impl<'b, 'a> Builder<'b, 'a> {
         if self.sense_mismatches > 0 {
             notes.push(format!("{} edges run against their same_sense (read by their vertices)", self.sense_mismatches));
         }
+        // Each edge's label and NURBS form: a circle about a revolved face's axis labelled on that
+        // face's frame, so its form lies on the face's quarter grid.
+        let mut frames: Vec<Vec<brep::Frame>> = vec![Vec::new(); self.edges.len()];
+        for f in &self.faces {
+            let Some(frame) = brep::form::frame_of(&f.surface) else { continue };
+            for l in &f.loops {
+                if let LoopB::Edges(es) = l {
+                    for (e, _) in es {
+                        if let Some(slot) = frames.get_mut(*e as usize) {
+                            slot.push(frame.clone());
+                        }
+                    }
+                }
+            }
+        }
+        for (edge, fr) in self.edges.iter_mut().zip(&frames) {
+            let (label, interval, form) =
+                brep::form::edge(&edge.curve, edge.interval, fr, self.tol).ok_or_else(|| unsupported("an arc of more than one turn"))?;
+            (edge.curve, edge.interval, edge.form) = (label, interval, form);
+        }
         // Each face's pcurves; a face whose loops disagree with its same_sense is turned over.
         let mut pcs: Vec<Vec<Vec<Curve2>>> = Vec::with_capacity(self.faces.len());
+        let mut face_forms: Vec<Option<BSurface>> = Vec::with_capacity(self.faces.len());
         let mut domains = Vec::with_capacity(self.faces.len());
         let mut turned = vec![false; self.faces.len()];
         let (mut failed, mut first_failure, mut loosened) = (0usize, None, 0usize);
         for fi in 0..self.faces.len() {
             match self.face_pcurves(fi) {
-                Ok((pc, domain, flipped, tol)) => {
+                Ok((pc, domain, flipped, tol, form)) => {
+                    face_forms.push(form);
                     if flipped && let Some(t) = turned.get_mut(fi) {
                         *t = true;
                     }
@@ -689,6 +713,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                     first_failure.get_or_insert_with(|| format!("face #{}: {m}", self.faces.get(fi).map_or(0, |f| f.step)));
                     pcs.push(Vec::new());
                     domains.push([[0.0; 2]; 2]);
+                    face_forms.push(None);
                 }
             }
         }
@@ -841,10 +866,14 @@ impl<'b, 'a> Builder<'b, 'a> {
         let mut edges = Vec::with_capacity(edge_order.len());
         for &e in &edge_order {
             let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+            let (nurbs, interval) = match &edge.form {
+                Some((c, i)) => (Some(c.clone()), *i),
+                None => (None, edge.interval),
+            };
             edges.push(Edge {
-                nurbs: None,
+                nurbs,
                 curve: edge.curve.clone(),
-                interval: edge.interval,
+                interval,
                 vertices: [vmap(edge.vertices[0])?, vmap(edge.vertices[1])?],
                 tolerance: edge.tolerance,
                 uses: uses.get(e as usize).cloned().unwrap_or_default(),
@@ -884,7 +913,8 @@ impl<'b, 'a> Builder<'b, 'a> {
                 }
             }
             let domain = *domains.get(f as usize).ok_or("face reference")?;
-            faces.push(Face { nurbs: None, surface: face.surface.clone(), domain, loops });
+            let nurbs = face_forms.get(f as usize).cloned().flatten();
+            faces.push(Face { nurbs, surface: face.surface.clone(), domain, loops });
         }
         let mut out_shells = Vec::with_capacity(shells.len());
         for s in &shells {
@@ -927,9 +957,9 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// marks none (or marks one that another loop encloses), and turns the face over when its
     /// outer loop runs clockwise about the natural normal on a surface where that cannot be a
     /// face's outer boundary.
-    fn face_pcurves(&mut self, fi: usize) -> R<(Vec<Vec<Curve2>>, [[f64; 2]; 2], bool, f64)> {
+    fn face_pcurves(&mut self, fi: usize) -> R<(Vec<Vec<Curve2>>, [[f64; 2]; 2], bool, f64, Option<BSurface>)> {
         let face = self.faces.get(fi).ok_or("face reference")?;
-        let surface = face.surface.clone();
+        let label = face.surface.clone();
         let edge_loops: Vec<Vec<(u32, bool)>> = face
             .loops
             .iter()
@@ -941,24 +971,42 @@ impl<'b, 'a> Builder<'b, 'a> {
         // Which loop index in `face.loops` each edge loop is.
         let positions: Vec<usize> = face.loops.iter().enumerate().filter(|(_, l)| matches!(l, LoopB::Edges(_))).map(|(i, _)| i).collect();
         let mut tol = self.tol;
-        let pcs = loop {
-            let mut uses = Vec::with_capacity(edge_loops.len());
-            for l in &edge_loops {
-                let mut u = Vec::with_capacity(l.len());
-                for &(e, forward) in l {
-                    let edge = self.edges.get(e as usize).ok_or("edge reference")?;
-                    u.push(EdgeUse { edge: e, curve: &edge.curve, interval: edge.interval, forward, tolerance: 0.0, given: None });
+        // The face's pcurves on `on`, each edge on its NURBS form when `formed`.
+        let pcurves_on = |on: &BSurface, formed: bool, tol: &mut f64| -> R<Vec<Vec<Curve2>>> {
+            loop {
+                let mut uses = Vec::with_capacity(edge_loops.len());
+                for l in &edge_loops {
+                    let mut u = Vec::with_capacity(l.len());
+                    for &(e, forward) in l {
+                        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                        let (curve, interval) = match &edge.form {
+                            Some((c, i)) if formed => (c, *i),
+                            _ => (&edge.curve, edge.interval),
+                        };
+                        u.push(EdgeUse { edge: e, curve, interval, forward, tolerance: 0.0, given: None });
+                    }
+                    uses.push(u);
                 }
-                uses.push(u);
-            }
-            match pcurve::pcurves(&surface, &uses, tol) {
-                Ok(p) => break p,
-                Err(pcurve::Error::Failed(m)) if !m.contains("not supported") && tol * 10.0 <= MAX_FIT_TOLERANCE * (1.0 + 1e-9) => {
-                    tol *= 10.0;
+                match pcurve::pcurves(on, &uses, *tol) {
+                    Ok(p) => return Ok(p),
+                    Err(pcurve::Error::Failed(m)) if !m.contains("not supported") && *tol * 10.0 <= MAX_FIT_TOLERANCE * (1.0 + 1e-9) => {
+                        *tol *= 10.0;
+                    }
+                    Err(e) => return Err(e.to_string()),
                 }
-                Err(e) => return Err(e.to_string()),
             }
         };
+        // A cylinder, cone, sphere or torus on its NURBS form, over the extent its label's pcurves
+        // give; then every pcurve on the forms.
+        let form = match brep::form::frame_of(&label) {
+            Some(_) => {
+                let extent = face_domain(&label, &pcurves_on(&label, false, &mut tol)?)?;
+                Some(brep::form::surface(&label, extent).ok_or_else(|| unsupported("a face of more than one turn"))?.0)
+            }
+            None => None,
+        };
+        let surface = form.clone().unwrap_or(label);
+        let pcs = pcurves_on(&surface, true, &mut tol)?;
         if tol > self.tol {
             for l in &edge_loops {
                 for &(e, _) in l {
@@ -1029,7 +1077,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         }
         let pcs: Vec<Vec<Curve2>> = if flip { pcs.into_iter().map(|l| l.into_iter().rev().collect()).collect() } else { pcs };
         let domain = face_domain(&surface, &pcs)?;
-        Ok((pcs, domain, flip, tol))
+        Ok((pcs, domain, flip, tol, form))
     }
 }
 
