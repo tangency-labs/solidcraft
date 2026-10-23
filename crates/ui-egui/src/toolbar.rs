@@ -887,10 +887,16 @@ fn ribbon_text(ui: &egui::Ui, at: egui::Pos2, text: &str, size: f32, color: Colo
     ui.painter().galley(origin, galley, color);
 }
 
-/// SKETCH while editing a sketch and SHEET METAL while a sheet body is active take the contextual
-/// tab style; SHEET METAL is an ordinary tab otherwise.
+/// SKETCH while editing a sketch, SHEET METAL while a sheet body is active and WELDMENTS while a
+/// frame member is take the contextual tab style; SHEET METAL and WELDMENTS are ordinary tabs
+/// otherwise.
 fn contextual_tab(app: &SolveApp, tab: &str) -> bool {
-    tab == "SKETCH" || (tab == "SHEET METAL" && crate::workspace::sheet_body(app).is_some())
+    match tab {
+        "SKETCH" => true,
+        "SHEET METAL" => crate::workspace::sheet_body(app).is_some(),
+        "WELDMENTS" => crate::workspace::frame_body(app).is_some(),
+        _ => false,
+    }
 }
 
 fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
@@ -991,7 +997,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                 }
             });
     });
-    if matches!(app.ui.tab.as_str(), "SKETCH" | "SHEET METAL") {
+    if matches!(app.ui.tab.as_str(), "SKETCH" | "SHEET METAL" | "WELDMENTS") {
         ui.painter().line_segment(
             [row.left_bottom() - vec2(0.0, 1.0), row.right_bottom() - vec2(0.0, 1.0)],
             Stroke::new(2.0, panel_accent(&t, &app.ui.tab, "")),
