@@ -89,8 +89,19 @@ public:
         case K_TRIG:
         {
             double arg = p[1] * dT + p[2];
+#if defined(__APPLE__)
+            // Apple clang combines the direct calls into __sincos_stret, whose
+            // rounding can differ from the separate calls in the Rust evaluator.
+            // Volatile function pointers keep this synthetic test function on
+            // the same platform sin/cos paths without changing kernel flags.
+            double (*volatile sine)(double) = std::sin;
+            double (*volatile cosine)(double) = std::cos;
+            f = p[0] * sine(arg) + p[3] * dT + p[4];
+            fp = p[0] * p[1] * cosine(arg) + p[3];
+#else
             f = p[0] * std::sin(arg) + p[3] * dT + p[4];
             fp = p[0] * p[1] * std::cos(arg) + p[3];
+#endif
             break;
         }
         case K_ATAN:

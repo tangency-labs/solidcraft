@@ -8124,6 +8124,38 @@
     "tol": 0.0,
     "maximize": false
    }
+  },
+  {
+   "name": "trig_bracket_residual_separate_platform_calls",
+   "inputs": {
+    "acceptable": 1.9498269151442054e-12,
+    "algorithm": 3,
+    "desired": null,
+    "func": {
+     "fail_first": 0,
+     "fail_hi": 0.0,
+     "fail_lo": 1.0,
+     "found_tol": 0.0,
+     "kind": 2,
+     "p": [
+      -0.3882206991029129,
+      3.602483678194587,
+      -1.2331464376658001,
+      -0.592468345313117,
+      0.4070053463734302
+     ],
+     "partial": true
+    },
+    "guesses": [
+     0.4249261703541882
+    ],
+    "interval": [
+     -1.600249728224778,
+     0.7935376232354012
+    ],
+    "op": "solve_it",
+    "periodic": false
+   }
   }
  ]
 }
