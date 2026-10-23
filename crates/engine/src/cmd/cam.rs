@@ -13,32 +13,31 @@ use crate::params::{bad, bool_, num, str_, vec2_list};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("cam.tool", "CAM Tool", tool_cmd).at("MANUFACTURE", "SETUP").icon("tool").params(
+    CommandSpec::new("cam.tool", "CAM Tool", tool_cmd).icon("hole").params(
         "number (1…9999); kind?: flat_endmill|ball_endmill|drill (default flat_endmill); diameter (mm); flute_length (mm); \
          description?; flutes?; spindle_rpm?; feed?; plunge_feed?; stepdown?; stepover?; delete?: bool",
     ),
     CommandSpec::new("cam.setup", "CAM Setup", setup_cmd)
-        .at("MANUFACTURE", "SETUP")
-        .icon("setup")
+        .icon("settings")
         .params("name; work_offset?: 1…6 (G54…G59, default 1); stock?: {min:[x,y,z], max:[x,y,z]}; delete?: bool"),
-    CommandSpec::new("cam.contour", "2D Contour", contour_cmd).at("MANUFACTURE", "MILLING").icon("contour").params(
+    CommandSpec::new("cam.contour", "2D Contour", contour_cmd).icon("cut").params(
         "setup; name; tool (number); outer: [[x,y],…] (or regions: [{outer, holes?}]); holes?: [[[x,y],…]]; \
          side?: outside|inside|on (default outside); climb?: bool (default true); stock_to_leave?; tolerance?; \
          ramp_angle?: deg (default 0); clearance?; retract?; top?; bottom (required unless cut given); stepdown?; \
          feed?; plunge_feed?; spindle_rpm?; coolant?; cut?: {heights, feeds, stepdown}",
     ),
-    CommandSpec::new("cam.pocket", "2D Pocket", pocket_cmd).at("MANUFACTURE", "MILLING").icon("pocket").params(
+    CommandSpec::new("cam.pocket", "2D Pocket", pocket_cmd).icon("hole").params(
         "setup; name; tool (number); outer: [[x,y],…] (or regions); holes?; stepover? (default half the tool diameter); \
          climb?; stock_to_leave?; tolerance?; ramp_angle?: deg; clearance?; retract?; top?; bottom; stepdown?; \
          feed?; plunge_feed?; spindle_rpm?; coolant?; cut?",
     ),
-    CommandSpec::new("cam.delete_op", "Delete CAM Operation", delete_op).at("MANUFACTURE", "MILLING").icon("delete").params("setup; name"),
-    CommandSpec::new("cam.post", "Post Process", post_cmd).icon("post").noundo().params(
+    CommandSpec::new("cam.delete_op", "Delete CAM Operation", delete_op).icon("delete").params("setup; name"),
+    CommandSpec::new("cam.post", "Post Process", post_cmd).icon("export").noundo().params(
         "setup; post?: rs274 | name of a saved post (default rs274); program?: name (default the setup's); \
          verify?: bool (default true: read the G-code back and check it against the toolpaths) → \
          {gcode, extension, post, operations, readback?}",
     ),
-    CommandSpec::new("cam.list", "List CAM", list_cmd).icon("tool").noundo().params("→ tools, setups (with operations) and saved posts"),
+    CommandSpec::new("cam.list", "List CAM", list_cmd).icon("list").noundo().params("→ tools, setups (with operations) and saved posts"),
 ];
 
 fn tool_cmd(s: &mut Session, p: &Value) -> Result<Value> {
