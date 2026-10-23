@@ -33,5 +33,6 @@ pub use p3::{
 };
 pub use p4::{squeeze_out_smallest_interval, ClassificationInit, LoopCrossings};
 pub use p7::{
-    set_do_filleting_geometry, CoincidentMaybe, PartialCoincidence, VertexObjects, UNDEF_LOOP_INDEX,
+    set_do_filleting_geometry, set_do_filleting_geometry_mut, CoincidentMaybe, PartialCoincidence,
+    VertexObjects, UNDEF_LOOP_INDEX,
 };

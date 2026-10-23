@@ -492,7 +492,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                 }
             }
             OpIn::Fillet { j, todo, .. } => {
-                let r = cc_mod::set_do_filleting_geometry(&k, &geo, *j, cc, Some(&other), *todo);
+                let r = cc_mod::set_do_filleting_geometry_mut(&k, &mut Geo(&mut pool), *j, cc, Some(&other), *todo);
                 o.push(st(r)?.err().unwrap_or(0.0));
             }
         }

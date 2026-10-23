@@ -20,7 +20,7 @@
 //! | [`CurveClassification::are_coincident_maybe`], [`CoincidentMaybe`] | `AreCoincidentMaybe`                          |
 //! | [`CurveClassification::classify_face_interval`], [`CurveClassification::classify_face_interval_mut`] | `ClassifyFaceInterval` |
 //! | [`CurveClassification::test_for_partial_coincident_edges`], [`PartialCoincidence`] | `TestForPartialCoincidentEdges` |
-//! | [`set_do_filleting_geometry`]                               | `sm_SetDoFilletingGeometry`                           |
+//! | [`set_do_filleting_geometry`], [`set_do_filleting_geometry_mut`] | `sm_SetDoFilletingGeometry`                     |
 //! | [`CurveClassification::curve`] of the owner                 | `SmCurveInterval::GetCurve`                           |
 //! | [`curve_is_degenerate`] (`intersect.curve_class_p3`)        | `SmTol::IsDegenerate(const SmCurve*, SmExtent1d, SmXSectTol3d*)` (CO-PORTED from `geom.tol`, with the tolerance given) |
 //! | `tol_is_closed_curve` (private)                             | `SmTol::IsClosed(const SmObject*, SmXSectTol3d*)` for a curve (CO-PORTED from `geom.tol`, with the tolerance given) |
@@ -63,8 +63,9 @@
 //!   adapter lacks that hook keeps the earlier [`SolidError::Unported`] deferral, and a
 //!   connection target in another B-rep is connected to nothing. `IsConnectedTo(NULL)` is
 //!   `TRUE` before any member is read, as upstream. The edits of `sm_SetDoFilletingGeometry`
-//!   (`SmVertex::SetPoint`, `SmEdge::SetCurve`) need mutable topology and its `Notify`
-//!   chain and still return [`SolidError::Unported`].
+//!   (`SmVertex::SetPoint`, `SmEdge::SetCurve`) on the mutable path ([`set_do_filleting_geometry_mut`])
+//!   update the B-rep entities directly; the read-only path ([`set_do_filleting_geometry`]) returns
+//!   [`SolidError::Unported`].
 //! - **Face classifiers.** `SmFace::EdgeCurveOnClassify` / `Point3DClassify`
 //!   ([`crate::query::face::p1`]) run on the B-rep and face that the adapter resolves
 //!   the face handle to. Upstream's members are `const` but may add UV trim curves and
@@ -1149,6 +1150,34 @@ pub fn set_do_filleting_geometry<O: ClassObject>(
     other: Option<&CurveClassification<O>>,
     todo: u64,
 ) -> Result<()> {
+    set_do_filleting_geometry_with(k, &mut ReadOnly(geometry), index, this, other, todo)
+}
+
+/// [`set_do_filleting_geometry`] with mutable access to the B-rep behind the topology
+/// handles: the vertex and edge modifications are applied directly to the entities.
+///
+/// # Errors
+///
+/// Those of [`set_do_filleting_geometry`].
+pub fn set_do_filleting_geometry_mut<O: ClassObject>(
+    k: &Kernel,
+    geometry: &mut impl ClassGeometryMut<O>,
+    index: usize,
+    this: &CurveClassification<O>,
+    other: Option<&CurveClassification<O>>,
+    todo: u64,
+) -> Result<()> {
+    set_do_filleting_geometry_with(k, &mut Mutable(geometry), index, this, other, todo)
+}
+
+fn set_do_filleting_geometry_with<O: ClassObject>(
+    k: &Kernel,
+    access: &mut impl FilletAccess<O>,
+    index: usize,
+    this: &CurveClassification<O>,
+    other: Option<&CurveClassification<O>>,
+    todo: u64,
+) -> Result<()> {
     // no work - don't have DoingFillet Data
     if !this.doing_fillets() || this.other_classification().is_none() {
         return Ok(());
@@ -1177,7 +1206,8 @@ pub fn set_do_filleting_geometry<O: ClassObject>(
             .start
             .vertex_object()
             .ok_or(SolidError::null_pointer(OP_FILLET))?;
-        vertex_set_point(this_v, vertex_point(geometry, other_v)?)?;
+        let point = vertex_point(access.geometry(), other_v)?;
+        access.set_vertex_point(this_v, point)?;
     }
 
     // when asked - set EndVertex Geometry
@@ -1195,7 +1225,8 @@ pub fn set_do_filleting_geometry<O: ClassObject>(
             .end
             .vertex_object()
             .ok_or(SolidError::null_pointer(OP_FILLET))?;
-        vertex_set_point(this_v, vertex_point(geometry, other_v)?)?;
+        let point = vertex_point(access.geometry(), other_v)?;
+        access.set_vertex_point(this_v, point)?;
     }
 
     // when asked - set MidEdge Geometry
@@ -1211,21 +1242,21 @@ pub fn set_do_filleting_geometry<O: ClassObject>(
             .mid
             .edge_object()
             .ok_or(SolidError::null_pointer(OP_FILLET))?;
-        let this_edge_curve = edge_curve(geometry, this_edge)?;
-        let this_edge_ivl = edge_interval(geometry, Some(this_edge))?;
+        let this_edge_curve = edge_curve(access.geometry(), this_edge)?;
+        let this_edge_ivl = edge_interval(access.geometry(), Some(this_edge))?;
 
         // other mid edge
         let other_edge = other_ivl
             .mid
             .edge_object()
             .ok_or(SolidError::null_pointer(OP_FILLET))?;
-        let other_edge_curve = edge_curve(geometry, other_edge)?;
-        let other_edge_ivl = edge_interval(geometry, Some(other_edge))?;
+        let other_edge_curve = edge_curve(access.geometry(), other_edge)?;
+        let other_edge_ivl = edge_interval(access.geometry(), Some(other_edge))?;
 
         // DropPoint locals
         let other_start_guess = other_edge_ivl.min();
         let other_end_guess = other_edge_ivl.max();
-        let xsect_tol_3d = edge_pair_xsect_tol_3d(k, geometry, this_edge, other_edge)?;
+        let xsect_tol_3d = edge_pair_xsect_tol_3d(k, access.geometry(), this_edge, other_edge)?;
 
         // this and other edge end point samples (statuses ignored)
         let sample = |c: &Curve, t: f64| -> Result<[Vec3; 2]> {
@@ -1317,7 +1348,7 @@ pub fn set_do_filleting_geometry<O: ClassObject>(
         }
 
         // Set ThisEdge->Curve from OtherEdge->Curve Copy
-        edge_set_curve(this_edge, copy)?;
+        access.set_edge_curve(this_edge, copy)?;
     }
 
     Ok(())
@@ -1867,23 +1898,6 @@ fn vertex_point<O: ClassObject>(geometry: &impl ClassGeometry<O>, vertex: O) -> 
     vertex::point(b, v)
 }
 
-/// `SmVertex::SetPoint`.
-fn vertex_set_point<O: ClassObject>(vertex: O, point: Point3) -> Result<()> {
-    let _ = (vertex, point);
-    // UNPORTED(topology.vertex): SmVertex::SetPoint
-    Err(SolidError::unported(
-        "SmVertex::SetPoint",
-        "topology.vertex",
-    ))
-}
-
-/// `SmEdge::SetCurve(curve, TRUE, TRUE, TRUE)` and `SmCurve::SetOwner(edge)`.
-fn edge_set_curve<O: ClassObject>(edge: O, curve: Curve) -> Result<()> {
-    let _ = (edge, curve);
-    // UNPORTED(topology.edge): SmEdge::SetCurve
-    Err(SolidError::unported("SmEdge::SetCurve", "topology.edge"))
-}
-
 /// `SmTol::GetXSectTol3d(const SmObject*, const SmObject*)` of two edges: the sum of
 /// their zone tolerances (`GetTolerance`).
 fn edge_pair_xsect_tol_3d<O: ClassObject>(
@@ -1966,10 +1980,36 @@ trait FaceQueries<O: ClassObject> {
     ) -> Result<()>;
 }
 
+/// The mutable and read-only topology operations of [`set_do_filleting_geometry_with`].
+trait FilletAccess<O: ClassObject> {
+    type Geometry: ClassGeometry<O>;
+    fn geometry(&self) -> &Self::Geometry;
+    fn set_vertex_point(&mut self, vertex: O, point: Point3) -> Result<()>;
+    fn set_edge_curve(&mut self, edge: O, curve: Curve) -> Result<()>;
+}
+
 /// A read-only adapter: `EdgeCurveOnClassify` and `Point3DClassify` run on a copy of
 /// the face's B-rep (#614); `FindVertexSector` and `PointClassify` defer until the
 /// caller gives mutable access ([`CurveClassification::classify_face_interval_mut`]).
 struct ReadOnly<'g, G>(&'g G);
+
+impl<O: ClassObject, G: ClassGeometry<O>> FilletAccess<O> for ReadOnly<'_, G> {
+    type Geometry = G;
+    fn geometry(&self) -> &G {
+        self.0
+    }
+    fn set_vertex_point(&mut self, _vertex: O, _point: Point3) -> Result<()> {
+        // UNPORTED(topology.vertex): SmVertex::SetPoint
+        Err(SolidError::unported(
+            "SmVertex::SetPoint",
+            "topology.vertex",
+        ))
+    }
+    fn set_edge_curve(&mut self, _edge: O, _curve: Curve) -> Result<()> {
+        // UNPORTED(topology.edge): SmEdge::SetCurve
+        Err(SolidError::unported("SmEdge::SetCurve", "topology.edge"))
+    }
+}
 
 impl<O: ClassObject, G: ClassGeometry<O>> FaceQueries<O> for ReadOnly<'_, G> {
     type Geometry = G;
@@ -2232,6 +2272,31 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FaceQueries<O> for Mutable<'_, G> {
         *point_class =
             pc.map_objects(&mut |e| geometry.topology_handle_in(b, e).ok_or_else(unresolved_3d))?;
         r
+    }
+}
+
+impl<O: ClassObject, G: ClassGeometryMut<O>> FilletAccess<O> for Mutable<'_, G> {
+    type Geometry = G;
+    fn geometry(&self) -> &G {
+        self.0
+    }
+    fn set_vertex_point(&mut self, vertex: O, point: Point3) -> Result<()> {
+        match self.0.topology_entity_mut(vertex) {
+            Some((b, EntityRef::Vertex(v))) => {
+                b.vertex_mut(v)?.point = point;
+                Ok(())
+            }
+            _ => ReadOnly(&*self.0).set_vertex_point(vertex, point),
+        }
+    }
+    fn set_edge_curve(&mut self, edge: O, curve: Curve) -> Result<()> {
+        match self.0.topology_entity_mut(edge) {
+            Some((b, EntityRef::Edge(e))) => {
+                b.edge_mut(e)?.curve = Some(curve);
+                Ok(())
+            }
+            _ => ReadOnly(&*self.0).set_edge_curve(edge, curve),
+        }
     }
 }
 
