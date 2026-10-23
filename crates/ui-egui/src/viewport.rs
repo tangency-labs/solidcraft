@@ -3719,6 +3719,8 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
 
 /// Sketch points and the status of the active sketch (constraint glyphs: `sketch_tools`).
 fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    crate::manufacture_setup::paint_overlays(app, painter, proj);
+    crate::manufacture_2d::paint_overlays(app, painter, proj);
     let t = Tokens::get();
     let st = crate::open_meshing::shown_world(app);
     for item in &app.session.selection {
