@@ -75,8 +75,9 @@ pub enum Shell {
 #[serde(deny_unknown_fields)]
 pub struct OrientedFace {
     pub face: u32,
-    /// The face's normal in this shell is its surface's natural normal (∂S/∂u × ∂S/∂v). In a
-    /// closed shell the normals point out of the material.
+    /// The face's normal in this shell is the natural normal (∂S/∂u × ∂S/∂v) of the surface its
+    /// (u, v) are on, [`Face::parameters`]: its NURBS form when it has one. In a closed shell the
+    /// normals point out of the material.
     pub forward: bool,
 }
 
@@ -528,6 +529,35 @@ impl Face {
     /// Everything that evaluates the face's domain or pcurves goes through this.
     pub fn parameters(&self) -> &Surface {
         self.nurbs.as_ref().unwrap_or(&self.surface)
+    }
+
+    /// Whether the face's NURBS form turns its natural normal against `surface`'s (away from
+    /// the axis of a cylinder or cone, the centre of a sphere, the tube's centre circle of a
+    /// torus), at the middle of `domain`. A shell's `forward` is about [`Face::parameters`], so
+    /// the side `surface` is used on is `forward != form_turns()`. `Some(false)` without a form;
+    /// `None` where the form does not evaluate there.
+    pub fn form_turns(&self) -> Option<bool> {
+        let Some(form) = &self.nurbs else { return Some(false) };
+        let eval = eval::SurfaceEval::new(form).ok()?;
+        let [[u0, u1], [v0, v1]] = self.domain;
+        let (p, su, sv) = eval.derivs(0.5 * (u0 + u1), 0.5 * (v0 + v1))?;
+        let v3 = |a: [f64; 3]| crate::Vec3::new(a[0], a[1], a[2]);
+        let radial = |f: &Frame| {
+            let (o, z) = (v3(f.origin), v3(f.x_axis).cross(v3(f.y_axis)));
+            let d = p - o;
+            (o, d - z * (d.dot(z) / z.dot(z)))
+        };
+        let outward = match &self.surface {
+            Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } => radial(frame).1,
+            Surface::Sphere { frame, .. } => p - v3(frame.origin),
+            Surface::Torus { frame, major_radius, .. } => {
+                let (o, r) = radial(frame);
+                p - (o + r.normalized()? * *major_radius)
+            }
+            _ => return None,
+        };
+        let along = su.cross(sv).dot(outward);
+        (along.abs() > 0.0).then_some(along < 0.0)
     }
 }
 
