@@ -767,24 +767,45 @@ void op_bbox(Rd& rd, const SmContext& ctx, std::vector<double>& o)
     delete s;
 }
 
-// `W S cont uv vec`: GetDomainWithContinuity (virtual): `status [D]` (`SM_ERR` without a surface
-// cache, where upstream would crash).
+// `W S cont uv vec history`: GetDomainWithContinuity (virtual): `status [D]` (`SM_ERR`
+// without a surface cache, where upstream would crash). The surface's cache is made
+// first; `history` sets what happened to it before the call: 0 made outside a Boolean
+// operation (its tree is built), 1 made while doing a Boolean operation (no tree: its
+// continuity arrays stay empty), 2 as 1 then its tree built (`GetTree`), 3 as 0 with
+// the call made while doing a Boolean operation (the built cache is reused).
 void op_dom_cont(Rd& rd, const SmContext& ctx, std::vector<double>& o)
 {
     SmSurface* s = read_wrapped(rd, ctx);
     SmContinuityType c = (SmContinuityType)rd.idx();
     SmPoint2d uv = rd.uv();
     SmVector2d v = rd.uv();
+    int64_t history = rd.idx();
+    SmContext* pc = SM_CONST_CAST(SmContext*, &ctx);
+    SmBoolean was_boolean = pc->GetDoingBoolean();
     // the base body reads the surface cache through a NULL pointer when none can be made
     // (after SE(SM_ERR)): report SM_ERR instead (the built cache is reused by the call)
-    if (s->GetType() != SmSTEPSurface_TYPE && smsurf_GetSurfaceCache(s) == NULL)
+    if (s->GetType() != SmSTEPSurface_TYPE)
     {
-        o.push_back(st(SM_ERR));
-        delete s;
-        return;
+        pc->SetDoingBoolean(history == 1 || history == 2 ? TRUE : FALSE);
+        SmSurfaceCache* pSC = smsurf_GetSurfaceCache(s);
+        pc->SetDoingBoolean(was_boolean);
+        if (pSC == NULL)
+        {
+            o.push_back(st(SM_ERR));
+            delete s;
+            return;
+        }
+        if (history == 2 && pSC->GetTree() == NULL)
+        {
+            o.push_back(st(SM_ERR));
+            delete s;
+            return;
+        }
     }
     o.push_back(0.0);
+    pc->SetDoingBoolean(history == 3 ? TRUE : FALSE);
     put_dom(o, s->GetDomainWithContinuity(c, uv, v));
+    pc->SetDoingBoolean(was_boolean);
     delete s;
 }
 // A curve: `GetType()`, then for an SmBSplineCurve `dim hasNurb [n p m cpts(x y z w) knots]`.

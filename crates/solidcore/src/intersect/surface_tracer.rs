@@ -2139,18 +2139,25 @@ where
     Ok(out)
 }
 
-/// `smsurf_GetSurfaceCache` for the tracer's surface ([`surface_cache`], built fresh):
-/// the cache callers pass to [`SurfaceTrace::do_trace`].
+/// `smsurf_GetSurfaceCache` for the tracer's surface ([`surface_cache`], built fresh)
+/// and the tracer constructor's `pSC->GetTree()` (whose failure the constructor
+/// ignores): the cache callers pass to [`SurfaceTrace::do_trace`]. The tree is built
+/// before the boundary search reads the cache's continuity arrays, also during a
+/// Boolean operation.
 ///
 /// # Errors
 ///
 /// Those of the cache builds (the continuities of the tree build:
-/// `SmSurface::CalculateContinuities`).
+/// `SmSurface::CalculateContinuities`); [`SolidError::Unported`] from the tree build.
 pub fn tracer_surface_cache<O: Copy + PartialEq>(
     k: &Kernel,
     t: &SurfaceTracer<'_>,
 ) -> Result<SurfaceCache<O>> {
-    surface_cache(k, t.surface, None)
+    let mut cache = surface_cache(k, t.surface, None)?;
+    match cache.get_tree(k) {
+        Err(e) if e.is_unported() => Err(e),
+        _ => Ok(cache),
+    }
 }
 
 #[cfg(test)]

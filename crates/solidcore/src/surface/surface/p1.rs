@@ -28,6 +28,7 @@
 //! | [`Surface::approximate_size`]                     | `ApproximateSize`                                |
 //! | [`validate_surface_cache`], [`make_surface_cache`], [`make_trim_srf_cache`], [`cache_tolerances`] | `CacheMakeOrValidate` |
 //! | [`make_trim_srf_cache_with_face`], [`get_surface_cache_with_face`] | `CacheMakeOrValidate(SM_OC_TRIMSRF)`, `smsurf_GetSurfaceCache` of a face's surface |
+//! | [`cache_tree_built_on_get`], [`continuity_surface_cache`], [`note_surface_cache`] | the tree state of the cache `smsurf_GetSurfaceCache` hands out (`m_pCacheObj` reused or made) |
 //! | [`Surface::compute_param_direction`]              | `ComputeParamDirection`                          |
 //! | [`Surface::evaluate_directional_derivs`]          | `EvaluateDirectionalDerivs`                      |
 //! | [`Surface::create_offset_surface`]                | `CreateOffsetSurface`                            |
@@ -73,8 +74,16 @@
 //!   `CacheMakeOrValidate` (the cache type check and the reuse of an existing cache,
 //!   whose face state the caller passes in). The members that query a cache
 //!   (`CalculateBoundingBox`, `GetDomainWithContinuity`, `CreateSilhouetteCurves`)
-//!   build one as `smsurf_GetSurfaceCache` would: the trimmed surface cache. The
-//!   debug cache counters are not modelled. The owner of a face's surface is an
+//!   build one as `smsurf_GetSurfaceCache` would: the trimmed surface cache. Whether
+//!   upstream's cache of that surface object has its tree (`GetTree` builds it lazily;
+//!   one made during a Boolean operation has none, and its continuity arrays stay empty)
+//!   is the surface's cache slot ([`Surface::cache_tree_state`]): a new cache honours it
+//!   (no tree for an `Unbuilt` slot, the continuities alone for a `Built` slot during a
+//!   Boolean operation) and records it, and the readers of the continuity arrays that
+//!   call no `GetTree` (`GetDomainWithContinuity`, `LiftCurve`) take their cache from
+//!   [`continuity_surface_cache`]. The rest of the cache (its UV domain, face
+//!   containment and modified-face state) is rebuilt as before. The debug cache
+//!   counters are not modelled. The owner of a face's surface is an
 //!   [`ObjectRef`] the surface cannot follow to the B-rep: a caller holding the face
 //!   builds the cache with [`make_trim_srf_cache_with_face`] /
 //!   [`get_surface_cache_with_face`], giving `GetFace()` as a
@@ -167,7 +176,7 @@ use super::p2::{
     SURF_OF_REVOLUTION_TYPE,
 };
 use super::p7::{SpGlobalSolver, SsGlobalSolver};
-use super::{Surface, SurfaceKind};
+use super::{CacheTreeState, Surface, SurfaceKind};
 
 const OP_STEP: &str = "surface::surface::p1::StepSurface";
 const OP_CACHE: &str = "surface::surface::p1::validate_surface_cache";
@@ -946,10 +955,57 @@ pub fn make_surface_cache<O: Copy + PartialEq>(
     Ok(cache)
 }
 
+/// Whether `smsurf_GetSurfaceCache` hands out a cache whose tree is built, given the
+/// surface's cache slot: a new cache is built unless the context is doing a Boolean
+/// operation; an existing one is reused as it is.
+#[must_use]
+pub fn cache_tree_built_on_get(k: &Kernel, state: CacheTreeState) -> bool {
+    match state {
+        CacheTreeState::NoCache => !k.context.doing_boolean(),
+        CacheTreeState::Unbuilt => false,
+        CacheTreeState::Built => true,
+    }
+}
+
+/// The tree step of `CacheMakeOrValidate(SM_OC_TRIMSRF, ..)` on a cache the port has
+/// just made, given the surface's cache slot (`state`): a new cache (`NoCache`) is
+/// built unless the context is doing a Boolean operation; upstream reuses an existing
+/// one, so an `Unbuilt` cache stays without tree (even outside a Boolean operation)
+/// and a `Built` one has its continuities (built here outside a Boolean operation,
+/// else only the continuity arrays are restored and the tree waits for `GetTree`).
+/// `build` builds the tree (and marks the slot built). A new cache left without tree
+/// marks the slot `Unbuilt`.
+fn trim_srf_cache_tree<O: Copy + PartialEq>(
+    k: &Kernel,
+    surface: &Surface,
+    state: CacheTreeState,
+    cache: &mut TrimSrfCache<O>,
+    build: impl FnOnce(&mut TrimSrfCache<O>) -> Result<()>,
+) -> Result<()> {
+    let doing_boolean = k.context.doing_boolean();
+    match state {
+        // when we are not doing a boolean operation
+        //  - during a boolean operation delay surface cache tree construction
+        //    until some function calls SmSurfaceCache::GetTree()
+        CacheTreeState::NoCache | CacheTreeState::Built if !doing_boolean => {
+            // build the surface subdivision tree annotated with UVTrimBoundary
+            // classifications
+            build(cache)
+        }
+        CacheTreeState::NoCache => {
+            surface.set_cache_tree_state(CacheTreeState::Unbuilt);
+            Ok(())
+        }
+        CacheTreeState::Built => cache.base_mut().restore_continuities(k),
+        CacheTreeState::Unbuilt => Ok(()),
+    }
+}
+
 /// `SmSurface::CacheMakeOrValidate(SM_OC_TRIMSRF, ..)` building a new cache: the
 /// surface's [`TrimSrfCache`] with the [`cache_tolerances`], its tree built unless
 /// the context is doing a Boolean operation (then [`SurfaceCache::get_tree`] builds
-/// it on first use).
+/// it on first use) or the surface's cache slot says upstream reuses a cache whose
+/// tree is not built ([`Surface::cache_tree_state`]; see [`trim_srf_cache_tree`]).
 ///
 /// # Errors
 ///
@@ -964,16 +1020,10 @@ pub fn make_trim_srf_cache<O: Copy + PartialEq>(
     // construct new SurfaceCache Object
     // the cache refers to the surface itself upstream (`m_cpSurface`): an exact copy,
     // not `Clone` (the copy constructor, which fixes the knot vectors up again)
+    let state = surface.cache_tree_state();
     let mut cache = TrimSrfCache::new(surface.clone_for_evaluation()?, cache_options(tol));
     cache.base_mut().set_surface_handle(handle);
-
-    // when we are not doing a boolean operation
-    //  - during a boolean operation delay surface cache tree construction
-    //    until some function calls SmSurfaceCache::GetTree()
-    if !k.context.doing_boolean() {
-        // build the surface subdivision tree annotated with UVTrimBoundary classifications
-        cache.build_tree(k)?;
-    }
+    trim_srf_cache_tree(k, surface, state, &mut cache, |c| c.build_tree(k))?;
     Ok(cache)
 }
 
@@ -994,19 +1044,15 @@ pub fn make_trim_srf_cache_with_face<O: Copy + PartialEq>(
     let tol = cache_tolerances(k, surface)?;
 
     // construct new SurfaceCache Object
+    let state = surface.cache_tree_state();
     let mut cache = TrimSrfCache::new(surface.clone_for_evaluation()?, cache_options(tol));
     cache.base_mut().set_surface_handle(handle);
     if let Some(owner) = surface.face()? {
         cache.bind_face(owner, face.face(), face.zone_tol_3d(k, face.face())?)?;
     }
-
-    // when we are not doing a boolean operation
-    //  - during a boolean operation delay surface cache tree construction
-    //    until some function calls SmSurfaceCache::GetTree()
-    if !k.context.doing_boolean() {
-        // build the surface subdivision tree annotated with UVTrimBoundary classifications
-        cache.build_tree_with_face(k, face)?;
-    }
+    trim_srf_cache_tree(k, surface, state, &mut cache, |c| {
+        c.build_tree_with_face(k, face)
+    })?;
     Ok(cache)
 }
 
@@ -1057,6 +1103,45 @@ pub fn get_surface_cache<O: Copy + PartialEq>(
         Err(e @ SolidError::Unported { .. }) => Err(e),
         // else - get or make SurfaceCache
         Err(_) => make_surface_cache(k, surface, handle),
+    }
+}
+
+/// The cache-slot side of `smsurf_GetSurfaceCache` for a caller that uses no cache
+/// object from it (the port's solve that follows makes its own): a surface without a
+/// cache gets one, whose tree is built unless the context is doing a Boolean
+/// operation ([`Surface::cache_tree_state`]).
+pub fn note_surface_cache(k: &Kernel, surface: &Surface) {
+    if surface.cache_tree_state() == CacheTreeState::NoCache {
+        surface.set_cache_tree_state(if k.context.doing_boolean() {
+            CacheTreeState::Unbuilt
+        } else {
+            CacheTreeState::Built
+        });
+    }
+}
+
+/// `smsurf_GetSurfaceCache` for a reader of the cache's continuity arrays that does not
+/// call `GetTree` (`GetDomainWithContinuity`, `LiftCurve`): the arrays are filled only
+/// when the cache's tree has been built. When upstream's cache has its tree (the
+/// surface's cache slot is built, or a new cache is made outside a Boolean operation)
+/// the cache comes from the caller's `context` as for a solve (else
+/// [`get_surface_cache`]); otherwise upstream's cache has no tree and its arrays are
+/// empty: [`get_surface_cache`] makes it so (a new cache marks the slot unbuilt).
+///
+/// # Errors
+///
+/// Those of [`get_surface_cache`] and of the context's cache preparation.
+pub fn continuity_surface_cache<O: Copy + PartialEq>(
+    k: &Kernel,
+    surface: &Surface,
+    handle: Option<O>,
+    context: Option<&mut dyn SurfaceSolveContext<O>>,
+) -> Result<SurfaceCache<O>> {
+    match context {
+        Some(context) if cache_tree_built_on_get(k, surface.cache_tree_state()) => {
+            context.build_surface_cache(k, surface, handle)
+        }
+        _ => get_surface_cache(k, surface, handle),
     }
 }
 
@@ -1614,16 +1699,14 @@ impl Surface {
         min_continuity: ContinuityType,
         uv: Point2,
         uv_vector: Vec2,
-        mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+        context: Option<&mut dyn SurfaceSolveContext<O>>,
         handle: Option<O>,
     ) -> Result<Extent2d> {
         if let SurfaceKind::Step(s) = self.kind() {
             return s.domain_with_continuity();
         }
-        let cache = match context.as_mut() {
-            Some(context) => context.build_surface_cache(k, self, handle),
-            None => get_surface_cache::<O>(k, self, None),
-        }?;
+        // (no GetTree: the continuity arrays are empty unless the cache's tree was built)
+        let cache = continuity_surface_cache(k, self, handle, context)?;
         self.domain_with_continuity_using(min_continuity, uv, uv_vector, &cache)
     }
 
@@ -2118,6 +2201,12 @@ impl Surface {
 
         let mut silhouette =
             SurfaceSilhouette::new(k, self, uv_domain, perspective, eye_point_or_view_vector)?;
+        // (the tracer constructor's pSC->GetTree(), whose failure it ignores)
+        if let Err(e) = cache.get_tree(k) {
+            if e.is_unported() {
+                return Err(e);
+            }
+        }
         let traced = silhouette.do_trace(k, &mut cache, approx_tol_3d, ang_tol_rad)?;
         let mut curves_3d = traced.curves_3d;
         let mut curves_uv = traced.uv_curves;

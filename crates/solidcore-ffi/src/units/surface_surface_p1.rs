@@ -33,7 +33,7 @@
 //! | `Step`       | `SmSTEPSurface` `GetNaturalUVDomain`, `GetDomainWithContinuity`, `GetKnots` | `S v hasIvl lo hi` |
 //! | `Cache`      | `CacheMakeOrValidate` (new cache)                      | `W S trim`            |
 //! | `BBox`       | `CalculateBoundingBox`                                 | `W S D normal pseudo expand polar` |
-//! | `DomCont`    | `GetDomainWithContinuity`                              | `W S cont uv V`       |
+//! | `DomCont`    | `GetDomainWithContinuity` after a cache history        | `W S cont uv V hist`  |
 //! | `Sil`        | `Transform` (translation, optional), `CreateSilhouetteCurves` | `S D persp eye(V) hasTol tol hasAng ang hasMove move(V)` |
 //!
 //! The output is the op status (`0` = `SM_SUCCESS`, else the `SmStatus`) and the op's
@@ -159,6 +159,15 @@ pub const MIN_SIL_ANG: f64 = 1e-3;
 
 /// Highest `SmContinuityType`.
 const MAX_CONTINUITY: usize = 13;
+
+/// Highest `DomCont` cache history (`0` cache built, `1` cache made while doing a
+/// Boolean operation, `2` as `1` then its tree built, `3` as `0` with the call made
+/// while doing a Boolean operation).
+pub const MAX_DOM_CONT_HISTORY: usize = 3;
+
+/// How far outside the surface domain (in domain sides) a `DomCont` point with a cache
+/// history may lie.
+const DOM_CONT_OUTSIDE: f64 = 1.0;
 
 /// A `W S` block: its kind and domain.
 fn wrapped(rd: &mut Reader<'_>) -> Result<(Kind, Srf), FfiError> {
@@ -378,8 +387,26 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
         Op::DomCont => {
             let (_, srf) = wrapped(rd)?;
             rd.index(MAX_CONTINUITY)?;
-            uv_in(rd, &srf)?;
+            // a point in the domain, or near it after a cache history (the continuity
+            // domain around a point off the surface depends on that history)
+            let u = rd.finite()?;
+            let v = rd.finite()?;
             rd.finites(2)?;
+            let d = srf.dom;
+            if rd.index(MAX_DOM_CONT_HISTORY)? == 0 {
+                if u < d[0] || u > d[2] || v < d[1] || v > d[3] {
+                    return Err(bad("uv outside the surface domain"));
+                }
+            } else {
+                let (w, h) = (d[2] - d[0], d[3] - d[1]);
+                if u < d[0] - DOM_CONT_OUTSIDE * w
+                    || u > d[2] + DOM_CONT_OUTSIDE * w
+                    || v < d[1] - DOM_CONT_OUTSIDE * h
+                    || v > d[3] + DOM_CONT_OUTSIDE * h
+                {
+                    return Err(bad("uv too far outside the surface domain"));
+                }
+            }
         }
         Op::Sil => {
             let (kind, srf, size) = sized_surface(rd)?;

@@ -160,6 +160,18 @@
 //!   `SmSurfaceEval`, `SmDerivSurfDefinition`, `SmDropCurveFail` and
 //!   `SmLSIGlobalSolver` are implicit `Drop`; the classes themselves belong to other
 //!   units.
+//! - **Cache slot.** The port builds surface caches afresh instead of keeping one on
+//!   the surface (`m_pCacheObj`), but whether that cache's tree has been built is
+//!   observable: `GetDomainWithContinuity`, `LiftCurve`, `GetSurfaceContinuity` and
+//!   the drop-curve boundary search read the continuity arrays without `GetTree`.
+//!   [`Surface::cache_tree_state`] keeps that bit of history ([`CacheTreeState`]) in a
+//!   slot shared by the surface and its evaluation copies (which stand for upstream's
+//!   pointers to the one object); `Clone` starts an empty slot, as the copy
+//!   constructor leaves `m_pCacheObj` null. The cache builds of `surface.surface_p1`
+//!   and `surface.surface_cache_p3` keep it in step.
+
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
 
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
@@ -325,6 +337,72 @@ pub struct Surface {
     /// a face tolerance. Valid only while the recorded face is still the one reached, so
     /// an owner change can never leave another face's tolerance behind.
     owner_zone_tol_3d: Option<(ObjectRef, f64)>,
+    /// The state of the surface's cache slot (`SmAObject::m_pCacheObj`), shared with
+    /// its evaluation copies ([`CacheSlot`]).
+    cache_slot: CacheSlot,
+}
+
+/// What a surface's cache slot (`SmAObject::m_pCacheObj`) holds, as far as a reader of
+/// the cache's continuity arrays (`GetUContinuitiesArray`, `GetVContinuitiesArray`)
+/// can tell without calling `GetTree`: the arrays are filled only by
+/// `SmSurfaceCache::BuildTreeBase`, which runs when a cache is made outside a Boolean
+/// operation or on the first `GetTree`, and the cache then lives on with the surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CacheTreeState {
+    /// No cache: the next `smsurf_GetSurfaceCache` makes one, building its tree
+    /// unless the context is doing a Boolean operation.
+    #[default]
+    NoCache,
+    /// A cache whose tree has not been built (made during a Boolean operation): its
+    /// continuity arrays stay empty until a `GetTree` builds the tree.
+    Unbuilt,
+    /// A cache whose tree has been built: its continuity arrays are filled.
+    Built,
+}
+
+impl CacheTreeState {
+    const fn to_u8(self) -> u8 {
+        match self {
+            Self::NoCache => 0,
+            Self::Unbuilt => 1,
+            Self::Built => 2,
+        }
+    }
+
+    const fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Self::Unbuilt,
+            2 => Self::Built,
+            _ => Self::NoCache,
+        }
+    }
+}
+
+/// The cache slot of a surface. Upstream keeps a surface's cache on the surface object
+/// and everything that works on the surface reaches it through a pointer; the port
+/// builds its caches afresh and passes evaluation copies
+/// ([`Surface::clone_for_evaluation`]) where upstream passes that pointer. The slot
+/// records the one part of the cache's history a later reader can observe (whether
+/// its tree was built), shared between a surface and its evaluation copies so that a
+/// tree built through any of them is seen by all; `Clone` (the copy constructor,
+/// which leaves `m_pCacheObj` null) starts an empty slot. Single-threaded use only
+/// orders the accesses, so the result is deterministic.
+#[derive(Debug, Default)]
+struct CacheSlot(Arc<AtomicU8>);
+
+impl CacheSlot {
+    /// The same slot (an evaluation copy stands for the same surface object).
+    fn share(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+
+    fn get(&self) -> CacheTreeState {
+        CacheTreeState::from_u8(self.0.load(Ordering::Relaxed))
+    }
+
+    fn set(&self, state: CacheTreeState) {
+        self.0.store(state.to_u8(), Ordering::Relaxed);
+    }
 }
 
 /// The copy constructor: copies the geometry, resets the owner (an owning offset in it
@@ -336,6 +414,7 @@ impl Clone for Surface {
             owner: None,
             owner_chain_face: None,
             owner_zone_tol_3d: None,
+            cache_slot: CacheSlot::default(),
         };
         s.update_owned_bases();
         s
@@ -574,6 +653,7 @@ impl Surface {
             owner: self.owner,
             owner_chain_face: self.owner_chain_face,
             owner_zone_tol_3d: self.owner_zone_tol_3d,
+            cache_slot: self.cache_slot.share(),
         })
     }
 
@@ -618,6 +698,7 @@ impl Surface {
             owner: self.owner,
             owner_chain_face: self.owner_chain_face,
             owner_zone_tol_3d: self.owner_zone_tol_3d,
+            cache_slot: self.cache_slot.share(),
         }
     }
 }
@@ -743,15 +824,30 @@ pub struct PlaneWith3dCurves {
 }
 
 impl Surface {
-    /// A surface of the given kind without owner.
+    /// A surface of the given kind without owner (and without cache).
     #[must_use]
-    pub const fn new(kind: SurfaceKind) -> Self {
+    pub fn new(kind: SurfaceKind) -> Self {
         Self {
             kind,
             owner: None,
             owner_chain_face: None,
             owner_zone_tol_3d: None,
+            cache_slot: CacheSlot::default(),
         }
+    }
+
+    /// The state of this surface's cache slot (see [`CacheTreeState`]), shared with its
+    /// evaluation copies.
+    #[must_use]
+    pub fn cache_tree_state(&self) -> CacheTreeState {
+        self.cache_slot.get()
+    }
+
+    /// Records the state of this surface's cache slot, for this surface and every
+    /// evaluation copy of it: the cache builds keep it in step, and a caller that
+    /// rebuilds a surface which already had a cache upstream (an import) restores it.
+    pub fn set_cache_tree_state(&self, state: CacheTreeState) {
+        self.cache_slot.set(state);
     }
 
     /// The concrete kind.

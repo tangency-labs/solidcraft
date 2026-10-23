@@ -17,7 +17,7 @@
 //!
 //! | [`Op`]   | after the blocks | outputs |
 //! |----------|------------------|---------|
-//! | `Export` |                  | per B-rep `len export` (`len 0` for an absent one), each export a `0`-prefixed graph as [`super::topology_vertexuse`] exports it; then per B-rep `n_faces` (`0` for an absent one) and per face (export order) `-1`, or `n byte*n`: the binary `WriteToDB` record (version 33) of a revolution, extrusion, cone, cylinder, sphere or torus, dispatched by the graph's native surface type code |
+//! | `Export` |                  | per B-rep `len export` (`len 0` for an absent one), each export a `0`-prefixed graph as [`super::topology_vertexuse`] exports it; then per B-rep `n_faces` (`0` for an absent one) and per face (export order) `-1`, or `n byte*n`: the binary `WriteToDB` record (version 33) of a revolution, extrusion, cone, cylinder, sphere or torus, dispatched by the graph's native surface type code; then per B-rep `n_faces` and per face the state of its surface's cache after the build (`0` none, `1` tree not built, `2` tree built) |
 //! | `Run`    | `dist approx make_analytics n_local (face surface)* inset extend n_shell face* n_pairs (eu eu)* n_ops ops*` | per op its code, a status and its outputs (below): an op's out-parameters follow a success status only, the states of existing topology (edge states, a face's domain and surface) follow every status |
 //!
 //! The run header takes any finite `dist` (zero included) and any finite `approx` that
@@ -520,21 +520,42 @@ fn export_blocks<'a>(rd: &mut Reader<'a>) -> Option<[Option<&'a [f64]>; 2]> {
 /// binary `WriteToDB` bytes in native face order (`None` for kinds represented by
 /// the graph alone; an empty list for an absent B-rep). The graph's surface type
 /// selects the reader. Counts must match the graph and bytes must be exact integers.
-/// Returns `None` for a failed build, malformed record, or trailing output.
+/// Returns `None` for a failed build, malformed record or cache state, or trailing
+/// output.
 #[must_use]
 pub fn split_surface_records(out: &[f64]) -> Option<[Vec<Option<Vec<u8>>>; 2]> {
+    split_export_tail(out).map(|(records, _)| records)
+}
+
+/// The per-face cache states after an `Export` output's surface records: the state of
+/// each face surface's cache after the C++ build, in native face order (an empty list
+/// for an absent B-rep): `0` no cache, `1` a cache whose tree is not built, `2` a cache
+/// whose tree is built (`solidcore::surface::surface::CacheTreeState`). Returns `None`
+/// as [`split_surface_records`].
+#[must_use]
+pub fn split_cache_tree_states(out: &[f64]) -> Option<[Vec<u8>; 2]> {
+    split_export_tail(out).map(|(_, states)| states)
+}
+
+/// Per-face surface records and cache states of an `Export` output.
+type ExportTail = ([Vec<Option<Vec<u8>>>; 2], [Vec<u8>; 2]);
+
+fn split_export_tail(out: &[f64]) -> Option<ExportTail> {
     let mut rd = Reader::new(out);
     let blocks = export_blocks(&mut rd)?;
-    let mut breps: [Vec<Option<Vec<u8>>>; 2] = [Vec::new(), Vec::new()];
-    for (faces, block) in breps.iter_mut().zip(blocks) {
-        let expected = match block {
+    let face_count = |block: Option<&[f64]>| -> Option<usize> {
+        match block {
             Some(block) => {
                 let mut header = Reader::new(block);
                 header.skip(5).ok()?;
-                header.index(out.len()).ok()?
+                header.index(out.len()).ok()
             }
-            None => 0,
-        };
+            None => Some(0),
+        }
+    };
+    let mut breps: [Vec<Option<Vec<u8>>>; 2] = [Vec::new(), Vec::new()];
+    for (faces, block) in breps.iter_mut().zip(blocks) {
+        let expected = face_count(block)?;
         let n = rd.index(out.len()).ok()?;
         if n != expected {
             return None;
@@ -557,8 +578,22 @@ pub fn split_surface_records(out: &[f64]) -> Option<[Vec<Option<Vec<u8>>>; 2]> {
             faces.push(Some(bytes));
         }
     }
+    let mut states: [Vec<u8>; 2] = [Vec::new(), Vec::new()];
+    for (faces, block) in states.iter_mut().zip(blocks) {
+        let n = rd.index(out.len()).ok()?;
+        if n != face_count(block)? {
+            return None;
+        }
+        for _ in 0..n {
+            let s = rd.num().ok()?;
+            if s != 0.0 && s != 1.0 && s != 2.0 {
+                return None;
+            }
+            faces.push(s as u8);
+        }
+    }
     rd.done().ok()?;
-    Some(breps)
+    Some((breps, states))
 }
 
 /// Per B-rep: `[vertices, edges, faces, edgeuses, faceuses]`.

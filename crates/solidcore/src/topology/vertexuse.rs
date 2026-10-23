@@ -782,6 +782,9 @@ fn global_point_solve(
     request: SolutionRequested,
     _point_test: bool,
 ) -> Result<Vec<PointDrop>> {
+    // smsurf_GetSurfaceCache(pSurface): the surface's cache slot (its tree is not built
+    // during a Boolean operation, which later continuity readers can observe)
+    crate::surface::surface::p1::note_surface_cache(k, surface);
     // The Rust surface solver builds no surface cache, so the cache flags upstream
     // switches around the call (point testing, boundary curves, `m_bHaveTSurfaceCache`)
     // have nothing to act on; a face-owned surface is Unported (query.face_p2) inside.

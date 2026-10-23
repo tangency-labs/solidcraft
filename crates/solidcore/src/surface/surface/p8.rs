@@ -1007,11 +1007,17 @@ impl Surface {
         handle: Option<O>,
         op: &'static str,
     ) -> Result<SurfaceCache<O>> {
-        match get_surface_cache::<O>(k, self, handle) {
-            Ok(c) => Ok(c),
-            Err(e) if e.is_unported() => Err(e),
-            Err(_) => Err(SolidError::null_pointer(op)),
+        let mut cache = match get_surface_cache::<O>(k, self, handle) {
+            Ok(c) => c,
+            Err(e) if e.is_unported() => return Err(e),
+            Err(_) => return Err(SolidError::null_pointer(op)),
+        };
+        // the solves' GetTree (NER): a reused cache whose tree is not built yet
+        // (the surface's cache slot) builds it now
+        if cache.tree().is_none() {
+            Self::held_cache(k, &mut cache, op)?;
         }
+        Ok(cache)
     }
 
     fn solve_cache_from_context<O: SolutionObject>(

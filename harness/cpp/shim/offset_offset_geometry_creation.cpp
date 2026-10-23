@@ -38,6 +38,7 @@
 #include <SmRelation.h>
 #include <SmSSIData.h>
 #include <SmSurfOfRevolution.h>
+#include <SmSurfaceCache.h>
 #include <SmTorus.h>
 
 #include <cstdlib>
@@ -396,6 +397,25 @@ SmBrep* build_input(Rd& rd, const char* path, SmStatus& status)
         return nullptr;
     }
     return brep;
+}
+
+// Reads the protected decomposition tree of a surface cache without building it
+// (`GetTree` would build it).
+struct CacheTreePeek : SmSurfaceCache
+{
+    static bool built(const SmSurfaceCache* c) { return c->*(&CacheTreePeek::m_pTree) != nullptr; }
+};
+
+// The state of a surface's cache slot (`m_pCacheObj`, a trimmed surface cache or a
+// surface cache): 0 none, 1 a cache whose tree is not built (made during a Boolean
+// operation: its continuity arrays are empty), 2 a cache whose tree is built. Reading
+// files builds B-reps while doing a Boolean operation, so their face surfaces can keep
+// caches without trees into the script; the Rust import restores this state.
+double cache_tree_state(const SmSurface* s)
+{
+    if (s == nullptr || s->GetCacheObj() == nullptr)
+        return 0.0;
+    return CacheTreePeek::built(static_cast<const SmSurfaceCache*>(s->GetCacheObj())) ? 2.0 : 1.0;
 }
 
 bool build_two(Rd& rd, const char* path, Two& t, std::vector<double>& o)
@@ -1017,6 +1037,19 @@ void run_og(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
                 for (char ch : bytes)
                     o.push_back((double)(unsigned char)ch);
             }
+        }
+        // Per B-rep, per face (export order): the state of the face surface's cache
+        // after the build (`cache_tree_state`).
+        for (int b = 0; b < 2; b++)
+        {
+            if (t.brep[b] == nullptr)
+            {
+                o.push_back(0.0);
+                continue;
+            }
+            o.push_back((double)t.g[b].faces.size());
+            for (SmFace* f : t.g[b].faces)
+                o.push_back(cache_tree_state(f->GetSurface()));
         }
         return;
     }

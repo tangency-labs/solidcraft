@@ -18,6 +18,14 @@
 //! `upstream_sil_adv.json` fixtures are the `prog_test` `my_test_sil_adv` faces
 //! (`harness/fixturegen/sil_adv.py`), and `silNNNN` cases come from their own seed stream.
 //!
+//! `DomCont` makes the surface's cache first (UB-83: upstream reads a null cache) and
+//! then calls `GetDomainWithContinuity`; `history` says what happened to that cache before
+//! the call (made during a Boolean operation, so without tree and with empty continuity
+//! arrays; then its tree built; or reused during a Boolean operation). The `domhistNNNN`
+//! cases (their own seed stream) cover those histories, half of them at points off the
+//! surface domain, where the end-knot discontinuities clamp the domain only once the
+//! cache's tree has been built (`plan/findings.md`, "surface cache history").
+//!
 //! Deferred cases: the paths into unported units (every surface cache build needs
 //! `SmSurface::CalculateContinuities`, `surface.surface_p6`: `Cache`, `BBox` of
 //! curve-bounded and STEP surfaces, `DomCont` of every kind but STEP surfaces; the
@@ -38,12 +46,13 @@ use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::nurbs::knots::Side;
 use solidcore::surface::surface::p1::{
     base_is_degenerate_curve, base_is_degenerate_point, crossed_seam_or_pole,
-    evaluate_normal_section, find_uv_curve_ivl_in_domain, make_surface_cache,
+    evaluate_normal_section, find_uv_curve_ivl_in_domain, get_surface_cache, make_surface_cache,
     make_trim_srf_cache, FindSingularParamWithGivenTangentDir, StepSurface,
 };
 use solidcore::surface::surface::p2::IsoCurveLengthIntegrand;
-use solidcore::surface::surface::Surface;
+use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::surface::surface_cache::p1::SurfaceCache;
+use solidcore::error::SM_ERR;
 use solidcore::SolidError;
 use solidcore_ffi::units::surface_surface_p1::{self as ffi, Op, MAX_DIR_DERIV};
 
@@ -175,6 +184,12 @@ enum OpIn {
         cont: u8,
         uv: [f64; 2],
         vec: [f64; 2],
+        /// What happened to the surface's cache before the call (the shim's
+        /// `op_dom_cont`): `0` made outside a Boolean operation, `1` made while doing
+        /// one (no tree), `2` as `1` then its tree built, `3` as `0` with the call made
+        /// while doing a Boolean operation.
+        #[serde(default)]
+        history: u8,
     },
     /// `CreateSilhouetteCurves` on the (unwrapped) surface, translated first by
     /// `translate` (`Transform`) when given.
@@ -352,10 +367,16 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             o.extend(dom);
             o.extend([flag(*normal), flag(*pseudo), flag(*expand), flag(*polar)]);
         }
-        OpIn::DomCont { cont, uv, vec } => {
+        OpIn::DomCont {
+            cont,
+            uv,
+            vec,
+            history,
+        } => {
             o.push(f64::from(*cont));
             o.extend(uv);
             o.extend(vec);
+            o.push(f64::from(*history));
         }
         OpIn::Sil {
             dom,
@@ -822,9 +843,34 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                 Err(e) => Ok(vec![status(&e)]),
             }
         }
-        OpIn::DomCont { cont, uv, vec } => {
+        OpIn::DomCont {
+            cont,
+            uv,
+            vec,
+            history,
+        } => {
             let s = run()?;
             let c = continuity(*cont)?;
+            let mut k = Kernel::default();
+            if *history != 0 && !matches!(s.kind(), SurfaceKind::Step(_)) {
+                // the shim's cache history: the surface's cache, made while doing a
+                // Boolean operation for 1 and 2 (no tree), its tree then built for 2
+                k.context.set_doing_boolean(matches!(history, 1 | 2));
+                let made = get_surface_cache::<()>(&k, &s, None);
+                k.context.set_doing_boolean(false);
+                let built = made.and_then(|mut cache| {
+                    if *history == 2 {
+                        cache.get_tree(&k)?;
+                    }
+                    Ok(())
+                });
+                match built {
+                    Ok(()) => {}
+                    Err(e) if e.is_unported() => return Ok(Err(e)),
+                    Err(_) => return Ok(Ok(vec![f64::from(SM_ERR)])),
+                }
+            }
+            k.context.set_doing_boolean(*history == 3);
             match s.domain_with_continuity(&k, c, p2(*uv), Vec2::new(vec[0], vec[1])) {
                 Ok(d) => {
                     let mut o = vec![0.0];
@@ -1109,6 +1155,7 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
             cont: rng.below(14) as u8,
             uv: gen_uv(rng, d),
             vec: [rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0)],
+            history: 0,
         },
     };
     Ok(Inputs { wrap, surf, op })
@@ -1177,6 +1224,73 @@ fn gen_sil(rng: &mut Rng) -> Result<Inputs, HarnessError> {
     })
 }
 
+/// Generated `DomCont` cases with a cache history (their own seed stream,
+/// `surface.surface_p1:domhist`).
+pub const DOM_HIST_CASES: usize = 96;
+
+/// A `DomCont` case after a cache history (`1` to `3`, see [`OpIn::DomCont`]): half the
+/// points in the domain, half off it (up to 90 % of a side out in u, v or both), where
+/// the end-knot discontinuities clamp the domain only when the cache's continuity
+/// arrays are filled.
+fn gen_dom_hist(rng: &mut Rng) -> Result<Inputs, HarnessError> {
+    let surf = gen_surf(rng);
+    // tiny surfaces split their surface cache past MAX_SUBDIVISION_NODES on the Rust side
+    // (an InvalidInput where upstream subdivides on; plan/findings.md, surface.surface_cache_p3)
+    if surf_size(&surf)? < 1e-2 {
+        return Err(harness("domhist: surface too small for the Rust subdivision bound"));
+    }
+    let wrap = rng.chance(0.1);
+    let d = surf_domain(&surf)?;
+    let [u, v] = gen_uv(rng, d);
+    let out = |rng: &mut Rng, lo: f64, hi: f64| -> f64 {
+        let w = (hi - lo) * rng.uniform(1e-3, 0.9);
+        if rng.chance(0.5) {
+            lo - w
+        } else {
+            hi + w
+        }
+    };
+    let uv = match rng.below(6) {
+        0..=2 => [u, v],
+        3 => [out(rng, d[0], d[2]), v],
+        4 => [u, out(rng, d[1], d[3])],
+        _ => [out(rng, d[0], d[2]), out(rng, d[1], d[3])],
+    };
+    let component = |rng: &mut Rng| {
+        if rng.chance(0.15) {
+            0.0
+        } else {
+            rng.uniform(-1.0, 1.0)
+        }
+    };
+    let vec = [component(rng), component(rng)];
+    Ok(Inputs {
+        wrap,
+        surf,
+        op: OpIn::DomCont {
+            cont: rng.below(14) as u8,
+            uv,
+            vec,
+            history: 1 + rng.below(3) as u8,
+        },
+    })
+}
+
+fn generate_dom_hist(rng: &mut Rng) -> Option<Value> {
+    for _ in 0..64 {
+        let Ok(i) = gen_dom_hist(rng) else {
+            continue;
+        };
+        let Ok((op, input)) = cpp_input(&i) else {
+            continue;
+        };
+        if ffi::validate(op, &input).is_ok() {
+            return serde_json::to_value(i).ok();
+        }
+    }
+    None
+}
+
 fn generate_sil(rng: &mut Rng) -> Option<Value> {
     for _ in 0..64 {
         let Ok(i) = gen_sil(rng) else {
@@ -1226,6 +1340,17 @@ impl UnitDiff for Runner {
         };
         for mut c in sil.generated_cases("surface.surface_p1:sil", generate_sil) {
             c.name = c.name.replacen("gen", "sil", 1);
+            c.unit = self.id().to_string();
+            v.push(c);
+        }
+        // GetDomainWithContinuity after a cache history: their own seed stream
+        // (`<unit>:domhist`); named `domhistNNNN`.
+        let hist = CaseContext {
+            seeds: ctx.seeds.max(DOM_HIST_CASES),
+            ..ctx.clone()
+        };
+        for mut c in hist.generated_cases("surface.surface_p1:domhist", generate_dom_hist) {
+            c.name = c.name.replacen("gen", "domhist", 1);
             c.unit = self.id().to_string();
             v.push(c);
         }

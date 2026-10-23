@@ -367,7 +367,12 @@ pub trait OffsetBrep<O>: ProtoGeometry<O> {
     where
         O: Copy + PartialEq,
     {
-        crate::surface::surface::p1::get_surface_cache(k, surface, handle)
+        let mut cache = crate::surface::surface::p1::get_surface_cache(k, surface, handle)?;
+        // the solve's GetTree: a reused cache whose tree is not built builds it now
+        if cache.tree().is_none() {
+            cache.get_tree(k)?;
+        }
+        Ok(cache)
     }
 
     /// Read-only face queries after cache preparation. One service resolves all

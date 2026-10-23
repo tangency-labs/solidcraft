@@ -87,6 +87,11 @@
 //!   flags and rejects a face-owned trimmed build without a [`CacheFace`](crate::surface::trim_srf_cache::CacheFace)
 //!   adapter, instead of silently building a plain cache. [`SurfaceCache::subdivide_node`]
 //!   does not call `GetTree` (it needs a built tree and fails without one).
+//! - **Cache slot.** Filling the continuity arrays (`BuildTreeBase`) also marks the
+//!   cache slot of the cache's surface built
+//!   ([`CacheTreeState::Built`](crate::surface::surface::CacheTreeState)), so that a
+//!   later cache made for the same surface object shows its continuities as upstream's
+//!   reused cache does.
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
@@ -101,7 +106,7 @@ use crate::nurbs::b_spline_surface::{BSplineSurface, BoundingBoxRequest, SurfPar
 use crate::nurbs::nurbs_srf::split_srf;
 use crate::nurbs::srf_basic::Direction;
 use crate::nurbs::srf_basic::Surface as NurbSurface;
-use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface::{CacheTreeState, Surface, SurfaceKind};
 
 use crate::geom::geom_utility::p2::ContinuityType;
 
@@ -1020,7 +1025,27 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         let u_conts = calculate_continuities(k, self.surface(), SurfParamType::U)?;
         let v_conts = calculate_continuities(k, self.surface(), SurfParamType::V)?;
         self.set_continuities(u_conts, v_conts);
+        // the surface's cache now has its continuity arrays (its cache slot, shared
+        // with the surface the cache was made from)
+        self.surface().set_cache_tree_state(CacheTreeState::Built);
         self.build_tree_base_nodes(k, u_count, v_count, tester)
+    }
+
+    /// Sets the continuity arrays a cache of this surface already has when its tree
+    /// was built before (the surface's cache slot is
+    /// [`CacheTreeState::Built`](crate::surface::surface::CacheTreeState)) but this cache
+    /// is made without building one (during a Boolean operation): upstream reuses the
+    /// built cache, whose `BuildTreeBase` computed them from the same surface.
+    ///
+    /// # Errors
+    ///
+    /// Those of `SmSurface::CalculateContinuities` ([`SolidError::Unported`] for kinds
+    /// without iso curves).
+    pub fn restore_continuities(&mut self, k: &Kernel) -> Result<()> {
+        let u_conts = calculate_continuities(k, self.surface(), SurfParamType::U)?;
+        let v_conts = calculate_continuities(k, self.surface(), SurfParamType::V)?;
+        self.set_continuities(u_conts, v_conts);
+        Ok(())
     }
 
     /// The rest of [`SurfaceCache::build_tree_base`] once the continuities are set.
