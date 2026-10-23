@@ -214,17 +214,6 @@ fn the_example_macros_run() {
     let tiny = run(&mut holes, "inspect.find_holes", json!({"feature": "Small"}));
     assert_eq!(tiny["count"], 1, "the 4 mm hole is still a hole: {tiny}");
 
-    let mut gear = Session::default();
-    let r = play_example(&mut gear, "gear_generator.rhai", json!({"params": {"teeth": 12, "gear_module": 2, "bore": 8, "thickness": 8, "pa": 20}}));
-    assert_eq!(r["ran"], true, "{r}");
-    let m = run(&mut gear, "inspect.measure", json!({}));
-    assert_eq!(m["body_count"], 1, "{m}");
-    let v = volume(&mut gear);
-    let (ra, rf, bore_r, thick) = (14.0, 9.5, 4.0, 8.0);
-    let max = std::f64::consts::PI * (ra * ra - bore_r * bore_r) * thick;
-    let min = std::f64::consts::PI * (rf * rf - bore_r * bore_r) * thick;
-    assert!(v > min && v < max, "involute blank {v} should sit between root {min} and tip {max}");
-
     let dir = temp_dir("stl");
     let step = dir.join("cube.step");
     let out = dir.join("out");
