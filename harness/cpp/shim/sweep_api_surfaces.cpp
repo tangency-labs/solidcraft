@@ -345,8 +345,23 @@ void run(Rd& rd, std::vector<double>& o)
         SmApiStatus stat = SmApiCreateSurfaceRevolution(c, v3(ax.data()), v3(ax.data() + 3),
                                                         ax[6], res);
         o.push_back(st(stat));
-        if (stat == SM_SUCCESS)
+        if (stat == SM_SUCCESS) {
             o.push_back(flg(res != NULL));
+            if (res) {
+                o.push_back(flg(res->GetOwner() == NULL));
+                const auto domain = res->GetNaturalUVDomain();
+                o.push_back(domain.GetMin().x);o.push_back(domain.GetMin().y);
+                o.push_back(domain.GetMax().x);o.push_back(domain.GetMax().y);
+                for (int u = 0; u <= 4; ++u) for (int v = 0; v <= 4; ++v) {
+                    SmPoint3d point;
+                    const auto status = res->EvaluatePoint(domain.Evaluate(u/4.0,v/4.0),point);
+                    o.push_back(st(status));
+                    if (status == SM_SUCCESS) {
+                        o.push_back(point.x);o.push_back(point.y);o.push_back(point.z);
+                    }
+                }
+            }
+        }
         delete res;
         break;
     }

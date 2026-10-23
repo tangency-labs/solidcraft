@@ -23,7 +23,7 @@
 //! | `Extrude`        | 1  | curve `V[3]`                                 | [surface] curve `has [n cpts]`     |
 //! | `Sweep`          | 2  | curve curve                                  | [surface]                          |
 //! | `Ruled`          | 3  | curve curve                                  | [surface]                          |
-//! | `Revolution`     | 4  | curve `O[3] A[3] angle`                      | [`has`]                            |
+//! | `Revolution`     | 4  | curve `O[3] A[3] angle`                      | [`has`, owned-result geometry]     |
 //! | `Skin`           | 5  | `k`, `k` curves                              | [surface]                          |
 //! | `SkinPrimitive`  | 6  | `np`, `np` counts, `nc`, `nc` curves, `degree cap` | [`has start side end` counts] |
 //! | `SkinFromFaces`  | 7  | `nf`, `nf` x `C[3] r` planar circles, `degree` | [`has new_faces` count]          |
@@ -31,6 +31,11 @@
 //! The output starts with the API status (`0` = `SM_SUCCESS`, else the `SmStatus`);
 //! bracketed parts follow only on success. A surface is `has` then (when the result is
 //! an `SmBSplineSurface`) `has_nurb oob borrowed knot_type form [n m p q r s cpts u v]`.
+//!
+//! A present revolution result retains `has`, followed by an owner-clear flag, its
+//! natural UV domain (`min.x min.y max.x max.y`), then 25 virtual point evaluations
+//! in u-major order on a 5 by 5 grid. Each evaluation is its normalized status,
+//! followed by `x y z` only on success. No B-spline substitute is constructed.
 //!
 //! [`run`] accepts only what upstream handles without undefined behaviour: finite data;
 //! well-formed clamped NURB curves (`m = n+p+1`, `1 <= p <= n`, degree at most 17,

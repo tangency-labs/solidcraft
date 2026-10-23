@@ -43,7 +43,7 @@
 //!   failure) and then returns `SM_ERR`, a path the port does not have.
 
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -277,8 +277,8 @@ pub fn create_ruled_surface(
 ///
 /// # Errors
 ///
-/// `InvalidInput` for no curve; [`SolidError::Unported`] otherwise
-/// (`SmPrimitiveCreation::CreateRotationalSweep`).
+/// `InvalidInput` for no curve; errors from the rotational construction or
+/// `SM_ERR` if the constructed B-rep has no standalone owned surface.
 pub fn create_surface_revolution(
     k: &mut Kernel,
     curve: Option<&BSplineCurve>,
@@ -295,7 +295,7 @@ pub fn create_surface_revolution(
     let curve_copy = Curve::from(curve.copy());
     let mut curves_to_sweep = vec![Some(curve_copy)];
 
-    let (brep, ()) = PrimitiveModel::build_new(k, |pc, model| {
+    let (mut brep, ()) = PrimitiveModel::build_new(k, |pc, model| {
         pc.create_partial_rotational_sweep(
             model,
             PrimitiveModel::MAIN,
@@ -310,10 +310,22 @@ pub fn create_surface_revolution(
             },
         )
     })?;
-    crate::topology::brep::p1::surfaces(&brep, None)?
-        .first()
-        .map(|surface| (*surface).clone())
-        .ok_or_else(|| SolidError::sm_err(OP_REVOLUTION))
+    // GetSurfaces uses this production model's actual face-owner identities.
+    // SmApiSurfaces.cpp:434-442 detaches the first owned surface, rather than
+    // making a base or derived copy that could reset its evaluation metadata.
+    let face = crate::topology::brep::p1::surface_owners(&brep, None, &|id| {
+        crate::topology::loopuse::notify_ref(EntityRef::Face(id))
+    })?
+    .first()
+    .copied()
+    .ok_or_else(|| SolidError::sm_err(OP_REVOLUTION))?;
+    let mut surface = brep
+        .face_mut(face)?
+        .surface
+        .take()
+        .ok_or_else(|| SolidError::sm_err(OP_REVOLUTION))?;
+    surface.set_owner(None);
+    Ok(surface)
 }
 
 /// The surface skinned through `profiles` (`SmApiCreateSkin`,
@@ -394,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn revolution_and_skin_primitive_validate_then_defer() {
+    fn revolution_and_skin_primitive_validate_and_construct() {
         let o = Point3::new(0.0, 0.0, 0.0);
         let x = Vec3::new(1.0, 0.0, 0.0);
         assert!(matches!(
@@ -402,10 +414,15 @@ mod tests {
             Err(SolidError::InvalidInput { .. })
         ));
         let c = wave(0.0);
-        assert!(
-            create_surface_revolution(&mut Kernel::default(), Some(&c), o, x, 180.0)
-                .unwrap_err()
-                .is_unported()
+        let mut revolution_kernel = Kernel::default();
+        let surface =
+            create_surface_revolution(&mut revolution_kernel, Some(&c), o, x, 180.0).unwrap();
+        assert_eq!(surface.owner(), None);
+        assert_eq!(
+            surface
+                .evaluate_point(&revolution_kernel, surface.natural_uv_domain().min())
+                .unwrap(),
+            Point3::ZERO,
         );
 
         let mut k = Kernel::default();

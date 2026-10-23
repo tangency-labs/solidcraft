@@ -4,6 +4,9 @@
 #include <memory>
 #include <cmath>
 #include <SmTopologySweep.h>
+#include <SmFace.h>
+#include <SmEdge.h>
+#include <SmVertex.h>
 #include <SmPrimitiveCreation.h>
 #include <SmTransSweepGeometry.h>
 #include <SmRotationalSweepGeometry.h>
@@ -65,6 +68,46 @@ void pc3_samples(std::vector<double>& out,SmBSplineCurve* curve) {
     for(int i=0;i<=4;i++) {
         SmVector3d v[2];curve->Evaluate(ivl.Evaluate(i/4.0),1,TRUE,v);
         put_vec(out,v[0]);put_vec(out,v[1]);
+    }
+}
+void pc3_point(std::vector<double>& out, SmStatus status, const SmPoint3d& point) {
+    out.push_back(double(status==SM_SUCCESS?0:status));
+    if(status==SM_SUCCESS) put_vec(out,point);
+}
+void pc3_geometry(std::vector<double>& out, const SmBrep& brep, bool success) {
+    SmTArray<SmFace*> faces; brep.GetFaces(faces);
+    SmTArray<SmEdge*> edges; brep.GetEdges(edges);
+    SmTArray<SmVertex*> vertices; brep.GetVertices(vertices);
+    out.push_back(double(faces.GetSize()));
+    out.push_back(double(edges.GetSize()));
+    out.push_back(double(vertices.GetSize()));
+    if(!success) return;
+    for(ULONG i=0;i<vertices.GetSize();++i) {
+        auto* vertex=vertices[i]; out.push_back(vertex?1.0:0.0);
+        if(vertex) put_vec(out,vertex->GetPoint());
+    }
+    for(ULONG i=0;i<edges.GetSize();++i) {
+        auto* edge=edges[i]; auto* curve=edge->GetCurve();
+        out.push_back(curve?1.0:0.0);
+        if(!curve) continue;
+        const auto interval=edge->GetInterval();
+        out.push_back(interval.GetMin());out.push_back(interval.GetMax());
+        for(int j=0;j<=4;++j) {
+            SmPoint3d point; const auto status=curve->EvaluatePoint(interval.Evaluate(j/4.0),point);
+            pc3_point(out,status,point);
+        }
+    }
+    for(ULONG i=0;i<faces.GetSize();++i) {
+        auto* face=faces[i]; auto* surface=face->GetSurface();
+        out.push_back(surface?1.0:0.0);
+        if(!surface) continue;
+        const auto domain=face->GetUVDomain();
+        out.push_back(domain.GetMin().x);out.push_back(domain.GetMin().y);
+        out.push_back(domain.GetMax().x);out.push_back(domain.GetMax().y);
+        for(int u=0;u<=2;++u) for(int v=0;v<=2;++v) {
+            SmPoint3d point; const auto status=surface->EvaluatePoint(domain.Evaluate(u/2.0,v/2.0),point);
+            pc3_point(out,status,point);
+        }
     }
 }
 struct Pc3Probe : sc_pc3_PrimitiveCreation {
@@ -179,11 +222,7 @@ SC_EXPORT int32_t sc_primitive_primitive_creation_p3_eval(int32_t op,const doubl
         }
         out={double(status==SM_SUCCESS?0:status),double(brep.m_bEditingEnabled!=FALSE),double(the_context().GetDoingBoolean()!=FALSE),
             double(starts.GetSize()),double(sides.GetSize()),double(ends.GetSize())};
-        // The topology the entry point left in the B-rep.
-        SmTArray<SmFace*> faces;SmTArray<SmEdge*> edges;SmTArray<SmVertex*> vertices;
-        brep.GetFaces(faces);brep.GetEdges(edges);brep.GetVertices(vertices);
-        out.push_back(double(faces.GetSize()));out.push_back(double(edges.GetSize()));
-        out.push_back(double(vertices.GetSize()));
+        pc3_geometry(out,brep,status==SM_SUCCESS);
         // Only non-consuming entry points retain caller ownership of these curves.
         for(ULONG i=0;i<curves.GetSize();i++)
             if(curves[i] && (op>=4 || curves[i]->GetOwner()==NULL)) delete curves[i];

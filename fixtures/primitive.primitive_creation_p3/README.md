@@ -16,17 +16,35 @@ seeds and scales from 1e-6 through 1e6.
 | Invalid capped repetition counts, empty curve sweep, null blend edge uses | Entry-point status and edit/context/output-list state; these are early exits, not geometry coverage |
 | Swung primitive with no profiles | Successful empty-loop return and unchanged state, not a constructed surface |
 
-The eight nontrivial construction fixtures execute the real C++ public entry
-points. Rust defers at `CreatePlanarFacesWith3DCurves`, `CreateFaceFromSurface`
-or `CreateFacesFromSurface`; no topology or later transformations are compared
-for those cases. All eight owned functions have full Rust bodies, including
-control flow after dependency adapters. The production caller must supply a
-`PrimitiveAccess` resolver extending the existing `SweepAccess` interface.
-No concrete production construction adapter is supplied by this unit.
+The construction fixtures run through the production `PrimitiveModel`, using the
+same new B-rep and primitive options as the native probe. In addition to the
+original six fields (status, editing/Boolean flags and three output-list lengths),
+they compare owning-list face/edge/vertex counts. Successful calls also compare
+vertex positions, each edge's actual interval and five curve evaluations, and each
+face's UV domain and nine surface evaluations. Evaluation statuses are retained;
+failed operations compare partial topology counts without evaluating unfinished
+geometry. Neither side substitutes cached B-splines for virtual geometry dispatch.
+
+The current 296 cases yield 295 passes, no deferrals or failures, and the unchanged
+UB-78 rejection. All 295 comparable native/Rust output digests agree exactly.
+Nine former topology-construction deferrals now compare actual nonempty geometry,
+including the existing zero and
+negative tolerance cases. The repeated linear wire has two faces, seven edges and
+six vertices; skin, curve-sweep and swung fixtures each have one face, four edges
+and four vertices. The partial rotational sweep also builds one face, four edges
+and four vertices. A native-enabled regression requires those counts, successful
+construction and the complete geometry record on both sides; the repeated linear
+fixture also exercises the public FFI output-buffer retry.
+
+The production deletion adapter uses the landed context-only intersector with the
+model's real notification records and object keys, matching the fresh native
+intersector inside the rotational caller. The revolution API extracts and detaches
+the actual first surface under those same keys, matching `GetSurfaces` and
+`SetOwner(NULL)`; no geometry copy or owner guess replaces it.
 
 Curve-sweep scaling, profile orientation, face-based skinning, classification,
 cap construction, stitching, map-copy tails and topology edits are implemented
-but **not certified by these differential results**. A kernel regression checks
+but paths beyond the specifically compared fixtures remain **uncertified**. A kernel regression checks
 that preparation preserves the input curves and that the inverse placements
 recover the original path. Another checks the transform/marriage mutations on
 the missing-face early return. Neither replaces native comparison of the tails.
@@ -38,16 +56,17 @@ curve construction or non-finite fixture samples are construction rejections.
 The Rust port still checks these inputs safely. No comparison tolerance or
 absolute floor is added.
 
-Legacy sweep APIs remain blocked at their earlier `SmBrep` constructor. Their
-outdated p3 blocker labels now identify that actual missing dependency. Five
-read-only sweep services resolve the integrated B-rep/region/shell accessors;
-no arena-order replacement is used.
+The adjacent surface-of-revolution API uses the same real model and now compares
+its detached output's owner state, UV domain and 25 virtual point evaluations.
+Its native unit has 879 exact passes and three remaining downstream skin/cache
+classification deferrals; those paths are separate from this unit's completed
+construction fixtures.
 
 
 Review regressions (`review.json`) allow finite zero/negative rule tolerances and
 zero/negative curve-sweep approximation tolerance through the checked FFI. Four
-helper cases compare real values on both sides; two curve-sweep cases still defer
-at topology construction. That earlier update has 293 cases: 284 pass, 8 deferred,
+helper cases compare real values on both sides; two curve-sweep cases deferred
+at topology construction at that historical checkpoint; they now compare geometry. That earlier update has 293 cases: 284 pass, 8 deferred,
 1 UB-78 rejection and 0 failures.
 
 Swung scaling retains the original derived `Curve` for virtual point evaluation
@@ -101,17 +120,19 @@ adapter tracked by #255. The curve-record format also still cannot express
 reversed circular arcs (`end_angle < start_angle`).
 
 The `topology.brep_p8` and `topology.brep_p3` face services of `PrimitiveAccess`
-(`CreatePlanarFace(s)With3DCurves`, `CreateFace(s)FromSurface`, `DeleteFace`) are
-now real trait defaults over `SweepAccess::with_brep_mut`, so the fixture's
-one-B-rep adapter reaches them too. The adapter also keeps a tag store (none on the
-fresh B-rep, untagged curves) and deletes faces through
-`KernelManifoldIntersector::delete_faces_with_keys` under its own face keys, as the
-production `SweepStore` does. Every entry-point record now ends with the face, edge
-and vertex counts of the B-rep, so the construction tails compare real topology:
-the repeated linear wire sweep leaves 2 faces / 7 edges / 6 vertices, the full
-rotation of a line 1 / 3 / 2, the partial rotation, skin, curve sweep and swung
-primitive 1 / 4 / 4, identical to the native B-rep. Face geometry is not compared.
-The gate has 296 cases: 295 pass bit-identically, none defer, 1 is rejected under
-UB-78, and none fail.
-`axis_inside_face` is a trait default too (the `SmFace::CurveOnClassify` axis check
-`SweepStore` already used), so neither the fixture nor `PrimitiveModel` needs its own.
+are shared trait defaults over the caller's real `SweepAccess::with_brep_mut`.
+The differential entry points use `PrimitiveModel`; the small one-B-rep adapter
+remains only in default-adapter tests. Production rotational cleanup calls
+`KernelManifoldIntersector::delete_faces_with_keys` with the model's actual
+notification records and identity callback.
+
+Records retain status, editing/boolean state and output-array sizes, then compare
+owning-list face/edge/vertex counts. Successful constructions also compare vertex
+positions, actual edge intervals and five edge evaluations, and face UV domains
+and nine surface evaluations. The native constructor uses virtual geometry
+methods. Evaluation statuses remain visible in the records.
+
+The gate has 296 cases: 295 pass, none defer, and one retains its UB-78 rejection.
+The shared `axis_inside_face` default calls the existing SweepStore classifier;
+neither production nor test adapters duplicate it. The merged defaults preserve
+consumed curve slots instead of changing their container shape.

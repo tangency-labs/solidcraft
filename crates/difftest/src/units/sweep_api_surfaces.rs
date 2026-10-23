@@ -15,11 +15,11 @@
 //! `srf_u`, `srf_v`) and, for extrusions, the extruded curve's NURB afterwards
 //! (`crv_has`, `crv_n`, `crv_cpts`).
 //!
-//! Cases reaching `SmPrimitiveCreation` (valid skin primitives, surfaces of
-//! revolution of a curve, skins from faces) are deferred on the Rust side
-//! (`primitive.primitive_creation_p2` / `_p3`); their input validation (`NULL` curve,
-//! malformed profile structure, bad degree) is compared. Every run has at least
-//! [`MIN_GENERATED`] generated cases.
+//! Successful revolutions retain the API status/presence fields and compare the
+//! detached surface's owner state, natural UV domain and 25 virtual point
+//! evaluations/statuses. Skin construction can still defer at actual face/cache
+//! services. Input validation (`NULL` curve, malformed profiles, bad degree)
+//! remains compared. Every run has at least [`MIN_GENERATED`] generated cases.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -312,8 +312,20 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
             }
         }
         Inputs::Revolution { .. } => {
-            if ok {
-                s.vals("has", 1)?;
+            if ok && s.flag("has")? {
+                s.vals("revolution_owner_clear", 1)?;
+                s.vals("revolution_domain", 4)?;
+                let mut statuses = Vec::new();
+                let mut points = Vec::new();
+                for _ in 0..25 {
+                    let status = s.take(1)?;
+                    if status.first().copied() == Some(0.0) {
+                        points.extend(s.take(3)?);
+                    }
+                    statuses.extend(status);
+                }
+                s.put("revolution_status", statuses);
+                s.put("revolution_points", points);
             }
         }
         Inputs::SkinPrimitive { .. } => {
@@ -501,7 +513,39 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Vec3::new(axis[0], axis[1], axis[2]),
                 *angle_deg,
             ) {
-                Ok(_) => Err(SolidError::sm_err("runner: revolution cannot succeed yet")),
+                Ok(surface) => {
+                    o.extend([0.0, 1.0, flag(surface.owner().is_none())]);
+                    let domain = surface.natural_uv_domain();
+                    o.extend([
+                        domain.min().x,
+                        domain.min().y,
+                        domain.max().x,
+                        domain.max().y,
+                    ]);
+                    let mut result = Ok(());
+                    for u in 0..=4 {
+                        for v in 0..=4 {
+                            match surface.evaluate_point(
+                                &k,
+                                domain.evaluate(f64::from(u) / 4.0, f64::from(v) / 4.0),
+                            ) {
+                                Ok(point) => {
+                                    o.push(0.0);
+                                    o.extend(point.to_array());
+                                }
+                                Err(e) if e.is_unported() => {
+                                    result = Err(e);
+                                    break;
+                                }
+                                Err(e) => o.push(status(&e)),
+                            }
+                        }
+                        if result.is_err() {
+                            break;
+                        }
+                    }
+                    result
+                }
                 Err(e) if e.is_unported() => Err(e),
                 Err(e) => {
                     o.push(status(&e));
@@ -561,7 +605,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 .collect::<solidcore::Result<Vec<_>>>();
             let discs = match discs {
                 Ok(d) => d,
-                Err(e) if e.is_unported() => return Output::unported(&e).ok_or_else(|| harness("unported")),
+                Err(e) if e.is_unported() => {
+                    return Output::unported(&e).ok_or_else(|| harness("unported"))
+                }
                 Err(e) => return Err(harness(format!("planar circle: {e}"))),
             };
             let mut faces = Vec::new();
@@ -978,6 +1024,34 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[cfg(feature = "cpp")]
+    #[test]
+    fn successful_revolution_compares_detached_native_surface_geometry() {
+        let context = CaseContext {
+            root: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."),
+            seeds: 0,
+        };
+        let cases = context.fixture_cases("sweep.api_surfaces").unwrap();
+        let case = cases
+            .iter()
+            .find(|case| case.name == "revolution_wave_x_axis")
+            .unwrap();
+        let inputs = case.parse().unwrap();
+        let native = cpp(&inputs).unwrap();
+        let result = rust(&inputs).unwrap();
+        assert_eq!(native.values.get("status"), Some(&vec![0.0]));
+        assert_eq!(native.values.get("has"), Some(&vec![1.0]));
+        assert_eq!(
+            native.values.get("revolution_owner_clear"),
+            Some(&vec![1.0])
+        );
+        assert_eq!(native.values.get("revolution_status"), Some(&vec![0.0; 25]));
+        let points = native.values.get("revolution_points").unwrap();
+        assert_eq!(points.len(), 75);
+        assert!(points.iter().any(|value| *value != 0.0));
+        assert_eq!(result, native);
+    }
 
     /// The generators reach success and failure of the compared ops on the Rust side.
     #[test]
