@@ -3,7 +3,7 @@
 <!-- ANCHOR: architecture -->
 | Layer | Crates | Role |
 |---|---|---|
-| L0 | `geom` | vectors, planes, profiles, meshes and their measures |
+| L0 | `geom`, `laser` | vectors, planes, profiles, meshes and their measures; laser device profiles and LightBurn handoff packages |
 | L1 | `sketch`, `kernel`, `render` | constraint solver and profiles; the B-rep kernel boundary (truck); view math and the headless scene description |
 | L2 | `doc` | parameters, expressions, the feature timeline and its incremental evaluation |
 | L3 | `io` | design files, STL/OBJ/STEP/3MF export, STEP and 3MF/STL/OBJ/glTF import features |
