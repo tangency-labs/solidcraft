@@ -1194,6 +1194,7 @@
   "ui.agent_chat_files_left_out": "K jedné zprávě lze připojit nejvýše {max} souborů; vynecháno: {files}",
   "ui.agent_chat_files_loading": "Čekání na přečtení souborů",
   "ui.agent_chat_files_max": "K jedné zprávě nejvýše {max} souborů",
+  "ui.agent_chat_flatpak_none_found": "Nebyl nalezen žádný kódovací agent. Sandbox Flatpaku ve výchozím stavu nevidí agenty nainstalované ve vaší domovské složce a nemá přístup k síti. Chcete-li povolit Claude Code a jeho adaptér ACP nainstalované přes nvm nebo do ~/.local/bin, spusťte v terminálu tento příkaz a poté SolidCraft restartujte. Udělí přístup k uvedeným programům a přihlašovacím souborům a také přístup k síti:",
   "ui.agent_chat_import_failed": "{name}: import selhal: {error}",
   "ui.agent_chat_intro": "Chatujte s kódovacím agentem, kterého již používáte, nebo s modelem na zvoleném endpointu. Pracuje na otevřeném návrhu pomocí nástrojů SolidCraftu: jeho změny vidíte průběžně a každou zprávu lze vrátit jedním krokem. Co smí dělat bez ptaní, nastavíte v Předvolby > AI.",
   "ui.agent_chat_key_in_env": "klíč nastaven",

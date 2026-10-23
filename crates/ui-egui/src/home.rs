@@ -794,7 +794,6 @@ fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<File
                         },
                     );
                     publish(&format!("home:recent:{index}"), &response);
-                    response.clone().on_hover_text(path);
                     ui_kit::Menu::context(&response, |ui| {
                         if crate::context_menu::button(ui, app.tr_label("Remove from list"), "delete").clicked() {
                             app.home.recent.retain(|x| x != path);

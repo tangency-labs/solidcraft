@@ -266,10 +266,7 @@ pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
     // Every body's names are read below: work out the ones not known yet on all cores first
     // (each body's names are its own, whichever thread works them out).
     if legacy_name(name).is_none() {
-        let bodies: Vec<&ModelBody> = st.bodies.iter().filter(|b| !b.body.is_mesh()).collect();
-        solidcraft_kernel::for_each_on_threads(&bodies, 16, |b| {
-            let _ = naming::names(b);
-        });
+        naming::warm_names(st.bodies.iter().filter(|b| !b.body.is_mesh()));
     }
     locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p)
 }
@@ -445,9 +442,7 @@ pub fn locate_one(st: &ModelState, body: Option<&str>, name: &str) -> Result<Fac
         st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh() && body.is_none_or(|n| b.name == n)).collect();
     // As [`locate_face`]: the names of several bodies are worked out on all cores first.
     if bodies.len() > 1 && legacy_name(name).is_none() {
-        solidcraft_kernel::for_each_on_threads(&bodies, 16, |(_, b)| {
-            let _ = naming::names(b);
-        });
+        naming::warm_names(bodies.iter().map(|(_, b)| *b));
     }
     let hit = locate_in(bodies.into_iter(), name, Vec3::ZERO).ok_or_else(|| format!("no face is named `{name}` (`model.faces` lists the names)"))?;
     if hit.split {

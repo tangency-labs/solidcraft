@@ -197,6 +197,24 @@ impl App {
     }
 }
 
+/// Linux file dialogs match patterns by case, so each extension goes in as lower and upper
+/// case, plus FreeCAD's own mixed casing.
+fn case_variants(exts: &[&str]) -> Vec<String> {
+    let mut all: Vec<String> = Vec::new();
+    for e in exts {
+        let mut forms = vec![e.to_ascii_lowercase(), e.to_ascii_uppercase()];
+        if e.eq_ignore_ascii_case("fcstd") {
+            forms.push("FCStd".into());
+        }
+        for v in forms {
+            if !all.contains(&v) {
+                all.push(v);
+            }
+        }
+    }
+    all
+}
+
 fn services(cc: &eframe::CreationContext<'_>) -> Services {
     let parent = rfd::AsyncFileDialog::new().set_parent(cc);
     let open_parent = parent.clone();
@@ -208,48 +226,14 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
             let mut dialog = open_parent.clone();
             if !first.is_empty() {
                 let label = first.iter().map(|e| e.to_uppercase()).collect::<Vec<_>>().join(", ");
-                let both: Vec<String> = first.iter().flat_map(|e| [e.to_lowercase(), e.to_uppercase()]).collect();
-                dialog = dialog.add_filter(label, &both);
+                dialog = dialog.add_filter(label, &case_variants(first));
             }
-            let future = dialog
-                .add_filter(
-                    "Designs, CAD files and meshes",
-                    &[
-                        io::DESIGN_EXT,
-                        io::LEGACY_DESIGN_EXT,
-                        "json",
-                        "step",
-                        "stp",
-                        "STEP",
-                        "STP",
-                        "igs",
-                        "iges",
-                        "IGS",
-                        "IGES",
-                        "FCStd",
-                        "fcstd",
-                        "3dm",
-                        "3DM",
-                        "3mf",
-                        "3MF",
-                        "stl",
-                        "STL",
-                        "obj",
-                        "OBJ",
-                        "glb",
-                        "GLB",
-                        "gltf",
-                        "GLTF",
-                    ],
-                )
-                .add_filter("SolidCraft design (container or JSON)", &[io::DESIGN_EXT, io::LEGACY_DESIGN_EXT, "json"])
-                .add_filter("STEP", &["step", "stp", "STEP", "STP"])
-                .add_filter("IGES", &["igs", "iges", "IGS", "IGES"])
-                .add_filter("FreeCAD and Rhino", &["FCStd", "fcstd", "3dm", "3DM"])
-                .add_filter("Mesh (3MF, STL, OBJ, glTF)", &["3mf", "3MF", "stl", "STL", "obj", "OBJ", "glb", "GLB", "gltf", "GLTF"])
-                .add_filter("Sketch drawings (DXF, SVG)", &["dxf", "DXF", "svg", "SVG"])
-                .add_filter("All files", &["*"])
-                .pick_file();
+            // The groups come from the format registry, so a new format joins this dialog by itself.
+            dialog = dialog.add_filter("Designs, CAD files and meshes", &case_variants(&io::formats::open_extensions(true)));
+            for (label, exts) in io::formats::import_filters(true) {
+                dialog = dialog.add_filter(label, &case_variants(&exts));
+            }
+            let future = dialog.add_filter("All files", &["*"]).pick_file();
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
         })),
         // One kind of file (the agent chat's attachments): only the types it names, as given and in
@@ -640,9 +624,11 @@ fn main() -> eframe::Result {
     solidcraft_engine::crash::phase("window");
     let options = eframe::NativeOptions {
         viewport: app_viewport()?,
-        depth_buffer: depth_bits,
-        stencil_buffer: STENCIL_BITS,
-        multisampling: samples,
+        // The window's pass (egui's) has no depth and one sample: the viewport draws its scene
+        // offscreen with its own depth and MSAA, then blits it, so the UI pass pays for neither.
+        depth_buffer: 0,
+        stencil_buffer: 0,
+        multisampling: 1,
         // Kept with the other settings, not in a folder named after the app id. Safe mode reads
         // and writes a scratch copy, leaving the user's settings as they were.
         persistence_path: if safe_mode {
@@ -711,9 +697,19 @@ fn main() -> eframe::Result {
                 lost_at: None,
             });
             if let Some(rs) = &cc.wgpu_render_state {
-                eprintln!("SolidCraft graphics: {:?}, MSAA {}x (requested {}x)", rs.adapter.get_info().backend, rs.msaa_samples, samples);
+                // The viewport's scene keeps the app's anti-aliasing; the window's pass is 1x.
+                // A count the device cannot render with falls back to the supported default.
+                let scene_samples = {
+                    let requested = u32::from(samples).max(1);
+                    if requested <= 1 || rs.msaa_supported.is_empty() || rs.msaa_supported.contains(&requested) {
+                        requested
+                    } else {
+                        rs.msaa_supported.iter().copied().filter(|&n| n <= solidcraft_ui_egui::prefs::Prefs::default().msaa).max().unwrap_or(1)
+                    }
+                };
+                eprintln!("SolidCraft graphics: {:?}, MSAA {scene_samples}x (requested {}x)", rs.adapter.get_info().backend, samples);
                 solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
-                app.set_wgpu(rs, depth_bits, STENCIL_BITS, rs.msaa_samples);
+                app.set_wgpu_split(rs, depth_bits, STENCIL_BITS, scene_samples);
                 solidcraft_ui_egui::gpu::install_picture_renderer(rs);
                 // The graphics driver is loaded now; it may have put its own exception filter
                 // in front of ours.
@@ -723,8 +719,8 @@ fn main() -> eframe::Result {
                 solidcraft_ui_egui::prefs::check_msaa(&mut app, u32::from(samples));
                 let info = rs.adapter.get_info();
                 solidcraft_engine::crash::set_environment(&format!(
-                    "Renderer: {:?} {} ({}), MSAA {}x",
-                    info.backend, info.name, info.driver, rs.msaa_samples
+                    "Renderer: {:?} {} ({}), MSAA {scene_samples}x",
+                    info.backend, info.name, info.driver
                 ));
             }
             mark("viewport pipelines");

@@ -479,7 +479,11 @@ fn contact_sets_stop_a_driven_joint_at_touching() {
     assert!((b_x(&s) - 5.0).abs() < 1e-6);
     run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 10}));
     run(&mut s, "contact.create", json!({"occurrences": ["A", "B"]}));
+    super::super::joints::solve_counts::take();
     let r = run(&mut s, "joint.drive", json!({"joint": "Rail", "value": -5}));
+    let (all, full) = super::super::joints::solve_counts::take();
+    assert!(all > 4, "contact must still test intermediate placements");
+    assert_eq!(full, 1, "contact trials must not repeat DOF analysis");
     assert!(r["stopped_by_contact"].is_object(), "{r}");
     // Stopped where the faces touch (to the search's resolution, 15 mm / 2^14).
     assert!((b_x(&s) - 10.0).abs() < 2e-3, "{}", b_x(&s));

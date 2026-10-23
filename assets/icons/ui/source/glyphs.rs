@@ -104,10 +104,10 @@ pub(crate) fn brand_mark(p: &egui::Painter, c: Pos2) {
 
 /// The same original mark as a single quiet silhouette, without face seams or outlines.
 pub(crate) fn brand_mark_silhouette(p: &egui::Painter, c: Pos2, height: f32, ink: Color32) {
-    brand_mark_styled(p, c, height, [ink; 4], false);
+    brand_mark_styled(p, c, height, [ink; 3], false);
 }
 
-fn brand_mark_styled(p: &egui::Painter, c: Pos2, height: f32, colours: [Color32; 4], edges: bool) {
+fn brand_mark_styled(p: &egui::Painter, c: Pos2, height: f32, colours: [Color32; 3], edges: bool) {
     let s = height / 412.217;
     let m = |pts: &[(f32, f32)]| -> Vec<egui::Pos2> { pts.iter().map(|&(x, y)| pos2(c.x + (x - 178.5) * s, c.y + (y - 206.1) * s)).collect() };
     // egui only fills convex shapes, so each face is a few overlapping convex pieces.
@@ -115,7 +115,7 @@ fn brand_mark_styled(p: &egui::Painter, c: Pos2, height: f32, colours: [Color32;
         p.add(egui::Shape::convex_polygon(m(pts), col, Stroke::NONE));
     };
     // The faces are separated by gaps that show the application bar, not by white lines.
-    let [light, mid, dark, _] = colours;
+    let [light, mid, dark] = colours;
     let edge_col = crate::theme::Tokens::get().app_bar;
     face(light, &[(3.5, 105.9), (177.0, 5.8), (263.4, 55.6), (263.8, 156.0), (177.0, 406.4)]);
     face(light, &[(177.0, 206.1), (263.8, 156.0), (350.5, 206.2), (350.5, 306.3), (177.0, 406.4)]);
@@ -129,7 +129,7 @@ fn brand_mark_styled(p: &egui::Painter, c: Pos2, height: f32, colours: [Color32;
     if !edges {
         return;
     }
-    // White edge lines.
+    // The seams between the faces and around the mark, in the bar's colour, so they read as gaps.
     let edge = Stroke::new(10.0 * s, edge_col);
     let line = |pts: &[(f32, f32)]| {
         p.add(egui::Shape::line(m(pts), edge));

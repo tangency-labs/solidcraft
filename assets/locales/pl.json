@@ -1183,6 +1183,7 @@
   "ui.agent_chat_files_left_out": "Do jednej wiadomości można dołączyć najwyżej {max} plików; pominięto: {files}",
   "ui.agent_chat_files_loading": "Oczekiwanie na odczytanie plików",
   "ui.agent_chat_files_max": "Najwyżej {max} plików w jednej wiadomości",
+  "ui.agent_chat_flatpak_none_found": "Nie znaleziono agenta programistycznego. Piaskownica Flatpak domyślnie nie widzi agentów zainstalowanych w folderze domowym i nie ma dostępu do sieci. Aby zezwolić na Claude Code i jego adapter ACP zainstalowane przez nvm lub w ~/.local/bin, uruchom to polecenie w terminalu, a potem uruchom ponownie SolidCraft. Daje ono dostęp do wymienionych programów i plików logowania oraz dostęp do sieci:",
   "ui.agent_chat_import_failed": "{name}: import się nie powiódł: {error}",
   "ui.agent_chat_intro": "Rozmawiaj z agentem programistycznym, którego już używasz, lub z wybranym punktem końcowym modelu. Pracuje on na otwartym projekcie za pomocą narzędzi SolidCraft: jego zmiany są widoczne na bieżąco, a cofa się je jednym krokiem na wiadomość. To, co może robić bez pytania, ustawisz w Preferencje > AI.",
   "ui.agent_chat_key_in_env": "klucz ustawiony",

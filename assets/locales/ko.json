@@ -1187,6 +1187,7 @@
   "ui.agent_chat_files_left_out": "메시지 하나에는 파일을 최대 {max}개까지 보낼 수 있습니다. 제외됨: {files}",
   "ui.agent_chat_files_loading": "파일을 읽는 동안 기다리는 중",
   "ui.agent_chat_files_max": "메시지 하나에 파일은 최대 {max}개",
+  "ui.agent_chat_flatpak_none_found": "코딩 에이전트를 찾지 못했습니다. Flatpak 샌드박스는 기본적으로 홈 폴더에 설치된 에이전트를 볼 수 없고 네트워크에도 접근할 수 없습니다. nvm 또는 ~/.local/bin에 설치한 Claude Code와 ACP 어댑터를 허용하려면 터미널에서 다음 명령을 실행한 뒤 SolidCraft를 다시 시작하세요. 나열된 프로그램과 로그인 파일에 대한 접근 권한 및 네트워크 접근 권한을 부여합니다:",
   "ui.agent_chat_import_failed": "{name}: 가져오기 실패: {error}",
   "ui.agent_chat_intro": "이미 사용 중인 코딩 에이전트나 선택한 모델 엔드포인트와 채팅하세요. SolidCraft 도구로 열린 디자인을 다루며, 변경 사항은 바로 보이고 메시지마다 한 번에 실행 취소할 수 있습니다. 묻지 않고 할 수 있는 일은 환경 설정 > AI에서 정합니다.",
   "ui.agent_chat_key_in_env": "키 설정됨",

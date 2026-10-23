@@ -73,6 +73,22 @@ pub(super) fn placement(s: &Session, inputs: &[SelInput]) -> Option<(Vec<u64>, V
 /// The trace's parameters (OK's `motion.trace.keep` and the preview's `motion.trace`).
 pub fn params(s: &Session, f: &TraceForm, inputs: &[SelInput]) -> Result<Value, String> {
     let mut p = picked_point(s, inputs)?;
+    // Retain a geometric snap, rather than just its current world coordinates. Map a pick
+    // shown in an exploded view back to the actual placement, as picked_point does.
+    if let Some(pick) = sel_items(inputs, 0).first()
+        && let Some(snap) = snap_of(s, pick)
+        && let Some((path, _, shown, placed)) = placement(s, inputs)
+        && let Some(inverse) = mat_inverse(&shown)
+    {
+        let mut reference = snap.param;
+        reference["occurrence"] = json!(path.last().copied().unwrap_or(0));
+        for key in ["point", "face", "circle", "edge"] {
+            if let Some(at) = reference.get(key).and_then(solidcraft_engine::params::vec3) {
+                reference[key] = pt(apply_point(&placed, apply_point(&inverse, at)));
+            }
+        }
+        p["point_ref"] = reference;
+    }
     if f.by_study {
         p["study"] = json!(s.doc.assembly.studies.get(f.study).ok_or("no motion study yet")?.id);
     } else {

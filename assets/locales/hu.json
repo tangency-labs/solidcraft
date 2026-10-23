@@ -1182,6 +1182,7 @@
   "ui.agent_chat_files_left_out": "Egy üzenethez legfeljebb {max} fájl tartozhat; kihagyva: {files}",
   "ui.agent_chat_files_loading": "Várakozás a fájlok beolvasására",
   "ui.agent_chat_files_max": "Egy üzenetben legfeljebb {max} fájl lehet",
+  "ui.agent_chat_flatpak_none_found": "Nem található kódolóügynök. A Flatpak homokozó alapértelmezés szerint nem látja a saját mappájába telepített ügynököket, és nincs hálózati hozzáférése. Az nvm-mel vagy a ~/.local/bin mappába telepített Claude Code és ACP-adaptere engedélyezéséhez futtassa ezt a parancsot egy terminálban, majd indítsa újra a SolidCraftot. Hozzáférést ad a felsorolt programokhoz és bejelentkezési fájlokhoz, valamint a hálózathoz:",
   "ui.agent_chat_import_failed": "{name}: az importálás sikertelen: {error}",
   "ui.agent_chat_intro": "Csevegjen egy már használt kódolóügynökkel vagy egy választott modellvégponttal. A megnyitott terven a SolidCraft eszközein keresztül dolgozik: a módosításai láthatók közben, és üzenetenként egy lépésben vonhatók vissza. Hogy mit tehet kérdés nélkül, azt a Beállítások > AI menüpontban adhatja meg.",
   "ui.agent_chat_key_in_env": "kulcs beállítva",

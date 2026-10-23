@@ -14,6 +14,45 @@ fn near(value: &Value, expected: f64) {
 }
 
 #[test]
+fn component_create_rejects_bodies_without_changing_design() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body1"}));
+    let doc = s.doc.clone();
+    let active_path = s.active_occurrence_path.clone();
+    let error = s.execute("component.create", &json!({"name":"Part","bodies":["Body1"]})).unwrap_err();
+    assert!(matches!(&error, crate::EngineError::BadParams { cmd, .. } if cmd == "component.create"));
+    let msg = error.to_string();
+    for expected in ["bodies", "name, parent, parent_path, activate", "component.move_bodies", "component.from_bodies"] {
+        assert!(msg.contains(expected), "{msg}");
+    }
+    assert_eq!(s.doc, doc);
+    assert_eq!(s.active_component, 0);
+    assert_eq!(s.active_occurrence_path, active_path);
+    assert_eq!(s.doc.model_body_component(s.model.state().body("Body1").unwrap()), 0);
+}
+
+#[test]
+fn component_create_rejects_unknown_keys_and_accepts_documented_keys() {
+    let mut s = Session::default();
+    let (parent, occurrence) = created(&mut s, "Parent");
+    let params = json!({"name":"Child","parent":parent,"parent_path":[occurrence],"activate":false});
+    let mut invalid = params.clone();
+    invalid["activte"] = json!(true);
+    let doc = s.doc.clone();
+    let error = s.execute("component.create", &invalid).unwrap_err().to_string();
+    assert!(error.contains("activte"), "{error}");
+    assert!(error.contains("name, parent, parent_path, activate"), "{error}");
+    assert_eq!(s.doc, doc);
+    assert_eq!(s.active_component, parent);
+    assert_eq!(s.active_occurrence_path, Some(vec![occurrence]));
+    let child = run(&mut s, "component.create", params);
+    assert_eq!(child["name"], "Child");
+    assert_eq!(child["parent"], parent);
+    assert_eq!(s.active_component, parent);
+    assert_eq!(s.active_occurrence_path, Some(vec![occurrence]));
+}
+
+#[test]
 fn instance_copy_uses_selected_source_transform() {
     let mut s = Session::default();
     let (component, first) = created(&mut s, "Block");

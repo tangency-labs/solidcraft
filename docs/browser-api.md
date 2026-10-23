@@ -47,4 +47,5 @@ cargo xtask web-api-test --site dist/web
 
 The test starts a local server and headless Chrome, discovers commands, creates a box in the
 live document, checks undo and redo, and verifies error handling and the pending-request limit.
+It also checks that Ctrl+Tab and Ctrl+Shift+Tab are left to the browser, which switches tabs with them.
 Set `CHROME` to a Chrome or Chromium executable if it is not installed in a usual location.

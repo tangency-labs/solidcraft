@@ -313,3 +313,74 @@ fn reach_refuses_bad_params_and_says_why_nothing_moves() {
         assert!(r["reason"].as_str().is_some_and(|w| w.contains(why)), "{p}: {r}");
     }
 }
+
+/// Reach still publishes fresh full diagnostics after a lightweight refresh, including stationary
+/// mouse frames, loop-limited targets and undo/redo. Full analysis runs once only when requested.
+#[test]
+fn reach_preserves_full_diagnostics_without_repeating_dof_analysis() {
+    let (mut s, _, q0) = four_bar();
+    let o4 = Vec3::new(45.0, 0.0, 0.0);
+    let start = q0.y.atan2(q0.x - 45.0);
+    for (angle, quiet) in [(-10.0_f64, false), (-5.0, true), (-5.0, true), (100.0, false)] {
+        let a = start + angle.to_radians();
+        let to = o4 + Vec3::new(40.0 * a.cos(), 40.0 * a.sin(), 0.0);
+        super::solve_counts::take();
+        let r = reach(&mut s, "Rocker", q0, json!({"point":pt(to), "continuous":true, "quiet":quiet}));
+        assert_eq!(super::solve_counts::take().1, usize::from(!quiet));
+        assert_eq!(r["reached"], angle != 100.0, "{r}");
+        assert_eq!(r["stopped_by_loop"].is_object(), angle == 100.0, "{r}");
+        let expected = super::sol_json(&solidcraft_doc::joints::solve(&s.doc, &s.model.state()), &json!({"quiet":quiet}));
+        for key in ["dof", "fixed", "errors", "conflicts"] {
+            assert_eq!(r.get(key), expected.get(key), "{key}: {r}");
+        }
+        let listed = run(&mut s, "joint.list", json!({}));
+        let full = super::sol_json(&solidcraft_doc::joints::solve(&s.doc, &s.model.state()), &json!({}));
+        assert_eq!(listed["dof"], full["dof"]);
+    }
+    for command in ["edit.undo", "edit.redo"] {
+        run(&mut s, command, json!({}));
+        let full = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
+        assert!(full.conflicts.is_empty() && full.errors.is_empty());
+        for part in ["Crank", "Coupler", "Rocker"] {
+            assert_eq!(full.dof.get(&occ(&s, part)), Some(&1), "{command}: {part}");
+        }
+    }
+}
+
+/// Successive large pointer goals must use the new joint values at every perturbation and
+/// solve, keep all loop pins together and preserve mobility reports through undo/redo.
+#[test]
+fn quarter_turn_reaches_keep_the_four_bar_closed_and_diagnostics_current() {
+    let (mut s, p0, q0) = four_bar();
+    let ground = place(&s, "Ground", Vec3::ZERO);
+    for (i, point) in
+        [Vec3::new(-20.0, 0.0, 0.0), Vec3::new(0.0, -20.0, 0.0), Vec3::new(20.0, 0.0, 0.0), Vec3::new(0.0, 20.0, 0.0)].into_iter().enumerate()
+    {
+        let r = reach(&mut s, "Crank", p0, json!({"point":pt(point), "continuous":true, "quiet":i % 2 == 0}));
+        assert_eq!((&r["reached"], &r["stopped_by_loop"], &r["stopped_by_limit"]), (&json!(true), &Value::Null, &Value::Null), "{r}");
+        assert!(place(&s, "Crank", p0).dist(point) < 1e-5, "{r}");
+        let rocker = place(&s, "Rocker", q0);
+        let [a, b] = meet(point, 50.0, Vec3::new(45.0, 0.0, 0.0), 40.0);
+        assert!(rocker.dist(a).min(rocker.dist(b)) < 1e-5, "{r}");
+        assert!(place(&s, "Coupler", q0).dist(rocker) < 1e-6, "{r}");
+        assert!(place(&s, "Coupler", p0).dist(point) < 1e-5, "{r}");
+        assert_eq!(place(&s, "Ground", Vec3::ZERO), ground);
+        let full = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
+        assert!(full.errors.is_empty() && full.conflicts.is_empty(), "{full:?}");
+        for part in ["Crank", "Coupler", "Rocker"] {
+            assert_eq!(full.dof.get(&occ(&s, part)), Some(&1));
+        }
+        let steps = s.undo.len();
+        let again = reach(&mut s, "Crank", p0, json!({"point":pt(point), "continuous":true, "quiet":true}));
+        assert_eq!((&again["reached"], &again["moved"], s.undo.len()), (&json!(true), &json!(false), steps), "{again}");
+    }
+    for (command, point) in [("edit.undo", Vec3::new(20.0, 0.0, 0.0)), ("edit.redo", p0)] {
+        run(&mut s, command, json!({}));
+        assert!(place(&s, "Crank", p0).dist(point) < 1e-5, "{command}");
+        let full = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
+        assert!(full.errors.is_empty() && full.conflicts.is_empty(), "{command}: {full:?}");
+        for part in ["Crank", "Coupler", "Rocker"] {
+            assert_eq!(full.dof.get(&occ(&s, part)), Some(&1));
+        }
+    }
+}

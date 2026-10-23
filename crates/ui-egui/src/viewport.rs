@@ -1077,13 +1077,13 @@ fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, st: &std::sync::Arc<solidcra
         let (c0, c1) = ([0, 0, 0, a0 as u8], [0, 0, 0, a1 as u8]);
         for k in 0..n {
             let (p00, p01, p10, p11) = (at(r0, k), at(r0, k + 1), at(r1, k), at(r1, k + 1));
-            sc.trans_tri(p00, [0.0; 3], c0);
-            sc.trans_tri(p10, [0.0; 3], c1);
-            sc.trans_tri(p11, [0.0; 3], c1);
+            sc.shadow_tri(p00, c0);
+            sc.shadow_tri(p10, c1);
+            sc.shadow_tri(p11, c1);
             if r0 > 0.0 {
-                sc.trans_tri(p00, [0.0; 3], c0);
-                sc.trans_tri(p11, [0.0; 3], c1);
-                sc.trans_tri(p01, [0.0; 3], c0);
+                sc.shadow_tri(p00, c0);
+                sc.shadow_tri(p11, c1);
+                sc.shadow_tri(p01, c0);
             }
         }
     }
@@ -4188,6 +4188,19 @@ fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
 mod tests {
     use super::*;
     use crate::navigation::*;
+
+    #[test]
+    fn ground_shadow_does_not_enter_see_through_geometry() -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = solidcraft_engine::Session::default();
+        session.execute("solid.box", &json!({"length": 30, "width": 30, "height": 10}))?;
+        let app = SolveApp::new(session, crate::Services::default());
+        let mut scene = GpuScene::default();
+        ground_shadow(&mut scene, &app, &app.session.world_state());
+        assert!(scene.trans.is_empty(), "the ground shadow must not trigger order-independent transparency");
+        assert_eq!(scene.shadow.len(), 48 * 5 * 3 * crate::gpu::TRI_SIZE, "all shadow rings are retained");
+        assert!(scene.shadow.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().any(|v| v.get(27).is_some_and(|a| *a > 0)));
+        Ok(())
+    }
 
     /// Every tangent seam Continuity Analysis reports keeps its colour while the pointer rests on
     /// a face (#1247): a 60 x 40 x 20 box with its four top edges rounded (6 mm) has eight, four

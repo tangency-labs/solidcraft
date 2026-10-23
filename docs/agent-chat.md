@@ -155,6 +155,30 @@ The panel lists agents that aren't installed with their install command and a **
 **Refresh** looks again after you install one. **Test** starts an agent briefly, asks it for a
 session and ends it again.
 
+### Flatpak
+
+The Flatpak sandbox has no home-folder or network access by default. Agents installed
+through nvm or `~/.local/bin` can therefore work in a terminal while SolidCraft reports
+that no agent was found. For Claude Code and its ACP adapter, run:
+
+```sh
+flatpak override --user ai.storyteller.solidcraft --filesystem=~/.nvm:ro --filesystem=~/.local/bin:ro --filesystem=~/.local/share/claude:ro --filesystem=~/.claude --filesystem=~/.claude.json --share=network
+```
+
+These permissions apply to SolidCraft for your user account:
+
+- `~/.nvm:ro` exposes Node and globally installed npm adapters read-only.
+- `~/.local/bin:ro` exposes locally installed executables read-only.
+- `~/.local/share/claude:ro` exposes Claude Code's native installation read-only,
+  including the targets of links in `~/.local/bin`.
+- `~/.claude` and `~/.claude.json` allow Claude Code to read and update its sign-in
+  and configuration files.
+- `--share=network` lets the adapter reach its service. It also gives SolidCraft
+  network access, including making an enabled control server reachable from the host.
+
+Restart SolidCraft after applying the override. Other agents or installation folders
+may need different filesystem permissions.
+
 ### XAI Grok
 
 Install **Grok Build** and run `grok login` in a terminal to sign in with your Grok account.

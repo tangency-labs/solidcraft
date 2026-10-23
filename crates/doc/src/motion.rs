@@ -5,6 +5,29 @@
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::Vec3;
 
+/// The motion retained by an associative trace. Joint bounds keep their expressions, in
+/// command units (degrees or millimetres); studies are referenced by their stable identity.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TraceMotion {
+    Joint { joint: u64, index: usize, from: serde_json::Value, to: serde_json::Value },
+    Study { study: u64 },
+}
+
+/// A generated root sketch curve and the inputs needed to regenerate it. The seed values
+/// select the original assembly branch: playing or dragging the mechanism does not redefine
+/// its trace. Older saved curves have no entry here and remain ordinary fixed sketch curves.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MotionTrace {
+    pub sketch: u64,
+    pub wire: String,
+    pub occurrence: Vec<u64>,
+    pub point: crate::joints::JointOrigin,
+    pub motion: TraceMotion,
+    pub samples: Option<usize>,
+    pub seeds: Vec<(u64, Vec<f64>)>,
+}
+
 /// Occurrences whose bodies may touch but not pass through each other while joints move.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ContactSet {

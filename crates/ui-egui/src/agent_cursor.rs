@@ -4,7 +4,9 @@
 //! then glides to each pick in the parameters (faces, edges and points projected to the screen,
 //! sketch points, the plane of a new sketch), and only then does the command run. The reply
 //! waits for the animation, so an agent's timing stays honest. With "follow camera" on, a new
-//! sketch turns the view to face it and finishing the sketch turns back.
+//! sketch turns the view to face it and finishing the sketch turns back. Pointer input the agent
+//! sends itself (`ui.move`, `ui.click`, `ui.drag`, `ui.scroll`) moves the pointer too, as each
+//! event reaches the app, and a press leaves a ripple.
 //!
 //! The show is bounded, whatever the request's size: besides the toolbar button the pointer
 //! visits at most [`MAX_PICK_STOPS`] picks (a long point list is summarised by its first, middle
@@ -166,6 +168,19 @@ impl AgentCursor {
     /// the command.
     pub fn computing(&self) -> Option<(f64, &str)> {
         self.job.as_ref().filter(|j| j.stops.is_empty()).and_then(|j| j.ahead.as_ref()).map(|a| (a.started, a.label.as_str()))
+    }
+
+    /// Follow the pointer input an agent sends itself (`ui.move`, `ui.click`, `ui.drag`,
+    /// `ui.scroll`), as it reaches the app: the pointer goes where the input lands, and a press
+    /// leaves a ripple. A request being acted out keeps the pointer meanwhile.
+    pub(crate) fn follow_input(&mut self, at: Pos2, press: bool, now: f64) {
+        if self.job.is_some() {
+            return;
+        }
+        self.pos = Some(at);
+        if press {
+            self.ripples.push((at, now));
+        }
     }
 
     /// Stop the request the pointer waits on: answered as stopped, nothing of it applied.
@@ -562,6 +577,29 @@ mod tests {
         let (r, frames) = h.call_queued("engine.batch", json!({"commands": [{"command": "doc.open", "params": {"path": "x.solidcraft"}}]}));
         assert!(r["error"].as_str().is_some_and(|e| e.starts_with("engine.batch unavailable")), "{r}");
         assert!(frames <= 3, "{frames}");
+    }
+
+    #[test]
+    fn the_pointer_follows_the_agents_own_mouse_input() {
+        let mut h = crate::scenario::Harness::new();
+        // Hidden: control-channel input leaves the pointer alone.
+        assert_eq!(h.call("ui.agent_cursor", json!({"show": false}))["ok"], true);
+        h.call("ui.move", json!({"x": 300, "y": 300}));
+        h.frames(2);
+        assert_eq!(h.app.agent.pos, None);
+
+        assert_eq!(h.call("ui.agent_cursor", json!({"show": true}))["ok"], true);
+        h.call("ui.move", json!({"x": 420, "y": 380}));
+        h.frames(2);
+        assert_eq!(h.app.agent.pos, Some(pos2(420.0, 380.0)), "a move moves it");
+        h.call("ui.click", json!({"x": 500, "y": 400, "button": "right"}));
+        h.frames(4);
+        assert_eq!(h.app.agent.pos, Some(pos2(500.0, 400.0)), "a click lands where it clicked");
+        assert!(h.app.agent.ripples.iter().any(|(at, _)| *at == pos2(500.0, 400.0)), "and leaves a ripple");
+        // A drag is followed (one step a frame) to where it is released.
+        h.call("ui.drag", json!({"x0": 600, "y0": 300, "x1": 700, "y1": 360, "steps": 4}));
+        h.frames(8);
+        assert_eq!(h.app.agent.pos, Some(pos2(700.0, 360.0)));
     }
 
     #[test]

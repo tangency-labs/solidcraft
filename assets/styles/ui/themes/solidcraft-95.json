@@ -126,8 +126,7 @@
     "logo": [
       "#ffffff",
       "#c0c0c0",
-      "#808080",
-      "#ffffff"
+      "#808080"
     ],
     "manipulator": "#000080",
     "mesh_accent": "#000080",

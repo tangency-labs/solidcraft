@@ -17,6 +17,8 @@ use crate::expr::{self, Kind, Value};
 use crate::lineage::Traced;
 use crate::{AxisRef, DocError, Document, Feature, FeatureKind, HoleKind, Operation, PlaneRef, ProfileSel, Result};
 
+type JointFaces = (Body, kernel::Result<Arc<[kernel::FaceInfo]>>);
+
 /// A body in the evaluated model.
 #[derive(Clone, Debug)]
 pub struct ModelBody {
@@ -31,6 +33,9 @@ pub struct ModelBody {
     // Timeline snapshots are cloned before meshes are requested. Share the cell itself so
     // meshing any snapshot also warms every unchanged copy of this body.
     mesh: Arc<OnceLock<Arc<Mesh>>>,
+    /// Joint face measurements use their own tolerance, independent of display quality.
+    /// Shared by snapshots of this geometry; the body identity guards direct replacement.
+    joint_faces: Arc<OnceLock<JointFaces>>,
     /// Lazy canonical reference triangles for a proper rigid occurrence placement.
     mesh_placement: Option<Arc<placed_mesh::PlacedMesh>>,
     /// The display plan (none when the body has no plan: a mesh body, or one the planner
@@ -71,6 +76,7 @@ impl ModelBody {
             body,
             feature,
             mesh: Arc::new(OnceLock::new()),
+            joint_faces: Arc::new(OnceLock::new()),
             mesh_placement: None,
             plan: Arc::new(Default::default()),
             plan_mesh: Arc::new(Default::default()),
@@ -84,6 +90,19 @@ impl ModelBody {
             source_key: 0,
             outline: Arc::new(OnceLock::new()),
         }
+    }
+
+    /// Face measurements for joint origins, at their original chord tolerance. Pose changes
+    /// and scratch copies share them; a geometry edit makes a new body and cache.
+    pub(crate) fn joint_faces(&self) -> Result<Arc<[kernel::FaceInfo]>> {
+        let measure = || {
+            #[cfg(test)]
+            cost_tests::count(|c| c.joint_faces += 1);
+            let tol = (self.body.size() * 2e-3).max(1e-3);
+            self.body.faces(tol).map(Arc::from)
+        };
+        let (body, faces) = self.joint_faces.get_or_init(|| (self.body.clone(), measure()));
+        if body.same(&self.body) { faces.clone().map_err(Into::into) } else { measure().map_err(Into::into) }
     }
 
     /// A box around the body without meshing it ([`Body::outline_bounds`]), worked out once.

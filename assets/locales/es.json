@@ -1183,6 +1183,7 @@
   "ui.agent_chat_files_left_out": "Se pueden enviar como máximo {max} archivos con un mensaje; omitidos: {files}",
   "ui.agent_chat_files_loading": "Esperando a que se lean los archivos",
   "ui.agent_chat_files_max": "Como máximo {max} archivos por mensaje",
+  "ui.agent_chat_flatpak_none_found": "No se ha encontrado ningún agente de programación. De forma predeterminada, el entorno aislado de Flatpak no ve los agentes instalados en tu carpeta personal y no tiene acceso a la red. Para permitir Claude Code y su adaptador ACP instalados con nvm o en ~/.local/bin, ejecuta este comando en un terminal y reinicia SolidCraft. Concede acceso a los programas y archivos de inicio de sesión indicados, además de acceso a la red:",
   "ui.agent_chat_import_failed": "{name}: la importación falló: {error}",
   "ui.agent_chat_intro": "Habla con un agente de programación que ya utilices o con un servicio de modelos que elijas. Trabaja sobre el diseño abierto mediante las herramientas de SolidCraft: sus cambios se muestran al realizarlos y pueden deshacerse de una vez por mensaje. Lo que puede hacer sin preguntar se configura en Preferencias > IA.",
   "ui.agent_chat_key_in_env": "clave configurada",

@@ -309,6 +309,8 @@ pub struct Session {
     /// Full model evaluations (`refresh`), for tests.
     #[cfg(test)]
     pub(crate) evaluations: usize,
+    /// Resolved associative trace inputs, independent of the document revision and view state.
+    pub(crate) motion_traces: cmd::motion::associative::Cache,
 }
 
 /// A sketch changed by one frame of an interactive gesture (`live: true`).
@@ -445,6 +447,7 @@ impl Session {
             render_jobs: Default::default(),
             #[cfg(test)]
             evaluations: 0,
+            motion_traces: Default::default(),
             crash_journal: false,
         }
     }
@@ -651,8 +654,9 @@ impl Session {
         self.prune_occurrence_state();
         // Joints follow the geometry their origins snap to.
         if !self.doc.assembly.joints.is_empty() {
-            cmd::joints::resolve(self);
+            cmd::joints::place(self);
         }
+        cmd::motion::associative::refresh(self);
         if let Some(id) = self.active_sketch
             && self.doc.feature(id).is_none()
         {
@@ -669,7 +673,7 @@ impl Session {
         {
             self.revision += 1;
             if !self.doc.assembly.joints.is_empty() {
-                cmd::joints::resolve(self);
+                cmd::joints::place(self);
             }
             return;
         }
@@ -978,6 +982,7 @@ impl Session {
             saved_visibility: self.saved_visibility.clone(),
             #[cfg(test)]
             evaluations: 0,
+            motion_traces: self.motion_traces.clone(),
             crash_journal: false,
         }
     }

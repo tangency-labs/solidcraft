@@ -1182,6 +1182,7 @@
   "ui.agent_chat_files_left_out": "Maksimal {max} file per pesan; tidak disertakan: {files}",
   "ui.agent_chat_files_loading": "Menunggu file selesai dibaca",
   "ui.agent_chat_files_max": "Maksimal {max} file per pesan",
+  "ui.agent_chat_flatpak_none_found": "Agen coding tidak ditemukan. Secara bawaan, sandbox Flatpak tidak dapat melihat agen yang terpasang di folder rumah Anda dan tidak memiliki akses jaringan. Untuk mengizinkan Claude Code dan adaptor ACP-nya yang dipasang melalui nvm atau di ~/.local/bin, jalankan perintah ini di terminal, lalu mulai ulang SolidCraft. Perintah ini memberi akses ke program dan berkas masuk yang disebutkan, serta akses jaringan:",
   "ui.agent_chat_import_failed": "{name}: impor gagal: {error}",
   "ui.agent_chat_intro": "Mengobrol dengan agen coding yang sudah Anda pakai, atau endpoint model pilihan Anda. Agen bekerja pada desain yang terbuka lewat alat SolidCraft: perubahannya tampil saat dibuat dan dapat diurungkan satu langkah per pesan. Yang boleh dilakukannya tanpa bertanya diatur di Preferensi > AI.",
   "ui.agent_chat_key_in_env": "key diatur",

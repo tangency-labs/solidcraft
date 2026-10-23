@@ -25,7 +25,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("E")
         .contract(&EXTRUDE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("distance: expr (or through_all: true); taper?: angle expr; sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [{curves: [ids]}] (the profile whose outer loop is made of exactly these curves, or pieces of them; found again on every recompute, so it follows parameter changes; islands inside are its holes; an error when no profile or several match) | [{point:[x,y]}] (index and point picks are stored by their curves when that finds the same profile); face?: [x,y,z] (extrude a planar body face instead of a sketch profile); faces?: [[x,y,z],…] (coplanar faces of one body); face_body?: name (whose face, where faces of several bodies meet at the point); direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); convention?: total_distance|legacy_per_side (default total_distance; legacy preserves older symmetric extents); distance2?: expr (Two Sides: a second distance the other way from the first side, which may be through_all or to; with direction: negative the first side goes against the normal and distance2 along it); start_offset?: expr (along the sketch normal, also with direction: negative); to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); from?: [x,y,z] (From Object: start at that face or point); operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); targets?: [body] (Join from a face, or from a sketch on a body's face, defaults to that face's body; explicit targets or participants override); name?; body_name?; thin?: true (Thin: a wall along sketch curves instead of the profiles) with curves?: [curve ids] (open chains and closed loops, joined where they meet end to end; default: every drawn curve of the sketch), thickness: expr, side?: center|inside|outside|two_sides (a closed loop's inside is the area it encloses, an open chain's the side it bends toward, a straight line's the left of its first curve as drawn; default center), thickness2?: expr (two_sides: the thickness outside); corners are mitred, crossing walls are one"),
+        .params("distance: expr (or through_all: true); taper?: angle expr; sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [{curves: [ids]}] (the profile whose outer loop is made of exactly these curves, or pieces of them; found again on every recompute, so it follows parameter changes; islands inside are its holes; an error when no profile or several match) | [{point:[x,y]}] (index and point picks are stored by their curves when that finds the same profile); default: every drawn profile, except that a loop inside another is its hole and a loop inside that hole is material again; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); faces?: [[x,y,z],…] (coplanar faces of one body); face_body?: name (whose face, where faces of several bodies meet at the point); direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); convention?: total_distance|legacy_per_side (default total_distance; legacy preserves older symmetric extents); distance2?: expr (Two Sides: a second distance the other way from the first side, which may be through_all or to; with direction: negative the first side goes against the normal and distance2 along it); start_offset?: expr (along the sketch normal, also with direction: negative); to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); from?: [x,y,z] (From Object: start at that face or point); operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); targets?: [body] (Join from a face, or from a sketch on a body's face, defaults to that face's body; explicit targets or participants override); name?; body_name?; thin?: true (Thin: a wall along sketch curves instead of the profiles) with curves?: [curve ids] (open chains and closed loops, joined where they meet end to end; default: every drawn curve of the sketch), thickness: expr, side?: center|inside|outside|two_sides (a closed loop's inside is the area it encloses, an open chain's the side it bends toward, a straight line's the left of its first curve as drawn; default center), thickness2?: expr (two_sides: the thickness outside); corners are mitred, crossing walls are one"),
     CommandSpec::new("solid.revolve", "Revolve", revolve)
         .at("SOLID", "CREATE")
         .icon("revolve")
@@ -653,6 +653,7 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
         profiles: match face_profile {
             Some(f) => f,
             None if thin.is_some() => ProfileSel::All,
+            None if p.get("profiles").is_none() => default_extrude_profiles(s, sketch),
             None => profiles(p, cmd)?,
         },
         extent,
@@ -661,6 +662,47 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
         thin,
     };
     add_feature(s, p, kind)
+}
+
+/// The profiles an extrude takes when `profiles` is omitted: even-odd nesting over what was drawn,
+/// so a loop inside an outline is its hole and a loop inside that hole is material again (#5172).
+/// Without nesting this is `All`, as before. When the pick cannot be stored so that it finds the
+/// same profiles again (the sketch is not solved, or two profiles share their curves), it stays
+/// `All` too.
+fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
+    let st = s.model.state();
+    let Some(ss) = st.sketch(sketch) else { return ProfileSel::All };
+    let drawn = solidcraft_sketch::find_drawn_profiles(&ss.sketch);
+    let ps = if drawn.is_empty() { ss.profiles.clone() } else { drawn };
+    if ps.len() > 10_000 || ps.iter().all(|p| p.region.holes.is_empty()) {
+        return ProfileSel::All;
+    }
+    // Each profile has the profiles directly inside it as holes, so the number of holes around a
+    // point of a profile's material is its nesting depth.
+    let material: Vec<_> = ps
+        .iter()
+        .filter(|p| {
+            let probe = p.region.interior_point();
+            ps.iter().filter(|other| other.region.holes.iter().any(|hole| hole.contains(probe))).count() % 2 == 0
+        })
+        .collect();
+    let all = solidcraft_sketch::without_text_counters(&ss.sketch, ps.clone());
+    if material.iter().map(|p| &p.outer_curves).eq(all.iter().map(|p| &p.outer_curves)) {
+        return ProfileSel::All;
+    }
+    // Profiles of the solved sketch itself are stored by index, which `stable_profiles` turns
+    // into curves; drawn profiles of a sketch with projected references are named by curves.
+    let same = ps.len() == ss.profiles.len() && ps.iter().zip(&ss.profiles).all(|(a, b)| a.outer_curves == b.outer_curves);
+    let sel = if same {
+        let indices = ps.iter().enumerate().filter(|(_, p)| material.iter().any(|m| std::ptr::eq(*m, *p))).map(|(i, _)| i).collect();
+        ProfileSel::Indices { indices }
+    } else {
+        ProfileSel::Curves { loops: material.iter().map(|p| p.outer_curves.clone()).collect() }
+    };
+    match solidcraft_doc::profile_selection_indices(ss, &sel) {
+        Ok(found) if found.len() == material.len() && material.iter().all(|p| !p.outer_curves.is_empty()) => sel,
+        _ => ProfileSel::All,
+    }
 }
 
 /// The body whose face `sketch` is attached to (on the face itself, not offset from it), when

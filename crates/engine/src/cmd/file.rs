@@ -1095,4 +1095,33 @@ mod tests {
         assert!(stopped.world_state().bodies.is_empty());
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    /// Every option the format registry offers is a parameter its owning command documents,
+    /// so the registry and the commands can't drift apart.
+    #[test]
+    fn registry_options_name_documented_command_parameters() {
+        use solidcraft_io::formats;
+        let params_of = |id: &str| crate::find_command(id).map(|c| c.params).unwrap_or_else(|| panic!("registry names unknown command {id}"));
+        for f in formats::FORMATS {
+            if let Some(import) = &f.import {
+                for o in import.options {
+                    for id in ["doc.open", if import.target == formats::ImportTarget::Mesh { "file.insert_mesh" } else { "file.insert_step" }] {
+                        assert!(params_of(id).contains(o.param), "{}: `{}` is not a documented parameter of {id}", f.id, o.param);
+                    }
+                }
+            }
+            if let Some(export) = &f.export {
+                let params = params_of(export.command);
+                if let Some(format) = export.format {
+                    assert!(params.contains(format), "{}: `{format}` is not a documented format of {}", f.id, export.command);
+                }
+                for o in export.options {
+                    assert!(params.contains(o.param), "{}: `{}` is not a documented parameter of {}", f.id, o.param, export.command);
+                }
+            }
+        }
+        for o in formats::DESIGN_SAVE_OPTIONS {
+            assert!(params_of("file.save_as").contains(o.param), "`{}` is not a documented parameter of file.save_as", o.param);
+        }
+    }
 }

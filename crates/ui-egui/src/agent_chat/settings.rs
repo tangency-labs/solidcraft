@@ -257,7 +257,11 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         if app.agent_chat.detecting.is_some() {
             ui_kit::text(ui, tr("ui.agent_chat_detecting"), ui_kit::Text::Hint("detecting"));
         } else if all.is_empty() {
-            ui_kit::empty_box(ui, "assistant_agents", tr("ai.prefs.no_agents"));
+            if std::env::var_os("FLATPAK_ID").is_some() {
+                super::panel::no_agents(ui);
+            } else {
+                ui_kit::empty_box(ui, "assistant_agents", tr("ai.prefs.no_agents"));
+            }
         }
         for (index, entry) in all.iter().enumerate() {
             ui.push_id(&entry.id, |ui| {

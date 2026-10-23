@@ -977,6 +977,9 @@ fn a_part_at_a_dead_point_of_its_loop_keeps_its_mobility() {
     pin(&mut s, "revolute", "Root pin", "Ground", "Barrel", root, Vec3::Z);
     pin(&mut s, "slider", "Stroke", "Barrel", "Rod", root, Vec3::Y);
     pin(&mut s, "revolute", "Tip pin", "Rod", "Panel", tip, Vec3::Z);
+    super::solve_counts::take();
+    s.refresh();
+    assert_eq!(super::solve_counts::take().1, 0, "refresh must not repeat the singular-pose analysis");
     for part in ["Panel", "Barrel", "Rod"] {
         assert_eq!(dof_of(&mut s, part), 1, "dead point: {part}");
     }
@@ -1377,6 +1380,194 @@ fn four_bar_coupler_point_traces_its_closed_form_curve() {
     assert!(from_study.iter().zip(&pts).all(|(a, b)| near(*a, *b)), "{r}");
 }
 
+fn kept_trace_fit(s: &Session, id: u64) -> Vec<Vec3> {
+    s.doc.sketch(id).unwrap().wires.first().unwrap().fit.clone()
+}
+
+#[test]
+fn chebyshev_demo_regenerates_its_analytic_trajectory_without_resampling_playback() {
+    let mut s = Session::default();
+    s.run_script(&serde_json::from_str(include_str!("../../../../examples/chebyshev-motion-trace.json")).unwrap()).unwrap();
+    let trace = s.doc.assembly.traces.first().unwrap().clone();
+    let original = kept_trace_fit(&s, trace.sketch);
+    assert_eq!(original.len(), 145);
+    assert_eq!(s.doc.assembly.joints.len(), 4);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    // Independent circle-intersection construction: P is the crank end, Q the
+    // coupler/rocker pin, and the tracer extends the coupler by another PQ.
+    let mut q = Vec3::new(40.0, 50.0, 0.0);
+    for (i, got) in original.iter().enumerate() {
+        let theta = (90.0 + 2.5 * i as f64).to_radians();
+        let p = Vec3::new(20.0 * theta.cos(), 20.0 * theta.sin(), 0.0);
+        let [a, b] = meet(p, 50.0, Vec3::new(40.0, 0.0, 0.0), 50.0);
+        q = if a.dist(q) < b.dist(q) { a } else { b };
+        let want = q * 2.0 - p + Vec3::Z * 10.0;
+        assert!(near(*got, want), "sample {i}: {got:?} wants {want:?}");
+    }
+    let count = s.motion_traces.recomputations;
+    for angle in [30, 90, 180, 270, 0] {
+        let result = run(&mut s, "joint.drive", json!({"joint":"Crank drive","value":angle,"quiet":true}));
+        assert!(result["stopped_by_loop"].is_null(), "{result}");
+    }
+    assert_eq!(s.motion_traces.recomputations, count);
+    assert_eq!(kept_trace_fit(&s, trace.sketch), original);
+
+    run(&mut s, "parameters.change", json!({"name":"coupler_length","expression":"55 mm"}));
+    let updated = kept_trace_fit(&s, trace.sketch);
+    let [q, _] = meet(Vec3::new(0.0, 20.0, 0.0), 55.0, Vec3::new(40.0, 0.0, 0.0), 50.0);
+    assert!(near(updated[0], q * 2.0 - Vec3::new(0.0, 20.0, 0.0) + Vec3::Z * 10.0));
+    assert_ne!(updated, original);
+    assert_eq!(s.doc.assembly.traces[0].wire, trace.wire);
+    assert_eq!(s.motion_traces.recomputations, count + 1, "a dimension edit resamples once");
+    assert!(s.model.result(trace.sketch).unwrap().warning.is_none());
+
+    run(&mut s, "parameters.change", json!({"changes":{"coupler_length":"2.5 * unit_length","unit_length":"24 mm"}}));
+    let scaled = kept_trace_fit(&s, trace.sketch);
+    assert!(scaled.iter().zip(&original).all(|(a, b)| near(*a, Vec3::new(b.x * 1.2, b.y * 1.2, 10.0))));
+    run(&mut s, "parameters.change", json!({"name":"trace_sweep","expression":"180 deg"}));
+    let half = kept_trace_fit(&s, trace.sketch);
+    assert!(near(half[0], scaled[0]) && near(*half.last().unwrap(), scaled[72]));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+}
+
+#[test]
+fn associative_trace_reuses_pose_and_unrelated_edits_but_follows_drive_expressions() {
+    let (mut s, p0, q0) = four_bar();
+    let mid = (p0 + q0) * 0.5;
+    run(&mut s, "parameters.add", json!({"name":"swing","expression":"90 deg"}));
+    let r = run(
+        &mut s,
+        "motion.trace.keep",
+        json!({"occurrence":"Coupler","point":[mid.x,mid.y,mid.z],
+        "joint":"Crank","from":0,"to":"swing","samples":19}),
+    );
+    let id = r["sketch"].as_u64().unwrap();
+    let original = kept_trace_fit(&s, id);
+    let count = s.motion_traces.recomputations;
+    for angle in [20, 45, 75, 10] {
+        run(&mut s, "joint.drive", json!({"joint":"Crank","value":angle,"quiet":true}));
+        assert_eq!(kept_trace_fit(&s, id), original);
+    }
+    run(&mut s, "parameters.add", json!({"name":"unrelated","expression":"123 mm"}));
+    run(&mut s, "parameters.change", json!({"name":"unrelated","expression":"456 mm"}));
+    assert_eq!(s.motion_traces.recomputations, count, "pose and unrelated edits must not resample");
+    let mut preview = s.scratch();
+    run(&mut preview, "joint.drive", json!({"joint":"Crank","value":80,"quiet":true}));
+    assert_eq!(preview.motion_traces.recomputations, count, "scratch previews reuse the same valid inputs");
+    run(&mut s, "parameters.change", json!({"name":"swing","expression":"180 deg"}));
+    let updated = kept_trace_fit(&s, id);
+    assert_ne!(updated, original);
+    assert_eq!(s.motion_traces.recomputations, count + 1, "a parameter command may refresh twice; sample once");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(kept_trace_fit(&s, id), original);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(kept_trace_fit(&s, id), updated);
+    assert_eq!(s.motion_traces.recomputations, count + 1, "undo and redo reuse the retained input results");
+    run(&mut s, "parameters.rename", json!({"name":"swing","new_name":"travel"}));
+    assert_eq!(s.motion_traces.recomputations, count + 1, "renaming a parameter leaves resolved inputs unchanged");
+    let count = s.motion_traces.recomputations;
+    let before = s.doc.clone();
+    for invalid in [
+        json!({"sketch":id,"samples":501}),
+        json!({"sketch":id,"index":99}),
+        json!({"sketch":id,"from":"missing_parameter"}),
+        json!({"sketch":id,"joint":"Missing","from":0,"to":90}),
+    ] {
+        assert!(s.execute("motion.trace.edit", &invalid).is_err());
+        assert_eq!(*s.doc, *before, "invalid trace edits must be atomic");
+    }
+    run(&mut s, "motion.trace.edit", json!({"sketch":id,"samples":19}));
+    assert_eq!(s.motion_traces.recomputations, count, "an identical definition is reusable");
+    assert!(std::sync::Arc::ptr_eq(&before, &s.doc), "an identical edit must not refresh the model or add an undo step");
+    run(&mut s, "motion.trace.edit", json!({"sketch":id,"auto_update":false}));
+    run(&mut s, "parameters.change", json!({"name":"travel","expression":"270 deg"}));
+    assert_eq!(kept_trace_fit(&s, id), updated, "detaching preserves the curve");
+}
+
+#[test]
+fn associative_trace_follows_a_study_and_survives_serialization() {
+    let (mut s, p0, q0) = four_bar();
+    let mid = (p0 + q0) * 0.5;
+    let study = run(
+        &mut s,
+        "motion.study",
+        json!({"name":"Turn","steps":18,
+        "keys":[{"joint":"Crank","points":[[0,0],[18,90]]}]}),
+    );
+    let r = run(&mut s, "motion.trace.keep", json!({"occurrence":"Coupler","point":[mid.x,mid.y,mid.z],"study":"Turn"}));
+    let id = r["sketch"].as_u64().unwrap();
+    let original = kept_trace_fit(&s, id);
+    run(
+        &mut s,
+        "motion.study",
+        json!({"study":study["study"],"name":"Turn","steps":36,
+        "keys":[{"joint":"Crank","points":[[0,0],[36,180]]}]}),
+    );
+    assert_eq!(kept_trace_fit(&s, id).len(), 37);
+    assert_ne!(kept_trace_fit(&s, id), original);
+    let doc: solidcraft_doc::Document = serde_json::from_value(serde_json::to_value(&*s.doc).unwrap()).unwrap();
+    let mut opened = Session::new(doc);
+    run(&mut opened, "motion.trace.edit", json!({"sketch":id,"samples":25}));
+    assert_eq!(kept_trace_fit(&opened, id).len(), 25);
+    run(&mut opened, "motion.delete", json!({"study":"Turn"}));
+    assert!(run(&mut opened, "motion.list", json!({}))["traces"][0]["error"].is_string());
+    assert!(opened.model.result(id).unwrap().warning.as_ref().unwrap().contains("last successful"));
+    let count = opened.motion_traces.recomputations;
+    opened.refresh();
+    assert_eq!(opened.motion_traces.recomputations, count, "a missing dependency must not retry on every refresh");
+    run(&mut opened, "edit.undo", json!({}));
+    assert!(run(&mut opened, "motion.list", json!({}))["traces"][0]["error"].is_null());
+    assert!(opened.model.result(id).unwrap().warning.is_none());
+}
+
+#[test]
+fn associative_trace_follows_a_resized_picked_face_and_keeps_downstream_paths_current() {
+    let mut s = two_cubes();
+    pin(&mut s, "revolute", "Pivot", "A", "B", Vec3::new(20.0, 0.0, 0.0), Vec3::Z);
+    let r = run(
+        &mut s,
+        "motion.trace.keep",
+        json!({"occurrence":"B","point":[25,5,10],
+        "point_ref":{"occurrence":"B","face":[25,5,10]},"joint":"Pivot","from":0,"to":90,"samples":2}),
+    );
+    let id = r["sketch"].as_u64().unwrap();
+    let original = kept_trace_fit(&s, id);
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(&mut s, "solid.pipe", json!({"path_sketch":id,"path":r["curves"],"diameter":1,"operation":"new","body_name":"TracePipe"}));
+    let pipe_before = s.model.state().body("TracePipe").unwrap().outline_bounds();
+    let comp = s.doc.find_component("B").unwrap();
+    let height =
+        s.doc.features.iter().find(|f| f.component == comp && matches!(f.kind, solidcraft_doc::FeatureKind::Box { .. })).unwrap().param_names[2]
+            .clone();
+    let count = s.motion_traces.recomputations;
+    run(&mut s, "parameters.change", json!({"name":height,"expression":"15 mm"}));
+    let updated = kept_trace_fit(&s, id);
+    assert!(updated.iter().all(|p| (p.z - 15.0).abs() < 1e-6));
+    assert_ne!(original, updated);
+    assert_eq!(s.motion_traces.recomputations, count + 1);
+    let model = s.model.state();
+    assert_eq!(model.sketch(id).unwrap().sketch.wires.first().unwrap().fit, updated);
+    let pipe_after = model.body("TracePipe").unwrap().outline_bounds();
+    assert!((pipe_after.min.z - pipe_before.min.z - 5.0).abs() < 1e-6);
+}
+
+#[test]
+fn associative_trace_ignores_another_mechanism_on_the_same_ground() {
+    let (mut s, p0, q0) = four_bar();
+    part(&mut s, "Other", [100.0, 0.0, -5.0]);
+    pin(&mut s, "revolute", "Other pivot", "Ground", "Other", Vec3::new(100.0, 0.0, 0.0), Vec3::Z);
+    let mid = (p0 + q0) * 0.5;
+    run(
+        &mut s,
+        "motion.trace.keep",
+        json!({"occurrence":"Coupler","point":[mid.x,mid.y,mid.z],
+        "joint":"Crank","from":0,"to":180,"samples":19}),
+    );
+    let count = s.motion_traces.recomputations;
+    run(&mut s, "joint.limits", json!({"joint":"Other pivot","min":-20,"max":30}));
+    assert_eq!(s.motion_traces.recomputations, count);
+}
+
 /// The middle of a slider-crank's rod: halfway between the crank pin on its circle and the wrist
 /// pin at a·cos θ + √(b² − (a·sin θ)²).
 #[test]
@@ -1759,4 +1950,64 @@ fn joint_inspect_reads_only() {
     run(&mut s, "joint.inspect", json!({"joint": "Fix"}));
     assert_eq!(run(&mut s, "document.inspect", json!({}))["undo"], undo);
     assert_eq!(serde_json::to_value(&s.doc).unwrap_or_default(), before);
+}
+
+/// Trial placements use exactly the same constraints as a full solve. Only the expensive DOF
+/// report is optional: loop stops, errors and the resulting pose must not depend on it.
+#[test]
+fn placement_analysis_preserves_held_loop_constraints_and_diagnostics() {
+    use solidcraft_doc::joints::{self, Analysis};
+    use std::collections::BTreeMap;
+
+    let (s, _, _) = four_bar();
+    let rocker = s.doc.assembly.joints.iter().find(|j| j.name == "Rocker").unwrap().id;
+    let held = BTreeMap::from([((rocker, 0), 0.0)]);
+    for angle in [-10.0_f64, 40.0, 100.0] {
+        let mut doc = (*s.doc).clone();
+        doc.assembly.joints.iter_mut().find(|j| j.id == rocker).unwrap().values[0] = angle.to_radians();
+        let full = joints::solve_holding(&doc, &s.model.state(), &held);
+        let placement = joints::solve_holding_with_analysis(&doc, &s.model.state(), &held, Analysis::Placement);
+        assert!(placement.dof.is_empty(), "trial placement must not compute DOF");
+        assert_eq!(placement.world, full.world);
+        assert_eq!(placement.values, full.values);
+        assert_eq!(placement.fixed, full.fixed);
+        assert_eq!(placement.conflicts, full.conflicts);
+        assert_eq!(placement.errors, full.errors);
+        let mut placed = doc.clone();
+        placed.apply_joint_solution(&placement);
+        let mut reference = doc;
+        reference.apply_joint_solution(&full);
+        assert_eq!(placed, reference);
+        assert_eq!(joints::solve(&placed, &s.model.state()).dof, joints::solve(&reference, &s.model.state()).dof);
+    }
+    // A degenerate origin remains an error even in a placement-only trial.
+    let mut broken = (*s.doc).clone();
+    broken.assembly.joints[0].b.snap = solidcraft_doc::joints::Snap::Point { point: Vec3::ZERO, z: Some(Vec3::ZERO), x: None };
+    let full = joints::solve(&broken, &s.model.state());
+    let placement = joints::solve_holding_with_analysis(&broken, &s.model.state(), &BTreeMap::new(), Analysis::Placement);
+    assert!(!full.errors.is_empty());
+    assert_eq!(placement.errors, full.errors);
+    assert_eq!(placement.conflicts, full.conflicts);
+}
+
+/// Ordinary commands publish one complete report; refresh only updates constraint placements.
+/// Counts are deterministic work assertions, not timing thresholds tied to a test machine.
+#[test]
+fn joint_drive_and_refresh_do_not_repeat_dof_analysis() {
+    let (mut s, _, _) = four_bar();
+    for (angle, quiet) in [(17, false), (58, true), (105, false)] {
+        super::solve_counts::take();
+        let r = run(&mut s, "joint.drive", json!({"joint":"Crank", "value":angle, "quiet":quiet}));
+        let (all, full) = super::solve_counts::take();
+        assert!(all > full, "placement trials must still run");
+        assert_eq!(full, usize::from(!quiet), "only a published DOF report needs full analysis");
+        let expected = super::sol_json(&solidcraft_doc::joints::solve(&s.doc, &s.model.state()), &json!({"quiet":quiet}));
+        for key in ["dof", "fixed", "errors", "conflicts"] {
+            assert_eq!(r.get(key), expected.get(key), "{key}: {r}");
+        }
+        let before = s.doc.clone();
+        s.refresh();
+        assert_eq!(super::solve_counts::take().1, 0, "refresh discards the DOF report");
+        assert_eq!(*s.doc, *before);
+    }
 }

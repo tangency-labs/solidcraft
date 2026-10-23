@@ -572,6 +572,8 @@ pub struct Assembly {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub studies: Vec<crate::motion::MotionStudy>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub traces: Vec<crate::motion::MotionTrace>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exploded: Vec<crate::motion::ExplodedView>,
 }
 
@@ -597,6 +599,15 @@ impl Assembly {
                 }
             }
         }
+        for trace in &self.traces {
+            if let crate::motion::TraceMotion::Joint { joint, from, to, .. } = &trace.motion {
+                for (label, value) in [("from", from), ("to", to)] {
+                    if let serde_json::Value::String(e) = value {
+                        out.push((*joint, format!("trace {} {label}", trace.sketch), e.as_str()));
+                    }
+                }
+            }
+        }
         out
     }
 
@@ -616,6 +627,15 @@ impl Assembly {
                 }
             }
         }
+        for trace in &mut self.traces {
+            if let crate::motion::TraceMotion::Joint { from, to, .. } = &mut trace.motion {
+                for value in [from, to] {
+                    if let serde_json::Value::String(e) = value {
+                        out.push(e);
+                    }
+                }
+            }
+        }
         out
     }
 
@@ -627,6 +647,7 @@ impl Assembly {
             && !self.contact_enabled
             && !self.contact_all
             && self.studies.is_empty()
+            && self.traces.is_empty()
             && self.exploded.is_empty()
     }
 }
@@ -731,8 +752,7 @@ fn nearest_plane(doc: &Document, st: &ModelState, o: &JointOrigin, pick: Vec3) -
     let mut best: Option<(f64, Vec3, Vec3)> = None;
     for b in component_bodies(doc, st, comp) {
         let offset = doc.model_body_offset(b);
-        let tol = (b.body.size() * 2e-3).max(1e-3);
-        for f in b.body.faces(tol)? {
+        for f in b.joint_faces()?.iter() {
             let Some(n) = f.plane_normal else { continue };
             let (c, n) = match offset {
                 Some(m) => (apply_point(m, f.centroid), apply_vector(m, n)),
@@ -836,6 +856,15 @@ pub fn clamp(j: &Joint, q: &mut [f64]) {
     }
 }
 
+/// Work requested after placing occurrences and checking their joint constraints.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Analysis {
+    /// Placement, loop closure, conflicts and errors only; `Solution::dof` is empty.
+    Placement,
+    /// Also count each occurrence's remaining motion, including nearby singular poses.
+    DegreesOfFreedom,
+}
+
 /// The result of placing occurrences by their joints.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Solution {
@@ -852,7 +881,7 @@ pub struct Solution {
     /// Remaining degrees of freedom per occurrence (6 = free, 0 = fixed): how many independent
     /// values still move it, from the fixed occurrences, with loops kept closed and a value a
     /// motion link sets moving with the values its link chain starts from (a driven gear has its
-    /// driving gear's one, a screw's travel its turn's).
+    /// driving gear's one, a screw's travel its turn's). Empty for [`Analysis::Placement`].
     pub dof: BTreeMap<u64, usize>,
     /// Occurrences fixed in place (grounded, or the root's).
     pub fixed: Vec<u64>,
@@ -943,22 +972,36 @@ fn flip_of(j: &Joint) -> Mat {
     if !j.flip { mat_mul(&m, &[[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]) } else { m }
 }
 
+/// Component-space frames stay fixed throughout one solve. Cache their inverses without
+/// regrouping products: reversed joints still invert the value-dependent link as before.
+struct JointFrames {
+    a: Mat,
+    b: Mat,
+    inverse_a: Option<Mat>,
+    inverse_b: Option<Mat>,
+}
+
+impl JointFrames {
+    fn new(a: Mat, b: Mat) -> Self {
+        Self { a, b, inverse_a: mat_inverse(&a), inverse_b: mat_inverse(&b) }
+    }
+
+    fn through(&self, joint: &Joint, values: &[f64], from_a: bool, t: &Mat) -> Option<Mat> {
+        let link = mat_mul(&link_of(joint, values), self.inverse_b.as_ref()?);
+        if from_a { Some(mat_mul(&mat_mul(t, &self.a), &link)) } else { Some(mat_mul(&mat_mul(t, &mat_inverse(&link)?), self.inverse_a.as_ref()?)) }
+    }
+}
+
 /// B's world transform from A's (or A's from B's, going the other way) for the joint's values.
 fn through(j: &Joint, (fa, fb): &(Mat, Mat), q: &[f64], from_a: bool, t: &Mat) -> Option<Mat> {
-    let link = mat_mul(&link_of(j, q), &mat_inverse(fb)?);
-    if from_a {
-        Some(mat_mul(&mat_mul(t, fa), &link))
-    } else {
-        // T_A = T_B · link⁻¹ · F_a⁻¹
-        Some(mat_mul(&mat_mul(t, &mat_inverse(&link)?), &mat_inverse(fa)?))
-    }
+    JointFrames::new(*fa, *fb).through(j, q, from_a, t)
 }
 
 /// The spanning tree the solver places occurrences along, out from the fixed ones.
 struct Tree<'a> {
     joints: BTreeMap<u64, &'a Joint>,
     /// Joint frames in component coordinates (A's, B's).
-    frames: BTreeMap<u64, (Mat, Mat)>,
+    frames: BTreeMap<u64, JointFrames>,
     fixed: BTreeMap<u64, Mat>,
     /// Placed occurrence → (the occurrence it is placed from, the joint, from the joint's A side).
     parent: BTreeMap<u64, (u64, u64, bool)>,
@@ -968,8 +1011,10 @@ struct Tree<'a> {
 
 impl Tree<'_> {
     fn step(&self, joint: u64, from_a: bool, t: &Mat, vals: &Values) -> Option<Mat> {
+        #[cfg(test)]
+        tests::PLACEMENT_STEPS.with(|steps| steps.set(steps.get() + 1));
         let q = vals.get(&joint).map(Vec::as_slice).unwrap_or(&[]);
-        through(self.joints.get(&joint)?, self.frames.get(&joint)?, q, from_a, t)
+        self.frames.get(&joint)?.through(self.joints.get(&joint)?, q, from_a, t)
     }
 
     /// Where every placed occurrence is for these values.
@@ -1005,6 +1050,75 @@ impl Tree<'_> {
             t = self.step(*joint, *from_a, &t, vals)?;
         }
         Some(t)
+    }
+}
+
+/// Storage shared by one residual callback's evaluations, scoped to its immutable tree.
+/// Keep map nodes and path capacity, but invalidate every placement before reading new values.
+struct PlacementWorkspace<'tree, 'doc> {
+    tree: &'tree Tree<'doc>,
+    placed: BTreeMap<u64, Option<Mat>>,
+    path: Vec<(u64, u64, bool)>,
+}
+
+impl<'tree, 'doc> PlacementWorkspace<'tree, 'doc> {
+    fn new(tree: &'tree Tree<'doc>) -> Self {
+        Self { tree, placed: BTreeMap::new(), path: Vec::new() }
+    }
+
+    fn at<'values>(&'values mut self, values: &'values Values) -> Placements<'values, 'tree, 'doc> {
+        for placed in self.placed.values_mut() {
+            *placed = None;
+        }
+        Placements { workspace: self, values }
+    }
+}
+
+/// Only this guard can read placements. Its values stay immutable until it is dropped;
+/// obtaining the next guard clears validity while retaining the allocated storage.
+struct Placements<'values, 'tree, 'doc> {
+    workspace: &'values mut PlacementWorkspace<'tree, 'doc>,
+    values: &'values Values,
+}
+
+impl Placements<'_, '_, '_> {
+    fn world(&mut self, mut occurrence: u64) -> Option<Mat> {
+        self.workspace.path.clear();
+        let mut t = loop {
+            if let Some(t) = self.workspace.placed.get(&occurrence).and_then(Option::as_ref).or_else(|| self.workspace.tree.fixed.get(&occurrence)) {
+                break *t;
+            }
+            if self.workspace.path.len() >= self.workspace.tree.order.len() {
+                return None;
+            }
+            let &(from, joint, from_a) = self.workspace.tree.parent.get(&occurrence)?;
+            self.workspace.path.push((occurrence, joint, from_a));
+            occurrence = from;
+        };
+        while let Some((occurrence, joint, from_a)) = self.workspace.path.pop() {
+            t = self.workspace.tree.step(joint, from_a, &t, self.values)?;
+            #[cfg(test)]
+            if !self.workspace.placed.contains_key(&occurrence) {
+                tests::PLACEMENT_INSERTS.with(|inserts| inserts.set(inserts.get() + 1));
+            }
+            self.workspace.placed.insert(occurrence, Some(t));
+        }
+        Some(t)
+    }
+
+    fn closure_gaps(&mut self, closing: &[u64], scale: f64, out: &mut Vec<f64>) -> Option<()> {
+        for id in closing {
+            let (joint, frames) = (self.workspace.tree.joints.get(id)?, self.workspace.tree.frames.get(id)?);
+            let tb = self.world(joint.b.occurrence)?;
+            let ta = self.world(joint.a.occurrence)?;
+            let want = self.workspace.tree.step(*id, true, &ta, self.values)?;
+            for p in [Vec3::ZERO, Vec3::X * scale, Vec3::Y * scale] {
+                let at = apply_point(&frames.b, p);
+                let d = apply_point(&want, at) - apply_point(&tb, at);
+                out.extend([d.x, d.y, d.z]);
+            }
+        }
+        Some(())
     }
 }
 
@@ -1212,8 +1326,8 @@ fn loop_scale(tree: &Tree, around: &BTreeSet<u64>, vals: &Values) -> f64 {
     let joints: Aabb3 = around
         .iter()
         .filter_map(|id| {
-            let (j, (fa, _)) = (tree.joints.get(id)?, tree.frames.get(id)?);
-            Some(apply_point(&mat_mul(&tree.world(j.a.occurrence, vals)?, fa), Vec3::ZERO))
+            let (j, frames) = (tree.joints.get(id)?, tree.frames.get(id)?);
+            Some(apply_point(&mat_mul(&tree.world(j.a.occurrence, vals)?, &frames.a), Vec3::ZERO))
         })
         .collect();
     if joints.is_empty() { 1.0 } else { joints.diagonal().clamp(1.0, 1e6) }
@@ -1221,18 +1335,8 @@ fn loop_scale(tree: &Tree, around: &BTreeSet<u64>, vals: &Values) -> f64 {
 
 /// How far each closing joint is from meeting: three points of B's joint frame, `scale` apart,
 /// where the joint wants them against where the tree puts them (appended to `out`).
-fn closure_gaps(tree: &Tree, closing: &[u64], vals: &Values, scale: f64, out: &mut Vec<f64>) -> Option<()> {
-    for id in closing {
-        let (j, (_, fb)) = (tree.joints.get(id)?, tree.frames.get(id)?);
-        let tb = tree.world(j.b.occurrence, vals)?;
-        let want = tree.step(*id, true, &tree.world(j.a.occurrence, vals)?, vals)?;
-        for p in [Vec3::ZERO, Vec3::X * scale, Vec3::Y * scale] {
-            let at = apply_point(fb, p);
-            let d = apply_point(&want, at) - apply_point(&tb, at);
-            out.extend([d.x, d.y, d.z]);
-        }
-    }
-    Some(())
+fn closure_gaps(workspace: &mut PlacementWorkspace, closing: &[u64], vals: &Values, scale: f64, out: &mut Vec<f64>) -> Option<()> {
+    workspace.at(vals).closure_gaps(closing, scale, out)
 }
 
 /// How far a closing joint may be off before it is a conflict: its frames apart by more than
@@ -1294,6 +1398,7 @@ fn nearby_pose(tree: &Tree, groups: &[Group], asm: &Assembly, linked: &BTreeSet<
                 (v + d * if k % 2 == 0 { w } else { -w }).max(*lo).min(*hi)
             })
             .collect();
+        let mut workspace = PlacementWorkspace::new(tree);
         let mut work = near.clone();
         let mut gaps = |x: &[f64]| -> Option<Vec<f64>> {
             spent += 1;
@@ -1307,7 +1412,7 @@ fn nearby_pose(tree: &Tree, groups: &[Group], asm: &Assembly, linked: &BTreeSet<
             }
             apply_links(asm, &mut work);
             let mut out = Vec::with_capacity(closing.len() * 9);
-            closure_gaps(tree, closing, &work, scale, &mut out)?;
+            closure_gaps(&mut workspace, closing, &work, scale, &mut out)?;
             out.iter().all(|v| v.is_finite()).then_some(out)
         };
         if close_within(&mut gaps, &mut x, &bounds, (1e-10 * scale).min(1e-7), loose_gap(scale)).is_some()
@@ -1422,6 +1527,7 @@ fn loop_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, dof: &m
         let (n, gaps) = (values.len(), closers.len() * 9);
         // How many ways the occurrence moves at a pose, with the loops kept closed.
         let mut free_at = |at: &Values| -> Option<usize> {
+            let mut workspace = PlacementWorkspace::new(tree);
             let mut work = at.clone();
             // The loops' gaps, then three points of the occurrence `scale` apart.
             let mut f = |x: &[f64]| -> Option<Vec<f64>> {
@@ -1433,8 +1539,9 @@ fn loop_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, dof: &m
                 }
                 apply_links(asm, &mut work);
                 let mut out = Vec::with_capacity(closers.len() * 9 + 9);
-                closure_gaps(tree, &closers, &work, scale, &mut out)?;
-                let t = tree.world(*occ, &work)?;
+                let mut placed = workspace.at(&work);
+                placed.closure_gaps(&closers, scale, &mut out)?;
+                let t = placed.world(*occ)?;
                 for p in [Vec3::ZERO, Vec3::X * scale, Vec3::Y * scale] {
                     let q = apply_point(&t, p);
                     out.extend([q.x, q.y, q.z]);
@@ -1530,6 +1637,7 @@ fn close_group(
     if !moves.is_empty() {
         first = first.min(1.0 / stride(&effective(&x0, 0.0), &effective(&x0, 1.0)));
     }
+    let mut workspace = PlacementWorkspace::new(tree);
     let mut work = vals.clone();
     // How far each closing joint is from meeting with the held values `t` of the way along:
     // three points of B's joint frame, where the joint wants them against where the tree puts them.
@@ -1540,7 +1648,7 @@ fn close_group(
         }
         place(&mut work, x, t);
         let mut out = Vec::with_capacity(closing.len() * 9);
-        closure_gaps(tree, closing, &work, scale, &mut out)?;
+        closure_gaps(&mut workspace, closing, &work, scale, &mut out)?;
         out.iter().all(|v| v.is_finite()).then_some(out)
     };
     // Already closed, with no held value moving. (A moving one is followed all the way: a
@@ -1690,6 +1798,13 @@ pub fn solve(doc: &Document, st: &ModelState) -> Solution {
 /// of the other joints around the loop. The `held` values (the ones being driven) keep theirs,
 /// moving there from the values given (where the loops last closed) so the others follow them.
 pub fn solve_holding(doc: &Document, st: &ModelState, held: &Held) -> Solution {
+    solve_holding_with_analysis(doc, st, held, Analysis::DegreesOfFreedom)
+}
+
+/// Place occurrences and check constraints with the requested diagnostic work. Placement-only
+/// solves still close and check every loop, respect held values and limits, and report errors;
+/// they leave `Solution::dof` empty rather than returning the spanning tree's approximate count.
+pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis) -> Solution {
     let asm = &doc.assembly;
     let mut sol = Solution::default();
     let mut vals = joint_values(asm);
@@ -1704,9 +1819,9 @@ pub fn solve_holding(doc: &Document, st: &ModelState, held: &Held) -> Solution {
     for id in &closing {
         let Some(j) = tree.joints.get(id) else { continue };
         let (Some(ta), Some(tb)) = (placed.get(&j.a.occurrence), placed.get(&j.b.occurrence)) else { continue };
-        let (Some(want), Some((_, fb))) = (tree.step(*id, true, ta, &vals), tree.frames.get(id)) else { continue };
+        let (Some(want), Some(frames)) = (tree.step(*id, true, ta, &vals), tree.frames.get(id)) else { continue };
         // Measured at the joint, where the loop solver closes it.
-        let (dt, da) = mismatch(&mat_mul(&want, fb), &mat_mul(tb, fb));
+        let (dt, da) = mismatch(&mat_mul(&want, &frames.b), &mat_mul(tb, &frames.b));
         if dt > CONFLICT_MM || da > CONFLICT_RAD {
             sol.conflicts.push((
                 j.id,
@@ -1719,11 +1834,15 @@ pub fn solve_holding(doc: &Document, st: &ModelState, held: &Held) -> Solution {
             sol.conflicts.push((j.id, j.name.clone(), "the loop can't stay closed on the way to these values".into()));
         }
     }
-    if !closing.is_empty() {
-        loop_dof(&tree, &closing, asm, &vals, &mut dof);
-    }
-    for o in &doc.occurrences {
-        dof.entry(o.id).or_insert(6);
+    if analysis == Analysis::DegreesOfFreedom {
+        if !closing.is_empty() {
+            loop_dof(&tree, &closing, asm, &vals, &mut dof);
+        }
+        for o in &doc.occurrences {
+            dof.entry(o.id).or_insert(6);
+        }
+    } else {
+        dof.clear();
     }
     placed.remove(&0);
     sol.world = placed;
@@ -1749,7 +1868,7 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Soluti
     let joints: Vec<&Joint> = asm.joints.iter().filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
     // Joint frames in component coordinates (errors leave the joint out). An origin several joints
     // share (a panel face every part sits on) is found once.
-    let mut frames: BTreeMap<u64, (Mat, Mat)> = BTreeMap::new();
+    let mut frames: BTreeMap<u64, JointFrames> = BTreeMap::new();
     let mut found: BTreeMap<(u64, String), std::result::Result<Mat, String>> = BTreeMap::new();
     let mut resolve = |o: &JointOrigin| -> Result<Mat> {
         let Ok(comp) = component_of(doc, o.occurrence) else { return resolve_origin(doc, st, o) };
@@ -1770,7 +1889,7 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Soluti
         }
         match (resolve(&j.a), resolve(&j.b)) {
             (Ok(fa), Ok(fb)) => {
-                frames.insert(j.id, (fa, fb));
+                frames.insert(j.id, JointFrames::new(fa, fb));
             }
             (Err(e), _) | (_, Err(e)) => sol.errors.push((j.id, j.name.clone(), e.to_string())),
         }
@@ -1953,6 +2072,138 @@ pub fn frame_of(o: Vec3, z: Vec3, x: Option<Vec3>) -> Option<Mat> {
 mod tests {
     use super::*;
 
+    thread_local! {
+        pub(super) static PLACEMENT_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        pub(super) static PLACEMENT_INSERTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    pub(super) fn placement_tree(asm: &Assembly) -> Tree<'_> {
+        Tree {
+            joints: asm.joints.iter().map(|j| (j.id, j)).collect(),
+            frames: asm.joints.iter().map(|j| (j.id, JointFrames::new(mat_mul(&shift(3.0, 4.0, 5.0), &rot_y(0.3)), rot_x(-0.2)))).collect(),
+            fixed: BTreeMap::from([(0, IDENTITY)]),
+            parent: BTreeMap::from([(1, (0, 1, true)), (2, (1, 2, false)), (3, (2, 3, true)), (4, (1, 4, true)), (99, (0, 5, true))]),
+            order: vec![1, 2, 3, 4, 99],
+        }
+    }
+
+    /// Shared ancestors are evaluated once, without visiting an unrelated assembly branch.
+    /// The same arithmetic must be used after values change and on a reversed tree edge.
+    #[test]
+    fn residual_placements_reuse_ancestors_only_for_the_current_values() {
+        let asm = chain(6, 0.2);
+        let tree = placement_tree(&asm);
+        let mut values = joint_values(&asm);
+        let expected: BTreeMap<u64, Mat> = [1, 2, 3, 4].into_iter().map(|id| (id, tree.world(id, &values).unwrap())).collect();
+        let mut workspace = PlacementWorkspace::new(&tree);
+        PLACEMENT_STEPS.with(|steps| steps.set(0));
+        {
+            let mut placed = workspace.at(&values);
+            for id in [3, 4, 3, 2, 4] {
+                assert_eq!(placed.world(id), expected.get(&id).copied());
+            }
+            assert_eq!(placed.world(0), Some(IDENTITY));
+            assert_eq!(placed.world(1234), None);
+        }
+        assert_eq!(PLACEMENT_STEPS.with(|steps| steps.get()), 4, "one step per needed occurrence; no unrelated branch");
+        values.get_mut(&1).unwrap()[0] += 0.1;
+        apply_links(&asm, &mut values);
+        let changed = tree.world(3, &values).unwrap();
+        assert_ne!(Some(&changed), expected.get(&3));
+        let mut placed = workspace.at(&values);
+        assert_eq!(placed.world(3), Some(changed), "a new residual evaluation cannot reuse the previous values' placements");
+    }
+
+    /// Cached static inverses retain the original multiplication order for every joint kind,
+    /// flip and traversal direction. A non-invertible frame remains a failed step.
+    #[test]
+    fn prepared_joint_frames_match_fresh_inverses() {
+        fn reference(j: &Joint, fa: &Mat, fb: &Mat, q: &[f64], from_a: bool, t: &Mat) -> Option<Mat> {
+            let link = mat_mul(&link_of(j, q), &mat_inverse(fb)?);
+            if from_a { Some(mat_mul(&mat_mul(t, fa), &link)) } else { Some(mat_mul(&mat_mul(t, &mat_inverse(&link)?), &mat_inverse(fa)?)) }
+        }
+        let mut joint = chain(1, 0.0).joints.remove(0);
+        let fa = mat_mul(&shift(3.0, -7.0, 11.0), &rot_y(0.3));
+        let fb = mat_mul(&shift(-2.0, 5.0, 13.0), &rot_x(-0.2));
+        let t = mat_mul(&shift(17.0, 19.0, -23.0), &rot_z(0.7));
+        let singular = [[0.0; 4]; 4];
+        for (a, b) in [(fa, fb), (singular, fb), (fa, singular)] {
+            let frames = JointFrames::new(a, b);
+            for kind in [
+                JointKind::Rigid,
+                JointKind::Revolute,
+                JointKind::Slider,
+                JointKind::Cylindrical,
+                JointKind::PinSlot,
+                JointKind::Planar,
+                JointKind::Ball,
+                JointKind::Parallel,
+                JointKind::Perpendicular,
+                JointKind::Angle,
+                JointKind::PointOnPlane,
+                JointKind::PointOnLine,
+                JointKind::LineOnPlane,
+            ] {
+                joint.kind = kind;
+                joint.offset = 2.7;
+                joint.angle = -0.41;
+                for flip in [false, true] {
+                    joint.flip = flip;
+                    for angle in [0.0, 1e-6, -0.37, std::f64::consts::PI] {
+                        let q: Vec<f64> = (0..kind.dofs().len()).map(|i| angle * (i + 1) as f64).collect();
+                        for forward in [false, true] {
+                            assert_eq!(
+                                frames.through(&joint, &q, forward, &t),
+                                reference(&joint, &a, &b, &q, forward, &t),
+                                "{kind:?}, {flip}, {angle}, {forward}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The loop solver's residual entry point reuses shared ancestors for each perturbation;
+    /// row order, duplicate rows, append semantics and missing-origin failure stay unchanged.
+    #[test]
+    fn closure_residuals_reuse_shared_ancestors_for_each_perturbation() {
+        let mut asm = chain(6, 0.2);
+        asm.joints[5].a.occurrence = 3;
+        asm.joints[5].b.occurrence = 4;
+        let tree = placement_tree(&asm);
+        let mut workspace = PlacementWorkspace::new(&tree);
+        let mut cold = true;
+        for start in [0.2, 0.2 + 1e-6, 0.2 - 1e-6, 1.3] {
+            let mut values = joint_values(&asm);
+            values.get_mut(&1).unwrap()[0] = start;
+            apply_links(&asm, &mut values);
+            let mut expected = vec![42.0];
+            for id in [6, 6] {
+                let joint = tree.joints.get(&id).unwrap();
+                let frames = tree.frames.get(&id).unwrap();
+                let a = tree.world(joint.a.occurrence, &values).unwrap();
+                let b = tree.world(joint.b.occurrence, &values).unwrap();
+                let want = through(joint, &(frames.a, frames.b), values.get(&id).unwrap(), true, &a).unwrap();
+                for point in [Vec3::ZERO, Vec3::X * 37.0, Vec3::Y * 37.0] {
+                    let at = apply_point(&frames.b, point);
+                    let d = apply_point(&want, at) - apply_point(&b, at);
+                    expected.extend([d.x, d.y, d.z]);
+                }
+            }
+            PLACEMENT_STEPS.with(|steps| steps.set(0));
+            PLACEMENT_INSERTS.with(|inserts| inserts.set(0));
+            let mut actual = vec![42.0];
+            assert_eq!(closure_gaps(&mut workspace, &[6, 6], &values, 37.0, &mut actual), Some(()));
+            assert_eq!(actual, expected);
+            assert_eq!(PLACEMENT_INSERTS.with(|inserts| inserts.get()), if cold { 4 } else { 0 }, "reuse cache storage between perturbations");
+            cold = false;
+            assert_eq!(PLACEMENT_STEPS.with(|steps| steps.get()), 6, "four tree placements and two closing-joint steps");
+            assert_eq!(closure_gaps(&mut workspace, &[u64::MAX], &values, 37.0, &mut actual), None);
+            assert_eq!(actual, expected, "an unresolved joint does not insert a zero residual");
+        }
+    }
+
     fn close(a: &Mat, b: &Mat) -> bool {
         let (t, r) = mismatch(a, b);
         t < 1e-9 && r < 1e-9
@@ -1960,7 +2211,7 @@ mod tests {
 
     /// Revolute joints 1…n (joint 1 at `start`, the others at 0) linked 1 → 2 → … → n with
     /// ratio 2, the links stored from the end of the chain; joint 3 limited to ±50.
-    fn chain(n: u64, start: f64) -> Assembly {
+    pub(super) fn chain(n: u64, start: f64) -> Assembly {
         let origin = JointOrigin { occurrence: 0, snap: Snap::Point { point: Vec3::ZERO, z: None, x: None } };
         let joints = (1..=n)
             .map(|id| Joint {

@@ -12,6 +12,35 @@ fn near(a: Vec3, b: Vec3) -> bool {
     a.dist(b) < 1e-6
 }
 
+#[test]
+fn joint_origin_names_in_face_or_circle_explain_the_correct_form() {
+    let mut s = Session::default();
+    for (name, corner) in [("A", [0, 0, 0]), ("B", [40, 0, 0])] {
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": corner}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+    }
+    run(&mut s, "joint.origin", json!({"name": "TopA", "occurrence": "A:1", "face": [10, 10, 10]}));
+    run(&mut s, "joint.origin", json!({"name": "BotB", "occurrence": "B:1", "face": [50, 10, 0]}));
+    for field in ["face", "circle"] {
+        for (side, name, occurrence) in [("a", "TopA", "A:1"), ("b", "BotB", "B:1")] {
+            let mut params = json!({"type": "rigid", "a": "TopA", "b": "BotB"});
+            params[side] = json!({"occurrence": occurrence, field: name});
+            let error = s.execute("joint.create", &params).unwrap_err().to_string();
+            assert_eq!(
+                error,
+                format!("invalid parameters for `joint.create`: `{name}` is a joint origin: pass it as the whole origin, not as a `{field}` name")
+            );
+            assert!(s.doc.assembly.joints.is_empty());
+        }
+    }
+    let error = s.execute("joint.create", &json!({"type": "rigid", "a": {"face": "Missing"}, "b": "BotB"})).unwrap_err().to_string();
+    assert!(error.contains("no face is named `Missing`"), "{error}");
+    let result = run(&mut s, "joint.create", json!({"type": "rigid", "a": "TopA", "b": "BotB"}));
+    assert_eq!(result["errors"].as_array().map(Vec::len), Some(0), "{result}");
+    assert_eq!(s.doc.assembly.joints.len(), 1);
+}
+
 /// Widths swept: small steps (a hole's wall in a 1 mm plate is a few long facets, and a pick
 /// stored at the old width lies beside the moved hole) and large ones.
 const WIDTHS: [f64; 9] = [302.0, 304.0, 310.0, 330.0, 400.0, 450.0, 510.0, 301.0, 300.0];

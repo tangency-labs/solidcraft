@@ -1183,6 +1183,7 @@
   "ui.agent_chat_files_left_out": "Tối đa {max} tệp đính kèm trong một tin nhắn; đã bỏ qua: {files}",
   "ui.agent_chat_files_loading": "Đang chờ đọc các tệp đính kèm",
   "ui.agent_chat_files_max": "Tối đa {max} tệp trong một tin nhắn",
+  "ui.agent_chat_flatpak_none_found": "Không tìm thấy tác tử lập trình nào. Theo mặc định, hộp cát Flatpak không thấy các tác tử được cài trong thư mục nhà của bạn và không có quyền truy cập mạng. Để cho phép Claude Code và bộ điều hợp ACP của nó được cài qua nvm hoặc trong ~/.local/bin, hãy chạy lệnh này trong terminal, rồi khởi động lại SolidCraft. Lệnh cấp quyền truy cập các chương trình và tệp đăng nhập được liệt kê, cùng quyền truy cập mạng:",
   "ui.agent_chat_import_failed": "{name}: nhập tệp thất bại: {error}",
   "ui.agent_chat_intro": "Trò chuyện với tác tử lập trình (AI agent) bạn đang dùng hoặc một điểm cuối mô hình bạn chọn. AI thao tác trên thiết kế đang mở thông qua các công cụ của SolidCraft: các thay đổi hiển thị ngay khi thực hiện và có thể hoàn tác theo từng bước cho mỗi tin nhắn. Các thao tác AI được phép thực hiện mà không cần hỏi được đặt trong Tùy chọn cài đặt > AI.",
   "ui.agent_chat_key_in_env": "đã đặt khóa",

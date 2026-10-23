@@ -1182,6 +1182,7 @@
   "ui.agent_chat_files_left_out": "一條訊息最多傳送 {max} 個檔案；未傳送：{files}",
   "ui.agent_chat_files_loading": "正在等待檔案讀取完成",
   "ui.agent_chat_files_max": "一條訊息最多附加 {max} 個檔案",
+  "ui.agent_chat_flatpak_none_found": "未找到程式設計代理。預設情況下，Flatpak 沙箱無法存取主資料夾中安裝的代理，也無法存取網路。若要允許透過 nvm 或在 ~/.local/bin 中安裝的 Claude Code 及其 ACP 轉接器，請在終端機執行以下命令，然後重新啟動 SolidCraft。此命令會授予對所列程式和登入檔案的存取權限，以及網路存取權限：",
   "ui.agent_chat_import_failed": "{name}：匯入失敗：{error}",
   "ui.agent_chat_intro": "與您已在使用的程式設計代理或您選擇的模型端點聊天。它透過 SolidCraft 的工具處理開啟的設計：變更即時顯示，每條訊息的變更可一步復原。無需詢問即可執行的範圍在「偏好設定 > AI」中設定。",
   "ui.agent_chat_key_in_env": "已設定金鑰",

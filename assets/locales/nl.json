@@ -1182,6 +1182,7 @@
   "ui.agent_chat_files_left_out": "Maximaal {max} bestanden per bericht; weggelaten: {files}",
   "ui.agent_chat_files_loading": "Wachten tot de bestanden zijn gelezen",
   "ui.agent_chat_files_max": "Maximaal {max} bestanden per bericht",
+  "ui.agent_chat_flatpak_none_found": "Geen codeeragent gevonden. De Flatpak-sandbox ziet standaard geen agents die in je persoonlijke map zijn geïnstalleerd en heeft geen netwerktoegang. Voer dit commando uit in een terminal en start SolidCraft daarna opnieuw om Claude Code en de ACP-adapter toe te staan die via nvm of in ~/.local/bin zijn geïnstalleerd. Het geeft toegang tot de genoemde programma’s en aanmeldbestanden, plus netwerktoegang:",
   "ui.agent_chat_import_failed": "{name}: importeren mislukt: {error}",
   "ui.agent_chat_intro": "Chat met een codeeragent die u al gebruikt, of met een modeleindpunt naar keuze. De agent werkt aan het geopende ontwerp via de tools van SolidCraft: de wijzigingen verschijnen terwijl ze worden gemaakt en worden per bericht als één stap ongedaan gemaakt. Wat hij zonder te vragen mag doen, stelt u in via Voorkeuren > AI.",
   "ui.agent_chat_key_in_env": "sleutel ingesteld",

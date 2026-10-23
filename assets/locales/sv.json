@@ -1182,6 +1182,7 @@
   "ui.agent_chat_files_left_out": "Högst {max} filer följer med ett meddelande; utelämnade: {files}",
   "ui.agent_chat_files_loading": "Väntar på att filerna ska läsas",
   "ui.agent_chat_files_max": "Högst {max} filer i ett meddelande",
+  "ui.agent_chat_flatpak_none_found": "Ingen kodningsagent hittades. Flatpak-sandlådan ser som standard inte agenter som är installerade i din hemmapp och har ingen nätverksåtkomst. För att tillåta Claude Code och dess ACP-adapter installerade via nvm eller i ~/.local/bin kör du det här kommandot i en terminal och startar sedan om SolidCraft. Det ger åtkomst till de angivna programmen och inloggningsfilerna samt nätverksåtkomst:",
   "ui.agent_chat_import_failed": "{name}: importen misslyckades: {error}",
   "ui.agent_chat_intro": "Chatta med en kodningsagent du redan använder, eller en modellslutpunkt du väljer. Den arbetar med den öppna konstruktionen via SolidCrafts verktyg: dess ändringar syns medan den gör dem och ångras som ett steg per meddelande. Vad den får göra utan att fråga ställs in under Inställningar > AI.",
   "ui.agent_chat_key_in_env": "nyckel angiven",

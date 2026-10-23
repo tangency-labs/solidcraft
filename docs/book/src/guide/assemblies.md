@@ -212,13 +212,31 @@ first) or a motion study. The path previews in the viewport as the mechanism wou
 loops follow, and the path ends where a loop can no longer close or a contact set stops the
 motion, which the dialog says under the values. OK keeps the path as a 3D sketch spline in a new
 sketch of the root component (**Motion Trace1**, ...), where no joint moves it, and it can serve
-as a sweep or pipe path. It is a fixed curve: it
-does not follow later changes to the mechanism. A path that comes back to where it started is
-kept as a closed, smooth spline.
+as a sweep or pipe path. New traces retain their source and update when the mechanism's
+joint origins, limits, motion links or driving conditions change. Playing or dragging the
+mechanism does not redefine the trace: it keeps the assembly branch from when it was made.
+Unrelated parameter and display changes do not resample it. A path that comes back to where
+it started is kept as a closed, smooth spline.
 `motion.trace {occurrence, point, joint, from, to, index?, samples?}` (or `{occurrence, point,
 study, samples?}`) answers the world points without changing the design, and
-`motion.trace.keep` with the same parameters (and `name?`) keeps them. A trace takes 2 to 500
+`motion.trace.keep` with the same parameters (and `name?`) keeps them. `point_ref` can retain a
+joint-origin snap (such as `{occurrence, face: [x,y,z]}`), so the point follows its resized
+face; without it, the point is fixed in the part's coordinates. The dialog retains its face
+or circle snap. `motion.trace.edit {sketch, from?, to?, samples?}` changes a joint trace's
+driving conditions; `joint` with `from` and `to`, or `study`, replaces its motion source.
+Expressions in `from` and `to` follow parameter edits. Study traces follow edits to the
+referenced study, including its step count when Samples was left at the default.
+`auto_update: false` in `motion.trace.keep` makes a fixed curve; in `motion.trace.edit` it
+detaches an existing association, preserving the curve. Curves saved by earlier versions
+remain fixed. `motion.list` includes the associations and their errors. If a source is lost,
+the sketch warns and keeps its last successful curve until the source is restored or the
+association is detached. Changes and their generated curves undo and redo together.
+A trace takes 2 to 500
 samples: 100 by default for a joint, one per step for a study.
+
+The [Chebyshev linkage demo](https://github.com/tangency-labs/solidcraft/blob/main/docs/chebyshev-motion-trace.md)
+builds a complete four-joint mechanism, plays a saved study and demonstrates the
+same retained trajectory updating after a link-length or driving-range edit.
 
 **Export Animation…** in the **Motion Study** dialog saves the study as an animated GIF, drawn
 from the viewport's camera as the study plays (the keys in the dialog count, even before OK).

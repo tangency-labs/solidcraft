@@ -9,8 +9,8 @@ use solidcraft_geom::Vec3;
 use solidcraft_sketch::linalg;
 
 use super::{
-    Assembly, Held, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build, close_within, closure_gaps, jacobian,
-    joint_values, largest, least_squares, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
+    Assembly, Held, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build, close_within, jacobian, joint_values,
+    largest, least_squares, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
 };
 use crate::{Document, ModelState, apply_point, apply_vector, mat_mul};
 
@@ -133,8 +133,8 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
     let lever = path
         .iter()
         .filter_map(|id| {
-            let (j, (fa, _)) = (tree.joints.get(id)?, tree.frames.get(id)?);
-            Some(apply_point(&mat_mul(&tree.world(j.a.occurrence, &vals)?, fa), Vec3::ZERO).dist(point?))
+            let (j, frames) = (tree.joints.get(id)?, tree.frames.get(id)?);
+            Some(apply_point(&mat_mul(&tree.world(j.a.occurrence, &vals)?, &frames.a), Vec3::ZERO).dist(point?))
         })
         .fold(0.0, f64::max);
     let span = point.map_or(scale, |p| scale.max(p.dist(r.to)).max(lever));
@@ -155,7 +155,8 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
     let mt = if r.axis.is_some() { 6 } else { 3 };
     let spent = Cell::new(0usize);
     let mut work = vals.clone();
-    let mut f = |x: &[f64]| misses(tree, asm, r, scale, &vars, &closers, x, &mut work, &spent);
+    let mut workspace = super::PlacementWorkspace::new(tree);
+    let mut f = |x: &[f64]| misses(&mut workspace, asm, r, scale, &vars, &closers, x, &mut work, &spent);
     let mut x = x0.clone();
     let miss = |res: &[f64]| res.iter().take(mt).map(|v| v * v).sum::<f64>().sqrt();
     let before = f(&x0).map_or(f64::INFINITY, |r| miss(&r));
@@ -216,7 +217,8 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
         if let Some(first) = closers.first() {
             let k = drive.len();
             let mut alone = vals.clone();
-            let mut g = |x: &[f64]| misses(tree, asm, r, scale, &drive, &[], x, &mut alone, &spent);
+            let mut alone_workspace = super::PlacementWorkspace::new(tree);
+            let mut g = |x: &[f64]| misses(&mut alone_workspace, asm, r, scale, &drive, &[], x, &mut alone, &spent);
             let (mut xo, bo, co) = (x0.get(..k).unwrap_or_default().to_vec(), bounds.get(..k).unwrap_or_default(), cap.get(..k).unwrap_or_default());
             // The loops left open, nothing to pace.
             if let Some(ro) = approach(&mut g, &|_, _| 0.0, mt, &mut xo, bo, co, tol, loose_gap(scale))
@@ -249,7 +251,7 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
 /// The target's misses with the values `vars` at `x`: the point's (mm), then the axis's (as mm
 /// across the chain's `scale`), then the gaps of the loops `closers`, weighted.
 fn misses(
-    tree: &Tree,
+    workspace: &mut super::PlacementWorkspace,
     asm: &Assembly,
     r: &Reach,
     scale: f64,
@@ -269,9 +271,18 @@ fn misses(
         }
     }
     apply_links(asm, work);
-    let mut out = target(tree, r, scale, work)?;
-    let n = out.len();
-    closure_gaps(tree, closers, work, scale, &mut out)?;
+    let tree = workspace.tree;
+    // An open chain has only one target placement to read. Loops share their ancestors with
+    // that target, but a single placement needs no residual-local map.
+    let mut out = if closers.is_empty() {
+        target(tree, r, scale, work)?
+    } else {
+        let mut placed = workspace.at(work);
+        let mut out = target_at(&placed.world(r.occurrence)?, r, scale);
+        placed.closure_gaps(closers, scale, &mut out)?;
+        out
+    };
+    let n = if r.axis.is_some() { 6 } else { 3 };
     for v in out.iter_mut().skip(n) {
         *v *= LOOP_WEIGHT;
     }
@@ -280,14 +291,17 @@ fn misses(
 
 /// The target's misses for these values: the point's (mm), then the axis's (as mm across `scale`).
 fn target(tree: &Tree, r: &Reach, scale: f64, vals: &Values) -> Option<Vec<f64>> {
-    let t = tree.world(r.occurrence, vals)?;
-    let d = apply_point(&t, r.point) - r.to;
+    Some(target_at(&tree.world(r.occurrence, vals)?, r, scale))
+}
+
+fn target_at(t: &crate::Mat, r: &Reach, scale: f64) -> Vec<f64> {
+    let d = apply_point(t, r.point) - r.to;
     let mut out = vec![d.x, d.y, d.z];
     if let Some((a, z)) = r.axis {
-        let w = (apply_vector(&t, a) - z) * scale;
+        let w = (apply_vector(t, a) - z) * scale;
         out.extend([w.x, w.y, w.z]);
     }
-    Some(out)
+    out
 }
 
 /// How many steps apart the values `vars` at `a` and at `b` put the `paced` values (each with its
@@ -446,4 +460,56 @@ fn approach(
         }
     }
     Some(r)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::tests::{PLACEMENT_INSERTS, PLACEMENT_STEPS, chain, placement_tree};
+    use super::*;
+
+    /// Exercise the IK callback itself: removing sharing at this call site must fail even if
+    /// the reusable placement helper still passes its own tests.
+    #[test]
+    fn ik_residual_reuses_target_and_loop_ancestors_at_the_call_site() {
+        let mut asm = chain(6, 0.2);
+        asm.joints[5].a.occurrence = 3;
+        asm.joints[5].b.occurrence = 4;
+        let tree = placement_tree(&asm);
+        let base = joint_values(&asm);
+        let mut workspace = super::super::PlacementWorkspace::new(&tree);
+        let mut cold = true;
+        for axis in [None, Some((Vec3::Y, Vec3::Z))] {
+            let r = Reach { occurrence: 3, point: Vec3::new(1.0, 2.0, 3.0), to: Vec3::new(7.0, 11.0, 13.0), axis, joints: None };
+            for x in [0.2, 0.2 + 1e-6, 0.2 - 1e-6, 1.3] {
+                let mut reference = base.clone();
+                reference.get_mut(&1).unwrap()[0] = x;
+                apply_links(&asm, &mut reference);
+                let mut expected = target(&tree, &r, 37.0, &reference).unwrap();
+                let n = expected.len();
+                super::super::closure_gaps(&mut super::super::PlacementWorkspace::new(&tree), &[6], &reference, 37.0, &mut expected).unwrap();
+                for v in expected.iter_mut().skip(n) {
+                    *v *= LOOP_WEIGHT;
+                }
+                let mut work = base.clone();
+                let spent = Cell::new(0);
+                PLACEMENT_STEPS.with(|steps| steps.set(0));
+                PLACEMENT_INSERTS.with(|inserts| inserts.set(0));
+                let actual = misses(&mut workspace, &asm, &r, 37.0, &[(1, 0)], &[6], &[x], &mut work, &spent);
+                assert_eq!(actual, Some(expected));
+                assert_eq!(
+                    PLACEMENT_INSERTS.with(|inserts| inserts.get()),
+                    if cold { 4 } else { 0 },
+                    "IK must retain cache storage across evaluations"
+                );
+                cold = false;
+                assert_eq!(spent.get(), 1, "reuse must not skip a finite-difference evaluation or bypass its work cap");
+                assert_eq!(PLACEMENT_STEPS.with(|steps| steps.get()), 5, "four tree placements shared by the target and loop, plus the closing step");
+            }
+            let mut work = base.clone();
+            let spent = Cell::new(MAX_LOOP_WORK);
+            PLACEMENT_STEPS.with(|steps| steps.set(0));
+            assert!(misses(&mut workspace, &asm, &r, 37.0, &[(1, 0)], &[6], &[0.2], &mut work, &spent).is_none());
+            assert_eq!(PLACEMENT_STEPS.with(|steps| steps.get()), 0);
+        }
+    }
 }

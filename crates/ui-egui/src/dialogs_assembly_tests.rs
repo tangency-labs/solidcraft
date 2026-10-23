@@ -674,4 +674,19 @@ fn motion_trace_keeps_the_picked_point_path() {
         apply_point(&seen, apply_point(&mat_inverse(&put).unwrap(), at(&json!({"point": start}))))
     };
     assert!(drawn.dist(shown) < 1e-6, "{drawn:?} wants {shown:?}");
+    // The dialog retained the picked face, rather than its old coordinates. Resizing that
+    // part raises its top face and the whole saved trajectory by the same amount.
+    let component = app.session.doc.find_component("Coupler").unwrap();
+    let height = app
+        .session
+        .doc
+        .features
+        .iter()
+        .find(|f| f.component == component && matches!(f.kind, solidcraft_engine::doc::FeatureKind::Box { .. }))
+        .unwrap()
+        .param_names[2]
+        .clone();
+    app.run("parameters.change", json!({"name":height,"expression":"4 mm"})).unwrap();
+    let updated = &app.session.doc.sketch(sketch).unwrap().wires[0].fit;
+    assert!(updated.len() == wire.fit.len() && updated.iter().zip(&wire.fit).all(|(a, b)| (*a - *b - Vec3::new(0.0, 0.0, 2.0)).len() < 1e-6));
 }

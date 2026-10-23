@@ -520,16 +520,15 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("cube_border", "labelled"),
     ("cube_text", "labelled"),
     ("cube_hover", "hover highlight"),
-    // Not a colour, or the end of a mark that is measured elsewhere.
+    // Not a colour.
     ("analysis.hatch", "a flag: stripes on the failing faces"),
-    ("logo[3]", "the mark's white edge"),
     // Icon colours that are a shade of a measured one, or one mark alone.
     ("icons.highlight", "white ink on viewport markers and the agent pointer"),
     ("icons.agent", "the agent's pointer, alone"),
     ("icons.marker_halo", "a dark halo under a marker"),
 ];
 
-/// Every token field, by path (`sketch`, `analysis.draft`, `logo[3]`…): the arrays of distinct
+/// Every token field, by path (`sketch`, `analysis.draft`, `triad`…): the arrays of distinct
 /// meanings by element where only some elements are measured.
 fn token_fields(t: &Tokens) -> BTreeSet<String> {
     let text = format!("{t:#?}");
@@ -565,7 +564,7 @@ fn every_token_is_measured_or_carries_no_meaning() {
     for t in [Tokens::light(), Tokens::dark()] {
         let measured: BTreeSet<&str> =
             groups(&t).iter().flat_map(|g| g.members.iter().chain(&g.grounds).map(|(n, _)| field_of(n))).chain(SHADED).collect();
-        // An element of an array (`logo[3]`) is listed for the record; its array is measured.
+        // An element of an array (`triad[0]`) is listed for the record; its array is measured.
         let listed: BTreeSet<&str> = NO_MEANING.iter().map(|(n, _)| field_of(n)).collect();
         let fields = token_fields(&t);
         let unplaced: Vec<&String> = fields.iter().filter(|f| !measured.contains(f.as_str()) && !listed.contains(f.as_str())).collect();

@@ -1182,6 +1182,7 @@
   "ui.agent_chat_files_left_out": "Bir iletiyle en fazla {max} dosya gider; dışarıda kalanlar: {files}",
   "ui.agent_chat_files_loading": "Dosyaların okunması bekleniyor",
   "ui.agent_chat_files_max": "Bir iletide en fazla {max} dosya olabilir",
+  "ui.agent_chat_flatpak_none_found": "Kodlama ajanı bulunamadı. Flatpak korumalı alanı varsayılan olarak ana klasörünüze yüklenen ajanları göremez ve ağ erişimi yoktur. nvm ile veya ~/.local/bin içine yüklenen Claude Code'a ve ACP bağdaştırıcısına izin vermek için bu komutu bir terminalde çalıştırın, ardından SolidCraft'ı yeniden başlatın. Komut, listelenen programlara ve oturum açma dosyalarına erişimin yanı sıra ağ erişimi de verir:",
   "ui.agent_chat_import_failed": "{name}: içe aktarma başarısız oldu: {error}",
   "ui.agent_chat_intro": "Zaten kullandığınız bir kodlama ajanıyla veya seçtiğiniz bir model uç noktasıyla sohbet edin. Ajan, SolidCraft'ın araçlarıyla açık tasarım üzerinde çalışır: Değişiklikleri hemen görünür ve mesaj başına tek adımda geri alınabilir. Sormadan neleri yapabileceğini Ayarlar > AI altında belirlersiniz.",
   "ui.agent_chat_key_in_env": "anahtar ayarlı",

@@ -1182,6 +1182,7 @@
   "ui.agent_chat_files_left_out": "Cel mult {max} fișiere merg cu un mesaj; omise: {files}",
   "ui.agent_chat_files_loading": "Se așteaptă citirea fișierelor",
   "ui.agent_chat_files_max": "Cel mult {max} fișiere pe un mesaj",
+  "ui.agent_chat_flatpak_none_found": "Nu s-a găsit niciun agent de programare. Implicit, sandboxul Flatpak nu vede agenții instalați în dosarul personal și nu are acces la rețea. Pentru a permite Claude Code și adaptorul său ACP instalate prin nvm sau în ~/.local/bin, rulați această comandă într-un terminal, apoi reporniți SolidCraft. Ea acordă acces la programele și fișierele de autentificare enumerate, precum și acces la rețea:",
   "ui.agent_chat_import_failed": "{name}: importul a eșuat: {error}",
   "ui.agent_chat_intro": "Conversați cu un agent de programare pe care îl folosiți deja sau cu un endpoint de model ales de dumneavoastră. Lucrează la proiectul deschis prin instrumentele SolidCraft: modificările lui apar pe măsură ce le face și se anulează ca un singur pas per mesaj. Ce poate face fără să întrebe se stabilește în Preferințe > AI.",
   "ui.agent_chat_key_in_env": "cheie setată",

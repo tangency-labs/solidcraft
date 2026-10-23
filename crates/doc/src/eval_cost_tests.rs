@@ -13,15 +13,16 @@ use solidcraft_sketch::Sketch;
 
 use crate::*;
 
-/// Work counted on this thread: bodies moved into a component's frame, STEP texts digested.
+/// Work counted on this thread: bodies moved, STEP texts digested, joint faces measured.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
     pub digested: usize,
+    pub joint_faces: usize,
 }
 
 thread_local! {
-    static COUNTS: Cell<Counts> = const { Cell::new(Counts { moved: 0, digested: 0 }) };
+    static COUNTS: Cell<Counts> = const { Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0 }) };
 }
 
 pub(super) fn count(f: impl FnOnce(&mut Counts)) {
@@ -37,6 +38,103 @@ fn counted(f: impl FnOnce()) -> Counts {
     COUNTS.with(|c| c.set(Counts::default()));
     f();
     COUNTS.with(Cell::get)
+}
+
+#[test]
+fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
+    use crate::joints::{Joint, JointKind, JointOrigin, Snap, XRef};
+    let mut doc = Document::new("joint face work");
+    let part = doc.add_component(Some("Crank"), 0).unwrap();
+    let occurrence = doc.occurrences.iter().find(|o| o.component == part).unwrap().id;
+    let id = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::ZERO),
+                axis: Dir(Vec3::Z),
+                radius: "2".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(id).unwrap().component = part;
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let pick = Vec3::new(0.0, 0.0, 10.0);
+    let face = joints::face_name_at(&doc, &state, part, pick, false).unwrap();
+    doc.assembly.joints.push(Joint {
+        id: 100,
+        name: "Pivot".into(),
+        kind: JointKind::Revolute,
+        a: JointOrigin { occurrence: 0, snap: Snap::Frame { origin: pick, z: Vec3::Z, x: Some(Vec3::X) } },
+        b: JointOrigin { occurrence, snap: Snap::FaceCenter { pick, face: None, x: Some(XRef::Dir(Vec3::X)) } },
+        values: vec![0.0],
+        limits: Vec::new(),
+        flip: true,
+        offset: 0.0,
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+    });
+    // One body supplies both old nearest-face snaps and persistent named-face snaps.
+    // A scratch model shares its measurements, even though each sample changes the pose.
+    let snapshot = model.clone();
+    let work = counted(|| {
+        for name in [None, Some(face)] {
+            doc.assembly.joints[0].b.snap = Snap::FaceCenter { pick, face: name, x: Some(XRef::Dir(Vec3::X)) };
+            for k in 0..145 {
+                let angle = (k as f64 * 2.5).to_radians();
+                doc.assembly.joints[0].values[0] = angle;
+                let solution = joints::solve(&doc, &snapshot.state());
+                assert!(solution.errors.is_empty() && solution.conflicts.is_empty(), "{solution:?}");
+                let point = apply_point(&solution.world[&occurrence], Vec3::new(5.0, 0.0, 10.0));
+                assert!(point.dist(Vec3::new(5.0 * angle.cos(), 5.0 * angle.sin(), 10.0)) < 1e-9);
+                doc.apply_joint_solution(&solution);
+            }
+        }
+    });
+    assert_eq!(work.joint_faces, 1, "pose-only samples must not remeasure unchanged faces: {work:?}");
+
+    // Editing geometry creates a fresh measurement without changing a retained snapshot.
+    let FeatureKind::Cylinder { height, .. } = &mut doc.feature_mut(id).unwrap().kind else { panic!("cylinder") };
+    *height = "12".into();
+    model.evaluate(&doc);
+    let origin = &doc.assembly.joints[0].b;
+    let work = counted(|| {
+        let changed = joints::resolve_origin(&doc, &model.state(), origin).unwrap();
+        let retained = joints::resolve_origin(&doc, &snapshot.state(), origin).unwrap();
+        assert!((changed[3][2] - 12.0).abs() < 1e-9);
+        assert!((retained[3][2] - 10.0).abs() < 1e-9);
+    });
+    assert_eq!(work.joint_faces, 1, "only the edited body must be measured: {work:?}");
+}
+
+#[test]
+fn joint_face_measurements_never_follow_a_replaced_body_or_stale_offset() {
+    use crate::joints::{JointOrigin, Snap};
+    let mut doc = Document::new("replaced joint geometry");
+    let mut state = ModelState::default();
+    state.bodies.push(ModelBody::new("Pin".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 10.0).unwrap(), 0));
+    let origin = JointOrigin { occurrence: 0, snap: Snap::FaceCenter { pick: Vec3::new(0.0, 0.0, 10.0), face: None, x: None } };
+    let work = counted(|| {
+        joints::resolve_origin(&doc, &state, &origin).unwrap();
+    });
+    assert_eq!(work.joint_faces, 1);
+    let retained = state.clone();
+    // Body is public; a clone's old measurement must never mask a direct replacement.
+    state.bodies[0].body = kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 12.0).unwrap();
+    let changed = joints::resolve_origin(&doc, &state, &origin).unwrap();
+    assert!((changed[3][2] - 12.0).abs() < 1e-9);
+    let work = counted(|| {
+        let old = joints::resolve_origin(&doc, &retained, &origin).unwrap();
+        assert!((old[3][2] - 10.0).abs() < 1e-9);
+        doc.body_offsets.insert("Pin".into(), rigid(Vec3::new(0.0, 0.0, 1.0), Vec3::ZERO, Vec3::Z, 0.0));
+        let moved = joints::resolve_origin(&doc, &retained, &origin).unwrap();
+        assert!((moved[3][2] - 11.0).abs() < 1e-9);
+    });
+    assert_eq!(work.joint_faces, 0, "offsets are applied after the shared face measurements");
 }
 
 /// `parts` imported files of two boxes each, every one in its own component placed away from

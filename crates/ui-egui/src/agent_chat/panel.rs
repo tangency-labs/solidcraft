@@ -1006,6 +1006,30 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+const FLATPAK_OVERRIDE: &str = "flatpak override --user ai.storyteller.solidcraft --filesystem=~/.nvm:ro --filesystem=~/.local/bin:ro --filesystem=~/.local/share/claude:ro --filesystem=~/.claude --filesystem=~/.claude.json --share=network";
+
+#[cfg(not(target_arch = "wasm32"))]
+fn no_agents_message() -> String {
+    if std::env::var_os("FLATPAK_ID").is_some() { tr("ui.agent_chat_flatpak_none_found") } else { tr("ui.agent_chat_none_found") }.to_string()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn no_agents(ui: &mut egui::Ui) {
+    let flatpak = std::env::var_os("FLATPAK_ID").is_some();
+    let style = if flatpak { ui_kit::Text::Report("none", false) } else { ui_kit::Text::Note("none") };
+    ui_kit::text(ui, &no_agents_message(), style);
+    if flatpak {
+        // The Copy button comes before the long command so it shows without scrolling.
+        let copy = ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small);
+        crate::scenario::publish_handle("agent_chat:flatpak_override", copy.rect.center());
+        if copy.clicked() {
+            ui.ctx().copy_text(FLATPAK_OVERRIDE.to_string());
+        }
+        ui_kit::text(ui, FLATPAK_OVERRIDE, ui_kit::Text::Report("flatpak_override", false));
+    }
+}
+
 /// Before the first connection: what's installed, how to install the rest, and Add agent.
 #[cfg(not(target_arch = "wasm32"))]
 fn picker(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -1038,9 +1062,15 @@ fn picker(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.agent_chat.agent_id = Some(e.id.clone());
         }
     }
+    // In the Flatpak the hint already says nothing was found, so the install list below is
+    // headed "Not installed" instead of repeating it.
+    let flatpak_hint = all.is_empty() && app.agent_chat.detecting.is_none() && std::env::var_os("FLATPAK_ID").is_some();
+    if flatpak_hint {
+        no_agents(ui);
+    }
     let missing: Vec<discover::Missing> = app.agent_chat.detection.as_ref().map(|d| d.missing.clone()).unwrap_or_default();
     if !missing.is_empty() {
-        let heading = if all.is_empty() { tr("ui.agent_chat_none_found") } else { tr("ui.agent_chat_not_installed") };
+        let heading = if all.is_empty() && !flatpak_hint { tr("ui.agent_chat_none_found") } else { tr("ui.agent_chat_not_installed") };
         ui_kit::section(ui, "sc_agent_missing", heading, all.is_empty(), |ui| {
             for m in missing {
                 ui.horizontal(|ui| {
@@ -1656,6 +1686,56 @@ pub(super) fn quote(a: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_discovery_explains_flatpak_permissions() {
+        const CHILD: &str = "SOLIDCRAFT_TEST_FLATPAK_MESSAGE";
+        if let Ok(case) = std::env::var(CHILD) {
+            let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            app.agent_chat.detection = Some(discover::Detection::default());
+            assert!(agents::entries(&app).is_empty());
+            let message = no_agents_message();
+            if case == "flatpak" {
+                assert!(message.contains("sandbox"), "{message}");
+                assert!(message.contains("restart"), "{message}");
+                let ctx = crate::fonts::test_context();
+                let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(300.0, 900.0))), ..Default::default() };
+                for _ in 0..2 {
+                    let mut output = ctx.run_ui(input.clone(), |ui| picker(&mut app, ui));
+                    assert!(crate::test_support::text_shapes(&output).any(|text| text.galley.text() == message));
+                    assert!(crate::test_support::text_shapes(&output).any(|text| text.galley.text() == FLATPAK_OVERRIDE));
+                    output.textures_delta.clear();
+                }
+                let at = crate::scenario::handle_at("agent_chat:flatpak_override").expect("copy override");
+                let mut copied = false;
+                for pressed in [true, false] {
+                    let mut output =
+                        ctx.run_ui(egui::RawInput { events: crate::test_support::pointer(at, pressed), ..input.clone() }, |ui| picker(&mut app, ui));
+                    copied |= output
+                        .platform_output
+                        .commands
+                        .iter()
+                        .any(|command| matches!(command, egui::OutputCommand::CopyText(text) if text == FLATPAK_OVERRIDE));
+                    output.textures_delta.clear();
+                }
+                assert!(copied, "Copy preserves the complete override command");
+            } else {
+                assert_eq!(message, tr("ui.agent_chat_none_found"));
+            }
+            return;
+        }
+        for case in ["flatpak", "native"] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "agent_chat::panel::tests::empty_discovery_explains_flatpak_permissions", "--nocapture"]);
+            child.env(CHILD, case);
+            if case == "flatpak" {
+                child.env("FLATPAK_ID", "ai.storyteller.solidcraft");
+            } else {
+                child.env_remove("FLATPAK_ID");
+            }
+            assert!(child.status().unwrap().success(), "{case}");
+        }
+    }
 
     #[test]
     fn custom_commands_show_short_in_the_picker() {

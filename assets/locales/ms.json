@@ -1183,6 +1183,7 @@
   "ui.agent_chat_files_left_out": "Paling banyak {max} fail bersama satu mesej; ditinggalkan: {files}",
   "ui.agent_chat_files_loading": "Menunggu fail dibaca",
   "ui.agent_chat_files_max": "Paling banyak {max} fail pada satu mesej",
+  "ui.agent_chat_flatpak_none_found": "Tiada ejen pengekodan. Secara lalai, kotak pasir Flatpak tidak dapat melihat ejen yang dipasang dalam folder rumah anda dan tiada akses rangkaian. Untuk membenarkan Claude Code dan penyesuai ACP-nya yang dipasang melalui nvm atau dalam ~/.local/bin, jalankan arahan ini dalam terminal, kemudian mulakan semula SolidCraft. Ia memberi akses kepada program dan fail log masuk yang disenaraikan, serta akses rangkaian:",
   "ui.agent_chat_import_failed": "{name}: import gagal: {error}",
   "ui.agent_chat_intro": "Sembang dengan ejen pengekodan biasa anda atau titik akhir model pilihan. Ejen mengubah reka bentuk melalui alat SolidCraft; perubahan dipaparkan terus dan boleh dibatalkan sekali bagi setiap mesej. Tetapkan kebenaran di Tetapan > AI.",
   "ui.agent_chat_key_in_env": "kunci tersedia",
