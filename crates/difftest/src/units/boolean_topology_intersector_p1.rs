@@ -1149,6 +1149,68 @@ impl ProtoBrep<H> for Two {
     fn face_uv_domain(&self, face: H) -> Option<Extent2d> {
         fp2::uv_domain(self.brep(face)?, fid(face)).ok()
     }
+    fn face_trim_uv_domain(&mut self, k: &Kernel, face: H) -> solidcore::Result<Extent2d> {
+        if face.kind != K_FACE {
+            return Err(invalid("not a face handle"));
+        }
+        let b = self.brep_m(face)?;
+        b.face(fid(face))
+            .map_err(|_| invalid("unknown face handle"))?;
+        let mut output = solidcore::topology::face::p1::UvDomainFromTrim {
+            domain: Extent2d::new(),
+            max_uv_loop_gap: 0.0,
+            second_max_uv_loop_gap: 0.0,
+        };
+        let result = solidcore::topology::face::p1::calculate_uv_domain_from_uv_trim_curves_into(
+            k,
+            b,
+            fid(face),
+            true,
+            false,
+            false,
+            &mut output,
+        );
+        if let Err(error) = result {
+            if error.is_unported() {
+                return Err(error);
+            }
+        }
+        Ok(output.domain)
+    }
+    fn face_point_classify_uv(
+        &mut self,
+        k: &Kernel,
+        face: H,
+        uv: Point2,
+        source_tolerance: f64,
+    ) -> solidcore::Result<PointClassType> {
+        if face.kind != K_FACE {
+            return Err(invalid("not a face handle"));
+        }
+        let b = self.brep_m(face)?;
+        b.face(fid(face))
+            .map_err(|_| invalid("unknown face handle"))?;
+        let mut output = PointClassification::new(source_tolerance);
+        let result = point_classify(
+            k,
+            b,
+            fid(face),
+            uv,
+            &mut output,
+            PointClassifyOptions {
+                src_zone_tol_3d: source_tolerance,
+                do_boundary_intersections: true,
+                use_uv_classification: true,
+                ..PointClassifyOptions::default()
+            },
+        );
+        if let Err(error) = result {
+            if error.is_unported() {
+                return Err(error);
+            }
+        }
+        Ok(output.point_class())
+    }
     fn set_face_uv_domain(&mut self, face: H, domain: Extent2d) -> Option<()> {
         fp2::set_uv_domain(self.brep_mut(face)?, fid(face), &domain).ok()
     }

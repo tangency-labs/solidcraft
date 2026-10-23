@@ -22,6 +22,7 @@
 
 #include "StdAfx.h"
 #include <SmApiGeneral.h>
+#include <SmAxis2Placement.h>
 #include <SmAssembly.h>
 #include <SmAssemblyInstance.h>
 #include <SmAttribute.h>
@@ -36,10 +37,12 @@
 #include <SmCrvOnSurf.h>
 #include <SmCurveClass.h>
 #include <SmEdge.h>
+#include <SmEdgeuse.h>
 #include <SmEllipse.h>
 #include <SmFace.h>
 #include <SmHermiteCurve.h>
 #include <SmLine.h>
+#include <SmLoopuse.h>
 #include <SmNurbsCrv.h>
 #include <SmNurbsSrf.h>
 #include <SmOwningTopology.h>
@@ -55,6 +58,7 @@
 #include <nurbs.h>
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <set>
 #include <vector>
@@ -1329,6 +1333,7 @@ enum PoolKind : int64_t
     K_FACE = 5,
     K_REGION = 6,
     K_LOOP = 7,
+    K_TRIMMED_FACE = 11, // input only: a real owned rectangular trimmed face
     K_VERTEX_AT = 10, // input only: a K_VERTEX with a point and a tolerance
 };
 
@@ -1384,6 +1389,12 @@ struct Pool
     std::vector<SmObject*> ptrs;
     std::vector<bool> alive;
     std::map<const void*, int64_t> ids;
+    SmBrep* operands[2] = {NULL, NULL};
+    std::map<int64_t, SmBrep*> face_breps;
+    std::map<int64_t, SmExtent2d> face_initial_domains;
+    std::map<int64_t, SmPoint2d> face_trim_shifts;
+    std::map<int64_t, std::pair<double, SmExtent2d>> face_domain_probes;
+    std::set<int64_t> owned_surfaces;
 
     double id(const void* p) const
     {
@@ -1461,6 +1472,7 @@ struct ProtoRun
     Pool pool;
     Tbl vds, eds, pvs, pes, pfs;
     SmProtoTopologyManager* mgr = NULL;
+    unsigned first_ed_final_initialized = 0;
 
     SmVertexDefinition* vd(int64_t i) const { return vds.live(i) ? (SmVertexDefinition*)vds.p[(size_t)i] : NULL; }
     SmEdgeDefinition* ed(int64_t i) const { return eds.live(i) ? (SmEdgeDefinition*)eds.p[(size_t)i] : NULL; }
@@ -2282,6 +2294,64 @@ void put_pc_pair(std::vector<double>& out, const SmPointClassification& a, const
 }
 
 // Runs one P2 op (its arguments already past the code). SC_ERR_ARG for malformed arguments.
+// Only the audited direct-UV segment continuation; never preflight its classification.
+bool unit_segment(const SmCurve* curve, ULONG dim)
+{
+    if (curve == NULL || curve->GetDim() != dim || curve->GetType() != SmBSplineCurve_TYPE)
+        return false;
+    const SmBSplineCurve* bs = (const SmBSplineCurve*)curve;
+    if (bs->GetDegree() != 1 || bs->GetNumberControlPoints() != 2 || bs->IsRational() != FALSE)
+        return false;
+    SmTArray<double> knots;
+    SmTArray<SmPoint3d> points;
+    SmTArray<double> weights;
+    if (bs->GetKnotsAll(knots) != SM_SUCCESS || knots.GetSize() != 4 ||
+        knots[0] != 0.0 || knots[1] != 0.0 || knots[2] != 1.0 || knots[3] != 1.0 ||
+        bs->GetControlPolygon(points, weights) != SM_SUCCESS || points.GetSize() != 2)
+        return false;
+    for (ULONG i = 0; i < points.GetSize(); ++i)
+        if (!std::isfinite(points[i].x) || !std::isfinite(points[i].y) || !std::isfinite(points[i].z))
+            return false;
+    return true;
+}
+
+bool face_update_edges_ok(ProtoRun& r, int which, SmFace* old_face)
+{
+    if (r.eds.p.empty())
+        return true;
+    if (r.eds.p.size() != 1 || r.pes.p.size() != 1 || r.pvs.p.size() != 2 ||
+        r.ed(0) == NULL || r.pe(0) == NULL || r.pv(0) == NULL || r.pv(1) == NULL ||
+        r.first_ed_final_initialized != 3)
+        return false;
+    SmEdgeDefinition* ed = r.ed(0);
+    SmProtoEdge* pe = r.pe(0);
+    const auto& pes = r.mgr->GetProtoEdges();
+    const auto& pvs = r.mgr->GetProtoVertices();
+    const auto& definitions = pe->GetEdgeDefinitions();
+    if (pes.GetSize() != 1 || pes[0] != pe || pvs.GetSize() != 2 || pvs[0] != r.pv(0) || pvs[1] != r.pv(1) ||
+        pe->GetStartProtoVertex() != r.pv(0) || pe->GetEndProtoVertex() != r.pv(1) ||
+        definitions.GetSize() != 1 || definitions[0] != ed || ed->GetProtoEdge() != pe)
+        return false;
+    for (int i = 0; i < 2; ++i)
+    {
+        const auto& incident = r.pv(i)->GetProtoEdges();
+        if (incident.GetSize() != 1 || incident[0] != pe)
+            return false;
+    }
+    SmTopology* other = ed->GetSrcTopo(3 - which);
+    SmCurve* c3 = ed->GetXSectCurve3d();
+    SmCurve* uv = ed->GetXSectUVCurve(which);
+    SmExtent1d interval = ed->GetXSectInterval();
+    if (ed->GetSrcTopo(which) != old_face || !r.pool.live_ptr(other) || r.pool.kind_of(other) != K_REGION ||
+        !r.pool.live_ptr(c3) || !r.pool.live_ptr(uv) || c3 == uv || ed->GetXSectUVCurve(3 - which) != NULL ||
+        interval.GetMin() != 0.0 || interval.GetMax() != 1.0 ||
+        pe->GetXSectInterval().GetMin() != 0.0 || pe->GetXSectInterval().GetMax() != 1.0 ||
+        !unit_segment(c3, 3) || !unit_segment(uv, 2))
+        return false;
+    SmPoint3d midpoint;
+    return uv->EvaluatePoint(0.5, midpoint) == SM_SUCCESS && std::isfinite(midpoint.x) && std::isfinite(midpoint.y);
+}
+
 int32_t run_p2_op(ProtoRun& r, Rd& rd, int64_t op, std::vector<double>& out, double& status, bool& skip)
 {
     SmProtoTopologyManager* mgr = r.mgr;
@@ -2921,15 +2991,53 @@ int32_t run_p2_op(ProtoRun& r, Rd& rd, int64_t op, std::vector<double>& out, dou
     }
     case P2_MGR_UPDATE_FACES:
     {
-        rd.idx();
-        rd.idx();
-        rd.idx();
-        rd.idx();
-        rd.idx();
-        rd.idx();
-        // the bare faces have no face uses or loops for CalculateUVDomainFromUVTrimCurves
-        // and sm_ClassifyParamOnFaces: not run (the port defers here, unit topology.face_p1)
-        skip = true;
+        int64_t which = rd.idx(), old_id = rd.idx(), new_id = rd.idx();
+        int64_t split_id = rd.idx(), other_id = rd.idx(), calling_id = rd.idx();
+        // Bare-face scripts remain unexecuted; begin with real vertex-definition fixtures.
+        if (skip || which < 1 || which > 2 || !r.pool.is(old_id, K_FACE) || !r.pool.is(new_id, K_FACE) || !r.pool.face_breps.count(old_id) ||
+            !r.pool.face_breps.count(new_id) || split_id != -1 || other_id != -1 || calling_id != -1 ||
+            !r.pfs.p.empty() ||
+            r.pool.face_breps[old_id] != r.pool.operands[which - 1] ||
+            r.pool.face_breps[new_id] != r.pool.operands[which - 1])
+        {
+            skip = true;
+            break;
+        }
+        SmFace* old_face = (SmFace*)r.pool.ptrs[(size_t)old_id];
+        SmFace* new_face = (SmFace*)r.pool.ptrs[(size_t)new_id];
+        if (!face_update_edges_ok(r, (int)which, old_face))
+        {
+            skip = true;
+            break;
+        }
+        status = st(mgr->UpdateFaces((int)which, old_face, new_face, NULL, NULL, NULL));
+        for (SmFace* face : {old_face, new_face})
+        {
+            SmExtent2d domain = face->GetUVDomain();
+            out.insert(out.end(), {domain.GetMin().x, domain.GetMin().y, domain.GetMax().x, domain.GetMax().y});
+            SmTArray<SmLoopuse*> loops;
+            face->GetUpwardLoopuses(loops);
+            out.push_back((double)loops.GetSize());
+            int64_t edge_count = 0, trim_count = 0;
+            for (ULONG li = 0; li < loops.GetSize(); ++li)
+            {
+                SmTArray<SmEdgeuse*> edges;
+                loops[li]->GetEdgeuses(edges);
+                edge_count += edges.GetSize();
+                for (ULONG ei = 0; ei < edges.GetSize(); ++ei)
+                    if (edges[ei]->GetUVTrimCurve() != NULL)
+                        ++trim_count;
+            }
+            out.insert(out.end(), {(double)edge_count, (double)trim_count, (double)face->GetTolerance()});
+            auto probe = r.pool.face_domain_probes.find((int64_t)r.pool.id(face));
+            out.push_back(probe == r.pool.face_domain_probes.end() ? 0.0 : 1.0);
+            if (probe != r.pool.face_domain_probes.end())
+            {
+                const SmExtent2d& prepared = probe->second.second;
+                out.insert(out.end(), {probe->second.first, prepared.GetMin().x, prepared.GetMin().y,
+                    prepared.GetMax().x, prepared.GetMax().y});
+            }
+        }
         break;
     }
     case P2_MGR_CAN_COMBINE_VDS:
@@ -2955,6 +3063,8 @@ int32_t run_proto(Rd& rd, std::vector<double>& o)
 {
     const SmContext& ctx = the_context();
     ProtoRun r;
+    r.pool.operands[0] = new (ctx) SmBrep();
+    r.pool.operands[1] = new (ctx) SmBrep();
     int64_t n_obj = rd.idx();
     if (n_obj < 0 || n_obj > 64)
         return SC_ERR_ARG;
@@ -2986,6 +3096,30 @@ int32_t run_proto(Rd& rd, std::vector<double>& o)
             if (!r.pool.is_curve(c))
                 return SC_ERR_ARG;
             p = new (anchor()) ScEdge((SmCurve*)r.pool.ptrs[(size_t)c]);
+            break;
+        }
+        case K_TRIMMED_FACE:
+        {
+            int64_t operand = rd.idx(), surface = rd.idx();
+            double u0 = rd.num(), v0 = rd.num(), u1 = rd.num(), v1 = rd.num();
+            double a0 = rd.num(), b0 = rd.num(), a1 = rd.num(), b1 = rd.num();
+            double du = rd.num(), dv = rd.num();
+            if (operand < 1 || operand > 2 || (!r.pool.is(surface, K_PLANE) && !r.pool.is(surface, K_BSURF)) ||
+                r.pool.owned_surfaces.count(surface) || u0 > u1 || v0 > v1 || a0 > a1 || b0 > b1)
+                return SC_ERR_ARG;
+            SmBrep* body = r.pool.operands[operand - 1];
+            SmFace* face = NULL;
+            SmStatus made = body->CreateFaceFromSurface((SmSurface*)r.pool.ptrs[(size_t)surface],
+                SmExtent2d(SmPoint2d(u0, v0), SmPoint2d(u1, v1)), face);
+            if (made != SM_SUCCESS || face == NULL)
+                return SC_ERR_ARG;
+            r.pool.face_initial_domains[(int64_t)r.pool.ptrs.size()] =
+                SmExtent2d(SmPoint2d(a0, b0), SmPoint2d(a1, b1));
+            r.pool.face_trim_shifts[(int64_t)r.pool.ptrs.size()] = SmPoint2d(du, dv);
+            p = face;
+            kind = K_FACE;
+            r.pool.face_breps[(int64_t)r.pool.ptrs.size()] = body;
+            r.pool.owned_surfaces.insert(surface);
             break;
         }
         case K_FACE:
@@ -3026,8 +3160,45 @@ int32_t run_proto(Rd& rd, std::vector<double>& o)
     double override_tol = rd.num();
     if (rd.bad)
         return SC_ERR_ARG;
-    SmBrep* b1 = new (ctx) SmBrep();
-    SmBrep* b2 = new (ctx) SmBrep();
+    for (const auto& entry : r.pool.face_initial_domains)
+    {
+        SmFace* face = (SmFace*)r.pool.ptrs[(size_t)entry.first];
+        face->SetUVDomain(entry.second);
+        SmPoint2d shift = r.pool.face_trim_shifts[entry.first];
+        if (shift.x != 0.0 || shift.y != 0.0)
+        {
+            double tmp;
+            if (face->CreateUVTrimCurves(FALSE, NULL, NULL, tmp, tmp, tmp, tmp, tmp, tmp) != SM_SUCCESS)
+                return SC_ERR_ARG;
+            int64_t transformed = 0;
+            SmAxis2Placement transform;
+            transform.Translate(SmVector3d(shift.x, shift.y, 0.0));
+            SmTArray<SmLoopuse*> loops;
+            face->GetUpwardLoopuses(loops);
+            for (ULONG li = 0; li < loops.GetSize(); ++li)
+            {
+                SmTArray<SmEdgeuse*> edges;
+                loops[li]->GetEdgeuses(edges);
+                for (ULONG ei = 0; ei < edges.GetSize(); ++ei)
+                {
+                    SmCurve* curve = edges[ei]->GetUVTrimCurve();
+                    if (curve != NULL)
+                    {
+                        if (curve->Transform(transform, NULL) != SM_SUCCESS)
+                            return SC_ERR_ARG;
+                        ++transformed;
+                    }
+                }
+            }
+            if (transformed == 0)
+                return SC_ERR_ARG;
+            SmExtent2d domain;
+            SmStatus probe_status = face->CalculateUVDomainFromUVTrimCurves(domain);
+            r.pool.face_domain_probes[entry.first] = {st(probe_status), domain};
+        }
+    }
+    SmBrep* b1 = r.pool.operands[0];
+    SmBrep* b2 = r.pool.operands[1];
     SmTopologyIntersector* ti = new SmTopologyIntersector(ctx, b1, b2, approx_tol, 0.0);
     r.mgr = new (b1) SmProtoTopologyManager(b1, b2, ti, capture, override_tol);
 
@@ -3588,7 +3759,8 @@ int32_t run_proto(Rd& rd, std::vector<double>& o)
         }
         case P_ED_SET_FINAL:
         {
-            SmEdgeDefinition* d = r.ed(rd.idx());
+            int64_t id = rd.idx();
+            SmEdgeDefinition* d = r.ed(id);
             int64_t w = rd.idx();
             int64_t j = rd.idx();
             if (j != -1 && !r.pool.is(j, K_EDGE))
@@ -3603,6 +3775,8 @@ int32_t run_proto(Rd& rd, std::vector<double>& o)
                 d->*get(EdFinal1()) = e;
             else
                 d->*get(EdFinal2()) = e;
+            if (id == 0)
+                r.first_ed_final_initialized |= w == 1 ? 1 : 2;
             break;
         }
         case P_MGR_REMOVE_VD:

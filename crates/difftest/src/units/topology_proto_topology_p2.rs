@@ -26,8 +26,8 @@
 //!
 //! Deferred: everything past `SmBrep::MakeEdgeInFace` (unit `topology.brep_p5`), the
 //! merges of `SmPointClassification::MergeIntoObject` (unresolved region/face
-//! owners and vertex methods), `UpdateFaces` (`SmFace::CalculateUVDomainFromUVTrimCurves`, unit
-//! `topology.face_p1`), the B-rep walks of `sm_AreConnected` and point classifications on
+//! owners and vertex methods), bare-face `UpdateFaces` scripts without owning
+//! geometry, the B-rep walks of `sm_AreConnected` and point classifications on
 //! bare topology (units `topology.edge`, `topology.vertex`, `topology.face_p2`), and
 //! `SmProtoVertex::ContainsPoint` (unit `query.face_p2`). Bare-edge merges without
 //! an arena defer to `topology.brep_p9` until mutable arena context is supplied.
@@ -153,6 +153,58 @@ fn ed_tangent_ok(k: &solidcore::kernel::Kernel, r: &ProtoRun, ed: solidcore::top
             Some(o) => Err(Fail::Deferred(Box::new(o))),
             None => Ok(false),
         },
+    }
+}
+
+fn unit_segment(curve: &solidcore::curve::curve::Curve, dim: u64) -> bool {
+    use solidcore::curve::curve::CurveKind;
+    let CurveKind::BSpline(bs) = curve.kind() else { return false; };
+    let Some(nurb) = bs.gw_nurb() else { return false; };
+    curve.dim() == dim && matches!(bs.degree(), Ok(1))
+        && matches!(bs.number_control_points(), Ok(2)) && matches!(bs.is_rational(), Ok(false))
+        && nurb.knots() == [0.0, 0.0, 1.0, 1.0]
+        && nurb.cpts().iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
+}
+
+fn face_update_edges_ok(r: &ProtoRun, which: i32, old_face: H) -> Result<bool, Fail> {
+    use solidcore::intersect::point_class::ClassGeometry;
+    if r.n_ed == 0 { return Ok(true); }
+    let (Some(ed_id), Some(pe_id), Some(pv0), Some(pv1)) = (r.ed(0), r.pe(0), r.pv(0), r.pv(1)) else {
+        return Ok(false);
+    };
+    if r.n_ed != 1 || r.n_pe != 1 || r.n_pv != 2 || r.first_ed_final_initialized != 3
+        || r.mgr.proto_edges() != [pe_id] || r.mgr.proto_vertices() != [pv0, pv1] {
+        return Ok(false);
+    }
+    let (Some(ed), Some(pe)) = (r.mgr.edge_def(ed_id), r.mgr.proto_edge(pe_id)) else { return Ok(false); };
+    if pe.start_proto_vertex() != Some(pv0) || pe.end_proto_vertex() != Some(pv1)
+        || pe.edge_definitions() != [ed_id] || ed.proto_edge() != Some(pe_id)
+        || pe.xsect_interval().min() != 0.0 || pe.xsect_interval().max() != 1.0 {
+        return Ok(false);
+    }
+    for vertex in [pv0, pv1] {
+        if r.mgr.proto_vertex(vertex).is_none_or(|pv| pv.proto_edges() != [pe_id]) {
+            return Ok(false);
+        }
+    }
+    let (Some(other), Some(c3), Some(uv)) = (ed.src_topo(3 - which), ed.xsect_curve_3d(), ed.xsect_uv_curve(which)) else {
+        return Ok(false);
+    };
+    if ed.src_topo(which) != Some(old_face) || !r.pool.is(other.0 as i64, pk::REGION)
+        || c3 == uv || ed.xsect_uv_curve(3 - which).is_some()
+        || ed.xsect_interval().min() != 0.0 || ed.xsect_interval().max() != 1.0 {
+        return Ok(false);
+    }
+    let (Some(c3), Some(uv)) = (r.pool.curve(c3), r.pool.curve(uv)) else { return Ok(false); };
+    if !unit_segment(c3, 3) || !unit_segment(uv, 2) { return Ok(false); }
+    // The native preflight excludes its DropPoint fallback. A Rust-only ordinary
+    // evaluation failure must fail the harness rather than exclude this fixture.
+    let point = super::topology_proto_topology_p1::st(uv.evaluate_point(&r.k, 0.5))?;
+    match point {
+        Ok(point) if point.x.is_finite() && point.y.is_finite() => Ok(true),
+        _ => Err(super::topology_proto_topology_p1::harness(
+            "admitted UpdateFaces UV segment did not evaluate to a finite midpoint",
+        ).into()),
     }
 }
 
@@ -522,6 +574,23 @@ pub(super) fn run_op(
             let edge = |j: i64| r.pool.is(j, pk::EDGE).then(|| r.pool.h(j));
             match (face(fo), face(fne)) {
                 (Some(f1), Some(f2)) if (1..=2).contains(&w) => {
+                    if !r.pool.is_owned_face(f1, w)
+                        || !r.pool.is_owned_face(f2, w)
+                        || se != -1
+                        || oe != -1
+                        || ed != -1
+                        || r.n_pf != 0
+                    {
+                        return Err(Fail::Deferred(Box::new(Output::deferred(
+                            "harness:proto-real-face-update",
+                            "UpdateFaces needs audited real owned-face fixtures",
+                        ))));
+                    }
+                    if !face_update_edges_ok(r, w as i32, f1)? {
+                        return Err(Fail::Deferred(Box::new(Output::deferred(
+                            "harness:proto-real-face-update", "UpdateFaces edge continuation needs audited direct-UV fixtures",
+                        ))));
+                    }
                     let (se, oe, ed) = (edge(se), edge(oe), r.ed(ed));
                     let _ = res(
                         r.mgr
@@ -529,11 +598,13 @@ pub(super) fn run_op(
                         st,
                         skip,
                     )?;
+                    if !*skip {
+                        r.pool.put_owned_face(f1, out)?;
+                        r.pool.put_owned_face(f2, out)?;
+                    }
                 }
-                _ => {}
+                _ => *skip = true,
             }
-            // the shim never runs it on its bare faces
-            *skip = true;
         }
         q::MGR_CAN_COMBINE_VDS => {
             let d1 = r.vd(rd.idx());

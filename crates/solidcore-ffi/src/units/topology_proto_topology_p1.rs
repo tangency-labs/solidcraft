@@ -156,6 +156,8 @@ pub mod pool {
     pub const VERTEX_TOL: i64 = 9;
     /// Input only: a vertex with a point and a zone tolerance (`10 P[3] tol`).
     pub const VERTEX_AT: i64 = 10;
+    /// Input only: operand, distinct surface id, trim/initial domains and UV trim translation.
+    pub const TRIMMED_FACE: i64 = 11;
 }
 
 /// Proto-script ops (arguments after the code; `pv`, `pe`, `ed`, `vd`, `pf` are proto ids,
@@ -434,7 +436,10 @@ crate::reader::unit_reader!();
 
 impl Reader<'_> {
     fn num(&mut self) -> Result<f64, FfiError> {
-        let v = *self.input.get(self.at).ok_or_else(|| bad("script ends early"))?;
+        let v = *self
+            .input
+            .get(self.at)
+            .ok_or_else(|| bad("script ends early"))?;
         self.at += 1;
         Ok(v)
     }
@@ -672,7 +677,7 @@ fn validate_proto(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     use proto_op as p;
     let n_obj = rd.int(0, MAX_OBJECTS)?;
     for _ in 0..n_obj {
-        match rd.int(0, pool::VERTEX_AT)? {
+        match rd.int(0, pool::TRIMMED_FACE)? {
             pool::CURVE => rd.curve()?,
             pool::PLANE => {
                 rd.vec3()?;
@@ -681,6 +686,13 @@ fn validate_proto(rd: &mut Reader<'_>) -> Result<(), FfiError> {
             pool::BSURF => rd.surface()?,
             pool::EDGE | pool::FACE => {
                 rd.id()?;
+            }
+            pool::TRIMMED_FACE => {
+                rd.int(1, 2)?;
+                rd.id()?;
+                for _ in 0..10 {
+                    rd.finite()?;
+                }
             }
             pool::VERTEX_AT => {
                 rd.vec3()?;

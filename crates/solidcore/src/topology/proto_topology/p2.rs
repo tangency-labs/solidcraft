@@ -75,8 +75,7 @@
 //! - The `SM_DEBUG_CODE` blocks (dumps, drawing) are not ported; release `SM_ASSERT`s
 //!   are expression statements whose only effect is the dereference they make.
 //! - **Callees not ported yet** return [`SolidError::Unported`]: the owning B-rep editing metadata for `SmBrep::MakeEdgeInFace`
-//!   (`topology.brep_p1`; part 5's typed arena entry point is available), `SmFace::CalculateUVDomainFromUVTrimCurves`
-//!   (`topology.face_p1`), `sm_ClassifyParamOnFaces` (`query.face_p2`),
+//!   (`topology.brep_p1`; part 5's typed arena entry point is available),
 //!   `SmSurface::DropPoint` (`surface.surface_p5`) and `SmEdgeuse::EvaluateBinormal`
 //!   (`topology.edgeuse_p3`).
 //! - **Recursion.** None.
@@ -94,7 +93,7 @@ use crate::intersect::point_class::{
     object_zone_tol_3d, ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
 use crate::kernel::Kernel;
-use crate::math::{max2, max3, max4, Point2, Point3, Vec3};
+use crate::math::{max2, max3, max4, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 
 use super::p1::proto::{are_connected, can_imprint, find_position_from_pcs, topo_dimension};
@@ -133,6 +132,26 @@ pub trait ProtoBrep<O>: ProtoGeometry<O> + ProtoTopology<O> {
     fn topology_tolerance(&self, topo: O) -> Option<f64>;
     /// `SmFace::GetUVDomain`.
     fn face_uv_domain(&self, face: O) -> Option<Extent2d>;
+    /// Trim-derived UV domain with native's ignored ordinary status. Retains the
+    /// initialized or partial domain on failure.
+    ///
+    /// # Errors
+    ///
+    /// Invalid or stale owning-face handles and genuine unported callees.
+    fn face_trim_uv_domain(&mut self, k: &Kernel, face: O) -> Result<Extent2d>;
+    /// The actual (possibly partial) UV point classification with the native
+    /// `PointClassify(uv, tolerance, TRUE, TRUE, pc)` flags and ignored ordinary status.
+    ///
+    /// # Errors
+    ///
+    /// Invalid or stale owning-face handles and genuine unported callees.
+    fn face_point_classify_uv(
+        &mut self,
+        k: &Kernel,
+        face: O,
+        uv: Point2,
+        source_tolerance: f64,
+    ) -> Result<PointClassType>;
     /// `SmFace::SetUVDomain`.
     fn set_face_uv_domain(&mut self, face: O, domain: Extent2d) -> Option<()>;
     /// `SmFace::GetSurface`: the handle of the face's surface (`Some(None)` for none).
@@ -385,22 +404,10 @@ fn make_edge_in_face<O>() -> Result<(Option<O>, Option<O>, Option<O>)> {
     ))
 }
 
-/// `SmFace::CalculateUVDomainFromUVTrimCurves`.
-fn calculate_uv_domain_from_uv_trim_curves<O: Copy>(face: O) -> Result<Extent2d> {
-    let _ = face;
-    // UNPORTED(topology.face_p1): SmFace::CalculateUVDomainFromUVTrimCurves
-    // (ported as topology::face::p1::calculate_uv_domain_from_uv_trim_curves, which takes
-    // a Brep face; a ProtoBrep face handle cannot reach it until the ProtoBrep trait has
-    // a B-rep face query)
-    Err(SolidError::unported(
-        "SmFace::CalculateUVDomainFromUVTrimCurves",
-        "topology.face_p1",
-    ))
-}
-
-/// `sm_ClassifyParamOnFaces`: 1 on the first face only, 2 on the second only, 0
-/// otherwise.
-fn classify_param_on_faces<O: Copy>(
+/// `sm_ClassifyParamOnFaces`: first matching face interior, or zero.
+fn classify_param_on_faces<O: ClassObject>(
+    k: &Kernel,
+    brep: &mut impl ProtoBrep<O>,
     uv: Point2,
     zone_tol_3d: f64,
     face1: O,
@@ -408,12 +415,26 @@ fn classify_param_on_faces<O: Copy>(
     face2: O,
     domain2: &Extent2d,
 ) -> Result<i32> {
-    let _ = (uv, zone_tol_3d, face1, domain1, face2, domain2);
-    // UNPORTED(query.face_p2): sm_ClassifyParamOnFaces
-    Err(SolidError::unported(
-        "sm_ClassifyParamOnFaces",
-        "query.face_p2",
-    ))
+    let in_face1 = domain1.contains_point(uv, EFF_ZERO);
+    let in_face2 = domain2.contains_point(uv, EFF_ZERO);
+    if in_face1 && !in_face2 {
+        return Ok(1);
+    }
+    if !in_face1 && in_face2 {
+        return Ok(2);
+    }
+    let tolerance = if zone_tol_3d > EFF_ZERO {
+        zone_tol_3d
+    } else {
+        zone_tol_for_xsect_result(k, brep, face1, face2)?
+    };
+    if brep.face_point_classify_uv(k, face1, uv, tolerance)? == PointClassType::Face {
+        return Ok(1);
+    }
+    if brep.face_point_classify_uv(k, face2, uv, tolerance)? == PointClassType::Face {
+        return Ok(2);
+    }
+    Ok(0)
 }
 
 /// `SmSurface::DropPoint(pt, GetNaturalUVDomain(), NULL, .., SM_SO_NORMALIZE)`: the
@@ -1758,10 +1779,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: the faces' UV domains from their trim curves
-    /// (`SmFace::CalculateUVDomainFromUVTrimCurves`, unit `topology.face_p1`), the
-    /// face classification of UV points (`sm_ClassifyParamOnFaces`, unit
-    /// `query.face_p2`), the surface drops (unit `surface.surface_p5`) and the edge
+    /// Those of the owning-face domain and classification callbacks;
+    /// [`SolidError::Unported`] for the surface drops (unit `surface.surface_p5`) and the edge
     /// use binormals (unit `topology.edgeuse_p3`); [`SolidError::InvalidInput`] for
     /// deleted objects or unknown handles.
     pub fn update_faces(
@@ -1779,10 +1798,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
         // Face UVDomains = Min(current FaceUVDomain, UVTrimCurve domain) (statuses
         // ignored)
-        let old_domain =
-            ignore_soft(calculate_uv_domain_from_uv_trim_curves(old_face))?.unwrap_or_default();
-        let new_domain =
-            ignore_soft(calculate_uv_domain_from_uv_trim_curves(new_face))?.unwrap_or_default();
+        let old_domain = brep.face_trim_uv_domain(k, old_face)?;
+        let new_domain = brep.face_trim_uv_domain(k, new_face)?;
 
         if !brep
             .face_uv_domain(old_face)
@@ -1815,6 +1832,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let uv = v.brep_uv_param(which);
             let zone_tol = zone_tol_for_xsect_result(k, brep, old_face, new_face)?;
             let which_face = classify_param_on_faces(
+                k,
+                brep,
                 uv,
                 zone_tol,
                 old_face,
@@ -1867,6 +1886,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
             let zone_tol = zone_tol_for_xsect_result(k, brep, old_face, new_face)?;
             let which_face = classify_param_on_faces(
+                k,
+                brep,
                 face_uv,
                 zone_tol,
                 old_face,
@@ -1968,6 +1989,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     };
                     let zone_tol = zone_tol_for_xsect_result(k, brep, old_face, new_face)?;
                     which_face = classify_param_on_faces(
+                        k,
+                        brep,
                         face_uv,
                         zone_tol,
                         old_face,
@@ -2243,6 +2266,18 @@ mod tests {
         }
         fn face_uv_domain(&self, _face: H) -> Option<Extent2d> {
             None
+        }
+        fn face_trim_uv_domain(&mut self, _k: &Kernel, _face: H) -> Result<Extent2d> {
+            Err(dangling("test handle has no owning face"))
+        }
+        fn face_point_classify_uv(
+            &mut self,
+            _k: &Kernel,
+            _face: H,
+            _uv: Point2,
+            _tolerance: f64,
+        ) -> Result<PointClassType> {
+            Err(dangling("test handle has no owning face"))
         }
         fn set_face_uv_domain(&mut self, _face: H, _domain: Extent2d) -> Option<()> {
             None
