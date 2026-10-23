@@ -2031,13 +2031,7 @@ impl Surface {
             SurfaceKind::OffsetSurface(s) => s.trim_with_domain(k, trim_domain),
             SurfaceKind::SrfInVolume(s) => s.trim_with_domain(k, trim_domain),
             SurfaceKind::Plane(s) => s.trim_with_domain(trim_domain),
-            SurfaceKind::Cone(_) => {
-                // DISPATCH GAP (#76): keep the cone's MakeNurb/UV/iso overrides during trim.
-                Err(SolidError::unported(
-                    "SurfaceKind::Cone::TrimWithDomain callbacks",
-                    "surface.surface_p2",
-                ))
-            }
+            SurfaceKind::Cone(s) => s.trim_with_domain(k, trim_domain),
             SurfaceKind::Sphere(s) => s.trim_with_domain(k, trim_domain),
             SurfaceKind::Torus(s) => s.trim_with_domain(k, trim_domain),
             SurfaceKind::SurfOfRevolution(s) => s.trim_with_domain(k, trim_domain),

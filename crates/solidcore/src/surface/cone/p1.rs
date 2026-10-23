@@ -240,6 +240,48 @@ pub struct Cone {
     pub(crate) cylinder: bool,
 }
 
+/// The cone's `ConvertUVFromNURBSToSTEP` on its base parts (the virtual the
+/// inherited `UpdateAnalyticalDomain` calls); see [`Cone::convert_uv_from_nurbs_to_step`].
+pub(crate) fn cone_convert_uv_from_nurbs_to_step(
+    rev: &SurfOfRevolution,
+    inside_out: bool,
+    k: &Kernel,
+    nurbs_uv: Point2,
+) -> Result<Point2> {
+    // swap NurbPoint when needed
+    let step_ivl = rev.anal_uv_domain.v_interval();
+    let nurb_domain = rev.base.natural_uv_domain();
+    let (nurb_uv, nurb_ivl) = if rev.swap_uv {
+        (
+            Point2::new(nurbs_uv.y, nurbs_uv.x),
+            nurb_domain.u_interval(),
+        )
+    } else {
+        (nurbs_uv, nurb_domain.v_interval())
+    };
+
+    // convert sweep coordinate
+    let circle = rev
+        .polar_curve
+        .as_ref()
+        .ok_or(SolidError::null_pointer(OP_TO_STEP))?;
+    let (x, _exact) = rev.polar.convert_to_polar_parameter(k, circle, nurb_uv.x)?;
+
+    // convert linear coordinate
+    let y = if rev.is_bounded()? {
+        if inside_out {
+            step_ivl.min() + ((nurb_uv.y - nurb_ivl.max()) / -nurb_ivl.length() * step_ivl.length())
+        } else {
+            step_ivl.min() + ((nurb_uv.y - nurb_ivl.min()) / nurb_ivl.length() * step_ivl.length())
+        }
+    } else if inside_out {
+        -nurb_uv.y
+    } else {
+        nurb_uv.y
+    };
+    Ok(Point2::new(x, y))
+}
+
 /// The cone's `CreateIsoParametricCurve` on its base parts (the virtual the
 /// inherited NURB rebuild calls).
 pub(crate) fn cone_iso_curve(
@@ -1343,44 +1385,7 @@ impl Cone {
     ///
     /// `SM_ERR_NULL_POINTER` without polar curve; those of the polar conversion.
     pub fn convert_uv_from_nurbs_to_step(&self, k: &Kernel, nurbs_uv: Point2) -> Result<Point2> {
-        // swap NurbPoint when needed
-        let step_ivl = self.rev.anal_uv_domain.v_interval();
-        let nurb_domain = self.rev.base.natural_uv_domain();
-        let (nurb_uv, nurb_ivl) = if self.rev.swap_uv {
-            (
-                Point2::new(nurbs_uv.y, nurbs_uv.x),
-                nurb_domain.u_interval(),
-            )
-        } else {
-            (nurbs_uv, nurb_domain.v_interval())
-        };
-
-        // convert sweep coordinate
-        let circle = self
-            .rev
-            .polar_curve
-            .as_ref()
-            .ok_or(SolidError::null_pointer(OP_TO_STEP))?;
-        let (x, _exact) = self
-            .rev
-            .polar
-            .convert_to_polar_parameter(k, circle, nurb_uv.x)?;
-
-        // convert linear coordinate
-        let y = if self.rev.is_bounded()? {
-            if self.inside_out {
-                step_ivl.min()
-                    + ((nurb_uv.y - nurb_ivl.max()) / -nurb_ivl.length() * step_ivl.length())
-            } else {
-                step_ivl.min()
-                    + ((nurb_uv.y - nurb_ivl.min()) / nurb_ivl.length() * step_ivl.length())
-            }
-        } else if self.inside_out {
-            -nurb_uv.y
-        } else {
-            nurb_uv.y
-        };
-        Ok(Point2::new(x, y))
+        cone_convert_uv_from_nurbs_to_step(&self.rev, self.inside_out, k, nurbs_uv)
     }
 
     // ---- evaluation -----------------------------------------------------------------

@@ -10,6 +10,7 @@
 //! | [`Cone::rebuild_step_from_nurb_parameters`]  | `SmCone::RebuildSTEPFromNURBParameters`          |
 //! | [`ellipse_trim_intervals`]                   | `sm_GetEllipseTrimIntervals` (file static)       |
 //! | [`Cone::reparameterize`]                     | `SmSurfOfRevolution::Reparameterize` (inherited; its polar converter rebuild calls the cone's iso curves) |
+//! | [`Cone::trim_with_domain`]                  | `SmSurfOfRevolution::TrimWithDomain` (inherited; its conversions and NURB rebuilds call the cone's virtuals) |
 //! | [`Cone::base_mut`]                           | `GetGwNurbPointer` (non-`const`, inherited)      |
 //!
 //! Deviations:
@@ -22,7 +23,9 @@
 //!   error status through `SER` from a function returning `SmBoolean`
 //!   (`IsNurbSurfaceCone`: a failed iso curve) the error is returned; upstream's caller
 //!   would read that status as `TRUE` with a `NULL` cone.
-//! - **Uninitialised reads.** `sm_GetEllipseTrimIntervals` ignores the status of
+//! - **Uninitialised reads.** A failed `ConvertUVFromNURBSToSTEP` in
+//!   [`Cone::trim_with_domain`] (upstream ignores the status and reads the corner it may
+//!   not have written) returns the error. `sm_GetEllipseTrimIntervals` ignores the status of
 //!   `smgu_LinePlaneIntersect` and then reads its parameter: a seam line parallel to
 //!   the ellipse plane (or of zero length) returns the error here. A failed
 //!   `ConvertUVFromNURBSToSTEP` (upstream then uses a default-constructed domain) and
@@ -226,6 +229,26 @@ impl Cone {
             .reparameterize_using(k, trim_domain, &|s, k, p, t| {
                 Ok(super::p1::cone_iso_curve(s, inside_out, k, p, t, None, false)?.curve)
             })
+    }
+
+    /// Trims to the NURB domain `new_nurb_uv_domain` (the inherited
+    /// `SmSurfOfRevolution::TrimWithDomain`): its body with the cone's
+    /// `ConvertUVFromNURBSToSTEP` (in `UpdateAnalyticalDomain`) and iso curves (in
+    /// `MakeNurb`, `Reparameterize` and `RebuildPolarConverter`) as its virtual calls.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`crate::surface::surf_of_revolution::SurfOfRevolution::trim_with_domain`]
+    /// and of [`Self::convert_uv_from_nurbs_to_step`] (upstream ignores that status and
+    /// reads the corner it may not have written).
+    pub fn trim_with_domain(&mut self, k: &Kernel, new_nurb_uv_domain: &Extent2d) -> Result<()> {
+        let inside_out = self.inside_out;
+        self.rev.trim_with_domain_using(
+            k,
+            new_nurb_uv_domain,
+            &|s, k, uv| super::p1::cone_convert_uv_from_nurbs_to_step(s, inside_out, k, uv),
+            &|s, k, p, t| Ok(super::p1::cone_iso_curve(s, inside_out, k, p, t, None, false)?.curve),
+        )
     }
 
     /// Rebuilds the polar converter with the cone's iso curves
@@ -1126,6 +1149,34 @@ mod tests {
             assert!((found.bot_radius() - cone.bot_radius()).abs() < 1e-9);
             assert!((found.top_radius() - cone.top_radius()).abs() < 1e-9);
             assert_eq!(found.rev().swap_uv(), swap);
+        }
+    }
+
+    #[test]
+    fn trim_with_domain_keeps_the_shape() {
+        let k = kernel();
+        for (swap, inside) in [(false, false), (true, false), (false, true), (true, true)] {
+            let mut cone = canonical(&k, 2.0, 1.0, 3.0, swap, inside);
+            let d = cone.rev().base().natural_uv_domain();
+            let (lo, hi) = (d.min(), d.max());
+            let trim = Extent2d::from_bounds(
+                lo.x + 0.25 * (hi.x - lo.x),
+                lo.y + 0.125 * (hi.y - lo.y),
+                lo.x + 0.75 * (hi.x - lo.x),
+                lo.y + 0.5 * (hi.y - lo.y),
+            );
+            cone.trim_with_domain(&k, &trim).unwrap();
+            let nd = cone.rev().base().natural_uv_domain();
+            assert!(nd.is_contained_by(&trim, 1e-12) && trim.is_contained_by(&nd, 1e-12));
+            let p = cone.rev().base().evaluate_point(trim.max()).unwrap();
+            let back = cone.convert_uv_from_nurbs_to_step(&k, trim.max()).unwrap();
+            let q = cone.evaluate_step_point(back).unwrap();
+            assert!((p - q).length() < 1e-9);
+            // the cone through the trimmed corner keeps its radius at that height
+            let r = (p.x * p.x + p.y * p.y).sqrt();
+            assert!((r - cone.radius(p.z)).abs() < 1e-9);
+            // a domain outside the current one is rejected
+            assert!(cone.trim_with_domain(&k, &d).is_err());
         }
     }
 
