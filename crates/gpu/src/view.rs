@@ -12,7 +12,6 @@
 use std::sync::{Arc, Mutex};
 
 use solidcraft_geom::Vec3;
-use wgpu::util::DeviceExt;
 
 use crate::pbr;
 
@@ -429,6 +428,10 @@ impl GpuScene {
 
 pub type SceneSlot = Arc<Mutex<Option<GpuScene>>>;
 
+/// Where the product preview's geometry upload reports a GPU error it caught (out of memory, a
+/// buffer the device refused): the preview shows it instead of drawing.
+pub type UploadError = Arc<Mutex<Option<String>>>;
+
 /// A reference image (canvas or decal): a textured quad, depth-tested against the model.
 #[derive(Clone)]
 pub struct GpuImage {
@@ -450,6 +453,8 @@ const IMG_SIZE: usize = 24;
 pub struct Frame {
     /// Product preview uses its own batches, retaining the Design viewport's uploads.
     pub product: bool,
+    /// Product preview only: receives a GPU error raised by its geometry upload.
+    pub upload_error: Option<UploadError>,
     pub key: u64,
     pub slot: SceneSlot,
     pub sketch_key: u64,
@@ -634,13 +639,11 @@ impl SharedGpu {
         if tris.vertices.len() as u64 > limit || index_bytes > limit {
             return upload(device, "sc_instanced_unshared", &tris.unshared(), SHARED_SIZE).map(SharedGpu::Unshared);
         }
-        let buffer = |label: &str, contents: &[u8], usage: wgpu::BufferUsages| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents, usage })
-        };
+        let buffer = |label: &str, contents: &[u8], usage: wgpu::BufferUsages| buffer_init(device, label, contents, usage);
         let indices: Vec<u8> = tris.indices.iter().flat_map(|i| i.to_le_bytes()).collect();
         Some(SharedGpu::Indexed {
-            vertices: buffer("sc_instanced_vertices", &tris.vertices, wgpu::BufferUsages::VERTEX),
-            indices: buffer("sc_instanced_indices", &indices, wgpu::BufferUsages::INDEX),
+            vertices: buffer("sc_instanced_vertices", &tris.vertices, wgpu::BufferUsages::VERTEX)?,
+            indices: buffer("sc_instanced_indices", &indices, wgpu::BufferUsages::INDEX)?,
             count: u32::try_from(tris.indices.len()).unwrap_or(u32::MAX),
         })
     }
@@ -912,11 +915,10 @@ impl Batches {
                     },
                 };
                 // Until the first cull, every placement is drawn in full.
-                let instances = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("sc_instances"),
-                    contents: &placements,
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                });
+                let Some(instances) = buffer_init(device, "sc_instances", &placements, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST)
+                else {
+                    continue;
+                };
                 let count = if i == 0 { count } else { 0 };
                 levels.push(LevelDraw { tris: gpu.1.clone(), flat: tris.flat, error, instances, count });
                 self.instanced_tris.insert(key, gpu);
@@ -1893,12 +1895,26 @@ fn upload_with(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize, 
     let parts = bytes
         .chunks(chunk)
         .filter(|part| part.len() >= stride)
-        .map(|part| {
-            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: part, usage });
-            (buffer, u32::try_from(part.len() / stride).unwrap_or(0))
-        })
-        .collect();
+        .map(|part| Some((buffer_init(device, label, part, usage)?, u32::try_from(part.len() / stride).unwrap_or(0))))
+        .collect::<Option<Vec<_>>>()?;
     Some(Batch { parts, chunk })
+}
+
+/// As `create_buffer_init`, without its panic when the device refused the buffer (an allocation
+/// error caught by an error scope): `None` instead, so the upload fails.
+fn buffer_init(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> Option<wgpu::Buffer> {
+    let len = contents.len() as u64;
+    let size = len.div_ceil(wgpu::COPY_BUFFER_ALIGNMENT) * wgpu::COPY_BUFFER_ALIGNMENT;
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: true });
+    match buffer.get_mapped_range_mut(..len) {
+        Ok(mut mapped) => mapped.copy_from_slice(contents),
+        Err(error) => {
+            log::error!("geometry upload failed: {error}");
+            return None;
+        }
+    }
+    buffer.unmap();
+    Some(buffer)
 }
 
 /// Bytes per GPU buffer for vertices of `stride` bytes: within the device's limit and a
@@ -2049,7 +2065,25 @@ impl Renderer {
         }
         res.cached = None;
         if cb.product {
+            // A large product scene can exceed what the device will allocate. Its upload runs under
+            // its own error scopes, so the failure reaches the preview instead of the device's
+            // uncaptured-error handler, and nothing half-uploaded is drawn.
+            let scopes =
+                [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation].map(|f| device.push_error_scope(f));
             res.product.take(device, cb.key, &cb.slot, None);
+            let mut failed = None;
+            for scope in scopes.into_iter().rev() {
+                if let Some(e) = crate::popped(scope.pop()) {
+                    failed.get_or_insert(e.to_string());
+                }
+            }
+            if let Some(error) = failed {
+                log::error!("product preview upload failed: {error}");
+                res.product = Batches { key: Some(cb.key), ..Batches::default() };
+                if let Some(Ok(mut sink)) = cb.upload_error.as_ref().map(|e| e.lock()) {
+                    *sink = Some(error);
+                }
+            }
             res.product.sort_glass(queue, cb.back);
             queue.write_buffer(&res.uniform, 0, &uniform_bytes(cb, cb.size_px[0], cb.size_px[1], res.linear_out, res.target.reversed_depth()));
             // The product picture goes through the window's pass too: offscreen when the targets
@@ -2643,6 +2677,21 @@ mod tests {
         assert_eq!(SharedTris::new(&smooth).indices.len(), 6);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn rejected_geometry_allocation_returns_without_panicking() {
+        let Ok((_, device, _)) = crate::open_headless() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        // Invalid mapping usage provides a deterministic failed allocation without exhausting memory.
+        let result =
+            super::upload_with(&device, "rejected geometry", &[0; 288], super::PBR_SIZE, wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::VERTEX);
+        assert!(result.is_none());
+        assert!(pollster::block_on(scope.pop()).is_some());
+    }
+
     /// Only the FirePro under Metal skips GPU evaluation; the same card under another backend
     /// and other Metal GPUs keep it.
     #[test]
@@ -2667,6 +2716,7 @@ mod tests {
         let slot = || Arc::new(Mutex::new(None));
         super::Frame {
             product: false,
+            upload_error: None,
             key: 1,
             slot: slot(),
             sketch_key: 2,
@@ -2904,6 +2954,7 @@ mod glass_tests {
         let none = || Arc::new(Mutex::new(None));
         let frame = Frame {
             product: false,
+            upload_error: None,
             key: 1,
             slot: Arc::new(Mutex::new(Some(scene))),
             sketch_key: 0,
@@ -3073,6 +3124,7 @@ mod glass_tests {
         let none = || Arc::new(Mutex::new(None));
         Frame {
             product: false,
+            upload_error: None,
             key: 1,
             slot: Arc::new(Mutex::new(Some(scene))),
             sketch_key: 0,

@@ -361,6 +361,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
     let mode = scene.analysis.map(|a| a.mode);
     Frame {
         product: false,
+        upload_error: None,
         key,
         slot: Arc::new(Mutex::new(Some(scene_geometry(scene)))),
         sketch_key: 0,

@@ -15,7 +15,46 @@ use solidcraft_engine::render::{
 use crate::gpu::{Frame, GpuScene, SceneSlot, ViewportCallback};
 use crate::{SolveApp, theme::Tokens};
 
-const MAX_GEOMETRY_BYTES: usize = 128 * 1024 * 1024;
+/// The browser's preview budget: WebGPU and WebGL share the tab's memory, so it stays small.
+const WEB_GEOMETRY_BYTES: u64 = 128 * 1024 * 1024;
+/// Desktop: at most this many of the device's largest buffers of geometry...
+const DESKTOP_GEOMETRY_BUFFERS: u64 = 8;
+/// ...and never more than this, whatever the device allows.
+const DESKTOP_GEOMETRY_CEILING: u64 = 2 * 1024 * 1024 * 1024;
+
+/// The product preview's geometry budget for a device whose largest buffer is `max_buffer_size`
+/// bytes (`wgpu::Device::limits`, what the device was created with). Uploads are split into
+/// buffers of at most that size, so the budget bounds memory, not a single buffer: 2 GiB on a
+/// device with the standard 256 MiB buffers. An allocation the device still refuses is caught
+/// by the upload's error scope and reported, not a crash.
+pub(crate) fn geometry_budget(max_buffer_size: u64, web: bool) -> u64 {
+    if web { WEB_GEOMETRY_BYTES } else { max_buffer_size.saturating_mul(DESKTOP_GEOMETRY_BUFFERS).min(DESKTOP_GEOMETRY_CEILING) }
+}
+
+fn admit_geometry(bytes: u64, budget: u64) -> Result<(), String> {
+    if bytes > budget {
+        return Err(format!(
+            "Render preview needs {:.1} MiB of geometry; the limit is {:.1} MiB. Hide bodies in Design, then return to Render and try again.",
+            bytes as f64 / 1048576.0,
+            budget as f64 / 1048576.0
+        ));
+    }
+    Ok(())
+}
+
+/// The message when the device refused the preview's geometry.
+fn upload_refusal(scene: &ProductScene, error: &str) -> String {
+    let bytes: u64 = scene.meshes.iter().map(|m| (m.mesh.triangles.len() as u64).saturating_mul(3 * crate::gpu::PBR_SIZE as u64)).sum();
+    format!(
+        "The graphics device could not hold the Render preview's {:.1} MiB of geometry ({error}). Hide bodies in Design, then return to Render and try again.",
+        bytes as f64 / 1048576.0
+    )
+}
+
+/// Fill, text and outline of the preview's message card.
+fn message_colors(t: &Tokens) -> (Color32, Color32, Color32) {
+    (t.panel, t.text, t.border)
+}
 
 #[cfg(test)]
 #[path = "render_workspace_tests.rs"]
@@ -23,6 +62,9 @@ mod tests;
 
 pub struct State {
     pub host: Option<ExecutorDescriptor>,
+    pub geometry_budget: u64,
+    /// A GPU error the preview's last geometry upload caught.
+    pub upload_error: crate::gpu::UploadError,
     pub image_host: Option<solidcraft_engine::render::job::CpuHost>,
     pub view: ViewState,
     revision: u64,
@@ -55,6 +97,8 @@ impl Default for State {
     fn default() -> Self {
         Self {
             host: None,
+            geometry_budget: WEB_GEOMETRY_BYTES,
+            upload_error: Arc::new(Mutex::new(None)),
             image_host: None,
             view: Default::default(),
             revision: u64::MAX,
@@ -129,7 +173,8 @@ pub fn reset_document(app: &mut SolveApp) {
     app.ui.ribbon_context = None;
     let host = app.render_workspace.host.clone();
     let image_host = app.render_workspace.image_host.clone();
-    app.render_workspace = State { host, image_host, ..Default::default() };
+    let geometry_budget = app.render_workspace.geometry_budget;
+    app.render_workspace = State { host, image_host, geometry_budget, ..Default::default() };
     if active(app) {
         app.ui.tab = "MODEL".into();
     }
@@ -372,15 +417,13 @@ fn export_image(app: &mut SolveApp, job: solidcraft_engine::render::job::JobId, 
 }
 
 /// Convert only product surfaces; geometry budgets are admitted before vertex allocation.
-pub fn gpu_scene(scene: &ProductScene) -> Result<(u64, GpuScene), String> {
+pub fn gpu_scene(scene: &ProductScene, budget: u64) -> Result<(u64, GpuScene), String> {
     let bytes = scene
         .meshes
         .iter()
-        .try_fold(0usize, |n, m| m.mesh.triangles.len().checked_mul(3 * crate::gpu::PBR_SIZE).and_then(|x| n.checked_add(x)))
+        .try_fold(0u64, |n, m| (m.mesh.triangles.len() as u64).checked_mul(3 * crate::gpu::PBR_SIZE as u64).and_then(|x| n.checked_add(x)))
         .ok_or("product geometry size overflow")?;
-    if bytes > MAX_GEOMETRY_BYTES {
-        return Err("product preview exceeds the 128 MiB geometry upload budget".into());
-    }
+    admit_geometry(bytes, budget)?;
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     let mut gpu = GpuScene::default();
     for body in &scene.meshes {
@@ -507,17 +550,26 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let signature = (app.session.revision, Arc::as_ptr(&app.session.world_state()) as usize, visibility.finish());
         if app.render_workspace.scene_signature != Some(signature) {
             let scene = solidcraft_engine::product_scene::extract(&app.session).map_err(|e| e.to_string())?;
-            let (key, gpu) = gpu_scene(&scene)?;
+            let (key, gpu) = gpu_scene(&scene, app.render_workspace.geometry_budget)?;
             if app.render_workspace.key != Some(key) {
                 if let Ok(mut slot) = app.render_workspace.slot.lock() {
                     *slot = Some(gpu);
                 }
                 app.render_workspace.key = Some(key);
+                // A new upload: forget the last one's error, and look again next frame, after
+                // this frame's paint callback has uploaded it, in case the device refused it.
+                if let Ok(mut error) = app.render_workspace.upload_error.lock() {
+                    *error = None;
+                }
+                ui.ctx().request_repaint();
             }
             app.render_workspace.scene = Some(scene);
             app.render_workspace.scene_signature = Some(signature);
         }
         let scene = app.render_workspace.scene.as_ref().ok_or("no product scene")?;
+        if let Some(error) = app.render_workspace.upload_error.lock().ok().and_then(|e| e.clone()) {
+            return Err(upload_refusal(scene, &error));
+        }
         request.features = scene.required_features();
         solidcraft_engine::render::resolve_request(&[app.session.render_backend()], &request).map_err(|e| e.to_string())?;
         let key = app.render_workspace.key.ok_or("no product geometry")?;
@@ -530,6 +582,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let slot = app.render_workspace.slot.clone();
         let callback = ViewportCallback(Frame {
             product: true,
+            upload_error: Some(app.render_workspace.upload_error.clone()),
             key,
             slot: slot.clone(),
             sketch_key: 0,
@@ -558,13 +611,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         Ok(())
     })();
     if let Err(error) = result {
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            error,
-            egui::FontId::proportional(crate::theme::Tokens::get().font_heading),
-            Tokens::get().text,
-        );
+        // On a card: the preview's background is the setup's own colour, which the theme's text
+        // colour alone may barely stand out from.
+        let t = Tokens::get();
+        let (fill, ink, stroke) = message_colors(&t);
+        let galley = ui.painter().layout(error, egui::FontId::proportional(t.font_heading), ink, (rect.width() - 48.0).max(1.0));
+        let message = egui::Rect::from_center_size(rect.center(), galley.size());
+        ui.painter().rect(message.expand(12.0), f32::from(t.radius_md), fill, egui::Stroke::new(1.0, stroke), egui::StrokeKind::Outside);
+        ui.painter().galley(message.min, galley, ink);
     }
     crate::viewport::axis_view(app, ui, rect);
 }

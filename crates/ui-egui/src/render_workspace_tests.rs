@@ -21,7 +21,7 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
         )
         .unwrap();
         let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
-        let (key, gpu) = gpu_scene(&scene).unwrap();
+        let (key, gpu) = gpu_scene(&scene, WEB_GEOMETRY_BYTES).unwrap();
         assert!(!gpu.pbr.is_empty() && gpu.tris.is_empty());
         assert_ne!(previous, Some(key));
         previous = Some(key);
@@ -275,7 +275,7 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Glass"})).unwrap();
     s.execute("appearance.assign", &json!({"bodies":["Glass"],"color":"#336699","opacity":0.4})).unwrap();
     let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
-    let (key, gpu) = gpu_scene(&scene).unwrap();
+    let (key, gpu) = gpu_scene(&scene, WEB_GEOMETRY_BYTES).unwrap();
     assert!(gpu.tris.is_empty());
     assert!(!gpu.glass.is_empty());
     assert!(gpu.glass.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().all(|v| v[24..] == [51, 102, 153, 102]));
@@ -283,11 +283,11 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     s.selection = vec![solidcraft_engine::Sel::Body { name: "Glass".into() }];
     s.section = Some((solidcraft_engine::geom::Vec3::ZERO, solidcraft_engine::geom::Vec3::X));
     let after = solidcraft_engine::product_scene::extract(&s).unwrap();
-    assert_eq!(gpu_scene(&after).unwrap().0, key);
+    assert_eq!(gpu_scene(&after, WEB_GEOMETRY_BYTES).unwrap().0, key);
     s.execute("appearance.assign", &json!({"bodies":["Glass"],"color":"#336699","opacity":0.0})).unwrap();
     let invisible = solidcraft_engine::product_scene::extract(&s).unwrap();
     assert_eq!(invisible.meshes[0].opacity, 0.0);
-    let (_, empty) = gpu_scene(&invisible).unwrap();
+    let (_, empty) = gpu_scene(&invisible, WEB_GEOMETRY_BYTES).unwrap();
     assert!(empty.tris.is_empty() && empty.glass.is_empty());
 }
 
@@ -671,4 +671,54 @@ fn four_and_five_k_viewports_preview_downscaled_within_the_limits() {
         }
     }
     assert_eq!(preview_size(None, (5120, 2880)), (5120, 2880), "no executor: resolution reports it");
+}
+
+#[test]
+fn geometry_budget_follows_the_device_buffer_limit_and_keeps_the_web_cap() {
+    // The standard 256 MiB device buffers: 2 GiB, far past the old fixed 128 MiB.
+    assert_eq!(geometry_budget(256 << 20, false), 2 << 30);
+    assert!(admit_geometry(129 << 20, geometry_budget(256 << 20, false)).is_ok());
+    // A smaller device gets less, a larger one no more than the ceiling.
+    assert_eq!(geometry_budget(64 << 20, false), 512 << 20);
+    assert_eq!(geometry_budget(u64::MAX, false), DESKTOP_GEOMETRY_CEILING);
+    for device in [0, 256 << 20, u64::MAX] {
+        let budget = geometry_budget(device, true);
+        assert_eq!(budget, 128 << 20);
+        assert!(admit_geometry(budget, budget).is_ok());
+        assert!(admit_geometry(budget + 1, budget).is_err());
+    }
+}
+
+#[test]
+fn preview_messages_are_readable_in_both_themes() {
+    for (name, t) in [("light", Tokens::light()), ("dark", Tokens::dark())] {
+        let (fill, ink, _) = message_colors(&t);
+        let ratio = crate::theme::contrast_ratio(ink, fill);
+        assert!(ratio >= 4.5, "{name}: message text is {ratio:.2}:1 on its card");
+    }
+}
+
+#[test]
+fn geometry_refusal_reports_scene_size_limit_and_recovery() {
+    use solidcraft_engine::{
+        geom::{Aabb3, Mesh},
+        render::ProductMesh,
+    };
+    let scene = ProductScene {
+        meshes: vec![ProductMesh {
+            name: "Synthetic assembly".into(),
+            mesh: Arc::new(Mesh { triangles: vec![[0; 3]; 1 << 20], ..Default::default() }),
+            color: [128; 3],
+            opacity: 1.0,
+            surface: None,
+            faces: Vec::new(),
+        }],
+        bounds: Aabb3::EMPTY,
+    };
+    let error = gpu_scene(&scene, WEB_GEOMETRY_BYTES).err().unwrap();
+    assert!(error.contains("144.0 MiB"), "{error}");
+    assert!(error.contains("128.0 MiB"), "{error}");
+    assert!(error.contains("Hide bodies in Design"), "{error}");
+    let refused = upload_refusal(&scene, "Out of Memory");
+    assert!(refused.contains("144.0 MiB") && refused.contains("Out of Memory") && refused.contains("Hide bodies in Design"), "{refused}");
 }

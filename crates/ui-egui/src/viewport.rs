@@ -2695,6 +2695,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let cb = ViewportCallback(Frame {
             ssaa,
             product: false,
+            upload_error: None,
             key: app.viewport.key,
             slot: app.viewport.slot.clone(),
             sketch_key: app.viewport.sketch_key,
@@ -5041,6 +5042,7 @@ mod tests {
                 let e = proj.cam.eye().to_f32();
                 let frame = Frame {
                     product: false,
+                    upload_error: None,
                     key: 1,
                     slot: slot.clone(),
                     sketch_key: 0,
