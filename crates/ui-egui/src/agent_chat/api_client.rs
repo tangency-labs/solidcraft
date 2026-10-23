@@ -9,11 +9,11 @@
 //! The loop runs on a thread of its own: a model request can take a while.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use super::acp::ModelInfo;
 use super::agents::Protocol;
@@ -49,6 +49,511 @@ const TEST_TIMEOUT_S: u64 = 60;
 /// Tools the model is not offered.
 const HIDDEN_TOOLS: &[&str] = &["crash_reports"];
 
+/// Chat counter for OpenCode Go session IDs, next to the wall clock below.
+static GO_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// A stable session ID for OpenCode Go's routing and prompt cache; one per chat,
+/// not per request. Unique per chat on this machine; the gateway only needs an
+/// opaque stable string.
+fn new_session_id() -> String {
+    let n = GO_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    format!("solidcraft-{t:x}-{n:x}-{:x}", std::process::id())
+}
+
+/// Whether `base_url` is an OpenCode Go endpoint: all of them need
+/// `x-opencode-session`, on every path (the `zen/go` gateway and the per-model
+/// `inference/go/...` endpoints alike).
+fn is_opencode_go(base_url: &str) -> bool {
+    let u = base_url.trim().to_ascii_lowercase();
+    u.starts_with("https://opencode.ai/") && u.contains("/go")
+}
+
+/// Which wire protocol one OpenCode Go model speaks. Go exposes one endpoint per
+/// model family (see https://opencode.ai/docs/go/#endpoints); the preset stays a
+/// single base URL and each model is routed to its own shape.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum GoProtocol {
+    Chat,
+    Responses,
+    Messages,
+    Gemini,
+}
+
+/// The protocol `model` speaks on a Go endpoint, by family. Anything unknown
+/// stays on chat completions; a mismatch at request time falls through to the
+/// next protocol (see `should_try_next_go`), so new models keep working.
+fn go_protocol(model: &str) -> GoProtocol {
+    let m = model.trim().to_ascii_lowercase();
+    if m.starts_with("gemini-") {
+        return GoProtocol::Gemini;
+    }
+    if m.starts_with("grok-") || m.starts_with("gpt-") || m.starts_with("muse-spark-") {
+        return GoProtocol::Responses;
+    }
+    if m == "minimax-m3" || m.starts_with("claude-") || m.starts_with("qwen") {
+        return GoProtocol::Messages;
+    }
+    GoProtocol::Chat
+}
+
+/// Request URL for a Go `protocol` (`base_url` is the preset's base).
+fn go_url(base_url: &str, model: &str, protocol: GoProtocol) -> String {
+    match protocol {
+        GoProtocol::Gemini => {
+            let m = model.trim().to_ascii_lowercase();
+            format!("https://opencode.ai/inference/go/google/v1beta/models/{m}:generateContent")
+        }
+        GoProtocol::Responses => format!("{base_url}/responses"),
+        GoProtocol::Messages => format!("{base_url}/messages"),
+        GoProtocol::Chat => format!("{base_url}/chat/completions"),
+    }
+}
+
+/// Whether the endpoint refused the request because the model speaks another
+/// protocol (the gateway's wording): those refusals are retried elsewhere.
+fn is_protocol_mismatch(body: &Value) -> bool {
+    let detail = body.pointer("/error/message").or_else(|| body.get("error")).and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
+    detail.contains("does not support this protocol")
+}
+
+/// Whether another Go protocol may succeed after this refusal: the gateway
+/// naming a protocol mismatch, or a per-path credential refusal while the same
+/// key works on the sibling paths.
+fn should_try_next_go(status: u16, body: &Value) -> bool {
+    if is_protocol_mismatch(body) {
+        return true;
+    }
+    if status == 401 {
+        let detail = body.pointer("/error/message").or_else(|| body.get("error")).and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
+        return detail.contains("credential");
+    }
+    false
+}
+
+/// OpenAI function tools as Anthropic tools for Go's Messages endpoints.
+fn go_anthropic_tools(tools: &[Value]) -> Vec<Value> {
+    tools
+        .iter()
+        .filter_map(|t| {
+            let f = t.get("function")?;
+            Some(json!({
+                "name": f.get("name")?,
+                "description": f.get("description").and_then(Value::as_str).unwrap_or(""),
+                "input_schema": f.get("parameters").cloned().unwrap_or(json!({"type": "object"})),
+            }))
+        })
+        .collect()
+}
+
+/// OpenAI function tools as Responses API tools for Go's Responses endpoints.
+fn go_responses_tools(tools: &[Value]) -> Vec<Value> {
+    tools
+        .iter()
+        .filter_map(|t| {
+            let f = t.get("function")?;
+            Some(json!({
+                "type": "function",
+                "name": f.get("name")?,
+                "description": f.get("description").and_then(Value::as_str).unwrap_or(""),
+                "parameters": f.get("parameters").cloned().unwrap_or(json!({"type": "object"})),
+            }))
+        })
+        .collect()
+}
+
+/// One JSON Schema node reduced to what Gemini's Schema proto accepts: `type`
+/// (a single string), `description`, `enum`, `items`, object-only `properties`
+/// and string-only `required`. Everything else is dropped because the endpoint
+/// rejects unknown names instead of ignoring them.
+fn go_gemini_property(schema: &Value) -> Value {
+    let Some(o) = schema.as_object() else { return json!({"type": "string"}) };
+    let mut out = Map::new();
+    let mut kind = Value::String("string".to_string());
+    if let Some(t) = o.get("type").and_then(Value::as_str) {
+        kind = Value::String(t.to_string());
+    }
+    out.insert("type".to_string(), kind);
+    if let Some(d) = o.get("description").and_then(Value::as_str) {
+        out.insert("description".to_string(), Value::String(d.to_string()));
+    }
+    if let Some(e) = o.get("enum").and_then(Value::as_array) {
+        out.insert("enum".to_string(), Value::Array(e.clone()));
+    }
+    if let Some(items) = o.get("items") {
+        out.insert("items".to_string(), go_gemini_property(items));
+    }
+    if let Some(props) = o.get("properties").and_then(Value::as_object) {
+        out.insert("properties".to_string(), Value::Object(props.iter().map(|(k, v)| (k.clone(), go_gemini_property(v))).collect()));
+    } else if out.get("type").and_then(Value::as_str) == Some("object") {
+        out.insert("properties".to_string(), Value::Object(Map::new()));
+    }
+    if let Some(req) = o.get("required").and_then(Value::as_array) {
+        if !req.is_empty() && req.iter().all(|r| r.is_string()) {
+            out.insert("required".to_string(), Value::Array(req.clone()));
+        }
+    }
+    Value::Object(out)
+}
+
+/// A tool's parameters reduced to a Gemini object schema (see `go_gemini_property`).
+fn go_gemini_schema(schema: &Value) -> Value {
+    let mut root = go_gemini_property(schema);
+    root["type"] = Value::String("object".to_string());
+    if root.get("properties").is_none() {
+        root["properties"] = Value::Object(Map::new());
+    }
+    root
+}
+
+/// OpenAI function tools as Gemini function declarations.
+fn go_gemini_tools(tools: &[Value]) -> Vec<Value> {
+    tools
+        .iter()
+        .filter_map(|t| {
+            let f = t.get("function")?;
+            let params = f.get("parameters").cloned().unwrap_or(json!({"type": "object"}));
+            Some(json!({
+                "name": f.get("name")?,
+                "description": f.get("description").and_then(Value::as_str).unwrap_or(""),
+                "parameters": go_gemini_schema(&params),
+            }))
+        })
+        .collect()
+}
+
+/// Append `block` to `msgs`, merging into the last message when it already has
+/// `role` (Anthropic and Gemini both require alternating roles, and one turn
+/// answers each tool call with its own OpenAI `tool` message here).
+fn go_push_block(msgs: &mut Vec<Value>, role: &str, block: Value) {
+    if let Some(last) = msgs.last_mut() {
+        let same = last.get("role").and_then(Value::as_str) == Some(role);
+        if same {
+            if let Some(content) = last.get_mut("content").and_then(Value::as_array_mut) {
+                content.push(block);
+                return;
+            }
+        }
+    }
+    msgs.push(json!({"role": role, "content": [block]}));
+}
+
+/// A `data:<mime>;base64,<data>` URL as its parts.
+fn go_data_url(url: &str) -> Option<(&str, &str)> {
+    let rest = url.strip_prefix("data:")?;
+    let (mime, data) = rest.split_once(";base64,")?;
+    if mime.is_empty() || data.is_empty() {
+        return None;
+    }
+    Some((mime, data))
+}
+
+/// OpenAI-style history as Anthropic messages; the system note is dropped (the
+/// caller sends its own) and tool answers merge so roles alternate.
+fn go_anthropic_messages(history: &[Value]) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    for m in history {
+        let role = m.get("role").and_then(Value::as_str).unwrap_or("");
+        match role {
+            "user" => match m.get("content") {
+                Some(Value::String(t)) => go_push_block(&mut out, "user", json!({"type": "text", "text": t})),
+                Some(Value::Array(parts)) => {
+                    for p in parts {
+                        if let Some(t) = p.get("text").and_then(Value::as_str) {
+                            go_push_block(&mut out, "user", json!({"type": "text", "text": t}));
+                        } else if let Some(url) = p.pointer("/image_url/url").and_then(Value::as_str) {
+                            if let Some((mime, data)) = go_data_url(url) {
+                                go_push_block(
+                                    &mut out,
+                                    "user",
+                                    json!({"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}),
+                                );
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            },
+            "assistant" => {
+                if let Some(t) = m.get("content").and_then(Value::as_str).filter(|t| !t.is_empty()) {
+                    go_push_block(&mut out, "assistant", json!({"type": "text", "text": t}));
+                }
+                if let Some(calls) = m.get("tool_calls").and_then(Value::as_array) {
+                    for c in calls {
+                        let id = c.get("id").and_then(Value::as_str).unwrap_or("");
+                        let name = c.pointer("/function/name").and_then(Value::as_str).unwrap_or("");
+                        let input = tool_arguments(c.pointer("/function/arguments")).unwrap_or_else(|_| json!({}));
+                        go_push_block(&mut out, "assistant", json!({"type": "tool_use", "id": id, "name": name, "input": input}));
+                    }
+                }
+            }
+            "tool" => {
+                let id = m.get("tool_call_id").and_then(Value::as_str).unwrap_or("");
+                let text = m.get("content").and_then(Value::as_str).unwrap_or("");
+                go_push_block(&mut out, "user", json!({"type": "tool_result", "tool_use_id": id, "content": text}));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// OpenAI-style history as Responses API input items. Assistant history takes
+/// `output_text` parts: `input_text` is rejected there.
+fn go_responses_input(history: &[Value]) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    for m in history {
+        let role = m.get("role").and_then(Value::as_str).unwrap_or("");
+        match role {
+            "system" => {
+                if let Some(t) = m.get("content").and_then(Value::as_str) {
+                    out.push(json!({"type": "message", "role": "system", "content": [{"type": "input_text", "text": t}]}));
+                }
+            }
+            "user" => match m.get("content") {
+                Some(Value::String(t)) => {
+                    out.push(json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": t}]}));
+                }
+                Some(Value::Array(parts)) => {
+                    let content: Vec<Value> = parts
+                        .iter()
+                        .filter_map(|p| {
+                            if let Some(t) = p.get("text").and_then(Value::as_str) {
+                                Some(json!({"type": "input_text", "text": t}))
+                            } else {
+                                p.pointer("/image_url/url").and_then(Value::as_str).map(|url| json!({"type": "input_image", "image_url": url}))
+                            }
+                        })
+                        .collect();
+                    if !content.is_empty() {
+                        out.push(json!({"type": "message", "role": "user", "content": content}));
+                    }
+                }
+                _ => {}
+            },
+            "assistant" => {
+                if let Some(t) = m.get("content").and_then(Value::as_str).filter(|t| !t.is_empty()) {
+                    out.push(json!({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": t}]}));
+                }
+                if let Some(calls) = m.get("tool_calls").and_then(Value::as_array) {
+                    for c in calls {
+                        let args = match c.pointer("/function/arguments") {
+                            Some(Value::String(s)) if !s.trim().is_empty() => s.clone(),
+                            Some(v @ Value::Object(_)) => v.to_string(),
+                            _ => "{}".to_string(),
+                        };
+                        out.push(json!({
+                            "type": "function_call",
+                            "call_id": c.get("id").and_then(Value::as_str).unwrap_or(""),
+                            "name": c.pointer("/function/name").and_then(Value::as_str).unwrap_or(""),
+                            "arguments": args,
+                        }));
+                    }
+                }
+            }
+            "tool" => {
+                out.push(json!({
+                    "type": "function_call_output",
+                    "call_id": m.get("tool_call_id").and_then(Value::as_str).unwrap_or(""),
+                    "output": m.get("content").and_then(Value::as_str).unwrap_or(""),
+                }));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Tool call ids back to their names, so Gemini answers can name the function
+/// they answer (its history items carry only the id).
+fn go_call_names(history: &[Value]) -> std::collections::HashMap<String, String> {
+    let mut names = std::collections::HashMap::new();
+    for m in history {
+        if let Some(calls) = m.get("tool_calls").and_then(Value::as_array) {
+            for c in calls {
+                if let (Some(id), Some(name)) = (c.get("id").and_then(Value::as_str), c.pointer("/function/name").and_then(Value::as_str)) {
+                    names.insert(id.to_string(), name.to_string());
+                }
+            }
+        }
+    }
+    names
+}
+
+/// Append `part` to `contents`, merging into the last content with `role`.
+fn go_push_part(contents: &mut Vec<Value>, role: &str, part: Value) {
+    if let Some(last) = contents.last_mut() {
+        let same = last.get("role").and_then(Value::as_str) == Some(role);
+        if same {
+            if let Some(parts) = last.get_mut("parts").and_then(Value::as_array_mut) {
+                parts.push(part);
+                return;
+            }
+        }
+    }
+    contents.push(json!({"role": role, "parts": [part]}));
+}
+
+/// OpenAI-style history as Gemini contents (the system note is dropped; the
+/// caller sends its own instruction).
+fn go_gemini_contents(history: &[Value]) -> Vec<Value> {
+    let names = go_call_names(history);
+    let mut out: Vec<Value> = Vec::new();
+    for m in history {
+        let role = m.get("role").and_then(Value::as_str).unwrap_or("");
+        match role {
+            "user" => match m.get("content") {
+                Some(Value::String(t)) => go_push_part(&mut out, "user", json!({"text": t})),
+                Some(Value::Array(parts)) => {
+                    for p in parts {
+                        if let Some(t) = p.get("text").and_then(Value::as_str) {
+                            go_push_part(&mut out, "user", json!({"text": t}));
+                        } else if let Some(url) = p.pointer("/image_url/url").and_then(Value::as_str) {
+                            if let Some((mime, data)) = go_data_url(url) {
+                                go_push_part(&mut out, "user", json!({"inlineData": {"mimeType": mime, "data": data}}));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            },
+            "assistant" => {
+                if let Some(t) = m.get("content").and_then(Value::as_str).filter(|t| !t.is_empty()) {
+                    go_push_part(&mut out, "model", json!({"text": t}));
+                }
+                if let Some(calls) = m.get("tool_calls").and_then(Value::as_array) {
+                    for c in calls {
+                        let name = c.pointer("/function/name").and_then(Value::as_str).unwrap_or("");
+                        let args = tool_arguments(c.pointer("/function/arguments")).unwrap_or_else(|_| json!({}));
+                        go_push_part(&mut out, "model", json!({"functionCall": {"name": name, "args": args}}));
+                    }
+                }
+            }
+            "tool" => {
+                let id = m.get("tool_call_id").and_then(Value::as_str).unwrap_or("");
+                let name = names.get(id).map(String::as_str).unwrap_or("tool");
+                let text = m.get("content").and_then(Value::as_str).unwrap_or("");
+                go_push_part(&mut out, "user", json!({"functionResponse": {"name": name, "response": {"output": text}}}));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A Responses API answer as the tool loop's Reply; the kept assistant message
+/// is OpenAI-shaped so the loop stores one history shape for all of Go.
+fn go_responses_reply(body: &Value) -> Reply {
+    let mut text = Vec::new();
+    let mut calls = Vec::new();
+    let mut kept_calls = Vec::new();
+    if let Some(items) = body.get("output").and_then(Value::as_array) {
+        for item in items {
+            match item.get("type").and_then(Value::as_str) {
+                Some("message") => {
+                    if let Some(parts) = item.get("content").and_then(Value::as_array) {
+                        for p in parts {
+                            if let Some(t) = p.get("text").and_then(Value::as_str).filter(|t| !t.is_empty()) {
+                                text.push((false, t.to_string()));
+                            }
+                        }
+                    }
+                }
+                Some("function_call") if calls.len() < 32 => {
+                    let id = item.get("call_id").and_then(Value::as_str).map_or_else(|| format!("call-{}", calls.len()), str::to_string);
+                    let name = item.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                    let raw_args = match item.get("arguments") {
+                        Some(Value::String(s)) => s.clone(),
+                        Some(v) => v.to_string(),
+                        None => "{}".to_string(),
+                    };
+                    let arguments = tool_arguments(item.get("arguments"));
+                    calls.push(Call { id: id.clone(), name: name.clone(), arguments: arguments.clone() });
+                    kept_calls.push(json!({"id": id, "type": "function", "function": {"name": name, "arguments": raw_args}}));
+                }
+                _ => {}
+            }
+        }
+    }
+    let joined: String = text.iter().map(|(_, t)| t.as_str()).collect();
+    let mut assistant = json!({"role": "assistant", "content": if joined.is_empty() { Value::Null } else { Value::String(joined) }});
+    if !kept_calls.is_empty() {
+        assistant["tool_calls"] = Value::Array(kept_calls);
+    }
+    Reply { text, calls, assistant }
+}
+
+/// An Anthropic messages answer as the tool loop's Reply (history stays OpenAI-shaped).
+fn go_messages_reply(body: &Value) -> Reply {
+    let mut text = Vec::new();
+    let mut calls = Vec::new();
+    let mut kept_calls = Vec::new();
+    if let Some(blocks) = body.get("content").and_then(Value::as_array) {
+        for b in blocks {
+            match b.get("type").and_then(Value::as_str) {
+                Some("text") => {
+                    if let Some(t) = b.get("text").and_then(Value::as_str).filter(|t| !t.trim().is_empty()) {
+                        text.push((false, t.to_string()));
+                    }
+                }
+                Some("tool_use") if calls.len() < 32 => {
+                    let id = b.get("id").and_then(Value::as_str).map_or_else(|| format!("toolu-{}", calls.len()), str::to_string);
+                    let name = b.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                    let raw_args = b.get("input").map(|i| i.to_string()).unwrap_or_else(|| "{}".to_string());
+                    let arguments = match b.get("input") {
+                        None | Some(Value::Null) => Ok(json!({})),
+                        Some(v @ Value::Object(_)) => Ok(v.clone()),
+                        Some(_) => Err("the tool arguments must be a JSON object".to_string()),
+                    };
+                    calls.push(Call { id: id.clone(), name: name.clone(), arguments: arguments.clone() });
+                    kept_calls.push(json!({"id": id, "type": "function", "function": {"name": name, "arguments": raw_args}}));
+                }
+                _ => {}
+            }
+        }
+    }
+    let joined: String = text.iter().map(|(_, t)| t.as_str()).collect();
+    let mut assistant = json!({"role": "assistant", "content": if joined.is_empty() { Value::Null } else { Value::String(joined) }});
+    if !kept_calls.is_empty() {
+        assistant["tool_calls"] = Value::Array(kept_calls);
+    }
+    Reply { text, calls, assistant }
+}
+
+/// A Gemini answer as the tool loop's Reply (history stays OpenAI-shaped).
+fn go_gemini_reply(body: &Value) -> Reply {
+    let mut text = Vec::new();
+    let mut calls = Vec::new();
+    let mut kept_calls = Vec::new();
+    if let Some(parts) = body.pointer("/candidates/0/content/parts").and_then(Value::as_array) {
+        for (i, p) in parts.iter().enumerate() {
+            if let Some(t) = p.get("text").and_then(Value::as_str).filter(|t| !t.is_empty()) {
+                text.push((false, t.to_string()));
+            } else if let Some(call) = p.get("functionCall") {
+                if calls.len() >= 32 {
+                    continue;
+                }
+                let name = call.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                let raw_args = call.get("args").map(|a| a.to_string()).unwrap_or_else(|| "{}".to_string());
+                let arguments = match call.get("args") {
+                    None | Some(Value::Null) => Ok(json!({})),
+                    Some(v @ Value::Object(_)) => Ok(v.clone()),
+                    Some(_) => Err("the tool arguments must be a JSON object".to_string()),
+                };
+                let id = format!("call-{i}");
+                calls.push(Call { id: id.clone(), name: name.clone(), arguments: arguments.clone() });
+                kept_calls.push(json!({"id": id, "type": "function", "function": {"name": name, "arguments": raw_args}}));
+            }
+        }
+    }
+    let joined: String = text.iter().map(|(_, t)| t.as_str()).collect();
+    let mut assistant = json!({"role": "assistant", "content": if joined.is_empty() { Value::Null } else { Value::String(joined) }});
+    if !kept_calls.is_empty() {
+        assistant["tool_calls"] = Value::Array(kept_calls);
+    }
+    Reply { text, calls, assistant }
+}
+
 pub struct ApiConfig {
     pub name: String,
     pub protocol: Protocol,
@@ -79,6 +584,8 @@ impl ApiBackend {
         if cfg.key.is_some() && !super::agents::key_safe_for(&cfg.base_url) {
             return Err(crate::i18n::tr("ui.ai_key_needs_https").to_string());
         }
+        // One stable session ID per chat for OpenCode Go's routing and prompt cache.
+        let session_id = new_session_id();
         // The same MCP server an ACP agent would get.
         let mcp = match &ctx.bridge {
             Some(b) => {
@@ -101,6 +608,7 @@ impl ApiBackend {
                 tools: Vec::new(),
                 tool_names: Vec::new(),
                 history: Vec::new(),
+                session_id,
                 events: ev_tx,
                 wake,
                 cancel: stop,
@@ -172,6 +680,8 @@ struct Worker {
     tool_names: Vec<String>,
     /// The conversation in the endpoint's shape, without the system note (sent separately).
     history: Vec<Value>,
+    /// OpenCode Go's stable session ID for this chat (one per chat, not per request).
+    session_id: String,
     events: Sender<Event>,
     wake: Arc<dyn Fn() + Send + Sync>,
     cancel: Arc<AtomicBool>,
@@ -208,6 +718,8 @@ impl Worker {
                 Cmd::SetRequestTimeout(secs) => self.cfg.request_timeout_s = secs,
                 Cmd::NewChat => {
                     self.history.clear();
+                    // A new conversation gets a fresh Go session ID for routing and caching.
+                    self.session_id = new_session_id();
                     self.cancel.store(false, Ordering::Relaxed);
                     self.emit(Event::Ready { agent: format!("{} · {}", self.cfg.name, self.cfg.model), images: true });
                 }
@@ -379,6 +891,10 @@ impl Worker {
     }
 
     fn request(&self) -> Result<Reply, String> {
+        // OpenCode Go serves one protocol per model family behind a single base URL.
+        if self.cfg.protocol == Protocol::OpenAi && is_opencode_go(&self.cfg.base_url) {
+            return self.go_request();
+        }
         let mut body = self.body();
         let (status, v) = self.post(&body)?;
         // Some OpenAI models refuse function tools on this endpoint unless the reasoning effort is
@@ -399,6 +915,108 @@ impl Worker {
             return Err(http_error(status, &v));
         }
         Ok(reply(self.cfg.protocol, &v))
+    }
+
+    /// One Go model on its own protocol, falling through to the next protocol when
+    /// the gateway names a mismatch (or a per-path credential refusal). A model the
+    /// map does not know starts on chat completions, so new models keep working.
+    fn go_request(&self) -> Result<Reply, String> {
+        let mapped = go_protocol(&self.cfg.model);
+        let mut order = vec![mapped];
+        for p in [GoProtocol::Chat, GoProtocol::Responses, GoProtocol::Messages, GoProtocol::Gemini] {
+            if p != mapped {
+                order.push(p);
+            }
+        }
+        let mut first_err: Option<String> = None;
+        for protocol in order {
+            let mut body = self.go_body(protocol);
+            if protocol == GoProtocol::Chat && !self.tools.is_empty() && self.no_reasoning.get() {
+                body["reasoning_effort"] = json!("none");
+            }
+            let (status, v) = self.go_post(protocol, &body)?;
+            if protocol == GoProtocol::Chat {
+                // As on plain OpenAI endpoints: ask again once with reasoning effort
+                // "none" when the refusal names it.
+                let refused =
+                    status == 400 && !self.tools.is_empty() && !self.no_reasoning.get() && http_error(status, &v).contains("reasoning_effort");
+                if refused {
+                    self.no_reasoning.set(true);
+                    body["reasoning_effort"] = json!("none");
+                    let (status, v) = self.go_post(protocol, &body)?;
+                    if status == 200 {
+                        return Ok(reply(self.cfg.protocol, &v));
+                    }
+                    let e = http_error(status, &v);
+                    if first_err.is_none() {
+                        first_err = Some(e.clone());
+                    }
+                    if !should_try_next_go(status, &v) {
+                        return Err(e);
+                    }
+                    continue;
+                }
+            }
+            if status == 200 {
+                return Ok(if protocol == GoProtocol::Chat { reply(self.cfg.protocol, &v) } else { Self::go_reply(protocol, &v) });
+            }
+            let e = http_error(status, &v);
+            if first_err.is_none() {
+                first_err = Some(e.clone());
+            }
+            if !should_try_next_go(status, &v) {
+                return Err(e);
+            }
+        }
+        Err(first_err.unwrap_or_else(|| "the request ended without an answer".to_string()))
+    }
+
+    /// The request body for one Go protocol from the OpenAI-shaped history. Chat
+    /// reuses the endpoint body; the others convert it (each carries the system
+    /// note the way its protocol takes it).
+    fn go_body(&self, protocol: GoProtocol) -> Value {
+        match protocol {
+            GoProtocol::Chat => self.body(),
+            GoProtocol::Responses => {
+                let mut history = vec![json!({"role": "system", "content": super::acp::SYSTEM_NOTE})];
+                history.extend(self.history.iter().cloned());
+                let mut body = json!({"model": self.cfg.model, "input": go_responses_input(&history)});
+                if !self.tools.is_empty() {
+                    body["tools"] = Value::Array(go_responses_tools(&self.tools));
+                }
+                body
+            }
+            GoProtocol::Messages => {
+                let mut body = json!({
+                    "model": self.cfg.model,
+                    "max_tokens": ANTHROPIC_MAX_TOKENS,
+                    "system": super::acp::SYSTEM_NOTE,
+                    "messages": go_anthropic_messages(&self.history),
+                });
+                if !self.tools.is_empty() {
+                    body["tools"] = Value::Array(go_anthropic_tools(&self.tools));
+                }
+                body
+            }
+            GoProtocol::Gemini => {
+                let mut body = json!({"contents": go_gemini_contents(&self.history)});
+                body["systemInstruction"] = json!({"parts": [{"text": super::acp::SYSTEM_NOTE}]});
+                if !self.tools.is_empty() {
+                    body["tools"] = json!([{"functionDeclarations": go_gemini_tools(&self.tools)}]);
+                }
+                body
+            }
+        }
+    }
+
+    /// A non-chat Go answer as the tool loop's Reply.
+    fn go_reply(protocol: GoProtocol, body: &Value) -> Reply {
+        match protocol {
+            GoProtocol::Chat => reply(Protocol::OpenAi, body),
+            GoProtocol::Responses => go_responses_reply(body),
+            GoProtocol::Messages => go_messages_reply(body),
+            GoProtocol::Gemini => go_gemini_reply(body),
+        }
     }
 
     /// The request body in the endpoint's shape: the system note is a message for OpenAI and a
@@ -449,8 +1067,33 @@ impl Worker {
             }
         }
         let req = HttpRequest { method: "POST", url, headers, body: Some(body.to_string().into_bytes()), timeout_s: self.limit_s() };
-        // The request runs on a thread of its own so that Stop does not wait for the model: a
-        // cancelled one is abandoned (the host's own timeout ends it) and its answer dropped.
+        self.send(&req)
+    }
+
+    /// POST for one Go protocol attempt: its own URL, always the session header,
+    /// and the Bearer key (Go speaks Bearer on every path, unlike `x-api-key`).
+    fn go_post(&self, protocol: GoProtocol, body: &Value) -> Result<(u16, Value), String> {
+        let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
+        headers.push(("x-opencode-session".to_string(), self.session_id.clone()));
+        if protocol == GoProtocol::Messages {
+            headers.push(("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string()));
+        }
+        if let Some(k) = &self.cfg.key {
+            headers.push(("Authorization".into(), format!("Bearer {k}")));
+        }
+        let req = HttpRequest {
+            method: "POST",
+            url: go_url(&self.cfg.base_url, &self.cfg.model, protocol),
+            headers,
+            body: Some(body.to_string().into_bytes()),
+            timeout_s: self.limit_s(),
+        };
+        self.send(&req)
+    }
+
+    /// The request runs on a thread of its own so that Stop does not wait for the model: a
+    /// cancelled one is abandoned (the host's own timeout ends it) and its answer dropped.
+    fn send(&self, req: &HttpRequest) -> Result<(u16, Value), String> {
         let (tx, rx) = channel();
         let http = self.cfg.http.clone();
         let started = std::time::Instant::now();
@@ -1211,6 +1854,387 @@ mod tests {
         b.shutdown(true);
     }
 
+    /// Go models route by family; the preset's base stays one URL for all of them.
+    #[test]
+    fn go_models_route_to_their_protocol() {
+        for model in ["mimo-v2.6-flash", "deepseek-v4.1-flash", "glm-5.3", "kimi-k3", "hy3", "beam-free", "longcat-2.0", "something-new"] {
+            assert_eq!(go_protocol(model), GoProtocol::Chat, "{model}");
+        }
+        for model in ["grok-4.7", "gpt-6-luna", "gpt-5.6-luna", "muse-spark-1.3-contributor", "muse-spark-1.2-contributor"] {
+            assert_eq!(go_protocol(model), GoProtocol::Responses, "{model}");
+        }
+        for model in ["claude-haiku-5-5", "minimax-m3", "qwen3.8-max", "qwen3.8-flash", "qwen3.7-plus"] {
+            assert_eq!(go_protocol(model), GoProtocol::Messages, "{model}");
+        }
+        // minimax-m3.1-flash-free is chat/completions per the Go docs, not messages.
+        assert_eq!(go_protocol("minimax-m3.1-flash-free"), GoProtocol::Chat);
+        assert_eq!(go_protocol("gemini-4-argon-contributor"), GoProtocol::Gemini);
+        let gemini = go_url("https://opencode.ai/zen/go/v1", "gemini-4-argon-contributor", GoProtocol::Gemini);
+        assert!(gemini.starts_with("https://opencode.ai/inference/go/") && gemini.contains("gemini-4-argon-contributor"), "{gemini}");
+        assert_eq!(
+            go_url("https://opencode.ai/zen/go/v1", "muse-spark-1.3-contributor", GoProtocol::Responses),
+            "https://opencode.ai/zen/go/v1/responses"
+        );
+    }
+
+    fn go_cfg(model: &str, http: HttpFn) -> ApiConfig {
+        ApiConfig {
+            name: "Test".into(),
+            protocol: Protocol::OpenAi,
+            base_url: "https://opencode.ai/zen/go/v1".into(),
+            model: model.into(),
+            key: None,
+            http,
+        }
+    }
+
+    fn go_ctx() -> StartContext {
+        StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) }
+    }
+
+    /// Every Go protocol carries the session header; other endpoints see none.
+    #[test]
+    fn go_session_header_goes_on_every_protocol() {
+        for model in ["mimo-v2.6-flash", "muse-spark-1.3-contributor", "claude-haiku-5-5", "gemini-4-argon-contributor"] {
+            let seen = Arc::new(std::sync::Mutex::new(Vec::<HttpRequest>::new()));
+            let log = seen.clone();
+            let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+                if r.method == "GET" {
+                    return Ok((200, b"{\"data\":[]}".to_vec()));
+                }
+                log.lock().unwrap().push(r.clone());
+                Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": "ok"}}]}).to_string().into_bytes()))
+            });
+            let mut b = ApiBackend::start(go_cfg(model, http), go_ctx()).unwrap();
+            b.prompt(&[PromptPart::Text("hi".into())]);
+            let start = std::time::Instant::now();
+            while seen.lock().unwrap().is_empty() && start.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let reqs = seen.lock().unwrap();
+            assert!(!reqs.is_empty(), "{model}: no request sent");
+            assert!(
+                reqs.iter().all(|r| r.headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("x-opencode-session"))),
+                "{model}: every request needs x-opencode-session"
+            );
+            // Go speaks Bearer on every path, and Messages takes the version header too.
+            assert!(reqs.iter().all(|r| r.headers.iter().any(|(n, v)| n == "Content-Type" && v == "application/json")));
+            drop(reqs);
+            b.shutdown(true);
+        }
+        // A non-Go endpoint with a Go-looking model name still sends no session header.
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<HttpRequest>::new()));
+        let log = seen.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            if r.method == "GET" {
+                return Ok((200, b"{\"data\":[]}".to_vec()));
+            }
+            log.lock().unwrap().push(r.clone());
+            Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": "ok"}}]}).to_string().into_bytes()))
+        });
+        let cfg = ApiConfig {
+            name: "Test".into(),
+            protocol: Protocol::OpenAi,
+            base_url: "https://api.openai.com/v1".into(),
+            model: "muse-spark-1.3-contributor".into(),
+            key: None,
+            http,
+        };
+        let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
+        b.prompt(&[PromptPart::Text("hi".into())]);
+        let start = std::time::Instant::now();
+        while seen.lock().unwrap().is_empty() && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let reqs = seen.lock().unwrap();
+        assert!(reqs.iter().all(|r| r.headers.iter().all(|(name, _)| !name.eq_ignore_ascii_case("x-opencode-session"))));
+        drop(reqs);
+        b.shutdown(true);
+    }
+
+    /// The session ID is stable within a chat and fresh after New Chat.
+    #[test]
+    fn go_session_is_stable_within_a_chat() {
+        let sessions = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let log = sessions.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            if r.method == "GET" {
+                return Ok((200, b"{\"data\":[]}".to_vec()));
+            }
+            let id = r.headers.iter().find(|(name, _)| name.eq_ignore_ascii_case("x-opencode-session")).map(|(_, v)| v.clone()).unwrap_or_default();
+            log.lock().unwrap().push(id);
+            Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": "ok"}}]}).to_string().into_bytes()))
+        });
+        let mut b = ApiBackend::start(go_cfg("mimo-v2.6-flash", http), go_ctx()).unwrap();
+        let run = |b: &mut ApiBackend, f: &dyn Fn(&mut ApiBackend), want: usize| {
+            f(b);
+            let mut events = Vec::new();
+            let start = std::time::Instant::now();
+            while events.iter().filter(|e| matches!(e, Event::TurnEnded { .. } | Event::Ready { .. })).count() < want
+                && start.elapsed() < Duration::from_secs(10)
+            {
+                events.extend(b.poll());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        run(&mut b, &|b| b.prompt(&[PromptPart::Text("one".into())]), 2);
+        run(&mut b, &|b| b.prompt(&[PromptPart::Text("still one".into())]), 1);
+        run(&mut b, &|b| b.new_session(), 1);
+        run(&mut b, &|b| b.prompt(&[PromptPart::Text("two".into())]), 1);
+        let ids = sessions.lock().unwrap();
+        assert_eq!(ids.len(), 3);
+        assert!(!ids[0].is_empty(), "every model request needs x-opencode-session");
+        assert_eq!(ids[0], ids[1], "same conversation keeps its session ID");
+        assert_ne!(ids[1], ids[2], "New Chat gets a fresh session ID");
+        drop(ids);
+        b.shutdown(true);
+    }
+
+    /// Non-chat Go answers parse into the loop's Reply with OpenAI-shaped history.
+    #[test]
+    fn go_replies_parse_into_openai_shaped_history() {
+        let r = go_responses_reply(&json!({"output": [
+            {"type": "reasoning", "summary": []},
+            {"type": "message", "content": [{"type": "output_text", "text": "Mea"}, {"type": "output_text", "text": "suring."}]},
+            {"type": "function_call", "call_id": "c1", "name": "measure", "arguments": "{}"},
+        ]}));
+        assert_eq!(r.text, [(false, "Measuring.".to_string())]);
+        assert_eq!(r.calls.len(), 1);
+        assert_eq!(r.calls[0].name, "measure");
+        assert_eq!(r.assistant["tool_calls"][0]["id"], "c1");
+        let m = go_messages_reply(&json!({"content": [
+            {"type": "text", "text": "Hi."},
+            {"type": "tool_use", "id": "t1", "name": "batch", "input": {"commands": []}},
+        ]}));
+        assert_eq!(m.text, [(false, "Hi.".to_string())]);
+        assert_eq!(m.calls[0].id, "t1");
+        assert_eq!(m.calls[0].arguments.as_ref().unwrap(), &json!({"commands": []}));
+        assert_eq!(m.assistant["tool_calls"][0]["function"]["arguments"], "{\"commands\":[]}");
+        let g = go_gemini_reply(&json!({"candidates": [{"content": {"parts": [
+            {"text": "Done."},
+            {"functionCall": {"name": "measure", "args": {}}},
+        ]}}]}));
+        assert_eq!(g.text, [(false, "Done.".to_string())]);
+        assert_eq!(g.calls[0].name, "measure");
+        assert_eq!(g.assistant["role"], "assistant");
+        // Empty answers end the turn instead of breaking it.
+        for (protocol, v) in [
+            (GoProtocol::Responses, json!({"output": []})),
+            (GoProtocol::Messages, json!({"content": []})),
+            (GoProtocol::Gemini, json!({"candidates": []})),
+        ] {
+            let n = Worker::go_reply(protocol, &v);
+            assert!(n.text.is_empty() && n.calls.is_empty(), "{v}");
+            assert!(n.assistant.get("tool_calls").is_none(), "{v}");
+        }
+    }
+
+    /// OpenAI-shaped history converts per Go protocol: system handling, merged
+    /// tool answers, output_text for Responses, id-to-name for Gemini.
+    #[test]
+    fn go_history_converts_for_each_protocol() {
+        let history = vec![
+            json!({"role": "user", "content": "measure it"}),
+            json!({"role": "assistant", "content": "On it.", "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "measure", "arguments": "{}"}},
+                {"id": "c2", "type": "function", "function": {"name": "batch", "arguments": "{\"commands\":[]}"}},
+            ]}),
+            json!({"role": "tool", "tool_call_id": "c1", "content": "1mm"}),
+            json!({"role": "tool", "tool_call_id": "c2", "content": "ok"}),
+        ];
+        let messages = go_anthropic_messages(&history);
+        let roles: Vec<&str> = messages.iter().map(|m| m["role"].as_str().unwrap_or("")).collect();
+        assert_eq!(roles, ["user", "assistant", "user"], "{messages:?}");
+        assert_eq!(messages[2]["content"].as_array().unwrap().len(), 2, "both tool answers in one message");
+        assert_eq!(messages[1]["content"][1]["type"], "tool_use");
+        let with_system = vec![vec![json!({"role": "system", "content": "sys"})], history.clone()].concat();
+        let input = go_responses_input(&with_system);
+        assert_eq!(input[0]["type"], "message");
+        assert!(input.iter().any(|i| i["type"] == "function_call"), "{input:?}");
+        assert!(input.iter().any(|i| i["type"] == "function_call_output" && i["output"] == "1mm"), "{input:?}");
+        assert!(
+            input.iter().any(|i| i["role"] == "assistant"
+                && i.get("content").and_then(Value::as_array).is_some_and(|c| c.iter().any(|p| p["type"] == "output_text"))),
+            "{input:?}"
+        );
+        let contents = go_gemini_contents(&history);
+        let groles: Vec<&str> = contents.iter().map(|m| m["role"].as_str().unwrap_or("")).collect();
+        assert_eq!(groles, ["user", "model", "user"], "{contents:?}");
+        assert_eq!(contents[2]["parts"][0]["functionResponse"]["name"], "measure");
+        // Each Go protocol posts its own URL and body shape.
+        for (model, want_url) in [
+            ("muse-spark-1.3-contributor", "https://opencode.ai/zen/go/v1/responses"),
+            ("claude-haiku-5-5", "https://opencode.ai/zen/go/v1/messages"),
+            ("gemini-4-argon-contributor", "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon-contributor:generateContent"),
+            ("mimo-v2.6-flash", "https://opencode.ai/zen/go/v1/chat/completions"),
+        ] {
+            let seen = Arc::new(std::sync::Mutex::new(Vec::<HttpRequest>::new()));
+            let log = seen.clone();
+            let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+                if r.method == "GET" {
+                    return Ok((200, b"{\"data\":[]}".to_vec()));
+                }
+                log.lock().unwrap().push(r.clone());
+                Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": "ok"}}]}).to_string().into_bytes()))
+            });
+            let mut b = ApiBackend::start(go_cfg(model, http), go_ctx()).unwrap();
+            b.prompt(&[PromptPart::Text("hi".into())]);
+            let start = std::time::Instant::now();
+            while seen.lock().unwrap().is_empty() && start.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let reqs = seen.lock().unwrap();
+            assert_eq!(reqs[0].url, want_url, "{model}");
+            let body: Value = serde_json::from_slice(reqs[0].body.as_deref().unwrap_or(b"null")).unwrap();
+            assert!(body.get("tools").is_none(), "{model}: no MCP tools in this session, none sent");
+            drop(reqs);
+            b.shutdown(true);
+        }
+    }
+
+    /// A Go model the map does not know falls through protocols on the gateway's
+    /// mismatch wording; other refusals stop at once, on one request.
+    #[test]
+    fn go_unknown_models_fall_through_protocols() {
+        let urls = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let log = urls.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            if r.method == "GET" {
+                return Ok((200, b"{\"data\":[]}".to_vec()));
+            }
+            log.lock().unwrap().push(r.url.clone());
+            if r.url.ends_with("/chat/completions") {
+                return Ok((
+                    400,
+                    json!({"error": {"message": "Model something-new does not support this protocol. Use /responses."}}).to_string().into_bytes(),
+                ));
+            }
+            Ok((200, json!({"output": [{"type": "message", "content": [{"type": "output_text", "text": "Hi."}]}]}).to_string().into_bytes()))
+        });
+        let mut b = ApiBackend::start(go_cfg("something-new", http), go_ctx()).unwrap();
+        b.prompt(&[PromptPart::Text("hi".into())]);
+        let mut events = Vec::new();
+        let start = std::time::Instant::now();
+        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
+            events.extend(b.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text == "Hi.")), "{events:?}");
+        let tried = urls.lock().unwrap();
+        assert_eq!(tried.len(), 2, "{tried:?}");
+        assert!(tried[0].ends_with("/chat/completions") && tried[1].ends_with("/responses"), "{tried:?}");
+        drop(tried);
+        b.shutdown(true);
+        // Other refusals never cascade: one request, then the error.
+        let seen = Arc::new(std::sync::Mutex::new(0_usize));
+        let count = seen.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            if r.method == "GET" {
+                return Ok((200, b"{\"data\":[]}".to_vec()));
+            }
+            *count.lock().unwrap() += 1;
+            Ok((400, json!({"error": {"message": "context length exceeded"}}).to_string().into_bytes()))
+        });
+        let mut b = ApiBackend::start(go_cfg("mimo-v2.6-flash", http), go_ctx()).unwrap();
+        b.prompt(&[PromptPart::Text("hi".into())]);
+        let mut events = Vec::new();
+        let start = std::time::Instant::now();
+        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
+            events.extend(b.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(*seen.lock().unwrap(), 1);
+        assert!(events.iter().any(|e| matches!(e, Event::Error(_))), "{events:?}");
+        b.shutdown(true);
+    }
+
+    /// A Go per-path credential refusal falls through; a non-Go 401 never does.
+    #[test]
+    fn go_credential_refusals_fall_through() {
+        let urls = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let log = urls.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            if r.method == "GET" {
+                return Ok((200, b"{\"data\":[]}".to_vec()));
+            }
+            log.lock().unwrap().push(r.url.clone());
+            if r.url.ends_with("/messages") {
+                return Ok((401, json!({"error": {"message": "Upstream request failed: Go requires a credential"}}).to_string().into_bytes()));
+            }
+            Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": "Hi."}}]}).to_string().into_bytes()))
+        });
+        let mut b = ApiBackend::start(go_cfg("qwen3.8-max", http), go_ctx()).unwrap();
+        b.prompt(&[PromptPart::Text("hi".into())]);
+        let mut events = Vec::new();
+        let start = std::time::Instant::now();
+        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
+            events.extend(b.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text == "Hi.")), "{events:?}");
+        let tried = urls.lock().unwrap();
+        assert!(tried.len() >= 2 && tried[0].ends_with("/messages"), "{tried:?}");
+        drop(tried);
+        b.shutdown(true);
+        // A non-Go 401 never cascades: one request, then the error.
+        let seen = Arc::new(std::sync::Mutex::new(0_usize));
+        let count = seen.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            if r.method == "GET" {
+                return Ok((200, b"{\"data\":[]}".to_vec()));
+            }
+            *count.lock().unwrap() += 1;
+            Ok((401, json!({"error": {"message": "bad key"}}).to_string().into_bytes()))
+        });
+        let cfg = ApiConfig {
+            name: "Test".into(),
+            protocol: Protocol::OpenAi,
+            base_url: "http://localhost:1/v1".into(),
+            model: "m".into(),
+            key: None,
+            http,
+        };
+        let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
+        b.prompt(&[PromptPart::Text("hi".into())]);
+        let mut events = Vec::new();
+        let start = std::time::Instant::now();
+        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
+            events.extend(b.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(*seen.lock().unwrap(), 1);
+        assert!(events.iter().any(|e| matches!(e, Event::Error(_))), "{events:?}");
+        b.shutdown(true);
+    }
+
+    /// Gemini takes a minimal schema subset: unknown keywords are dropped,
+    /// non-object nodes become plain strings, parameters stay objects.
+    #[test]
+    fn go_gemini_schemas_are_reduced_to_the_supported_subset() {
+        let schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "properties": {
+                "commands": {"type": "array", "additionalProperties": true, "items": {"type": "string", "default": "x"}},
+                "filter": {"description": "q"},
+                "bad": [1, 2],
+            },
+            "required": ["commands"],
+        });
+        let clean = go_gemini_schema(&schema);
+        assert_eq!(clean["type"], "object");
+        assert!(clean.get("additionalProperties").is_none() && clean.get("$schema").is_none(), "{clean}");
+        assert_eq!(clean.pointer("/properties/commands/type"), Some(&json!("array")));
+        assert!(clean.pointer("/properties/commands/additionalProperties").is_none(), "{clean}");
+        assert_eq!(clean.pointer("/properties/commands/items"), Some(&json!({"type": "string"})), "{clean}");
+        assert_eq!(clean.pointer("/properties/filter/type"), Some(&json!("string")));
+        assert_eq!(clean.pointer("/properties/bad/type"), Some(&json!("string")));
+        assert_eq!(clean["required"], json!(["commands"]));
+        let tools = go_gemini_tools(&[json!({"type": "function", "function": {"name": "batch", "parameters": schema}})]);
+        assert!(tools[0].pointer("/parameters/additionalProperties").is_none(), "{tools:?}");
+    }
+
     #[test]
     fn tool_arguments_are_an_object_or_an_error() {
         assert_eq!(tool_arguments(None), Ok(json!({})));
@@ -1313,6 +2337,7 @@ mod tests {
             tools: vec![json!({"type": "function", "function": {"name": "measure"}})],
             tool_names: vec!["measure".into()],
             history: vec![json!({"role": "user", "content": "hi"})],
+            session_id: "test-session".to_string(),
             events,
             wake: Arc::new(|| {}),
             cancel: Arc::new(AtomicBool::new(false)),
