@@ -115,16 +115,18 @@ fn lost_attachment_ghost_rebind_preview_cancel_apply_and_undo_preserve_sketch() 
     let repaired = h.app.session.doc.to_json();
     let path = h.dir.join("rebound-face.solidcraft");
     h.app.run("file.save", json!({"path":path})).unwrap();
-    // Saving the untitled design names it after its file; everything else is exact.
+    // Saving names an untitled design after its file and records in-file history. Undo does not
+    // roll that history back, because the save is not an undo step. The model itself stays exact.
     let named = |doc: &str| {
         let mut doc = solidcraft_engine::doc::Document::from_json(doc).unwrap();
         doc.name = "rebound-face".into();
+        doc.document_history = solidcraft_engine::doc::document_history::DocumentHistory::default();
         doc.to_json()
     };
     h.app.run("edit.undo", json!({})).unwrap();
-    assert_eq!(h.app.session.doc.to_json(), named(&before));
+    assert_eq!(named(&h.app.session.doc.to_json()), named(&before));
     h.app.run("doc.open", json!({"path":path})).unwrap();
-    assert_eq!(h.app.session.doc.to_json(), named(&repaired));
+    assert_eq!(named(&h.app.session.doc.to_json()), named(&repaired));
     assert_eq!(raw_sketch(&h, sketch), raw);
     assert!(h.app.session.model.result(sketch).unwrap().error.is_none());
 }

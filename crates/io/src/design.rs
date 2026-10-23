@@ -111,6 +111,15 @@ impl PackageWriter {
         self.part(&name, bytes, compressed)?;
         Ok(Value::String(name))
     }
+    /// A blob the package already stores (the live feature wrote it) is named again without
+    /// counting its bytes a second time. A new payload is stored and counted once.
+    fn blob_ref(&mut self, bytes: &[u8], extension: &str, compressed: bool) -> Result<Value> {
+        let name = format!("blobs/{}.{extension}", digest(bytes));
+        if self.names.contains(&name) {
+            return Ok(Value::String(name));
+        }
+        self.blob(bytes, extension, compressed)
+    }
 }
 
 /// Counts what is written without keeping it.
@@ -270,7 +279,8 @@ fn write_container(
         value.as_object_mut().ok_or_else(|| invalid("canvas metadata"))?.insert("image_blob".into(), blob);
         canvases.push(value);
     }
-    let metadata = replace(doc, fields([("features", Value::Array(features)), ("canvases", Value::Array(canvases))])).map_err(invalid)?;
+    let mut metadata = replace(doc, fields([("features", Value::Array(features)), ("canvases", Value::Array(canvases))])).map_err(invalid)?;
+    externalize_snapshots(&mut writer, &mut metadata, compression == DesignCompression::Compact)?;
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
     writer.part("container.json", &serde_json::to_vec(&json!({"format": VERSION})).map_err(invalid)?, false)?;
@@ -700,7 +710,185 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         }
         canvas.data = solidcraft_doc::canvas::base64_encode(bytes);
     }
+    rehydrate_snapshots(&mut doc, reader)?;
     Ok(doc)
+}
+
+/// Pull STEP, mesh and canvas bytes out of revision snapshots into the same hash-named blobs
+/// as the live document. An unchanged import is stored once.
+fn externalize_snapshots(writer: &mut PackageWriter, metadata: &mut Value, compress_mesh: bool) -> Result<()> {
+    let Some(entries) = metadata.get_mut("document_history").and_then(|h| h.get_mut("entries")).and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for entry in entries {
+        let Some(snapshot) = entry.get_mut("snapshot") else { continue };
+        externalize_document(writer, snapshot, compress_mesh)?;
+    }
+    Ok(())
+}
+
+fn externalize_document(writer: &mut PackageWriter, doc: &mut Value, compress_mesh: bool) -> Result<()> {
+    if let Some(features) = doc.get_mut("features").and_then(Value::as_array_mut) {
+        for feature in features {
+            externalize_feature(writer, feature, compress_mesh)?;
+        }
+    }
+    if let Some(canvases) = doc.get_mut("canvases").and_then(Value::as_array_mut) {
+        for canvas in canvases {
+            externalize_canvas(writer, canvas)?;
+        }
+    }
+    Ok(())
+}
+
+fn externalize_feature(writer: &mut PackageWriter, feature: &mut Value, compress_mesh: bool) -> Result<()> {
+    match feature.get("type").and_then(Value::as_str) {
+        Some("import") => {
+            let Some(step) = feature.get("step").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned) else {
+                return Ok(());
+            };
+            // STEP is always compressed, as the live feature stores it.
+            let blob = writer.blob_ref(step.as_bytes(), "step", true)?;
+            let obj = feature.as_object_mut().ok_or_else(|| invalid("feature metadata"))?;
+            obj.insert("step".into(), Value::String(String::new()));
+            obj.insert("step_blob".into(), blob);
+        }
+        Some("mesh_import") => {
+            let Some(meshes) = feature.get_mut("meshes").and_then(Value::as_array_mut) else {
+                return Ok(());
+            };
+            for mesh in meshes {
+                let parsed: MeshData = serde_json::from_value(mesh.clone()).map_err(invalid)?;
+                if parsed.positions.is_empty() && parsed.triangles.is_empty() {
+                    continue;
+                }
+                let bytes = encode_mesh(&parsed)?;
+                let blob = writer.blob_ref(&bytes, "mesh", compress_mesh)?;
+                let obj = mesh.as_object_mut().ok_or_else(|| invalid("mesh metadata"))?;
+                obj.insert("positions".into(), json!([]));
+                obj.insert("triangles".into(), json!([]));
+                obj.insert("mesh_blob".into(), blob);
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn externalize_canvas(writer: &mut PackageWriter, canvas: &mut Value) -> Result<()> {
+    let Some(data) = canvas.get("data").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned) else {
+        return Ok(());
+    };
+    let format = canvas.get("format").and_then(Value::as_str).unwrap_or("");
+    if !matches!(format, "png" | "jpeg") {
+        return Err(invalid("invalid canvas format or size"));
+    }
+    let bytes = solidcraft_doc::canvas::base64_decode(&data).ok_or_else(|| invalid("invalid canvas base64"))?;
+    if bytes.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES {
+        return Err(invalid("canvas too large"));
+    }
+    let blob = writer.blob_ref(&bytes, format, false)?;
+    let obj = canvas.as_object_mut().ok_or_else(|| invalid("canvas metadata"))?;
+    obj.insert("data".into(), json!(""));
+    obj.insert("image_blob".into(), blob);
+    Ok(())
+}
+
+/// Put snapshot payloads back. Newest first. A snapshot that would push resolved payloads over
+/// the budget is dropped and the design still opens. A hash mismatch or an ambiguous embedded
+/// payload still fails the open.
+fn rehydrate_snapshots<R: Read + Seek>(doc: &mut Document, reader: &mut PackageReader<R>) -> Result<()> {
+    for entry in doc.document_history.entries.iter_mut().rev() {
+        let Some(mut snapshot) = entry.snapshot.take() else { continue };
+        match rehydrate_document(reader, &mut snapshot) {
+            Ok(()) => entry.snapshot = Some(snapshot),
+            Err(e) if payload_over_budget(&e) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+fn payload_over_budget(err: &IoError) -> bool {
+    matches!(err, IoError::Invalid(message) if message.contains("resolved payloads too large"))
+}
+
+fn rehydrate_document<R: Read + Seek>(reader: &mut PackageReader<R>, doc: &mut Value) -> Result<()> {
+    if let Some(features) = doc.get_mut("features").and_then(Value::as_array_mut) {
+        for feature in features {
+            rehydrate_feature(reader, feature)?;
+        }
+    }
+    if let Some(canvases) = doc.get_mut("canvases").and_then(Value::as_array_mut) {
+        for canvas in canvases {
+            rehydrate_canvas(reader, canvas)?;
+        }
+    }
+    Ok(())
+}
+
+fn rehydrate_feature<R: Read + Seek>(reader: &mut PackageReader<R>, feature: &mut Value) -> Result<()> {
+    match feature.get("type").and_then(Value::as_str) {
+        Some("import") => {
+            let step = feature.get("step").and_then(Value::as_str).unwrap_or("");
+            if !step.is_empty() {
+                if feature.get("step_blob").is_some() {
+                    return Err(invalid("ambiguous embedded STEP and blob"));
+                }
+                return Ok(());
+            }
+            if feature.get("step_blob").is_none() {
+                return Ok(());
+            }
+            let text = reader.blob(feature, "step_blob", "step")?;
+            let text = std::str::from_utf8(text).map_err(invalid)?.to_owned();
+            let obj = feature.as_object_mut().ok_or_else(|| invalid("feature metadata"))?;
+            obj.insert("step".into(), Value::String(text));
+            obj.remove("step_blob");
+        }
+        Some("mesh_import") => {
+            let Some(meshes) = feature.get_mut("meshes").and_then(Value::as_array_mut) else {
+                return Ok(());
+            };
+            for mesh in meshes.iter_mut() {
+                if mesh.get("mesh_blob").is_none() {
+                    continue;
+                }
+                let positions = mesh.get("positions").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
+                let triangles = mesh.get("triangles").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
+                if positions != 0 || triangles != 0 {
+                    return Err(invalid("ambiguous embedded mesh and blob"));
+                }
+                let bytes = reader.blob(mesh, "mesh_blob", "mesh")?.to_vec();
+                let mut parsed: MeshData = serde_json::from_value(mesh.clone()).map_err(invalid)?;
+                decode_mesh(&bytes, &mut parsed)?;
+                *mesh = serde_json::to_value(&parsed).map_err(invalid)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn rehydrate_canvas<R: Read + Seek>(reader: &mut PackageReader<R>, canvas: &mut Value) -> Result<()> {
+    if canvas.get("image_blob").is_none() {
+        return Ok(());
+    }
+    if !canvas.get("data").and_then(Value::as_str).unwrap_or("").is_empty() {
+        return Err(invalid("invalid canvas metadata"));
+    }
+    let format = canvas.get("format").and_then(Value::as_str).unwrap_or("").to_owned();
+    if !matches!(format.as_str(), "png" | "jpeg") {
+        return Err(invalid("invalid canvas metadata"));
+    }
+    let bytes = reader.blob(canvas, "image_blob", &format)?.to_vec();
+    if bytes.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES {
+        return Err(invalid("canvas too large"));
+    }
+    let obj = canvas.as_object_mut().ok_or_else(|| invalid("canvas metadata"))?;
+    obj.insert("data".into(), Value::String(solidcraft_doc::canvas::base64_encode(&bytes)));
+    obj.remove("image_blob");
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1641,5 +1829,26 @@ mod tests {
             times.sort_by(f64::total_cmp);
         }
         eprintln!("{label}: median atomic-save ms json={:.3} container={:.3}", saves[0][4], saves[1][4]);
+    }
+
+    #[test]
+    fn revision_snapshots_share_import_blobs_and_reopen() {
+        let mut doc = Document::from_json(&document().to_json()).unwrap();
+        let limits = solidcraft_doc::document_history::SnapshotLimits::standard();
+        let snapshot = solidcraft_doc::document_history::DocumentHistory::model_snapshot(&doc, limits.max_bytes).unwrap();
+        doc.document_history.record_save_with(Some(snapshot), limits);
+        let bytes = write_design_container(&doc).unwrap();
+        let entries = parts(&bytes);
+        assert_eq!(entries.keys().filter(|n| n.ends_with(".step")).count(), 1, "the snapshot's STEP is the live import's blob");
+        assert_eq!(entries.keys().filter(|n| n.ends_with(".mesh")).count(), 1);
+        assert_eq!(entries.keys().filter(|n| n.ends_with(".png")).count(), 1);
+        let json: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        let snap = &json["document_history"]["entries"][0]["snapshot"];
+        assert_eq!(snap["features"][0]["step"], "");
+        assert!(snap["features"][0].get("step_blob").and_then(Value::as_str).is_some_and(|n| n.starts_with("blobs/")));
+        assert_eq!(snap["canvases"][0]["data"], "");
+        let reopened = crate::read_design(&bytes).unwrap();
+        assert_eq!(reopened.document_history.revision, 1);
+        assert_eq!(reopened, doc);
     }
 }

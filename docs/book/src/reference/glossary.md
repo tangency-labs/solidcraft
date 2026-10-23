@@ -257,6 +257,17 @@ The first instance is the original.
 - **Elsewhere:** instance, element, occurrence.
 - **For translators:** not an occurrence of a component.
 
+### revision
+
+One recorded save of a design, kept in the design file, oldest first.
+
+The save count starts at 0 for a file that has not been saved by a build that records revisions. A saved revision can keep a snapshot: the parametric model at that save, without the revision list and without the evaluated solid. Keeping snapshots is off until it is turned on in Preferences (General, Autosave and recovery). The default limits are the newest 16 revisions and 128 MB of snapshot payload; both can be lowered, and neither can be raised past 64 revisions or 128 MB. Restoring one replaces the working model and leaves the save count where it is, so the next save is the next revision. Opening one read-only shows that model and refuses edits and Save until Save As or another restore. A revision whose snapshot was dropped, or that never had one, stays in the list and cannot be restored.
+
+- **In SolidCraft:** `doc.revisions`, `doc.restore`; the Revisions window (File view and the File menu); the `document_history` design-file key.
+- **Don't use:** history (that is undo, or the timeline), version (that is a design property or a file from a server).
+- **Elsewhere:** version, save, checkpoint.
+- **For translators:** not the undo history and not the feature timeline. A read-only revision is not a separate file until Save As.
+
 ### rollback marker
 
 The marker in the timeline after which no feature is computed.
@@ -334,6 +345,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | one placed copy of a component | *occurrence* | "Paste (Instance)" on `occurrence.copy` |
 | History | the undo and redo history | history | Undo, Redo |
 | | the list of features | *timeline* | "Feature history" (`ui.feature_history`), "Roll History Marker" |
+| | an in-file save | *revision* | Revisions, `doc.revisions`, `doc.restore` |
 | Part | a standard part | *standard part* | `parts.*` |
 | | a body, an occurrence or the design | *body*, *occurrence*, *design* | catalogue texts that say "part" |
 | | a design property | *part number* | Design Properties |

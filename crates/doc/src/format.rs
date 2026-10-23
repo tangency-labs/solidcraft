@@ -1038,8 +1038,9 @@ fn validate_freeform_offsets(value: &Value) -> Result<()> {
 const MAX_REAL: f64 = 1e9;
 
 /// Every number the design itself holds is in range ([`check_numbers`]). `metadata` is left
-/// alone: it is other tools' data, kept as it is and never read as a number (#1015); parsing
-/// already bounds its nesting.
+/// alone at every depth: it is other tools' data, kept as it is and never read as a number
+/// (#1015). A revision snapshot nests a document, so its metadata is skipped the same way.
+/// Parsing already bounds its nesting.
 fn check_design_numbers(v: &Value) -> Result<()> {
     match v {
         Value::Object(m) => m.iter().filter(|(k, _)| k.as_str() != "metadata").try_for_each(|(_, x)| check_numbers(x, 1)),
@@ -1058,7 +1059,8 @@ fn check_typed_numbers(d: &Document) -> Result<()> {
 }
 
 /// Every non-integer number in the file is finite and within ±`MAX_REAL` (a damaged or hostile
-/// file is refused instead of overflowing the geometry later).
+/// file is refused instead of overflowing the geometry later). An object named `metadata` is
+/// skipped, including one nested in a revision snapshot.
 fn check_numbers(v: &Value, depth: usize) -> Result<()> {
     if depth > 64 {
         return Err(DocError::Invalid("damaged design: nested too deeply".into()));
@@ -1071,7 +1073,7 @@ fn check_numbers(v: &Value, depth: usize) -> Result<()> {
             }
         }
         Value::Array(a) => a.iter().try_for_each(|x| check_numbers(x, depth + 1))?,
-        Value::Object(m) => m.values().try_for_each(|x| check_numbers(x, depth + 1))?,
+        Value::Object(m) => m.iter().filter(|(k, _)| k.as_str() != "metadata").try_for_each(|(_, x)| check_numbers(x, depth + 1))?,
         _ => {}
     }
     Ok(())

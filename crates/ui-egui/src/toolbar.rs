@@ -542,12 +542,16 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     app.start("component.insert_design");
                     close = true;
                 }
-                if item_if(ui, app.tr("ui.save"), "Ctrl+S", "save", shown) {
+                if item_if(ui, app.tr("ui.save"), "Ctrl+S", "save", shown && app.session.revision_view.is_none()) {
                     save(app);
                     close = true;
                 }
                 if item_if(ui, &format!("{}…", app.tr("ui.save_as")), "", "save", shown) {
                     save_as(app);
+                    close = true;
+                }
+                if item_if(ui, app.tr("home.revisions"), "", "restore", shown) {
+                    app.start("doc.revisions");
                     close = true;
                 }
                 if item(ui, "Save As JSON…", "", "save") {

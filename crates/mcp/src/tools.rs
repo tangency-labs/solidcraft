@@ -319,6 +319,26 @@ pub fn tool_definitions() -> Vec<Value> {
             ),
             Effect::ReadOnly,
         ),
+        tool(
+            "revisions",
+            "List revisions",
+            "Revisions stored in the open design: the save count, the format number, and each entry's action and whether it still has a model snapshot. A snapshot is the parametric model at that save, not a second boundary representation. Snapshots are off unless revision history is turned on.",
+            obj(json!({}), &[]),
+            Effect::ReadOnly,
+        ),
+        tool(
+            "restore",
+            "Restore a revision",
+            "Replace the open design with a revision stored in the file. mode working (the default) keeps the save count, so the next save is the next revision. mode readonly refuses edits and Save until Save As or another restore. A revision with no snapshot is refused.",
+            obj(
+                json!({
+                    "revision": {"type": "integer", "description": "Save count from revisions"},
+                    "mode": {"type": "string", "enum": ["working", "readonly"], "description": "working replaces the model; readonly opens it and refuses edits and Save"}
+                }),
+                &["revision"],
+            ),
+            Effect::Replaces,
+        ),
     ]
 }
 
@@ -544,6 +564,8 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "new_design" => exec(b, "file.new", pick(a, &["name"])),
         "open" => exec(b, "doc.open", pick(a, &["path", "up", "names"])),
         "save" => exec(b, "file.save", pick(a, &["path", "format"])),
+        "revisions" => exec(b, "doc.revisions", json!({})),
+        "restore" => exec(b, "doc.restore", pick(a, &["revision", "mode"])),
         other => Err(format!("unknown tool `{other}`")),
     }
 }

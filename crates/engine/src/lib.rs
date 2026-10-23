@@ -245,6 +245,13 @@ pub struct Session {
     pub active_sketch: Option<u64>,
     pub selection: Vec<Sel>,
     pub path: Option<String>,
+    /// Set when an earlier revision is open read-only (`doc.restore` with `mode: "readonly"`).
+    /// Edits and Save are refused until that revision is restored as the working model, saved
+    /// as a new file, or another design is opened.
+    pub revision_view: Option<u64>,
+    /// Whether saves keep model snapshots, and the size and revision caps. Off by default.
+    /// A preference, like `auto_project`: it belongs to the user, not the design.
+    pub revision_limits: solidcraft_doc::document_history::RevisionHistoryOptions,
     /// One-shot display-only notification during doc.open, before authoritative evaluation.
     /// Interactive loaders may show it provisionally; it never becomes model state.
     pub open_preview: Option<Box<dyn Fn(solidcraft_io::DesignPreview) + Send + Sync>>,
@@ -419,6 +426,8 @@ impl Session {
             active_sketch: None,
             selection: Vec::new(),
             path: None,
+            revision_view: None,
+            revision_limits: Default::default(),
             open_preview: None,
             log: Vec::new(),
             revision: 1,
@@ -460,6 +469,7 @@ impl Session {
     /// checkpoint keeps, not the replaced session's file path (docs/mcp.md).
     pub fn replace_design(&mut self, fresh: Session) {
         let auto_project = self.auto_project;
+        let revision_limits = self.revision_limits;
         let param_check = self.param_check;
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
@@ -467,6 +477,7 @@ impl Session {
         let next_checkpoint = self.next_checkpoint;
         *self = fresh;
         self.auto_project = auto_project;
+        self.revision_limits = revision_limits;
         self.param_check = param_check;
         self.render_viewport = render_viewport;
         self.render_jobs = render_jobs;
@@ -809,6 +820,13 @@ impl Session {
     /// the model up to date before anything reads it.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        if let Some(rev) = self.revision_view
+            && (spec.undoable || spec.id == "file.save")
+        {
+            return Err(EngineError::Other(format!(
+                "revision {rev} is open read-only; restore it as the working model (`doc.restore` mode \"working\") or use Save As"
+            )));
+        }
         let host_viewport = self.render_viewport.clone();
         let host_jobs = self.render_jobs.host.clone();
         let live = spec.live.filter(|_| params.get("live").and_then(Value::as_bool) == Some(true));
@@ -975,6 +993,8 @@ impl Session {
             active_sketch: self.active_sketch,
             selection: self.selection.clone(),
             path: None,
+            revision_view: self.revision_view,
+            revision_limits: self.revision_limits,
             open_preview: None,
             saved: self.saved.clone(),
             log: Vec::new(),

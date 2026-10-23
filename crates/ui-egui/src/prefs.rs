@@ -599,6 +599,12 @@ preference_settings! {
     selection_shift_add_only: bool = false, PAGE_SKETCH;
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+    /// Keep a parametric snapshot with each save. Off: the save records the revision and stores no model.
+    revision_history: bool = false, 0;
+    /// Megabytes of snapshot payload kept. 1–128; the default and the ceiling are 128.
+    revision_history_mb: u32 = 128, 0;
+    /// Newest revisions that keep a snapshot. 1–64; the default is 16.
+    revision_history_versions: u32 = 16, 0;
 }
 
 /// What a middle-button double-click in the view does.
@@ -870,6 +876,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
         0 => {
             app.autosave_minutes = 5.0;
             set_autosave(app);
+            apply_revision_history(app);
         }
         PAGE_INTERFACE => {
             app.ui.dark = true;
@@ -898,6 +905,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
 /// Settings that follow the preferences every frame: the theme when it follows the system, and
 /// the interface scale.
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
+    apply_revision_history(app);
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
         solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default(),
@@ -967,6 +975,18 @@ pub(crate) fn apply_new_design_units(app: &mut SolveApp, units: &str) {
             }
         }
     }
+}
+
+/// Copy the revision-history preference onto the session. Off by default. The size cap is
+/// 1–128 MB (default 128) and the revision cap is 1–64 (default 16).
+pub fn apply_revision_history(app: &mut SolveApp) {
+    let mb = app.preferences.revision_history_mb.clamp(1, 128);
+    let versions = app.preferences.revision_history_versions.clamp(1, 64);
+    app.session.revision_limits = solidcraft_engine::doc::document_history::RevisionHistoryOptions {
+        enabled: app.preferences.revision_history,
+        max_bytes: (mb as usize) << 20,
+        max_versions: versions as usize,
+    };
 }
 
 /// The autosave interval follows `app.autosave_minutes` (0: off).
@@ -1640,6 +1660,9 @@ mod tests {
             ("selection_shift_add_only", json!(true), PAGE_SKETCH),
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
+            ("revision_history", json!(true), 0),
+            ("revision_history_mb", json!(32), 0),
+            ("revision_history_versions", json!(4), 0),
         ];
         let defaults = serde_json::to_value(Prefs::default()).unwrap();
         for (field, value, owner) in fields {

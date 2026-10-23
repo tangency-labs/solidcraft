@@ -1,0 +1,52 @@
+[
+  {
+    "note": "File view opens Revisions. Selecting the first save and Restore brings that solid back. Volume returns from 9000 mm3 to 8000 mm3."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "solid.box",
+      "params": {"length": 40, "width": 20, "height": 10, "name": "First"}
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "file.save_as",
+      "params": {"path": "$DIR/part.solidcraft"}
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "solid.box",
+      "params": {"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "name": "Second"}
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {"command": "file.save", "params": {}}
+  },
+  {
+    "expect": {"volume": 9000, "bodies": 2}
+  },
+  {
+    "call": "ui.home",
+    "params": {"open": true}
+  },
+  {
+    "click": {"handle": "home:revisions"}
+  },
+  {
+    "expect": {"home": false}
+  },
+  {
+    "widget": "Revision 1"
+  },
+  {
+    "widget": "Restore"
+  },
+  {
+    "expect": {"status": "restored", "volume": 8000, "bodies": 1}
+  }
+]

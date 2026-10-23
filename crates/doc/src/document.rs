@@ -2406,6 +2406,10 @@ pub struct Document {
     /// that number yet; `crate::format::pending_names`). Empty, and not saved, otherwise.
     #[serde(default = "crate::format::pending_names", skip_serializing_if = "Vec::is_empty")]
     pub format_pending: Vec<String>,
+    /// In-file save history: format number, save count, and optional parametric snapshots.
+    /// An older design opens at save count 0 (`document_history`).
+    #[serde(default)]
+    pub document_history: crate::document_history::DocumentHistory,
     pub name: String,
     #[serde(default = "default_units")]
     pub units: String,
@@ -2664,6 +2668,7 @@ impl Document {
             render: Default::default(),
             format: default_format(),
             format_pending: crate::format::pending_names(),
+            document_history: crate::document_history::DocumentHistory::fresh(),
             name: name.into(),
             units: default_units(),
             metadata: Default::default(),
