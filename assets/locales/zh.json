@@ -606,6 +606,7 @@
   "cmd.canvas_delete": "删除画布",
   "cmd.canvas_edit": "编辑画布",
   "cmd.canvas_insert": "画布",
+  "cmd.canvas_to_sketch": "画布转草图",
   "cmd.component_activate": "激活组件",
   "cmd.component_break_link": "断开链接",
   "cmd.component_capture_position": "捕获位置",

@@ -452,6 +452,7 @@
   "cmd.canvas_delete": "캔버스 삭제",
   "cmd.canvas_edit": "캔버스 편집",
   "cmd.canvas_insert": "캔버스",
+  "cmd.canvas_to_sketch": "캔버스에서 스케치",
   "cmd.component_activate": "구성 요소 활성화",
   "cmd.component_break_link": "링크 끊기",
   "cmd.component_capture_position": "위치 캡처",

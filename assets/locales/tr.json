@@ -450,6 +450,7 @@
   "cmd.canvas_delete": "Tuvali sil",
   "cmd.canvas_edit": "Tuvali düzenle",
   "cmd.canvas_insert": "Tuval",
+  "cmd.canvas_to_sketch": "Tuvalden eskiz",
   "cmd.component_activate": "Bileşeni etkinleştir",
   "cmd.component_break_link": "Bağı kopar",
   "cmd.component_capture_position": "Konumu yakala",

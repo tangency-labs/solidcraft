@@ -451,6 +451,7 @@
   "cmd.canvas_delete": "Eliminar lienzo",
   "cmd.canvas_edit": "Editar lienzo",
   "cmd.canvas_insert": "Lienzo",
+  "cmd.canvas_to_sketch": "Boceto desde lienzo",
   "cmd.component_activate": "Activar componente",
   "cmd.component_break_link": "Romper vínculo",
   "cmd.component_capture_position": "Capturar posición",

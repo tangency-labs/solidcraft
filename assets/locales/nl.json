@@ -450,6 +450,7 @@
   "cmd.canvas_delete": "Canvas verwijderen",
   "cmd.canvas_edit": "Canvas bewerken",
   "cmd.canvas_insert": "Canvas",
+  "cmd.canvas_to_sketch": "Canvas naar schets",
   "cmd.component_activate": "Component activeren",
   "cmd.component_break_link": "Koppeling verbreken",
   "cmd.component_capture_position": "Positie vastleggen",

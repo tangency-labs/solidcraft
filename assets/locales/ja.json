@@ -606,6 +606,7 @@
   "cmd.canvas_delete": "キャンバスを削除",
   "cmd.canvas_edit": "キャンバスを編集",
   "cmd.canvas_insert": "キャンバス",
+  "cmd.canvas_to_sketch": "キャンバスからスケッチ",
   "cmd.component_activate": "コンポーネントをアクティブ化",
   "cmd.component_break_link": "リンクを解除",
   "cmd.component_capture_position": "位置をキャプチャ",

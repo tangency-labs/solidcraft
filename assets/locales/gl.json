@@ -451,6 +451,7 @@
   "cmd.canvas_delete": "Eliminar o lenzo",
   "cmd.canvas_edit": "Editar o lenzo",
   "cmd.canvas_insert": "Lenzo",
+  "cmd.canvas_to_sketch": "Bosquexo desde o lenzo",
   "cmd.component_activate": "Activar o compoñente",
   "cmd.component_break_link": "Romper a ligazón",
   "cmd.component_capture_position": "Capturar a posición",

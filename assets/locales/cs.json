@@ -451,6 +451,7 @@
   "cmd.canvas_delete": "Smazat plátno",
   "cmd.canvas_edit": "Upravit plátno",
   "cmd.canvas_insert": "Plátno",
+  "cmd.canvas_to_sketch": "Náčrt z plátna",
   "cmd.component_activate": "Aktivovat komponentu",
   "cmd.component_break_link": "Zrušit odkaz",
   "cmd.component_capture_position": "Zachytit polohu",

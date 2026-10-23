@@ -717,7 +717,7 @@ pub(super) fn create_face_profile(s: &mut Session, p: &Value, body: &str, index:
     create_sketch_with_plane(s, p, plane, Some((body, index)))
 }
 
-fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<Value> {
+pub(super) fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<Value> {
     if face::is_face(p) {
         face::capture_positions(s, &plane)?;
     }

@@ -71,6 +71,7 @@ mod silhouette;
 mod sketch;
 pub(crate) use sketch::author_path_for_rebind;
 pub(crate) use sketch::created as sketch_created;
+mod canvas_sketch;
 mod sketch_3d;
 mod sketch_canvas;
 pub mod sketch_clipboard;
@@ -264,6 +265,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_inspect::COMMANDS.iter());
     v.extend(sketch_ends::COMMANDS.iter());
     v.extend(sketch_canvas::COMMANDS.iter());
+    v.extend(canvas_sketch::COMMANDS.iter());
     v.extend(sketch_3d::COMMANDS.iter());
     v.extend(surface_analysis::COMMANDS.iter());
     v.extend(surface_boundary::COMMANDS.iter());

@@ -451,6 +451,7 @@
   "cmd.canvas_delete": "Xóa Canvas",
   "cmd.canvas_edit": "Chỉnh sửa hình ảnh Canvas",
   "cmd.canvas_insert": "Chèn hình ảnh Canvas",
+  "cmd.canvas_to_sketch": "Phác thảo từ hình ảnh Canvas",
   "cmd.component_activate": "Kích hoạt cụm chi tiết",
   "cmd.component_break_link": "Ngắt liên kết cụm chi tiết",
   "cmd.component_capture_position": "Lưu vị trí cụm chi tiết",

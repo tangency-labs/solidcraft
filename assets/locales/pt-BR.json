@@ -451,6 +451,7 @@
   "cmd.canvas_delete": "Excluir tela de referência",
   "cmd.canvas_edit": "Editar tela de referência",
   "cmd.canvas_insert": "Tela de referência",
+  "cmd.canvas_to_sketch": "Esboço a partir da tela de referência",
   "cmd.component_activate": "Ativar componente",
   "cmd.component_break_link": "Quebrar vínculo",
   "cmd.component_capture_position": "Capturar posição",

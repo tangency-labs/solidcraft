@@ -451,6 +451,7 @@
   "cmd.canvas_delete": "Видалити полотно",
   "cmd.canvas_edit": "Редагувати полотно",
   "cmd.canvas_insert": "Полотно",
+  "cmd.canvas_to_sketch": "Ескіз з полотна",
   "cmd.component_activate": "Активувати компонент",
   "cmd.component_break_link": "Розірвати зв'язок",
   "cmd.component_capture_position": "Зафіксувати положення",

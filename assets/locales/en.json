@@ -606,6 +606,7 @@
   "cmd.canvas_delete": "Delete Canvas",
   "cmd.canvas_edit": "Edit Canvas",
   "cmd.canvas_insert": "Canvas",
+  "cmd.canvas_to_sketch": "Canvas to Sketch",
   "cmd.component_activate": "Activate Component",
   "cmd.component_break_link": "Break Link",
   "cmd.component_capture_position": "Capture Position",

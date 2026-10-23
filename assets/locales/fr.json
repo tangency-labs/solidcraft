@@ -451,6 +451,7 @@
   "cmd.canvas_delete": "Supprimer le canevas",
   "cmd.canvas_edit": "Modifier le canevas",
   "cmd.canvas_insert": "Canevas",
+  "cmd.canvas_to_sketch": "Esquisse depuis le canevas",
   "cmd.component_activate": "Activer le composant",
   "cmd.component_break_link": "Rompre le lien",
   "cmd.component_capture_position": "Capturer la position",

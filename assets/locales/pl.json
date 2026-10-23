@@ -451,6 +451,7 @@
   "cmd.canvas_delete": "Usuń płótno",
   "cmd.canvas_edit": "Edytuj płótno",
   "cmd.canvas_insert": "Płótno",
+  "cmd.canvas_to_sketch": "Szkic z płótna",
   "cmd.component_activate": "Aktywuj komponent",
   "cmd.component_break_link": "Zerwij łącze",
   "cmd.component_capture_position": "Zapamiętaj położenie",

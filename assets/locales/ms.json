@@ -451,6 +451,7 @@
   "cmd.canvas_delete": "Padam Kanvas",
   "cmd.canvas_edit": "Sunting Kanvas",
   "cmd.canvas_insert": "Kanvas",
+  "cmd.canvas_to_sketch": "Kanvas ke Lakaran",
   "cmd.component_activate": "Aktifkan Komponen",
   "cmd.component_break_link": "Putuskan Pautan",
   "cmd.component_capture_position": "Rakam Kedudukan",

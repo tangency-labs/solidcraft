@@ -1534,6 +1534,7 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
     vec![
         Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })),
         Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })),
+        Item::action("canvas.to_sketch", "Canvas to Sketch", "canvas").with(json!({ "canvas": id })),
         Item::sep(),
         Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })),
         Item::action("ui.rename", "Rename", "rename").with(json!({ "canvas": id })),

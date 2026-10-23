@@ -450,6 +450,7 @@
   "cmd.canvas_delete": "Ta bort duk",
   "cmd.canvas_edit": "Redigera duk",
   "cmd.canvas_insert": "Duk",
+  "cmd.canvas_to_sketch": "Skiss från duk",
   "cmd.component_activate": "Aktivera komponent",
   "cmd.component_break_link": "Bryt länk",
   "cmd.component_capture_position": "Fånga läge",

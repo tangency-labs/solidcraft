@@ -450,6 +450,7 @@
   "cmd.canvas_delete": "Vászon törlése",
   "cmd.canvas_edit": "Vászon szerkesztése",
   "cmd.canvas_insert": "Vászon",
+  "cmd.canvas_to_sketch": "Vázlat vászonból",
   "cmd.component_activate": "Komponens aktiválása",
   "cmd.component_break_link": "Kapcsolat megszakítása",
   "cmd.component_capture_position": "Pozíció rögzítése",

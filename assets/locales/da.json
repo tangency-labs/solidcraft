@@ -451,6 +451,7 @@
   "cmd.canvas_delete": "Slet referencebillede",
   "cmd.canvas_edit": "Redigér referencebillede",
   "cmd.canvas_insert": "Referencebillede",
+  "cmd.canvas_to_sketch": "Skitse fra referencebillede",
   "cmd.component_activate": "Aktivér komponent",
   "cmd.component_break_link": "Bryd forbindelse",
   "cmd.component_capture_position": "Registrér position",

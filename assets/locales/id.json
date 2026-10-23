@@ -450,6 +450,7 @@
   "cmd.canvas_delete": "Hapus Kanvas",
   "cmd.canvas_edit": "Edit Kanvas",
   "cmd.canvas_insert": "Kanvas",
+  "cmd.canvas_to_sketch": "Kanvas ke Sketsa",
   "cmd.component_activate": "Aktifkan Komponen",
   "cmd.component_break_link": "Putuskan Tautan",
   "cmd.component_capture_position": "Tangkap Posisi",

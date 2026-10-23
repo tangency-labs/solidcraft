@@ -450,6 +450,7 @@
   "cmd.canvas_delete": "Șterge pânza",
   "cmd.canvas_edit": "Editează pânza",
   "cmd.canvas_insert": "Pânză",
+  "cmd.canvas_to_sketch": "Schiță din pânză",
   "cmd.component_activate": "Activează componenta",
   "cmd.component_break_link": "Rupe legătura",
   "cmd.component_capture_position": "Capturează poziția",

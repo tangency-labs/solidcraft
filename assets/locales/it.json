@@ -454,6 +454,7 @@
   "cmd.canvas_delete": "Elimina immagine di riferimento",
   "cmd.canvas_edit": "Modifica immagine di riferimento",
   "cmd.canvas_insert": "Immagine di riferimento",
+  "cmd.canvas_to_sketch": "Schizzo da immagine di riferimento",
   "cmd.component_activate": "Attiva componente",
   "cmd.component_break_link": "Interrompi collegamento",
   "cmd.component_capture_position": "Acquisisci posizione",

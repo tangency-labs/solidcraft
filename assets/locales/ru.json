@@ -450,6 +450,7 @@
   "cmd.canvas_delete": "Удалить подложку",
   "cmd.canvas_edit": "Изменить подложку",
   "cmd.canvas_insert": "Подложка",
+  "cmd.canvas_to_sketch": "Эскиз из подложки",
   "cmd.component_activate": "Активировать компонент",
   "cmd.component_break_link": "Разорвать связь",
   "cmd.component_capture_position": "Зафиксировать положение",

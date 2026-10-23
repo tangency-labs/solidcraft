@@ -450,6 +450,7 @@
   "cmd.canvas_delete": "刪除畫布",
   "cmd.canvas_edit": "編輯畫布",
   "cmd.canvas_insert": "畫布",
+  "cmd.canvas_to_sketch": "畫布轉草圖",
   "cmd.component_activate": "啟用元件",
   "cmd.component_break_link": "斷開連結",
   "cmd.component_capture_position": "擷取位置",
