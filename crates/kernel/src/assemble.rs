@@ -52,11 +52,21 @@ pub(crate) struct AUse {
 #[derive(Clone, Debug)]
 pub(crate) struct AFace {
     pub surface: Surface,
+    /// The NURBS form the face's parameters are on, as the record's `Face::nurbs`: its domain,
+    /// pcurves and `natural_out` are about this surface when it is given.
+    pub nurbs: Option<Surface>,
     pub natural_out: bool,
     pub loops: Vec<Vec<AUse>>,
     pub shell: usize,
     /// The source record's face whose surface and parameter box this face keeps.
     pub domain: Option<[[f64; 2]; 2]>,
+}
+
+impl AFace {
+    /// The surface the face's (u, v) are on, as `Face::parameters`.
+    pub fn parameters(&self) -> &Surface {
+        self.nurbs.as_ref().unwrap_or(&self.surface)
+    }
 }
 
 /// A body taken apart: vertices, edges and faces that [`Assembly::finish`] builds into a record.
@@ -108,7 +118,14 @@ impl Assembly {
                 if slot.is_some() {
                     return Err(invalid("a face used by two shells"));
                 }
-                *slot = Some(AFace { surface: f.surface.clone(), natural_out: of.forward, loops, shell: s, domain: Some(f.domain) });
+                *slot = Some(AFace {
+                    surface: f.surface.clone(),
+                    nurbs: f.nurbs.clone(),
+                    natural_out: of.forward,
+                    loops,
+                    shell: s,
+                    domain: Some(f.domain),
+                });
             }
         }
         if faces.iter().any(Option::is_none) {
@@ -273,8 +290,8 @@ impl Assembly {
                     .collect::<Result<Vec<_>>>()
             })
             .collect::<Result<_>>()?;
-        let pcurves = pcurves_within(&f.surface, &uses, self.tolerance, f.domain).map_err(|e| invalid(format!("face {i}: {e}")))?;
-        let domain = domain_of(&f.surface, &pcurves, f.domain).ok_or_else(|| invalid(format!("face {i}: no parameter box")))?;
+        let pcurves = pcurves_within(f.parameters(), &uses, self.tolerance, f.domain).map_err(|e| invalid(format!("face {i}: {e}")))?;
+        let domain = domain_of(f.parameters(), &pcurves, f.domain).ok_or_else(|| invalid(format!("face {i}: no parameter box")))?;
         let stored = loops
             .iter()
             .zip(&pcurves)
@@ -282,7 +299,7 @@ impl Assembly {
                 edges: l.iter().zip(pc).map(|(u, pcurve)| OrientedEdge { edge: u.edge, forward: u.forward, pcurve: pcurve.clone() }).collect(),
             })
             .collect();
-        Ok(Face { nurbs: None, surface: f.surface.clone(), domain, loops: stored })
+        Ok(Face { nurbs: f.nurbs.clone(), surface: f.surface.clone(), domain, loops: stored })
     }
 }
 

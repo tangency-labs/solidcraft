@@ -270,7 +270,7 @@ fn wall(p: &Piece, n: Vec3, bottom: &AUse, top: &AUse, up_a: u32, up_b: u32, rig
             u.forward = !u.forward;
         }
     }
-    Ok(AFace { surface, natural_out, loops: vec![lp], shell, domain: None })
+    Ok(AFace { surface, nurbs: None, natural_out, loops: vec![lp], shell, domain: None })
 }
 
 /// Raise the band of the planar face at `at` that runs `width` wide along its outer loop
@@ -321,7 +321,14 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
         // (The band's edge runs the face's way round: a hole when the band follows the inner
         // loop, the outer loop when it follows the outer.)
         let rest_loops = if outside { vec![cedges.clone(), other] } else { vec![other, cedges.clone()] };
-        let rest = AFace { surface: face.surface.clone(), natural_out: face.natural_out, loops: rest_loops, shell: face.shell, domain: face.domain };
+        let rest = AFace {
+            surface: face.surface.clone(),
+            nurbs: face.nurbs.clone(),
+            natural_out: face.natural_out,
+            loops: rest_loops,
+            shell: face.shell,
+            domain: face.domain,
+        };
         // Walls: along the face's loop (the band's outside continues the walls below, on the
         // loop's right) and along the band's edge (its outside on that edge's left).
         let mut walls = Vec::with_capacity(2 * k);
@@ -343,6 +350,7 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
         let u = n.any_perp();
         let top = AFace {
             surface: Surface::Plane { origin: arr(origin), u_axis: arr(u), v_axis: arr(n.cross(u)) },
+            nurbs: None,
             natural_out: true,
             loops: top_loops,
             shell: face.shell,
