@@ -6,9 +6,9 @@
 //! Dialects land one PR at a time (`grbl`, then Marlin / Repetier / Mach3 / LinuxCNC / Fanuc / Haas).
 
 mod grbl;
+mod mach3;
 mod marlin;
 mod repetier;
-mod mach3;
 
 use crate::{GcodeDialect, LineEnding, PathSegment, PostProfile, Tool, ToolKind};
 
