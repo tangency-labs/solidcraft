@@ -325,9 +325,13 @@ Changes with no useful observable behavior do not need screenshot or video evide
 small example without private designs or sensitive details; attach the media or link to an
 accessible recording rather than committing generated review artifacts.
 
-To show a picture without attaching it, put it in a branch of its own (in a fork, a branch no PR
-tracks) and link the raw file: GitHub renders it inline in the comment. The review artifacts stay
-out of the diff that way, and the branch is not part of the PR.
+To show a picture without committing it, attach the media to the PR (it goes to the PR's own
+attachment storage and renders inline in the comment), or put it in a gist and link it. The review
+artifacts stay out of the diff that way, and nothing has to be pushed to a branch of its own.
+
+A contributor without write access to this repository cannot upload an attachment to a pull
+request here; in that case put the picture in a gist and link it, or say so in the pull request and
+let a maintainer attach the file.
 
 Keep an eye on your PR's status, but don't push to it only to catch up with `main` (no merge of
 `main`, no Update branch button, no rebase for that alone): every push restarts the whole CI
