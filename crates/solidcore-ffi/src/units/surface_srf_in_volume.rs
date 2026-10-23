@@ -37,7 +37,7 @@
 //! | `SetBase`     | `SetBaseSurface`                           | surface block `in_param copy owns` | state |
 //! | `SetVolume`   | `SetVolume`                                | volume block `copy owns`      | state |
 //! | `Mirror`      | `CreateMirrorSurface`                      | `O X Y`                       | state of the mirrored surface |
-//! | `Exact`       | `MakeExactBSplineIfPossible`               |                               | (status only) |
+//! | `Exact`       | `MakeExactBSplineIfPossible`               |                               | on success: `made [surface]` |
 //! | `WriteDb`     | `WriteToDB` (ASCII, 17 digits; a generator helper) | `version`            | the bytes |
 //! | `ReadDb`      | `SmSrfInVolume::ReadFromDB` (static, ASCII) | `version nb B[nb]` (no object block) | `made [state]` |
 //!
@@ -45,6 +45,9 @@
 //! `owner_flag in_param` the base surface (`type has_nurb [n m p q r s cpts knots]`)
 //! and the volume chain (`n` then per map `type [matrix(16) if a transform | two members
 //! if a twist, unbend or bend volume] has_orient [O(16)] has_inv [I(16)]`).
+//! `Exact` returns `made = 0` for a successful null result; otherwise its surface
+//! record is `type has_nurb [n m p q r s cpts(x y z w) u_knots v_knots]`, including
+//! the concrete derived type (for example, a plane) rather than a B-spline stand-in.
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: finite
 //! values, well-formed clamped B-splines, planes with a non-zero normal, derivative

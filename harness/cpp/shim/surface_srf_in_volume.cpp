@@ -642,6 +642,13 @@ void siv_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<dou
         SmBSplineSurface* b = NULL;
         SmStatus s = c->MakeExactBSplineIfPossible(b);
         o.push_back(st(s));
+        if (s == SM_SUCCESS)
+        {
+            o.push_back(flg(b != NULL));
+            if (b != NULL)
+                put_surface(o, b);
+        }
+        delete b;
         break;
     }
     case OP_WRITE_DB:

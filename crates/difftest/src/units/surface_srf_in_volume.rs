@@ -13,11 +13,11 @@
 //! `SM_SUCCESS`, else the `SmStatus`; `1007` for a Rust `InvalidInput`, `-1` for a Rust
 //! error upstream cannot produce) and the rest as `out`.
 //!
-//! Deferred cases: `MakeExactBSplineOutSurfaceFrom*Space` (in no unit in `units.json`: a
-//! dispatch gap), the plane's `Transform` / `TrimWithDomain`
-//! (`surface.plane_p2`) and the base surface's `STEPInversion`, which runs
-//! `SmSurface::GlobalPointSolve` (`surface.surface_p4`) once the volume inversion has
-//! succeeded. Volumes are chains of transform, plain, default and component
+//! `Exact` calls the existing kernel-aware implementation and compares the returned
+//! surface's presence, concrete type and full NURB data, not merely its status.
+//! Its existing FFI guard permits transform-only chains; bend, unbend and twist
+//! exact-conversion implementations are not covered here. Volumes are otherwise
+//! chains of transform, plain, default and component
 //! twist / unbend / bend maps (the component constructors take a real axis, mid
 //! direction, period or neutral distance and tolerance). B-spline volumes are not
 //! built: they evaluate to `SM_ERR` on both sides (no `USE_VOLUMES` in the reference
@@ -858,8 +858,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             put_state(&mut o, &m);
         }
         OpIn::Exact => {
-            tri!(o, siv_of(&s)?.make_exact_b_spline_if_possible());
+            let exact = tri!(o, siv_of(&s)?.make_exact_b_spline_if_possible_with(&k));
             o.push(0.0);
+            o.push(b(exact.is_some()));
+            if let Some(exact) = exact {
+                put_surface(&mut o, &exact);
+            }
         }
         OpIn::ReadDb { .. } => return Err(harness("static op")),
     }
@@ -1362,4 +1366,121 @@ impl UnitDiff for Runner {
 #[allow(dead_code)]
 fn _srf_in(s: &SrfIn) -> Result<InlineSrf, HarnessError> {
     srf(s)
+}
+
+#[cfg(all(test, feature = "cpp"))]
+mod tests {
+    use super::*;
+
+    fn assert_exact_result(name: &str, output: &Output) -> Result<(), HarnessError> {
+        assert!(output.error.is_none(), "{name}: {:?}", output.error);
+        assert!(output.deferred.is_none(), "{name}: {:?}", output.deferred);
+        assert!(output.rejected.is_none(), "{name}: {:?}", output.rejected);
+        assert_eq!(
+            output.ints.get("status").map(Vec::as_slice),
+            Some([0].as_slice()),
+            "{name}"
+        );
+        let data = output
+            .values
+            .get("out")
+            .ok_or_else(|| harness("missing exact result"))?;
+        if name.contains("_null_") {
+            // A successful null result is an observed output, not an empty pass.
+            assert_eq!(data, &[0.0], "{name}");
+            return Ok(());
+        }
+
+        assert_eq!(data.first(), Some(&1.0), "{name}: exact surface missing");
+        assert_eq!(
+            data.get(2),
+            Some(&1.0),
+            "{name}: returned surface has no NURB"
+        );
+        if name.starts_with("exact_plane_") {
+            assert_eq!(
+                data.get(1),
+                Some(&(Plane::TYPE as f64)),
+                "{name}: plane was sliced"
+            );
+            assert!(data.len() > 9, "{name}: plane geometry missing");
+            return Ok(());
+        }
+
+        assert_eq!(data.get(1), Some(&(BSplineSurface::TYPE as f64)), "{name}");
+        assert_eq!(
+            data.get(3..9),
+            Some([1.0, 1.0, 1.0, 1.0, 3.0, 3.0].as_slice()),
+            "{name}"
+        );
+        // Independent homogeneous control nets: translation acts on w, and the
+        // noncommuting chain must run in its original order, without dehomogenizing.
+        let expected = if name.starts_with("exact_identity_") {
+            [
+                1.0, 2.0, 3.0, 1.0, 0.0, 4.0, 2.0, 2.0, 6.0, -2.0, 4.0, 2.0, 3.0, 6.0, 9.0, 3.0,
+            ]
+        } else if name.starts_with("exact_rigid_") {
+            [
+                0.0, -2.0, 8.0, 1.0, 0.0, -6.0, 12.0, 2.0, 6.0, 0.0, 14.0, 2.0, 0.0, -6.0, 24.0,
+                3.0,
+            ]
+        } else {
+            assert!(name.starts_with("exact_chain_"), "{name}");
+            [
+                -3.0, -5.0, -1.0, 1.0, -6.0, -6.0, -4.0, 2.0, 0.0, -8.0, 2.0, 2.0, -9.0, -15.0,
+                -3.0, 3.0,
+            ]
+        };
+        assert_eq!(
+            data.get(9..25),
+            Some(expected.as_slice()),
+            "{name}: transformed control net"
+        );
+        assert_eq!(
+            data.get(25..),
+            Some([-2.0, -2.0, 3.0, 3.0, 4.0, 4.0, 6.0, 6.0].as_slice()),
+            "{name}: knots"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn exact_fixtures_compare_returned_geometry_and_nullness() {
+        let text = include_str!("../../../../fixtures/surface.srf_in_volume/exact_results.json");
+        let fixtures: Value = serde_json::from_str(text).unwrap();
+        let cases = fixtures["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 16);
+        for fixture in cases {
+            let name = fixture["name"].as_str().unwrap();
+            let input: Inputs = serde_json::from_value(fixture["inputs"].clone()).unwrap();
+            let native = cpp(&input).unwrap();
+            let port = rust(&input).unwrap();
+            assert_exact_result(name, &native).unwrap();
+            assert_exact_result(name, &port).unwrap();
+            let diff = crate::compare::compare(&native, &port, &[]);
+            assert!(diff.pass(), "{name}: {diff:?}");
+            assert!(diff.values_compared > 0, "{name}: empty comparison");
+        }
+    }
+
+    #[test]
+    fn exact_former_deferrals_compare_observed_results() {
+        for index in [450, 602, 608, 1982] {
+            let seed = CaseContext::seed_for("surface.srf_in_volume", index);
+            let mut rng = Rng::new(seed);
+            let input: Inputs = serde_json::from_value(Runner.generate(&mut rng).unwrap()).unwrap();
+            assert!(matches!(input.op, OpIn::Exact), "gen{index:04}");
+            let native = cpp(&input).unwrap();
+            let port = rust(&input).unwrap();
+            assert!(
+                port.deferred.is_none(),
+                "gen{index:04}: {:?}",
+                port.deferred
+            );
+            assert_eq!(port.ints["status"], [0], "gen{index:04}");
+            let diff = crate::compare::compare(&native, &port, &[]);
+            assert!(diff.pass(), "gen{index:04}: {diff:?}");
+            assert!(diff.values_compared > 0, "gen{index:04}: empty comparison");
+        }
+    }
 }
