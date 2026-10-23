@@ -2277,14 +2277,15 @@ mod header_report_tests {
             captured_frame(&mut h);
             // The report card takes a few frames to reach its full height.
             h.frames(16);
+            let close_label = if h.widget("Close draft").is_some() { "Close draft" } else { "Close" };
             // Existing review content scrolls vertically when the window is narrow.
             if width < 700.0 {
-                let [x, y] = h.widget("Close draft").unwrap();
+                let [x, y] = h.widget(close_label).unwrap();
                 h.call("ui.scroll", json!({"x":x,"y":y - 60.0,"delta":-1200}));
                 // Let the scroll animation finish before locating the click target.
                 h.frames(60);
             }
-            h.step(&json!({"widget":"Close draft"})).unwrap();
+            h.step(&json!({"widget":close_label})).unwrap();
             assert!(h.app.issue_report.draft.is_none(), "width {width}: review closes through its actual button");
             h.step(&json!({"click":{"handle":"tab:home"}})).unwrap();
             assert!(h.app.home.open, "width {width}: the Home tab remains reachable beside Report");
