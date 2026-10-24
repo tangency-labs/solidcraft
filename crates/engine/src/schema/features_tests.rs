@@ -772,6 +772,7 @@ fn feature_result_serializes_like_the_old_reply() {
             ms,
             param_warnings: vec![],
             notice: None,
+            unit_warnings: vec![],
         };
         assert_eq!(serde_json::to_value(&new).ok(), Some(old));
     }
