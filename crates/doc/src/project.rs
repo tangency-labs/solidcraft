@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use solidcraft_geom::{Mesh, Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Mesh, MinByFinite, Plane, Seg2, Vec2, Vec3};
 use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource, Sketch};
 
 use crate::eval::ModelState;
@@ -692,15 +692,7 @@ fn body_mesh(st: &ModelState, name: &str, at: Vec3) -> Result<(usize, std::sync:
     {
         return Ok((i, b.mesh()));
     }
-    let mut best: Option<(usize, f64)> = None;
-    for (i, b) in st.bodies.iter().enumerate() {
-        let m = b.mesh();
-        if let Some((_, _, d)) = nearest_face(&m, at)
-            && best.is_none_or(|(_, bd)| d < bd)
-        {
-            best = Some((i, d));
-        }
-    }
+    let best = st.bodies.iter().enumerate().filter_map(|(i, b)| Some((i, nearest_face(&b.mesh(), at)?.2))).min_by_finite(|&(_, d)| d);
     let (i, _) = best.ok_or_else(|| DocError::Invalid(format!("body {name} no longer exists")))?;
     let b = st.bodies.get(i).ok_or_else(|| DocError::Invalid(format!("body {name} no longer exists")))?;
     Ok((i, b.mesh()))
@@ -715,21 +707,18 @@ fn closest_on_segment(p: Vec3, a: Vec3, b: Vec3) -> Vec3 {
 
 /// Nearest non-seam edge: (index, closest point, distance).
 pub(crate) fn nearest_edge(m: &Mesh, p: Vec3) -> Option<(usize, Vec3, f64)> {
-    let mut best: Option<(usize, Vec3, f64)> = None;
-    for (i, e) in m.edges.iter().enumerate() {
-        if m.seams.get(i).copied().unwrap_or(false) {
-            continue;
-        }
-        for w in e.windows(2) {
-            let (Some(a), Some(b)) = (w.first(), w.get(1)) else { continue };
-            let q = closest_on_segment(p, *a, *b);
-            let d = q.dist(p);
-            if best.is_none_or(|(_, _, bd)| d < bd) {
-                best = Some((i, q, d));
-            }
-        }
-    }
-    best
+    m.edges
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !m.seams.get(*i).copied().unwrap_or(false))
+        .flat_map(|(i, e)| {
+            e.windows(2).filter_map(move |w| {
+                let (Some(a), Some(b)) = (w.first(), w.get(1)) else { return None };
+                let q = closest_on_segment(p, *a, *b);
+                Some((i, q, q.dist(p)))
+            })
+        })
+        .min_by_finite(|&(_, _, d)| d)
 }
 
 pub(crate) fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
@@ -748,16 +737,15 @@ pub(crate) fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 
 /// Nearest face: (B-rep face index, closest point, distance).
 pub(crate) fn nearest_face(m: &Mesh, p: Vec3) -> Option<(u32, Vec3, f64)> {
-    let mut best: Option<(u32, Vec3, f64)> = None;
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let Some([a, b, c]) = m.tri(t) else { continue };
-        let q = closest_on_triangle(p, a, b, c);
-        let d = q.dist(p);
-        if best.is_none_or(|(_, _, bd)| d < bd) {
-            best = Some((*f, q, d));
-        }
-    }
-    best
+    m.triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter_map(|(t, f)| {
+            let [a, b, c] = m.tri(t)?;
+            let q = closest_on_triangle(p, a, b, c);
+            Some((*f, q, q.dist(p)))
+        })
+        .min_by_finite(|&(_, _, d)| d)
 }
 
 /// A full circle split by a seam comes out as two arcs between the same two points, but some

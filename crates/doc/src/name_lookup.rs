@@ -8,7 +8,7 @@
 //! was worked out from geometry, found where the reference's point no longer lies, is reported:
 //! only geometry decided.
 
-use solidcraft_geom::{Mesh, Vec3};
+use solidcraft_geom::{Mesh, MinByFinite, Vec3};
 
 use crate::history_names::{Match, Names};
 use crate::naming::{self, closest, edge_names, face_names, legacy_edge_names, legacy_face_names, strip_piece};
@@ -98,20 +98,16 @@ fn edge_near(b: &ModelBody, m: &Mesh, i: usize, near: Vec3) -> bool {
 
 /// The point of face `face` of a mesh nearest `p`, and how far it is.
 fn nearest_on_face(m: &Mesh, face: usize, p: Vec3) -> Option<(f64, Vec3)> {
-    let mut best: Option<(f64, Vec3)> = None;
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        if *f as usize != face {
-            continue;
-        }
-        let Some([a, b, c]) = m.tri(t) else { continue };
-        let q = closest(p, a, b, c);
-        let d = q.dist(p);
-        // A non-finite candidate must never become the best: nothing compares less than NaN.
-        if d.is_finite() && best.is_none_or(|x| d < x.0) {
-            best = Some((d, q));
-        }
-    }
-    best
+    m.triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter(|(_, f)| **f as usize == face)
+        .filter_map(|(t, _)| {
+            let [a, b, c] = m.tri(t)?;
+            let q = closest(p, a, b, c);
+            Some((q.dist(p), q))
+        })
+        .min_by_finite(|&(d, _)| d)
 }
 
 /// The middle of edge `i` of a mesh (along its polyline).
@@ -224,22 +220,19 @@ impl FaceHit {
         let d = dir.normalized()?;
         let m = b.mesh();
         let slack = (b.body.size() * 1e-9).max(1e-9);
-        let mut best: Option<f64> = None;
-        for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-            if *f as usize != self.face {
-                continue;
-            }
-            let Some([a, bb, c]) = m.tri(t) else { continue };
-            // A hair's width around each triangle, so a place on the seam of two is on the face.
-            let centre = (a + bb + c) * (1.0 / 3.0);
-            let grow = |v: Vec3| v + (v - centre).normalized().unwrap_or(Vec3::ZERO) * slack;
-            if let Some(hit) = naming::ray_hit(p, d, grow(a), grow(bb), grow(c))
-                && best.is_none_or(|old| hit.abs() < old.abs())
-            {
-                best = Some(hit);
-            }
-        }
-        best.map(|t| p + d * t)
+        m.triangles
+            .iter()
+            .zip(&m.tri_face)
+            .filter(|(_, f)| **f as usize == self.face)
+            .filter_map(|(t, _)| {
+                let [a, bb, c] = m.tri(t)?;
+                // A hair's width around each triangle, so a place on the seam of two is on the face.
+                let centre = (a + bb + c) * (1.0 / 3.0);
+                let grow = |v: Vec3| v + (v - centre).normalized().unwrap_or(Vec3::ZERO) * slack;
+                naming::ray_hit(p, d, grow(a), grow(bb), grow(c))
+            })
+            .min_by_finite(|hit| hit.abs())
+            .map(|t| p + d * t)
     }
 }
 

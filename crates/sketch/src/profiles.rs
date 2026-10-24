@@ -10,7 +10,7 @@
 use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Loop2, Region2, Ring, Seg2, Vec2};
+use solidcraft_geom::{Loop2, MinByFinite, Region2, Ring, Seg2, Vec2};
 
 use crate::model::{CurveKind, Sketch};
 use crate::shape::{Shape, intersections_within};
@@ -966,25 +966,26 @@ fn find_profiles_bounded(sk: &Sketch, max_edges: usize) -> Vec<Profile> {
             // along each segment (curvature decides between equal tangents, e.g. a line tangent
             // to an arc, or an arc leaving back along the incoming line).
             let kt = half(twin).map(|(ts, _, _)| curvature(&ts)).unwrap_or(0.0);
-            let mut best: Option<(f64, f64, usize)> = None;
-            for &o in outgoing.get(to).map(Vec::as_slice).unwrap_or(&[]) {
-                if o == twin {
-                    continue;
-                }
-                let Some((os, _, _)) = half(o) else { continue };
-                let mut raw = (back - os.start_tangent().angle()).rem_euclid(TAU);
-                if raw > TAU - 1e-9 {
-                    raw = 0.0;
-                }
-                let mut d = raw + (kt - curvature(&os)) * 1e-7;
-                if d <= 1e-12 {
-                    d += TAU;
-                }
-                if best.is_none_or(|(bd, _, _)| d < bd) {
-                    best = Some((d, 0.0, o));
-                }
-            }
-            let best = best.map(|(d, _, o)| (d, o));
+            let best = outgoing
+                .get(to)
+                .map(Vec::as_slice)
+                .unwrap_or(&[])
+                .iter()
+                .copied()
+                .filter(|o| *o != twin)
+                .filter_map(|o| {
+                    let (os, _, _) = half(o)?;
+                    let mut raw = (back - os.start_tangent().angle()).rem_euclid(TAU);
+                    if raw > TAU - 1e-9 {
+                        raw = 0.0;
+                    }
+                    let mut d = raw + (kt - curvature(&os)) * 1e-7;
+                    if d <= 1e-12 {
+                        d += TAU;
+                    }
+                    Some((d, o))
+                })
+                .min_by_finite(|&(turn, _)| turn);
             let Some((_, next)) = best else {
                 ok = false;
                 break;

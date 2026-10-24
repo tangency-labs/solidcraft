@@ -17,7 +17,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use solidcraft_geom::{Aabb3, Mesh, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Aabb3, Mesh, MinByFinite, Seg2, Vec2, Vec3};
 
 use crate::history_names::Names;
 use crate::lineage::Lineage;
@@ -251,17 +251,18 @@ impl FaceIndex {
 
     /// The face a point lies on (within `tol`).
     fn face_at(&self, p: Vec3, tol: f64) -> Option<usize> {
-        let mut best: Option<(f64, usize)> = None;
-        for (i, (bounds, tris)) in self.faces.iter().enumerate() {
-            if !bounds.inflated(tol).contains(p) {
-                continue;
-            }
-            let d = tris.iter().map(|[a, b, c]| closest(p, *a, *b, *c).dist(p)).fold(f64::MAX, f64::min);
-            if d <= tol && best.is_none_or(|(bd, _)| d < bd) {
-                best = Some((d, i));
-            }
-        }
-        best.map(|(_, i)| i)
+        self.faces
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (bounds, tris))| {
+                if !bounds.inflated(tol).contains(p) {
+                    return None;
+                }
+                let d = tris.iter().map(|[a, b, c]| closest(p, *a, *b, *c).dist(p)).fold(f64::MAX, f64::min);
+                (d <= tol).then_some((d, i))
+            })
+            .min_by_finite(|&(d, _)| d)
+            .map(|(_, i)| i)
     }
 }
 
@@ -736,36 +737,19 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
 
 /// The sketch curve (id) nearest a point in the sketch plane, and how near.
 fn nearest_curve_dist(ss: &crate::SolvedSketch, q: Vec2) -> Option<(f64, String)> {
-    let mut best: Option<(f64, String)> = None;
-    for (ci, c) in ss.sketch.curves.iter().enumerate() {
-        if c.construction {
-            continue;
-        }
-        for s in ss.sketch.segs(ci) {
-            let d = seg_dist(&s, q);
-            if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
-                best = Some((d, c.id.clone()));
-            }
-        }
-    }
-    best
+    ss.sketch
+        .curves
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !c.construction)
+        .flat_map(|(ci, c)| ss.sketch.segs(ci).into_iter().map(move |s| (seg_dist(&s, q), &c.id)))
+        .min_by_finite(|&(d, _)| d)
+        .map(|(d, id)| (d, id.clone()))
 }
 
 /// The sketch curve (id) nearest a point in the sketch plane.
 fn nearest_curve(ss: &crate::SolvedSketch, q: Vec2) -> Option<String> {
-    let mut best: Option<(f64, String)> = None;
-    for (ci, c) in ss.sketch.curves.iter().enumerate() {
-        if c.construction {
-            continue;
-        }
-        for s in ss.sketch.segs(ci) {
-            let d = seg_dist(&s, q);
-            if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
-                best = Some((d, c.id.clone()));
-            }
-        }
-    }
-    best.map(|(_, id)| id)
+    nearest_curve_dist(ss, q).map(|(_, id)| id)
 }
 
 fn seg_dist(s: &Seg2, q: Vec2) -> f64 {

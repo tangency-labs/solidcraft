@@ -17,7 +17,7 @@
 //! beyond that order, and no surface can be told to carry a condition the target has not got.
 
 use mt::{BoundedCurve, ParametricCurve, ParametricSurface, ParametricSurface3D, SearchNearestParameter};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::{MinByFinite, Vec3};
 use truck_modeling as mt;
 
 use crate::body::{Body, from_p3, p3};
@@ -375,19 +375,11 @@ fn nearest_side(face: &mt::Face, chain: &[mt::Edge]) -> Result<Side> {
     let poly = chain_polyline(chain)?;
     /// Samples of each side used to tell which one the chain runs along.
     const SAMPLES: usize = 17;
-    let mut best: Option<(f64, Side)> = None;
-    for side in Side::ALL {
-        let mut total = 0.0;
-        for k in 0..SAMPLES {
-            let t = k as f64 / (SAMPLES - 1) as f64;
-            total += chain_distance(&poly, Side::at(&surf, &ranges, side, t));
-        }
-        let mean = total / SAMPLES as f64;
-        if best.is_none_or(|(b, _)| mean < b) {
-            best = Some((mean, side));
-        }
-    }
-    best.map(|(_, s)| s).ok_or_else(|| KernelError::Failed("match: the face has no sides".into()))
+    let mean = |side: Side| {
+        let total: f64 = (0..SAMPLES).map(|k| chain_distance(&poly, Side::at(&surf, &ranges, side, k as f64 / (SAMPLES - 1) as f64))).sum();
+        total / SAMPLES as f64
+    };
+    Side::ALL.into_iter().min_by_finite(|side| mean(*side)).ok_or_else(|| KernelError::Failed("match: the face has no sides".into()))
 }
 
 /// The face's own edges that run along a side of its parameter rectangle, chained head to tail.

@@ -10,7 +10,7 @@
 //! together; the flat solid is the outline extruded through the thickness.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Aabb2, LINEAR_TOL, Loop2, Plane, Region2, Ring, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Aabb2, LINEAR_TOL, Loop2, MinByFinite, Plane, Region2, Ring, Seg2, Vec2, Vec3};
 use solidcraft_kernel::{self as kernel, Body, EdgeSpec, FaceSpec, SurfSpec};
 
 use crate::expr::{self, Kind, Value};
@@ -3895,24 +3895,24 @@ impl SheetBody {
     /// point lies on (sheet coordinates, within `tol`): its persistent name and plane (see
     /// [`panel_face`](Self::panel_face)).
     fn rim_face_at(&self, p: Vec3, tol: f64) -> Option<(String, Plane)> {
-        let mut best: Option<(f64, String)> = None;
-        for (pi, a, b, name) in self.rims() {
-            let Some(inverse) = mat_inverse(&self.world(pi)) else { continue };
-            let q = apply_point(&inverse, p);
-            if q.z < -tol || q.z > self.t + tol {
-                continue;
-            }
-            let q2 = Vec2::new(q.x, q.y);
-            let d = b - a;
-            let along = (q2 - a).dot(d) / d.len2();
-            if !(-1e-9..=1.0 + 1e-9).contains(&along) {
-                continue;
-            }
-            let off = ((a + d * along) - q2).len();
-            if off <= tol && best.as_ref().is_none_or(|(o, _)| off < *o) {
-                best = Some((off, name));
-            }
-        }
+        let best = self
+            .rims()
+            .into_iter()
+            .filter_map(|(pi, a, b, name)| {
+                let q = apply_point(&mat_inverse(&self.world(pi))?, p);
+                if q.z < -tol || q.z > self.t + tol {
+                    return None;
+                }
+                let q2 = Vec2::new(q.x, q.y);
+                let d = b - a;
+                let along = (q2 - a).dot(d) / d.len2();
+                if !(-1e-9..=1.0 + 1e-9).contains(&along) {
+                    return None;
+                }
+                let off = ((a + d * along) - q2).len();
+                (off <= tol).then_some((off, name))
+            })
+            .min_by_finite(|&(off, _)| off);
         let name = match best {
             Some((_, name)) => name,
             None => self.bend_side_at(p, tol)?,

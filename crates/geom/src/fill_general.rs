@@ -52,9 +52,9 @@
 //! - **A crown** fills the middle out along the surface's own normals, on control points clear of
 //!   the loop, so it moves neither the loop nor the conditions across it.
 
-use crate::Vec3;
 use crate::bspline::{HPoint, NurbsSurface, SplineError, SplineResult, invalid};
 use crate::fill::{Band, Grid, MAX_LOOP_POINTS, SMOOTHNESS, inside_loop, segments_meet};
+use crate::{MinByFinite, Vec3};
 
 /// Most spans of the surface along the domain's longer side.
 pub const MAX_GENERAL_SPANS: usize = 64;
@@ -997,20 +997,13 @@ fn locate(net: &Net, d: &[[f64; 2]], p: Vec3) -> SplineResult<[f64; 2]> {
     };
     let (lo, hi) = ([*u0, *v0], [*u1, *v1]);
     let samples = 48;
-    let mut best: Option<(f64, [f64; 2])> = None;
-    for i in 0..=samples {
-        for j in 0..=samples {
-            let q = [lo[0] + (hi[0] - lo[0]) * i as f64 / samples as f64, lo[1] + (hi[1] - lo[1]) * j as f64 / samples as f64];
-            if !inside_loop(q, d) {
-                continue;
-            }
-            let Some(s) = net.point(q) else { continue };
-            let dist = s.dist(p);
-            if best.is_none_or(|(b, _)| dist < b) {
-                best = Some((dist, q));
-            }
-        }
-    }
+    let best = (0..=samples)
+        .flat_map(|i| {
+            (0..=samples).map(move |j| [lo[0] + (hi[0] - lo[0]) * i as f64 / samples as f64, lo[1] + (hi[1] - lo[1]) * j as f64 / samples as f64])
+        })
+        .filter(|q| inside_loop(*q, d))
+        .filter_map(|q| Some((net.point(q)?.dist(p), q)))
+        .min_by_finite(|&(d, _)| d);
     let Some((_, mut q)) = best else { return Err(SplineError::Unsupported("passing through points: the loop's development is too thin".into())) };
     for _ in 0..40 {
         let (Some(s), Some(su), Some(sv)) = (net.point(q), net.der(q, 1, 0), net.der(q, 0, 1)) else { break };

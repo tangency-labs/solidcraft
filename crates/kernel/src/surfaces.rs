@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use mt::{BoundedCurve, InnerSpace, MetricSpace, ParametricCurve, ParametricSurface3D, SearchNearestParameter};
-use solidcraft_geom::{Plane, Region2, Seg2, UnitVec3, Vec2, Vec3};
+use solidcraft_geom::{MinByFinite, Plane, Region2, Seg2, UnitVec3, Vec2, Vec3};
 use truck_modeling as mt;
 
 use crate::body::{Body, from_p3, p3};
@@ -597,15 +597,16 @@ pub fn remove_faces(body: &Body, faces: &[usize]) -> Result<Body> {
 /// Index of the face nearest a point (over its mesh triangles).
 pub(crate) fn nearest_face(body: &Body, p: Vec3) -> Result<usize> {
     let m = body.tessellate(body.size() * 2e-3)?;
-    let mut best: Option<(f64, u32)> = None;
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let Some([a, b, c]) = m.tri(t) else { continue };
-        let d = ((a + b + c) / 3.0).dist(p).min(a.dist(p)).min(b.dist(p)).min(c.dist(p));
-        if best.is_none_or(|(x, _)| d < x) {
-            best = Some((d, *f));
-        }
-    }
-    best.map(|(_, f)| f as usize).ok_or_else(|| KernelError::Invalid("no face there".into()))
+    m.triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter_map(|(t, f)| {
+            let [a, b, c] = m.tri(t)?;
+            Some((((a + b + c) / 3.0).dist(p).min(a.dist(p)).min(b.dist(p)).min(c.dist(p)), *f as usize))
+        })
+        .min_by_finite(|&(d, _)| d)
+        .map(|(_, f)| f)
+        .ok_or_else(|| KernelError::Invalid("no face there".into()))
 }
 
 /// Sew surface bodies along edges that coincide (within `tol`): one body, a solid when the

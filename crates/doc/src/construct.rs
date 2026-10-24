@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcraft_geom::{MinByFinite, Plane, Vec2, Vec3};
 use solidcraft_kernel::{self as kernel, FaceSurface};
 
 use crate::eval::{ModelBody, ModelState};
@@ -159,17 +159,11 @@ fn edge_points(st: &ModelState, at: Vec3, name: &Option<String>) -> Result<Vec<V
             }
         }
     }
-    let mut best: Option<(f64, Vec<Vec3>)> = None;
-    for b in bodies(st) {
-        let tol = (b.body.size() * 1e-3).max(1e-3);
-        let Ok(edges) = b.body.edges(tol) else { continue };
-        for e in edges {
-            let d = e.points.windows(2).map(|w| at.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min);
-            if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
-                best = Some((d, e.points));
-            }
-        }
-    }
+    let best = bodies(st)
+        .filter_map(|b| b.body.edges((b.body.size() * 1e-3).max(1e-3)).ok())
+        .flatten()
+        .map(|e| (e.points.windows(2).map(|w| at.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min), e.points))
+        .min_by_finite(|&(d, _)| d);
     match best {
         Some((d, pts)) if pts.len() >= 2 && d <= 1e-3 + 1e-2 * pts.iter().fold(0.0, |m: f64, p| m.max(p.len())).max(1.0) => Ok(pts),
         _ => Err(bad(format!("no edge at {at:?}"))),
@@ -265,18 +259,11 @@ pub(crate) fn point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
             if let Some(v) = edges.as_deref().and_then(|names| named_vertex(ctx.st, *at, names)) {
                 return Ok(v);
             }
-            let mut best: Option<(f64, Vec3)> = None;
-            for b in bodies(ctx.st) {
-                let tol = (b.body.size() * 1e-3).max(1e-3);
-                let Ok(edges) = b.body.edges(tol) else { continue };
-                for v in edges.iter().flat_map(|e| [e.points.first().copied(), e.points.last().copied()]).flatten() {
-                    let d = v.dist(*at);
-                    if best.is_none_or(|(bd, _)| d < bd) {
-                        best = Some((d, v));
-                    }
-                }
-            }
-            best.map(|(_, v)| v).ok_or_else(|| bad("there is no vertex"))
+            bodies(ctx.st)
+                .filter_map(|b| b.body.edges((b.body.size() * 1e-3).max(1e-3)).ok())
+                .flat_map(|edges| edges.into_iter().flat_map(|e| [e.points.first().copied(), e.points.last().copied()]).flatten())
+                .min_by_finite(|v| v.dist(*at))
+                .ok_or_else(|| bad("there is no vertex"))
         }
         GeoRef::ConstructPoint { name } => match construct(ctx.st, name)? {
             ConstructGeom::Point(p) => Ok(*p),

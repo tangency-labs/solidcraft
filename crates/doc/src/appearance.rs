@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::{MinByFinite, Vec3};
 
 use crate::Document;
 
@@ -268,15 +268,14 @@ pub fn face_index_at(b: &crate::ModelBody, p: Vec3) -> Option<usize> {
 /// The face of `b` nearest `p` and how far it is, however far.
 pub fn nearest_face(b: &crate::ModelBody, p: Vec3) -> Option<(f64, usize)> {
     let m = b.mesh();
-    let mut best: Option<(f64, u32)> = None;
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let Some([a, bb, c]) = m.tri(t) else { continue };
-        let d = closest_on_triangle(p, a, bb, c).dist(p);
-        if best.is_none_or(|(x, _)| d < x) {
-            best = Some((d, *f));
-        }
-    }
-    best.map(|(d, f)| (d, f as usize))
+    m.triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter_map(|(t, f)| {
+            let [a, bb, c] = m.tri(t)?;
+            Some((closest_on_triangle(p, a, bb, c).dist(p), *f as usize))
+        })
+        .min_by_finite(|&(d, _)| d)
 }
 
 /// How far from a face of `b` a picked point may lie and still pick it (`face_index_at`).

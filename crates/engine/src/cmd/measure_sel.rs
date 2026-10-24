@@ -5,7 +5,7 @@
 //! have a direction (planar faces, straight edges), the angle.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Mesh, UnitVec3, Vec3};
+use solidcraft_geom::{Mesh, MinByFinite, UnitVec3, Vec3};
 
 use super::measure_shape::{Shape, Slot, add_round, centre};
 use crate::params::bad;
@@ -368,44 +368,37 @@ fn sample<T: Copy>(v: &[T], max: usize) -> Vec<T> {
     v.iter().step_by(step).copied().collect()
 }
 
+/// Every pair of a point from `a` with a point from `b`.
+fn pairs<'a>(a: &'a [Vec3], b: &'a [Vec3]) -> impl Iterator<Item = (Vec3, Vec3)> + 'a {
+    a.iter().flat_map(move |&x| b.iter().map(move |&y| (x, y)))
+}
+
+/// How far apart a pair of points is.
+fn gap(&(a, b): &(Vec3, Vec3)) -> f64 {
+    a.dist(b)
+}
+
 /// Closest pair of points between two pieces of geometry.
 fn closest(a: &Geo, b: &Geo) -> Option<(Vec3, Vec3)> {
     let pts_to_tris = |pts: &[Vec3], tris: &[[Vec3; 3]]| -> Option<(Vec3, Vec3)> {
         let pts = sample(pts, MAX_POINTS);
         let tris = sample(tris, MAX_TRIS);
-        let mut best: Option<(f64, Vec3, Vec3)> = None;
-        for p in &pts {
-            for [x, y, z] in &tris {
-                let q = closest_on_triangle(*p, *x, *y, *z);
-                let d = p.dist(q);
-                if best.is_none_or(|(bd, _, _)| d < bd) {
-                    best = Some((d, *p, q));
-                }
-            }
-        }
-        best.map(|(_, p, q)| (p, q))
+        // Each point with its nearest point on each triangle.
+        let feet = pts.iter().flat_map(|&p| tris.iter().map(move |&[x, y, z]| (p, closest_on_triangle(p, x, y, z))));
+        feet.min_by_finite(gap)
     };
     let verts = |tris: &[[Vec3; 3]]| -> Vec<Vec3> { tris.iter().flat_map(|t| t.iter().copied()).collect() };
     match (a, b) {
         (Geo::Points(p), Geo::Points(q)) => {
             let (p, q) = (sample(p, MAX_POINTS), sample(q, MAX_POINTS));
-            let mut best: Option<(f64, Vec3, Vec3)> = None;
-            for x in &p {
-                for y in &q {
-                    let d = x.dist(*y);
-                    if best.is_none_or(|(bd, _, _)| d < bd) {
-                        best = Some((d, *x, *y));
-                    }
-                }
-            }
-            best.map(|(_, x, y)| (x, y))
+            pairs(&p, &q).min_by_finite(gap)
         }
         (Geo::Points(p), Geo::Tris(t)) => pts_to_tris(p, t),
         (Geo::Tris(t), Geo::Points(p)) => pts_to_tris(p, t).map(|(x, y)| (y, x)),
         (Geo::Tris(t1), Geo::Tris(t2)) => {
             let ab = pts_to_tris(&verts(t1), t2);
             let ba = pts_to_tris(&verts(t2), t1).map(|(x, y)| (y, x));
-            [ab, ba].into_iter().flatten().min_by(|x, y| x.0.dist(x.1).total_cmp(&y.0.dist(y.1)))
+            [ab, ba].into_iter().flatten().min_by_finite(gap)
         }
     }
 }
@@ -539,14 +532,5 @@ fn farthest(a: &Geo, b: &Geo) -> Option<(Vec3, Vec3)> {
         }
     };
     let (p, q) = (pts(a), pts(b));
-    let mut best: Option<(f64, Vec3, Vec3)> = None;
-    for x in &p {
-        for y in &q {
-            let d = x.dist(*y);
-            if best.is_none_or(|(bd, _, _)| d > bd) {
-                best = Some((d, *x, *y));
-            }
-        }
-    }
-    best.map(|(_, x, y)| (x, y))
+    pairs(&p, &q).max_by_finite(gap)
 }

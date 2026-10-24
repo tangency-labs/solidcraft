@@ -9,7 +9,7 @@ use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::tess::TessPlan;
-use solidcraft_geom::{Mesh, Plane, Region2, UnitVec3, Vec2, Vec3, regions_apart};
+use solidcraft_geom::{Mesh, MinByFinite, Plane, Region2, UnitVec3, Vec2, Vec3, regions_apart};
 use solidcraft_kernel::{self as kernel, Body, BoolOp};
 use solidcraft_sketch::{CurveKind, Profile, SolveReport, find_profiles};
 
@@ -3513,15 +3513,16 @@ fn blend_target(state: &ModelState, body: &Option<crate::BodyName>, edges: &[Vec
         return state.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")));
     }
     let p = edges.first().ok_or_else(|| DocError::Invalid("no edges selected".into()))?;
-    let mut best: Option<(usize, f64)> = None;
-    for (i, b) in state.bodies.iter().enumerate() {
-        let tol = (b.body.size() * 2e-3).max(1e-3);
-        if let Ok(Some((_, d))) = b.body.nearest_edge(*p, tol)
-            && best.is_none_or(|(_, bd)| d < bd)
-        {
-            best = Some((i, d));
-        }
-    }
+    let best = state
+        .bodies
+        .iter()
+        .enumerate()
+        .filter_map(|(i, b)| {
+            let tol = (b.body.size() * 2e-3).max(1e-3);
+            let (_, d) = b.body.nearest_edge(*p, tol).ok().flatten()?;
+            Some((i, d))
+        })
+        .min_by_finite(|&(_, d)| d);
     best.map(|(i, _)| i).ok_or_else(|| {
         if state.bodies.iter().any(|b| b.body.is_mesh()) {
             DocError::Invalid("there is no solid body to modify (mesh bodies have no edges)".into())

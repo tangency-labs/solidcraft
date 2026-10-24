@@ -1,5 +1,5 @@
 use serde::Serialize;
-use solidcraft_geom::{Aabb3, Mesh, Vec3};
+use solidcraft_geom::{Aabb3, Mesh, MinByFinite, Vec3};
 use truck_meshalgo::prelude::*;
 use truck_modeling as mt;
 
@@ -1682,18 +1682,15 @@ impl Body {
     /// Index of the edge closest to `p` (by polyline distance).
     pub fn nearest_edge(&self, p: Vec3, tol: f64) -> Result<Option<(usize, f64)>> {
         let edges = self.edges(tol)?;
-        let mut best: Option<(usize, f64)> = None;
-        for e in &edges {
-            for w in e.points.windows(2) {
-                if let (Some(a), Some(b)) = (w.first(), w.get(1)) {
-                    let d = p.dist_to_segment(*a, *b);
-                    if best.is_none_or(|(_, bd)| d < bd) {
-                        best = Some((e.index, d));
-                    }
-                }
-            }
-        }
-        Ok(best)
+        Ok(edges
+            .iter()
+            .flat_map(|e| {
+                e.points.windows(2).filter_map(|w| match (w.first(), w.get(1)) {
+                    (Some(a), Some(b)) => Some((e.index, p.dist_to_segment(*a, *b))),
+                    _ => None,
+                })
+            })
+            .min_by_finite(|&(_, d)| d))
     }
 
     /// Is the point inside the solid?

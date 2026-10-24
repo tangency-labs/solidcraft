@@ -11,7 +11,7 @@
 
 use serde_json::{Map, Value};
 use solidcraft_doc::{Mat, apply_point, apply_vector, is_identity, map_point_expr, mat_inverse};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::{MinByFinite, Vec3};
 
 use crate::Session;
 
@@ -137,27 +137,28 @@ fn frame_at(s: &Session, f: &Frames, p: Vec3, body: Option<&str>) -> Option<Mat>
         return Some(*m);
     }
     let world = s.world_state();
-    let mut best: Option<(f64, Mat)> = None;
-    for wb in &world.bodies {
-        let Some((_, _, m)) = f.bodies.iter().find(|(w, _, _)| *w == wb.name) else { continue };
-        let mesh = wb.mesh();
-        let bb = mesh.bounds();
-        let tol = (bb.diagonal() * 1e-3).max(1e-3);
-        if p.x < bb.min.x - tol
-            || p.y < bb.min.y - tol
-            || p.z < bb.min.z - tol
-            || p.x > bb.max.x + tol
-            || p.y > bb.max.y + tol
-            || p.z > bb.max.z + tol
-        {
-            continue;
-        }
-        let d = mesh.triangles.iter().filter_map(|t| mesh.tri(t)).map(|[a, b, c]| tri_dist(p, a, b, c)).fold(f64::INFINITY, f64::min);
-        if d <= tol && best.as_ref().is_none_or(|(bd, _)| d < *bd) {
-            best = Some((d, *m));
-        }
-    }
-    best.map(|(_, m)| m)
+    world
+        .bodies
+        .iter()
+        .filter_map(|wb| {
+            let (_, _, m) = f.bodies.iter().find(|(w, _, _)| *w == wb.name)?;
+            let mesh = wb.mesh();
+            let bb = mesh.bounds();
+            let tol = (bb.diagonal() * 1e-3).max(1e-3);
+            if p.x < bb.min.x - tol
+                || p.y < bb.min.y - tol
+                || p.z < bb.min.z - tol
+                || p.x > bb.max.x + tol
+                || p.y > bb.max.y + tol
+                || p.z > bb.max.z + tol
+            {
+                return None;
+            }
+            let d = mesh.triangles.iter().filter_map(|t| mesh.tri(t)).map(|[a, b, c]| tri_dist(p, a, b, c)).fold(f64::INFINITY, f64::min);
+            (d <= tol).then_some((d, *m))
+        })
+        .min_by_finite(|&(d, _)| d)
+        .map(|(_, m)| m)
 }
 
 fn tri_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {

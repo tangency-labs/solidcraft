@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::Vec3;
+use crate::{MinByFinite, Vec3};
 
 /// Axis-aligned bounding box.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -685,16 +685,7 @@ impl Mesh {
     /// shared edge or vertex hits at least one of them; it never slips between them.
     pub fn raycast(&self, o: Vec3, dir: Vec3) -> Option<(f64, usize)> {
         let frame = RayFrame::new(o, dir)?;
-        let mut best: Option<(f64, usize)> = None;
-        for (i, t) in self.triangles.iter().enumerate() {
-            let Some(p) = self.tri(t) else { continue };
-            if let Some(t) = frame.hit(p)
-                && best.is_none_or(|(bt, _)| t < bt)
-            {
-                best = Some((t, i));
-            }
-        }
-        best
+        self.triangles.iter().enumerate().filter_map(|(i, t)| Some((frame.hit(self.tri(t)?)?, i))).min_by_finite(|&(t, _)| t)
     }
 }
 
