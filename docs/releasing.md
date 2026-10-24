@@ -71,10 +71,11 @@ deployment. The stable Flatpak repository is not automatically updated with nigh
    `Cargo.lock` (it changes only our own crates, never dependency versions, and needs no
    network). Inspect the diff: only `version = ` lines of workspace crates should change.
    SolidCraft does not currently implement `cargo xtask version set`.
-3. Fix the design format number: run `scripts/fold-format-pending.sh`. It moves the pending
-   format changes (`crates/doc/src/format/pending/*.rs`) into the next `crates/doc/src/format/v<N>/`
-   folder, so the release writes and reads that number for good, and does nothing when nothing
-   is pending. Commit the move with the version files. (CONTRIBUTING.md, "Changing the design
+3. Fix the file format numbers: run `scripts/fold-format-pending.sh`. It moves the pending
+   format changes of designs (`crates/doc/src/format/pending/*.rs`) and of drawings
+   (`crates/doc/src/drawing/format/pending/*.rs`) into each one's next `v<N>/` folder, so the
+   release writes and reads those numbers for good, and does nothing for a family with nothing
+   pending. Commit the move with the version files. (CONTRIBUTING.md, "Changing the design
    file format".)
 4. Run `cargo xtask ci` and the packaging checks in `.github/workflows/packaging-lint.yml`.
    Commit the version files through the normal review flow and land them on `main`.

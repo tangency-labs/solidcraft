@@ -255,7 +255,9 @@ a conflict. `crates/doc/src/format/pending/README.md` has an example.
 
 **At release time** the maintainer runs `scripts/fold-format-pending.sh`, which moves the pending
 files into `crates/doc/src/format/v<N>/` and fixes that number for good (see
-[docs/releasing.md](docs/releasing.md)). Never add a file to a `v<N>/` folder afterwards.
+[docs/releasing.md](docs/releasing.md)). Never add a file to a `v<N>/` folder afterwards. Drawings
+follow the same rules with their own numbers, from 1, in `crates/doc/src/drawing/format/` (see its
+`pending/README.md`), and the same script folds them.
 
 ## Lists many changes add to
 

@@ -174,7 +174,8 @@ A change that saves something new in a design adds ONE file, `crates/doc/src/for
 (a `//!` note, and `pub fn step` if older designs must be rewritten). Never edit `FORMAT`,
 `JSON_STEPS`, the history in `format.rs`, another change's file or a `v<N>/` folder: the build
 works out the number (the next one while anything is pending), and the release folds pending
-changes into `v<N>/` with `scripts/fold-format-pending.sh`. See CONTRIBUTING.md.
+changes into `v<N>/` with `scripts/fold-format-pending.sh`. See CONTRIBUTING.md. Drawings work the same
+way with their own numbers: one file in `crates/doc/src/drawing/format/pending/`.
 
 ## Application releases
 Development pushes are not application releases. Follow `docs/releasing.md` when asked to
