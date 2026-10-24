@@ -218,6 +218,7 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "Ollama", base_url: "http://localhost:11434/v1" },
     ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
     ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
+    ApiPreset { name: "OpenCode Go", base_url: "https://opencode.ai/inference/go/v1" },
 ];
 
 /// Anthropic-compatible endpoints people use. The base URL is the one their documentation calls

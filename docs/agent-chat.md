@@ -199,7 +199,12 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 - **Custom command:** any other program that speaks ACP on stdin and stdout, such as
   `my-agent --acp`. SolidCraft starts it directly, not through a shell.
 - **OpenAI-compatible API:** a preset (Ollama `http://localhost:11434/v1`, LM Studio
-  `http://localhost:1234/v1`, OpenAI) or a custom URL, the model name, and an optional key.
+  `http://localhost:1234/v1`, OpenAI, OpenCode Go `https://opencode.ai/inference/go/v1`) or a custom URL, the model name, and an optional key.
+  OpenCode Go lists models at `/inference/go/v1/models` and routes each conversation
+  to its documented protocol endpoint: OpenAI Responses or Chat Completions,
+  Anthropic Messages, or Gemini `generateContent`. Every conversation request
+  carries the required stable `x-opencode-session` header. Unknown models are retried
+  on another protocol only when Go identifies a protocol mismatch.
 - **Anthropic-compatible API:** a preset (Anthropic) or a custom URL, for an endpoint that
   speaks the Anthropic Messages API (`{base}/v1/messages`). This covers Anthropic itself and
   providers that offer an Anthropic-compatible endpoint, such as DeepSeek and Qwen.
