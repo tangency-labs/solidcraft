@@ -15,7 +15,7 @@
 //! | [`pass_sp_convergence_test`]                      | `sm_PassSPConvergenceTest` (static)              |
 //! | [`Surface::create_seam_curve`]                    | `SmSurface::CreateSeamCurve`                     |
 //! | [`Surface::is_on_seam`], [`SeamInfo`]             | `SmSurface::IsOnSeam`                            |
-//! | [`Surface::global_point_solve`], [`Surface::global_point_solve_point_test_off`], [`global_point_solve_starts`], [`NoObject`] | `SmSurface::GlobalPointSolve` |
+//! | [`Surface::global_point_solve`], [`Surface::global_point_solve_point_test_off`], [`Surface::global_point_solve_face_tested`], [`FaceTest`], [`global_point_solve_starts`], [`NoObject`] | `SmSurface::GlobalPointSolve` |
 //! | [`classify_curve_surface_xsect_point`], [`XsectClassification`] | `sm_ClassifyCurveSurfaceXSectPoint` (static) |
 //! | [`CsIntersectEnfo`] (`EvalNFunctions`)           | `SmCSIntersectENFO::Evaluate` (struct: `surface.surface_p1`) |
 //! | [`CsNormalizeEnfo`] (`EvalNFunctions`)            | `SmCSNormalizeENFO::Evaluate` (struct: `surface.surface_p1`) |
@@ -116,6 +116,11 @@ const OP_SSI_NORMALIZE: &str = "surface::surface::p4::SsiNormalizeEnfo::evaluate
 const OP_SS_NORMALIZE: &str = "surface::surface::p4::SsNormalizeEnfo::evaluate";
 const OP_EVAL_NORMAL: &str = "surface::surface::p4::SurfaceEval::eval_normal";
 const OP_CLASSIFY: &str = "surface::surface::p4::classify_curve_surface_xsect_point";
+
+/// The trim boundary test a caller holding a face gives
+/// [`Surface::global_point_solve_face_tested`]: whether the solution at `uv` (classified
+/// with the tolerance given) lies in or on the face; `None` for no test.
+pub type FaceTest<'a> = Option<&'a mut dyn FnMut(&Kernel, Point2, f64) -> Result<bool>>;
 
 /// Entry `i` of an evaluation result.
 fn nth(v: &[Vec3], i: usize, op: &'static str) -> Result<Vec3> {
@@ -1339,6 +1344,7 @@ impl Surface {
             opt_target_distance,
             requested,
             &mut solutions,
+            None,
             true,
         )?;
         Ok(solutions)
@@ -1375,6 +1381,7 @@ impl Surface {
             opt_target_distance,
             requested,
             solutions,
+            None,
             true,
         )
     }
@@ -1410,6 +1417,7 @@ impl Surface {
             opt_target_distance,
             requested,
             solutions,
+            None,
             false,
         )
     }
@@ -1447,8 +1455,51 @@ impl Surface {
             opt_target_distance,
             requested,
             solutions,
+            None,
             false,
         )
+    }
+
+    /// [`Surface::global_point_solve`] of a face's surface by a caller that holds the
+    /// face and the surface's cache: the trim boundary test of the fast drop
+    /// (`pFace->PointClassify(uv, tol, TRUE, FALSE, ..)` of each solution, keeping
+    /// face, edge and vertex points) is `classify` (`uv`, `src_zone_tol_3d`), or none
+    /// when `classify` is `None` (the cache is not a trimmed one, has point testing off
+    /// or its face was modified).
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::global_point_solve`], and those of `classify`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn global_point_solve_face_tested<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface: Option<O>,
+        uv_domain: &Extent2d,
+        op: SolverOperation,
+        test_point: Point3,
+        src_zone_tol_3d: f64,
+        opt_target_distance: Option<f64>,
+        requested: SolutionRequested,
+        classify: FaceTest<'_>,
+    ) -> Result<SolutionArray<O>> {
+        let mut solutions = SolutionArray::new();
+        self.global_point_solve_in(
+            k,
+            surface,
+            None,
+            None,
+            uv_domain,
+            op,
+            test_point,
+            src_zone_tol_3d,
+            opt_target_distance,
+            requested,
+            &mut solutions,
+            Some(classify),
+            false,
+        )?;
+        Ok(solutions)
     }
 
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -1465,6 +1516,7 @@ impl Surface {
         opt_target_distance: Option<f64>,
         requested: SolutionRequested,
         solutions: &mut SolutionArray<O>,
+        face_test: Option<FaceTest<'_>>,
         point_test_off: bool,
     ) -> Result<()> {
         // init output
@@ -1510,7 +1562,23 @@ impl Surface {
                 // values are within the trim boundaries of the face, unless flags in its
                 // surface cache indicate otherwise.
                 if !point_test_off && self.owner().is_some_and(|o| o.type_code == FACE_TYPE) {
-                    if let Some(context) = context {
+                    if let Some(test) = face_test {
+                        // the caller holds the face and its surface's cache: it tests
+                        // only when that cache is trimmed, point testing is on and its
+                        // face was not modified (`None`: no test)
+                        if let Some(classify) = test {
+                            let mut i = 0;
+                            while i < solutions.len() {
+                                let point = solutions.get_at(i)?;
+                                let uv = Point2::new(point.start.param(0)?, point.start.param(1)?);
+                                if classify(k, uv, src_zone_tol_3d)? {
+                                    i += 1;
+                                } else {
+                                    solutions.remove_at(i, 1);
+                                }
+                            }
+                        }
+                    } else if let Some(context) = context {
                         let built;
                         let cache = if let Some(cache) = cache {
                             cache

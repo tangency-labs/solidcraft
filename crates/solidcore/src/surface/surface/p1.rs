@@ -1024,6 +1024,8 @@ pub fn make_trim_srf_cache<O: Copy + PartialEq>(
     let mut cache = TrimSrfCache::new(surface.clone_for_evaluation()?, cache_options(tol));
     cache.base_mut().set_surface_handle(handle);
     trim_srf_cache_tree(k, surface, state, &mut cache, |c| c.build_tree(k))?;
+    // a face surface whose owner is cleared keeps it (SmCacheMgr::AddToObjectCache)
+    surface.keep_standalone_trim_cache(&cache)?;
     Ok(cache)
 }
 

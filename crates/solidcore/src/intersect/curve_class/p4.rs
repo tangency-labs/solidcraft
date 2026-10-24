@@ -440,7 +440,7 @@ fn edgeuse_evaluate_binormal<O: ClassObject, G: ClassGeometry<O>>(
     if !eu1::is_loop_edgeuse(b, eu)? {
         return Ok(());
     }
-    let mut scratch = b.clone();
+    let mut scratch = b.clone_sharing_surface_caches();
     match topo_eu3::evaluate_binormal(
         k,
         &mut scratch,
@@ -500,7 +500,7 @@ fn vertexuse_compute_uv_sector<O: ClassObject, G: ClassGeometry<O>>(
     vertexuse: O,
 ) -> Result<UvSectorIo<O>> {
     let (b, vu) = vertexuse_id(geometry, vertexuse, OP_CROSS)?;
-    let mut scratch = b.clone();
+    let mut scratch = b.clone_sharing_surface_caches();
     let io = topo_vertexuse::compute_uv_sector(k, &mut scratch, vu, false)?.io;
     let eu_handle = |eu: Option<EdgeuseId>| -> Result<Option<O>> {
         eu.map(|eu| handle_of(geometry, b, EntityRef::Edgeuse(eu), OP_CROSS))

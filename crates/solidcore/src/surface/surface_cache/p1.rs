@@ -1853,6 +1853,12 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         &self.surface
     }
 
+    /// The cached surface, mutable: only for the bookkeeping of the surface object it
+    /// stands for (its cache slot), never its geometry.
+    pub(crate) fn surface_mut(&mut self) -> &mut Surface {
+        &mut self.surface
+    }
+
     /// The cached surface and the singularity memo of the running
     /// [`SurfaceCache::subdivide_to_tolerances_with`] (`None` outside it).
     pub(crate) fn surface_and_pole_memo(&mut self) -> (&Surface, Option<&mut PoleMemo>) {

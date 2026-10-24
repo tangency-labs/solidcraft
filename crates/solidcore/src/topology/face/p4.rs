@@ -125,8 +125,8 @@ use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::face::p2::{
-    curve_on_classify_cached, face_surface_cache, point_classify, BrepCacheFace,
-    CurveOnClassifyCache, CurveOnClassifyObjects, PointClassifyOptions,
+    curve_on_classify_cached, face_cache_tree, face_surface_cache, point_classify, BrepCacheFace,
+    CurveOnClassifyCache, CurveOnClassifyObjects, FaceSurfaceCache, PointClassifyOptions,
 };
 use crate::surface::surface::p5::{SS_NONE, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
 use crate::surface::surface::p8::{FaceSolveCache, HeldSolveCache};
@@ -533,37 +533,35 @@ struct FaceLineCache<'b, O> {
     b: &'b mut Brep,
     f: FaceId,
     surface: O,
-    /// The trimmed cache, once built.
-    trim: Option<TrimSrfCache<EntityRef>>,
+    /// The face surface's cache, once fetched; given back to the surface after the
+    /// solve.
+    trim: Option<FaceSurfaceCache>,
 }
 
 impl<O: SolutionObject> FaceSolveCache<O> for FaceLineCache<'_, O> {
     fn build(&mut self, k: &Kernel) -> Result<SurfaceCache<O>> {
-        // the face's trimmed cache, its tree built (GetTree); the surface needs a name
-        // in the cache's object space: after the build every node's `mBA_pSurface` is
-        // the cache surface (the polar boxes of the leaf solves are computed on it)
-        let mut c = face_surface_cache(k, self.b, self.f, Some(EntityRef::Face(self.f)))?;
-        if c.base().tree().is_none() {
-            c.build_tree_with_face(
-                k,
-                &mut BrepCacheFace {
-                    b: &mut *self.b,
-                    f: self.f,
-                },
-            )?;
-        }
+        // the face's trimmed cache (kept on the surface), its tree built (GetTree); the
+        // surface needs a name in the cache's object space: after the build every
+        // node's `mBA_pSurface` is the cache surface (the polar boxes of the leaf solves
+        // are computed on it)
+        let mut lease = face_surface_cache(k, self.b, self.f)?;
+        let built = face_cache_tree(k, self.b, self.f, &mut lease.cache);
         let surface = self.surface;
-        let mut solve_cache = c.base().map_handles(|_| Ok(surface))?;
-        solve_cache.set_surface_handle(Some(surface));
-        self.trim = Some(c);
-        Ok(solve_cache)
+        let solve_cache = built.and_then(|()| {
+            let mut c = lease.cache.base().map_handles(|_| Ok(surface))?;
+            c.set_surface_handle(Some(surface));
+            Ok(c)
+        });
+        self.trim = Some(lease);
+        solve_cache
     }
 
     fn point_test(&mut self, k: &Kernel, uv: Point2) -> Result<bool> {
-        let trim = self
+        let trim = &self
             .trim
             .as_ref()
-            .ok_or_else(|| null("GlobalLineIntersect: point test without cache"))?;
+            .ok_or_else(|| null("GlobalLineIntersect: point test without cache"))?
+            .cache;
         // PointTest(uv, ok, NULL, NULL): the face's zone tolerance
         let (ok, _) = trim.point_test_in(
             k,
@@ -606,8 +604,12 @@ fn global_line_intersect_with<O: SolutionObject>(
         .as_ref()
         .ok_or_else(|| null("GlobalLineIntersect: face without surface"))?
         .clone_for_evaluation()?;
-    // the face's trimmed surface cache, when the surface solve fetched it
-    let mut trim: Option<TrimSrfCache<EntityRef>> = None;
+    // A surface with a face solves on the face's trimmed cache, kept on the surface:
+    // a cache held by the caller stands only for a surface without face.
+    let held = match held {
+        Some(held) if face_surface.face()?.is_none() => Some(held),
+        _ => None,
+    };
     let mut solutions = if let Some(held) = held {
         face_surface.global_line_intersect_held(
             k,
@@ -637,9 +639,12 @@ fn global_line_intersect_with<O: SolutionObject>(
             line_interval,
             false,
             src_zone_tol_3d,
-        )?;
-        trim = face_cache.trim;
-        solutions
+        );
+        // the cache goes back to the surface (PointClassify below finds it there)
+        if let Some(lease) = face_cache.trim.take() {
+            lease.release();
+        }
+        solutions?
     };
 
     // If there are no solutions then return whatever the surface method returns.
@@ -663,9 +668,7 @@ fn global_line_intersect_with<O: SolutionObject>(
         if sol.solution_type == SolutionType::SingleValue {
             // Get uv on surface
             let uv = Point2::new(sol.start.parameters[1], sol.start.parameters[2]);
-            if classify_uv_point(k, b, f, uv, src_zone_tol_3d, trim.as_mut())?
-                == PointClassType::Unknown
-            {
+            if classify_uv_point(k, b, f, uv, src_zone_tol_3d, None)? == PointClassType::Unknown {
                 removal_indices.push(ii);
                 ii += 1;
                 continue;
@@ -1459,9 +1462,6 @@ impl<M: CurveOnClassifyObjects<O>, O: ClassObject> CurveOnClassifyObjects<O>
     fn loop_id(&self, tgt_loop: O) -> Option<LoopId> {
         self.inner.loop_id(tgt_loop)
     }
-    fn trim_cache(&self, f: FaceId) -> Option<&TrimSrfCache<O>> {
-        self.inner.trim_cache(f)
-    }
 }
 
 /// The inputs of [`has_seam_problem`] after the face (`HasSeamProblem`'s optional
@@ -2070,7 +2070,7 @@ impl<O: LoopObject> ClassGeometry<O> for BrepSeamObjects<'_, O> {
                 .map(|(f, _)| f)?,
         };
         let vu = vertex::vertexuse_of_face(self.b, v, Some(f)).ok()??;
-        let mut snapshot = self.b.clone();
+        let mut snapshot = self.b.clone_sharing_surface_caches();
         let gap = vertexuse::vertex_face_gap(self.k, &mut snapshot, vu, false).ok()?;
         Some(gap.map_or(0.0, |g| g.gap_3d))
     }

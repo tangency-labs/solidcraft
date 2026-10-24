@@ -1407,8 +1407,41 @@ pub(crate) fn recalc_gaps(b: &mut Brep) -> Result<(), SolidError> {
 /// Each record is stored only after it is fully computed. `strict`: stop at the first
 /// failure; else skip the failed record.
 fn fill_gaps(b: &mut Brep, strict: bool) -> Result<(), SolidError> {
+    // The refill reconstructs values the C++ export reported, and must not leave cache
+    // history the C++ side did not have: its smsurf_GetSurfaceCache calls build no
+    // tree (as during a Boolean operation: no UV trim curves are made), and the trimmed
+    // caches they keep are dropped again, leaving each surface's cache slot as a
+    // face-unaware lookup outside a Boolean operation leaves it (a built tree).
+    use solidcore::surface::surface::CacheTreeState;
+    let before: Vec<Option<(bool, CacheTreeState)>> = b
+        .faces()
+        .iter()
+        .map(|(_, f)| {
+            f.surface
+                .as_ref()
+                .map(|s| (s.has_trim_cache(), s.cache_tree_state()))
+        })
+        .collect();
+    let result = fill_gaps_body(b, strict);
+    for ((_, f), before) in b.faces().iter().zip(before) {
+        if let (Some(s), Some((had, state))) = (f.surface.as_ref(), before) {
+            if !had && s.has_trim_cache() && !s.trim_cache_in_use() {
+                s.delete_trim_cache();
+            }
+            if state == CacheTreeState::NoCache && s.cache_tree_state() == CacheTreeState::Unbuilt
+            {
+                s.set_cache_tree_state(CacheTreeState::Built);
+            }
+        }
+    }
+    result
+}
+
+fn fill_gaps_body(b: &mut Brep, strict: bool) -> Result<(), SolidError> {
     use std::collections::BTreeSet;
-    let k = Kernel::default();
+    let mut k = Kernel::default();
+    k.context.set_doing_boolean(true);
+    let k = k;
     let keep = |r: Result<(), SolidError>| match r {
         Err(e) if strict => Err(e),
         _ => Ok(()),

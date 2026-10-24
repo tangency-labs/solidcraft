@@ -1441,8 +1441,12 @@ impl Surface {
                     Err(_) => return Err(SolidError::null_pointer(OP_LINE)),
                 };
                 face_cache = Some(source);
+                // the face's source ran the trimmed cache's own GetTree: the base
+                // cache's cannot rebuild a face-owned tree
+                let has_tree = owned.tree().is_some();
                 held = Some(&mut owned);
                 match held.as_deref_mut() {
+                    Some(c) if has_tree => &*c,
                     Some(c) => Self::held_cache(k, c, OP_LINE)?,
                     None => return Err(SolidError::null_pointer(OP_LINE)),
                 }

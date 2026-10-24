@@ -760,12 +760,37 @@ impl Brep {
     /// [`Brep::end_surface_owner_cleared`] ends it.
     pub fn begin_surface_owner_cleared(&mut self, f: FaceId) {
         self.surface_owner_cleared.push(f);
+        // the surface object (and its copies) learns it too
+        if let Some(s) = self.faces.get(f).and_then(|face| face.surface.as_ref()) {
+            s.begin_owner_cleared(f);
+        }
+    }
+
+    /// A private copy of this B-rep that stands for the B-rep itself (a query's scratch
+    /// copy where upstream works on the B-rep): its face surfaces share the cache slots
+    /// of this B-rep's ([`Surface::share_cache_slot_of`]), so that the surface caches the
+    /// query makes or reuses on the copy are the B-rep's surfaces' own, as upstream's
+    /// are. A plain `clone` (the copy constructor) starts every surface without cache.
+    #[must_use]
+    pub fn clone_sharing_surface_caches(&self) -> Self {
+        let mut copy = self.clone();
+        for (id, face) in self.faces.iter() {
+            if let (Some(original), Ok(face_copy)) = (face.surface.as_ref(), copy.face_mut(id)) {
+                if let Some(surface) = face_copy.surface.as_mut() {
+                    surface.share_cache_slot_of(original);
+                }
+            }
+        }
+        copy
     }
 
     /// Ends the innermost [`Brep::begin_surface_owner_cleared`] scope of face `f`.
     pub fn end_surface_owner_cleared(&mut self, f: FaceId) {
         if let Some(i) = self.surface_owner_cleared.iter().rposition(|&g| g == f) {
             self.surface_owner_cleared.remove(i);
+        }
+        if let Some(s) = self.faces.get(f).and_then(|face| face.surface.as_ref()) {
+            s.end_owner_cleared(f);
         }
     }
 

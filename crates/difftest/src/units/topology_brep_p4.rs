@@ -842,6 +842,19 @@ impl UnitDiff for Runner {
         }
         let mut b = import(&f)?;
         own_surfaces(&mut b)?;
+        // reading a file heals the B-rep during a Boolean operation, which leaves its
+        // face surfaces with trimmed caches whose trees are not built (and that later
+        // smsurf_GetSurfaceCache calls reuse): the face surfaces' cache states as the
+        // C++ read left them
+        if let BrepIn::File { .. } = &i.brep {
+            use super::topology_edgeuse_p1 as eu1;
+            let file = eu1::BrepIn::File {
+                file: String::new(),
+                rebuild: false,
+            };
+            let blk = eu1::brep_block_of(Some(&file), false, false)?;
+            eu1::seed_cache_tree_states(&b, &path, &blk)?;
+        }
         damage(&mut b, i.damage)?;
         b.set_editing_enabled(i.editing);
         let pre = record_counts(&b);

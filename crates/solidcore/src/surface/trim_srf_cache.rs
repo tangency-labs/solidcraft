@@ -366,6 +366,27 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         &mut self.base
     }
 
+    /// The same cache with every handle mapped by `map` (the base's
+    /// [`SurfaceCache::map_handles`] and the implanted edge uses' curves).
+    ///
+    /// # Errors
+    ///
+    /// Those of `map` and of the base's mapping.
+    pub fn map_handles<P: Copy + PartialEq>(
+        &self,
+        map: impl Fn(O) -> Result<P>,
+    ) -> Result<TrimSrfCache<P>> {
+        let edgeuse_curves = self
+            .edgeuse_curves
+            .iter()
+            .map(|(o, c)| Ok((map(*o)?, c.clone_exact())))
+            .collect::<Result<_>>()?;
+        Ok(TrimSrfCache {
+            base: self.base.map_handles(&map)?,
+            edgeuse_curves,
+        })
+    }
+
     /// Unwraps the `SmSurfaceCache` base.
     #[must_use]
     pub fn into_base(self) -> SurfaceCache<O> {

@@ -417,6 +417,12 @@ fn loop_vertex_uv(k: &Kernel, surface: &Surface, point: Vec3, zone: f64) -> ScRe
         ..Vertexuse::default()
     })?;
     b.loopuse_mut(lu)?.start = LoopuseStart::Vertexuse(Some(vu));
+    // The shim attaches its cache to the surface first, with point testing off, so
+    // ComputeUVPoint's smsurf_GetSurfaceCache reuses it instead of building a trimmed
+    // cache of the face: give the Rust surface the same kind of cache.
+    if let Some(s) = b.face(f)?.surface.as_ref() {
+        s.attach_trim_cache(|c| c.base_mut().point_test_enabled = false)?;
+    }
     solidcore::topology::vertexuse::compute_uv_point(k, &mut b, vu, true)
 }
 fn rust(i: &Input) -> ScResult<Output> {
@@ -546,6 +552,7 @@ fn rust(i: &Input) -> ScResult<Output> {
                 surface: &pool.surface,
                 loops: &loops,
                 cache: &cache,
+                cache_handle: &Some,
             },
             i.check3d,
         )

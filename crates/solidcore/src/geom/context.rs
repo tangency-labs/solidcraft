@@ -45,6 +45,7 @@
 //! | `lock_mark`, `unlock_mark` (private)      | `SmNewMarkAndLock::LockMark`, `UnlockMark`      |
 //! | `unlocked_mark` (private)                 | `SmNewMarkAndLock::GetUnlockedMark`             |
 //! | [`with_mark_lock`]                        | the scoped `{ SmNewMarkAndLock sMarkLock(pContext, mask); ... }` idiom |
+//! | [`Context::claim_mark`], [`SharedMarkLock`] | the same idiom in a `const` query (`SmNewMarkAndLock(const SmContext*, mask)`) |
 //! | [`MassPropertyBehavior`]                  | `SmMassPropertyBehavior` (and its constructor)  |
 //! | [`create_context`]                        | `SmApiCreateContext`                            |
 //! | [`get_or_create_context`]                 | `SmApiGetOrCreateContext`                       |
@@ -58,6 +59,10 @@
 //!   [`Kernel`]'s own context. A method that upstream would run through a null
 //!   context pointer (a crash) returns [`SolidError::InvalidInput`], as does an index
 //!   outside the slice.
+//! - The marks and their locks are atomics, so that a `const` query that only holds the
+//!   context shared (the port's `&Kernel`) can still claim a mark as upstream's do
+//!   ([`Context::claim_mark`], whose guard unlocks on drop). The kernel is
+//!   single-threaded: the accesses happen in program order.
 //! - The upstream two-context constructor locks the *first* context's mark type in the
 //!   second context and increments the first context's mark twice; this is ported
 //!   as is (see `plan/findings.md`).
@@ -76,7 +81,7 @@
 //!   `Dump`, `GetTypeString` and `IsLockedMark` are unused upstream and not ported.
 
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
 
@@ -187,11 +192,14 @@ pub trait NotifyCallback: std::fmt::Debug + Send {
 #[derive(Debug)]
 pub struct Context {
     /// `m_lCurrentMark`, `m_lCurrentMark2`, `m_lCurrentMark3`, `m_lCurrentMarkIO`,
-    /// `m_lCurrentMarkAssert`.
-    current_marks: [u64; 5],
+    /// `m_lCurrentMarkAssert`. Atomic so that a query holding the context shared can
+    /// claim a mark ([`Context::claim_mark`]), as upstream's `const` queries do
+    /// through `SmNewMarkAndLock(const SmContext*, ..)`; single-threaded use orders the
+    /// accesses.
+    current_marks: [AtomicU64; 5],
     /// `m_bMarkLock`, `m_bMark2Lock`, `m_bMark3Lock`, `m_bMarkIOLock`,
     /// `m_bMarkAssertLock`.
-    mark_locks: [bool; 5],
+    mark_locks: [AtomicBool; 5],
     /// `m_bDoingBoolean`.
     doing_boolean: bool,
     /// `m_dThisModelSizeEstimate`.
@@ -460,8 +468,14 @@ impl Context {
     /// An immutable metadata snapshot, without copying callback ownership.
     pub(crate) fn metadata_copy(&self) -> Self {
         Self {
-            current_marks: self.current_marks,
-            mark_locks: self.mark_locks,
+            current_marks: self
+                .current_marks
+                .each_ref()
+                .map(|m| AtomicU64::new(m.load(Ordering::Relaxed))),
+            mark_locks: self
+                .mark_locks
+                .each_ref()
+                .map(|l| AtomicBool::new(l.load(Ordering::Relaxed))),
             doing_boolean: self.doing_boolean,
             model_size_estimate: self.model_size_estimate,
             large_small_size_ratio: self.large_small_size_ratio,
@@ -479,8 +493,8 @@ impl Context {
     #[must_use]
     pub fn new(model_size_estimate: f64, large_small_size_ratio: f64) -> Self {
         Self {
-            current_marks: [1; 5],
-            mark_locks: [false; 5],
+            current_marks: [1; 5].map(AtomicU64::new),
+            mark_locks: [false; 5].map(AtomicBool::new),
             doing_boolean: false,
             model_size_estimate,
             large_small_size_ratio,
@@ -676,34 +690,29 @@ impl Context {
     pub fn current_mark(&self, mark_type: MarkType) -> u64 {
         match mark_type {
             MarkType::NoMark => {
-                let [m1, m2, m3, mio, massert] = self.current_marks;
+                let [m1, m2, m3, mio, massert] = self
+                    .current_marks
+                    .each_ref()
+                    .map(|m| m.load(Ordering::Relaxed));
                 1 + max5(m1, m2, m3, mio, massert)
             }
             _ => self
                 .current_marks
                 .get(mark_type.slot().unwrap_or(MARK_IO))
-                .copied()
-                .unwrap_or(0),
+                .map_or(0, |m| m.load(Ordering::Relaxed)),
         }
     }
 
     /// Advances a mark by two and returns the new value (`SmContext::NewMark`; the
     /// lock check is a debug-only assertion upstream). [`MarkType::NoMark`] changes
     /// nothing and returns [`Context::current_mark`] of it.
-    fn new_mark(&mut self, mark_type: MarkType) -> u64 {
+    fn new_mark(&self, mark_type: MarkType) -> u64 {
         if mark_type == MarkType::NoMark {
             return self.current_mark(MarkType::NoMark);
         }
-        match self
-            .current_marks
-            .get_mut(mark_type.slot().unwrap_or(MARK_IO))
-        {
-            Some(m) => {
-                *m = m.wrapping_add(2);
-                *m
-            }
-            None => 0,
-        }
+        self.current_marks
+            .get(mark_type.slot().unwrap_or(MARK_IO))
+            .map_or(0, |m| m.fetch_add(2, Ordering::Relaxed).wrapping_add(2))
     }
 
     /// Whether a mark is locked (`IsMarkLocked`); never for [`MarkType::NoMark`] or
@@ -713,14 +722,52 @@ impl Context {
         mark_type
             .slot()
             .and_then(|s| self.mark_locks.get(s))
-            .copied()
-            .unwrap_or(false)
+            .is_some_and(|l| l.load(Ordering::Relaxed))
     }
 
     /// Sets a mark's lock flag (no-op for marks without a slot).
-    fn set_lock(&mut self, mark_type: MarkType, locked: bool) {
-        if let Some(l) = mark_type.slot().and_then(|s| self.mark_locks.get_mut(s)) {
-            *l = locked;
+    fn set_lock(&self, mark_type: MarkType, locked: bool) {
+        if let Some(l) = mark_type.slot().and_then(|s| self.mark_locks.get(s)) {
+            l.store(locked, Ordering::Relaxed);
+        }
+    }
+
+    /// `SmNewMarkAndLock(const SmContext*, mask)` for a holder of the context that
+    /// cannot change it otherwise (upstream's `const` queries): picks the first
+    /// unlocked mark allowed by `mask` as [`MarkLock::new`] does, advances and locks
+    /// it until the returned guard is dropped (`~SmNewMarkAndLock`).
+    #[must_use]
+    pub fn claim_mark(&self, mask: i32) -> SharedMarkLock<'_> {
+        let mark_type = unlocked_mark(self, mask);
+        self.new_mark(mark_type);
+        self.set_lock(mark_type, true);
+        SharedMarkLock {
+            context: self,
+            mark_type,
+        }
+    }
+}
+
+/// A mark claimed through a shared context ([`Context::claim_mark`]); dropping it
+/// unlocks the mark if it is still locked (`~SmNewMarkAndLock`).
+#[derive(Debug)]
+pub struct SharedMarkLock<'a> {
+    context: &'a Context,
+    mark_type: MarkType,
+}
+
+impl SharedMarkLock<'_> {
+    /// The claimed mark (`GetMarkType`).
+    #[must_use]
+    pub const fn mark_type(&self) -> MarkType {
+        self.mark_type
+    }
+}
+
+impl Drop for SharedMarkLock<'_> {
+    fn drop(&mut self) {
+        if self.context.is_mark_locked(self.mark_type) {
+            self.context.set_lock(self.mark_type, false);
         }
     }
 }
@@ -1072,6 +1119,24 @@ pub fn get_or_create_context(slot: &mut Option<Context>) -> &mut Context {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_shared_context_claims_and_unlocks_a_mark() {
+        let mut k = Kernel::default();
+        let before = k.context.current_mark(MarkType::Mark2);
+        let m = with_mark_lock(&mut k, ALL_MARKS, |k, outer| {
+            assert_eq!(outer, MarkType::Mark);
+            let lock = k.context.claim_mark(ALL_MARKS);
+            // the first mark is locked by the enclosing lock: the second is claimed
+            assert_eq!(lock.mark_type(), MarkType::Mark2);
+            assert!(k.context.is_mark_locked(MarkType::Mark2));
+            lock.mark_type()
+        })
+        .unwrap();
+        assert_eq!(m, MarkType::Mark2);
+        assert!(!k.context.is_mark_locked(MarkType::Mark2));
+        assert_eq!(k.context.current_mark(MarkType::Mark2), before + 2);
+    }
+
     use super::*;
 
     const ALL: [MarkType; 7] = [

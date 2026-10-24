@@ -281,13 +281,13 @@ fn status<T>(r: Result<T>) -> Result<Option<T>> {
 
 /// `smsurf_GetSurfaceCache(pSurface)` of the surface of face `f` (`NER`), as
 /// `EvaluateBinormal` calls it before clearing the surface's owner: the face's trimmed
-/// surface cache, whose construction attaches a UV trim curve to every edge use of the
-/// face (`SmFace::CreateUVTrimCurves`, `SmTrimSrfCache.cpp:209`), built over the B-rep
-/// ([`crate::query::face::p2::face_surface_cache`]). The cache itself is not kept (the
-/// Rust surface solvers build their own); only its side effect on the face is.
+/// surface cache, kept on the surface, whose construction (when the surface has none
+/// yet) attaches a UV trim curve to every edge use of the face
+/// (`SmFace::CreateUVTrimCurves`, `SmTrimSrfCache.cpp:209`), built over the B-rep
+/// ([`crate::query::face::p2::face_surface_cache`]). The Rust surface solve that
+/// follows builds its own cache; only the face's and the surface's state is kept.
 fn face_surface_cache(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
-    crate::query::face::p2::face_surface_cache(k, b, f, Some(crate::error::EntityRef::Face(f)))
-        .map(|_| ())
+    crate::query::face::p2::note_face_surface_cache(k, b, f)
 }
 
 /// `pEdge->SetTolerance(tolerance)` (default arguments).

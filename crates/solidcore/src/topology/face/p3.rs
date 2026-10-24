@@ -391,7 +391,7 @@ pub fn destroy(k: &mut Kernel, b: &mut Brep, f: FaceId, env: &mut NotifyEnv<'_>)
 }
 
 /// `Notify`: `PreEdit` resets the rectangular-trim flag to `UNSURE` and marks the
-/// surface's trimmed surface cache (`trim_cache`) as modified; `PostEdit`,
+/// surface's trimmed surface cache (`trim_cache`, else the one the surface keeps) as modified; `PostEdit`,
 /// `SplitInBrep`, `ChangeGeometry` and `Split` are passed to every edge use and vertex
 /// use of the upward face use (clearing their cached UV trim curves and gaps); then the
 /// notification goes to `SmTopology::Notify`.
@@ -415,8 +415,11 @@ pub fn notify(
         N::PreEdit => {
             // m_bRectangularTrim: UNSURE = Not yet set
             b.face_mut(f)?.rectangular_trim = face2::UNSURE;
+            // the cache given, else the surface's own (GetObjectCache)
             if let Some(sc) = trim_cache {
                 sc.base_mut().face_was_modified = true;
+            } else if let Some(s) = b.face(f)?.surface.as_ref() {
+                s.mark_trim_cache_face_modified();
             }
         }
         N::PostEdit | N::SplitInBrep | N::ChangeGeometry | N::Split => {
