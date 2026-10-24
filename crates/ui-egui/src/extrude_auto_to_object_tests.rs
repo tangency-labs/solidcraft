@@ -194,3 +194,18 @@ fn off_by_default_a_face_off_the_profile_plane_joins_the_profiles() {
     assert!(!click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::new(5.0, 5.0, 25.0) }));
     assert!(to_object(dialog(&h)).is_none());
 }
+
+#[test]
+fn manual_to_object_accepts_a_parallel_plane_with_automatic_switching_off() {
+    let mut h = scene_with(false);
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    assert_eq!(dialog(&h).active_input().unwrap().label, "To Object");
+    assert!(!click(&mut h, |_| Hit::Plane { name: "YZ".into(), point: Vec3::new(0.0, 5.0, 5.0) }));
+    assert!(!click(&mut h, |_| Hit::Plane { name: "XY".into(), point: Vec3::new(5.0, 5.0, 0.0) }));
+    assert!(to_object(dialog(&h)).is_none());
+    assert!(click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::new(5.0, 5.0, 25.0) }));
+    let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+    assert_eq!(commands[0].1["to"], json!([0.0, 0.0, 25.0]));
+    assert!((solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap() - 25.0).abs() < 1e-9);
+}

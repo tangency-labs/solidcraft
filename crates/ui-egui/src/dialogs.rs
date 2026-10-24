@@ -1174,15 +1174,13 @@ impl Dialog {
         inp.accepts(h, |body, face| snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some()))
     }
 
-    /// Extrude's automatic To Object: with profiles picked, a face or vertex off their plane, or
-    /// a plane parallel to it, is the object to extrude to rather than another profile. While the
-    /// To Object input is active, a parallel plane is taken too (as a place on it).
+    /// With automatic To Object enabled and profiles picked, a face or vertex off their plane,
+    /// or a parallel plane, is the target rather than another profile. An explicitly active
+    /// To Object input accepts parallel planes regardless of the automatic switching preference.
     fn extrude_target(&self, s: &Session, h: &Hit) -> Option<Sel> {
-        if !matches!(self.kind, Kind::Extrude { thin: false, smart: crate::smart_extrude::Smart { auto_to_object: true, .. }, .. }) {
-            return None;
-        }
+        let Kind::Extrude { thin: false, smart, .. } = &self.kind else { return None };
         let to_active = self.active_input().is_some_and(|i| i.label == TO_OBJECT);
-        if self.active != 0 && !to_active {
+        if !to_active && (self.active != 0 || !smart.auto_to_object) {
             return None;
         }
         let reference = profile_plane(s, self.inputs.first()?.items.first()?)?;
