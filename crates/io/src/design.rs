@@ -13,7 +13,7 @@ mod native_cache;
 pub(crate) mod package;
 mod provenance;
 mod text;
-mod thumbnail;
+pub(crate) mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use import_cache::ImportCache;
 pub use native_cache::read_design_geometry;

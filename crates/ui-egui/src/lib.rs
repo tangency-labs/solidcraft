@@ -1713,7 +1713,9 @@ impl SolveApp {
         if id == "document.list" {
             return documents::command(self, id, &params);
         }
-        if self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some() {
+        if (self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some())
+            && !matches!(id, "cloud.cancel" | "cloud.status" | "cloud.thumbnail.finish")
+        {
             return Err("a file operation is in progress".into());
         }
         // The window has the design tabs, which the engine does not: it shows the design asked for.
@@ -1751,7 +1753,7 @@ impl SolveApp {
         }
         let params = if id == "drawing.create" { prefs::new_drawing_params(self, params) } else { params };
         // Global cloud operations can outlive the tab from which they were started.
-        if matches!(id, "cloud.cancel" | "cloud.status")
+        if matches!(id, "cloud.cancel" | "cloud.status" | "cloud.thumbnail.finish")
             && let Some(operation) = params.get("operation").and_then(Value::as_str)
             && !self.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation)
         {

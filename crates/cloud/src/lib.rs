@@ -3,6 +3,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod catalog;
 mod configuration;
 #[cfg(feature = "github")]
 pub mod github;
@@ -13,12 +14,16 @@ mod publication;
 mod settings;
 pub mod setup;
 mod snapshot;
+mod thumbnail;
+pub use catalog::{CachedEntry, LocalRevision, StoredDesign, manifest_digest, stored_designs};
 pub use configuration::{Configuration, MAX_SETTINGS_BYTES};
 pub use outbox::{PendingSave, StagedSave};
 pub use project::{Destination, PROJECT_MARKER, Project, check_path};
 pub use publication::{Publication, Published, revision};
 pub use settings::{Authentication, Connection, GitRemote, HostSetup, Settings, SshIdentity, github_setup, host_setup};
 pub use snapshot::{Asset, CHUNK_BYTES, Chunk, Codec, FORMAT, MAX_ASSET_BYTES, MAX_MANIFEST_BYTES, Manifest, Snapshot, digest};
+
+pub use thumbnail::{MAX_THUMBNAIL_BYTES, Thumbnail, attach_thumbnail};
 
 /// Errors are classified so every host can offer the same recovery action.
 #[derive(Debug, thiserror::Error)]

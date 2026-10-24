@@ -54,6 +54,21 @@ pub fn run(site: &str) -> Result<(), String> {
     let browser = Chrome::launch(&executable, &profile)?;
     let mut cdp = open(&browser, &url)?;
 
+    phase(&mut cdp, "preview-write", "preview_restart")?;
+    let (browser, mut cdp) = restart(browser, cdp, &executable, &profile, &url)?;
+    cdp.eval(OFFLINE)?;
+    phase(&mut cdp, "preview-read", "preview_restart")?;
+
+    phase(&mut cdp, "lineage-write", "lineage_restart")?;
+    let (browser, mut cdp) = restart(browser, cdp, &executable, &profile, &url)?;
+    cdp.eval(OFFLINE)?;
+    phase(&mut cdp, "lineage-read", "lineage_restart")?;
+
+    phase(&mut cdp, "worker-competing-write", "competing_restart")?;
+    let (browser, mut cdp) = restart(browser, cdp, &executable, &profile, &url)?;
+    cdp.eval(OFFLINE)?;
+    phase(&mut cdp, "worker-competing-read", "competing_restart")?;
+
     phase(&mut cdp, "worker-write", "worker_restart")?;
     let (browser, mut cdp) = restart(browser, cdp, &executable, &profile, &url)?;
     cdp.eval(OFFLINE)?;

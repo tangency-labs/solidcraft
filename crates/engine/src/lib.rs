@@ -58,6 +58,7 @@ pub mod slicers;
 pub mod snap;
 pub mod status_details;
 pub mod status_items;
+mod thumbnail;
 pub mod timing;
 pub mod title_block_text;
 pub mod upright_image;

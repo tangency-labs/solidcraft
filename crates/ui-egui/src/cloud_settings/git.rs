@@ -138,7 +138,9 @@ fn field(ui: &mut egui::Ui, key: &str, value: &mut String, browse: bool) -> bool
                 + t.space_16 * 2.0
                 + ui.spacing().item_spacing.x;
             let width = if browse { (ui.available_width() - browse_width).max(t.space_24) } else { ui.available_width() };
-            let r = ui.add(egui::TextEdit::singleline(value).char_limit(4096).desired_width(width));
+            let r = ui_kit::settings_control_width(ui, width, |ui| {
+                ui_kit::bounded_cell_editor(ui, egui::Id::new(("cloud_git_field", key)), value, "", false, 4096)
+            });
             crate::scenario::publish_target(&format!("cloud_git:{key}"), r.rect);
             if browse {
                 picked = button(ui, &format!("cloud_git:browse:{key}"), tr("cloud.browse"), true);
@@ -165,6 +167,8 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .actions(primary, "Cancel", None)
         .show(ctx, enabled && wizard.valid() && !wizard.key.as_ref().is_some_and(key::Editor::editing), |ui| {
             ui_kit::text(ui, tr("cloud.git_hint"), ui_kit::Text::Inline);
+            let choice_label_width = ui_kit::ContentWidth::label(ui, tr("cloud.git_auth")).max(crate::theme::Tokens::get().form_label_width)
+                + crate::theme::Tokens::get().space_8;
             ui.add_enabled_ui(enabled, |ui| {
                 field(ui, "cloud.connection_name", &mut wizard.connection.name, false);
                 if field(ui, "cloud.git_checkout", &mut wizard.connection.checkout, true) {
@@ -173,26 +177,35 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 field(ui, "cloud.git_remote", &mut wizard.connection.remote, false);
                 ui_kit::text(ui, tr("cloud.git_remote_hint"), ui_kit::Text::Hint("cloud_git_remote_hint"));
                 field(ui, "cloud.git_branch", &mut wizard.connection.branch, false);
-                ui_kit::row(ui, tr("cloud.git_auth"), |ui| {
+                ui_kit::settings_block(ui, tr("cloud.git_auth"), choice_label_width, |ui| {
                     for (kind, key) in [
                         (Authentication::System, "cloud.git_system"),
                         (Authentication::Https, "cloud.git_https"),
                         (Authentication::Ssh, "cloud.git_ssh"),
                     ] {
-                        let r = ui.radio_value(&mut wizard.connection.authentication, kind, tr(key));
+                        let r = ui_kit::list_picker(ui, key, tr(key), wizard.connection.authentication == kind);
                         crate::scenario::publish_target(&format!("cloud_git:{key}"), r.rect);
-                        if r.changed() && wizard.connection.authentication != Authentication::Ssh {
-                            wizard.connection.ssh_identity = SshIdentity::System;
+                        if r.clicked() {
+                            wizard.connection.authentication = kind;
+                            if wizard.connection.authentication != Authentication::Ssh {
+                                wizard.connection.ssh_identity = SshIdentity::System;
+                            }
                         }
                     }
                 });
                 if wizard.connection.authentication == Authentication::Ssh {
-                    ui_kit::row(ui, tr("cloud.git_ssh"), |ui| {
+                    ui_kit::settings_block(ui, tr("cloud.git_ssh"), choice_label_width, |ui| {
                         let mut custom = matches!(wizard.connection.ssh_identity, SshIdentity::File(_));
-                        let system = ui.radio_value(&mut custom, false, tr("cloud.ssh_system"));
+                        let system = ui_kit::list_picker(ui, "cloud_ssh_system", tr("cloud.ssh_system"), !custom);
                         crate::scenario::publish_target("cloud_git:ssh_system", system.rect);
-                        let key = ui.radio_value(&mut custom, true, tr("cloud.ssh_key"));
+                        if system.clicked() {
+                            custom = false;
+                        }
+                        let key = ui_kit::list_picker(ui, "cloud_ssh_key", tr("cloud.ssh_key"), custom);
                         crate::scenario::publish_target("cloud_git:ssh_key", key.rect);
+                        if key.clicked() {
+                            custom = true;
+                        }
                         match (&wizard.connection.ssh_identity, custom) {
                             (SshIdentity::System, true) => wizard.connection.ssh_identity = SshIdentity::File(String::new()),
                             (SshIdentity::File(_), false) => wizard.connection.ssh_identity = SshIdentity::System,

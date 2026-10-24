@@ -21,6 +21,7 @@ impl Host for Worker {
             | Operation::Test(c)
             | Operation::List(c)
             | Operation::Synchronize(c)
+            | Operation::Thumbnail { connection: c, .. }
             | Operation::Open { connection: c, .. }
             | Operation::Save { connection: c, .. } => c.id.clone(),
         };

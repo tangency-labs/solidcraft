@@ -114,11 +114,16 @@ impl LocalOutbox {
     }
 
     pub fn pending(&self) -> Result<Vec<PendingSave>> {
+        self.pending_bounded(128 << 20)
+    }
+
+    fn pending_bounded(&self, limit: usize) -> Result<Vec<PendingSave>> {
         let path = self.path("pending")?;
         if !path.exists() {
             return Ok(Vec::new());
         }
         let mut records = Vec::new();
+        let mut metadata_bytes = 0usize;
         for entry in fs::read_dir(path).map_err(storage)? {
             let entry = entry.map_err(storage)?;
             if entry.path().extension().is_none_or(|e| e != "json") {
@@ -128,7 +133,12 @@ impl LocalOutbox {
                 return Err(storage("too many queued saves"));
             }
             let name = entry.file_name().to_string_lossy().to_string();
-            let record = PendingSave::read(&self.read(&format!("pending/{name}"))?)?;
+            let bytes = self.read(&format!("pending/{name}"))?;
+            metadata_bytes = metadata_bytes.checked_add(bytes.len()).ok_or_else(|| storage("queued metadata too large"))?;
+            if metadata_bytes > limit {
+                return Err(storage("queued metadata too large"));
+            }
+            let record = PendingSave::read(&bytes)?;
             if name != format!("{}.json", record.id) {
                 return Err(storage("pending save identifier mismatch"));
             }
@@ -272,6 +282,18 @@ mod tests {
     }
 
     #[test]
+    fn queued_metadata_limit_bounds_the_total_before_reading_all_records() {
+        let fixture = Fixture::new();
+        let first = fixture.save("one", None);
+        let outbox = fixture.outbox();
+        assert_eq!(outbox.pending_bounded(first.record_bytes.len() + 1).unwrap().len(), 1);
+        let second = fixture.save("two", Some(first.record.id.clone()));
+        let limit = first.record_bytes.len() + second.record_bytes.len() - 1;
+        assert!(outbox.pending_bounded(limit).unwrap_err().to_string().contains("metadata too large"));
+        assert_eq!(outbox.pending().unwrap().len(), 2);
+    }
+
+    #[test]
     fn local_save_survives_reopening_until_publication_is_confirmed() {
         let root = std::env::temp_dir().join(format!(
             "solidcraft-outbox-{}-{}",
@@ -332,7 +354,7 @@ mod tests {
             drop(outbox);
             let reopened = fixture.outbox();
             let cached = reopened.cached(&staged.record.connection, &staged.record.destination).unwrap().unwrap();
-            assert_eq!(cached.published.revision, staged.record.id);
+            assert_eq!(cached.revision, Some(staged.record.id.clone()));
             reopened.published(&staged.record, &publication).unwrap();
             assert!(reopened.pending().unwrap().is_empty());
             assert_eq!(reopened.receipt(&staged.record).unwrap().unwrap().revision, staged.record.id);

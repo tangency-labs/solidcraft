@@ -43,6 +43,14 @@ impl NativeHost {
     ) -> Result<()> {
         check_cancelled(job)?;
         match operation {
+            Operation::Thumbnail { connection, destination } => {
+                let png = super::previews::read(connection, destination, executable, outbox, job)?;
+                check_cancelled(job)?;
+                job.update(|status| {
+                    status.result = Some(solidcraft_cloud::Thumbnail::response(png));
+                    status.phase = Phase::Ready;
+                })?;
+            }
             Operation::GenerateSshKey(input) => {
                 let key = super::ssh::generate(outbox.root(), input, job, access)?;
                 job.update(|status| {
@@ -112,17 +120,28 @@ impl NativeHost {
                 })?;
             }
             Operation::List(connection) => {
-                let mut destinations = BTreeMap::new();
-                for destination in outbox.cached_destinations(&connection)? {
-                    destinations.insert(destination.design_path()?, destination);
-                }
+                let cached = outbox.cached_entries(&connection)?;
+                let mut pending = Vec::new();
                 for save in outbox.pending()? {
                     save.check_connection(&connection)?;
                     if outbox.receipt(&save)?.is_none() {
-                        destinations.insert(save.destination.design_path()?, save.destination);
+                        pending.push(save);
                     }
                 }
-                match GitRepository::open_cancellable(connection, executable, job.clone()).and_then(|repository| repository.list()) {
+                let mut catalog = solidcraft_cloud::stored_designs(cached, pending)?;
+                let mut destinations = BTreeMap::new();
+                for entry in &catalog {
+                    destinations.insert(entry.destination.design_path()?, entry.destination.clone());
+                }
+                match GitRepository::open_cancellable(connection, executable, job.clone()).and_then(|repository| {
+                    let entries = repository.list()?;
+                    for entry in catalog.iter_mut().filter(|e| e.phase == Phase::Synced) {
+                        if !repository.matches_stored(entry).unwrap_or(false) {
+                            entry.phase = Phase::Ready;
+                        }
+                    }
+                    Ok(entries)
+                }) {
                     Ok(entries) => {
                         for destination in entries {
                             destinations.insert(destination.design_path()?, destination);
@@ -135,37 +154,29 @@ impl NativeHost {
                 let result = serde_json::to_value(destinations.into_values().collect::<Vec<_>>()).map_err(storage)?;
                 job.update(|status| {
                     status.result = Some(result);
+                    status.catalog = catalog;
                     status.phase = Phase::Ready;
                 })?;
             }
-            Operation::Open { connection, destination } => {
+            Operation::Open { connection, destination, local_revision } => {
                 destination.validate()?;
                 if destination.connection != connection.id {
                     return Err(storage("repository connection mismatch"));
                 }
-                let mut pending = Vec::new();
-                for save in outbox.pending()?.into_iter().filter(|save| save.destination == destination) {
-                    save.check_connection(&connection)?;
-                    if outbox.receipt(&save)?.is_none() {
-                        pending.push(save);
-                    }
-                }
-                // Two local sessions can have made competing offline saves. Neither snapshot
-                // may silently win; retain both and leave selection to conflict resolution.
-                let parents: BTreeSet<_> = pending.iter().filter_map(|save| save.expected_revision.as_deref()).collect();
-                let tips: Vec<_> = pending.iter().filter(|save| !parents.contains(save.id.as_str())).collect();
-                if tips.len() > 1 {
-                    return Err(Error::Conflict);
-                }
-                let snapshot = if let Some(save) = tips.first() {
-                    save.check_connection(&connection)?;
-                    let snapshot = outbox.recover_document(save)?;
+                let mut snapshot = if let Some(save) = pending_revision(outbox, &connection, &destination, local_revision.as_deref())? {
+                    let snapshot = outbox.recover_document(&save)?;
                     job.update(|status| status.revision = Some(save.id.clone()))?;
                     snapshot
                 } else {
                     // Reading an ordinary checkout needs no connectivity and never fetches.
-                    match GitRepository::open_cancellable(connection.clone(), executable, job.clone()).and_then(|repo| repo.snapshot(&destination)) {
-                        Ok(snapshot) => {
+                    match GitRepository::open_cancellable(connection.clone(), executable, job.clone()).and_then(|repo| {
+                        let lock = repo.lock()?;
+                        Ok((repo.snapshot(&destination)?, lock))
+                    }) {
+                        Ok((snapshot, _lock)) => {
+                            // Cache failures must be reported, never mistaken for an unavailable
+                            // checkout and silently replaced with an older cached snapshot.
+                            outbox.cache_checkout(&connection, &destination, &snapshot)?;
                             job.update(|status| status.revision = solidcraft_cloud::revision(&snapshot.manifest).map(str::to_owned))?;
                             snapshot
                         }
@@ -173,7 +184,7 @@ impl NativeHost {
                             let Some(cached) = outbox.cached(&connection, &destination)? else { return Err(error) };
                             let snapshot = outbox.recover_document(&cached.save)?;
                             job.update(|status| {
-                                status.revision = Some(cached.published.revision);
+                                status.revision = cached.revision;
                                 status.message = Some(error.to_string());
                             })?;
                             snapshot
@@ -181,6 +192,14 @@ impl NativeHost {
                         Err(error) => return Err(error),
                     }
                 };
+                // A durable save can arrive while the checkout is read. As in the browser,
+                // select that local head before exposing the opening result.
+                if let Some(save) = pending_revision(outbox, &connection, &destination, local_revision.as_deref())?
+                    && job.status()?.revision.as_deref() != Some(save.id.as_str())
+                {
+                    snapshot = outbox.recover_document(&save)?;
+                    job.update(|status| status.revision = Some(save.id))?;
+                }
                 check_cancelled(job)?;
                 job.update(|status| status.destination = Some(destination))?;
                 job.opened(snapshot)?;
@@ -209,6 +228,9 @@ impl NativeHost {
             pending = PendingSave::ordered(pending)?;
         }
         if pending.is_empty() {
+            if !connection.remote.is_empty() {
+                open_repository(connection.clone(), executable, job, access)?.refresh()?;
+            }
             drop(lock);
             job.update(|status| {
                 status.phase = Phase::Synced;
@@ -236,10 +258,11 @@ impl NativeHost {
                         return Ok(published);
                     }
                     let snapshot = outbox.recover_document(&save)?;
+                    let parent = outbox.published_parent(&save)?;
                     if repository.is_none() {
                         repository = Some(open_repository(connection.clone(), executable, job, access)?);
                     }
-                    repository.as_ref().ok_or_else(|| storage("repository unavailable"))?.publish(&save, snapshot)
+                    repository.as_ref().ok_or_else(|| storage("repository unavailable"))?.publish_with_parent(&save, snapshot, parent.as_ref())
                 })
                 .and_then(|published| {
                     outbox.published(&save, &published)?;
@@ -279,6 +302,26 @@ impl NativeHost {
         drop(lock);
         job.update(|status| status.phase = Phase::Synced)
     }
+}
+
+pub(super) fn pending_tip(outbox: &LocalOutbox, connection: &Connection, destination: &solidcraft_cloud::Destination) -> Result<Option<PendingSave>> {
+    pending_revision(outbox, connection, destination, None)
+}
+
+fn pending_revision(
+    outbox: &LocalOutbox,
+    connection: &Connection,
+    destination: &solidcraft_cloud::Destination,
+    revision: Option<&str>,
+) -> Result<Option<PendingSave>> {
+    let mut pending = Vec::new();
+    for save in outbox.pending()?.into_iter().filter(|save| &save.destination == destination) {
+        save.check_connection(connection)?;
+        if outbox.receipt(&save)?.is_none() {
+            pending.push(save);
+        }
+    }
+    PendingSave::local_head(pending, destination, revision)
 }
 
 fn open_repository(connection: Connection, executable: &str, job: &Job, access: Option<&dyn super::NativeAccess>) -> Result<GitRepository> {
@@ -324,6 +367,7 @@ impl Host for NativeHost {
             | Operation::Test(connection)
             | Operation::List(connection)
             | Operation::Synchronize(connection)
+            | Operation::Thumbnail { connection, .. }
             | Operation::Open { connection, .. }
             | Operation::Save { connection, .. } => Some(connection),
         };

@@ -10,6 +10,8 @@ use solidcraft_cloud::{
 use solidcraft_engine::{Session, doc::Document};
 
 use crate::{SolveApp, i18n::tr, ui_kit};
+mod previews;
+mod versions;
 
 #[derive(Default)]
 pub(crate) struct Browser {
@@ -19,6 +21,11 @@ pub(crate) struct Browser {
     opening: Option<String>,
     error: Option<String>,
     statuses: Vec<SaveStatus>,
+    publications: BTreeMap<String, usize>,
+    previews: previews::State,
+    versions: Option<versions::Choice>,
+    local_captures: std::collections::BTreeSet<String>,
+    completed_syncs: std::collections::BTreeSet<String>,
 }
 
 struct SaveStatus {
@@ -26,11 +33,14 @@ struct SaveStatus {
     operation: u64,
     phase: Phase,
     conflict: bool,
+    revision: Option<String>,
+    local_revisions: Vec<solidcraft_cloud::LocalRevision>,
 }
 
 struct Catalog {
     connection: Connection,
     entries: Arc<Vec<Destination>>,
+    stored: Vec<SaveStatus>,
     pending: Option<String>,
     message: Option<String>,
 }
@@ -87,16 +97,17 @@ fn request(app: &mut SolveApp, connection: &Connection) {
             if let Some(old) = previous.as_ref().and_then(|c| c.pending.as_ref()) {
                 let _ = app.run("cloud.cancel", json!({"operation":old}));
             }
-            let entries = previous.filter(|c| c.connection == *connection).map(|c| c.entries).unwrap_or_default();
+            let (entries, stored) = previous.filter(|c| c.connection == *connection).map(|c| (c.entries, c.stored)).unwrap_or_default();
             app.cloud
                 .browser
                 .catalogs
-                .insert(connection.id.clone(), Catalog { connection: connection.clone(), entries, pending: Some(operation), message: None });
+                .insert(connection.id.clone(), Catalog { connection: connection.clone(), entries, stored, pending: Some(operation), message: None });
         }
         Err(error) => {
             app.cloud.browser.catalogs.entry(connection.id.clone()).or_insert_with(|| Catalog {
                 connection: connection.clone(),
                 entries: Default::default(),
+                stored: Vec::new(),
                 pending: None,
                 message: Some(error.clone()),
             });
@@ -105,7 +116,7 @@ fn request(app: &mut SolveApp, connection: &Connection) {
     }
 }
 
-fn entries(status: &JobStatus, connection: &str) -> Result<Vec<Destination>, String> {
+fn entries(status: &JobStatus, connection: &str) -> Result<(Vec<Destination>, Vec<SaveStatus>), String> {
     let value = status.result.clone().ok_or("missing repository listing")?;
     let values = value.as_array().ok_or("invalid repository listing")?;
     if values.len() > 10_000 {
@@ -120,25 +131,72 @@ fn entries(status: &JobStatus, connection: &str) -> Result<Vec<Destination>, Str
     }
     entries.sort_by(|a, b| (&a.project, &a.file).cmp(&(&b.project, &b.file)));
     entries.dedup();
-    Ok(entries)
+    if status.catalog.len() > 10_000 {
+        return Err("stored catalog is too large".into());
+    }
+    let listed: std::collections::BTreeSet<_> = entries.iter().map(|d| (&d.connection, &d.project, &d.file)).collect();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut stored = Vec::new();
+    for entry in &status.catalog {
+        entry.validate(connection).map_err(|e| e.to_string())?;
+        let d = &entry.destination;
+        let key = (&d.connection, &d.project, &d.file);
+        if !listed.contains(&key) || !seen.insert(key) {
+            return Err("stored status has no listed design".into());
+        }
+        stored.push(SaveStatus {
+            destination: entry.destination.clone(),
+            operation: status.operation.strip_prefix("cloud-").and_then(|id| id.parse().ok()).unwrap_or(0),
+            phase: entry.phase,
+            conflict: entry.conflict,
+            revision: entry.revision.clone(),
+            local_revisions: entry.local_revisions.clone(),
+        });
+    }
+    Ok((entries, stored))
 }
 
 /// Poll completion in every tab, including when Start is hidden. Downloaded designs are
 /// completed in a fresh editor so changing tabs or editing during IO cannot lose work.
 pub(crate) fn tick(app: &mut SolveApp, statuses: &[JobStatus]) {
+    app.cloud.browser.publications.retain(|id, _| statuses.iter().any(|s| &s.operation == id));
+    let mut refresh = std::collections::BTreeSet::new();
+    app.cloud.browser.completed_syncs.retain(|id| statuses.iter().any(|s| &s.operation == id));
+    for status in statuses.iter().filter(|s| s.phase == Phase::Synced && !s.saved_locally && s.destination.is_none() && !s.connection.is_empty()) {
+        if app.cloud.browser.completed_syncs.insert(status.operation.clone()) {
+            refresh.insert(status.connection.clone());
+        }
+    }
+    app.cloud.browser.local_captures.retain(|id| statuses.iter().any(|s| &s.operation == id));
+    for status in statuses.iter().filter(|s| s.saved_locally) {
+        if app.cloud.browser.local_captures.insert(status.operation.clone()) {
+            refresh.insert(status.connection.clone());
+        }
+    }
+    for status in statuses.iter().filter(|s| !s.publications.is_empty()) {
+        let seen = app.cloud.browser.publications.entry(status.operation.clone()).or_default();
+        if *seen < status.publications.len() {
+            refresh.insert(status.connection.clone());
+            *seen = status.publications.len();
+        }
+    }
     app.cloud.browser.statuses = statuses
         .iter()
+        .filter(|s| s.saved_locally)
         .filter_map(|s| {
             Some(SaveStatus {
                 destination: s.destination.clone()?,
                 operation: s.operation.strip_prefix("cloud-").and_then(|id| id.parse().ok()).unwrap_or(0),
                 phase: s.phase,
                 conflict: s.publications.iter().any(|p| p.conflict && Some(&p.destination) == s.destination.as_ref()),
+                revision: s.revision.clone(),
+                local_revisions: Vec::new(),
             })
         })
         .collect();
     let attention = app.tr("cloud.needs_attention").to_owned();
     let settings = app.session.cloud_settings();
+    let mut refreshed = Vec::new();
     app.cloud.browser.catalogs.retain(|id, c| settings.connection(id) == Some(&c.connection));
     for (id, catalog) in &mut app.cloud.browser.catalogs {
         if let Some(operation) = catalog.pending.as_ref()
@@ -147,8 +205,10 @@ pub(crate) fn tick(app: &mut SolveApp, statuses: &[JobStatus]) {
             match status.phase {
                 Phase::Ready => {
                     match entries(status, id) {
-                        Ok(entries) => {
+                        Ok((entries, stored)) => {
                             catalog.entries = Arc::new(entries);
+                            catalog.stored = stored;
+                            refreshed.push(id.clone());
                             catalog.message = status.message.clone();
                         }
                         Err(error) => catalog.message = Some(error),
@@ -172,6 +232,19 @@ pub(crate) fn tick(app: &mut SolveApp, statuses: &[JobStatus]) {
                 && !catalog.entries.contains(destination)
             {
                 Arc::make_mut(&mut catalog.entries).push(destination.clone());
+            }
+        }
+    }
+    for id in refreshed {
+        previews::clear(app, &id);
+    }
+    previews::poll(app, statuses);
+    if !app.session.cloud_configuring() {
+        for id in refresh {
+            if app.cloud.browser.catalogs.contains_key(&id)
+                && let Some(connection) = app.session.cloud_settings().connection(&id).cloned()
+            {
+                request(app, &connection);
             }
         }
     }
@@ -223,10 +296,28 @@ fn opened_session(app: &mut SolveApp, operation: &str) -> Result<Session, String
 }
 
 fn open(app: &mut SolveApp, destination: &Destination) {
+    let revisions = app
+        .cloud
+        .browser
+        .catalogs
+        .get(&destination.connection)
+        .into_iter()
+        .flat_map(|c| &c.stored)
+        .find(|s| &s.destination == destination)
+        .map(|s| s.local_revisions.clone())
+        .unwrap_or_default();
+    if revisions.len() > 1 {
+        app.cloud.browser.versions = Some(versions::Choice::new(destination.clone(), revisions));
+        return;
+    }
+    open_revision(app, destination, None);
+}
+
+fn open_revision(app: &mut SolveApp, destination: &Destination, revision: Option<&str>) {
     if app.cloud.browser.opening.is_some() {
         return;
     }
-    match app.run("cloud.open", json!({"destination":destination})) {
+    match app.run("cloud.open", json!({"destination":destination, "local_revision":revision})) {
         Ok(result) => {
             app.cloud.browser.opening = result.get("operation").and_then(|v| v.as_str()).map(str::to_owned);
             app.cloud.browser.error = None;
@@ -245,7 +336,7 @@ fn phase(status: &SaveStatus) -> &'static str {
         Phase::SavedLocally => tr("cloud.saved_locally"),
         Phase::Failed | Phase::Cancelled => tr("cloud.needs_attention"),
         Phase::Working => tr("cloud.saving"),
-        Phase::Ready => "",
+        Phase::Ready => tr("cloud.available_locally"),
     }
 }
 
@@ -266,6 +357,8 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     }
     let t = crate::theme::Tokens::get();
+    previews::textures(app, ui.ctx());
+    let mut seen = Vec::new();
     let mut connection = selected(app);
     if let Some(c) = &connection
         && !app.cloud.browser.catalogs.contains_key(&c.id)
@@ -274,7 +367,7 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
         request(app, c);
     }
     ui_kit::FileView::section(ui, tr("cloud.title"), t.space_10, |ui| {
-        ui.horizontal_wrapped(|ui| {
+        ui_kit::FileView::control_row(ui, |ui| {
             if button(ui, "cloud:connect", tr("cmd.cloud.connect"), true) {
                 app.start("cloud.connect");
             }
@@ -286,19 +379,22 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             ui.hyperlink_to(crate::i18n::tr_label("Help"), "https://tangency-labs.github.io/solidcraft/guide/cloud-saves.html");
         });
-        ui.add_space(t.space_8);
+        ui.add_space(t.space_12);
         if let Some(c) = &mut connection {
             let connections = app.session.cloud_settings().connections.clone();
-            ui.horizontal_wrapped(|ui| {
-                ui.label(tr("cloud.repository"));
-                let response = egui::ComboBox::from_id_salt("cloud_repo").selected_text(&c.name).show_ui(ui, |ui| {
-                    for candidate in &connections {
-                        if ui.selectable_label(candidate.id == c.id, &candidate.name).clicked() {
-                            *c = candidate.clone();
+            ui_kit::FileView::detail(ui, tr("cloud.repository"));
+            ui.add_space(t.space_4);
+            ui_kit::FileView::control_row(ui, |ui| {
+                let response = ui_kit::settings_control_width(ui, t.form_card_width, |ui| {
+                    ui_kit::dropdown_menu(ui, "cloud_repo", &c.name.clone(), |ui| {
+                        for candidate in &connections {
+                            if ui_kit::list_picker(ui, &candidate.id, &candidate.name, candidate.id == c.id).clicked() {
+                                *c = candidate.clone();
+                            }
                         }
-                    }
+                    })
                 });
-                crate::scenario::publish_target("cloud:repositories", response.response.rect);
+                crate::scenario::publish_target("cloud:repositories", response.rect);
                 if button(ui, "cloud:refresh", tr("ui.agent_chat_refresh"), !app.session.cloud_configuring()) {
                     request(app, c);
                 }
@@ -332,7 +428,9 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
                         |ui, rows| {
                             for index in rows {
                                 let Some(destination) = designs.get(index) else { continue };
-                                let status = statuses.iter().filter(|s| &s.destination == destination).max_by_key(|s| s.operation);
+                                seen.push(destination.clone());
+                                let status =
+                                    statuses.iter().chain(&catalog.stored).filter(|s| &s.destination == destination).max_by_key(|s| s.operation);
                                 let path = format!("{} / {}", destination.project, destination.file);
                                 let response = ui
                                     .add_enabled_ui(app.cloud.browser.opening.is_none(), |ui| {
@@ -344,7 +442,7 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
                                                 path: &path,
                                                 when: status.map(phase).unwrap_or(""),
                                                 workspace: tr("home.design_workspace"),
-                                                thumbnail: None,
+                                                thumbnail: previews::image(app, destination),
                                             },
                                         )
                                     })
@@ -369,15 +467,19 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     });
     ui.add_space(t.file_section_gap);
+    for destination in seen {
+        previews::touch(app, destination);
+    }
 }
 
 fn button(ui: &mut egui::Ui, id: &str, label: &str, enabled: bool) -> bool {
-    let response = ui.add_enabled_ui(enabled, |ui| ui_kit::button(ui, label, ui_kit::Button::Normal)).inner;
+    let response = ui_kit::button(ui, label, ui_kit::Button::Enabled(enabled));
     crate::scenario::publish_target(id, response.rect);
     response.clicked()
 }
 
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    versions::show(app, ctx);
     if let Some(operation) = app.cloud.browser.opening.clone() {
         let (closed, action) = ui_kit::Window::new(egui::Id::new("cloud_opening"), "open", tr("cmd.cloud.open"))
             .fields()
@@ -408,30 +510,37 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .actions(tr("ui.save"), "Cancel", None)
         .show(ctx, valid, |ui| {
             ui_kit::row(ui, tr("cloud.repository"), |ui| {
-                egui::ComboBox::from_id_salt("cloud_save_repo")
-                    .selected_text(connections.iter().find(|c| c.id == picker.connection).map(|c| c.name.as_str()).unwrap_or(""))
-                    .show_ui(ui, |ui| {
+                ui_kit::dropdown_menu(
+                    ui,
+                    "cloud_save_repo",
+                    connections.iter().find(|c| c.id == picker.connection).map(|c| c.name.as_str()).unwrap_or(""),
+                    |ui| {
                         for c in &connections {
-                            ui.selectable_value(&mut picker.connection, c.id.clone(), &c.name);
+                            if ui_kit::list_picker(ui, &c.id, &c.name, picker.connection == c.id).clicked() {
+                                picker.connection = c.id.clone();
+                            }
                         }
-                    });
+                    },
+                );
             });
             ui_kit::row(ui, tr("ui.project"), |ui| {
-                let response = ui.add(egui::TextEdit::singleline(&mut picker.project).char_limit(512));
+                let response = ui_kit::bounded_cell_editor(ui, egui::Id::new("cloud_save_project_name"), &mut picker.project, "", false, 512);
                 response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), tr("ui.project")));
                 crate::scenario::publish_target("cloud:project", response.rect);
             });
             let projects: std::collections::BTreeSet<_> =
                 app.cloud.browser.catalogs.get(&picker.connection).into_iter().flat_map(|c| c.entries.iter()).map(|d| &d.project).collect();
             if !projects.is_empty() {
-                egui::ComboBox::from_id_salt("cloud_save_project").selected_text(tr("cloud.existing_project")).show_ui(ui, |ui| {
+                ui_kit::dropdown_menu(ui, "cloud_save_project", tr("cloud.existing_project"), |ui| {
                     for project in projects {
-                        ui.selectable_value(&mut picker.project, project.clone(), project);
+                        if ui_kit::list_picker(ui, project, project, picker.project == *project).clicked() {
+                            picker.project = project.clone();
+                        }
                     }
                 });
             }
             ui_kit::row(ui, tr("cloud.design_name"), |ui| {
-                let response = ui.add(egui::TextEdit::singleline(&mut picker.name).char_limit(128));
+                let response = ui_kit::bounded_cell_editor(ui, egui::Id::new("cloud_save_design_name"), &mut picker.name, "", false, 128);
                 response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), tr("cloud.design_name")));
                 crate::scenario::publish_target("cloud:name", response.rect);
             });

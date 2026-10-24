@@ -136,9 +136,9 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.label(&wizard.repository);
                     });
                 }
-                egui::CollapsingHeader::new(crate::i18n::tr_label("Advanced")).default_open(!wizard.repository.is_empty()).show(ui, |ui| {
+                ui_kit::section(ui, "cloud_advanced", "Advanced", !wizard.repository.is_empty(), |ui| {
                     ui_kit::row(ui, tr("cloud.repository"), |ui| {
-                        let r = ui.add(egui::TextEdit::singleline(&mut wizard.repository).hint_text("owner/solidcraft-designs").char_limit(512));
+                        let r = ui_kit::bounded_cell_editor(ui, egui::Id::new("cloud_repository"), &mut wizard.repository, "", false, 512);
                         crate::scenario::publish_target("cloud:repository", r.rect);
                     });
                 });
@@ -149,7 +149,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::text(ui, tr("cloud.token_prefill"), ui_kit::Text::Hint("cloud_token_prefill"));
                 ui_kit::text(ui, tr("cloud.token_scope"), ui_kit::Text::Hint("cloud_token_scope"));
                 ui_kit::row(ui, tr("cloud.token"), |ui| {
-                    let r = ui.add(egui::TextEdit::singleline(&mut wizard.token).password(true).char_limit(8192));
+                    let r = ui_kit::bounded_password_field(ui, egui::Id::new("cloud_token"), &mut wizard.token, "", 8192);
                     crate::scenario::publish_target("cloud:token", r.rect);
                 });
                 ui_kit::text(ui, tr("cloud.token_retry"), ui_kit::Text::Hint("cloud_token_retry"));
@@ -250,6 +250,27 @@ mod tests {
             let job = Job::new(String::new())?;
             job.update(|s| s.phase = Phase::Ready)?;
             Ok(job)
+        }
+    }
+
+    #[test]
+    fn advanced_override_can_be_edited_and_collapsed_without_hiding_token_creation() {
+        for dark in [false, true] {
+            let mut h = Harness::new();
+            h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
+            h.app.start("cloud.connect");
+            h.frames(2);
+            assert!(crate::scenario::rect_of("cloud:repository").is_none());
+            h.step(&serde_json::json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+            h.frames(2);
+            h.step(&serde_json::json!({"click":{"handle":"cloud:repository"}})).unwrap();
+            h.step(&serde_json::json!({"text":"work/designs"})).unwrap();
+            assert_eq!(h.app.cloud.setup.as_ref().unwrap().repository, "work/designs");
+            h.step(&serde_json::json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+            h.frames(2);
+            assert!(crate::scenario::rect_of("cloud:repository").is_none());
+            assert!(crate::scenario::rect_of("cloud:create_token").is_some());
+            assert_eq!(h.app.cloud.setup.as_ref().unwrap().repository, "work/designs");
         }
     }
 

@@ -54,9 +54,14 @@ pub enum Operation {
     Setup(Connection),
     Test(Connection),
     List(Connection),
+    Thumbnail {
+        connection: Connection,
+        destination: Destination,
+    },
     Open {
         connection: Connection,
         destination: Destination,
+        local_revision: Option<String>,
     },
     Save {
         connection: Connection,
@@ -104,6 +109,9 @@ pub struct JobStatus {
     /// Browser storage persistence was granted (false is a recoverability warning).
     #[serde(default)]
     pub storage_persistent: Option<bool>,
+    /// Reconstructed from durable cache and outbox state on repository listing.
+    #[serde(default)]
+    pub catalog: Vec<crate::StoredDesign>,
 }
 
 struct State {
@@ -138,6 +146,7 @@ impl Job {
                 result: None,
                 publications: Vec::new(),
                 storage_persistent: None,
+                catalog: Vec::new(),
             },
             cancelled: false,
             opened: None,
@@ -202,10 +211,12 @@ impl Job {
     }
 
     pub fn fail(&self, error: Error) -> Result<()> {
-        self.update(|status| {
-            status.phase = if status.saved_locally { Phase::SavedLocally } else { Phase::Failed };
-            status.message = Some(error.to_string());
-        })
+        let mut state = self.0.lock().map_err(|_| Error::Storage("cloud operation state unavailable".into()))?;
+        if !state.cancelled {
+            state.status.phase = if state.status.saved_locally { Phase::SavedLocally } else { Phase::Failed };
+            state.status.message = Some(error.to_string());
+        }
+        Ok(())
     }
 
     pub fn opened(&self, snapshot: Snapshot) -> Result<()> {
@@ -216,6 +227,15 @@ impl Job {
             state.cancel_handler = None;
         }
         Ok(())
+    }
+
+    /// Consume a completed transient response so image bytes do not remain in history.
+    pub fn take_result(&self) -> Result<Value> {
+        let mut state = self.0.lock().map_err(|_| Error::Storage("cloud operation state unavailable".into()))?;
+        if state.cancelled || state.status.phase != Phase::Ready {
+            return Err(Error::Storage("operation has not completed".into()));
+        }
+        state.status.result.take().ok_or_else(|| Error::Storage("operation result already consumed".into()))
     }
 
     pub fn take_opened(&self) -> Result<Snapshot> {
@@ -250,6 +270,9 @@ mod tests {
         .unwrap();
         job.cancel().unwrap();
         assert_eq!(called.load(Ordering::SeqCst), 1);
+        job.fail(Error::Storage("worker observed cancellation".into())).unwrap();
+        assert_eq!(job.status().unwrap().phase, Phase::Cancelled);
+        assert!(job.status().unwrap().message.is_none(), "a superseded preview is not a storage failure");
         job.cancel().unwrap();
         assert_eq!(called.load(Ordering::SeqCst), 1);
         let late = called.clone();
@@ -268,5 +291,11 @@ mod tests {
         synced.update(|status| status.phase = Phase::Synced).unwrap();
         synced.cancel().unwrap();
         assert_eq!(called.load(Ordering::SeqCst), 2, "confirmed publication cannot be cancelled");
+        let queued = Job::new("durable".into()).unwrap();
+        queued.update(|status| status.saved_locally = true).unwrap();
+        queued.cancel().unwrap();
+        queued.fail(Error::Storage("upload stopped".into())).unwrap();
+        assert_eq!(queued.status().unwrap().phase, Phase::SavedLocally);
+        assert!(queued.status().unwrap().message.is_none());
     }
 }
