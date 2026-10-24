@@ -10,5 +10,10 @@
   {"click": {"handle": "prefs:theme:light"}},
   {"expect": {"prefs": {"theme": "light", "dark": false}}},
   {"widget": "Cancel"},
-  {"expect": {"prefs": {"dialog": null, "theme": "dark", "dark": true}}}
+  {"expect": {"prefs": {"dialog": null, "theme": "dark", "dark": true}}},
+  {"note": "Okibi (dark) and Akari (light) are built in by id."},
+  {"call": "ui.prefs", "params": {"theme": "akari"}},
+  {"expect": {"prefs": {"theme": "akari", "dark": false}}},
+  {"call": "ui.prefs", "params": {"theme": "okibi"}},
+  {"expect": {"prefs": {"theme": "okibi", "dark": true}}}
 ]

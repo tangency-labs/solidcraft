@@ -115,9 +115,12 @@ and command menus remain available.
 
 ### Colour themes
 
-General › **Theme** lists Dark, Light and System (follows the operating system), the built-in
-Gruvbox themes (dark and light, each in hard, normal and soft contrast) and any themes you have
-imported. A choice applies at once.
+Interface › **Theme** lists Dark, Light and System (follows the operating system), the built-in
+themes and any themes you have imported. A choice applies at once. The built-in themes are Gruvbox
+(dark and light, each in hard, normal and soft contrast), SolidCraft 95, Platinum 9, Cupertino,
+Green Phosphor, Amber Phosphor, Blueprint, One Dark, Tokyo Night, Solarized Light, Nord, High
+Contrast, Graphite, Nosferatu, Catppuccin Mocha, and Okibi and Akari (dark and light, from the
+[Okibi design system](https://kaievns.github.io/okibi-akiri-design-system-spec/)).
 
 A theme is a small JSON file that starts from the Dark or Light palette and changes any of its
 colours and corner radii by name:
