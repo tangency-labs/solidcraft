@@ -219,30 +219,35 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     }
     let state_js = STATE_JS.replace("STARTED", started).replace("BUILD_FILES", &json!(files.into_iter().collect::<Vec<_>>()).to_string());
     let count = std::cell::Cell::new(0);
-    let launch_at = |cdp: &mut Cdp, at: &str, build: &str| -> Result<Duration, String> {
-        let n = count.get() + 1;
-        count.set(n);
-        let t = Instant::now();
-        let search = format!("?launch={n}");
-        let what = format!("launch {n} starts build {build}");
-        // One retry: on a heavily loaded machine a launch can stall past the timeout. Loading the
-        // same page again must still start the same build.
-        for attempt in 1..=2 {
-            let r = cdp.call("Page.navigate", json!({ "url": format!("http://127.0.0.1:{}{at}?launch={n}", server.port) }))?;
-            if let Some(e) = r["errorText"].as_str().filter(|e| !e.is_empty()) {
-                return Err(format!("launch {n} (build {build}): the page didn't load: {e}"));
+    let launch_at =
+        |cdp: &mut Cdp, at: &str, build: &str, mut during_load: Option<&mut dyn FnMut() -> Result<(), String>>| -> Result<Duration, String> {
+            let n = count.get() + 1;
+            count.set(n);
+            let t = Instant::now();
+            let search = format!("?launch={n}");
+            let what = format!("launch {n} starts build {build}");
+            // One retry for ordinary launches. A coordinated update changes the active worker, so
+            // repeating that launch would exercise a different build and hide the original failure.
+            let attempts = if during_load.is_some() { 1 } else { 2 };
+            for attempt in 1..=attempts {
+                let r =
+                    cdp.call_with_pending("Page.navigate", json!({ "url": format!("http://127.0.0.1:{}{at}?launch={n}", server.port) }), || {
+                        during_load.as_mut().map_or(Ok(()), |f| f())
+                    })?;
+                if let Some(e) = r["errorText"].as_str().filter(|e| !e.is_empty()) {
+                    return Err(format!("launch {n} (build {build}): the page didn't load: {e}"));
+                }
+                match wait_for(cdp, &state_js, &what, |s| {
+                    s["search"] == search.as_str() && s["ready"] == "complete" && s["build"] == build && s["started"] == true
+                }) {
+                    Ok(()) => return Ok(t.elapsed()),
+                    Err(e) if attempt < attempts => println!("retry {e}"),
+                    Err(e) => return Err(e),
+                }
             }
-            match wait_for(cdp, &state_js, &what, |s| {
-                s["search"] == search.as_str() && s["ready"] == "complete" && s["build"] == build && s["started"] == true
-            }) {
-                Ok(()) => return Ok(t.elapsed()),
-                Err(e) if attempt == 1 => println!("retry {e}"),
-                Err(e) => return Err(e),
-            }
-        }
-        unreachable!()
-    };
-    let launch = |cdp: &mut Cdp, build: &str| launch_at(cdp, PREFIX, build);
+            unreachable!()
+        };
+    let launch = |cdp: &mut Cdp, build: &str| launch_at(cdp, PREFIX, build, None);
     // The page is controlled by the worker, which keeps exactly this build's files (and the mark
     // that they are all there).
     let keeps = |i: usize| {
@@ -260,7 +265,7 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     step("offline: build v1 starts from the kept copy", launch(&mut cdp, "v1")?);
 
     // The other copy is always online, with build v2.
-    let t = launch_at(&mut cdp, ELSEWHERE, "v2")?;
+    let t = launch_at(&mut cdp, ELSEWHERE, "v2", None)?;
     let elsewhere = kept.get(1).map(|(v, n)| (cache_name(ELSEWHERE, v), n + 1)).unwrap_or_default();
     wait_for(&mut cdp, &state_js, "the other copy keeps build v2", |s| {
         s["controlled"] == true && s["kept"] == json!({ elsewhere.0.clone(): elsewhere.1 })
@@ -333,27 +338,20 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     cdp.call("Network.clearBrowserCache", json!({}))?;
     other.eval(age)?;
     cdp.call("Page.navigate", json!({ "url": "about:blank" }))?;
-    // The other tab updates once the launch is waiting for build.json, and leaves.
-    let waiting = server.checks.clone();
-    let before = waiting.load(Ordering::SeqCst);
-    let updater = std::thread::spawn(move || -> Result<Cdp, String> {
-        let t = Instant::now();
-        while waiting.load(Ordering::SeqCst) <= before {
-            if t.elapsed() > LAUNCH_TIMEOUT {
-                return Err("the launch never asked for build.json".into());
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        other.eval(
-            "navigator.serviceWorker.getRegistration().then((r) => {
-              setTimeout(() => { r.update(); location.replace('about:blank'); }, 0);
-              return true;
-            })",
-        )?;
-        Ok(other)
-    });
-    let t = launch(&mut cdp, "v3")?;
-    let mut other = updater.join().map_err(|_| "the updating tab panicked".to_string())??;
+    let checks = server.checks.load(Ordering::SeqCst);
+    let t = launch_at(
+        &mut cdp,
+        PREFIX,
+        "v3",
+        Some(&mut || {
+            // The navigation has reached the old worker and is waiting for build.json. A timer
+            // here could update the worker before navigation even starts on a loaded CI runner.
+            wait_for_requests(&server.checks, checks + 1, "slow build checks", LAUNCH_TIMEOUT)?;
+            other.eval("navigator.serviceWorker.getRegistration().then((r) => { r.update(); return true; })")?;
+            other.call("Page.navigate", json!({ "url": "about:blank" }))?;
+            Ok(())
+        }),
+    )?;
     let [name3, name4] = [2, 3].map(|i| kept.get(i).map(|(v, _)| cache_name(PREFIX, v)).unwrap_or_default());
     wait_for(&mut cdp, &state_js, "v4's worker keeps v4, v3's copy retired", |s| {
         s["kept"].as_object().is_some_and(|k| k.len() == 1 && k.contains_key(&name4))
@@ -453,7 +451,8 @@ const STATE_JS: &str = "(async () => {
   }
   const filling = (await navigator.locks.query()).held.map((l) => l.name).filter((n) => n.startsWith(prefix));
   return { search: location.search, ready: document.readyState, build: document.documentElement.dataset.build ?? null,
-    started: STARTED, controlled: !!navigator.serviceWorker.controller, caches: caches_, kept, retired, complete, filling,
+    started: STARTED, scripts: { started: document.documentElement.dataset.started ?? null, shared: document.documentElement.dataset.shared ?? null },
+    controlled: !!navigator.serviceWorker.controller, caches: caches_, kept, retired, complete, filling,
     registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length };
 })()";
 
@@ -660,14 +659,7 @@ impl Server {
 
     /// Wait until `n` files in all were asked for in Mode::SlowFiles.
     fn wait_asked_slowly(&self, n: usize) -> Result<(), String> {
-        let t = Instant::now();
-        while t.elapsed() < LAUNCH_TIMEOUT {
-            if self.slow.load(Ordering::SeqCst) >= n {
-                return Ok(());
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        Err(format!("only {} of {n} slow files were asked for", self.slow.load(Ordering::SeqCst)))
+        wait_for_requests(&self.slow, n, "slow files", LAUNCH_TIMEOUT)
     }
 
     /// Let go of the files held back in Mode::SlowFiles and Mode::FailFast.
@@ -683,6 +675,18 @@ impl Server {
             *m = mode;
         }
     }
+}
+
+/// Wait for the server to receive the requests needed by a test step.
+fn wait_for_requests(count: &AtomicUsize, n: usize, what: &str, timeout: Duration) -> Result<(), String> {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if count.load(Ordering::SeqCst) >= n {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Err(format!("only {} of {n} {what} were asked for", count.load(Ordering::SeqCst)))
 }
 
 /// Hold a connection while the server's mode stays as it was.
@@ -1011,9 +1015,16 @@ impl Cdp {
 
     /// Call a DevTools method and return its result.
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.call_with_pending(method, params, || Ok(()))
+    }
+
+    /// Run a test action after sending a request, before waiting for its response. Navigation
+    /// waits for the page's response headers; a second tab can act while that response is held.
+    fn call_with_pending(&mut self, method: &str, params: Value, pending: impl FnOnce() -> Result<(), String>) -> Result<Value, String> {
         self.next += 1;
         let id = self.next;
         self.send_frame(0x1, json!({ "id": id, "method": method, "params": params }).to_string().as_bytes())?;
+        pending()?;
         loop {
             let reply: Value = serde_json::from_str(&self.recv()?).map_err(|e| format!("DevTools: {e}"))?;
             if reply["id"] == id {
