@@ -354,7 +354,10 @@ fn measure_pair(
             && ib.max.z <= ob.max.z;
         nested && i.positions.first().is_some_and(|p| o.contains(*p))
     };
-    let touching = mesh.is_some_and(|m| m.distance <= slack);
+    // Meshes coarser than the gap (a large sphere's) come within their slack while the faces stay
+    // apart: a gap on the exact faces rules out shared volume without the costly intersection.
+    let apart = || matches!(solidcraft_kernel::body_distance(a, b, gap.max(slack)), Ok(Some(d)) if d.exact && d.distance > tolerance);
+    let touching = mesh.is_some_and(|m| m.distance <= slack && (m.distance <= tolerance || !apart()));
     if touching || holds(ba, bb) || holds(bb, ba) {
         // A pair whose shared part can't be worked out is reported, not passed as clear.
         let region = shared_region(a, b);

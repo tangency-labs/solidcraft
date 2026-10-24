@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 
 use crate::Session;
+use solidcraft_kernel::DistanceShape;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
@@ -103,6 +104,34 @@ fn distances_are_exact_on_edges_and_curved_faces() {
     assert!(near.iter().all(|n| pair(n).contains(&"A".to_string())), "{r}");
     let all = run(&mut s, "inspect.clearance", json!({"clearance": 50, "against": ["A"]}));
     assert_eq!(all["near"].as_array().map(Vec::len), Some(3), "{all}");
+}
+
+/// What the clearance check leans on to skip the intersection: where two bodies' faces cross
+/// but their coarse meshes stay apart (the facets run inside a sphere), the distance on the exact
+/// faces is still 0. A sphere dipping into a cube's top edge by a little, its mesh made coarse.
+#[test]
+fn crossing_faces_measure_0_where_coarse_meshes_stay_apart() {
+    use solidcraft_geom::Vec3;
+    let cube = solidcraft_kernel::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let cube_mesh = cube.tessellate(0.01).unwrap();
+    let mut apart = 0;
+    for off in [1.0, 2.0, 3.0, 5.0] {
+        for dip in [0.05, 0.1, 0.2] {
+            let radius = 20.0_f64;
+            let centre = Vec3::new(10.0 + off, 5.0, 10.0 - dip + (radius * radius - off * off).sqrt());
+            let ball = solidcraft_kernel::sphere(centre, radius).unwrap();
+            let chord = 1.0;
+            let ball_mesh = ball.tessellate(chord).unwrap();
+            let (a, b) = (DistanceShape::new(&cube, &cube_mesh, 0.01), DistanceShape::new(&ball, &ball_mesh, chord));
+            if a.mesh_closest(&b, 10.0).is_none_or(|m| m.distance <= 1e-6) {
+                continue;
+            }
+            apart += 1;
+            let d = solidcraft_kernel::body_distance(&a, &b, 10.0).unwrap().unwrap();
+            assert!(d.exact && d.distance < 1e-6, "off {off}, dip {dip}: {} apart", d.distance);
+        }
+    }
+    assert!(apart > 0, "no case where the meshes stay apart");
 }
 
 /// A pin in a hole 0.2 mm wider all round, in a plate whose mesh is coarser than that gap: the
