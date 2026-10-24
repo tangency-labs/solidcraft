@@ -804,15 +804,23 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
 /// Unicode character boundaries. An oversized word stays on one line with an ellipsis.
 fn ribbon_button_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<String> {
     let mut lines = ribbon_label_lines(painter, label, width);
+    // Right-to-left labels come in display order (see `bidi`): a line reads from its right end,
+    // so a shortened line loses characters on the left, where the ellipsis then goes.
+    let rtl = crate::bidi::has_rtl(label);
     for line in &mut lines {
         if ribbon_label_width(painter, line) > width {
             while !line.is_empty() {
-                line.pop();
-                if ribbon_label_width(painter, &format!("{}…", line.trim_end())) <= width {
+                if rtl {
+                    line.remove(0);
+                } else {
+                    line.pop();
+                }
+                let shortened = if rtl { format!("…{}", line.trim_start()) } else { format!("{}…", line.trim_end()) };
+                if ribbon_label_width(painter, &shortened) <= width {
                     break;
                 }
             }
-            *line = format!("{}…", line.trim_end());
+            *line = if rtl { format!("…{}", line.trim_start()) } else { format!("{}…", line.trim_end()) };
         }
     }
     lines
@@ -837,6 +845,27 @@ fn ribbon_label_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<S
     let measure = |text: &str| ribbon_label_width(painter, text);
     let normalized = label.split_whitespace().collect::<Vec<_>>().join(" ");
     let label = normalized.as_str();
+    if crate::bidi::has_rtl(label) {
+        // Display-order right-to-left text reads from its end: the first line takes the words
+        // at the end of the string, the second line the words before them.
+        let breaks = label.char_indices().filter(|(_, c)| c.is_whitespace() || *c == '/').map(|(at, c)| at + c.len_utf8());
+        let mut start = label.len();
+        for cut in std::iter::once(0).chain(breaks).collect::<Vec<_>>().into_iter().rev() {
+            if cut >= start {
+                continue;
+            }
+            if start < label.len() && measure(label.get(cut..).unwrap_or_default().trim()) > width {
+                break;
+            }
+            start = cut;
+        }
+        let (rest, first) = label.split_at(start);
+        let mut lines = vec![first.trim().to_owned()];
+        if !rest.trim().is_empty() {
+            lines.push(rest.trim().to_owned());
+        }
+        return lines;
+    }
     let mut end = 0;
     for token in label.split_inclusive(|c: char| c.is_whitespace() || c == '/') {
         let next = end + token.len();
@@ -2899,6 +2928,25 @@ mod ribbon_label_tests {
                         let galley = ribbon_button_galley(&painter, label, width, Color32::WHITE);
                         assert!(galley.rows.len() <= 2, "{}: {label}", command.id);
                         assert!(galley.size().x <= width + 0.01, "{}: {label}: {} > {width}", command.id, galley.size().x);
+                        if crate::bidi::has_rtl(label) {
+                            // epaint adds zero-width glyphs to right-to-left rows, so their text
+                            // is not the source text: check the lines the galley is built from.
+                            let lines = ribbon_button_lines(&painter, label, width);
+                            let first = lines[0].strip_prefix('…').unwrap_or(&lines[0]);
+                            assert!(label.ends_with(first), "{}: {label} -> {lines:?}", command.id);
+                            if let [first, second] = lines.as_slice()
+                                && !first.starts_with('…')
+                                && !second.starts_with('…')
+                            {
+                                // Both lines whole: they split the label at a space or after a slash.
+                                assert!(
+                                    *label == format!("{second} {first}") || *label == format!("{second}{first}"),
+                                    "{}: {label} -> {lines:?}",
+                                    command.id
+                                );
+                            }
+                            continue;
+                        }
                         let first = galley.rows.first().unwrap().text();
                         let visible = first.strip_suffix('…').unwrap_or(&first);
                         assert!(label.starts_with(visible), "{}: {label} -> {first}", command.id);
@@ -2950,6 +2998,15 @@ mod ribbon_label_tests {
             let lines = ribbon_button_lines(&painter, "長い日本語のラベル 続き", 50.0);
             assert_eq!(lines.len(), 2);
             assert!(lines[0].ends_with('…'));
+            // Hebrew comes in display order (`bidi::visual`): the reader starts at the right end,
+            // so "סקיצה חדשה" (New Sketch, stored as "חדשה סקיצה") puts סקיצה on the first line.
+            let label = crate::bidi::visual("סקיצה חדשה").into_owned();
+            let width = ribbon_label_width(&painter, "סקיצה").max(ribbon_label_width(&painter, "חדשה")) + 1.0;
+            assert!(ribbon_label_width(&painter, &label) > width);
+            assert_eq!(ribbon_button_lines(&painter, &label, width), vec!["סקיצה", "חדשה"]);
+            let lines = ribbon_button_lines(&painter, &crate::bidi::visual("אחת שתיים שלוש ארבע חמש"), 50.0);
+            assert_eq!(lines.len(), 2);
+            assert!(lines[1].starts_with('…'), "{lines:?}");
         });
         output.textures_delta.clear();
     }
