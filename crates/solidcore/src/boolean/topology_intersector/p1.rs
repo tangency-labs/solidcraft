@@ -245,7 +245,9 @@ pub(super) fn find_common_elements<O: Copy + PartialEq>(this: &[O], other: &[O])
 /// the ported function that implements it. A method returns `Ok(None)` /
 /// `Err(InvalidInput)` where upstream would dereference null.
 pub trait IntersectorBrep<O>:
-    ProtoBrep<O> + crate::topology::proto_topology::p3::BrepGlue<O>
+    ProtoBrep<O>
+    + crate::topology::proto_topology::p3::BrepGlue<O>
+    + crate::intersect::curve_class::p5::ClassGeometryMut<O>
 {
     /// `SmBrep::MakeVertexLoop` with its default opposite orientation, using the
     /// caller's mutable arenas and notification state (`topology::brep::p9`).
@@ -2612,12 +2614,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                             .cc1
                             .get_mut(kk)
                             .ok_or(dangling("classification lists differ"))?;
-                        ignore_soft(cc1.set_point_class_parameters(k, brep, true))?;
+                        ignore_soft(cc1.set_point_class_parameters_mut(k, brep, true))?;
                         let cc2 = fi
                             .cc2
                             .get_mut(kk)
                             .ok_or(dangling("classification lists differ"))?;
-                        ignore_soft(cc2.set_point_class_parameters(k, brep, true))?;
+                        ignore_soft(cc2.set_point_class_parameters_mut(k, brep, true))?;
                     }
 
                     // For each interval in the classification

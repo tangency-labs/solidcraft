@@ -59,7 +59,7 @@
 //! | [`CurveClassification::set_is_curve_current`]          | `SetIsCurveCurrent`                              |
 //! | [`CurveClassification::remove_at`]                     | `RemoveAt`                                       |
 //! | [`CurveClassification::set_size`], [`MAX_INTERVALS`]   | `SetSize`                                        |
-//! | [`CurveClassification::set_point_class_parameters`]    | `SetPointClassParameters`                        |
+//! | [`CurveClassification::set_point_class_parameters`], [`CurveClassification::set_point_class_parameters_mut`]| `SetPointClassParameters`                        |
 //! | [`CurveClassification::find_best_squeeze_end`]         | `FindBestSqueezeEnd`                             |
 //! | [`CurveClassification::is_referenced`]                 | `IsReferenced`                                   |
 //! | [`src_zone_tol_3d_of`]                                 | `SmTol::GetSrcZoneTol3d(const SmCurveClassification*)`, `SmTol::GetSrcZoneTol3d(const SmCurveInterval*)` |
@@ -128,6 +128,11 @@
 //!   `SmTol::MapTo2d(.., SmCurve, SmSurface)` (`SmSurface::DropPoint`,
 //!   `surface.surface_p5`; its UV-curve branch is co-ported as
 //!   [`map_to_2d_on_curve`]).
+//! - **Mutable topology.** `SetPointClassParameters` has a read-only form and one over
+//!   topology the point solves may change
+//!   ([`CurveClassification::set_point_class_parameters_mut`], through
+//!   [`PointClassification::compute_point_parameters_mut`]): a face surface's point
+//!   solve makes the face's trimmed surface cache there, as upstream.
 //! - **Recursion.** None.
 
 use std::borrow::Cow;
@@ -484,6 +489,52 @@ pub struct CurveClassification<O> {
     pub(super) allocated: bool,
     /// `m_bIgnoreTangency`.
     pub(super) ignore_tangency: bool,
+}
+
+/// How `SetPointClassParameters` reaches the classifications' objects: read-only, or
+/// with topology the point solves may change.
+trait PointParams<O> {
+    type Geometry: ClassGeometry<O>;
+    fn geometry(&self) -> &Self::Geometry;
+    /// `pc.ComputePointParameters(point)`.
+    fn compute(&mut self, k: &Kernel, pc: &mut PointClassification<O>, point: Point3)
+        -> Result<()>;
+}
+
+/// Read-only access ([`CurveClassification::set_point_class_parameters`]).
+struct ReadOnlyParams<'g, G>(&'g G);
+
+impl<O: ClassObject, G: ClassGeometry<O>> PointParams<O> for ReadOnlyParams<'_, G> {
+    type Geometry = G;
+    fn geometry(&self) -> &G {
+        self.0
+    }
+    fn compute(
+        &mut self,
+        k: &Kernel,
+        pc: &mut PointClassification<O>,
+        point: Point3,
+    ) -> Result<()> {
+        pc.compute_point_parameters(k, self.0, point)
+    }
+}
+
+/// Mutable access ([`CurveClassification::set_point_class_parameters_mut`]).
+struct MutableParams<'g, G>(&'g mut G);
+
+impl<O: ClassObject, G: super::p5::ClassGeometryMut<O>> PointParams<O> for MutableParams<'_, G> {
+    type Geometry = G;
+    fn geometry(&self) -> &G {
+        self.0
+    }
+    fn compute(
+        &mut self,
+        k: &Kernel,
+        pc: &mut PointClassification<O>,
+        point: Point3,
+    ) -> Result<()> {
+        pc.compute_point_parameters_mut(k, self.0, point)
+    }
 }
 
 impl<O: ClassObject> CurveClassification<O> {
@@ -986,6 +1037,32 @@ impl<O: ClassObject> CurveClassification<O> {
         geometry: &impl ClassGeometry<O>,
         set_mids: bool,
     ) -> Result<()> {
+        self.set_point_class_parameters_in(k, &mut ReadOnlyParams(geometry), set_mids)
+    }
+
+    /// [`CurveClassification::set_point_class_parameters`] over topology it may change:
+    /// each classification's parameters are computed with
+    /// [`PointClassification::compute_point_parameters_mut`] (a face surface's point
+    /// solve may make the face's trimmed surface cache, as upstream).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`CurveClassification::set_point_class_parameters`].
+    pub fn set_point_class_parameters_mut(
+        &mut self,
+        k: &Kernel,
+        geometry: &mut impl super::p5::ClassGeometryMut<O>,
+        set_mids: bool,
+    ) -> Result<()> {
+        self.set_point_class_parameters_in(k, &mut MutableParams(geometry), set_mids)
+    }
+
+    fn set_point_class_parameters_in(
+        &mut self,
+        k: &Kernel,
+        access: &mut impl PointParams<O>,
+        set_mids: bool,
+    ) -> Result<()> {
         let num_cis = self.data.len();
         let mut ret: Result<()> = Ok(());
         let mut pt = Vec3::UNDEF;
@@ -1008,14 +1085,14 @@ impl<O: ClassObject> CurveClassification<O> {
             if !start_set {
                 if ii == 0 {
                     let param = self.at(ii)?.interval.min();
-                    match self.curve_geometry(geometry)?.evaluate_point(k, param) {
+                    match self
+                        .curve_geometry(access.geometry())?
+                        .evaluate_point(k, param)
+                    {
                         Ok(p) => pt = p,
                         Err(e) => record(Err(e))?,
                     }
-                    let r = self
-                        .at_mut(ii)?
-                        .start
-                        .compute_point_parameters(k, geometry, pt);
+                    let r = access.compute(k, &mut self.at_mut(ii)?.start, pt);
                     record(r)?;
                 } else {
                     let prev_end = self.at(ii - 1)?.end;
@@ -1026,28 +1103,28 @@ impl<O: ClassObject> CurveClassification<O> {
             // End:
             if !self.at(ii)?.end.are_parameters_set() {
                 let param = self.at(ii)?.interval.max();
-                match self.curve_geometry(geometry)?.evaluate_point(k, param) {
+                match self
+                    .curve_geometry(access.geometry())?
+                    .evaluate_point(k, param)
+                {
                     Ok(p) => pt = p,
                     Err(e) => record(Err(e))?,
                 }
-                let r = self
-                    .at_mut(ii)?
-                    .end
-                    .compute_point_parameters(k, geometry, pt);
+                let r = access.compute(k, &mut self.at_mut(ii)?.end, pt);
                 record(r)?;
             }
 
             // Mid:
             if set_mids && !self.at(ii)?.mid.are_parameters_set() {
                 let param = self.at(ii)?.interval.mid();
-                match self.curve_geometry(geometry)?.evaluate_point(k, param) {
+                match self
+                    .curve_geometry(access.geometry())?
+                    .evaluate_point(k, param)
+                {
                     Ok(p) => pt = p,
                     Err(e) => record(Err(e))?,
                 }
-                let r = self
-                    .at_mut(ii)?
-                    .mid
-                    .compute_point_parameters(k, geometry, pt);
+                let r = access.compute(k, &mut self.at_mut(ii)?.mid, pt);
                 record(r)?;
             }
         } // End for each CurveInterval

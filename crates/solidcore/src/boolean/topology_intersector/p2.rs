@@ -1396,8 +1396,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     let num_ivls = cc1.size();
 
                     // Make sure that all PointClasses can evaluate their positions.
-                    ignore_soft(cc1.set_point_class_parameters(k, brep, false))?;
-                    ignore_soft(cc2.set_point_class_parameters(k, brep, false))?;
+                    ignore_soft(cc1.set_point_class_parameters_mut(k, brep, false))?;
+                    ignore_soft(cc2.set_point_class_parameters_mut(k, brep, false))?;
 
                     for ll in 0..num_ivls {
                         let mut ci1 = *cc1.at(ll)?;

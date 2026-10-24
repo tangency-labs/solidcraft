@@ -726,6 +726,8 @@ fn own_surfaces(b: &mut Brep) -> Result<(), HarnessError> {
                 let _ = s.set_owner(Some(face_owner(f.index())));
             }
         }
+        // the face's tolerance, as the face upstream answers GetTolerance with
+        b.sync_face_surface_tolerance(f).map_err(|e| err(&e))?;
     }
     // the edge curves' owners (`SmCurve::GetOwner`/`GetEdge`, set by the B-rep build
     // upstream): the edge's arena identity, which `SmBrep::GetCurves`
