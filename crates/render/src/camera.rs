@@ -290,6 +290,37 @@ impl Camera {
             (self.distance - r * 4.0 - 1.0, self.distance + r * 4.0 + 1.0)
         }
     }
+    /// Clip a known scene, retaining the radius-based margin for grids and overlays.
+    /// In perspective the orbit distance is not the nearest geometry's depth: a deep assembly
+    /// can reach almost to the eye. Cap the usual near plane at half that nearest depth so the
+    /// distance-based precision floor cannot clip its front components after a projection change.
+    pub fn clip_bounds(&self, bounds: &Aabb3) -> (f64, f64) {
+        let fallback = self.clip((self.half_height() * 2.0).max(50.0));
+        if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() {
+            return fallback;
+        }
+        let radius = bounds.diagonal() * 0.5 + bounds.center().dist(self.target);
+        if !radius.is_finite() {
+            return fallback;
+        }
+        let (near, far) = self.clip(radius.max(self.half_height() * 2.0).max(10.0));
+        if self.fov <= 0.0 {
+            return (near, far);
+        }
+        let back = self.back();
+        let nearest = Vec3::new(
+            if back.x >= 0.0 { bounds.max.x } else { bounds.min.x },
+            if back.y >= 0.0 { bounds.max.y } else { bounds.min.y },
+            if back.z >= 0.0 { bounds.max.z } else { bounds.min.z },
+        );
+        let depth = self.distance + (self.target - nearest).dot(back);
+        if !depth.is_finite() {
+            return (near, far);
+        }
+        // A box crossing the eye uses the minimum positive near plane; points behind the eye
+        // still cannot be projected. Keep the existing one-micrometre lower limit.
+        (near.min((depth * 0.5).max(1e-3)), far)
+    }
     /// Projection to clip space (OpenGL/wgpu style, depth 0..1).
     pub fn proj(&self, aspect: f64, near: f64, far: f64) -> Mat4 {
         let aspect = if aspect.is_finite() && aspect > 1e-6 { aspect } else { 1.0 };
@@ -305,6 +336,11 @@ impl Camera {
     }
     pub fn view_proj(&self, aspect: f64, radius: f64) -> Mat4 {
         let (n, f) = self.clip(radius);
+        self.proj(aspect, n, f).mul(&self.view())
+    }
+    /// View-projection using the current scene bounds to admit nearby components.
+    pub fn view_proj_bounds(&self, aspect: f64, bounds: &Aabb3) -> Mat4 {
+        let (n, f) = self.clip_bounds(bounds);
         self.proj(aspect, n, f).mul(&self.view())
     }
     /// World point → pixel coordinates (x right, y down) and depth (0 near … 1 far).
@@ -628,6 +664,58 @@ mod tests {
         let hit = o + d * (o.z / -d.z);
         let (sx, sy, _) = c.to_screen(hit, 800.0, 600.0, 20.0).unwrap();
         assert!((sx - 600.0).abs() < 1e-6 && (sy - 300.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn large_scene_projection_toggle_keeps_near_and_far_components_in_clip_range() {
+        for scale in [1.0, 100.0] {
+            let bounds = Aabb3 { min: Vec3::new(-0.25, -10_000.0, -0.25) * scale, max: Vec3::new(0.25, 10_000.0, 0.25) * scale };
+            let mut cam = Camera { yaw: 0.0, pitch: 0.0, distance: 10_002.0 * scale, ..Default::default() };
+            let original = cam.view_proj_bounds(16.0 / 9.0, &bounds);
+            for fov in [0.0, 0.6, 0.0, 0.6, 0.0] {
+                cam.fov = fov;
+                let vp = cam.view_proj_bounds(16.0 / 9.0, &bounds);
+                let gpu = vp.to_f32();
+                assert!(gpu.iter().flatten().all(|v| v.is_finite()));
+                for x in [bounds.min.x, bounds.max.x] {
+                    for y in [bounds.min.y, bounds.max.y] {
+                        for z in [bounds.min.z, bounds.max.z] {
+                            let p = Vec3::new(x, y, z);
+                            let c = vp.apply(p);
+                            assert!(c[3] > 0.0 && (0.0..=c[3]).contains(&c[2]), "scale={scale}, fov={fov}, {p:?}: {c:?}");
+                            assert!(c[0].abs() <= c[3] && c[1].abs() <= c[3]);
+                            let p = p.to_f32();
+                            let c: [f32; 4] = std::array::from_fn(|r| gpu[0][r] * p[0] + gpu[1][r] * p[1] + gpu[2][r] * p[2] + gpu[3][r]);
+                            assert!(c[3] > 0.0 && (0.0..=c[3]).contains(&c[2]), "GPU scale={scale}, fov={fov}: {c:?}");
+                        }
+                    }
+                }
+                if fov == 0.0 {
+                    assert_eq!(vp, original);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bounds_clipping_handles_eye_crossing_and_invalid_bounds() {
+        let cam = Camera { yaw: 0.0, pitch: 0.0, distance: 10_000.0, fov: 0.6, ..Default::default() };
+        let crossing = Aabb3 { min: Vec3::new(-1.0, -10_001.0, -1.0), max: Vec3::new(1.0, 10_001.0, 1.0) };
+        let (near, far) = cam.clip_bounds(&crossing);
+        assert_eq!(near, 1e-3);
+        assert!(far.is_finite() && far > near);
+        let c = cam.view_proj_bounds(1.0, &crossing).apply(Vec3::new(0.0, -9_999.0, 0.0));
+        assert!(c[3] > 0.0 && (0.0..=c[3]).contains(&c[2]));
+        let fallback = cam.clip((cam.half_height() * 2.0).max(50.0));
+        for bounds in [
+            Aabb3::EMPTY,
+            Aabb3 { min: Vec3::new(f64::NAN, 0.0, 0.0), max: Vec3::ZERO },
+            Aabb3 { min: Vec3::ZERO, max: Vec3::new(f64::INFINITY, 1.0, 1.0) },
+            Aabb3 { min: Vec3::new(-f64::MAX, -1.0, -1.0), max: Vec3::new(f64::MAX, 1.0, 1.0) },
+        ] {
+            assert_eq!(cam.clip_bounds(&bounds), fallback);
+            assert!(cam.view_proj_bounds(1.0, &bounds).0.iter().flatten().all(|v| v.is_finite()));
+        }
     }
 
     #[test]
