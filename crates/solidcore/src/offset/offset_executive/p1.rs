@@ -23,6 +23,7 @@
 //! | [`OffsetExecutive::build_offset_of_vertex`] | `BuildOffsetOfVertex` |
 //! | [`OffsetExecutive::build_offset_of_faceuse`] | `BuildOffsetOfFaceuse` |
 //! | `build_contained_offset_faces` (private) | `BuildOffsetOfFaceuse` contained-domain branch |
+//! | `build_boolean_offset_faces` (private) | `BuildOffsetOfFaceuse` 2D-boolean branch |
 //! | [`OffsetExecutive::map_edgeuses`] | `MapEdgeuses` |
 //!
 //! Deviations: RAII replaces the destructor. Constructor scalars are an immutable snapshot
@@ -49,7 +50,12 @@
 //! hands over the pointer); a failed constructor drops it and, as upstream, relates no
 //! face. Its `SmSSIData` UV curves are cloned into the merge input; a missing entry,
 //! which upstream dereferences, is a null-pointer error. `GetInfiniteRegion` is the
-//! `Brep` accessor. Of the shared `NormalizedEvaluate` placeholder, only `MapEdgeuses`
+//! `Brep` accessor. In the 2D-boolean branch the offset surface goes to the first
+//! resulting face and each later face owns an exact copy (upstream they all share the
+//! one pointer); the temporary planar and domain B-reps notify through arena-only
+//! stores (`ArenaNotifyState`, faces named by `loopuse::notify_ref`), as merge p3's
+//! planar boolean does, and `GetSurfaces` selects the surfaces owned under those
+//! names. Of the shared `NormalizedEvaluate` placeholder, only `MapEdgeuses`
 //! calls `topology::edgeuse::p3`; `RemoveExcessFaces` and `FillGapEdgeuses` keep it in
 //! front of their own unported continuations.
 //! No new input-driven recursion; existing topology walks are cycle-bounded.
@@ -1227,8 +1233,10 @@ impl OffsetExecutive {
     /// made from the face's UV curve copies and takes ownership of the surface
     /// (`offset_surface` becomes `None`); `notifications` keys original-side
     /// entities and `offset_key_of` offset-side ones, and `offset_curve_ref` the curves
-    /// of offset edges split by the self-intersection merge. Otherwise the 2D domain
-    /// boolean defers at the B-rep face constructor.
+    /// of offset edges split by the self-intersection merge. Otherwise the face's UV
+    /// domain is intersected with the offset surface's in 2D and the surface (taken
+    /// from `offset_surface` once that boolean has run) trims one offset face per
+    /// resulting face.
     #[allow(clippy::too_many_arguments)]
     pub fn build_offset_of_faceuse(
         &mut self,
@@ -1302,10 +1310,65 @@ impl OffsetExecutive {
             return Ok(());
         }
 
-        // cpp:3767–3825: prepare the 2D domain boolean. No later boolean or
-        // topology construction can run before CreatePlanarFaceWith3DCurves.
-        let mut planar_brep = Brep::new();
+        // cpp:3765–3928: the 2D domain boolean.
+        let new_faces = self.build_boolean_offset_faces(
+            kernel,
+            original,
+            face_id,
+            orientation,
+            &mut curves,
+            offset_surface,
+            &offset_domain,
+            notifications,
+            offset_key_of,
+        )?;
+        for new_face in new_faces {
+            self.relate_faceuse(original_faceuse, new_face);
+            self.map_edgeuses(
+                kernel,
+                original,
+                original_faceuse,
+                new_face,
+                notifications,
+                offset_key_of,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// The 2D-boolean branch of `BuildOffsetOfFaceuse` (cpp:3765–3928), when the face
+    /// domain is not inside the offset surface's: the face's UV trim curves (as 3D
+    /// curves at `z = 0`) bound a face on a plane, which is intersected
+    /// (`SmPrimitiveCreation::Boolean2D`) with the offset surface's UV domain box;
+    /// each resulting face's curves, back in 2D, trim an offset face on the surface.
+    /// Returns the offset faces in the result's face order. The surface is taken from
+    /// `offset_surface` once the domain boolean has run.
+    #[allow(clippy::too_many_arguments)]
+    fn build_boolean_offset_faces(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &mut Brep,
+        face_id: FaceId,
+        orientation: OrientType,
+        curves: &mut face::FaceCurves,
+        offset_surface: &mut Option<Surface>,
+        offset_domain: &Extent2d,
+        notifications: &mut NotifyEnv<'_>,
+        offset_key_of: &dyn Fn(EntityRef) -> ObjectRef,
+    ) -> Result<Vec<FaceId>> {
+        use crate::geom::tol::USE_DEFAULT;
+        use crate::primitive::primitive_creation::p1::{Boolean2d, PrimitiveCreation};
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p3::new_brep;
+        use crate::topology::brep::p8::{create_planar_face_with_3d_curves, FaceBuildEnv};
+        use crate::topology::topology_traverser::Marks;
+
+        let arena_face = |face: FaceId| loopuse::notify_ref(EntityRef::Face(face));
+        let mut planar_brep = new_brep(kernel, USE_DEFAULT, USE_DEFAULT)?;
+        planar_brep.set_editing_enabled(true);
         planar_brep.set_tolerance(1.0e-6);
+
+        // get bounding box containing all pFU->Face->UVTrimCurves
         let mut total_bbox = Extent3d::new();
         if let Some(uv_curves) = curves.uv_curves.as_mut() {
             for curve in uv_curves {
@@ -1313,6 +1376,8 @@ impl OffsetExecutive {
                 total_bbox = total_bbox.union(&bbox);
             }
         }
+
+        // create a 3d line between every offsetSurface domain corner point
         let min = offset_domain.min();
         let max = offset_domain.max();
         let mut box_curves = Vec::new();
@@ -1344,16 +1409,194 @@ impl OffsetExecutive {
                 Vec3::new(end.x, end.y, 0.0),
             )?;
             ignore_status(line.edit_parameterization(&ivl))?;
-            box_curves.push(line);
+            box_curves.push(Curve::from(line));
         }
-        // Continuation cpp:3827–3928: copy/expand the planar surface to include UV
-        // bounds, MakeFaceWithCurves, Boolean2D(intersection), map its faces' 3D
-        // curves back to UV, construct offset faces, notify and relate them.
-        // UNPORTED(topology.brep_p8): SmBrep::CreatePlanarFaceWith3DCurves
-        Err(SolidError::unported(
-            "SmBrep::CreatePlanarFaceWith3DCurves",
-            "topology.brep_p8",
-        ))
+
+        // make a new Brep containing 1 planar face bounded by the 3d Curves just made
+        let mut domain_brep = new_brep(kernel, USE_DEFAULT, USE_DEFAULT)?;
+        domain_brep.set_tolerance(planar_brep.tolerance());
+        domain_brep.set_editing_enabled(true);
+        {
+            let mut state = ArenaNotifyState::new(&domain_brep);
+            let mut env = state.env(None);
+            let mut marks = Marks::default();
+            let mut fenv = FaceBuildEnv {
+                env: &mut env,
+                marks: &mut marks,
+                this_face: &arena_face,
+            };
+            let region = domain_brep.infinite_region();
+            let tolerance = domain_brep.tolerance();
+            create_planar_face_with_3d_curves(
+                kernel,
+                &mut domain_brep,
+                region,
+                &box_curves,
+                tolerance,
+                &mut fenv,
+            )?;
+        }
+
+        // copy the plane just made and get its natural domain
+        let mut copy_plane = {
+            // GetSurfaces: the surfaces their faces own, under the faces' identities.
+            let owners = bp1::surface_owners(&domain_brep, None, &arena_face)?;
+            let first_face = required(owners.first().copied())?;
+            let first = required(domain_brep.face(first_face)?.surface.as_ref())?;
+            if !matches!(first.kind(), SurfaceKind::Plane(_)) {
+                // SM_CAST_PTR yields NULL, dereferenced next upstream.
+                return Err(SolidError::null_pointer(OP));
+            }
+            first.copy(kernel)?
+        };
+        let mut copy_domain = copy_plane.natural_uv_domain();
+        let SurfaceKind::Plane(plane) = copy_plane.kind_mut() else {
+            return Err(SolidError::null_pointer(OP));
+        };
+
+        // increase the copy domain to include the projection of every UV trim curve
+        // bounding box corner onto this plane.
+        for corner in [
+            total_bbox.min(),
+            total_bbox.max(),
+            total_bbox.evaluate(1.0, 0.0, 0.0),
+            total_bbox.evaluate(0.0, 1.0, 0.0),
+        ] {
+            copy_domain.add_point(plane.project_point_to_uv_domain(corner));
+        }
+        ignore_status(plane.adjust_step_uv_domain(&copy_domain))?;
+        let copy_plane_domain = copy_plane.natural_uv_domain();
+
+        // make a planar face using the offset UV trim curves (as 3D curves)
+        let mut loops = Vec::new();
+        for &count in &curves.curve_loops {
+            loops.push(
+                usize::try_from(count)
+                    .map_err(|_| SolidError::invalid_input(OP, "loop count exceeds usize"))?,
+            );
+        }
+        let input = FaceCurvesInput {
+            loops,
+            curves_3d: curves
+                .uv_curves
+                .take()
+                .map(|list| list.into_iter().map(Some).collect()),
+            uv_curves: None,
+            orientations: std::mem::take(&mut curves.curve_orients),
+            loop_points: std::mem::take(&mut curves.loop_points),
+        };
+        {
+            let mut state = ArenaNotifyState::new(&planar_brep);
+            let mut env = state.env(None);
+            let region = planar_brep.infinite_region();
+            bp7::make_face_with_curves(
+                kernel,
+                &mut planar_brep,
+                region,
+                input,
+                copy_plane,
+                &copy_plane_domain,
+                OrientType::Same,
+                None,
+                &arena_face,
+                &mut env,
+            )?;
+        }
+
+        // Intersect in 2d the domain B-rep with the planar B-rep.
+        let mut result = None;
+        {
+            let mut primitive = PrimitiveCreation::new(None, 0, false);
+            let mut domain_marks = Marks::default();
+            let mut planar_marks = Marks::default();
+            let mut state = ArenaNotifyState::new(&domain_brep);
+            state.seed(&planar_brep);
+            primitive.boolean_2d(
+                kernel,
+                &mut domain_brep,
+                &mut planar_brep,
+                Boolean2d::Intersection,
+                &mut result,
+                (&mut domain_marks, &mut planar_marks),
+                &mut state.env(None),
+            )?;
+        }
+        // Upstream dereferences the result next, even when Boolean2D left it null.
+        let mut result = required(result)?;
+
+        // The result's faces represent the UV domain of the part of the original face
+        // that corresponds to the offset face. Their edge curves are UV trim curves,
+        // mapped into the offset B-rep with the offset surface.
+        let surface = required(offset_surface.take())?;
+        let result_faces = bp1::faces(&result, None)?;
+        let mut new_faces = Vec::new();
+        for (index, &result_face) in result_faces.iter().enumerate() {
+            let made = face::create_curves_from_face(
+                kernel,
+                &mut result,
+                result_face,
+                OrientType::Same,
+                true,
+                false,
+            )?;
+            let mut uv_curves = made.curves_3d.unwrap_or_default();
+            // Convert face 3dCurves into 2D curves (all their Z components are zero).
+            for curve in &mut uv_curves {
+                ignore_status(curve.convert_to_2d(kernel))?;
+            }
+            let mut loops = Vec::new();
+            for &count in &made.curve_loops {
+                loops.push(
+                    usize::try_from(count)
+                        .map_err(|_| SolidError::invalid_input(OP, "loop count exceeds usize"))?,
+                );
+            }
+            let input = FaceCurvesInput {
+                loops,
+                curves_3d: None,
+                uv_curves: Some(uv_curves),
+                orientations: made.curve_orients,
+                loop_points: made.loop_points,
+            };
+            // Upstream every face shares the one offset surface; here each face but
+            // the first owns an exact copy of it.
+            let face_surface = if index == 0 {
+                surface.clone()
+            } else {
+                surface.copy(kernel)?
+            };
+            let this_face = |face| offset_key_of(EntityRef::Face(face));
+            let brep = required(self.offset_brep.as_mut())?;
+            let region = brep.infinite_region();
+            let made = bp7::make_face_with_curves(
+                kernel,
+                brep,
+                region,
+                input,
+                face_surface,
+                offset_domain,
+                orientation,
+                None,
+                &this_face,
+                &mut offset_env(notifications, offset_key_of),
+            )?;
+            let offset_face = required(made.face)?;
+            new_faces.push(offset_face);
+            // SM_NO_GET_BREP is NULL in the pinned reference; the status is not checked.
+            ignore_status(face3::notify(
+                original,
+                face_id,
+                notifications,
+                None,
+                NotifyOperation::Copy,
+                [
+                    Some(offset_key_of(EntityRef::Face(offset_face))),
+                    None,
+                    None,
+                ],
+            ))?;
+        }
+        Ok(new_faces)
     }
 
     /// The contained-domain branch of `BuildOffsetOfFaceuse` (cpp:3613–3762): the
@@ -3243,11 +3486,13 @@ mod tests {
             &Extent2d::from_bounds(0.2, 0.2, 0.8, 0.8),
         ));
         let mut offset = Some(smaller.clone());
-        assert_dependency(
-            build_face(&mut executive, &mut original, Some(faceuse), &mut offset),
-            "SmBrep::CreatePlanarFaceWith3DCurves",
-            "topology.brep_p8",
-        );
+        // The 2D-boolean branch: the loopless face gives the planar face no curves,
+        // and that MakeFaceWithCurves status is returned (SER) before the boolean,
+        // with the offset surface still the caller's.
+        match build_face(&mut executive, &mut original, Some(faceuse), &mut offset) {
+            Err(error) => assert!(!error.is_unported(), "{error:?}"),
+            Ok(()) => panic!("a loopless planar face must fail"),
+        }
         assert!(offset.is_some());
         executive.set_operation(OffsetOperation::LocalOperation);
         let mut offset = Some(smaller);
