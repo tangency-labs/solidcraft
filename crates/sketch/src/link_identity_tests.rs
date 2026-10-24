@@ -103,11 +103,12 @@ fn geometric_refresh_updates_conic_and_ellipse_scalar_values() {
 #[test]
 fn many_curves_sharing_few_points_do_not_enter_permutation_matching() {
     let mut sk = Sketch::new();
-    let geom = vec![LinkGeom::Line(Vec2::new(1.0, 1.0), Vec2::new(2.0, 2.0)); 513];
+    let arc = |c: Vec2| LinkGeom::Arc { c, a: c + Vec2::X, b: c + Vec2::Y };
+    let geom = vec![arc(Vec2::new(1.0, 1.0)); 513];
     let link = sk.add_link(LinkKind::Project, face(), &geom).unwrap();
-    assert_eq!(sk.link_points(&link).len(), 2);
+    assert_eq!(sk.link_points(&link).len(), 3);
     let before = sk.clone();
-    let shifted = vec![LinkGeom::Line(Vec2::new(3.0, 3.0), Vec2::new(4.0, 4.0)); 513];
+    let shifted = vec![arc(Vec2::new(3.0, 3.0)); 513];
     assert!(sk.update_link(&link, &shifted).is_err());
     assert_eq!(sk.points, before.points);
     assert_eq!(sk.curves, before.curves);
@@ -330,4 +331,32 @@ fn huge_loop_does_not_make_nearby_bowtie_edges_topologically_adjacent() {
     assert_eq!(sk.points, saved.points);
     assert_eq!(sk.curves, saved.curves);
     assert!(sk.link(&link).unwrap().lost);
+}
+
+#[test]
+fn edge_on_face_lays_out_as_one_silhouette_line_and_stays_current() {
+    let mut sk = Sketch::new();
+    // A vertical wall seen from above: its top and bottom edges project onto the same segment,
+    // its vertical edges onto points.
+    let (a, b) = (Vec2::new(40.0, 0.0), Vec2::new(40.0, 30.0));
+    let wall = vec![LinkGeom::Line(a, b), LinkGeom::Line(b, b), LinkGeom::Line(b, a), LinkGeom::Line(a, a)];
+    let link = sk.add_link(LinkKind::Project, face(), &wall).unwrap();
+    assert_eq!(sk.link_curves(&link).len(), 1);
+    assert!(!sk.update_link(&link, &wall).unwrap(), "the same silhouette keeps its curve");
+    assert!(!sk.link(&link).unwrap().lost);
+    // A notched wall seen edge-on: overlapping pieces along one line, still one line end to end.
+    let notched = [(0.0, 12.0), (8.0, 20.0), (18.0, 30.0), (5.0, 25.0)]
+        .into_iter()
+        .flat_map(|(y0, y1)| [LinkGeom::Line(Vec2::new(40.0, y0), Vec2::new(40.0, y1)), LinkGeom::Line(Vec2::new(40.0, y1), Vec2::new(40.0, y0))])
+        .collect::<Vec<_>>();
+    assert!(!sk.update_link(&link, &notched).unwrap(), "the same line keeps its curve");
+    let [ci] = sk.link_curves(&link)[..] else { panic!("one line") };
+    let CurveKind::Line { a, b } = sk.curves[ci].kind else { panic!("a line") };
+    let ends = [sk.points[a].pos, sk.points[b].pos];
+    assert!(ends.contains(&Vec2::new(40.0, 0.0)) && ends.contains(&Vec2::new(40.0, 30.0)), "{ends:?}");
+    assert!(!sk.link(&link).unwrap().lost);
+    // Turned to face the sketch, the wall is its rectangle again.
+    assert!(sk.update_link(&link, &square(10.0)).unwrap());
+    assert_eq!(sk.link_curves(&link).len(), 4);
+    assert!(!sk.link(&link).unwrap().lost);
 }

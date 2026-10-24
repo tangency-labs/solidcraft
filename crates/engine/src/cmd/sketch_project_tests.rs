@@ -677,3 +677,35 @@ fn a_face_sketch_saved_with_fitted_letters_reopens_and_builds_the_same() {
         sketch.curves.iter().filter(|c| c.link.is_some() && matches!(c.kind, solidcraft_sketch::CurveKind::Spline { control: true, .. })).count();
     assert!(pieces > 0, "{pieces}");
 }
+
+#[test]
+fn a_face_seen_edge_on_projects_as_its_silhouette_and_follows_edits() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 30}));
+    // The +x wall of the 40 x 30 x 20 box, seen from above: one line from (40, 0) to (40, 30).
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"face": [40, 15, 10]}]}));
+    let link = r["links"][0]["link"].as_str().unwrap().to_string();
+    assert_eq!(ids(&r["links"][0]["curves"]).len(), 1, "{r}");
+    let si = inspect(&mut s);
+    let c = linked_curves(&si).into_iter().find(|c| c["link"] == link.as_str()).unwrap();
+    let xs: Vec<f64> = [&c["start_at"][0], &c["end_at"][0]].iter().map(|v| v.as_f64().unwrap()).collect();
+    assert!(xs.iter().all(|x| (x - 40.0).abs() < 1e-6), "{c}");
+    run(&mut s, "sketch.finish", json!({}));
+    let sketch = s.doc.features.last().unwrap().id;
+    let lost = |s: &Session| s.model.state().sketch(sketch).unwrap().sketch.link(&link).unwrap().lost;
+    assert!(!lost(&s), "the silhouette is current after the sketch is evaluated");
+    assert!(
+        s.model.results.iter().all(|r| r.warning.is_none()),
+        "{:?}",
+        s.model.results.iter().filter_map(|r| r.warning.clone()).collect::<Vec<_>>()
+    );
+    // The wall follows the width.
+    run(&mut s, "parameters.change", json!({"name": "width", "expression": "50 mm"}));
+    assert!(!lost(&s), "{:?}", s.model.results.iter().filter_map(|r| r.warning.clone()).collect::<Vec<_>>());
+    let st = s.model.state();
+    let sk = &st.sketch(sketch).unwrap().sketch;
+    let ci = sk.link_curves(&link)[0];
+    let solidcraft_sketch::CurveKind::Line { a, b } = sk.curves[ci].kind else { panic!("not a line") };
+    assert!((sk.point(a).unwrap().x - 50.0).abs() < 1e-6 && (sk.point(b).unwrap().x - 50.0).abs() < 1e-6);
+}
