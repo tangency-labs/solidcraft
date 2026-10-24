@@ -119,6 +119,12 @@ the clean-room and licence rules, and where help is wanted most. Open work is in
 SolidCraft's continuous integration runs on [Blacksmith](https://www.blacksmith.sh), which
 sponsors its CI minutes.
 
+## Disclaimer
+
+The files in this repository are provided as is, without warranty, liability or indemnity, and
+Tangency Labs and the contributors accept no responsibility for any harmful or unlawful use of
+them: read [DISCLAIMER.md](DISCLAIMER.md).
+
 ## Licence
 
 MIT OR Apache-2.0, at your option. Developed under the
