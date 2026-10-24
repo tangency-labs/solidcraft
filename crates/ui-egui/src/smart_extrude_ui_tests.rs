@@ -123,3 +123,131 @@ fn an_explicit_reverse_keeps_the_operation() {
     drag_to(&mut h, 2.0);
     assert_eq!(state(&h), (1, JOIN, false));
 }
+
+/// Pressing on a top face and pulling it up extrudes it by the distance dragged, without any
+/// tool being started; letting go leaves the window open until OK.
+#[test]
+fn pulling_a_face_up_extrudes_it() {
+    let mut h = Harness::new();
+    h.app.preferences.direct_interaction = true;
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"home"}})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"drag":[{"world":[10,10,10]},{"world":[10,10,20]}]})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_some(), "the window stays open after the release");
+    assert_eq!(state(&h), (0, JOIN, true), "pulled out: Join");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "OK applied the extrude");
+    let (lo, hi) = bounds_z(&h);
+    assert!(lo.abs() < 1e-6 && hi > 10.5, "the box grew upward: z {lo}..{hi}");
+}
+
+/// Direct interaction is a setting, off until someone turns it on: a pull then does nothing.
+#[test]
+fn direct_interaction_is_off_until_the_setting_is_on() {
+    let mut h = Harness::new();
+    assert!(!h.app.preferences.direct_interaction);
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"home"}})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    let before = volume(&h);
+    h.step(&json!({"drag":[{"world":[10,10,10]},{"world":[10,10,20]}]})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "no extrude window");
+    assert!((volume(&h) - before).abs() < 1e-6);
+}
+
+/// A press on a face that moves sideways is still a box selection: nothing is extruded.
+#[test]
+fn dragging_sideways_over_a_face_does_not_extrude() {
+    let mut h = Harness::new();
+    h.app.preferences.direct_interaction = true;
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"home"}})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    let before = volume(&h);
+    h.step(&json!({"drag":[{"world":[10,10,10]},{"world":[18,10,10]}]})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none());
+    assert!((volume(&h) - before).abs() < 1e-6);
+}
+
+/// Pulling a face down into the body cuts, and the window waits for OK as well.
+#[test]
+fn pulling_a_face_down_into_the_body_cuts() {
+    let mut h = Harness::new();
+    h.app.preferences.direct_interaction = true;
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"home"}})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"drag":[{"world":[10,10,10]},{"world":[10,10,5]}]})).unwrap();
+    h.frames(4);
+    assert_eq!(state(&h).1, CUT, "pushed into the box: Cut");
+}
+
+/// The Fillet window's radius, whether it is a chamfer, and whether the pull opened it.
+fn blend(h: &Harness) -> (String, bool, bool) {
+    let Some(Dialog { kind: Kind::Fillet { radius, chamfer, .. }, extra, .. }) = &h.app.dialog else { panic!("fillet dialog: {:?}", h.app.dialog) };
+    (radius.clone(), *chamfer, extra.contains_key(crate::drag_blend::MARK))
+}
+
+fn pull_an_edge(shift: bool, enabled: bool) -> Harness {
+    pull_an_edge_to(shift, enabled, [26.0, 10.0, 10.0])
+}
+
+fn pull_an_edge_to(shift: bool, enabled: bool, to: [f64; 3]) -> Harness {
+    let mut h = Harness::new();
+    h.app.preferences.direct_interaction = enabled;
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"home"}})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"drag":[{"world":[20,10,10]},{"world":to}],"shift":shift,"late_mods":true})).unwrap();
+    h.frames(4);
+    h
+}
+
+/// Pulling an edge away from where it was pressed rounds it by that far, and the window waits
+/// for OK.
+#[test]
+fn pulling_an_edge_rounds_it() {
+    let mut h = pull_an_edge(false, true);
+    let (radius, chamfer, marked) = blend(&h);
+    assert!(marked && !chamfer, "a round, opened by the pull");
+    let r: f64 = radius.trim_end_matches(" mm").parse().unwrap_or(0.0);
+    assert!(r > 0.5, "the pull set a radius: {radius}");
+    let before = volume(&h);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "OK applied the round");
+    assert!(volume(&h) < before - 1e-6, "material came off the edge");
+}
+
+/// Shift while pulling makes the edge a chamfer; the window can switch it back.
+#[test]
+fn shift_while_pulling_an_edge_chamfers_it() {
+    let h = pull_an_edge(true, true);
+    assert!(blend(&h).1, "a chamfer");
+}
+
+/// Without the setting an edge press-drag is a box selection as before.
+#[test]
+fn pulling_an_edge_does_nothing_until_direct_interaction_is_on() {
+    let h = pull_an_edge(false, false);
+    assert!(h.app.dialog.is_none());
+}
+
+/// Moving straight up while pulling an edge sets the step, not the size: the size is then just
+/// one step of the ladder.
+#[test]
+fn moving_up_while_pulling_an_edge_sets_the_step() {
+    let h = pull_an_edge_to(false, true, [20.0, 10.0, 16.0]);
+    let (radius, _, marked) = blend(&h);
+    assert!(marked);
+    let r: f64 = radius.trim_end_matches(" mm").parse().unwrap_or(f64::NAN);
+    assert!(crate::drag_extrude::STEPS.iter().any(|s| (s - r).abs() < 1e-9), "{radius} is a step of the ladder");
+}

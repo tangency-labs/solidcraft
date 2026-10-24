@@ -344,6 +344,16 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             });
         }
         Kind::Fillet { radius, chamfer, chain, ctype, distance2, angle, flip } => {
+            // A window opened by pulling an edge can become the other kind (Shift while pulling
+            // picks the chamfer).
+            if d.extra.contains_key(crate::drag_blend::MARK) {
+                form_row(ui, "Kind", |ui| {
+                    let mut chosen = usize::from(*chamfer);
+                    if ui_kit::segmented(ui, &mut chosen, &["Round", "Chamfer"], Default::default()) {
+                        *chamfer = chosen == 1;
+                    }
+                });
+            }
             if *chamfer {
                 choice_row(ui, "Chamfer Type", "ch_type", ctype, &CHAMFER_TYPES);
             }

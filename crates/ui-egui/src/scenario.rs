@@ -8,7 +8,7 @@
 //!   text (with `near`: the one in that label's row)
 //! - `{"click": AT, "double"?, "shift"?, "ctrl"?, "button"?}`, `{"move": AT, "shift"?, "alt"?, "ctrl"?, "cmd"?}`,
 //!   `{"hold": AT, "frames"?}` (press and hold still: Select Other),
-//!   `{"drag": [AT, AT], "shift"?, "ctrl"?, "steps"?}` where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
+//!   `{"drag": [AT, AT], "shift"?, "ctrl"?, "late_mods"?, "steps"?}` where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
 //!   or `{"sketch": [x,y]}` (the sketch being edited)
 //! - `{"queued": "engine.execute", "params": {…}, "min_frames"?: n, "max_frames"?: n}`: a request sent the way an
 //!   agent's arrive (through the app's request queue, answered between frames, so the agent
@@ -412,209 +412,213 @@ impl Harness {
     /// Run one step.
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
-        let res =
-            if let Some(id) = s.get("start").and_then(Value::as_str) {
-                self.call("ui.start", json!({ "command": id }))
-            } else if let Some(k) = s.get("key").and_then(Value::as_str) {
-                {
-                    let mut params = json!({"key": k, "shift": flag("shift"), "cmd": flag("cmd"), "alt": flag("alt")});
-                    if let Some(ctrl) = s.get("ctrl") {
-                        params["ctrl"] = ctrl.clone();
-                    }
-                    if let Some(pressed) = s.get("pressed") {
-                        params["pressed"] = pressed.clone();
-                    }
-                    self.call("ui.key", params)
+        let res = if let Some(id) = s.get("start").and_then(Value::as_str) {
+            self.call("ui.start", json!({ "command": id }))
+        } else if let Some(k) = s.get("key").and_then(Value::as_str) {
+            {
+                let mut params = json!({"key": k, "shift": flag("shift"), "cmd": flag("cmd"), "alt": flag("alt")});
+                if let Some(ctrl) = s.get("ctrl") {
+                    params["ctrl"] = ctrl.clone();
                 }
-            } else if let Some(n) = s.get("frames").and_then(Value::as_u64) {
-                if n > 600 {
-                    return Err("frames must be at most 600".into());
+                if let Some(pressed) = s.get("pressed") {
+                    params["pressed"] = pressed.clone();
                 }
-                self.frames(n as usize);
-                return Ok(());
-            } else if let Some(t) = s.get("text").and_then(Value::as_str) {
-                self.call("ui.text", json!({ "text": t }))
-            } else if let Some(at) = s.get("click") {
-                let [x, y] = self.at(at)?;
-                // Hover first, as a hand does.
-                self.call("ui.move", json!({"x": x, "y": y}));
-                let mut p = json!({"x": x, "y": y, "double": flag("double"), "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt")});
-                if let Some(b) = s.get("button") {
-                    p["button"] = b.clone();
-                }
-                self.call("ui.click", p)
-            } else if let Some(text) = s.get("widget").and_then(Value::as_str) {
-                // A dialog field, choice or button, found by its text.
-                let found = match s.get("near").and_then(Value::as_str) {
-                    Some(near) => self.widget_near(text, near),
-                    None => self.widget(text),
-                };
-                let [x, y] = found.ok_or_else(|| format!("no widget `{text}` on screen"))?;
-                self.call("ui.move", json!({"x": x, "y": y}));
-                self.call("ui.click", json!({"x": x, "y": y}))
-            } else if let Some(at) = s.get("hold") {
-                // Press and hold still (Select Other): `frames` with the button down (default 40,
-                // about 0.67 s), then let go.
-                let [x, y] = self.at(at)?;
-                self.call("ui.move", json!({"x": x, "y": y}));
-                let frames = s.get("frames").and_then(Value::as_u64).unwrap_or(40);
-                self.call(
-                    "ui.drag",
-                    json!({"x0": x, "y0": y, "x1": x, "y1": y, "steps": 1, "hold": frames, "shift": flag("shift"), "ctrl": flag("ctrl")}),
-                )
-            } else if let Some(at) = s.get("move") {
-                let [x, y] = self.at(at)?;
-                self.call("ui.move", json!({"x": x, "y": y,"shift":flag("shift"),"alt":flag("alt"),"ctrl":flag("ctrl"),"cmd":flag("cmd")}))
-            } else if let Some(d) = s.get("drag") {
-                let [x0, y0] = self.at(d.get(0).unwrap_or(&Value::Null))?;
-                let [x1, y1] = self.at(d.get(1).unwrap_or(&Value::Null))?;
-                let steps = s.get("steps").cloned().unwrap_or(json!(8));
-                self.call(
-                    "ui.drag",
-                    json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt")}),
-                )
-            } else if let Some(m) = s.get("queued").and_then(Value::as_str) {
-                let (v, frames) = self.call_queued(m, s.get("params").cloned().unwrap_or(json!({})));
-                let min = s.get("min_frames").and_then(Value::as_u64).unwrap_or(0);
-                if (frames as u64) < min {
-                    return Err(format!("{m} was answered after {frames} frames: the agent cursor did not act it out ({min})"));
-                }
-                if let Some(max) = s.get("max_frames").and_then(Value::as_u64)
-                    && frames as u64 > max
-                {
-                    return Err(format!("{m} was answered after {frames} frames, more than {max}"));
-                }
-                v
-            } else if let Some(f) = s.get("script").and_then(Value::as_str) {
-                // A command script (`{"commands": [{command, params}]}`, path from the repository
-                // root) run through the engine, as `solidcraft-cli run` does.
-                let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(f);
-                let text = std::fs::read_to_string(&path).map_err(|e| format!("{f}: {e}"))?;
-                let v: Value = serde_json::from_str(&text).map_err(|e| format!("{f}: {e}"))?;
-                for (i, c) in v["commands"].as_array().into_iter().flatten().enumerate() {
-                    let r = self.call("engine.execute", json!({"command": c["command"], "params": c.get("params").cloned().unwrap_or(json!({}))}));
-                    if r["ok"] != true {
-                        return Err(format!("{f}: step {} ({}): {}", i + 1, c["command"], r["error"]));
-                    }
-                }
-                self.frames(2);
-                return Ok(());
-            } else if let Some(m) = s.get("call").and_then(Value::as_str) {
-                // "$DIR" in a string parameter is the scenario's folder.
-                let params = with_dir(s.get("params").cloned().unwrap_or(json!({})), &self.dir.to_string_lossy());
-                self.call(m, params)
-            } else if s.get("note").is_some() || s.get("pending").is_some() {
-                return Ok(());
-            } else if let Some(name) = s.get("shot").and_then(Value::as_str) {
-                // With SOLIDCRAFT_SCENARIO_SHOTS set: a render of the model as the camera sees it.
-                if let Ok(dir) = solidcraft_engine::geom::env::var("SCENARIO_SHOTS").ok_or(()) {
-                    // Drawn on the GPU: the headless device, as the CLI draws.
-                    #[cfg(not(target_arch = "wasm32"))]
-                    if solidcraft_engine::capture::installed().is_none() {
-                        solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-                            let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
-                            Ok(solidcraft_engine::capture::Picture { rgba, renderer })
-                        }));
-                    }
-                    let path = std::path::Path::new(&dir).join(format!("{name}.png"));
-                    let r = self.call("ui.render", json!({"path": path.to_string_lossy(), "width": 1000, "height": 700}));
-                    if r["ok"] != true {
-                        return Err(format!("shot {name}: {}", r["error"]));
-                    }
-                }
-                return Ok(());
-            } else if let Some(c) = s.get("camera") {
-                // Put the camera at an orbit: {"yaw": rad, "pitch": rad}.
-                if let Some(y) = c.get("yaw").and_then(Value::as_f64) {
-                    self.app.cam.yaw = y;
-                }
-                if let Some(p) = c.get("pitch").and_then(Value::as_f64) {
-                    self.app.cam.pitch = p;
-                }
-                self.app.cam_anim = None;
-                self.frames(2);
-                // Where `camera.panned` and `camera.zoomed` checks measure from.
-                self.cam_mark = Some(self.app.cam);
-                return Ok(());
-            } else if let Some(v) = s.get("view_anim").and_then(Value::as_str) {
-                return self.view_anim(v, s.get("max_deg").and_then(Value::as_f64).unwrap_or(10.0));
-            } else if s.get("autosave").is_some() {
-                self.start_autosave();
-                return Ok(());
-            } else if let Some(how) = s.get("restart").and_then(Value::as_str) {
-                // "crash": the app dies (its autosave lock goes with it, the entry stays);
-                // "close": it closes normally. Then a new app starts on the same folders.
-                let mut old = std::mem::replace(&mut self.app, SolveApp::new(Session::default(), Services::default()));
-                if how == "close" {
-                    crate::recovery_ui::close(&mut old);
-                    // The desktop saves its settings on close and loads them on the next start.
-                    let prefs = old.prefs();
-                    self.app.load_prefs(&prefs);
-                }
-                drop(old);
-                self.ctx = egui::Context::default();
-                crate::fonts::setup_bundled_fonts(&self.ctx);
-                self.ctx.enable_accesskit();
-                self.install();
-                self.start_autosave();
-                self.frames(3);
-                return Ok(());
-            } else if let Some(f) = s.get("make_image").and_then(Value::as_str) {
-                // A picture to insert (a 200 x 100 checkerboard PNG in the scenario's folder).
-                let img = image::RgbImage::from_fn(200, 100, |x, y| {
-                    if (x / 20 + y / 20) % 2 == 0 { image::Rgb([230, 230, 230]) } else { image::Rgb([60, 90, 160]) }
-                });
-                img.save(self.dir.join(f)).map_err(|e| format!("make_image: {e}"))?;
-                return Ok(());
-            } else if let Some(f) = s.get("choose_file").and_then(Value::as_str) {
-                *self.next_file.borrow_mut() = Some(self.dir.join(f).to_string_lossy().into_owned());
-                return Ok(());
-            } else if let Some(m) = s.get("print").and_then(Value::as_str) {
-                let r = self.call(m, s.get("params").cloned().unwrap_or(json!({})));
-                eprintln!("print {m}: {r}");
-                return Ok(());
-            } else if s.get("debug").is_some() {
-                let ui = self.call("ui.inspect", json!({}));
-                let sel = self.call("ui.selection", json!({}));
-                eprintln!(
-                    "debug: dialog {} tool {} hover {}\nselection {}\nstatus {:?}",
-                    ui["result"]["dialog"], ui["result"]["tool"], ui["result"]["hover"], sel["result"]["selection"], self.app.status
-                );
-                if s["debug"] == json!("widgets") {
-                    let texts: Vec<String> = self
-                        .output
-                        .accesskit_update
-                        .iter()
-                        .flat_map(|t| t.nodes.iter())
-                        .filter_map(|(_, n)| {
-                            let at = n.bounds().map(|b| format!(" @{:.0},{:.0}", (b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0)).unwrap_or_default();
-                            n.label().or(n.value()).map(|l| format!("{:?} {l}{at}", n.role()))
-                        })
-                        .collect();
-                    eprintln!("widgets: {texts:?}");
-                }
-                if s["debug"] == json!("handles") {
-                    let names: Vec<String> = HANDLES.with(|h| h.borrow().iter().map(|(n, p)| format!("{n} @{:.0},{:.0}", p.x, p.y)).collect());
-                    eprintln!("handles: {names:?}");
-                }
-                return Ok(());
-            } else if let Some(e) = s.get("until") {
-                // Background work (a sample being built, a preview): frames until the checks pass.
-                let mut last = String::new();
-                for _ in 0..600 {
-                    match check(self, e) {
-                        Ok(()) => return Ok(()),
-                        Err(m) => last = m,
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(20));
-                    self.frames(2);
-                }
-                return Err(format!("timed out: {last}"));
-            } else if let Some(e) = s.get("expect") {
-                return check(self, e);
-            } else {
-                return Err(format!("unknown step {s}"));
+                self.call("ui.key", params)
+            }
+        } else if let Some(n) = s.get("frames").and_then(Value::as_u64) {
+            if n > 600 {
+                return Err("frames must be at most 600".into());
+            }
+            self.frames(n as usize);
+            return Ok(());
+        } else if let Some(t) = s.get("text").and_then(Value::as_str) {
+            self.call("ui.text", json!({ "text": t }))
+        } else if let Some(at) = s.get("click") {
+            let [x, y] = self.at(at)?;
+            // Hover first, as a hand does.
+            self.call("ui.move", json!({"x": x, "y": y}));
+            let mut p = json!({"x": x, "y": y, "double": flag("double"), "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt")});
+            if let Some(b) = s.get("button") {
+                p["button"] = b.clone();
+            }
+            self.call("ui.click", p)
+        } else if let Some(text) = s.get("widget").and_then(Value::as_str) {
+            // A dialog field, choice or button, found by its text.
+            let found = match s.get("near").and_then(Value::as_str) {
+                Some(near) => self.widget_near(text, near),
+                None => self.widget(text),
             };
+            let [x, y] = found.ok_or_else(|| format!("no widget `{text}` on screen"))?;
+            self.call("ui.move", json!({"x": x, "y": y}));
+            self.call("ui.click", json!({"x": x, "y": y}))
+        } else if let Some(at) = s.get("hold") {
+            // Press and hold still (Select Other): `frames` with the button down (default 40,
+            // about 0.67 s), then let go.
+            let [x, y] = self.at(at)?;
+            self.call("ui.move", json!({"x": x, "y": y}));
+            let frames = s.get("frames").and_then(Value::as_u64).unwrap_or(40);
+            self.call(
+                "ui.drag",
+                json!({"x0": x, "y0": y, "x1": x, "y1": y, "steps": 1, "hold": frames, "shift": flag("shift"), "ctrl": flag("ctrl")}),
+            )
+        } else if let Some(at) = s.get("move") {
+            let [x, y] = self.at(at)?;
+            self.call("ui.move", json!({"x": x, "y": y,"shift":flag("shift"),"alt":flag("alt"),"ctrl":flag("ctrl"),"cmd":flag("cmd")}))
+        } else if let Some(d) = s.get("drag") {
+            let [x0, y0] = self.at(d.get(0).unwrap_or(&Value::Null))?;
+            let [x1, y1] = self.at(d.get(1).unwrap_or(&Value::Null))?;
+            let steps = s.get("steps").cloned().unwrap_or(json!(8));
+            self.call(
+                    "ui.drag",
+                    json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt"), "late_mods": flag("late_mods")}),
+                )
+        } else if let Some(m) = s.get("queued").and_then(Value::as_str) {
+            let (v, frames) = self.call_queued(m, s.get("params").cloned().unwrap_or(json!({})));
+            let min = s.get("min_frames").and_then(Value::as_u64).unwrap_or(0);
+            if (frames as u64) < min {
+                return Err(format!("{m} was answered after {frames} frames: the agent cursor did not act it out ({min})"));
+            }
+            if let Some(max) = s.get("max_frames").and_then(Value::as_u64)
+                && frames as u64 > max
+            {
+                return Err(format!("{m} was answered after {frames} frames, more than {max}"));
+            }
+            v
+        } else if let Some(f) = s.get("script").and_then(Value::as_str) {
+            // A command script (`{"commands": [{command, params}]}`, path from the repository
+            // root) run through the engine, as `solidcraft-cli run` does.
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(f);
+            let text = std::fs::read_to_string(&path).map_err(|e| format!("{f}: {e}"))?;
+            let v: Value = serde_json::from_str(&text).map_err(|e| format!("{f}: {e}"))?;
+            for (i, c) in v["commands"].as_array().into_iter().flatten().enumerate() {
+                let r = self.call("engine.execute", json!({"command": c["command"], "params": c.get("params").cloned().unwrap_or(json!({}))}));
+                if r["ok"] != true {
+                    return Err(format!("{f}: step {} ({}): {}", i + 1, c["command"], r["error"]));
+                }
+            }
+            self.frames(2);
+            return Ok(());
+        } else if let Some(m) = s.get("call").and_then(Value::as_str) {
+            // "$DIR" in a string parameter is the scenario's folder.
+            let params = with_dir(s.get("params").cloned().unwrap_or(json!({})), &self.dir.to_string_lossy());
+            self.call(m, params)
+        } else if s.get("note").is_some() || s.get("pending").is_some() {
+            return Ok(());
+        } else if let Some(name) = s.get("shot").and_then(Value::as_str) {
+            // With SOLIDCRAFT_SCENARIO_SHOTS set: a render of the model as the camera sees it.
+            if let Ok(dir) = solidcraft_engine::geom::env::var("SCENARIO_SHOTS").ok_or(()) {
+                // Drawn on the GPU: the headless device, as the CLI draws.
+                #[cfg(not(target_arch = "wasm32"))]
+                if solidcraft_engine::capture::installed().is_none() {
+                    solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
+                        let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+                        Ok(solidcraft_engine::capture::Picture { rgba, renderer })
+                    }));
+                }
+                let path = std::path::Path::new(&dir).join(format!("{name}.png"));
+                let r = self.call("ui.render", json!({"path": path.to_string_lossy(), "width": 1000, "height": 700}));
+                if r["ok"] != true {
+                    return Err(format!("shot {name}: {}", r["error"]));
+                }
+            }
+            return Ok(());
+        } else if let Some(c) = s.get("camera") {
+            // Put the camera at an orbit: {"yaw": rad, "pitch": rad}.
+            if let Some(y) = c.get("yaw").and_then(Value::as_f64) {
+                self.app.cam.yaw = y;
+            }
+            if let Some(p) = c.get("pitch").and_then(Value::as_f64) {
+                self.app.cam.pitch = p;
+            }
+            self.app.cam_anim = None;
+            self.frames(2);
+            // Where `camera.panned` and `camera.zoomed` checks measure from.
+            self.cam_mark = Some(self.app.cam);
+            return Ok(());
+        } else if let Some(v) = s.get("view_anim").and_then(Value::as_str) {
+            return self.view_anim(v, s.get("max_deg").and_then(Value::as_f64).unwrap_or(10.0));
+        } else if s.get("autosave").is_some() {
+            self.start_autosave();
+            return Ok(());
+        } else if let Some(how) = s.get("restart").and_then(Value::as_str) {
+            // "crash": the app dies (its autosave lock goes with it, the entry stays);
+            // "close": it closes normally. Then a new app starts on the same folders.
+            let mut old = std::mem::replace(&mut self.app, SolveApp::new(Session::default(), Services::default()));
+            if how == "close" {
+                crate::recovery_ui::close(&mut old);
+                // The desktop saves its settings on close and loads them on the next start.
+                let prefs = old.prefs();
+                self.app.load_prefs(&prefs);
+            }
+            drop(old);
+            self.ctx = egui::Context::default();
+            crate::fonts::setup_bundled_fonts(&self.ctx);
+            self.ctx.enable_accesskit();
+            self.install();
+            self.start_autosave();
+            self.frames(3);
+            return Ok(());
+        } else if let Some(f) = s.get("make_image").and_then(Value::as_str) {
+            // A picture to insert (a 200 x 100 checkerboard PNG in the scenario's folder).
+            let img =
+                image::RgbImage::from_fn(
+                    200,
+                    100,
+                    |x, y| {
+                        if (x / 20 + y / 20) % 2 == 0 { image::Rgb([230, 230, 230]) } else { image::Rgb([60, 90, 160]) }
+                    },
+                );
+            img.save(self.dir.join(f)).map_err(|e| format!("make_image: {e}"))?;
+            return Ok(());
+        } else if let Some(f) = s.get("choose_file").and_then(Value::as_str) {
+            *self.next_file.borrow_mut() = Some(self.dir.join(f).to_string_lossy().into_owned());
+            return Ok(());
+        } else if let Some(m) = s.get("print").and_then(Value::as_str) {
+            let r = self.call(m, s.get("params").cloned().unwrap_or(json!({})));
+            eprintln!("print {m}: {r}");
+            return Ok(());
+        } else if s.get("debug").is_some() {
+            let ui = self.call("ui.inspect", json!({}));
+            let sel = self.call("ui.selection", json!({}));
+            eprintln!(
+                "debug: dialog {} tool {} hover {}\nselection {}\nstatus {:?}",
+                ui["result"]["dialog"], ui["result"]["tool"], ui["result"]["hover"], sel["result"]["selection"], self.app.status
+            );
+            if s["debug"] == json!("widgets") {
+                let texts: Vec<String> = self
+                    .output
+                    .accesskit_update
+                    .iter()
+                    .flat_map(|t| t.nodes.iter())
+                    .filter_map(|(_, n)| {
+                        let at = n.bounds().map(|b| format!(" @{:.0},{:.0}", (b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0)).unwrap_or_default();
+                        n.label().or(n.value()).map(|l| format!("{:?} {l}{at}", n.role()))
+                    })
+                    .collect();
+                eprintln!("widgets: {texts:?}");
+            }
+            if s["debug"] == json!("handles") {
+                let names: Vec<String> = HANDLES.with(|h| h.borrow().iter().map(|(n, p)| format!("{n} @{:.0},{:.0}", p.x, p.y)).collect());
+                eprintln!("handles: {names:?}");
+            }
+            return Ok(());
+        } else if let Some(e) = s.get("until") {
+            // Background work (a sample being built, a preview): frames until the checks pass.
+            let mut last = String::new();
+            for _ in 0..600 {
+                match check(self, e) {
+                    Ok(()) => return Ok(()),
+                    Err(m) => last = m,
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                self.frames(2);
+            }
+            return Err(format!("timed out: {last}"));
+        } else if let Some(e) = s.get("expect") {
+            return check(self, e);
+        } else {
+            return Err(format!("unknown step {s}"));
+        };
         let failed = res["ok"] != json!(true);
         if failed != flag("fail") {
             return Err(format!("{s}: {res}"));

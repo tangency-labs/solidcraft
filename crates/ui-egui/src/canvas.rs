@@ -363,7 +363,7 @@ pub fn snap_step(half_height: f64) -> f64 {
 }
 
 /// Parameter along the line `base + dir * t` closest to the view ray through `pos`.
-fn along(proj: &Proj, pos: Pos2, base: Vec3, dir: Vec3) -> Option<f64> {
+pub(crate) fn along(proj: &Proj, pos: Pos2, base: Vec3, dir: Vec3) -> Option<f64> {
     let (o, r) = proj.ray(pos);
     let w0 = base - o;
     let (b, d, e) = (dir.dot(r), dir.dot(w0), r.dot(w0));
@@ -570,7 +570,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             box_at = ts + vec2(14.0, -12.0);
         }
     }
-    value_box(ui, label, value, box_at, focus || *value != before);
+    let note = crate::drag_extrude::step_note(app);
+    value_box_noted(ui, label, value, box_at, focus || *value != before, note.as_deref());
     if *value != before
         && let Kind::Extrude { all, .. } = &mut d.kind
     {
@@ -595,17 +596,36 @@ fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, 
     value_box_in(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), select_all, keep_tab);
 }
 
+/// [`value_box`] with a note after the field (a pull's step size).
+fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, note: Option<&str>) {
+    let ids = (egui::Id::new("sc_canvas_area"), egui::Id::new("sc_canvas_value"));
+    value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), note);
+}
+
 /// [`value_box_with`] under its own ids (its area's and its field's), for a value beside the main
 /// one (a hole's reference distances), with the point of the box that sits at `at`. Returns where
 /// the field is.
 pub(crate) fn value_box_in(
     ui: &mut egui::Ui,
+    ids: (egui::Id, egui::Id),
+    label: &str,
+    value: &mut String,
+    at: (Pos2, egui::Align2),
+    select_all: bool,
+    keep_tab: bool,
+) -> Option<egui::Rect> {
+    value_box_full(ui, ids, label, value, at, (select_all, keep_tab), None)
+}
+
+/// [`value_box_in`] with a short dimmed note after the field (a pull's step size).
+fn value_box_full(
+    ui: &mut egui::Ui,
     (area, id): (egui::Id, egui::Id),
     label: &str,
     value: &mut String,
     (at, pivot): (Pos2, egui::Align2),
-    select_all: bool,
-    keep_tab: bool,
+    (select_all, keep_tab): (bool, bool),
+    note: Option<&str>,
 ) -> Option<egui::Rect> {
     let t = Tokens::get();
     let mut field = None;
@@ -621,6 +641,9 @@ pub(crate) fn value_box_in(
                     let mut st = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
                     st.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
                     st.store(ui.ctx(), id);
+                }
+                if let Some(note) = note {
+                    ui.label(egui::RichText::new(note).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
                 }
                 field = Some(r.rect);
             });

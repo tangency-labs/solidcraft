@@ -494,7 +494,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             // Positioning precedes the press by a frame: it is not a modifier-only gesture.
             app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             app.synthetic.push(egui::Event::PointerMoved(a));
-            app.synthetic.push(egui::Event::PointerButton { pos: a, button, pressed: true, modifiers });
+            // `late_mods`: the modifiers go down once the drag has started, as when Shift is added mid-drag.
+            let late = b("late_mods");
+            let at_press = if late { egui::Modifiers::NONE } else { modifiers };
+            app.synthetic.push(egui::Event::PointerButton { pos: a, button, pressed: true, modifiers: at_press });
             // `hold`: frames to keep the button down before moving (press-and-hold).
             for _ in 0..f("hold").unwrap_or(0.0).clamp(0.0, 600.0) as usize {
                 app.synthetic.push(egui::Event::PointerMoved(a));
@@ -502,6 +505,11 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             let steps = f("steps").unwrap_or(10.0).clamp(1.0, 200.0) as usize;
             for k in 1..=steps {
                 app.synthetic.push(egui::Event::PointerMoved(a + (z - a) * (k as f32 / steps as f32)));
+                if late && k == 1 {
+                    // One event per frame: the drag has started unmodified before the keys go down.
+                    app.synthetic.push(egui::Event::PointerMoved(a + (z - a) * (1.0 / steps as f32)));
+                    app.synthetic.push(egui::Event::ModifiersChanged(modifiers));
+                }
             }
             // `hold_end`: frames to keep the button down at the end (to look at a drag's snap).
             for _ in 0..f("hold_end").unwrap_or(0.0).clamp(0.0, 600.0) as usize {
