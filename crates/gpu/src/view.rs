@@ -3281,6 +3281,33 @@ mod glass_tests {
         assert!(max <= 1, "the blitted picture matches the direct one (max difference {max})");
     }
 
+    /// The Render workspace's preview once painted the modelling viewport's last frame instead of
+    /// its own (#5119): after a frame with see-through surfaces, drawn offscreen for
+    /// order-independent transparency, it stayed frozen on that frame whatever the camera did.
+    #[test]
+    fn product_preview_never_paints_the_last_modelling_frame() {
+        let Some((_, device, queue)) = crate::open_headless().ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false }, None);
+        let middle = |pixels: &[u8]| -> [i32; 4] {
+            let at = (32 * 64 + 32) * 4;
+            std::array::from_fn(|i| pixels.get(at + i).map_or(-1, |v| i32::from(*v)))
+        };
+        let red = [220, 40, 40, 128];
+        let model = middle(&render_frame(&mut r, &device, &queue, &test_frame(two_layers(red, red, true), 1.0), true));
+        assert!(r.ss_ready, "the see-through modelling frame is drawn offscreen");
+        assert!(model[0] > model[2] + 60, "the modelling frame shows its red layers: {model:?}");
+        let mut product = GpuScene::default();
+        for p in [[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]] {
+            product.tri([p[0], p[1], 0.0], [0.0, 0.0, 1.0], [40, 80, 220, 255]);
+        }
+        let mut frame = test_frame(product, 1.0);
+        frame.product = true;
+        let preview = middle(&render_frame(&mut r, &device, &queue, &frame, true));
+        assert!(preview[2] > preview[0] + 60, "the preview shows its own blue square: {preview:?}");
+    }
+
     /// Two see-through squares, one at z = 5 (near) and one at z = -5, in `near` and `far`
     /// colours, given near first or far first.
     fn two_layers(near: [u8; 4], far: [u8; 4], near_first: bool) -> GpuScene {
