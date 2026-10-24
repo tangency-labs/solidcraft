@@ -110,6 +110,10 @@ fn go_protocol(model: &str) -> GoProtocol {
 /// The Go gateway root every per-model endpoint hangs under.
 const GO_BASE: &str = "https://opencode.ai/inference/go";
 
+/// Most tool calls the loop answers from one reply: every call kept here gets
+/// its own `tool` message on the next turn.
+const GO_MAX_TOOL_CALLS: usize = 32;
+
 /// The documented Go endpoint for a model's protocol family.
 fn go_url(model: &str, protocol: GoProtocol) -> String {
     match protocol {
@@ -439,7 +443,13 @@ fn go_push_part(contents: &mut Vec<Value>, role: &str, part: Value) {
 /// earlier function-call parts, by kept call id: Gemini 3 rejects a tool round
 /// whose first function call lacks the signature it sent.
 fn go_gemini_contents(history: &[Value], sigs: &std::collections::HashMap<String, String>) -> Vec<Value> {
-    let names = go_call_names(history);
+    // Tool answers name their function via this map; turns without tool
+    // results skip the extra history pass entirely (the common case).
+    let names = if history.iter().any(|m| m.get("role").and_then(Value::as_str) == Some("tool")) {
+        go_call_names(history)
+    } else {
+        std::collections::HashMap::new()
+    };
     let mut out: Vec<Value> = Vec::new();
     for m in history {
         let role = m.get("role").and_then(Value::as_str).unwrap_or("");
@@ -518,7 +528,7 @@ impl GoCallAccum {
     }
 
     fn full(&self) -> bool {
-        self.calls.len() >= 32
+        self.calls.len() >= GO_MAX_TOOL_CALLS
     }
 
     fn push_call(&mut self, id: String, name: String, arguments: Result<Value, String>, raw_args: String) {
@@ -1065,6 +1075,20 @@ impl Worker {
         Err(first_err.unwrap_or_else(|| "the request ended without an answer".to_string()))
     }
 
+    /// The `tools` value for one Go protocol, or nothing when the loop has no
+    /// tools: one place instead of an `is_empty` check in every arm below.
+    fn go_tools(&self, protocol: GoProtocol) -> Option<Value> {
+        if self.tools.is_empty() {
+            return None;
+        }
+        Some(match protocol {
+            GoProtocol::Responses => Value::Array(go_responses_tools(&self.tools)),
+            GoProtocol::Messages => Value::Array(go_anthropic_tools(&self.tools)),
+            GoProtocol::Gemini => json!([{"functionDeclarations": go_gemini_tools(&self.tools)}]),
+            GoProtocol::Chat => Value::Array(self.tools.clone()),
+        })
+    }
+
     /// The request body for one Go protocol from the OpenAI-shaped history. Chat
     /// reuses the endpoint body; the others convert it (each carries the system
     /// note the way its protocol takes it).
@@ -1073,8 +1097,8 @@ impl Worker {
             GoProtocol::Chat => self.body(),
             GoProtocol::Responses => {
                 let mut body = json!({"model": self.cfg.model, "input": go_responses_input(super::acp::SYSTEM_NOTE, &self.history)});
-                if !self.tools.is_empty() {
-                    body["tools"] = Value::Array(go_responses_tools(&self.tools));
+                if let Some(tools) = self.go_tools(protocol) {
+                    body["tools"] = tools;
                 }
                 body
             }
@@ -1085,16 +1109,16 @@ impl Worker {
                     "system": super::acp::SYSTEM_NOTE,
                     "messages": go_anthropic_messages(&self.history),
                 });
-                if !self.tools.is_empty() {
-                    body["tools"] = Value::Array(go_anthropic_tools(&self.tools));
+                if let Some(tools) = self.go_tools(protocol) {
+                    body["tools"] = tools;
                 }
                 body
             }
             GoProtocol::Gemini => {
                 let mut body = json!({"contents": go_gemini_contents(&self.history, &self.gemini_sigs.borrow())});
                 body["systemInstruction"] = json!({"parts": [{"text": super::acp::SYSTEM_NOTE}]});
-                if !self.tools.is_empty() {
-                    body["tools"] = json!([{"functionDeclarations": go_gemini_tools(&self.tools)}]);
+                if let Some(tools) = self.go_tools(protocol) {
+                    body["tools"] = tools;
                 }
                 body
             }
@@ -1325,6 +1349,9 @@ fn reply(protocol: Protocol, body: &Value) -> Reply {
 /// are dropped (gateways reject them), thinking content is kept.
 fn sanitize_reasoning_details(details: Option<&Value>) -> Option<Value> {
     let items = details?.as_array()?;
+    if items.iter().all(|d| matches!(d, Value::Object(_)) && d.get("index").is_none()) {
+        return Some(Value::Array(items.clone()));
+    }
     let clean: Vec<Value> = items
         .iter()
         .filter_map(|d| {
