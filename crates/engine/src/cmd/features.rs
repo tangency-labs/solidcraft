@@ -1946,6 +1946,14 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         (_, Some(x)) => x,
         (None, None) => return Err(bad(cmd, "`position` must be [x, y, z], numbers or length expressions (or give `sketch` and `points`)")),
     };
+    // A hole starts on a face: a point off every face (past a body's edge) would drill a hole
+    // nobody picked, and cutting across an edge that way is slow.
+    if points.is_none() && !super::face::on_a_face(s, position) {
+        return Err(bad(
+            cmd,
+            format!("`position` [{}, {}, {}] is not on a face of a body; pick a point on the face to drill", position.x, position.y, position.z),
+        ));
+    }
     let direction = match (p.get("direction").and_then(vec3), &points) {
         (None, Some((sp, _, d))) if !sp.single => *d,
         (d, _) => match d {
