@@ -86,3 +86,78 @@ fn sound(s: &Session) {
         assert!(b.body.validity().is_empty(), "{:?}", b.body.validity());
     }
 }
+
+/// Seed 6 (minimised, #1494): a cylinder joined on a box's side leaves a saddle on the
+/// cylinder seam. The shell used to refuse that corner.
+#[test]
+fn shell_box_with_side_cylinder_seam_saddle() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"height": 30.0, "length": 47.5, "width": 45.0}));
+    run(&mut s, "solid.cylinder", json!({"axis": [1.0, 0.0, 0.0], "base": [47.5, 0.0, 10.0], "height": 30.0, "operation": "join", "radius": 7.5}));
+    run(&mut s, "solid.shell", json!({"faces": [[23.75, 22.5, 0.0]], "thickness": 1.0}));
+    sound(&s);
+}
+
+/// Seed 78 (minimised, #142): a half-revolve cut by a box. A shell thicker than the rim used to
+/// look like a missed corner; it is refused as a wall cross.
+#[test]
+fn shell_half_revolve_cut_by_box_names_wall_cross() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [7.5, 0.0], "p1": [25.0, 5.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"angle": "180 deg", "axis": "Z"}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"corner": [-25.0, 0.0, -2.5], "height": 22.5, "length": 17.5, "operation": "cut", "width": 22.5}),
+    );
+    let err = s
+        .execute("solid.shell", &json!({"faces": [[16.25, 0.0, -2.5]], "thickness": 2.0}))
+        .expect_err("thick shell");
+    let msg = err.to_string();
+    assert!(msg.contains("faces would cross"), "{msg}");
+    assert!(!msg.contains("don't meet the same way"), "{msg}");
+}
+
+/// Seed 38 (minimised, #142): a cylindrical notch on a box edge. A shell thicker than the notch
+/// used to look like a missed corner; it is refused as a wall cross.
+#[test]
+fn shell_box_with_edge_notch_names_wall_cross() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"height": 27.5, "length": 47.5, "width": 60.0}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"axis": [0.0, 0.0, -1.0], "base": [47.5, 0.0, 25.0], "height": 22.5, "operation": "cut", "radius": 1.25}),
+    );
+    let err = s
+        .execute("solid.shell", &json!({"faces": [[47.5, 30.509393063583815, 13.75]], "thickness": 2.0}))
+        .expect_err("thick shell");
+    let msg = err.to_string();
+    assert!(msg.contains("faces would cross"), "{msg}");
+    assert!(!msg.contains("don't meet the same way"), "{msg}");
+}
+
+/// Seed 69 (minimised, #142): a 90° revolve with a joined box, shelled twice. The second shell
+/// used to refuse a corner on the revolved wall.
+#[test]
+fn shell_revolved_section_with_joined_box_twice() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2.5, 0.0], "p1": [22.5, 30.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"angle": "90 deg", "axis": "Z"}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"corner": [22.5, 17.5, -7.5], "height": 5.0, "length": 22.5, "operation": "join", "width": 7.5}),
+    );
+    run(&mut s, "solid.shell", json!({"faces": [[33.75, 17.5, -5.0]], "thickness": 1.5}));
+    run(
+        &mut s,
+        "solid.shell",
+        json!({"faces": [[1.5, 12.327229847555518, -15.0]], "thickness": 1.5}),
+    );
+    sound(&s);
+}
