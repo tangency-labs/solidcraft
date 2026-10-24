@@ -3559,6 +3559,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let picture = crate::space_mouse_model::corner_rect(area, position, &obstacles);
         crate::space_mouse_model::corner(ui, picture, calibration, app.space_mouse.raw.into());
     }
+    // Last, so it sits over the overlays; only where a click would reach the model.
+    let badge_at = hover.filter(|p| {
+        inside
+            && !navigating
+            && resp.hovered()
+            && ui.ctx().layer_id_at(*p).is_none_or(|layer| layer == ui.layer_id())
+            && !crate::shell::covered(app, *p)
+    });
+    crate::tool_cursor::show(app, &painter, badge_at);
 }
 
 fn paint_box_selection(painter: &egui::Painter, bx: BoxSel, sketch: bool) {
@@ -4654,8 +4663,8 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     ui.data_mut(|d| d.insert_temp(menu_id, menu_open));
 }
 
-/// The View settings above the navigation bar's last button: grid, ground shadow and the agent
-/// cursor (#35). False once it should close (a click outside it).
+/// The View settings above the navigation bar's last button: grid, ground shadow, the tool at
+/// the cursor and the agent cursor (#35). False once it should close (a click outside it).
 fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
     let t = crate::theme::Tokens::get();
     // A preset dropdown extends beyond this menu; let it consume its own clicks.
@@ -4675,6 +4684,8 @@ fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
             crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Grid"), &mut app.ui.show_grid);
             crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Ground shadow"), &mut app.ui.ground_shadow);
             crate::prefs::ambient_occlusion_checkbox(app, ui, "Ambient occlusion");
+            let tool = crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Show tool at cursor"), &mut app.ui.tool_cursor);
+            crate::scenario::publish_handle("view:tool_cursor", tool.rect.center());
             ui.separator();
             let s = &mut app.ui.agent_cursor;
             let show = crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Show Agent Cursor"), &mut s.show);

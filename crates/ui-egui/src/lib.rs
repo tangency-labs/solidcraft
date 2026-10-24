@@ -248,6 +248,7 @@ mod thin_extrude_tests;
 pub mod timeline;
 pub mod timeline_left;
 pub mod titlebar;
+pub mod tool_cursor;
 pub mod tool_modifiers;
 pub mod toolbar;
 pub mod toolbar_custom;
@@ -303,6 +304,9 @@ pub struct UiState {
     pub up_axis: solidcraft_engine::render::UpAxis,
     /// The agent cursor: shown, speed, follow camera (#35).
     pub agent_cursor: agent_cursor::Settings,
+    /// The running tool's icon rides beside the pointer in the viewport (View settings; off by
+    /// default).
+    pub tool_cursor: bool,
 }
 
 impl Default for UiState {
@@ -324,6 +328,7 @@ impl Default for UiState {
             ground_shadow: true,
             up_axis: Default::default(),
             agent_cursor: Default::default(),
+            tool_cursor: false,
         }
     }
 }

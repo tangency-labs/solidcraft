@@ -473,6 +473,7 @@
   "Show Agent Cursor": "エージェントカーソルを表示",
   "Show in folder": "フォルダに表示",
   "Show the pointer an AI agent moves (#35)": "エージェントが操作するポインターを表示 (#35)",
+  "Show tool at cursor": "カーソルの横にツールを表示",
   "Signed axes": "符号付き座標軸",
   "Size": "サイズ",
   "Sketch constraints": "スケッチ拘束",

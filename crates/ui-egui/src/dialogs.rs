@@ -606,6 +606,11 @@ fn fits(a: Accept, s: &Sel) -> bool {
 }
 
 impl Dialog {
+    /// The command this dialog runs, whose icon and label its header shows.
+    pub(crate) fn command(&self) -> Option<&'static str> {
+        dense::command(&self.kind)
+    }
+
     /// Show why OK (or starting the sketch) was refused, for as long as the inputs stay as they are.
     fn refuse(&mut self, app: &SolveApp, error: String) {
         self.refused = Some(Refused::now(app, self));
