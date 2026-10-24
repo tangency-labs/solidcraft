@@ -526,8 +526,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.delete", "Delete", "delete").key("Del"));
         v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [face] })));
         v.push(Item::sep());
-        v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": face, "feature": feature })).on(feature.is_some()));
-        v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": feature })).on(feature.is_some()));
+        v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": face })));
+        v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": feature, "body": face })).on(feature.is_some()));
         v.push(Item::sep());
         v.push(cmd(app, "solid.press_pull", "Press Pull"));
         v.push(cmd(app, "inspect.measure", "Measure"));
@@ -1120,24 +1120,22 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             app.pick_save_command(&format!("{name}.step"), &["step", "stp", "igs", "stl", "3mf", "obj"], "file.export", json!({"bodies": bodies}));
         }
         "ui.findBrowser" => {
-            if let Some(feature) = id_of(&p, "feature") {
-                if let Some(body) = p.get("body").and_then(Value::as_str) {
-                    crate::browser::reveal_feature(app, feature, body);
-                }
-                return;
-            }
             if let Some(b) = p.get("body").and_then(Value::as_str) {
-                app.ui.show_browser = true;
-                app.preferences.timeline_left_browser_collapsed = false;
-                app.tree.reveal_feature = None;
-                app.tree.reveal = Some(b.to_string());
+                crate::browser::reveal_body(app, b);
                 let _ = app.run("select.set", json!({"items": [{"type": "body", "name": b}]}));
             }
         }
         "ui.findTimeline" => {
-            let f = id_of(&p, "feature").or_else(|| p.get("body").and_then(Value::as_str).and_then(|b| body_feature(app, b)));
+            let body = p.get("body").and_then(Value::as_str);
+            let f = id_of(&p, "feature").or_else(|| body.and_then(|b| body_feature(app, b)));
             if let Some(f) = f {
                 app.ui.show_timeline = true;
+                crate::timeline_left::reveal_feature(app, f);
+                // From a face or body, the Browser shows the feature in that body's copy. From a
+                // sketch, plane or feature row there is no body: that row is the Browser's view.
+                if let Some(body) = body {
+                    crate::browser::reveal_feature(app, f, body);
+                }
                 let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": f}]}));
             }
         }

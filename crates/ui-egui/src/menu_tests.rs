@@ -1008,17 +1008,18 @@ fn contribution_picked_faces_open_their_own_feature_after_later_modifiers() {
         let pick = Sel::Face { body: "Plate".into(), index, point };
         app.session.selection = vec![pick.clone()];
         let items = context_menu::items(&app, &Target::Viewport);
-        for label in ["Edit Feature", "Find in Timeline", "Find in Browser"] {
+        for label in ["Edit Feature", "Find in Timeline"] {
             let item = find(&items, label);
             assert!(item.enabled, "{label}, {expected}: {names:?}");
             assert_eq!(item.params.as_ref().unwrap()["feature"], json!(expected));
         }
         act(&mut app, &Target::Viewport, "Find in Timeline");
         assert_eq!(app.session.selection, vec![Sel::Feature { id: expected }]);
+        // The browser lists bodies: a picked face finds its body there, whichever feature made the face.
         app.session.selection = vec![pick.clone()];
         act(&mut app, &Target::Viewport, "Find in Browser");
-        assert_eq!(app.session.selection, vec![Sel::Feature { id: expected }]);
-        assert_eq!(app.tree.reveal_feature.as_ref().unwrap().id, expected);
+        assert_eq!(app.session.selection, vec![Sel::Body { name: "Plate".into() }]);
+        assert_eq!(app.tree.reveal.as_deref(), Some("Plate"));
         app.session.selection = vec![pick];
         act(&mut app, &Target::Viewport, "Edit Feature");
         assert_eq!(app.dialog.as_ref().unwrap().editing.unwrap().0, expected);
@@ -1034,7 +1035,7 @@ fn contribution_unresolvable_face_does_not_edit_the_body_creator() {
     let items = context_menu::items(&app, &Target::Viewport);
     assert!(!find(&items, "Edit Feature").enabled);
     assert!(!find(&items, "Find in Timeline").enabled);
-    assert!(!find(&items, "Find in Browser").enabled);
+    assert!(find(&items, "Find in Browser").enabled, "the body is still known");
 }
 
 #[test]

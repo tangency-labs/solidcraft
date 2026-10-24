@@ -24,6 +24,39 @@ pub(crate) fn reveal_feature(app: &mut SolveApp, id: u64, body: &str) {
     features::reveal(app, id, body);
 }
 
+/// Find in Browser for a body: open every row that holds it (the document, the placements down
+/// to it, its Bodies folder and any group around it) and scroll its row into view. The rows
+/// are opened here, not while drawing, because a collapsed ancestor never draws its children.
+pub(crate) fn reveal_body(app: &mut SolveApp, body: &str) {
+    app.ui.show_browser = true;
+    app.preferences.timeline_left_browser_collapsed = false;
+    app.tree.reveal_feature = None;
+    app.tree.reveal = Some(body.to_string());
+    let state = app.session.model.state();
+    let Some(source) = app.session.world_state().body(body).map(|selected| selected.definition_name().to_string()) else { return };
+    let Some(component) = state.body(&source).map(|definition| definition.component) else { return };
+    // Every component's first placement keeps the definition's name, so the owner must match too.
+    let Some((_, path, _)) = app
+        .session
+        .doc
+        .placements()
+        .into_iter()
+        .find(|(owner, path, _)| *owner == component && app.session.doc.world_body_name(&state, &source, *owner, path) == body)
+    else {
+        return;
+    };
+    app.tree.collapsed.remove("c0");
+    for depth in 1..=path.len() {
+        app.tree.collapsed.remove(&occurrence_key(&path[..depth]));
+    }
+    let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
+    app.tree.collapsed.remove(&scope);
+    app.tree.collapsed.remove(&format!("{scope}/bodies"));
+    for g in app.session.doc.browser_groups.iter().filter(|g| g.component == component && g.folder == "bodies" && g.items.contains(&source)) {
+        app.tree.collapsed.remove(&format!("{scope}/g{}", g.id));
+    }
+}
+
 #[cfg(test)]
 #[path = "browser_model_tests.rs"]
 mod model_tests;
@@ -70,7 +103,7 @@ pub struct TreeState {
     pub expanded: BTreeSet<String>,
     /// Scroll to this body's row and open its folders (Find in Browser).
     pub reveal: Option<String>,
-    /// A native feature to reveal in its placed component's Features folder.
+    /// A native feature to reveal in its placed component's Features folder (Find in Timeline).
     pub(super) reveal_feature: Option<features::Reveal>,
     /// The Move/Copy panel of an occurrence.
     pub occurrence_move: Option<OccMove>,
@@ -263,7 +296,7 @@ pub fn group_action(app: &mut SolveApp, action: &str, p: &Value) {
                 && let Some(g) = r.get("group").and_then(Value::as_u64)
             {
                 app.tree.collapsed.remove(&format!("c{comp}/{folder}"));
-                app.tree.collapsed.remove(&format!("g{g}"));
+                app.tree.collapsed.remove(&format!("c{comp}/g{g}"));
             }
         }
         "ui.ungroup" => {
@@ -1836,16 +1869,6 @@ fn folder_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, comp: u64, path: Option
     }
     let fstatic = folder_static(folder);
     let key = format!("{prefix}/{folder}");
-    if let Some(r) = app.tree.reveal.clone()
-        && folder == "bodies"
-        && all.iter().any(|e| e.key == r)
-    {
-        app.tree.collapsed.remove(&key);
-        app.tree.collapsed.remove(&format!("c{comp}"));
-        for g in app.session.doc.browser_groups.iter().filter(|g| g.items.contains(&r)) {
-            app.tree.collapsed.remove(&format!("g{}", g.id));
-        }
-    }
     let open = is_open(app, &key, true);
     // The folder's eye is its own: hiding it hides its items without changing theirs, and its
     // items never change it. It and everything in it fade while it or a placement above is
@@ -1990,7 +2013,8 @@ fn entry_row(
         toggle(app, &pattern_key, true);
     }
     if folder == "bodies"
-        && app.tree.reveal.as_deref() == Some(e.key.as_str())
+        // The placed body's world name: a later placement's rows keep the definition's key.
+        && app.tree.reveal.as_deref().is_some_and(|body| e.bodies.iter().any(|b| b == body))
         && let Some(rect) = r.rect
     {
         ui.scroll_to_rect(rect, Some(egui::Align::Center));

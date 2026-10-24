@@ -8,14 +8,18 @@ pub(crate) struct Reveal {
     pub path: Vec<u64>,
 }
 
-/// Reveal the actual creating feature without changing the active component or history marker.
+/// Open the Features folder that lists this feature and scroll to its row, without changing the
+/// active component or history marker. The folder is the one of the placement `body` belongs to:
+/// without a body there is no telling which copy of a component was meant.
 pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
     let Some(feature) = app.session.doc.feature(id) else { return };
+    if matches!(feature.kind, FeatureKind::Sketch { .. }) {
+        return; // Sketches are listed in Sketches, not Features.
+    }
     let component = feature.component;
     let state = app.session.model.state();
     let world = app.session.world_state();
-    let Some(selected) = world.body(body) else { return };
-    let source = selected.definition_name();
+    let Some(source) = world.body(body).map(|selected| selected.definition_name()) else { return };
     let Some((_, path, _)) = app
         .session
         .doc
@@ -33,9 +37,9 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
         app.tree.collapsed.remove(&occurrence_key(&path[..depth]));
     }
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
+    app.tree.collapsed.remove(&scope);
     app.tree.expanded.insert(format!("{scope}/features"));
     app.tree.reveal_feature = Some(Reveal { id, path });
-    let _ = app.run("select.set", json!({"items":[Sel::Feature { id }]}));
 }
 
 pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: &[u64], depth: usize, acts: &mut Actions) {
@@ -149,7 +153,7 @@ mod tests {
         let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
         assert_eq!(labels.iter().filter(|label| *label == "Profile").count(), 1, "{labels:?}");
         assert!(labels.contains(&name), "{labels:?}");
-        find(&mut h.app, extrude, "Plate");
+        find_in_timeline(&mut h.app, extrude, "Plate");
         h.frames(2);
         assert!(h.app.tree.reveal_feature.is_none(), "the creator row was drawn and scrolled to");
         let at = h.call("ui.at", json!({"handle":format!("row:browser-feature:c0:{extrude}")}));
@@ -189,20 +193,45 @@ mod tests {
         assert_eq!(sorted(&h.app.session.selection), sorted(&all), "Shift+click below the anchor");
     }
 
-    fn find(app: &mut SolveApp, feature: u64, body: &str) {
+    fn find_in_timeline(app: &mut SolveApp, feature: u64, body: &str) {
         let state = app.session.world_state();
         let model_body = state.body(body).unwrap();
         let names = solidcraft_engine::doc::naming::face_names(model_body);
         let index = names.iter().position(|name| name.starts_with(&format!("F{feature}:"))).unwrap();
         app.session.selection = vec![Sel::Face { body: body.into(), index, point: solidcraft_engine::geom::Vec3::ZERO }];
-        let item = crate::context_menu::items(app, &Target::Viewport).into_iter().find(|item| item.id == "ui.findBrowser").unwrap();
+        let item = crate::context_menu::items(app, &Target::Viewport).into_iter().find(|item| item.id == "ui.findTimeline").unwrap();
         assert!(item.enabled);
         crate::context_menu::run_item(app, &item, pos2(0.0, 0.0));
         assert_eq!(app.session.selection, [Sel::Feature { id: feature }]);
     }
 
     #[test]
-    fn browser_feature_reveal_opens_the_picked_placement_and_survives_reopen() {
+    fn find_in_timeline_from_a_sketch_or_plane_row_leaves_the_browser_alone() {
+        let mut h = Harness::new();
+        let assembly = h.app.run("component.create", json!({"name":"Assembly"})).unwrap();
+        h.app.run("component.create", json!({"name":"Part"})).unwrap();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XZ","name":"PartSketch"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[5,25],"p1":[15,32]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sketch = h.app.session.doc.find_feature("PartSketch").unwrap().id;
+        let plane = h.app.run("construct.plane.offset", json!({"base":"XY","offset":30,"name":"PartPlane"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("occurrence.copy", json!({"occurrence":assembly["occurrence"],"translate":[90,0,0]})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.frames(2);
+        let (collapsed, expanded) = (h.app.tree.collapsed.clone(), h.app.tree.expanded.clone());
+        // Neither row says which copy it was in: revealing in "the first placement" picked the other copy.
+        for (target, id) in [(Target::Sketch { id: sketch }, sketch), (Target::Plane { id: plane }, plane)] {
+            let item = crate::context_menu::items(&h.app, &target).into_iter().find(|item| item.id == "ui.findTimeline").unwrap();
+            crate::context_menu::run_item(&mut h.app, &item, pos2(0.0, 0.0));
+            assert_eq!(h.app.session.selection, [Sel::Feature { id }]);
+            assert!(h.app.tree.reveal_feature.is_none(), "{target:?}");
+            assert_eq!((&h.app.tree.collapsed, &h.app.tree.expanded), (&collapsed, &expanded), "{target:?}");
+        }
+    }
+
+    #[test]
+    fn find_in_timeline_opens_the_picked_placements_features_folder_and_survives_reopen() {
         let mut h = Harness::new();
         let assembly = h.app.run("component.create", json!({"name":"Assembly"})).unwrap();
         let component = h.app.run("component.create", json!({"name":"Part"})).unwrap();
@@ -222,7 +251,7 @@ mod tests {
         h.app.preferences.timeline_left_browser_collapsed = true;
         let undo = h.app.session.undo.len();
         for id in [base, hole, fillet] {
-            find(&mut h.app, id, &world_body);
+            find_in_timeline(&mut h.app, id, &world_body);
             assert_eq!(h.app.tree.reveal_feature.as_ref().unwrap().path, path);
             assert!(!h.app.tree.collapsed.contains("c0"));
             assert!(!h.app.tree.collapsed.contains(&occurrence_key(&path)));
@@ -238,18 +267,95 @@ mod tests {
     }
 
     #[test]
-    fn browser_feature_body_only_and_stale_targets_keep_their_meaning() {
+    fn find_in_timeline_from_a_root_body_opens_the_root_features_folder() {
+        let mut h = Harness::new();
+        let base = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+        h.frames(2);
+        assert!(
+            h.call("ui.at", json!({"handle":format!("row:browser-feature:c0:{base}")}))["ok"].as_bool() != Some(true),
+            "the folder starts closed"
+        );
+        let item =
+            crate::context_menu::items(&h.app, &Target::Body { name: "Plate".into() }).into_iter().find(|item| item.id == "ui.findTimeline").unwrap();
+        crate::context_menu::run_item(&mut h.app, &item, pos2(0.0, 0.0));
+        assert!(h.app.tree.expanded.contains("c0/features"));
+        h.frames(2);
+        let at = h.call("ui.at", json!({"handle":format!("row:browser-feature:c0:{base}")}));
+        assert!(at["ok"].as_bool().unwrap_or(false), "{at}");
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: base }]);
+    }
+
+    #[test]
+    fn browser_find_from_a_body_or_its_face_reveals_the_body() {
         let mut h = Harness::new();
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap();
-        h.app.session.selection = vec![Sel::Body { name: "Plate".into() }];
-        let item = crate::context_menu::items(&h.app, &Target::Viewport).into_iter().find(|item| item.id == "ui.findBrowser").unwrap();
-        crate::context_menu::run_item(&mut h.app, &item, pos2(0.0, 0.0));
-        assert_eq!(h.app.tree.reveal.as_deref(), Some("Plate"));
-        assert!(h.app.tree.reveal_feature.is_none());
-        let before = h.app.session.selection.clone();
-        reveal(&mut h.app, u64::MAX, "Plate");
-        reveal(&mut h.app, 1, "Missing");
-        assert_eq!(h.app.session.selection, before);
+        for pick in [Sel::Body { name: "Plate".into() }, Sel::Face { body: "Plate".into(), index: 0, point: solidcraft_engine::geom::Vec3::ZERO }] {
+            h.app.tree.reveal = None;
+            h.app.session.selection = vec![pick.clone()];
+            let item = crate::context_menu::items(&h.app, &Target::Viewport).into_iter().find(|item| item.id == "ui.findBrowser").unwrap();
+            assert!(item.enabled, "{pick:?}");
+            crate::context_menu::run_item(&mut h.app, &item, pos2(0.0, 0.0));
+            assert_eq!(h.app.tree.reveal.as_deref(), Some("Plate"), "{pick:?}");
+            assert_eq!(h.app.session.selection, [Sel::Body { name: "Plate".into() }], "{pick:?}");
+        }
+    }
+
+    fn find_in_browser(app: &mut SolveApp, pick: Sel) {
+        app.session.selection = vec![pick];
+        let item = crate::context_menu::items(app, &Target::Viewport).into_iter().find(|item| item.id == "ui.findBrowser").unwrap();
+        crate::context_menu::run_item(app, &item, pos2(0.0, 0.0));
+    }
+
+    fn face(body: &str) -> Sel {
+        Sel::Face { body: body.into(), index: 0, point: solidcraft_engine::geom::Vec3::ZERO }
+    }
+
+    #[test]
+    fn browser_find_opens_the_collapsed_rows_above_the_body() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap();
+        let group = h.app.run("browser.group", json!({"component":0,"folder":"bodies","items":["Plate"]})).unwrap()["group"].as_u64().unwrap();
+        for key in ["c0".to_string(), "c0/bodies".to_string(), format!("c0/g{group}")] {
+            h.app.tree.collapsed.insert(key);
+        }
+        h.frames(2);
+        assert!(!drawn_rows().iter().any(|(label, ..)| label == "Plate"), "the body starts hidden");
+        find_in_browser(&mut h.app, face("Plate"));
+        h.frames(2);
+        assert!(drawn_rows().iter().any(|(label, ..)| label == "Plate"), "{:?}", drawn_rows());
+        assert!(h.app.tree.reveal.is_none(), "the body row was drawn and scrolled to");
+        assert_eq!(h.app.session.selection, [Sel::Body { name: "Plate".into() }]);
+    }
+
+    #[test]
+    fn browser_find_reveals_a_body_in_its_own_nested_placement() {
+        let mut h = Harness::new();
+        let assembly = h.app.run("component.create", json!({"name":"Assembly"})).unwrap();
+        let component = h.app.run("component.create", json!({"name":"Part"})).unwrap();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap();
+        let copy = h.app.run("occurrence.copy", json!({"occurrence":assembly["occurrence"],"translate":[70,25,10]})).unwrap();
+        let first = vec![assembly["occurrence"].as_u64().unwrap(), component["occurrence"].as_u64().unwrap()];
+        let later = vec![copy["occurrence"].as_u64().unwrap(), component["occurrence"].as_u64().unwrap()];
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        // The first placement's body keeps the definition's name, which every component's first
+        // placement (the root's too) would also give; a later one has its own world name.
+        for (path, named_plate) in [(first, true), (later, false)] {
+            let world_body = h.app.session.occurrence_bodies(&path, false).unwrap()[0].clone();
+            assert_eq!(world_body == "Plate", named_plate);
+            h.app.tree.collapsed.insert("c0".into());
+            for depth in 1..=path.len() {
+                h.app.tree.collapsed.insert(occurrence_key(&path[..depth]));
+            }
+            h.app.tree.collapsed.insert(format!("{}/bodies", occurrence_key(&path)));
+            find_in_browser(&mut h.app, face(&world_body));
+            for depth in 1..=path.len() {
+                assert!(!h.app.tree.collapsed.contains(&occurrence_key(&path[..depth])), "{world_body}: {:?}", &path[..depth]);
+            }
+            assert!(!h.app.tree.collapsed.contains(&format!("{}/bodies", occurrence_key(&path))), "{world_body}");
+            h.frames(2);
+            assert!(h.app.tree.reveal.is_none(), "{world_body}: the placed body row was drawn and scrolled to");
+            assert_eq!(h.app.session.selection, [Sel::Body { name: world_body }]);
+        }
     }
 
     #[test]
@@ -274,7 +380,7 @@ mod tests {
         let owner = state.body(&name).unwrap().feature;
         assert_ne!(owner, base);
         h.app.session.selection = vec![Sel::Face { body: name, index: 0, point: solidcraft_engine::geom::Vec3::ZERO }];
-        for id in ["ui.findBrowser", "ui.findTimeline", "ui.editFeature"] {
+        for id in ["ui.findTimeline", "ui.editFeature"] {
             let item = crate::context_menu::items(&h.app, &Target::Viewport).into_iter().find(|item| item.id == id).unwrap();
             assert!(!item.enabled || item.params.as_ref().unwrap()["feature"] == json!(owner), "{id}: {item:?}");
         }
