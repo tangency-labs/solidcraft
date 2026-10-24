@@ -56,7 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("rect3")
         .enabled(in_sketch)
-        .params(concat!("p0, p1: first edge; p2: point on the opposite edge", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: first edge; p2: point on the opposite edge; construction?: bool", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.rounded", "Rounded Rectangle", rect_rounded)
         .at("SKETCH", "CREATE")
         .icon("rect_rounded")
@@ -66,14 +66,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("rect_center")
         .enabled(in_sketch)
-        .params(concat!("center, corner. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+        .params(concat!("center, corner; construction?: bool. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.circle.center", "Center Diameter Circle", circle_center)
         .at("SKETCH", "CREATE")
         .icon("circle")
         .key("C")
         .enabled(in_sketch)
         .params(concat!(
-            "center: [x,y] or point ref, radius | diameter: number; through?: point ref (a point the circle passes through, kept on it: where the tool's second click snapped)",
+            "center: [x,y] or point ref, radius | diameter: number; through?: point ref (a point the circle passes through, kept on it: where the tool's second click snapped); construction?: bool",
             connect_doc!(),
             created_doc!()
         )),
@@ -81,18 +81,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("circle2")
         .enabled(in_sketch)
-        .params(concat!("p0, p1: diameter ends", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: diameter ends; construction?: bool", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.circle.three_point", "3-Point Circle", circle_three)
         .at("SKETCH", "CREATE")
         .icon("circle3")
         .enabled(in_sketch)
-        .params(concat!("p0, p1, p2", connect_doc!(), created_doc!())),
-    CommandSpec::new("sketch.arc.three_point", "3-Point Arc", arc_three).at("SKETCH", "CREATE").icon("arc3").enabled(in_sketch).params(concat!("start, end, through: [x,y] or point ref (a referenced through point stays on the arc)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1, p2; construction?: bool", connect_doc!(), created_doc!())),
+    CommandSpec::new("sketch.arc.three_point", "3-Point Arc", arc_three).at("SKETCH", "CREATE").icon("arc3").enabled(in_sketch).params(concat!("start, end, through: [x,y] or point ref (a referenced through point stays on the arc); construction?: bool", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.arc.center_point", "Center Point Arc", arc_center)
         .at("SKETCH", "CREATE")
         .icon("arc_center")
         .enabled(in_sketch)
-        .params(concat!("center, start, end (counter-clockwise from start) | center, start, sweep: signed degrees", connect_doc!(), created_doc!())),
+        .params(concat!("center, start, end (counter-clockwise from start) | center, start, sweep: signed degrees; construction?: bool", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.polygon.inscribed", "Inscribed Polygon", polygon_inscribed)
         .at("SKETCH", "CREATE")
         .icon("polygon")
@@ -1222,6 +1222,7 @@ fn circle_two(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let (out, info) = draw(s, p, cmd, |sk, _| {
         let ci = sk.add_circle((a + b) * 0.5, r, None, None)?;
+        mark_construction(sk, &[ci], p);
         Ok((ids_of(sk, &[ci]), Vec::new()))
     })?;
     Ok(result(out, info))
@@ -1247,6 +1248,7 @@ fn circle_three(s: &mut Session, p: &Value) -> Result<Value> {
     let (o, r) = circumcircle(a, b, c).ok_or_else(|| bad(cmd, "the points are collinear"))?;
     let (out, info) = draw(s, p, cmd, |sk, _| {
         let ci = sk.add_circle(o, r, None, None)?;
+        mark_construction(sk, &[ci], p);
         Ok((ids_of(sk, &[ci]), Vec::new()))
     })?;
     Ok(result(out, info))
@@ -1269,6 +1271,7 @@ fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(c) = sk.curves.get_mut(ci) {
             c.reversed = !ccw;
         }
+        mark_construction(sk, &[ci], p);
         let mut cons = Vec::new();
         if let Some(point) = t.idx() {
             cons.push(add_c(sk, ConstraintKind::PointOnCurve { p: point, c: ci })?);
@@ -1310,10 +1313,12 @@ fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
                 }
                 ci
             };
+            mark_construction(sk, &[ci], p);
             return Ok((ids_of(sk, &[ci]), Vec::new()));
         }
         let b = req_parg(sk, doc, p, "end", cmd)?;
         let ci = sk.add_arc(c.pos(), a.pos(), b.pos(), [c.idx(), a.idx(), b.idx()], id.as_deref())?;
+        mark_construction(sk, &[ci], p);
         Ok((ids_of(sk, &[ci]), Vec::new()))
     })?;
     Ok(result(out, info))

@@ -238,6 +238,30 @@ fn construction_toggle_takes_shapes_out_of_profiles_and_back() {
 }
 
 #[test]
+fn circles_and_arcs_honour_construction() {
+    let cases = [
+        ("sketch.arc.center_point", json!({"center": [0, 0], "start": [8, 0], "end": [-8, 0]})),
+        ("sketch.arc.center_point", json!({"center": [0, 0], "start": [8, 0], "sweep": -90})),
+        ("sketch.arc.three_point", json!({"start": [8, 0], "end": [-8, 0], "through": [0, 8]})),
+        ("sketch.circle.two_point", json!({"p0": [-8, 0], "p1": [8, 0]})),
+        ("sketch.circle.three_point", json!({"p0": [8, 0], "p1": [0, 8], "p2": [-8, 0]})),
+    ];
+    for (cmd, params) in cases {
+        for construction in [false, true] {
+            let mut s = new_sketch();
+            let mut p = params.clone();
+            if construction {
+                p["construction"] = json!(true);
+            }
+            run(&mut s, cmd, p);
+            let sk = sketch(&s);
+            let curve = sk.curves.last().expect("created curve");
+            assert_eq!(curve.construction, construction, "{cmd} {params}");
+        }
+    }
+}
+
+#[test]
 fn centerline_can_become_construction_directly() {
     let mut s = new_sketch();
     let l = curve_ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0]]})));
