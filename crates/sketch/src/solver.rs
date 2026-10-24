@@ -743,7 +743,72 @@ pub(crate) fn touch_point(sk: &Sketch, k: &ConstraintKind, on_curve: &[(usize, u
         return Some(*p);
     }
     let on = |p: usize, c: usize| on_curve.binary_search(&(p, c)).is_ok();
-    ea.iter().find(|p| on(**p, b)).or_else(|| eb.iter().find(|p| on(**p, a))).copied()
+    if let Some(p) = ea.iter().find(|p| on(**p, b)).or_else(|| eb.iter().find(|p| on(**p, a))) {
+        return Some(*p);
+    }
+    contact_through_coincident(sk, a, b, &ea, &eb, on_curve)
+}
+
+/// Whether curve `c` is a straight line.
+fn is_straight(sk: &Sketch, c: usize) -> bool {
+    matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Line { .. }))
+}
+
+/// A touch point the two curves reach through `Coincident` constraints, when they share no point
+/// and no end of one is a point-on-curve of the other: a point lying on `a` (an end of it, or a
+/// point-on-curve of it) tied by a chain of `Coincident` constraints to a point lying on `b`
+/// (the chain may be empty: a free point on both curves). That covers two ends tied together, a
+/// line end tied to a free point that is on the circle, and a free point on both curves.
+/// Free-form curves count only their ends. Without this the tangency falls back to the
+/// touch-free form (distance from the centre equals the radius), whose Jacobian is
+/// rank-deficient at the solution: the touch point is a double root of it, so it converges to
+/// only sqrt(residual) of tangent and drops rank (see the `coincident_tangent_*` tests). The
+/// point returned is the one lying on the round curve (for a free-form curve, its end), so the
+/// radius to it is read from the curve it belongs to.
+fn contact_through_coincident(sk: &Sketch, a: usize, b: usize, ea: &[usize], eb: &[usize], on_curve: &[(usize, usize)]) -> Option<usize> {
+    let n = sk.points.len();
+    let free = |c: usize| sk.curves.get(c).is_some_and(|c| c.kind.is_freeform());
+    // Points lying on a curve: its ends, and (unless free-form) the points constrained onto it.
+    let lying = |c: usize, ends: &[usize]| -> Vec<usize> {
+        let mut v: Vec<usize> = ends.to_vec();
+        if !free(c) {
+            v.extend(on_curve.iter().filter(|(_, cc)| *cc == c).map(|(p, _)| *p));
+            // The midpoint of a line lies on it.
+            v.extend(sk.constraints.iter().filter(|k| !k.driven).filter_map(|k| match k.kind {
+                ConstraintKind::Midpoint { p, l } if l == c => Some(p),
+                _ => None,
+            }));
+        }
+        v.retain(|p| *p < n);
+        v
+    };
+    let (on_a, on_b) = (lying(a, ea), lying(b, eb));
+    if on_a.is_empty() || on_b.is_empty() {
+        return None;
+    }
+    let mut parent: Vec<usize> = (0..n).collect();
+    for c in sk.constraints.iter().filter(|c| !c.driven) {
+        if let ConstraintKind::Coincident { p, q } = c.kind
+            && p != q
+            && p < n
+            && q < n
+        {
+            union(&mut parent, p, q);
+        }
+    }
+    for &p in &on_a {
+        let root = find(&mut parent, p);
+        if let Some(&q) = on_b.iter().find(|q| find(&mut parent, **q) == root) {
+            return Some(if free(a) {
+                p
+            } else if free(b) || is_straight(sk, a) {
+                q
+            } else {
+                p
+            });
+        }
+    }
+    None
 }
 
 /// Variables a block depends on, and whether it reads a point that is a constant of the solve.
@@ -2197,6 +2262,11 @@ fn solve_inner(
     let mut det = vec![false; lay.n];
     let mut rank = 0;
     let mut redundant: Vec<String> = Vec::new();
+    let mut degenerate = false;
+    // Tangents whose touch-free form is violated (or whose round curve collapsed): named in
+    // `failing` only when the sketch failed anyway, so a sketch inside the acceptance tolerance
+    // is never `Solved` with a constraint in `failing`.
+    let mut named: Vec<String> = Vec::new();
     // A component too large to solve is a failure, not an allocation.
     if comps.iter().any(|(_, vars, bis)| !bis.is_empty() && oversized(vars)) {
         max_residual = f64::MAX;
@@ -2223,6 +2293,26 @@ fn solve_inner(
         }
         let (r, _, owner) = system(sk, &lay, &sub, &mut x, false);
         check(&r, &owner, &sub, &mut failing);
+        // A tangency read at its touch point can hold there while the curves are not tangent (the
+        // touch point is not on the line, or not on the round curve): that failure is named by the
+        // constraint that ties the point, and the tangent is named as well when the touch-free
+        // form (distance from the centre equals the radius) is violated. A tangent whose round
+        // curve has collapsed to a point holds trivially and is a degenerate answer: it fails.
+        let now = State { sk, lay: &lay, x: &x };
+        for (b, _) in &sub {
+            let (Block::User(ci, k) | Block::TangentAt(ci, k, _)) = b else { continue };
+            let ConstraintKind::Tangent { a: ta, b: tb } = **k else { continue };
+            let Some(c) = sk.constraints.get(*ci) else { continue };
+            let mut touch_free = Vec::new();
+            if matches!(b, Block::TangentAt(..)) {
+                residuals(&now, k, &mut touch_free);
+            }
+            let collapsed = [ta, tb].iter().any(|&cv| !now.is_line(cv) && !now.is_freeform(cv) && now.radius_of(cv) < ACCEPT);
+            if (collapsed || touch_free.iter().any(|v| !(v.abs() < ACCEPT))) && !named.contains(&c.id) {
+                named.push(c.id.clone());
+            }
+            degenerate |= collapsed;
+        }
         if analysis == Analysis::StatusOnly {
             continue;
         }
@@ -2273,6 +2363,9 @@ fn solve_inner(
     if !consts.is_empty() {
         let (r, _, owner) = system(sk, &lay, &consts, &mut x, false);
         check(&r, &owner, &consts, &mut failing);
+    }
+    if degenerate {
+        max_residual = max_residual.max(1.0);
     }
     // Weld the whole connected closure graph, preserving every immutable node.
     // Validate the actual prospective geometry before accepting a numerical solve.
@@ -2329,6 +2422,13 @@ fn solve_inner(
         None
     };
     let status = if max_residual < ACCEPT { SolveStatus::Solved } else { SolveStatus::Failed };
+    if status == SolveStatus::Failed {
+        for id in named {
+            if !failing.contains(&id) {
+                failing.push(id);
+            }
+        }
+    }
     for id in &folded {
         if !failing.contains(id) {
             failing.push(id.clone());
