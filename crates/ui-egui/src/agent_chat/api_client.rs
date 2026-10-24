@@ -344,10 +344,12 @@ fn go_anthropic_messages(history: &[Value]) -> Vec<Value> {
     out
 }
 
-/// OpenAI-style history as Responses API input items. Assistant history takes
-/// `output_text` parts: `input_text` is rejected there.
-fn go_responses_input(history: &[Value]) -> Vec<Value> {
+/// OpenAI-style history as Responses API input items, with the system note
+/// first (no history clone: the note is pushed, not prepended as a message).
+/// Assistant history takes `output_text` parts: `input_text` is rejected there.
+fn go_responses_input(system: &str, history: &[Value]) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::new();
+    out.push(json!({"type": "message", "role": "system", "content": [{"type": "input_text", "text": system}]}));
     for m in history {
         let role = m.get("role").and_then(Value::as_str).unwrap_or("");
         match role {
@@ -1070,9 +1072,7 @@ impl Worker {
         match protocol {
             GoProtocol::Chat => self.body(),
             GoProtocol::Responses => {
-                let mut history = vec![json!({"role": "system", "content": super::acp::SYSTEM_NOTE})];
-                history.extend(self.history.iter().cloned());
-                let mut body = json!({"model": self.cfg.model, "input": go_responses_input(&history)});
+                let mut body = json!({"model": self.cfg.model, "input": go_responses_input(super::acp::SYSTEM_NOTE, &self.history)});
                 if !self.tools.is_empty() {
                     body["tools"] = Value::Array(go_responses_tools(&self.tools));
                 }
@@ -2286,8 +2286,7 @@ mod tests {
         assert_eq!(roles, ["user", "assistant", "user"], "{messages:?}");
         assert_eq!(messages[2]["content"].as_array().unwrap().len(), 2, "both tool answers in one message");
         assert_eq!(messages[1]["content"][1]["type"], "tool_use");
-        let with_system = [vec![json!({"role": "system", "content": "sys"})], history.clone()].concat();
-        let input = go_responses_input(&with_system);
+        let input = go_responses_input("sys", &history);
         assert_eq!(input[0]["type"], "message");
         assert!(input.iter().any(|i| i["type"] == "function_call"), "{input:?}");
         assert!(input.iter().any(|i| i["type"] == "function_call_output" && i["output"] == "1mm"), "{input:?}");
