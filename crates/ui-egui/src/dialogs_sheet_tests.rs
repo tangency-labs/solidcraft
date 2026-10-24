@@ -953,3 +953,89 @@ fn flat_perforations_cull_offscreen_and_subpixel_holes() {
     app.flat_view.cam.distance = fitted_distance * 1000.0;
     assert!(flat_circles(&mut app, &dialog, rect).is_empty());
 }
+
+/// The Flange dialog's Height From row: Outer Sharp (the default) asks for nothing, Inner Sharp
+/// reaches the feature, and Edit Feature shows it again.
+#[test]
+fn flange_dialog_measures_the_height_from_the_chosen_datum() {
+    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"layout":mode}));
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        let edges: Vec<Sel> = edge_sel(&h.app.session, Vec3::new(50.0, 0.0, 2.5)).into_iter().collect();
+        assert_eq!(edges.len(), 1);
+        h.app.session.selection = edges;
+        h.app.start("sheet.flange");
+        h.frames(3);
+        let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
+            Some(Kind::Sheet(Sm::Flange { height_from, .. })) => Some(*height_from),
+            _ => None,
+        };
+        assert_eq!(shown(&h.app), Some(0));
+        let d = h.app.dialog.clone().unwrap();
+        let c = apply_commands(&h.app, &d).unwrap();
+        assert!(c[0].1.get("height_from").is_none(), "{}", c[0].1);
+        h.step(&json!({"click": {"handle": "dialog:Height From"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Height From:Inner Sharp"}})).unwrap();
+        assert_eq!(shown(&h.app), Some(1));
+        let d = h.app.dialog.clone().unwrap();
+        let c = apply_commands(&h.app, &d).unwrap();
+        assert_eq!(c[0].1["height_from"], json!("inner"), "{}", c[0].1);
+        h.step(&json!({"widget": "OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+        let saved = |app: &SolveApp| match app.session.doc.features.last().map(|f| &f.kind) {
+            Some(FeatureKind::SheetFlange { height_from, .. }) => height_from.clone(),
+            _ => None,
+        };
+        assert_eq!(saved(&h.app).as_deref(), Some("inner"));
+        // Edit Feature shows Inner Sharp; Tangent then reaches the feature.
+        let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+        let mut e = edit_dialog(&h.app, id, None).unwrap();
+        assert!(matches!(&e.kind, Kind::Sheet(Sm::Flange { height_from: 1, .. })));
+        let c = apply_commands(&h.app, &e).unwrap();
+        assert_eq!(c[0].1["params"]["height_from"], json!("inner"));
+        if let Kind::Sheet(Sm::Flange { height_from, .. }) = &mut e.kind {
+            *height_from = 2;
+        }
+        let commands = apply_commands(&h.app, &e).unwrap();
+        run_all(&mut h.app, commands);
+        assert_eq!(saved(&h.app).as_deref(), Some("tangent"));
+    }
+}
+
+/// The Flange dialog's Bend Position offers material outside and tangent, and Edit Feature shows them again.
+#[test]
+fn flange_dialog_offers_material_outside_and_tangent_bend_positions() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.session.selection = edge_sel(&h.app.session, Vec3::new(50.0, 0.0, 2.5)).into_iter().collect();
+    h.app.start("sheet.flange");
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "dialog:Bend Position"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Bend Position:Material Outside"}})).unwrap();
+    let d = h.app.dialog.clone().unwrap();
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c[0].1["position"], json!("material_outside"), "{}", c[0].1);
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    let mut e = edit_dialog(&h.app, id, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Flange { position: 3, .. })));
+    if let Kind::Sheet(Sm::Flange { position, .. }) = &mut e.kind {
+        *position = 4;
+    }
+    let commands = apply_commands(&h.app, &e).unwrap();
+    assert_eq!(commands[0].1["params"]["position"], json!("tangent"));
+    run_all(&mut h.app, commands);
+    let saved = match h.app.session.doc.features.last().map(|f| &f.kind) {
+        Some(FeatureKind::SheetFlange { position, .. }) => position.clone(),
+        _ => String::new(),
+    };
+    assert_eq!(saved, "tangent");
+}

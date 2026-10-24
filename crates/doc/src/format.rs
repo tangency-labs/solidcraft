@@ -1419,6 +1419,7 @@ mod tests {
             body: None,
             corner_relief_shape: shape.map(Into::into),
             corner_relief: size.map(Into::into),
+            height_from: None,
         };
         let saved = |document: &Document| -> Value { serde_json::from_str(&document.to_json()).unwrap() };
         // A flange that follows the rule saves neither key, and a design of format 23 opens as it was.
