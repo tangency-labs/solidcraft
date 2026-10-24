@@ -255,7 +255,7 @@ fn member_body(app: &SolveApp, pick: &Sel) -> Option<String> {
         Sel::Face { body, .. } => body,
         _ => return None,
     };
-    app.session.model.state().frame_members.iter().any(|m| m.body == *body).then(|| body.clone())
+    app.session.model.state().frame_member(body).is_some().then(|| body.clone())
 }
 
 /// The command Trim/Extend's OK runs (`extra`: parameters kept from the feature being edited).
@@ -275,7 +275,10 @@ pub fn trim_commands(app: &SolveApp, t: &Trim, inputs: &[SelInput], extra: &Map<
         let target = match (member_body(app, pick), pick) {
             // A member, or a face of one: a butt joint against it.
             (Some(body), _) => json!(body),
-            (None, Sel::Face { point, .. }) => json!({"plane": {"face": [point.x, point.y, point.z]}}),
+            // The exact face (its body, index and path), as Start Sketch picks one.
+            (None, face @ Sel::Face { point, .. }) => json!({
+                "plane": crate::sketch_attachment_ui::face_plane(app, face).unwrap_or_else(|| json!({"face": [point.x, point.y, point.z]}))
+            }),
             (None, Sel::Plane { name }) => json!({"plane": name}),
             _ => return Err("trim to members, planar faces or planes".into()),
         };

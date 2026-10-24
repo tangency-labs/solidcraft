@@ -83,7 +83,7 @@ pub mod text_params;
 pub mod thread_forms;
 
 pub use assembly::{
-    BomType, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames, apply_point, apply_vector, is_identity, is_placement,
+    BomType, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames, apply_point, apply_vector, is_identity, is_placement, map_plane_ref,
     map_point_expr, map_vector_expr, mat_inverse, mat_mul, rigid,
 };
 pub use document::*;
