@@ -1000,13 +1000,18 @@ fn combine_of_a_piece_a_cut_used_to_split_off_takes_the_body_it_is_part_of() {
 
 /// A triangular prism and a thin slab sharing their bottom plane, the prism's edge in that plane
 /// lying in the slab's end face, the slab's corners rounded nearly to half its width (so its flat
-/// end is narrower than the prism).
+/// end is narrower than the prism). Also with the prism's bottom up to 6e-4 above the slab's, where
+/// the prism's bottom is moved down into the slab's plane (with either body the target), and 1e-4
+/// below it.
 #[test]
 fn prism_edge_in_a_round_cornered_slab_end_face_joins() {
-    for r in [4.5, 4.9] {
+    let slab_first = [(4.9, 2e-4, true)];
+    let prism_first = [0.0, 8e-5, 1e-4, 2e-4, 5e-4, 6e-4, -1e-4].map(|dz| (4.9, dz, false));
+    for (r, dz, swap) in [(4.5, 0.0, false)].into_iter().chain(prism_first).chain(slab_first) {
+        let (target, tool) = if swap { ("Slab", "Prism") } else { ("Prism", "Slab") };
         let mut s = Session::default();
         let mut run = |c: &str, p: Value| s.execute(c, &p).unwrap();
-        run("sketch.create", json!({"plane": {"origin": [-45.6, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}}));
+        run("sketch.create", json!({"plane": {"origin": [-45.6, 0, dz], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}}));
         run("sketch.line", json!({"points": [[-63, 0], [-3, 0], [-63, 60]], "closed": true}));
         run("sketch.finish", json!({}));
         run("solid.extrude", json!({"distance": 1.2, "operation": "new", "body_name": "Prism"}));
@@ -1015,14 +1020,61 @@ fn prism_edge_in_a_round_cornered_slab_end_face_joins() {
         run("sketch.finish", json!({}));
         run("solid.extrude", json!({"distance": 0.4, "operation": "new", "body_name": "Slab"}));
         let (prism, slab) = (volume(&s, "Prism"), volume(&s, "Slab"));
-        s.execute("solid.combine", &json!({"target": "Prism", "tools": ["Slab"], "operation": "join"})).unwrap();
+        s.execute("solid.combine", &json!({"target": target, "tools": [tool], "operation": "join"})).unwrap();
         let join = s.model.results.last().unwrap();
-        assert_eq!(join.error.as_deref(), None, "r {r}");
-        // The prism inside the slab: 1.2 wide, 0.4 high and 60 long, less the 0.4 x 0.4 triangle the
-        // sloped face leaves empty at the slab's end.
-        let shared = 1.2 * 0.4 * 60.0 - 1.2 * 0.4 * 0.4 / 2.0;
-        let got = volume(&s, "Prism");
-        assert!((got - (prism + slab - shared)).abs() < 1e-3 * got, "r {r}: {got} vs {}", prism + slab - shared);
+        assert_eq!(join.error.as_deref(), None, "r {r} dz {dz} {target}");
+        // The prism inside the slab: 1.2 wide and 60 long at its bottom, shorter by its height above
+        // that, between the slab's bottom and top (0.4).
+        let (t0, t1) = (f64::max(0.0, -dz), 0.4 - dz);
+        let shared = 1.2 * (60.0 * (t1 - t0) - (t1 * t1 - t0 * t0) / 2.0);
+        let got = volume(&s, target);
+        assert!((got - (prism + slab - shared)).abs() < 1e-3 * got, "r {r} dz {dz} {target}: {got} vs {}", prism + slab - shared);
+        if dz >= 0.0 {
+            // The slab's bottom stays where it was, under the prism too: the slab is not cut back to
+            // the prism's plane.
+            let mesh = s.model.state().body(target).unwrap().body.tessellate(0.01).unwrap();
+            assert!(mesh.bounds().min.z.abs() < 1e-9, "r {r} dz {dz} {target}: bottom at {}", mesh.bounds().min.z);
+            assert!(mesh.contains(solidcraft_geom::Vec3::new(-45.0, -30.0, 0.5 * dz.max(1e-4))), "r {r} dz {dz} {target}");
+        }
+    }
+}
+
+/// Faces a hair out of one plane that the general boolean takes exactly stay as they are: a block
+/// with a hole across it joined to a cylinder whose bottom is 5e-4 below the block's, and a box
+/// whose bottom is 5e-4 above a block's, cut from it and intersected with it.
+#[test]
+fn faces_a_hair_out_of_one_plane_keep_exact_booleans() {
+    let pi = std::f64::consts::PI;
+    let p = solidcraft_geom::Vec3::new;
+    let mut s = Session::default();
+    let mut run = |c: &str, p: Value| s.execute(c, &p).unwrap();
+    run("solid.box", json!({"length": 80, "width": 40, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Block"}));
+    run("sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}}));
+    run("sketch.circle.center", json!({"center": [5, 5], "radius": 2}));
+    run("sketch.finish", json!({}));
+    run("solid.extrude", json!({"distance": 80, "operation": "cut"}));
+    run("sketch.create", json!({"plane": {"origin": [60, 20, -5e-4], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run("sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+    run("sketch.finish", json!({}));
+    run("solid.extrude", json!({"distance": 20, "operation": "new", "body_name": "Cylinder"}));
+    run("solid.combine", json!({"target": "Block", "tools": ["Cylinder"], "operation": "join"}));
+    let want = 80.0 * 40.0 * 10.0 - pi * 4.0 * 80.0 + pi * 100.0 * (10.0 + 5e-4);
+    let got = volume(&s, "Block");
+    assert!((got - want).abs() < 0.2, "{got} vs {want}");
+    let mesh = s.model.state().body("Block").unwrap().body.tessellate(0.01).unwrap();
+    assert!(!mesh.contains(p(5.0, 5.0, -2.5e-4)), "the block's bottom moved");
+    assert!(mesh.contains(p(60.0, 20.0, -2.5e-4)), "the cylinder's bottom");
+
+    for (operation, want, inside) in [("cut", 4000.0 - 100.0 * (10.0 - 5e-4), true), ("intersect", 100.0 * (10.0 - 5e-4), false)] {
+        let mut s = Session::default();
+        let mut run = |c: &str, p: Value| s.execute(c, &p).unwrap();
+        run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Block"}));
+        run("solid.box", json!({"length": 10, "width": 10, "height": 20, "corner": [5, 5, 5e-4], "operation": "new", "body_name": "Box"}));
+        run("solid.combine", json!({"target": "Block", "tools": ["Box"], "operation": operation}));
+        let got = volume(&s, "Block");
+        assert!((got - want).abs() < 1e-6, "{operation}: {got} vs {want}");
+        let mesh = s.model.state().body("Block").unwrap().body.tessellate(0.01).unwrap();
+        assert_eq!(mesh.contains(p(10.0, 10.0, 2.5e-4)), inside, "{operation}: the 5e-4 layer under the box");
     }
 }
 
