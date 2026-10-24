@@ -496,9 +496,23 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
         super::component::to_active_frame(s, &mut kind);
     }
     // Bare lengths typed in an inch (or cm…) design mean that unit.
+    let mut unit_warnings = Vec::new();
     if s.doc.units.trim() != "mm" {
         let doc = s.doc.clone();
-        for (_, e, k) in kind.inputs_mut() {
+        let u = doc.units.trim().to_string();
+        for (label, e, k) in kind.inputs_mut() {
+            // A bare number inside an expression keeps the mm default, so it means something
+            // else than the same number on its own would (#5887). Say so where it changes the
+            // value; the expression itself is left alone.
+            if let Some((as_mm, as_design)) = doc.design_unit_mismatch(e, k) {
+                let mm = |v: f64| format!("{v:.4}").trim_end_matches('0').trim_end_matches('.').to_string();
+                unit_warnings.push(format!(
+                    "`{label}`: a plain number inside an expression is read as mm, so `{}` is {} mm, not the {} mm it would be in `{u}`. Give the number its unit (`1 {u}`) to mean {u}.",
+                    e.as_str().trim(),
+                    mm(as_mm),
+                    mm(as_design)
+                ));
+            }
             *e = doc.with_design_unit(e, k).into();
         }
     }
@@ -647,6 +661,7 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
         warning,
         ms: r.map(|r| r.ms),
         param_warnings: Vec::new(),
+        unit_warnings,
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
