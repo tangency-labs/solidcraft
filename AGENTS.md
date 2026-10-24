@@ -81,7 +81,10 @@ People trust SolidCraft with their designs; a crash loses their work. **This out
 - **Everything is a command.** User-visible behaviour = a command in `crates/engine/src/cmd/*`
   (`CommandSpec`: id = our own dotted, lower-case id `<area>.<thing>[.<variant>]` such as
   `solid.extrude` or `sketch.rectangle.two_point`, never another product's command id; label;
-  toolbar tab and panel; icon; shortcut; params doc; `enabled`; JSON `run`) + tests. The toolbar,
+  toolbar tab and panel; icon; shortcut; params doc; `enabled`; JSON `run`) + input and output
+  schemas (a contract and a reply type in `crates/engine/src/schema/`, registered with
+  `checked!`, `.contract` and `.output`; a test fails without them, and
+  `schema/unconverted.txt` only shrinks; how: docs/book/src/dev/schemas.md) + tests. The toolbar,
   dialogs, sketch tools, palette, scripts, CLI and control channel all reach the same commands.
 - **Programmatic calls never open dialogs.** `engine.execute` runs the JSON form; only toolbar
   clicks (`ui.start`) start interactive tools and dialogs, which then run commands.

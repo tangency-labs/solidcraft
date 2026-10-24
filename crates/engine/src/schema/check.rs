@@ -115,7 +115,7 @@ impl<P: DeserializeOwned + JsonSchema + 'static> Contract for TypedContract<P> {
 }
 
 /// The most keys of one call that are looked at, and the longest key given a suggestion.
-const MAX_KEYS: usize = 64;
+pub(crate) const MAX_KEYS: usize = 64;
 const MAX_KEY_LEN: usize = 64;
 const MAX_MESSAGE_LEN: usize = 300;
 const MAX_WHOLE_LEN: usize = 4096;
@@ -258,6 +258,20 @@ pub(crate) fn parse_issue(e: &serde_path_to_error::Error<serde_json::Error>) -> 
     };
     // serde quotes the caller's value, which may be long.
     Issue { path, message: truncate(&message, MAX_MESSAGE_LEN), suggestion: None }
+}
+
+/// Run `handler` as the command `id`, checking the call against the contract `id` publishes
+/// (its [`CommandSpec::contract`](crate::cmd::CommandSpec::contract)), so the contract enforced is
+/// always the one described. With the level off and no audit recorder, this is exactly
+/// `handler(s, p)`, without looking anything up; a command without a contract just runs.
+pub fn run_checked_as(s: &mut Session, p: &Value, id: &str, handler: Run) -> Result<Value> {
+    if s.param_check == ParamCheck::Off && !record::enabled() {
+        return handler(s, p);
+    }
+    match crate::cmd::find_command(id).and_then(|c| c.contract) {
+        Some(contract) => run_checked(s, p, id, contract, handler),
+        None => handler(s, p),
+    }
 }
 
 /// Run `handler` as the command `id`, checking the call against `contract` as the session's

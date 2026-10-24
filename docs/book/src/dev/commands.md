@@ -31,9 +31,20 @@ ending in the same word (`file.open`: did you mean `doc.open`?).
 ## Adding a command
 
 1. Add a `CommandSpec` to the right file in `crates/engine/src/cmd/` and implement `run`.
-2. Write engine tests that measure the result: volume, area, and face/edge/vertex counts
+2. Give it input and output schemas: a parameters type (its contract) and a reply type in the
+   module for its command file under `crates/engine/src/schema/` (`schema/features.rs` for
+   `cmd/features.rs`, and so on; create it for the file's first contract), built from the shared
+   field types in `schema/types.rs`. Register them with `checked!(…)`, `.contract(…)` and
+   `.output(…)`, as `solid.extrude` does, and add the command to that module's
+   `schemas_and_the_key_check_agree` test, with error-message cases and a reply test. The
+   parameters type documents each parameter (keep the `.params(…)` prose too, for now), and
+   `describe_command` serves both schemas to agents and scripts. A test
+   (`every_command_has_input_and_output_schemas`) fails for a command without them; the commands
+   that predate the rule are listed in `schema/unconverted.txt`, which only shrinks.
+   [Command schemas](schemas.md) walks through it, with the shared types and a checklist.
+3. Write engine tests that measure the result: volume, area, and face/edge/vertex counts
    against values you can derive by hand.
-3. The hostile-input test (`hostile_params_never_panic` in `crates/engine/src/tests.rs`) runs
+4. The hostile-input test (`hostile_params_never_panic` in `crates/engine/src/tests.rs`) runs
    your command automatically with every documented parameter set to junk. It must return
    errors, never panic.
-4. For UI work, add a scenario (see [Test harnesses](testing.md)).
+5. For UI work, add a scenario (see [Test harnesses](testing.md)).
