@@ -68,7 +68,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole: metric major minus pitch or tabulated UNC/UNF, G or Rp cut-tap drill) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?; thread?: \"M6\" or \"1/4-20 UNC\" (cosmetic); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
+        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole: metric major minus pitch or tabulated UNC/UNF, G or Rp cut-tap drill) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?; thread?: \"M6\" or \"1/4-20 UNC\" (cosmetic); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); handedness?: right|left (default right, needs thread for left); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
     CommandSpec::new("solid.pipe", "Pipe", pipe)
         .at("SOLID", "CREATE")
         .icon("pipe")
@@ -92,7 +92,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.thread", "Thread", thread)
         .at("SOLID", "CREATE")
         .icon("thread")
-        .params("face: [x,y,z] on a cylindrical face; designation?: ISO metric (\"M8\", \"M8x1\"; default: the size that fits); length?: expr (default: the whole face); modeled?: bool (default false). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body; a shaft thicker than the thread is first turned down to its major diameter over the threaded length"),
+        .params("face: [x,y,z] on a cylindrical face; designation?: ISO metric (\"M8\", \"M8x1\"; default: the size that fits); length?: expr (default: the whole face); handedness?: right|left (default right); modeled?: bool (default false). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body; a shaft thicker than the thread is first turned down to its major diameter over the threaded length"),
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
@@ -1905,10 +1905,27 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         _ => None,
     };
     let thread = str_(p, "thread").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let handedness = thread_handedness(p, cmd)?;
+    if thread.is_none() && !handedness.is_right() {
+        return Err(bad(cmd, "`handedness` needs `thread` (a tapped hole)"));
+    }
     if let Some(t) = &thread
         && solidcraft_doc::parse_tapped_thread(t).is_none()
     {
         return Err(bad(cmd, format!("unknown tapped thread `{t}` (ISO metric or a catalogued UNC/UNF, G or Rp size)")));
+    }
+    let thread_depth = match p.get("thread_depth") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(req_expr(cmd, p, "thread_depth")?),
+    };
+    if let Some(d) = &thread_depth {
+        if thread.is_none() {
+            return Err(bad(cmd, "`thread_depth` requires `thread` (a tapped hole)"));
+        }
+        let depth = s.doc.eval(d, Kind::Length).map_err(|e| bad(cmd, format!("`thread_depth`: {e}")))?;
+        if !depth.is_finite() || depth <= 0.0 {
+            return Err(bad(cmd, "`thread_depth` must be finite and positive"));
+        }
     }
     // A position given as length expressions (#1678), say `["leg_h*0.4", "width/2", "t"]`: kept,
     // so the hole follows the parameters; drilled where they evaluate now.
@@ -2006,10 +2023,13 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             _ => solidcraft_doc::HoleKind::Simple,
         },
         "drilled" => solidcraft_doc::HoleKind::Drilled { tip_angle: expr(p, "tip_angle").unwrap_or_else(|| "118 deg".into()) },
-        "counterbore" => solidcraft_doc::HoleKind::Counterbore { cb_diameter: get("cb_diameter")?, cb_depth: get("cb_depth")? },
+        "counterbore" => {
+            solidcraft_doc::HoleKind::Counterbore { cb_diameter: get("cb_diameter")?, cb_depth: get("cb_depth")?, tip_angle: expr(p, "tip_angle") }
+        }
         "countersink" => solidcraft_doc::HoleKind::Countersink {
             cs_diameter: get("cs_diameter")?,
             cs_angle: expr(p, "cs_angle").unwrap_or_else(|| "90 deg".into()),
+            tip_angle: expr(p, "tip_angle"),
         },
         other => return Err(bad(cmd, format!("unknown hole type `{other}`"))),
     };
@@ -2049,6 +2069,8 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             hole: kind,
             points: points.map(|x| x.0),
             thread,
+            thread_depth,
+            handedness,
             to: to.map(FacePick),
             references,
         },
@@ -2337,6 +2359,13 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
+fn thread_handedness(p: &Value, cmd: &str) -> Result<solidcraft_doc::ThreadHandedness> {
+    match p.get("handedness") {
+        None => Ok(solidcraft_doc::ThreadHandedness::Right),
+        Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "`handedness` must be `right` or `left`")),
+    }
+}
+
 fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.thread";
     let face = p
@@ -2354,7 +2383,8 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, l, Kind::Length, cmd, "length")?;
     }
     let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
-    let v = add_feature(s, p, FeatureKind::Thread { face: FacePick(face), designation, length, modeled })?;
+    let handedness = thread_handedness(p, cmd)?;
+    let v = add_feature(s, p, FeatureKind::Thread { face: FacePick(face), designation, length, modeled, handedness })?;
     let st = s.model.state();
     let t = v.get("feature").and_then(Value::as_u64).and_then(|id| st.threads.iter().find(|t| t.feature == id).cloned());
     Ok(json!({"feature": v.get("feature"), "name": v.get("name"), "thread": t}))

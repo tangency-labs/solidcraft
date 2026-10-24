@@ -15,6 +15,21 @@ pub const MAX_PARAMS: usize = 10_000;
 /// numbers, and far from overflowing the next id.
 pub const MAX_FEATURE_ID: u64 = 1 << 52;
 
+/// Screw direction independent of the cylinder's placement and the picked end.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(rename_all = "lowercase")]
+pub enum ThreadHandedness {
+    #[default]
+    Right,
+    Left,
+}
+
+impl ThreadHandedness {
+    pub fn is_right(&self) -> bool {
+        *self == Self::Right
+    }
+}
+
 /// A named parameter. User parameters are created by the user; model parameters (`d1`, `d2`…)
 /// are created by dimensions and features.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -721,6 +736,14 @@ pub enum FeatureKind {
         /// A cosmetic thread in the holes (e.g. "M6x1").
         #[serde(default, skip_serializing_if = "Option::is_none")]
         thread: Option<String>,
+        /// Threaded depth from the cylindrical wall's entry; `None` = its full useful length.
+        /// Independent of the drill depth and excluding the drill point and entry recess.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Thread depth")]
+        thread_depth: Option<Expr>,
+        /// Screw direction of the cosmetic thread; older holes are right-handed.
+        #[serde(default, skip_serializing_if = "ThreadHandedness::is_right")]
+        handedness: ThreadHandedness,
         /// To Object: drill down to the face (or point) here instead of `depth`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<FacePick>,
@@ -743,6 +766,8 @@ pub enum FeatureKind {
         length: Option<Expr>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         modeled: bool,
+        #[serde(default, skip_serializing_if = "ThreadHandedness::is_right")]
+        handedness: ThreadHandedness,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
@@ -2015,12 +2040,20 @@ pub enum HoleKind {
         cb_diameter: Expr,
         #[walk(length = "Counterbore depth")]
         cb_depth: Expr,
+        /// Optional drill point below the narrow cylindrical bore; absent stays flat.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Tip angle")]
+        tip_angle: Option<Expr>,
     },
     Countersink {
         #[walk(length = "Countersink diameter")]
         cs_diameter: Expr,
         #[walk(angle = "Countersink angle")]
         cs_angle: Expr,
+        /// Optional drill point, independent of the entry countersink.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Tip angle")]
+        tip_angle: Option<Expr>,
     },
 }
 

@@ -274,7 +274,12 @@ fn the_dialog_shows_the_sizes_beside_a_section_of_the_hole() {
     h.frames(3);
     let (cb, cbd, depth, dia) = (at("Counterbore Ø"), at("Counterbore depth"), at("Depth"), at("Diameter"));
     assert!(cb.y < cbd.y && cbd.y < depth.y && depth.y < dia.y, "{cb:?} {cbd:?} {depth:?} {dia:?}");
-    assert!(handle_at("dialog:Tip Angle").is_none(), "no tip on a counterbore");
+    assert!(handle_at("dialog:Tip Angle").is_some(), "a counterbore retains the selected angled bottom");
+    if let Some(Kind::Hole { opts, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        opts.angled = false;
+    }
+    h.frames(3);
+    assert!(handle_at("dialog:Tip Angle").is_none(), "a flat bottom needs no tip angle");
     // Through all: no depth.
     if let Some(Kind::Hole { opts, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
         opts.all = true;
@@ -292,4 +297,64 @@ fn the_dialog_shows_the_sizes_beside_a_section_of_the_hole() {
     h.step(&json!({"text": "7 mm"})).unwrap();
     h.frames(2);
     assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole { depth, .. } if depth == "7 mm"));
+}
+
+#[test]
+fn tapped_thread_depth_field_keeps_focus_and_typing_separate_from_acceptance() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    let hole = h.app.run("solid.hole", json!({"position":[20,15,20],"thread":"M6","depth":12})).unwrap()["feature"].as_u64().unwrap();
+    let original = h.app.session.doc.to_json();
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":hole}})).unwrap();
+    h.frames(3);
+    // Opening Edit Feature intentionally rolls the marker back; focusing a field must
+    // preserve that editing state, and Cancel must restore the original marker too.
+    let editing = h.app.session.doc.to_json();
+    assert!(handle_at("dialog:Thread depth").is_none(), "full tapping needs no partial-depth field");
+    h.step(&json!({"click":{"handle":"dialog:Full thread depth"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("dialog:Thread depth").is_some(), "partial depth belongs beside the section");
+    h.step(&json!({"click":{"handle":"dialog:Thread depth"}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"1 cm / 2"})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.session.doc.to_json(), editing, "selecting and typing a dimension must not apply the model");
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole { opts, .. } if !opts.thread_full_depth && opts.thread_depth == "1 cm / 2"));
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frames(3);
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.to_json(), original, "Cancel preserves the accepted design");
+}
+
+/// The upstream Preferences split must retain both Hole controls on Design.
+#[test]
+fn hole_design_preferences_keep_both_controls_and_cancel_after_page_split() {
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"language":"en", "open":"Design"}));
+    let page = rect_of("prefs:page_body").unwrap();
+    for label in ["Snap to face and edge centres", "Move holes by clicking or dragging"] {
+        let mut point = None;
+        for _ in 0..12 {
+            point = h.output.accesskit_update.as_ref().and_then(|tree| {
+                tree.nodes.iter().rev().find_map(|(_, node)| {
+                    if node.label() != Some(label) {
+                        return None;
+                    }
+                    let b = node.bounds()?;
+                    let p = egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32);
+                    page.contains(p).then_some(p)
+                })
+            });
+            if point.is_some() {
+                break;
+            }
+            h.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":-100}));
+            h.frames(12);
+        }
+        let p = point.unwrap_or_else(|| panic!("Hole preference missing from Design: {label}"));
+        h.call("ui.click", json!({"x":p.x,"y":p.y}));
+    }
+    assert!(h.app.preferences.hole_snaps && h.app.preferences.hole_moves);
+    h.call("ui.prefs", json!({"button":"cancel"}));
+    assert!(!h.app.preferences.hole_snaps && !h.app.preferences.hole_moves);
 }

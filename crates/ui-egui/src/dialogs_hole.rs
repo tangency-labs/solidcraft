@@ -19,6 +19,7 @@ pub(crate) enum Dim {
     CbDepth,
     CsAngle,
     Depth,
+    ThreadDepth,
     Diameter,
     TipAngle,
 }
@@ -32,6 +33,7 @@ impl Dim {
             Dim::CbDepth => "Counterbore depth",
             Dim::CsAngle => "Countersink angle",
             Dim::Depth => "Depth",
+            Dim::ThreadDepth => "Thread depth",
             Dim::Diameter => "Diameter",
             Dim::TipAngle => "Tip Angle",
         }
@@ -39,8 +41,8 @@ impl Dim {
 }
 
 /// The sizes a hole of type `kind` takes, top to bottom: a depth unless it goes through all or
-/// to an object, a diameter unless it is tapped (the thread sets it), a tip angle for an angled
-/// tip at the bottom of a blind simple hole.
+/// to an object, a diameter unless tapped, and a tip angle for an angled bottom
+/// independently of the entry recess.
 pub(crate) fn dims(kind: usize, opts: &HoleOpts, to_object: bool) -> Vec<Dim> {
     let mut v = match kind {
         1 => vec![Dim::TopDiameter, Dim::CbDepth],
@@ -50,13 +52,29 @@ pub(crate) fn dims(kind: usize, opts: &HoleOpts, to_object: bool) -> Vec<Dim> {
     if !opts.all && !to_object {
         v.push(Dim::Depth);
     }
+    if opts.tapped && !opts.thread_full_depth {
+        v.push(Dim::ThreadDepth);
+    }
     if !opts.tapped {
         v.push(Dim::Diameter);
     }
-    if kind == 0 && opts.angled && !opts.all {
+    if opts.angled && !opts.all {
         v.push(Dim::TipAngle);
     }
     v
+}
+
+/// Tapped bores use the engine's catalogued cut-tap drill, including Unified and parallel pipe sizes.
+/// A custom draft with an error must not illustrate its stale, last valid designation.
+fn bore_diameter(diameter: &str, opts: &HoleOpts, eval: &dyn Fn(&str, ValueKind) -> Option<f64>) -> Option<f64> {
+    if opts.tapped {
+        if opts.custom_thread.as_ref().is_some_and(|draft| draft.error.is_some()) {
+            return None;
+        }
+        solidcraft_engine::doc::parse_tapped_thread(&opts.thread).map(|size| size.tap_drill)
+    } else {
+        eval(diameter, ValueKind::Length).filter(|v| v.is_finite() && *v > 0.0)
+    }
 }
 
 /// What the picture is drawn from.
@@ -66,6 +84,9 @@ struct Section {
     to_object: bool,
     angled: bool,
     tapped: bool,
+    /// A schematic fraction: known blind extents use the entered lengths. To Object and
+    /// Through All have no typed drill length, so partial tapping is shown as a shorter span.
+    thread_fraction: f32,
     /// The bore's diameter over the counterbore's or countersink's (1 for a simple hole).
     ratio: f32,
     /// Half the countersink's and the tip's angles (radians).
@@ -82,7 +103,8 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Kind, to_object: bool, eval: &dyn 
     let len = |e: &str| eval(e, ValueKind::Length).filter(|v| v.is_finite() && *v > 0.0);
     let angle = |e: &str, lo: f64, hi: f64, or: f64| eval(e, ValueKind::Angle).filter(|v| v.is_finite()).map_or(or, |v| (v / 2.0).clamp(lo, hi));
     let top = if kind == 2 { cs_diameter.as_str() } else { cb_diameter.as_str() };
-    let ratio = match (len(diameter.as_str()), len(top)) {
+    let bore = bore_diameter(diameter, opts, eval);
+    let ratio = match (bore, len(top)) {
         (Some(d), Some(t)) if kind != 0 => (d / t).clamp(0.3, 0.8) as f32,
         _ if kind != 0 => 0.55,
         _ => 1.0,
@@ -91,8 +113,26 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Kind, to_object: bool, eval: &dyn 
         kind,
         through: opts.all,
         to_object,
-        angled: kind == 0 && opts.angled,
+        angled: opts.angled,
         tapped: opts.tapped,
+        thread_fraction: if opts.thread_full_depth {
+            1.0
+        } else if !opts.all && !to_object {
+            let recess = match kind {
+                1 => len(cb_depth.as_str()).unwrap_or(0.0),
+                2 => match (bore, len(cs_diameter.as_str())) {
+                    (Some(d), Some(top)) => (top - d).max(0.0) / (2.0 * angle(cs_angle.as_str(), 0.35, 1.3, std::f64::consts::FRAC_PI_4).tan()),
+                    _ => 0.0,
+                },
+                _ => 0.0,
+            };
+            match (len(opts.thread_depth.as_str()), len(depth.as_str()).filter(|d| *d > recess)) {
+                (Some(thread), Some(drill)) => (thread / (drill - recess)).clamp(0.05, 1.0) as f32,
+                _ => 0.55,
+            }
+        } else {
+            0.55
+        },
         ratio,
         cs_half: angle(cs_angle.as_str(), 0.35, 1.3, std::f64::consts::FRAC_PI_4) as f32,
         tip_half: angle(opts.tip_angle.as_str(), 0.5, 1.3, 1.03) as f32,
@@ -112,6 +152,9 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Kind, to_object: bool, eval: &dyn 
     }
     if dims.contains(&Dim::Depth) {
         fields.push((Dim::Depth.label(kind), depth));
+    }
+    if dims.contains(&Dim::ThreadDepth) {
+        fields.push((Dim::ThreadDepth.label(kind), &mut opts.thread_depth));
     }
     if dims.contains(&Dim::Diameter) {
         fields.push((Dim::Diameter.label(kind), diameter));
@@ -135,8 +178,15 @@ fn head(p: &egui::Painter, tip: Pos2, from: Pos2, col: Color32) {
 /// A dimension line from `a` to `b` with arrowheads at both ends.
 fn dimension(p: &egui::Painter, a: Pos2, b: Pos2, stroke: Stroke) {
     p.line_segment([a, b], stroke);
-    head(p, a, b, stroke.color);
-    head(p, b, a, stroke.color);
+    if a.distance(b) < 14.0 {
+        // Short partial depths need outward arrows rather than overlapping heads.
+        let d = (b - a).normalized();
+        head(p, a, a - d * 8.0, stroke.color);
+        head(p, b, b + d * 8.0, stroke.color);
+    } else {
+        head(p, a, b, stroke.color);
+        head(p, b, a, stroke.color);
+    }
 }
 
 /// An arc about `c` of radius `r` between the directions at `from` and `to` (radians, screen y
@@ -187,9 +237,10 @@ fn paint(p: &egui::Painter, pic: Rect, s: &Section, slots: &[(Dim, Rect, bool)])
     };
     // Across: the axis, the widest half width, the material's sides; the vertical dimensions sit
     // right of the material, before the fields.
-    let cx = pic.left() + 44.0;
-    let wide = 24.0;
-    let (left, right) = (pic.left() + 6.0, pic.left() + 76.0);
+    // Leave three separate depth lanes inside the picture even on a narrow form.
+    let cx = pic.left() + pic.width() * 0.40;
+    let wide = pic.width() * 0.20;
+    let (left, right) = (pic.left() + pic.width() * 0.04, pic.left() + pic.width() * 0.68);
     let bottom = pic.bottom() - 3.0;
     let top_r = wide;
     let bore_r = if s.kind == 0 { wide * 0.55 } else { wide * s.ratio };
@@ -205,7 +256,7 @@ fn paint(p: &egui::Painter, pic: Rect, s: &Section, slots: &[(Dim, Rect, bool)])
         bottom + 1.0
     } else {
         let mut y = step + 18.0;
-        for d in [Dim::Depth, Dim::Diameter] {
+        for d in [Dim::Depth, Dim::ThreadDepth, Dim::Diameter] {
             if let Some(v) = y_of(d) {
                 y = y.max(v + 10.0);
             }
@@ -242,12 +293,15 @@ fn paint(p: &egui::Painter, pic: Rect, s: &Section, slots: &[(Dim, Rect, bool)])
         p.add(Shape::convex_polygon(vec![pos2(cx - bore_r, shoulder), pos2(cx + bore_r, shoulder), apex], clear, Stroke::NONE));
     }
     // A tapped hole's thread: thin lines at the thread's major diameter, in the material.
+    let thread_start = step + 2.0;
+    let thread_end = thread_start + ((if s.through { bottom } else { shoulder - 3.0 }) - thread_start).max(0.0) * s.thread_fraction;
     if s.tapped {
         let r = bore_r * 1.22;
-        let (y0, y1) = (half.iter().rev().nth(1).map_or(top, |x| x.1), if s.through { bottom } else { shoulder - 3.0 });
         for x in [cx - r, cx + r] {
-            p.line_segment([pos2(x, y0 + 2.0), pos2(x, y1)], Stroke::new(1.0, t.form_ink));
+            p.line_segment([pos2(x, thread_start), pos2(x, thread_end)], Stroke::new(1.0, t.form_ink));
         }
+        p.line_segment([pos2(cx - r, thread_end), pos2(cx - bore_r, thread_end)], Stroke::new(1.0, t.form_ink));
+        p.line_segment([pos2(cx + bore_r, thread_end), pos2(cx + r, thread_end)], Stroke::new(1.0, t.form_ink));
     }
     // Outlines: the block's top and sides, the hole's walls and bottom.
     let edge = Stroke::new(1.4, t.form_ink);
@@ -289,13 +343,20 @@ fn paint(p: &egui::Painter, pic: Rect, s: &Section, slots: &[(Dim, Rect, bool)])
         leader(Dim::TopDiameter, b);
     }
     // Depths stand right of the material: the counterbore's nearer, the hole's farther out.
-    let mut x = right + 8.0;
+    let mut x = right + pic.width() * 0.07;
     if let Some(y) = y_of(Dim::CbDepth) {
         p.line_segment([pos2(cx + top_r, step), pos2(x + 3.0, step)], thin(Dim::CbDepth));
         p.line_segment([pos2(right, top), pos2(x + 3.0, top)], thin(Dim::CbDepth));
         dimension(p, pos2(x, top), pos2(x, step), ink(Dim::CbDepth));
         leader(Dim::CbDepth, pos2(x, y.clamp(top + 2.0, step - 2.0)));
-        x += 10.0;
+        x += pic.width() * 0.10;
+    }
+    if let Some(y) = y_of(Dim::ThreadDepth) {
+        p.line_segment([pos2(cx + bore_r * 1.22, thread_start), pos2(x + 3.0, thread_start)], thin(Dim::ThreadDepth));
+        p.line_segment([pos2(cx + bore_r * 1.22, thread_end), pos2(x + 3.0, thread_end)], thin(Dim::ThreadDepth));
+        dimension(p, pos2(x, thread_start), pos2(x, thread_end), ink(Dim::ThreadDepth));
+        leader(Dim::ThreadDepth, pos2(x, y.clamp(thread_start, thread_end.max(thread_start))));
+        x += pic.width() * 0.10;
     }
     if let Some(y) = y_of(Dim::Depth) {
         p.line_segment([pos2(cx + bore_r, shoulder), pos2(x + 3.0, shoulder)], thin(Dim::Depth));
@@ -333,6 +394,125 @@ fn paint(p: &egui::Painter, pic: Rect, s: &Section, slots: &[(Dim, Rect, bool)])
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recessed_drill_point_total_depth_dimension_is_outside_partial_tapping() {
+        for kind in [1, 2] {
+            for width in [80.0, 120.0] {
+                for fraction in [0.05, 0.5] {
+                    let ctx = crate::fonts::test_context();
+                    let pic = Rect::from_min_size(pos2(10.0, 10.0), vec2(width, 200.0));
+                    let section = Section {
+                        kind,
+                        through: false,
+                        to_object: false,
+                        angled: false,
+                        tapped: true,
+                        thread_fraction: fraction,
+                        ratio: 0.5,
+                        cs_half: std::f32::consts::FRAC_PI_4,
+                        tip_half: 1.03,
+                    };
+                    let slots = [
+                        (Dim::TopDiameter, 25.0),
+                        (if kind == 1 { Dim::CbDepth } else { Dim::CsAngle }, 60.0),
+                        (Dim::Depth, 105.0),
+                        (Dim::ThreadDepth, 145.0),
+                    ]
+                    .map(|(dim, y)| (dim, Rect::from_min_size(pos2(150.0, y), vec2(100.0, 20.0)), false));
+                    let output = ctx.run_ui(egui::RawInput::default(), |ui| paint(ui.painter(), pic, &section, &slots));
+                    let mut dimensions: Vec<_> = output
+                        .shapes
+                        .iter()
+                        .filter_map(|clipped| match &clipped.shape {
+                            Shape::LineSegment { points, stroke }
+                                if (stroke.width - 1.0).abs() < 1e-4
+                                    && (points[0].x - points[1].x).abs() < 1e-4
+                                    && points[0].x > pic.left() + width * 0.68
+                                    && (points[0].y - points[1].y).abs() > 0.5 =>
+                            {
+                                Some((points[0].x, (points[0].y - points[1].y).abs()))
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    assert!(dimensions.len() >= 2, "both total and partial depths must be drawn");
+                    dimensions.sort_by(|a, b| b.1.total_cmp(&a.1));
+                    let total = dimensions[0];
+                    assert!(dimensions.iter().skip(1).all(|shorter| total.0 > shorter.0), "longest drill depth must be outside: {dimensions:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tapped_section_uses_the_current_nominal_size_and_pitch() {
+        let mut opts = HoleOpts { tapped: true, thread: "M8".into(), ..HoleOpts::default() };
+        let stale_diameter = |_: &str, _: ValueKind| Some(4.0);
+        assert_eq!(bore_diameter("4 mm", &opts, &stale_diameter), Some(6.75));
+        opts.thread = "M8x1.2".into();
+        assert_eq!(bore_diameter("4 mm", &opts, &stale_diameter), Some(6.8));
+        for (designation, drill) in [("G 1/4", 11.75), ("Rp 1/4", 11.4), ("1/4-20 UNC", 5.1054)] {
+            opts.thread = designation.into();
+            assert_eq!(bore_diameter("4 mm", &opts, &stale_diameter), Some(drill), "{designation}");
+        }
+        opts.thread = "invalid".into();
+        assert_eq!(bore_diameter("4 mm", &opts, &stale_diameter), None);
+        opts.tapped = false;
+        assert_eq!(bore_diameter("4 mm", &opts, &stale_diameter), Some(4.0));
+    }
+
+    #[test]
+    fn partial_tapping_has_an_independent_dimension_for_every_extent() {
+        for kind in 0..=2 {
+            for through in [false, true] {
+                let mut opts = HoleOpts { tapped: true, thread_full_depth: false, all: through, ..HoleOpts::default() };
+                for to_object in [false, true] {
+                    let labels: Vec<_> = dims(kind, &opts, to_object).into_iter().map(|d| d.label(kind)).collect();
+                    assert!(labels.contains(&"Thread depth"), "partial tapping needs its own dimension: {labels:?}");
+                }
+                opts.thread_full_depth = true;
+                assert!(!dims(kind, &opts, false).into_iter().any(|d| d.label(kind) == "Thread depth"));
+                opts.thread_full_depth = false;
+                opts.tapped = false;
+                assert!(!dims(kind, &opts, false).into_iter().any(|d| d.label(kind) == "Thread depth"));
+            }
+        }
+    }
+
+    #[test]
+    fn partial_tapping_fields_do_not_overlap_on_narrow_forms() {
+        for width in [220.0, 280.0, 360.0] {
+            let ctx = crate::fonts::test_context();
+            let app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            let mut kind = crate::dialogs::Dialog::for_command(&app, "solid.hole").unwrap().kind;
+            if let Kind::Hole { kind, opts, .. } = &mut kind {
+                *kind = 1;
+                opts.tapped = true;
+                opts.thread_full_depth = false;
+            }
+            for _ in 0..3 {
+                let mut output = ctx.run_ui(
+                    egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width + 20.0, 700.0))), ..Default::default() },
+                    |ui| {
+                        ui.set_width(width);
+                        crate::ui_kit::scope(ui, |ui| rows(ui, &mut kind, false, &|_, _| Some(10.0)));
+                    },
+                );
+                output.textures_delta.clear();
+            }
+            let figure = crate::scenario::rect_of("dialog:figure:hole section").unwrap();
+            let picture = crate::scenario::rect_of("dialog:figure_picture:hole section").unwrap();
+            let mut previous_bottom = figure.top();
+            assert!(!dims(1, &HoleOpts { tapped: true, ..HoleOpts::default() }, false).contains(&Dim::Diameter));
+            for label in ["Counterbore Ø", "Counterbore depth", "Depth", "Thread depth"] {
+                let field = crate::scenario::rect_of(&format!("dialog:widget:{label}")).unwrap();
+                assert!(figure.contains_rect(field), "{label} is outside the {width} pt form: {field:?}");
+                assert!(field.left() > picture.right() && field.top() >= previous_bottom, "{label} overlaps another element: {field:?}");
+                previous_bottom = field.bottom();
+            }
+        }
+    }
 
     fn opts(all: bool, angled: bool) -> HoleOpts {
         HoleOpts { all, angled, ..HoleOpts::default() }
