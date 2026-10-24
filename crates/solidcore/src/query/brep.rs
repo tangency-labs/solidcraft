@@ -60,7 +60,9 @@
 //!   owned by its arena records). The ray fires may add missing UV trim curves, which
 //!   upstream's `const` method does to the B-rep itself; [`BrepClassifier`] serves
 //!   callers that hold the B-rep shared and makes a private copy on the first ray fire
-//!   only. A ray fire that fails with an ordinary error moves on to the next direction,
+//!   only ([`Brep::clone_standing_for_self`]: its geometry keeps its owners, which the
+//!   copy constructor resets, so the copy's cache still holds its curves and surfaces).
+//!   A ray fire that fails with an ordinary error moves on to the next direction,
 //!   as a failing status does upstream; [`SolidError::Unported`] propagates.
 //! - **Out-params.** The evaluated point, normal or point and derivatives are the
 //!   return value; on failure there is none (upstream evaluates into locals and leaves
@@ -605,7 +607,7 @@ impl<'a> BrepQuery<'a> {
         // none), `None` on failure.
         // (the solve of each ray fire builds the cache when needed)
         let mut fire = |direction: Vec3| -> Result<Option<Option<RegionId>>> {
-            let b = target.mutable();
+            let b = target.mutable()?;
             let fired = self.cache(k, b).and_then(|cache| {
                 bp2::ray_fire(
                     k,
@@ -773,11 +775,16 @@ impl Target<'_> {
         }
     }
 
-    /// The B-rep to edit, copying a shared one first.
-    fn mutable(&mut self) -> &mut Brep {
+    /// The B-rep to edit, copying a shared one first: the copy stands for the B-rep
+    /// ([`Brep::clone_standing_for_self`]), so its geometry keeps naming its edges and
+    /// faces and the ray fires' cache holds them.
+    fn mutable(&mut self) -> Result<&mut Brep> {
         match self {
-            Self::Own(b) => b,
-            Self::Shared { source, copy } => copy.get_or_insert_with(|| (*source).clone()),
+            Self::Own(b) => Ok(b),
+            Self::Shared { source, copy } => match copy {
+                Some(b) => Ok(b),
+                None => Ok(copy.insert(source.clone_standing_for_self()?)),
+            },
         }
     }
 }

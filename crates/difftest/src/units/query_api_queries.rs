@@ -470,178 +470,6 @@ impl<'a> Objects<'a> {
     }
 }
 
-/// A read-only view of the two B-reps for the relationship queries, which read the
-/// B-reps themselves after the solve (`SmApiBrepRelationship`): its solve cannot make
-/// the face caches it reaches, so those cases stay deferred.
-struct ReadOnlyObjects<'a> {
-    breps: [&'a Brep; 2],
-    caches: [BrepCache<Object>; 2],
-}
-impl<'a> ReadOnlyObjects<'a> {
-    fn new(breps: [&'a Brep; 2]) -> Result<Self> {
-        Ok(Self {
-            breps,
-            caches: [
-                BrepCache::new(solidcore::geom::a_object::BREP_TYPE)?,
-                BrepCache::new(solidcore::geom::a_object::BREP_TYPE)?,
-            ],
-        })
-    }
-    fn build(&mut self, k: &Kernel) -> Result<()> {
-        for (i, (cache, brep)) in self.caches.iter_mut().zip(&self.breps).enumerate() {
-            cache.build_trees(
-                k,
-                CacheSource::Brep(brep),
-                |o| Object(i, o),
-                &arena_identity,
-            )?;
-        }
-        Ok(())
-    }
-    fn b(&self, o: Object) -> Result<&Brep> {
-        self.breps
-            .get(o.0)
-            .copied()
-            .ok_or(SolidError::sm_err("query api scene handle"))
-    }
-}
-impl TopologyObjects<Object> for ReadOnlyObjects<'_> {
-    fn brep_cache(&self, o: Object) -> Result<&BrepCache<Object>> {
-        self.caches
-            .get(o.0)
-            .ok_or(SolidError::sm_err("query api scene cache"))
-    }
-    fn curve(&self, o: Object) -> Result<&Curve> {
-        let CacheObject::Curve(e) = o.1 else {
-            return Err(SolidError::sm_err("curve handle"));
-        };
-        self.b(o)?
-            .edge(e)?
-            .curve
-            .as_ref()
-            .ok_or(SolidError::null_pointer("curve"))
-    }
-    fn analytic_curve_handle(&self, o: Object) -> Option<Object> {
-        Some(o)
-    }
-    fn vertex_point(&self, o: Object) -> Result<Point3> {
-        let CacheObject::Vertex(v) = o.1 else {
-            return Err(SolidError::sm_err("vertex handle"));
-        };
-        Ok(self.b(o)?.vertex(v)?.point)
-    }
-    fn vertex_tolerance(&self, o: Object) -> Result<f64> {
-        let CacheObject::Vertex(v) = o.1 else {
-            return Err(SolidError::sm_err("vertex handle"));
-        };
-        Ok(self.b(o)?.vertex(v)?.tolerance)
-    }
-    fn curve_edge(&self, o: Object) -> Result<Option<Object>> {
-        let Some(owner) = self.curve(o)?.edge(&|_| None)? else {
-            return Ok(None);
-        };
-        Ok(self
-            .b(o)?
-            .edges()
-            .ids()
-            .find(|e| arena_identity(CacheObject::Edge(*e)) == owner)
-            .map(|e| Object(o.0, CacheObject::Edge(e))))
-    }
-    fn edge_curve(&self, o: Object) -> Result<Option<Object>> {
-        let CacheObject::Edge(e) = o.1 else {
-            return Err(SolidError::sm_err("edge handle"));
-        };
-        Ok(self
-            .b(o)?
-            .edge(e)?
-            .curve
-            .as_ref()
-            .map(|_| Object(o.0, CacheObject::Curve(e))))
-    }
-    fn edge_interval(&self, o: Object) -> Result<Extent1d> {
-        let CacheObject::Edge(e) = o.1 else {
-            return Err(SolidError::sm_err("edge handle"));
-        };
-        Ok(self.b(o)?.edge(e)?.interval)
-    }
-    fn edge_tolerance(&self, o: Object) -> Result<f64> {
-        let CacheObject::Edge(e) = o.1 else {
-            return Err(SolidError::sm_err("edge handle"));
-        };
-        Ok(self.b(o)?.edge(e)?.tolerance)
-    }
-    fn surface_face(&self, o: Object) -> Result<Option<Object>> {
-        let Some(owner) = self.surface(o)?.face()? else {
-            return Ok(None);
-        };
-        Ok(self
-            .b(o)?
-            .faces()
-            .ids()
-            .find(|f| arena_identity(CacheObject::Face(*f)) == owner)
-            .map(|f| Object(o.0, CacheObject::Face(f))))
-    }
-    fn face_surface(&self, o: Object) -> Result<Object> {
-        let CacheObject::Face(f) = o.1 else {
-            return Err(SolidError::sm_err("face handle"));
-        };
-        self.b(o)?
-            .face(f)?
-            .surface
-            .as_ref()
-            .ok_or(SolidError::null_pointer("surface"))?;
-        Ok(Object(o.0, CacheObject::Surface(f)))
-    }
-    fn surface(&self, o: Object) -> Result<&Surface> {
-        let CacheObject::Surface(f) = o.1 else {
-            return Err(SolidError::sm_err("surface handle"));
-        };
-        self.b(o)?
-            .face(f)?
-            .surface
-            .as_ref()
-            .ok_or(SolidError::null_pointer("surface"))
-    }
-    fn face_uv_domain(&self, o: Object) -> Result<solidcore::geom::extent2d::Extent2d> {
-        let CacheObject::Face(f) = o.1 else {
-            return Err(SolidError::sm_err("face handle"));
-        };
-        Ok(self.b(o)?.face(f)?.uv_domain)
-    }
-    fn face_tolerance(&self, o: Object) -> Result<f64> {
-        let CacheObject::Face(f) = o.1 else {
-            return Err(SolidError::sm_err("face handle"));
-        };
-        Ok(self.b(o)?.face(f)?.tolerance)
-    }
-    fn face_entity(&self, o: Object) -> Option<(&Brep, FaceId)> {
-        let CacheObject::Face(f) = o.1 else {
-            return None;
-        };
-        Some((self.b(o).ok()?, f))
-    }
-    fn surface_owner(&self, o: Object) -> Result<Option<Object>> {
-        self.surface_face(o)
-    }
-    fn shape_member(&self, o: Object) -> ShapeMember {
-        let b = BrepId::from_index(o.0 as u32);
-        match o.1 {
-            CacheObject::Vertex(v) => ShapeMember::Vertex((b, v)),
-            CacheObject::Edge(e) => ShapeMember::Edge((b, e)),
-            CacheObject::Face(f) => ShapeMember::Face((b, f)),
-            _ => ShapeMember::Other,
-        }
-    }
-    fn shape_member_object(&self, member: ShapeMember) -> Result<Object> {
-        Ok(match member {
-            ShapeMember::Vertex((b, v)) => Object(b.index() as usize, CacheObject::Vertex(v)),
-            ShapeMember::Edge((b, e)) => Object(b.index() as usize, CacheObject::Edge(e)),
-            ShapeMember::Face((b, f)) => Object(b.index() as usize, CacheObject::Face(f)),
-            ShapeMember::Other => return Err(SolidError::sm_err("shape handle")),
-        })
-    }
-}
-
 /// The two B-reps' identities (`BrepId` 0 and 1, the arena identity of their records).
 fn identities() -> [BrepIdentity<'static>; 2] {
     let owner_of: &'static dyn Fn(solidcore::geom::object::ObjectRef) -> Option<solidcore::geom::object::ObjectRef> = &|_| None;
@@ -820,7 +648,7 @@ impl FaceQueries<Object> for Contexts<'_> {
     }
 }
 
-fn topology(k: &mut Kernel, i: &Inputs, b: &mut Brep, second: &Brep) -> Result<Vec<f64>> {
+fn topology(k: &mut Kernel, i: &Inputs, b: &mut Brep, second: &mut Brep) -> Result<Vec<f64>> {
     let a = &i.data;
     let point = v([a[11], a[12], a[13]]);
     let index = a[20] as usize;
@@ -851,21 +679,25 @@ fn topology(k: &mut Kernel, i: &Inputs, b: &mut Brep, second: &Brep) -> Result<V
             }
         }
         7 | 8 => {
-            let mut objects = ReadOnlyObjects::new([b, second])?;
-            objects.build(k)?;
-            let a = api::BrepRef {
-                brep: b,
-                handle: Object(0, CacheObject::Brep),
-            };
-            let b = api::BrepRef {
-                brep: second,
-                handle: Object(1, CacheObject::Brep),
-            };
+            // the solve makes the face caches it reaches on the B-reps themselves
+            // (upstream's `smsurf_GetSurfaceCache`); the classification then reads them
+            let identities = identities();
+            let objects = Objects::new(k, [&mut *b, &mut *second], &identities)?;
+            let solution = api::brep_relationship_solve(
+                k,
+                &objects,
+                Object(0, CacheObject::Brep),
+                Object(1, CacheObject::Brep),
+            )?;
+            let [l0, l1] = &objects.lives;
+            let result = l0.with_brep(|a| {
+                l1.with_brep(|b| api::brep_relationship_classify(k, &objects, &solution, a, b))
+            })?;
             if i.op == 7 {
-                let result = api::brep_relationship(k, &objects, a, b)?;
                 o.extend([result.distance, f64::from(result.relationship)]);
             } else {
-                o.push(api::brep_distance(k, &objects, a, b)?);
+                // `SmApiBrepDistance` is the relationship query's distance
+                o.push(result.distance);
             }
         }
         9 => {
@@ -1042,12 +874,12 @@ impl UnitDiff for Runner {
                 }
                 other[21] = 6.;
                 other[17] = 0.;
-                let second = if i.op == 7 || i.op == 8 {
+                let mut second = if i.op == 7 || i.op == 8 {
                     imported(&k, &other, 0)?
                 } else {
                     Brep::new()
                 };
-                topology(&mut k, &i, &mut b, &second)
+                topology(&mut k, &i, &mut b, &mut second)
             }
         };
         Ok(output(i.op, result))

@@ -828,6 +828,38 @@ impl Brep {
         copy
     }
 
+    /// A private copy of this B-rep that stands for the B-rep itself where upstream
+    /// queries the B-rep in place (a `const` query that still makes missing UV trim
+    /// curves on it): its edge curves, face surfaces and UV trim curves are exact copies
+    /// that keep their owners (and the surfaces share their cache slots), so the copy's
+    /// geometry still names its own edges and faces. A plain `clone` (the copy
+    /// constructor) resets every owner, and a B-rep cache made from it then holds no
+    /// curve or surface.
+    ///
+    /// # Errors
+    ///
+    /// Those of the geometry copies (a geometry nesting deeper than
+    /// `MAX_GEOMETRY_NESTING`).
+    pub fn clone_standing_for_self(&self) -> Result<Self> {
+        let mut copy = self.clone();
+        for (id, edge) in self.edges.iter() {
+            if let Some(curve) = edge.curve.as_ref() {
+                copy.edge_mut(id)?.curve = Some(curve.clone_for_evaluation()?);
+            }
+        }
+        for (id, face) in self.faces.iter() {
+            if let Some(surface) = face.surface.as_ref() {
+                copy.face_mut(id)?.surface = Some(surface.clone_for_evaluation()?);
+            }
+        }
+        for (id, edgeuse) in self.edgeuses.iter() {
+            if let Some(curve) = edgeuse.uv_trim_curve.as_ref() {
+                copy.edgeuse_mut(id)?.uv_trim_curve = Some(curve.clone_for_evaluation()?);
+            }
+        }
+        Ok(copy)
+    }
+
     /// Ends the innermost [`Brep::begin_surface_owner_cleared`] scope of face `f`.
     pub fn end_surface_owner_cleared(&mut self, f: FaceId) {
         if let Some(i) = self.surface_owner_cleared.iter().rposition(|&g| g == f) {
@@ -1382,6 +1414,60 @@ mod tests {
         // an unmatched end is a no-op
         b.end_surface_owner_cleared(g);
         assert!(!b.is_surface_owner_cleared(g));
+    }
+
+    #[test]
+    fn copy_standing_for_the_brep_keeps_geometry_owners() {
+        use crate::curve::line::Line;
+        use crate::geom::object::ObjectRef;
+        use crate::surface::plane::Plane;
+        let mut b = Brep::new();
+        let s = b.add_shell().unwrap();
+        let (v0, v1) = (
+            b.add_vertex(Vec3::ZERO).unwrap(),
+            b.add_vertex(Vec3::X).unwrap(),
+        );
+        let e = b.add_edge(v0, v1).unwrap();
+        let f = b.add_face(s).unwrap();
+        let edge_owner = ObjectRef {
+            type_code: edge::TYPE,
+            key: ObjectKey(u64::from(e.index())),
+        };
+        let face_owner = ObjectRef {
+            type_code: face::p2::TYPE,
+            key: ObjectKey(u64::from(f.index())),
+        };
+        let mut curve =
+            Curve::from(Line::create_line_segment(3, Vec3::ZERO, Vec3::X, None).unwrap());
+        let _ = curve.set_owner(Some(edge_owner), None);
+        b.edge_mut(e).unwrap().curve = Some(curve);
+        let mut surface = Surface::from(Plane::new(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            crate::math::Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ));
+        surface.set_owner(Some(face_owner));
+        b.face_mut(f).unwrap().surface = Some(surface);
+
+        // the copy constructor resets the owners
+        let plain = b.clone();
+        assert_eq!(plain.edge(e).unwrap().curve.as_ref().unwrap().owner(), None);
+        assert_eq!(
+            plain.face(f).unwrap().surface.as_ref().unwrap().owner(),
+            None
+        );
+        // the copy standing for the B-rep keeps them
+        let copy = b.clone_standing_for_self().unwrap();
+        assert_eq!(
+            copy.edge(e).unwrap().curve.as_ref().unwrap().owner(),
+            Some(edge_owner)
+        );
+        assert_eq!(
+            copy.face(f).unwrap().surface.as_ref().unwrap().owner(),
+            Some(face_owner)
+        );
     }
 
     #[test]
