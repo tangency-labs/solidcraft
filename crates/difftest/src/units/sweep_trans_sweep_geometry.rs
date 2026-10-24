@@ -11,8 +11,9 @@ use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::hermite_curve::HermiteCurve;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::geom::extent2d::Extent2d;
-use solidcore::geom::tol::zone_tol3d;
+use solidcore::geom::tol::{zone_tol3d, USE_DEFAULT};
 use solidcore::kernel::Kernel;
 use solidcore::math::{Vec2, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -25,8 +26,13 @@ use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::sweep::topology_sweep::SweepGeometryCreation;
 use solidcore::sweep::trans_sweep_geometry::TranslationalSweepGeometry;
-use solidcore::topology::{Brep, Edgeuse, EdgeuseOwner, Vertexuse, VertexuseOwner};
-use solidcore::{Result, SolidError};
+use solidcore::topology::brep::p3::new_brep;
+use solidcore::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+use solidcore::topology::edge::NotifyEnv;
+use solidcore::topology::topology_traverser::Marks;
+use solidcore::topology::{Brep, Edgeuse, EdgeuseOwner, FaceId, Vertexuse, VertexuseOwner};
+use solidcore::{EntityRef, Result, SolidError};
+use std::collections::BTreeMap;
 use solidcore_ffi::units::sweep_trans_sweep_geometry as ffi;
 
 /// Translational sweep differential runner.
@@ -205,8 +211,28 @@ fn surface(k: &Kernel, o: &mut Vec<f64>, s: &Surface) -> Result<()> {
     }
     Ok(())
 }
+/// `SmBrep::CreateFaceFromSurface(surface, domain, face)` in the infinite region.
+fn create_face(k: &mut Kernel, b: &mut Brep, s: Surface, domain: &Extent2d) -> Result<FaceId> {
+    let mut records = BTreeMap::new();
+    let mut attributes = AttributeStore::default();
+    let key_of = super::topology_brep_p8::key_of;
+    let mut env = NotifyEnv {
+        records: &mut records,
+        attributes: &mut attributes,
+        context: None,
+        key_of: &key_of,
+    };
+    let mut marks = Marks::default();
+    let this_face = |f: FaceId| key_of(EntityRef::Face(f));
+    let mut fenv = FaceBuildEnv {
+        env: &mut env,
+        marks: &mut marks,
+        this_face: &this_face,
+    };
+    create_face_from_surface(k, b, Some(s), domain, &mut fenv)
+}
 fn rust(i: &Input) -> Result<Vec<f64>> {
-    let k = Kernel::default();
+    let mut k = Kernel::default();
     let sweep = TranslationalSweepGeometry {
         sweep_vector: v(i.sweep),
         base: SweepGeometryCreation {
@@ -345,14 +371,13 @@ fn rust(i: &Input) -> Result<Vec<f64>> {
                     Vec3::new(0., 0., 2.),
                 )?)
             };
-            let sh = b.add_shell()?;
-            let f = b.add_face(sh)?;
-            {
-                let f = b.face_mut(f)?;
-                f.uv_domain = s.natural_uv_domain();
-                f.surface = Some(s);
-                f.tolerance = zone_tol3d(&k, i.tolerances[3]);
-            }
+            // The native fixture makes the face with `SmBrep::CreateFaceFromSurface`
+            // over the natural domain in a `new SmBrep()` (with its infinite region);
+            // a failed call's status is the outcome.
+            let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT)?;
+            let domain = s.natural_uv_domain();
+            let f = create_face(&mut k, &mut b, s, &domain)?;
+            b.face_mut(f)?.tolerance = zone_tol3d(&k, i.tolerances[3]);
             let (s, t) = sweep.face_sweep_same(&k, &b, f)?;
             o.push(t);
             surface(&k, &mut o, &s)?;

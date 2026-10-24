@@ -18023,6 +18023,85 @@ labels. Read the first as the proposal to give the runner's `StaticHandle` a
 `natural_uv_domain`, and the second as the missing face-aware `SurfaceSolveContext`
 (global solves on a face's surface should use that face's trimmed surface cache).
 
+## sweep.trans_sweep_geometry: op 8 makes its face with CreateFaceFromSurface (PR #692, 2026-10-23)
+
+The `FaceSweepSame` op (op 8) used to build its input face differently on each side: the
+shim calls `SmBrep::CreateFaceFromSurface(surface, natural domain)` on a `new SmBrep()`,
+while the Rust runner pushed a bare face record (no loop, no infinite region) and set its
+surface by hand. When `CreateFaceFromSurface` failed, the shim returned `SC_ERR_ARG` and
+the case was recorded as a rejected "native fixture constructor", so 11 cases never
+compared anything. All 11 failed with `SM_ERR` (1001) inside `MakeFaceWithCurves`: the
+B-spline extrusion of a 1e-9-scale or near-degenerate profile curve degenerates to a
+curve (`nanoscale_fixture_{0,1,2,4,5}_8`, `gen0147`, `gen0256`, `gen0337`, `gen0386`,
+`gen0405`, `gen0471`).
+
+Now the Rust runner makes the face with `topology::brep::p8::create_face_from_surface`
+on `topology::brep::p3::new_brep(k, USE_DEFAULT, USE_DEFAULT)` (the B-rep needs its
+infinite region, as `new SmBrep()` has), and the shim returns a failed
+`CreateFaceFromSurface` status as the case's output instead of rejecting. All 11 cases
+compare `[1001]` on both sides. No FFI guard was removed: `SC_ERR_ARG` is still
+returned when the profile curve constructor fails, when the profile is not a
+`SmBSplineCurve`, when `SmBSplineSurface::CreateLinearSweep` fails, and when
+`CreateFaceFromSurface` succeeds without a face.
+
+- **Still rejected (op 8):** `rejected_constructor_0_8` and `rejected_constructor_2_8`.
+  Their profile curve constructor fails (a 1e-15 line segment, a 1e-15 radius circle)
+  before any face exists, exactly like their op 5-7 siblings, so the sweep is never
+  reached. The unit keeps 8 rejected fixtures, all curve-constructor failures.
+- **New deferral:** `gen0411` (op 8, a circle profile of radius about 1.5e-6 extruded
+  into a closed B-spline surface) passed before, against the bare face record, and now
+  defers on `topology.face_p2` ("SmFace handle of a surface's face",
+  `surface/surface_cache/p1.rs` `SurfaceCache::face`). Natively `CreateFaceFromSurface`
+  succeeds. In Rust, `MakeFaceWithCurves` splits the closed face (`split_closed` ->
+  `find_and_set_infinite_region` -> `find_infinite_region`), which ray-fires the shell;
+  the line/surface solve on the now face-owned surface builds a trimmed surface cache
+  that needs the owning face's caller handle. That is the shell ray-fire gap that the
+  open face-geometry-for-shell-ray-queries work addresses. It is the unit's only
+  deferral, so the unit goes from green to partial.
+
+Before: 788 cases, 769 pass, 0 deferred, 19 rejected. After: 788 cases, 779 pass
+(the 11 re-covered cases included), 0 failed, 1 deferred (`gen0411`), 8 rejected,
+max_rel_err 0.
+
+## Small fixture rejections explained: fillet_geom_p3, merge_p4, offset_executive_p2 (PR #692, 2026-10-23)
+
+These rejections had no reason recorded in `plan/`. None is a wrong guard, so their
+behaviour is unchanged.
+
+- **blend.fillet_geom_p3 `regress_corner_edge_on_edge` (1 case).** The shim refuses
+  (`SC_ERR_ARG`) `CalcCornerEdgeGeom` on an edge whose type is computed by another
+  unit's calculator (`Model::other_unit_edge`: cross section, fillet x side face, on
+  edge, on extended edge, fillet end, setback rail, rail extension). This fixture is an
+  `SM_FE_ON_EDGE` edge on the shim's `network` model: `CalcEdgeOnEdge`
+  (`blend.fillet_geom_p6`) crashed natively on it in fuzzing, since the shim does not
+  build the solver data that calculator reads. The guard covers every other-unit edge
+  type, not only the crashing one; those calculators are tested in their own units.
+  The other five `regress_*` rejections are documented in `plan/upstream-issues.md`
+  (UB-211 `regress_on_vertex_unclassified`, UB-185 `regress_mate_cycle`, UB-208
+  `regress_recalc_no_dir_all_*`, UB-210 `regress_fif_no_curve_no_corner`).
+- **blend.fillet_geom_p3 `regress_recalc_analytic_default` (1 case).** `ReCalcFilletGeom`
+  with `analytic = TRUE` on a geometry that is not `SM_FG_TANGENT_ROLLOVER` runs
+  `CalcConeFilletGeom`/`CalcTorusFilletGeom` (`blend.fillet_solver_p2`), which read
+  solver data the shim's base `SmFilletSolver` does not build; it crashed natively. The
+  shim refuses every analytic recalculation except on a tangent rollover.
+- **boolean.merge_p4 `plane-domain-constructor-rejection`, `gen0008`, `gen0013` (3
+  cases).** An operand of kind 3 is a `SmPlane(point, normal)`, whose natural UV domain
+  is `±SM_INFINITE_PARAMETER` (1234567). The shim makes its face with
+  `CreateFaceFromSurface` on `[0, u] x [0, v]`; when `u` or `v` exceeds 1234567 (2e6 in
+  the fixture; `v` = 1889531 and 1242370 in the generated `other` operands at the 1e6
+  scale), upstream's domain-containment check returns `SM_ERR`. The shim then returns
+  `[-1]`. The Rust operands are imported from the native export, so there is no Rust
+  operand to merge and nothing to compare.
+- **offset.offset_executive_p2 `review_sheet_*` (9 cases).** The native plane-sheet
+  fixture (a unit square made with `CreateFaceFromSurface` on a B-rep whose tolerance
+  is 0.9 or 1000) is refused with `SM_ERR` by `representable_topology`: with a
+  tolerance that large compared with the edges, upstream merges or drops boundary
+  vertices and edges, so the result is not 1 face, 1 loop, 4 edges, 8 edge uses and 4
+  vertices. The Rust fixture builds that 4-edge sheet by hand and cannot represent the
+  collapsed topology, so the offset operation is never run on either side. The runner
+  test `incomplete_native_sheets_are_rejected_without_hiding_valid_controls` pins the
+  9 rejections and the 4 compared controls (tolerance 0.5, and 1000 on a 1e4-scale
+  sheet).
 ## blend.fillet_intersector `rv_next_clipped_step`: fixed, the wrong `PointOnPlaneSolve` override (2026-10-23, follows the open entry above)
 
 - **Root cause.** Not the offset-surface extension state. `SmFilletSolver::StepSolve`'s clipped

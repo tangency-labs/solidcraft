@@ -260,18 +260,25 @@ SC_EXPORT int32_t sc_sweep_trans_sweep_geometry_eval(const double *in,
         return SC_ERR_ARG;
       input = s;
     }
+    // A failed CreateFaceFromSurface (e.g. a swept surface that degenerates to
+    // a curve) is a defined outcome: its status is compared, as the Rust side
+    // makes the face the same way.
     st = b->CreateFaceFromSurface(input, input->GetNaturalUVDomain(), f);
-    if (st != SM_SUCCESS || !f)
+    if (st != SM_SUCCESS)
+      o.push_back(status(st));
+    else if (!f)
       return SC_ERR_ARG;
-    f->SetTolerance(in[10], FALSE, FALSE);
-    SmSurface *s = nullptr;
-    double tol = 0;
-    st = sweep.FaceSweepSame(ctx, f, s, tol);
-    std::unique_ptr<SmSurface> clean(s);
-    o.push_back(status(st));
-    if (st == SM_SUCCESS) {
-      o.push_back(tol);
-      put_surface(o, s);
+    else {
+      f->SetTolerance(in[10], FALSE, FALSE);
+      SmSurface *s = nullptr;
+      double tol = 0;
+      st = sweep.FaceSweepSame(ctx, f, s, tol);
+      std::unique_ptr<SmSurface> clean(s);
+      o.push_back(status(st));
+      if (st == SM_SUCCESS) {
+        o.push_back(tol);
+        put_surface(o, s);
+      }
     }
   }
   return sc_copy_out(o.data(), int64_t(o.size()), out, cap, len);
