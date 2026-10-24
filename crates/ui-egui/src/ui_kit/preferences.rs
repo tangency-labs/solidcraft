@@ -100,6 +100,7 @@ pub(crate) fn settings_pair<R>(ui: &mut Ui, controls: impl FnOnce(&mut Ui) -> R,
 
 /// A horizontally scrollable, draggable tile rail with its import action pinned outside it.
 /// The hidden scrollbar never reserves vertical space; a vertical wheel also moves the rail.
+/// An end with more tiles past it shows a chevron that scrolls a page that way (#6161).
 pub(crate) fn theme_rail(ui: &mut Ui, tiles: impl FnOnce(&mut Ui), import: impl FnOnce(&mut Ui)) {
     let t = Tokens::get();
     let action_width = t.form_label_width + t.space_24 + t.space_6;
@@ -108,7 +109,7 @@ pub(crate) fn theme_rail(ui: &mut Ui, tiles: impl FnOnce(&mut Ui), import: impl 
         ui.spacing_mut().item_spacing.x = t.space_8;
         ui.allocate_ui_with_layout(vec2(rail_width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
             ui.style_mut().always_scroll_the_only_direction = true;
-            egui::ScrollArea::horizontal()
+            let out = egui::ScrollArea::horizontal()
                 .id_salt("settings_theme_rail")
                 .max_width(rail_width)
                 .auto_shrink([false, true])
@@ -120,9 +121,43 @@ pub(crate) fn theme_rail(ui: &mut Ui, tiles: impl FnOnce(&mut Ui), import: impl 
                         tiles(ui);
                     });
                 });
+            rail_arrows(ui, out.id, out.state, out.inner_rect, out.content_size);
         });
         ui.allocate_ui_with_layout(vec2(action_width, 0.0), egui::Layout::top_down(egui::Align::Min), import);
     });
+}
+
+/// The theme rail's chevrons: one at each end with tiles past it, over the tiles there.
+fn rail_arrows(ui: &mut Ui, id: egui::Id, mut state: egui::scroll_area::State, view: Rect, content: egui::Vec2) {
+    let t = Tokens::get();
+    let room = (content.x - view.width()).max(0.0);
+    // Halfway down the tiles (the area itself may report less height than they take).
+    let middle = view.top() + content.y.max(view.height()) / 2.0;
+    let size = t.control_height;
+    for (more, next) in [(state.offset.x > 0.5, false), (state.offset.x < room - 0.5, true)] {
+        if !more {
+            continue;
+        }
+        let x = if next { view.right() - size / 2.0 } else { view.left() + size / 2.0 };
+        let r = Rect::from_center_size(pos2(x, middle), vec2(size, size));
+        let label = crate::i18n::tr_label(if next { "More themes" } else { "Previous themes" });
+        let response = ui.interact(r, id.with(("rail_arrow", next)), Sense::click());
+        ui.painter().rect_filled(r, t.control_radius, if response.hovered() { t.hover } else { t.control_fill });
+        ui.painter().rect_stroke(r, t.control_radius, Stroke::new(1.0, t.control_border), egui::StrokeKind::Inside);
+        let icon = r.shrink(t.form_icon_inset);
+        if next {
+            crate::icons::paint_ink(ui.painter(), icon, "chevron_right", t.form_ink);
+        } else {
+            crate::icons::paint_ink_mirrored(ui.painter(), icon, "chevron_right", t.form_ink);
+        }
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+        scenario::publish_target(if next { "theme_rail:next" } else { "theme_rail:previous" }, r);
+        if response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(label).clicked() {
+            let page = (view.width() * 0.8).max(size);
+            state.offset.x = (state.offset.x + if next { page } else { -page }).clamp(0.0, room);
+            state.store(ui.ctx(), id);
+        }
+    }
 }
 
 /// Dashed import tile matches the swatch tiles, while remaining permanently visible.
