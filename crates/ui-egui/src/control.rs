@@ -103,8 +103,10 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
     if r.is_ok()
         && !matches!(id, "view.layout" | "view.navigate" | "view.ambient_occlusion" | "view.graphics_preset" | "view.history_layout")
         && app.session.active_sketch.is_none()
-        && app.session.world_state().bodies.len() == 1
+        // Cheap test first: placing the world (`world_state`) after every step of a batch in a
+        // design with components rebuilt its display geometry once per step.
         && app.session.undo.len() <= 2
+        && app.session.world_state().bodies.len() == 1
     {
         app.fit_view();
     }
@@ -138,13 +140,18 @@ pub(crate) fn batch_step_command(step: &Value) -> Option<&str> {
     command(step)
 }
 
-/// `engine.batch {commands, rollback?, timings?, profile?}`: the steps in one request, so in one
-/// frame (#743). With `timings` the reply adds each step's time and `total_ms`, with `profile`
-/// each step's kernel share too (`solidcraft_engine::timing`, #1833). Each
-/// step runs as `engine.execute` runs it; the first failure stops the batch and, with
+/// `engine.batch {commands, rollback?, timings?, profile?, evaluate?}`: the steps in one
+/// request, so in one frame (#743). With `timings` the reply adds each step's time and
+/// `total_ms`, with `profile` each step's kernel share too (`solidcraft_engine::timing`, #1833).
+/// Each step runs as `engine.execute` runs it; the first failure stops the batch and, with
 /// `rollback` (the default), the design goes back to its checkpoint. Step failures are part of
 /// the reply; refusals (`engine.batch unavailable: …`) come before anything runs, so the client
 /// can send the steps one by one instead.
+///
+/// `evaluate: "end"` lets runs of parameter edits wait for one evaluation instead of one each
+/// ([`solidcraft_engine::Session::defer_value_edits`]); `"step"` (the default) evaluates after every step. When
+/// the one evaluation refuses the edits, the batch runs again step by step from its checkpoint,
+/// so the reply names the step that failed as it would have without `evaluate`.
 fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
     let Some(steps) = p.get("commands").and_then(Value::as_array).filter(|s| s.len() <= MAX_BATCH) else {
         return err(format!("engine.batch: commands must be an array of at most {MAX_BATCH} steps"));
@@ -154,37 +161,91 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
     if let Some(why) = batch_refusal(steps) {
         return err(why);
     }
+    let deferred = match p.get("evaluate").map(|v| v.as_str()) {
+        None | Some(Some("step")) => false,
+        Some(Some("end")) => true,
+        _ => return err("engine.batch: evaluate must be \"step\" or \"end\""),
+    };
     let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
     let profile = p.get("profile").and_then(Value::as_bool).unwrap_or(false);
     let timed = profile || p.get("timings").and_then(Value::as_bool).unwrap_or(false);
-    let mut rows = Vec::new();
     let clock = timing::Clock::start();
-    let checkpoint = if rollback { app.run("edit.checkpoint", json!({})).ok().and_then(|v| v["checkpoint"].as_u64()) } else { None };
-    let mut results = Vec::with_capacity(steps.len());
-    for (i, step) in steps.iter().enumerate() {
-        let (r, took) = timing::time(profile, || match command(step) {
-            Some(id) => execute(app, id, step.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))),
-            None => Err("missing `command`".to_string()),
-        });
-        if timed {
-            rows.push(took.to_json(i, command(step).unwrap_or_default()));
+    // A deferred batch whose edits are refused runs again from here, so it always keeps one.
+    let checkpoint = |app: &mut SolveApp| app.run("edit.checkpoint", json!({})).ok().and_then(|v| v["checkpoint"].as_u64());
+    let mut kept = if rollback || deferred { checkpoint(app) } else { None };
+    let mut run = run_steps(app, steps, deferred && kept.is_some(), profile, timed);
+    if run.refused_deferred
+        && let Some(id) = kept
+    {
+        // Back to the start, and once more with an evaluation after every step.
+        let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": id}));
+        kept = checkpoint(app);
+        run = run_steps(app, steps, false, profile, timed);
+    }
+    let checkpoint = kept;
+    let BatchRun { results, rows, failed, .. } = run;
+    if let Some((i, e)) = failed {
+        let restored = rollback && checkpoint.is_some_and(|id| app.run("edit.restore_checkpoint", json!({"checkpoint": id})).is_ok());
+        if !rollback && let Some(id) = checkpoint {
+            let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": id, "forget": true}));
         }
-        match r {
-            Ok(v) => results.push(v),
-            Err(e) => {
-                let restored = checkpoint.is_some_and(|id| app.run("edit.restore_checkpoint", json!({"checkpoint": id})).is_ok());
-                let failed = json!({"index": i, "command": command(step), "error": e});
-                // `rolled_back`: the design really is back at its checkpoint.
-                let reply =
-                    json!({"completed": i, "results": results, "failed": failed, "undone": if restored { i } else { 0 }, "rolled_back": restored});
-                return ok(with_timings(reply, timed, rows, clock.ms()));
-            }
-        }
+        let failed = json!({"index": i, "command": steps.get(i).and_then(command), "error": e});
+        // `rolled_back`: the design really is back at its checkpoint.
+        let reply = json!({"completed": i, "results": results, "failed": failed, "undone": if restored { i } else { 0 }, "rolled_back": restored});
+        return ok(with_timings(reply, timed, rows, clock.ms()));
     }
     if let Some(id) = checkpoint {
         let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": id, "forget": true}));
     }
     ok(with_timings(json!({"completed": results.len(), "results": results, "undone": 0}), timed, rows, clock.ms()))
+}
+
+/// What [`run_steps`] did: each step's result up to the first failure (its index and error),
+/// and its timing rows.
+struct BatchRun {
+    results: Vec<Value>,
+    rows: Vec<Value>,
+    failed: Option<(usize, String)>,
+    /// The one evaluation of deferred edits refused them: the steps must run again one by one
+    /// to name the step.
+    refused_deferred: bool,
+}
+
+/// Run `steps` in order until one fails; with `deferred`, parameter edits wait for one
+/// evaluation (before the next other step, or at the end).
+fn run_steps(app: &mut SolveApp, steps: &[Value], deferred: bool, profile: bool, timed: bool) -> BatchRun {
+    let mut out = BatchRun { results: Vec::with_capacity(steps.len()), rows: Vec::new(), failed: None, refused_deferred: false };
+    if deferred && app.session.defer_value_edits(true).is_err() {
+        out.refused_deferred = true;
+        return out;
+    }
+    for (i, step) in steps.iter().enumerate() {
+        let id = command(step);
+        // The waiting edits are evaluated before any other step; a refusal there belongs to
+        // them, not to this step.
+        if deferred && !id.is_some_and(|id| solidcraft_engine::DEFERRABLE.contains(&id)) && app.session.settle_deferred().is_err() {
+            out.refused_deferred = true;
+            break;
+        }
+        let (r, took) = timing::time(profile, || match id {
+            Some(id) => execute(app, id, step.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))),
+            None => Err("missing `command`".to_string()),
+        });
+        if timed {
+            out.rows.push(took.to_json(i, id.unwrap_or_default()));
+        }
+        match r {
+            Ok(v) => out.results.push(v),
+            Err(e) => {
+                out.failed = Some((i, e));
+                break;
+            }
+        }
+    }
+    if deferred && app.session.defer_value_edits(false).is_err() {
+        out.refused_deferred = true;
+    }
+    out
 }
 
 /// A batch reply with `timings` and `total_ms` when they were asked for.
@@ -1240,6 +1301,100 @@ mod tests {
         assert_eq!(after["undo"], before["undo"], "{after}");
         assert_eq!(after["bodies"], before["bodies"]);
         assert_eq!(without_timings(&after["timeline"]), without_timings(&before["timeline"]));
+    }
+
+    /// The plate of `engine_batch_evaluates_once_with_evaluate_end`: a 40 mm by `len/2` sketch
+    /// extruded `h`.
+    fn parametric_plate(h: &mut crate::scenario::Harness) {
+        let v = batch(
+            h,
+            json!({"commands": [
+                {"command": "parameters.add", "params": {"name": "len", "expression": "60 mm"}},
+                {"command": "parameters.add", "params": {"name": "h", "expression": "10 mm"}},
+                {"command": "sketch.create", "params": {"plane": "XY"}},
+                {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [40, 30]}},
+                {"command": "sketch.constraint.coincident", "params": {"a": "p1", "b": "origin"}},
+                {"command": "sketch.dimension", "params": {"entities": ["l1"], "value": 40}},
+                {"command": "sketch.dimension", "params": {"entities": ["l2"], "value": "len/2"}},
+                {"command": "sketch.finish"},
+                {"command": "solid.extrude", "params": {"distance": "h"}},
+            ]}),
+        );
+        assert!(v["result"].get("failed").is_none(), "{v}");
+    }
+
+    fn volume(h: &mut crate::scenario::Harness) -> f64 {
+        h.call("engine.execute", json!({"command": "inspect.measure"}))["result"]["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
+    }
+
+    /// `evaluate: "end"`: parameter edits wait for one evaluation, before the next other step
+    /// or at the end; the design and the undo history are those of `evaluate: "step"`, and a
+    /// failing step is still named by its index. Anything else is refused before it runs.
+    #[test]
+    fn engine_batch_evaluates_once_with_evaluate_end() {
+        let edits = |h: &str| {
+            json!([
+                {"command": "parameters.change", "params": {"name": "len", "expression": "80 mm"}},
+                {"command": "parameters.change", "params": {"name": "h", "expression": h}},
+                {"command": "parameters.comment", "params": {"name": "h", "comment": "plate"}},
+                {"command": "solid.sphere", "params": {"radius": 1, "center": [100, 0, 0], "operation": "new"}},
+                {"command": "parameters.change", "params": {"name": "len", "expression": "100 mm"}},
+            ])
+        };
+        let mut each = crate::scenario::Harness::new();
+        parametric_plate(&mut each);
+        let v = batch(&mut each, json!({"commands": edits("12 mm")}));
+        assert!(v["result"].get("failed").is_none(), "{v}");
+        let mut end = crate::scenario::Harness::new();
+        parametric_plate(&mut end);
+        let v = batch(&mut end, json!({"commands": edits("12 mm"), "evaluate": "end"}));
+        assert_eq!(v["result"]["completed"], 5, "{v}");
+        assert!((volume(&mut end) - volume(&mut each)).abs() < 1e-6);
+        assert!((volume(&mut end) - (40.0 * 50.0 * 12.0 + 4.0 / 3.0 * std::f64::consts::PI)).abs() < 1e-2, "{}", volume(&mut end));
+        assert_eq!(inspect(&mut end)["undo"], inspect(&mut each)["undo"]);
+        // A step that fails, deferred or not, is named and the batch rolled back.
+        let before = inspect(&mut end);
+        let v = batch(&mut end, json!({"commands": edits("bogus +"), "evaluate": "end"}));
+        assert_eq!((v["result"]["failed"]["index"].clone(), v["result"]["rolled_back"].clone()), (json!(1), json!(true)), "{v}");
+        assert_eq!(inspect(&mut end)["undo"], before["undo"]);
+        assert!((volume(&mut end) - (40.0 * 50.0 * 12.0 + 4.0 / 3.0 * std::f64::consts::PI)).abs() < 1e-2);
+        let v = batch(&mut end, json!({"commands": edits("12 mm"), "evaluate": "later"}));
+        assert!(v["error"].as_str().is_some_and(|e| e.contains("evaluate")), "{v}");
+    }
+
+    /// `evaluate: "end"`: an edit the one evaluation refuses (a sketch that can no longer
+    /// solve) makes the batch run again step by step, so `failed` names that edit, not the
+    /// step the evaluation ran before; the design is back as it was.
+    #[test]
+    fn engine_batch_names_a_deferred_edit_the_evaluation_refuses() {
+        let mut h = crate::scenario::Harness::new();
+        // A triangle of points whose sides are dimensions (parameters): one too long can't close.
+        let run = |h: &mut crate::scenario::Harness, id: &str, p: serde_json::Value| h.app.run(id, p).unwrap_or_else(|e| panic!("{id}: {e}"));
+        run(&mut h, "sketch.create", json!({"plane": "XY", "name": "Triangle"}));
+        for (id, at) in [("a", [0.0, 0.0]), ("b", [40.0, 0.0]), ("c", [18.0, 30.0])] {
+            run(&mut h, "sketch.point", json!({"point": at, "id": id}));
+        }
+        run(&mut h, "sketch.constraint.horizontal_vertical", json!({"points": ["a", "b"], "mode": "horizontal"}));
+        let params: Vec<String> = [["a", "b"], ["b", "c"], ["c", "a"]]
+            .iter()
+            .map(|e| run(&mut h, "sketch.dimension", json!({"entities": e}))["param"].as_str().unwrap_or_default().to_string())
+            .collect();
+        run(&mut h, "sketch.finish", json!({}));
+        let before = inspect(&mut h);
+        let v = batch(
+            &mut h,
+            json!({"evaluate": "end", "commands": [
+                {"command": "parameters.comment", "params": {"name": params[0], "comment": "base"}},
+                {"command": "parameters.change", "params": {"name": params[1], "expression": "500 mm"}},
+                {"command": "parameters.comment", "params": {"name": params[1], "comment": "side"}},
+                {"command": "solid.sphere", "params": {"radius": 1, "center": [100, 0, 0]}},
+            ]}),
+        );
+        let r = &v["result"];
+        assert_eq!((r["failed"]["index"].clone(), r["failed"]["command"].clone()), (json!(1), json!("parameters.change")), "{v}");
+        assert!(r["failed"]["error"].as_str().is_some_and(|e| e.contains("Triangle")), "{v}");
+        assert_eq!((r["completed"].clone(), r["rolled_back"].clone()), (json!(1), json!(true)), "{v}");
+        assert_eq!(inspect(&mut h)["undo"], before["undo"]);
     }
 
     #[test]

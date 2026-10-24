@@ -694,3 +694,49 @@ fn flipped_offset_sketch_plane_follows_its_parameter() {
     run(&mut s, "parameters.change", json!({"name": "d", "expression": "50 mm"}));
     assert!((volume(&mut s) - 400.0 * 50.0).abs() < 1e-6, "{}", volume(&mut s));
 }
+
+/// `engine.batch {evaluate: "end"}`: parameter edits run deferred evaluate the design once, give
+/// the design evaluating each in turn gives, and each still records its own undo step.
+#[test]
+fn deferred_value_edits_evaluate_once() {
+    let mut each = Session::default();
+    block(&mut each);
+    run(&mut each, "parameters.add", json!({"name": "h", "expression": "10 mm"}));
+    let mut deferred = each.scratch();
+    let edits = [("len", "80 mm"), ("h", "12 mm"), ("len", "100 mm")];
+    for (name, e) in edits {
+        run(&mut each, "parameters.change", json!({"name": name, "expression": e}));
+    }
+    let undo = deferred.undo.len();
+    deferred.defer_value_edits(true).unwrap();
+    deferred.evaluations = 0;
+    for (name, e) in edits {
+        run(&mut deferred, "parameters.change", json!({"name": name, "expression": e}));
+    }
+    run(&mut deferred, "parameters.comment", json!({"name": "h", "comment": "boss height"}));
+    assert_eq!(deferred.evaluations, 0, "nothing evaluated while deferred");
+    assert!(deferred.has_deferred());
+    deferred.defer_value_edits(false).unwrap();
+    assert_eq!(deferred.evaluations, 1, "one evaluation for all the edits");
+    assert!(!deferred.has_deferred());
+    assert!(rel(volume(&mut deferred), volume(&mut each)) < 1e-9);
+    assert!(rel(volume(&mut deferred), 40.0 * 50.0 * 10.0) < 1e-9);
+    assert_eq!(deferred.undo.len(), undo + edits.len() + 1, "one undo step per edit, as before");
+    // Any other command brings the design up to date before it runs.
+    deferred.defer_value_edits(true).unwrap();
+    run(&mut deferred, "parameters.change", json!({"name": "len", "expression": "60 mm"}));
+    assert!(rel(volume(&mut deferred), 40.0 * 30.0 * 10.0) < 1e-9, "inspect.measure saw the edit");
+    deferred.defer_value_edits(false).unwrap();
+}
+
+/// A deferred edit the sketch cannot take is refused when the design is evaluated, as it is
+/// when evaluated at once; the caller rolls back or replays to name the step.
+#[test]
+fn deferred_unsolvable_value_edit_is_refused_when_settled() {
+    let (mut s, _feature, params) = linkage_session();
+    run(&mut s, "sketch.finish", json!({}));
+    s.defer_value_edits(true).unwrap();
+    run(&mut s, "parameters.change", json!({"name": params[7], "expression": "500 mm"}));
+    let why = s.defer_value_edits(false).map(|_| String::new()).unwrap_or_else(|e| e.to_string());
+    assert!(why.contains("Linkage") && why.contains("conflict"), "{why}");
+}

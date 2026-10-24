@@ -127,6 +127,7 @@ pub fn tool_definitions() -> Vec<Value> {
                     "rollback": {"type": "boolean", "description": "Undo completed steps when one fails (default true)"},
                     "timings": {"type": "boolean", "description": "Add `timings`: [{index, command, ms}] for every step run (the failing one included) and `total_ms` (default false)"},
                     "profile": {"type": "boolean", "description": "Like timings, and each step's `profile`: {boolean_ms, tessellate_ms, other_ms}, its time in kernel booleans, in tessellation and the rest (default false)"},
+                    "evaluate": {"type": "string", "enum": ["step", "end"], "description": "When the design is evaluated: after every step (\"step\", the default) or, in the app, once for each run of parameter edits (parameters.*) before the next other step or the end (\"end\"); a refused edit is still named by its step. Headless evaluates every step"},
                     "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created` (default true)"},
                 }),
                 &["commands"],
@@ -800,6 +801,10 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
     if timed && let Some(o) = params.as_object_mut() {
         o.insert("timings".into(), Value::Bool(true));
         o.insert("profile".into(), Value::Bool(profile));
+    }
+    // Only sent when asked for, so apps that predate it run the batch as before.
+    if let (Some(e), Some(o)) = (a.get("evaluate").filter(|e| !e.is_null()), params.as_object_mut()) {
+        o.insert("evaluate".into(), e.clone());
     }
     if params.to_string().len() + 64 * 1024 <= solidcraft_engine::MAX_LINE {
         match b.call("engine.batch", params) {

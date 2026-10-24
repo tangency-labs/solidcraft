@@ -193,7 +193,16 @@ impl Ahead {
     /// [`Session::prime`], so running them for real evaluates nothing again: the shared cache
     /// drops results past its budget, and a large design's states are past it.
     pub fn evaluate(self, commands: &[(String, Value)]) -> Result<Evaluated> {
-        let (after, _) = self.0.preview_in_place(commands)?;
+        self.evaluate_deferring(commands, false)
+    }
+
+    /// [`Ahead::evaluate`]; with `defer`, parameter edits wait for one evaluation as the run
+    /// here will make them wait ([`Session::defer_value_edits`], `engine.batch {evaluate: "end"}`),
+    /// so computing ahead costs what the run saves.
+    pub fn evaluate_deferring(mut self, commands: &[(String, Value)], defer: bool) -> Result<Evaluated> {
+        self.0.defer_value_edits(defer)?;
+        let (mut after, _) = self.0.preview_in_place(commands)?;
+        after.defer_value_edits(false)?;
         after.world_state().warm_display();
         Ok(Evaluated(after.model))
     }
@@ -321,6 +330,8 @@ pub struct Session {
     /// Record this session's top-level commands in the crash journal (the app's own design;
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
+    /// Parameter edits that wait for one evaluation ([`Session::defer_value_edits`]).
+    defer: DeferredValues,
     /// Full model evaluations (`refresh`), for tests.
     #[cfg(test)]
     pub(crate) evaluations: usize,
@@ -466,6 +477,7 @@ impl Session {
             evaluations: 0,
             motion_traces: Default::default(),
             crash_journal: false,
+            defer: DeferredValues::default(),
         }
     }
 
@@ -823,6 +835,12 @@ impl Session {
         for (id, sketch) in updated {
             *self.doc_mut().sketch_mut(id)? = sketch;
         }
+        if self.defer.now {
+            // Checked once, by `settle_deferred`, against the sketches as they were before the
+            // first waiting edit.
+            self.defer.waiting.get_or_insert_with(|| solved_before.clone());
+            return Ok(());
+        }
         self.refresh();
         for r in &self.model.results {
             let (Some(before), Some(k)) = (solved_before.get(&r.id), r.state.sketch(r.id)) else { continue };
@@ -852,6 +870,10 @@ impl Session {
         let host_viewport = self.render_viewport.clone();
         let host_jobs = self.render_jobs.host.clone();
         let live = spec.live.filter(|_| params.get("live").and_then(Value::as_bool) == Some(true));
+        let defer = self.defer.on && DEFERRABLE.contains(&spec.id);
+        if !defer {
+            self.settle_deferred()?;
+        }
         if live.is_none() && spec.reads_model && self.model.is_stale() {
             self.refresh();
         }
@@ -876,11 +898,13 @@ impl Session {
             crash::command_begin(self, spec.id, given);
         }
         let scope = crash::Scope::enter();
+        self.defer.now = defer;
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match live {
             Some(run) => run(self, params),
             None => (spec.run)(self, params).map(|v| (v, None)),
         }));
         drop(scope);
+        self.defer.now = false;
         let r = match r {
             Ok(r) => r,
             Err(p) => {
@@ -922,6 +946,8 @@ impl Session {
                         self.redo.clear();
                     }
                     match live_edit {
+                        // `settle_deferred` evaluates.
+                        None if defer => self.revision += 1,
                         Some(edit) => self.refresh_live(edit),
                         None if render_only => self.refresh_render(&previous_doc),
                         None => self.refresh_from(&previous_doc),
@@ -934,7 +960,10 @@ impl Session {
                     self.doc = before.doc;
                     self.active_sketch = before.active_sketch;
                     self.pending_moves = before.pending_moves;
-                    self.refresh();
+                    // A deferred edit evaluated nothing: the model still stands for the design.
+                    if !defer {
+                        self.refresh();
+                    }
                 }
                 Err(e)
             }
@@ -960,6 +989,33 @@ impl Session {
         let Ok(after) = self.doc.sketch(sk) else { return v };
         out.insert("created".into(), cmd::sketch_created(before.doc.sketch(sk).ok(), after));
         v
+    }
+
+    /// Let parameter edits ([`DEFERRABLE`]) wait for one evaluation instead of evaluating the
+    /// design after each (`engine.batch {evaluate: "end"}`). Every other command first brings
+    /// the design up to date ([`Session::settle_deferred`]), so commands that build on geometry
+    /// see it as before. Each edit still records its own undo step. Turning it off settles.
+    pub fn defer_value_edits(&mut self, on: bool) -> Result<()> {
+        if !on {
+            self.defer.on = false;
+            return self.settle_deferred();
+        }
+        self.defer.on = true;
+        Ok(())
+    }
+
+    /// Edits are waiting for an evaluation ([`Session::defer_value_edits`]).
+    pub fn has_deferred(&self) -> bool {
+        self.defer.waiting.is_some()
+    }
+
+    /// Evaluate once for the waiting parameter edits, and refuse them, as each edit refuses
+    /// itself when not deferred, when a sketch that solved before them no longer does (the
+    /// design keeps the edits: the caller rolls back or replays them one by one to name the
+    /// step).
+    pub fn settle_deferred(&mut self) -> Result<()> {
+        let Some(solved) = self.defer.waiting.take() else { return Ok(()) };
+        self.settle_value_edit(&solved)
     }
 
     /// Remember the design, active sketch, pending positions and undo history; returns the checkpoint's id.
@@ -1052,6 +1108,7 @@ impl Session {
             evaluations: 0,
             motion_traces: self.motion_traces.clone(),
             crash_journal: false,
+            defer: DeferredValues::default(),
         }
     }
 
@@ -1275,6 +1332,23 @@ mod thread_tests;
 mod view_bounds_tests;
 #[cfg(test)]
 mod world_placement_cache_tests;
+
+/// Parameter edits run one after another without evaluating the design after each
+/// ([`Session::defer_value_edits`]).
+#[derive(Default)]
+struct DeferredValues {
+    /// Deferring is on.
+    on: bool,
+    /// The command running now is one whose evaluation waits.
+    now: bool,
+    /// Edits are waiting: the sketches that solved before the first of them.
+    waiting: Option<SketchValues>,
+}
+
+/// Commands whose evaluation [`Session::defer_value_edits`] lets wait: they change only
+/// parameters, which no later command of the kind reads from the model.
+pub const DEFERRABLE: [&str; 6] =
+    ["parameters.change", "parameters.add", "parameters.rename", "parameters.comment", "parameters.delete", "parameters.favorite"];
 
 /// Per sketch feature: its parameter-driven dimensions' values (see [`own_values`]).
 pub(crate) type SketchValues = std::collections::BTreeMap<u64, std::collections::BTreeMap<String, f64>>;

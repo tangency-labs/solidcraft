@@ -184,8 +184,10 @@ fn evaluate_ahead(app: &SolveApp, request: &Value, commands: Vec<(String, Value)
     let scope = crate::control::request_scope(app, request).ok()?;
     let ahead = app.session.ahead();
     let kept = ahead.kept();
+    // `engine.batch {evaluate: "end"}` runs with its parameter edits deferred: so does this.
+    let defer = request.get("evaluate").and_then(Value::as_str) == Some("end");
     let rx = spawn(scope, move || {
-        let _ = ahead.evaluate(&commands);
+        let _ = ahead.evaluate_deferring(&commands, defer);
         None
     })?;
     Some((rx, kept))
