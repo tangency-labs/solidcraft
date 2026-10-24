@@ -4098,9 +4098,17 @@ pub fn axis_of(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
             let st = app.session.world_state();
             let sid = curves_sketch(app, std::slice::from_ref(id), None)?;
             let ss = st.sketch(sid)?;
-            let c = ss.sketch.curves.get(ss.sketch.curve_index(id)?)?;
-            let solidcraft_engine::sketch::CurveKind::Line { a, b } = c.kind else { return None };
-            let (pa, pb) = (ss.plane.to_world(ss.sketch.point(a)?), ss.plane.to_world(ss.sketch.point(b)?));
+            let (pa, pb) = if let Some(i) = ss.sketch.curve_index(id) {
+                let c = ss.sketch.curves.get(i)?;
+                let solidcraft_engine::sketch::CurveKind::Line { a, b } = c.kind else { return None };
+                (ss.plane.to_world(ss.sketch.point(a)?), ss.plane.to_world(ss.sketch.point(b)?))
+            } else {
+                let w = ss.sketch.wires.get(ss.sketch.wire_index(id)?)?;
+                if w.fit.len() != 2 {
+                    return None;
+                }
+                (*w.pts.first()?, *w.pts.last()?)
+            };
             Some((pa, (pb - pa).normalized()?))
         }
         // A straight model edge, along it.

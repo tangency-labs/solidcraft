@@ -1578,11 +1578,12 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         }
         // 3D sketch curves (paths for sweeps and pipes).
         for w in &ss.sketch.wires {
+            let straight = w.fit.len() == 2;
             let pts: Vec<Pos2> = w.pts.iter().filter_map(|q| proj.to_screen(*q)).collect();
             for seg in pts.windows(2) {
                 let dd = seg_dist(pos, seg[0], seg[1]) - bonus;
                 if dd < 6.0 && bestc.wants(dd) {
-                    bestc.offer(dd, Hit::SketchCurve { sketch: sid, id: w.id.clone(), straight: false });
+                    bestc.offer(dd, Hit::SketchCurve { sketch: sid, id: w.id.clone(), straight });
                 }
             }
         }
@@ -4721,6 +4722,60 @@ mod tests {
         assert_eq!(scene.shadow.len(), 48 * 5 * 3 * crate::gpu::TRI_SIZE, "all shadow rings are retained");
         assert!(scene.shadow.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().any(|v| v.get(27).is_some_and(|a| *a > 0)));
         Ok(())
+    }
+
+    #[test]
+    fn straight_3d_wire_is_offered_as_an_axis_but_spline_is_refused() {
+        for (command, points, straight) in [
+            ("sketch.line3d", json!([[10, 20, 30], [30, 20, 30]]), true),
+            ("sketch.spline3d", json!([[10, 20, 30], [20, 25, 40], [30, 20, 30]]), false),
+            ("sketch.spline3d", json!([[10, 20, 30], [20, 20, 30], [30, 20, 30]]), false),
+        ] {
+            let mut s = solidcraft_engine::Session::default();
+            s.execute("sketch.create", &json!({"plane":"XZ", "offset":7})).unwrap();
+            s.execute("sketch.options", &json!({"sketch_3d":true})).unwrap();
+            let id = s.execute(command, &json!({"points":points})).unwrap()["curves"][0].as_str().unwrap().to_string();
+            s.execute("sketch.finish", &json!({})).unwrap();
+            let mut app = SolveApp::new(s, crate::Services::default());
+            app.fit_view();
+            let st = app.session.world_state();
+            let wire = &st.sketches[0].sketch.wires[0];
+            let at = (wire.pts[0] + wire.pts[1]) * 0.5;
+            let proj = projection(&app, Rect::from_min_size(Pos2::ZERO, vec2(800., 600.)));
+            let hits = pick_all(&app, &proj, proj.to_screen(at).unwrap());
+            let hit = hits.iter().find(|h| matches!(h, Hit::SketchCurve { id: picked, .. } if picked == &id)).unwrap();
+            let axis = crate::selection::SelInput::new("Axis", crate::selection::AXES, false);
+            assert_eq!(axis.accepts(hit, |_, _| false).is_some(), straight, "{hit:?}");
+            let selected = Sel::SketchCurve { id };
+            assert_eq!(crate::dialogs::axis_of(&app, &selected).is_some(), straight);
+        }
+    }
+
+    #[test]
+    fn plane_at_angle_uses_3d_wire_endpoints_in_model_space() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("sketch.create", &json!({"plane":"XZ", "offset":7})).unwrap();
+        s.execute("sketch.options", &json!({"sketch_3d":true})).unwrap();
+        let id = s.execute("sketch.line3d", &json!({"points":[[10,20,30],[30,20,30]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        let selected = Sel::SketchCurve { id };
+        let (origin, dir) = crate::dialogs::axis_of(&app, &selected).unwrap();
+        assert!(origin.dist(Vec3::new(10., 20., 30.)) < 1e-9);
+        assert!(dir.dist(Vec3::X) < 1e-9);
+        let mut dialog = crate::dialogs::Dialog::for_command(&app, "construct.plane.at_angle").unwrap();
+        dialog.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+        dialog.inputs[1].items = vec![selected];
+        if let crate::dialogs::Kind::AnglePlane { angle } = &mut dialog.kind {
+            *angle = "90 deg".into();
+        }
+        for (command, params) in crate::dialogs::apply_commands(&app, &dialog).unwrap() {
+            app.run(&command, params).unwrap();
+        }
+        let planes = solidcraft_engine::view::construction_planes(&app.session);
+        let plane = &planes.last().unwrap().2;
+        assert!(plane.normal().dist(-Vec3::Y) < 1e-9);
+        assert!(plane.origin.dist(Vec3::new(0., 50., 10.)) < 1e-9, "{plane:?}");
     }
 
     /// Every tangent seam Continuity Analysis reports keeps its colour while the pointer rests on
