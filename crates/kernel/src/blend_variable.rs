@@ -555,6 +555,10 @@ pub fn taper(body: &Body, edge_at: Vec3, radius: f64) -> Result<Taper> {
 /// on alone gets a [`taper`], and the rest the constant radius. The result and the taper of each
 /// edge (in `edges`' order; None where the radius is constant).
 pub fn fillet_tapered(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body, Vec<Option<Taper>>)> {
+    crate::memo::scope(|| fillet_tapered_in_scope(body, edges, radius))
+}
+
+fn fillet_tapered_in_scope(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body, Vec<Option<Taper>>)> {
     let why = match crate::fillet(body, edges, radius) {
         Err(KernelError::TooLarge(why)) => why,
         other => return other.map(|b| (b, vec![None; edges.len()])),

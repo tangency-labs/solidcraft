@@ -656,6 +656,11 @@ and reference-object placement remain separate work, as do loft rails and center
   placement changes invalidate it. A Pi assembly edge-selection probe drops from 9.24 s to
   0.57 s; initial opening is unchanged. Actual Windows desktop profiling measures 15.87 s
   median opening, with 82% spent rebuilding geometry; halving full opening remains open.
+- Pattern copies of fillets and chamfers no longer redo whole-body work the body hasn't changed
+  (#2341): measures kept per body, a blend's heal and edge meshes made once, unchanged revolved
+  faces searched once. Results and names are unchanged; a 42-cell baseplate opens 2.6× faster.
+  Joins in patterns (#2076) remain. See
+  [measurements](docs/perf.md#pattern-copies-of-fillets-and-chamfers-work-kept-per-body-2341-2026-10-18).
 
 ## Kernel
 
