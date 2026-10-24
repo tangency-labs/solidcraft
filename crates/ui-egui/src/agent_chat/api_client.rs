@@ -85,38 +85,41 @@ enum GoProtocol {
     Gemini,
 }
 
-/// The protocol `model` speaks on a Go endpoint, by family. Anything unknown
-/// stays on chat completions; a mismatch at request time falls through to the
-/// next protocol (see `should_try_next_go`), so new models keep working.
+/// The protocol `model` speaks on a Go endpoint, by family (prefix table in
+/// match order: `minimax-m3.1-flash` must precede `minimax-`). Anything
+/// unknown stays on chat completions; a mismatch at request time falls through
+/// to the next protocol (see `should_try_next_go`), so new models keep working.
+/// Adding a model is one prefix in the right row.
+const GO_PROTOCOL_TABLE: &[(&[&str], GoProtocol)] = &[
+    (&["gemini-"], GoProtocol::Gemini),
+    (&["grok-", "gpt-", "muse-spark-"], GoProtocol::Responses),
+    (&["minimax-m3.1-flash"], GoProtocol::Chat),
+    (&["minimax-", "claude-", "qwen"], GoProtocol::Messages),
+];
+
 fn go_protocol(model: &str) -> GoProtocol {
     let m = model.trim().to_ascii_lowercase();
-    if m.starts_with("gemini-") {
-        return GoProtocol::Gemini;
-    }
-    if m.starts_with("grok-") || m.starts_with("gpt-") || m.starts_with("muse-spark-") {
-        return GoProtocol::Responses;
-    }
-    // MiniMax M3.1 Flash is chat/completions per the Go docs; the rest of the
-    // family (M3, M2.7, M2.5) speaks Messages.
-    if m.starts_with("minimax-m3.1-flash") {
-        return GoProtocol::Chat;
-    }
-    if m.starts_with("minimax-") || m.starts_with("claude-") || m.starts_with("qwen") {
-        return GoProtocol::Messages;
+    for (prefixes, protocol) in GO_PROTOCOL_TABLE {
+        if prefixes.iter().any(|p| m.starts_with(p)) {
+            return *protocol;
+        }
     }
     GoProtocol::Chat
 }
+
+/// The Go gateway root every per-model endpoint hangs under.
+const GO_BASE: &str = "https://opencode.ai/inference/go";
 
 /// The documented Go endpoint for a model's protocol family.
 fn go_url(model: &str, protocol: GoProtocol) -> String {
     match protocol {
         GoProtocol::Gemini => {
             let m = model.trim().to_ascii_lowercase();
-            format!("https://opencode.ai/inference/go/google/v1beta/models/{m}:generateContent")
+            format!("{GO_BASE}/google/v1beta/models/{m}:generateContent")
         }
-        GoProtocol::Responses => "https://opencode.ai/inference/go/openai/v1/responses".into(),
-        GoProtocol::Messages => "https://opencode.ai/inference/go/anthropic/v1/messages".into(),
-        GoProtocol::Chat => "https://opencode.ai/inference/go/openai/v1/chat/completions".into(),
+        GoProtocol::Responses => format!("{GO_BASE}/openai/v1/responses"),
+        GoProtocol::Messages => format!("{GO_BASE}/anthropic/v1/messages"),
+        GoProtocol::Chat => format!("{GO_BASE}/openai/v1/chat/completions"),
     }
 }
 
@@ -125,23 +128,25 @@ fn go_error_detail(body: &Value) -> String {
     body.pointer("/error/message").or_else(|| body.get("error")).and_then(Value::as_str).unwrap_or("").to_ascii_lowercase()
 }
 
-/// Whether the endpoint refused the request because the model speaks another
-/// protocol (the gateway's wording): those refusals are retried elsewhere.
-fn is_protocol_mismatch(body: &Value) -> bool {
-    go_error_detail(body).contains("does not support this protocol")
-}
-
 /// Whether another Go protocol may succeed after this refusal: the gateway
 /// naming a protocol mismatch, or a per-path credential refusal while the same
 /// key works on the sibling paths.
 fn should_try_next_go(status: u16, body: &Value) -> bool {
-    if is_protocol_mismatch(body) {
+    let detail = go_error_detail(body);
+    if detail.contains("does not support this protocol") {
         return true;
     }
     if status == 401 {
-        return go_error_detail(body).contains("credential");
+        return detail.contains("credential");
     }
     false
+}
+
+/// The shared `(name, description, params)` of one OpenAI function tool, if it has one.
+fn go_fn_parts(t: &Value) -> Option<(&Value, &str, Value)> {
+    let f = t.get("function")?;
+    let params = f.get("parameters").cloned().unwrap_or(json!({"type": "object"}));
+    Some((f.get("name")?, f.get("description").and_then(Value::as_str).unwrap_or(""), params))
 }
 
 /// OpenAI function tools as Anthropic tools for Go's Messages endpoints.
@@ -149,11 +154,11 @@ fn go_anthropic_tools(tools: &[Value]) -> Vec<Value> {
     tools
         .iter()
         .filter_map(|t| {
-            let f = t.get("function")?;
+            let (name, desc, params) = go_fn_parts(t)?;
             Some(json!({
-                "name": f.get("name")?,
-                "description": f.get("description").and_then(Value::as_str).unwrap_or(""),
-                "input_schema": f.get("parameters").cloned().unwrap_or(json!({"type": "object"})),
+                "name": name,
+                "description": desc,
+                "input_schema": params,
             }))
         })
         .collect()
@@ -164,12 +169,12 @@ fn go_responses_tools(tools: &[Value]) -> Vec<Value> {
     tools
         .iter()
         .filter_map(|t| {
-            let f = t.get("function")?;
+            let (name, desc, params) = go_fn_parts(t)?;
             Some(json!({
                 "type": "function",
-                "name": f.get("name")?,
-                "description": f.get("description").and_then(Value::as_str).unwrap_or(""),
-                "parameters": f.get("parameters").cloned().unwrap_or(json!({"type": "object"})),
+                "name": name,
+                "description": desc,
+                "parameters": params,
             }))
         })
         .collect()
@@ -225,15 +230,24 @@ fn go_gemini_tools(tools: &[Value]) -> Vec<Value> {
     tools
         .iter()
         .filter_map(|t| {
-            let f = t.get("function")?;
-            let params = f.get("parameters").cloned().unwrap_or(json!({"type": "object"}));
+            let (name, desc, params) = go_fn_parts(t)?;
             Some(json!({
-                "name": f.get("name")?,
-                "description": f.get("description").and_then(Value::as_str).unwrap_or(""),
+                "name": name,
+                "description": desc,
                 "parameters": go_gemini_schema(&params),
             }))
         })
         .collect()
+}
+
+/// A tool call's `input`/`args` under the Go reply parsers' strict rule: only
+/// an object (or missing/null) is accepted, exactly as the endpoints send.
+fn go_args_object(raw: Option<&Value>) -> Result<Value, String> {
+    match raw {
+        None | Some(Value::Null) => Ok(json!({})),
+        Some(v @ Value::Object(_)) => Ok(v.clone()),
+        Some(_) => Err("the tool arguments must be a JSON object".to_string()),
+    }
 }
 
 /// Append `item` to the last message with `role` (creating one), so roles keep
@@ -528,11 +542,7 @@ fn go_messages_reply(body: &Value) -> Reply {
                     let id = b.get("id").and_then(Value::as_str).map_or_else(|| format!("toolu-{}", calls.len()), str::to_string);
                     let name = b.get("name").and_then(Value::as_str).unwrap_or("").to_string();
                     let raw_args = b.get("input").map(|i| i.to_string()).unwrap_or_else(|| "{}".to_string());
-                    let arguments = match b.get("input") {
-                        None | Some(Value::Null) => Ok(json!({})),
-                        Some(v @ Value::Object(_)) => Ok(v.clone()),
-                        Some(_) => Err("the tool arguments must be a JSON object".to_string()),
-                    };
+                    let arguments = go_args_object(b.get("input"));
                     calls.push(Call { id: id.clone(), name: name.clone(), arguments: arguments.clone() });
                     kept_calls.push(json!({"id": id, "type": "function", "function": {"name": name, "arguments": raw_args}}));
                 }
@@ -558,11 +568,7 @@ fn go_gemini_reply(body: &Value) -> Reply {
                 }
                 let name = call.get("name").and_then(Value::as_str).unwrap_or("").to_string();
                 let raw_args = call.get("args").map(|a| a.to_string()).unwrap_or_else(|| "{}".to_string());
-                let arguments = match call.get("args") {
-                    None | Some(Value::Null) => Ok(json!({})),
-                    Some(v @ Value::Object(_)) => Ok(v.clone()),
-                    Some(_) => Err("the tool arguments must be a JSON object".to_string()),
-                };
+                let arguments = go_args_object(call.get("args"));
                 // Unique across rounds: `go_call_names` maps the whole history, so a
                 // repeated `call-0` would answer an old result with the newest name.
                 let id = format!("go-{}", GO_GEMINI_CALL_COUNTER.fetch_add(1, Ordering::Relaxed));
