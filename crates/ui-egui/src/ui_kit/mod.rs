@@ -55,7 +55,9 @@ pub(crate) use preferences::*;
 pub(crate) use preferences_assistant::*;
 pub(crate) use preferences_navigation::*;
 pub(crate) use preferences_small::*;
-pub(crate) use radial::{RADIAL_RADIUS, radial_menu};
+#[cfg(test)]
+pub(crate) use radial::radial_menu;
+pub(crate) use radial::{RadialLayout, radial_menu_layers, radial_preview};
 pub(crate) use reports::*;
 pub(crate) use search::{CommandSearch, SearchBadge, SearchFieldGeometry};
 pub(crate) use shortcuts::*;

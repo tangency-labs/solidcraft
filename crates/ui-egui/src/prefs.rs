@@ -457,6 +457,11 @@ preference_settings! {
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
+    /// How long (milliseconds) the right button is held still before a move opens the radial
+    /// menu; read through `context_menu::hold_secs`, which keeps it in range.
+    radial_hold_ms: u32 = 350, PAGE_NAVIGATION;
+    /// The radial menu shows icons only, in smaller sectors (the lit command's name above it).
+    radial_compact: bool = false, PAGE_NAVIGATION;
     /// Mouse gestures: a ring of tools on the right button.
     mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
     /// The wheel zooms out when turned forward.
