@@ -1237,6 +1237,29 @@ fn mesh_meeting_size(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh) -> f6
     if s.x > 0.0 && s.y > 0.0 && s.z > 0.0 { s.x.min(s.y).min(s.z) } else { f64::INFINITY }
 }
 
+/// Whether `r` (meshed as `m`) has a shell beside others that meshes to nothing: faces of no
+/// area along a line where the operands only touch (a tool's end face tangent to a round side,
+/// #3741). It encloses no material, so volume and membership miss it, but it is not a solid:
+/// whatever takes the body apart into its pieces later (the next cut) fails on it.
+fn has_empty_shell(r: &Body, m: &solidcraft_geom::Mesh) -> bool {
+    let shells = r.solid.boundaries();
+    if shells.len() < 2 {
+        return false;
+    }
+    let mut meshed = vec![false; r.solid.face_iter().count()];
+    for f in &m.tri_face {
+        if let Some(x) = meshed.get_mut(*f as usize) {
+            *x = true;
+        }
+    }
+    let mut first = 0;
+    shells.iter().any(|sh| {
+        let faces = meshed.get(first..first + sh.len());
+        first += sh.len();
+        faces.is_some_and(|faces| !faces.contains(&true))
+    })
+}
+
 /// Whether a result volume is plausible for `op`: within the bounds the operands' volumes
 /// leave, plus the slack the meshed volumes are measured to.
 fn plausible(v: f64, op: BoolOp, va: f64, vb: f64, slack: f64) -> bool {
@@ -1403,7 +1426,7 @@ where
         if !bounds {
             return (false, v);
         }
-        if unfused(r) || crate::coplanar::has_skin(r, &mr) {
+        if unfused(r) || crate::coplanar::has_skin(r, &mr) || has_empty_shell(r, &mr) {
             return (false, v);
         }
         let consistent = match &meshes {
