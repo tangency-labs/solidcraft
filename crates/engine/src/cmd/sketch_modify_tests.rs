@@ -427,6 +427,71 @@ fn three_point_arc_coordinates_stay_free_and_invalid_references_are_atomic() {
 }
 
 #[test]
+fn midpoint_line_keeps_curve_and_midpoint_snaps() {
+    for (mid, at) in [("on:c1:20,0", Vec2::new(20.0, 0.0)), ("mid:base", Vec2::new(20.0, -10.0))] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":20}));
+        run(&mut s, "sketch.line", json!({"points":[[10,-10],[30,-10]],"ids":["base"]}));
+        let before = s.doc.to_json();
+        let undo = s.undo.len();
+        let out = run(&mut s, "sketch.line.midpoint", json!({"mid":mid,"end":[at.x,at.y + 15.0]}));
+        let line = ids(&out["curves"])[0].clone();
+        let check = |s: &Session| {
+            let sk = sketch(s);
+            let l = sk.curve_index(&line).unwrap();
+            let a = sk.resolve_point(&format!("{line}.start")).and_then(|i| sk.point(i)).unwrap();
+            let b = sk.resolve_point(&format!("{line}.end")).and_then(|i| sk.point(i)).unwrap();
+            assert!(a.dist(at - Vec2::new(0.0, 15.0)) < 1e-6);
+            assert!(b.dist(at + Vec2::new(0.0, 15.0)) < 1e-6);
+            let point = sk
+                .constraints
+                .iter()
+                .find_map(|c| match c.kind {
+                    ConstraintKind::Midpoint { p, l: target } if target == l => Some(p),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(sk.point(point).unwrap().dist(at) < 1e-6);
+            let reference = sk.curve_index(if mid.starts_with("on:") { "c1" } else { "base" }).unwrap();
+            assert!(
+                sk.constraints.iter().any(|c| match c.kind {
+                    ConstraintKind::PointOnCurve { p, c } => mid.starts_with("on:") && p == point && c == reference,
+                    ConstraintKind::Midpoint { p, l } => mid.starts_with("mid:") && p == point && l == reference,
+                    _ => false,
+                }),
+                "the line's middle must remain attached to the snapped geometry"
+            );
+        };
+        check(&s);
+        assert_eq!(s.undo.len(), undo + 1, "the snap and line are one edit");
+        let after = s.doc.to_json();
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.to_json(), before);
+        run(&mut s, "edit.redo", json!({}));
+        check(&s);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&after).unwrap());
+        reopened.active_sketch = s.active_sketch;
+        check(&reopened);
+    }
+}
+
+#[test]
+fn midpoint_line_rejects_bad_snaps_and_degenerate_lines_atomically() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":20}));
+    s.mark_saved();
+    let before = s.doc.to_json();
+    let history = (s.undo.len(), s.redo.len());
+    for mid in ["on:missing:20,0", "on:c1:NaN,0", "mid:c1", "on:c1:20,0"] {
+        // The last snap creates a point before the zero-length line is refused.
+        assert!(s.execute("sketch.line.midpoint", &json!({"mid":mid,"end":[20,0]})).is_err(), "{mid}");
+        assert_eq!(s.doc.to_json(), before, "failed midpoint {mid} changed the sketch");
+        assert_eq!((s.undo.len(), s.redo.len()), history);
+        assert!(!s.is_dirty());
+    }
+}
+
+#[test]
 fn new_creation_tools() {
     let mut s = new_sketch();
     let r = run(&mut s, "sketch.line.midpoint", json!({"mid": [0, 0], "end": [10, 5]}));

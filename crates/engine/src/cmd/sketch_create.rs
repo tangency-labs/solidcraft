@@ -30,7 +30,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("line_mid")
         .enabled(in_sketch)
-        .params(concat!("mid: [x,y] or point ref, end: [x,y]; construction?", created_doc!())),
+        .params(concat!("mid: [x,y], point ref or snap (\"mid:<line>\", \"on:<curve>:x,y\", model vertex/edge); end: [x,y]; construction?", created_doc!())),
     CommandSpec::new("sketch.arc.tangent", "Tangent Arc", arc_tangent).at("SKETCH", "CREATE").icon("arc_tangent").enabled(in_sketch).params(concat!(
         "start: end point of a line or arc (\"l1.end\"), end: [x,y]; curve?: the curve to be tangent to (default: the one ending at start)",
         created_doc!()
@@ -698,6 +698,7 @@ fn conic(s: &mut Session, p: &Value) -> Result<Value> {
 fn midpoint_line(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.line.midpoint";
     let end = req_vec2(cmd, p, "end")?;
+    let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let m = req_parg(sk, doc, p, "mid", cmd)?;
         let start = m.pos() * 2.0 - end;
