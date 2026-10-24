@@ -46,10 +46,13 @@ impl AcpBackend {
     pub fn start(argv: &[String], ctx: StartContext) -> Result<AcpBackend, String> {
         let wake = ctx.wake;
         let proc = AgentProcess::spawn(argv, &ctx.cwd, ENV_REMOVE, wake)?;
+        // An agent inside WSL is told the same folder and bridge as WSL shows them (#5546).
+        let (cwd, bridge) =
+            if acp::runs_in_wsl(argv) { (acp::wsl_path(&ctx.cwd), ctx.bridge.as_ref().map(acp::McpBridge::in_wsl)) } else { (ctx.cwd, ctx.bridge) };
         let mut b = AcpBackend {
             proc,
-            cwd: ctx.cwd,
-            bridge: ctx.bridge,
+            cwd,
+            bridge,
             next_id: 0,
             pending: HashMap::new(),
             session: None,
@@ -257,8 +260,9 @@ pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, Stri
     };
     p.send(&acp::request(1, "initialize", acp::initialize_params(env!("CARGO_PKG_VERSION"))));
     let init = wait_for(&p, 1);
+    let session_cwd = if acp::runs_in_wsl(argv) { acp::wsl_path(cwd) } else { cwd.to_path_buf() };
     let result = init.and_then(|v| {
-        p.send(&acp::request(2, "session/new", acp::session_new_params(cwd, None)));
+        p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None)));
         wait_for(&p, 2).map(|_| {
             let who = acp::agent_info(&v);
             crate::i18n::format("ui.ai_test_acp_ok", &[("agent", if who.is_empty() { "?" } else { &who })])

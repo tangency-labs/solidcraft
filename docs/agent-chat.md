@@ -210,6 +210,22 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   SolidCraft runs the conversation itself, with the same tools, limits and questions as for a
   coding agent, and at most 24 model requests per message.
 
+### An agent inside WSL (Windows)
+
+An agent installed inside WSL keeps its own settings, skills and sign-in there. Add it as a
+**Custom command** that starts it through `wsl.exe`, for example:
+
+```
+wsl.exe -d Ubuntu -e bash -lc claude-agent-acp
+```
+
+`bash -lc` runs your login shell's setup, so the agent is found where your `PATH` puts it (npm,
+nvm, Volta). When the command's program is `wsl` or `wsl.exe`, SolidCraft gives the agent its
+working folder and the `solidcraft-app` server's program as WSL shows them (`C:\Users\…` becomes
+`/mnt/c/Users/…`). The server itself still runs on Windows and reaches the app at `127.0.0.1`, so
+this works with WSL's default networking. If you moved WSL's drive mounts away from `/mnt`
+(`automount.root` in `/etc/wsl.conf`), those paths won't match and the agent can't start the server.
+
 ## Signing in
 
 If a coding agent isn't signed in, it says so and the panel shows **Sign in to the agent** with
