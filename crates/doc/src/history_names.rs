@@ -428,6 +428,12 @@ pub(crate) fn matches(names: &Names, index: usize, name: &str) -> Option<Match> 
     if info.is_some_and(|i| i.aliases.iter().any(|a| a == name)) {
         return Some(Match::Alias);
     }
+    // A pattern copy's faces carry their instance after the name (`…@F9.1`, after any
+    // qualifier): the names compare as the original's do, within the same copy only.
+    let ((name, at), (current, here)) = (instance_suffix(name), instance_suffix(current));
+    if at != here {
+        return None;
+    }
     // The named face (or piece) was split further: this is one of its pieces.
     if descends(current, name) {
         return Some(Match::Piece);
@@ -441,6 +447,21 @@ pub(crate) fn matches(names: &Names, index: usize, name: &str) -> Option<Match> 
     }
     let root = crate::naming::strip_piece(name);
     (crate::naming::strip_piece(current) == root).then_some(Match::Stem)
+}
+
+/// A name and the pattern instances after it (`F3:top#[F4:side]@F9.1` is `F3:top#[F4:side]` and
+/// `@F9.1`; a copy of a copy carries one instance after another).
+fn instance_suffix(n: &str) -> (&str, &str) {
+    let mut core = n;
+    while let Some(at) = core.rfind('@') {
+        let instance = core.get(at + 1..).and_then(|t| t.strip_prefix('F')).and_then(|t| t.split_once('.'));
+        let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+        if !instance.is_some_and(|(feature, k)| digits(feature) && digits(k)) {
+            break;
+        }
+        core = core.get(..at).unwrap_or_default();
+    }
+    (core, n.get(core.len()..).unwrap_or_default())
 }
 
 #[cfg(test)]

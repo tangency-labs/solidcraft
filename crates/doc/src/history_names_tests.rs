@@ -44,6 +44,32 @@ fn pieces_are_told_apart_by_the_faces_only_they_touch() {
     assert_eq!(matches(&names, 2, "top"), None);
 }
 
+/// A pattern's copy names its faces after the original's with the instance after them
+/// (`…@F9.1`, after any qualifier): a stored piece name of a copy finds its piece as the
+/// original's does, in that copy only.
+#[test]
+fn a_pattern_copys_piece_names_match_as_the_originals_do() {
+    let faces = named(&["top#[left,slot:a]@F9.1", "top#[right,slot:b]@F9.1", "front@F9.1", "top#[left,slot:a]@F9.2", "top#[left,slot:a]"]);
+    let names = qualify(faces, &[]);
+    // The faces around the piece have changed since the name was stored (other slot walls).
+    let stored = "top#[left,slot:c]@F9.1";
+    assert_eq!(matches(&names, 0, stored), Some(Match::Stem));
+    assert_eq!(matches(&names, 1, stored), Some(Match::Stem));
+    assert_eq!(matches(&names, 2, stored), None);
+    assert_eq!(matches(&names, 3, stored), None, "another copy");
+    assert_eq!(matches(&names, 4, stored), None, "the original");
+    assert_eq!(matches(&names, 0, "top@F9.1"), Some(Match::Piece), "a piece of the copy's face");
+    assert_eq!(matches(&names, 0, "top#[left,slot:a]@F9.1"), Some(Match::Exact));
+    // Copies of copies carry one instance after another.
+    let names = qualify(named(&["top#[left]@F9.1@F12.2", "top#[left]@F9.1@F12.1"]), &[]);
+    assert_eq!(matches(&names, 0, "top#[slot:c]@F9.1@F12.2"), Some(Match::Stem));
+    assert_eq!(matches(&names, 1, "top#[slot:c]@F9.1@F12.2"), None);
+    // Hostile suffixes never panic.
+    for n in ["@", "@F", "@F.", "@F1.", "a@F1.1@", "a#[b]@F1.1]", "@F1.1"] {
+        let _ = matches(&names, 0, n);
+    }
+}
+
 #[test]
 fn pieces_nothing_tells_apart_are_numbered_and_unverified() {
     let faces = named(&["top", "top", "ring"]);
