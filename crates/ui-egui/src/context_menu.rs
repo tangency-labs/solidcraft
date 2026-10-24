@@ -1563,7 +1563,7 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) {
 fn context_target_selected(selection: &[Sel], target: &Sel) -> bool {
     selection.iter().any(|selected| {
         crate::selection::same_item(selected, target)
-            || matches!((selected, target), (Sel::SketchCurve { id: a }, Sel::SketchMidpoint { id: b }) if a == b)
+            || matches!((selected, target), (Sel::SketchCurve { id: a, .. }, Sel::SketchMidpoint { id: b }) if a == b)
     })
 }
 

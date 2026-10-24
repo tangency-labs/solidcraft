@@ -1764,7 +1764,7 @@ fn a_huge_selection_is_counted_not_dropped_silently() {
         Sel::Edge { body: "Nope".into(), index: 7, point: solidcraft_engine::geom::Vec3::new(0.0, 0.0, 0.0) },
         Sel::Feature { id: u64::MAX },
         Sel::Plane { name: "XY".into() },
-        Sel::SketchCurve { id: "c1".into() },
+        Sel::SketchCurve { id: "c1".into(), sketch: None },
     ];
     let described = context::describe(&mut session, &odd);
     assert_eq!(described.items.len(), 5);
