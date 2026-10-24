@@ -1116,6 +1116,48 @@ fn appearance_submenu_swatches_apply_to_the_clicked_body_and_keep_library_action
 }
 
 #[test]
+fn appearance_parent_click_opens_editor_after_hovering_quick_choices() {
+    use crate::scenario::{Harness, rect_of};
+    let mut h = Harness::new();
+    h.app = sample_app();
+    let name = body(&h.app);
+    h.frames(3);
+    context_menu::open_for(&mut h.app, pos2(400.0, 180.0), Target::Body { name: name.clone() });
+    h.frames(2);
+    h.step(&json!({"move":[10, 10]})).unwrap();
+    h.step(&json!({"move":{"handle":"menu:ui.appearance"}})).unwrap();
+    h.frames(2);
+    assert!(rect_of("menu:appearance.assign:Aluminum - Satin").is_some(), "hover opens quick choices");
+    assert!(h.app.dialog.is_none(), "hover must not open the editor");
+    h.step(&json!({"click":{"handle":"menu:ui.appearance"}})).unwrap();
+    assert!(h.app.viewport.context_menu.is_none(), "activation closes the context menu");
+    let dialog = h.app.dialog.as_ref().expect("parent click opens the full editor");
+    assert!(matches!(dialog.kind, crate::dialogs::Kind::Appearance(_)));
+    assert_eq!(dialog.inputs[0].items, vec![solidcraft_engine::Sel::Body { name }]);
+}
+
+#[test]
+fn appearance_hovered_quick_choice_applies_without_opening_editor() {
+    use crate::scenario::Harness;
+    let mut h = Harness::new();
+    h.app = sample_app();
+    let name = body(&h.app);
+    let rows = context_menu::items(&h.app, &Target::Body { name: name.clone() });
+    let appearance = find(&rows, "Appearance");
+    let swatch = appearance.children.iter().find(|row| row.swatch.is_some()).unwrap();
+    h.frames(3);
+    context_menu::open_for(&mut h.app, pos2(400.0, 180.0), Target::Body { name: name.clone() });
+    h.frames(2);
+    h.step(&json!({"move":[10, 10]})).unwrap();
+    h.step(&json!({"move":{"handle":"menu:ui.appearance"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click":{"handle":format!("menu:{}:{}", swatch.id, swatch.label)}})).unwrap();
+    assert_eq!(h.app.session.doc.appearances.bodies[&name].color, swatch.swatch.unwrap());
+    assert!(h.app.dialog.is_none(), "quick choice applies directly");
+    assert!(h.app.viewport.context_menu.is_none());
+}
+
+#[test]
 fn appearance_submenu_keyboard_opens_beside_parent_and_left_returns_to_it() {
     use crate::scenario::{Harness, rect_of};
     let mut h = Harness::new();
