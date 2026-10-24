@@ -34,6 +34,10 @@ mod removed_later_tests;
 #[path = "viewport_plane_target_tests.rs"]
 mod plane_target_tests;
 
+#[cfg(test)]
+#[path = "viewport_refine_wait_tests.rs"]
+mod refine_wait_tests;
+
 #[path = "navigation_cube.rs"]
 mod navigation_cube;
 
@@ -73,6 +77,8 @@ pub struct ViewportState {
     pub(crate) lod: std::sync::Mutex<crate::display_lod::Lod>,
     /// The view and model the refinement was last chosen for.
     lod_view: u64,
+    /// Refinement waits for the camera to stop ([`REFINE_STILL_MS`]).
+    lod_rest: CameraRest,
     /// Each body mesh's box (the mesh held, so its address stays its own), from the last state.
     mesh_bounds: std::sync::Mutex<MeshBounds>,
     /// Each shown body mesh's section index for the cut's normal (the mesh held, so its address
@@ -501,6 +507,27 @@ fn drawn_mesh(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> std::syn
     if current() == DisplayQuality::Normal { b.mesh() } else { b.plan_mesh().unwrap_or_else(|| b.mesh()) }
 }
 
+/// How long (ms) the camera must stand still before display refinements are chosen and swapped in.
+const REFINE_STILL_MS: f64 = 200.0;
+
+/// The camera the last frame had and when it last differed from the one before (ms).
+#[derive(Default)]
+struct CameraRest {
+    camera: u64,
+    moved_at: f64,
+}
+
+impl CameraRest {
+    /// Notes this frame's camera (a hash of the view) at `now` (ms); how much longer (ms) the
+    /// camera has to stand still, 0 once it has for [`REFINE_STILL_MS`].
+    fn wait(&mut self, camera: u64, now: f64) -> f64 {
+        if camera != self.camera {
+            *self = CameraRest { camera, moved_at: now };
+        }
+        (REFINE_STILL_MS - (now - self.moved_at)).max(0.0)
+    }
+}
+
 /// Choose which bodies to draw finer than the chosen display quality for this view (#1320):
 /// each shown body's screen-space error from its box on screen, refinements planned off the UI
 /// thread and swapped in when ready. Keeps repainting while refinements are being planned.
@@ -514,6 +541,15 @@ fn update_refinement(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
     scene_key(app).hash(&mut h);
     crate::sketch_display::projection_key(proj, app.viewport.pixels_per_point()).hash(&mut h);
     let view = h.finish();
+    // A moving camera is left alone: every refinement swapped in rebuilds and uploads the whole
+    // model scene, which in a large assembly takes tens of milliseconds a time. The bodies keep
+    // the step they have until the camera has stood still for [`REFINE_STILL_MS`].
+    let camera = crate::sketch_display::projection_key(proj, app.viewport.pixels_per_point());
+    let wait = app.viewport.lod_rest.wait(camera, crate::now_ms());
+    if wait > 0.0 {
+        ctx.request_repaint_after(std::time::Duration::from_millis(wait as u64 + 5));
+        return;
+    }
     // While refinements are being planned, the view standing still: only collect finished ones.
     if view == app.viewport.lod_view {
         let (busy, finished) = app.viewport.lod.lock().map_or((false, false), |mut l| {
