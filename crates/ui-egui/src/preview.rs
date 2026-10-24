@@ -111,6 +111,7 @@ pub struct PreviewState {
     /// The radius splines the previewed fillet tapered its edges with.
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
     straight: crate::extrude_preview::StraightPreview,
+    moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
     pub rolled_back: bool,
 }
@@ -133,6 +134,7 @@ impl PreviewState {
 
     fn clear(&mut self) {
         self.straight.clear();
+        self.moving.clear();
         self.running = None;
         self.running_tool = false;
         self.running_stream_key = None;
@@ -328,8 +330,13 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         pv.started = crate::now_ms();
         pv.running_stream_key = stream_key;
         let mut straight = std::mem::take(&mut app.preview.straight);
-        let job = straight.compute(app, &cmds, colors);
+        let mut job = straight.compute(app, &cmds, colors);
         app.preview.straight = straight;
+        if job.is_none() {
+            let mut moving = std::mem::take(&mut app.preview.moving);
+            job = moving.compute(app, &cmds, colors);
+            app.preview.moving = moving;
+        }
         if let Some(job) = job {
             app.preview.apply(key, job);
             app.preview.busy = false;
