@@ -148,21 +148,50 @@ pub fn write_token_file(path: &Path, token: &str) -> Result<()> {
     f.sync_all()
 }
 
-/// Windows: drop inherited entries and grant only the current user full access.
+/// How long `icacls` may take (#6145). It finishes at once; on some computers the new process
+/// is left suspended (security software holding it), and waiting on it without a limit froze
+/// the app.
+#[cfg(windows)]
+const ICACLS_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Windows: drop inherited entries and grant only the current user full access. An `icacls`
+/// that doesn't finish in time is ended and the file kept as made: it is in the user's own
+/// local app data folder, which other users can't read by default.
 #[cfg(windows)]
 fn restrict_to_user(path: &Path) -> Result<()> {
     use std::os::windows::process::CommandExt;
     let user = std::env::var("USERNAME").map_err(|_| Error::other("USERNAME is not set"))?;
     let domain = std::env::var("USERDOMAIN").ok().filter(|d| !d.is_empty());
     let who = domain.map_or(user.clone(), |d| format!("{d}\\{user}"));
-    let status = std::process::Command::new("icacls")
+    let child = std::process::Command::new("icacls")
         .arg(path)
         .args(["/inheritance:r", "/grant:r", &format!("{who}:F")])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .creation_flags(0x0800_0000)
-        .status()?;
-    if status.success() { Ok(()) } else { Err(Error::other(format!("icacls failed to restrict {}", path.display()))) }
+        .spawn()?;
+    match wait_within(child, ICACLS_LIMIT)? {
+        Some(status) if !status.success() => Err(Error::other(format!("icacls failed to restrict {}", path.display()))),
+        _ => Ok(()),
+    }
+}
+
+/// Wait for `child` at most `limit`: its exit status, or `None` (and the child ended) when it
+/// hasn't finished by then.
+#[cfg(any(windows, test))]
+fn wait_within(mut child: std::process::Child, limit: std::time::Duration) -> Result<Option<std::process::ExitStatus>> {
+    let start = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        if start.elapsed() >= limit {
+            // Not waited for afterwards: a suspended process may not end at once.
+            let _ = child.kill();
+            return Ok(None);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 }
 
 /// Removes the token file when the app ends.
@@ -177,6 +206,21 @@ impl Drop for TokenFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #6145: a child that doesn't finish in time is given up on, not waited for forever.
+    #[cfg(unix)]
+    #[test]
+    fn a_slow_child_is_waited_for_only_so_long() {
+        use std::time::{Duration, Instant};
+        let start = Instant::now();
+        let slow = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        assert!(wait_within(slow, Duration::from_millis(200)).unwrap().is_none());
+        assert!(start.elapsed() < Duration::from_secs(5), "{:?}", start.elapsed());
+        let quick = std::process::Command::new("true").spawn().unwrap();
+        assert!(wait_within(quick, Duration::from_secs(5)).unwrap().is_some_and(|s| s.success()));
+        let failing = std::process::Command::new("false").spawn().unwrap();
+        assert!(wait_within(failing, Duration::from_secs(5)).unwrap().is_some_and(|s| !s.success()));
+    }
 
     #[test]
     fn tokens_compare_whole() {
