@@ -744,7 +744,7 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
     let mut names: std::collections::BTreeSet<String> = ["OUTLINE", "CUT", "BEND_UP", "BEND_DOWN"].map(String::from).into();
     names.extend(entities.iter().map(|e| e.layer.clone()));
     let layers: Vec<_> = names.iter().map(|name| dxf_layer(name)).collect();
-    Ok(solidcraft_io::write_dxf_drawing(&layers, &entities))
+    Ok(solidcraft_io::write_dxf_drawing(&layers, &entities)?)
 }
 
 /// What a `sheet.export_dxf` call asks for; a value it cannot use is refused.

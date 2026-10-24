@@ -88,7 +88,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if sketch > 0 {
         layers.push(DxfLayer::new("SKETCH", 5));
     }
-    let text = solidcraft_io::write_dxf_drawing(&layers, &entities);
+    let text = solidcraft_io::write_dxf_drawing(&layers, &entities)?;
     writing.check().map_err(|e| bad(CMD, e))?;
     let mut result = json!({"visible":visible,"hidden":hidden,"sketch":sketch,"units":"mm","tolerance":tolerance,"projection":if cam.fov > 0.0 {"perspective"} else {"orthographic"}});
     result["stats"] = json!({"bodies":meshes.placements.len(),"shared_meshes":meshes.meshes.len(),"triangles":meshes.triangles,

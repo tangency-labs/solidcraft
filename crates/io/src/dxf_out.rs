@@ -15,6 +15,8 @@ use std::fmt::Write as _;
 
 use solidcraft_geom::{Loop2, MAX_BEZIER_DEGREE, Seg2, Vec2};
 
+use crate::{IoError, Result};
+
 /// A layer's linetype, defined in the file's LTYPE table so a viewer needs nothing else.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DxfLinetype {
@@ -95,7 +97,8 @@ pub enum DxfShape {
     },
     /// One line of text, centred on `at` (its baseline) and turned `angle_deg` counter-clockwise.
     /// `%%d`, `%%p` and `%%c` are AutoCAD's degree, plus-minus and diameter signs; other letters
-    /// outside ASCII are written as `\U+XXXX`.
+    /// outside ASCII through U+FFFF are written as `\U+XXXX`. Characters beyond U+FFFF
+    /// are refused by [`write_dxf_drawing`], never substituted with `?`.
     Text {
         at: Vec2,
         height: f64,
@@ -314,21 +317,31 @@ impl Out {
 }
 
 /// A text on one line, as a TEXT entity holds it: at most 250 characters, control characters as
-/// spaces, letters outside ASCII as `\U+XXXX` (`?` beyond the first 65536).
-fn text_value(s: &str) -> String {
-    s.chars()
+/// spaces, letters outside ASCII through U+FFFF as `\U+XXXX`. Refuse characters beyond
+/// U+FFFF anywhere in the source, including past the existing 250-character output limit.
+/// AC1015 uses CIF escapes, not UTF-8; surrogate-pair escapes are not portable across readers.
+fn text_value(s: &str) -> Result<String> {
+    if let Some((i, c)) = s.chars().enumerate().find(|(_, c)| u32::from(*c) > 0xffff) {
+        return Err(IoError::Invalid(format!(
+            "character {c:?} (U+{:04X}) at position {} cannot be written as DXF AC1015 text; only characters through U+FFFF are supported",
+            u32::from(c),
+            i + 1
+        )));
+    }
+    Ok(s.chars()
         .take(250)
         .map(|c| match c {
             c if c.is_ascii_control() => " ".to_string(),
             c if c.is_ascii() => c.to_string(),
-            c => u16::try_from(u32::from(c)).map_or_else(|_| "?".to_string(), |u| format!("\\U+{u:04X}")),
+            c => format!("\\U+{:04X}", u32::from(c)),
         })
-        .collect()
+        .collect())
 }
 
 /// A DXF drawing (AutoCAD 2000, millimetres) of `entities`. `layers` are the layers they are on
-/// (layer `0` is always there).
-pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> String {
+/// (layer `0` is always there). A TEXT character beyond U+FFFF returns an error naming the
+/// character, its position, the entity and its layer; no drawing is returned on failure.
+pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<String> {
     let mut pts = Vec::new();
     for e in entities {
         e.shape.sample(&mut pts);
@@ -423,7 +436,7 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> String 
 
     o.code(0, "SECTION");
     o.code(2, "ENTITIES");
-    for e in entities {
+    for (index, e) in entities.iter().enumerate() {
         let kind = match &e.shape {
             DxfShape::Line(..) => "LINE",
             DxfShape::Polyline { .. } => "LWPOLYLINE",
@@ -505,7 +518,9 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> String 
                 o.code(100, "AcDbText");
                 o.point(10, *at);
                 o.num(40, *height);
-                o.code(1, text_value(text));
+                let value =
+                    text_value(text).map_err(|error| IoError::Invalid(format!("DXF TEXT entity {} on layer {:?}: {error}", index + 1, e.layer)))?;
+                o.code(1, value);
                 o.num(50, *angle_deg);
                 // Centred (72 = 1): a reader that places the text by the second alignment point
                 // and one that takes the first both put its middle on `at`.
@@ -544,7 +559,7 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> String 
     head.code(9, "$EXTMAX");
     head.point(10, hi);
     head.code(0, "ENDSEC");
-    head.s + &o.s
+    Ok(head.s + &o.s)
 }
 
 #[cfg(test)]
@@ -704,7 +719,7 @@ mod tests {
             DxfEntity { layer: "OUTLINE".into(), shape: DxfShape::Circle { c: Vec2::new(5.0, 5.0), r: 4.0 } },
             DxfEntity { layer: "CUT".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::X) },
         ];
-        let dxf = write_dxf_drawing(&[DxfLayer::new("OUTLINE", 7), DxfLayer::new("CUT", 1)], &ents);
+        let dxf = write_dxf_drawing(&[DxfLayer::new("OUTLINE", 7), DxfLayer::new("CUT", 1)], &ents).unwrap();
         let p = pairs(&dxf);
         let after = |var: &str| &p[p.iter().position(|(c, v)| (*c, v.as_str()) == (9, var)).unwrap() + 1..];
         assert_eq!(after("$ACADVER")[0], (1, "AC1015".to_string()));
@@ -741,7 +756,7 @@ mod tests {
         assert!(handles.len() > ents.len() && handles.iter().all(|h| *h < u64::from_str_radix(&p[seed_at].1, 16).unwrap()));
         assert!(dxf.ends_with("  0\nEOF\n"));
         // No entities: a valid, empty drawing.
-        assert_eq!(entities(&write_dxf_drawing(&[], &[])).len(), 0);
+        assert_eq!(entities(&write_dxf_drawing(&[], &[]).unwrap()).len(), 0);
     }
 
     #[test]
@@ -757,7 +772,7 @@ mod tests {
             seg_shape(&Seg2::Cubic { p0: cubic[0], p1: cubic[1], p2: cubic[2], p3: cubic[3] }),
         ];
         let ents: Vec<DxfEntity> = shapes.into_iter().map(|shape| DxfEntity { layer: "0".into(), shape }).collect();
-        let dxf = write_dxf_drawing(&[], &ents);
+        let dxf = write_dxf_drawing(&[], &ents).unwrap();
         let back = read_dxf(&dxf).unwrap();
         assert_eq!(back.len(), 6, "{back:?}");
         assert!(matches!(&back[0], Geom2::Line(a, b) if a.dist(Vec2::ZERO) < 1e-9 && b.dist(Vec2::new(10.0, 0.0)) < 1e-9));
@@ -813,7 +828,7 @@ mod tests {
     #[test]
     fn a_rational_spline_lists_knots_then_weights_then_control_points() {
         let hyperbola = seg_shape(&Seg2::Conic { a: Vec2::ZERO, apex: Vec2::new(1.0, 2.0), b: Vec2::new(3.0, 0.0), w: 2.0 });
-        let dxf = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: hyperbola }]);
+        let dxf = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: hyperbola }]).unwrap();
         let e = &entities(&dxf)[0];
         assert_eq!(values(e, 70), [12.0]);
         assert!(near(&values(e, 41), &[1.0, 2.0, 1.0]) && near(&values(e, 40), &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]));
@@ -846,7 +861,7 @@ mod tests {
 
     #[test]
     fn a_dashed_layer_names_its_linetype_and_the_table_defines_it() {
-        let dxf = write_dxf_drawing(&[DxfLayer::new("BEND", 1).dashed(), DxfLayer::new("CUT", 4)], &[]);
+        let dxf = write_dxf_drawing(&[DxfLayer::new("BEND", 1).dashed(), DxfLayer::new("CUT", 4)], &[]).unwrap();
         let p = pairs(&dxf);
         // The linetypes of every drawing, then DASHED: a dash of 12.7 mm and a gap of 6.35 mm, 19.05 mm in all.
         let types = table_records(&p, "LTYPE");
@@ -869,7 +884,7 @@ mod tests {
     fn hidden_polylines_continue_short_dashes_across_chords_and_round_trip() {
         let points = vec![Vec2::ZERO, Vec2::new(1., 0.), Vec2::new(2., 1.), Vec2::new(3., 1.)];
         let layer = DxfLayer { linetype: DxfLinetype::Hidden, ..DxfLayer::new("HIDDEN", 8) };
-        let text = write_dxf_drawing(&[layer], &[DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points } }]);
+        let text = write_dxf_drawing(&[layer], &[DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points } }]).unwrap();
         let records = entities(&text);
         assert_eq!(records[0].0, "LWPOLYLINE");
         assert_eq!(field(&records[0].1, 70), "128");
@@ -884,7 +899,7 @@ mod tests {
     fn text_is_centred_on_its_point_and_the_reader_gets_it_back() {
         let at = Vec2::new(30.0, 12.0);
         let note = DxfShape::Text { at, height: 3.0, angle_deg: 90.0, text: "AB%%d\nC\u{b0}".into() };
-        let dxf = write_dxf_drawing(&[DxfLayer::new("NOTES", 8)], &[DxfEntity { layer: "NOTES".into(), shape: note }]);
+        let dxf = write_dxf_drawing(&[DxfLayer::new("NOTES", 8)], &[DxfEntity { layer: "NOTES".into(), shape: note }]).unwrap();
         let file = entities(&dxf);
         let [text] = file.as_slice() else { panic!("{file:?}") };
         assert_eq!(text.0, "TEXT");
@@ -913,11 +928,52 @@ mod tests {
     }
 
     #[test]
+    fn non_bmp_text_is_never_silently_replaced() {
+        for c in ['𠀋', '𝑥', '😀', '\u{10000}', '\u{10ffff}'] {
+            let shape = DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text: format!("中{c}") };
+            let entities =
+                [DxfEntity { layer: "OUTLINE".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::X) }, DxfEntity { layer: "NOTES".into(), shape }];
+            let error = write_dxf_drawing(&[DxfLayer::new("NOTES", 8)], &entities).unwrap_err();
+            assert!(matches!(error, IoError::Invalid(_)), "{error}");
+            let message = error.to_string();
+            assert!(message.contains("DXF TEXT entity 2 on layer \"NOTES\""), "{message}");
+            assert!(message.contains(&format!("{c:?} (U+{:04X}) at position 2", u32::from(c))), "{message}");
+            assert!(message.contains("only characters through U+FFFF are supported"), "{message}");
+        }
+    }
+
+    #[test]
+    fn non_bmp_text_past_the_output_limit_is_also_refused() {
+        // Even a character beyond the existing output limit must not vanish unnoticed.
+        for prefix in [249, 250, 10_000] {
+            let shape = DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text: format!("{}𠀋", "中".repeat(prefix)) };
+            let error = write_dxf_drawing(&[], &[DxfEntity { layer: "NOTES".into(), shape }]).unwrap_err().to_string();
+            assert!(error.contains(&format!("U+2000B) at position {}", prefix + 1)), "{error}");
+            assert!(error.len() < 300, "the error must not repeat unbounded input text");
+        }
+    }
+
+    #[test]
+    fn bmp_text_keeps_its_existing_encoding_through_ffff() {
+        for (text, expected) in [
+            ("ASCII %%d %%p %%c ° 中 \u{ffff}\n".into(), "ASCII %%d %%p %%c \\U+00B0 \\U+4E2D \\U+FFFF".into()),
+            ("\u{ffff}".repeat(250), "\\U+FFFF".repeat(250)),
+        ] {
+            let shape = DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text };
+            let dxf = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]).unwrap();
+            let file = entities(&dxf);
+            let [entity] = file.as_slice() else { panic!("{file:?}") };
+            assert_eq!(field(&entity.1, 1), expected);
+            assert!(dxf.contains("AC1015"));
+        }
+    }
+
+    #[test]
     fn the_extents_hold_the_text() {
         // Five letters of 3 mm, turned to read upwards: 0.8 × 3 × 5 = 12 mm long around y = 12, and
         // 3 mm to the left of the baseline at x = 30.
         let shape = DxfShape::Text { at: Vec2::new(30.0, 12.0), height: 3.0, angle_deg: 90.0, text: "ABCDE".into() };
-        let dxf = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]);
+        let dxf = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]).unwrap();
         let p = pairs(&dxf);
         let after = |var: &str| &p[p.iter().position(|(c, v)| (*c, v.as_str()) == (9, var)).unwrap() + 1..];
         assert_eq!(&after("$EXTMIN")[..2], &[(10, "27.0".to_string()), (20, "6.0".to_string())]);
