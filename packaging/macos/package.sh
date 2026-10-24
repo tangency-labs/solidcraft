@@ -7,6 +7,12 @@
 #                                                      compatibility alias) with the licence files
 #
 # Usage: packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build]
+#        packaging/macos/package.sh --build-only <rust-target>
+#
+# --build-only builds just that target (aarch64-apple-darwin or x86_64-apple-darwin) and stops,
+# so the release workflow can build the two halves of the universal binary on separate runners;
+# a later `--arch universal --skip-build` run joins the binaries it finds under
+# $CARGO_TARGET_DIR/<target>/release/ and packages them.
 #
 # The app is ad-hoc signed (not notarized): the first launch needs right-click > Open.
 # Adapted from PhotoCraft's packaging (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
@@ -18,11 +24,13 @@ MACOS_BUNDLE_ID=ai.storyteller.solidcraft
 
 ARCH=universal
 SKIP_BUILD=0
+BUILD_ONLY=
 while [ $# -gt 0 ]; do
   case "$1" in
     --arch) ARCH="$2"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
-    -h | --help) sed -n '2,10p' "$0"; exit 0 ;;
+    --build-only) BUILD_ONLY="$2"; shift 2 ;;
+    -h | --help) sed -n '2,16p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -40,6 +48,16 @@ WORK="$CARGO_TARGET_DIR/macos-package"
 APP="$WORK/SolidCraft.app"
 DMG="$DIST/solidcraft-$VERSION-macos-$ARCH.dmg"
 CLI_ZIP="$DIST/solidcraft-cli-$VERSION-macos-$ARCH.zip"
+
+if [ -n "$BUILD_ONLY" ]; then
+  case "$BUILD_ONLY" in
+    aarch64-apple-darwin | x86_64-apple-darwin) ;;
+    *) echo "unknown --build-only target $BUILD_ONLY" >&2; exit 2 ;;
+  esac
+  echo "==> SolidCraft $VERSION for macOS ($BUILD_ONLY, build only)"
+  (cd "$ROOT" && cargo build --release --locked -p solidcraft -p solidcraft-cli --target "$BUILD_ONLY")
+  exit 0
+fi
 
 echo "==> SolidCraft $VERSION for macOS ($ARCH)"
 if [ "$SKIP_BUILD" = 0 ]; then
