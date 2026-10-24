@@ -1112,7 +1112,8 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
     // of the body the feature names, or of any body: a pick far from every edge would round
     // whichever edge is nearest (#783). Each body's edges are worked out once.
     let named = str_(p, "body").filter(|n| st.body(n).is_some());
-    let mut candidates: Option<Vec<(f64, Vec<solidcraft_kernel::EdgeInfo>)>> = None;
+    // Per body: its size, its edges' polylines and which of them are seams.
+    let mut candidates: Option<Vec<(f64, Vec<Vec<Vec3>>, Vec<bool>)>> = None;
     let mut out = Vec::new();
     for e in a {
         let pt = match edge_ref_form(e).map_err(|why| bad(cmd, why))? {
@@ -1133,27 +1134,69 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
                 .filter(|b| named.is_none_or(|n| b.name == n) && !b.body.is_mesh())
                 .filter_map(|b| {
                     let size = b.body.size();
-                    b.body.edges((size * 2e-3).max(1e-3)).ok().map(|edges| (size, edges))
+                    let tol = (size * 2e-3).max(1e-3);
+                    // The display mesh flags seams (a smooth surface meeting itself, as down the side
+                    // of a cylinder), which nobody means by a pick where they end.
+                    match b.body.display_mesh(tol) {
+                        Ok(m) => Some((size, m.edges, m.seams)),
+                        Err(_) => b.body.edges(tol).ok().map(|edges| (size, edges.into_iter().map(|e| e.points).collect(), Vec::new())),
+                    }
                 })
                 .collect()
         });
+        // A point where several edges meet (a corner) is ambiguous: the kernel would round one of
+        // them, picked silently (#5173). Edges that carry straight on through the point (the two
+        // halves of a circle) are one edge to whoever picked it, and seams don't count. Directions
+        // come from the polylines' end chords, which lean off a curve's tangent: within about 45°
+        // of opposite counts as carrying on (edges at a real corner are far from opposite).
         let mut nearest = f64::INFINITY;
-        let on_edge = bodies.iter().any(|(size, edges)| {
-            let d = edges
-                .iter()
-                .flat_map(|e| e.points.windows(2))
-                .filter_map(|w| Some(pt.dist_to_segment(*w.first()?, *w.get(1)?)))
-                .fold(f64::INFINITY, f64::min);
-            nearest = nearest.min(d);
-            d <= size * 0.05 + 1e-3
-        });
-        if !on_edge && !bodies.is_empty() {
+        let mut near = Vec::new();
+        for (size, edges, seams) in bodies.iter() {
+            for (i, points) in edges.iter().enumerate() {
+                let d = points.windows(2).filter_map(|w| Some(pt.dist_to_segment(*w.first()?, *w.get(1)?))).fold(f64::INFINITY, f64::min);
+                nearest = nearest.min(d);
+                if d <= size * 0.05 + 1e-3 {
+                    near.push((d, seams.get(i).copied().unwrap_or(false), leaving(points, pt)));
+                }
+            }
+        }
+        let matches = near.len();
+        let mut meeting: Vec<Option<Vec3>> = near.iter().filter(|(d, seam, _)| !seam && *d <= nearest + 1e-3).map(|(_, _, dir)| *dir).collect();
+        let mut chains = 0usize;
+        while let Some(dir) = meeting.pop() {
+            chains += 1;
+            if let Some(dir) = dir
+                && let Some(j) = meeting.iter().position(|o| o.is_some_and(|other| other.dot(dir) < -0.7))
+            {
+                meeting.swap_remove(j);
+            }
+        }
+        if chains > 1 {
+            return Err(bad(
+                cmd,
+                format!("[{}, {}, {}] is where {chains} edges meet: give a point along one edge, such as its midpoint", pt.x, pt.y, pt.z),
+            ));
+        }
+        if matches == 0 && !bodies.is_empty() {
             let far = if nearest.is_finite() { format!("the nearest edge is {nearest:.3} mm away") } else { "there is no edge".to_string() };
             return Err(bad(cmd, format!("no edge at [{}, {}, {}]: {far}", pt.x, pt.y, pt.z)));
         }
         out.push(pt);
     }
     Ok(out)
+}
+
+/// The direction an edge's polyline leaves `pt` in, when `pt` is one of its ends; `None` when
+/// the edge runs on through `pt`.
+fn leaving(points: &[Vec3], pt: Vec3) -> Option<Vec3> {
+    let (first, last) = (points.first()?, points.last()?);
+    if first.dist(pt) <= 1e-3 {
+        (*points.get(1)? - *first).normalized()
+    } else if last.dist(pt) <= 1e-3 {
+        (*points.get(points.len().checked_sub(2)?)? - *last).normalized()
+    } else {
+        None
+    }
 }
 
 /// An edge reference as given, before it is looked up: see [`edge_points`].
