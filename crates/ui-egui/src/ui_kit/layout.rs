@@ -94,6 +94,7 @@ pub(crate) fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usiz
 
 /// Internal form geometry for controls which need several lines (e.g. text areas).
 pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
+    let mut passthrough = false;
     if crate::prefs_search::querying(ui) {
         crate::prefs_search::set_control(ui, text);
         if !crate::prefs_search::visible(ui, &[text]) {
@@ -101,7 +102,17 @@ pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl F
             crate::prefs_search::recheck(ui, &[text]);
             return result;
         }
+        crate::prefs_search::push_passthrough(ui);
+        passthrough = true;
     }
+    let result = sized_row_body(ui, text, height, control);
+    if passthrough {
+        crate::prefs_search::pop_passthrough(ui);
+    }
+    result
+}
+
+fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get();
     let width = dimension(ui.available_width());
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
@@ -141,6 +152,9 @@ pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl F
 /// row's control. It says in words what a colour or an icon shows, so colour is never the only cue.
 /// Dim helper beneath a row control. Tokens: `form_icon_size, font_small, text_dim, space_8; label-column tokens`.
 pub(crate) fn caption(ui: &mut Ui, aligned_to: &str, text: &str) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let t = Tokens::get();
     let width = dimension(ui.available_width());
     let (rect, _) = ui.allocate_exact_size(vec2(width, t.form_icon_size), egui::Sense::hover());
@@ -296,6 +310,9 @@ pub(crate) fn list_row(ui: &mut Ui, key: &str, text: &str) -> Response {
 /// Full-width rule; Tokens: dialog_rule. Use between groups without extra padding.
 /// Full-width rule without extra padding. Tokens: `dialog_rule`.
 pub(crate) fn divider(ui: &mut Ui, key: &str) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), 1.0), egui::Sense::hover());
     Tokens::get().secondary_hline(ui.painter(), rect.x_range(), rect.top(), Tokens::get().dialog_rule);
     scenario::publish_rect(&format!("dialog:divider:{key}"), rect);
@@ -350,6 +367,22 @@ pub(crate) enum Text<'a> {
 }
 
 pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
+    if crate::prefs_search::querying(ui) {
+        let heading = matches!(style, Text::Heading(_));
+        if heading {
+            let hit = crate::prefs_search::texts_hit(ui, &[text]);
+            crate::prefs_search::set_heading_open(ui, hit);
+            if hit {
+                crate::prefs_search::reveal(ui);
+            } else if crate::prefs_search::suppress_chrome(ui) {
+                return crate::prefs_search::hidden_response(ui);
+            }
+        } else if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[text]) {
+            return crate::prefs_search::hidden_response(ui);
+        } else if crate::prefs_search::texts_hit(ui, &[text]) && !crate::prefs_search::shows_all(ui) {
+            crate::prefs_search::reveal(ui);
+        }
+    }
     let t = Tokens::get();
     let fixed = matches!(style, Text::Cell | Text::NameCell(_) | Text::MonoCell | Text::Value(_, _));
     let ink = match style {

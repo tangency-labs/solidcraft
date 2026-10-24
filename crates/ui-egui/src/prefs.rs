@@ -1703,7 +1703,7 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             draw_page(app, ui, index, t);
         }
         if crate::prefs_search::hits(ui) == 0 {
-            ui_kit::text(ui, crate::i18n::tr("prefs.search_empty"), ui_kit::Text::Hint("prefs_search"));
+            ui.label(egui::RichText::new(crate::i18n::tr("prefs.search_empty")).size(t.font_body).color(t.form_dim));
         }
     } else {
         let label = WINDOW_PAGES.get(app.prefs_window.section).map(|item| crate::i18n::tr(item.label)).unwrap_or("");

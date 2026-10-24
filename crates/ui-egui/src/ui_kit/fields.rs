@@ -470,6 +470,9 @@ impl Default for Slider {
 /// Native input, keyboard routing, enabled state and accessibility; one token-painted track/thumb.
 /// Tokens: control_height, space_24/8/4/2, dialog_body/rule, control_fill, form_primary.
 pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>, options: Slider) -> Response {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     // Own form styling even in callers such as the viewport menu which have no kit scope.
     super::scope(ui, |ui| {
         let t = Tokens::get();

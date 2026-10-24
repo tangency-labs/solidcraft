@@ -7,7 +7,6 @@ use std::collections::{HashMap, HashSet};
 
 use egui::{Context, Id, Pos2, Rect, Response, RichText, Sense, Ui, UiBuilder, Vec2, vec2};
 
-use crate::shortcut_box::score;
 use crate::theme::Tokens;
 
 const STATE: &str = "prefs_search_state";
@@ -18,13 +17,16 @@ struct State {
     live: bool,
     query: String,
     page: String,
-    page_matches: bool,
     page_shown: bool,
     section: String,
     section_matches: bool,
     section_shown: String,
     block_matches: bool,
     force: u32,
+    /// Set while a matching row draws, so its own slider or buttons stay visible.
+    passthrough: u32,
+    /// A heading matched, so the controls under it stay visible until the next heading.
+    heading_open: bool,
     hiding: u32,
     key: String,
     hits: u32,
@@ -64,13 +66,14 @@ pub(crate) fn begin(ui: &Ui, filter: &str) -> SearchFrame {
         state.live = true;
         state.query = query;
         state.page.clear();
-        state.page_matches = false;
         state.page_shown = false;
         state.section.clear();
         state.section_matches = false;
         state.section_shown.clear();
         state.block_matches = false;
         state.force = 0;
+        state.passthrough = 0;
+        state.heading_open = false;
         state.hiding = 0;
         state.key.clear();
         state.hits = 0;
@@ -110,7 +113,24 @@ pub(crate) fn hits(ui: &Ui) -> u32 {
 }
 
 pub(crate) fn shows_all(ui: &Ui) -> bool {
-    with(ui, |state| state.page_matches || state.section_matches || state.block_matches || state.force > 0).unwrap_or(false)
+    with(ui, |state| state.section_matches || state.block_matches || state.force > 0 || state.heading_open || state.passthrough > 0).unwrap_or(false)
+}
+
+/// Stray notes, figures and buttons. A matching row opts out with [`push_passthrough`].
+pub(crate) fn suppress_chrome(ui: &Ui) -> bool {
+    querying(ui) && !shows_all(ui)
+}
+
+pub(crate) fn set_heading_open(ui: &Ui, open: bool) {
+    with(ui, |state| state.heading_open = open);
+}
+
+pub(crate) fn push_passthrough(ui: &Ui) {
+    with(ui, |state| state.passthrough = state.passthrough.saturating_add(1));
+}
+
+pub(crate) fn pop_passthrough(ui: &Ui) {
+    with(ui, |state| state.passthrough = state.passthrough.saturating_sub(1));
 }
 
 pub(crate) fn set_force_scroll(ctx: &Context, on: bool) {
@@ -121,27 +141,24 @@ pub(crate) fn force_scroll(ctx: &Context) -> bool {
     ctx.data(|data| data.get_temp(Id::new(SCROLL))).unwrap_or(false)
 }
 
-pub(crate) fn begin_page(ui: &mut Ui, label: &str) {
-    let matches = text_hit(ui, label);
+pub(crate) fn begin_page(ui: &Ui, label: &str) {
     with(ui, |state| {
         state.page = label.to_string();
-        state.page_matches = matches;
         state.page_shown = false;
         state.section.clear();
         state.section_matches = false;
         state.section_shown.clear();
+        state.heading_open = false;
     });
-    if matches {
-        reveal(ui);
-    }
 }
 
 pub(crate) fn begin_section(ui: &Ui, title: &str) {
     let matches = text_hit(ui, title);
     with(ui, |state| {
         state.section = title.to_string();
-        state.section_matches = state.page_matches || matches || state.force > 0;
+        state.section_matches = matches || state.force > 0;
         state.section_shown.clear();
+        state.heading_open = false;
     });
 }
 
@@ -163,8 +180,8 @@ pub(crate) fn block_gate(ui: &Ui, label: &str, hint: Option<&str>) -> Option<Blo
         state.child_matched = false;
         state.key = key.clone();
         let discover = !state.seen_blocks.contains(&key);
-        let show = state.page_matches || state.section_matches || state.force > 0 || label_hit || state.open_blocks.contains(&key) || discover;
-        state.block_matches = state.page_matches || state.section_matches || state.force > 0 || label_hit;
+        let show = state.section_matches || state.force > 0 || label_hit || state.open_blocks.contains(&key);
+        state.block_matches = state.section_matches || state.force > 0 || label_hit;
         BlockGate { key, discover, show }
     })
 }
@@ -317,7 +334,7 @@ fn extra_hit(state: &State, key: &str) -> bool {
 }
 
 fn extra_hit_text(state: &State, text: Option<&str>) -> bool {
-    text.is_some_and(|text| !state.query.is_empty() && (score(&state.query, text) > 0 || english_hit(&state.query, text)))
+    text.is_some_and(|text| setting_score(&state.query, text) > 0 || english_hit(&state.query, text))
 }
 
 /// Whether any of `texts` matches the current query. Does not draw a heading.
@@ -329,7 +346,26 @@ fn text_hit(ui: &Ui, text: &str) -> bool {
     if text.is_empty() {
         return false;
     }
-    with(ui, |state| !state.query.is_empty() && (score(&state.query, text) > 0 || english_hit(&state.query, text))).unwrap_or(false)
+    with(ui, |state| setting_score(&state.query, text) > 0 || english_hit(&state.query, text)).unwrap_or(false)
+}
+
+/// Prefix, the start of a word, or a run of at least three characters. Scattered letters are not
+/// a match: "zoom" finds "Reverse zoom direction", and "rzd" does not.
+fn setting_score(query: &str, text: &str) -> u32 {
+    if query.chars().count() < 2 || text.is_empty() {
+        return 0;
+    }
+    let text = text.to_lowercase();
+    if text.starts_with(query) {
+        return 1000;
+    }
+    if text.split(|c: char| !c.is_alphanumeric()).any(|word| !word.is_empty() && word.starts_with(query)) {
+        return 800;
+    }
+    if query.chars().count() >= 3 && text.contains(query) {
+        return 600;
+    }
+    0
 }
 
 /// Whether `query` matches any of `texts`, including the English source of a translation.
@@ -338,7 +374,7 @@ pub(crate) fn matches_text(query: &str, texts: &[&str]) -> bool {
     if query.is_empty() {
         return true;
     }
-    texts.iter().any(|text| !text.is_empty() && (score(&query, text) > 0 || english_hit(&query, text)))
+    texts.iter().any(|text| setting_score(&query, text) > 0 || english_hit(&query, text))
 }
 
 fn english_hit(query: &str, shown: &str) -> bool {
@@ -363,7 +399,7 @@ fn english_hit(query: &str, shown: &str) -> bool {
             });
             *slot = (lang, map);
         }
-        slot.1.get(shown).is_some_and(|lines| lines.iter().any(|english| score(query, english) > 0))
+        slot.1.get(shown).is_some_and(|lines| lines.iter().any(|english| setting_score(query, english) > 0))
     })
 }
 
@@ -374,7 +410,9 @@ mod tests {
     #[test]
     fn search_matches_a_label_a_subsequence_and_the_english_source() {
         assert!(matches_text("zoom", &["Reverse zoom direction"]));
-        assert!(matches_text("rzd", &["Reverse zoom direction"]));
+        assert!(matches_text("zo", &["Reverse zoom direction"]));
+        assert!(!matches_text("rzd", &["Reverse zoom direction"]));
+        assert!(!matches_text("q", &["Units of new designs"]));
         assert!(!matches_text("qqqq", &["Units of new designs"]));
         let _language = crate::i18n::scope("fr");
         assert!(matches_text("units", &["Unités des nouvelles conceptions"]));
@@ -395,6 +433,8 @@ mod tests {
         h.frames(3);
         assert!(h.widget("Reverse zoom direction").is_some());
         assert!(h.widget("Units of new designs").is_none());
+        assert!(h.widget("Grid").is_none(), "a checkbox on another page stays hidden");
+        assert!(h.widget("Interface language").is_none(), "the page around a match stays hidden");
         h.app.prefs_window.filter = "fusion".into();
         h.frames(3);
         assert!(h.widget("Mouse mapping").is_some(), "the dropdown's current value counts");

@@ -6,6 +6,17 @@ use egui::{FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 /// One mouse silhouette beside the actual mapping selector and binding legend.
 /// The figure is descriptive content, not an icon asset or an application viewport.
 pub(crate) fn settings_mouse_mapping(ui: &mut Ui, bindings: &[(Vec<String>, String)], mapping: impl FnOnce(&mut Ui)) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        mapping(ui);
+        for (keys, action) in bindings.iter().take(10) {
+            let chord = keys.join(" ");
+            if crate::prefs_search::texts_hit(ui, &[action, &chord]) {
+                crate::prefs_search::reveal(ui);
+                settings_gesture(ui, keys, action);
+            }
+        }
+        return;
+    }
     let t = Tokens::get();
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = t.space_24 - t.space_2;

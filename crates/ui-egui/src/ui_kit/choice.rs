@@ -24,6 +24,12 @@ pub(crate) struct Segments<'a> {
 }
 
 pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Segments<'_>) -> bool {
+    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, options) {
+        return false;
+    }
+    if crate::prefs_search::querying(ui) && !crate::prefs_search::shows_all(ui) {
+        crate::prefs_search::reveal(ui);
+    }
     let Segments { icons, workspace_accent, dense, states, compact, primary, intrinsic, proportional } = config;
     let accent = crate::theme::TabAccent::current(ui.ctx());
     let t = Tokens::get();
