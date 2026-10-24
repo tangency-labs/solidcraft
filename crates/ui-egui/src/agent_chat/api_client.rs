@@ -153,17 +153,26 @@ fn go_fn_parts(t: &Value) -> Option<(&Value, &str, Value)> {
     Some((f.get("name")?, f.get("description").and_then(Value::as_str).unwrap_or(""), params))
 }
 
+/// One tool in an Anthropic/Responses wrapper: `params_key` is `input_schema`
+/// (Messages) or `parameters` (Responses, with `"type": "function"`).
+fn go_shaped_tool(name: &Value, desc: &str, params: Value, params_key: &str, type_tag: Option<&str>) -> Value {
+    let mut m = Map::new();
+    if let Some(t) = type_tag {
+        m.insert("type".to_string(), Value::String(t.to_string()));
+    }
+    m.insert("name".to_string(), name.clone());
+    m.insert("description".to_string(), Value::String(desc.to_string()));
+    m.insert(params_key.to_string(), params);
+    Value::Object(m)
+}
+
 /// OpenAI function tools as Anthropic tools for Go's Messages endpoints.
 fn go_anthropic_tools(tools: &[Value]) -> Vec<Value> {
     tools
         .iter()
         .filter_map(|t| {
             let (name, desc, params) = go_fn_parts(t)?;
-            Some(json!({
-                "name": name,
-                "description": desc,
-                "input_schema": params,
-            }))
+            Some(go_shaped_tool(name, desc, params, "input_schema", None))
         })
         .collect()
 }
@@ -174,12 +183,7 @@ fn go_responses_tools(tools: &[Value]) -> Vec<Value> {
         .iter()
         .filter_map(|t| {
             let (name, desc, params) = go_fn_parts(t)?;
-            Some(json!({
-                "type": "function",
-                "name": name,
-                "description": desc,
-                "parameters": params,
-            }))
+            Some(go_shaped_tool(name, desc, params, "parameters", Some("function")))
         })
         .collect()
 }
