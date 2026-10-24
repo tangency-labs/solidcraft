@@ -735,6 +735,47 @@ impl Session {
         self.refresh();
     }
 
+    /// Pin the name of every body the features made, as if the body had been renamed to it, and
+    /// reserve the `Body<N>` names, so that no later command renames a body or hands its number
+    /// to another. It is part of the command that made the bodies. A design saved before names
+    /// were pinned is pinned by its first command that changes it, with the names it has after
+    /// that command: when that command is itself a delete, reorder, suppress or rollback, the
+    /// later counted bodies are renumbered once, as they always were.
+    fn pin_body_names(&mut self) {
+        if self.model.is_stale() {
+            return;
+        }
+        let mut pins: Vec<(u64, Vec<String>)> = Vec::new();
+        let mut reserve: Vec<String> = Vec::new();
+        for f in self.doc.features.iter().filter(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::FrameMember { .. })) {
+            let Some(r) = self.model.result(f.id).filter(|r| r.error.is_none() && !r.skipped && !r.stale) else { continue };
+            let made: Vec<&str> = r.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.as_str()).collect();
+            reserve.extend(made.iter().filter(|n| solidcraft_doc::is_counted_body_name(n) && !self.doc.reserved_body_names.contains(**n)).map(|n| n.to_string()));
+            let mut names = f.body_names.clone();
+            names.resize(names.len().max(made.len()), String::new());
+            for (slot, name) in names.iter_mut().zip(&made) {
+                if slot.trim().is_empty() {
+                    *slot = name.to_string();
+                }
+            }
+            if names != f.body_names {
+                pins.push((f.id, names));
+            }
+        }
+        if pins.is_empty() && reserve.is_empty() {
+            return;
+        }
+        let doc = self.doc_mut();
+        for (id, names) in pins {
+            if let Some(f) = doc.feature_mut(id) {
+                f.body_names = names;
+            }
+        }
+        doc.reserved_body_names.extend(reserve);
+        // The pinned names are the ones the bodies have: no result changes, so none is evaluated.
+        self.model.refingerprint(&self.doc);
+    }
+
     /// A hidden construction plane stays hidden when the design renames it, or undo or redo
     /// gives it another name (#4353): the hidden list keeps planes by name.
     fn follow_plane_renames(&mut self, previous: &Document) {
@@ -974,6 +1015,7 @@ impl Session {
                         }
                         self.redo.clear();
                     }
+                    let pin = outermost && live_edit.is_none() && !render_only;
                     match live_edit {
                         Some(edit) => {
                             let sketch = edit.sketch;
@@ -983,6 +1025,9 @@ impl Session {
                         None if render_only => self.refresh_render(&previous_doc),
                         None if display_only => self.refresh_display(),
                         None => self.refresh_from(&previous_doc),
+                    }
+                    if pin {
+                        self.pin_body_names();
                     }
                 }
                 Ok(v)

@@ -2198,7 +2198,7 @@ impl Model {
 
     /// Set every result's fingerprint to `doc`'s, so the next evaluation reuses every result
     /// (after a change that builds nothing differently).
-    fn refingerprint(&mut self, doc: &Document) {
+    pub fn refingerprint(&mut self, doc: &Document) {
         let (vals, _) = evaluation_values(doc);
         let marker = doc.marker.unwrap_or(usize::MAX);
         self.step_digests = StepDigests::of(doc, &self.step_digests);

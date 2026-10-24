@@ -2462,6 +2462,11 @@ pub struct DesignLink {
     pub feature: u64,
 }
 
+/// A name the design's counter hands out (`Body1`).
+pub fn is_counted_body_name(name: &str) -> bool {
+    name.strip_prefix("Body").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) && n.parse::<usize>().is_ok())
+}
+
 /// The document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
@@ -2788,9 +2793,12 @@ impl Document {
     ///
     /// A name the design numbered (`Body1`) is not used again after the rename: the design's
     /// counter starts over at every evaluation, so without this a design that is evaluated
-    /// again hands the freed name to the next body (#4957).
+    /// again hands the freed name to the next body (#4957). Every counted name is reserved as
+    /// soon as a body has it (`Session::pin_body_names`), so this only matters for a design
+    /// that has not been through a command since then. `new` may be a reserved name: a rename
+    /// is deliberate, and the body then has what the design keeps under it.
     pub fn rename_body_keys(&mut self, old: &str, new: &str) {
-        if old.strip_prefix("Body").and_then(|n| n.parse::<usize>().ok()).is_some() {
+        if is_counted_body_name(old) {
             self.reserved_body_names.insert(old.to_string());
         }
         if let Some(m) = self.materials.remove(old) {
