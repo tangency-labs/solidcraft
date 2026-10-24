@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Cancel render job</title>
+  <path d="M10.59 10.09L46.59 10.09A4 4 0 0 1 50.59 14.09L50.59 42.09A4 4 0 0 1 46.59 46.09L10.59 46.09A4 4 0 0 1 6.59 42.09L6.59 14.09A4 4 0 0 1 10.59 10.09Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.59 41.09L19.59 25.09L29.59 38.09L36.59 31.09L48.59 41.09L48.59 44.09L8.59 44.09Z" fill="#8e9faf"/>
+  <circle cx="40.59" cy="20.09" r="3.2" fill="#328bd3"/>
+  <path d="M40.59 33.09L53.59 33.09A4 4 0 0 1 57.59 37.09L57.59 50.09A4 4 0 0 1 53.59 54.09L40.59 54.09A4 4 0 0 1 36.59 50.09L36.59 37.09A4 4 0 0 1 40.59 33.09Z" fill="#ffffff" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M40.59 34.09L53.59 34.09A3 3 0 0 1 56.59 37.09L56.59 50.09A3 3 0 0 1 53.59 53.09L40.59 53.09A3 3 0 0 1 37.59 50.09L37.59 37.09A3 3 0 0 1 40.59 34.09Z" fill="#236ead" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

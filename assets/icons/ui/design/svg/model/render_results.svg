@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Render results</title>
+  <path d="M11.02 7.52L41.02 7.52A4 4 0 0 1 45.02 11.52L45.02 36.52A4 4 0 0 1 41.02 40.52L11.02 40.52A4 4 0 0 1 7.02 36.52L7.02 11.52A4 4 0 0 1 11.02 7.52Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M21.02 19.52L51.02 19.52A4 4 0 0 1 55.02 23.52L55.02 49.52A4 4 0 0 1 51.02 53.52L21.02 53.52A4 4 0 0 1 17.02 49.52L17.02 23.52A4 4 0 0 1 21.02 19.52Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19.02 48.52L30.02 34.52L40.02 45.52L47.02 38.52L53.02 48.52L53.02 51.52L19.02 51.52Z" fill="#8e9faf"/>
+  <circle cx="45.02" cy="29.52" r="3.2" fill="#328bd3"/>
+  <path d="M33.02 47.52L40.02 54.52L55.02 37.52" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M33.02 47.52L40.02 54.52L55.02 37.52" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
