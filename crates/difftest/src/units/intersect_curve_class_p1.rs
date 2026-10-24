@@ -25,8 +25,10 @@
 //! ([`BareTopology`]), so their zone tolerances and the edge curve / face surface of
 //! `ComputePointParameters` are the ported topology members.
 //!
-//! Deferred cases: ops that reach other topology members (`sm_SetXSectEdgeThroughPoint`,
-//! `sm_GetCCIGeometry`, `sm_ComputeFacePointClass`),
+//! `sm_SetXSectEdgeThroughPoint` and `sm_GetCCIGeometry` run on the edge's B-rep record
+//! (an edited edge curve is written back to the pool curve the shim's edge shares).
+//!
+//! Deferred cases: ops that reach other topology members (`sm_ComputeFacePointClass`),
 //! surface point solves (`ComputePointParameters` on surfaces, `sm_GetCCISurfaceGaps` with
 //! surfaces), `SmTol::MapTo2d` for a curve of dimension other than 2 or 3 on a surface
 //! (`SmSurface::DropPoint`) and an `SmCrvOnSurf` over a plane. Generated scripts are filtered by the shim's
@@ -979,6 +981,21 @@ impl Pool {
         }
     }
 
+    /// Edge object `j`'s B-rep record was edited: the pool curve it shares (in the shim,
+    /// `SmEdge::m_pCurve` is that pool object) follows, with the other edges on it.
+    fn edge_curve_edited(&mut self, j: usize) {
+        let Some(i) = self.bare.edge_curve.get(j).copied().flatten() else {
+            return;
+        };
+        let Some(EntityRef::Edge(e)) = self.bare.ent(j) else {
+            return;
+        };
+        let Some(c) = self.bare.brep.edge(e).ok().and_then(|r| r.curve.clone()) else {
+            return;
+        };
+        self.put_curve(i, c);
+    }
+
     fn put_curve(&mut self, i: usize, c: Curve) {
         // the shim's edges share the pool curve: keep their records in step
         self.bare.curve_edited(i, &c);
@@ -1698,18 +1715,53 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                 }
                 OpIn::EdgeThrough { e, p, srf, uv, prm, .. } => {
                     let h = pool.handle(*e)?.ok_or_else(|| harness("no edge"))?;
-                    let surfaces: Vec<&Surface> = srf
+                    let Some((_, EntityRef::Edge(eid))) = pool.topology_entity(h) else {
+                        return Err(harness("edge handle without an edge").into());
+                    };
+                    // the shim's surfaces are pool objects the edge edit never touches
+                    let owned: Vec<Surface> = srf
                         .iter()
-                        .map(|x| pool.surface_at(*x)?.ok_or_else(|| harness("no surface")))
+                        .map(|x| pool.surface_at(*x)?.cloned().ok_or_else(|| harness("no surface")))
                         .collect::<Result<_, _>>()?;
+                    let surfaces: Vec<&Surface> = owned.iter().collect();
                     let uvs: Vec<Point2> = uv.iter().map(|q| uvp(*q)).collect();
-                    must(cc_mod::set_xsect_edge_through_point(h, v3(*p), &surfaces, &uvs, *prm))?;
-                    return Err(harness("edge through point ported").into());
+                    let brep = match pool.topo.as_mut() {
+                        Some(t) => &mut t.brep,
+                        None => &mut pool.bare.brep,
+                    };
+                    let r = cc_mod::p1::set_xsect_edge_through_point_in(
+                        &k,
+                        brep,
+                        eid,
+                        v3(*p),
+                        &surfaces,
+                        &uvs,
+                        *prm,
+                    );
+                    // the shim's edge shares its pool curve: an edited edge curve is that curve
+                    if pool.topo.is_none() {
+                        pool.edge_curve_edited(e.unwrap_or(usize::MAX));
+                    }
+                    match st(r)? {
+                        Ok(r) => o.extend([
+                            if r.success { 0.0 } else { 1001.0 },
+                            r.param,
+                            r.deviation.unwrap_or(-7.0),
+                            b(r.modified_curve),
+                        ]),
+                        Err(s) => o.extend([s, *prm, -7.0, 0.0]),
+                    }
                 }
                 OpIn::CciGeometry { e, .. } => {
                     let h = pool.handle(*e)?.ok_or_else(|| harness("no edge"))?;
-                    must(cc_mod::get_cci_geometry(&cc, h))?;
-                    return Err(harness("cci geometry ported").into());
+                    match st(cc_mod::p1::get_cci_geometry_in(&pool, &cc, h))? {
+                        Ok(r) => o.extend([
+                            0.0,
+                            r.surfaces.len() as f64,
+                            r.edge_surface_count as f64,
+                        ]),
+                        Err(s) => o.extend([s, 0.0, 0.0]),
+                    }
                 }
                 OpIn::FacePointClass { f, p, tol, .. } => {
                     let h = pool.handle(*f)?.ok_or_else(|| harness("no face"))?;
@@ -2690,7 +2742,7 @@ fn edge_cases() -> Vec<(String, Value)> {
         OpIn::Gaps { t: 0, cp: [0.0; 3], ep: [3.0, 4.0, 0.0], sol: [0.0, 0.0], pairs: vec![], count: 0 },
     ];
     out.push(("edge_angles".into(), json!(Script { objects: objs, face: None, ops })));
-    // the topology helpers (deferred in the port)
+    // the topology helpers (the face point classification is deferred in the port)
     let objs = vec![
         line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0]),
         ObjIn::Plane { o: [0.0, 0.0, 0.0], n: [0.0, 0.0, 1.0] },

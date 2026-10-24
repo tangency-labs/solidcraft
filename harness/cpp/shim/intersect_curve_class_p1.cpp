@@ -2849,7 +2849,7 @@ int32_t run(Rd& rd, std::vector<double>& o)
         }
         case OP_EDGE_THROUGH:
         {
-            // deferred in the port (the edge's topology); run for the record only
+            // the edge and its curve are a pool edge and pool curve (the Rust side its B-rep record)
             SmEdge* e = (SmEdge*)pool.get(rd.idx(), {K_EDGE}, ok);
             SmPoint3d p = rd.vec();
             SmTArray<const SmSurface*> srf;

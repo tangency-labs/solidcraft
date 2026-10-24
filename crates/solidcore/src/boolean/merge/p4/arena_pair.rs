@@ -381,6 +381,21 @@ impl ClassGeometry<H> for Objs<'_, '_> {
     fn point(&self, o: H) -> Option<Point3> {
         ClassGeometry::point(self.two, o)
     }
+    // the topology handles are those of the pair, so the classification's topology
+    // members (`SmVertex::GetTolerance`, `SmEdge::GetTolerance`, ...) reach the same
+    // entities through either adapter
+    fn classification_vertex_point(&self, o: H) -> Option<Point3> {
+        self.two.classification_vertex_point(o)
+    }
+    fn topology_zone_tol_3d(&self, o: H) -> Option<f64> {
+        self.two.topology_zone_tol_3d(o)
+    }
+    fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+        self.two.topology_entity(o)
+    }
+    fn topology_handle_in(&self, brep: &Brep, entity: EntityRef) -> Option<H> {
+        self.two.topology_handle_in(brep, entity)
+    }
 }
 
 impl CurveOnClassifyObjects<H> for Objs<'_, '_> {

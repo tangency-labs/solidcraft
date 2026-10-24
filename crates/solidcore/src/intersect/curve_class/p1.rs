@@ -66,9 +66,8 @@
 //! | [`interval_obj_zone_tol_3d`]                           | `SmTol::GetObjZoneTol3d(const SmCurveInterval*)` |
 //! | `ScaledZero for CurveInterval`                         | `SmTol::GetScaledZero(const SmCurveInterval&)`   |
 //! | [`set_xsect_curve_through_point`], [`XSectThroughPoint`] | `sm_SetXSectCurveThroughPoint` (static)        |
-//! | [`set_xsect_edge_through_point`], [`set_xsect_edge_through_point_in`] | `sm_SetXSectEdgeThroughPoint` (static)           |
+//! | [`set_xsect_edge_through_point_in`]                    | `sm_SetXSectEdgeThroughPoint` (static)           |
 //! | [`get_cci_surface_gaps`], [`CciSurfaceGaps`]           | `sm_GetCCISurfaceGaps` (static)                  |
-//! | [`get_cci_geometry`], [`CciGeometry`]                  | `sm_GetCCIGeometry` (static)                     |
 //! | [`get_cci_geometry_in`], [`CciGeometryRefs`]           | `sm_GetCCIGeometry` (static), through an adapter |
 //! | [`apply_point_solution`], [`ApplyPointSolutionInput`], [`ApplyPointSolution`] | `sm_ApplyPointSolution` (static) |
 //! | [`apply_point_solution_in`], [`ApplyPointSolutionEdges`] | `sm_ApplyPointSolution` with `pEdge`/`pEMate` |
@@ -1475,28 +1474,8 @@ pub fn set_xsect_curve_through_point(
     Ok(out)
 }
 
-/// `sm_SetXSectEdgeThroughPoint`: [`set_xsect_curve_through_point`] for an edge and all
-/// of its UV trim curves.
-///
-/// # Errors
-///
-/// [`SolidError::Unported`]: the edge's curve, tolerance and faces come first
-/// (`SmEdge::GetCurve`, unit `topology.edge`).
-pub fn set_xsect_edge_through_point<O>(
-    edge: O,
-    through_point: Point3,
-    surfaces: &[&Surface],
-    uv_points: &[Vec2],
-    param: f64,
-) -> Result<XSectThroughPoint> {
-    let _ = (edge, through_point, surfaces, uv_points, param);
-    // UNPORTED(topology.edge): SmEdge::GetCurve (an opaque edge handle; the B-rep form
-    // is set_xsect_edge_through_point_in)
-    Err(SolidError::unported("SmEdge::GetCurve", "topology.edge"))
-}
-
-/// [`set_xsect_edge_through_point`] on edge `e` of the B-rep `b`
-/// (`sm_SetXSectEdgeThroughPoint`): `through_point` is projected onto the edge curve
+/// `sm_SetXSectEdgeThroughPoint`: [`set_xsect_curve_through_point`] for edge `e` of the
+/// B-rep `b` and all of its UV trim curves: `through_point` is projected onto the edge curve
 /// over the edge interval near `param`; when the two surfaces at `uv_points` meet
 /// there within the intersection tolerance and their intersection tangent is defined
 /// and within six angular tolerances of the curve tangent, a B-spline edge curve
@@ -1846,62 +1825,8 @@ pub fn get_cci_surface_gaps<S: Copy>(
     Ok(out)
 }
 
-/// The surfaces, edge uses and UV trim curves around a classification-curve / edge
-/// intersection ([`get_cci_geometry`]).
-#[derive(Debug, Clone, PartialEq)]
-pub struct CciGeometry<O> {
-    /// `pEMate`: the edge's Boolean mate.
-    pub emate: Option<O>,
-    /// `rSurfaces`: curve surfaces, edge surfaces, the common surface again, mate
-    /// surfaces.
-    pub surfaces: Vec<O>,
-    /// `rEdgeuses`: the edge use of each surface (none for the curve's).
-    pub edgeuses: Vec<Option<O>>,
-    /// `rUVCurves`: the UV trim curve of each surface.
-    pub uv_curves: Vec<Option<O>>,
-    /// `lEdgeSurfaceCount`.
-    pub edge_surface_count: usize,
-}
-
-/// `sm_GetCCIGeometry`: the surfaces, edge uses and UV trim curves at a
-/// classification-curve / `edge` intersection.
-///
-/// # Errors
-///
-/// [`SolidError::Unported`]: the faces of the edge (`SmEdge::GetFaces`, unit
-/// `topology.edge`) follow the classification's surfaces.
-pub fn get_cci_geometry<O: ClassObject>(
-    classification: &CurveClassification<O>,
-    edge: O,
-) -> Result<CciGeometry<O>> {
-    let _ = edge;
-    let mut out = CciGeometry {
-        emate: None,
-        surfaces: Vec::new(),
-        edgeuses: Vec::new(),
-        uv_curves: Vec::new(),
-        edge_surface_count: 0,
-    };
-
-    // gather the ClassCurve Surfaces and UVTrimCurves
-    if let Some(s) = classification.surface1() {
-        out.surfaces.push(s);
-        out.edgeuses.push(None);
-        out.uv_curves.push(classification.uv_curve1());
-    }
-    if let Some(s) = classification.surface2() {
-        out.surfaces.push(s);
-        out.edgeuses.push(None);
-        out.uv_curves.push(classification.uv_curve2());
-    }
-
-    // get Faces connected to Edge and Edge->BooleanMate: this entry point has no
-    // adapter to resolve `edge` to its B-rep ([`get_cci_geometry_in`] has one).
-    // UNPORTED(topology.edge): SmEdge::GetFaces
-    Err(SolidError::unported("SmEdge::GetFaces", "topology.edge"))
-}
-
-/// [`get_cci_geometry`] over the geometry the handles resolve to: the classification's
+/// The result of [`get_cci_geometry_in`] (`sm_GetCCIGeometry`), over the geometry the
+/// handles resolve to: the classification's
 /// surfaces and UV curves through the adapter, the edge's (and its Boolean mate's)
 /// faces, edge uses and UV trim curves through [`ClassGeometry::topology_entity`].
 /// Surfaces are told apart by identity, as upstream compares `SmSurface*`.
