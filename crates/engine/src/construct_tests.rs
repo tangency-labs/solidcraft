@@ -312,6 +312,25 @@ fn plane_on_a_3d_wire_moves_with_its_component() {
     assert!(parallel(p.normal(), Vec3::Z));
 }
 
+/// Once a design has a component, the root's constructions are built in the model placed in the
+/// world. A plane through a construction axis of the root finds the axis there and follows it
+/// (it failed with "unknown construction `Ax`" on every evaluation after the component came).
+#[test]
+fn a_plane_through_a_construction_axis_follows_it_in_a_design_with_a_component() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "d", "expression": "10 mm"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": "d", "name": "P1"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "5 mm", "name": "P2"}));
+    run(&mut s, "construct.axis.two_planes", json!({"a": {"plane": "P1"}, "b": {"plane": "P2"}, "name": "Ax"}));
+    run(&mut s, "construct.plane.perpendicular", json!({"plane": "XY", "line": {"axis": "Ax"}, "name": "Q"}));
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "parameters.change", json!({"name": "d", "expression": "30 mm"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let q = plane(&s, "Q");
+    assert!(on_plane(&q, Vec3::new(0.0, 30.0, 5.0)) && parallel(q.normal(), Vec3::Y), "{q:?}");
+}
+
 /// Built from model geometry, they follow when the model changes: the box gets taller.
 #[test]
 fn construction_follows_the_model() {

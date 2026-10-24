@@ -7317,9 +7317,10 @@ pub fn state_in_frame_at<'a>(doc: &Document, st: &'a ModelState, comp: u64, fram
     Cow::Owned(out)
 }
 
-/// The model placed in the world: each component's bodies, sketches and threads through every
-/// occurrence of it (bodies of the first placement keep their names; further instances get the
-/// occurrence path in brackets). Without components this is the model itself.
+/// The model placed in the world: each component's bodies, sketches, threads and construction
+/// geometry through every occurrence of it (bodies of the first placement keep their names;
+/// further instances get the occurrence path in brackets). Without components this is the model
+/// itself.
 pub fn world_state(doc: &Document, st: &ModelState) -> ModelState {
     world_state_reusing(doc, st, &mut PlacedBodies::default())
 }
@@ -7469,6 +7470,13 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
                     }
                 }
                 out.sketches.push(Arc::new(s2));
+            }
+            // The component's construction planes, axes and points where it is placed: once the
+            // design has a component the root's constructions are built in this state
+            // (`construction_state`), and one built on another finds it here by name.
+            for c in st.construct.iter().filter(|c| comp_of_feature(c.feature) == comp) {
+                let geom = if ident { c.geom.clone() } else { c.geom.placed(&m) };
+                out.construct.push(crate::construct::Construct { geom, ..c.clone() });
             }
             for t in st
                 .threads
