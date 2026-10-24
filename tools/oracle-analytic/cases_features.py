@@ -237,11 +237,24 @@ def c33():
     def path_len(inset):  # perimeter of the obround inset by `inset`
         return 2 * Lst + 2 * PI * (R - inset)
 
-    # Removed fillet spandrel: area R^2(1-pi/4), centroid inset d from the wall and d below the top.
+    # The perimeter of the inward offset shrinks as P(u) = P(0) - 2*pi*u.
+    # Pappus gives exact swept volumes, but using the unweighted section
+    # centroid for Z misses the correlation between inset u and depth v.
+    perimeter = path_len(0)
     d = spandrel_offset(rf)
-    fil = MP.at(spandrel_area(rf) * path_len(d), [Lst / 2, 0, H - d])
-    # Removed chamfer triangle: area c^2/2, centroid inset c/3, height c/3.
-    cha = MP.at(ch * ch / 2 * path_len(ch / 3), [Lst / 2, 0, ch / 3])
+    fillet_area = spandrel_area(rf)
+    fillet_volume = fillet_area * path_len(d)
+    # Mixed first moment int(u*v dA) of square r*r minus quarter disk.
+    fillet_inset_depth_moment = rf ** 4 * (19 / 24 - PI / 4)
+    fillet_depth_moment = (perimeter * fillet_area * d
+                           - 2 * PI * fillet_inset_depth_moment)
+    fil = MP.at(fillet_volume, [Lst / 2, 0,
+                               H - fillet_depth_moment / fillet_volume])
+    # For the bottom chamfer, int(z dV) = P*c^3/6 - pi*c^4/12.
+    chamfer_volume = ch * ch / 2 * path_len(ch / 3)
+    chamfer_z_moment = perimeter * ch ** 3 / 6 - PI * ch ** 4 / 12
+    cha = MP.at(chamfer_volume, [Lst / 2, 0,
+                                chamfer_z_moment / chamfer_volume])
     mp = base - fil - cha
     top = 2 * (R - rf) * Lst + PI * (R - rf) ** 2
     bot = 2 * (R - ch) * Lst + PI * (R - ch) ** 2
@@ -252,8 +265,11 @@ def c33():
     area = top + bot + wall + fsurf + csurf
     write("33-fillet-tangent-chain",
           "obround (R8, centres 40 apart) x 10 minus R2 fillet spandrel R^2(1-pi/4) and 1 mm chamfer "
-          "triangle swept round the whole loop (Pappus: section x path of its centroid, inset "
-          "R(10-3pi)/(3(4-pi)) resp. c/3); surfaces likewise (fillet arc centroid inset R-2R/pi)",
+          "triangle swept round the whole loop. Swept volumes use Pappus; Z moments "
+          "account for inward-offset perimeter P(u)=P-2pi*u: fillet top-depth moment "
+          "P*A*d-2pi*r^4*(19/24-pi/4), A=r^2*(1-pi/4), "
+          "d=r*(10-3pi)/(3*(4-pi)); bottom chamfer Z moment "
+          "P*c^3/6-pi*c^4/12; surfaces use fillet arc centroid inset r-2r/pi",
           1, mp, area, [(-8, -8, 0), (48, 8, 10)], faces=14)
 
 
