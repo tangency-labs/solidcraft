@@ -125,6 +125,7 @@ pub fn tool_definitions() -> Vec<Value> {
                         "items": {"type": "object", "properties": {"command": {"type": "string"}, "params": {"type": "object"}}, "required": ["command"]},
                     },
                     "rollback": {"type": "boolean", "description": "Undo completed steps when one fails (default true)"},
+                    "coalesce_parameters": {"type": "boolean", "description": "Set each run of consecutive plain parameter edits (parameters.change or set_parameter with a name and a value, or changes) together, rebuilding the design once for the run instead of once per edit; a run that is refused goes step by step, naming the refused step. Other steps still see the design up to date. Each step keeps its own result; the run is one undo step (default false)"},
                     "timings": {"type": "boolean", "description": "Add `timings`: [{index, command, ms}] for every step run (the failing one included) and `total_ms` (default false)"},
                     "profile": {"type": "boolean", "description": "Like timings, and each step's `profile`: {boolean_ms, tessellate_ms, other_ms}, its time in kernel booleans, in tessellation and the rest (default false)"},
                     "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created` (default true)"},
@@ -796,7 +797,11 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
     // An app that runs batches itself answers the whole batch in one request, so one frame
     // (#743). One too long for a control line goes step by step: the app would refuse it unrun.
     // The margin covers the envelope and the `allow_paths` the backend adds.
+    let coalesce = a.get("coalesce_parameters").and_then(Value::as_bool).unwrap_or(false);
     let mut params = json!({"commands": steps, "rollback": rollback});
+    if coalesce && let Some(o) = params.as_object_mut() {
+        o.insert("coalesce_parameters".into(), Value::Bool(true));
+    }
     if timed && let Some(o) = params.as_object_mut() {
         o.insert("timings".into(), Value::Bool(true));
         o.insert("profile".into(), Value::Bool(profile));
@@ -834,46 +839,68 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
     let clock = timing::Clock::start();
     // The kernel's share can only be measured where the commands run: in this process.
     let profile = profile && b.in_process();
-    for (i, step) in steps.iter().enumerate() {
-        let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str);
-        let (r, took) = timing::time(profile, || match command {
-            Some(id) => exec(b, id, step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}))),
-            None => Err("missing `command`".to_string()),
-        });
-        if timed {
-            rows.push(took.to_json(i, command.unwrap_or_default()));
-        }
-        match r {
-            Ok(v) => {
-                let v = narrow(i, v);
-                results.push(if verbose { v } else { compact(v) })
-            }
-            Err(e) => {
-                // A step still running in the app was not cancelled: the rollback first waits for
-                // it (the backend does), so a restored checkpoint takes it back too.
-                let running = e.starts_with(STILL_RUNNING);
-                let (went_back, undone) = start.rollback(b, i);
-                // Only a rollback asked for is reported as one.
-                let rolled_back = rollback && went_back;
-                let mut failed = json!({"index": i, "command": command, "error": e});
-                // Applied: the steps before it, unless rolled back; and the step itself while it
-                // still runs, as it will apply when it finishes.
-                let mut applied: Vec<usize> = if rolled_back { Vec::new() } else { (0..i).collect() };
-                if running && !rolled_back {
-                    failed["still_running"] = json!(true);
-                    applied.push(i);
+    // With `coalesce_parameters`, each run of plain parameter edits as one edit (#5822); a run
+    // whose combined edit is refused goes step by step.
+    for run in solidcraft_engine::batch_params::plan(steps, coalesce) {
+        let singles = match run {
+            solidcraft_engine::batch_params::BatchRun::Step(i) => vec![i],
+            solidcraft_engine::batch_params::BatchRun::Params { steps: indices, changes } => {
+                let (r, took) = timing::time(profile, || exec(b, "parameters.change", solidcraft_engine::batch_params::combined_params(&changes)));
+                match r {
+                    Ok(v) => {
+                        if timed {
+                            rows.push(took.to_json(indices.first().copied().unwrap_or(0), "parameters.change"));
+                        }
+                        let rows = solidcraft_engine::batch_params::step_results(steps, &indices, &v);
+                        results.extend(rows.into_iter().map(|v| if verbose { v } else { compact(v) }));
+                        continue;
+                    }
+                    Err(_) => indices,
                 }
-                let reply = json!({
-                    "ok": false,
-                    "completed": i,
-                    "failed": failed,
-                    "rolled_back": rolled_back,
-                    "undone": undone,
-                    "applied": applied,
-                    "not_run": (i + 1..steps.len()).collect::<Vec<_>>(),
-                    "results": results,
-                });
-                return text_result(&with_timings(reply, timed, rows, clock.ms()), true);
+            }
+        };
+        for i in singles {
+            let Some(step) = steps.get(i) else { continue };
+            let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str);
+            let (r, took) = timing::time(profile, || match command {
+                Some(id) => exec(b, id, step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}))),
+                None => Err("missing `command`".to_string()),
+            });
+            if timed {
+                rows.push(took.to_json(i, command.unwrap_or_default()));
+            }
+            match r {
+                Ok(v) => {
+                    let v = narrow(i, v);
+                    results.push(if verbose { v } else { compact(v) })
+                }
+                Err(e) => {
+                    // A step still running in the app was not cancelled: the rollback first waits for
+                    // it (the backend does), so a restored checkpoint takes it back too.
+                    let running = e.starts_with(STILL_RUNNING);
+                    let (went_back, undone) = start.rollback(b, i);
+                    // Only a rollback asked for is reported as one.
+                    let rolled_back = rollback && went_back;
+                    let mut failed = json!({"index": i, "command": command, "error": e});
+                    // Applied: the steps before it, unless rolled back; and the step itself while it
+                    // still runs, as it will apply when it finishes.
+                    let mut applied: Vec<usize> = if rolled_back { Vec::new() } else { (0..i).collect() };
+                    if running && !rolled_back {
+                        failed["still_running"] = json!(true);
+                        applied.push(i);
+                    }
+                    let reply = json!({
+                        "ok": false,
+                        "completed": i,
+                        "failed": failed,
+                        "rolled_back": rolled_back,
+                        "undone": undone,
+                        "applied": applied,
+                        "not_run": (i + 1..steps.len()).collect::<Vec<_>>(),
+                        "results": results,
+                    });
+                    return text_result(&with_timings(reply, timed, rows, clock.ms()), true);
+                }
             }
         }
     }

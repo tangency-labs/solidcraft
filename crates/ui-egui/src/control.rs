@@ -46,7 +46,7 @@ use std::sync::mpsc::Sender;
 use serde_json::{Value, json};
 use solidcraft_engine::io::vfs;
 use solidcraft_engine::render::StandardView;
-use solidcraft_engine::timing;
+use solidcraft_engine::{batch_params, timing};
 
 use crate::SolveApp;
 
@@ -161,23 +161,44 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
     let clock = timing::Clock::start();
     let checkpoint = if rollback { app.run("edit.checkpoint", json!({})).ok().and_then(|v| v["checkpoint"].as_u64()) } else { None };
     let mut results = Vec::with_capacity(steps.len());
-    for (i, step) in steps.iter().enumerate() {
-        let (r, took) = timing::time(profile, || match command(step) {
-            Some(id) => execute(app, id, step.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))),
-            None => Err("missing `command`".to_string()),
-        });
-        if timed {
-            rows.push(took.to_json(i, command(step).unwrap_or_default()));
-        }
-        match r {
-            Ok(v) => results.push(v),
-            Err(e) => {
-                let restored = checkpoint.is_some_and(|id| app.run("edit.restore_checkpoint", json!({"checkpoint": id})).is_ok());
-                let failed = json!({"index": i, "command": command(step), "error": e});
-                // `rolled_back`: the design really is back at its checkpoint.
-                let reply =
-                    json!({"completed": i, "results": results, "failed": failed, "undone": if restored { i } else { 0 }, "rolled_back": restored});
-                return ok(with_timings(reply, timed, rows, clock.ms()));
+    // With `coalesce_parameters`, each run of plain parameter edits rebuilds once (#5822); a run
+    // whose combined edit is refused goes step by step, so a refused edit is named by its step.
+    let coalesce = p.get("coalesce_parameters").and_then(Value::as_bool).unwrap_or(false);
+    for run in batch_params::plan(steps, coalesce) {
+        let singles = match run {
+            batch_params::BatchRun::Step(i) => vec![i],
+            batch_params::BatchRun::Params { steps: indices, changes } => {
+                let (r, took) = timing::time(profile, || execute(app, "parameters.change", batch_params::combined_params(&changes)));
+                match r {
+                    Ok(v) => {
+                        if timed {
+                            rows.push(took.to_json(indices.first().copied().unwrap_or(0), "parameters.change"));
+                        }
+                        results.extend(batch_params::step_results(steps, &indices, &v));
+                        continue;
+                    }
+                    Err(_) => indices,
+                }
+            }
+        };
+        for i in singles {
+            let Some(step) = steps.get(i) else { continue };
+            let (r, took) = timing::time(profile, || match command(step) {
+                Some(id) => execute(app, id, step.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))),
+                None => Err("missing `command`".to_string()),
+            });
+            if timed {
+                rows.push(took.to_json(i, command(step).unwrap_or_default()));
+            }
+            match r {
+                Ok(v) => results.push(v),
+                Err(e) => {
+                    let restored = checkpoint.is_some_and(|id| app.run("edit.restore_checkpoint", json!({"checkpoint": id})).is_ok());
+                    let failed = json!({"index": i, "command": command(step), "error": e});
+                    // `rolled_back`: the design really is back at its checkpoint.
+                    let reply = json!({"completed": i, "results": results, "failed": failed, "undone": if restored { i } else { 0 }, "rolled_back": restored});
+                    return ok(with_timings(reply, timed, rows, clock.ms()));
+                }
             }
         }
     }
@@ -1195,6 +1216,44 @@ mod tests {
         assert!(v["result"].get("failed").is_none(), "{v}");
         assert!(frames <= 2, "a batch of 80 steps took {frames} frames");
         assert_eq!(inspect(&mut h)["sketches"].as_array().map(Vec::len), Some(40));
+    }
+
+    /// #5822: `engine.batch {coalesce_parameters}` sets a run of parameter edits together, one
+    /// rebuild, and answers each step; a refused edit is named by its own step and the batch goes
+    /// back. Unasked, each edit runs on its own as before.
+    #[test]
+    fn engine_batch_coalesces_parameter_edits_when_asked() {
+        let mut h = crate::scenario::Harness::new();
+        let build = json!([
+            {"command": "parameters.add", "params": {"name": "w", "expression": "10 mm"}},
+            {"command": "parameters.add", "params": {"name": "d", "expression": "10 mm"}},
+            {"command": "solid.box", "params": {"length": "w", "width": "d", "height": 10}},
+        ]);
+        assert_eq!(batch(&mut h, json!({"commands": build}))["ok"], true);
+        let edits = json!([
+            {"command": "parameters.change", "params": {"name": "w", "expression": "20 mm"}},
+            {"command": "parameters.change", "params": {"name": "d", "expression": "30 mm"}},
+        ]);
+        let v = batch(&mut h, json!({"commands": edits, "coalesce_parameters": true}));
+        let results = v["result"]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 2, "{v}");
+        assert!(results.iter().all(|r| r["coalesced"] == 2), "{v}");
+        assert_eq!(results[1]["value"], 30.0, "{v}");
+        let volume = |h: &mut crate::scenario::Harness| {
+            h.call("engine.execute", json!({"command": "inspect.measure", "params": {}}))["result"]["total"]["volume_mm3"].as_f64()
+        };
+        assert!(volume(&mut h).is_some_and(|v| (v - 6000.0).abs() < 1e-6));
+        let bad = json!([
+            {"command": "parameters.change", "params": {"name": "w", "expression": "5 mm"}},
+            {"command": "parameters.change", "params": {"name": "d", "expression": "1 +"}},
+        ]);
+        let v = batch(&mut h, json!({"commands": bad, "coalesce_parameters": true}));
+        assert_eq!(v["result"]["failed"]["index"], 1, "{v}");
+        assert_eq!(v["result"]["rolled_back"], true, "{v}");
+        assert!(volume(&mut h).is_some_and(|v| (v - 6000.0).abs() < 1e-6), "the batch went back");
+        // Unasked: one result per edit, none coalesced.
+        let v = batch(&mut h, json!({"commands": edits}));
+        assert!(v["result"]["results"].as_array().unwrap().iter().all(|r| r.get("coalesced").is_none()), "{v}");
     }
 
     /// #1833: `engine.batch` times its steps where they run, the failing one included, with the

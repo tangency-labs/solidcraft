@@ -497,6 +497,73 @@ fn batch_stops_at_first_error_and_rolls_back() {
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 2);
 }
 
+/// #5822: with `coalesce_parameters` a batch of parameter edits, one per step, rebuilds the
+/// design once for the run, and every step still has its own result. A run with an edit
+/// `changes` can't make (a new parameter) goes step by step, and a refused edit is still named
+/// by its own step.
+#[test]
+fn batch_coalesces_parameter_edits() {
+    let mut s = server();
+    let mut build = vec![json!({"command": "solid.box", "params": {"length": 100, "width": 100, "height": 5, "body_name": "Plate"}})];
+    for i in 0..5 {
+        build.push(json!({"command": "parameters.add", "params": {"name": format!("h{i}"), "expression": "5 mm"}}));
+        build.push(json!({"command": "solid.cylinder", "params": {"radius": 3, "height": format!("h{i}"), "base": [i * 15 - 30, 0, 5], "operation": "join"}}));
+    }
+    tool(&mut s, "batch", json!({"commands": build}));
+    let edits: Vec<Value> = (0..5)
+        .map(|i| json!({"command": "parameters.change", "params": {"name": format!("h{i}"), "expression": format!("{} mm", 10 + i)}}))
+        .collect();
+    let r = tool(&mut s, "batch", json!({"commands": edits, "coalesce_parameters": true}));
+    let results = r["results"].as_array().unwrap();
+    assert_eq!(results.len(), 5, "{r}");
+    for (i, row) in results.iter().enumerate() {
+        assert_eq!(row["name"], format!("h{i}"), "{row}");
+        assert_eq!(row["coalesced"], 5, "{row}");
+        assert_eq!(row["value"], json!(10.0 + i as f64), "{row}");
+    }
+    // The plate and five pins, as tall as the new parameters make them.
+    let pins: f64 = (0..5).map(|i| std::f64::consts::PI * 9.0 * (10.0 + f64::from(i))).sum();
+    let v = tool(&mut s, "measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((v - (100.0 * 100.0 * 5.0 + pins)).abs() < 1e-3 * v, "{v}");
+    // The same edits step by step on a second design end in the same design and values.
+    let mut t = server();
+    tool(&mut t, "batch", json!({"commands": build}));
+    let one_by_one = tool(&mut t, "batch", json!({"commands": edits}));
+    for (a, b) in results.iter().zip(one_by_one["results"].as_array().unwrap()) {
+        assert_eq!((&a["name"], &a["value"]), (&b["name"], &b["value"]), "{a} vs {b}");
+    }
+    let w = tool(&mut t, "measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((v - w).abs() < 1e-9 * w, "coalesced {v}, step by step {w}");
+    let list = |s: &mut Server| tool(s, "execute", json!({"command": "parameters.list", "params": {"filter": "user"}}));
+    assert_eq!(list(&mut s), list(&mut t));
+    // A new parameter in the run: the run goes step by step and still sets everything.
+    let r = tool(
+        &mut s,
+        "batch",
+        json!({"coalesce_parameters": true, "commands": [
+            {"command": "parameters.change", "params": {"name": "h0", "expression": "6 mm"}},
+            {"command": "parameters.change", "params": {"name": "spare", "expression": "2 mm"}},
+        ]}),
+    );
+    assert_eq!(r["results"].as_array().map(Vec::len), Some(2), "{r}");
+    assert!(r["results"][0].get("coalesced").is_none(), "{r}");
+    // A refused edit is named by its own step, and the batch goes back.
+    let r = raw_tool(
+        &mut s,
+        "batch",
+        json!({"coalesce_parameters": true, "commands": [
+            {"command": "parameters.change", "params": {"name": "h1", "expression": "7 mm"}},
+            {"command": "parameters.change", "params": {"name": "h2", "expression": "1 +"}},
+        ]}),
+    );
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["failed"]["index"], 1, "{body}");
+    assert_eq!(body["rolled_back"], true, "{body}");
+    let rows = tool(&mut s, "execute", json!({"command": "parameters.list", "params": {"filter": "user"}}));
+    let h1 = rows.to_string();
+    assert!(h1.contains("11 mm"), "h1 kept its value after the refused batch: {h1}");
+}
+
 /// Regression: with a full undo history a failed batch reported `undone: 0` and left its
 /// sketches behind (an empty "Sketch1", two sketches named "TapHole").
 #[test]
