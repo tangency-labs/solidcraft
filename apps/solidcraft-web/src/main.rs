@@ -25,6 +25,13 @@ fn browser_switches_tabs(key: &str, ctrl: bool) -> bool {
     ctrl && key == "Tab"
 }
 
+/// Ctrl+W (⌘W, without Shift or Alt) while a design is shown closes it in the app, so the
+/// browser must not close the tab (#5366). On the start page the browser closes the tab.
+#[cfg(any(target_arch = "wasm32", test))]
+fn closes_design(key: &str, command: bool, shift: bool, alt: bool, design_shown: bool) -> bool {
+    design_shown && command && !shift && !alt && key.eq_ignore_ascii_case("w")
+}
+
 #[cfg(target_arch = "wasm32")]
 mod web {
     use std::rc::Rc;
@@ -76,6 +83,23 @@ mod web {
     thread_local! {
         /// An open design has unsaved changes: leaving the page asks first.
         static UNSAVED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// A design is shown (not the start page): Ctrl+W closes it, not the browser tab.
+        static DESIGN_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// Ctrl+W (⌘W) closes the design shown, as on the desktop; on the start page it is left to
+    /// the browser, which closes the tab (#5366). Browsers that keep Ctrl+W to themselves still
+    /// close the tab, after asking when a design is unsaved ([`ask_before_unload`]).
+    fn keep_ctrl_w_for_the_design(window: &web_sys::Window) {
+        let on_key = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(|e: web_sys::KeyboardEvent| {
+            let command = e.ctrl_key() || e.meta_key();
+            if crate::closes_design(&e.key(), command, e.shift_key(), e.alt_key(), DESIGN_SHOWN.with(std::cell::Cell::get)) {
+                e.prevent_default();
+            }
+        });
+        let _ = window.add_event_listener_with_callback_and_bool("keydown", on_key.as_ref().unchecked_ref(), true);
+        // The listener lives as long as the page.
+        on_key.forget();
     }
 
     /// The browser's "leave site? changes you made may not be saved" prompt while a design has
@@ -508,6 +532,7 @@ mod web {
             self.space_mouse.logic(&mut self.app, ctx);
             self.files_tick(ctx);
             UNSAVED.with(|u| u.set(solidcraft_ui_egui::documents::any_dirty(&self.app)));
+            DESIGN_SHOWN.with(|d| d.set(solidcraft_ui_egui::toolbar::design_shown(&self.app)));
         }
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
             let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
@@ -581,6 +606,7 @@ mod web {
             let Some(window) = web_sys::window() else { return };
             ask_before_unload(&window);
             leave_tab_switching_to_browser(&window);
+            keep_ctrl_w_for_the_design(&window);
             let Some(document) = window.document() else { return };
             let Some(canvas) = document.get_element_by_id(CANVAS_ID).and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok()) else {
                 log::error!("missing <canvas id=\"{CANVAS_ID}\">");
@@ -716,5 +742,19 @@ mod tests {
         // Tab and Shift+Tab move between the app's fields; Ctrl with other keys stays the app's.
         assert!(!browser_switches_tabs("Tab", false));
         assert!(!browser_switches_tabs("s", true));
+    }
+
+    #[test]
+    fn ctrl_w_closes_the_design_not_the_tab() {
+        // Ctrl+W and ⌘W (either case of the key) close the design shown.
+        assert!(closes_design("w", true, false, false, true));
+        assert!(closes_design("W", true, false, false, true));
+        // On the start page the browser closes the tab.
+        assert!(!closes_design("w", true, false, false, false));
+        // Ctrl+Shift+W (close the window), plain W and other keys stay the browser's or the app's.
+        assert!(!closes_design("W", true, true, false, true));
+        assert!(!closes_design("w", true, false, true, true));
+        assert!(!closes_design("w", false, false, false, true));
+        assert!(!closes_design("s", true, false, false, true));
     }
 }
