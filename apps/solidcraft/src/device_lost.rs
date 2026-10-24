@@ -49,7 +49,8 @@ pub fn note(software: bool) -> String {
 pub fn restart(software: bool, lost_at: u64) {
     let Ok(exe) = std::env::current_exe() else { return };
     let mut command = std::process::Command::new(exe);
-    command.args(std::env::args_os().skip(1)).env(LOST_ENV, lost_at.to_string());
+    // The notice of a hang that restarted this launch isn't the next one's (`App::watch_for_a_hang`).
+    command.args(std::env::args_os().skip(1)).env(LOST_ENV, lost_at.to_string()).env_remove(startup::HUNG_ENV);
     if software {
         command.env(startup::RENDERER_ENV, "cpu");
     }

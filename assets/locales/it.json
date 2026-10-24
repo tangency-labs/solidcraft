@@ -1070,7 +1070,6 @@
   "settings.frame_rate_note": "Mostra i fotogrammi al secondo nell'angolo inferiore destro della vista.",
   "settings.measure_axis_distances": "Mostra distanze X/Y/Z",
   "settings.measure_axis_distances_help": "Mostra le componenti lungo gli assi globali accanto alla distanza totale quando Misura è aperto.",
-  "settings.msaa_applies_on_restart": "L'antialiasing verrà applicato al prossimo avvio di SolidCraft",
   "settings.msaa_reset": "{setting}: {requested}× non è supportato da questo dispositivo grafico; ora è {reset}× (supportati: {supported}).",
   "settings.msaa_unsupported": "Non supportato da questo dispositivo grafico",
   "settings.reset_intro": "Queste impostazioni non funzionano su questo computer e impedirebbero l'avvio di SolidCraft, quindi sono state modificate:",

@@ -1073,7 +1073,6 @@
   "settings.frame_rate_note": "Affiche les images par seconde dans le coin inférieur droit de la vue.",
   "settings.measure_axis_distances": "Afficher les cotes X/Y/Z",
   "settings.measure_axis_distances_help": "Afficher les cotes suivant les axes du repère global en plus de la distance totale pendant la mesure.",
-  "settings.msaa_applies_on_restart": "L'anticrénelage s'appliquera au prochain démarrage de SolidCraft",
   "settings.msaa_reset": "{setting} : {requested}× n'est pas pris en charge par ce périphérique graphique ; la valeur est désormais {reset}× (pris en charge : {supported}).",
   "settings.msaa_unsupported": "Non pris en charge par ce périphérique graphique",
   "settings.reference_geometry_through_bodies": "Afficher la géométrie de référence à travers les corps",

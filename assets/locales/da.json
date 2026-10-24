@@ -1067,7 +1067,6 @@
   "settings.frame_rate_note": "Viser billeder pr. sekund nederst til højre i modelvisningen.",
   "settings.measure_axis_distances": "Vis X/Y/Z-afstande",
   "settings.measure_axis_distances_help": "Vis afstanden langs X-, Y- og Z-aksen sammen med den samlede afstand i Mål.",
-  "settings.msaa_applies_on_restart": "Kantudjævning træder i kraft, næste gang SolidCraft starter",
   "settings.msaa_reset": "{setting}: {requested}× understøttes ikke af denne grafikenhed; værdien er nu {reset}× (understøttet: {supported}).",
   "settings.msaa_unsupported": "Understøttes ikke af denne grafikenhed",
   "settings.reset_intro": "Disse indstillinger virker ikke på denne computer og ville forhindre SolidCraft i at starte. De er derfor ændret:",

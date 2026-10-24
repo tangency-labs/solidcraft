@@ -1066,7 +1066,6 @@
   "settings.frame_rate_note": "在檢視右下角顯示每秒影格數。",
   "settings.measure_axis_distances": "顯示 X/Y/Z 距離",
   "settings.measure_axis_distances_help": "開啟測量時，在總距離之外顯示沿世界座標軸方向的分量尺寸。",
-  "settings.msaa_applies_on_restart": "抗鋸齒將在下次啟動 SolidCraft 時生效",
   "settings.msaa_reset": "{setting}: {requested}× 不受此圖形裝置支援；已重設為 {reset}× (支援: {supported})。",
   "settings.msaa_unsupported": "此圖形裝置不支援",
   "settings.reset_intro": "這些設定在此電腦上無法正常工作，會導致 SolidCraft 無法啟動，因此已變更：",

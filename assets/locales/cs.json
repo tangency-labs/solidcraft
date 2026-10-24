@@ -1067,7 +1067,6 @@
   "settings.frame_rate_note": "Zobrazuje snímky za sekundu v pravém dolním rohu pohledu.",
   "settings.measure_axis_distances": "Zobrazit vzdálenosti X/Y/Z",
   "settings.measure_axis_distances_help": "Při otevřeném měření zobrazit kromě celkové vzdálenosti i složky ve směru os.",
-  "settings.msaa_applies_on_restart": "Vyhlazování se projeví při příštím spuštění SolidCraftu",
   "settings.msaa_reset": "{setting}: {requested}× toto grafické zařízení nepodporuje; nyní je nastaveno {reset}× (podporováno: {supported}).",
   "settings.msaa_unsupported": "Toto grafické zařízení nepodporuje",
   "settings.reset_intro": "Tato nastavení na tomto počítači nefungují a bránila by spuštění SolidCraftu, proto byla změněna:",

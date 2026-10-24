@@ -1066,7 +1066,6 @@
   "settings.frame_rate_note": "Показывает кадры в секунду в правом нижнем углу вида.",
   "settings.measure_axis_distances": "Расстояния X/Y/Z",
   "settings.measure_axis_distances_help": "Показывать размеры вдоль мировых осей вместе с общим расстоянием, пока открыто окно измерения.",
-  "settings.msaa_applies_on_restart": "Сглаживание вступит в силу при следующем запуске SolidCraft",
   "settings.msaa_reset": "{setting}: {requested}× не поддерживается этим графическим устройством; теперь {reset}× (поддерживается: {supported}).",
   "settings.msaa_unsupported": "Не поддерживается этим графическим устройством",
   "settings.reset_intro": "Эти настройки не работают на этом компьютере и могли бы помешать запуску SolidCraft, поэтому они были изменены:",

@@ -1067,7 +1067,6 @@
   "settings.frame_rate_note": "Papar bingkai sesaat di kanan bawah.",
   "settings.measure_axis_distances": "Papar jarak X/Y/Z",
   "settings.measure_axis_distances_help": "Papar jarak paksi dunia X/Y/Z bersama jarak keseluruhan semasa Ukur dibuka.",
-  "settings.msaa_applies_on_restart": "Antialias digunakan apabila SolidCraft dimulakan semula",
   "settings.msaa_reset": "{setting}: {requested}× tidak disokong oleh peranti grafik ini; kini {reset}× (disokong: {supported}).",
   "settings.msaa_unsupported": "Tidak disokong oleh peranti grafik ini",
   "settings.reset_intro": "Tetapan ini menghalang SolidCraft bermula pada komputer ini, jadi telah diubah:",

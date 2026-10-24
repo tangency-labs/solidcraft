@@ -1066,7 +1066,6 @@
   "settings.frame_rate_note": "Megjeleníti a másodpercenkénti képkockaszámot a nézet jobb alsó sarkában.",
   "settings.measure_axis_distances": "X/Y/Z távolságok megjelenítése",
   "settings.measure_axis_distances_help": "A világtengely-összetevők méreteit is megjeleníti a teljes távolság mellett, amíg a Mérés nyitva van.",
-  "settings.msaa_applies_on_restart": "Az élsimítás a SolidCraft következő indításakor lép érvénybe",
   "settings.msaa_reset": "{setting}: a(z) {requested}× nem támogatott ezen a grafikus eszközön; most {reset}× (támogatott: {supported}).",
   "settings.msaa_unsupported": "Ez a grafikus eszköz nem támogatja",
   "settings.reset_intro": "Ezek a beállítások nem működnek ezen a számítógépen, és megakadályoznák a SolidCraft indulását, ezért módosultak:",

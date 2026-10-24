@@ -1246,7 +1246,6 @@
   "settings.frame_rate_note": "Pokazuje liczbę klatek na sekundę w prawym dolnym rogu widoku.",
   "settings.measure_axis_distances": "Pokaż odległości X/Y/Z",
   "settings.measure_axis_distances_help": "Gdy pomiar jest otwarty, pokazuj składowe wzdłuż osi globalnych obok odległości całkowitej.",
-  "settings.msaa_applies_on_restart": "Wygładzanie krawędzi zadziała po ponownym uruchomieniu SolidCraft",
   "settings.msaa_reset": "{setting}: {requested}× nie jest obsługiwane przez to urządzenie graficzne; ustawiono {reset}× (obsługiwane: {supported}).",
   "settings.msaa_unsupported": "Nieobsługiwane przez to urządzenie graficzne",
   "settings.reference_geometry_through_bodies": "Pokaż geometrię odniesienia przez bryły",

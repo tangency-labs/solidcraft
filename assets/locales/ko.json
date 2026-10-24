@@ -1071,7 +1071,6 @@
   "settings.frame_rate_note": "뷰의 오른쪽 아래에 초당 프레임 수를 표시합니다.",
   "settings.measure_axis_distances": "X/Y/Z 거리 표시",
   "settings.measure_axis_distances_help": "측정 대화상자가 열려 있는 동안 전체 거리와 함께 월드 축 방향 치수와 거리를 표시합니다.",
-  "settings.msaa_applies_on_restart": "안티앨리어싱은 다음에 SolidCraft를 시작할 때 적용됩니다",
   "settings.msaa_reset": "{setting}: {requested}×는 이 그래픽 장치에서 지원되지 않아 {reset}×로 변경했습니다(지원: {supported}).",
   "settings.msaa_unsupported": "이 그래픽 장치에서 지원되지 않음",
   "settings.reference_geometry_through_bodies": "바디를 통해 참조 형상 표시",

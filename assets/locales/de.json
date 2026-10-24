@@ -1188,7 +1188,6 @@
   "settings.frame_rate_note": "Zeigt die Bilder pro Sekunde unten rechts in der Ansicht.",
   "settings.measure_axis_distances": "X/Y/Z-Maße anzeigen",
   "settings.measure_axis_distances_help": "Bei geöffneter Messung die Abstände entlang der Weltachsen zusätzlich zum Gesamtabstand anzeigen.",
-  "settings.msaa_applies_on_restart": "Die Kantenglättung wird beim nächsten Start von SolidCraft übernommen",
   "settings.msaa_reset": "{setting}: {requested}× wird von diesem Grafikgerät nicht unterstützt; jetzt {reset}× (unterstützt: {supported}).",
   "settings.msaa_unsupported": "Von diesem Grafikgerät nicht unterstützt",
   "settings.reference_geometry_through_bodies": "Referenzgeometrie durch Körper hindurch anzeigen",

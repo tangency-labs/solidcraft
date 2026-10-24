@@ -1066,7 +1066,6 @@
   "settings.frame_rate_note": "Toont frames per seconde in de rechteronderhoek van de weergave.",
   "settings.measure_axis_distances": "X/Y/Z-afstanden tonen",
   "settings.measure_axis_distances_help": "Toon de componentmaten langs de wereldassen naast de totale afstand terwijl Meten open is.",
-  "settings.msaa_applies_on_restart": "Anti-aliasing wordt toegepast bij de volgende start van SolidCraft",
   "settings.msaa_reset": "{setting}: {requested}× wordt niet ondersteund door dit grafische apparaat; het is nu {reset}× (ondersteund: {supported}).",
   "settings.msaa_unsupported": "Niet ondersteund door dit grafische apparaat",
   "settings.reset_intro": "Deze instellingen werken niet op deze computer en zouden voorkomen dat SolidCraft start, daarom zijn ze gewijzigd:",

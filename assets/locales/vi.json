@@ -1067,7 +1067,6 @@
   "settings.frame_rate_note": "Hiển thị số khung hình trên giây (FPS) ở góc dưới bên phải khung nhìn.",
   "settings.measure_axis_distances": "Hiển thị khoảng cách theo trục X/Y/Z",
   "settings.measure_axis_distances_help": "Hiển thị kích thước thành phần theo các trục tọa độ cùng với khoảng cách tổng thể khi mở công cụ Đo lường.",
-  "settings.msaa_applies_on_restart": "Khử răng cưa sẽ áp dụng vào lần khởi động tiếp theo của SolidCraft",
   "settings.msaa_reset": "{setting}: Mức {requested}× không được hỗ trợ bởi thiết bị đồ họa này; đã đặt về {reset}× (hỗ trợ: {supported}).",
   "settings.msaa_unsupported": "Thiết bị đồ họa này không hỗ trợ",
   "settings.reset_intro": "Các cài đặt sau không hoạt động trên máy tính này và có thể khiến SolidCraft không thể khởi động, vì vậy chúng đã được tự động điều chỉnh:",

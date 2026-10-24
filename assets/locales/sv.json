@@ -1066,7 +1066,6 @@
   "settings.frame_rate_note": "Visar bildrutor per sekund i vyns nedre högra hörn.",
   "settings.measure_axis_distances": "Visa X/Y/Z-avstånd",
   "settings.measure_axis_distances_help": "Visa världsaxelns komponentmått bredvid det totala avståndet medan Mät är öppet.",
-  "settings.msaa_applies_on_restart": "Kantutjämning tillämpas nästa gång SolidCraft startar",
   "settings.msaa_reset": "{setting}: {requested}× stöds inte av den här grafikenheten; det är nu {reset}× (stöds: {supported}).",
   "settings.msaa_unsupported": "Stöds inte av den här grafikenheten",
   "settings.reset_intro": "Dessa inställningar fungerar inte på den här datorn och skulle hindra SolidCraft från att starta, så de ändrades:",

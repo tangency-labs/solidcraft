@@ -1067,7 +1067,6 @@
   "settings.frame_rate_note": "Mostra quadros por segundo no canto inferior direito da vista.",
   "settings.measure_axis_distances": "Mostrar distâncias X/Y/Z",
   "settings.measure_axis_distances_help": "Mostrar as componentes nos eixos do mundo junto com a distância total enquanto Medir está aberto.",
-  "settings.msaa_applies_on_restart": "O antisserrilhamento vale na próxima vez que o SolidCraft iniciar",
   "settings.msaa_reset": "{setting}: {requested}× não é suportado por este dispositivo gráfico; agora é {reset}× (suportados: {supported}).",
   "settings.msaa_unsupported": "Não suportado por este dispositivo gráfico",
   "settings.reset_intro": "Estas configurações não funcionam neste computador e impediriam o SolidCraft de iniciar, por isso foram alteradas:",

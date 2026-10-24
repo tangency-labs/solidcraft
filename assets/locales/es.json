@@ -1073,7 +1073,6 @@
   "settings.frame_rate_note": "Muestra los fotogramas por segundo en la esquina inferior derecha de la vista.",
   "settings.measure_axis_distances": "Mostrar distancias X/Y/Z",
   "settings.measure_axis_distances_help": "Mostrar las cotas de cada eje global junto a la distancia total mientras está abierta la herramienta Medir.",
-  "settings.msaa_applies_on_restart": "El suavizado de bordes se aplicará la próxima vez que se inicie SolidCraft",
   "settings.msaa_reset": "{setting}: este dispositivo gráfico no admite {requested}×; se ha establecido {reset}× (admitidos: {supported}).",
   "settings.msaa_unsupported": "No compatible con este dispositivo gráfico",
   "settings.reference_geometry_through_bodies": "Mostrar geometría de referencia a través de los cuerpos",

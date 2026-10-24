@@ -1066,7 +1066,6 @@
   "settings.frame_rate_note": "Menampilkan frame per detik di sudut kanan bawah tampilan.",
   "settings.measure_axis_distances": "Tampilkan jarak X/Y/Z",
   "settings.measure_axis_distances_help": "Tampilkan dimensi komponen sumbu dunia di samping jarak total saat Ukur terbuka.",
-  "settings.msaa_applies_on_restart": "Anti-aliasing berlaku saat SolidCraft dimulai berikutnya",
   "settings.msaa_reset": "{setting}: {requested}× tidak didukung oleh perangkat grafis ini; sekarang menjadi {reset}× (didukung: {supported}).",
   "settings.msaa_unsupported": "Tidak didukung oleh perangkat grafis ini",
   "settings.reset_intro": "Pengaturan ini tidak berfungsi di komputer ini dan akan mencegah SolidCraft dimulai, sehingga diubah:",

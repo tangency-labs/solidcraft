@@ -1066,7 +1066,6 @@
   "settings.frame_rate_note": "Görünümün sağ alt köşesinde saniyedeki kare sayısını gösterir.",
   "settings.measure_axis_distances": "X/Y/Z mesafelerini göster",
   "settings.measure_axis_distances_help": "Ölç açıkken toplam mesafenin yanında dünya ekseni bileşen ölçülerini gösterir.",
-  "settings.msaa_applies_on_restart": "Kenar yumuşatma, SolidCraft bir sonraki başlatıldığında uygulanır",
   "settings.msaa_reset": "{setting}: {requested}× bu grafik aygıtı tarafından desteklenmiyor; {reset}× olarak ayarlandı (desteklenen: {supported}).",
   "settings.msaa_unsupported": "Bu grafik aygıtı tarafından desteklenmiyor",
   "settings.reset_intro": "Bu ayarlar bu bilgisayarda çalışmadığı ve SolidCraft'ın başlamasını engelleyeceği için değiştirildi:",

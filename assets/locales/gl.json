@@ -1067,7 +1067,6 @@
   "settings.frame_rate_note": "Mostra as imaxes por segundo na esquina inferior dereita da vista.",
   "settings.measure_axis_distances": "Mostrar as distancias en X/Y/Z",
   "settings.measure_axis_distances_help": "Mostra as compoñentes da distancia segundo os eixes do mundo xunto á distancia total mentres Medir está aberto.",
-  "settings.msaa_applies_on_restart": "O antialiasing aplicarase a próxima vez que se inicie SolidCraft",
   "settings.msaa_reset": "{setting}: este dispositivo gráfico non admite {requested}×; agora é {reset}× (admitidos: {supported}).",
   "settings.msaa_unsupported": "Non admitido por este dispositivo gráfico",
   "settings.reset_intro": "Estes axustes non funcionan neste ordenador e impedirían que SolidCraft se iniciase, así que se cambiaron:",

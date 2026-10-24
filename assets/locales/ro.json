@@ -1066,7 +1066,6 @@
   "settings.frame_rate_note": "Afișează cadrele pe secundă în colțul din dreapta jos al vizualizării.",
   "settings.measure_axis_distances": "Afișează distanțele X/Y/Z",
   "settings.measure_axis_distances_help": "Afișează cotele pe axele globale alături de distanța totală cât timp Măsurare este deschis.",
-  "settings.msaa_applies_on_restart": "Anti-aliasing se aplică la următoarea pornire a SolidCraft",
   "settings.msaa_reset": "{setting}: {requested}× nu este acceptat de acest dispozitiv grafic; acum este {reset}× (acceptat: {supported}).",
   "settings.msaa_unsupported": "Neacceptat de acest dispozitiv grafic",
   "settings.reset_intro": "Aceste setări nu funcționează pe acest calculator și ar împiedica pornirea SolidCraft, deci au fost modificate:",
