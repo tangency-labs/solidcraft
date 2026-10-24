@@ -389,6 +389,26 @@ fn cylinder_deboss_is_connected_and_unsupported_profile_failure_is_atomic() {
 }
 
 #[test]
+fn cylinder_emboss_accepts_a_pick_on_either_half_of_the_wall() {
+    // #3425: the kernel splits a full cylinder wall into two half-faces; a pick on the half the
+    // sketch is not tangent to was refused with "saved selection no longer identifies ...".
+    for mode in ["emboss", "deboss"] {
+        let mut volumes = Vec::new();
+        for pick in [[0., 10., 7.5], [0., -10., 7.5]] {
+            let mut s = cylinder_badge();
+            let params = json!({"sketch":"Badge","face":pick,"depth":1,"mode":mode,"targets":["Sleeve"],"name":"Badge Wrap"});
+            run(&mut s, "solid.emboss", params);
+            assert_eq!(s.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
+            let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
+            loaded.refresh();
+            assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{:?}", loaded.model.results);
+            volumes.push(exact_cylinder_volume(&loaded));
+        }
+        assert!((volumes[0] - volumes[1]).abs() < 1e-6, "{mode}: {volumes:?}");
+    }
+}
+
+#[test]
 fn cylinder_small_chord_pick_is_saved_on_the_exact_surface() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius":"0.1mm","height":"0.2mm","body_name":"Tiny"}));
