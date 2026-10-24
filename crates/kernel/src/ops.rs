@@ -1383,14 +1383,16 @@ where
             Err(_) => {}
         }
     }
-    // Bodies touching along one whole face (a part joined with its mirror image).
+    // Bodies touching along whole faces (a part joined with its mirror image, a pin through a
+    // hole on a base under it): held to the slit check too, as a pair left unglued (a planar
+    // contact whose edges don't match, a round one) stays inside the result.
     if op == BoolOp::Union && a.solid.boundaries().len() == 1 {
-        let glued = if b.solid.boundaries().len() == 1 { crate::coplanar::glue(a, b) } else { crate::coplanar::glue_all_caps(a, b) };
-        if let Some(Ok(body)) = glued {
-            let (ok, _) = check(&body);
-            if ok {
-                return Ok(Some(body));
-            }
+        let glued = if b.solid.boundaries().len() == 1 { crate::coplanar::glue_round(a, b) } else { crate::coplanar::glue_all_caps(a, b) };
+        if let Some(Ok(body)) = glued
+            && check(&body).0
+            && crate::coplanar::slit_free(&body, a, b, tol_m)
+        {
+            return Ok(Some(body));
         }
     }
     // Bores on a common cylinder (a pad's bore around the hole it is joined over, a disc filling
@@ -1461,7 +1463,12 @@ where
     // Faces back to back over part of their area: imprinted on each other and glued (exact; held
     // to the retry guard's checks all the same).
     if op == BoolOp::Union && crate::coplanar::faces_touch(a, b) {
-        let accept = |body: &Body| check(body).0 && !unfused(body) && crate::boolean_guard::check_retry(a, b, op, Some(body)).is_ok();
+        let accept = |body: &Body| {
+            check(body).0
+                && !unfused(body)
+                && crate::coplanar::slit_free(body, a, b, tol_m)
+                && crate::boolean_guard::check_retry(a, b, op, Some(body)).is_ok()
+        };
         // Imprinted along the contact's own outline (faces there bounded by lines and arcs), then
         // along the sides' surfaces.
         if let Some(body) = crate::outline::outline_union(a, b, &accept) {

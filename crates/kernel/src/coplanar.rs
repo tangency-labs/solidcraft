@@ -29,6 +29,7 @@ use truck_modeling::{self as mt, builder};
 
 use crate::body::shell_groups::boxes_separate;
 use crate::body::{Body, Solid, from_p3, p3, v3};
+use crate::boolean_record::Traced;
 use crate::clearance::{Clearance, Occupancy};
 use crate::history::{Change, EdgeOrigin, FaceOrigin, FaceProv, History};
 use crate::{BoolOp, KernelError, Result, guard, record};
@@ -975,28 +976,35 @@ fn trimmed(x: &Body, h: History, slab: &Body, operands: [&Body; 2], n: Vec3, d: 
     Some(cut)
 }
 
-/// Do the bodies touch over an area, back to back on a common plane: has `a` material just
-/// behind some part of a face of `b` lying in a plane of a face of `a` that faces the other way?
-/// (Contact along a line or at a point is not this.)
+/// Do the bodies touch over an area, back to back on a common plane: has either body material
+/// just behind some part of a face of the other lying in a plane of one of its own faces that
+/// faces the other way? (Contact along a line or at a point is not this.)
 pub(crate) fn faces_touch(a: &Body, b: &Body) -> bool {
     let size = a.size().max(b.size());
     let tol = (size * 1e-7).max(1e-9) * 10.0;
-    let pa = planes(a);
-    let faces: Vec<(usize, Vec3)> = planes(b)
-        .into_iter()
-        .filter(|(_, y)| pa.iter().any(|(_, x)| x.n.dot(y.n) < -1.0 + 1e-9 && (x.d + y.d).abs() < tol))
-        .map(|(i, y)| (i, y.n))
-        .collect();
-    if faces.is_empty() {
+    let (pa, pb) = (planes(a), planes(b));
+    // Each body's faces lying on a face of the other that faces the other way.
+    let facing = |own: &[(usize, PlaneFace)], other: &[(usize, PlaneFace)]| -> Vec<(usize, Vec3)> {
+        own.iter().filter(|(_, y)| other.iter().any(|(_, x)| x.n.dot(y.n) < -1.0 + 1e-9 && (x.d + y.d).abs() < tol)).map(|(i, y)| (*i, y.n)).collect()
+    };
+    let (fa, fb) = (facing(&pa, &pb), facing(&pb, &pa));
+    if fa.is_empty() || fb.is_empty() {
         return false;
     }
     let (Ok(ma), Ok(mb)) = (a.tessellate_with(size * 1e-3, true), b.tessellate_with(size * 1e-3, true)) else { return false };
-    let inside = ma.inside_index();
     let depth = (size * 1e-4).max(1e-6);
-    mb.triangles.iter().zip(&mb.tri_face).take(100_000).any(|(t, fi)| {
-        let Some((_, n)) = faces.iter().find(|(i, _)| *i == *fi as usize) else { return false };
-        mb.tri(t).is_some_and(|[p, q, r]| inside.contains((p + q + r) / 3.0 + *n * depth))
-    })
+    // Material of `other` just behind some part of one of `faces`, sampled on the faces' mesh.
+    // Both ways: a face much larger than the contact (a wall standing on a thin plate's side)
+    // is meshed coarsely enough that none of its samples lands there, but the other's face is
+    // then within the contact.
+    let behind = |faces: &[(usize, Vec3)], m: &solidcraft_geom::Mesh, other: &solidcraft_geom::Mesh| {
+        let inside = other.inside_index();
+        m.triangles.iter().zip(&m.tri_face).take(100_000).any(|(t, fi)| {
+            let Some((_, n)) = faces.iter().find(|(i, _)| *i == *fi as usize) else { return false };
+            m.tri(t).is_some_and(|[p, q, r]| inside.contains((p + q + r) / 3.0 + *n * depth))
+        })
+    };
+    behind(&fb, &mb, &ma) || behind(&fa, &ma, &mb)
 }
 
 /// Does `r` hold a skin of no thickness: a planar face lying on another of its planar faces that
@@ -1216,12 +1224,13 @@ pub(crate) fn imprint_union(a: &Body, b: &Body, accept: &dyn Fn(&Body) -> bool) 
             };
             let (pa, pb) = (corners(&a2, *n, *d), corners(&b2, -*n, -*d));
             let a3 = crate::splitface::split_edges_at(&a2, &pb)?;
-            ha = crate::boolean_record::through(&a3, 0, ha.as_ref());
+            ha = crate::boolean_record::step(&a2, &a3, ha);
             let b3 = crate::splitface::split_edges_at(&b2, &pa)?;
-            hb = crate::boolean_record::through(&b3, 0, hb.as_ref());
+            hb = crate::boolean_record::step(&b2, &b3, hb);
             (a2, b2) = (a3, b3);
         }
-        let Some(r) = glue(&a2, &b2) else { return Ok(None) };
+        let ((a2, ha), (b2, hb)) = cylinders_imprinted((a2, ha), (b2, hb), tol)?;
+        let Some(r) = glue_round(&a2, &b2) else { return Ok(None) };
         let r = r?;
         let (ha, hb) = (crate::boolean_record::placed(ha, 0, 2), crate::boolean_record::placed(hb, 1, 2));
         let h = crate::boolean_record::of_pair(&r, &ha, &hb);
@@ -1238,15 +1247,22 @@ pub(crate) fn imprint_union(a: &Body, b: &Body, accept: &dyn Fn(&Body) -> bool) 
 /// faces): every such pair of faces goes and the shells are stitched along their edges. `None`
 /// when no such pair of faces exists.
 pub(crate) fn glue(a: &Body, b: &Body) -> Option<Result<Body>> {
-    glue_impl(a, b, false)
+    glue_impl(a, b, false, false)
+}
+
+/// [`glue`] of round faces too: faces back to back on a common cylinder, as
+/// [`cylinders_imprinted`] leaves them. Only for unions whose result is held to [`slit_free`]: a
+/// round pair glued where a planar one could not be (or the other way round) leaves a slit.
+pub(crate) fn glue_round(a: &Body, b: &Body) -> Option<Result<Body>> {
+    glue_impl(a, b, false, true)
 }
 
 /// Glue every certified start cap, retaining each tool's original contact tolerance.
 pub(crate) fn glue_all_caps(a: &Body, b: &Body) -> Option<Result<Body>> {
-    glue_impl(a, b, true)
+    glue_impl(a, b, true, false)
 }
 
-fn glue_impl(a: &Body, b: &Body, all_caps: bool) -> Option<Result<Body>> {
+fn glue_impl(a: &Body, b: &Body, all_caps: bool, round: bool) -> Option<Result<Body>> {
     use mt::{BoundedCurve, ParametricCurve};
     let size = a.size().max(b.size());
     let tol = (size * 1e-7).max(1e-9) * 10.0;
@@ -1283,6 +1299,9 @@ fn glue_impl(a: &Body, b: &Body, all_caps: bool) -> Option<Result<Body>> {
     if all_caps && pa.len().saturating_mul(pb.len()) > 2_000_000 {
         return None;
     }
+    // Candidates: faces in one plane facing each other, and (`round`) faces back to back on one
+    // cylinder (a ring's inner wall on a plate's rounded corner).
+    let mut pairs: Vec<(usize, usize, f64)> = Vec::new();
     for (ia, x) in &pa {
         for (ib, y) in &pb {
             if all_caps
@@ -1291,57 +1310,70 @@ fn glue_impl(a: &Body, b: &Body, all_caps: bool) -> Option<Result<Body>> {
                 continue;
             }
             let tol = if all_caps { (a.size().max(*tool_sizes.get(&fb_list.get(*ib)?.id())?) * 1e-7).max(1e-9) * 10.0 } else { tol };
-            let key = |p: Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
-            if glued_a.contains(ia) || glued_b.contains(ib) || x.n.dot(y.n) > -1.0 + 1e-9 || (x.d + y.d).abs() > tol {
-                continue;
+            if x.n.dot(y.n) <= -1.0 + 1e-9 && (x.d + y.d).abs() <= tol {
+                pairs.push((*ia, *ib, tol));
             }
-            let (Some(fa), Some(fb)) = (fa_list.get(*ia), fb_list.get(*ib)) else { continue };
-            let ea: Vec<mt::Edge> = fa.edge_iter().collect();
-            let eb: Vec<mt::Edge> = fb.edge_iter().collect();
-            if ea.len() != eb.len() {
-                continue;
-            }
-            let (mut pair_map, mut pair_vmap) = (Vec::new(), Vec::new());
-            let mut ok = true;
-            for e in &eb {
-                let ends = (key(from_p3(e.absolute_front().point())), key(from_p3(e.absolute_back().point())));
-                let m = mid(e);
-                // The same curve: the same ends and e's middle on f (curves of one shape may be
-                // parametrised differently, so their parameter middles needn't coincide).
-                let on = |f: &mt::Edge| {
-                    use mt::SearchNearestParameter;
-                    let c = f.curve();
-                    let (t0, t1) = c.range_tuple();
-                    key(mid(f)) == key(m)
-                        || c.search_nearest_parameter(p3(m), None, 100)
-                            .is_some_and(|t| (t0.min(t1) - 1e-9..=t0.max(t1) + 1e-9).contains(&t) && from_p3(c.subs(t)).dist(m) <= tol)
-                };
-                let hit = ea.iter().find(|f| {
-                    let fe = (key(from_p3(f.absolute_front().point())), key(from_p3(f.absolute_back().point())));
-                    (fe == ends || fe == (ends.1, ends.0)) && on(f)
-                });
-                let Some(f) = hit else {
-                    ok = false;
-                    break;
-                };
-                let same = key(from_p3(f.absolute_front().point())) == ends.0;
-                pair_map.push((e.id(), if same { f.absolute_clone() } else { f.absolute_clone().inverse() }));
-                let (fa_v, fb_v) = if same {
-                    (f.absolute_front().clone(), f.absolute_back().clone())
-                } else {
-                    (f.absolute_back().clone(), f.absolute_front().clone())
-                };
-                pair_vmap.push((e.absolute_front().id(), fa_v));
-                pair_vmap.push((e.absolute_back().id(), fb_v));
-            }
-            if !ok {
-                continue;
-            }
-            map.extend(pair_map);
-            vmap.extend(pair_vmap);
-            glued_a.push(*ia);
-            glued_b.push(*ib);
         }
+    }
+    if round {
+        let (ca, cb) = common_cylinders(a, b, tol);
+        for x in &ca {
+            for y in &cb {
+                let facing = |f: Option<&&mt::Face>, c: &CylFace| f.and_then(|f| faces_out(f, c));
+                if same_cylinder(x, y, tol) && facing(fa_list.get(x.index), x).zip(facing(fb_list.get(y.index), y)).is_some_and(|(p, q)| p != q) {
+                    pairs.push((x.index, y.index, tol));
+                }
+            }
+        }
+    }
+    for (ia, ib, tol) in pairs {
+        let key = |p: Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
+        if glued_a.contains(&ia) || glued_b.contains(&ib) {
+            continue;
+        }
+        let (Some(fa), Some(fb)) = (fa_list.get(ia), fb_list.get(ib)) else { continue };
+        let ea: Vec<mt::Edge> = fa.edge_iter().collect();
+        let eb: Vec<mt::Edge> = fb.edge_iter().collect();
+        if ea.len() != eb.len() {
+            continue;
+        }
+        let (mut pair_map, mut pair_vmap) = (Vec::new(), Vec::new());
+        let mut ok = true;
+        for e in &eb {
+            let ends = (key(from_p3(e.absolute_front().point())), key(from_p3(e.absolute_back().point())));
+            let m = mid(e);
+            // The same curve: the same ends and e's middle on f (curves of one shape may be
+            // parametrised differently, so their parameter middles needn't coincide).
+            let on = |f: &mt::Edge| {
+                use mt::SearchNearestParameter;
+                let c = f.curve();
+                let (t0, t1) = c.range_tuple();
+                key(mid(f)) == key(m)
+                    || c.search_nearest_parameter(p3(m), None, 100)
+                        .is_some_and(|t| (t0.min(t1) - 1e-9..=t0.max(t1) + 1e-9).contains(&t) && from_p3(c.subs(t)).dist(m) <= tol)
+            };
+            let hit = ea.iter().find(|f| {
+                let fe = (key(from_p3(f.absolute_front().point())), key(from_p3(f.absolute_back().point())));
+                (fe == ends || fe == (ends.1, ends.0)) && on(f)
+            });
+            let Some(f) = hit else {
+                ok = false;
+                break;
+            };
+            let same = key(from_p3(f.absolute_front().point())) == ends.0;
+            pair_map.push((e.id(), if same { f.absolute_clone() } else { f.absolute_clone().inverse() }));
+            let (fa_v, fb_v) =
+                if same { (f.absolute_front().clone(), f.absolute_back().clone()) } else { (f.absolute_back().clone(), f.absolute_front().clone()) };
+            pair_vmap.push((e.absolute_front().id(), fa_v));
+            pair_vmap.push((e.absolute_back().id(), fb_v));
+        }
+        if !ok {
+            continue;
+        }
+        map.extend(pair_map);
+        vmap.extend(pair_vmap);
+        glued_a.push(ia);
+        glued_b.push(ib);
     }
     if all_caps
         && b.face_sources()?
@@ -1524,18 +1556,290 @@ struct CylFace {
 }
 
 fn cylinders(b: &Body) -> Vec<CylFace> {
-    (0..b.face_count())
-        .filter_map(|index| match crate::face_surface(b, index)? {
+    let size = b.size();
+    b.solid
+        .face_iter()
+        .enumerate()
+        .filter_map(|(index, f)| match crate::surface_kind::surface_of(f, size)? {
             crate::FaceSurface::Cylinder { origin, axis, radius } => Some(CylFace { index, origin, axis, radius }),
             _ => None,
         })
         .collect()
 }
 
+/// The faces of `body` on one of the cylinders `on`. Only a face whose corners all lie on one of
+/// them has its surface classified, which costs far more than looking at its corners.
+fn cylinders_on(body: &Body, on: &[CylFace], tol: f64) -> Vec<CylFace> {
+    if on.is_empty() {
+        return Vec::new();
+    }
+    let size = body.size();
+    let off = |c: &CylFace, p: Vec3| {
+        let v = p - c.origin;
+        ((v - c.axis * v.dot(c.axis)).len() - c.radius).abs()
+    };
+    body.solid
+        .face_iter()
+        .enumerate()
+        .filter(|(_, f)| {
+            let corners: Vec<Vec3> = f.vertex_iter().map(|v| from_p3(v.point())).collect();
+            !corners.is_empty() && on.iter().any(|c| corners.iter().all(|p| off(c, *p) < tol * 10.0))
+        })
+        .filter_map(|(index, f)| match crate::surface_kind::surface_of(f, size)? {
+            crate::FaceSurface::Cylinder { origin, axis, radius } => Some(CylFace { index, origin, axis, radius }),
+            _ => None,
+        })
+        .filter(|x| on.iter().any(|c| same_cylinder(c, x, tol)))
+        .collect()
+}
+
+/// The faces of `a` and of `b` on a cylinder the other has faces on too. The body with fewer
+/// faces is classified whole, the other only where it can match ([`cylinders_on`]).
+fn common_cylinders(a: &Body, b: &Body, tol: f64) -> (Vec<CylFace>, Vec<CylFace>) {
+    let a_smaller = a.face_count() <= b.face_count();
+    let (small, large) = if a_smaller { (a, b) } else { (b, a) };
+    let cl = cylinders_on(large, &cylinders(small), tol);
+    let cs = cylinders_on(small, &cl, tol);
+    if a_smaller { (cs, cl) } else { (cl, cs) }
+}
+
 /// Do the two cylinders lie on the same surface?
 fn same_cylinder(x: &CylFace, y: &CylFace, tol: f64) -> bool {
     let off = y.origin - x.origin;
     x.axis.dot(y.axis).abs() > 1.0 - 1e-9 && (x.radius - y.radius).abs() < tol && (off - x.axis * off.dot(x.axis)).len() < tol
+}
+
+/// Does face `f`, on the cylinder `c`, face away from its axis (a boss rather than a bore)?
+fn faces_out(f: &mt::Face, c: &CylFace) -> Option<bool> {
+    use mt::{ParametricSurface3D, SearchNearestParameter};
+    let s = f.oriented_surface();
+    let p = f.vertex_iter().next()?.point();
+    let (u, v) = s.search_nearest_parameter(p, None, 100)?;
+    let n = s.normal(u, v);
+    let n = Vec3::new(n.x, n.y, n.z);
+    let q = from_p3(p) - c.origin;
+    let radial = q - c.axis * q.dot(c.axis);
+    let along = n.dot(radial);
+    (along.abs() > 1e-6 * radial.len().max(1e-12)).then_some(along > 0.0)
+}
+
+/// Most cylinders, and levels on each, [`cylinders_imprinted`] splits faces at.
+const MAX_CYLINDER_SPLITS: usize = 64;
+
+/// `body`'s faces on the cylinder `c` (its history over its operand alongside, `cyl` its faces
+/// on the `common` cylinders), split across the axis at each of `levels` that falls inside one.
+fn split_levels(
+    body: &mut Body,
+    h: &mut Option<History>,
+    cyl: &mut Vec<CylFace>,
+    common: &[CylFace],
+    c: &CylFace,
+    levels: &[f64],
+    tol: f64,
+) -> Result<()> {
+    for s in levels.iter().take(MAX_CYLINDER_SPLITS) {
+        let fs: Vec<&mt::Face> = body.solid.face_iter().collect();
+        let faces: Vec<usize> = cyl
+            .iter()
+            .filter(|x| same_cylinder(c, x, tol))
+            .filter(|x| {
+                fs.get(x.index).is_some_and(|f| {
+                    let along: Vec<f64> = f.vertex_iter().map(|v| (from_p3(v.point()) - c.origin).dot(c.axis)).collect();
+                    let (lo, hi) = along.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| (lo.min(*t), hi.max(*t)));
+                    *s > lo + tol && *s < hi - tol
+                })
+            })
+            .map(|x| x.index)
+            .collect();
+        if faces.is_empty() {
+            continue;
+        }
+        let plane = solidcraft_geom::Plane::from_normal(c.origin + c.axis * *s, c.axis)
+            .ok_or_else(|| KernelError::Failed("a cylinder with no axis".into()))?;
+        let (split, _) = crate::splitface::split_across(body, &faces, plane, (c.origin, c.axis.vec(), c.radius))?;
+        *h = crate::boolean_record::step(body, &split, h.take());
+        *cyl = cylinders_on(&split, common, tol);
+        *body = split;
+    }
+    Ok(())
+}
+
+/// Bodies touching back to back on a cylinder (a ring joined round a plate, its inner wall on
+/// the plate's rounded corners), each with its history over its operand: each body's faces on a
+/// cylinder the other has faces on are split across the axis where the other's faces there
+/// end, and their edges where the other's corners lie, so that the bands they share are the same
+/// faces in both, which [`glue`] then takes away. Cut along the axis they are not: faces that
+/// meet the contact's sides along the axis stay as they are.
+pub(crate) fn cylinders_imprinted((mut a, mut ha): Traced, (mut b, mut hb): Traced, tol: f64) -> Result<(Traced, Traced)> {
+    let (mut ca, mut cb) = common_cylinders(&a, &b, tol);
+    let mut common: Vec<CylFace> = Vec::new();
+    for x in &ca {
+        if cb.iter().any(|y| same_cylinder(x, y, tol)) && !common.iter().any(|y| same_cylinder(x, y, tol)) {
+            common.push(*x);
+        }
+    }
+    let on = |body: &Body, cyl: &[CylFace], c: &CylFace| -> Vec<Vec3> {
+        let fs: Vec<&mt::Face> = body.solid.face_iter().collect();
+        let mut out: Vec<Vec3> = cyl
+            .iter()
+            .filter(|x| same_cylinder(c, x, tol))
+            .filter_map(|x| fs.get(x.index))
+            .flat_map(|f| f.vertex_iter().map(|v| from_p3(v.point())))
+            .collect();
+        out.sort_by(|p, q| (p.x, p.y, p.z).partial_cmp(&(q.x, q.y, q.z)).unwrap_or(std::cmp::Ordering::Equal));
+        out.dedup_by(|p, q| p.dist(*q) <= tol);
+        out
+    };
+    let levels = |points: &[Vec3], c: &CylFace| -> Vec<f64> {
+        let mut out: Vec<f64> = points.iter().map(|p| (*p - c.origin).dot(c.axis)).collect();
+        out.sort_by(f64::total_cmp);
+        out.dedup_by(|s, t| (*s - *t).abs() <= tol);
+        out
+    };
+    for c in common.iter().take(MAX_CYLINDER_SPLITS) {
+        let (pa, pb) = (on(&a, &ca, c), on(&b, &cb, c));
+        split_levels(&mut b, &mut hb, &mut cb, &common, c, &levels(&pa, c), tol)?;
+        split_levels(&mut a, &mut ha, &mut ca, &common, c, &levels(&pb, c), tol)?;
+        let (pa, pb) = (on(&a, &ca, c), on(&b, &cb, c));
+        let a2 = crate::splitface::split_edges_at(&a, &pb)?;
+        if !std::sync::Arc::ptr_eq(&a2.solid, &a.solid) {
+            ha = crate::boolean_record::step(&a, &a2, ha);
+            ca = cylinders_on(&a2, &common, tol);
+            a = a2;
+        }
+        let b2 = crate::splitface::split_edges_at(&b, &pa)?;
+        if !std::sync::Arc::ptr_eq(&b2.solid, &b.solid) {
+            hb = crate::boolean_record::step(&b, &b2, hb);
+            cb = cylinders_on(&b2, &common, tol);
+            b = b2;
+        }
+    }
+    Ok(((a, ha), (b, hb)))
+}
+
+/// Most triangle-against-triangle tests [`slit_free`] makes before taking the result for one
+/// with a slit.
+const MAX_SLIT_TESTS: usize = 20_000_000;
+
+/// A surface the operands touched on: one of their back-to-back planes, or one of their common
+/// cylinders.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Contact {
+    Plane(usize),
+    Round(usize),
+}
+
+/// Is `r`, the union of `a` and `b` that touched back to back, free of slits: of faces of one
+/// operand left lying on the other's where they touched, a crack of no width that no volume or
+/// shell check sees? No two faces of `r` on a plane or cylinder the operands touched on may face
+/// each other over a common area: as `r` meshes to `chord`, the middle of a triangle on one side
+/// of that surface lies on a triangle on its other side (within the two meshes' sag). Material
+/// merely in front of a face (a gap, a fillet under a pad's edge) is no slit, and a surface with
+/// faces on one side only has none to look for.
+pub(crate) fn slit_free(r: &Body, a: &Body, b: &Body, chord: f64) -> bool {
+    let size = a.size().max(b.size());
+    let tol = (size * 1e-7).max(1e-9) * 10.0;
+    let back: Vec<(Vec3, f64)> = coincident_planes(a, b).into_iter().filter(|(_, _, same)| !*same).map(|(n, d, _)| (n, d)).collect();
+    let mut rounds: Vec<CylFace> = Vec::new();
+    for c in common_cylinders(a, b, tol).0 {
+        if !rounds.iter().any(|x| same_cylinder(x, &c, tol)) {
+            rounds.push(c);
+        }
+    }
+    let mut on: HashMap<usize, Contact> = HashMap::new();
+    for (i, p) in planes(r) {
+        if let Some(k) = back.iter().position(|(n, d)| p.n.dot(*n).abs() > 1.0 - 1e-9 && (p.d - d * p.n.dot(*n)).abs() < tol) {
+            on.insert(i, Contact::Plane(k));
+        }
+    }
+    for x in cylinders_on(r, &rounds, tol) {
+        if let Some(k) = rounds.iter().position(|c| same_cylinder(c, &x, tol)) {
+            on.insert(x.index, Contact::Round(k));
+        }
+    }
+    if on.len() < 2 {
+        return true;
+    }
+    let Ok(m) = r.tessellate_with(chord, true) else { return false };
+    // The contact faces' triangles (corners, unit normal), by surface and by the side they face.
+    let mut sides: HashMap<(Contact, bool), Vec<([Vec3; 3], Vec3)>> = HashMap::new();
+    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+        let Some(contact) = on.get(&(*f as usize)) else { continue };
+        let Some([p, q, s]) = m.tri(t) else { continue };
+        let Some(n) = (q - p).cross(s - p).normalized() else { continue };
+        let out = match contact {
+            Contact::Plane(k) => back.get(*k).is_some_and(|(m, _)| n.dot(*m) > 0.0),
+            Contact::Round(k) => rounds.get(*k).is_some_and(|c| {
+                let v = (p + q + s) / 3.0 - c.origin;
+                n.dot(v - *c.axis * v.dot(*c.axis)) > 0.0
+            }),
+        };
+        sides.entry((*contact, out)).or_default().push(([p, q, s], n));
+    }
+    let near = chord * 2.0 + tol;
+    let mut tests = 0usize;
+    sides
+        .iter()
+        .filter(|((_, out), _)| *out)
+        .all(|((contact, _), xs)| sides.get(&(*contact, false)).is_none_or(|ys| !faces_meet(xs, ys, near, &mut tests)))
+}
+
+/// Does the middle of a triangle of `xs` lie on a triangle of `ys` facing the other way, within
+/// `near` of its plane? Looked up in a grid of `ys`; past [`MAX_SLIT_TESTS`] tests (`tests` counts
+/// them across calls), taken for yes.
+fn faces_meet(xs: &[([Vec3; 3], Vec3)], ys: &[([Vec3; 3], Vec3)], near: f64, tests: &mut usize) -> bool {
+    let extent = |t: &[Vec3; 3]| {
+        let mut bb = Aabb3::EMPTY;
+        t.iter().for_each(|p| bb.add(*p));
+        bb
+    };
+    // Cells about as large as the triangles, so that each lands in a few.
+    let mean = ys.iter().map(|(t, _)| extent(t).diagonal()).sum::<f64>() / ys.len().max(1) as f64;
+    let cell = mean.max(near * 4.0).max(1e-9);
+    let at = |v: f64| (v / cell).floor() as i64;
+    let mut grid: HashMap<(i64, i64, i64), Vec<usize>> = HashMap::new();
+    let mut wide: Vec<usize> = Vec::new();
+    for (k, (t, _)) in ys.iter().enumerate() {
+        let bb = extent(t);
+        let (lo, hi) = (bb.min - Vec3::new(near, near, near), bb.max + Vec3::new(near, near, near));
+        let (x0, x1, y0, y1, z0, z1) = (at(lo.x), at(hi.x), at(lo.y), at(hi.y), at(lo.z), at(hi.z));
+        let cells = (x1 - x0 + 1).saturating_mul(y1 - y0 + 1).saturating_mul(z1 - z0 + 1);
+        if !(1..=64).contains(&cells) {
+            wide.push(k);
+            continue;
+        }
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                for z in z0..=z1 {
+                    grid.entry((x, y, z)).or_default().push(k);
+                }
+            }
+        }
+    }
+    let on = |c: Vec3, [p, q, s]: &[Vec3; 3], n: Vec3| {
+        let h = (c - *p).dot(n);
+        if h.abs() > near {
+            return false;
+        }
+        // Barycentric coordinates of c's foot on the triangle's plane.
+        let x = c - n * h;
+        let (e1, e2, w) = (*q - *p, *s - *p, x - *p);
+        let (d11, d12, d22, w1, w2) = (e1.dot(e1), e1.dot(e2), e2.dot(e2), w.dot(e1), w.dot(e2));
+        let det = d11 * d22 - d12 * d12;
+        if !(det > 0.0) {
+            return false;
+        }
+        let (u, v) = ((d22 * w1 - d12 * w2) / det, (d11 * w2 - d12 * w1) / det);
+        u >= -1e-6 && v >= -1e-6 && u + v <= 1.0 + 1e-6
+    };
+    xs.iter().any(|(t, n)| {
+        let c = (t[0] + t[1] + t[2]) / 3.0;
+        let cell = grid.get(&(at(c.x), at(c.y), at(c.z))).map(Vec::as_slice).unwrap_or_default();
+        cell.iter().chain(&wide).any(|k| {
+            *tests += 1;
+            *tests > MAX_SLIT_TESTS || ys.get(*k).is_some_and(|(u, m)| n.dot(*m) < -0.9 && on(c, u, *m))
+        })
+    })
 }
 
 /// The history over `[a, b]` of `r`, made in [`bore_union`]: `joined` (the target joined with
@@ -1568,8 +1872,7 @@ fn recut(r: &Body, joined: &Body, narrowed: &Body, cut: &Body, bore: &[usize], t
 /// Do the bodies have cylindrical faces on a common cylinder?
 pub(crate) fn has_coincident_cylinders(a: &Body, b: &Body) -> bool {
     let tol = (a.size().max(b.size()) * 1e-7).max(1e-9) * 10.0;
-    let cb = cylinders(b);
-    cylinders(a).iter().any(|x| cb.iter().any(|y| same_cylinder(x, y, tol)))
+    !common_cylinders(a, b, tol).0.is_empty()
 }
 
 /// Union of bodies with bores on a common cylinder (a drain pad's bore around the drain hole
@@ -1592,7 +1895,7 @@ pub(crate) fn bore_union(a: &Body, b: &Body, accept: &dyn Fn(&Body) -> bool) -> 
     let (ma, mb) = (a.tessellate_with(mtol, true).ok()?, b.tessellate_with(mtol, true).ok()?);
     let (ia, ib) = (ma.inside_index(), mb.inside_index());
     let empty = |p: Vec3| !ia.contains(p) && !ib.contains(p);
-    let (ca, cb) = (cylinders(a), cylinders(b));
+    let (ca, cb) = common_cylinders(a, b, tol);
     // (body to narrow, its operand number, its mesh and inside test, the other body and its
     // inside test, their faces on the cylinder).
     let ways = [(b, 1, &mb, &ib, a, &ia, &cb, &ca), (a, 0, &ma, &ia, b, &ib, &ca, &cb)];

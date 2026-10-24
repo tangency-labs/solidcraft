@@ -170,6 +170,15 @@ fixes below (sound face pushes, no panics in the boolean's final assembly).
 
 ### Fixed
 
+- **Walls joined flush round a part** (a box's walls extruded from a ring sketched round its
+  gridded floor, rounded corners and all): the bodies only touch, back to back on planes and
+  cylinders, and the join failed with "Union: no result" after many retries. The contact
+  is now seen from either body (a 40 mm wall's face meshes too coarsely to land on a 3 mm
+  floor), round contact faces are split across their axis on exact arcs where the other
+  body's faces end, and glued like planar ones. A glued join that leaves two of its faces on one
+  contact surface back to back over a common area (a slit, which no volume or shell check sees)
+  is refused, on every glue path. The glued body keeps its face lineage: an imprint step that
+  changed nothing no longer composes the previous step's history twice.
 - Back-to-back contact joins preserve intentional Split Face boundaries, including on
   faces away from the contact. The glue pass retains their lines during healing and in
   the resulting body for subsequent operations. Partial circular-contact regressions

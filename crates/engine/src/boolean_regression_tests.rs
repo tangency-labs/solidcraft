@@ -421,6 +421,61 @@ fn lip_swept_flush_round_a_corner_joins() {
     assert!((volume - block - lip).abs() < 0.02, "{volume} expected {}", block + lip);
 }
 
+/// A 60 × 50 floor 3.25 thick with r4 corners, a pocket with sloping sides in its top and a
+/// socket under it, drawn with the ring round it (10 wide, r14 outside) in its sketch.
+fn floor_in_a_ring(s: &mut Session) {
+    let mut run = |c: &str, p: Value| s.execute(c, &p).unwrap();
+    run("sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    run("sketch.rectangle.rounded", json!({"p0": [0, 0], "p1": [60, 50], "radius": 4}));
+    run("sketch.rectangle.rounded", json!({"p0": [-10, -10], "p1": [70, 60], "radius": 14}));
+    run("sketch.finish", json!({}));
+    run("solid.extrude", json!({"sketch": "Outline", "profiles": [{"point": [30, 25]}], "distance": 3.25, "body_name": "Floor"}));
+    run("sketch.create", json!({"plane": "XY", "offset": 3.25, "name": "Pocket"}));
+    run("sketch.rectangle.rounded", json!({"p0": [10, 10], "p1": [50, 40], "radius": 3}));
+    run("sketch.finish", json!({}));
+    run(
+        "solid.extrude",
+        json!({"sketch": "Pocket", "distance": 2.25, "direction": "negative", "taper": "-15 deg", "operation": "cut", "targets": ["Floor"]}),
+    );
+    run("sketch.create", json!({"plane": "XY", "name": "Socket"}));
+    run("sketch.rectangle.two_point", json!({"p0": [12, 12], "p1": [48, 38]}));
+    run("sketch.finish", json!({}));
+    run("solid.extrude", json!({"sketch": "Socket", "distance": 4.75, "direction": "negative", "operation": "join", "targets": ["Floor"]}));
+}
+
+/// The walls of a box joined round its floor: the ring round the floor's outline, rounded
+/// corners and all, extruded as a join from the floor's bottom, or from the floor of the socket
+/// under it, past its top. The ring only touches the floor, back to back on its sides, and the
+/// floor is no prism: the join failed with "Union: no result". It adds the ring's area times its
+/// height, exactly glued, as one shell.
+#[test]
+fn walls_join_flush_round_a_floor() {
+    use std::f64::consts::PI;
+    let ring = (80.0 * 70.0 - (4.0 - PI) * 14.0 * 14.0) - (60.0 * 50.0 - (4.0 - PI) * 4.0 * 4.0);
+    // From the floor's bottom, 40 high; from the socket's floor (4.75 under it), 10.
+    for (from, height) in [(None, 40.0), (Some(json!([30, 25, -4.75])), 10.0)] {
+        let mut s = Session::default();
+        floor_in_a_ring(&mut s);
+        let before = volume(&s, "Floor");
+        let mut walls =
+            json!({"sketch": "Outline", "profiles": [{"point": [-5, 25]}], "distance": height, "operation": "join", "targets": ["Floor"]});
+        if let Some(from) = from {
+            walls["from"] = from;
+        }
+        let reply = s.execute("solid.extrude", &walls).unwrap();
+        assert!(reply["warning"].is_null(), "{height}: {reply}");
+        let result = s.model.result(reply["feature"].as_u64().unwrap()).unwrap();
+        assert!(!result.boolean_diagnostics.events.iter().any(|e| e.strategy.alters_result()), "{height}: {:?}", result.boolean_diagnostics);
+        let state = s.model.state();
+        assert_eq!(state.bodies.len(), 1);
+        let floor = &state.bodies[0].body;
+        assert_eq!(floor.shell_count(), 1);
+        assert!(floor.validity().is_empty(), "{height}: {:?}", floor.validity());
+        let added = volume(&s, "Floor") - before;
+        assert!((added - ring * height).abs() < 2e-5 * ring * height, "{height}: {added} vs {}", ring * height);
+    }
+}
+
 /// #1275: an Extrude Cut of a whole face of a rounded-rectangle block with a bottom chamfer. The
 /// tool's corner cylinders lay on the block's; they are grown off them now, as straight edges
 /// were, and the cut takes 5 mm off the top.

@@ -485,9 +485,13 @@ pub(crate) fn fit(pts: &[mt::Point3], scale: f64) -> Result<mt::Curve> {
     Ok(mt::Curve::BSplineCurve(bsp))
 }
 
+/// A cylinder: a point on its axis, the unit axis, and the radius.
+pub(crate) type Round = (Vec3, Vec3, f64);
+
 /// The curve of a split line: an exact circular arc when a cylinder meets a plane square to its
-/// axis (a sketch arc splitting a planar face), else [`fit`].
-fn fit_on(g: &Field, face: &mt::Face, pts: &[mt::Point3], scale: f64) -> Result<mt::Curve> {
+/// axis (a sketch arc splitting a planar face; with `across`, the cylinder a split face lies on,
+/// a plane splitting that round side), else [`fit`].
+fn fit_on(g: &Field, face: &mt::Face, pts: &[mt::Point3], scale: f64, across: Option<Round>) -> Result<mt::Curve> {
     if let (Field::Cylinder { axis, .. }, mt::Surface::Plane(pl)) = (g, face.surface())
         && let (Some(a), Some(b), Some(m)) = (pts.first(), pts.last(), pts.get(pts.len() / 2))
         && a.distance(*b) > scale * 1e-9
@@ -499,7 +503,118 @@ fn fit_on(g: &Field, face: &mt::Face, pts: &[mt::Point3], scale: f64) -> Result<
             return Ok(e.curve());
         }
     }
+    // A plane square to a round side's axis: the traced points lie on the face's mesh, a chord's
+    // sag inside the cylinder, so the arc is taken from the cylinder itself between the ends
+    // (where the split meets the face's edges).
+    if let Some((o, axis, r)) = across
+        && let Field::Plane { n, .. } = g
+        && n.cross(axis).len() < 1e-9
+        && let (Some(a), Some(b)) = (pts.first(), pts.last())
+        && a.distance(*b) > scale * 1e-9
+        && let Some(m) = arc_middle(face, (o, axis, r), pts, scale)
+    {
+        let (va, vb) = (mt::Vertex::new(*a), mt::Vertex::new(*b));
+        let e = guard("split arc", || Ok(mt::builder::circle_arc(&va, &vb, p3(m))))?;
+        return Ok(e.curve());
+    }
     fit(pts, scale)
+}
+
+/// Points along each curved edge of a face, sampled so that a face's side of its cylinder shows.
+const EDGE_SAMPLES: usize = 720;
+
+/// The middle of the arc of the circle `round` makes in the plane of the first of `pts`, from
+/// that point to the last, on the side `face` covers: the side where the points between them, or
+/// else the face's own edges, come nearest the arc's middle (a small face's traced chain may keep
+/// only its ends). `None` when the ends are off the circle.
+fn arc_middle(face: &mt::Face, (o, axis, r): Round, pts: &[mt::Point3], scale: f64) -> Option<Vec3> {
+    let off_axis = |p: Vec3| {
+        let v = p - o;
+        v - axis * v.dot(axis)
+    };
+    let (a, b) = (from_p3(*pts.first()?), from_p3(*pts.last()?));
+    let on_circle = |p: Vec3| (off_axis(p).len() - r).abs() <= scale * 1e-6;
+    if !on_circle(a) || !on_circle(b) {
+        return None;
+    }
+    let (ua, ub) = (off_axis(a).normalized()?, off_axis(b).normalized()?);
+    let sum = ua + ub;
+    // The two arcs' middles: either side of the chord, or of the diameter for half a turn.
+    let middle = if sum.len() > 1e-6 { sum * (1.0 / sum.len()) } else { axis.cross(ua).normalized()? };
+    let mut samples: Vec<Vec3> = pts.get(1..pts.len().saturating_sub(1)).unwrap_or_default().iter().map(|p| from_p3(*p)).collect();
+    for e in face.edge_iter() {
+        let c = e.curve();
+        let (t0, t1) = c.range_tuple();
+        let n = if matches!(c, mt::Curve::Line(_)) { 1 } else { EDGE_SAMPLES };
+        samples.extend((0..=n).map(|k| from_p3(c.subs(t0 + (t1 - t0) * k as f64 / n as f64))));
+    }
+    let level = o + axis * (a - o).dot(axis);
+    // The arc that runs on the face: the split line lies on it all the way, the other way round
+    // leaves it (a small face's chain may keep only its ends, and its edges can reach both sides
+    // elsewhere: over half a turn, with a hole in it). Else the side the face's points come nearest.
+    let meshed = face_triangles(face, (r * 1e-2).max(scale * 1e-7));
+    let along = |m: Vec3| arc_on_face(&meshed, (level, r), [ua, m, ub]);
+    let (on, off) = (along(middle), along(-middle));
+    let dir = if on != off {
+        if on > off { middle } else { -middle }
+    } else {
+        let nearest = |d: Vec3| samples.iter().filter_map(|p| off_axis(*p).normalized()).map(|u| u.dot(d)).fold(f64::NEG_INFINITY, f64::max);
+        if nearest(middle) >= nearest(-middle) { middle } else { -middle }
+    };
+    Some(level + dir * r)
+}
+
+/// Points [`arc_on_face`] tries on each half of an arc.
+pub(crate) const ARC_STEPS: usize = 16;
+
+/// A face's triangles, meshed to `tol`, with that tolerance.
+pub(crate) fn face_triangles(face: &mt::Face, tol: f64) -> (Vec<[Vec3; 3]>, f64) {
+    let shell: mt::Shell = vec![face.clone()].into();
+    let meshed = shell.robust_triangulation(tol);
+    let Some(pm) = meshed.face_iter().next().and_then(|f| f.surface()) else { return (Vec::new(), tol) };
+    let pos = pm.positions();
+    let at = |i: usize| pos.get(i).map(|p| from_p3(*p));
+    let tris = pm.faces().triangle_iter().filter_map(|t| Some([at(t[0].pos)?, at(t[1].pos)?, at(t[2].pos)?])).collect();
+    (tris, tol)
+}
+
+/// How many points between the ends of the arc about `centre` (radius `r`) from `ua` through `um`
+/// to `ub` (unit directions off its axis) lie on a face, given as its triangles (meshed to a
+/// tolerance): within three tolerances of one.
+pub(crate) fn arc_on_face((tris, tol): &(Vec<[Vec3; 3]>, f64), (centre, r): (Vec3, f64), [ua, um, ub]: [Vec3; 3]) -> usize {
+    let turn = |u: Vec3, v: Vec3, t: f64| {
+        let w = u.dot(v).clamp(-1.0, 1.0).acos();
+        if w < 1e-12 { u } else { (u * ((1.0 - t) * w).sin() + v * (t * w).sin()) * (1.0 / w.sin()) }
+    };
+    let mut count = 0;
+    for (half, (u, v)) in [(ua, um), (um, ub)].into_iter().enumerate() {
+        for k in 1..=ARC_STEPS {
+            if half == 1 && k == ARC_STEPS {
+                break;
+            }
+            let p = centre + turn(u, v, k as f64 / ARC_STEPS as f64) * r;
+            if tris.iter().any(|t| triangle_distance(p, t) <= tol * 3.0) {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// The distance from `p` to the triangle `t`.
+fn triangle_distance(p: Vec3, [a, b, c]: &[Vec3; 3]) -> f64 {
+    let segment = |x: Vec3, y: Vec3| {
+        let d = y - x;
+        let l = d.dot(d);
+        let t = if l > 0.0 { ((p - x).dot(d) / l).clamp(0.0, 1.0) } else { 0.0 };
+        p.dist(x + d * t)
+    };
+    let edges = segment(*a, *b).min(segment(*b, *c)).min(segment(*c, *a));
+    let Some(n) = (*b - *a).cross(*c - *a).normalized() else { return edges };
+    let h = (p - *a).dot(n);
+    let foot = p - n * h;
+    let inside = [(*a, *b), (*b, *c), (*c, *a)].iter().all(|(x, y)| (*y - *x).cross(foot - *x).dot(n) >= 0.0);
+    if inside { h.abs() } else { edges }
 }
 
 /// Cut an edge at a parameter (none when the point is already a vertex): the vertex and the
@@ -697,7 +812,15 @@ fn inside(poly: &[(f64, f64)], q: (f64, f64)) -> bool {
 /// by its pieces, boundary edges cut in every face).
 /// Returns how many lines split it and how many faces now stand in its place (at `fi`). The
 /// pieces of cut edges are recorded in `rec`.
-fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64, new_edges: &mut Vec<mt::Edge>, rec: &mut Rebuild) -> Result<(usize, usize)> {
+fn split_one(
+    faces: &mut Vec<mt::Face>,
+    fi: usize,
+    g: &Field,
+    size: f64,
+    across: Option<Round>,
+    new_edges: &mut Vec<mt::Edge>,
+    rec: &mut Rebuild,
+) -> Result<(usize, usize)> {
     let Some(face) = faces.get(fi).cloned() else { return Ok((0, 1)) };
     let chains = trace(&face, g, size)?;
     if chains.is_empty() {
@@ -814,7 +937,7 @@ fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64, new_edg
                 edges.iter().skip(k).chain(edges.iter().take(k)).cloned().collect()
             };
             let (Some(w1), Some(w2)) = (ws.get(wa_i), ws.get(wb_i)) else { continue };
-            let slit = mt::Edge::new_unchecked(&va, &vb, fit_on(g, &face, &pts, size)?);
+            let slit = mt::Edge::new_unchecked(&va, &vb, fit_on(g, &face, &pts, size, across)?);
             new_edges.push(slit.clone());
             let mut joined = from(w1, &va);
             joined.push(slit.clone());
@@ -855,7 +978,7 @@ fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64, new_edg
         else {
             continue;
         };
-        let split = mt::Edge::new_unchecked(&va, &vb, fit_on(g, &face, &pts, size)?);
+        let split = mt::Edge::new_unchecked(&va, &vb, fit_on(g, &face, &pts, size, across)?);
         new_edges.push(split.clone());
         let run = |from: usize, to: usize| -> Vec<mt::Edge> {
             let mut out = Vec::new();
@@ -1091,7 +1214,7 @@ pub(crate) struct Imprint {
     rec: Rebuild,
 }
 
-fn imprint(body: &Body, faces: &[usize], fields: &[Field], size: f64) -> Result<Imprint> {
+fn imprint(body: &Body, faces: &[usize], fields: &[Field], size: f64, across: Option<Round>) -> Result<Imprint> {
     let mut out = Imprint { shells: Vec::new(), origin: Vec::new(), new_edges: Vec::new(), made: HashMap::new(), rec: Rebuild::default() };
     let body_faces: Vec<&mt::Face> = body.solid.face_iter().collect();
     let mut base = 0;
@@ -1110,7 +1233,7 @@ fn imprint(body: &Body, faces: &[usize], fields: &[Field], size: f64) -> Result<
                     continue;
                 }
                 let src = origin.get(k).copied().unwrap_or(0);
-                let (m, pieces) = split_one(&mut fs, k, g, size, &mut out.new_edges, &mut out.rec)?;
+                let (m, pieces) = split_one(&mut fs, k, g, size, across, &mut out.new_edges, &mut out.rec)?;
                 *out.made.entry(src).or_default() += m;
                 // The pieces stand at k..k + pieces; positions after shift.
                 target = target.iter().take(k).copied().chain(std::iter::repeat_n(true, pieces)).chain(target.iter().skip(k + 1).copied()).collect();
@@ -1157,6 +1280,18 @@ pub fn split_faces_with_map(body: &Body, faces: &[usize], tool: &SplitTool) -> R
 
 /// Split where the tool meets the listed faces (missing some is fine; missing all is an error).
 pub(crate) fn split_any(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Imprint)> {
+    split_with(body, faces, tool, None)
+}
+
+/// [`split_any`] of faces on the cylinder `round` by a plane square to its axis, each cut along an
+/// exact arc of its circle (not a curve fitted to the face's mesh), so that it matches another
+/// body's edge on that circle (see [`crate::coplanar::cylinders_imprinted`]). The cylinder is
+/// given, so a round side swept or revolved (or read from STEP) is cut as one extruded is.
+pub(crate) fn split_across(body: &Body, faces: &[usize], plane: Plane, round: Round) -> Result<(Body, Imprint)> {
+    split_with(body, faces, &SplitTool::Plane(plane), Some(round))
+}
+
+fn split_with(body: &Body, faces: &[usize], tool: &SplitTool, across: Option<Round>) -> Result<(Body, Imprint)> {
     body.require_brep("split face")?;
     let size = body.size();
     let fields = fields(tool)?;
@@ -1165,7 +1300,7 @@ pub(crate) fn split_any(body: &Body, faces: &[usize], tool: &SplitTool) -> Resul
         return Err(KernelError::Invalid("no such face".into()));
     }
     guard("split face", || {
-        let mut imp = imprint(body, faces, &fields, size)?;
+        let mut imp = imprint(body, faces, &fields, size, across)?;
         if imp.made.values().all(|m| *m == 0) {
             return Err(KernelError::Invalid("the tool does not cross the selected faces".into()));
         }
@@ -1387,7 +1522,7 @@ pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
     let total = body.solid.face_iter().count();
     let all: Vec<usize> = (0..total).collect();
     guard("split body", || {
-        let imp = imprint(body, &all, &fields, size)?;
+        let imp = imprint(body, &all, &fields, size, None)?;
         let new_edges = imp.new_edges;
         if imp.made.values().all(|m| *m == 0) || new_edges.is_empty() {
             return Ok(vec![crate::boolean_record::operand(body, 0, &crate::record::counts(&[body]))]);
