@@ -6,6 +6,7 @@ use solidcraft_engine::doc::versions::{GraphKind, GraphPoint};
 
 use crate::SolveApp;
 use crate::theme::Tokens;
+use crate::ui_kit::{Container, Surface};
 
 /// Draw the graph and the buttons that create a version, branch, switch or restore.
 pub(super) fn rows(
@@ -344,11 +345,12 @@ pub(crate) fn soften_while_viewing(app: &SolveApp, ui: &mut egui::Ui) {
 pub(crate) fn banner(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(view) = app.session.version_view.clone() else { return };
     let t = Tokens::get();
-    egui::Area::new(egui::Id::new("sc_version_banner"))
+    Container::new(ctx, Surface::Toast)
+        .area(egui::Id::new("sc_version_banner"))
         .order(egui::Order::Foreground)
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, t.space_24 * 4.0))
         .show(ctx, |ui| {
-            egui::Frame::popup(ui.style()).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+            Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = t.space_8;
                     ui.label(crate::i18n::format("ui.versions_viewing", &[("name", view.name.as_str())]));
