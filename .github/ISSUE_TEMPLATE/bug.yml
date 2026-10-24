@@ -6,6 +6,7 @@ body:
     attributes:
       value: |
         Thanks for taking the time to report this! Inside the app, **Report an Issue** fills most of this in for you, with the command, its settings and your environment.
+        Before reporting a boolean or modelling failure, please try to reproduce it on the latest nightly or a build from current `main`, and say which build you used.
   - type: textarea
     id: what
     attributes:
