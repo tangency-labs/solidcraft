@@ -2081,6 +2081,27 @@ fn midplane_asks_for_two_planes_then_builds_the_one_between_them() {
     assert!((pl.origin.z - 10.0).abs() < 1e-6, "{pl:?}");
 }
 
+/// Plane at Angle draws the tilted plane while its dialog is open, when created and when edited,
+/// and redraws it when the angle changes (it used to show only the picked plane and the label).
+#[test]
+fn plane_at_angle_previews_the_tilted_plane_when_edited() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let id = h.app.run("construct.plane.at_angle", json!({"base":"XY","axis":"Y","angle":"45 deg"})).unwrap()["feature"].as_u64().unwrap();
+    h.app.edit_feature(id);
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(d.kind, Kind::AnglePlane { .. }) && d.editing.is_some(), "{d:?}");
+    assert!(d.previews(), "the edited plane is previewed");
+    wait_feature_preview(&mut h);
+    let first = h.app.preview.key;
+    if let Kind::AnglePlane { angle } = &mut h.app.dialog.as_mut().unwrap().kind {
+        *angle = "30 deg".into();
+    }
+    wait_feature_preview(&mut h);
+    assert_ne!(h.app.preview.key, first, "a new angle redraws the preview");
+}
+
 /// #2474, #2494: every construct tool asks for what it needs. Started from the toolbar with
 /// nothing selected, none of them runs its command and reports that `a` (or `face`, `edge`…)
 /// is required; a construct command added later without a dialog fails here too.

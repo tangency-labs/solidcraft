@@ -1005,6 +1005,7 @@ impl Dialog {
                 | Kind::PatternCirc { .. }
                 | Kind::Loft { .. }
                 | Kind::Sweep { .. }
+                | Kind::AnglePlane { .. }
                 | Kind::PathPlane { .. }
                 | Kind::Midplane
                 | Kind::Construct { .. }
@@ -5224,6 +5225,29 @@ mod refused_ok_tests {
         for s in steps {
             h.step(s).unwrap();
         }
+    }
+
+    #[test]
+    fn selected_plane_axis_and_angle_build_a_preview() {
+        let app = SolveApp::new(Session::default(), Default::default());
+        let mut dialog = Dialog::for_command(&app, "construct.plane.at_angle").expect("the command has a dialog");
+        dialog.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+        dialog.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+        if let Kind::AnglePlane { angle } = &mut dialog.kind {
+            *angle = "30 deg".into();
+        }
+
+        assert!(dialog.previews());
+        let commands = preview_commands(&app, &dialog).expect("the selected inputs form a command");
+        assert_eq!(commands.first().map(|(_, params)| params["angle"].as_str()), Some(Some("30 deg")));
+        let preview = crate::preview::compute(
+            &app.session,
+            &commands,
+            crate::preview::Colors { body: [1; 4], added: [2; 4], new_body: [3; 4], removed: [4; 4], edge: [5; 4] },
+        )
+        .expect("the angled plane previews");
+
+        assert!(!preview.scene.xray.is_empty(), "the preview contains the translucent construction plane");
     }
 
     /// A box, and a hole dialog with a position picked on its top.
