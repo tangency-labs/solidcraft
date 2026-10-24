@@ -21,12 +21,13 @@
 //! entity count.
 //!
 //! **Trimmed surface caches.** Reading a file can leave a trimmed surface cache on a face
-//! surface. The port has no object caches, so the shim deletes the cache of every face
-//! surface an op classifies against first: both sides classify through the face's
-//! vertices and loops, and `PointClassify`'s cache branch is not compared.
+//! surface. Existing fixtures clear it. `PointClassify` additionally accepts `cache_mode`
+//! (`absent`, `valid`, `modified`) and `repeats` (default 1). Explicit cached/repeated
+//! cases build real face-owned caches and compare their state before/after every
+//! query, including the classification, without rebuilding between queries.
 //!
 //! **Outputs.** `status` (`0` or the `SmStatus` code), whether the face surface still
-//! has a trimmed surface cache (always `0`), and the classification: class, object kind and export
+//! has a trimmed surface cache, and the classification: class, object kind and export
 //! index, gap, source tolerance, pre-snap parameter, curve and surface parameters and
 //! the parameters-set flag. `CurveOnClassify` compares its status, modified flag and
 //! every interval (range and start/mid/end classifications; the classified line is
@@ -101,10 +102,37 @@ struct Edit {
     value: f64,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CacheMode {
+    #[default]
+    Absent,
+    Valid,
+    Modified,
+}
+
+impl CacheMode {
+    const fn code(self) -> f64 {
+        match self {
+            Self::Absent => 0.0,
+            Self::Valid => 1.0,
+            Self::Modified => 2.0,
+        }
+    }
+}
+
+const fn one() -> usize {
+    1
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum OpIn {
     PointClassify {
+        #[serde(default)]
+        cache_mode: CacheMode,
+        #[serde(default = "one")]
+        repeats: usize,
         face: i64,
         at: At,
         #[serde(default)]
@@ -332,6 +360,8 @@ fn dom_of(m: &Model, f: FaceId, d: Option<[f64; 4]>) -> Result<[f64; 4], Harness
 fn op_args(k: &Kernel, m: &Model, op: &OpIn) -> Result<(Op, Vec<f64>, Vec<FaceId>), HarnessError> {
     match op {
         OpIn::PointClassify {
+            cache_mode,
+            repeats,
             face,
             at,
             src_tol,
@@ -345,7 +375,14 @@ fn op_args(k: &Kernel, m: &Model, op: &OpIn) -> Result<(Op, Vec<f64>, Vec<FaceId
         } => {
             let f = face_of(m, *face)?;
             let uv = point_of(k, m, f, at)?;
-            let mut v = vec![f64::from(f.index()), uv.x, uv.y, *src_tol, flag(*do_bnd), flag(*use_uv)];
+            let mut v = vec![
+                f64::from(f.index()),
+                uv.x,
+                uv.y,
+                *src_tol,
+                flag(*do_bnd),
+                flag(*use_uv),
+            ];
             v.extend([flag(*tgt_only), flag(*has_loops)]);
             let n_loops = m.brep.loops().len();
             let ls: Vec<f64> = loops
@@ -356,7 +393,10 @@ fn op_args(k: &Kernel, m: &Model, op: &OpIn) -> Result<(Op, Vec<f64>, Vec<FaceId
                 .collect();
             v.push(ls.len() as f64);
             v.extend(ls);
-            v.extend([*pc_tol, flag(*uv_ok)]);
+            if !(1..=16).contains(repeats) {
+                return Err(harness("repeats outside 1..=16"));
+            }
+            v.extend([*pc_tol, flag(*uv_ok), cache_mode.code(), *repeats as f64]);
             Ok((Op::PointClassify, v, vec![f]))
         }
         OpIn::ClassifyParam {
@@ -413,6 +453,78 @@ fn op_args(k: &Kernel, m: &Model, op: &OpIn) -> Result<(Op, Vec<f64>, Vec<FaceId
     }
 }
 
+fn prepare_trim_cache(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    mode: CacheMode,
+) -> solidcore::Result<()> {
+    if let Some(surface) = b.face(f)?.surface.as_ref() {
+        surface.delete_trim_cache();
+    }
+    if mode == CacheMode::Absent {
+        return Ok(());
+    }
+    let mut lease = qf::face_surface_cache(k, b, f)?;
+    let built = qf::face_cache_tree(k, b, f, &mut lease.cache);
+    lease.release();
+    built?;
+    if mode == CacheMode::Modified {
+        let key_of = super::boolean_topology_intersector_p1::p9_entity_ref;
+        let mut records = std::collections::BTreeMap::new();
+        let mut attributes = solidcore::geom::attribute::AttributeStore::default();
+        let mut env = solidcore::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key_of,
+        };
+        solidcore::topology::face::p3::notify(
+            b,
+            f,
+            &mut env,
+            None,
+            solidcore::geom::object::NotifyOperation::PreEdit,
+            [Some(key_of(EntityRef::Face(f))), None, None],
+        )?;
+    }
+    Ok(())
+}
+
+fn cache_state(b: &Brep, f: FaceId) -> solidcore::Result<[f64; 5]> {
+    use solidcore::surface::{
+        surface::{p2::TrimCacheSlot, Surface},
+        surface_cache::p1::FaceContainment,
+    };
+    let Some(surface) = b.face(f)?.surface.as_ref() else {
+        return Ok([0.0; 5]);
+    };
+    match surface.take_trim_cache() {
+        TrimCacheSlot::Empty => Ok([0.0; 5]),
+        TrimCacheSlot::CheckedOut => Err(SolidError::invalid_input(
+            "difftest::cache_state",
+            "cache still checked out",
+        )),
+        TrimCacheSlot::Stored(cache) => {
+            let c = cache.base();
+            let containment = match c.face_containment_done {
+                FaceContainment::NotDone => 0.0,
+                FaceContainment::Done => 1.0,
+                FaceContainment::UnderConstruction => 2.0,
+            };
+            let state = [
+                1.0,
+                flag(c.have_t_surface_cache),
+                containment,
+                flag(c.face_was_modified),
+                flag(c.tree().is_some()),
+            ];
+            Surface::store_trim_cache(*cache);
+            Ok(state)
+        }
+    }
+}
+
 /// The C++ point classification block as outputs under `prefix`.
 fn put_pc(o: Output, prefix: &str, pc: &[f64]) -> Output {
     o.values(&format!("{prefix}pc"), pc.to_vec())
@@ -461,6 +573,16 @@ fn cpp(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let body = o.get(1..).ok_or_else(|| harness("empty c++ output"))?;
     match op {
         Op::PointClassify => {
+            if let OpIn::PointClassify {
+                cache_mode,
+                repeats,
+                ..
+            } = &i.op
+            {
+                if *cache_mode != CacheMode::Absent || *repeats != 1 {
+                    return Ok(Output::new().values("cached_pc", body.to_vec()));
+                }
+            }
             let (head, pc) = body.split_at(2.min(body.len()));
             let status = head.first().copied().unwrap_or(-9.0);
             let tsc = head.get(1).copied().unwrap_or(-9.0);
@@ -504,7 +626,11 @@ fn pc_block(pc: &PointClassification<EntityRef>) -> Vec<f64> {
 
 /// The shim's `put_pc` block for a curve classification's point classification: only
 /// faces, edges and vertices have an export index (other objects are `-3, -1`).
-fn cc_pc_block(k: &Kernel, objects: &Objects<'_>, pc: &PointClassification<H>) -> Result<Vec<f64>, HarnessError> {
+fn cc_pc_block(
+    k: &Kernel,
+    objects: &Objects<'_>,
+    pc: &PointClassification<H>,
+) -> Result<Vec<f64>, HarnessError> {
     let (kind, index) = match pc.object() {
         None => (0.0, -1.0),
         Some(H::Face(f)) => (1.0, f64::from(f.index())),
@@ -703,7 +829,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         ];
         return Ok(Output::new().values("proto", out));
     }
-    let m = match model(i)? {
+    let mut m = match model(i)? {
         Ok(m) => m,
         Err(o) => return Ok(o),
     };
@@ -717,6 +843,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     match (&i.op, op) {
         (
             OpIn::PointClassify {
+                cache_mode,
+                repeats,
                 src_tol,
                 do_bnd,
                 use_uv,
@@ -740,28 +868,58 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 .iter()
                 .map(|&l| LoopId::from_index(l as u32))
                 .collect();
-            let mut pc = PointClassification::new(zone_tol3d(&k, *pc_tol));
-            let opts = qf::PointClassifyOptions {
-                src_zone_tol_3d: zone_tol3d(&k, *src_tol),
-                do_boundary_intersections: *do_bnd,
-                use_uv_classification: *use_uv,
-                tgt_loops_only: *tgt_only,
-                tgt_loops: has_loops.then_some(loops.as_slice()),
-                uv_space_okay: *uv_ok,
-                trim_cache: None,
-            };
-            let status = match qf::point_classify(&k, &mut b.clone(), f, uv, &mut pc, opts) {
-                Ok(()) => 0.0,
-                Err(SolidError::Upstream { code, .. }) => f64::from(code),
-                Err(e) => return Ok(rust_err(&e)),
-            };
-            Ok(put_pc(
-                Output::new()
-                    .scalar("status", status)
-                    .scalar("has_trim_cache", 0.0),
-                "",
-                &pc_block(&pc),
-            ))
+            // A plain B-rep clone invokes Surface's copy constructor and clears
+            // its owner, disabling PointClassify's face-owned trim-cache path.
+            let b = &mut m.brep;
+            if let Err(e) = prepare_trim_cache(&k, b, f, *cache_mode) {
+                return Ok(rust_err(&e));
+            }
+            let traced = *cache_mode != CacheMode::Absent || *repeats != 1;
+            let mut trace = Vec::new();
+            let mut last = Output::new();
+            for _ in 0..*repeats {
+                if traced {
+                    trace.extend(cache_state(b, f).map_err(|e| harness(e.to_string()))?);
+                }
+                let has_cache = b
+                    .face(f)
+                    .map_err(|e| harness(e.to_string()))?
+                    .surface
+                    .as_ref()
+                    .is_some_and(solidcore::surface::surface::Surface::has_trim_cache);
+                let mut pc = PointClassification::new(zone_tol3d(&k, *pc_tol));
+                let opts = qf::PointClassifyOptions {
+                    src_zone_tol_3d: zone_tol3d(&k, *src_tol),
+                    do_boundary_intersections: *do_bnd,
+                    use_uv_classification: *use_uv,
+                    tgt_loops_only: *tgt_only,
+                    tgt_loops: has_loops.then_some(loops.as_slice()),
+                    uv_space_okay: *uv_ok,
+                    trim_cache: None,
+                };
+                let status = match qf::point_classify(&k, b, f, uv, &mut pc, opts) {
+                    Ok(()) => 0.0,
+                    Err(SolidError::Upstream { code, .. }) => f64::from(code),
+                    Err(e) => return Ok(rust_err(&e)),
+                };
+                last = put_pc(
+                    Output::new()
+                        .scalar("status", status)
+                        .scalar("has_trim_cache", flag(has_cache)),
+                    "",
+                    &pc_block(&pc),
+                );
+                if traced {
+                    trace.extend([status, flag(has_cache)]);
+                    trace.extend(pc_block(&pc));
+                    trace.extend(cache_state(b, f).map_err(|e| harness(e.to_string()))?);
+                }
+            }
+            Ok(if traced {
+                Output::new().values("cached_pc", trace)
+            } else {
+                last
+            })
         }
         (OpIn::ClassifyParam { tol, .. }, Op::ClassifyParam) => {
             let [f1, f2] = [faces.first(), faces.get(1)].map(Option::<&FaceId>::copied);
@@ -772,7 +930,16 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let uv = Point2::new(a(0), a(1));
             let d1 = Extent2d::from_points(Point2::new(a(4), a(5)), Point2::new(a(6), a(7)));
             let d2 = Extent2d::from_points(Point2::new(a(9), a(10)), Point2::new(a(11), a(12)));
-            match qf::classify_param_on_faces(&k, &mut b.clone(), uv, zone_tol3d(&k, *tol), f1, &d1, f2, &d2) {
+            match qf::classify_param_on_faces(
+                &k,
+                &mut b.clone(),
+                uv,
+                zone_tol3d(&k, *tol),
+                f1,
+                &d1,
+                f2,
+                &d2,
+            ) {
                 Ok(w) => Ok(Output::new().values("which", vec![f64::from(w)])),
                 Err(e) => Ok(rust_err(&e)),
             }
@@ -796,21 +963,28 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let line = match BSplineCurve::create_line_segment(u64::from(*dim), p, q) {
                 Ok(line) => line,
                 Err(SolidError::Upstream { code, .. }) => {
-                    return Ok(Output::new().values("curve_classification", vec![-3.0, f64::from(code)]))
+                    return Ok(
+                        Output::new().values("curve_classification", vec![-3.0, f64::from(code)])
+                    )
                 }
                 Err(e) => return Ok(rust_err(&e)),
             };
             let curve = Curve::from(line);
             let interval = curve.natural_interval();
             let objects = Objects { brep: b, curve };
-            let mut cc: CurveClassification<H> =
-                CurveClassification::with_curve_interval(&k, H::Curve, interval, zone_tol3d(&k, *tol));
-            let (status, modified) =
-                match qf::curve_on_classify(&k, b, f, &objects, *do_pc, &mut cc, *big_gaps, *check3d, true) {
-                    Ok(modified) => (0.0, modified),
-                    Err(SolidError::Upstream { code, .. }) => (f64::from(code), false),
-                    Err(e) => return Ok(rust_err(&e)),
-                };
+            let mut cc: CurveClassification<H> = CurveClassification::with_curve_interval(
+                &k,
+                H::Curve,
+                interval,
+                zone_tol3d(&k, *tol),
+            );
+            let (status, modified) = match qf::curve_on_classify(
+                &k, b, f, &objects, *do_pc, &mut cc, *big_gaps, *check3d, true,
+            ) {
+                Ok(modified) => (0.0, modified),
+                Err(SolidError::Upstream { code, .. }) => (f64::from(code), false),
+                Err(e) => return Ok(rust_err(&e)),
+            };
             let mut o = vec![status, flag(modified), cc.size() as f64];
             for iv in cc.intervals() {
                 o.extend([iv.interval.min(), iv.interval.max()]);
@@ -994,6 +1168,8 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         _ => {
             let tgt_only = rng.chance(0.25);
             OpIn::PointClassify {
+                cache_mode: CacheMode::Absent,
+                repeats: 1,
                 face: rng.below(64) as i64,
                 at: gen_at(rng),
                 src_tol: gen_tol(rng),
@@ -1061,5 +1237,71 @@ impl UnitDiff for Runner {
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         serde_json::to_value(gen_case(rng)).ok()
+    }
+}
+
+#[cfg(test)]
+mod trim_cache_tests {
+    use super::*;
+
+    #[test]
+    fn trim_cache_fixtures_compare_values_and_repeated_state() {
+        let file = crate::case::repo_root().join("fixtures/query.face_p2/trim_cache.json");
+        let fixtures: Value =
+            serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+        for case in fixtures["cases"].as_array().unwrap() {
+            let input: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+            let native = cpp(&Kernel::default(), &input).unwrap();
+            let actual = rust(&input).unwrap();
+            assert!(native.error.is_none(), "{}: {:?}", case["name"], native);
+            assert!(actual.error.is_none(), "{}: {:?}", case["name"], actual);
+            assert!(
+                crate::compare::compare(&native, &actual, &[]).pass(),
+                "{}: native={native:?} actual={actual:?}",
+                case["name"]
+            );
+            let trace = actual.values.get("cached_pc").unwrap();
+            assert_eq!(trace.len(), 44, "{}", case["name"]);
+            assert_eq!(trace[5], 0.0, "first query status: {}", case["name"]);
+            assert_eq!(trace[27], 0.0, "second query status: {}", case["name"]);
+        }
+    }
+
+    #[test]
+    fn valid_trim_cache_fast_path_is_observed() {
+        let mut input: Inputs = serde_json::from_value(serde_json::json!({
+            "brep": {"kind": "face", "surface": {"bspline": {
+                "net": [[[0,0,0,1],[0,3,0,1]], [[5,0,0,1],[5,3,0.001,1]]],
+                "p": 1, "q": 1, "u": [0,0,1,1], "v": [0,0,1,1]}}, "dom": [0,0,1,1]},
+            "edits": [{"kind": 3, "sel": 0, "value": 0}, {"kind": 0, "sel": 0, "value": 0.001}],
+            "op": "point_classify", "face": 0,
+            "at": {"mode": "frac", "a": 0.37, "b": 0.41},
+            "cache_mode": "valid", "repeats": 2, "pc_tol": 0.0002
+        }))
+        .unwrap();
+        let native = cpp(&Kernel::default(), &input).unwrap();
+        let actual = rust(&input).unwrap();
+        assert!(crate::compare::compare(&native, &actual, &[]).pass());
+        let trace = &actual.values["cached_pc"];
+        assert_eq!(&trace[..5], &[1., 1., 1., 0., 1.]);
+        assert_eq!(&trace[17..22], &trace[..5]);
+        assert_eq!(&trace[22..27], &trace[..5]);
+        assert_eq!(trace[7], 102.0);
+        assert_eq!(
+            trace[11], 0.0002,
+            "fast path retains the classification source tolerance"
+        );
+        if let OpIn::PointClassify { cache_mode, .. } = &mut input.op {
+            *cache_mode = CacheMode::Absent;
+        }
+        let uncached = rust(&input).unwrap();
+        assert_eq!(
+            uncached.values["cached_pc"][11], 0.001,
+            "fallback uses the larger face tolerance"
+        );
+        assert!(
+            !crate::compare::compare(&native, &uncached, &[]).pass(),
+            "dropping the prepared cache must be detected"
+        );
     }
 }

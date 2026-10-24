@@ -29,7 +29,7 @@
 //! | [`Op`]            | parameters after the blocks | outputs |
 //! |-------------------|-----------------------------|---------|
 //! | `Export`          |                             | the graph (see [`counts`]) |
-//! | `PointClassify`   | `f u v src_tol do_bnd use_uv tgt_only has_loops n loop* pc_tol uv_ok` | `status has_trim_cache pc` |
+//! | `PointClassify`   | `f u v src_tol do_bnd use_uv tgt_only has_loops n loop* pc_tol uv_ok cache_mode repeats` | `status has_trim_cache pc`; cached/repeated cases wrap each query in five cache flags before/after (present, trimmed, containment, modified, tree) |
 //! | `ClassifyParam`   | `u v tol f1 dom1[4] f2 dom2[4]` | `which` |
 //! | `CurveOnClassify` | `f dim P[3] Q[3] tol do_pc big_gaps check3d uv_ok` | `status modified n (t0 t1 pc pc pc)*`, or `-3 status` when the line could not be made |
 //!
@@ -167,7 +167,10 @@ fn check_points(rd: &mut Reader<'_>, k: usize, planar: bool, what: &str) -> Resu
             return Err(bad(format!("{what}: weight out of range")));
         }
         let z = if z == NOZ { 0.0 } else { z };
-        if [x, y, z].iter().any(|c| !c.is_finite() || c.abs() > MAX_COORD) {
+        if [x, y, z]
+            .iter()
+            .any(|c| !c.is_finite() || c.abs() > MAX_COORD)
+        {
             return Err(bad(format!("{what}: point out of range")));
         }
     }
@@ -244,7 +247,8 @@ fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
         2 => {
             let dom = surface(rd)?;
             let d = rd.finites(4)?;
-            let (Some(&a), Some(&b2), Some(&c), Some(&e)) = (d.first(), d.get(1), d.get(2), d.get(3))
+            let (Some(&a), Some(&b2), Some(&c), Some(&e)) =
+                (d.first(), d.get(1), d.get(2), d.get(3))
             else {
                 return Err(bad("domain too short"));
             };
@@ -285,7 +289,6 @@ pub fn counts(export: &[f64]) -> Option<[usize; 10]> {
     }
     Some(c)
 }
-
 
 /// A tolerance argument: finite, `|t| <= MAX_TOL`.
 fn tol(rd: &mut Reader<'_>) -> Result<f64, FfiError> {
@@ -330,6 +333,11 @@ fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError
             }
             tol(rd)?;
             rd.flag()?;
+            rd.index(2)?;
+            let repeats = rd.index(16)?;
+            if repeats == 0 {
+                return Err(bad("zero point-classification queries"));
+            }
         }
         Op::ClassifyParam => {
             rd.finites(2)?;
