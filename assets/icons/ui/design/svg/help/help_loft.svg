@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Loft: two sections to a solid</title>
+  <path d="M15.2 32.95 L28.4 40.58 L15.2 48.2 L2 40.58 Z" fill="#b9ddf8" stroke="#236ead" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M2 40.58 L10.43 18.56" fill="none" stroke="#6f879c" stroke-width="0.9" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1 2"/>
+  <path d="M15.2 48.2 L15.2 21.31" fill="none" stroke="#6f879c" stroke-width="0.9" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1 2"/>
+  <path d="M28.4 40.58 L19.97 18.56" fill="none" stroke="#6f879c" stroke-width="0.9" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1 2"/>
+  <path d="M15.2 32.95 L15.2 15.8" fill="none" stroke="#6f879c" stroke-width="0.9" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1 2"/>
+  <path d="M10.43 18.56A4.77 2.75 0 1 0 19.97 18.56A4.77 2.75 0 1 0 10.43 18.56Z" fill="#b9ddf8" stroke="#236ead" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M35.6 40.58L48.8 48.2L48.8 21.31A4.77 2.75 0 0 1 44.03 18.56Z" fill="#328bd3" stroke="#236ead" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M48.8 48.2L62 40.58L53.57 18.56A4.77 2.75 0 0 1 48.8 21.31Z" fill="#236ead" stroke="#236ead" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M38.38 33.31 L39.42 34.02 L40.3 34.62 L41.09 35.15 L41.83 35.63 L42.55 36.08 L43.26 36.51 L44 36.92 L44.78 37.33 L45.61 37.76 L46.52 38.21 L47.57 38.72 L48.8 39.32 L50.03 38.72 L51.08 38.21 L51.99 37.76 L52.82 37.33 L53.6 36.92 L54.34 36.51 L55.05 36.08 L55.77 35.63 L56.51 35.15 L57.3 34.62 L58.18 34.02 L59.22 33.31" fill="none" stroke="#b9ddf8" stroke-width="0.8" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M41.16 26.04 L41.71 26.58 L42.22 27.06 L42.72 27.5 L43.23 27.9 L43.76 28.28 L44.33 28.62 L44.93 28.95 L45.58 29.26 L46.28 29.56 L47.04 29.84 L47.87 30.14 L48.8 30.45 L49.73 30.14 L50.56 29.84 L51.32 29.56 L52.02 29.26 L52.67 28.95 L53.27 28.62 L53.84 28.28 L54.37 27.9 L54.88 27.5 L55.38 27.06 L55.89 26.58 L56.44 26.04" fill="none" stroke="#b9ddf8" stroke-width="0.8" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M48.8 48.2 L48.8 21.31" fill="none" stroke="#34465b" stroke-width="0.9" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M35.6 40.58 L48.8 48.2 L62 40.58" fill="none" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M44.03 18.56A4.77 2.75 0 1 0 53.57 18.56A4.77 2.75 0 1 0 44.03 18.56Z" fill="#b9ddf8" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28.9 29.9 L31.8 29.9 L31.8 27.6 L35.4 32 L31.8 36.4 L31.8 34.1 L28.9 34.1 Z" fill="#236ead" stroke="#236ead" stroke-width="0.8" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

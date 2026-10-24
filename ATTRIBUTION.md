@@ -208,6 +208,12 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/icons/ui/design/svg/flat/style.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/flat/undo.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/flat/zoom.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/help/help_combine.svg | SolidCraft contributors | tooltip example illustration (64 grid, before/after of the tool), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/help/help_loft.svg | SolidCraft contributors | tooltip example illustration (64 grid, before/after of the tool), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/help/help_mirror.svg | SolidCraft contributors | tooltip example illustration (64 grid, before/after of the tool), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/help/help_pattern_circular.svg | SolidCraft contributors | tooltip example illustration (64 grid, before/after of the tool), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/help/help_pattern_rectangular.svg | SolidCraft contributors | tooltip example illustration (64 grid, before/after of the tool), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/help/help_sweep.svg | SolidCraft contributors | tooltip example illustration (64 grid, before/after of the tool), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/accessibility.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/activate.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/align.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
