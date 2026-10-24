@@ -59,6 +59,7 @@ pub(crate) mod motion;
 mod parts;
 mod script;
 mod section;
+mod selection;
 pub(crate) use measure_sel::measure_items;
 #[cfg(test)]
 mod kernel_heal_tests;
@@ -290,6 +291,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(browser::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
+    v.extend(selection::COMMANDS.iter());
     v.extend(clipboard::COMMANDS.iter());
     v.extend(sketch_clipboard::COMMANDS.iter());
     v.extend(script::COMMANDS.iter());
