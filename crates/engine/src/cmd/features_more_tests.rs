@@ -1322,6 +1322,24 @@ fn fillet_an_arc_that_runs_into_a_knife_edge_tip() {
     assert!(rel(before - after, 2.0 * removed) < 2e-3, "removed {} vs {}", before - after, 2.0 * removed);
 }
 
+/// #2752: resampling must reuse the rolling-ball centre instead of shifting
+/// it by the radius again (a singular Newton start on this sphere's axis).
+#[test]
+fn fillet_the_rim_of_a_capped_sphere() {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius":2,"body_name":"Ball"}));
+    run(&mut s, "solid.box", json!({"length":6,"width":6,"height":3,"corner":[-3,-3,1],"operation":"cut","targets":["Ball"]}));
+    run(&mut s, "solid.fillet", json!({"edges":[[3.0f64.sqrt(),0,1]],"radius":1}));
+    assert_eq!(s.model.state().bodies.len(), 1);
+    let state = s.model.state();
+    let body = &state.body("Ball").unwrap().body;
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    let pi = std::f64::consts::PI;
+    let want = 7.0 * pi + pi * pi / 2.0;
+    let volume = planned(&s);
+    assert!((volume - want).abs() < 0.01, "volume {volume}, expected {want}");
+}
+
 /// The part's front corner (the front face into the arc) rounded with 2 first, then the bottom
 /// run (front edge, the corner round's arc, the arc) with 2 as well: a round on a round of the
 /// same radius. Along the front edge a straight round; at the corner the ball turns about one
