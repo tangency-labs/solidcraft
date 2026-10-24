@@ -33,6 +33,7 @@ fn case_json(c: &CaseResult) -> Value {
     }
     m.insert("max_rel_err".into(), num(c.diff.max_rel_err));
     m.insert("values_compared".into(), json!(c.diff.values_compared));
+    m.insert("exact_compared".into(), json!(c.diff.exact_compared));
     if !c.diagnostics.is_empty() {
         m.insert("diagnostics".into(), json!(c.diagnostics));
     }
@@ -173,4 +174,42 @@ pub fn summary_line(r: &UnitResult) -> String {
         s.push_str(" (no comparable cases)");
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::case::CaseSource;
+    use crate::compare::compare;
+    use crate::output::Output;
+
+    #[test]
+    fn known_mismatch_reports_distinguish_integer_checks_from_length_only_failures() {
+        for (cpp, rust, expected) in [
+            (Output::new().int("ids", 1), Output::new().int("ids", 2), 1),
+            (
+                Output::new().ints("ids", vec![1, 2]),
+                Output::new().ints("ids", vec![1]),
+                0,
+            ),
+        ] {
+            let case = CaseResult {
+                name: "known".into(),
+                source: CaseSource::Inline,
+                inputs: Value::Null,
+                diff: compare(&cpp, &rust, &[]),
+                harness_error: None,
+                both_errored: false,
+                rejected: None,
+                deferred: None,
+                perturbed: None,
+                diagnostics: std::collections::BTreeMap::new(),
+                known_mismatch: Some("test comparison".into()),
+            };
+            let report = case_json(&case);
+            assert_eq!(report["outcome"], "known_mismatch");
+            assert_eq!(report["values_compared"], 0);
+            assert_eq!(report["exact_compared"], expected);
+        }
+    }
 }
