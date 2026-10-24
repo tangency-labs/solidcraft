@@ -651,6 +651,20 @@ preference_settings! {
     suppress_sketch_snap: ModifierCombo = ModifierCombo::CTRL_ALT, PAGE_SKETCH;
     /// Whether Alt/Option also frees gizmo / canvas manipulator arrows (Primary always does).
     manipulator_free_alt: bool = true, PAGE_SKETCH;
+    /// A shape drawn in a sketch gets all its dimensions at once: the typed values, and every
+    /// other size the shape has at its size as drawn (`sketch.draw.dimensioned` with `as_drawn`).
+    /// Shapes `solidcraft_engine::dimension_roles` doesn't list are drawn as before.
+    sketch_auto_dimensions: bool = false, PAGE_SKETCH => check(
+        "Dimension new shapes",
+        "Each shape you draw gets all its dimensions, at the sizes you drew (typed values win). A size the sketch already sets is left out."
+    );
+    /// With `sketch_auto_dimensions`: new shapes are also placed from the sketch origin until they
+    /// are fully constrained (`sketch.draw.dimensioned` with `locate`). A shape already anchored to
+    /// the origin or to placed geometry gets nothing more.
+    sketch_auto_locate: bool = false, PAGE_SKETCH => check(
+        "Also place them from the origin (fully constrained)",
+        "Each new shape is also dimensioned from the sketch origin until nothing of it is left free. A shape already attached to the origin or to placed geometry gets none."
+    );
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;

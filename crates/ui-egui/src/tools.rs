@@ -454,13 +454,21 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
     app.tool = Some(tool);
 }
 
-/// Geometry and typed constraints are committed atomically, as one undo step.
+/// Geometry and typed constraints are committed atomically, as one undo step. With "Dimension
+/// new shapes" on (Preferences › Sketch), every other size of a shape the engine can dimension
+/// joins them at its size as drawn, and with "Also place them from the origin" the shape is then
+/// placed until fully constrained; the engine's `dimension_roles` decides which shapes those are.
+/// This is the one place drawing tools commit through: the 3D tools (`sketch3d`) take part by
+/// committing here once their creators are listed there.
 pub(crate) fn draw(app: &mut SolveApp, t: &Tool, params: Value) -> Result<Value, String> {
     let dimensions = crate::sketch_dims::dimensions(t);
-    if dimensions.as_object().is_none_or(|values| values.is_empty()) {
+    let as_drawn = app.preferences.sketch_auto_dimensions && solidcraft_engine::dimension_roles(t.cmd).is_some();
+    let locate = as_drawn && app.preferences.sketch_auto_locate;
+    if !as_drawn && dimensions.as_object().is_none_or(|values| values.is_empty()) {
         app.run(t.cmd, params)
     } else {
-        let result = app.run("sketch.draw.dimensioned", json!({"command": t.cmd, "params": params, "dimensions": dimensions}))?;
+        let request = json!({"command": t.cmd, "params": params, "dimensions": dimensions, "as_drawn": as_drawn, "locate": locate});
+        let result = app.run("sketch.draw.dimensioned", request)?;
         // The internal wrapper has no toolbar category; apply the original creator's line
         // type while retaining the draw's undo history, including at the history limit.
         let history = std::mem::take(&mut app.session.undo);

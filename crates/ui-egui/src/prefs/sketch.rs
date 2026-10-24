@@ -9,6 +9,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         if ui_kit::checkbox(ui, crate::i18n::tr_label("Project face edges into new sketches"), &mut auto).changed() {
             let _ = app.run("sketch.auto_project", json!({"value": auto}));
         }
+        let dimension = setting::sketch_auto_dimensions(app, ui);
+        crate::scenario::publish_handle("prefs:sketch_auto_dimensions", dimension.rect.center());
+        ui.add_enabled_ui(app.preferences.sketch_auto_dimensions, |ui| {
+            let locate = setting::sketch_auto_locate(app, ui);
+            crate::scenario::publish_handle("prefs:sketch_auto_locate", locate.rect.center());
+        });
         ui_kit::settings_block_hint(ui, app.tr("prefs.hold_stop_snapping"), app.tr("prefs.snap_drawing_note"), t.space_24 * 8.0 + t.space_8, |ui| {
             let combo = &mut app.preferences.suppress_sketch_snap;
             ui_kit::settings_control_width(ui, t.space_24 * 7.0 + t.space_12, |ui| {

@@ -15,6 +15,7 @@ mod dimensioned;
 mod drag;
 #[path = "sketch_face.rs"]
 pub(super) mod face;
+pub use dimensioned::dimension_roles;
 use dimensioned::draw as draw_dimensioned;
 use drag::drag_entity;
 
@@ -45,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!("points: [[x,y] | \"l1.end\" | {at, ref}…] (x and y each a number or an expression over the design's parameters, \"W / 2\": such a point is fixed where it comes to and follows the parameters; likewise wherever a point argument also takes a point id), closed?: bool, construction?: bool, ids?: [..], infer?: bool (add horizontal/vertical)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.draw.dimensioned", "Draw Dimensioned Sketch Geometry", draw_dimensioned).icon("dimension")
         .enabled(in_sketch)
-        .params(concat!("command: sketch creation command, params: object, dimensions: object of role to numeric or expression value; creates geometry and all driving dimensions atomically in one undo step", created_doc!())),
+        .params(concat!("command: sketch creation command, params: object, dimensions: object of role to numeric or expression value (optional with as_drawn), as_drawn?: bool (also dimension every other role of the shape at its size as drawn; a radius or diameter given takes the place of the other, a circle otherwise takes its diameter, and a size the sketch already determines, such as the angle of a line inferred horizontal, is left out), locate?: bool (then place the shape from the sketch origin until nothing of it is left free: horizontal and vertical distances from the origin to its points, centres first, each kept only where it removes freedom, so a shape anchored to the origin or to placed geometry gets none; a point on an axis goes onto that axis instead of a 0 distance; the reply's located lists them); creates geometry and all driving dimensions atomically in one undo step", created_doc!())),
     CommandSpec::new("sketch.rectangle.two_point", "2-Point Rectangle", rect_two_point)
         .at("SKETCH", "CREATE")
         .icon("rect")
