@@ -37,21 +37,15 @@ async fn recovered(store: &Store, save: &PendingSave) -> Result<Snapshot> {
 }
 
 async fn pending_tip(store: &Store, destination: &Destination) -> Result<Option<PendingSave>> {
-    let pending: Vec<_> = store.pending().await?.into_iter().filter(|save| &save.destination == destination).collect();
-    let parents: BTreeSet<_> = pending.iter().filter_map(|save| save.expected_revision.as_deref()).collect();
-    let tips: Vec<_> = pending.iter().filter(|save| !parents.contains(save.id.as_str())).collect();
-    if tips.len() > 1 {
-        return Err(Error::Conflict);
-    }
-    Ok(tips.first().map(|save| (*save).clone()))
+    PendingSave::local_head(store.pending().await?, destination, None)
 }
 
-async fn open(store: &Store, connection: &Connection, destination: &Destination, job: &Job) -> Result<()> {
+async fn open(store: &Store, connection: &Connection, destination: &Destination, local_revision: Option<&str>, job: &Job) -> Result<()> {
     destination.validate()?;
     if destination.connection != connection.id {
         return Err(storage("repository connection mismatch"));
     }
-    if let Some(save) = pending_tip(store, destination).await? {
+    if let Some(save) = PendingSave::local_head(store.pending().await?, destination, local_revision)? {
         let snapshot = recovered(store, &save).await?;
         check_cancelled(job)?;
         job.update(|status| {
@@ -77,11 +71,12 @@ async fn open(store: &Store, connection: &Connection, destination: &Destination,
     // A local save can have arrived during the download. cache_remote preserves that head;
     // read the selected cache instead of replacing it with our older in-flight response.
     let cached = store.cached(destination).await?.ok_or_else(|| storage("cached design missing"))?;
-    let snapshot = recovered(store, &cached.save).await?;
+    let pending = pending_tip(store, destination).await?;
+    let snapshot = recovered(store, pending.as_ref().unwrap_or(&cached.save)).await?;
     check_cancelled(job)?;
     job.update(|status| {
         status.destination = Some(cached.destination);
-        status.revision = cached.revision;
+        status.revision = pending.map(|save| save.id).or(cached.revision);
     })?;
     job.opened(snapshot)
 }
@@ -112,7 +107,7 @@ async fn synchronize(connection: Connection, store: Store, job: Job, target: Opt
                 status.phase = Phase::Synced;
             });
         }
-        let repository = repository(&connection, &job).await?;
+        let mut remote = None;
         job.update(|status| status.phase = Phase::Syncing)?;
         let mut blocked = BTreeSet::new();
         let mut first_error = None;
@@ -125,16 +120,30 @@ async fn synchronize(connection: Connection, store: Store, job: Job, target: Opt
             }
             let result = async {
                 save.check_connection(&connection)?;
-                let published = repository
-                    .publish_async(
-                        &save,
-                        || recovered(&store, &save),
-                        |bytes| {
-                            check_cancelled(&job)?;
-                            solidcraft_engine::io::cloud::check_document(bytes)
-                        },
-                    )
-                    .await?;
+                let parent = match &save.expected_revision {
+                    Some(id) => store.receipt(id).await?,
+                    None => None,
+                };
+                let published = if let Some(published) = store.receipt(&save.id).await? {
+                    published
+                } else {
+                    if remote.is_none() {
+                        remote = Some(repository(&connection, &job).await?);
+                    }
+                    remote
+                        .as_ref()
+                        .ok_or_else(|| storage("repository unavailable"))?
+                        .publish_with_parent(
+                            &save,
+                            || recovered(&store, &save),
+                            |bytes| {
+                                check_cancelled(&job)?;
+                                solidcraft_engine::io::cloud::check_document(bytes)
+                            },
+                            parent.as_ref(),
+                        )
+                        .await?
+                };
                 // Finish this acknowledgement even if Cancel raced a successful ref update.
                 store.confirm(save.clone(), published.clone()).await?;
                 Ok(published)
@@ -214,6 +223,7 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
         Operation::Test(connection)
         | Operation::List(connection)
         | Operation::Synchronize(connection)
+        | Operation::Thumbnail { connection, .. }
         | Operation::Open { connection, .. }
         | Operation::Save { connection, .. } => connection.clone(),
         _ => return Err(storage("invalid repository operation")),
@@ -245,12 +255,17 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
             job.update(|status| status.phase = Phase::Ready)?;
         }
         Operation::List(connection) => {
-            let mut destinations = BTreeMap::new();
-            for destination in store.cached_destinations().await? {
-                destinations.insert(destination.design_path()?, destination);
-            }
+            let cached = store.cached_entries().await?;
+            let mut pending = Vec::new();
             for save in store.pending().await? {
-                destinations.insert(save.destination.design_path()?, save.destination);
+                if store.receipt(&save.id).await?.is_none() {
+                    pending.push(save);
+                }
+            }
+            let catalog = solidcraft_cloud::stored_designs(cached, pending)?;
+            let mut destinations = BTreeMap::new();
+            for entry in &catalog {
+                destinations.insert(entry.destination.design_path()?, entry.destination.clone());
             }
             match async { repository(&connection, job).await?.list().await }.await {
                 Ok(entries) => {
@@ -264,10 +279,27 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
             check_cancelled(job)?;
             job.update(|status| {
                 status.result = Some(serde_json::json!(destinations.into_values().collect::<Vec<_>>()));
+                status.catalog = catalog;
                 status.phase = Phase::Ready;
             })?;
         }
-        Operation::Open { connection, destination } => open(&store, &connection, &destination, job).await?,
+        Operation::Thumbnail { connection, destination } => {
+            let png = if let Some(save) = pending_tip(&store, &destination).await? {
+                store.thumbnail(&save).await?
+            } else if let Some(entry) = store.cached(&destination).await? {
+                store.thumbnail(&entry.save).await?
+            } else {
+                repository(&connection, job).await?.thumbnail(&destination, solidcraft_engine::io::cloud::check_document).await?
+            };
+            check_cancelled(job)?;
+            job.update(|status| {
+                status.result = Some(solidcraft_cloud::Thumbnail::response(png));
+                status.phase = Phase::Ready;
+            })?;
+        }
+        Operation::Open { connection, destination, local_revision } => {
+            open(&store, &connection, &destination, local_revision.as_deref(), job).await?
+        }
         _ => return Err(storage("invalid repository operation")),
     }
     Ok(())
@@ -297,6 +329,7 @@ impl Host for BrowserHost {
             | Operation::Test(connection)
             | Operation::List(connection)
             | Operation::Synchronize(connection)
+            | Operation::Thumbnail { connection, .. }
             | Operation::Open { connection, .. }
             | Operation::Save { connection, .. } => Some(connection),
         };

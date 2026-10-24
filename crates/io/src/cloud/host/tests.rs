@@ -237,7 +237,8 @@ fn restart_lists_and_opens_latest_offline_capture_without_a_checkout_or_git() {
     let listing = complete(&restarted.submit(Operation::List(connection.clone()), "unavailable-git".into()).unwrap());
     assert_eq!(listing.phase, Phase::Ready);
     assert_eq!(listing.result.unwrap(), serde_json::json!([destination]));
-    let opening = restarted.submit(Operation::Open { connection: connection.clone(), destination }, "unavailable-git".into()).unwrap();
+    let opening =
+        restarted.submit(Operation::Open { connection: connection.clone(), destination, local_revision: None }, "unavailable-git".into()).unwrap();
     assert_eq!(complete(&opening).revision, Some(revision));
     let snapshot = opening.take_opened().unwrap();
     let document = super::super::open_document(&snapshot.manifest, &snapshot.document, |_| panic!("no assets")).unwrap();
@@ -304,7 +305,10 @@ fn confirmed_catalog_survives_lost_checkout_and_old_receipts_cannot_replace_newe
     assert_eq!(status.publications[0].revision, first_record.id);
     assert!(fixture.outbox(&connection).pending().unwrap().is_empty());
     let opening = restarted
-        .submit(Operation::Open { connection: connection.clone(), destination: second_record.destination.clone() }, "unavailable-git".into())
+        .submit(
+            Operation::Open { connection: connection.clone(), destination: second_record.destination.clone(), local_revision: None },
+            "unavailable-git".into(),
+        )
         .unwrap();
     let status = complete(&opening);
     assert_eq!(status.phase, Phase::Ready, "{status:?}");
@@ -348,7 +352,9 @@ fn confirmed_conflict_copies_reopen_at_their_actual_destinations_after_restart()
     assert!(entries.contains(&destination));
     assert!(entries.contains(&publication.destination));
     for (destination, expected) in [(destination, "Original design"), (publication.destination.clone(), "Competing design")] {
-        let opening = restarted.submit(Operation::Open { connection: connection.clone(), destination }, "unavailable-git".into()).unwrap();
+        let opening = restarted
+            .submit(Operation::Open { connection: connection.clone(), destination, local_revision: None }, "unavailable-git".into())
+            .unwrap();
         assert_eq!(complete(&opening).phase, Phase::Ready);
         let snapshot = opening.take_opened().unwrap();
         assert_eq!(super::super::open_document(&snapshot.manifest, &snapshot.document, |_| panic!("no assets")).unwrap().name, expected);
@@ -359,6 +365,115 @@ fn confirmed_conflict_copies_reopen_at_their_actual_destinations_after_restart()
     assert_eq!(status.publications[0].destination, publication.destination);
     assert_eq!(status.publications[0].revision, competing_record.id);
     assert!(fixture.outbox(&connection).pending().unwrap().is_empty());
+}
+
+#[test]
+fn synchronization_pulls_peer_updates_with_an_empty_queue_and_preserves_unrelated_work() {
+    let fixture = Fixture::new();
+    let mut connection = fixture.checkout("pull");
+    let saved_checkout = PathBuf::from(&connection.checkout);
+    let checkout = saved_checkout.as_path();
+    fs::write(checkout.join("notes.txt"), "Original notes\n").unwrap();
+    fs::write(checkout.join("draft.txt"), "Original draft\n").unwrap();
+    Fixture::git(checkout, &["add", "notes.txt", "draft.txt"]);
+    Fixture::git(checkout, &["commit", "-m", "Unrelated documents"]);
+    let bare = fixture.0.join("storage.git");
+    Fixture::git(&fixture.0, &["clone", "--bare", &connection.checkout, bare.to_str().unwrap()]);
+    Fixture::git(checkout, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    connection.remote = "origin".into();
+    connection = GitRepository::open(connection, "").unwrap().verified_connection().unwrap();
+    let first = save(&connection, "parts/bracket", "Original bracket", None);
+    let destination = first.record.destination.clone();
+    let first_id = first.record.id.clone();
+    assert_eq!(
+        published(
+            &fixture
+                .host()
+                .submit(Operation::Save { connection: connection.clone(), save: Box::new(first), synchronize: true }, String::new())
+                .unwrap()
+        )
+        .phase,
+        Phase::Synced
+    );
+    let peer = fixture.0.join("peer");
+    Fixture::git(&fixture.0, &["clone", bare.to_str().unwrap(), peer.to_str().unwrap()]);
+    Fixture::git(&peer, &["config", "user.name", "Peer"]);
+    Fixture::git(&peer, &["config", "user.email", "peer@example.invalid"]);
+    Fixture::git(&peer, &["config", "commit.gpgSign", "false"]);
+    let peer_connection = Connection { checkout: peer.to_string_lossy().into_owned(), ..connection.clone() };
+    let edit = save(&peer_connection, "parts/bracket", "Peer bracket", Some(first_id));
+    let revision = edit.record.id.clone();
+    GitRepository::open(peer_connection, "").unwrap().publish(&edit.record, edit.record.recover(|p| Ok(edit.objects[p].clone())).unwrap()).unwrap();
+    fs::write(checkout.join("notes.txt"), "Staged notes\n").unwrap();
+    Fixture::git(checkout, &["add", "notes.txt"]);
+    fs::write(checkout.join("draft.txt"), "Unstaged draft\n").unwrap();
+    let before = Fixture::git(checkout, &["status", "--porcelain=v1", "-z"]);
+    assert!(fixture.outbox(&connection).pending().unwrap().is_empty());
+    let result = published(&fixture.host().submit(Operation::Synchronize(connection.clone()), String::new()).unwrap());
+    assert_eq!(result.phase, Phase::Synced, "{result:?}");
+    assert!(result.publications.is_empty(), "a download cannot invent a publication");
+    assert_eq!(Fixture::git(checkout, &["status", "--porcelain=v1", "-z"]), before);
+    assert_eq!(fs::read_to_string(checkout.join("notes.txt")).unwrap(), "Staged notes\n");
+    assert_eq!(fs::read_to_string(checkout.join("draft.txt")).unwrap(), "Unstaged draft\n");
+    let opening =
+        fixture.host().submit(Operation::Open { connection: connection.clone(), destination, local_revision: None }, String::new()).unwrap();
+    let status = complete(&opening);
+    assert_eq!(status.phase, Phase::Ready);
+    assert_eq!(status.revision, Some(revision));
+    let snapshot = opening.take_opened().unwrap();
+    assert_eq!(super::super::open_document(&snapshot.manifest, &snapshot.document, |_| panic!("no assets")).unwrap().name, "Peer bracket");
+    let merge_head = checkout.join(".git/MERGE_HEAD");
+    fs::write(&merge_head, Fixture::git(checkout, &["rev-parse", "HEAD"])).unwrap();
+    assert_eq!(published(&fixture.host().submit(Operation::Synchronize(connection), String::new()).unwrap()).phase, Phase::Failed);
+    assert_eq!(Fixture::git(checkout, &["status", "--porcelain=v1", "-z"]), before);
+}
+
+#[test]
+fn offline_children_follow_a_confirmed_conflict_copy_across_restart_without_duplicate_revisions() {
+    let fixture = Fixture::new();
+    let connection = fixture.checkout("lineage");
+    let host = fixture.host();
+    let original = save(&connection, "parts/bracket", "External design", None);
+    let original_destination = original.record.destination.clone();
+    let original_job =
+        host.submit(Operation::Save { connection: connection.clone(), save: Box::new(original), synchronize: true }, String::new()).unwrap();
+    assert_eq!(published(&original_job).phase, Phase::Synced);
+    let first = save(&connection, "parts/bracket", "Offline first", None);
+    let first_id = first.record.id.clone();
+    let child = save(&connection, "parts/bracket", "Offline child", Some(first_id.clone()));
+    let child_record = child.record.clone();
+    let grandchild = save(&connection, "parts/bracket", "Offline latest", Some(child_record.id.clone()));
+    let latest_id = grandchild.record.id.clone();
+    for capture in [first, child, grandchild] {
+        let job =
+            host.submit(Operation::Save { connection: connection.clone(), save: Box::new(capture), synchronize: false }, String::new()).unwrap();
+        assert_eq!(complete(&job).phase, Phase::SavedLocally);
+    }
+    let status = published(&fixture.host().submit(Operation::Synchronize(connection.clone()), String::new()).unwrap());
+    assert_eq!(status.phase, Phase::Synced, "{status:?}");
+    assert_eq!(status.publications.len(), 3);
+    let destination = status.publications[0].destination.clone();
+    assert_ne!(destination, original_destination);
+    assert!(status.publications.iter().all(|p| p.destination == destination && p.conflict));
+    assert_eq!(status.publications[2].revision, latest_id);
+    let repo = GitRepository::open(connection.clone(), "").unwrap();
+    assert_eq!(repo.open_design(&original_destination).unwrap().0.name, "External design");
+    assert_eq!(repo.open_design(&destination).unwrap().0.name, "Offline latest");
+    let outbox = fixture.outbox(&connection);
+    assert!(outbox.pending().unwrap().is_empty());
+    let receipt = outbox.read(&format!("receipts/{}.json", child_record.id)).unwrap();
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&receipt).unwrap()["format"], "solidcraft-native-publication/2");
+    // Queue removal was interrupted after the child receipt. Replay without a checkout;
+    // retain the newer cache instead of rolling it back to that child's document.
+    let replay = save(&connection, "parts/bracket", "Offline child", Some(first_id));
+    outbox.stage(&replay).unwrap();
+    let commits = Fixture::git(Path::new(&connection.checkout), &["rev-list", "--count", "HEAD"]);
+    fs::rename(&connection.checkout, fixture.0.join("disconnected")).unwrap();
+    let status = published(&fixture.host().submit(Operation::Synchronize(connection.clone()), "unavailable-git".into()).unwrap());
+    assert_eq!(status.phase, Phase::Synced, "{status:?}");
+    assert_eq!(status.publications[0].destination, destination);
+    assert_eq!(outbox.cached(&connection, &destination).unwrap().unwrap().revision, Some(latest_id));
+    assert_eq!(Fixture::git(&fixture.0.join("disconnected"), &["rev-list", "--count", "HEAD"]), commits);
 }
 
 #[test]
@@ -373,7 +488,9 @@ fn newer_or_corrupt_checkout_content_never_silently_opens_a_stale_cached_design(
     let path = Path::new(&connection.checkout).join("Robot/parts/bracket/document.json");
     for bytes in [br#"{"format":"solidcraft/4294967295"}"#.as_slice(), b"corrupt document"] {
         fs::write(&path, bytes).unwrap();
-        let opening = host.submit(Operation::Open { connection: connection.clone(), destination: destination.clone() }, String::new()).unwrap();
+        let opening = host
+            .submit(Operation::Open { connection: connection.clone(), destination: destination.clone(), local_revision: None }, String::new())
+            .unwrap();
         let status = complete(&opening);
         assert_eq!(status.phase, Phase::Failed, "{status:?}");
         if bytes.starts_with(b"{") {
@@ -429,7 +546,10 @@ fn competing_offline_captures_remain_available_instead_of_opening_an_arbitrary_t
     let outbox = fixture.outbox(&connection);
     outbox.stage(&first).unwrap();
     outbox.stage(&second).unwrap();
-    let job = fixture.host().submit(Operation::Open { connection, destination }, String::new()).unwrap();
+    let job = fixture
+        .host()
+        .submit(Operation::Open { connection: connection.clone(), destination: destination.clone(), local_revision: None }, String::new())
+        .unwrap();
     let status = complete(&job);
     assert_eq!(status.phase, Phase::Failed);
     assert!(status.message.unwrap().contains("changed elsewhere"));
@@ -437,6 +557,25 @@ fn competing_offline_captures_remain_available_instead_of_opening_an_arbitrary_t
     assert_eq!(outbox.pending().unwrap().len(), 2);
     let _: Snapshot = outbox.recover(&first.record).unwrap();
     outbox.recover(&second.record).unwrap();
+    for (save, name) in [(&first, "Device one"), (&second, "Device two")] {
+        let job = fixture
+            .host()
+            .submit(
+                Operation::Open { connection: connection.clone(), destination: destination.clone(), local_revision: Some(save.record.id.clone()) },
+                "unavailable-git".into(),
+            )
+            .unwrap();
+        let status = complete(&job);
+        assert_eq!(status.phase, Phase::Ready, "{status:?}");
+        assert_eq!(status.revision, Some(save.record.id.clone()));
+        let snapshot = job.take_opened().unwrap();
+        assert_eq!(super::super::open_document(&snapshot.manifest, &snapshot.document, |_| panic!("no assets")).unwrap().name, name);
+    }
+    let job =
+        fixture.host().submit(Operation::Open { connection, destination, local_revision: Some("f".repeat(64)) }, "unavailable-git".into()).unwrap();
+    assert_eq!(complete(&job).phase, Phase::Failed);
+    assert!(job.take_opened().is_err());
+    assert_eq!(outbox.pending().unwrap().len(), 2, "inspection never discards captures");
 }
 
 #[test]
@@ -509,4 +648,136 @@ fn guided_checkout_setup_retries_and_pushes_without_git_identity_configuration()
     let repo = GitRepository::open(Connection { checkout: reopened.to_string_lossy().into_owned(), ..prepared.clone() }, "").unwrap();
     assert_eq!(repo.open_design(&destination).unwrap().0.name, "First cloud save");
     assert_eq!(Fixture::git(Path::new(&prepared.checkout), &["config", "--get", "user.name"]), b"\n");
+}
+
+#[test]
+fn externally_published_checkouts_are_cached_without_receipts_and_survive_lost_checkout() {
+    let fixture = Fixture::new();
+    let connection = fixture.checkout("external");
+    let capture = save(&connection, "parts/bracket", "External bracket", None);
+    let destination = capture.record.destination.clone();
+    let repo = GitRepository::open(connection.clone(), "").unwrap();
+    let publication = repo.publish(&capture.record, capture.record.recover(|p| Ok(capture.objects[p].clone())).unwrap()).unwrap();
+    let before = Fixture::git(Path::new(&connection.checkout), &["rev-parse", "HEAD"]);
+    let manifest_path = Path::new(&connection.checkout).join("Robot/parts/bracket/manifest.json");
+    let manifest = fs::read(&manifest_path).unwrap();
+    let opening = fixture
+        .host()
+        .submit(Operation::Open { connection: connection.clone(), destination: destination.clone(), local_revision: None }, String::new())
+        .unwrap();
+    assert_eq!(complete(&opening).phase, Phase::Ready);
+    assert_eq!(complete(&opening).revision.as_deref(), Some(publication.revision.as_str()));
+    let snapshot = opening.take_opened().unwrap();
+    assert_eq!(super::super::open_document(&snapshot.manifest, &snapshot.document, |_| Err(storage("no assets"))).unwrap().name, "External bracket");
+    assert_eq!(fs::read(&manifest_path).unwrap(), manifest);
+    assert_eq!(Fixture::git(Path::new(&connection.checkout), &["rev-parse", "HEAD"]), before);
+    assert!(fixture.outbox(&connection).pending().unwrap().is_empty());
+    assert!(fixture.outbox(&connection).receipt(&capture.record).unwrap().is_none());
+    fs::remove_dir_all(&connection.checkout).unwrap();
+    let host = fixture.host();
+    let list = complete(&host.submit(Operation::List(connection.clone()), "missing-git-executable".into()).unwrap());
+    assert_eq!(list.phase, Phase::Ready);
+    assert_eq!(list.catalog.len(), 1);
+    assert_eq!(list.catalog[0].phase, Phase::Ready);
+    let opening =
+        host.submit(Operation::Open { connection: connection.clone(), destination, local_revision: None }, "missing-git-executable".into()).unwrap();
+    assert_eq!(complete(&opening).phase, Phase::Ready);
+    let recovered = opening.take_opened().unwrap();
+    assert_eq!(recovered.document, snapshot.document);
+}
+
+#[test]
+fn changed_checkout_is_not_marked_synced_and_cache_failures_never_open_an_older_head() {
+    let fixture = Fixture::new();
+    let connection = fixture.checkout("observed");
+    let capture = save(&connection, "parts/bracket", "Published head", None);
+    let record = capture.record.clone();
+    let destination = record.destination.clone();
+    let host = fixture.host();
+    assert_eq!(
+        published(
+            &host.submit(Operation::Save { connection: connection.clone(), save: Box::new(capture), synchronize: true }, String::new()).unwrap()
+        )
+        .phase,
+        Phase::Synced
+    );
+    let list = complete(&host.submit(Operation::List(connection.clone()), String::new()).unwrap());
+    assert_eq!(list.catalog[0].phase, Phase::Synced);
+    let changed = save(&connection, "parts/bracket", "Changed externally", Some(record.id));
+    GitRepository::open(connection.clone(), "")
+        .unwrap()
+        .publish(&changed.record, changed.record.recover(|p| Ok(changed.objects[p].clone())).unwrap())
+        .unwrap();
+    let list = complete(&host.submit(Operation::List(connection.clone()), String::new()).unwrap());
+    assert_eq!(list.catalog[0].phase, Phase::Ready);
+    let outbox = fixture.outbox(&connection);
+    let held = fs::OpenOptions::new().write(true).create(true).truncate(false).open(outbox.path("catalog.lock").unwrap()).unwrap();
+    held.try_lock().unwrap();
+    let blocked = host
+        .submit(Operation::Open { connection: connection.clone(), destination: destination.clone(), local_revision: None }, String::new())
+        .unwrap();
+    assert_eq!(complete(&blocked).phase, Phase::Failed);
+    assert!(complete(&blocked).message.unwrap().contains("catalog"));
+    assert!(blocked.take_opened().is_err());
+    drop(held);
+    let opening = host
+        .submit(Operation::Open { connection: connection.clone(), destination: destination.clone(), local_revision: None }, String::new())
+        .unwrap();
+    assert_eq!(complete(&opening).phase, Phase::Ready);
+    let latest = opening.take_opened().unwrap();
+    assert_eq!(super::super::open_document(&latest.manifest, &latest.document, |_| Err(storage("no assets"))).unwrap().name, "Changed externally");
+    let cached = outbox.cached(&connection, &destination).unwrap().unwrap();
+    assert!(!cached.confirmed);
+    let cache_path = outbox.path(&format!("cached/{}.json", solidcraft_cloud::digest(&serde_json::to_vec(&destination).unwrap()))).unwrap();
+    let mut future: serde_json::Value = serde_json::from_slice(&fs::read(&cache_path).unwrap()).unwrap();
+    future["format"] = "solidcraft-cache/999".into();
+    let future = serde_json::to_vec(&future).unwrap();
+    fs::write(&cache_path, &future).unwrap();
+    let opening = host.submit(Operation::Open { connection, destination, local_revision: None }, String::new()).unwrap();
+    assert_eq!(complete(&opening).phase, Phase::Failed);
+    assert!(complete(&opening).message.unwrap().contains("Upgrade SolidCraft"));
+    assert_eq!(fs::read(cache_path).unwrap(), future);
+}
+
+#[test]
+fn previews_do_not_read_imports_and_a_missing_preview_does_not_block_opening() {
+    let fixture = Fixture::new();
+    let connection = fixture.connection("preview");
+    let mut doc = solidcraft_doc::Document::new("Preview import");
+    doc.add_feature(
+        solidcraft_doc::FeatureKind::Import {
+            file: "source.step".into(),
+            step: "ISO-10303-21;\nEND-ISO-10303-21;".into(),
+            components: Vec::new(),
+            skip: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    let mut snapshot = super::super::prepare_document(&doc).unwrap();
+    let png = include_bytes!("../../../../../assets/samples/exports/0.png").to_vec();
+    solidcraft_cloud::attach_thumbnail(&mut snapshot, png.clone()).unwrap();
+    let capture = PendingSave::stage(&connection, "Robot", "parts/bracket", None, snapshot).unwrap();
+    let source = capture.record.manifest.assets.values().next().unwrap().chunks.first().unwrap().path().unwrap();
+    let source_bytes = capture.objects[&source].clone();
+    let picture = solidcraft_cloud::Thumbnail::read(&capture.record.manifest).unwrap().unwrap().paths().unwrap().pop().unwrap();
+    let destination = capture.record.destination.clone();
+    let host = fixture.host();
+    assert!(
+        complete(
+            &host.submit(Operation::Save { connection: connection.clone(), save: Box::new(capture), synchronize: false }, String::new()).unwrap()
+        )
+        .saved_locally
+    );
+    let outbox = fixture.outbox(&connection);
+    fs::remove_file(outbox.path(&source).unwrap()).unwrap();
+    let preview =
+        complete(&host.submit(Operation::Thumbnail { connection: connection.clone(), destination: destination.clone() }, String::new()).unwrap());
+    assert_eq!(preview.phase, Phase::Ready);
+    assert_eq!(solidcraft_cloud::Thumbnail::decode_response(&preview.result.unwrap()).unwrap(), Some(png));
+    fs::write(outbox.path(&source).unwrap(), source_bytes).unwrap();
+    fs::remove_file(outbox.path(&picture).unwrap()).unwrap();
+    let opening = host.submit(Operation::Open { connection, destination, local_revision: None }, String::new()).unwrap();
+    assert_eq!(complete(&opening).phase, Phase::Ready);
+    assert_eq!(opening.take_opened().unwrap().manifest.assets.len(), 1);
 }

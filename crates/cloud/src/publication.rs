@@ -25,26 +25,78 @@ pub fn revision(manifest: &Manifest) -> Option<&str> {
     manifest.extra.get("revision").and_then(Value::as_str)
 }
 
+impl Published {
+    /// Only a confirmed captured parent may redirect an offline child. Revision identities
+    /// stay immutable; this mapping belongs to publication, not to the staged document.
+    pub fn target(save: &PendingSave, parent: Option<&Self>) -> Result<Destination> {
+        let Some(parent) = parent else { return Ok(save.destination.clone()) };
+        parent.destination.validate()?;
+        if save.expected_revision.as_deref() != Some(parent.revision.as_str())
+            || parent.destination.connection != save.destination.connection
+            || parent.destination.project != save.destination.project
+            || !matches!(parent.commit.len(), 40 | 64)
+            || !parent.commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(Error::Invalid("publication parent mismatch".into()));
+        }
+        Ok(parent.destination.clone())
+    }
+
+    pub fn validate(&self, save: &PendingSave, parent: Option<&Self>) -> Result<()> {
+        let target = Self::target(save, parent)?;
+        let redirected = target != save.destination;
+        let valid_destination = if self.conflict {
+            (redirected && self.destination == target) || self.destination == conflict_destination(&target, &save.id)?
+        } else {
+            !redirected && self.destination == target
+        };
+        if !valid_destination
+            || self.revision != save.id
+            || !matches!(self.commit.len(), 40 | 64)
+            || !self.commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(Error::Invalid("publication acknowledgement mismatch".into()));
+        }
+        Ok(())
+    }
+}
+
+fn conflict_destination(destination: &Destination, revision: &str) -> Result<Destination> {
+    let mut destination = destination.clone();
+    destination.file = format!("conflicts/{}-{}", destination.file, revision.get(..12).ok_or_else(|| Error::Invalid("short revision".into()))?);
+    destination.validate()?;
+    Ok(destination)
+}
+
 impl Publication {
     /// `existing` is the manifest at the requested destination. Hosts must additionally check
     /// its document schema before writing. Reading this plan never modifies local storage.
     pub fn prepare(save: &PendingSave, snapshot: Snapshot, project_marker: Option<&[u8]>, existing: Option<&[u8]>) -> Result<Self> {
+        Self::prepare_with_parent(save, snapshot, project_marker, existing, None)
+    }
+
+    pub fn prepare_with_parent(
+        save: &PendingSave,
+        snapshot: Snapshot,
+        project_marker: Option<&[u8]>,
+        existing: Option<&[u8]>,
+        parent: Option<&Published>,
+    ) -> Result<Self> {
         PendingSave::read(&serde_json::to_vec(save).map_err(|e| Error::Invalid(e.to_string()))?)?;
         if snapshot.manifest.write()? != save.manifest.write()? {
             return Err(Error::Invalid("snapshot does not match queued save".into()));
         }
         let project = project_marker.map(Project::read).transpose()?;
         let previous = existing.map(Manifest::read).transpose()?;
-        let mut destination = save.destination.clone();
+        let mut destination = Published::target(save, parent)?;
+        let redirected = destination != save.destination;
         let already_published = previous.as_ref().is_some_and(|manifest| revision(manifest) == Some(save.id.as_str()));
         let actual = previous.as_ref().and_then(revision);
         let conflict = !already_published && actual != save.expected_revision.as_deref();
         // An existing pre-revision snapshot is also a competing design, never an empty slot.
         let conflict = conflict || (!already_published && previous.is_some() && actual.is_none());
         if conflict {
-            destination.file =
-                format!("conflicts/{}-{}", destination.file, save.id.get(..12).ok_or_else(|| Error::Invalid("short revision".into()))?);
-            destination.validate()?;
+            destination = conflict_destination(&destination, &save.id)?;
         }
         let mut files = BTreeMap::new();
         if !already_published {
@@ -86,7 +138,7 @@ impl Publication {
                 files.insert(format!("{}/{PROJECT_MARKER}", destination.project), Project::new(name.into())?.write()?);
             }
         }
-        Ok(Self { destination, files, conflict, already_published })
+        Ok(Self { destination, files, conflict: conflict || redirected, already_published })
     }
 }
 

@@ -1,5 +1,5 @@
-//! GitHub Git Database adapter. The application supplies HTTP and credentials; there is no
-//! authentication relay. Octocrab owns the GitHub protocol and typed models. This adapter
+//! GitHub Git Database adapter. The application supplies HTTP and credentials;
+//! Octocrab owns the GitHub protocol and typed models. This adapter
 //! applies SolidCraft project, compatibility and publication policies to its Git Database API.
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -198,7 +198,7 @@ impl GitHub {
         Ok(designs)
     }
 
-    pub async fn open(&self, destination: &Destination, check_document: impl Fn(&[u8]) -> Result<()>) -> Result<Snapshot> {
+    async fn head(&self, destination: &Destination, check_document: impl Fn(&[u8]) -> Result<()>) -> Result<(Tree, Manifest, Vec<u8>)> {
         destination.validate()?;
         if destination.connection != self.connection {
             return Err(invalid("repository connection mismatch"));
@@ -218,6 +218,32 @@ impl GitHub {
         let document =
             self.read(&tree, &format!("{prefix}/document.json"), crate::MAX_MANIFEST_BYTES).await?.ok_or_else(|| invalid("document missing"))?;
         check_document(&document)?;
+        if crate::digest(&document) != manifest.document_hash {
+            return Err(invalid("document hash mismatch"));
+        }
+        Ok((tree, manifest, document))
+    }
+
+    async fn preview_objects(&self, tree: &Tree, destination: &Destination, manifest: &Manifest) -> Result<BTreeMap<String, Vec<u8>>> {
+        let mut bytes = BTreeMap::new();
+        if let Some(thumbnail) = crate::Thumbnail::read(manifest)? {
+            for path in thumbnail.paths()? {
+                if let Ok(Some(value)) = self.read(tree, &format!("{}/{path}", destination.project), crate::MAX_THUMBNAIL_BYTES).await {
+                    bytes.insert(path, value);
+                }
+            }
+        }
+        crate::Thumbnail::objects(manifest, |path| bytes.get(path).cloned().ok_or_else(|| storage("preview unavailable")))
+    }
+
+    pub async fn thumbnail(&self, destination: &Destination, check_document: impl Fn(&[u8]) -> Result<()>) -> Result<Option<Vec<u8>>> {
+        let (tree, manifest, _) = self.head(destination, check_document).await?;
+        let objects = self.preview_objects(&tree, destination, &manifest).await?;
+        crate::Thumbnail::png(&manifest, |path| objects.get(path).cloned().ok_or_else(|| storage("preview unavailable")))
+    }
+
+    pub async fn open(&self, destination: &Destination, check_document: impl Fn(&[u8]) -> Result<()>) -> Result<Snapshot> {
+        let (tree, manifest, document) = self.head(destination, check_document).await?;
         let mut objects = BTreeMap::new();
         for asset in manifest.assets.values() {
             for chunk in &asset.chunks {
@@ -232,6 +258,7 @@ impl GitHub {
             }
         }
         Snapshot::hydrate(&manifest, &document, |path| objects.get(path).cloned().ok_or_else(|| invalid("asset chunk missing")))?;
+        objects.extend(self.preview_objects(&tree, destination, &manifest).await?);
         Ok(Snapshot { manifest, document, objects })
     }
 
@@ -252,16 +279,27 @@ impl GitHub {
         snapshot: impl Fn() -> F,
         check_document: impl Fn(&[u8]) -> Result<()>,
     ) -> Result<Published> {
+        self.publish_with_parent(save, snapshot, check_document, None).await
+    }
+
+    pub async fn publish_with_parent<F: std::future::Future<Output = Result<Snapshot>>>(
+        &self,
+        save: &PendingSave,
+        snapshot: impl Fn() -> F,
+        check_document: impl Fn(&[u8]) -> Result<()>,
+        parent: Option<&Published>,
+    ) -> Result<Published> {
         save.check_connection(&self.endpoint)?;
         if save.destination.connection != self.connection {
             return Err(invalid("repository connection mismatch"));
         }
+        let target = Published::target(save, parent)?;
         for _ in 0..3 {
             let snapshot = snapshot().await?;
             check_document(&snapshot.document)?;
             let tree = self.tree().await?;
             let marker = self.read(&tree, &format!("{}/{PROJECT_MARKER}", save.destination.project), crate::MAX_MANIFEST_BYTES).await?;
-            let prefix = save.destination.design_path()?;
+            let prefix = target.design_path()?;
             let existing = self.read(&tree, &format!("{prefix}/manifest.json"), crate::MAX_MANIFEST_BYTES).await?;
             if let Some(bytes) = &existing {
                 Manifest::read(bytes)?;
@@ -269,11 +307,16 @@ impl GitHub {
             if let Some(document) = self.read(&tree, &format!("{prefix}/document.json"), crate::MAX_MANIFEST_BYTES).await? {
                 check_document(&document)?;
             }
-            let publication = Publication::prepare(save, snapshot, marker.as_deref(), existing.as_deref())?;
+            let publication = Publication::prepare_with_parent(save, snapshot, marker.as_deref(), existing.as_deref(), parent)?;
             if publication.already_published {
-                return Ok(Published { destination: publication.destination, revision: save.id.clone(), commit: tree.commit, conflict: false });
+                return Ok(Published {
+                    destination: publication.destination,
+                    revision: save.id.clone(),
+                    commit: tree.commit,
+                    conflict: publication.conflict,
+                });
             }
-            if publication.conflict {
+            if publication.destination != target {
                 let path = format!("{}/manifest.json", publication.destination.design_path()?);
                 if let Some(bytes) = self.read(&tree, &path, crate::MAX_MANIFEST_BYTES).await? {
                     let previous = Manifest::read(&bytes)?;

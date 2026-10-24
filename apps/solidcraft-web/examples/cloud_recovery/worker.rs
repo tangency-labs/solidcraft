@@ -19,7 +19,7 @@ fn require(condition: bool, message: &str) -> Result<()> {
     if condition { Ok(()) } else { Err(Error::Storage(format!("browser worker test: {message}"))) }
 }
 
-async fn complete(job: &Job) -> Result<JobStatus> {
+pub(super) async fn complete(job: &Job) -> Result<JobStatus> {
     for _ in 0..1000 {
         let status = job.status()?;
         if !matches!(status.phase, Phase::Working | Phase::Syncing) {
@@ -50,6 +50,34 @@ pub async fn phase(name: &str, identity: String) -> Result<Value> {
         Connection { id: identity.clone(), repository: "fixture/offline".into(), credential: format!("cloud:{identity}"), ..Default::default() };
     let destination = Destination { connection: identity.clone(), project: "Robot".into(), file: "parts/bracket".into() };
     match name {
+        "worker-competing-write" => {
+            let store = Store::open(connection.clone()).await?;
+            for name in ["Tab one", "Tab two"] {
+                let snapshot = solidcraft_engine::io::cloud::prepare_document(&solidcraft_engine::doc::Document::new(name))?;
+                store.stage(PendingSave::stage(&connection, &destination.project, &destination.file, None, snapshot)?).await?;
+            }
+            require(store.pending().await?.len() == 2, "competing tab edits remain queued")?;
+            Ok(json!({"phase":name}))
+        }
+        "worker-competing-read" => {
+            let store = Store::open(connection.clone()).await?;
+            let pending = store.pending().await?;
+            let default =
+                operation(Operation::Open { connection: connection.clone(), destination: destination.clone(), local_revision: None }).await?;
+            require(default.phase == Phase::Failed, "ambiguous opening requires a choice")?;
+            for save in &pending {
+                let job = BrowserHost.submit(
+                    Operation::Open { connection: connection.clone(), destination: destination.clone(), local_revision: Some(save.id.clone()) },
+                    String::new(),
+                )?;
+                let status = complete(&job).await?;
+                require(status.phase == Phase::Ready && status.revision.as_ref() == Some(&save.id), "explicit revision opened offline")?;
+                require(job.take_opened()?.document == store.recover(save).await?.document, "exact selected document restored")?;
+            }
+            let stale = operation(Operation::Open { connection, destination, local_revision: Some("f".repeat(64)) }).await?;
+            require(stale.phase == Phase::Failed && store.pending().await?.len() == 2, "stale choice cannot substitute or discard a capture")?;
+            Ok(json!({"phase":name}))
+        }
         "worker-future-document" => {
             let snapshot = solidcraft_cloud::Snapshot::prepare(
                 br#"{"format":"solidcraft/4294967295"}"#.to_vec(),
@@ -77,7 +105,8 @@ pub async fn phase(name: &str, identity: String) -> Result<Value> {
                     .map_err(|_| Error::Storage("fixture directory invalid".into()))?;
             }
             JsFuture::from(directory.remove_entry(name)).await.map_err(|_| Error::Storage("fixture removal failed".into()))?;
-            for request in [Operation::Open { connection: connection.clone(), destination }, Operation::Synchronize(connection)] {
+            for request in [Operation::Open { connection: connection.clone(), destination, local_revision: None }, Operation::Synchronize(connection)]
+            {
                 let status = operation(request).await?;
                 require(
                     status.phase == Phase::Failed && status.message.as_deref().is_some_and(|message| message.contains("Upgrade SolidCraft")),
@@ -147,7 +176,7 @@ pub async fn phase(name: &str, identity: String) -> Result<Value> {
                 "credentials never enter status/errors",
             )?;
             require(Store::open(connection.clone()).await?.pending().await?.len() == 1, "failed sync retained the capture")?;
-            open_and_list(connection, destination).await?;
+            open_and_list(connection, destination, Phase::SavedLocally).await?;
             Ok(json!({"phase":name,"connections":settings.connections.len(),"offline_open":true}))
         }
         "worker-confirm" => {
@@ -160,7 +189,7 @@ pub async fn phase(name: &str, identity: String) -> Result<Value> {
         }
         "worker-cached-read" => {
             require(Store::open(connection.clone()).await?.pending().await?.is_empty(), "receipt survived restart")?;
-            open_and_list(connection.clone(), destination).await?;
+            open_and_list(connection.clone(), destination, Phase::Synced).await?;
             require(operation(Operation::Synchronize(connection)).await?.phase == Phase::Synced, "empty queue needs no connectivity")?;
             Ok(json!({"phase":name,"cached_open":true}))
         }
@@ -181,10 +210,14 @@ pub async fn phase(name: &str, identity: String) -> Result<Value> {
     }
 }
 
-async fn open_and_list(connection: Connection, destination: Destination) -> Result<()> {
+async fn open_and_list(connection: Connection, destination: Destination, expected: Phase) -> Result<()> {
     let listed = operation(Operation::List(connection.clone())).await?;
     require(listed.phase == Phase::Ready && listed.result == Some(json!([destination])), "offline listing includes the cached design")?;
-    let opening = BrowserHost.submit(Operation::Open { connection, destination: destination.clone() }, String::new())?;
+    require(
+        listed.catalog.len() == 1 && listed.catalog.first().is_some_and(|entry| entry.phase == expected),
+        "durable listing status survived restart",
+    )?;
+    let opening = BrowserHost.submit(Operation::Open { connection, destination: destination.clone(), local_revision: None }, String::new())?;
     let status = complete(&opening).await?;
     require(status.phase == Phase::Ready && status.destination == Some(destination), "offline opening completed")?;
     let snapshot = opening.take_opened()?;

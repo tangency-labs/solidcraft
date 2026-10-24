@@ -237,6 +237,65 @@ fn publication_reuses_assets_preserves_other_files_and_retries_without_a_second_
 }
 
 #[test]
+fn offline_children_update_the_parents_conflict_copy_and_retries_do_not_commit_again() {
+    run_test(async {
+        let repository = repository();
+        let (api, connection) = adapter(repository.clone());
+        let original = stage(&connection, b"external", None);
+        let original_publication = api.publish(&original.record, || recover(&original), |_| Ok(())).await.unwrap();
+        let parent = stage(&connection, b"offline first", None);
+        let published = api.publish(&parent.record, || recover(&parent), |_| Ok(())).await.unwrap();
+        assert!(published.conflict);
+        let child = stage(&connection, b"offline next", Some(parent.record.id.clone()));
+        let child_publication =
+            api.publish_with_parent(&child.record, || std::future::ready(recover(&child)), |_| Ok(()), Some(&published)).await.unwrap();
+        child_publication.validate(&child.record, Some(&published)).unwrap();
+        assert_eq!(child_publication.destination, published.destination);
+        assert!(child_publication.conflict);
+        assert_eq!(api.open(&original_publication.destination, |_| Ok(())).await.unwrap().document, b"external");
+        assert_eq!(api.open(&published.destination, |_| Ok(())).await.unwrap().document, b"offline next");
+        let commits = repository.lock().unwrap().commits;
+        let retry = api.publish_with_parent(&child.record, || std::future::ready(recover(&child)), |_| Ok(()), Some(&published)).await.unwrap();
+        assert_eq!(retry.destination, child_publication.destination);
+        assert_eq!(repository.lock().unwrap().commits, commits);
+        let mut wrong = published;
+        wrong.destination.project = "Other".into();
+        assert!(matches!(
+            api.publish_with_parent(&child.record, || std::future::ready(recover(&child)), |_| Ok(()), Some(&wrong)).await,
+            Err(Error::Invalid(_))
+        ));
+    });
+}
+
+#[test]
+fn previews_fetch_only_the_image_and_optional_corruption_does_not_block_opening() {
+    run_test(async {
+        let repository = repository();
+        let (api, connection) = adapter(repository.clone());
+        let mut snapshot = Snapshot::prepare(b"{}".to_vec(), BTreeMap::from([("blobs/source.step".into(), vec![42; 512 << 10])])).unwrap();
+        let png = include_bytes!("../../../../assets/samples/exports/0.png").to_vec();
+        crate::attach_thumbnail(&mut snapshot, png.clone()).unwrap();
+        let preview = crate::Thumbnail::read(&snapshot.manifest).unwrap().unwrap().paths().unwrap().pop().unwrap();
+        let source = snapshot.manifest.assets.values().next().unwrap().chunks.first().unwrap().path().unwrap();
+        let save = PendingSave::stage(&connection, "Robot", "parts/bracket", None, snapshot).unwrap();
+        let published = api.publish(&save.record, || recover(&save), |_| Ok(())).await.unwrap();
+        let bytes = repository.lock().unwrap().files.remove(&format!("Robot/{source}")).unwrap();
+        repository.lock().unwrap().requests.clear();
+        assert_eq!(api.thumbnail(&published.destination, |_| Ok(())).await.unwrap(), Some(png));
+        let requested = repository.lock().unwrap().requests.clone();
+        assert_eq!(requested.iter().filter(|(method, path, _)| method == "GET" && path.contains("/git/blobs/")).count(), 4);
+        {
+            let mut repo = repository.lock().unwrap();
+            repo.files.insert(format!("Robot/{source}"), bytes);
+            repo.files.insert(format!("Robot/{preview}"), b"damaged optional image".to_vec());
+        }
+        let reopened = api.open(&published.destination, |_| Ok(())).await.unwrap();
+        assert_eq!(reopened.document, b"{}");
+        assert!(crate::Thumbnail::png(&reopened.manifest, |p| reopened.objects.get(p).cloned().ok_or_else(|| storage("missing"))).unwrap().is_none());
+    });
+}
+
+#[test]
 fn future_formats_and_symlinks_are_rejected_before_any_remote_write() {
     run_test(async {
         for symbolic_link in [false, true] {
