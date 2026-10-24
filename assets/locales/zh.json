@@ -866,6 +866,7 @@
   "cmd.sketch_drag": "拖动草图几何",
   "cmd.sketch_drag_end": "结束草图拖动",
   "cmd.sketch_draw_dimensioned": "绘制带尺寸的草图图元",
+  "cmd.sketch_drawing_bounds": "图纸尺寸",
   "cmd.sketch_edit": "编辑草图",
   "cmd.sketch_edit_text": "编辑文字",
   "cmd.sketch_export_dxf": "另存为 DXF",

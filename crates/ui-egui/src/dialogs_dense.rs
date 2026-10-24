@@ -17,6 +17,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::PartSize(_) => Some("parts.resize"),
         Kind::SaveMesh(_) => Some("file.save_mesh"),
         Kind::ViewDxf { .. } => Some("file.export_view_dxf"),
+        Kind::InsertDrawing(p) => Some(if p.command.ends_with("dxf") { "sketch.insert_dxf" } else { "sketch.insert_svg" }),
         Kind::Sketch => Some("sketch.create"),
         Kind::SketchModify(k) => Some(crate::sketch_modify_ui::command(k)),
         Kind::Text(_) => Some("sketch.edit_text"),
@@ -201,6 +202,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::PartSize(k) => enter |= crate::dialogs_part_size::rows(app, ui, k),
         Kind::SaveMesh(k) => enter |= crate::dialogs_save_mesh::rows(app, ui, k),
         Kind::ViewDxf { dashed, tolerance } => crate::dialogs_view_dxf::rows(app, ui, dashed, tolerance),
+        Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
         Kind::Sketch => {
             if d.error.is_some() && matches!(d.inputs.first().and_then(|i| i.items.first()), Some(Sel::Face { .. })) {
                 ui_kit::text(

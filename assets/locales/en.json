@@ -866,6 +866,7 @@
   "cmd.sketch_drag": "Drag Sketch Geometry",
   "cmd.sketch_drag_end": "End Sketch Drag",
   "cmd.sketch_draw_dimensioned": "Draw Dimensioned Sketch Geometry",
+  "cmd.sketch_drawing_bounds": "Drawing Size",
   "cmd.sketch_edit": "Edit Sketch",
   "cmd.sketch_edit_text": "Edit Text",
   "cmd.sketch_export_dxf": "Save As DXF",

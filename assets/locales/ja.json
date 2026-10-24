@@ -866,6 +866,7 @@
   "cmd.sketch_drag": "スケッチ ジオメトリをドラッグ",
   "cmd.sketch_drag_end": "スケッチのドラッグを終了",
   "cmd.sketch_draw_dimensioned": "寸法付きスケッチ ジオメトリを描画",
+  "cmd.sketch_drawing_bounds": "図面のサイズ",
   "cmd.sketch_edit": "スケッチを編集",
   "cmd.sketch_edit_text": "テキストを編集",
   "cmd.sketch_export_dxf": "DXF として保存",

@@ -394,6 +394,8 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
                 | "sketch.chamfer.equal_distance"
                 | "sketch.chamfer.two_distance"
                 | "sketch.chamfer.distance_angle"
+                | "sketch.insert_svg"
+                | "sketch.insert_dxf"
         ) || command == "construct.plane.along_path"
             || params.get("command").and_then(Value::as_str) == Some("construct.plane.along_path")
     }) {
@@ -801,7 +803,11 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     if app.preview.rolled_back {
         return;
     }
-    if !app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_)) && d.previews()) {
+    if !app
+        .dialog
+        .as_ref()
+        .is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_) | crate::dialogs::Kind::InsertDrawing(_)) && d.previews())
+    {
         return;
     }
     let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
