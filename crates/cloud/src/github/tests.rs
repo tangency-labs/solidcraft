@@ -19,6 +19,12 @@ struct Repository {
     commits: usize,
     requests: Vec<(String, String, Value)>,
     compete_once: bool,
+    empty: bool,
+    readonly: bool,
+    denied: bool,
+    initialized: bool,
+    write_denied: bool,
+    automatic: bool,
 }
 
 impl Repository {
@@ -35,7 +41,53 @@ impl Repository {
 
     fn respond(&mut self, method: &str, path: &str, body: Value) -> (u16, Value) {
         self.requests.push((method.into(), path.into(), body.clone()));
+        if method == "GET" && path == "/user" {
+            if self.denied {
+                return (401, json!({"message":"denied","documentation_url":URL}));
+            }
+            let mut account = json!({"login":"owner","id":1,"node_id":"user","gravatar_id":"","type":"User","site_admin":false});
+            for key in [
+                "avatar_url",
+                "url",
+                "html_url",
+                "followers_url",
+                "following_url",
+                "gists_url",
+                "starred_url",
+                "subscriptions_url",
+                "organizations_url",
+                "repos_url",
+                "events_url",
+                "received_events_url",
+            ] {
+                account[key] = json!(URL);
+            }
+            return (200, account);
+        }
+        if method == "GET" && (path == "/repos/owner/designs" || (self.automatic && path == "/repos/owner/solidcraft-designs")) {
+            if self.denied {
+                return (403, json!({"message":"denied","documentation_url":URL}));
+            }
+            return (
+                200,
+                json!({"id":1,"name":"designs","full_name":if self.automatic {"owner/solidcraft-designs"} else {"owner/designs"},"url":URL,"default_branch":"main",
+                "size":if self.empty {0} else {1},"permissions":{"push":!self.readonly,"pull":true},"private":true}),
+            );
+        }
+        if method == "PUT" && path.ends_with("/contents/README.md") {
+            assert!(self.empty && !self.initialized);
+            assert_eq!(body["branch"], "main");
+            assert!(body.get("sha").is_none(), "setup cannot overwrite an existing file");
+            self.initialized = true;
+            return (
+                201,
+                json!({"content":{"name":"README.md","path":"README.md","sha":"a".repeat(40),"size":1,"url":URL,"type":"file","_links":{"self":URL}},"commit":{}}),
+            );
+        }
         if method == "GET" && path.contains("/git/ref/") {
+            if self.empty && !self.initialized {
+                return (409, json!({"message":"empty repository","documentation_url":URL}));
+            }
             return (200, self.reference());
         }
         if method == "GET" && path.contains("/git/commits/") {
@@ -79,6 +131,9 @@ impl Repository {
             return (201, self.commit(&format!("{:040x}", self.commits)));
         }
         if method == "PATCH" && path.contains("/git/refs/") {
+            if self.write_denied {
+                return (403, json!({"message":"Contents permission denied","documentation_url":URL}));
+            }
             assert_eq!(body["force"], false);
             if self.compete_once {
                 self.compete_once = false;
@@ -88,6 +143,9 @@ impl Repository {
                 self.files.insert(path, serde_json::to_vec(&manifest).unwrap());
                 self.commit = "f".repeat(40);
                 return (422, json!({"message":"Update is not a fast forward","documentation_url":URL}));
+            }
+            if body["sha"].as_str() == Some(self.commit.as_str()) {
+                return (200, self.reference());
             }
             self.files = self.pending.clone();
             self.commit = body["sha"].as_str().unwrap().into();
@@ -234,4 +292,76 @@ fn a_corrupt_existing_object_is_never_reused_as_a_successful_save() {
         assert!(matches!(api.publish(&save.record, || recover(&save), |_| Ok(())).await, Err(Error::Invalid(_))));
         assert!(repository.lock().unwrap().requests.iter().all(|(_, path, _)| !path.ends_with("/git/refs/heads/main")));
     });
+}
+
+#[test]
+fn guided_setup_discovers_the_account_and_default_repository_only_without_an_override() {
+    run_test(async {
+        let repository = repository();
+        repository.lock().unwrap().automatic = true;
+        let (api, _) = adapter(repository.clone());
+        let mut automatic = crate::setup::github_connection("").unwrap();
+        automatic.credential = "local-credential-reference".into();
+        let prepared = prepare(api.client.clone(), automatic).await.unwrap();
+        assert_eq!(prepared.repository, "owner/solidcraft-designs");
+        assert_eq!(prepared.id, crate::setup::github_connection("owner/solidcraft-designs").unwrap().id);
+        assert_eq!(prepared.credential, "local-credential-reference");
+        prepare(api.client.clone(), prepared).await.unwrap();
+        assert_eq!(repository.lock().unwrap().requests.iter().filter(|(_, path, _)| path == "/user").count(), 1);
+        repository.lock().unwrap().denied = true;
+        let before = repository.lock().unwrap().requests.len();
+        assert!(prepare(api.client.clone(), crate::setup::github_connection("").unwrap()).await.is_err());
+        assert_eq!(repository.lock().unwrap().requests.len(), before + 1, "authentication failure cannot guess another account");
+    });
+}
+
+#[test]
+fn guided_setup_initializes_empty_repositories_once_and_preserves_existing_content() {
+    tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(tokio::task::LocalSet::new().run_until(async {
+        for empty in [false, true] {
+            let repository = repository();
+            repository.lock().unwrap().empty = empty;
+            let (adapter, connection) = adapter(repository.clone());
+            let prepared = prepare(adapter.client.clone(), connection).await.unwrap();
+            assert_eq!(prepared.remote, "https://github.com/owner/designs.git");
+            assert_eq!(prepared.branch, "main");
+            prepare(adapter.client.clone(), prepared).await.unwrap();
+            let repo = repository.lock().unwrap();
+            assert_eq!(repo.requests.iter().filter(|(method, _, _)| method == "PUT").count(), usize::from(empty));
+            assert_eq!(repo.requests.iter().filter(|(method, _, _)| method == "PATCH").count(), 2);
+        }
+    }));
+}
+
+#[test]
+fn guided_setup_reports_denied_or_readonly_repositories_without_writes() {
+    tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(tokio::task::LocalSet::new().run_until(async {
+        for denied in [false, true] {
+            let repository = repository();
+            {
+                let mut repo = repository.lock().unwrap();
+                repo.denied = denied;
+                repo.readonly = !denied;
+            }
+            let (adapter, connection) = adapter(repository.clone());
+            let message = prepare(adapter.client.clone(), connection).await.err().unwrap().to_string();
+            assert!(message.contains(if denied { "access denied" } else { "does not allow pushes" }));
+            assert!(repository.lock().unwrap().requests.iter().all(|(method, _, _)| method == "GET"));
+        }
+    }));
+}
+
+#[test]
+fn setup_checks_token_write_permission_even_when_account_can_push() {
+    tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(tokio::task::LocalSet::new().run_until(async {
+        let repository = repository();
+        repository.lock().unwrap().write_denied = true;
+        let (adapter, connection) = adapter(repository.clone());
+        assert!(prepare(adapter.client.clone(), connection).await.err().unwrap().to_string().contains("access denied"));
+        let state = repository.lock().unwrap();
+        assert_eq!(state.commits, 0);
+        let (_, _, probe) = state.requests.iter().find(|(method, _, _)| method == "PATCH").unwrap();
+        assert_eq!(probe["force"], false);
+        assert_eq!(probe["sha"], state.commit);
+    }));
 }

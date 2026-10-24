@@ -28,6 +28,11 @@ fn kit_table_limit(id: egui::Id) -> Option<f32> {
     if id == egui::Id::new("sc_prefs") {
         return Some(solidcraft_ui_egui::theme::Tokens::get().form_card_width * 10.0 / 3.0);
     }
+    for (name, cards) in [("cloud_setup", 2.0), ("cloud_destination", 2.0), ("cloud_git_setup", 2.2)] {
+        if id == egui::Id::new(name) {
+            return Some(solidcraft_ui_egui::theme::Tokens::get().form_card_width * cards);
+        }
+    }
     [
         egui::Id::new("sc_bom"),
         egui::Id::new("sc_gesture_editor"),

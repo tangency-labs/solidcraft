@@ -46,3 +46,4 @@ rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 gethostname = { workspace = true }
 process-wrap = { version = "10.0.1", default-features = false, features = ["std", "process-group", "job-object"] }
 shlex = "2.0.1"
+tempfile = "3"

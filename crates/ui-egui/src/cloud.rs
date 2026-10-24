@@ -8,6 +8,7 @@ pub(crate) mod configuration;
 
 #[derive(Default)]
 pub(crate) struct State {
+    pub setup: Option<crate::cloud_setup::Wizard>,
     retry_at: f64,
     messages: BTreeMap<String, String>,
 }

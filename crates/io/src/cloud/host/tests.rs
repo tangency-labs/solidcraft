@@ -450,3 +450,63 @@ fn asynchronous_git_operations_retain_the_callers_allowed_folders() {
     assert_eq!(status.phase, Phase::Failed);
     assert!(status.message.unwrap().contains("outside"));
 }
+
+#[test]
+fn guided_checkout_setup_retries_and_pushes_without_git_identity_configuration() {
+    struct Access {
+        connection: Connection,
+        secrets: std::sync::Mutex<BTreeMap<String, String>>,
+    }
+    impl super::super::NativeAccess for Access {
+        fn credential(&self, _: &str) -> Result<Option<String>> {
+            Ok(None)
+        }
+        fn store_credential(&self, id: &str, token: &str) -> Result<()> {
+            self.secrets.lock().unwrap().insert(id.into(), token.into());
+            Ok(())
+        }
+        fn prepare(&self, mut connection: Connection, _: &Job) -> Result<Connection> {
+            connection.id = self.connection.id.clone();
+            connection.remote = self.connection.remote.clone();
+            connection.checkout.clear();
+            Ok(connection)
+        }
+    }
+    let fixture = Fixture::new();
+    let source = fixture.checkout("source");
+    let bare = fixture.0.join("remote with spaces.git");
+    Fixture::git(&fixture.0, &["clone", "--bare", &source.checkout, bare.to_str().unwrap()]);
+    let connection =
+        Connection { id: "guided".into(), remote: bare.to_string_lossy().into_owned(), repository: "owner/designs".into(), ..Default::default() };
+    let access = std::sync::Arc::new(Access { connection: connection.clone(), secrets: Default::default() });
+    let host = fixture.host().with_access(access.clone());
+    assert_eq!(complete(&host.store_credential("test-id".into(), "test-token".into()).unwrap()).phase, Phase::Ready);
+    assert_eq!(access.secrets.lock().unwrap().get("test-id").unwrap(), "test-token");
+    let requested = Connection { id: "github-automatic".into(), ..connection.clone() };
+    let result = complete(&host.submit(Operation::Setup(requested.clone()), String::new()).unwrap());
+    assert_eq!(result.phase, Phase::Ready, "{:?}", result.message);
+    let prepared: Connection = serde_json::from_value(result.result.unwrap()).unwrap();
+    let repeated = complete(&host.submit(Operation::Setup(prepared.clone()), String::new()).unwrap());
+    assert_eq!(repeated.phase, Phase::Ready, "{:?}", repeated.message);
+    assert_eq!(prepared, serde_json::from_value::<Connection>(repeated.result.unwrap()).unwrap());
+    let other = Connection { id: "another-account".into(), ..connection };
+    let other_host = fixture.host().with_access(std::sync::Arc::new(Access { connection: other, secrets: Default::default() }));
+    let other = complete(&other_host.submit(Operation::Setup(requested), String::new()).unwrap());
+    assert_eq!(other.phase, Phase::Ready, "{other:?}");
+    let other: Connection = serde_json::from_value(other.result.unwrap()).unwrap();
+    assert_ne!(prepared.checkout, other.checkout, "automatic account discovery must keep checkouts isolated");
+    // Empty local identity overrides any machine-wide identity without changing it.
+    Fixture::git(Path::new(&prepared.checkout), &["config", "user.name", ""]);
+    Fixture::git(Path::new(&prepared.checkout), &["config", "user.email", ""]);
+    Fixture::git(Path::new(&prepared.checkout), &["config", "commit.gpgSign", "false"]);
+    let capture = save(&prepared, "parts/first", "First cloud save", None);
+    let status =
+        complete(&host.submit(Operation::Save { connection: prepared.clone(), save: Box::new(capture), synchronize: true }, String::new()).unwrap());
+    assert_eq!(status.phase, Phase::Synced, "{:?}", status.message);
+    let reopened = fixture.0.join("ordinary checkout");
+    Fixture::git(&fixture.0, &["clone", bare.to_str().unwrap(), reopened.to_str().unwrap()]);
+    let destination = status.destination.unwrap();
+    let repo = GitRepository::open(Connection { checkout: reopened.to_string_lossy().into_owned(), ..prepared.clone() }, "").unwrap();
+    assert_eq!(repo.open_design(&destination).unwrap().0.name, "First cloud save");
+    assert_eq!(Fixture::git(Path::new(&prepared.checkout), &["config", "--get", "user.name"]), b"\n");
+}
