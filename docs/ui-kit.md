@@ -552,3 +552,33 @@ shared renderer snapshots that palette into the icon look and cache identity;
 callers continue to request semantic icon IDs and surface-specific monochrome ink.
 See [the shipped-theme colour audit](theme-colour-audit.md) for the schema,
 workspace assignments, accessibility rules and intentionally monochrome themes.
+
+## Material previews and look chains
+
+`sphere_thumbnail(ui, id, Sphere { color, kind, opacity }, size)` paints a lit
+sphere using a fixed CPU mesh and the egui painter, without a texture or GPU.
+`FinishKind` covers Matte, Satin, Gloss, Metal and Glass. Colour is document data;
+highlights, shadows, checker and UI chrome use `Tokens`. Glass shows a four-by-four
+checker and defaults to 35% opacity; other finishes default to opaque. Explicit
+opacity is clamped to 0–1; non-finite opacity uses the finish default. Sizes are
+rounded and bounded to 1–96 logical points (non-finite sizes become 1).
+
+A shared per-egui-context FIFO cache retains at most 64 meshes, keyed by RGBA,
+finish, byte opacity and bounded size. Hits reuse shading without changing eviction
+order. Every mesh has 637 vertices and 1,152 triangles, independently of input.
+Theme highlight/shadow changes clear the cache. No file assets are added.
+
+`look_chain(ui, id, labels, looks, active)` draws Face → Body → Component → Material
+as four connected steps. Pass translated labels, `[Option<Sphere>; 4]` and one
+`LookStep`; empty slots use a dashed circle and plus, while filled slots reuse the
+sphere cache. Exactly one step has a `Tokens::render_accent` ring. It returns
+`Option<LookStep>` on activation; callers own commands and selection. Disabled
+controls do not activate. Handles/rects are `{id}:face`, `:body`, `:component`,
+`:material`; `{id}` is the full allocation. Long labels clip within their step.
+These are content widgets; their enclosing surface still belongs to `Container`.
+
+Gallery entries show all five sphere finishes, a mixed filled/empty look chain
+with Body active, and an empty chain with Face active in both themes.
+
+For CPU-rendered review images, run
+`SOLIDCRAFT_MATERIAL_WIDGET_EVIDENCE=/tmp/material-widgets cargo test -p solidcraft-ui-egui ui_kit::gallery::material_widgets_board_in_both_themes`.
