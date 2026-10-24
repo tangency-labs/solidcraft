@@ -19205,3 +19205,326 @@ C++ and (4, none) in the port. No edge use binormal is evaluated in this case.
 Suspected to be the same Rust merge region/shell handling as `gen0000` / `gen0003`
 above (the inset shell's Difference); not traced further. Listed in
 `known_mismatches.toml`.
+
+## General — macOS-arm64 divergence cluster, wave-2 follow-up (2026-10-24)
+
+Diagnosis-only follow-up to #799, based on authoritative main `2ca17d8e9`
+(after #793). The frozen sweep evidence is
+`promote-zero-deferred-evidence.txt` and
+`promote-zero-deferred-sweep-retry.log` under
+`~/.local/share/opencode/`; the latter's SHA256 was rechecked as
+`94cf2cc986a539fd97471c71e3b7a0e8f1d8f5e0f6348b13f8928e7e4d8d5923`.
+Those historical outcomes are not substituted for fresh post-#793 runs below.
+
+Environment: macOS 27.0.1 arm64, Rust 1.98.1, `CARGO_BUILD_JOBS=2`,
+`RUSTC_WRAPPER` unset (sccache unavailable), and the existing shared reference
+at `SOLIDCORE_CPP_DIR=/Users/altvnk/Projects/Personal/solidcore/bin/cpp`.
+No reference rebuild, kernel/harness change, tolerance change or plan-status
+promotion/demotion is part of this diagnosis. Commands use `nice -n 10`.
+
+Reproduction command (one unit per process, default seeds, no case filter):
+
+```sh
+export CARGO_BUILD_JOBS=2
+unset RUSTC_WRAPPER
+export SOLIDCORE_CPP_DIR=/Users/altvnk/Projects/Personal/solidcore/bin/cpp
+nice -n 10 rustup run 1.98.1 cargo run --profile difftest -p difftest --features cpp -- --unit <unit.id>
+```
+
+The lane's ignored `bin/macos-divergence/<unit.id>.log` and
+`reports/difftest/<unit.id>.json` retain the fresh output and case inputs;
+neither generated artifact is committed. A harness failure or worker signal
+is not converted to an operation status, a rejection, a deferred case or a pass.
+
+The overlapping, separately owned PR #773 proposes unit-level non-x86-64
+oracle restrictions for `geom.hash_table`, `heal.heal_data_p1`/`p2`/`p3` and
+`surface.twist_volume` (#448); it is not incorporated or modified here.
+That architecture-dependent conversion cluster is distinct from the
+allocator-dependent deform use-after-free (#449, UB-251), whose ten macOS
+cases already have case-level `skipped(platform)` wiring in #793.
+
+## blend.fillet_solver_p5 — Linux-only native worker is unavailable on macOS (2026-10-24)
+
+The platform mechanism is explicit, not a numerical comparison failure:
+`harness/cpp/shim/sc_rollover_worker.h:52-96` implements `isolated` only
+under `__linux__ && SC_ROLLOVER_WORKER_PATH`; the other branch immediately
+returns `SC_ERR_EXCEPTION`. No worker is spawned on macOS. Both the native
+evaluation and Rust's native fixture import can therefore fail with
+`cpp_exception`; the runner correctly treats these harness failures as failures,
+not matching operation-error passes. Repeating them or reducing `--jobs` cannot
+enable the missing branch. This is distinct from the out-of-range conversion
+skips proposed in #773 and the deform skips landed in #793 (#449, UB-251).
+
+What would settle it: implement and separately validate a macOS fresh-process
+containment path, or define an explicit unsupported-platform policy without
+turning exceptions into passing comparisons. Neither change belongs to this
+findings-only lane. No `upstream-issues.md` entry: the observed limitation is
+in this repository's harness, not evidence of a new upstream kernel defect.
+
+Fresh full run: 100 cases, 0 passed, 100 failed, 0 deferred, 0
+`skipped(platform)`, 0 rejected, 0 known mismatches; `max_rel_err=0` because
+no value comparison was reached. Samples
+`review_huge_tiny_pair_100_100`, `review_huge_tiny_pair_100_101` and
+`review_huge_tiny_pair_100_102` all report
+`cpp: cpp_exception; rust: cpp_exception`. They use rails spanning
+`[-1e300, 1e300]` and `[0, 1e-300]`, with the second interval's classification
+100, 101 and 102 respectively. Their extreme scales are not evidence of a
+numerical failure: the platform guard returns before executing the fixture.
+
+## geom.hash_table — ARM64 conversion-dependent voxel results (2026-10-24)
+
+Fresh full run: 619 cases, 184 passed, 435 failed, 0 deferred, 0
+`skipped(platform)`, 0 rejected, 0 known mismatches;
+`max_rel_err=1.9983959312403277`. Two full runs reproduce the counts.
+Samples (C++ first, Rust second):
+
+- `heal_fitcrv_incremental`: planar input points (`z=0`), tolerance `0.01`;
+  `values.floats.len=236/364`, `ints.ints.len=3935/4161`.
+- `map_points_outside`: box `[0,0,0,1,1,1]`, voxel counts `[2,3,4]`, first
+  mapped point `[-0.5,0.2,0.2]`; `values.floats[0]=0/0.5`.
+- `gen0000` (seed `5793377638189413714`): zero-width y extent,
+  `values.floats[19]=5.078904121819958/12.31764670862244`.
+
+Class: architecture-dependent behavior, not small floating-point residue.
+These are the negative/out-of-range and zero-extent voxel mapping conditions
+already documented in UB-35 (`SmHashTable.h:1957-1959`). Rust deliberately
+emulates the x86-64 reference; ARM64's saturating native conversion differs.
+What would settle it: retain these exact inputs in an x86-64 reference replay
+and verify the oracle restriction proposed by the separately owned #773.
+Do not change the deterministic Rust conversion to match this host.
+No new `upstream-issues.md` entry: UB-35 already records the defect.
+
+## heal.heal_data_p1 / p2 / p3 — architecture-associated cache records (2026-10-24)
+
+Fresh full runs, with all outcome categories kept separate:
+
+- `heal.heal_data_p1`: 495 cases, 432 passed, 24 failed, 11 deferred, 0
+  `skipped(platform)`, 0 rejected, 28 known mismatches; `max_rel_err=1`.
+  `sphere_low_op` (radius `0.001`, stage-2 face snapshot) has
+  `values.out.len=2951/2961`; `sphere_big` (radius `1000`, swapped) and
+  `closed_sphere_swap0` (radius `1`, unswapped) have `3031/3041`.
+  These sequences include coincident-vertex caching and face-props snapshots.
+  Existing known mismatches are not counted in the 24 failures.
+- `heal.heal_data_p2`: 738 cases, 478 passed, 260 failed, 0 deferred, 0
+  `skipped(platform)`, 0 rejected, 0 known mismatches; `max_rel_err=1`.
+  `tiny_box` (sizes `[1e-4,1e-4,1e-4]`) has
+  `values.out[3378]=0/12`; `flat_box` (`[1e4,1e-4,1]`) has `0/4` there;
+  `duplicate_targets` (unit box, repeated edge/face/vertex targets) has
+  `values.out.len=3032/3057`.
+- `heal.heal_data_p3`: 478 cases, 450 passed, 28 failed, 0 deferred, 0
+  `skipped(platform)`, 0 rejected, 0 known mismatches; `max_rel_err=1`.
+  `review_valid_no_prior_targets` and
+  `review_valid_remove_all_prior_vertices` (box `[1,2,3]`, cache props then
+  update targets with operation 6) have `values.out.len=2833/2848` and
+  `3369/3384`; `gen0001` (`sphere.smb`, cache/fix coincident vertices,
+  voxels `[12,12,12]`) has `2856/2876`.
+
+Class: architecture-associated histogram/voxel/cache-layout divergence, not a
+tiny-value tolerance failure. UB-194 (`SmTArray.h:2395-2397`, used by
+`SmHealData::Cache_EdgeProps`) explains short-edge histogram bucket changes;
+UB-35 explains coincident-vertex voxel membership and resulting record sizes.
+These mechanisms and older ARM64 reproductions are already documented under
+General and the healer findings. The present samples alone do not prove the
+first causal cache operation for every one of the 24/260/28 failures.
+What would settle that remaining attribution: compare these exact records with
+the same-revision x86-64 oracle and trace the first cache divergence per sample;
+coordinate unsupported-oracle policy with #773 rather than introducing another
+skip approach. No new upstream issue: UB-35 and UB-194 already cover these
+conversion defects. No healer status or known-mismatch waiver was changed.
+
+## geom.local_solve1d — reproducible near-threshold residual (2026-10-24)
+
+Fresh full run: 3316 cases, 3315 passed, 1 failed, 0 deferred, 0
+`skipped(platform)`, 0 rejected, 0 known mismatches;
+`max_rel_err=1.588890061224939e-9`. There is only one failing case to sample:
+`gen1231`, seed `1894831246230431480`, `solve_it`, algorithm 3,
+function kind 2 with partial derivatives, guess `0.4249261703541882`, interval
+`[-1.600249728224778,0.7935376232354012]`, acceptable accuracy
+`1.9498269151442054e-12`. At `values.state_f[3]` and `[10]`, C++ returns
+`3.493706235424554e-8`, Rust `3.493706240975669e-8`
+(absolute difference about `5.55e-17`). A second full run and a standalone
+`--filter gen1231 --no-report` reproduce the same values.
+
+Class: floating-point residual, just outside the unchanged `1e-9` relative
+gate. A platform/libm or operation-rounding cause is plausible, not established
+by the error magnitude. This is not evidence for an architecture-conversion
+skip or a looser tolerance. What would settle it: compare the same case's
+evaluation/iteration values on Linux x86-64 and macOS, locating the first
+rounding difference. No new upstream issue without such attribution.
+
+## topology.brep_data — SIGSEGV is in the C++ reader (2026-10-24)
+
+Three fresh full unit runs terminate with signal 11 (Python subprocess return
+code `-11`). No run finishes a unit report; passed/failed/deferred/skip/rejected
+totals are therefore unavailable, not zero and not copied from a stale report.
+This reproduces without parallel unit scheduling. Isolated
+`--unit topology.brep_data --filter gen0110 --no-report` also terminates with
+SIGSEGV (shell status 139).
+
+LLDB on that isolated case shows `EXC_BAD_ACCESS`, address `0x58`, in
+`SmShellData::ReadFromDB + 500`, with the stack:
+`SmShellData::ReadFromDB` <- `SmBrepData::ReadFromDB` <-
+`SmBrepData::ReadFromFile` <- `sc_topology_brep_data_run` <-
+`solidcore_ffi::units::topology_brep_data::run` <-
+`difftest::units::topology_brep_data::cpp` <- `Runner::run_cpp`.
+Thus the crashing engine is upstream C++, not the Rust kernel. A Rust-only
+`--filter gen0110 --digest-dir bin/macos-divergence/rust-only --digest-debug`
+run completes (`cases=1`, `needs_cpp=0`, exit 0); that is attribution evidence,
+not a passing C++ differential comparison.
+
+A debugger breakpoint at the C shim preserved the full run's last input:
+2777-byte ASCII `Version 33` stream, beginning with the color component
+`4.595e-321`; SHA256
+`95f52f5fe9381b17a1ae67ad33ba2938747c2fc470dcc2c4495890b4b79dd3bb`.
+The isolated `gen0110` shim input has the identical length and SHA256.
+This matches the already documented UB-6 platform trigger (libc++ extraction
+of a subnormal double sets stream failure, later readers use unset locals),
+including the previously identified crashing case `gen0110`; UB-75 records
+the related unchecked reader counts. The current `skipped_platform` hook
+covers mode `db` only, not this `ReadFromFile` path. Class: reproducible
+platform/environment-dependent upstream reader crash, not worker instability.
+
+Reproduce the backtrace without rebuilding the shared reference:
+
+```sh
+nice -n 10 lldb -b -o run -k 'thread backtrace -c 18' -k 'process kill' -- \
+  bin/difftest/difftest --unit topology.brep_data --filter gen0110 --no-report
+```
+
+What would settle a fix: exercise the file-mode/subnormal path against the
+existing libc++ oracle guard policy and verify the reader's extraction/status
+handling in a separately owned implementation change. No Rust crash chase was
+performed. No new `upstream-issues.md` entry: UB-6 already records this exact
+case and C++ crash location; duplicating it would add no new defect.
+
+## query.face_p4 — exact loop-classification disagreement (2026-10-24)
+
+Fresh full run: 500 cases, 492 passed, 1 failed, 5 deferred, 0
+`skipped(platform)`, 0 rejected, 2 known mismatches; `max_rel_err=0`.
+The sole failing case is `gen0360`, seed `4634847627957580463`: a swapped
+scale-1 cylinder (`a=1.3301972357953764`, `c=1.74191392660755`), one
+vertical UV line at `u=0.3916538774595547` and one rectangular UV loop,
+face 33, imported stage-3 props (`props=1`). C++/Rust differ in
+`ints.classify_loop_ios[8]=1/2`, `[10]=1/0`, `[11]=1/5`, and
+`ints.looptree.len=17/9`. A standalone
+`--filter gen0360 --no-report` reproduces all four integer mismatches.
+There are not two or three new failing cases to sample; `gen0157` and
+`gen0300` remain separate pre-existing known mismatches.
+
+Class: reproducible geometry/classification divergence, provisionally
+platform-sensitive, with the first causal operation still unlocated. It is
+not a small compared floating-point residue (`max_rel_err=0` does not make
+different integer classifications equal), nor does isolation suggest a
+scheduling-dependent worker failure. The runner documents approximate imported
+3D curves as a classification hazard; whether that or a native platform-specific
+branch explains this scale-1 cylinder remains unproven. What would settle it:
+replay this exact input on x86-64 and compare the imported curves, bisector and
+first containment decision. Neither #773's conversion-only restrictions nor
+#793's deform-only skips establish an exemption for this case. No new upstream
+issue without evidence that the native result itself is defective.
+
+## topology.brep_p10 — expected mismatch unexpectedly agrees on this lane (2026-10-24)
+
+Fresh full run: 1404 cases, 1380 passed, 1 failed, 4 deferred, 0
+`skipped(platform)`, 7 rejected, 12 known mismatches;
+`max_rel_err=6.978000677784215e-7`. Crucially, the sole failure is not that
+relative error. It is `read_Solids_fillet_ts`, input
+`Solids/fillet_ts.smb`, with harness error
+`listed in crates/difftest/known_mismatches.toml but the case is now pass: remove the entry`.
+Its actual comparison has 1683 floating values and 9486 exact items compared,
+zero mismatches and `max_rel_err=0`. The current known-mismatch annotation
+expects different UV-trim/gap mutations (historical value lengths 1659/1683).
+This lane instead agrees and correctly fails the stale-expectation guard.
+Three isolated `--filter read_Solids_fillet_ts --no-report` runs reproduce
+that error with `max_rel_err=0`; a second full run reproduces all outcome
+counts above. This is not evidence of scheduling/worker instability.
+
+There is only one newly failing case. For contrast, the existing
+`known_mismatch` case `gen0115` contributes the unit's maximum error:
+`values.dbls[654]`, C++ `9.7170165910819e-4`, Rust
+`9.717009810547064e-4`; `read_Boolean_extrudeHoles1` remains a known
+length disagreement (`values.dbls.len=909/921`). They are not additional
+unwaived failures or evidence that the sole failure is floating-point residue.
+
+Class: platform/environment-sensitive expected-mismatch inversion, not a
+newly observed numeric regression. What would settle the policy: compare the
+same fixture on authoritative Linux x86-64, determine why the expected UV-trim
+mutation difference disappears here, and only then revise the expectation in
+a separately owned harness change. This lane does not remove the waiver,
+promote the case or infer an upstream defect from unexpected agreement.
+
+## Platform-skipped controls — post-#793 outcomes re-derived (2026-10-24)
+
+Fresh full runs, not the pre-#793 sweep's failure counts:
+
+- `surface.srf_in_volume`: 2112 cases, 2037 passed, 0 failed, 0 deferred,
+  75 `skipped(platform)`, 0 rejected, 0 known mismatches, `max_rel_err=0`,
+  exit 0. The existing non-libstdc++ hook skips `ReadDb` operations only.
+- `topology.database_io`: 2066 cases, 0 passed, 0 failed, 0 deferred,
+  2066 `skipped(platform)`, 0 rejected, 0 known mismatches,
+  `max_rel_err=0`. All cases are skipped for libc++ extraction differences.
+  Although #793's aggregate verdict prints `PASS`, the command exits 1:
+  `GATE-FAIL (value-share) 0 of 0 passing cases compare a value (minimum 75% and at least one)`.
+  This is an independent coverage gate, not 2066 passes and not a crash.
+- `curve.curve_p6`: 3138 cases, 3135 passed, 0 failed, 0 deferred,
+  3 `skipped(platform)`, 0 rejected, 0 known mismatches, `max_rel_err=0`,
+  exit 0. Exact skip names: `gen0161`, `gen0953`, `gen2879`.
+- `nurbs.b_spline_curve_n_lib`: 2326 cases, 2319 passed, 0 failed,
+  0 deferred, 7 `skipped(platform)`, 0 rejected, 0 known mismatches,
+  `max_rel_err=0`, exit 0. Exact skip names: `gen0695`, `gen0720`,
+  `gen0880`, `gen0932`, `gen1279`, `gen1374`, `gen1482`.
+
+The latter ten JSON case records all have `pass=false`,
+`outcome="skipped(platform)"`, `values_compared=0` and `exact_compared=0`.
+They are the landed #793 controls for #449 / UB-251's allocator-dependent
+`DeformToEndPointTargets` use-after-free, not ten newly passing deform checks.
+The skipped reader controls cover the already documented libc++/libstdc++
+environment differences. What would settle broader support: validate a safe
+same-platform oracle and an explicit coverage policy; no loosening of the
+zero-value gate or blanket conversion of skips to passes is proposed here.
+No new upstream entry: these mechanisms already have upstream issue records.
+
+## General — macOS divergence follow-up verification and remaining gates (2026-10-24)
+
+Fetched authoritative `upstream/main` again and merged it into
+`plan/macos-divergence-findings` before final verification; the merge was
+already up to date at `2ca17d8e9963483d46ab53e7e52743a6dfc4345c`.
+Thus all unit runs above and the post-merge checks use the same kernel,
+harness, fixtures and known-mismatch configuration. Only this findings file
+is changed against upstream; `plan/upstream-issues.md` and unit statuses are
+unchanged. Existing upstream defect entries are cited instead of duplicated.
+
+The assigned standard suite was run twice, including after that final merge,
+with Rust 1.98.1 and the environment recorded above. Every command exited 0:
+
+```sh
+nice -n 10 rustup run 1.98.1 cargo fmt --all --check
+nice -n 10 rustup run 1.98.1 cargo clippy --workspace --all-targets -- -D warnings
+nice -n 10 rustup run 1.98.1 cargo test -p solidcore
+nice -n 10 rustup run 1.98.1 cargo check -p solidcore --target wasm32-unknown-unknown
+```
+
+Kernel tests: 2109 unit tests passed; integration groups passed 3, 1, 4 and 2
+tests respectively (one integration test ignored); doctests had no failures.
+Final logs are `bin/macos-divergence/final-{fmt,clippy,test,wasm}.log`.
+The native difftest link also emits Apple's nonfatal `__eh_frame section too
+large` unwind-table warning; the binary builds and executes, and that warning
+does not explain any of the attributed failures.
+
+Unresolved product findings: eight selected units have case/harness failures
+(`geom.hash_table`, three healer parts, `blend.fillet_solver_p5`,
+`geom.local_solve1d`, `query.face_p4`, `topology.brep_p10`),
+`topology.database_io` fails the independent zero-value coverage gate, and
+`topology.brep_data` crashes in C++. The three passing commands are
+`surface.srf_in_volume`, `curve.curve_p6` and
+`nurbs.b_spline_curve_n_lib`, with their skips explicitly separate from
+passes above. A full local `--green` sweep was not added to the assigned
+validation; no local all-green or platform-fix claim is made. These diagnosed
+pre-existing defects are the content of the completed findings report, not
+prerequisites to merge this documentation-only PR. Canonical CI run
+[40125789957](https://github.com/tangency-labs/solidcore/actions/runs/40125789957)
+passed all eight checks on exact report head
+`33bb6841920092836a382e01265886f5c43cd361`. Readiness of the documentation
+correction is gated by its own exact-head canonical CI, independently of the
+unresolved product findings. No tolerance, waiver, input, plan status or
+existing PR (#773) was changed to obtain green.
