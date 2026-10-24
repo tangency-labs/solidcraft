@@ -463,8 +463,10 @@ pub struct SolveApp {
     pub stand_up_occurrence: Option<u64>,
     /// The file's header names an exporter that saves Y up (SolidWorks): the offer says so.
     pub stand_up_reason: bool,
-    /// The anti-aliasing sample counts the graphics device supports (empty without a GPU).
+    /// The anti-aliasing sample counts the scene colour/depth formats support (empty without a GPU).
     pub msaa_supported: Vec<u32>,
+    /// AMD/D3D12 defaults to 1x; Graphics explains the workaround and permits an override.
+    pub msaa_compatibility: bool,
     /// Settings put back at start because they kept SolidCraft from starting, one line each,
     /// shown until dismissed (`prefs::show_reset_notice`).
     pub settings_reset: Vec<prefs::SettingReset>,
@@ -598,6 +600,7 @@ impl SolveApp {
             stand_up_occurrence: None,
             stand_up_reason: false,
             msaa_supported: Vec::new(),
+            msaa_compatibility: false,
             settings_reset: Vec::new(),
             big_operation: false,
             autosave_minutes: 5.0,
