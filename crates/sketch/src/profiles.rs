@@ -1166,9 +1166,53 @@ fn rejoined(segs: Vec<Seg2>, joins: &impl Fn(&Seg2, &Seg2) -> bool) -> Vec<Seg2>
     out
 }
 
+/// `regions` with each region that repeats an earlier one (the same boundary within a small
+/// tolerance) left out.
+fn without_repeats(regions: &[Region2]) -> Vec<Region2> {
+    // Comparing every pair is quadratic: beyond this many the regions are kept as they are.
+    const MAX_COMPARED: usize = 5000;
+    if regions.len() < 2 || regions.len() > MAX_COMPARED {
+        return regions.to_vec();
+    }
+    let keys: Vec<(f64, Vec2, f64)> =
+        regions.iter().map(|r| (r.outer.signed_area().abs(), r.outer.centroid(), r.outer.segs.iter().map(Seg2::length).sum::<f64>())).collect();
+    let mut kept: Vec<usize> = Vec::new();
+    for (i, r) in regions.iter().enumerate() {
+        let Some(&(area, centroid, size)) = keys.get(i) else { continue };
+        let tol = 1e-7 * (1.0 + size);
+        let repeat = kept.iter().any(|&k| {
+            keys.get(k).is_some_and(|&(a, c, _)| (a - area).abs() <= tol * (1.0 + size) && c.dist(centroid) <= tol)
+                && regions.get(k).is_some_and(|other| same_region(r, other, tol))
+        });
+        if !repeat {
+            kept.push(i);
+        }
+    }
+    kept.iter().filter_map(|&i| regions.get(i).cloned()).collect()
+}
+
+/// Whether two regions have the same boundary within `tol`: the same outer loop and the same
+/// holes, whichever segment each loop starts with.
+fn same_region(a: &Region2, b: &Region2, tol: f64) -> bool {
+    let on = |p: Vec2, l: &Loop2| l.segs.iter().any(|s| s.point_at(s.closest_param(p)).dist(p) <= tol);
+    // Each loop's corners and segment middles lie on the other loop.
+    let covers = |x: &Loop2, y: &Loop2| x.segs.iter().all(|s| on(s.start(), y) && on(s.mid(), y));
+    let same_loop = |x: &Loop2, y: &Loop2| {
+        (x.signed_area().abs() - y.signed_area().abs()).abs() <= tol * (1.0 + x.segs.iter().map(Seg2::length).sum::<f64>())
+            && covers(x, y)
+            && covers(y, x)
+    };
+    a.holes.len() == b.holes.len() && same_loop(&a.outer, &b.outer) && a.holes.iter().all(|h| b.holes.iter().any(|g| same_loop(h, g)))
+}
+
 /// Union of regions that touch along shared boundary segments (one extrude of several adjacent
 /// profiles makes one body). Disjoint regions stay separate.
 pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
+    // A region drawn again on top of another is one region (#5543): a circle drawn twice at one
+    // place is two profiles, and extruded as two coincident tools a cut through a grid of holes
+    // with four such circles retried with the tool nudged and took fifty times as long.
+    let distinct = without_repeats(regions);
+    let regions = distinct.as_slice();
     let tol = MERGE_TOL * 10.0;
     // Every boundary segment oriented with the region on its left.
     let mut segs: Vec<Seg2> = Vec::new();
