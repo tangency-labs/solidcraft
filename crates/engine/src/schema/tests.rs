@@ -147,6 +147,13 @@ fn shape_problems_are_issues() {
     let c = box_contract();
     assert_eq!(messages(&c.check(&json!({"width": 5, "height": 5}))), vec!["`length` is required"]);
     assert_eq!(messages(&c.check(&json!({"length": true, "width": 5, "height": 5}))), vec!["`length` must be a number or an expression"]);
+    // A number out of range or an over-long expression says which limit it broke (#4712).
+    assert_eq!(messages(&c.check(&json!({"length": 1e9, "width": 5, "height": 5}))), vec!["`length` must be a number between -1e9 and 1e9"]);
+    assert_eq!(messages(&c.check(&json!({"length": -2e12, "width": 5, "height": 5}))), vec!["`length` must be a number between -1e9 and 1e9"]);
+    assert_eq!(
+        messages(&c.check(&json!({"length": "1+".repeat(2049) + "1", "width": 5, "height": 5}))),
+        vec!["`length` must be an expression of at most 4096 characters"]
+    );
     assert_eq!(
         messages(&c.check(&json!({"length": 5, "width": 5, "height": 5, "corner": null}))),
         vec!["`corner` must be a point [x, y, z] of numbers or length expressions"]

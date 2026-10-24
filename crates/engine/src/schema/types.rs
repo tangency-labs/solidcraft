@@ -61,7 +61,8 @@ macro_rules! expr_type {
 
         impl<'de> Deserialize<'de> for $name {
             fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-                params::expr(&wrap(Value::deserialize(d)?), "v").map($name).ok_or_else(|| D::Error::custom("must be a number or an expression"))
+                let v = wrap(Value::deserialize(d)?);
+                params::expr(&v, "v").map($name).ok_or_else(|| D::Error::custom(params::expr_problem(v.get("v"))))
             }
         }
 

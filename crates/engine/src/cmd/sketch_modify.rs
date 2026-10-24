@@ -10,7 +10,7 @@ use solidcraft_sketch::{ConstraintKind, Curve, CurveKind, Shape, Sketch, interse
 
 use super::sketch::{add_c, edit, ids_of, solve_current};
 use super::{CommandSpec, in_sketch};
-use crate::params::{bad, bool_, expr, num, req_vec2, str_, string_list, vec2, vec2_list};
+use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec2_list};
 use crate::{Result, Session};
 
 #[path = "sketch_pattern.rs"]
@@ -953,7 +953,7 @@ fn cut_corner(
 
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.fillet";
-    let r_expr = expr(p, "radius").ok_or_else(|| bad(cmd, "`radius` must be a number or an expression"))?;
+    let r_expr = req_expr(cmd, p, "radius")?;
     // Several corners at once (`points`), each like a single `point`.
     let corners: Vec<Value> = match p.get("points").and_then(Value::as_array) {
         Some(a) if !a.is_empty() && a.len() <= 500 => a.iter().map(|q| json!({ "point": q })).collect(),

@@ -11,7 +11,7 @@ use solidcraft_geom::{Aabb2, Ring, Vec2, Vec3};
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr, feature_sketch, profiles, sketch_id};
-use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
+use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -116,7 +116,7 @@ fn flange_edges(s: &Session, p: &Value, cmd: &str) -> Result<Vec<FlangeEdge>> {
             if o.get(k).is_none_or(Value::is_null) {
                 return Ok(None);
             }
-            let e = expr(v, k).ok_or_else(|| bad(cmd, format!("edges[{i}]: `{k}` must be a number or an expression")))?;
+            let e = expr(v, k).ok_or_else(|| bad(cmd, format!("edges[{i}]: `{k}` {}", expr_problem(v.get(k)))))?;
             check_expr(s, &e, kind, cmd, &format!("edges[{i}].{k}"))?;
             Ok(Some(e))
         };
