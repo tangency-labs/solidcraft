@@ -14,7 +14,8 @@
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Open`] | `SmFilletOpenCorner::SmFilletOpenCorner`           |
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Degenerate`] | `SmFilletDegenerateCorner::SmFilletDegenerateCorner` |
 //! | [`FilletCorner::corner_type`], [`FilletCornerKind::name`] | `GetCornerType`, `GetName` (per derived class)   |
-//! | [`FilletCorner::create`]                           | `SmFilletCorner::Create`                              |
+//! | [`FilletCorner::create`] | `SmFilletCorner::Create` |
+//! | [`FilletCorner::create_with_solver_lookup`] | `Create` with borrowed executive solvers |
 //! | [`FilletCorner::calc_corner_geom`]                 | `SmFilletCorner::CalcCornerGeom`                      |
 //! | [`FilletCorner::create_corner_patch`]              | `CreateCornerPatch` (virtual: `SmFilletCorner`, `SmFillet3x2MixedConvexityCorner`, `SmFilletNx1Corner`, `SmFilletNx2Corner`) |
 //! | [`FilletCorner::adjust_topology`]                  | `AdjustTopology` (virtual; `SmFilletNx2Corner::AdjustTopology` here) |
@@ -27,9 +28,9 @@
 //!   members (`m_vVertices`, `m_vEdges`) are ids of the executive's [`FilletBrep`];
 //!   `m_cpVertex`, `m_pSolverEUs` and `m_pAllEUs` are ids of the B-rep being filleted.
 //!   The executive and the fillet solvers are passed explicitly: the executive's
-//!   edge-use-to-solver map as [`FilletExecutiveData`], the solvers as a slice indexed
-//!   by [`FilletSolverId`]. A corner's own identity (`this`, stored by new fillet
-//!   vertices and edges) is [`CornerEnv::corner`]. `m_crContext` is the [`Kernel`].
+//!   edge-use-to-solver map as [`FilletExecutiveData`] with a solver slice, or a
+//!   lookup borrowing its actual solver bases. A corner's identity (`this`, stored by
+//!   new fillet vertices and edges) is [`CornerEnv::corner`]. The context is [`Kernel`].
 //! - **Constructors.** `SmFilletCorner(...)` (unit `blend.fillet_corner_p1`) and the
 //!   constructors of the derived classes owned by `blend.fillet_corner_p2`
 //!   (`SmFillet1x1Corner`, `SmFilletNx1ClosedCorner`, `SmFilletNx1Corner`,
@@ -428,6 +429,31 @@ impl FilletCorner {
         exec: &FilletExecutiveData,
         solvers: &[FilletSolver],
     ) -> Result<Option<Self>> {
+        Self::create_with_solver_lookup(k, b, vertex, solver_eus, |edge_use| {
+            exec.fillet_solver_of_edgeuse(edge_use)
+                .and_then(|id| usize::try_from(id.0).ok())
+                .and_then(|i| solvers.get(i))
+                .ok_or_else(|| invalid(OP_CREATE, "filleted edge use without fillet solver"))
+        })
+    }
+
+    /// `SmFilletCorner::Create` using the executive's live solver objects.
+    ///
+    /// `solver_of` resolves each filleted edge use to its actual borrowed solver
+    /// base. Lookups occur in `solver_eus` order after the topology walk, where the
+    /// native factory reads tolerances and the surface generator. No solver is copied.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::create`] and `solver_of`; the first lookup failure stops
+    /// construction before any later solver is requested.
+    pub fn create_with_solver_lookup<'solver>(
+        k: &Kernel,
+        b: &mut Brep,
+        vertex: VertexId,
+        solver_eus: &[EdgeuseId],
+        solver_of: impl Fn(EdgeuseId) -> Result<&'solver FilletSolver>,
+    ) -> Result<Option<Self>> {
         // get number of edgeuses connected to this vertex to be filleted
         let total_solver_eus = solver_eus.len();
 
@@ -513,11 +539,7 @@ impl FilletCorner {
         // for every to-be-filleted edgeuse connected to vertex:
         // Collect max tolerances and check for Chamfer corner.
         for &edge_use in solver_eus {
-            let solver = exec
-                .fillet_solver_of_edgeuse(edge_use)
-                .and_then(|id| usize::try_from(id.0).ok())
-                .and_then(|i| solvers.get(i))
-                .ok_or_else(|| invalid(OP_CREATE, "filleted edge use without fillet solver"))?;
+            let solver = solver_of(edge_use)?;
             let tol = solver.approx_tol_3d;
             let tan_tol = solver.tangency_tolerance;
 
@@ -2269,6 +2291,104 @@ mod tests {
         let (exec, solvers) = one_solver(fil);
         let c = FilletCorner::create(&k, &mut b, v, &[fil], &exec, &solvers).unwrap();
         assert_eq!(c.map(|c| c.kind), Some(FilletCornerKind::Degenerate));
+    }
+
+    fn box_corner() -> Result<(Kernel, Brep, VertexId, Vec<EdgeuseId>)> {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 2.0, 3.0, 4.0)?;
+        let vertex = b
+            .vertices()
+            .ids()
+            .next()
+            .ok_or_else(|| invalid(OP_CREATE, "box vertex"))?;
+        let mut edges = std::collections::BTreeSet::new();
+        let mut outgoing = Vec::new();
+        for &vu in &b.vertex(vertex)?.vertexuses {
+            if let Some(eu) = crate::topology::vertexuse::edgeuse(&b, vu)? {
+                if let Some(edge) = eu1::edge(&b, eu)? {
+                    if edges.insert(edge) {
+                        outgoing.push(eu);
+                    }
+                }
+            }
+        }
+        Ok((k, b, vertex, outgoing))
+    }
+
+    #[test]
+    fn factory_borrows_live_solver_state_in_edgeuse_order() {
+        use std::cell::RefCell;
+
+        let (k, mut b, vertex, outgoing) = box_corner().unwrap();
+        assert_eq!(outgoing.len(), 3);
+        let mut solvers = [
+            FilletSolver::new(0.03, 0.1, 0.3),
+            FilletSolver::new(0.02, 0.1, 0.2),
+            FilletSolver::new(0.01, 0.1, 0.1),
+        ];
+        for solver in &mut solvers {
+            solver.fsg = Some(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::Linear);
+        }
+        let seen = RefCell::new(Vec::new());
+        let corner = FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, |eu| {
+            seen.borrow_mut().push(eu);
+            let index = outgoing
+                .iter()
+                .position(|&candidate| candidate == eu)
+                .unwrap();
+            Ok(solvers.get(index).unwrap())
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(*seen.borrow(), outgoing);
+        assert_eq!(corner.kind, FilletCornerKind::ConvexNByN);
+        assert_eq!(corner.approx_tol_3d, 0.01);
+        assert_eq!(corner.tangency_tol_radians, 0.1);
+
+        // The next factory call sees the same owned solver's updated state.
+        solvers.get_mut(1).unwrap().approx_tol_3d = 0.001;
+        let corner = FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, |eu| {
+            let index = outgoing
+                .iter()
+                .position(|&candidate| candidate == eu)
+                .unwrap();
+            Ok(solvers.get(index).unwrap())
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(corner.approx_tol_3d, 0.001);
+    }
+
+    #[test]
+    fn factory_lookup_failure_preserves_native_lazy_prefix() {
+        use std::cell::RefCell;
+
+        let (k, mut b, vertex, outgoing) = box_corner().unwrap();
+        assert_eq!(outgoing.len(), 3);
+        let mut solver = FilletSolver::new(0.01, 0.1, 0.1);
+        solver.fsg = Some(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::Linear);
+        let seen = RefCell::new(Vec::new());
+        let failure = invalid("factory_lookup_test", "second solver unavailable");
+        let result = FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, |eu| {
+            seen.borrow_mut().push(eu);
+            if seen.borrow().len() == 2 {
+                Err(failure.clone())
+            } else {
+                Ok(&solver)
+            }
+        });
+        assert_eq!(result.unwrap_err(), failure);
+        assert_eq!(*seen.borrow(), outgoing.get(..2).unwrap());
+
+        // Invalid topology fails before the first native solver read.
+        seen.borrow_mut().clear();
+        b.edgeuse_mut(*outgoing.first().unwrap()).unwrap().cw = None;
+        let result = FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, |eu| {
+            seen.borrow_mut().push(eu);
+            Ok(&solver)
+        });
+        assert!(result.is_err());
+        assert!(seen.borrow().is_empty());
     }
 
     #[test]
