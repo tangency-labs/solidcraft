@@ -986,6 +986,14 @@ void tt_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         double tol = rd.num();
         bool want_list = rd.flag();
         tt_mirror_pre(rd, l, o);
+        if (rd.flag())
+        {
+            const size_t selector = (size_t)rd.idx();
+            SmLoopuse* lu = l->GetLoopuse();
+            SmTArray<SmEdgeuse*> eus;
+            if (lu != nullptr) lu->GetEdgeuses(eus);
+            if (eus.GetSize()) eus[(ULONG)(selector % eus.GetSize())]->DeleteUVTrimCurve();
+        }
         SmFace* f = tt_ok_loop(l) ? tt_loop_face(l) : nullptr;
         SmSurface* s = f ? f->GetSurface() : nullptr;
         if (s == nullptr || !tt_ok_loop_extremes(l))

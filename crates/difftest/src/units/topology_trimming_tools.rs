@@ -347,6 +347,9 @@ enum OpIn {
         list: bool,
         #[serde(default)]
         mirror: Option<(i64, u8)>,
+        /// Remove the selected edge use pair's exact UV trim before checking.
+        #[serde(default)]
+        project: Option<i64>,
     },
     BCheckFace {
         brep: BrepIn,
@@ -715,10 +718,15 @@ fn encode(op: &OpIn) -> Result<(Op, String, Vec<f64>), HarnessError> {
             tol,
             list,
             mirror,
+            project,
         } => {
             v = brep_block(brep)?;
             v.extend([*l as f64, *tol, flag(*list)]);
             push_mirror(&mut v, *mirror);
+            v.push(flag(project.is_some()));
+            if let Some(eu) = project {
+                v.push(*eu as f64);
+            }
             (Op::BCheckLoop, shared::path_of(brep)?)
         }
         OpIn::BCheckFace {
@@ -1737,10 +1745,21 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
             tol,
             list,
             mirror,
+            project,
             ..
         } => {
             let l = lid(*l);
             mirror_pre(k, b, Some(l), *mirror, &mut o)?;
+            if let Some(selector) = project.filter(|_| ok_loop(b, l).unwrap_or(false)) {
+                let eus = loop_eus(b, l)?;
+                if let Some(&eu) = eus.get(selector as usize % eus.len().max(1)) {
+                    let mate = eu1::mate(b, eu).map_err(f)?;
+                    b.edgeuse_mut(eu).map_err(f)?.uv_trim_curve = None;
+                    if let Some(mate) = mate {
+                        b.edgeuse_mut(mate).map_err(f)?.uv_trim_curve = None;
+                    }
+                }
+            }
             let srf = if ok_loop(b, l)? {
                 loop_surface(b, l)?
             } else {
@@ -2640,6 +2659,7 @@ fn gen_op(rng: &mut Rng) -> OpIn {
             l: gen_sel(rng),
             tol: gen_tol(rng),
             list: rng.chance(0.7),
+            project: None,
             mirror: gen_mirror(rng),
         },
         33 => OpIn::BCheckFace {
