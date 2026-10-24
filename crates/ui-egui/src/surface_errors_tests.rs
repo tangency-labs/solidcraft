@@ -4,6 +4,8 @@
 //! its surfaces under `capture_errors`, logs the error and tries again once the retry is due. A
 //! driver's refusal can't be provoked here, so these check the capture on a real device with an
 //! error the validation always reports, and the retry policy with a stand-in clock and device.
+//! An error no scope catches at all is reported by the device's handler
+//! (`gpu::log_uncaptured_errors`) instead of panicking (#5486).
 
 use egui_wgpu::{Attempt, ConfigureRetry, SURFACE_RECREATE_AFTER, capture_errors, wgpu};
 use std::time::Duration;
@@ -22,6 +24,24 @@ fn an_error_under_capture_is_returned_not_a_panic() {
         device.create_buffer(&wgpu::BufferDescriptor { label: Some("good"), size: 4, usage: wgpu::BufferUsages::COPY_DST, mapped_at_creation: false })
     });
     assert!(error.is_none(), "{error:?}");
+    assert_eq!(buffer.size(), 4);
+}
+
+/// An error no scope caught on the window's device used to reach wgpu's default handler, which
+/// panics ("wgpu error: Out of Memory", #5486). With the handler installed it is reported and
+/// the device goes on working.
+#[test]
+fn an_uncaught_gpu_error_is_not_a_panic() {
+    let Some((_, device, queue)) = crate::gpu::offscreen_device() else { return };
+    crate::gpu::log_uncaptured_errors(&device);
+    // No error scope around it: mapped at creation with a size that isn't a multiple of 4.
+    let _bad =
+        device.create_buffer(&wgpu::BufferDescriptor { label: Some("bad"), size: 3, usage: wgpu::BufferUsages::MAP_WRITE, mapped_at_creation: true });
+    let (buffer, error) = capture_errors(&device, || {
+        device.create_buffer(&wgpu::BufferDescriptor { label: Some("good"), size: 4, usage: wgpu::BufferUsages::COPY_DST, mapped_at_creation: false })
+    });
+    assert!(error.is_none(), "{error:?}");
+    queue.submit([]);
     assert_eq!(buffer.size(), 4);
 }
 
