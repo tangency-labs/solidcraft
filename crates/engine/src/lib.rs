@@ -246,6 +246,14 @@ impl WorldCache {
     }
 }
 
+/// A version open for looking, with the workspace kept aside.
+#[derive(Clone)]
+pub struct VersionView {
+    pub version: String,
+    pub name: String,
+    pub(crate) parked: std::sync::Arc<Document>,
+}
+
 /// An editing session on one design.
 pub struct Session {
     pub doc: Arc<Document>,
@@ -258,6 +266,9 @@ pub struct Session {
     pub(crate) sketch_entry: Option<SketchEntry>,
     pub selection: Vec<Sel>,
     pub path: Option<String>,
+    /// A version shown in the window without replacing the open workspace. The workspace is
+    /// `parked`; the document on display is the version. Not saved.
+    pub version_view: Option<VersionView>,
     /// One-shot display-only notification during doc.open, before authoritative evaluation.
     /// Interactive loaders may show it provisionally; it never becomes model state.
     pub open_preview: Option<Box<dyn Fn(solidcraft_io::DesignPreview) + Send + Sync>>,
@@ -435,6 +446,7 @@ impl Session {
             sketch_entry: None,
             selection: Vec::new(),
             path: None,
+            version_view: None,
             open_preview: None,
             log: Vec::new(),
             revision: 1,
@@ -493,7 +505,8 @@ impl Session {
 
     /// The design has changes not in its file: in the document, or in what is hidden.
     pub fn is_dirty(&self) -> bool {
-        (!Arc::ptr_eq(&self.doc, &self.saved) && *self.doc != *self.saved) || self.visibility != self.saved_visibility
+        let doc = self.persisted_doc();
+        (!Arc::ptr_eq(doc, &self.saved) && **doc != *self.saved) || self.visibility != self.saved_visibility
     }
     pub fn mark_saved(&mut self) {
         self.saved = self.doc.clone();
@@ -550,12 +563,19 @@ impl Session {
         Ok(())
     }
 
+    /// The design a file or an autosave should write. While a version is only being viewed,
+    /// that is the workspace, not the version on screen.
+    pub fn persisted_doc(&self) -> &std::sync::Arc<Document> {
+        self.version_view.as_ref().map(|view| &view.parked).unwrap_or(&self.doc)
+    }
+
     /// The design as a file holds it: the document with what is hidden in it.
     pub fn design(&self) -> std::borrow::Cow<'_, Document> {
+        let base = self.persisted_doc();
         if self.visibility.is_empty() {
-            return std::borrow::Cow::Borrowed(&*self.doc);
+            return std::borrow::Cow::Borrowed(base);
         }
-        let mut doc = (*self.doc).clone();
+        let mut doc = (**base).clone();
         doc.visibility = self.visibility.clone();
         std::borrow::Cow::Owned(doc)
     }
@@ -856,6 +876,9 @@ impl Session {
             self.refresh();
         }
         (spec.enabled)(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
+        if self.version_view.is_some() && spec.undoable {
+            return Err(EngineError::Disabled(spec.id.to_string(), "a version is open for viewing: go back to the workspace before editing".into()));
+        }
         let before = Snapshot {
             label: spec.label.to_string(),
             doc: self.doc.clone(),
@@ -1020,6 +1043,7 @@ impl Session {
             sketch_entry: None,
             selection: self.selection.clone(),
             path: None,
+            version_view: self.version_view.clone(),
             open_preview: None,
             saved: self.saved.clone(),
             log: Vec::new(),

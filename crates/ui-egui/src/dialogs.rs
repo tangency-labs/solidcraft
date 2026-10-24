@@ -23,6 +23,8 @@ use crate::viewport::Hit;
 
 #[path = "dialogs_dense.rs"]
 mod dense;
+#[path = "versions_ui.rs"]
+pub(crate) mod versions_ui;
 
 const SELECT_ONLY: &[Scope] = &[Scope::Selection, Scope::FeaturePreview];
 const SELECT_MANIP: &[Scope] = &[Scope::Selection, Scope::Manipulator, Scope::FeaturePreview];
@@ -339,6 +341,18 @@ crate::dialog_descriptor::dialog_descriptors! {
                 features: Vec<u64>,
                 with: Vec<String>,
                 fail: Vec<String>,
+            },
+            /// The design's versions and branches.
+            Versions {
+                name: String,
+                selected: Option<String>,
+                notice: Option<String>,
+                /// `true` when `notice` is a refusal. A success stays in the normal text colour.
+                error: bool,
+                /// Conflict paths the merge should take from the other workspace.
+                take_theirs: Vec<String>,
+                /// The node the conflict choices belong to.
+                compared: Option<String>,
             },
             /// Joints and components (`dialogs_assembly`).
             Assembly(crate::dialogs_assembly::Asm),
@@ -805,6 +819,10 @@ impl Dialog {
             "solid.combine" => Dialog::new(
                 Kind::Combine { operation: 1, keep_tools: false },
                 vec![SelInput::new("Target Body", BODIES, false), SelInput::new("Tool Bodies", BODIES, true)],
+            ),
+            "version.graph" => Dialog::new(
+                Kind::Versions { name: String::new(), selected: None, notice: None, error: false, take_theirs: Vec::new(), compared: None },
+                vec![],
             ),
             _ => {
                 let (kind, inputs) = Kind::simple_start(id)
@@ -1787,6 +1805,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::EditParam { .. } => "EDIT DIMENSION",
         Kind::Rename { .. } => "RENAME",
         Kind::ConfirmDelete { .. } => "DELETE FEATURE",
+        Kind::Versions { .. } => "VERSIONS",
         Kind::Assembly(k) => k.title(),
         Kind::Sheet(k) => k.title(),
         Kind::Surface(k) => k.title(),
@@ -2457,13 +2476,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut apply_again = app.applying.is_some() && d.repeat_after_apply;
     let mut cancel = false;
     let mut enter = false;
-    let wide = matches!(&d.kind, Kind::Motion(k) if k.wide());
+    let wide = matches!(&d.kind, Kind::Motion(k) if k.wide()) || matches!(d.kind, Kind::Versions { .. });
 
     let raw_title = title(&d.kind);
     let heading = if d.editing.is_some() { crate::i18n::format("dialog.edit_title", &[("title", tr(raw_title))]) } else { tr(raw_title).to_string() };
     let frame = crate::ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
     // OK is offered once the inputs make a feature.
-    let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. });
+    let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::Versions { .. });
     let valid = match &d.kind {
         Kind::Sketch => false,
         Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),
@@ -2476,7 +2495,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     };
     // Measure only closes; a deletion's primary action says what it does.
     let (ok_label, close_label) = match &d.kind {
-        Kind::Measure { .. } => ("", "Close"),
+        Kind::Measure { .. } | Kind::Versions { .. } => ("", "Close"),
         Kind::ConfirmDelete { .. } => ("Delete", "Cancel"),
         Kind::SaveMesh(k) => (crate::dialogs_save_mesh::button(k), "Cancel"),
         Kind::ViewDxf { .. } => ("Export DXF…", "Cancel"),
@@ -2540,6 +2559,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 d.kind,
                 Kind::Material { .. }
                     | Kind::Appearance(_)
+                    | Kind::Versions { .. }
                     | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })
                     | Kind::Sheet(crate::dialogs_sheet::Sm::Rules { .. })
                     | Kind::Plastic(crate::dialogs_plastic::Pl::Rules { .. })
@@ -2600,8 +2620,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
     let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::new("sc_canvas_value")));
     // Tables (configurations, a study's keys) take Enter for their cells.
-    let enter_applies =
-        !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. }) && !matches!(&d.kind, Kind::Motion(k) if k.wide());
+    let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. } | Kind::Versions { .. })
+        && !matches!(&d.kind, Kind::Motion(k) if k.wide());
     let report_active = app.issue_report.draft.is_some();
     if !report_active && enter_applies && app.applying.is_none() && (enter || canvas_enter || (enter_free && nothing_focused)) {
         ok = true;
@@ -3925,7 +3945,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
         Kind::ConfirmDelete { features, .. } => ("timeline.delete", json!({ "features": features })),
-        Kind::Sketch | Kind::Measure { .. } => return Ok(Vec::new()),
+        Kind::Sketch | Kind::Measure { .. } | Kind::Versions { .. } => return Ok(Vec::new()),
         Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),
         Kind::Sheet(k) => return crate::dialogs_sheet::commands(app, k, &d.inputs, &d.extra),
         Kind::Surface(k) => return crate::dialogs_surface::commands(app, k, &d.inputs, &d.extra),

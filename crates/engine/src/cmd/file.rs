@@ -345,6 +345,9 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
 }
 
 fn write(s: &mut Session, path: &str, format: &str, compression: &str, preview: bool, cache: bool) -> Result<Value> {
+    if s.version_view.is_some() {
+        return Err(bad("file.save", "go back to the workspace before saving"));
+    }
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
     // Saving an unnamed design, or one named after the file it was saved as, names it after its
     // file (not an undoable edit).

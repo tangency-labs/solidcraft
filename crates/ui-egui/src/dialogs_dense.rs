@@ -17,6 +17,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::PartSize(_) => Some("parts.resize"),
         Kind::SaveMesh(_) => Some("file.save_mesh"),
         Kind::ViewDxf { .. } => Some("file.export_view_dxf"),
+        Kind::Versions { .. } => Some("version.graph"),
         Kind::Sketch => Some("sketch.create"),
         Kind::SketchModify(k) => Some(crate::sketch_modify_ui::command(k)),
         Kind::Text(_) => Some("sketch.edit_text"),
@@ -144,6 +145,9 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
 }
 
 pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    if let Kind::Versions { name, selected, notice, error, take_theirs, compared } = &mut d.kind {
+        return super::versions_ui::rows(app, ui, name, selected, notice, error, take_theirs, compared);
+    }
     let t = Tokens::get();
     let mut enter = false;
     if matches!(d.kind, Kind::Appearance(_)) {

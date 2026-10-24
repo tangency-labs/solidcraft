@@ -184,6 +184,7 @@ pub const SECTIONS: &[Section] = &[
         ids: &["material.assign", "appearance.assign", "material.properties.validate", "library.inspect", "library.export", "library.apply"],
     },
     Section { tab: "MANAGE", panel: "RULES", promoted: 3, ids: &["sheet.manage_rules", "plastic.manage_rules", "plastic.assign_rule"] },
+    Section { tab: "MANAGE", panel: "VERSIONS", promoted: 1, ids: &["version.graph"] },
     Section {
         tab: "MANAGE",
         panel: "DESIGN",
