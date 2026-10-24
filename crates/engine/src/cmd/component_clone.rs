@@ -276,6 +276,7 @@ pub(super) fn paste(
     if let Some(o) = scratch.doc_mut().occurrences.iter_mut().find(|o| o.id == root_occurrence) {
         o.transform = transform;
         o.grounded = source_occurrence.as_ref().is_some_and(|o| o.grounded);
+        o.bom_type = source_occurrence.as_ref().and_then(|o| o.bom_type);
     }
     if let Some(o) = &source_occurrence {
         occurrences.insert(o.id, root_occurrence);
@@ -290,6 +291,7 @@ pub(super) fn paste(
         let id = scratch.doc_mut().add_occurrence(child, owner, pose)?;
         if let Some(o) = scratch.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
             o.grounded = old.grounded;
+            o.bom_type = old.bom_type;
         }
         occurrences.insert(old.id, id);
     }

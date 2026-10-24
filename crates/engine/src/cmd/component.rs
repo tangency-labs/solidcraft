@@ -38,10 +38,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("component.properties", "Component Physical Properties", properties::component)
         .icon("measure").noundo()
-        .params("component?: id or name (default active); descendants?: bool (default true). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates"),
+        .params("component?: id or name (default active); descendants?: bool (default true). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates. A placement inside it that counts as a reference (its occurrence's bom_type, else its component's) adds nothing, nor does anything inside that; the placement measured counts whatever its type"),
     CommandSpec::new("occurrence.properties", "Occurrence Physical Properties", properties::occurrence)
         .icon("measure").noundo()
-        .params("occurrence: id or name; path?: [occurrence ids] (required if nested under multiple instances); descendants?: bool (default true). Physical properties of this placement in world coordinates, including pending moves"),
+        .params("occurrence: id or name; path?: [occurrence ids] (required if nested under multiple instances); descendants?: bool (default true). Physical properties of this placement in world coordinates, including pending moves. A placement inside it that counts as a reference (its occurrence's bom_type, else its component's) adds nothing, nor does anything inside that; this placement counts whatever its type"),
     CommandSpec::new("component.rename", "Rename Component", rename).icon("rename").params("component, name"),
     CommandSpec::new("component.delete", "Delete Component", delete).icon("delete").params("component: deletes it, its subcomponents, occurrences and features"),
     CommandSpec::new("component.unlock", "Unlock Contents", unlock).icon("rigid_group").params(
@@ -73,7 +73,7 @@ fn component(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<u64> {
     s.doc.find_component(&kk).ok_or_else(|| bad(cmd, format!("no component `{kk}`")))
 }
 
-fn occurrence(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
+pub(super) fn occurrence(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
     let kk = key(p.get("occurrence")).ok_or_else(|| bad(cmd, "`occurrence` must be an id or name"))?;
     s.doc.occurrences.iter().find(|o| o.id.to_string() == kk || o.name == kk).map(|o| o.id).ok_or_else(|| bad(cmd, format!("no occurrence `{kk}`")))
 }
@@ -177,6 +177,9 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
             return json!(o);
         }
         let mut v = json!({"id": o.id, "name": o.name, "parent": o.parent, "grounded": o.grounded});
+        if let Some(t) = o.bom_type {
+            v["bom_type"] = json!(t);
+        }
         if o.transform.iter().flatten().zip(solidcraft_doc::IDENTITY.iter().flatten()).any(|(a, b)| (a - b).abs() > 1e-12) {
             v["transform"] = json!(o.transform);
         }

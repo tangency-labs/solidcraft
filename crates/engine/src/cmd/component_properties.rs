@@ -1,6 +1,8 @@
 //! Physical properties of an assembly placement, with original body material assignments.
+use std::collections::HashSet;
+
 use serde_json::{Value, json};
-use solidcraft_doc::{Document, Mat};
+use solidcraft_doc::{BomType, Document, Mat};
 use solidcraft_geom::{Aabb3, Vec3};
 
 use crate::params::bad;
@@ -113,7 +115,14 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
         }
         out
     };
+    // As in the bill of materials, a placement that counts as a reference adds nothing, nor does
+    // anything inside it; the one measured counts whatever its type.
+    let reference: HashSet<u64> =
+        doc.occurrences.iter().zip(doc.occurrence_bom_types()).filter(|(_, t)| *t == BomType::Reference).map(|(o, _)| o.id).collect();
     for (component, path, transform) in selected_placements {
+        if path.iter().skip(selected.len()).any(|id| reference.contains(id)) {
+            continue;
+        }
         placement_count += 1;
         for body in state.bodies.iter().filter(|b| doc.model_body_component(b) == component) {
             let transform: Mat = doc.model_body_offset(body).map(|offset| solidcraft_doc::mat_mul(&transform, offset)).unwrap_or(transform);

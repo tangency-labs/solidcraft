@@ -634,6 +634,7 @@
   "cmd.motion_study": "Motion Study",
   "cmd.motion_trace": "Motion Trace",
   "cmd.motion_trace_keep": "Keep Motion Trace",
+  "cmd.occurrence_bom_type": "Bill of Materials Type",
   "cmd.occurrence_copy": "Paste (Instance)",
   "cmd.occurrence_ground": "Ground",
   "cmd.occurrence_move": "Move Occurrence",

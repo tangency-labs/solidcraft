@@ -8,8 +8,12 @@ fn close(actual: &Value, expected: f64) {
     assert!((actual.as_f64().unwrap() - expected).abs() < 1e-6, "{actual} != {expected}");
 }
 fn box_in(s: &mut Session, name: &str) -> (u64, u64, String) {
+    box_at(s, name, 0.0)
+}
+/// A new component in the active one, holding a 10 mm cube with its corner at `x` on the X axis.
+fn box_at(s: &mut Session, name: &str, x: f64) -> (u64, u64, String) {
     let c = run(s, "component.create", json!({"name": name}));
-    run(s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
     let body = s.model.state().bodies.last().unwrap().name.clone();
     (c["component"].as_u64().unwrap(), c["occurrence"].as_u64().unwrap(), body)
 }
@@ -74,6 +78,80 @@ fn nested_instances_require_a_path_and_can_exclude_descendants() {
     assert_eq!(r["body_count"], 0);
     assert!(r["total"]["center_of_mass"].is_null());
     assert!(r["total"]["bbox"].is_null());
+}
+
+/// Study 8.5: a placement that counts as a reference (a fixture shown for context) adds nothing to
+/// what is measured, nor does anything inside it, as in the bill of materials; the placement asked
+/// for counts whatever its type. 10 mm cubes along X: a steel block (7.85 g at 0 mm) and a fixture
+/// (1.29 g, the default density, at 20 mm) holding a pin (1.29 g at 40 mm).
+#[test]
+fn a_reference_placement_below_the_one_measured_adds_nothing() {
+    let mut s = Session::default();
+    let (_, _, block) = box_at(&mut s, "Block", 0.0);
+    run(&mut s, "material.assign", json!({"bodies": [block], "material": "Steel"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let (fixture, fixture_occurrence, _) = box_at(&mut s, "Fixture", 20.0);
+    let (pin, pin_occurrence, _) = box_at(&mut s, "Pin", 40.0);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let root = |s: &mut Session| run(s, "component.properties", json!({"component": "root"}));
+    let counted = |r: &Value| (r["body_count"].as_u64().unwrap(), r["placement_count"].as_u64().unwrap());
+    let fixture_type = |s: &mut Session, bom_type: &str| run(s, "component.metadata.set", json!({"component": fixture, "bom_type": bom_type}));
+    let occurrence_type = |s: &mut Session, occurrence: u64, bom_type: Value| {
+        run(s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": bom_type}));
+    };
+
+    let all = root(&mut s);
+    assert_eq!(counted(&all), (3, 4), "{all}");
+    close(&all["total"]["mass_g"], 7.85 + 1.29 + 1.29);
+    close(&all["total"]["center_of_mass"][0], (5.0 * 7.85 + 25.0 * 1.29 + 45.0 * 1.29) / 10.43);
+
+    // The fixture kept for reference: only the block counts.
+    fixture_type(&mut s, "reference");
+    let block_only = root(&mut s);
+    assert_eq!(counted(&block_only), (1, 2), "{block_only}");
+    assert_eq!(block_only["bodies"][0]["name"], block.as_str());
+    close(&block_only["total"]["mass_g"], 7.85);
+    close(&block_only["total"]["volume_mm3"], 1000.0);
+    close(&block_only["total"]["area_mm2"], 600.0);
+    close(&block_only["total"]["center_of_mass"][0], 5.0);
+    close(&block_only["total"]["bbox"]["max"][0], 10.0);
+    // Asked for, the fixture counts with the pin it holds, and the pin counts too.
+    let by_component = run(&mut s, "component.properties", json!({"component": fixture}));
+    let by_occurrence = run(&mut s, "occurrence.properties", json!({"occurrence": fixture_occurrence}));
+    for r in [by_component, by_occurrence] {
+        assert_eq!(counted(&r), (2, 2), "{r}");
+        close(&r["total"]["mass_g"], 2.58);
+        close(&r["total"]["center_of_mass"][0], 35.0);
+    }
+    let pin_by_component = run(&mut s, "component.properties", json!({"component": pin}));
+    let pin_by_occurrence = run(&mut s, "occurrence.properties", json!({"occurrence": pin_occurrence}));
+    for r in [pin_by_component, pin_by_occurrence] {
+        assert_eq!(counted(&r), (1, 1), "{r}");
+        close(&r["total"]["mass_g"], 1.29);
+    }
+
+    // The occurrence's own type counts, not its component's.
+    occurrence_type(&mut s, fixture_occurrence, json!("normal"));
+    assert_eq!(root(&mut s), all);
+    fixture_type(&mut s, "normal");
+    occurrence_type(&mut s, fixture_occurrence, json!("reference"));
+    assert_eq!(root(&mut s), block_only);
+
+    // A pin kept for reference inside the fixture: the fixture's own total is its own body.
+    occurrence_type(&mut s, fixture_occurrence, Value::Null);
+    occurrence_type(&mut s, pin_occurrence, json!("reference"));
+    let r = run(&mut s, "component.properties", json!({"component": fixture}));
+    assert_eq!(counted(&r), (1, 1), "{r}");
+    close(&r["total"]["mass_g"], 1.29);
+    let r = root(&mut s);
+    assert_eq!(counted(&r), (2, 3), "{r}");
+    close(&r["total"]["mass_g"], 7.85 + 1.29);
+    // The same pin placed again outside the fixture counts there.
+    run(&mut s, "occurrence.copy", json!({"component": pin, "parent": 0, "translate": [20, 0, 0]}));
+    let r = root(&mut s);
+    assert_eq!(counted(&r), (3, 4), "{r}");
+    close(&r["total"]["mass_g"], 7.85 + 1.29 + 1.29);
+    close(&r["total"]["bbox"]["max"][0], 70.0);
 }
 
 #[test]

@@ -118,10 +118,57 @@ pub struct Occurrence {
     /// Grounded occurrences don't move.
     #[serde(default)]
     pub grounded: bool,
+    /// How this occurrence counts in the bill of materials, in place of its component's type
+    /// (`None`: as its component).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bom_type: Option<BomType>,
 }
 
 fn identity() -> Mat {
     IDENTITY
+}
+
+/// How a component counts in the bill of materials of an assembly it is placed in. It is a part
+/// property (the `bom_type` key of the component's [`Metadata`](crate::Metadata)); a component
+/// without one is [`BomType::Normal`]. One occurrence can count as another type
+/// ([`Occurrence::bom_type`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BomType {
+    /// A row of its own; every occurrence adds to its quantity.
+    #[default]
+    Normal,
+    /// No row of its own: what it holds counts as if placed directly in its parent.
+    Phantom,
+    /// Shown, but counted nowhere, and nothing inside it is counted either.
+    Reference,
+    /// Bought: one row, with nothing inside it counted or listed.
+    Purchased,
+    /// Made as one item that doesn't come apart (a welded frame): one row in the assembly it is
+    /// placed in. What it holds is listed in its own bill of materials, and its purchased parts
+    /// also in the parts-only list of the assembly it is placed in.
+    Inseparable,
+}
+
+impl BomType {
+    /// Every type, in the order commands and documentation list them.
+    pub const ALL: [BomType; 5] = [BomType::Normal, BomType::Phantom, BomType::Reference, BomType::Purchased, BomType::Inseparable];
+
+    /// The word the design file and commands use.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BomType::Normal => "normal",
+            BomType::Phantom => "phantom",
+            BomType::Reference => "reference",
+            BomType::Purchased => "purchased",
+            BomType::Inseparable => "inseparable",
+        }
+    }
+
+    /// The type a word names, if it names one.
+    pub fn parse(word: &str) -> Option<BomType> {
+        BomType::ALL.into_iter().find(|t| t.as_str() == word)
+    }
 }
 
 /// How deep and how many placements [`Document::placements`] walks.
@@ -227,6 +274,14 @@ impl Document {
     /// The first occurrence of a component (its placement for authoring).
     pub fn occurrence_of(&self, component: u64) -> Option<&crate::Occurrence> {
         self.occurrences.iter().find(|o| o.component == component)
+    }
+
+    /// The bill of materials type each occurrence counts as, in the order of `occurrences`: its
+    /// own ([`Occurrence::bom_type`]), else its component's. Components are looked up once.
+    pub fn occurrence_bom_types(&self) -> Vec<BomType> {
+        let types: std::collections::HashMap<u64, BomType> =
+            self.components.iter().map(|c| (c.id, c.metadata.bom_type())).filter(|(_, t)| *t != BomType::Normal).collect();
+        self.occurrences.iter().map(|o| o.bom_type.or_else(|| types.get(&o.component).copied()).unwrap_or_default()).collect()
     }
 
     /// World transform of a component's frame (through its first occurrence and its parents').
@@ -390,7 +445,7 @@ impl Document {
         self.next_id = id.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
         let cname = self.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
         let k = self.occurrences.iter().filter(|o| o.component == component).count() + 1;
-        self.occurrences.push(crate::Occurrence { id, component, parent, name: format!("{cname}:{k}"), transform, grounded: false });
+        self.occurrences.push(crate::Occurrence { id, component, parent, name: format!("{cname}:{k}"), transform, grounded: false, bom_type: None });
         Ok(id)
     }
 }

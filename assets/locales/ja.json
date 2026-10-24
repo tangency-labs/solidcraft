@@ -634,6 +634,7 @@
   "cmd.motion_study": "モーション スタディ",
   "cmd.motion_trace": "モーション トレース",
   "cmd.motion_trace_keep": "モーション トレースを保持",
+  "cmd.occurrence_bom_type": "部品表の種類",
   "cmd.occurrence_copy": "貼り付け（インスタンス）",
   "cmd.occurrence_ground": "空間固定",
   "cmd.occurrence_move": "オカレンスを移動",

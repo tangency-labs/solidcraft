@@ -2798,12 +2798,15 @@ impl Document {
         *self == normalized
     }
 
-    /// Only components' part properties (metadata and free properties) changed: nothing to
-    /// evaluate. The same whole-Document proof as [`Document::differs_only_in_render`].
+    /// Only part properties changed (components' metadata and free properties, occurrences'
+    /// bill of materials types): nothing to evaluate. The same whole-Document proof as
+    /// [`Document::differs_only_in_render`].
     pub fn differs_only_in_part_properties(&self, previous: &Document) -> bool {
         if self.components.len() != previous.components.len()
             || self.components.iter().zip(&previous.components).any(|(a, b)| a.id != b.id)
-            || self.components == previous.components
+            || self.occurrences.len() != previous.occurrences.len()
+            || self.occurrences.iter().zip(&previous.occurrences).any(|(a, b)| a.id != b.id)
+            || (self.components == previous.components && self.occurrences == previous.occurrences)
         {
             return false;
         }
@@ -2811,6 +2814,9 @@ impl Document {
         for (n, c) in normalized.components.iter_mut().zip(&self.components) {
             n.metadata = c.metadata.clone();
             n.properties = c.properties.clone();
+        }
+        for (n, o) in normalized.occurrences.iter_mut().zip(&self.occurrences) {
+            n.bom_type = o.bom_type;
         }
         *self == normalized
     }
@@ -2842,9 +2848,21 @@ impl Document {
         st
     }
 
-    /// Density of a body's material (g/cm³).
+    /// The material a body's mass is computed with, as the library or this design spells it:
+    /// its assigned material when that is known and has a usable density, else
+    /// [`DEFAULT_MATERIAL`]. The assignment as stored (`materials`) is left as it is.
+    pub fn body_material(&self, body: &str) -> String {
+        self.materials
+            .get(body)
+            .and_then(|m| self.material_name(m))
+            .filter(|m| self.material_density(m).is_some())
+            .unwrap_or_else(|| DEFAULT_MATERIAL.into())
+    }
+
+    /// Density of a body's material (g/cm³): its [`Document::body_material`]'s, so the name a
+    /// body reads and the mass it has never disagree.
     pub fn density(&self, body: &str) -> f64 {
-        self.materials.get(body).and_then(|m| self.material_density(m)).unwrap_or(DEFAULT_DENSITY)
+        self.material_density(&self.body_material(body)).unwrap_or(DEFAULT_DENSITY)
     }
 
     /// A material defined in this design, by name (case-insensitive).
@@ -2905,29 +2923,37 @@ impl Document {
     }
 
     pub fn legacy_body_component(&self, body: &str, feature: u64) -> u64 {
-        self.body_components.get(body).copied().unwrap_or_else(|| self.feature(feature).map(|f| f.component).unwrap_or(0))
+        self.legacy_body_component_with(body, feature, |f| self.feature(f).map(|f| f.component))
     }
 
     /// Ownership in this evaluated timeline state, rather than a later transfer.
     pub fn model_body_component(&self, body: &crate::ModelBody) -> u64 {
-        if body.transferred || body.source_name.is_some() { body.component } else { self.legacy_body_component(&body.name, body.feature) }
+        self.model_body_component_with(body, |f| self.feature(f).map(|f| f.component))
     }
 
-    /// The components that own a body in `state` ([`Document::model_body_component`] of each),
-    /// in one pass: the timeline is looked up once, not once per body.
-    pub fn body_owners(&self, state: &crate::ModelState) -> std::collections::HashSet<u64> {
+    /// The component that owns each body in `state`, in its order ([`Document::model_body_component`]
+    /// of each), in one pass: the timeline is looked up once, not once per body.
+    pub fn body_owners(&self, state: &crate::ModelState) -> Vec<u64> {
         let features: std::collections::HashMap<u64, u64> = self.features.iter().rev().map(|f| (f.id, f.component)).collect();
-        state
-            .bodies
-            .iter()
-            .map(|b| {
-                if b.transferred || b.source_name.is_some() {
-                    b.component
-                } else {
-                    self.body_components.get(&b.name).copied().unwrap_or_else(|| features.get(&b.feature).copied().unwrap_or(0))
-                }
-            })
-            .collect()
+        state.bodies.iter().map(|b| self.model_body_component_with(b, |f| features.get(&f).copied())).collect()
+    }
+
+    /// [`Document::model_body_component`]'s rule, written once: a body the evaluation transferred,
+    /// or placed from a source, keeps the component it was given; any other is
+    /// [`Document::legacy_body_component`]'s. `feature_component` finds a feature's component:
+    /// the timeline for one body, a map built once for many ([`Document::body_owners`]).
+    fn model_body_component_with(&self, body: &crate::ModelBody, feature_component: impl FnOnce(u64) -> Option<u64>) -> u64 {
+        if body.transferred || body.source_name.is_some() {
+            body.component
+        } else {
+            self.legacy_body_component_with(&body.name, body.feature, feature_component)
+        }
+    }
+
+    /// [`Document::legacy_body_component`]'s rule, written once: the component the body was moved
+    /// to, else its feature's, else the root.
+    fn legacy_body_component_with(&self, body: &str, feature: u64, feature_component: impl FnOnce(u64) -> Option<u64>) -> u64 {
+        self.body_components.get(body).copied().unwrap_or_else(|| feature_component(feature).unwrap_or(0))
     }
 
     /// Recorded transfers already converted geometry into the new local frame.
@@ -3558,10 +3584,10 @@ impl Document {
     }
 }
 
-/// Density of the default material (g/cm³), as the default.
+/// The built-in material library: (name, density), and each material's colour.
 #[path = "../../../assets/materials/library.rs"]
 mod materials;
-pub use materials::{DEFAULT_DENSITY, MATERIALS, material_color};
+pub use materials::{DEFAULT_DENSITY, DEFAULT_MATERIAL, MATERIALS, material_color};
 
 /// A physical material defined in a design (`material.create`): its name, its density and,
 /// optionally, the look it gives bodies without an appearance of their own.

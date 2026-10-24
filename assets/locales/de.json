@@ -587,6 +587,7 @@
   "cmd.motion_study": "Bewegungsuntersuchung",
   "cmd.motion_trace": "Bewegungsbahn",
   "cmd.motion_trace_keep": "Bewegungsbahn behalten",
+  "cmd.occurrence_bom_type": "Stücklistentyp",
   "cmd.occurrence_copy": "Einfügen (Instanz)",
   "cmd.occurrence_ground": "Festsetzen",
   "cmd.occurrence_move": "Instanz verschieben",

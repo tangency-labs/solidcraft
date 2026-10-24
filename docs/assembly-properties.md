@@ -20,6 +20,12 @@ several instances of its parent; supply `path` (the complete list of occurrence 
 root) to choose one of those placements. An ambiguous occurrence without a path returns an
 error. Both commands accept `descendants: false` to measure only directly owned bodies.
 
+A placement inside the one measured that counts as a reference in the bill of materials (its
+occurrence's `bom_type`, else its component's: a fixture shown for context) adds nothing, nor
+does anything inside it: its bodies are not in `bodies`, the totals or `placement_count`. The
+placement measured counts whatever its type, so a reference fixture's own Properties still
+measure it, as a component's own bill of materials lists what it holds.
+
 Results contain a `bodies` list and a `total` object. Each body's entry identifies the original
 body name, owning component and occurrence path. Physical material density is resolved from
 that original body, so copies keep their material and mass. Values use millimetres, square

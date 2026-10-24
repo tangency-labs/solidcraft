@@ -46,6 +46,47 @@ An appearance sets colour and surface finish only. It has no effect on mass or s
 - **Elsewhere:** appearance, visual material, colour.
 - **For translators:** not the physical material.
 
+### bill of materials
+
+The list of the components placed in a design or in one component, with the quantity of each.
+
+It lists every part at any depth, or only the direct children. Each component's *bill of
+materials type* decides whether it has a row and whether what it holds is counted.
+
+- **In SolidCraft:** `assembly.bom` ("Bill of Materials") and its window on the INSPECT panel;
+  each row's `item`, `part_number` and `count`; a component's `metadata` and `properties`
+  design-file keys, which `component.metadata.set` changes.
+- **Don't use:** BOM in labels; parts list (for the bill of materials itself).
+- **Elsewhere:** bill of materials, BOM, parts list.
+- **For translators:** not a parts list on a drawing, which is one table that shows it.
+
+### bill of materials type
+
+The rule that decides whether a component has a row in a bill of materials, and whether what it
+holds is counted there.
+
+There are five:
+
+- *normal*, something you make: a row; each occurrence adds one to its quantity.
+- *phantom*, something just to group: no row; what it holds counts where it is placed.
+- *reference*, something to use as a reference: no row, and nothing inside it counts.
+- *purchased*, something you buy: one row; nothing inside it is counted or listed.
+- *inseparable*, something made as one piece (welded, glued, riveted and so on): one row; of
+  what it holds, only the purchased components are listed, and only in a list of every part.
+
+One occurrence can have a type of its own, which replaces its component's for that occurrence
+only.
+
+- **In SolidCraft:** the `bom_type` part property, which `component.metadata.set` changes and
+  `component.metadata` reads; `occurrence.bom_type` and an occurrence's `bom_type` design-file
+  key; the `bom_type` of each `assembly.bom` row.
+- **Don't use:** BOM structure, item type, kind; made (for *normal*: it reads as "already
+  made").
+- **Elsewhere:** BOM structure, BOM type.
+- **For translators:** *normal* here is not the sketch line type, a direction or the display
+  quality (see *Words with more than one meaning*); *reference* is not a construction plane;
+  *phantom* is not a hidden or see-through display.
+
 ### body
 
 One connected solid or surface shape that features create and change.
@@ -230,7 +271,8 @@ A component can have several occurrences. Moving an occurrence moves only that c
 component changes every copy. The browser names occurrences with a number, such as `Bolt M20:3`.
 
 - **In SolidCraft:** `occurrence.copy`, `occurrence.move`, `occurrence.ground`,
-  `occurrence.properties`; the `occurrences` design-file key; the `path` of occurrence ids.
+  `occurrence.properties`, `occurrence.bom_type`; the `occurrences` design-file key; the `path` of
+  occurrence ids.
 - **Don't use:** instance, placement.
 - **Elsewhere:** occurrence, instance, component instance.
 - **For translators:** not a *pattern instance*.
@@ -348,6 +390,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Normal | a sketch entity that isn't a construction entity | normal (line type) | the sketch palette's line type |
 | | the direction perpendicular to a surface | normal (direction) | the ruled surface's Normal mode |
 | | the middle display quality | normal (quality) | `ui.display_quality_normal` |
+| | a component with a row of its own in a bill of materials | normal (bill of materials type) | `bom_type` |
 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the

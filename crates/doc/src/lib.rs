@@ -9,6 +9,7 @@ pub mod appearance;
 mod assembly;
 mod body_transfer;
 mod body_transfer_sheet;
+pub mod bom;
 pub mod pbr_appearance;
 pub use body_transfer::{valid_transfer_matrix, validate_body_transfer};
 pub mod canvas;
@@ -53,8 +54,8 @@ pub use project3d::iso_grid;
 pub mod sheet;
 
 pub use assembly::{
-    IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, apply_point, apply_vector, is_identity, map_point_expr, mat_inverse, mat_mul,
-    rigid,
+    BomType, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, apply_point, apply_vector, is_identity, map_point_expr, mat_inverse,
+    mat_mul, rigid,
 };
 pub use document::*;
 pub use eval::KeptResults;

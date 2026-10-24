@@ -1,16 +1,19 @@
-//! The Bill of Materials window: `assembly.bom`'s rows (flat or top level, grouped by part
-//! number or by definition, a part's sub-parts in its row or not), with Export CSV… and Export
-//! JSON…. Picking a row edits its part
+//! The Bill of Materials window: the rows of a bill of materials view (`solidcraft_doc::bom`:
+//! flat or top level, grouped by part number or by definition, a part's sub-parts in its row or
+//! not), with Export CSV… and Export JSON… (through `assembly.bom`). Picking a row edits its part
 //! number, description and revision through one `component.metadata.set` per definition. The
 //! toolbar's Bill of Materials (`ui.start` of `assembly.bom`) opens it.
 
+use std::sync::Arc;
+
 use egui::RichText;
 use serde_json::{Value, json};
+use solidcraft_engine::doc::bom::{self, Bom, Group, Request, Row, Tree, View};
 
 use crate::SolveApp;
 use crate::theme::Tokens;
 
-/// The window's state; the rows come from the engine.
+/// The window's state; the rows come from the design.
 #[derive(Default)]
 pub struct BomPanel {
     /// Top level instead of flat.
@@ -20,7 +23,7 @@ pub struct BomPanel {
     /// A part with a part number keeps its sub-parts (a bolt's washers and nut) in its row.
     pub group_children: bool,
     /// The rows for (design revision, top, by_definition, group_children).
-    cache: Option<(u64, [bool; 3], Value)>,
+    cache: Option<(u64, [bool; 3], Arc<Bom>)>,
     /// The picked row's index, and its fields as edited.
     pub picked: Option<usize>,
     pub fields: [String; 3],
@@ -29,29 +32,40 @@ pub struct BomPanel {
 }
 
 impl BomPanel {
-    fn params(&self) -> Value {
-        json!({"levels": if self.top { "top" } else { "flat" }, "group_by": [if self.by_definition { "definition" } else { "part_number" }],
-            "group_children": self.group_children})
+    fn request(&self) -> Request {
+        Request {
+            view: if self.top { View::FirstLevel } else { View::PartsOnly },
+            group: if self.by_definition { Group::Definition } else { Group::PartNumber },
+            fold: self.group_children,
+            ..Request::default()
+        }
     }
 
-    /// The bill of materials for the design as it is now (computed again only after a change).
-    fn rows(&mut self, app: &mut SolveApp) -> Value {
+    /// `assembly.bom`'s parameters for the same list (the exports write it through the command).
+    fn params(&self) -> Value {
+        let r = self.request();
+        json!({"levels": r.view.as_str(), "group_by": [r.group.as_str()], "group_children": r.fold})
+    }
+
+    /// The bill of materials for the design as it is now (listed again only after a change).
+    fn rows(&mut self, app: &SolveApp) -> Arc<Bom> {
         let revision = app.session.revision;
         let key = [self.top, self.by_definition, self.group_children];
-        if let Some((r, k, v)) = &self.cache
+        if let Some((r, k, list)) = &self.cache
             && (*r, *k) == (revision, key)
         {
-            return v.clone();
+            return list.clone();
         }
-        let v = match app.session.execute("assembly.bom", &self.params()) {
-            Ok(v) => v,
+        let state = app.session.model.state();
+        let list = match bom::list(&mut Tree::new(&app.session.doc, &state), &self.request()) {
+            Ok(list) => Arc::new(list),
             Err(e) => {
                 self.error = Some(e.to_string());
-                json!({"rows": [], "total_occurrences": 0})
+                Arc::new(Bom::default())
             }
         };
-        self.cache = Some((revision, key, v.clone()));
-        v
+        self.cache = Some((revision, key, list.clone()));
+        list
     }
 }
 
@@ -60,18 +74,19 @@ pub fn open(app: &mut SolveApp) {
     app.bom = Some(BomPanel::default());
 }
 
-fn text(row: &Value, k: &str) -> String {
-    match &row[k] {
-        Value::String(t) => t.clone(),
-        Value::Null => String::new(),
-        v => v.to_string(),
+/// A row's cells after its item: part number, description, revision, quantity and definition.
+fn cells(ui: &mut egui::Ui, t: &Tokens, row: &Row) {
+    for text in [&row.part_number, &row.description, &row.revision] {
+        ui.label(text.as_str());
     }
+    ui.label(row.count.to_string());
+    ui.label(RichText::new(row.names.join("; ")).color(t.text_dim));
 }
 
 /// Apply the picked row's fields to each of its definitions (one undo step each).
-fn apply(app: &mut SolveApp, d: &mut BomPanel, row: &Value) {
+fn apply(app: &mut SolveApp, d: &mut BomPanel, components: &[u64]) {
     let [pn, desc, rev] = d.fields.clone();
-    for c in row["components"].as_array().into_iter().flatten() {
+    for c in components {
         let r = app.run("component.metadata.set", json!({"component": c, "part_number": pn, "description": desc, "revision": rev}));
         if let Err(e) = r {
             d.error = Some(e);
@@ -85,8 +100,7 @@ fn apply(app: &mut SolveApp, d: &mut BomPanel, row: &Value) {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut d) = app.bom.take() else { return };
     let t = Tokens::get();
-    let bom = d.rows(app);
-    let rows: Vec<Value> = bom["rows"].as_array().cloned().unwrap_or_default();
+    let list = d.rows(app);
     let (mut export, mut apply_row) = (None, None);
     let closed =
         crate::ui_kit::Window::new(egui::Id::new("sc_bom"), "bom", crate::i18n::tr_label("Bill of Materials")).cards(3.0).show_body(ctx, |ui| {
@@ -120,32 +134,26 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.label(RichText::new(h).strong().color(t.text_dim));
                     }
                     ui.end_row();
-                    for (i, row) in rows.iter().enumerate() {
-                        let picked = d.picked == Some(i);
-                        if crate::ui_kit::list_picker(ui, &i.to_string(), &text(row, "item"), picked).clicked() {
-                            d.picked = if picked { None } else { Some(i) };
-                            d.fields = [text(row, "part_number"), text(row, "description"), text(row, "revision")];
+                    // Rows at the top can be picked; the rows under them follow, dimmed.
+                    let mut top = 0;
+                    for (item, row) in list.rows_deep() {
+                        if item.len() == 1 {
+                            let (i, picked) = (top, d.picked == Some(top));
+                            top += 1;
+                            if crate::ui_kit::list_picker(ui, &i.to_string(), &row.item.to_string(), picked).clicked() {
+                                d.picked = if picked { None } else { Some(i) };
+                                d.fields = [row.part_number.clone(), row.description.clone(), row.revision.clone()];
+                            }
+                        } else {
+                            ui.label(RichText::new(bom::item_text(&item)).color(t.text_dim));
                         }
-                        ui.label(text(row, "part_number"));
-                        ui.label(text(row, "description"));
-                        ui.label(text(row, "revision"));
-                        ui.label(text(row, "count"));
-                        ui.label(RichText::new(text(row, "definition")).color(t.text_dim));
+                        cells(ui, &t, row);
                         ui.end_row();
-                        for c in row["children"].as_array().into_iter().flatten() {
-                            ui.label(RichText::new(text(c, "item")).color(t.text_dim));
-                            ui.label(text(c, "part_number"));
-                            ui.label(text(c, "description"));
-                            ui.label(text(c, "revision"));
-                            ui.label(text(c, "count"));
-                            ui.label(RichText::new(text(c, "definition")).color(t.text_dim));
-                            ui.end_row();
-                        }
                     }
                 });
             });
-            ui.label(RichText::new(format!("{} rows, {} placed", rows.len(), text(&bom, "total_occurrences"))).small().color(t.text_dim));
-            if let Some(row) = d.picked.and_then(|i| rows.get(i)) {
+            ui.label(RichText::new(format!("{} rows, {} placed", list.rows.len(), list.total.occurrences)).small().color(t.text_dim));
+            if let Some(row) = d.picked.and_then(|i| list.rows.get(i)) {
                 ui.separator();
                 egui::Grid::new("sc_bom_edit").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                     for (label, field) in ["Part number", "Description", "Revision"].into_iter().zip(d.fields.iter_mut()) {
@@ -157,7 +165,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                 });
                 if crate::ui_kit::button(ui, "Apply", crate::ui_kit::Button::Normal).clicked() {
-                    apply_row = Some(row.clone());
+                    apply_row = Some(row.components.clone());
                 }
             }
             if let Some(e) = &d.error {
@@ -172,8 +180,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             });
         });
-    if let Some(row) = apply_row {
-        apply(app, &mut d, &row);
+    if let Some(components) = apply_row {
+        apply(app, &mut d, &components);
     }
     if let Some(ext) = export {
         let mut params = d.params();
