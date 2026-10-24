@@ -858,6 +858,9 @@ pub fn apply(ctx: &egui::Context) {
         s.spacing.item_spacing = egui::vec2(t.space_6, t.space_4);
         s.spacing.button_padding = egui::vec2(t.space_6, t.space_3);
     });
+    // The new visuals are painted on the next pass: without a repaint request the widgets
+    // keep the previous theme's colours until some other event schedules a pass (#5802).
+    ctx.request_repaint();
 }
 
 #[cfg(test)]
@@ -893,6 +896,45 @@ mod tests {
         }
         assert_eq!(Tokens::outset_radius(0.0, 3.0), 0.0);
         assert_eq!(Tokens::outset_radius(6.0, 3.0), 9.0);
+    }
+
+    /// A theme change repaints: egui paints the new visuals on the next pass, so without a
+    /// repaint request the widgets keep the previous theme's colours until another event
+    /// schedules a pass (#5802).
+    #[test]
+    fn applying_a_theme_asks_for_a_repaint_with_the_new_visuals() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let ctx = egui::Context::default();
+        // The integration hook fires on every repaint request, whoever asked for it.
+        let requests = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = std::sync::Arc::clone(&requests);
+        ctx.set_request_repaint_callback(move |_| {
+            counter.fetch_add(1, Ordering::Relaxed);
+        });
+        // Let egui's own startup repaints settle: the context must be idle before the
+        // theme changes, so the only repaint left is the one the theme asks for.
+        let mut settled = false;
+        for _ in 0..8 {
+            ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+            if !ctx.has_requested_repaint() {
+                settled = true;
+                break;
+            }
+        }
+        assert!(settled, "the context must be idle before the theme changes");
+        let before = requests.load(Ordering::Relaxed);
+        let previous = super::is_dark();
+        super::set_dark(!previous);
+        let dark = super::is_dark();
+        let expected = super::visuals(dark);
+        // The theme is applied outside a pass: inside one egui schedules repaints of its
+        // own, and the request of the theme would hide among them.
+        super::apply(&ctx);
+        super::set_dark(previous);
+        assert!(requests.load(Ordering::Relaxed) > before, "a theme change must ask for a repaint");
+        assert!(ctx.has_requested_repaint(), "a theme change must leave a repaint pending");
+        let theme = if dark { egui::Theme::Dark } else { egui::Theme::Light };
+        assert_eq!(ctx.style_of(theme).visuals, expected, "the new theme's visuals must be in place");
     }
 
     #[test]
