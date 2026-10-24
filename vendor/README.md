@@ -242,6 +242,17 @@ Changes:
   ears would overlap (the pinched face of #1648 is one): it stays as it was.
   `crates/kernel/src/thin_face_tests.rs` holds it, `crates/kernel/tests/tess_loop_fill.rs` the
   ear clipping (through the `test-hooks` feature).
+- `tessellation/triangulation.rs`: a face none of whose loops winds counterclockwise in its
+  parameters still gets the surface's parameter rectangle as its outer boundary, except on a
+  surface without a period when one of its loops lies in the rectangle and crosses itself. Such
+  a face is a sliver a boolean cut along an edge of a face: the cut runs a few micrometres
+  outside the edge for most of its length and inside it near one end, so the loop winds
+  clockwise for most of its area. The rectangle around it meshed the whole surface in the
+  sliver's place, and the shared part of two bodies measured 6 % too much volume. Now the face
+  is the region its loop winds around. `crosses_itself` (also used by the ear clipping above)
+  sweeps the sides in order of their least first coordinate instead of comparing every pair, as
+  a trimming loop can have thousands of points. `crates/kernel/src/crossed_trim_tests.rs` holds
+  it.
 
 ## matext4cgmath 0.1.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/matext4cgmath)
 
