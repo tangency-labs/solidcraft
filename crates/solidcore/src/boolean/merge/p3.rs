@@ -16,7 +16,9 @@
 //! copying their implementations. Tree inputs retain null slots on failure;
 //! invalid indices and null operands dereferenced by a binary operation return
 //! `InvalidInput` instead of upstream
-//! undefined behavior. List inputs are copied once, as upstream requires. Debug
+//! undefined behavior, and an `InvalidInput` from `ManifoldBoolean` (undefined
+//! behaviour the port detects, such as UB-175) is returned as is rather than as
+//! `SM_ERR`. List inputs are copied once, as upstream requires. Debug
 //! drawing and the compile-time false IO experiment are omitted. No recursion;
 //! connected-component extraction is bounded by the initial face count, with an
 //! error if removal fails to make progress.
@@ -246,7 +248,8 @@ impl BooleanDriver for DependencyMerge {
 
 /// Evaluate all postfix trees, then append unused operands in original order.
 /// Leaves transfer an operand to the stack and clear its input slot immediately.
-/// Ordinary failures of `ManifoldBoolean` become `SM_ERR`; Unported propagates.
+/// Ordinary failures of `ManifoldBoolean` become `SM_ERR`; Unported propagates, and so
+/// does `InvalidInput`, the port's report of undefined behaviour upstream (UB-175).
 /// The token array is read-only, matching upstream despite its mutable signature.
 pub fn boolean_trees<D: BooleanDriver>(
     k: &mut Kernel,
@@ -297,7 +300,9 @@ pub fn boolean_trees<D: BooleanDriver>(
                     None,
                 )
                 .map_err(|e| {
-                    if e.is_unported() {
+                    // undefined behaviour the port detects (InvalidInput) keeps its
+                    // error, as Unported does
+                    if e.is_unported() || matches!(e, SolidError::InvalidInput { .. }) {
                         e
                     } else {
                         SolidError::sm_err(OP)
@@ -961,6 +966,7 @@ mod tests {
     struct Trace {
         pairs: Vec<(Option<i64>, Option<i64>)>,
         fail: bool,
+        undefined: bool,
         unported: bool,
         observed: Option<(bool, u64, BooleanOperation)>,
     }
@@ -994,7 +1000,13 @@ mod tests {
         ) -> Result<Option<i64>> {
             self.observed = Some((*manifold, *lamina, operation));
             if self.fail {
-                return Err(SolidError::invalid_input(OP, "test driver failure"));
+                return Err(SolidError::null_pointer("test driver failure"));
+            }
+            if self.undefined {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "test driver undefined behaviour",
+                ));
             }
             if self.unported {
                 return Err(SolidError::unported("test driver", "test.unit"));
@@ -1216,6 +1228,14 @@ mod tests {
         let mut input = vec![Some(1), Some(2)];
         let error = boolean_trees(&mut k, &mut input, &[0, 1, -1], None, &mut driver).unwrap_err();
         assert!(error.is_unported());
+        // so does the port's report of upstream undefined behaviour (InvalidInput)
+        let mut driver = Trace {
+            undefined: true,
+            ..Trace::default()
+        };
+        let mut input = vec![Some(1), Some(2)];
+        let error = boolean_trees(&mut k, &mut input, &[0, 1, -1], None, &mut driver).unwrap_err();
+        assert!(matches!(error, SolidError::InvalidInput { .. }));
         // the real engine's ordinary failure (empty operands) is mapped too
         let mut driver = DependencyMerge::default();
         let mut input = vec![Some(Brep::new()), Some(Brep::new())];
@@ -1337,7 +1357,13 @@ mod tests {
             BooleanOperation::Difference,
         )
         .unwrap_err();
-        assert!(matches!(error, SolidError::InvalidInput { .. }));
+        assert!(matches!(
+            error,
+            SolidError::Upstream {
+                code: crate::error::SM_ERR_NULL_POINTER,
+                ..
+            }
+        ));
         assert_eq!(
             driver.observed,
             Some((false, 1, BooleanOperation::Difference))

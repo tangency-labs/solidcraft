@@ -1691,6 +1691,37 @@ impl ProtoBrep<H> for Pool {
             },
         )
     }
+    fn edgeuse_evaluate_binormal(
+        &mut self,
+        _k: &Kernel,
+        _edgeuse: H,
+        _param: f64,
+    ) -> solidcore::Result<Vec3> {
+        // the pool's bare stand-ins have no B-rep to evaluate on
+        Err(SolidError::unported(
+            "SmEdgeuse::EvaluateBinormal (bare stand-ins without a B-rep)",
+            "harness:proto-pool-brep-edit",
+        ))
+    }
+    fn brep_make_edge_in_face(
+        &mut self,
+        _k: &Kernel,
+        _brep: H,
+        _face: H,
+        _start: H,
+        _end: H,
+        _curve: Curve,
+        _uv_curve: Option<Curve>,
+        _interval: Extent1d,
+        _orientation: solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType,
+        _tolerance: f64,
+    ) -> solidcore::Result<(Option<H>, Option<H>, Option<H>)> {
+        // the pool's bare stand-ins have no B-rep to edit
+        Err(SolidError::unported(
+            "SmBrep::MakeEdgeInFace (bare stand-ins without a B-rep)",
+            "harness:proto-pool-brep-edit",
+        ))
+    }
     fn brep_squeeze_edge(
         &mut self,
         _k: &mut Kernel,

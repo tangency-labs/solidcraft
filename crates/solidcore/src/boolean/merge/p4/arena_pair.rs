@@ -663,6 +663,64 @@ impl ProtoBrep<H> for ArenaPair<'_> {
         )
     }
 
+    /// `SmEdgeuse::EvaluateBinormal(t, FALSE, ..)` on the operand's B-rep
+    /// ([`crate::topology::edgeuse::p3::evaluate_binormal`]).
+    fn edgeuse_evaluate_binormal(
+        &mut self,
+        k: &Kernel,
+        edgeuse: H,
+        param: f64,
+    ) -> crate::Result<crate::math::Vec3> {
+        if edgeuse.kind != K_EDGEUSE {
+            return Err(invalid("not an edge use handle"));
+        }
+        let b = self.brep_m(edgeuse)?;
+        Ok(crate::topology::edgeuse::p3::evaluate_binormal(
+            k,
+            b,
+            EdgeuseId::from_index(edgeuse.i),
+            param,
+            false,
+            &crate::topology::edgeuse::p3::BinormalOptions::default(),
+        )?
+        .binormal)
+    }
+    /// `SmBrep::MakeEdgeInFace` of `brep`'s B-rep, which checks that operand's own
+    /// `m_bEditingEnabled`, through [`MergeIntervalBrep::merge_context`] of the face
+    /// ([`crate::topology::proto_topology::p2::make_edge_in_face_in_context`]).
+    fn brep_make_edge_in_face(
+        &mut self,
+        k: &Kernel,
+        brep: H,
+        face: H,
+        start: H,
+        end: H,
+        curve: SmCurve,
+        uv_curve: Option<SmCurve>,
+        interval: Extent1d,
+        orientation: OrientType,
+        tolerance: f64,
+    ) -> crate::Result<(Option<H>, Option<H>, Option<H>)> {
+        let in_brep = |h: H, kind: u8| brep.kind == K_BREP && h.b == brep.b && h.kind == kind;
+        if !in_brep(face, K_FACE) || !in_brep(start, K_VERTEX) || !in_brep(end, K_VERTEX) {
+            return Err(invalid("face or vertex is not in the B-rep"));
+        }
+        let ctx = self
+            .merge_context(face)
+            .ok_or_else(|| invalid("handle names an absent B-rep"))?;
+        crate::topology::proto_topology::p2::make_edge_in_face_in_context(
+            k,
+            ctx,
+            vid(start),
+            vid(end),
+            curve,
+            uv_curve,
+            interval,
+            orientation,
+            tolerance,
+        )
+    }
+
     /// `SmBrep::SqueezeEdge(edge, survivor)` of `brep`'s B-rep
     /// ([`crate::topology::brep::p3::squeeze_edge`]), notifying as the glue does.
     fn brep_squeeze_edge(

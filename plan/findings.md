@@ -19150,3 +19150,58 @@ other operand in the merge editing stages (`boolean.merge_p4` /
 `boolean.merge_p2` classification): the contained shell's faces are dropped instead
 of being kept reversed as a void. Listed in `known_mismatches.toml`; the offset
 port itself is not involved after the shell is built.
+
+## boolean.api_brep: tiny-box Booleans reach the UB-175 teardown once edge definitions imprint into faces
+
+Unit `boolean.api_brep`, cases `gen0059` (`with_options`, operation 3, boxes of
+size about 0.005 at (-0.0066, -0.0183, -0.0027) and (-0.0025, -0.0203, -0.0025)) and
+`gen0066` (`merge_breps`, operation 2, boxes of size about 0.008 and 0.004). Until
+`SmEdgeDefinition::Imprint` could run `SmBrep::MakeEdgeInFace` on the owning B-rep
+these cases were deferred there. Both now run to the end of
+`SmTopologyIntersector::IntersectInsertRelate`, where the port's UB-175 check
+(`plan/upstream-issues.md`: `~SmProtoTopologyManager` reads a freed proto edge) finds
+a proto vertex that still lists a freed proto edge: the proto vertex capture distance
+is at least 0.01 (`SmTopologyIntersector.cpp:1159`), larger than the boxes, so the
+intersection points collapse into shared proto vertices and some proto edges start
+and end on the same one. The port returns `SM_ERR_INVALID_INPUT` there
+(`gen0059` status 1007; in `gen0066` `merge_breps` reports it as `SM_ERR` 1001);
+the C++ reads the freed memory and goes on (status 0, 8 and 7 result records). The
+C++ build cannot be instrumented here, so no input-based rule separates these from
+tiny boxes that do not reach the condition from the inputs alone, so the
+`boolean.api_brep` runner rejects a case on the Rust side when the port reports exactly
+this UB-175 error (the way `primitive.api_primitives` rejects UB-119): the C++ is not
+run, because the input is undefined there. For that the merge's `BooleanTrees` now
+passes an `InvalidInput` from `ManifoldBoolean` through instead of turning it into
+`SM_ERR`.
+
+## boolean.merge_p3: vertex list order after merges that imprint edges into faces
+
+Unit `boolean.merge_p3`, cases `upstream_merge_breps_operation_3` (`merge_breps`,
+operation 3, boxes (0,0,0)+10 and (8,6,3)+(4,8,6)), `upstream_piecewise_boxes_2_keep_other`
+and `upstream_piecewise_boxes_3_keep_other` (`PiecewiseMerge` with
+`bCreateNewBrepsForFaces`, boxes (0,0,0)+10 and (5,0,0)+10). Deferred at
+`SmBrep::MakeEdgeInFace` before; now both sides finish with the same counts
+(18/36/22 and 10/20/12 faces/edges/vertices) and the same vertex positions, in a
+different vertex list order. C++ lists the vertices that belong only to the part of
+one operand on the far side of the other (the corners (8,6,3) and (8,6,9) inside the
+first box; the x = 0 corners of the first box in the piecewise cases) after all the
+others, as if that part's vertices were moved out of the B-rep and back in; the port
+keeps them in their original places (`values.record[18..]` and `[8..]`). The binormal
+classification of `UpdateFaces` is not involved (the merge case never evaluates one;
+in the piecewise cases every evaluation succeeds). Suspected cause: a step after the
+imprint in the merge editing stages that moves a region's or shell's topology between
+B-reps upstream and keeps it in place in the port. Follow-up: trace which step moves the
+far-side part's topology out of the B-rep and back in upstream. Listed in
+`known_mismatches.toml`.
+
+## offset.offset_executive_p2: gen0166 leaves extra shells and loops after a failed shell
+
+Unit `offset.offset_executive_p2`, case `gen0166` (`static_shell` of a 20x30x40 box at
+(-8.005, -18.639, -17.799), face 2 selected twice, distance -0.5, tolerance 1e-6).
+Deferred at `SmBrep::MakeEdgeInFace` before; now both sides return status 1000 with
+12 faces, 24 edges and 16 vertices, but the C++ result has 3 regions / 3 shells /
+13 loops and the port 3 / 7 / 16, and the selected faces after the call are (0, 2) in
+C++ and (4, none) in the port. No edge use binormal is evaluated in this case.
+Suspected to be the same Rust merge region/shell handling as `gen0000` / `gen0003`
+above (the inset shell's Difference); not traced further. Listed in
+`known_mismatches.toml`.

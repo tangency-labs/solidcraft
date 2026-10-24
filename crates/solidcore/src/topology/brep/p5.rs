@@ -9,7 +9,7 @@
 //! | [`delete_topological_vertex`] | `SmBrep::DeleteTopologicalVertex` |
 //! | [`find_and_set_infinite_region`] | `SmBrep::FindAndSetInfiniteRegion` |
 //! | [`glue_vertices`] | `SmBrep::GlueVertices` |
-//! | [`make_edge_in_face`], [`make_edge_in_face_with_uv_curve`] | `SmBrep::MakeEdgeInFace` |
+//! | [`make_edge_in_face`], [`make_edge_in_face_with_uv_curve`], [`make_edge_in_face_in`] | `SmBrep::MakeEdgeInFace` |
 //! | [`make_manifold`] | `SmBrep::MakeManifold` |
 //! | [`remove_topological_edges_and_vertices`] | `SmBrep::RemoveTopologicalEdgesAndVertices` |
 //! | [`remove_faces`] | `SmBrep::RemoveFaces` |
@@ -1394,7 +1394,12 @@ pub fn make_edge_in_face_with_uv_curve(
 ) -> Result<()> {
     with_p3_notifications(k, b, notifications, |k, b, env| {
         make_edge_with_backend(
-            &mut ArenaFaceEdge { k, b, env },
+            &mut ArenaFaceEdge {
+                k,
+                b,
+                env,
+                curve_ref: &edge_curve_identity,
+            },
             editing_enabled,
             face,
             start,
@@ -1407,6 +1412,50 @@ pub fn make_edge_in_face_with_uv_curve(
             output,
         )
     })
+}
+
+/// [`make_edge_in_face_with_uv_curve`] inside a caller's edit: notifying through the
+/// caller's `env`, with the new edge's curve identified by the caller's `curve_ref`
+/// (as [`super::p9::make_edge_in_face_with_vu`] takes it). The editing check reads
+/// `b`'s own `m_bEditingEnabled` ([`Brep::editing_enabled`]), as upstream's member does.
+///
+/// # Errors
+///
+/// Those of [`make_edge_in_face_with_uv_curve`].
+pub fn make_edge_in_face_in(
+    k: &Kernel,
+    b: &mut Brep,
+    face: Option<FaceId>,
+    start: Option<VertexId>,
+    end: Option<VertexId>,
+    curve: Curve,
+    uv_curve: Option<Curve>,
+    interval: Extent1d,
+    orientation: OrientType,
+    max_gap_3d: f64,
+    output: &mut EdgeInFace,
+    env: &mut EditNotifyEnv<'_>,
+    curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
+) -> Result<()> {
+    let editing_enabled = b.editing_enabled();
+    make_edge_with_backend(
+        &mut ArenaFaceEdge {
+            k,
+            b,
+            env,
+            curve_ref,
+        },
+        editing_enabled,
+        face,
+        start,
+        end,
+        curve,
+        uv_curve,
+        interval,
+        orientation,
+        max_gap_3d,
+        output,
+    )
 }
 
 /// Handle adapter for the shared owned control flow. Missing sector/insertion
@@ -1511,6 +1560,7 @@ struct ArenaFaceEdge<'a, 'e> {
     k: &'a Kernel,
     b: &'a mut Brep,
     env: &'a mut EditNotifyEnv<'e>,
+    curve_ref: &'a dyn Fn(EdgeId, i64) -> ObjectRef,
 }
 impl FaceEdgeBackend for ArenaFaceEdge<'_, '_> {
     type Face = FaceId;
@@ -1576,6 +1626,7 @@ impl FaceEdgeBackend for ArenaFaceEdge<'_, '_> {
             orientation,
             gap,
             out,
+            self.curve_ref,
         )
     }
 }
@@ -1620,8 +1671,8 @@ fn find_vertex_sector(
 
 /// `SmBrep::MakeEdgeInFaceWithVU(face, first, last, curve, uv, interval, orientation,
 /// max_gap_3d, ...)` without drop-curve state ([`super::p9::make_edge_in_face_with_vu`]).
-/// The double gap becomes the `SmZoneTol3d` parameter. Curves carry no identity in this
-/// port (module docs): the new edge's curve gets a call-local one.
+/// The double gap becomes the `SmZoneTol3d` parameter. The new edge's curve takes its
+/// identity from `curve_ref` (a call-local one for the plain entry points, module docs).
 #[allow(clippy::too_many_arguments)]
 fn make_edge_in_face_with_vu(
     k: &Kernel,
@@ -1636,6 +1687,7 @@ fn make_edge_in_face_with_vu(
     orientation: OrientType,
     max_gap_3d: f64,
     output: &mut EdgeInFace,
+    curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
 ) -> Result<()> {
     let made = super::p9::make_edge_in_face_with_vu(
         k,
@@ -1651,7 +1703,7 @@ fn make_edge_in_face_with_vu(
             curve_zone_tol_3d: crate::geom::tol::zone_tol3d(k, max_gap_3d),
         },
         env,
-        &edge_curve_identity,
+        curve_ref,
     )?;
     *output = EdgeInFace {
         edge: Some(made.edge),
