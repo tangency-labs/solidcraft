@@ -4955,6 +4955,42 @@ fn feature_tools_with_constructor(
             if let Some(pts) = points {
                 return regions.iter().map(|r| Ok(tool(r, kernel::sweep_path_with(&ss.plane, r, &pts, &ctl)?))).collect();
             }
+            // A path through several sketch curves: sweep each curve's segments as its own lump.
+            // A Boolean cut through the whole free-form tool fails on some sides (#3604), while
+            // the pieces are cut one by one (the Boolean's by_lumps path) and work.
+            let per_curve = if ctl.is_default() && path.len() > 1 {
+                let mut counts = Vec::with_capacity(path.len());
+                let mut ok = true;
+                for id in path {
+                    match ps.sketch.curve_index(id).map(|ci| ps.sketch.segs(ci).len()) {
+                        Some(n) => counts.push(n),
+                        None => {
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+                (ok && counts.iter().all(|&n| n > 0) && counts.iter().sum::<usize>() == segs.len()).then_some(counts)
+            } else {
+                None
+            };
+            if let Some(counts) = per_curve {
+                return regions
+                    .iter()
+                    .map(|r| {
+                        let mut bodies = Vec::with_capacity(counts.len());
+                        let mut at = 0;
+                        for (i, &n) in counts.iter().enumerate() {
+                            let group = &segs[at..at + n];
+                            let pts = kernel::path_polyline(group)?;
+                            let plane = if i == 0 { ss.plane } else { sweep_piece_plane(&ss.plane, &pts)? };
+                            bodies.push(kernel::sweep_with(&plane, r, group, &ctl)?);
+                            at += n;
+                        }
+                        Ok(tool(r, kernel::multi_lump(bodies)?))
+                    })
+                    .collect();
+            }
             regions.iter().map(|r| Ok(tool(r, kernel::sweep_with(&ss.plane, r, &segs, &ctl)?))).collect()
         }
         FeatureKind::Pipe { path_sketch, path, diameter, wall, .. } => {
@@ -5197,6 +5233,18 @@ fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<
         }
     }
     Ok(Some(chain))
+}
+
+/// The plane at a path piece's start, keeping the profile's up: the piece's sweep starts with
+/// the profile square to the path, turned as the path turns.
+fn sweep_piece_plane(profile: &solidcraft_geom::Plane, piece: &[Vec3]) -> Result<solidcraft_geom::Plane> {
+    let (Some(&a), Some(&b)) = (piece.first(), piece.get(1)) else {
+        return Err(DocError::Invalid("a path piece needs two points".into()));
+    };
+    let tangent = (b - a).normalized().ok_or_else(|| DocError::Invalid("path direction".into()))?;
+    let up = profile.y;
+    let x = up.cross(-tangent).normalized().ok_or_else(|| DocError::Invalid("sweep frame".into()))?;
+    Ok(solidcraft_geom::Plane { origin: a, x, y: up })
 }
 
 fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<kernel::PathSeg>> {
