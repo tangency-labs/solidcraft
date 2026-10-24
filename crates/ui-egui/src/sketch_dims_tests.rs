@@ -362,6 +362,27 @@ fn a_line_end_on_a_circle_outside_the_axis_snap_stays_at_the_cursor() {
     assert!((end.len() - 30.0).abs() < 1e-9 && end.dist(at) < 0.5, "{end:?}");
 }
 
+/// A click on a line type in the palette switches the drawing mode; it must not take the keyboard
+/// away from the dimension box of the shape being drawn (#2927).
+#[test]
+fn a_palette_linetype_click_leaves_the_dimension_box_focused() {
+    let mut h = drawing("sketch.rectangle.two_point");
+    type_value(&mut h, "30");
+    assert_focus(&h, 0);
+    let at = h.widget("- -").expect("the palette's construction button");
+    h.call("ui.click", json!({"x": at[0], "y": at[1]}));
+    h.settle();
+    assert_focus(&h, 0);
+    // The keyboard still reaches the box: typing keeps editing the dimension (a locked box keeps
+    // its caret, so the text is appended), and Tab still moves to the next box.
+    h.step(&json!({"text": "4"})).unwrap();
+    assert_focus(&h, 0);
+    assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "304");
+    tab(&mut h, false);
+    assert_focus(&h, 1);
+    assert_eq!(crate::sketch_palette::mode(&h.app), 1, "the click still switched the drawing line type");
+}
+
 /// A value box set off the cursor stays in the drawing area (#2201): past an edge it goes to the
 /// cursor's other side, still clear of it; with no room either side it is pushed inside.
 #[test]

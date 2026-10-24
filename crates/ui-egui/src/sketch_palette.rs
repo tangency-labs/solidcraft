@@ -511,6 +511,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         } else {
             set_mode(app, kind);
         }
+        // The button click would otherwise leave the shape's dimension box without the keyboard.
+        crate::sketch_dims::restore_box_focus(app, ctx);
     }
     if construction {
         toggle_construction(app);
