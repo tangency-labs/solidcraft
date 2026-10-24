@@ -158,7 +158,29 @@ const API_TEST: &str = r#"(async () => {
     check((await app.inspect()).bodies.length === 1, 'API still works after rejected requests');
     const ui = await app.request('ui.inspect');
     check(ui.home === false && ui.viewport[2] > 600, 'model viewport is visible');
-    return {commands: 'discovered', bodies: [0, 1, 0, 1], errors: 'rejected', queue: '256 completed, 1 rejected'};
+    // Browser files exist only in the VFS: native filesystem metadata cannot find them.
+    await app.execute('file.save', {path: '/upload/linked-part.solidcraft'});
+    await app.execute('file.new');
+    const linked = await app.execute('component.insert_design', {path: '/upload/linked-part.solidcraft'});
+    await app.execute('file.save', {path: '/opfs/linked-assembly.solidcraft'});
+    const links = await app.execute('component.links');
+    check(links.links[0].found === true, 'linked part is found in browser storage');
+    check(links.links[0].path === '../upload/linked-part.solidcraft', 'assembly stores a relative link');
+    check(links.links[0].file === '/upload/linked-part.solidcraft', 'relative link resolves to a browser storage key');
+    await app.request('ui.menu', {x: 200, y: 300, target: {type: 'occurrence', path: [linked.occurrence]}});
+    let menu;
+    for (let frame = 0; frame < 120; frame++) {
+        menu = await app.request('ui.menu');
+        if (menu.items?.some(item => item.id === 'ui.openLinkedDesign')) break;
+    }
+    check(menu.items?.some(item => item.id === 'ui.openLinkedDesign'), 'occurrence menu offers the source design');
+    await app.request('ui.menuPick', {item: 'ui.openLinkedDesign'});
+    const tabs = await app.request('ui.documents');
+    check(tabs.documents.length === 2 && tabs.active === 1, 'linked source opens in another tab');
+    check((await app.inspect()).bodies[0].name === 'Browser API box', 'source design is active');
+    await app.request('ui.documents', {action: 'switch', index: 0});
+    check((await app.execute('component.links')).links[0].component === linked.component, 'assembly remains in its tab');
+    return {commands: 'discovered', bodies: [0, 1, 0, 1], errors: 'rejected', queue: '256 completed, 1 rejected', linked: 'source opened from browser storage'};
 })()"#;
 
 /// Run the test; `required: false` (from `cargo xtask ci`) skips it when Chrome is missing.

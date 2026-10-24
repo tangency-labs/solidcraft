@@ -1896,6 +1896,7 @@
   "ui.one_side": "한 방향",
   "ui.open": "열기",
   "ui.open_ends_tip": "아무것과도 닿지 않음",
+  "ui.open_linked_design": "연결된 디자인 열기",
   "ui.open_preferences": "환경 설정 열기",
   "ui.open_recent": "최근 항목 열기",
   "ui.operation": "작업",
