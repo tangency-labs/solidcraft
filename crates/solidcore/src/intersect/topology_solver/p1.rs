@@ -106,6 +106,7 @@ use crate::query::face::p2::{
 use crate::surface::surface::p2::{surface_cache, Surface, SurfaceKind};
 use crate::surface::surface_cache::p1::{AltCacheKey, AltSrfCacheType};
 use crate::surface::trim_srf_cache::POINT_CLASS_UNKNOWN;
+use crate::topology::face::p2::create_curves_by_trimming;
 
 const OP_MAY: &str = "intersect::topology_solver::p1::TopologySolver::may_contain_answer";
 const OP_TWO_TREES: &str = "intersect::topology_solver::p1::TopologySolver::solve_two_trees";
@@ -1909,6 +1910,12 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
 /// vector `opt_vectors[0]` (3D curves and their UV trim curves), taken from the
 /// surface cache's alternate caches or made and cached there (silhouette curves of
 /// the surface to ten times `tolerance_3d` and 20 degrees, trimmed by the face).
+/// The surface cache is the per-call [`surface_cache`], so the alternate caches it
+/// searches first hold only what this call adds. The trimming works on the face
+/// [`TopologyObjects::face_entity`] resolves; an adapter that resolves none returns
+/// [`SolidError::Unported`] for `SmFace::CreateCurvesByTrimming`. A trimmed UV curve
+/// that is not a B-spline (upstream caches it as NULL and `GetCopyOfCurves` fails
+/// on it) is `SM_ERR_NULL_POINTER`.
 pub(super) fn face_silhouettes<O: Copy + PartialEq>(
     k: &Kernel,
     objects: &dyn TopologyObjects<O>,
@@ -1919,7 +1926,7 @@ pub(super) fn face_silhouettes<O: Copy + PartialEq>(
     // locals and temporaries
     let surface = objects.face_surface(face)?;
     let srf = objects.surface(surface)?;
-    let cache = surface_cache(k, srf, Some(surface))?;
+    let mut cache = surface_cache(k, srf, Some(surface))?;
     let view = *opt_vectors
         .first()
         .ok_or(null_deref(OP_FACE_SIL, "no view vector"))?;
@@ -1958,7 +1965,7 @@ pub(super) fn face_silhouettes<O: Copy + PartialEq>(
     }
 
     // Create the planar section curves from the brep and the plane
-    let (_curves_3d, _curves_uv) = srf.create_silhouette_curves(
+    let (curves_3d, curves_uv) = srf.create_silhouette_curves(
         k,
         &objects.face_uv_domain(face)?,
         view,
@@ -1967,13 +1974,62 @@ pub(super) fn face_silhouettes<O: Copy + PartialEq>(
         Some(angle_tol),
     )?;
 
-    // Now trim the curves (then SmSurfaceCache::AddCurvesToCache(SM_AS_TRIMMED_SILHOUETTE,
-    // ..) and HasCachedCurves again, SM_ERR when they are not found).
-    // UNPORTED(topology.face_p2): SmFace::CreateCurvesByTrimming
-    Err(SolidError::unported(
-        "SmFace::CreateCurvesByTrimming",
-        "topology.face_p2",
-    ))
+    // Now trim the curves.
+    let Some((b, f)) = objects.face_entity(face) else {
+        // DISPATCH GAP: SmFace::CreateCurvesByTrimming is ported (`topology::face::p2`),
+        // but this adapter cannot resolve the face handle to its `Brep` and `FaceId`.
+        return Err(SolidError::unported(
+            "SmFace::CreateCurvesByTrimming",
+            "topology.face_p2",
+        ));
+    };
+    let curves_3d: Vec<Option<Curve>> = curves_3d.into_iter().map(Some).collect();
+    let curves_uv: Vec<Option<Curve>> = curves_uv.into_iter().map(Some).collect();
+    let trimmed = create_curves_by_trimming(
+        k,
+        b,
+        f,
+        Some(approx_tol),
+        Some(&curves_3d),
+        Some(&curves_uv),
+        true,
+        true,
+    )?;
+    let trim_3d = trimmed.curves_3d.unwrap_or_default();
+    // a NULL UV entry (an interval of a non-B-spline UV curve) has no Rust cache slot;
+    // upstream's later GetCopyOfCurves stops at it with SM_ERR_NULL_POINTER
+    let trim_uv = trimmed
+        .uv_curves
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<Option<Vec<Curve>>>()
+        .ok_or(SolidError::null_pointer(OP_FACE_SIL))?;
+
+    // Register trimmed curves and create copy by getting them again
+    cache.add_curves_to_cache(
+        AltSrfCacheType::TrimmedSilhouette,
+        approx_tol,
+        angle_tol,
+        &key,
+        Some(trim_3d),
+        Some(trim_uv),
+    )?;
+
+    // Don't clean up here we just use the curves that were created
+    match cache.has_cached_curves(
+        AltSrfCacheType::TrimmedSilhouette,
+        approx_tol,
+        angle_tol,
+        &key,
+        true,
+        true,
+    )? {
+        Some(copies) => Ok((
+            copies.curves_3d.unwrap_or_default(),
+            copies.curves_uv.unwrap_or_default(),
+        )),
+        None => Err(SolidError::sm_err(OP_FACE_SIL)),
+    }
 }
 
 /// `pFace->GetSurface()->GlobalPointSolve(uv_domain, op, point, tol,

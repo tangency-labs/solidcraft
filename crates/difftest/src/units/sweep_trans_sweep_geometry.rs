@@ -212,7 +212,12 @@ fn surface(k: &Kernel, o: &mut Vec<f64>, s: &Surface) -> Result<()> {
     Ok(())
 }
 /// `SmBrep::CreateFaceFromSurface(surface, domain, face)` in the infinite region.
-fn create_face(k: &mut Kernel, b: &mut Brep, s: Surface, domain: &Extent2d) -> Result<FaceId> {
+pub(crate) fn create_face(
+    k: &mut Kernel,
+    b: &mut Brep,
+    s: Surface,
+    domain: &Extent2d,
+) -> Result<FaceId> {
     let mut records = BTreeMap::new();
     let mut attributes = AttributeStore::default();
     let key_of = super::topology_brep_p8::key_of;
