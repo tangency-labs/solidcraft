@@ -1579,10 +1579,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let target_uv_domain = brep
                     .face_uv_domain(target_face)
                     .ok_or(dangling("face handle is unknown"))?;
-                let target = brep
+                let mut target = brep
                     .surface(target_surface)
                     .ok_or(dangling("surface handle cannot be resolved"))?
                     .clone_for_evaluation()?;
+                let _ = target.set_owner(None::<crate::geom::object::ObjectRef>);
                 // DoTrace traces on the surface's cache (smsurf_GetSurfaceCache: the
                 // face's trimmed cache); a cache that cannot be had fails the drop
                 let mut cache = match brep.face_surface_trace_cache(k, target_surface) {

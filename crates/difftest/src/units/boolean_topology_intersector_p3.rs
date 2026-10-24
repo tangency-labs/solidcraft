@@ -859,11 +859,19 @@ impl IntersectorBrepP3<H> for Two {
             return Ok(None);
         }
         let side = surface.b;
-        let lease = solidcore::query::face::p2::face_surface_cache(
+        let mut lease = solidcore::query::face::p2::face_surface_cache(
             k,
             self.brep_m(surface)?,
             FaceId::from_index(surface.i),
         )?;
+        if let Ok(Some(owner)) = lease.cache.base().surface().face() {
+            let tol = self
+                .topology_tolerance(hd(side, K_FACE, surface.i))
+                .unwrap_or(0.0);
+            lease
+                .cache
+                .bind_face(owner, EntityRef::Face(FaceId::from_index(surface.i)), tol)?;
+        }
         // the cache's objects in this adapter's handles (the B-rep's topology)
         let mapped = lease.cache.base().map_handles(|e| match e {
             EntityRef::Vertexuse(vu) => Ok(hd(side, K_VERTEXUSE, vu.index())),
