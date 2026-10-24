@@ -636,6 +636,9 @@ pub(crate) fn font_specimen(ui: &mut Ui, text: &str) {
 
 /// Intrinsically sized segments, retaining the usual row label for accessibility and automation.
 pub(crate) fn settings_segments(ui: &mut Ui, label: &str, selected: &mut usize, options: &[&str]) -> bool {
+    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[label]) && !crate::prefs_search::texts_hit(ui, options) {
+        return false;
+    }
     let t = Tokens::get();
     let widest = options.iter().map(|s| super::ContentWidth::name(ui, s)).fold(0.0, f32::max);
     let width = ((widest + t.space_16) * options.len() as f32).min(dimension(ui.available_width()));
@@ -650,6 +653,9 @@ pub(crate) fn settings_segments(ui: &mut Ui, label: &str, selected: &mut usize, 
 }
 
 pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let t = Tokens::get();
     let colours = Tokens::themed(crate::theme::is_dark(), mode);
     ui.horizontal_wrapped(|ui| {
