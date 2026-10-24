@@ -16,7 +16,7 @@ struct Worker {
 impl Host for Worker {
     fn submit(&self, operation: Operation, _: String) -> solidcraft_cloud::Result<Job> {
         let connection = match &operation {
-            Operation::LoadSettings | Operation::Configure(_) => String::new(),
+            Operation::LoadSettings | Operation::Configure(_) | Operation::GenerateSshKey(_) => String::new(),
             Operation::Setup(c)
             | Operation::Test(c)
             | Operation::List(c)
@@ -207,7 +207,9 @@ fn startup_resumes_connections_once_without_duplicate_active_synchronizations() 
     h.frames(10);
     assert_eq!(worker.jobs.lock().unwrap().len(), 1);
     worker.jobs.lock().unwrap()[0].0.update(|status| status.phase = Phase::Synced).unwrap();
-    let _ = h.ctx.run_ui(egui::RawInput { time: Some(62.0), ..Default::default() }, |ui| h.app.logic(ui.ctx()));
+    let mut output = h.ctx.run_ui(egui::RawInput { time: Some(62.0), ..Default::default() }, |ui| h.app.logic(ui.ctx()));
+    // This logic-only frame has no renderer to consume font texture updates.
+    output.textures_delta.clear();
     assert_eq!(worker.jobs.lock().unwrap().len(), 2, "offline queues get another attempt later");
 }
 

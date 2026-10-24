@@ -20,6 +20,37 @@ pub enum Authentication {
     Ssh,
 }
 
+/// Verified native Git destinations. These are local connection metadata.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitRemote {
+    pub fetch: String,
+    pub push: Vec<String>,
+}
+
+impl GitRemote {
+    pub fn validate(&self) -> Result<()> {
+        if self.push.is_empty() || self.push.len() > 16 {
+            return Err(Error::Invalid("choose between one and sixteen Git push destinations".into()));
+        }
+        for endpoint in std::iter::once(&self.fetch).chain(&self.push) {
+            if endpoint.is_empty() || endpoint.starts_with('-') || endpoint.len() > 4096 || endpoint.chars().any(char::is_control) {
+                return Err(Error::Invalid("invalid Git destination".into()));
+            }
+            // Usernames in SSH URLs are ordinary Git configuration; passwords and HTTP
+            // userinfo belong in credential storage rather than recovery metadata.
+            if let Some((scheme, rest)) = endpoint.split_once("://") {
+                let authority = rest.split('/').next().unwrap_or("");
+                if let Some((userinfo, _)) = authority.rsplit_once('@')
+                    && (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https") || userinfo.contains(':'))
+                {
+                    return Err(Error::Invalid("keep credentials out of Git URLs".into()));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Connection {
@@ -35,6 +66,8 @@ pub struct Connection {
     pub ssh_identity: SshIdentity,
     /// An opaque host credential identifier, never the token itself.
     pub credential: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_remote: Option<GitRemote>,
 }
 
 impl Default for Connection {
@@ -50,12 +83,14 @@ impl Default for Connection {
             authentication: Authentication::Https,
             ssh_identity: SshIdentity::System,
             credential: "cloud:github".into(),
+            git_remote: None,
         }
     }
 }
 
 impl Connection {
     /// Credentials may be renewed without redirecting captured saves to another repository.
+    /// Legacy unpinned captures can acquire verified endpoints; captured pins stay immutable.
     pub fn same_repository(&self, other: &Self) -> bool {
         self.id == other.id
             && self.provider == other.provider
@@ -63,9 +98,13 @@ impl Connection {
             && self.checkout == other.checkout
             && self.remote == other.remote
             && self.branch == other.branch
+            && (self.git_remote.is_none() || self.git_remote == other.git_remote)
     }
 
     pub fn validate(&self) -> Result<()> {
+        if let Some(remote) = &self.git_remote {
+            remote.validate()?;
+        }
         if self.id.is_empty() || self.id.len() > 128 || !self.id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_')) {
             return Err(Error::Invalid("invalid connection identifier".into()));
         }
@@ -151,6 +190,7 @@ pub trait HostSetup {
     fn id(&self) -> &'static str;
     fn create_repository_url(&self) -> &'static str;
     fn create_token_url(&self) -> &'static str;
+    fn matches_remote(&self, remote: &str) -> bool;
     fn ssh_settings_url(&self) -> &'static str;
 }
 
@@ -165,9 +205,17 @@ impl HostSetup for GitHub {
     fn create_token_url(&self) -> &'static str {
         "https://github.com/settings/personal-access-tokens/new?name=SolidCraft&description=Save+SolidCraft+designs&contents=write&metadata=read&expires_in=none"
     }
+    fn matches_remote(&self, remote: &str) -> bool {
+        remote.starts_with("git@github.com:") || remote.starts_with("ssh://git@github.com/") || remote.starts_with("https://github.com/")
+    }
     fn ssh_settings_url(&self) -> &'static str {
         "https://github.com/settings/ssh/new"
     }
+}
+
+/// Host-specific convenience actions are selected here, independently of Git access.
+pub fn host_setup(provider: &str, remote: &str) -> Option<&'static dyn HostSetup> {
+    [github_setup()].into_iter().find(|host| host.id() == provider || host.matches_remote(remote))
 }
 
 pub fn github_setup() -> &'static dyn HostSetup {
@@ -191,6 +239,23 @@ mod tests {
         for repository in ["--upload-pack=bad", "repo\nother"] {
             assert!(Connection { repository: repository.into(), ..Default::default() }.validate().is_err());
         }
+    }
+
+    #[test]
+    fn pinned_endpoints_reject_credentials_control_characters_and_excessive_fanout() {
+        for url in [
+            "https://secret@example.test/repo",
+            "HTTPS://secret@example.test/repo",
+            "ssh://git:secret@example.test/repo",
+            "--upload-pack=bad",
+            "repo\nother",
+        ] {
+            assert!(GitRemote { fetch: url.into(), push: vec![url.into()] }.validate().is_err());
+        }
+        for url in ["ssh://git@example.test/repo", "git@example.test:repo", "../path with spaces.git", "file:///path with spaces.git"] {
+            GitRemote { fetch: url.into(), push: vec![url.into()] }.validate().unwrap();
+        }
+        assert!(GitRemote { fetch: "repo".into(), push: vec!["repo".into(); 17] }.validate().is_err());
     }
 
     #[test]

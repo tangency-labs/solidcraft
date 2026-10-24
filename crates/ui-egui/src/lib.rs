@@ -22,6 +22,8 @@ pub mod browser_prompts;
 pub mod canvas;
 pub mod cli_link;
 mod cloud;
+mod cloud_browser;
+mod cloud_settings;
 mod cloud_setup;
 #[cfg(test)]
 mod colour_tokens_tests;
@@ -447,6 +449,8 @@ pub struct Services {
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Choose an existing directory; absent on browser hosts.
+    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
     /// Where the host reads the anti-aliasing preference at start (a small JSON file).
     pub graphics_path: Option<String>,
@@ -1577,8 +1581,21 @@ impl SolveApp {
             }
             return;
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if id == "cloud.configure" {
+            cloud_settings::git::open(self);
+            return;
+        }
+        if id == "cloud.settings" {
+            prefs::open_at(self, prefs::PAGE_CLOUD);
+            return;
+        }
         if id == "cloud.connect" {
             cloud_setup::open(self);
+            return;
+        }
+        if matches!(id, "cloud.list" | "cloud.save") {
+            cloud_browser::start(self, id);
             return;
         }
         if id == "ui.palette" {
@@ -2930,6 +2947,9 @@ impl SolveApp {
         issue_report::CadInput::block(self, ui, &mut report_input);
         self.cad_ui(ui, &mut report_input);
         cloud_setup::show(self, ui.ctx());
+        #[cfg(not(target_arch = "wasm32"))]
+        cloud_settings::git::show(self, ui.ctx());
+        cloud_browser::show(self, ui.ctx());
         drop(report_input);
         // After everything else, on every page (the start page too, which returns early from
         // `cad_ui`): the window's edges resize it (#1381).

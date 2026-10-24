@@ -43,6 +43,13 @@ impl NativeHost {
     ) -> Result<()> {
         check_cancelled(job)?;
         match operation {
+            Operation::GenerateSshKey(input) => {
+                let key = super::ssh::generate(outbox.root(), input, job, access)?;
+                job.update(|status| {
+                    status.result = Some(serde_json::json!(key));
+                    status.phase = Phase::Ready;
+                })?;
+            }
             Operation::LoadSettings => {
                 let settings = outbox.load_settings()?.settings()?;
                 job.update(|status| {
@@ -98,8 +105,11 @@ impl NativeHost {
             }
             Operation::Synchronize(connection) => Self::synchronize(connection, executable, outbox, job, None, access)?,
             Operation::Test(connection) => {
-                open_repository(connection, executable, job, access)?.test_connection()?;
-                job.update(|status| status.phase = Phase::Ready)?;
+                let connection = open_repository(connection, executable, job, access)?.verified_connection()?;
+                job.update(|status| {
+                    status.result = Some(serde_json::json!(connection));
+                    status.phase = Phase::Ready;
+                })?;
             }
             Operation::List(connection) => {
                 let mut destinations = BTreeMap::new();
@@ -280,7 +290,11 @@ fn open_repository(connection: Connection, executable: &str, job: &Job, access: 
     } else {
         None
     };
-    GitRepository::authenticated(connection, executable, job.clone(), token)
+    let askpass = match (&connection.ssh_identity, access) {
+        (solidcraft_cloud::SshIdentity::File(path), Some(access)) => access.ssh_askpass(path)?,
+        _ => None,
+    };
+    GitRepository::authenticated(connection, executable, job.clone(), token).map(|repository| repository.with_ssh_askpass(askpass))
 }
 
 impl Host for NativeHost {
@@ -305,7 +319,7 @@ impl Host for NativeHost {
     }
     fn submit(&self, operation: Operation, git_executable: String) -> Result<Job> {
         let connection = match &operation {
-            Operation::LoadSettings | Operation::Configure(_) => None,
+            Operation::LoadSettings | Operation::Configure(_) | Operation::GenerateSshKey(_) => None,
             Operation::Setup(connection)
             | Operation::Test(connection)
             | Operation::List(connection)

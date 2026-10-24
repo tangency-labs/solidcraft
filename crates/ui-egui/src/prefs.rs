@@ -319,8 +319,21 @@ pub fn choose_nav_preset(prefs: &mut Prefs, preset: &NavPreset) {
     }
 }
 /// Stable control-channel names; presentation labels may be shorter.
-pub const PAGES: &[&str] =
-    &["General", "Appearance", "Layout", "Graphics", "Design", "Sketch", "Tools", "Navigation", "3D mouse", "Shortcuts", "Assistant", "Plugins"];
+pub const PAGES: &[&str] = &[
+    "General",
+    "Appearance",
+    "Layout",
+    "Graphics",
+    "Design",
+    "Sketch",
+    "Tools",
+    "Navigation",
+    "3D mouse",
+    "Shortcuts",
+    "Assistant",
+    "Plugins",
+    "Cloud Saves",
+];
 pub const PAGE_GENERAL: usize = 0;
 pub const PAGE_APPEARANCE: usize = 1;
 pub const PAGE_LAYOUT: usize = 2;
@@ -333,6 +346,7 @@ pub const PAGE_MOUSE3D: usize = 8;
 pub const PAGE_SHORTCUTS: usize = 9;
 pub const PAGE_ASSISTANT: usize = 10;
 pub const PAGE_PLUGINS: usize = 11;
+pub const PAGE_CLOUD: usize = 12;
 /// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
 const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
@@ -431,6 +445,14 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
         handle: "prefs:page:Plugins",
         scroll: true,
         draw: window_page::<PAGE_PLUGINS>,
+    },
+    ui_kit::WindowPage {
+        icon: "settings",
+        label: "cloud.title",
+        group: None,
+        handle: "prefs:page:Cloud Saves",
+        scroll: true,
+        draw: window_page::<PAGE_CLOUD>,
     },
 ];
 
@@ -1585,6 +1607,8 @@ pub struct PrefsWindow {
     pub section: usize,
     /// Everything as it was when the dialog opened (or at the last Apply), for Cancel.
     snapshot: Option<Snapshot>,
+    /// The ordinary settings at the instant an asynchronous cloud Apply was requested.
+    applying_snapshot: Option<Snapshot>,
     /// The up axis preference the view follows now (applied when it changes, and at startup).
     applied_up: Option<String>,
     /// The appearance last asked of the native window ([`sync_window_theme`]).
@@ -1823,7 +1847,7 @@ fn apply_pending(app: &mut SolveApp) -> bool {
     };
     // Update bookkeeping isn't a setting and Cancel keeps it (`restore`), so it isn't a change.
     snapshot.prefs.update.clone_from(&app.preferences.update);
-    app.prefs_window.snapshot.as_ref().is_some_and(|s| !s.matches(app))
+    !crate::cloud_settings::busy(app) && (app.prefs_window.snapshot.as_ref().is_some_and(|s| !s.matches(app)) || crate::cloud_settings::changed(app))
 }
 
 /// The saved-settings keys whose values the snapshot holds, as [`SolveApp::prefs`] writes them.
@@ -2108,6 +2132,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
         default_units_changed(app);
     }
     match page {
+        PAGE_CLOUD => crate::cloud_settings::defaults(app),
         0 => {
             app.autosave_minutes = 5.0;
             set_autosave(app);
@@ -2536,6 +2561,12 @@ fn unfold(ctx: &egui::Context) {
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    if let Some(close_after_apply) = crate::cloud_settings::advance(app) {
+        app.prefs_window.snapshot = Some(app.prefs_window.applying_snapshot.take().unwrap_or_else(|| Snapshot::take(app)));
+        if close_after_apply {
+            close(app, false);
+        }
+    }
     // File › Keyboard Shortcuts and Help › Keyboard Shortcuts open this dialog at that page.
     if app.keymap.open {
         app.keymap.open = false;
@@ -2548,7 +2579,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.prefs_window.land_on = None;
         app.prefs_window.reveal = None;
         crate::prefs_search::set_reveal(ctx, None);
+        crate::cloud_settings::cancel(app);
         app.prefs_window.snapshot = None;
+        app.prefs_window.applying_snapshot = None;
         // A question left up when the dialog closed is not still asked when it opens again.
         app.space_mouse.restore_pending = false;
         // Calibration opens from here and ends with it, so the cap moves the view again.
@@ -2631,7 +2664,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     match button {
         Some("defaults") => defaults(app, app.prefs_window.section),
-        Some("apply") => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") => {
+            if apply_cloud(app, false) {
+                app.prefs_window.snapshot = Some(Snapshot::take(app));
+            }
+        }
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
         _ if closed => close(app, true),
@@ -2644,8 +2681,23 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+fn apply_cloud(app: &mut SolveApp, close: bool) -> bool {
+    let pending = crate::cloud_settings::busy(app);
+    let snapshot = Snapshot::take(app);
+    let done = crate::cloud_settings::apply(app, close);
+    if !pending && crate::cloud_settings::busy(app) {
+        app.prefs_window.applying_snapshot = Some(snapshot);
+    }
+    done
+}
+
 /// Close the dialog; `revert`: put back what was there when it opened (Cancel, Esc, ×).
 pub(crate) fn close(app: &mut SolveApp, revert: bool) {
+    if crate::cloud_settings::busy(app) || (!revert && !apply_cloud(app, true)) {
+        return;
+    }
+    crate::cloud_settings::cancel(app);
+    app.prefs_window.applying_snapshot = None;
     if let Some(s) = app.prefs_window.snapshot.take()
         && revert
     {
@@ -2719,6 +2771,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
         }
         PAGE_ASSISTANT => crate::agent_chat::settings::page(app, ui),
         PAGE_PLUGINS => crate::plugins::page(app, ui),
+        PAGE_CLOUD => crate::cloud_settings::show(app, ui),
         PAGE_GENERAL => general::show(app, ui),
         PAGE_APPEARANCE => interface::appearance(app, ui, t),
         PAGE_LAYOUT => interface::layout(app, ui),
@@ -3397,7 +3450,11 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     match button.as_ref().and_then(|b| b.as_str()) {
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
-        Some("apply") => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") => {
+            if apply_cloud(app, false) {
+                app.prefs_window.snapshot = Some(Snapshot::take(app));
+            }
+        }
         Some("defaults") => defaults(app, app.prefs_window.section),
         Some(b) => return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults)")),
         None => {}
@@ -5849,7 +5906,8 @@ mod tests {
                 "3D mouse",
                 "Shortcuts",
                 "Assistant",
-                "Plugins"
+                "Plugins",
+                "Cloud Saves"
             ]
         );
         assert_eq!(WINDOW_PAGES.len(), PAGES.len());

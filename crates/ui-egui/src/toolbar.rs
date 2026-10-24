@@ -788,6 +788,8 @@ pub fn save(app: &mut SolveApp) {
         if crate::open_elsewhere::check_save(app) {
             crate::save_job::start(app, "file.save", json!({}));
         }
+    } else if app.services.cloud_host.is_some() && app.session.cloud_settings().default_connection.is_some() {
+        app.start("cloud.save");
     } else {
         save_as(app);
     }

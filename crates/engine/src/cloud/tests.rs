@@ -17,15 +17,16 @@ impl Host for MockHost {
                 })?;
                 return Ok(job);
             }
+            Operation::GenerateSshKey(_) => String::new(),
             Operation::LoadSettings => return Err(solidcraft_cloud::Error::Storage("no stored settings".into())),
             Operation::Setup(connection)
             | Operation::Test(connection)
             | Operation::List(connection)
             | Operation::Synchronize(connection)
             | Operation::Open { connection, .. }
-            | Operation::Save { connection, .. } => connection,
+            | Operation::Save { connection, .. } => connection.id.clone(),
         };
-        let job = Job::new(connection.id.clone())?;
+        let job = Job::new(connection)?;
         self.0.lock().unwrap().push((job.clone(), operation));
         Ok(job)
     }
@@ -64,6 +65,28 @@ fn configured() -> (Session, Arc<MockHost>, Destination) {
         .unwrap();
     let destination = Destination { connection: "github".into(), project: "Robot".into(), file: "parts/bracket".into() };
     (session, host, destination)
+}
+
+#[test]
+fn a_proposed_connection_can_be_tested_without_changing_saved_preferences() {
+    let (mut session, host, _) = configured();
+    let before = session.cloud_settings().clone();
+    let proposed = Connection {
+        id: "git".into(),
+        provider: String::new(),
+        checkout: "/example/checkout".into(),
+        credential: String::new(),
+        ..Default::default()
+    };
+    session.execute("cloud.test", &json!({"proposed":proposed, "git_executable":"/example/git"})).unwrap();
+    assert_eq!(session.cloud_settings(), &before);
+    let jobs = host.0.lock().unwrap();
+    let (_, Operation::Test(actual)) = jobs.last().unwrap() else { panic!("connection test") };
+    assert_eq!(actual, &proposed);
+    drop(jobs);
+    assert!(session.execute("cloud.test", &json!({"connection":"github","proposed":proposed})).is_err());
+    assert!(session.execute("cloud.test", &json!({"proposed":proposed,"git_executable":"git\nother"})).is_err());
+    assert_eq!(session.cloud_settings(), &before);
 }
 
 #[test]
@@ -382,4 +405,28 @@ fn native_save_as_detaches_the_cloud_binding_and_ignores_its_late_capture() {
     assert!(!session.is_dirty());
     assert_eq!(solidcraft_io::read_design(&std::fs::read(&path).unwrap()).unwrap().name, "Native copy");
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn key_generation_consumes_secret_input_without_serializing_it() {
+    let (mut session, host, _) = configured();
+    session.set_cloud_ssh_key_input(solidcraft_cloud::jobs::SshKeyInput { passphrase: "a local secret".to_owned().into(), remember: true }).unwrap();
+    let result = session.execute("cloud.ssh.generate", &json!({})).unwrap();
+    assert!(!result.to_string().contains("a local secret"));
+    let jobs = host.0.lock().unwrap();
+    let Operation::GenerateSshKey(input) = &jobs[0].1 else { panic!("key generation") };
+    assert_eq!(&**input.passphrase, "a local secret");
+    assert!(input.remember);
+    assert!(session.cloud.ssh_key_input.is_none());
+    drop(jobs);
+    session.execute("cloud.ssh.generate", &json!({})).unwrap();
+    let jobs = host.0.lock().unwrap();
+    let Operation::GenerateSshKey(input) = &jobs[1].1 else { panic!("key generation") };
+    assert!(input.passphrase.is_empty());
+    drop(jobs);
+    assert!(session.execute("cloud.ssh.generate", &json!({"passphrase":"not accepted"})).is_err());
+    session.set_cloud_host(None);
+    session.set_cloud_ssh_key_input(solidcraft_cloud::jobs::SshKeyInput { passphrase: "one shot".to_owned().into(), remember: false }).unwrap();
+    assert!(session.execute("cloud.ssh.generate", &json!({})).is_err());
+    assert!(session.cloud.ssh_key_input.is_none());
 }
