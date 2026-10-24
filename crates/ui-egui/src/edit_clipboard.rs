@@ -203,11 +203,16 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context) {
         let mut copies = 0;
         let mut cuts = 0;
         let mut pastes = 0;
+        // Firefox on Linux sends primary-selection Paste events during middle-click navigation.
+        // Include release frames and clicks completed within one frame; explicit Ctrl/Cmd+V still works.
+        let middle_navigation = i.pointer.button_down(egui::PointerButton::Middle)
+            || i.pointer.button_pressed(egui::PointerButton::Middle)
+            || i.pointer.button_released(egui::PointerButton::Middle);
         for e in &i.events {
             match e {
                 egui::Event::Copy => copies += 1,
                 egui::Event::Cut => cuts += 1,
-                egui::Event::Paste(_) => pastes += 1,
+                egui::Event::Paste(_) if !middle_navigation => pastes += 1,
                 egui::Event::Key { key: egui::Key::C, pressed: true, modifiers, .. } if modifiers.command && !modifiers.shift && !modifiers.alt => {
                     copies += 1
                 }
