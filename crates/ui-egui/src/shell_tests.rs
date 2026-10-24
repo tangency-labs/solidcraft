@@ -113,7 +113,7 @@ fn floating_sketch_palette_and_compass_share_measured_clearance() {
             }
             if width > 1000.0 {
                 let content = layout.content;
-                h.app.start("solid.extrude");
+                h.app.start("construct.plane.offset");
                 h.settle();
                 let dialog = h.app.viewport.dialog_rect.unwrap();
                 let expected_top = (content.top() + crate::viewport::AXIS_VIEW_CLEARANCE).min((content.bottom() - 360.0).max(content.top()));

@@ -223,6 +223,14 @@ impl SolveApp {
             let (id, params) = self.deferred_queue.remove(0);
             let _ = self.run_heavy(&id, params);
         }
+        if self.deferred.is_none()
+            && self.deferred_queue.is_empty()
+            && let Some((id, sketch)) = self.start_after_roll.take()
+            && self.dialog.is_none()
+            && self.tool.is_none()
+        {
+            self.start_interactive(&id, Some(sketch));
+        }
     }
 
     /// Start evaluating a command ahead. `None` when it should just run: not asked for

@@ -940,6 +940,18 @@ impl Dialog {
         Dialog::new(Kind::EditParam { name: name.into(), expr: s.doc.param(name).map(|p| p.expr.clone()).unwrap_or_default() }, vec![])
     }
 
+    /// An Extrude or Revolve started from inside a sketch takes that sketch's profile, as it would
+    /// had the sketch stayed open.
+    pub(crate) fn take_sketch_profile(&mut self, s: &Session, sketch: u64) {
+        if matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. })
+            && let Some(inp) = self.inputs.first_mut()
+            && inp.items.is_empty()
+        {
+            inp.items = single_profile(s, sketch);
+            self.advance();
+        }
+    }
+
     /// Make the first single input still empty (after the filled ones) active.
     fn advance(&mut self) {
         if let Some(i) = self.inputs.iter().position(|i| i.items.is_empty()) {
@@ -1379,12 +1391,15 @@ fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
 /// the last sketch's while no feature builds from it yet. A used profile (a cube's sketch on its
 /// bottom face) is only taken when it is picked.
 fn default_profiles(s: &Session) -> Vec<Sel> {
-    let st = s.world_state();
     let sid = s.active_sketch.or_else(|| {
         s.doc.features.iter().rev().find(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id).filter(|&id| !profiles_used(s, id))
     });
-    match sid.and_then(|id| st.sketch(id).map(|ss| (id, ss.profiles.len()))) {
-        Some((id, 1)) => vec![Sel::Profile { sketch: id, index: 0 }],
+    sid.map(|id| single_profile(s, id)).unwrap_or_default()
+}
+
+fn single_profile(s: &Session, sketch: u64) -> Vec<Sel> {
+    match s.world_state().sketch(sketch).map(|ss| ss.profiles.len()) {
+        Some(1) => vec![Sel::Profile { sketch, index: 0 }],
         _ => Vec::new(),
     }
 }
