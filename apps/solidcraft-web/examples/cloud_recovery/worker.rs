@@ -20,7 +20,11 @@ fn require(condition: bool, message: &str) -> Result<()> {
 }
 
 pub(super) async fn complete(job: &Job) -> Result<JobStatus> {
-    for _ in 0..1000 {
+    complete_for(job, 1000).await
+}
+
+pub(super) async fn complete_for(job: &Job, polls: usize) -> Result<JobStatus> {
+    for _ in 0..polls.min(6000) {
         let status = job.status()?;
         if !matches!(status.phase, Phase::Working | Phase::Syncing) {
             return Ok(status);
