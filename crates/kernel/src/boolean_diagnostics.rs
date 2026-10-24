@@ -21,6 +21,9 @@ pub enum BooleanStrategy {
     /// A rotationally symmetric tool turned about its own axis; its volume is unchanged.
     ToolReseam,
     Piecewise,
+    /// A Join's tools taken as drawn, after the tools run on into its target (or grown past the
+    /// faces they touch) gave no result. The result is the one the feature describes.
+    JoinAsDrawn,
     /// No retry gave a result, and the answer from sample points was kept although the bodies'
     /// facetings disagree with it.
     UnverifiedShortcut,
@@ -48,7 +51,7 @@ impl BooleanStrategy {
 }
 
 impl BooleanFallback {
-    pub(crate) fn new(strategy: BooleanStrategy) -> Self {
+    pub fn new(strategy: BooleanStrategy) -> Self {
         Self { strategy, translation_mm: 0., rotation_rad: 0., face_shift_mm: 0., tolerance_mm: 0. }
     }
 
@@ -65,6 +68,7 @@ impl BooleanFallback {
             BooleanStrategy::ToolNudge => format!("tool displacement {:.6e} mm, rotation {:.6e} rad", self.translation_mm, self.rotation_rad),
             BooleanStrategy::ToolReseam => format!("axisymmetric tool reseamed by {:.6e} rad (no displacement)", self.rotation_rad),
             BooleanStrategy::Piecewise => "piecewise retry (no displacement)".into(),
+            BooleanStrategy::JoinAsDrawn => "join of the tools as drawn (not run on into the target)".into(),
             BooleanStrategy::UnverifiedShortcut => format!(
                 "not verified: the bodies' facets pass through each other by more than {:.6e} mm, but they could not be intersected there; that part is ignored",
                 self.tolerance_mm
@@ -170,7 +174,8 @@ pub fn capture_boolean_diagnostics<T>(run: impl FnOnce() -> T) -> (T, BooleanDia
     (result, report)
 }
 
-pub(crate) fn record(event: BooleanFallback) {
+/// Note a retry in the report of the [`capture_boolean_diagnostics`] call it runs under.
+pub fn record(event: BooleanFallback) {
     REPORT.with(|cell| {
         if let Ok(mut report) = cell.try_borrow_mut()
             && let Some(report) = report.as_mut()
@@ -191,7 +196,9 @@ pub(crate) fn reject(reason: String) {
     });
 }
 
-pub(crate) fn merge(report: BooleanDiagnostics) {
+/// Add a captured report to the one of the [`capture_boolean_diagnostics`] call it runs under:
+/// for an attempt that was captured apart and then accepted.
+pub fn merge(report: BooleanDiagnostics) {
     for event in report.events {
         record(event);
     }
