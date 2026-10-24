@@ -40,6 +40,52 @@ pub struct PlannedBody {
     pub face_colors: Vec<[u8; 4]>,
 }
 
+/// What the viewport's last frame drew, counted as it was drawn (the performance overlay, #2548).
+/// Triangles and line segments count every pass that draws them, so a section's stencil passes
+/// count twice; that is the work the GPU did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DrawStats {
+    pub draw_calls: u32,
+    pub triangles: u64,
+    pub line_segments: u64,
+    /// The frame was drawn supersampled and filtered down.
+    pub supersampled: bool,
+}
+
+/// The renderer's last [`DrawStats`], shared with the UI that shows them.
+pub type DrawStatsHandle = Arc<Mutex<DrawStats>>;
+
+/// Counts a frame's draw calls as they are made (shared by the drawing closures, hence the cells).
+#[derive(Default)]
+pub(crate) struct Tally {
+    calls: std::cell::Cell<u32>,
+    triangles: std::cell::Cell<u64>,
+    segments: std::cell::Cell<u64>,
+}
+
+impl Tally {
+    /// A draw call of `vertices` triangle corners (or indices), `instances` times.
+    fn triangles(&self, vertices: u32, instances: u32) {
+        self.call();
+        self.triangles.set(self.triangles.get().saturating_add(u64::from(vertices / 3) * u64::from(instances)));
+    }
+
+    /// A draw call of `n` line segments.
+    fn segments(&self, n: u32) {
+        self.call();
+        self.segments.set(self.segments.get().saturating_add(u64::from(n)));
+    }
+
+    /// A draw call that counts neither (a full-screen pass).
+    fn call(&self) {
+        self.calls.set(self.calls.get().saturating_add(1));
+    }
+
+    fn stats(&self) -> DrawStats {
+        DrawStats { draw_calls: self.calls.get(), triangles: self.triangles.get(), line_segments: self.segments.get(), supersampled: false }
+    }
+}
+
 /// A quick hasher for welding (the keys are coordinates' bits, from the design, not chosen to
 /// collide): the standard one made welding a 2 M-triangle scan take half a second.
 #[derive(Default)]
@@ -792,17 +838,17 @@ struct InstancedDraw {
 impl InstancedDraw {
     /// Draw every placement in view, from its level, with `smooth` or `flat` as the level's
     /// triangles are lit.
-    pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass<'_>, smooth: &wgpu::RenderPipeline, flat: &wgpu::RenderPipeline) {
+    pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass<'_>, smooth: &wgpu::RenderPipeline, flat: &wgpu::RenderPipeline, tally: &Tally) {
         for level in &self.levels {
             pass.set_pipeline(if level.flat { flat } else { smooth });
-            level.draw(pass);
+            level.draw(pass, tally);
         }
     }
 }
 
 impl LevelDraw {
     /// Draw its placements (in vertex buffer 1).
-    fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
+    fn draw(&self, pass: &mut wgpu::RenderPass<'_>, tally: &Tally) {
         if self.count == 0 {
             return;
         }
@@ -812,11 +858,13 @@ impl LevelDraw {
                 pass.set_vertex_buffer(0, vertices.slice(..));
                 pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..*count, 0, 0..self.count);
+                tally.triangles(*count, self.count);
             }
             SharedGpu::Unshared(batch) => {
                 for (buffer, count) in &batch.parts {
                     pass.set_vertex_buffer(0, buffer.slice(..));
                     pass.draw(0..*count, 0..self.count);
+                    tally.triangles(*count, self.count);
                 }
             }
         }
@@ -1109,6 +1157,11 @@ impl Batches {
 
 /// The viewport's pipelines and the scenes uploaded to one device, for one kind of target.
 pub struct Renderer {
+    /// What the last frame drew ([`Renderer::stats`]).
+    stats: DrawStatsHandle,
+    /// What the frame `prepare` drew offscreen (supersampled, or for see-through surfaces),
+    /// published when `paint` copies it into the view.
+    ss_stats: DrawStats,
     /// The AO depth prepass resources (a 1 × 1 stand-in while ambient occlusion is off).
     ao: ao::Resources,
     tri: wgpu::RenderPipeline,
@@ -1854,6 +1907,8 @@ impl Renderer {
             ss_bgl,
             ss: None,
             ss_ready: false,
+            stats: DrawStatsHandle::default(),
+            ss_stats: DrawStats::default(),
             ss_key: None,
             cached: None,
             image,
@@ -2114,9 +2169,12 @@ impl Renderer {
         let key = frame_key(cb);
         if can_reuse(res.ss_ready && res.ss.is_some(), res.ss_key, key) {
             // A still frame shows the picture as it is; the first one filters it down once.
-            if res.ss_scaled && res.cached.is_none() {
+            let filter = res.ss_scaled && res.cached.is_none();
+            if filter {
                 res.cache_picture(device, encoder, cb.size_px);
             }
+            // The scene isn't drawn again: `paint`'s blit (and that filter) is all this frame draws.
+            res.ss_stats = DrawStats { draw_calls: u32::from(filter), ..DrawStats::default() };
             return;
         }
         res.cached = None;
@@ -2222,13 +2280,28 @@ impl Renderer {
                 pass.set_bind_group(0, &ss.bind, &[]);
             }
             pass.draw(0..3, 0..1);
+            self.publish(DrawStats { draw_calls: self.ss_stats.draw_calls + 1, supersampled: self.ss_scaled, ..self.ss_stats });
             return;
         }
+        let tally = Tally::default();
         if let Some(reset) = &self.depth_reset {
             pass.set_pipeline(reset);
             pass.draw(0..3, 0..1);
+            tally.call();
         }
-        self.draw(frame, pass, Phase::All);
+        self.draw(frame, pass, Phase::All, &tally);
+        self.publish(tally.stats());
+    }
+
+    /// What the last frame drew; the handle stays current as later frames are drawn.
+    pub fn stats(&self) -> DrawStatsHandle {
+        self.stats.clone()
+    }
+
+    fn publish(&self, drawn: DrawStats) {
+        if let Ok(mut s) = self.stats.lock() {
+            *s = drawn;
+        }
     }
 
     /// The target the pipelines draw into.
@@ -2238,8 +2311,8 @@ impl Renderer {
 }
 
 impl Renderer {
-    /// Draw the frame's scenes into `pass` (its viewport already set).
-    fn draw(&self, cb: &Frame, pass: &mut wgpu::RenderPass<'static>, phase: Phase) {
+    /// Draw the frame's scenes into `pass` (its viewport already set), counting what it draws.
+    fn draw(&self, cb: &Frame, pass: &mut wgpu::RenderPass<'static>, phase: Phase, tally: &Tally) {
         let res = self;
         pass.set_bind_group(0, &res.bind, &[]);
         let tris = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, b: &Option<Batch>| {
@@ -2248,6 +2321,7 @@ impl Renderer {
                 for (buffer, count) in &b.parts {
                     pass.set_vertex_buffer(0, buffer.slice(..));
                     pass.draw(0..*count, 0..1);
+                    tally.triangles(*count, 1);
                 }
             }
         };
@@ -2257,6 +2331,7 @@ impl Renderer {
                 for (buffer, count) in &b.parts {
                     pass.set_vertex_buffer(0, buffer.slice(..));
                     pass.draw(0..6, 0..*count);
+                    tally.segments(*count);
                 }
             }
         };
@@ -2284,12 +2359,13 @@ impl Renderer {
                 pass.set_vertex_buffer(1, d.colors.slice(..));
                 pass.set_index_buffer(d.mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..d.mesh.index_count, 0, 0..1);
+                tally.triangles(d.mesh.index_count, 1);
             }
         };
         // Instanced meshes, with the pipeline for smooth and for flat triangles.
         let instanced = |pass: &mut wgpu::RenderPass<'static>, smooth: &wgpu::RenderPipeline, flat: &wgpu::RenderPipeline| {
             for d in m.instanced.iter().filter(|d| d.look == InstanceLook::Opaque) {
-                d.draw(pass, smooth, flat);
+                d.draw(pass, smooth, flat, tally);
             }
         };
         // Whole highlighted bodies: the model's own evaluated plan triangles, drawn again in a
@@ -2321,6 +2397,7 @@ impl Renderer {
                     if lo < hi {
                         pass.set_vertex_buffer(0, buffer.slice(..));
                         pass.draw(lo - base..hi - base, 0..1);
+                        tally.triangles(hi - lo, 1);
                     }
                     base = end;
                 }
@@ -2331,7 +2408,7 @@ impl Renderer {
         let tinted_instanced =
             |pass: &mut wgpu::RenderPass<'static>, smooth: &wgpu::RenderPipeline, flat: &wgpu::RenderPipeline, list: &[InstancedDraw]| {
                 for d in list.iter().filter(|d| d.look == InstanceLook::Opaque) {
-                    d.draw(pass, smooth, flat);
+                    d.draw(pass, smooth, flat, tally);
                 }
             };
         let sectioned = cb.clip[..3].iter().map(|c| c * c).sum::<f32>() > 0.25;
@@ -2384,6 +2461,7 @@ impl Renderer {
                 for (buffer, count) in &q.parts {
                     pass.set_vertex_buffer(0, buffer.slice(..));
                     pass.draw(0..*count, 0..1);
+                    tally.triangles(*count, 1);
                 }
             }
         }
@@ -2396,7 +2474,7 @@ impl Renderer {
         let see_through =
             |pass: &mut wgpu::RenderPass<'static>, look: InstanceLook, (smooth, flat): &(wgpu::RenderPipeline, wgpu::RenderPipeline)| {
                 for d in m.instanced.iter().filter(|d| d.look == look) {
-                    d.draw(pass, smooth, flat);
+                    d.draw(pass, smooth, flat, tally);
                 }
             };
         tris(pass, &res.glass_far, &m.glass);
@@ -2431,7 +2509,7 @@ impl Renderer {
     }
 
     /// The model's see-through surfaces into the order-independent transparency's targets.
-    fn draw_see_through(&self, pass: &mut wgpu::RenderPass<'static>, p: &oit::Pipelines) {
+    fn draw_see_through(&self, pass: &mut wgpu::RenderPass<'static>, p: &oit::Pipelines, tally: &Tally) {
         let m = &self.model;
         pass.set_bind_group(0, &self.bind, &[]);
         pass.set_pipeline(&p.built);
@@ -2439,10 +2517,11 @@ impl Renderer {
             for (buffer, count) in &batch.parts {
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(0..*count, 0..1);
+                tally.triangles(*count, 1);
             }
         }
         for d in m.instanced.iter().filter(|d| d.look != InstanceLook::Opaque) {
-            d.draw(pass, &p.instanced, &p.instanced_flat);
+            d.draw(pass, &p.instanced, &p.instanced_flat, tally);
         }
     }
 }
@@ -2555,22 +2634,29 @@ impl Renderer {
                 })
                 .forget_lifetime()
         };
+        let tally = Tally::default();
         let (Some(p), Some(t), true) = (&self.oit, &self.oit_targets, see_through) else {
             let mut first = pass(encoder, true);
             first.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
-            self.draw(cb, &mut first, Phase::All);
+            self.draw(cb, &mut first, Phase::All, &tally);
+            drop(first);
+            self.ss_stats = tally.stats();
             return true;
         };
         {
             let mut first = pass(encoder, true);
             first.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
-            self.draw(cb, &mut first, Phase::BeforeSeeThrough);
+            self.draw(cb, &mut first, Phase::BeforeSeeThrough, &tally);
         }
-        p.accumulate(encoder, t, ss.depth.as_ref(), stencil, |pass| self.draw_see_through(pass, p));
+        p.accumulate(encoder, t, ss.depth.as_ref(), stencil, |pass| self.draw_see_through(pass, p, &tally));
         p.composite(encoder, t, &ss.color, ss.resolve.as_ref());
-        let mut over = pass(encoder, false);
-        over.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
-        self.draw(cb, &mut over, Phase::AfterSeeThrough);
+        tally.call();
+        {
+            let mut over = pass(encoder, false);
+            over.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
+            self.draw(cb, &mut over, Phase::AfterSeeThrough, &tally);
+        }
+        self.ss_stats = tally.stats();
         true
     }
 

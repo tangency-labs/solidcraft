@@ -8,8 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use egui_wgpu::wgpu;
 pub use solidcraft_gpu::view::{
-    AccessMap, BlockBytes, BlockTris, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook, InstancedMesh, LINE_SIZE, LOD_PX, PBR_SIZE,
-    PlannedBody, Renderer, SHARED_SIZE, SceneBlock, SceneSlot, SharedTris, TRI_SIZE, level_for, placement_scale, supersampled_size,
+    AccessMap, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook, InstancedMesh,
+    LINE_SIZE, LOD_PX, PBR_SIZE, PlannedBody, Renderer, SHARED_SIZE, SceneBlock, SceneSlot, SharedTris, TRI_SIZE, level_for, placement_scale,
+    supersampled_size,
 };
 
 /// A frame of the viewport as an egui paint callback.
@@ -19,13 +20,15 @@ pub struct ViewportCallback(pub Frame);
 /// MSAA settings, and the target of the pass the picture is shown in. Without a stencil the
 /// section cap does not hide the inside of cut bodies. Without `gpu_meshing` (safe mode) bodies
 /// are meshed on the CPU. When the two targets differ, the scene is drawn offscreen and blitted.
-pub fn install(rs: &egui_wgpu::RenderState, scene: GpuTarget, window: GpuTarget, gpu_meshing: bool) -> GpuTarget {
+/// Also returns the handle to what each frame drew.
+pub fn install(rs: &egui_wgpu::RenderState, scene: GpuTarget, window: GpuTarget, gpu_meshing: bool) -> (GpuTarget, DrawStatsHandle) {
     let tess = if gpu_meshing { solidcraft_gpu::view::tessellation(&rs.adapter, &rs.device, &rs.queue, solidcraft_gpu::SHADER) } else { None };
     let scene = GpuTarget { tess: tess.is_some(), ..scene };
     let window = GpuTarget { tess: tess.is_some(), ..window };
     let res = Renderer::with_window_target(&rs.device, scene, window, tess);
+    let stats = res.stats();
     rs.renderer.write().callback_resources.insert(res);
-    scene
+    (scene, stats)
 }
 
 /// Draw this process's headless pictures (`ui.render`, the agent's view image, thumbnails of

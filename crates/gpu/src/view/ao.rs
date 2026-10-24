@@ -168,8 +168,10 @@ impl Resources {
                 pass.set_index_buffer(draw.mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..draw.mesh.index_count, 0, 0..1);
             }
+            // The depth prepass is left out of the performance overlay's counts, as before.
+            let uncounted = super::Tally::default();
             for draw in batch.instanced.iter().filter(|d| d.look == super::InstanceLook::Opaque) {
-                draw.draw(&mut pass, &self.instanced_pipeline, &self.instanced_flat_pipeline);
+                draw.draw(&mut pass, &self.instanced_pipeline, &self.instanced_flat_pipeline, &uncounted);
             }
         }
     }

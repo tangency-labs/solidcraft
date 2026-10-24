@@ -684,7 +684,9 @@ impl SolveApp {
     }
 
     fn set_wgpu_targets(&mut self, rs: &egui_wgpu::RenderState, scene: crate::gpu::GpuTarget, window: crate::gpu::GpuTarget) {
-        self.viewport.gpu = Some(gpu::install(rs, scene, window, !self.cpu_meshing));
+        let (target, stats) = gpu::install(rs, scene, window, !self.cpu_meshing);
+        self.viewport.gpu = Some(target);
+        self.viewport.draw_stats = Some(stats);
         render_workspace::invalidate_scene(self);
         let (samples, has_depth) = self.viewport.gpu.map_or((1, false), |g| (g.samples.max(1), g.depth.is_some()));
         self.render_workspace.host = match render_workspace::host_executor(rs.device.limits().max_texture_dimension_2d, has_depth, samples) {
@@ -698,6 +700,7 @@ impl SolveApp {
         self.msaa_supported = rs.msaa_supported.clone();
         let info = rs.adapter.get_info();
         self.help.gpu = Some(format!("{} ({:?}, {:?})", info.name.trim(), info.backend, info.device_type));
+        self.viewport.adapter = format!("{:?} · {}", info.backend, info.name);
     }
 
     /// Preferences kept between runs (JSON), for the host to store.

@@ -293,6 +293,12 @@ impl Capturer {
         Ok(rgba)
     }
 
+    /// What the last picture drew ([`crate::view::DrawStats`]).
+    pub fn last_stats(&self) -> crate::view::DrawStats {
+        let Ok(state) = self.state.lock() else { return Default::default() };
+        state.renderer.stats().lock().map(|s| *s).unwrap_or_default()
+    }
+
     /// [`Capturer::rgba`] as PNG bytes.
     pub fn png(&self, scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<Vec<u8>> {
         let rgba = self.rgba(scene, cam, width, height)?;

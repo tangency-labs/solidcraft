@@ -182,6 +182,21 @@ Command icons use the shared SVG palette.
 Imported themes are kept with your preferences, so they work in the browser app too. Colour
 vision modes still apply on top of any theme.
 
+Graphics › **Frame rate** shows frames per second in the view's bottom-right corner. Click it,
+or turn on **Frame rate details**, for the performance overlay:
+
+- a graph of the last few seconds of frames, one bar per frame, with lines at 60 and 30 frames
+  per second. The triangles drawn are a line over it, and a tick at the top marks each frame that
+  rebuilt the scene, so you can see how geometry changes the frame time;
+- a histogram of frame times, the 1% low (the mean of the slowest 1% of frames) and the worst
+  frame, which show stutters that an average hides;
+- what the GPU drew last frame (triangles, line segments, draw calls), the viewport's size in
+  pixels with its MSAA and supersampling, the time the interface took, the last scene build and
+  the graphics backend and adapter.
+
+While the readout is on, the view redraws every frame. With vertical sync the frame rate tops
+out at the display's refresh rate; the interface time and the GPU counts still show the work.
+
 Navigation › **Smooth wheel zoom** is on by default. Turn it off to apply each wheel or
 trackpad event immediately, with no smoothing tail. It is independent of **Animate view
 changes**, which controls axis views, Look At, Home and Fit. Re-enabling smoothing during
