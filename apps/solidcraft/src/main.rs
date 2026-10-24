@@ -298,6 +298,7 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
         can_restore: None,
         restore_file: None,
         download_design: None,
+        easyprint_upload: Some(std::sync::Arc::new(easyprint_upload)),
         browser_files: None,
         agent_http: Some(std::sync::Arc::new(agent_http)),
         secrets: Some(std::sync::Arc::new(Keychain)),
@@ -392,6 +393,24 @@ fn agent_http(r: &solidcraft_ui_egui::agent_chat::backend::HttpRequest) -> Resul
     let status = response.status().as_u16();
     let body = response.body_mut().with_config().limit(16 << 20).read_to_vec().map_err(|e| e.to_string())?;
     Ok((status, body))
+}
+
+/// Open with EasyPrint: upload the model to Printables' import endpoint on a worker and answer on
+/// `done` with the address to open. Through [`agent_http`]: no redirects, a timeout, no cookies.
+fn easyprint_upload(name: &str, bytes: Vec<u8>, done: std::sync::mpsc::Sender<Result<String, String>>) {
+    use solidcraft_engine::easyprint;
+    let name = name.to_string();
+    std::thread::spawn(move || {
+        let (content_type, body) = easyprint::multipart(&name, &bytes);
+        let request = solidcraft_ui_egui::agent_chat::backend::HttpRequest {
+            method: "POST",
+            url: easyprint::IMPORT_URL.into(),
+            headers: vec![("Content-Type".into(), content_type), ("Accept".into(), "application/json".into())],
+            body: Some(body),
+            timeout_s: 180,
+        };
+        let _ = done.send(agent_http(&request).and_then(|(status, body)| easyprint::parse_import_response(status, &body)));
+    });
 }
 
 /// API keys in the system keychain (service "SolidCraft agent chat", one entry per agent).

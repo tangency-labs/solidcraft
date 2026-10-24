@@ -34,5 +34,5 @@ web-sys = { version = "0.3", features = [
     "FileSystemHandle", "FileSystemDirectoryHandle", "FileSystemFileHandle", "FileSystemGetFileOptions", "FileSystemWritableFileStream",
     "WritableStream", "File", "FileList", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "HtmlInputElement", "Storage",
     "IdbFactory", "IdbDatabase", "IdbObjectStore", "IdbOpenDbRequest", "IdbRequest", "IdbTransaction", "IdbTransactionMode",
-    "BeforeUnloadEvent", "Event", "EventTarget", "KeyboardEvent", "Response", "MediaQueryList", "Gamepad", "Performance",
+    "BeforeUnloadEvent", "Event", "EventTarget", "KeyboardEvent", "Response", "FormData", "Headers", "RequestInit", "MediaQueryList", "Gamepad", "Performance",
 ] }

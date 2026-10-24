@@ -11,6 +11,8 @@ mod api;
 #[cfg(any(target_arch = "wasm32", test))]
 mod disk;
 #[cfg(target_arch = "wasm32")]
+mod easyprint;
+#[cfg(target_arch = "wasm32")]
 mod files;
 #[cfg(target_arch = "wasm32")]
 mod install;
@@ -633,6 +635,7 @@ mod web {
                             })),
                             restore_file: Some(Box::new(move |path: &str| disk::restore(&restorer, path))),
                             download_design: Some(Box::new(files::download)),
+                            easyprint_upload: Some(std::sync::Arc::new(crate::easyprint::upload)),
                             browser_files: Some(Box::new(move || shown.panel.set(true))),
                             install_app: Some(crate::install::service(&cc.egui_ctx)),
                             ..Default::default()

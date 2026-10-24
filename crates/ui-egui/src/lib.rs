@@ -53,6 +53,7 @@ pub mod dim_view;
 mod dimension_create_ui_tests;
 pub mod documents;
 pub mod drag_snap;
+pub mod easyprint_ui;
 pub mod edit_clipboard;
 #[cfg(test)]
 mod font_literals_tests;
@@ -367,6 +368,9 @@ pub struct Services {
     pub agent_http: Option<agent_chat::backend::HttpFn>,
     /// The system keychain, for API agents' keys; None: keys can't be stored.
     pub secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
+    /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
+    /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
+    pub easyprint_upload: Option<easyprint_ui::Upload>,
 }
 
 pub struct SolveApp {
@@ -383,6 +387,10 @@ pub struct SolveApp {
     pub pre_sketch_marker: Option<Option<usize>>,
     pub services: Services,
     file_picker: Option<file_picker::Pending>,
+    /// A slicer started alone and waited for before the file is sent (Send to Slicer).
+    pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
+    /// Open with EasyPrint: the upload in flight and the question before the first one.
+    pub(crate) easyprint: easyprint_ui::State,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
     pub viewport: viewport::ViewportState,
@@ -543,7 +551,9 @@ impl SolveApp {
         }
         let mut render_workspace = render_workspace::State::default();
         render_workspace.image_host = image_host;
-        SolveApp {
+        #[cfg(not(target_arch = "wasm32"))]
+        solidcraft_engine::slicer_files::clean_old();
+        let mut app = SolveApp {
             session,
             ui: UiState::default(),
             shell: Default::default(),
@@ -553,6 +563,8 @@ impl SolveApp {
             pre_sketch_marker: None,
             services,
             file_picker: None,
+            slicer_wait: None,
+            easyprint: Default::default(),
             saving: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
@@ -633,7 +645,9 @@ impl SolveApp {
             applied_fonts_language: "en".into(),
             applied_ui_font: String::new(),
             applied_system_fonts: false,
-        }
+        };
+        easyprint_ui::install(&mut app);
+        app
     }
 
     /// Translate text using the active language preference.
@@ -801,6 +815,10 @@ impl SolveApp {
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
         if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
+        }
+        // Commands may start only detected slicers and the programs the user added under Custom….
+        if matches!(id, "file.save_mesh" | "file.send_to_slicer") {
+            solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
         let t0 = now_ms();
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
@@ -976,6 +994,11 @@ impl SolveApp {
         }
         if id == "view.ambient_occlusion" {
             let _ = self.run(id, json!({"enabled": !self.preferences.ambient_occlusion}));
+            return;
+        }
+        // Send to Slicer always asks which slicer (the dialog pre-selects the last one).
+        if matches!(id, "file.send_to_slicer" | "file.open_in_easyprint") && !dialogs_save_mesh::available(self) {
+            self.set_status(self.tr("ui.send_to_slicer_unavailable").to_string(), true);
             return;
         }
         // Another command ends Edit Text (its dialog is not a feature edit to keep).
@@ -1540,6 +1563,8 @@ impl SolveApp {
     pub fn logic(&mut self, ctx: &egui::Context) {
         frame_watch::begin(self);
         file_picker::tick(self, ctx);
+        dialogs_save_mesh::tick_wait(self, ctx);
+        easyprint_ui::tick(self, ctx);
         render_workspace::sync_backend(self);
         render_workspace::tick(self, ctx);
         file_load::tick(self, ctx);
@@ -1809,6 +1834,7 @@ impl SolveApp {
         context_menu::show(self, ui.ctx());
         mouse_gesture::show(self, ui.ctx());
         delete::show(self, ui.ctx());
+        easyprint_ui::show(self, ui.ctx());
         linked_source::show_copies(self, ui.ctx());
         shortcut_box::show(self, ui.ctx());
         prefs::show(self, ui.ctx());
