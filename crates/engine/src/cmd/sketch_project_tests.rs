@@ -677,3 +677,36 @@ fn a_face_sketch_saved_with_fitted_letters_reopens_and_builds_the_same() {
         sketch.curves.iter().filter(|c| c.link.is_some() && matches!(c.kind, solidcraft_sketch::CurveKind::Spline { control: true, .. })).count();
     assert!(pieces > 0, "{pieces}");
 }
+
+/// #5985: projecting a round edge (the rim of a boss, which the body holds as two half arcs)
+/// gives its whole circle, from either half and either rim; an edge that really is half a circle
+/// (the round side of a D-shaped boss) stays an arc.
+#[test]
+fn a_round_edge_projects_as_its_whole_circle() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 10}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.circle.center", json!({"center": [25, 25], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 2, "operation": "join", "targets": ["Body1"]}));
+    let projected = |s: &mut Session, at: [f64; 3]| {
+        run(s, "sketch.create", json!({"plane": "XY", "offset": 30}));
+        run(s, "sketch.project", json!({"refs": [{"edge": at}]}));
+        let id = s.active_sketch.unwrap();
+        run(s, "sketch.finish", json!({}));
+        // As kept after the sketch is refreshed: the link found again by its edge's name.
+        s.model.state().sketch(id).unwrap().sketch.curves.iter().map(|c| c.kind.clone()).collect::<Vec<_>>()
+    };
+    for at in [[35.0, 25.0, 12.0], [15.0, 25.0, 12.0], [35.0, 25.0, 10.0]] {
+        let curves = projected(&mut s, at);
+        assert!(matches!(curves.as_slice(), [solidcraft_sketch::CurveKind::Circle { r, .. }] if (r - 10.0).abs() < 1e-9), "{at:?}: {curves:?}");
+    }
+    // A D-shaped boss: its round side is half a circle, and stays an arc.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.line", json!({"points": [[5, 40], [5, 46]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [5, 46], "through": [8, 43], "end": [5, 40]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 2, "operation": "join", "targets": ["Body1"]}));
+    let curves = projected(&mut s, [8.0, 43.0, 12.0]);
+    assert!(matches!(curves.as_slice(), [solidcraft_sketch::CurveKind::Arc { .. }]), "{curves:?}");
+}

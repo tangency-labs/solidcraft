@@ -121,6 +121,11 @@ fn resolve_uncached(
             source = LinkSource::Edge { body: name, at: q };
             edge_index = Some(e);
             let exact = st.bodies.get(bi).and_then(|b| exact_edges(b, plane, &[e]).pop().flatten());
+            // A round edge the body split in two halves is projected as its whole circle (#5985).
+            let exact = match (exact, st.bodies.get(bi)) {
+                (Some(g), Some(b)) => Some(whole_circle(b, &mesh, plane, e, &g).map_or(g, |c| vec![c])),
+                (exact, _) => exact,
+            };
             edge_geom(plane, kind, exact, mesh.edges.get(e).cloned().unwrap_or_default(), &mut wires)
         }
         LinkSource::Face { body, at } => {
@@ -295,6 +300,24 @@ fn edge_geom(plane: &Plane, kind: LinkKind, exact: Option<Vec<LinkGeom>>, pts: V
     }
 }
 
+/// The circle an arc-shaped edge `e` (its exact projection `g`) completes with another edge of
+/// `body` that runs between the same two ends on the same circle: a body splits a full round
+/// edge into halves, and picking one projected only half of it (#5985).
+fn whole_circle(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, e: usize, g: &[LinkGeom]) -> Option<LinkGeom> {
+    let [LinkGeom::Arc { c, a, .. }] = g else { return None };
+    let r = a.dist(*c);
+    let tol = (r * 1e-4).max(1e-9);
+    // The other half shares this edge's two vertices (in space: another rim projects the same).
+    let ends = |k: usize| mesh.edges.get(k).and_then(|pts| Some((*pts.first()?, *pts.last()?)));
+    let (p, q) = ends(e)?;
+    let same_ends = |(u, v): (Vec3, Vec3)| (u.dist(p) <= tol && v.dist(q) <= tol) || (u.dist(q) <= tol && v.dist(p) <= tol);
+    let others: Vec<usize> = (0..mesh.edges.len()).filter(|k| *k != e && ends(*k).is_some_and(same_ends)).collect();
+    exact_edges(body, plane, &others).into_iter().flatten().find_map(|g| match g.as_slice() {
+        [LinkGeom::Arc { c: c2, a: a2, .. }] if c2.dist(*c) <= tol && (a2.dist(*c2) - r).abs() <= tol => Some(LinkGeom::Circle(*c, r)),
+        _ => None,
+    })
+}
+
 /// Edges `edges` of `body` (indices into its mesh's `edges`) on `plane` as their exact curves:
 /// lines, circles and arcs, and the Bézier pieces of a free-form curve. `None` for an edge that
 /// doesn't lie in a plane parallel to `plane` or isn't read exactly (a mesh body's): it is
@@ -366,14 +389,16 @@ fn locate_named_edge(st: &ModelState, body: &str, name: &str, at: Vec3) -> Optio
 /// moved onto it.
 fn resolve_named_edge(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str, index: usize, near: Vec3) -> Result<Resolved> {
     let target = st.body(body).ok_or_else(|| lost("named projection body"))?;
-    let pts = target.mesh().edges.get(index).cloned().unwrap_or_default();
+    let mesh = target.mesh();
+    let pts = mesh.edges.get(index).cloned().unwrap_or_default();
     let at = pts
         .windows(2)
         .filter_map(|w| Some(closest_on_segment(near, *w.first()?, *w.get(1)?)))
         .min_by(|a, b| a.dist(near).total_cmp(&b.dist(near)))
         .ok_or_else(|| lost("named projection edge"))?;
     let mut wires = Vec::new();
-    let exact = exact_edges(target, plane, &[index]).pop().flatten();
+    // As when it was first projected: a half of a split round edge is its whole circle.
+    let exact = exact_edges(target, plane, &[index]).pop().flatten().map(|g| whole_circle(target, &mesh, plane, index, &g).map_or(g, |c| vec![c]));
     let geom = edge_geom(plane, kind, exact, pts, &mut wires);
     if geom.is_empty() && wires.is_empty() {
         return Err(DocError::Invalid("named edge projects to nothing on this sketch plane".into()));
