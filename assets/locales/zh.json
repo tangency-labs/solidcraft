@@ -3095,6 +3095,7 @@
   "ui.total_angle": "总角度",
   "ui.trackpad_pan_tip": "双指滚动平移；Fusion 预设下，Shift + 双指滚动旋转视图。关闭时滚动缩放。鼠标滚轮和双指捏合缩放，拇指滚轮横向平移。",
   "ui.trim": "修剪",
+  "ui.turn_up_axis": "旋转向上轴",
   "ui.twist": "扭转",
   "ui.two_finger_scroll_pans": "双指滚动平移",
   "ui.two_sides": "双侧",

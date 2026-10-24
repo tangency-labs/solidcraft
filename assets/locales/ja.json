@@ -3095,6 +3095,7 @@
   "ui.total_angle": "合計角度",
   "ui.trackpad_pan_tip": "2本指スクロールでパンします。FusionではShift + 2本指スクロールで回転します。オフの場合はスクロールでズームします。マウスホイールとピンチ操作はズーム、サイドホイールは横方向のパンになります。",
   "ui.trim": "トリム",
+  "ui.turn_up_axis": "上方向の軸を回転",
   "ui.twist": "ねじれ",
   "ui.two_finger_scroll_pans": "2本指スクロールでパン",
   "ui.two_sides": "両側",
