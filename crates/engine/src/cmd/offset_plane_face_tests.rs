@@ -100,6 +100,42 @@ fn offset_plane_redefined_on_itself_is_refused() {
     assert!((plane(&s, "Side").origin.y + 7.0).abs() < 1e-9, "{:?}", plane(&s, "Side"));
 }
 
+/// A flat face of a sheet is kept by its sheet face name, as a sketch on it is: the plane follows
+/// the flange when the sheet changes (it stayed where the face was picked).
+#[test]
+fn offset_plane_from_a_sheet_flange_face_follows_the_flange() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "R1", "thickness": "1 mm", "bend_radius": "1 mm", "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [320, 200]}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 320}));
+    let width = d["param"].as_str().or_else(|| d["name"].as_str()).unwrap_or("d1").to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[320, 100, 1]], "height": 30}));
+    let flange = s.doc.features.last().map_or(0, |f| f.id);
+    // The flange's inner face, picked as model.faces lists it (body and index), 5 mm out along its normal.
+    let name = format!("sheet:Body1:F{flange}.0:top");
+    let faces = run(&mut s, "model.faces", json!({"body": "Body1"}));
+    let face = faces["faces"].as_array().unwrap().iter().find(|f| f["sheet_face"].as_str() == Some(name.as_str())).unwrap().clone();
+    run(
+        &mut s,
+        "construct.plane.offset",
+        json!({"base": {"face": face["point"], "body": "Body1", "index": face["index"]}, "offset": 5, "name": "Out"}),
+    );
+    let out = plane(&s, "Out");
+    assert!((out.normal().x.abs() - 1.0).abs() < 1e-9, "{out:?}");
+    let x0 = out.origin.x;
+    // 80 mm wider: the flange moves 80 mm along x, and the plane with it.
+    run(&mut s, "parameters.change", json!({"name": width, "expression": "400"}));
+    let moved = plane(&s, "Out");
+    assert!((moved.origin.x - x0 - 80.0).abs() < 1e-9, "{x0} -> {moved:?}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    // Reopened, the attachment still resolves where the face is.
+    let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    assert!((plane(&reopened, "Out").origin.x - x0 - 80.0).abs() < 1e-9);
+}
+
 #[test]
 fn plane_at_angle_from_a_planar_face_follows_the_face() {
     let mut s = Session::default();

@@ -6421,6 +6421,11 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     }
                     pl
                 }
+                // On a flat face of a sheet: that panel's plane as it is now, as a sketch on the
+                // face finds it (the stored plane is only where the face was picked).
+                None if crate::sheet::plane_sheet_face(plane).is_some() => {
+                    doc.resolve_plane_in(vals, &sheet_face_plane_in_frame(doc, st, f.component, plane)?, 0, Some(st))?
+                }
                 // A plane of numbers alone reads no body: placing them all is the design's size.
                 None if plane_is_fixed(plane) => doc.resolve_plane_in(vals, plane, 0, Some(st))?,
                 // Picks on bodies of other (moved) components are where those bodies are shown.
