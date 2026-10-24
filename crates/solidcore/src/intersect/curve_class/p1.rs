@@ -493,7 +493,7 @@ pub struct CurveClassification<O> {
 
 /// How `SetPointClassParameters` reaches the classifications' objects: read-only, or
 /// with topology the point solves may change.
-trait PointParams<O> {
+pub(super) trait PointParams<O> {
     type Geometry: ClassGeometry<O>;
     fn geometry(&self) -> &Self::Geometry;
     /// `pc.ComputePointParameters(point)`.
@@ -502,7 +502,7 @@ trait PointParams<O> {
 }
 
 /// Read-only access ([`CurveClassification::set_point_class_parameters`]).
-struct ReadOnlyParams<'g, G>(&'g G);
+pub(super) struct ReadOnlyParams<'g, G>(pub(super) &'g G);
 
 impl<O: ClassObject, G: ClassGeometry<O>> PointParams<O> for ReadOnlyParams<'_, G> {
     type Geometry = G;
@@ -520,7 +520,7 @@ impl<O: ClassObject, G: ClassGeometry<O>> PointParams<O> for ReadOnlyParams<'_, 
 }
 
 /// Mutable access ([`CurveClassification::set_point_class_parameters_mut`]).
-struct MutableParams<'g, G>(&'g mut G);
+pub(super) struct MutableParams<'g, G>(pub(super) &'g mut G);
 
 impl<O: ClassObject, G: super::p5::ClassGeometryMut<O>> PointParams<O> for MutableParams<'_, G> {
     type Geometry = G;
