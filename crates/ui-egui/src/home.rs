@@ -843,7 +843,7 @@ fn texture(texture: Option<&egui::TextureHandle>) -> Option<(egui::TextureId, eg
 }
 
 /// Abbreviate only an actual home-directory ancestor; the source path is kept for actions.
-fn friendly_path(path: &str) -> String {
+pub(crate) fn friendly_path(path: &str) -> String {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
     abbreviated_path(path, home.as_deref().map(std::path::Path::new))
 }

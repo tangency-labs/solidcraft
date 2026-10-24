@@ -424,6 +424,21 @@ pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
         .collect()
 }
 
+/// Where each tab's design is saved, in `tabs_info`'s order (`None`: not saved yet).
+fn tab_paths(app: &SolveApp) -> Vec<Option<String>> {
+    if app.docs.slots.is_empty() {
+        return vec![app.session.path.clone()];
+    }
+    app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session).path.clone()).collect()
+}
+
+/// A tab's tooltip: where its design is saved (home shortened to `~`), or that it isn't yet; with
+/// the full name above when the tab cut it short (#5868).
+fn tab_tooltip(name: &str, path: Option<&str>, cut: bool) -> String {
+    let place = path.map_or_else(|| crate::i18n::tr_label("Not saved yet").to_string(), crate::home::friendly_path);
+    if cut { format!("{name}\n{place}") } else { place }
+}
+
 /// The control channel's `ui.documents`: list, `new`, `switch`, `close` (by index; `force`
 /// closes without asking), `close_others` (all but `index`), `close_all`, `move` (`from`, `to`)
 /// or `quit`; `answer`: save | dont_save | cancel answers "save changes?".
@@ -473,6 +488,7 @@ struct TabDrag {
 pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let t = Tokens::get();
     let info = tabs_info(app);
+    let paths = tab_paths(app);
     let n = info.len();
     let (first, shown, w) = layout(n, app.docs.active, x1 - x0);
     let mut pick: Option<usize> = None;
@@ -569,6 +585,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         };
         let g = ui.painter().layout_no_wrap(label, font, ink);
         let text_w = (tr.width() - 30.0).max(10.0);
+        let tip = tab_tooltip(&name_display, paths.get(i).cloned().flatten().as_deref(), g.size().x > text_w);
         let clip = Rect::from_min_size(tr.min, vec2(text_w + 10.0, tr.height()));
         ui.painter().with_clip_rect(clip).galley(pos2(tr.left() + 10.0, tr.center().y - g.size().y / 2.0), g, ink);
         // ×
@@ -592,7 +609,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         }
         if xresp.on_hover_text("Close").clicked() {
             shut = Some(i);
-        } else if (if held.is_some() { resp } else { resp.on_hover_text(name.as_str()) }).clicked() {
+        } else if (if held.is_some() { resp } else { resp.on_hover_text(tip) }).clicked() {
             pick = Some(i);
         }
     }
@@ -886,6 +903,20 @@ mod tests {
     use super::*;
     use crate::Services;
     use egui::Color32;
+
+    /// #5868: a tab's tooltip says where its design is saved (home as `~`), or that it isn't
+    /// yet, with the full name above when the tab cut the name short.
+    #[test]
+    fn tab_tooltip_says_where_the_design_is_saved() {
+        assert_eq!(tab_tooltip("plate", Some("/srv/designs/plate.solidcraft"), false), "/srv/designs/plate.solidcraft");
+        assert_eq!(tab_tooltip("a-long-name", Some("/srv/a-long-name.solidcraft"), true), "a-long-name\n/srv/a-long-name.solidcraft");
+        assert_eq!(tab_tooltip("Untitled", None, false), "Not saved yet");
+        assert_eq!(tab_tooltip("Untitled", None, true), "Untitled\nNot saved yet");
+        if let Some(home) = std::env::var_os("HOME").filter(|h| !h.is_empty()) {
+            let path = std::path::Path::new(&home).join("Designs").join("bracket.solidcraft");
+            assert_eq!(tab_tooltip("bracket", path.to_str(), false), "~/Designs/bracket.solidcraft");
+        }
+    }
 
     fn app() -> SolveApp {
         SolveApp::new(Session::default(), Services::default())
