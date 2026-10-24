@@ -182,8 +182,16 @@ fn pictures_show_the_surface_analysis() {
     let plain = picture(&s);
     s.execute("inspect.curvature_map", &json!({})).unwrap();
     let curvature = picture(&s);
-    let blue = |img: &[u8]| pixels(img).filter(|p| i32::from(p[2]) - i32::from(p[0]) > 120 && p[1] < 140).count();
-    assert!(blue(&curvature) > 3000 && blue(&plain) == 0, "flat faces in the flat colour: {} (plain {})", blue(&curvature), blue(&plain));
+    let near = |p: [u8; 4], c: [u8; 3]| (0..3).all(|k| (i32::from(p[k]) - i32::from(c[k])).abs() < 60);
+    let flat = solidcraft_engine::render::AnalysisColors::DEFAULT.curvature[0].map(|v| (v * 255.0).round() as u8);
+    let flats = |img: &[u8]| pixels(img).filter(|p| near(*p, flat)).count();
+    // The flat colour is dark, so the plain picture's edge lines come near it in places.
+    assert!(
+        flats(&curvature) > 3000 && flats(&plain) * 10 < flats(&curvature),
+        "flat faces in the flat colour: {} (plain {})",
+        flats(&curvature),
+        flats(&plain)
+    );
     s.execute("inspect.zebra", &json!({})).unwrap();
     let zebra = picture(&s);
     let black = pixels(&zebra).filter(|p| p[0] < 40 && p[1] < 40 && p[2] < 40).count();
@@ -192,7 +200,6 @@ fn pictures_show_the_surface_analysis() {
     s.execute("inspect.accessibility", &json!({})).unwrap();
     let access = picture(&s);
     let [ok, blocked] = colors_of(solidcraft_engine::render::AnalysisColors::DEFAULT.access);
-    let near = |p: [u8; 4], c: [u8; 3]| (0..3).all(|k| (i32::from(p[k]) - i32::from(c[k])).abs() < 60);
     let (reachable, under) = (pixels(&access).filter(|p| near(*p, ok)).count(), pixels(&access).filter(|p| near(*p, blocked)).count());
     assert!(reachable > 1000 && under > 1000, "accessibility: {reachable} reachable, {under} blocked pixels");
 }
