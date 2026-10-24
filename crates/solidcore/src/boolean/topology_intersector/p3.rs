@@ -29,7 +29,7 @@
 //!   and vertices of `MergeClassifications` are not asked for (upstream passes `NULL`).
 //! - **Temporary curves.** The curve copies, the trimmed coincident curve and the
 //!   dropped UV curves that upstream deletes on return (`SmObjDelete`, `SmObjsDelete`)
-//!   are stored with [`ProtoBrep::insert_curve`] to get a handle; their handles are
+//!   are stored with [`ProtoBrep::insert_curve`](crate::topology::proto_topology::ProtoBrep::insert_curve) to get a handle; their handles are
 //!   returned in `deleted_curves` for the caller to free. On an error return they are
 //!   not reported.
 //! - **Owners of the curve copies.** As upstream, the edge-curve copy each edge pass merges

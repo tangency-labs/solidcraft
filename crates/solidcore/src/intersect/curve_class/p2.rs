@@ -846,7 +846,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
 /// Tightens a classification-curve / `edge` intersection `solution` onto its surfaces
 /// (`sm_RefineCCIToSurfaces`). The recursion counter is bumped first and nothing is
-/// done past [`MAX_REFINE_RECURSION`] (5) levels; nothing is done either for a solution
+/// done past `MAX_REFINE_RECURSION` (5) levels; nothing is done either for a solution
 /// that is not a point (a range whose curve parameters differ at both ends) or for a
 /// classification without both its surfaces. `sss_point` is the caller's value of the
 /// output point.

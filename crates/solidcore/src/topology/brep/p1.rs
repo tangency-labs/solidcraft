@@ -59,14 +59,14 @@
 //!   reported by [`regions`].
 //! - [`surfaces`] / [`curves`]: upstream's `GetOwner() == pFace` / `pEdge` test compares
 //!   the geometry's owner with the face's / edge's
-//!   [`arena_identity`](crate::topology::brep_cache::arena_identity) (the kernel's
+//!   [`arena_identity`] (the kernel's
 //!   identity of arena entities; a B-rep whose geometry carries no owner reports no
 //!   surfaces or curves, as upstream for unowned geometry); the attribute filter
 //!   ([`GeometryAttributeFilter`]) looks the geometry up under its own keys.
 //! - `SetThisModelSizeEstimate` / `SetThisLargeSmallSizeRatio` also write the B-rep's
 //!   context (`m_cpContext`): the kernel's [`Context`](crate::geom::context::Context).
 //! - Marks (`sm_SwapFaceUV`) are caller-owned
-//!   [`Marks`](crate::topology::topology_traverser::Marks) records, as the traverser.
+//!   [`Marks`] records, as the traverser.
 //! - `sm_MarkLoopsToDelete` recurses once per nesting level of the loops and branches
 //!   at every other loop of a face; the port stops with [`SolidError::InvalidInput`]
 //!   past [`MAX_LOOP_NESTING`] levels and past [`MAX_LOOP_MARK_CALLS`] calls in all

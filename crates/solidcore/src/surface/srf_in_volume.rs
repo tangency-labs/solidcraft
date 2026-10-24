@@ -38,7 +38,7 @@
 //!
 //! Deviations:
 //! - **Nesting.** `new`, `set_base_surface` and `set_volume` return `InvalidInput` when the surface or the volume would nest
-//!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
+//!   deeper than [`MAX_GEOMETRY_NESTING`]
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
 //!   cloning and dropping of nested geometry (no limit upstream).
 //! - Compound evaluation copies carry a depth counter checked by `Surface` against the same bound.
@@ -379,7 +379,7 @@ impl SrfInVolume {
     /// shared surface; the port propagates it only for [`SolidError::Unported`]),
     /// [`SolidError::Unported`] from copying an unported volume kind; `InvalidInput`
     /// when `surface` or `volume` nests deeper than
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1.
+    /// [`MAX_GEOMETRY_NESTING`] - 1.
     pub fn new(
         k: &Kernel,
         surface: Surface,
@@ -618,7 +618,7 @@ impl SrfInVolume {
     ///
     /// [`SolidError::Unported`] from copying an unported surface kind; `InvalidInput`
     /// when `surface` nests deeper than
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1 (nothing is changed).
+    /// [`MAX_GEOMETRY_NESTING`] - 1 (nothing is changed).
     pub fn set_base_surface(
         &mut self,
         k: &Kernel,
@@ -650,7 +650,7 @@ impl SrfInVolume {
     ///
     /// [`SolidError::Unported`] from copying an unported volume kind; `InvalidInput`
     /// when `volume` nests deeper than
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1 (nothing is changed).
+    /// [`MAX_GEOMETRY_NESTING`] - 1 (nothing is changed).
     pub fn set_volume(&mut self, volume: Volume, copy: bool, owns_volume: bool) -> Result<()> {
         check_geometry_nesting(NestedGeometry::Volume(&volume), 1, OP)?;
         self.volume = volume;

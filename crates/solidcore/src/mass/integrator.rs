@@ -383,7 +383,8 @@ where
     }
 }
 
-/// Precise geometric and mass properties built on the integrator.
+// Precise geometric and mass properties built on the integrator (documented by its
+// inner docs, whose links resolve in the module itself).
 pub mod properties;
 
 #[cfg(test)]

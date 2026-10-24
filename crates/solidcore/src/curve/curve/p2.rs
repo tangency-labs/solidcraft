@@ -3232,7 +3232,7 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for CcGlobalSolver<'t, O> {
 
     /// `SmGlobalSolver::IdenticalSolutions` (not overridden upstream), with each
     /// solution curve's natural interval read from the curve its tree decomposes
-    /// (see [`TreeCurves`]).
+    /// (see `TreeCurves`).
     fn identical_solutions(
         &self,
         sol1: &Solution<O>,
@@ -3397,7 +3397,7 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for CpGlobalSolver<'t, O> {
 
     /// `SmGlobalSolver::IdenticalSolutions` (not overridden upstream), with the
     /// solution curve's natural interval read from the curve the curve tree
-    /// decomposes (see [`TreeCurves`]).
+    /// decomposes (see `TreeCurves`).
     fn identical_solutions(
         &self,
         sol1: &Solution<O>,
@@ -3935,7 +3935,7 @@ impl KnotsWithStatus {
 
 /// The lists a caller that ignores `GetKnots`' status reads: what was written, also on a
 /// failing status; empty when nothing was (an error before the out-parameters, as
-/// [`ignored`]).
+/// `ignored`).
 ///
 /// # Errors
 ///

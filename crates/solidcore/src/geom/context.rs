@@ -571,7 +571,7 @@ impl Context {
     /// # Errors
     ///
     /// `InvalidInput`, before anything moves, while a crate edit has lent this context's
-    /// callbacks ([`Context::lend_notify`]): swapping the lent context's placeholder would
+    /// callbacks (`Context::lend_notify`): swapping the lent context's placeholder would
     /// let a nested edit through, notifying nobody.
     pub fn take_notify_lease(&mut self) -> Result<NotifyLease> {
         self.check_not_lent()?;

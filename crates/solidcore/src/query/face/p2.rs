@@ -616,7 +616,7 @@ impl Default for PointClassifyOptions<'_> {
 /// trimmed surface cache answers first when it is up to date; then the point's
 /// surface position is tested against every face vertex (within the larger of the
 /// face, vertex and `pc` tolerances), then the point against every loop
-/// ([`crate::query::r#loop::contains_uv_point`]). With `tgt_loops_only`, only the
+/// (`query::loop::contains_uv_point`). With `tgt_loops_only`, only the
 /// selected loops (and their vertices) are used. `pc` keeps its other members; its
 /// tolerance (`GetTolerance`) enters the vertex and loop tolerances.
 ///
@@ -626,7 +626,7 @@ impl Default for PointClassifyOptions<'_> {
 /// on the checked loops (a loop that cannot classify it, or only inner loops checked
 /// without the point being outside all of them); `SM_ERR_NULL_POINTER` for a face
 /// without surface; those of the trimmed surface cache search, of [`face_vertices`]
-/// and [`crate::query::r#loop::contains_uv_point`]; [`SolidError::InvalidInput`] for an
+/// and `query::loop::contains_uv_point`; [`SolidError::InvalidInput`] for an
 /// on-boundary edge without curve.
 pub fn point_classify(
     k: &Kernel,

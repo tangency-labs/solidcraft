@@ -8,7 +8,7 @@
 //! | Rust                                       | Upstream                                          |
 //! |--------------------------------------------|---------------------------------------------------|
 //! | [`Plane::create_offset_surface`]           | `CreateOffsetSurface`                             |
-//! | [`global_surface_intersect`] (via [`Surface::global_surface_intersect`]) | `GlobalSurfaceIntersect` |
+//! | `global_surface_intersect_in` (via [`Surface::global_surface_intersect`]) | `GlobalSurfaceIntersect` |
 //! | [`Plane::intersect_with_plane`]            | `IntersectWithPlane`                              |
 //! | [`Plane::trim_curve_to_plane_domain`]      | `TrimCurveToPlaneDomain`                          |
 //! | [`Plane::is_nurb_surface_plane`]           | `IsNurbSurfacePlane` (static)                     |

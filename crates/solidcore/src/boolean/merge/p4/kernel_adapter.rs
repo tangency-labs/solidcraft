@@ -419,7 +419,7 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
     ///
     /// Those of [`TopologyIntersector::delete_faces`] and an over-wide namespace (26 bits,
     /// as [`KernelManifoldIntersector::new`]'s); `InvalidInput` when the kernel
-    /// context's callbacks are already lent ([`Context::with_notification_context`]).
+    /// context's callbacks are already lent (`Context::with_notification_context`).
     pub fn delete_faces_in(
         kernel: &mut Kernel,
         brep: &mut Brep,

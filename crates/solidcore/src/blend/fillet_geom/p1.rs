@@ -65,7 +65,7 @@
 //! - **Object model.** Upstream's `SmFilletVertexuse`, `SmFilletVertex`,
 //!   `SmFilletEdgeuse` and `SmFilletEdge` derive from the topology classes and live in
 //!   the pseudo B-rep `SmFilletBrep` (an `SmBrep`). Here [`FilletBrep`] owns a
-//!   [`topology::Brep`] holding the topology records of the pseudo B-rep and keeps the
+//!   [`topology::Brep`](crate::topology::Brep) holding the topology records of the pseudo B-rep and keeps the
 //!   fillet-specific members in side tables keyed by the topology ids
 //!   ([`FilletBrep::fillet_vertex`], ...); every pseudo-B-rep vertex, edge, edge use and
 //!   vertex use made by the fillet code has an entry. `m_pEdgeListHead` is

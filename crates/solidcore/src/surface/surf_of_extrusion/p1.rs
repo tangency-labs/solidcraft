@@ -380,7 +380,7 @@ impl SurfOfExtrusion {
     /// # Errors
     ///
     /// `InvalidInput` for a generator not derived from `SmBSplineCurve`; those of the
-    /// generator's evaluation and tests (see [`Self::classify`]).
+    /// generator's evaluation and tests (see `Self::classify`).
     pub fn new(
         k: &Kernel,
         gen_curve: Curve,
@@ -424,7 +424,7 @@ impl SurfOfExtrusion {
     /// # Errors
     ///
     /// `InvalidInput` for a generator not derived from `SmBSplineCurve`; those of the
-    /// generator's evaluations and tests (see [`Self::classify`]).
+    /// generator's evaluations and tests (see `Self::classify`).
     pub fn new_infinite(
         k: &Kernel,
         gen_curve: Curve,

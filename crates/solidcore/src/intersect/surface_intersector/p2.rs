@@ -22,7 +22,7 @@
 //!   `SmSurfaceCache.h`, no functions) is defined here.
 //! - **Points.** `ComputePointValues` and `ClassifyBoundaryStartPointIntersection`
 //!   take the point (and the optional previous point) by reference, as upstream,
-//!   instead of an arena [`TsectId`]. The previous point is only read
+//!   instead of an arena [`TsectId`](super::p1::TsectId). The previous point is only read
 //!   (`StepBackFromSingularity` steps off the current point).
 //! - **Virtuals.** `ComputePointValues`, `FlushCurve`, `ComputeSingularityPoint` and
 //!   `ComputePointValuesDelta` are virtual upstream; the `SmSurfaceIntersector` bodies

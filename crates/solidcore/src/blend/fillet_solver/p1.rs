@@ -59,7 +59,7 @@
 //!   solver's own offsets keep a base extension they make, as upstream's `const`
 //!   evaluators do; `SmFindClippedRadiusEFO` evaluates copies (its iso curve and
 //!   `LocalCurveIntersect`), whose extension the solver's offsets then take
-//!   ([`FilletSolver::keep_extension_of_copy`]).
+//!   (`FilletSolver::keep_extension_of_copy`).
 //! - **Fillet geometries, executive, corners.** As in `blend.fillet_geom_p1`, the
 //!   solver's `SmFilletGeom`s live in the executive's pseudo B-rep ([`FilletBrep`],
 //!   `m_pExecutive->m_pPseudoBrep`) with its fillet vertices and edges; the solver
@@ -181,7 +181,7 @@ fn unported_on<A, T>(_args: A, upstream: &'static str, unit: &'static str) -> Re
 // ---- small types ----------------------------------------------------------------------
 
 /// `SmFilStatus` (`SmFilletGeom.h`) is unit `blend.fillet_geom_p1`'s
-/// [`FilStatus`](crate::blend::fillet_geom::p1::FilStatus) (one type per class): the
+/// [`FilStatus`] (one type per class): the
 /// processing status of a solver and of fillet geometries, vertices and edges.
 pub use crate::blend::fillet_geom::p1::FilStatus;
 
@@ -2768,7 +2768,7 @@ fn binormal_status_ignored(
 /// [`SolidError::InvalidInput`] where upstream dereferences `NULL` (an edge without
 /// primary edge use, an edge use without face use, radial or mate); the binormal
 /// evaluation's [`SolidError::Unported`], `NotFound` and `InvalidInput` (its status
-/// is otherwise ignored, see [`binormal_status_ignored`]).
+/// is otherwise ignored, see `binormal_status_ignored`).
 pub fn test_manifold_tangent_rollover(
     k: &Kernel,
     b: &mut Brep,

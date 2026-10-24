@@ -1957,7 +1957,7 @@ pub fn remove_faces(
 }
 
 /// [`remove_faces`] under the caller's notification environment `env` (the objects'
-/// `SmTopology` records and attributes), instead of the kernel's ([`plain_edit`]).
+/// `SmTopology` records and attributes), instead of the kernel's (`plain_edit`).
 ///
 /// # Errors
 ///

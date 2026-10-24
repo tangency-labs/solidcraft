@@ -149,7 +149,7 @@ const SRFS: [SrfIndex; 2] = [SrfIndex::First, SrfIndex::Second];
 // ---- co-ported enums ------------------------------------------------------------------------
 
 /// The filleting status `SmFilStatus` is unit `blend.fillet_geom_p1`'s
-/// [`FilStatus`](crate::blend::fillet_geom::p1::FilStatus) (one type per class).
+/// [`FilStatus`] (one type per class).
 pub use crate::blend::fillet_geom::p1::FilStatus;
 
 /// What a self-intersection handler does with self-intersecting fillets

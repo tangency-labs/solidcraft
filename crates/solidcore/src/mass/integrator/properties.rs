@@ -1,4 +1,4 @@
-//! Precise edge, face and B-rep properties and their SM_API query contracts.
+//! Precise edge, face and B-rep properties and their `SM_API` query contracts.
 //!
 //! Upstream: `source/SMLib/src/SmEdge.cpp`, `source/SMLib/src/SmFace.cpp`,
 //! `source/SMLib/src/SmBrep.cpp`, `source/SMLib/inc/SmTopoTypes.h`,

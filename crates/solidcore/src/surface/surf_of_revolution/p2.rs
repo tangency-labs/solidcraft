@@ -613,7 +613,7 @@ impl SurfOfRevolution {
     /// `other_uv_domain` (`GlobalSurfaceIntersect`): the special cases of a plane or
     /// another surface of revolution ([`Self::intersect_with_plane`],
     /// [`Self::intersect_with_surf_of_revolution`]) and, where they need more, the
-    /// general surface intersection ([`base_global_surface_intersect`]) whose
+    /// general surface intersection ([`base_global_surface_intersect`](crate::surface::surface::p2::base_global_surface_intersect)) whose
     /// curves follow the special cases' (upstream appends to the same arrays).
     ///
     /// # Errors

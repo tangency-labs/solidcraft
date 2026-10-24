@@ -9,7 +9,7 @@
 //! | [`TYPE`], [`TYPE_STRING`], [`CLASS_STRING`], [`is_kind_of`] | `SmVertexuse::GetType`, `GetTypeString`, `GetClassString`, `IsKindOf` |
 //! | [`crate::topology::Vertexuse`]              | `SmVertexuse` (members; `Default` is `SmVertexuse()`, `Drop` `~SmVertexuse`) |
 //! | [`vertexuse_type`]                          | `SmVertexuse::GetVertexuseType`                  |
-//! | [`vertex`]                                  | `SmVertexuse::GetVertex`                         |
+//! | [`vertex()`]                                | `SmVertexuse::GetVertex`                         |
 //! | [`is_loop_vertexuse`], [`is_shell_vertexuse`], [`is_edge_vertexuse`] | `SmVertexuse::IsLoopVertexuse`, `IsShellVertexuse`, `IsEdgeVertexuse` |
 //! | [`edgeuse`], [`faceuse`], [`loopuse`], [`shell`] | `SmVertexuse::GetEdgeuse`, `GetFaceuse`, `GetLoopuse`, `GetShell` |
 //! | [`has_vertex_edge_gap`], [`has_vertex_face_gap`] | `SmVertexuse::HasVertexEdgeGap`, `HasVertexFaceGap` |

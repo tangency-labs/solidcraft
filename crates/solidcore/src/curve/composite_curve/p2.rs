@@ -1104,7 +1104,7 @@ impl CompositeCurve {
     /// ([`check_bow_ties`], [`fix_bow_tie`]) are added, then every offset is split at
     /// its breaks (spans under `SM_EFF_ZERO_SQRT` and pieces shorter than
     /// `xsect_tol_3d / 100` dropped) and each piece is kept when
-    /// [`curve_classify`] says so (with its attribute's originator: the attribute's
+    /// [`curve_classify`](super::p1::curve_classify) says so (with its attribute's originator: the attribute's
     /// [`ObjectRef`] key indexes `orig_curves`).
     ///
     /// # Errors

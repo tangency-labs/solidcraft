@@ -1005,7 +1005,7 @@ fn trim_srf_cache_tree<O: Copy + PartialEq>(
 /// surface's [`TrimSrfCache`] with the [`cache_tolerances`], its tree built unless
 /// the context is doing a Boolean operation (then [`SurfaceCache::get_tree`] builds
 /// it on first use) or the surface's cache slot says upstream reuses a cache whose
-/// tree is not built ([`Surface::cache_tree_state`]; see [`trim_srf_cache_tree`]).
+/// tree is not built ([`Surface::cache_tree_state`]; see `trim_srf_cache_tree`).
 ///
 /// # Errors
 ///

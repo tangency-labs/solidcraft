@@ -58,7 +58,7 @@
 //!
 //! Deviations:
 //! - **Nesting.** `with_maps` and `add_next_map` return `InvalidInput` when the next-map chain would nest
-//!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
+//!   deeper than [`MAX_GEOMETRY_NESTING`]
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
 //!   cloning and dropping of nested geometry (no limit upstream).
 //! - **Kinds.** The class hierarchy is the [`VolumeKind`] enum: [`VolumeKind::Base`]
@@ -368,7 +368,7 @@ impl Volume {
     /// # Errors
     ///
     /// `InvalidInput` when the volume would hold more than
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) next maps.
+    /// [`MAX_GEOMETRY_NESTING`] next maps.
     pub fn with_maps(
         kind: VolumeKind,
         orient: Option<Transform>,
@@ -670,7 +670,7 @@ impl Volume {
     ///
     /// The failed `Copy` of `next` when it is added here; `InvalidInput` (nothing
     /// is added) when the chain would hold more than
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) next maps.
+    /// [`MAX_GEOMETRY_NESTING`] next maps.
     pub fn add_next_map(&mut self, next: Self, owner_flag: u64) -> Result<()> {
         // (port) bound the chain: `next` lands below every map already in it
         let mut depth = 1;
@@ -1147,7 +1147,7 @@ impl Volume {
     ///
     /// Those of [`Volume::transform_simple`]. Appending a map is refused when it
     /// would nest deeper than
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
+    /// [`MAX_GEOMETRY_NESTING`]
     /// (including the enclosing curve/surface).
     pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
         self.transform_at_depth(rotate_n_move, scale, 0)

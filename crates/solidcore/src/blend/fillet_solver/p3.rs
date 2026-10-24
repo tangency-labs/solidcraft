@@ -30,7 +30,7 @@
 //!   `*GetSurface(0)` as a `const` reference). Upstream evaluates the solver's own
 //!   `SmOffsetSurface`s, whose `const` evaluators store the base extension they make
 //!   (`m_pExtendedSurface`), so after each use the solver's offsets take the copies'
-//!   extensions back ([`FilletSolver::keep_extension_of_copy`]; a copy starts from the
+//!   extensions back (`FilletSolver::keep_extension_of_copy`; a copy starts from the
 //!   solver's extension and nothing else evaluates the solver's surface meanwhile, so
 //!   the history matches upstream's one object). `EvaluateNormal` runs on the solver's
 //!   own surface. Upstream's `SmIsoCurve` holds a pointer to the solver's surface, so

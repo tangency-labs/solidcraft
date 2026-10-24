@@ -38,7 +38,7 @@
 //! - **Ignored statuses.** `sm_RefineCCSolutions`, `ClassifyIntersectingRangeSolution`,
 //!   `SetMinMax` and the `EvaluatePoint`s of the solution combination and spurious
 //!   point checks ignore their status upstream; so does the port (a failed
-//!   evaluation leaves [`Vec3::UNDEF`], a failed classification is not degenerate),
+//!   evaluation leaves `Vec3::UNDEF`, a failed classification is not degenerate),
 //!   except [`SolidError::Unported`], which is always propagated.
 //! - **Debug only code.** The `SM_DEBUG_CODE` blocks, the assertions and the loop
 //!   that only warns about consecutive point solutions within tolerance

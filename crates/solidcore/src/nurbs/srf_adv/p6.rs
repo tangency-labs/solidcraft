@@ -172,7 +172,7 @@ fn weight_section(c: &mut Curve, wt: f64, rat_c: bool) {
 ///
 /// The trajectory is split into its linear and curved pieces (a degree-1 trajectory
 /// must be a line); each piece (degree elevated to `deg` when interpolating it) is
-/// sampled by a polyline within `E / 2` (at most [`MAXPTS`] segments, the tolerance
+/// sampled by a polyline within `E / 2` (at most `MAXPTS` segments, the tolerance
 /// growing tenfold until then), refined to enough samples for the degree or the
 /// scaling curve. At every sample the (scaled) cross section is placed in the frame
 /// `x = T'/|T'|`, `z` from `curZ` or the projection normal method from `z0`, `y = z x

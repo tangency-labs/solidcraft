@@ -1,12 +1,12 @@
 //! `SmSurfaceIntersector`, part 5: the top level surface/surface intersection
-//! ([`AdvSurfaceIntersector::do_intersection`]) and its grazing-box shortcut
+//! ([`do_intersection`]) and its grazing-box shortcut
 //! ([`SurfaceIntersector::grazing_box_process`]).
 //!
 //! Upstream: `source/SMLib/src/SmSurfaceIntersector.cpp`.
 //!
 //! | Rust                                                  | Upstream                      |
 //! |-------------------------------------------------------|-------------------------------|
-//! | [`AdvSurfaceIntersector::do_intersection`], [`AdvSurfaceIntersector::do_intersection_with_caches`] | `DoIntersection` |
+//! | [`do_intersection`], [`AdvSurfaceIntersector::do_intersection_with_caches`] | `DoIntersection` |
 //! | [`intersection_surface_caches`], [`IntersectionSurface`] | the `smsurf_GetSurfaceCache` / `GetTree` calls at the top of `DoIntersection` |
 //! | [`SurfaceIntersector::grazing_box_process`], [`GrazingBox`] | `GrazingBoxProcess`     |
 //!
@@ -24,7 +24,7 @@
 //!   [`AdvSurfaceIntersector::new`] sets.
 //! - **Surface caches.** Rust surfaces keep no cache, so the caller hands the caches
 //!   in ([`intersection_surface_caches`] builds them as `smsurf_GetSurfaceCache` /
-//!   `GetTree` would; [`AdvSurfaceIntersector::do_intersection`] does both). One
+//!   `GetTree` would; [`do_intersection`] does both). One
 //!   cache per surface, one for a self intersection (upstream gets the same cache
 //!   twice). The temporary flags (`m_bPointTestEnabled = FALSE`,
 //!   `m_bProcessBoundaryCurves = TRUE`) are set before the first solve rather than

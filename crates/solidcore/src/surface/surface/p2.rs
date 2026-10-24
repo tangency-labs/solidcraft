@@ -909,7 +909,7 @@ impl Surface {
 
     /// Takes this surface's trimmed surface cache out of its cache slot (shared with its
     /// evaluation copies) for use, leaving [`TrimCacheSlot::CheckedOut`] until
-    /// [`Surface::put_trim_cache`] returns it: [`TrimCacheSlot::Stored`] with the cache,
+    /// [`Surface::store_trim_cache`] returns it: [`TrimCacheSlot::Stored`] with the cache,
     /// whose own surface copy shares this slot again while it is out; otherwise what the
     /// slot holds ([`TrimCacheSlot::Empty`] or [`TrimCacheSlot::CheckedOut`]), unchanged.
     #[must_use]

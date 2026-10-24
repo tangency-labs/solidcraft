@@ -38,8 +38,8 @@
 //!   interval); past it `SM_ERR` is returned where upstream would recurse without end.
 //! - **Pointers into the interval array.** `GetPointClassByIndex` /
 //!   `GetPointClassMateByIndex` return pointers; the helpers below return a
-//!   [`PointClassLoc`] (interval, end) that [`CurveClassification::pc_at`] /
-//!   [`CurveClassification::pc_at_mut`] resolve.
+//!   `PointClassLoc` (interval, end) that `CurveClassification::pc_at` /
+//!   `CurveClassification::pc_at_mut` resolve.
 //! - **Undefined behaviour upstream** is an error here: a `FindInterval` / `IsCoincident` /
 //!   `InsertPointClass` over a classification without intervals (the code reads
 //!   `m_pData[0]`), an `IsCoincident` interval whose end classifications walk off the

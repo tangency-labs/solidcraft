@@ -285,7 +285,7 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
     ///
     /// `SM_ERR_NULL_POINTER` for a node without data; `InvalidInput` for a solver
     /// without curves, a node that is not a leaf span or a missing option vector;
-    /// `SM_ERR` past [`NUM_PARAM_GUESS`] guesses; those of the interval clipping,
+    /// `SM_ERR` past `NUM_PARAM_GUESS` guesses; those of the interval clipping,
     /// angles, `LocalCurveIntersect`, the end point evaluations and the solution
     /// accumulation.
     pub fn local_solve_branch(&mut self, branch: &Branch) -> Result<bool> {
