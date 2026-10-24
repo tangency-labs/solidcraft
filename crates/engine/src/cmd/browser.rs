@@ -42,6 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("browser.visibility", "Show/Hide", visibility).icon("eye").noundo().params(
         "visible: bool; items?: [sketch id or name | body name | construction name | joint name | O|X|Y|Z|XY|XZ|YZ]; \
          or joints?: [joint id or name] (their glyphs; they still constrain and move parts); \
+         or features?: [feature id or name] (the bodies they made; path?: [occurrence ids] for only that placement's); \
          or folder?: bodies|sketches|construction|origin|joints (all of it; showing also shows its browser folders and groups); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, c0/g7, c0/joints, c0/canvases] (the folder or group itself: its items keep their own state); \
          or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (requires paths and visible:true). Saved with the design; not an undo step",
@@ -302,6 +303,12 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({"visible":visible,"changed":paths.len(),"visibility":s.visibility}));
     }
     let items: Vec<Shown> = match (str_(p, "folder"), p.get("items")) {
+        _ if p.get("features").is_some() => {
+            if ["items", "folder", "joints"].iter().any(|k| p.get(*k).is_some()) {
+                return Err(bad(cmd, "give `features`, `items`, `folder` or `joints`, not several"));
+            }
+            feature_items(s, p, cmd)?
+        }
         _ if p.get("joints").is_some() => {
             if p.get("items").is_some() || p.get("folder").is_some() {
                 return Err(bad(cmd, "give `joints`, `items` or `folder`, not several"));
@@ -371,6 +378,44 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.revision += 1;
     Ok(json!({ "visible": visible, "changed": items.len(), "visibility": s.visibility }))
+}
+
+/// `features` (and `path`) of `browser.visibility`: the bodies those features made (#5099).
+fn feature_items(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Shown>> {
+    let keys = keys(p, "features", cmd)?;
+    if keys.is_empty() {
+        return Err(bad(cmd, "`features` must list feature ids or names"));
+    }
+    let mut ids = Vec::with_capacity(keys.len());
+    let mut component = None;
+    for k in &keys {
+        let f = s.doc.find_feature(k).ok_or_else(|| bad(cmd, format!("no feature `{k}`")))?;
+        if matches!(f.kind, FeatureKind::Sketch { .. }) {
+            return Err(bad(cmd, format!("`{k}` is a sketch: give it in `items`")));
+        }
+        ids.push(f.id);
+        component = Some(f.component);
+    }
+    let path = match p.get("path") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let path = v
+                .as_array()
+                .filter(|a| a.len() <= 64)
+                .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
+                .ok_or_else(|| bad(cmd, "`path` must list at most 64 occurrence ids"))?;
+            let placement = s.doc.placements().into_iter().find(|(_, at, _)| *at == path).ok_or_else(|| bad(cmd, "no placement at `path`"))?;
+            if ids.iter().any(|id| s.doc.feature(*id).is_some_and(|f| f.component != placement.0)) {
+                return Err(bad(cmd, "`path` must be a placement of the features' component"));
+            }
+            Some((component.unwrap_or(placement.0), path))
+        }
+    };
+    let bodies = s.feature_bodies(&ids, path.as_ref().map(|(c, at)| (*c, at.as_slice())));
+    if bodies.is_empty() {
+        return Err(bad(cmd, "those features made no bodies that are in the design now (a feature that changes bodies shows and hides with them)"));
+    }
+    Ok(bodies.into_iter().map(Shown::Body).collect())
 }
 
 fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1339,5 +1384,39 @@ mod tests {
             assert!(s.execute("browser.visibility", &p).is_err(), "{p}");
         }
         assert_eq!(s.visibility.hidden_folders, vec!["o:4/sketches".to_string()]);
+    }
+
+    /// #5099: a feature's bodies show and hide by the feature, in every placement or one.
+    #[test]
+    fn a_feature_shows_and_hides_the_bodies_it_made() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        run(&mut s, "solid.sphere", json!({"diameter": 4, "center": [30, 0, 0]}));
+        // A join makes no body of its own.
+        run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 20, "operation": "join"}));
+        let hide = |s: &mut Session, p: Value| run(s, "browser.visibility", p)["visibility"]["hidden_bodies"].clone();
+        assert_eq!(hide(&mut s, json!({"visible": false, "features": ["Sphere1"]})), json!(["Body2"]));
+        assert_eq!(hide(&mut s, json!({"visible": true, "features": ["Sphere1"]})), json!([]));
+        for (p, why) in [
+            (json!({"visible": false, "features": ["Box2"]}), "made no bodies"),
+            (json!({"visible": false, "features": ["Nope"]}), "no feature"),
+            (json!({"visible": false, "features": ["Box1"], "items": ["Body2"]}), "not several"),
+        ] {
+            let e = s.execute("browser.visibility", &p).expect_err("refused").to_string();
+            assert!(e.contains(why), "{p}: {e}");
+        }
+
+        // A component placed twice: every instance's body, or one placement's.
+        let first = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}))["occurrence"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 40, 0]}));
+        let second = run(&mut s, "occurrence.copy", json!({"occurrence": first}))["occurrence"].as_u64().unwrap();
+        let all = hide(&mut s, json!({"visible": false, "features": ["Box3"]}));
+        assert_eq!(all.as_array().unwrap().len(), 2, "{all}");
+        hide(&mut s, json!({"visible": true, "features": ["Box3"]}));
+        let one = hide(&mut s, json!({"visible": false, "features": ["Box3"], "path": [second]}));
+        assert_eq!(one.as_array().unwrap().len(), 1, "{one}");
+        assert!(all.as_array().unwrap().contains(&one[0]) && one[0] != all[0], "the copy's body: {one} of {all}");
+        let e = s.execute("browser.visibility", &json!({"visible": false, "features": ["Sphere1"], "path": [first]})).expect_err("other component");
+        assert!(e.to_string().contains("component"), "{e}");
     }
 }

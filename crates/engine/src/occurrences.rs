@@ -157,6 +157,30 @@ impl Session {
         Ok(out)
     }
 
+    /// The world names of the bodies `features` made (#5099), in every placement of their
+    /// component, or only in `placement` (a component and the path of one of its placements).
+    pub fn feature_bodies(&self, features: &[u64], placement: Option<(u64, &[u64])>) -> Vec<String> {
+        let state = self.model.state();
+        let made: Vec<_> = state.bodies.iter().filter(|b| features.contains(&b.feature)).collect();
+        if made.is_empty() {
+            return Vec::new();
+        }
+        let placements = match placement {
+            Some((component, path)) => vec![(component, path.to_vec())],
+            None => self.doc.placements().into_iter().map(|(component, path, _)| (component, path)).collect(),
+        };
+        let mut out = Vec::new();
+        for (component, path) in &placements {
+            for b in made.iter().filter(|b| self.doc.model_body_component(b) == *component) {
+                let name = self.doc.world_body_name(&state, &b.name, *component, path);
+                if !out.contains(&name) {
+                    out.push(name);
+                }
+            }
+        }
+        out
+    }
+
     /// Selected authoring placement, or the compatible first-placement frame.
     pub fn active_component_frame(&self) -> Mat {
         if let Some(path) = &self.active_occurrence_path
