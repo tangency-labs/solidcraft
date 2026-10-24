@@ -3262,6 +3262,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         (ps.first().map(|x| json!(x.0)).unwrap_or(Value::Null), json!(ps.iter().map(|x| x.1).collect::<Vec<_>>()))
     };
     let face_points = |i: usize| -> Vec<Value> { sels(d, i).face_points().into_iter().map(pt).collect() };
+    // An empty Thickness is no value to shell with: OK waits for one instead of the command
+    // refusing it with an error that asks for an issue report (#960).
+    if let Kind::Shell { thickness } = &d.kind
+        && thickness.trim().is_empty()
+    {
+        return Err("enter the thickness".into());
+    }
     let (cmd, params): (&str, Value) = match &d.kind {
         Kind::Extrude {
             distance,
@@ -5339,5 +5346,32 @@ mod awaiting_selection_tests {
         for failure in ["Offset distance must be positive", "the sketch has no curves", "Selection is not on this sketch", "", "sel"] {
             assert!(!awaiting_selection(failure), "{failure}");
         }
+    }
+}
+
+#[cfg(test)]
+mod shell_thickness_tests {
+    //! Shell with its Thickness box emptied (#960).
+
+    use super::*;
+    use crate::scenario::Harness;
+
+    #[test]
+    fn an_empty_thickness_makes_no_command() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+        h.step(&json!({"call":"ui.view","params":{"view":"top"}})).unwrap();
+        h.settle();
+        h.step(&json!({"start":"solid.shell"})).unwrap();
+        h.step(&json!({"click":{"world":[10,10,10]}})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().expect("the shell dialog");
+        assert_eq!(d.inputs[0].items.len(), 1, "the top face is picked");
+        assert!(dialog_commands(&h.app, d).is_ok(), "2 mm by default");
+        if let Some(Dialog { kind: Kind::Shell { thickness }, .. }) = h.app.dialog.as_mut() {
+            thickness.clear();
+        }
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(dialog_commands(&h.app, d).err().as_deref(), Some("enter the thickness"));
     }
 }
