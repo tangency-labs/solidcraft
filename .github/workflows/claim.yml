@@ -39,6 +39,9 @@ jobs:
           sparse-checkout: scripts/claim
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
+          # A GitHub server error (5xx) is retried instead of losing the claim. A retried write that
+          # had in fact gone through can post a comment twice; that is the lesser harm.
+          retries: 3
           script: |
             const claim = require('./scripts/claim/claim.js');
             if (context.eventName === 'issue_comment') {
