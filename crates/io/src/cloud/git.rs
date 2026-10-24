@@ -17,32 +17,61 @@ pub struct GitRepository {
     executable: OsString,
     connection: Connection,
     job: Option<solidcraft_cloud::jobs::Job>,
+    token: Option<String>,
 }
 
 impl GitRepository {
     /// Opening an existing checkout is read-only. Creation/cloning belongs to explicit setup.
     pub fn open(connection: Connection, executable: &str) -> Result<Self> {
-        Self::open_inner(connection, executable, None)
+        Self::open_inner(connection, executable, None, None)
     }
 
     pub fn open_cancellable(connection: Connection, executable: &str, job: solidcraft_cloud::jobs::Job) -> Result<Self> {
-        Self::open_inner(connection, executable, Some(job))
+        Self::open_inner(connection, executable, Some(job), None)
     }
 
-    fn open_inner(connection: Connection, executable: &str, job: Option<solidcraft_cloud::jobs::Job>) -> Result<Self> {
+    pub(super) fn authenticated(connection: Connection, executable: &str, job: solidcraft_cloud::jobs::Job, token: Option<String>) -> Result<Self> {
+        Self::open_inner(connection, executable, Some(job), token)
+    }
+
+    fn open_inner(connection: Connection, executable: &str, job: Option<solidcraft_cloud::jobs::Job>, token: Option<String>) -> Result<Self> {
         connection.validate()?;
         if connection.checkout.is_empty() {
             return Err(storage("choose a checkout location"));
         }
         crate::vfs::check(&connection.checkout).map_err(storage)?;
         let checkout = fs::canonicalize(&connection.checkout).map_err(storage)?;
-        let repository = Self { checkout, executable: if executable.is_empty() { "git".into() } else { executable.into() }, connection, job };
+        let repository = Self { checkout, executable: if executable.is_empty() { "git".into() } else { executable.into() }, connection, job, token };
         let root = repository.text(&["rev-parse", "--show-toplevel"])?;
         if fs::canonicalize(root.trim()).map_err(storage)? != repository.checkout {
             return Err(storage("checkout location must be the repository's top-level folder"));
         }
+        if repository.token.is_some() {
+            repository.check_token_destination()?;
+        }
         repository.check_ready()?;
         Ok(repository)
+    }
+
+    fn check_token_destination(&self) -> Result<()> {
+        let remote = &self.connection.remote;
+        let fetch = self.text(&["ls-remote", "--get-url", remote])?;
+        if fetch != *remote {
+            return Err(storage("Git URL rewriting changes this GitHub destination; use advanced settings or remove that rewrite"));
+        }
+        // `remote get-url` does not resolve push rules for a literal URL. Reject matching
+        // push rewrites rather than maintaining a second implementation of Git's matching.
+        let config = self.run(&["config", "--null", "--list"], None)?;
+        for entry in config.split(|b| *b == 0).filter(|entry| !entry.is_empty()) {
+            let entry = std::str::from_utf8(entry).map_err(storage)?;
+            let (key, value) = entry.split_once('\n').unwrap_or((entry, ""));
+            if (key.starts_with("url.") && key.ends_with(".pushinsteadof") && remote.starts_with(value))
+                || (key == format!("remote.{remote}.pushurl") && value != remote)
+            {
+                return Err(storage("Git push URL rewriting changes this GitHub destination; use advanced settings or remove that rewrite"));
+            }
+        }
+        Ok(())
     }
 
     fn command(&self) -> Result<Command> {
@@ -56,6 +85,9 @@ impl GitRepository {
             let key = key.replace('\\', "/");
             let ssh = shlex::try_join(["ssh", "-i", key.as_str(), "-o", "IdentitiesOnly=yes"]).map_err(storage)?;
             command.env("GIT_SSH_COMMAND", ssh);
+        }
+        if let Some(token) = &self.token {
+            super::auth::apply(&mut command, &self.connection, token)?;
         }
         Ok(command)
     }
@@ -78,6 +110,10 @@ impl GitRepository {
         let lock = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(path).map_err(storage)?;
         lock.try_lock().map_err(|_| storage("another SolidCraft process is synchronizing this checkout; try again shortly"))?;
         Ok(lock)
+    }
+
+    pub(super) fn setup_text(&self, args: &[&str]) -> Result<String> {
+        self.text(args)
     }
 
     fn text(&self, args: &[&str]) -> Result<String> {
@@ -132,6 +168,9 @@ impl GitRepository {
 
     pub fn test_connection(&self) -> Result<()> {
         self.check_ready()?;
+        if self.token.is_some() {
+            self.check_token_destination()?;
+        }
         if !self.connection.remote.is_empty() {
             self.run(&["ls-remote", "--", &self.connection.remote], None)?;
         }
@@ -210,6 +249,9 @@ impl GitRepository {
         }
         let _lock = self.lock()?;
         self.check_ready()?;
+        if self.token.is_some() {
+            self.check_token_destination()?;
+        }
         super::check_document(&snapshot.document)?;
         if !self.connection.remote.is_empty() {
             self.run(&["fetch", "--no-tags", "--", &self.connection.remote, &self.connection.branch], None)?;
@@ -292,17 +334,17 @@ impl GitRepository {
                 crate::safe_write::write_atomic(&path, bytes, false).map_err(storage)?;
             }
             self.run(&["add", "--pathspec-from-file=-", "--pathspec-file-nul"], Some(&paths))?;
-            self.run(
-                &[
-                    "commit",
-                    "--only",
-                    "--pathspec-from-file=-",
-                    "--pathspec-file-nul",
-                    "-m",
-                    &format!("Save {} ({})", save.destination.file, save.id),
-                ],
-                Some(&paths),
-            )?;
+            let mut identity = Vec::new();
+            if !self.text(&["config", "--get", "user.name"]).is_ok_and(|value| !value.is_empty()) {
+                identity.extend(["-c", "user.name=SolidCraft"]);
+            }
+            if !self.text(&["config", "--get", "user.email"]).is_ok_and(|value| !value.is_empty()) {
+                identity.extend(["-c", "user.email=cloud@solidcraft.invalid"]);
+            }
+            let message = format!("Save {} ({})", save.destination.file, save.id);
+            let commit_args = ["commit", "--only", "--pathspec-from-file=-", "--pathspec-file-nul", "-m", &message];
+            identity.extend(commit_args);
+            self.run(&identity, Some(&paths))?;
         }
         // Find the commit that captured this revision instead of pushing later unrelated edits.
         let commit = self.text(&["log", "-1", "--format=%H", "--", &published_path])?;
@@ -455,5 +497,20 @@ mod tests {
         assert!(parsed.status.success());
         let parts: Vec<_> = parsed.stdout.split(|b| *b == 0).filter(|s| !s.is_empty()).collect();
         assert_eq!(parts, [b"ssh".as_slice(), b"-i", key.to_str().unwrap().as_bytes(), b"-o", b"IdentitiesOnly=yes"]);
+    }
+    #[test]
+    fn guided_https_refuses_git_url_rewrites_before_network_access() {
+        let fixture = Fixture::new();
+        let mut connection = solidcraft_cloud::setup::github_connection("owner/designs").unwrap();
+        connection.checkout = fixture.checkout.to_string_lossy().into_owned();
+        let job = solidcraft_cloud::jobs::Job::new(connection.id.clone()).unwrap();
+        // A named origin is irrelevant: the guided connection uses an explicit destination.
+        let safe = GitRepository::authenticated(connection.clone(), "", job.clone(), Some("test-token".into())).unwrap();
+        assert_eq!(safe.setup_text(&["ls-remote", "--get-url", &connection.remote]).unwrap(), connection.remote);
+        Fixture::git(&fixture.checkout, &["config", "url.ssh://evil.test/.pushInsteadOf", "https://github.com/"]);
+        assert!(GitRepository::authenticated(connection.clone(), "", job.clone(), Some("test-token".into())).is_err());
+        Fixture::git(&fixture.checkout, &["config", "--unset-all", "url.ssh://evil.test/.pushInsteadOf"]);
+        Fixture::git(&fixture.checkout, &["config", "url.ssh://evil.test/.insteadOf", "https://github.com/"]);
+        assert!(GitRepository::authenticated(connection, "", job, Some("test-token".into())).is_err());
     }
 }

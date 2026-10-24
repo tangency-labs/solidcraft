@@ -4,7 +4,7 @@ Cloud saves are being developed in #4838 and draft PR #4839. This document disti
 
 ## Modules
 
-`solidcraft-cloud` is a standalone workspace crate with no CAD or UI dependencies. Its default feature set needs no filesystem, credentials, or network transport. The optional `github` feature adds an Octocrab adapter whose HTTP client is supplied by the platform. Its snapshot interface prepares reusable asset objects and hydrates them through an injected object reader. Errors distinguish invalid input, unavailable storage, competing edits, and an upgrade requirement. See [the format specification](cloud-storage-format.md).
+`solidcraft-cloud` is a standalone workspace crate with no CAD or UI dependencies. Its default feature set provides portable snapshot and queue types. The optional `github` feature adds an Octocrab adapter whose HTTP client is supplied by the platform. Its snapshot interface prepares reusable asset objects and hydrates them through an injected object reader. Errors distinguish invalid input, unavailable storage, competing edits, and an upgrade requirement. See [the format specification](cloud-storage-format.md).
 
 Implemented foundation tests cover asset reuse across parameter changes, chunk reconstruction, unknown versions and capabilities, unsupported codecs, optional metadata preservation, and corruption rejection. Native and wasm builds are required; Zstd's C dependency needs a wasm-capable Clang at build time.
 
@@ -14,16 +14,16 @@ Existing infrastructure is preferred over new protocol, cryptographic, database,
 
 | Responsibility | Reuse decision |
 | --- | --- |
-| Desktop repository engine | Installed Git, preserving its transports, helpers, agent, configuration, hooks, and signing. `process-wrap` owns cancellable Unix process groups and Windows Job Objects; a narrow adapter bounds input/output and deadlines. `gix` currently lacks push and its repository crate fails the browser probe. |
-| GitHub client | Octocrab 0.54.5 with default features disabled and a small browser service/executor adapter. Real typed Git Database read/write calls compile, and public Git reads executed in Chromium. The hand-written endpoint prototype has been replaced. |
+| Desktop repository engine | Installed Git, preserving its transports, helpers, agent, configuration, hooks, and signing. `process-wrap` owns cancellable Unix process groups and Windows Job Objects; a narrow adapter bounds input/output and deadlines. |
+| GitHub client | Octocrab 0.54.5 with default features disabled and a small browser service/executor adapter. Real typed Git Database read/write calls compile, and public Git reads executed in Chromium. |
 | Browser queue and metadata | `indexed_db_futures` provides schema upgrades, indices, durability options, and explicit transaction completion; its required APIs passed the browser-target compile probe. |
-| OPFS assets | Reuse one existing OPFS adapter or replace it with `opfs` when that removes binding code. Do not maintain two implementations of the same browser storage layer. |
+| OPFS assets | Shared OPFS adapter in `apps/solidcraft-web/src/files.rs`, with bounded reads and awaited write/close. |
 | Native credentials | Existing `keyring` service with per-connection credential identifiers. |
 | SSH key generation | `ssh-key` for Ed25519 and encrypted OpenSSH serialization; system Git/OpenSSH still handles existing keys and agents. Native encrypted-key roundtrip and wrong-passphrase checks passed. |
 | Locking and atomic writes | Standard-library file locks and existing `solidcraft_io::safe_write`; no extra locking or atomic-write library is needed. |
 | Encoding | Existing `serde`, `serde_json`, `sha2`, and `zstd`; no new serialization, hashing, or compression implementation. |
 
-Detailed comparisons, primary-source citations, exact versions, and probe limits are recorded in the [Git audit](research/cloud-git-crates.md), [GitHub client audit](research/cloud-github-crates.md), and [platform audit](research/cloud-platform-crates.md). Browser transport lives in `apps/solidcraft-web/src/cloud_client.rs`; it keeps Fetch futures local, bounds response accumulation, and uses Octocrab's host-scoped authorization middleware. No fork, patch, unsafe wrapper, or Tokio runtime is required in the browser.
+Detailed comparisons, primary-source citations, exact versions, and probe limits are recorded in the [Git audit](research/cloud-git-crates.md), [GitHub client audit](research/cloud-github-crates.md), and [platform audit](research/cloud-platform-crates.md). Browser transport lives in `apps/solidcraft-web/src/cloud_client.rs`; it keeps Fetch futures local, bounds response accumulation, and uses Octocrab's host-scoped authorization middleware. Browser tasks run on the platform executor.
 
 SolidCraft-specific code remains responsible for project layout, version compatibility, destination selection, capture-before-upload, durable acknowledgement, conflict copies, and reconciliation after an uncertain upload. General API or retry libraries do not decide those rules.
 
@@ -115,7 +115,7 @@ not enter engine command parameters, status, UI preferences, design catalogs,
 or repository metadata. The browser currently supports GitHub API access;
 arbitrary Git transports remain desktop-only. Setup calls credential storage
 directly and then configures opaque credential identifiers through commands.
-Guided setup and credential-entry UI remain unfinished. Storage persistence
+The guided setup UI stores credentials through this interface. Storage persistence
 grants are exposed as `JobStatus.storage_persistent` for the pending UI.
 
 The `cloud-recovery` example exercises the actual store without starting the renderer. With a matching `wasm-bindgen` CLI installed, run:
@@ -170,8 +170,62 @@ Saving to an explicit native path or adopting a native Save As detaches that
 binding and prevents an old asynchronous capture from reattaching it.
 `file.export` remains available for an independent native copy.
 
-These foundations, commands, platform workers, connection persistence, and browser recovery storage are implemented.
-Credential entry, native credential integration, guided setup, Home/Preferences
-integration, and end-to-end application evidence remain unfinished. User-facing
-documentation must remain marked unreleased until those paths have been
-exercised in the app.
+These foundations, commands, platform workers, connection persistence, browser
+recovery storage, native credentials, guided setup, and Home browsing/saving are
+implemented. The dedicated Cloud Saves preferences editor and authenticated host
+acceptance remain unfinished; the feature is unreleased.
+
+
+## Guided setup and native credentials
+
+`solidcraft_cloud::setup` validates provider identifiers, creates stable per-repository
+connection identities, and supplies the prefilled GitHub token link. Host setup stays
+separate from publication. Another provider can supply its setup module without
+changing snapshot or outbox code.
+
+GitHub setup uses a guided fine-grained personal access token. The link prefills
+name, description, resource owner, Contents write and Metadata read permissions, and `expires_in=none` (no
+expiration, subject to host policy). GitHub does not document a repository-selection
+URL parameter, so the wizard explicitly asks users to choose **Only select
+repositories**, select their repository, and generate/copy the token. The template
+never requests access to all repositories. The same setup runs on desktop and WASM.
+
+`cloud.connect` submits `Operation::Setup` with a proposed connection and an opaque
+credential identifier. It returns an operation id and, when ready, a verified connection;
+it does not change preferences. The UI merges that result into current settings and uses
+`cloud.configure` to apply it durably. Cancelling before Apply leaves settings unchanged.
+Setup jobs remain accessible if the user changes document tabs.
+
+Secrets enter `Host::store_credential` directly, outside serializable engine parameters
+and command/crash logs. Replacement tokens have separate local identifiers, so a failed
+reconnect cannot overwrite a working connection's token. Credential records left by an
+abandoned setup are local only. Native `NativeAccess` is injected by the desktop app:
+keyring stores tokens under the `SolidCraft cloud saves` service, and Octocrab uses the
+existing ureq transport with OS certificate verification, bounded responses, no redirects
+and a 30-second HTTP deadline. Its local executor is created on the cloud worker thread.
+Cancellation is checked before/after native HTTP requests; an in-flight native setup
+request may take up to that deadline to stop. Browser setup reuses cancellable Fetch and
+its separate IndexedDB credential store.
+
+The shared Octocrab setup adapter inspects the selected repository, adopts its default
+branch, creates a README only for an empty repository, and tests Contents write permission
+by updating the observed branch ref to its existing SHA with `force=false`. This creates
+no design revision; a concurrent branch advance rejects the probe safely. Existing files
+are never overwritten by initialization. Read-only/archived repositories and HTTP access
+failures leave local queues untouched.
+
+Native setup clones into an automatically cleaned temporary directory, validates the
+clone, then renames it into that connection's private checkout. Retries reuse the checkout
+only after verifying its origin and selected branch. HTTPS credentials use Git's standard
+credential-helper protocol with a fixed helper and connection-specific environment values.
+The helper answers only for HTTPS, `github.com`, and the exact selected repository path;
+it ignores store/erase calls. Tokens never enter argv, URLs, Git config or diagnostic output.
+Redirects and Git trace output are disabled for token-authenticated commands; effective
+fetch/push URL rewrites are checked before publication. System authentication is retained
+for connections that select it. Token lookup happens only for network operations, so an
+unavailable keychain does not prevent local checkout opens. Commits use the configured Git
+identity; missing identity fields get per-command fallbacks without editing Git config.
+
+The Start page opens this wizard and browses connected repositories. The Cloud
+Saves preference editor is the next UI integration step. All setup labels cover the 25
+supported locale catalogs, including en-GB.

@@ -12,6 +12,7 @@ use super::{GitRepository, LocalOutbox};
 
 pub struct NativeHost {
     root: PathBuf,
+    access: Option<std::sync::Arc<dyn super::NativeAccess>>,
 }
 
 fn storage(error: impl std::fmt::Display) -> Error {
@@ -24,10 +25,15 @@ fn check_cancelled(job: &Job) -> Result<()> {
 
 impl NativeHost {
     pub fn new(root: PathBuf) -> Result<Self> {
-        Ok(Self { root: LocalOutbox::new(root)?.root().to_path_buf() })
+        Ok(Self { root: LocalOutbox::new(root)?.root().to_path_buf(), access: None })
     }
 
-    fn run(operation: Operation, executable: &str, outbox: &LocalOutbox, job: &Job) -> Result<()> {
+    pub fn with_access(mut self, access: std::sync::Arc<dyn super::NativeAccess>) -> Self {
+        self.access = Some(access);
+        self
+    }
+
+    fn run(operation: Operation, executable: &str, outbox: &LocalOutbox, job: &Job, access: Option<&dyn super::NativeAccess>) -> Result<()> {
         check_cancelled(job)?;
         match operation {
             Operation::LoadSettings => {
@@ -47,6 +53,19 @@ impl NativeHost {
                     status.phase = Phase::Synced;
                 })?;
             }
+            Operation::Setup(connection) => {
+                let _lock = outbox.synchronization_lock()?;
+                let access = access.ok_or_else(|| storage("provider setup is unavailable"))?;
+                let connection = access.prepare(connection, job)?;
+                check_cancelled(job)?;
+                let token = access.credential(&connection.credential)?;
+                let connection = super::provision::checkout(connection, executable, outbox.root(), token, job)?;
+                check_cancelled(job)?;
+                job.update(|status| {
+                    status.result = Some(serde_json::json!(connection));
+                    status.phase = Phase::Ready;
+                })?;
+            }
             Operation::Save { connection, save, synchronize } => {
                 save.record.check_connection(&connection)?;
                 let document = save
@@ -62,12 +81,12 @@ impl NativeHost {
                     status.revision = Some(save.record.id.clone());
                 })?;
                 if synchronize {
-                    Self::synchronize(connection, executable, outbox, job, Some(save.record))?;
+                    Self::synchronize(connection, executable, outbox, job, Some(save.record), access)?;
                 }
             }
-            Operation::Synchronize(connection) => Self::synchronize(connection, executable, outbox, job, None)?,
+            Operation::Synchronize(connection) => Self::synchronize(connection, executable, outbox, job, None, access)?,
             Operation::Test(connection) => {
-                GitRepository::open_cancellable(connection, executable, job.clone())?.test_connection()?;
+                open_repository(connection, executable, job, access)?.test_connection()?;
                 job.update(|status| status.phase = Phase::Ready)?;
             }
             Operation::List(connection) => {
@@ -148,7 +167,14 @@ impl NativeHost {
         Ok(())
     }
 
-    fn synchronize(connection: Connection, executable: &str, outbox: &LocalOutbox, job: &Job, target: Option<PendingSave>) -> Result<()> {
+    fn synchronize(
+        connection: Connection,
+        executable: &str,
+        outbox: &LocalOutbox,
+        job: &Job,
+        target: Option<PendingSave>,
+        access: Option<&dyn super::NativeAccess>,
+    ) -> Result<()> {
         check_cancelled(job)?;
         let _lock = outbox.synchronization_lock()?;
         let mut pending = outbox.pending()?;
@@ -188,7 +214,7 @@ impl NativeHost {
                     }
                     let snapshot = outbox.recover_document(&save)?;
                     if repository.is_none() {
-                        repository = Some(GitRepository::open_cancellable(connection.clone(), executable, job.clone())?);
+                        repository = Some(open_repository(connection.clone(), executable, job, access)?);
                     }
                     repository.as_ref().ok_or_else(|| storage("repository unavailable"))?.publish(&save, snapshot)
                 })
@@ -229,11 +255,43 @@ impl NativeHost {
     }
 }
 
+fn open_repository(connection: Connection, executable: &str, job: &Job, access: Option<&dyn super::NativeAccess>) -> Result<GitRepository> {
+    let token = if connection.provider == "github"
+        && connection.authentication == solidcraft_cloud::Authentication::Https
+        && !connection.credential.is_empty()
+    {
+        access.map(|access| access.credential(&connection.credential)).transpose()?.flatten()
+    } else {
+        None
+    };
+    GitRepository::authenticated(connection, executable, job.clone(), token)
+}
+
 impl Host for NativeHost {
+    fn store_credential(&self, id: String, token: String) -> Result<Job> {
+        solidcraft_cloud::setup::check_token(&token)?;
+        if id.is_empty() || id.len() > 4096 || id.chars().any(char::is_control) {
+            return Err(storage("invalid credential identifier"));
+        }
+        let access = self.access.clone().ok_or_else(|| storage("credential storage is unavailable"))?;
+        let job = Job::new(String::new())?;
+        let worker = job.clone();
+        std::thread::Builder::new()
+            .name("solidcraft-cloud-credential".into())
+            .spawn(move || {
+                let result = access.store_credential(&id, &token).and_then(|()| worker.update(|s| s.phase = Phase::Ready));
+                if let Err(error) = result {
+                    let _ = worker.fail(error);
+                }
+            })
+            .map_err(storage)?;
+        Ok(job)
+    }
     fn submit(&self, operation: Operation, git_executable: String) -> Result<Job> {
         let connection = match &operation {
             Operation::LoadSettings | Operation::Configure(_) => None,
-            Operation::Test(connection)
+            Operation::Setup(connection)
+            | Operation::Test(connection)
             | Operation::List(connection)
             | Operation::Synchronize(connection)
             | Operation::Open { connection, .. }
@@ -250,13 +308,14 @@ impl Host for NativeHost {
         // alias two distinct connections' private queues.
         let root = connection.map(|c| self.root.join(solidcraft_cloud::digest(c.id.as_bytes()))).unwrap_or_else(|| self.root.clone());
         let outbox = LocalOutbox::new(root)?;
+        let access = self.access.clone();
         let worker = job.clone();
         let scope = crate::vfs::current_scope();
         std::thread::Builder::new()
             .name("solidcraft-cloud".into())
             .spawn(move || {
                 crate::vfs::scoped(scope, || {
-                    if let Err(error) = Self::run(operation, &git_executable, &outbox, &worker) {
+                    if let Err(error) = Self::run(operation, &git_executable, &outbox, &worker, access.as_deref()) {
                         let _ = worker.fail(error);
                     }
                 });

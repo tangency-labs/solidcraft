@@ -18,6 +18,7 @@ pub mod browser_canvas;
 pub mod browser_prompts;
 pub mod canvas;
 mod cloud;
+mod cloud_setup;
 #[cfg(test)]
 mod colour_tokens_tests;
 #[cfg(test)]
@@ -818,6 +819,17 @@ impl SolveApp {
         {
             return Err("connection settings are still being stored or loaded".into());
         }
+        // Global cloud operations can outlive the tab from which they were started.
+        if matches!(id, "cloud.cancel" | "cloud.status")
+            && let Some(operation) = params.get("operation").and_then(Value::as_str)
+            && !self.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation)
+        {
+            for slot in self.docs.background_mut() {
+                if slot.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation) {
+                    return slot.session.execute(id, &params).map_err(|e| e.to_string());
+                }
+            }
+        }
         let t0 = now_ms();
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
@@ -935,6 +947,10 @@ impl SolveApp {
     /// Start a command the way a toolbar click does: interactive tools and dialogs for commands
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
+        if id == "cloud.connect" {
+            cloud_setup::open(self);
+            return;
+        }
         if id == "ui.palette" {
             shortcut_box::open(self, None);
             return;
@@ -1697,6 +1713,7 @@ impl SolveApp {
         let mut report_input = None;
         issue_report::CadInput::block(self, ui, &mut report_input);
         self.cad_ui(ui, &mut report_input);
+        cloud_setup::show(self, ui.ctx());
         drop(report_input);
         // After everything else, on every page (the start page too, which returns early from
         // `cad_ui`): the window's edges resize it (#1381).

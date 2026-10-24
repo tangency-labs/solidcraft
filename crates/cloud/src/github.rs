@@ -92,24 +92,9 @@ fn blob_hash(bytes: &[u8], hash_length: usize) -> Result<String> {
     }
 }
 
-pub fn repository_name(value: &str) -> Result<String> {
-    let value = value.strip_prefix("https://github.com/").unwrap_or(value).trim_end_matches('/');
-    let value = value.strip_suffix(".git").unwrap_or(value);
-    let Some((owner, name)) = value.split_once('/') else {
-        return Err(invalid("enter a GitHub repository as owner/name"));
-    };
-    if owner.is_empty()
-        || name.is_empty()
-        || owner.len() > 100
-        || name.len() > 100
-        || !owner.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
-        || !name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
-        || matches!(name, "." | "..")
-    {
-        return Err(invalid("enter a GitHub repository as owner/name"));
-    }
-    Ok(value.into())
-}
+pub use crate::setup::github_repository as repository_name;
+mod setup;
+pub use setup::prepare;
 
 impl GitHub {
     /// The platform supplies an authenticated Octocrab client. Browser builds use its public

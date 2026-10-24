@@ -18,6 +18,11 @@ Optional GPU viewport ambient occlusion is available in View settings and Graphi
 with persistent settings, Performance/Quality graphics presets (Quality combines AO, Fine tessellation and adaptive 2× supersampling; manual combinations show Custom), and the
 `view.ambient_occlusion` and `view.graphics_preset` commands. See [display settings](docs/ambient-occlusion.md).
 
+Git-backed Cloud Saves (#4838) is in progress: portable project snapshots, durable offline
+queues, desktop/browser workers and guided GitHub setup with scoped HTTPS credentials are
+implemented on the feature branch. The repository browser, Cloud Saves settings editor,
+SSH key generation and integrated host validation remain. See the [implementation guide](docs/cloud-saves.md).
+
 ## Scope (owner decision, 2026-10-07)
 
 The issue batch adds preservation of blind pockets in through cuts, associative projected
