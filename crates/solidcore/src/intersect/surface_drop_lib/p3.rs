@@ -349,7 +349,7 @@ impl Surface {
         creating_uv_trim_curve: bool,
     ) -> Result<PlaneDropCurve> {
         if let SurfaceKind::Plane(p) = self.kind() {
-            return p.drop_curve(
+            return p.drop_curve_owned_by(
                 k,
                 uv_domain,
                 curve,
@@ -357,7 +357,7 @@ impl Surface {
                 approx_tol_3d,
                 keep_all_drop_curves,
                 creating_uv_trim_curve,
-                self.owner(),
+                self,
             );
         }
         let d = self.drop_curve_base::<O>(
