@@ -26,8 +26,7 @@
 //!
 //! Deferred: the cone `TrimWithDomain` callbacks of `ShrinkGeometry`
 //! (`surface.surface_p2`), and the `MoveSeam` splits past the recomputed seam problem
-//! (trimmed surface cache history, `surface.surface_p2`, or merges whose handles the
-//! geometry cannot resolve). Rejected: the seam calls the C++ crash trap (below) catches.
+//! (merges whose handles the geometry cannot resolve). Rejected: the seam calls the C++ crash trap (below) catches.
 //!
 //! **C++ crash trap.** Upstream `SplitAtSeam`'s U-then-V branch recurses on the wrong
 //! face and crashes (`plan/upstream-issues.md` UB-137). The shim runs every seam call

@@ -117,91 +117,61 @@ case = "project_t0_Defeature_brep1"
 why = "ProjectAndTrim removes every face; C++ keeps the former solid region as the infinite region, the port keeps the original one (its SmTopology fields differ: cpp 99999999, rust 0) (plan/findings.md: 'topology.brep_p10 project_t0_Defeature_brep1: the region left after ProjectAndTrim')"
 
 [[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_merge_breps_operation_3"
-why = "same result topology and vertex positions, different vertex list order: C++ lists one part's exclusive vertices last (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; issue #832)"
+unit = "heal.face_props"
+case = "gen0646"
+why = "torus face, edges far off the surface: SetProps_Stage2 seam flags differ after the trimmed cache raised edge tolerances (same tolerances and UV trims both sides; FindVertexSector of the seam disagrees) (plan/findings.md: 'trimmed surface cache history: tolerance-growth deferral removed')"
 
 [[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_piecewise_boxes_2_keep_other"
-why = "same result topology and vertex positions, different vertex list order: C++ lists one part's exclusive vertices last (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; issue #832)"
+unit = "heal.face_props"
+case = "gen0790"
+why = "torus face, edges far off the surface: SetProps_Stage2 seam flags differ after the trimmed cache raised edge tolerances (same tolerances and UV trims both sides; FindVertexSector of the seam disagrees) (plan/findings.md: 'trimmed surface cache history: tolerance-growth deferral removed')"
 
 [[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_piecewise_boxes_3_keep_other"
-why = "same result topology and vertex positions, different vertex list order: C++ lists one part's exclusive vertices last (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; issue #832)"
+unit = "heal.face_props"
+case = "gen1312"
+why = "torus face, edges far off the surface: V seam intervals 2-5 C++ FACE, port OUTSIDE (FindVertexSector) with identical raised edge tolerances and UV trims (plan/findings.md: 'trimmed surface cache history: tolerance-growth deferral removed')"
 
 [[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_merge_breps_operation_0"
-why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
+unit = "intersect.curve_class_p4"
+case = "gen1570"
+why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ on a torus face with edges far off the surface after the trimmed cache raised edge tolerances (plan/findings.md: 'trimmed surface cache history: tolerance-growth deferral removed')"
 
 [[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_merge_breps_operation_1"
-why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
+unit = "intersect.curve_class_p4"
+case = "gen1622"
+why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ on a torus face with edges far off the surface after the trimmed cache raised edge tolerances (plan/findings.md: 'trimmed surface cache history: tolerance-growth deferral removed')"
 
 [[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_merge_breps_operation_2"
-why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
+unit = "intersect.curve_class_p4"
+case = "gen1841"
+why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ on a torus face with edges far off the surface after the trimmed cache raised edge tolerances (plan/findings.md: 'trimmed surface cache history: tolerance-growth deferral removed')"
 
 [[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_piecewise_boxes_0"
-why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
+unit = "intersect.curve_class_p4"
+case = "gen1876"
+why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ on a torus face with edges far off the surface after the trimmed cache raised edge tolerances (plan/findings.md: 'trimmed surface cache history: tolerance-growth deferral removed')"
 
 [[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_piecewise_boxes_1"
-why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
+unit = "intersect.curve_class_p4"
+case = "gen1968"
+why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ on a torus face with edges far off the surface after the trimmed cache raised edge tolerances (plan/findings.md: 'trimmed surface cache history: tolerance-growth deferral removed')"
 
 [[mismatch]]
-unit = "blend.fillet_executive_p1"
-case = "remove_topo_edges_mouse_two_struts"
-why = "RemoveTopoEdges with topo edges 1 and 2 of Mouse.smb in sequence: after the second deletion one edge use's UV curve on the plane differs (faces, surfaces and the remaining edge agree; each edge alone matches); in DeleteEdge / DeleteTopologicalVertex / SetSurface, not located (plan/findings.md: 'blend.fillet_executive_p1, RemoveTopoEdges and SetBevelCorner')"
+unit = "intersect.curve_class_p4"
+case = "gen2061"
+why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ on a torus face with edges far off the surface after the trimmed cache raised edge tolerances (plan/findings.md: 'trimmed surface cache history: tolerance-growth deferral removed')"
 
 [[mismatch]]
-unit = "boolean.merge_p3"
-case = "piecewise_box_other_shell_vertex_imprint_2"
-why = "shell vertex on a box edge: C++ splits the edge (13 edges), Rust imprints it on a face (12 edges); deferred on main at the face solve's surface cache (SmFace handle of a surface's face), compared since the intersector's solves reach their faces' caches (plan/findings.md: 'boolean.merge_p3: shell vertex on a box edge finds no edge solution')"
+unit = "heal.heal_data_p1"
+case = "file_Endcap"
+why = "Endcap.smb HealTgts: out[215] C++ unset sentinel, port 7.6925e-4; cache creation order matches (gdb), cause not found (plan/findings.md: 'trimmed surface cache history: tolerance-growth deferral removed')"
 
 [[mismatch]]
-unit = "boolean.merge_p3"
-case = "piecewise_box_other_shell_vertex_imprint_3"
-why = "shell vertex on a box edge: C++ splits the edge (13 edges), Rust imprints it on a face (12 edges); deferred on main at the face solve's surface cache (SmFace handle of a surface's face), compared since the intersector's solves reach their faces' caches (plan/findings.md: 'boolean.merge_p3: shell vertex on a box edge finds no edge solution')"
+unit = "heal.heal_data_p1"
+case = "file_Endcap_rebuild_reverse"
+why = "Endcap.smb HealTgts: out[215] C++ unset sentinel, port 7.6925e-4; cache creation order matches (gdb), cause not found (plan/findings.md: 'trimmed surface cache history: tolerance-growth deferral removed')"
 
 [[mismatch]]
-unit = "primitive.primitive_creation_p2"
-case = "gen0003"
-why = "planar-path sweep at 1e4-1e6 scale: C++ succeeds, Rust's union of the ProjectAndTrim pieces returns SM_ERR (boolean::merge::p3) and leaves DoingBoolean set; cause not traced (plan/findings.md: 'primitive.primitive_creation_p2: planar-path sweeps at 1e4-1e6 scale fail their union after ProjectAndTrim')"
-
-[[mismatch]]
-unit = "primitive.primitive_creation_p2"
-case = "gen0028"
-why = "planar-path sweep at 1e4-1e6 scale: C++ succeeds, Rust's union of the ProjectAndTrim pieces returns SM_ERR (boolean::merge::p3) and leaves DoingBoolean set; cause not traced (plan/findings.md: 'primitive.primitive_creation_p2: planar-path sweeps at 1e4-1e6 scale fail their union after ProjectAndTrim')"
-
-[[mismatch]]
-unit = "primitive.primitive_creation_p2"
-case = "gen0039"
-why = "planar-path sweep at 1e4-1e6 scale: C++ succeeds, Rust's union of the ProjectAndTrim pieces returns SM_ERR (boolean::merge::p3) and leaves DoingBoolean set; cause not traced (plan/findings.md: 'primitive.primitive_creation_p2: planar-path sweeps at 1e4-1e6 scale fail their union after ProjectAndTrim')"
-
-[[mismatch]]
-unit = "primitive.primitive_creation_p2"
-case = "gen0178"
-why = "planar-path sweep at 1e4-1e6 scale: C++ succeeds, Rust's union of the ProjectAndTrim pieces returns SM_ERR (boolean::merge::p3) and leaves DoingBoolean set; cause not traced (plan/findings.md: 'primitive.primitive_creation_p2: planar-path sweeps at 1e4-1e6 scale fail their union after ProjectAndTrim')"
-
-[[mismatch]]
-unit = "primitive.primitive_creation_p2"
-case = "gen0200"
-why = "planar-path sweep at 1e4-1e6 scale: C++ succeeds, Rust's union of the ProjectAndTrim pieces returns SM_ERR (boolean::merge::p3) and leaves DoingBoolean set; cause not traced (plan/findings.md: 'primitive.primitive_creation_p2: planar-path sweeps at 1e4-1e6 scale fail their union after ProjectAndTrim')"
-
-[[mismatch]]
-unit = "primitive.primitive_creation_p2"
-case = "gen0208"
-why = "planar-path sweep at 1e4-1e6 scale: C++ succeeds, Rust's union of the ProjectAndTrim pieces returns SM_ERR (boolean::merge::p3) and leaves DoingBoolean set; cause not traced (plan/findings.md: 'primitive.primitive_creation_p2: planar-path sweeps at 1e4-1e6 scale fail their union after ProjectAndTrim')"
-
-[[mismatch]]
-unit = "primitive.primitive_creation_p2"
-case = "gen0252"
-why = "planar-path sweep at 1e4-1e6 scale: C++ succeeds, Rust's union of the ProjectAndTrim pieces returns SM_ERR (boolean::merge::p3) and leaves DoingBoolean set; cause not traced (plan/findings.md: 'primitive.primitive_creation_p2: planar-path sweeps at 1e4-1e6 scale fail their union after ProjectAndTrim')"
+unit = "topology.brep_p1"
+case = "Endcap_heal"
+why = "Endcap.smb HealBrep: a healed topology record differs (out[234], out[238]); cache creation order matches (gdb), cause not found (plan/findings.md: 'trimmed surface cache history: tolerance-growth deferral removed')"

@@ -77,12 +77,13 @@
 //!   so their additions are discarded. A handle the adapter cannot resolve keeps the
 //!   [`SolidError::Unported`] dispatch-gap deferral. An edge of another B-rep has no
 //!   use on the face: not inside, as upstream's use walk finds. **Cache history:** a
-//!   face query on the mutable path that raises a vertex or edge tolerance (a trimmed
-//!   surface cache built with the face's UV trim curves, `smsurf_GetSurfaceCache`)
-//!   defers on `surface.surface_p2`: upstream reuses an `SmTrimSrfCache` made earlier
-//!   without the face (no UV trims, no tolerance growth) when one exists, which the port
-//!   cannot know (`plan/findings.md`, "classification face queries through
-//!   `ClassGeometryMut`").
+//!   face query on the mutable path may build the face surface's trimmed surface cache
+//!   with the face (`smsurf_GetSurfaceCache`), whose UV trim curves raise vertex and
+//!   edge tolerances, or reuse the one the surface already holds (made earlier, with or
+//!   without the face). The surface's cache slot keeps that history
+//!   ([`crate::query::face::p2::face_surface_cache`]), so the query does what upstream
+//!   does and the raised tolerances stay on the B-rep (`plan/findings.md`, "trimmed
+//!   surface cache history: tolerance-growth deferral removed").
 //! - **`SmFace::FindVertexSector`** runs on the mutable path only; the read-only
 //!   path returns [`SolidError::Unported`] (`topology.face_p4`).
 //! - **`SmFace::PointClassify`** ([`crate::query::face::p2::point_classify`]) runs on
@@ -2185,7 +2186,6 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FaceQueries<O> for Mutable<'_, G> {
                 uv_space_okay,
             );
         };
-        let before = Tolerances::of(b);
         let r = find_vertex_sector_in(
             k,
             b,
@@ -2199,7 +2199,6 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FaceQueries<O> for Mutable<'_, G> {
             src_zone_tol_3d,
             uv_space_okay,
         )?;
-        before.check_unchanged(b, "SmFace::FindVertexSector")?;
         Ok(r)
     }
     fn edge_curve_on_classify(
@@ -2242,7 +2241,6 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FaceQueries<O> for Mutable<'_, G> {
                 face_index,
             );
         };
-        let before = Tolerances::of(b);
         let r = edge_curve_on_classify_in(
             k,
             b,
@@ -2256,7 +2254,6 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FaceQueries<O> for Mutable<'_, G> {
             uv_space_okay,
             face_index,
         )?;
-        before.check_unchanged(b, "SmFace::EdgeCurveOnClassify")?;
         Ok(r)
     }
     fn point_classify(
@@ -2287,7 +2284,6 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FaceQueries<O> for Mutable<'_, G> {
                 point_class,
             );
         };
-        let before = Tolerances::of(b);
         let r = qf2::point_classify(
             k,
             b,
@@ -2296,7 +2292,6 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FaceQueries<O> for Mutable<'_, G> {
             &mut pc,
             point_classify_options(src_zone_tol_3d, do_xsects, use_uv),
         );
-        before.check_unchanged(b, "SmFace::PointClassify")?;
         let geometry = &*self.0;
         let (b, _) = resolve_face(geometry, face).ok_or_else(unresolved_uv)?;
         *point_class =
@@ -2329,7 +2324,6 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FaceQueries<O> for Mutable<'_, G> {
                 point_class,
             );
         };
-        let before = Tolerances::of(b);
         let r = qf1::point_3d_classify(
             k,
             b,
@@ -2340,7 +2334,6 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FaceQueries<O> for Mutable<'_, G> {
             &mut pc,
             qf1::Point3dClassifyOptions::default(),
         );
-        before.check_unchanged(b, "SmFace::Point3DClassify")?;
         let geometry = &*self.0;
         let (b, _) = resolve_face(geometry, face).ok_or_else(unresolved_3d)?;
         *point_class =
@@ -2371,50 +2364,6 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FilletAccess<O> for Mutable<'_, G> 
             }
             _ => ReadOnly(&*self.0).set_edge_curve(edge, curve),
         }
-    }
-}
-
-/// The vertex and edge zone tolerances of a B-rep, taken before a face query of the
-/// mutable path.
-///
-/// A face query may build the face surface's trimmed surface cache
-/// (`smsurf_GetSurfaceCache`), whose `CreateUVTrimCurves` raises the tolerances of
-/// edges far from the surface. Upstream does that only when the surface has no
-/// trimmed cache yet: an `SmTrimSrfCache` made earlier while the surface had no
-/// owner face (no UV trim curves) is reused as is. The port keeps no object caches,
-/// so whether upstream grew the tolerances here depends on cache history it cannot
-/// know; a query that grew one defers (module Deviations).
-struct Tolerances {
-    vertices: Vec<f64>,
-    edges: Vec<f64>,
-}
-
-impl Tolerances {
-    fn of(b: &Brep) -> Self {
-        Self {
-            vertices: b.vertices().iter().map(|(_, v)| v.tolerance).collect(),
-            edges: b.edges().iter().map(|(_, e)| e.tolerance).collect(),
-        }
-    }
-
-    /// `Unported` when face query `query` raised a tolerance of `b`.
-    fn check_unchanged(&self, b: &Brep, query: &'static str) -> Result<()> {
-        let after = Self::of(b);
-        let grew = |before: &[f64], after: &[f64]| {
-            after
-                .iter()
-                .zip(before.iter().chain(core::iter::repeat(&f64::NEG_INFINITY)))
-                .any(|(a, b)| a > b)
-        };
-        if grew(&self.vertices, &after.vertices) || grew(&self.edges, &after.edges) {
-            let _ = query;
-            // UNPORTED(surface.surface_p2): smsurf_GetSurfaceCache object cache history
-            return Err(SolidError::unported(
-                "smsurf_GetSurfaceCache (trimmed surface cache history: tolerance growth)",
-                "surface.surface_p2",
-            ));
-        }
-        Ok(())
     }
 }
 
