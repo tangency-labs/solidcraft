@@ -2277,6 +2277,7 @@
   "update.prefs_flatpak": "Flatpak aktualisiert diese Installation ({version}): {command} ausführen oder die Softwareverwaltung nutzen. SolidCraft sucht nicht selbst.",
   "update.prefs_label": "Updates",
   "update.prefs_note": "Dies ist SolidCraft {version} ({kind}). Die Suche fragt GitHub nach dem neuesten Release und sendet sonst nichts.",
+  "update.prefs_web": "Laden Sie die Seite neu, um die neueste Web-App zu erhalten. Ist das Netzwerk nicht verfügbar oder kann das Update nicht rechtzeitig vollständig heruntergeladen werden, wird die gespeicherte Version geöffnet. Ein laufender Download wird für das nächste Neuladen fortgesetzt.",
   "update.release_page": "Release-Seite öffnen",
   "update.restart": "Jetzt neu starten",
   "update.restart_later": "Später",

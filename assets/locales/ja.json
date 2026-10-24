@@ -3052,6 +3052,7 @@
   "update.prefs_flatpak": "このコピー ({version}) は Flatpak が更新します: {command} を実行するか、ソフトウェアセンターを使ってください。SolidCraft 自身は確認しません。",
   "update.prefs_label": "アップデート",
   "update.prefs_note": "これは SolidCraft {version} ({kind}) です。確認では GitHub に最新リリースを問い合わせるだけで、ほかには何も送信しません。",
+  "update.prefs_web": "ページを再読み込みすると、最新のウェブアプリを取得します。ネットワークが利用できない場合や、更新のダウンロードが時間内に完了しない場合は、保存済みのバージョンを開きます。進行中のダウンロードは次回の再読み込みに向けて続行されます。",
   "update.release_page": "リリースページを開く",
   "update.restart": "今すぐ再起動",
   "update.restart_later": "後で",

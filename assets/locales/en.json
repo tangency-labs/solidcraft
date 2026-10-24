@@ -3052,6 +3052,7 @@
   "update.prefs_flatpak": "Flatpak updates this copy ({version}): run {command} or use your software center. SolidCraft doesn't check.",
   "update.prefs_label": "Updates",
   "update.prefs_note": "This is SolidCraft {version} ({kind}). A check asks GitHub for the latest release and sends nothing else.",
+  "update.prefs_web": "Reload the page to get the latest web app. If the network is unavailable or the update cannot finish downloading in time, the saved version opens instead; a download in progress continues for the next reload.",
   "update.release_page": "Open release page",
   "update.restart": "Restart now",
   "update.restart_later": "Later",
