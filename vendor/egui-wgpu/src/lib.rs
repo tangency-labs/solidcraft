@@ -70,6 +70,61 @@ pub(crate) fn startup_step(step: &'static str, detail: &str) {
     }
 }
 
+/// SolidCraft: a frame whose texture took at least this long to acquire stalled. wgpu waits at
+/// most a second for the swap chain's next image, and D3D12 then goes on as if it had come: a
+/// hung GPU shows as frames that each wait that second and never reach the screen, a white
+/// window with nothing reported (#3321).
+pub const STALLED_ACQUIRE: std::time::Duration = std::time::Duration::from_millis(950);
+
+static STALLED_FRAMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// SolidCraft: how many of the main window's frames in a row stalled acquiring their texture
+/// ([`STALLED_ACQUIRE`]). Other viewports (the agent chat's window) don't count: a frame on time
+/// there would start a stalled main window's count over.
+pub fn stalled_frames() -> u32 {
+    STALLED_FRAMES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The frames in a row that stalled, after one whose texture took `elapsed`. Only the `winit`
+/// painter acquires textures.
+#[cfg_attr(not(feature = "winit"), allow(dead_code))]
+fn count_stall(stalled: u32, elapsed: std::time::Duration) -> u32 {
+    if elapsed >= STALLED_ACQUIRE {
+        stalled.saturating_add(1)
+    } else {
+        0
+    }
+}
+
+/// The main window's acquire took `elapsed`: its surface is configured again, if it wasn't.
+#[cfg_attr(not(feature = "winit"), allow(dead_code))]
+pub(crate) fn note_acquire(elapsed: std::time::Duration) {
+    let stalled = count_stall(stalled_frames(), elapsed);
+    STALLED_FRAMES.store(stalled, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut since) = REFUSED_SINCE.lock() {
+        *since = None;
+    }
+}
+
+static REFUSED_SINCE: std::sync::Mutex<Option<web_time::Instant>> = std::sync::Mutex::new(None);
+
+/// SolidCraft: how long the main window has gone without acquiring a texture because its surface
+/// refuses its configuration (or waits for a refused one's retry, #1935); `None` while it
+/// acquires. Those frames are skipped before the acquire, so they never count as stalled: a
+/// surface refused for good after a GPU reset leaves a blank window with nothing else to show
+/// for it (#3321).
+pub fn refused_for() -> Option<std::time::Duration> {
+    REFUSED_SINCE.lock().ok().and_then(|since| *since).map(|since| since.elapsed())
+}
+
+/// The main window skipped a frame at `now` on a refused configure.
+#[cfg_attr(not(feature = "winit"), allow(dead_code))]
+pub(crate) fn note_refused(now: web_time::Instant) {
+    if let Ok(mut since) = REFUSED_SINCE.lock() {
+        since.get_or_insert(now);
+    }
+}
+
 /// An error produced by egui-wgpu.
 #[derive(thiserror::Error, Debug)]
 pub enum WgpuError {
@@ -774,6 +829,57 @@ mod msaa_tests {
         assert_eq!(super::msaa_counts(adapter, Some(F::MULTISAMPLE_X4)), [1, 4]);
         assert_eq!(super::msaa_counts(F::MULTISAMPLE_X4, None), [1]);
         assert_eq!(super::clamp_msaa_samples(&[], 8), 1);
+    }
+
+    /// A surface the adapter has no configuration for is refused, not configured (#3321): taken
+    /// as configured, the next frame panicked on "Surface is not configured for presentation".
+    #[test]
+    fn an_unsupported_surface_is_a_refused_configure() {
+        let error = super::supported_surface(None, 1920, 1080).err();
+        assert!(matches!(&error, Some(wgpu::Error::Validation { description, .. }) if description.contains("1920x1080")));
+        let mut retry = super::ConfigureRetry::default();
+        let now = web_time::Instant::now();
+        let attempt = retry.attempt(now, || super::supported_surface(None, 8, 8).map(|_| ()));
+        assert!(matches!(attempt, super::Attempt::Refused(plan, _) if plan.first), "{attempt:?}");
+        assert_eq!(retry.failures(), 1);
+    }
+
+    /// Frames that each waited out wgpu's one-second acquire count up; one on time starts over
+    /// (#3321).
+    #[test]
+    fn frames_that_wait_out_the_acquire_count_as_stalled() {
+        use std::time::Duration;
+        let second = Duration::from_millis(1000);
+        let stalled = (0..3).fold(0, |n, _| super::count_stall(n, second));
+        assert_eq!(stalled, 3);
+        assert_eq!(super::count_stall(stalled, Duration::from_millis(16)), 0);
+        // A slow frame isn't a stall: the image came before the timeout.
+        assert_eq!(super::count_stall(0, Duration::from_millis(400)), 0);
+        assert_eq!(super::count_stall(u32::MAX, second), u32::MAX);
+    }
+}
+
+/// SolidCraft: the configuration the adapter offers for a `width` x `height` surface, or the
+/// error for a surface it offers none for ([`unsupported_surface`]).
+pub fn supported_surface(
+    default_config: Option<wgpu::SurfaceConfiguration>,
+    width: u32,
+    height: u32,
+) -> Result<wgpu::SurfaceConfiguration, wgpu::Error> {
+    default_config.ok_or_else(|| unsupported_surface(width, height))
+}
+
+/// SolidCraft: the error for a surface the adapter offers no configuration for. It used to be
+/// logged and taken as configured, so the next frame acquired a texture from a surface that was
+/// never configured and the device's error handler panicked ("Surface is not configured for
+/// presentation", #1789, #2806): after the driver resets a lost GPU, the surface recreated for it
+/// has no configuration on that adapter (#3321). As an error, the configure is refused, the frame
+/// skipped, and the retry (every few refusals, a recreate) comes later.
+pub fn unsupported_surface(width: u32, height: u32) -> wgpu::Error {
+    let description = format!("The {width}x{height} surface isn't supported by this adapter");
+    wgpu::Error::Validation {
+        source: Box::new(std::io::Error::other(description.clone())),
+        description,
     }
 }
 

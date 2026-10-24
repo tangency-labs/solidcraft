@@ -55,7 +55,10 @@ SolidCraft needs Direct3D 12 or Vulkan on Windows, Metal on macOS, and Vulkan or
 Linux. Without a graphics driver it falls back to the system's software renderer (WARP on
 Windows, llvmpipe or lavapipe on Linux), which is slow but works. From 0.10.2, if no window can
 be opened at all, SolidCraft tries the software renderer once and otherwise shows a message
-saying what failed (earlier versions closed without a word). Things to try:
+saying what failed (earlier versions closed without a word). When it was Direct3D 12 on a
+graphics card or integrated GPU that failed, SolidCraft tries Vulkan first and keeps using it
+(`"backend": "vulkan"` in `graphics.json`), and the software renderer only if Vulkan fails
+too. Things to try:
 
 - Install the graphics driver from the GPU maker (Intel, AMD, NVIDIA) rather than Windows Update.
 - In a virtual machine, turn on 3D acceleration. Over Remote Desktop, try it on the machine itself.
@@ -78,7 +81,16 @@ old Intel Vulkan driver, `igvk64.dll`, did). Windows' Event Viewer names the dri
 From 0.11.1, SolidCraft on Windows starts Direct3D 12 first and loads no other graphics API
 when Direct3D 12 has a graphics card; Vulkan and then OpenGL are tried only on a computer
 without one. Earlier versions started Vulkan, Direct3D 12 and OpenGL together and preferred
-Vulkan. To choose the graphics API yourself, in any version, open a Command Prompt and start
+Vulkan. On a computer whose only graphics is AMD's integrated GPU (Ryzen laptops and desktops
+without a graphics card), SolidCraft starts Vulkan instead: Direct3D 12 hung those drivers a
+few seconds after the window opened, and the screen went black until Windows reset the driver.
+If the graphics driver stops responding while SolidCraft is open (the window stays white or
+black and every click takes a second), SolidCraft notices after a few seconds, closes, and
+starts again: on Vulkan if it was using Direct3D 12 (it keeps using Vulkan, as `"backend":
+"vulkan"` in `graphics.json`), otherwise in safe mode. Unsaved changes are offered for recovery.
+The restarted SolidCraft ignores `WGPU_BACKEND` (below); remove it if you set it with `setx`,
+or the next start uses that API again.
+To choose the graphics API yourself, in any version, open a Command Prompt and start
 SolidCraft from it:
 
 ```
