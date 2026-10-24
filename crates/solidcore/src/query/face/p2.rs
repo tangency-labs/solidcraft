@@ -1158,6 +1158,33 @@ pub(crate) struct CurveOnClassifyCache {
 }
 
 impl CurveOnClassifyCache {
+    /// Copy back what the classification's lazy queries left on its snapshot that
+    /// upstream keeps on the face's B-rep: the gap caches ([`Self::apply_gap_updates`]),
+    /// the edge uses' UV trim curves and the edge and vertex tolerances
+    /// `SetUVTrimCurve` raised to fit them.
+    pub(crate) fn apply_uv_trim_updates(self, b: &mut Brep) -> Result<()> {
+        if let Some(snapshot) = &self.snapshot {
+            for (id, eu) in snapshot.edgeuses().iter() {
+                if b.edgeuse(id)?.uv_trim_curve.is_none() && eu.uv_trim_curve.is_some() {
+                    b.edgeuse_mut(id)?
+                        .uv_trim_curve
+                        .clone_from(&eu.uv_trim_curve);
+                }
+            }
+            for (id, e) in snapshot.edges().iter() {
+                if e.tolerance > b.edge(id)?.tolerance {
+                    b.edge_mut(id)?.tolerance = e.tolerance;
+                }
+            }
+            for (id, v) in snapshot.vertices().iter() {
+                if v.tolerance > b.vertex(id)?.tolerance {
+                    b.vertex_mut(id)?.tolerance = v.tolerance;
+                }
+            }
+        }
+        self.apply_gap_updates(b)
+    }
+
     pub(crate) fn apply_gap_updates(self, b: &mut Brep) -> Result<()> {
         if let Some(snapshot) = self.snapshot {
             for (id, vu) in snapshot.vertexuses().iter() {

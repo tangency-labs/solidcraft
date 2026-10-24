@@ -295,15 +295,16 @@ impl Shell {
         })??;
         Ok(output)
     }
-    /// Classify whether this is an inner shell: `SmTopologyTraverser::IsInnerShell`
-    /// on this shell's face uses (`GetFaceuses`).
+    /// Classify whether shell `id` of `brep` is an inner shell:
+    /// `SmTopologyTraverser::IsInnerShell` on its face uses (`GetFaceuses`), on `brep`
+    /// itself (the UV trim curves its face queries make stay, as upstream's).
     ///
     /// # Errors
-    /// Invalid member classes and the errors of
+    /// A dangling id, invalid member classes and the errors of
     /// [`crate::topology::topology_traverser::is_inner_shell`] (its `SM_ERR` for an
     /// empty or inconclusive set, `Unported` from its ray intersections).
-    pub fn is_inner_shell(&self, kernel: &mut Kernel, brep: &Brep) -> Result<bool> {
-        let faceuses = self.get_faceuses()?;
+    pub fn is_inner_shell(kernel: &mut Kernel, brep: &mut Brep, id: ShellId) -> Result<bool> {
+        let faceuses = brep.shell(id)?.get_faceuses()?;
         crate::topology::topology_traverser::is_inner_shell(kernel, brep, &faceuses)
     }
 }
@@ -427,7 +428,7 @@ pub fn order_region_shells(kernel: &mut Kernel, brep: &mut Brep, id: RegionId) -
     if faceuse_shells.len() > 1 {
         for &shell in &faceuse_shells {
             if brep.shell(shell)?.is_closed(brep, shell)? {
-                match brep.shell(shell)?.is_inner_shell(kernel, brep) {
+                match Shell::is_inner_shell(kernel, brep, shell) {
                     Ok(true) => {
                         chosen = Some(shell);
                         break;

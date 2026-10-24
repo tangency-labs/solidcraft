@@ -512,7 +512,7 @@ fn merge_shells(k: &mut Kernel, b: &mut Brep, mut del: ShellId, mut keep: ShellI
     } else if del_region == inf
         // pKeepShell->IsInnerShell(bIsInner): swap when it succeeds with TRUE (asked
         // only when neither region is the infinite one)
-        || ignored(b.shell(keep)?.is_inner_shell(k, b))? == Some(true)
+        || ignored(crate::topology::Shell::is_inner_shell(k, b, keep))? == Some(true)
     {
         core::mem::swap(&mut del, &mut keep);
     }

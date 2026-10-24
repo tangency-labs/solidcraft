@@ -22,9 +22,10 @@
 //! arrays where early returns preserve optional arrays upstream. Shell ownership
 //! moves through `topology::shell` (`transfer_children`, `move_faceuse`: the
 //! `Remove` / `PostInsert` statuses that `FaceuseShellReplacement` ignores cannot
-//! fail on a consistent B-rep, so an inconsistent one is an error). The ray/face
-//! intersections (`SmFace::GlobalLineIntersect`) classify on a copy of the B-rep.
-//! `IsInnerShell` keeps each target face surface's solve cache for the whole call
+//! fail on a consistent B-rep, so an inconsistent one is an error). `IsInnerShell`'s
+//! face samples and ray/face intersections (`SmFace::GetPointsInFace`,
+//! `SmFace::GlobalLineIntersect`) run on the caller's B-rep, which keeps the UV trim
+//! curves they make, as upstream's `const` queries leave them. `IsInnerShell` keeps each target face surface's solve cache for the whole call
 //! (upstream's surface keeps its cache across the rays); the port otherwise builds one
 //! per intersection, and a failed build is kept too instead of being retried on every
 //! ray (the build is deterministic, so a retry fails the same way).
@@ -546,15 +547,12 @@ fn line_parameters(
 /// failures skip the face, as upstream).
 /// An empty or inconclusive set returns the upstream `SM_ERR`.
 ///
-/// The rays run on one copy of `b`, so the lazy cache updates of the face
-/// classifications carry over from ray to ray as upstream's do, and are dropped at the
-/// end (`b` is the caller's shared B-rep).
-pub fn is_inner_shell(k: &mut Kernel, b: &Brep, faceuses: &[FaceuseId]) -> Result<bool> {
+/// The rays and face samples run on `b` itself, so the UV trim curves their face
+/// classifications create stay on the B-rep, as upstream's `const` queries leave them.
+pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> Result<bool> {
     if faceuses.is_empty() {
         return Err(SolidError::sm_err(OP));
     }
-    let mut scratch = b.clone();
-    let b = &mut scratch;
     let mut samples = 3;
     if faceuses.len() < 6 {
         samples *= 2;
@@ -569,9 +567,9 @@ pub fn is_inner_shell(k: &mut Kernel, b: &Brep, faceuses: &[FaceuseId]) -> Resul
     let mut caches: BTreeMap<FaceId, HeldSolveCache<RaySurface>> = BTreeMap::new();
     for &source in faceuses {
         let source = b.faceuse(source)?;
-        let f = required(source.face)?;
-        let mut points = face::points_in_face(k, &*b, f, samples)?.pv;
-        if source.orientation == OrientType::Opposite {
+        let (f, orientation) = (required(source.face)?, source.orientation);
+        let mut points = face::points_in_face(k, b, f, samples)?.pv;
+        if orientation == OrientType::Opposite {
             for pair in points.chunks_exact_mut(2) {
                 if let Some(normal) = pair.get_mut(1) {
                     *normal *= -1.0;

@@ -232,15 +232,14 @@ impl UnitDiff for Runner {
                     &mut k, &mut b, &mut marks, start_fu, target, &mut fus, &lock,
                 ),
                 6 => tr::remove_shell(&mut k, &mut b, ShellId::from_index(r.start as u32), target),
-                _ => tr::is_inner_shell(
-                    &mut k,
-                    &b,
-                    &b.faceuses()
+                _ => {
+                    let faceuses = b
+                        .faceuses()
                         .iter()
                         .filter_map(|(id, fu)| (fu.shell == Some(target)).then_some(id))
-                        .collect::<Vec<_>>(),
-                )
-                .map(|v| closed = i64::from(v)),
+                        .collect::<Vec<_>>();
+                    tr::is_inner_shell(&mut k, &mut b, &faceuses).map(|v| closed = i64::from(v))
+                }
             };
             if let Err(e) = result {
                 if let Some(out) = Output::unported(&e) {

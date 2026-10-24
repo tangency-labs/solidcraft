@@ -92,7 +92,11 @@
 //!   against upstream (`plan/findings.md`). Point counts above
 //!   [`MAX_POINTS_IN_FACE`] are [`SolidError::InvalidInput`] (upstream allocates
 //!   them). The rectangular branch samples from `dUInc` / `dVInc`, not from the
-//!   domain minimum, as upstream does (`plan/upstream-issues.md`).
+//!   domain minimum, as upstream does (`plan/upstream-issues.md`). It takes the
+//!   B-rep mutably: its UV-domain and iso-line classifications run on it (the
+//!   classification's snapshot hands back the UV trim curves, the tolerance growth
+//!   that fits them and the gap caches), so what upstream's `const` queries leave on
+//!   the B-rep stays there.
 //! - **`CreateCurvesByTrimming`** drops its unused `bForceUVClassify` argument; the
 //!   output arrays are asked for with `want_3d` / `want_uv`.
 //! - **Unported callees.** `SmCurveClassification::ReSet` in the constructor of a curve
@@ -122,7 +126,9 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
-use crate::query::face::p2::{curve_on_classify, CurveOnClassifyObjects};
+use crate::query::face::p2::{
+    curve_on_classify_cached, CurveOnClassifyCache, CurveOnClassifyObjects,
+};
 use crate::query::face::p3 as qf3;
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use crate::surface::surface::p1::map_to_2d;
@@ -691,6 +697,39 @@ fn classify_curve_on_face(
     tol: f64,
     data_size: usize,
 ) -> Result<Vec<CurveInterval<ClassHandle>>> {
+    let mut cache = CurveOnClassifyCache::default();
+    classify_curve_on_face_cached(k, b, f, curve, with_uv_curve, tol, data_size, &mut cache)
+}
+
+/// [`classify_curve_on_face`] on the caller's B-rep: the UV trim curves (with their
+/// edge tolerance growth) and gap caches the classification makes stay on `b`, as
+/// upstream's `const` `CurveOnClassify` leaves them.
+fn classify_curve_on_face_in_place(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    curve: &Curve,
+    with_uv_curve: bool,
+    tol: f64,
+) -> Result<Vec<CurveInterval<ClassHandle>>> {
+    let mut cache = CurveOnClassifyCache::default();
+    let intervals =
+        classify_curve_on_face_cached(k, b, f, curve, with_uv_curve, tol, 0, &mut cache);
+    cache.apply_uv_trim_updates(b)?;
+    intervals
+}
+
+#[allow(clippy::too_many_arguments)] // upstream's constructor arguments
+fn classify_curve_on_face_cached(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    curve: &Curve,
+    with_uv_curve: bool,
+    tol: f64,
+    data_size: usize,
+    cache: &mut CurveOnClassifyCache,
+) -> Result<Vec<CurveInterval<ClassHandle>>> {
     let objects = FaceClassifyObjects { brep: b, curve };
     let init = ClassificationInit {
         curve: Some(ClassHandle::Curve),
@@ -708,7 +747,7 @@ fn classify_curve_on_face(
     };
     let mut classification = CurveClassification::with_curve(k, &init)?;
     // bHasBigGaps, bDoCheck3d: FALSE; bUVSpaceOkay: TRUE (the defaults)
-    curve_on_classify(
+    curve_on_classify_cached(
         k,
         b,
         f,
@@ -718,21 +757,21 @@ fn classify_curve_on_face(
         false,
         false,
         true,
+        cache,
     )?;
     Ok(classification.intervals().to_vec())
 }
 
 /// `SmFace::CalculateUVDomainFromUVTrimCurves(rTrimUVDomain)` (unit `topology.face_p1`),
-/// on a copy of the B-rep: the caller holds it shared, so the UV trim curves the call
-/// makes (a cache upstream fills through a `const` method) are not kept. The copy costs
-/// a whole-B-rep clone per call (O(faces * B-rep size) over a sweep of every face); pass
-/// the B-rep mutably once [`points_in_face`]'s callers can.
-fn calculate_uv_domain_from_uv_trim_curves(k: &Kernel, b: &Brep, f: FaceId) -> Result<Extent2d> {
-    let mut copy = b.clone();
-    crate::topology::face::p1::calculate_uv_domain_from_uv_trim_curves(
-        k, &mut copy, f, true, false, false,
-    )
-    .map(|r| r.domain)
+/// on the caller's B-rep: the UV trim curves the call makes (a cache upstream fills
+/// through a `const` method) stay on it.
+fn calculate_uv_domain_from_uv_trim_curves(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+) -> Result<Extent2d> {
+    crate::topology::face::p1::calculate_uv_domain_from_uv_trim_curves(k, b, f, true, false, false)
+        .map(|r| r.domain)
 }
 
 /// `pEU->NormalizedEvaluate(dT, TRUE, rUV)` (UV evaluation).
@@ -1216,7 +1255,7 @@ fn rand_dither(k: &mut Kernel) -> f64 {
 /// without surface; [`SolidError::Unported`] for the trimmed branch.
 pub fn points_in_face(
     k: &mut Kernel,
-    b: &Brep,
+    b: &mut Brep,
     f: FaceId,
     point_count: u64,
 ) -> Result<PointsInFace> {
@@ -1240,14 +1279,15 @@ pub fn points_in_face(
         return Err(null("GetPointsInFace: point count too large"));
     }
 
-    // locals
-    let surf = surface_deref(b, f)?;
+    // locals (the surface is cloned: the face classifications below edit `b`)
+    let rectangular_trim = face.rectangular_trim;
+    let surf = surface_deref(b, f)?.clone();
     let count = point_count as usize;
     let mut trim_curve_cnt = (2 * point_count).min(30);
     u_inc /= (trim_curve_cnt + 1) as f64;
     let mut u = u_inc;
 
-    if face.rectangular_trim == 1 {
+    if rectangular_trim == 1 {
         // when faced is rectangularly trimmed
         trim_curve_cnt = point_count.min(30);
         let j_cnt = if (point_count / trim_curve_cnt) * trim_curve_cnt < point_count {
@@ -1327,9 +1367,9 @@ pub fn points_in_face(
             }
 
             // classify the isoParameter UVTrimCurve against the face
-            let tol = face.tolerance;
+            let tol = b.face(f)?.tolerance;
             let crv = Curve::from(uv_curve.clone());
-            let intervals = classify_curve_on_face(k, b, f, &crv, true, tol, 0)?;
+            let intervals = classify_curve_on_face_in_place(k, b, f, &crv, true, tol)?;
             if intervals
                 .iter()
                 .any(|ivl| ivl.mid.point_class() == PointClassType::Face)
@@ -2774,16 +2814,16 @@ mod tests {
             .unwrap();
         let _ = s;
         let mut k = Kernel::default();
-        let r = points_in_face(&mut k, &b, f, 1).unwrap();
+        let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
         assert_eq!(r.uv, vec![Point2::new(1.0 / 3.0, 1.0)]);
         assert_eq!(r.pv.len(), 2);
         assert_eq!(r.pv[1], Vec3::Z);
-        let r = points_in_face(&mut k, &b, f, 7).unwrap();
+        let r = points_in_face(&mut k, &mut b, f, 7).unwrap();
         assert_eq!(r.uv.len(), 7);
-        assert!(points_in_face(&mut k, &b, f, MAX_POINTS_IN_FACE + 1).is_err());
-        assert!(points_in_face(&mut k, &b, f, 0).unwrap().uv.is_empty());
+        assert!(points_in_face(&mut k, &mut b, f, MAX_POINTS_IN_FACE + 1).is_err());
+        assert!(points_in_face(&mut k, &mut b, f, 0).unwrap().uv.is_empty());
         set_uv_domain(&mut b, f, &Extent2d::from_bounds(0.0, 0.0, 0.0, 1.0)).unwrap();
-        assert!(points_in_face(&mut k, &b, f, 1).is_err());
+        assert!(points_in_face(&mut k, &mut b, f, 1).is_err());
     }
 
     #[test]
