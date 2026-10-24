@@ -259,7 +259,7 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
     let hovered = if state.is_none() { pointer.filter(|_| ui.rect_contains_pointer(proj.rect)).and_then(|p| hit(&sh, p)) } else { None };
     let active = state.map(|s| s.handle).or(hovered);
     let hot = |h: Handle| active == Some(h);
-    let col = |h: Handle, i: usize| if hot(h) { tk.accent } else { tk.gizmo[i.min(2)] };
+    let col = |h: Handle, i: usize| if hot(h) { tk.accent } else { tk.axes()[i.min(2)] };
     for (i, pts) in &sh.rings {
         painter.add(Shape::line(pts.clone(), Stroke::new(if hot(Handle::Ring(*i)) { 3.0 } else { 1.8 }, col(Handle::Ring(*i), *i))));
     }

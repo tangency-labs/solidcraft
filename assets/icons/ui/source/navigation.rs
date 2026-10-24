@@ -152,11 +152,11 @@ pub(crate) fn curved_arrow(painter: &egui::Painter, at: Pos2, clockwise: bool, h
 pub(crate) const AXIS_RADIUS: f32 = 15.0;
 pub(crate) fn axis_tip(painter: &egui::Painter, c: Pos2, name: &str, d: &Vec3, at: Pos2, depth: f64, hovered: bool, t: Tokens) {
     let col = if d.x != 0.0 {
-        t.triad[0]
+        t.axis_x
     } else if d.y != 0.0 {
-        t.triad[1]
+        t.axis_y
     } else {
-        t.triad[2]
+        t.axis_z
     };
     let positive = !name.starts_with('-');
     let light = t.panel.r() > 128;

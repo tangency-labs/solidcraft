@@ -83,16 +83,6 @@
     "bend_up": "#b8bb26",
     "bend_down": "#fe8019",
     "interference": "#fb4934",
-    "triad": [
-      "#fb4934",
-      "#b8bb26",
-      "#83a598"
-    ],
-    "gizmo": [
-      "#fb4934",
-      "#b8bb26",
-      "#83a598"
-    ],
     "icons.agent": "#d3869b",
     "surface_fill": "#fe9755",
     "surface_soft": "#423326",

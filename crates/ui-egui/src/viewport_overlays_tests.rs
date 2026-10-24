@@ -72,7 +72,7 @@ fn compass_negative_ends_are_hollow_and_positive_ends_are_chunkier() {
             let circles: Vec<_> = output.shapes.iter().filter_map(|s| if let Shape::Circle(c) = &s.shape { Some(c) } else { None }).collect();
             let end = circles.iter().find(|circle| circle.center == painted).unwrap();
             if positive {
-                assert_eq!(end.fill, t.triad[0]);
+                assert_eq!(end.fill, t.axis_x);
                 assert_eq!(end.radius, 11.0);
                 let letters: Vec<_> = output
                     .shapes
@@ -317,7 +317,7 @@ fn a_hovered_compass_end_turns_white_and_its_letter_takes_the_axis_colour() {
             if !dark {
                 // White would vanish on the light compass: an axis-coloured outline keeps it visible.
                 assert!(
-                    circles.iter().any(|circle| circle.center == painted && circle.stroke.color == t.triad[0] && circle.stroke.width >= 2.0),
+                    circles.iter().any(|circle| circle.center == painted && circle.stroke.color == t.axis_x && circle.stroke.width >= 2.0),
                     "{name}: the hovered end is outlined in its axis colour on the light theme"
                 );
             }
@@ -325,8 +325,10 @@ fn a_hovered_compass_end_turns_white_and_its_letter_takes_the_axis_colour() {
             if positive {
                 assert!(
                     !letters.is_empty()
-                        && letters.iter().all(|text| text.override_text_color == Some(t.triad[0])
-                            || text.galley.job.sections.iter().all(|s| s.format.color == t.triad[0])),
+                        && letters
+                            .iter()
+                            .all(|text| text.override_text_color == Some(t.axis_x)
+                                || text.galley.job.sections.iter().all(|s| s.format.color == t.axis_x)),
                     "the letter takes the axis colour"
                 );
             } else {

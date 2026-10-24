@@ -65,11 +65,6 @@
     "form_success": "#8fdb9a",
     "form_success_fill": "#2c4a33",
     "form_tab_ink": "#c97fdf",
-    "gizmo": [
-      "#e06c75",
-      "#98c379",
-      "#61afef"
-    ],
     "glyph_bg": "#282c34",
     "glyph_edge": "#f57f87",
     "glyph_text": "#f57f87",
@@ -188,11 +183,6 @@
     "timeline_item_error": "#5c343d",
     "timeline_marker": "#abb2bf",
     "toolbar": "#21252b",
-    "triad": [
-      "#e06c75",
-      "#98c379",
-      "#61afef"
-    ],
     "viewport_bottom": "#282c34",
     "viewport_top": "#282c34",
     "warning": "#e5c07b"

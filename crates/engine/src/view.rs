@@ -30,6 +30,8 @@ pub mod colors {
     pub const PROFILE: Rgb = Rgb(255, 196, 120);
     pub const GRID: Rgb = Rgb(196, 202, 212);
     pub const GRID_MAJOR: Rgb = Rgb(170, 178, 190);
+    /// The origin axes: the light theme's X, Y and Z, the one set every axis in the UI is drawn
+    /// with (#976).
     pub const AXIS_X: Rgb = Rgb(220, 60, 60);
     pub const AXIS_Y: Rgb = Rgb(60, 170, 60);
     pub const AXIS_Z: Rgb = Rgb(60, 100, 230);

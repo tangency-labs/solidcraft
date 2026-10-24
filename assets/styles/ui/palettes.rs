@@ -155,9 +155,11 @@ impl Tokens {
             origin_plane_edge: Color32::from_rgba_unmultiplied_const(214, 140, 84, 200),
             origin_plane_hover: Color32::from_rgba_unmultiplied_const(120, 130, 230, 150),
             origin_point: Color32::from_rgb(214, 215, 218),
-            axis_x: Color32::from_rgb(255, 0, 0),
-            axis_y: Color32::from_rgb(0, 255, 0),
-            axis_z: Color32::from_rgb(2, 2, 248),
+            // The one set of X, Y and Z colours (#976), equal to the engine's `view::colors::AXIS_*`
+            // so a headless picture draws its origin axes as the window does.
+            axis_x: Color32::from_rgb(220, 60, 60),
+            axis_y: Color32::from_rgb(60, 170, 60),
+            axis_z: Color32::from_rgb(60, 100, 230),
             construction_plane: Color32::from_rgba_unmultiplied_const(249, 184, 134, 70),
             construction_geom: icon_primary(crate::icon_svg::CONSTRUCTION_PRIMARY[0]),
             body: Color32::from_rgb(176, 186, 198),
@@ -219,8 +221,6 @@ impl Tokens {
             sketch_lost: Color32::from_rgb(200, 60, 90),
             sketch_construction: Color32::from_rgb(230, 130, 40),
             sketch_centerline: Color32::from_rgb(200, 110, 60),
-            triad: [Color32::from_rgb(220, 60, 60), Color32::from_rgb(60, 170, 60), Color32::from_rgb(60, 100, 230)],
-            gizmo: [Color32::from_rgb(225, 70, 60), Color32::from_rgb(80, 190, 80), Color32::from_rgb(70, 130, 240)],
             bend_up: Color32::from_rgb(30, 140, 50),
             bend_down: Color32::from_rgb(200, 90, 20),
             interference: Color32::from_rgb(235, 45, 40),
@@ -375,9 +375,8 @@ impl Tokens {
         let mut t = self;
         let positive = [0.20, 0.45, 0.90];
         let negative = [0.85, 0.40, 0.05];
-        t.triad[0] = Color32::from_rgb(200, 40, 40);
-        t.triad[1] = Color32::from_rgb(120, 210, 80);
-        t.gizmo[1] = Color32::from_rgb(140, 220, 90);
+        t.axis_x = Color32::from_rgb(200, 40, 40);
+        t.axis_y = Color32::from_rgb(120, 210, 80);
         t.preview_sketch = Color32::from_rgb(80, 185, 145);
         t.analysis.draft = [positive, [0.95, 0.90, 0.60], negative];
         t.analysis.access = [positive, negative];

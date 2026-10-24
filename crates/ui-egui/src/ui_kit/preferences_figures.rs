@@ -137,7 +137,7 @@ pub(crate) fn paint_orientation(p: &Painter, rect: Rect, y_up: bool) {
         [(94.0, 65.0, 0, "X"), (26.0, 65.0, 1, "Y"), (60.0, 13.0, 2, "Z")]
     };
     for (x, y, index, label) in axes {
-        let colour = t.triad.get(index).copied().unwrap_or(t.form_ink);
+        let colour = t.axes().get(index).copied().unwrap_or(t.form_ink);
         let end = c.at(x, y);
         // A halo keeps every shaft distinct from the subtle ground and the other axes.
         p.line_segment([centre, end], Stroke::new(c.width(4.2), t.viewport_top));

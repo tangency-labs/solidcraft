@@ -603,8 +603,8 @@ pub(crate) fn colour_vision_sample(ui: &mut egui::Ui, t: &Tokens) {
                 // X along and Y up from one corner, as the view triad draws them.
                 p.rect_filled(cell, t.radius_sm, t.viewport_top);
                 let o = cell.left_bottom() + egui::vec2(t.space_12, -(t.space_4 + t.space_3));
-                p.line_segment([o, egui::pos2(cell.right() - t.space_10, o.y)], line(t.triad[0]));
-                p.line_segment([o, egui::pos2(o.x, cell.top() + t.space_6)], line(t.triad[1]));
+                p.line_segment([o, egui::pos2(cell.right() - t.space_10, o.y)], line(t.axis_x));
+                p.line_segment([o, egui::pos2(o.x, cell.top() + t.space_6)], line(t.axis_y));
             }
             3 => {
                 // Dashed, as the flat pattern draws them.

@@ -18,9 +18,9 @@
     "app_bar_separator": "#b4b4b8",
     "app_bar_tab_active": "#f4f4f4",
     "app_bar_text": "#242426",
-    "axis_x": "#ff0000",
-    "axis_y": "#00ff00",
-    "axis_z": "#0202f8",
+    "axis_x": "#e95049",
+    "axis_y": "#35a754",
+    "axis_z": "#297fdb",
     "bend_down": "#bd843f",
     "bend_up": "#36934d",
     "body": "#b6bbc3",
@@ -65,11 +65,6 @@
     "form_success": "#237b38",
     "form_success_fill": "#e6f3e8",
     "form_tab_ink": "#75559f",
-    "gizmo": [
-      "#ed514b",
-      "#36ad59",
-      "#2184e9"
-    ],
     "glyph_bg": "#ffffff",
     "glyph_edge": "#d73339",
     "glyph_text": "#d73339",
@@ -188,11 +183,6 @@
     "timeline_item_error": "#f8dedb",
     "timeline_marker": "#63636b",
     "toolbar": "#ececec",
-    "triad": [
-      "#e95049",
-      "#35a754",
-      "#297fdb"
-    ],
     "viewport_bottom": "#d9dce2",
     "viewport_top": "#f5f5f7",
     "warning": "#ad7400"

@@ -637,6 +637,9 @@ pub struct Tokens {
     pub origin_plane_edge: Color32,
     pub origin_plane_hover: Color32,
     pub origin_point: Color32,
+    /// The X, Y and Z colours, one set for every axis drawn (#976): the origin axes, the view
+    /// triad, the navigation cube's triad, the Move gizmo, a 3D sketch point's triad, joint
+    /// origins, measured distances along the axes and the headless picture's origin axes.
     pub axis_x: Color32,
     pub axis_y: Color32,
     pub axis_z: Color32,
@@ -733,10 +736,6 @@ pub struct Tokens {
     pub sketch_lost: Color32,
     pub sketch_construction: Color32,
     pub sketch_centerline: Color32,
-    /// The view triad's X, Y and Z (and the CPU scene's origin axes).
-    pub triad: [Color32; 3],
-    /// The move gizmo's X, Y and Z.
-    pub gizmo: [Color32; 3],
     /// Sheet metal flat pattern: bend up, bend down.
     pub bend_up: Color32,
     pub bend_down: Color32,
@@ -764,6 +763,11 @@ impl Tokens {
     /// Subtle shell elevation, derived from the semantic application-bar colour.
     pub(crate) fn shell_shadow(self) -> egui::Shadow {
         egui::Shadow { offset: [0, self.space_2 as i8], blur: self.space_8 as u8, spread: 0, color: self.app_bar.gamma_multiply(0.18) }
+    }
+
+    /// The X, Y and Z axis colours, in that order.
+    pub const fn axes(&self) -> [Color32; 3] {
+        [self.axis_x, self.axis_y, self.axis_z]
     }
 
     /// The tokens of the current theme and colour vision mode.

@@ -290,9 +290,8 @@ fn groups(t: &Tokens) -> Vec<Group> {
         group("validation status", &[("form_success", t.form_success), ("error", t.error)], &[("panel", t.panel)]),
         group("validation surfaces", &[("form_success_fill", t.form_success_fill), ("form_error_fill", t.form_error_fill)], &[]),
         group("UI text", &[("error", t.error), ("warning", t.warning), ("text", t.text)], &[("panel", t.panel)]),
-        group("origin axes", &[("axis_x", t.axis_x), ("axis_y", t.axis_y), ("axis_z", t.axis_z)], &[("viewport_top", t.viewport_top)]),
-        group("view triad", &[("triad[0]", t.triad[0]), ("triad[1]", t.triad[1]), ("triad[2]", t.triad[2])], &[("viewport_top", t.viewport_top)]),
-        group("gizmo", &[("gizmo[0]", t.gizmo[0]), ("gizmo[1]", t.gizmo[1]), ("gizmo[2]", t.gizmo[2])], &[("viewport_top", t.viewport_top)]),
+        // Every axis drawn: origin, view triad, navigation cube, Move gizmo… (one set, #976).
+        group("axes", &[("axis_x", t.axis_x), ("axis_y", t.axis_y), ("axis_z", t.axis_z)], &[("viewport_top", t.viewport_top)]),
         group("bend lines", &[("bend_up", t.bend_up), ("bend_down", t.bend_down)], &[("viewport_top", t.viewport_top)]),
         group("box select", &[("box_window", t.box_window), ("box_crossing", t.box_crossing)], &[("viewport_top", t.viewport_top)]),
         group(
@@ -563,7 +562,7 @@ fn token_fields(t: &Tokens) -> BTreeSet<String> {
     out
 }
 
-/// A group member's token field (`triad[0]` is part of `triad`).
+/// A group member's token field (`continuity[0]` is part of `continuity`).
 fn field_of(name: &str) -> &str {
     name.split('[').next().unwrap_or(name)
 }
@@ -698,7 +697,7 @@ fn off_gives_the_theme_unchanged() {
     }
 }
 
-/// The token fields whose `Debug` text differs (`triad`, `analysis.draft`…), so a field cannot
+/// The token fields whose `Debug` text differs (`continuity`, `analysis.draft`…), so a field cannot
 /// change in a mode by accident.
 fn changed_fields(a: &Tokens, b: &Tokens) -> BTreeSet<String> {
     let (la, lb) = (format!("{a:#?}"), format!("{b:#?}"));
@@ -732,8 +731,8 @@ fn changed_fields(a: &Tokens, b: &Tokens) -> BTreeSet<String> {
 fn each_mode_changes_only_its_table() {
     let set = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<BTreeSet<_>>();
     let red_green_both = [
-        "triad",
-        "gizmo",
+        "axis_x",
+        "axis_y",
         "analysis.draft",
         "analysis.access",
         "analysis.hatch",
