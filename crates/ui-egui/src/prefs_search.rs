@@ -112,6 +112,26 @@ pub(crate) fn hits(ui: &Ui) -> u32 {
     with(ui, |state| state.hits).unwrap_or(0)
 }
 
+pub(crate) fn query(ui: &Ui) -> String {
+    with(ui, |state| state.query.clone()).unwrap_or_default()
+}
+
+/// A child that does not move the parent until [`commit_search_child`] says this group matched.
+pub(crate) fn detached_child(ui: &mut Ui, salt: impl std::hash::Hash + std::fmt::Debug) -> Ui {
+    ui.new_child(UiBuilder::new().id_salt(salt).max_rect(ui.available_rect_before_wrap()).layout(egui::Layout::top_down(egui::Align::Min)))
+}
+
+/// Keep the child's layout only when it found something. An empty page or section leaves no gap.
+pub(crate) fn commit_search_child(ui: &mut Ui, child: &Ui, before: u32) {
+    if hits(ui) <= before {
+        return;
+    }
+    let rect = child.min_rect();
+    if rect.height().is_finite() && rect.height() > 0.0 && rect.width().is_finite() {
+        ui.advance_cursor_after_rect(rect);
+    }
+}
+
 pub(crate) fn shows_all(ui: &Ui) -> bool {
     with(ui, |state| state.section_matches || state.block_matches || state.force > 0 || state.heading_open || state.passthrough > 0).unwrap_or(false)
 }
@@ -436,6 +456,14 @@ mod tests {
         assert!(h.widget("Grid").is_none(), "a checkbox on another page stays hidden");
         assert!(h.widget("Interface language").is_none(), "the page around a match stays hidden");
         assert!(h.widget("Advanced").is_none(), "a folded heading is not a match");
+        let search = crate::scenario::handle_at("prefs:search").expect("search field");
+        let hit = h.widget("Reverse zoom direction").expect("zoom row");
+        let gap = hit[1] - f64::from(search.y);
+        assert!(gap < 520.0, "search results leave a {gap:.0}px gap under the field");
+        h.app.prefs_window.filter = "extrude".into();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("prefs:search:shortcuts").is_some(), "shortcut matches collapse to one row");
+        assert!(crate::scenario::rect_of("dialog:cell:Extrude").is_none(), "the shortcut list stays closed");
         h.step(&serde_json::json!({"click": {"handle": "prefs:search:clear"}})).expect("clear");
         h.frames(2);
         assert!(h.app.prefs_window.filter.is_empty(), "the search X clears the field");
