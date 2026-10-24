@@ -874,7 +874,7 @@ pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (Threa
             kernel::boolean(&input.body, &sleeve, BoolOp::Union)?.ok_or_else(|| DocError::Invalid("narrowing the hole removed everything".into()))?;
         let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
         let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&filled, &[&l, &unnamed]));
-        input = Traced { body: filled, lineage };
+        input = Traced { body: filled, lineage, recipe: None };
         groove_radius = r_min;
     }
     // The exact grooves: SMLib's screw sweeps, cut by one B-rep boolean.
@@ -931,14 +931,14 @@ pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (Threa
     // The groove's faces have no role to name them by.
     let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
     let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
-    let mut nb = Traced { body: nb, lineage };
+    let mut nb = Traced { body: nb, lineage, recipe: None };
     if tip != ThreadTip::None {
         for cone in tip_cones(&t, radius, ends, (tip, from_side), angle, depth, taper)? {
             let faces = cone.face_count();
             let cut = kernel::boolean(&nb.body, &cone, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the chamfer removed everything".into()))?;
             let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
             let lineage = nb.lineage.and_then(|l| crate::lineage::Lineage::step(&cut, &[&l, &unnamed]));
-            nb = Traced { body: cut, lineage };
+            nb = Traced { body: cut, lineage, recipe: None };
         }
     }
     if let Some(slot) = st.bodies.get_mut(i) {

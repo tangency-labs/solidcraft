@@ -933,8 +933,10 @@ impl Model {
         let mut before = Arc::new(ModelState::default());
         if let Ok(mut cache) = model.cache.lock() {
             for (f, r) in doc.features.iter().zip(&model.results).filter(|(_, r)| !r.skipped && r.error.is_none()) {
-                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests) ^ placement_digest(doc, f, Some(&before));
-                cache.put(
+                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests)
+                    ^ placement_digest(doc, f, Some(&before))
+                    ^ construct_digest(doc, &vals, f, Some(&before));
+                cache.states.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
                     CachedEval {
                         error: None,
@@ -942,9 +944,10 @@ impl Model {
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),
                         ms: r.ms,
-                        bytes: r.state.retained_bytes(),
                         state: r.state.clone(),
                     },
+                    r.state.retained_bytes(),
+                    r.ms,
                 );
                 before = r.state.clone();
             }
