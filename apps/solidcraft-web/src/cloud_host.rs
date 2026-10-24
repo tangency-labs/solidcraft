@@ -175,6 +175,7 @@ async fn synchronize(connection: Connection, store: Store, job: Job, target: Opt
 async fn run(operation: Operation, job: &Job) -> Result<()> {
     check_cancelled(job)?;
     let operation = match operation {
+        Operation::GenerateSshKey(_) => return Err(Error::Storage("SSH key generation requires the desktop app".into())),
         Operation::LoadSettings => {
             let settings = LocalSettings::open().await?.settings().await?;
             return job.update(|status| {
@@ -291,7 +292,7 @@ impl Host for BrowserHost {
     }
     fn submit(&self, operation: Operation, _: String) -> Result<Job> {
         let connection = match &operation {
-            Operation::LoadSettings | Operation::Configure(_) => None,
+            Operation::LoadSettings | Operation::Configure(_) | Operation::GenerateSshKey(_) => None,
             Operation::Setup(connection)
             | Operation::Test(connection)
             | Operation::List(connection)

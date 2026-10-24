@@ -8,6 +8,7 @@ use solidcraft_cloud::{
 
 #[derive(Default)]
 pub(crate) struct Wizard {
+    staged: bool,
     repository: String,
     token: String,
     candidate: Option<Connection>,
@@ -23,22 +24,33 @@ enum Pending {
 
 pub(crate) fn open(app: &mut SolveApp) {
     if app.cloud.setup.is_none() {
-        app.cloud.setup = Some(Wizard::default());
+        app.cloud.setup =
+            Some(Wizard { staged: app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_CLOUD, ..Default::default() });
     }
 }
 
-pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if app.services.cloud_host.is_none() {
+pub(crate) fn prefill(app: &mut SolveApp, connection: Connection) {
+    if let Some(wizard) = &mut app.cloud.setup {
+        wizard.repository = connection.repository.clone();
+        wizard.candidate = Some(connection);
+    }
+}
+
+pub(crate) fn cancel_preferences(app: &mut SolveApp) {
+    if !app.cloud.setup.as_ref().is_some_and(|w| w.staged) {
         return;
     }
-    let t = crate::theme::Tokens::get();
-    ui_kit::FileView::section(ui, tr("cloud.title"), t.space_10, |ui| {
-        ui_kit::FileView::detail(ui, tr("cloud.setup_hint"));
-        if ui_kit::button(ui, tr("cmd.cloud.connect"), ui_kit::Button::Normal).clicked() {
-            app.start("cloud.connect");
+    if let Some(wizard) = app.cloud.setup.take() {
+        match wizard.pending {
+            Some(Pending::Credential(job, _)) => {
+                let _ = job.cancel();
+            }
+            Some(Pending::Setup(operation)) => {
+                let _ = app.run("cloud.cancel", serde_json::json!({"operation":operation}));
+            }
+            _ => {}
         }
-    });
-    ui.add_space(t.file_section_gap);
+    }
 }
 
 fn poll(app: &mut SolveApp, wizard: &mut Wizard) -> Result<bool, String> {
@@ -69,6 +81,10 @@ fn poll(app: &mut SolveApp, wizard: &mut Wizard) -> Result<bool, String> {
                         return Ok(true);
                     }
                     let connection: Connection = serde_json::from_value(status.result.ok_or("setup result missing")?).map_err(|e| e.to_string())?;
+                    if wizard.staged {
+                        crate::cloud_settings::stage(app, connection)?;
+                        return Ok(true);
+                    }
                     let mut settings = app.session.cloud_settings().clone();
                     // Merge into the latest preferences, preserving other connected repos.
                     if let Some(existing) = settings.connections.iter_mut().find(|c| c.id == connection.id) {
@@ -95,7 +111,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut wizard) = app.cloud.setup.take() else { return };
     match poll(app, &mut wizard) {
         Ok(true) => {
-            app.set_status(tr("cloud.connected"), false);
+            app.set_status(tr(if wizard.staged { "cloud.setup_ready" } else { "cloud.connected" }), false);
             return;
         }
         Err(error) => {
@@ -146,7 +162,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
             if let Some(error) = &wizard.error {
                 ui_kit::text(ui, error, ui_kit::Text::Report("cloud_setup_error", true));
             }
-            ui.hyperlink_to(tr("Help"), "https://tangency-labs.github.io/solidcraft/guide/cloud-saves.html");
+            ui.hyperlink_to(crate::i18n::tr_label("Help"), "https://tangency-labs.github.io/solidcraft/guide/cloud-saves.html");
         });
     if closed || action == ui_kit::Action::Cancel {
         match wizard.pending {
@@ -171,7 +187,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 .filter(|c| c.id == connection.id)
                 .or_else(|| app.session.cloud_settings().connections.iter().find(|c| c.id == connection.id))
             {
-                connection.credential = existing.credential.clone();
+                connection = existing.clone();
             }
             if wizard.token.is_empty() {
                 wizard.candidate = Some(connection.clone());

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{Connection, Destination, Error, Manifest, Result, Snapshot, digest};
 
 const QUEUE_FORMAT: &str = "solidcraft-outbox/1";
+const PINNED_FORMAT: &str = "solidcraft-outbox/2";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PendingSave {
@@ -91,7 +92,7 @@ impl PendingSave {
             .map_err(|e| Error::Invalid(e.to_string()))?;
         let id = digest(&identity);
         let record = Self {
-            format: QUEUE_FORMAT.into(),
+            format: if connection.git_remote.is_some() { PINNED_FORMAT } else { QUEUE_FORMAT }.into(),
             id: id.clone(),
             destination,
             connection: connection.clone(),
@@ -111,7 +112,7 @@ impl PendingSave {
         }
         let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| Error::Invalid(e.to_string()))?;
         match value.get("format").and_then(serde_json::Value::as_str) {
-            Some(QUEUE_FORMAT) => {}
+            Some(QUEUE_FORMAT | PINNED_FORMAT) => {}
             Some(format) => {
                 return Err(Error::UpgradeRequired(format!("unsupported pending save format {format}")));
             }
@@ -213,7 +214,7 @@ mod tests {
         let snapshot = Snapshot::prepare(b"{}".to_vec(), BTreeMap::new()).unwrap();
         let staged = PendingSave::stage(&Connection::default(), "project", "parts/design", None, snapshot).unwrap();
         assert!(staged.record.recover(|_| Err(Error::Storage("interrupted".into()))).is_err());
-        assert!(matches!(PendingSave::read(br#"{"format":"solidcraft-outbox/2"}"#), Err(Error::UpgradeRequired(_))));
+        assert!(matches!(PendingSave::read(br#"{"format":"solidcraft-outbox/3"}"#), Err(Error::UpgradeRequired(_))));
         assert!(PendingSave::read(&staged.record_bytes).is_ok());
     }
 
@@ -231,6 +232,22 @@ mod tests {
         let restarted = PendingSave::read(&save.record_bytes).unwrap();
         assert_eq!(restarted.connection.repository, "owner/designs");
         assert!(restarted.check_connection(&connection).is_ok());
+    }
+
+    #[test]
+    fn pinned_queue_versions_keep_recovery_identity_and_reject_retargeting() {
+        let remote = crate::GitRemote { fetch: "../read.git".into(), push: vec!["../write.git".into()] };
+        let connection = Connection { git_remote: Some(remote), ..Default::default() };
+        let staged = PendingSave::stage(&connection, "project", "part", None, Snapshot::prepare(b"{}".to_vec(), BTreeMap::new()).unwrap()).unwrap();
+        assert_eq!(staged.record.format, "solidcraft-outbox/2");
+        staged.validate().unwrap();
+        let recovered = PendingSave::read(&staged.record_bytes).unwrap();
+        recovered.check_connection(&connection).unwrap();
+        let mut changed = connection.clone();
+        changed.git_remote.as_mut().unwrap().push = vec!["../another.git".into()];
+        assert!(recovered.check_connection(&changed).is_err());
+        changed.git_remote = None;
+        assert!(recovered.check_connection(&changed).is_err());
     }
 
     #[test]
