@@ -154,7 +154,7 @@ fn home_tab_and_file_recent_open_designs() {
         {"click":{"handle":"tab:home"}},
         {"click":{"handle":"home:recent:0"}},
         {"until":{"file_busy":false}},
-        {"expect":{"home":false,"bodies":1,"documents":2}},
+        {"expect":{"home":false,"bodies":1,"documents":1}},
         {"click":{"handle":"appbar:folder"}},
         {"widget":"Open Recent"}
     ]))
@@ -162,7 +162,7 @@ fn home_tab_and_file_recent_open_designs() {
     h.run(&json!([
         {"widget":path},
         {"until":{"file_busy":false}},
-        {"expect":{"home":false,"bodies":1,"documents":3}}
+        {"expect":{"home":false,"bodies":1,"documents":1}}
     ]))
     .unwrap();
 }

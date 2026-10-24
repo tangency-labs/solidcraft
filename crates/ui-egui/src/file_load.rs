@@ -50,7 +50,7 @@ pub struct Request {
 
 impl Request {
     pub fn new(path: &str, kind: Kind) -> Self {
-        Request { path: path.into(), kind, reply: None, scope: None, options: Default::default() }
+        Request { path: path.into(), kind, reply: None, scope: solidcraft_engine::io::vfs::current_scope(), options: Default::default() }
     }
     fn insert(&self) -> bool {
         self.kind == Kind::Insert
@@ -209,6 +209,9 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
 
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String> {
+    if app.file_load.idle() && reuse_open(app, &request) {
+        return Ok(());
+    }
     #[cfg(target_arch = "wasm32")]
     {
         if staged_kind(&request) {
@@ -256,6 +259,36 @@ pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String>
         app.file_load.queued.push_back(request);
         start(app);
         Ok(())
+    }
+}
+
+/// Answer each ordinary open separately, including queued requests for the same file.
+/// Validate the caller's scope before looking at existing sessions or resolving paths.
+fn reuse_open(app: &mut SolveApp, request: &Request) -> bool {
+    if request.kind != Kind::Open {
+        return false;
+    }
+    let reused = solidcraft_engine::io::vfs::scoped(request.scope.clone(), || {
+        solidcraft_engine::io::vfs::check(&request.path).map_err(|e| e.to_string())?;
+        // Let the command validate import-specific options, even for an existing tab.
+        if !request.options.is_empty() {
+            return Ok(false);
+        }
+        crate::documents::reuse_path(app, &request.path)
+    });
+    match reused {
+        Ok(false) => false,
+        Ok(true) => {
+            let s = &app.session;
+            request.answer(Ok(json!({"path": request.path, "features": s.doc.features.len(),
+                "errors": s.model.results.iter().filter(|r| r.error.is_some()).count(), "name": s.doc.name})));
+            true
+        }
+        Err(e) => {
+            app.set_status(e.clone(), true);
+            request.answer(Err(e));
+            true
+        }
     }
 }
 
@@ -325,6 +358,9 @@ fn start(app: &mut SolveApp) {
         return;
     }
     let Some(request) = app.file_load.queued.pop_front() else { return };
+    if reuse_open(app, &request) {
+        return;
+    }
     if matches!(request.kind, Kind::Open | Kind::Recover { .. })
         && app.docs.count() >= crate::documents::MAX_OPEN
         && !crate::documents::active_is_blank(app)
@@ -806,6 +842,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 request.answer(Ok(made.result));
             }
             _ if running.cancelled() => request.answer(Err("file operation cancelled".into())),
+            Ok(_) if reuse_open(app, request) => {}
             Ok(made) if running.matches(&app.session) => {
                 // Not meshed yet: framing it while it goes in must not mesh it here.
                 app.open_meshing_next = true;
@@ -1010,6 +1047,103 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn completed_open(app: &mut SolveApp, request: Request, session: Session) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Ok(Made { session, result: json!({"loaded": true}), thumbnail: false })).unwrap();
+        app.file_load.running = Some(Running {
+            request,
+            base: app.session.doc.clone(),
+            base_revision: app.session.revision,
+            before: Vec::new(),
+            rx,
+            phase: Arc::new(AtomicU8::new(0)),
+            progress: Arc::new(Progress::default()),
+            preview_rx: None,
+            preview: None,
+            partial_rx: None,
+            built: None,
+            staged: None,
+        });
+    }
+
+    #[test]
+    fn repeated_queued_opens_reply_once_and_keep_one_session() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let mut session = Session::default();
+        session.path = Some("queued.solidcraft".into());
+        let mut first = Request::new("queued.solidcraft", Kind::Open);
+        let (tx, first_reply) = std::sync::mpsc::channel();
+        first.reply = Some(tx);
+        completed_open(&mut app, first, session);
+        let mut replies = vec![first_reply];
+        for _ in 0..3 {
+            let mut request = Request::new("queued.solidcraft", Kind::Open);
+            let (tx, rx) = std::sync::mpsc::channel();
+            request.reply = Some(tx);
+            replies.push(rx);
+            begin_request(&mut app, request).unwrap();
+        }
+        let ctx = egui::Context::default();
+        tick(&mut app, &ctx);
+        let loaded = app.session.doc.clone();
+        app.session.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+        let dirty = app.session.doc.clone();
+        assert!(!Arc::ptr_eq(&loaded, &dirty));
+        for _ in 0..3 {
+            tick(&mut app, &ctx);
+        }
+        assert!(app.file_load.idle());
+        assert_eq!(app.docs.count(), 1);
+        assert!(Arc::ptr_eq(&dirty, &app.session.doc));
+        assert!(app.session.is_dirty());
+        for rx in replies {
+            assert_eq!(rx.try_recv().unwrap()["ok"], true);
+            assert!(rx.try_recv().is_err());
+        }
+    }
+
+    #[test]
+    fn finished_open_reuses_existing_dirty_tab_and_scope_still_applies() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.session.path = Some("existing.solidcraft".into());
+        app.session.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+        let dirty = app.session.doc.clone();
+        let undo = app.session.undo.len();
+        let camera = app.cam;
+        crate::documents::new_tab(&mut app);
+        let mut loaded = Session::default();
+        loaded.path = Some("existing.solidcraft".into());
+        let mut request = Request::new("existing.solidcraft", Kind::Open);
+        let (tx, rx) = std::sync::mpsc::channel();
+        request.reply = Some(tx);
+        completed_open(&mut app, request, loaded);
+        tick(&mut app, &egui::Context::default());
+        assert_eq!(rx.try_recv().unwrap()["result"]["features"], 1);
+        assert_eq!(app.docs.count(), 2);
+        assert_eq!(app.docs.active, 0);
+        assert!(Arc::ptr_eq(&dirty, &app.session.doc));
+        assert_eq!(app.session.undo.len(), undo);
+        assert_eq!(app.cam, camera);
+        assert!(app.session.is_dirty());
+
+        let mut denied = Request::new("existing.solidcraft", Kind::Open);
+        denied.scope = Some(Default::default());
+        let (tx, rx) = std::sync::mpsc::channel();
+        denied.reply = Some(tx);
+        begin_request(&mut app, denied).unwrap();
+        assert_eq!(rx.try_recv().unwrap()["ok"], false);
+        assert!(rx.try_recv().is_err());
+        assert!(app.file_load.idle());
+        assert!(Arc::ptr_eq(&dirty, &app.session.doc));
+        // ui.file dispatch carries its scope on the calling thread; preserve it in the queue.
+        solidcraft_engine::io::vfs::scoped(Some(Default::default()), || {
+            begin(&mut app, "existing.solidcraft", false);
+        });
+        assert!(app.status.as_ref().is_some_and(|s| s.2 && s.0.contains("outside the folders")));
+        assert!(!reuse_open(&mut app, &Request::new("existing.solidcraft", Kind::Insert)));
+        assert!(!reuse_open(&mut app, &Request::new("existing.solidcraft", Kind::Recover { id: "test".into(), dir: None })));
+    }
 
     #[test]
     fn dxf_export_progress_keeps_frames_alive_and_never_adopts_a_worker_document() {

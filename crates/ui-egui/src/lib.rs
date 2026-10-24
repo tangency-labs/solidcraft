@@ -1296,6 +1296,14 @@ impl SolveApp {
     }
 
     pub fn open_path(&mut self, path: &str) {
+        match documents::reuse_path(self, path) {
+            Ok(true) => return,
+            Err(e) => {
+                self.set_status(e, true);
+                return;
+            }
+            Ok(false) => {}
+        }
         self.home.open = false;
         documents::prepare_open(self);
         if let Ok(r) = self.run("doc.open", json!({ "path": path })) {

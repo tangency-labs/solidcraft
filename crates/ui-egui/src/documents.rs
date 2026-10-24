@@ -189,6 +189,49 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     app.docs.active = i;
 }
 
+/// Select an already-open saved design without reloading or framing it. Identity is derived
+/// from the current session path so Save As immediately changes which file the tab owns.
+pub(crate) fn reuse_path(app: &mut SolveApp, path: &str) -> Result<bool, String> {
+    solidcraft_engine::io::vfs::check(path).map_err(|e| e.to_string())?;
+    // Imports create unsaved designs, rather than owning their source file.
+    if solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_mesh_path(path) {
+        return Ok(false);
+    }
+    let matches = |s: &Session| s.path.as_deref().is_some_and(|p| same_path(p, path));
+    let index = if matches(&app.session) {
+        Some(app.docs.active)
+    } else {
+        app.docs.slots.iter().position(|s| s.as_ref().is_some_and(|s| matches(&s.session)))
+    };
+    let Some(index) = index else { return Ok(false) };
+    if app.file_picker_busy() {
+        return Err("finish choosing a file before switching designs".into());
+    }
+    switch(app, index);
+    Ok(true)
+}
+
+fn same_path(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // canonicalize resolves symlinks and Windows long names/case using the filesystem.
+        // Never lowercase: Windows can also host case-sensitive directories.
+        if let (Ok(a), Ok(b)) = (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+            return a == b;
+        }
+        // A deleted file can still select its live editing session. Path equality also
+        // accepts redundant separators and `.` without guessing how symlinks resolve `..`.
+        if let (Ok(a), Ok(b)) = (std::path::absolute(a), std::path::absolute(b)) {
+            return a == b;
+        }
+    }
+    // Browser VFS keys are exact strings, independent of the host's path conventions.
+    false
+}
+
 /// Open `session` in a new tab after the active one and switch to it (`fit`: frame its model).
 pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
     if app.docs.slots.is_empty() {
@@ -884,6 +927,104 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reopening_saved_design_preserves_dirty_session_and_view() {
+        let mut a = super::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let path = std::env::temp_dir().join(format!("solidcraft-reopen-{}.solidcraft", std::process::id()));
+        let path = path.to_string_lossy().into_owned();
+        a.session.execute("file.save", &serde_json::json!({"path": path})).unwrap();
+        a.session.execute("solid.box", &serde_json::json!({"length": 10, "width": 12, "height": 14})).unwrap();
+        a.session.selection = vec![solidcraft_engine::Sel::Body { name: "Body1".into() }];
+        a.cam.distance = 123.0;
+        a.ui.hidden_profiles = vec![7];
+        let doc = a.session.doc.clone();
+        let undo = a.session.undo.len();
+        let cam = a.cam;
+        a.open_path(&path);
+        assert_eq!(a.docs.count(), 1);
+        assert!(std::sync::Arc::ptr_eq(&doc, &a.session.doc));
+        assert!(a.session.is_dirty());
+        assert_eq!(a.session.undo.len(), undo);
+        assert_eq!(a.cam, cam);
+        assert_eq!(a.session.selection.len(), 1);
+        assert_eq!(a.ui.hidden_profiles, vec![7]);
+        super::new_tab(&mut a);
+        a.open_path(&path);
+        assert_eq!(a.docs.count(), 2);
+        assert_eq!(a.docs.active, 0);
+        assert!(std::sync::Arc::ptr_eq(&doc, &a.session.doc));
+        assert_eq!(a.cam, cam);
+        assert_eq!(a.session.selection.len(), 1);
+        assert_eq!(a.ui.hidden_profiles, vec![7]);
+        assert_eq!(a.session.undo.len(), undo);
+        assert!(a.session.is_dirty());
+        std::fs::remove_file(&path).unwrap();
+        a.open_path(&path);
+        assert_eq!(a.docs.count(), 2);
+        assert!(std::sync::Arc::ptr_eq(&doc, &a.session.doc));
+    }
+
+    #[test]
+    fn reuse_tracks_save_as_missing_files_and_full_capacity() {
+        let mut a = app();
+        a.session.path = Some("original.solidcraft".into());
+        let original = a.session.doc.clone();
+        // Save As updates the live path; lookup must not retain the old identity.
+        a.session.path = Some("renamed.solidcraft".into());
+        assert!(!reuse_path(&mut a, "original.solidcraft").unwrap());
+        for _ in 1..MAX_OPEN {
+            new_tab(&mut a);
+        }
+        assert_eq!(a.docs.count(), MAX_OPEN);
+        assert!(reuse_path(&mut a, "renamed.solidcraft").unwrap());
+        assert_eq!(a.docs.active, 0);
+        assert!(std::sync::Arc::ptr_eq(&original, &a.session.doc));
+        assert!(!reuse_path(&mut a, "elsewhere/renamed.solidcraft").unwrap());
+        assert_eq!(a.docs.count(), MAX_OPEN);
+        a.home.open = true;
+        assert!(reuse_path(&mut a, "renamed.solidcraft").unwrap());
+        assert!(!a.home.open);
+    }
+
+    #[test]
+    fn reuse_does_not_claim_a_switch_while_a_picker_is_open() {
+        let mut a = app();
+        a.session.path = Some("picker.solidcraft".into());
+        new_tab(&mut a);
+        a.services.pick_open = Some(Box::new(|_| Box::pin(std::future::pending())));
+        a.pick_open(|_, _| {});
+        assert!(a.file_picker_busy());
+        assert!(reuse_path(&mut a, "picker.solidcraft").is_err());
+        assert_eq!(a.docs.active, 1);
+        assert_eq!(a.docs.count(), 2);
+    }
+
+    #[test]
+    fn saved_path_identity_uses_the_filesystem_without_folding_case() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-tab-paths-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("other")).unwrap();
+        let path = dir.join("design.solidcraft");
+        std::fs::write(&path, b"identity test").unwrap();
+        let text = |p: &std::path::Path| p.to_string_lossy().into_owned();
+        assert!(same_path(&text(&path), &text(&dir.join("other/../design.solidcraft"))));
+        assert!(!same_path(&text(&path), &text(&dir.join("other/design.solidcraft"))));
+        #[cfg(windows)]
+        assert!(same_path(&text(&path), &text(&dir.join("DESIGN.solidcraft"))));
+        #[cfg(unix)]
+        {
+            let link = dir.join("alias.solidcraft");
+            std::os::unix::fs::symlink(&path, &link).unwrap();
+            assert!(same_path(&text(&path), &text(&link)));
+            std::fs::write(dir.join("DESIGN.solidcraft"), b"distinct").unwrap();
+            if std::fs::read(&path).unwrap() != b"distinct" {
+                assert!(!same_path(&text(&path), &text(&dir.join("DESIGN.solidcraft"))));
+            }
+        }
+        std::fs::remove_file(&path).unwrap();
+        assert!(same_path(&text(&path), &text(&dir.join("./design.solidcraft"))));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     use super::*;
     use crate::Services;
     use egui::Color32;
