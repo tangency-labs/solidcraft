@@ -237,7 +237,7 @@ fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
             ui_kit::row(ui, tr("ui.agent_chat_turn_limit"), |ui| {
-                ui_kit::settings_number(ui, &mut app.preferences.agent_chat_turn_limit, 1..=200, 1.0).on_hover_text(tr("ai.prefs.turn_limit_hint"));
+                ui_kit::plain_number_field(ui, &mut app.preferences.agent_chat_turn_limit, 1..=200).on_hover_text(tr("ai.prefs.turn_limit_hint"));
             });
         });
         ui_kit::text(ui, tr("ai.prefs.privacy_note"), ui_kit::Text::Hint("privacy"));

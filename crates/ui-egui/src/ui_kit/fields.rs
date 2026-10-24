@@ -558,6 +558,39 @@ pub(crate) fn number_field<T: egui::emath::Numeric>(
     response
 }
 
+/// Integer count field with a plain text cursor: no drag behavior or bidirectional arrow cursor.
+/// Parses and clamps to `range` on Enter or focus lost; invalid input reverts to the current value.
+/// Use instead of `number_field` in settings where drag-to-change is unexpected. Tokens: scope control/font tokens.
+pub(crate) fn plain_number_field(ui: &mut Ui, value: &mut u32, range: std::ops::RangeInclusive<u32>) -> Response {
+    let t = Tokens::get();
+    let id = egui::Id::new(("plain_number_field", label(ui)));
+    // Always load from temp data first: on the lost_focus() frame, has_focus() may already be
+    // false, so gating on it would discard the in-progress text before the commit runs.
+    let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| value.to_string());
+    let response = ui.add_sized(
+        vec2(dimension(ui.available_width()), row_height()),
+        text_input(egui::TextEdit::singleline(&mut text))
+            .id(id)
+            .font(egui::FontId::monospace(t.font_label))
+            .background_color(t.control_fill)
+            .clip_text(true),
+    );
+    crate::theme::TabAccent::number_focus(ui, &response);
+    if response.lost_focus() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+        *value = text.trim().parse::<u32>().unwrap_or(*value).clamp(*range.start(), *range.end());
+        ui.data_mut(|d| d.remove::<String>(id));
+    } else if response.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text));
+    }
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), crate::i18n::tr_label(label(ui)));
+        info.current_text_value = Some(value.to_string());
+        info
+    });
+    super::layout::publish_geometry(ui, &response);
+    response
+}
+
 /// Growing plain-text message editor; its parent owns scrolling and Enter routing.
 /// Tokens: control_fill, form_inset, font_label. Use text_area for bounded data input.
 #[cfg(any(not(target_arch = "wasm32"), test))]
