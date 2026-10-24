@@ -505,9 +505,12 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
     sort_group_features(&mut next);
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
     let active = active_param(p, cmd)?;
-    let (mut next, ordered) = reorder_features(s, next, &moving, slot, cmd)?;
+    let (mut next, ordered, checked) = reorder_features(s, next, &moving, slot, cmd)?;
     place_marker(s, &mut next, &moving, active, cmd)?;
     if next != *s.doc {
+        if let Some(model) = checked {
+            s.model = model;
+        }
         *s.doc_mut() = next;
     }
     Ok(json!({"features": ordered, "groups": groups, "group": target, "position": slot}))
@@ -1162,6 +1165,9 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     }
     place_marker(s, &mut next, &[id], active, cmd)?;
     if next != *s.doc {
+        // The check evaluated the new order: keep its results, so setting the design doesn't
+        // evaluate the moved part of the timeline a second time (#6186).
+        s.model = after;
         *s.doc_mut() = next;
     }
     Ok(json!({"feature": id, "position": to}))
@@ -1197,20 +1203,25 @@ fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.reorder_many";
     let ids = group_features(s, p, true, cmd)?;
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
-    let (next, ordered) = reorder_features(s, (*s.doc).clone(), &ids, slot, cmd)?;
+    let (next, ordered, checked) = reorder_features(s, (*s.doc).clone(), &ids, slot, cmd)?;
     if next != *s.doc {
+        if let Some(model) = checked {
+            s.model = model;
+        }
         *s.doc_mut() = next;
     }
     Ok(json!({"features": ordered, "position": slot.min(s.doc.features.len())}))
 }
 
+/// The reordered design, the moved features in order, and the model the move was checked on
+/// (none when the order didn't change), for the caller to keep (#6186).
 fn reorder_features(
     s: &Session,
     mut next: solidcraft_doc::Document,
     ids: &[u64],
     slot: usize,
     cmd: &str,
-) -> Result<(solidcraft_doc::Document, Vec<u64>)> {
+) -> Result<(solidcraft_doc::Document, Vec<u64>, Option<solidcraft_doc::Model>)> {
     let n = next.features.len();
     let slot = slot.min(n);
     let selected: std::collections::BTreeSet<u64> = ids.iter().copied().collect();
@@ -1235,16 +1246,19 @@ fn reorder_features(
     next.features.splice(insert_at..insert_at, moving);
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
-    if !unchanged {
-        let mut after = solidcraft_doc::Model::new();
-        after.evaluate(&next);
-        let broken = newly_broken(&s.model, &after);
-        if !broken.is_empty() {
-            let list: Vec<String> = broken.iter().map(|(name, error)| format!("{name} ({error})")).collect();
-            return Err(bad(cmd, format!("moving the selected features there breaks {}", list.join("; "))));
-        }
+    if unchanged {
+        return Ok((next, ordered, None));
     }
-    Ok((next, ordered))
+    // From the session's own results: the features before the first one moved are kept, not
+    // evaluated again from an empty model (#6186).
+    let mut after = s.model.clone();
+    after.evaluate(&next);
+    let broken = newly_broken(&s.model, &after);
+    if !broken.is_empty() {
+        let list: Vec<String> = broken.iter().map(|(name, error)| format!("{name} ({error})")).collect();
+        return Err(bad(cmd, format!("moving the selected features there breaks {}", list.join("; "))));
+    }
+    Ok((next, ordered, Some(after)))
 }
 
 fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {

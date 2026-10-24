@@ -972,3 +972,27 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
     assert_eq!(s.visibility.hidden_origin, ["Rail"]);
     assert_eq!(plane_link(&s), "Ledge");
 }
+
+/// #6186: a reorder evaluates the design once. The model the move was checked on is the one the
+/// session keeps, so setting the reordered design finds every result ready: nothing is
+/// recomputed or taken from the cache again. The same for `timeline.reorder_many`, whose check
+/// starts from the session's results rather than an empty model.
+#[test]
+fn a_reorder_keeps_the_model_it_was_checked_on() {
+    let mut s = Session::default();
+    for i in 0..4 {
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5 + i, "corner": [i * 10, 0, 0], "operation": "new"}));
+    }
+    let bodies = |s: &Session| s.model.state().bodies.len();
+    run(&mut s, "timeline.reorder", json!({"feature": "Box2", "position": 0}));
+    assert_eq!((s.model.last_recomputed, s.model.last_restored), (0, 0), "the checked model was kept");
+    assert_eq!(s.doc.features.first().map(|f| f.name.as_str()), Some("Box2"));
+    assert_eq!(bodies(&s), 4);
+    run(&mut s, "timeline.reorder_many", json!({"features": ["Box4"], "position": 2}));
+    assert_eq!((s.model.last_recomputed, s.model.last_restored), (0, 0), "the checked model was kept");
+    assert_eq!(s.doc.features.get(2).map(|f| f.name.as_str()), Some("Box4"));
+    // The kept model is the design's: evaluating it from scratch gives the same bodies.
+    let mut fresh = solidcraft_doc::Model::new();
+    fresh.evaluate(&s.doc);
+    assert_eq!(fresh.state().bodies.len(), bodies(&s));
+}
