@@ -419,6 +419,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 .map(|f| (f.id, f.name.clone(), icon_of(&f.kind), f.suppressed, f.kind.type_name(), TimelineKind::of(&f.kind)))
                 .collect();
             let order: Vec<u64> = feats.iter().map(|f| f.0).collect();
+            // With a component active, the features that don't affect it are dimmed (#5854).
+            let affecting = app.session.doc.features_affecting(&app.session.model.state(), app.session.active_component);
             // The feature whose body is under the cursor in the viewport.
             let st = app.session.world_state();
             let from_view = match &app.viewport.hover {
@@ -458,7 +460,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     kind: ty,
                     selected: sel || (floating && marker > 0 && i == marker - 1),
                     hovered: resp.hovered() || from_view == Some(*id),
-                    dim: rolled,
+                    dim: rolled || affecting.as_ref().is_some_and(|a| !a.contains(id)),
                     suppressed: *suppressed,
                     error: err.is_some(),
                     warning: warn.is_some(),
