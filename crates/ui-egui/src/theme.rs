@@ -282,7 +282,7 @@ impl TabAccent {
             "MESH" => (t.mesh_fill, t.mesh_ink, t.mesh_soft),
             "FORM" => (t.form_fill, t.form_tab_ink, t.form_soft),
             "SHEET METAL" => (t.sheet_fill, t.sheet_ink, t.sheet_soft),
-            "RENDER" => (t.render_fill, t.render_ink, t.render_soft),
+            "RENDER" | "RENDER APPEARANCE" | "RENDER SCENE" | "RENDER CAMERA" => (t.render_fill, t.render_ink, t.render_soft),
             // Model and shared utility tabs retain their existing selection exactly.
             _ => (t.accent, t.selected_ink, t.accent_soft),
         };

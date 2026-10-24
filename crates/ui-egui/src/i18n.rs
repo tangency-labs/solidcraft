@@ -544,6 +544,45 @@ mod tests {
         );
     }
 
+    #[test]
+    fn render_shell_labels_and_planned_reasons_translate_in_required_catalogs() {
+        for language in ["ja", "zh", "de", "ko"] {
+            let locale = Locale::for_language(language);
+            for label in [
+                "APPEARANCE",
+                "SCENE",
+                "LIGHTS",
+                "STAGE",
+                "CAMERA",
+                "SHOTS",
+                "LENS",
+                "FRAME",
+                "RESULT",
+                "IMAGE",
+                "BATCH",
+                "Shots",
+                "Shots Strip",
+                "Strip",
+                "Pick",
+                "Component",
+                "Product picking is not supported yet.",
+                "The live preview shows direct light only and no shadows.",
+            ] {
+                assert_ne!(locale.label(label), label, "{language}: {label}");
+            }
+            // "Studio" is also the German word: require the translated catalog entry,
+            // rather than requiring its spelling to differ from English.
+            assert!(locale.0.messages().contains_key("toolbar.render_studio"));
+            assert_eq!(locale.label("STUDIO"), locale.text("toolbar.render_studio"));
+            let session = solidcraft_engine::Session::default();
+            for command in solidcraft_engine::command_specs().into_iter().filter(|c| c.planned.is_some() && crate::workspace::render_tab(c.tab)) {
+                assert_ne!(locale.label(command.label), command.label, "{language}: {}", command.id);
+                let reason = command.info(&session).disabled_reason.unwrap();
+                assert_ne!(locale.label(&reason), reason, "{language}: {} reason", command.id);
+            }
+        }
+    }
+
     /// The mouse mapping picker shows its preset's help through `tr_label`, which the guard above
     /// can't see: the text sits in a struct field, not in a call. Each one must be the English text
     /// of its preset's catalog message, or it stays English in every locale.

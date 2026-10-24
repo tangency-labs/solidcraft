@@ -308,6 +308,16 @@ pub(crate) fn list_picker(ui: &mut Ui, key: &str, text: &str, selected: bool) ->
     response
 }
 
+/// Intrinsic-width selection chip for horizontal lists, sharing list-picker styling.
+pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) -> egui::Response {
+    let t = Tokens::get();
+    let width = (ui.painter().layout_no_wrap(text.to_owned(), crate::fonts::semibold(t.font_label), t.text).size().x + t.space_24)
+        .clamp(t.control_height * 2.0, t.form_card_width);
+    let response = ui.add_sized(vec2(width, super::row_height()), egui::Button::selectable(selected, text).truncate());
+    crate::scenario::publish_target(&format!("dialog:list:{key}"), response.rect);
+    response
+}
+
 /// A reusable draggable document-colour sample; caller supplies the existing domain payload.
 /// Tokens: control_height/radius, border, accent, hover.
 pub(crate) fn color_swatch<T: Send + Sync + 'static>(

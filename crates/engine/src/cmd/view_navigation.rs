@@ -7,6 +7,9 @@ use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::{Result, Sel, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
+CommandSpec::new("view.shots_strip", "Shots Strip", shots_strip)
+    .at("RENDER CAMERA", "SHOTS").icon("placeholder").noundo().doc_only()
+    .params("visible: bool → {visible}; Render Shots strip UI preference. Headless echo only, no document edits or undo"),
 CommandSpec::new("view.layout", "Workspace layout", layout)
     .icon("settings").noundo().doc_only().params("mode: floating|compact → validated workspace layout; display only, never opens a dialog"),
 CommandSpec::new("view.history_layout", "History layout", history_layout)
@@ -60,6 +63,16 @@ fn normal_to(s: &mut Session, p: &Value) -> Result<Value> {
     to.target = point;
     s.camera = Some(to);
     Ok(json!({"camera": to}))
+}
+
+fn shots_strip(_s: &mut Session, p: &Value) -> Result<Value> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        visible: bool,
+    }
+    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("view.shots_strip", e.to_string()))?;
+    Ok(json!({"visible": request.visible}))
 }
 
 fn layout(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -612,4 +625,28 @@ fn workspace_layout_validates_modes_without_mutating_the_design() {
     }
     assert_eq!(session.doc.to_json(), before);
     assert!(session.undo.is_empty());
+}
+
+#[cfg(test)]
+#[test]
+fn render_workspace_shots_strip_is_a_validated_headless_preference_request() {
+    let mut session = Session::default();
+    let document = session.doc.clone();
+    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    for visible in [false, true] {
+        assert_eq!(session.execute("view.shots_strip", &json!({"visible":visible})).unwrap(), json!({"visible":visible}));
+    }
+    for params in [
+        Value::Null,
+        json!({}),
+        json!([]),
+        json!({"visible":null}),
+        json!({"visible":"yes"}),
+        json!({"visible":1e300}),
+        json!({"visible":true,"unknown":true}),
+    ] {
+        assert!(session.execute("view.shots_strip", &params).is_err());
+    }
+    assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
+    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
 }

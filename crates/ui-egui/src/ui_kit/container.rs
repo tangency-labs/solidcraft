@@ -73,6 +73,32 @@ impl Container {
         Self { surface, layout, joined: None }
     }
 
+    /// Floating workspace cards retain their shared chrome even in compact ribbon layouts.
+    pub(crate) fn floating_card(surface: Surface) -> Self {
+        Self::for_layout(LayoutMode::Floating, surface)
+    }
+
+    /// Shared bottom-strip placement, used by History and other workspace strips.
+    pub(crate) fn bottom_strip_rect(self, available: egui::Rect, height: f32) -> egui::Rect {
+        let inset = available.shrink(self.gap());
+        egui::Rect::from_min_max(egui::pos2(inset.left(), (inset.bottom() - height).max(inset.top())), inset.max)
+    }
+
+    /// Anchored navigation surfaces share the compass/nav-bar frame and token padding.
+    pub(crate) fn navigation_card<R>(
+        ctx: &Context,
+        id: Id,
+        anchor: egui::Pos2,
+        pivot: egui::Align2,
+        add: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> egui::InnerResponse<R> {
+        let container = Self::new(ctx, Surface::Navigation);
+        container.area(id).movable(false).pivot(pivot).fixed_pos(anchor).order(egui::Order::Middle).show(ctx, |ui| {
+            let frame = container.frame(ctx, Tokens::get().overlay, Side::Left).inner_margin(Tokens::get().space_4);
+            container.show_frame(ui, frame, ctx.content_rect(), |ui| super::scope(ui, add)).inner
+        })
+    }
+
     /// Declare contacts from shell geometry; styling remains entirely in the container.
     pub fn joined(mut self, edges: DockEdges) -> Self {
         self.joined = Some(edges);

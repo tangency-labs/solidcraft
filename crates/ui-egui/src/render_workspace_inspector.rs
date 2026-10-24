@@ -219,17 +219,17 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     if app.render_workspace.revision != app.session.revision && !app.render_workspace.view.dirty {
         setups::load(app);
     }
-    let t = Tokens::get();
-    let minimum = (ui.available_width() * 0.40).clamp(t.form_card_width, t.form_card_width + t.space_24);
-    let maximum = (ui.available_width() * 0.52).max(minimum).min(t.form_card_width * 1.8);
-    let frame = crate::ui_kit::Panel::feature_frame(ui.ctx(), app.ui.layout, crate::frame::Side::Right).inner_margin(t.space_10);
-    let content = ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Panel)
-        .edge("sc_render_settings", ui_kit::Edge::Right)
-        .default_size(t.form_card_width + t.space_24 * 3.0)
-        .size_range(minimum..=maximum)
-        .resizable(true)
-        .frame(frame)
-        .show(ui, |ui| {
+    let bounds = crate::shell::panel_bounds(app, ui.available_rect_before_wrap());
+    let mut side = app.preferences.render_inspector_side.clone();
+    let mut width = app.preferences.render_inspector_width;
+    let title = app.tr("render.studio_title").to_string();
+    let icon = app.render_workspace.view.inspector.page.icon();
+    let content = ui_kit::Panel::workspace(
+        ui,
+        ui_kit::WorkspaceOptions { id: "render:inspector", title: &title, icon, bounds, fill_height: true },
+        &mut side,
+        &mut width,
+        |ui| {
             ui_kit::scope(ui, |ui| {
                 header(app, ui);
                 pages(app, ui);
@@ -273,8 +273,18 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                 );
             });
-        });
-    crate::scenario::publish_rect("render:inspector", content.response.rect);
+        },
+    );
+    app.preferences.render_inspector_width = width;
+    if app.preferences.render_inspector_side != side {
+        app.preferences.render_browser_side = if side == "left" { "right" } else { "left" }.into();
+    }
+    app.preferences.render_inspector_side = side.clone();
+    let rect = content.map(|c| c.response.rect);
+    crate::shell::register_panel(app, "render:inspector", rect, Some(if side == "left" { ui_kit::Edge::Left } else { ui_kit::Edge::Right }));
+    if let Some(rect) = rect {
+        crate::scenario::publish_rect("render:inspector", rect);
+    }
     confirmation(app, ui.ctx());
 }
 fn pages(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -302,7 +312,6 @@ fn pages(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.add_space(Tokens::get().space_4);
 }
 fn header(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui.heading(app.tr("render.studio_title"));
     let current = app.render_workspace.view.name.clone();
     let names: Vec<_> = app.session.doc.render.setups.keys().cloned().collect();
     let mut chosen = None;
@@ -318,7 +327,7 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     crate::scenario::publish_target("render:setups", menu.rect);
     if let Some(name) = chosen {
-        request_action(app, PendingAction::Switch(name));
+        switch_shot(app, name);
     }
     let field = ui_kit::bounded_cell_editor(ui, ui.id().with("render_setup_name"), &mut app.render_workspace.view.name, "", false, 128);
     crate::scenario::publish_target("render:setup-name", field.rect);
@@ -348,6 +357,11 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
 }
+pub(super) fn switch_shot(app: &mut SolveApp, name: String) {
+    setups::refresh_dirty(app);
+    request_action(app, PendingAction::Switch(name));
+}
+
 fn request_action(app: &mut SolveApp, action: PendingAction) {
     if app.render_workspace.view.dirty || matches!(&action, PendingAction::Remove(_)) {
         app.render_workspace.view.inspector.pending =
@@ -1060,6 +1074,7 @@ pub(super) fn fit_subject(app: &mut SolveApp) -> Result<(), String> {
     app.run("render.camera.set", json!({"camera":app.cam}))?;
     app.run("render.camera.fit", json!({}))?;
     app.follow_view_request(false);
+    app.fit_view();
     Ok(())
 }
 

@@ -184,6 +184,7 @@ pub mod preview;
 mod primitive_units_tests;
 pub mod recovery_ui;
 pub mod ref_images;
+mod render_ui;
 pub mod render_workspace;
 #[cfg(test)]
 mod revolve_edit_tests;
@@ -812,6 +813,11 @@ impl SolveApp {
                 self.preferences.layout = layout;
                 self.ui.layout = layout;
             }
+            if id == "view.shots_strip"
+                && let Some(visible) = v.get("visible").and_then(Value::as_bool)
+            {
+                self.preferences.render_shots_strip = visible;
+            }
             if id == "view.history_layout" {
                 if let Some(width) = v.get("width").and_then(Value::as_f64) {
                     self.preferences.timeline_left_width = ui_kit::history_snap_width(width as f32);
@@ -941,6 +947,7 @@ impl SolveApp {
             && let Some(why) = info.disabled_reason
         {
             let label = self.tr_label(info.label).to_string();
+            let why = self.tr_label(&why).to_string();
             self.set_status(format!("{label}: {why}"), true);
             return;
         }
@@ -968,6 +975,10 @@ impl SolveApp {
         if id == "view.layout" {
             let mode = if self.ui.layout == shell::LayoutMode::Floating { "compact" } else { "floating" };
             let _ = self.run(id, json!({"mode":mode}));
+            return;
+        }
+        if id == "view.shots_strip" {
+            let _ = self.run(id, json!({"visible": !self.preferences.render_shots_strip}));
             return;
         }
         if id == "view.history_layout" {
@@ -1349,7 +1360,7 @@ impl SolveApp {
         if render_workspace::active(self) {
             self.cancel_view_animation();
             match solidcraft_engine::product_scene::extract(&self.session) {
-                Ok(scene) if !scene.bounds.is_empty() => self.cam.fit(&scene.bounds),
+                Ok(scene) if !scene.bounds.is_empty() => self.fit_bounds(scene.bounds),
                 Err(e) => self.set_status(e.to_string(), true),
                 _ => {}
             }
@@ -1384,6 +1395,9 @@ impl SolveApp {
 
     fn fitted_bounds(&self, mut cam: Camera, bounds: &solidcraft_engine::geom::Aabb3) -> Camera {
         if let Some(layout) = &self.viewport.layout {
+            if render_workspace::active(self) {
+                return viewport_layout::fit_product_bounds(cam, bounds, layout).unwrap_or(cam);
+            }
             return viewport_layout::fit_bounds(cam, bounds, layout, self.perspective_view()).unwrap_or(cam);
         }
         let previous = cam;
@@ -1724,6 +1738,7 @@ impl SolveApp {
         // Browser hugs its contents in either layout; it never becomes a full-height blank column.
         if !self.ui.show_browser {
             self.shell.browser = None;
+            shell::register_panel(self, "render:browser", None, None);
         }
         if floating || left_timeline || !show_timeline {
             self.shell.history = None;
@@ -1767,6 +1782,7 @@ impl SolveApp {
             timeline_left::left_panel(self, ui);
         }
         if render_workspace::active(self) {
+            render_ui::shots_strip(self, ui);
             render_workspace::panel(self, ui);
         }
         if self.ui.show_browser {
@@ -1795,6 +1811,9 @@ impl SolveApp {
                     self.show_workspace(ui);
                 }
             });
+        if render_workspace::active(self) {
+            render_ui::overlays(self, ui);
+        }
         dialogs::show(self, ui.ctx());
         issue_report::CadInput::block(self, ui, report_input);
         sketch_palette::show(self, ui.ctx());

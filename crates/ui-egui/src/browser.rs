@@ -738,6 +738,11 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     DRAWN.with(|d| d.borrow_mut().clear());
     OCCURRENCES.with(|d| d.borrow_mut().clear());
     let mut acts = Actions::default();
+    if crate::render_workspace::active(app) {
+        render_card(app, ui, &mut acts);
+        finish_browser(app, ui, acts);
+        return;
+    }
     let stacked = crate::timeline_left::stacked(app);
     let container =
         Container::new(ui.ctx(), Surface::Panel).joined(crate::ui_kit::DockEdges { left: true, top: true, bottom: stacked, ..Default::default() });
@@ -801,6 +806,38 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     finish_browser(app, ui, acts);
 }
 
+fn render_card(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
+    let bounds = crate::shell::panel_bounds(app, ui.available_rect_before_wrap());
+    let mut side = app.preferences.render_browser_side.clone();
+    let mut width = app.preferences.render_browser_width;
+    let title = app.tr("ui.browser_title").to_string();
+    let content = crate::ui_kit::Panel::workspace(
+        ui,
+        crate::ui_kit::WorkspaceOptions { id: "render:browser", title: &title, icon: "list", bounds, fill_height: false },
+        &mut side,
+        &mut width,
+        |ui| {
+            browser_contents(app, ui, acts, true);
+        },
+    );
+    app.preferences.render_browser_width = width;
+    if app.preferences.render_browser_side != side {
+        app.preferences.render_inspector_side = if side == "left" { "right" } else { "left" }.into();
+    }
+    app.preferences.render_browser_side = side.clone();
+    let rect = content.map(|c| c.response.rect);
+    app.shell.browser = rect;
+    crate::shell::register_panel(
+        app,
+        "render:browser",
+        rect,
+        Some(if side == "left" { crate::ui_kit::Edge::Left } else { crate::ui_kit::Edge::Right }),
+    );
+    if let Some(rect) = rect {
+        crate::scenario::publish_rect("browser:card", rect);
+    }
+}
+
 fn browser_collapsed_rail(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let title_top = t.space_24 + ui.spacing().item_spacing.y;
@@ -838,9 +875,13 @@ pub(crate) fn panel_bounds(available: Rect, history: Option<Rect>, width: f32, g
 fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, collapsible: bool) {
     let t = Tokens::get();
     // Only the floating card folds; the docked column keeps its full height.
-    browser_header(app, ui, collapsible);
-    let stacked = crate::timeline_left::stacked(app);
-    if collapsible
+    let render = crate::render_workspace::active(app);
+    if !render {
+        browser_header(app, ui, collapsible);
+    }
+    let stacked = !render && crate::timeline_left::stacked(app);
+    if !render
+        && collapsible
         && (if stacked {
             (app.preferences.timeline_left_browser_collapsed && app.shell.history_folding.is_none_or(|p| p[0] >= 1.0))
                 || ui.available_height() <= t.space_3

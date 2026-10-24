@@ -143,6 +143,8 @@ completed drawings publish atomically. The browser still exports synchronously.
 
 ## Render foundation
 
+- Render UX shell: four task tabs, existing contextual inspector, hideable Shots strip, preview HUD and canvas-aware navigation; picking, comparison and batch rendering remain planned.
+
 - Original starter appearances (#1722): 34 opaque recipes through existing commands, with six explicitly unavailable glass recipes and preserved legacy looks; see [the contract](docs/render-starter-appearances.md).
 
 - Bounded linear film accumulation (#1696) supplies caller-admitted mean/variance storage and complete-pass views; actual progressive consumers remain separate. See [the film contract](docs/render-film.md).
