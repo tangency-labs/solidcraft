@@ -43,6 +43,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("align")
         .params("bodies: [names]; from: [x,y,z] | \"origin\" | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z] | from_plane: XY|XZ|YZ|construction or offset plane name or id|{origin, normal}; to: (the same) | to_face: [x,y,z] | to_plane: (a plane as from_plane; the point or face goes onto it along its normal, and the plane may move later: the bodies follow); faces and planes also turn to meet; flip?: bool"),
     CommandSpec::new("solid.remove", "Remove", remove).at("SOLID", "MODIFY").icon("delete").params("bodies: [names] (removed from here on in the timeline)"),
+    CommandSpec::new("solid.lighten", "Lighten", lighten)
+        .at("SOLID", "MODIFY")
+        .icon("cut")
+        .params("faces: [face points] | face_id; wall_offset?: length (default 2 mm); pocket_depth?: length (default 3 mm); draft_angle?: angle (default 0); corner_radius?: length (default 1 mm); floor_radius?: length (default 0); manufacturing_method?: string"),
 ];
 
 fn coil(s: &mut Session, p: &Value) -> Result<Value> {
@@ -516,6 +520,158 @@ fn boundary_fill(s: &mut Session, p: &Value) -> Result<Value> {
             cells: cells.into_iter().map(Position).collect(),
             operation,
             remove_tools: bool_(p, "remove_tools").unwrap_or(false),
+        },
+    )
+}
+
+fn lighten(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.lighten";
+    let body_filter = str_(p, "body").or_else(|| str_(p, "face_body"));
+
+    let (target_body_name, pt) = if let Some(fid_val) = p.get("face_id") {
+        let fid = if let Some(n) = fid_val.as_u64() {
+            n as usize
+        } else if let Some(s_val) = fid_val.as_str() {
+            s_val.parse::<usize>().map_err(|_| bad(cmd, "`face_id` must be an integer"))?
+        } else {
+            return Err(bad(cmd, "`face_id` must be an integer"));
+        };
+        let st = s.model.state();
+        let target_body = if let Some(name) = body_filter {
+            st.body(name).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?
+        } else if st.bodies.len() == 1 {
+            &st.bodies[0]
+        } else if let Some(b) = st.bodies.iter().find(|b| fid < b.body.face_count()) {
+            b
+        } else {
+            return Err(bad(cmd, "ambiguous body for `face_id`; specify `body`"));
+        };
+        let pl = target_body.body.face_plane(fid).or_else(|| target_body.body.planar_face(fid))
+            .ok_or_else(|| bad(cmd, format!("face {fid} is not planar")))?;
+        (target_body.name.clone(), pl.origin)
+    } else {
+        let face_val = p.get("faces").or_else(|| p.get("face")).ok_or_else(|| {
+            bad(cmd, "give `face_id` or `faces` on a planar face")
+        })?;
+
+        let pt = if let Some(arr) = face_val.as_array() {
+            if arr.is_empty() {
+                return Err(bad(cmd, "`faces` must not be empty"));
+            }
+            if let Some(first_arr) = arr.first().and_then(Value::as_array) {
+                vec3(&Value::Array(first_arr.clone())).ok_or_else(|| bad(cmd, "invalid point in `faces`"))?
+            } else if let Some(p_pt) = vec3(face_val) {
+                p_pt
+            } else {
+                super::face::face_ref(s, &arr[0], body_filter, cmd)?
+            }
+        } else {
+            super::face::face_ref(s, face_val, body_filter, cmd)?
+        };
+
+        let st = s.model.state();
+        let pick = super::face::face_at_state(&st, pt, body_filter)
+            .map_err(|tied| bad(cmd, format!("ambiguous face across bodies: {}", tied.join(", "))))?
+            .ok_or_else(|| bad(cmd, "no body face found at the given face coordinates"))?;
+
+        (pick.3, pt)
+    };
+
+    let wall = req_expr(cmd, p, "wall_offset")
+        .or_else(|_| req_expr(cmd, p, "wall"))
+        .or_else(|_| req_expr(cmd, p, "rib_clearance"))
+        .unwrap_or_else(|_| "2.0 mm".into());
+    check_expr(s, &wall, Kind::Length, cmd, "wall_offset")?;
+
+    let depth = req_expr(cmd, p, "pocket_depth")
+        .or_else(|_| req_expr(cmd, p, "depth"))
+        .or_else(|_| req_expr(cmd, p, "floor_thickness"))
+        .unwrap_or_else(|_| "3.0 mm".into());
+    check_expr(s, &depth, Kind::Length, cmd, "pocket_depth")?;
+
+    let draft = if let Some(dr) = expr(p, "draft_angle").or_else(|| expr(p, "draft")) {
+        check_expr(s, &dr, Kind::Angle, cmd, "draft_angle")?;
+        Some(dr)
+    } else {
+        None
+    };
+
+    let corner_radius = req_expr(cmd, p, "corner_radius")
+        .or_else(|_| req_expr(cmd, p, "corner_fillet"))
+        .or_else(|_| req_expr(cmd, p, "corner_fillet_radius"))
+        .unwrap_or_else(|_| "1.0 mm".into());
+    check_expr(s, &corner_radius, Kind::Length, cmd, "corner_radius")?;
+
+    let auto_fillet = match p.get("auto_fillet") {
+        Some(v) => v.as_bool().unwrap_or(false),
+        None => p.get("fillet_radius").is_some() || p.get("floor_radius").is_some(),
+    };
+    let fillet = if auto_fillet {
+        let f = expr(p, "fillet_radius")
+            .or_else(|| expr(p, "floor_radius"))
+            .or_else(|| expr(p, "floor_fillet"))
+            .unwrap_or_else(|| "1.0 mm".into());
+        check_expr(s, &f, Kind::Length, cmd, "fillet_radius")?;
+        Some(f)
+    } else {
+        None
+    };
+
+    let fillet_at = if auto_fillet {
+        if bool_(p, "fillet_top").unwrap_or(false) && bool_(p, "fillet_bottom").unwrap_or(false) {
+            "both".to_string()
+        } else if bool_(p, "fillet_top").unwrap_or(false) {
+            "top".to_string()
+        } else {
+            "bottom".to_string()
+        }
+    } else {
+        String::new()
+    };
+
+    let auto_chamfer = match p.get("auto_chamfer") {
+        Some(v) => v.as_bool().unwrap_or(false),
+        None => p.get("chamfer_size").is_some(),
+    };
+    let chamfer = if auto_chamfer {
+        let c = expr(p, "chamfer_size")
+            .or_else(|| expr(p, "chamfer_dist"))
+            .or_else(|| expr(p, "chamfer_distance"))
+            .unwrap_or_else(|| "0.5 mm".into());
+        check_expr(s, &c, Kind::Length, cmd, "chamfer_size")?;
+        Some(c)
+    } else {
+        None
+    };
+
+    let chamfer_at = if auto_chamfer {
+        if bool_(p, "chamfer_top").unwrap_or(false) && bool_(p, "chamfer_bottom").unwrap_or(false) {
+            "both".to_string()
+        } else if bool_(p, "chamfer_bottom").unwrap_or(false) {
+            "bottom".to_string()
+        } else {
+            "top".to_string()
+        }
+    } else {
+        String::new()
+    };
+
+    let body = body_filter.map(BodyName::from).or_else(|| Some(BodyName::from(target_body_name)));
+
+    add_feature(
+        s,
+        p,
+        FeatureKind::Lighten {
+            face: FacePick(pt),
+            body,
+            wall,
+            depth,
+            draft,
+            corner_radius,
+            fillet,
+            fillet_at,
+            chamfer,
+            chamfer_at,
         },
     )
 }

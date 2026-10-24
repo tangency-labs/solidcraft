@@ -1721,6 +1721,105 @@ fn loft_through_coplanar_sections_is_refused() {
 }
 
 #[test]
+fn lighten_command_creates_pockets_and_removes_volume() {
+    let mut s = Session::default();
+    // Create stock disc
+    run(&mut s, "solid.cylinder", json!({"radius": 50, "height": 10, "body_name": "Disc"}));
+    let vol_before = volume(&mut s);
+
+    // Cut a central hub hole
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 10, "operation": "cut", "targets": ["Disc"]}));
+
+    // Cut 4 bolt holes
+    for k in 0..4 {
+        let theta = k as f64 * std::f64::consts::FRAC_PI_2;
+        let pos = [30.0 * theta.cos(), 30.0 * theta.sin(), 0.0];
+        run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 10, "base": pos, "operation": "cut", "targets": ["Disc"]}));
+    }
+    let vol_with_holes = volume(&mut s);
+    assert!(vol_with_holes < vol_before);
+
+    // Run solid.lighten on the top face at [20, 20, 10]
+    let res = run(
+        &mut s,
+        "solid.lighten",
+        json!({
+            "faces": [[20, 20, 10]],
+            "wall_offset": "2.5 mm",
+            "pocket_depth": "3.0 mm",
+            "corner_radius": "1.0 mm",
+            "draft_angle": "0 deg",
+            "floor_radius": "0.5 mm",
+            "manufacturing_method": "CNC Endmill",
+        }),
+    );
+    let feat_id = res["feature"].as_u64().expect("lighten must produce a feature in the timeline");
+    assert!(s.doc.feature(feat_id).is_some(), "feature must be stored in document");
+
+    let vol_after = volume(&mut s);
+    assert!(vol_after < vol_with_holes, "lightening must remove material: before {vol_with_holes}, after {vol_after}");
+    let removed = vol_with_holes - vol_after;
+    assert!(removed > 1000.0, "expected significant pocket volume removed, got {removed}");
+
+    // Test undo: timeline rewinds and restores material
+    s.execute("edit.undo", &json!({})).unwrap();
+    let vol_undone = volume(&mut s);
+    assert!((vol_undone - vol_with_holes).abs() < 1e-2, "undo must restore pre-lighten state: expected {vol_with_holes}, got {vol_undone}");
+
+    // Test redo: timeline reapplies lightening
+    s.execute("edit.redo", &json!({})).unwrap();
+    let vol_redone = volume(&mut s);
+    assert!((vol_redone - vol_after).abs() < 1e-2, "redo must reapply lightening: expected {vol_after}, got {vol_redone}");
+}
+
+#[test]
+fn lighten_command_with_collapsing_offset_returns_error() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 10, "body_name": "Part"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 10, "operation": "cut", "targets": ["Part"]}));
+
+    // A wall offset of 100mm collapses the 20mm part
+    let err = s
+        .execute(
+            "solid.lighten",
+            &json!({
+                "faces": [[10, 10, 10]],
+                "wall_offset": "100.0 mm",
+                "pocket_depth": "3.0 mm",
+            }),
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("collapse"), "expected collapse error, got: {err}");
+}
+
+#[test]
+fn lighten_command_auto_chamfer_without_auto_fillet() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 10, "body_name": "Part"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 10, "operation": "cut", "targets": ["Part"]}));
+
+    s.execute(
+        "solid.lighten",
+        &json!({
+            "faces": [[10, 10, 10]],
+            "wall_offset": "2.0 mm",
+            "pocket_depth": "3.0 mm",
+            "auto_fillet": false,
+            "auto_chamfer": true,
+            "chamfer_size": "0.5 mm",
+        }),
+    )
+    .unwrap();
+
+    let last_feat = s.doc.features.last().expect("feature must exist");
+    if let solidcraft_doc::FeatureKind::Lighten { fillet, chamfer, .. } = &last_feat.kind {
+        assert_eq!(fillet, &None, "fillet must be None when auto_fillet is false");
+        assert_eq!(chamfer, &Some("0.5 mm".into()), "chamfer must be Some");
+    } else {
+        panic!("expected FeatureKind::Lighten");
+    }
+}
+
 fn duplicate_and_excess_profile_picks_are_refused_quickly() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Bottom"}));

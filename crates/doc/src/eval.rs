@@ -6399,6 +6399,47 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             Ok(())
         }
+        FeatureKind::Lighten { face, body, wall, depth, draft, corner_radius, fillet, fillet_at, chamfer, chamfer_at } => {
+            let picks = vec![face.0];
+            let i = body_at(st, body, &picks)?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let face_index = crate::appearance::face_index_at(&mb, face.0)
+                .ok_or_else(|| DocError::Invalid("lighten: no face of the body at the picked point".into()))?;
+            let at = |s: &str| -> Result<(bool, bool)> {
+                match s {
+                    "" | "bottom" => Ok((false, true)),
+                    "top" => Ok((true, false)),
+                    "both" => Ok((true, true)),
+                    o => Err(DocError::Invalid(format!("lighten: unknown edge location `{o}` (top, bottom or both)"))),
+                }
+            };
+            let mut options = kernel::LightenOptions {
+                wall_offset: val(vals, wall, Kind::Length)?,
+                pocket_depth: val(vals, depth, Kind::Length)?,
+                draft_angle: draft.as_ref().map(|d| val(vals, d, Kind::Angle)).transpose()?.unwrap_or(0.0),
+                corner_radius: val(vals, corner_radius, Kind::Length)?,
+                ..Default::default()
+            };
+            if let Some(r) = fillet {
+                let (top, bottom) = at(fillet_at)?;
+                options.auto_fillet = true;
+                options.fillet_radius = val(vals, r, Kind::Length)?;
+                options.fillet_top = top;
+                options.fillet_bottom = bottom;
+            }
+            if let Some(c) = chamfer {
+                let (top, bottom) = at(chamfer_at)?;
+                options.auto_chamfer = true;
+                options.chamfer_size = val(vals, c, Kind::Length)?;
+                options.chamfer_top = top;
+                options.chamfer_bottom = bottom;
+            }
+            let nb = Traced::step(kernel::lighten(&mb.body, face_index, &options)?, &[&mb.traced()]);
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+            }
+            Ok(())
+        }
         FeatureKind::Draft { faces, angle, neutral, pull, body } => {
             let a = val(vals, angle, Kind::Angle)?;
             let pl = doc.resolve_plane_in(vals, neutral, 0, Some(st))?;
