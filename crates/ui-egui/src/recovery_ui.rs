@@ -157,8 +157,53 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         apply(app, entry, recover);
     }
     if later {
-        app.recoverable.clear();
+        let _ = answer(app, "later", None);
     }
+}
+
+/// The prompt as the control channel's `ui.inspect` reports it (`dialog`), or `None` when
+/// nothing waits to be recovered.
+pub fn describe(app: &SolveApp) -> Option<serde_json::Value> {
+    if app.recoverable.is_empty() {
+        return None;
+    }
+    let designs: Vec<_> = app
+        .recoverable
+        .iter()
+        .take(20)
+        .map(|e| json!({"id": e.id, "name": e.name, "path": e.path, "features": e.features, "saved_at": e.saved_at, "autosaved": ago(e.saved_at)}))
+        .collect();
+    Some(json!({
+        "kind": "recover_unsaved",
+        "title": "Recover unsaved design?",
+        "designs": designs,
+        "actions": ["recover", "discard", "later"],
+    }))
+}
+
+/// What the prompt's buttons do: `recover` or `discard` the design `id` (default: the first one
+/// listed), or `later` (keep them all for the next launch). The control channel's
+/// `ui.recover` answers through here too.
+pub fn answer(app: &mut SolveApp, action: &str, id: Option<&str>) -> std::result::Result<(), String> {
+    if app.recoverable.is_empty() {
+        return Err("no Recover unsaved design? prompt is open".into());
+    }
+    if action == "later" {
+        app.recoverable.clear();
+        return Ok(());
+    }
+    if action != "recover" && action != "discard" {
+        return Err(format!("unknown action `{action}` (recover, discard or later)"));
+    }
+    let e = match id {
+        Some(id) => app.recoverable.iter().find(|e| e.id == id).cloned().ok_or_else(|| format!("no recovered design `{id}` is offered"))?,
+        None => app.recoverable.first().cloned().ok_or("no recovered design is offered")?,
+    };
+    if action == "recover" && app.session.is_dirty() {
+        return Err("save or discard the open design's changes before recovering another".into());
+    }
+    apply(app, e, action == "recover");
+    Ok(())
 }
 
 /// Shared recovery action for the launch prompt and File view; dirty work is never replaced.
