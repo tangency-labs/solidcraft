@@ -28,7 +28,7 @@ encoding_rs = { workspace = true }
 [target.'cfg(target_vendor = "apple")'.dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 
-# FreeCAD and Rhino import. Not in the browser build: it compiles the zstd C library.
+# FreeCAD and Rhino import codecs are native-only.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cadmpeg-core = { workspace = true }
 cadmpeg-ir = { workspace = true }

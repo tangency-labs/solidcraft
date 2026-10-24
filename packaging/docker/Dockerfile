@@ -20,7 +20,7 @@ FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-slim-bookworm AS build
 ARG TRUNK_VERSION
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl \
+ && apt-get install -y --no-install-recommends ca-certificates clang curl \
  && rm -rf /var/lib/apt/lists/*
 RUN rustup target add wasm32-unknown-unknown \
  && curl -fsSL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-$(uname -m)-unknown-linux-gnu.tar.gz" \

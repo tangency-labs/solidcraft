@@ -296,12 +296,14 @@ display meshing 203.160/197.790 ms respectively. Geometry dominates and these va
 results do not establish an end-to-end STEP opening improvement. Fresh processes do
 not imply a cold operating-system file cache, and these are not desktop first-frame times.
 
-Fast mode stores STEP and mesh payloads directly. Explicit `"compression":"compact"`
-compresses them at Deflate level one; it is a space/CPU tradeoff. In the initial
+The version-one `fast` mode stored STEP and mesh payloads directly. Explicit
+`"compression":"compact"` compressed them at Deflate level one; it is a space/CPU tradeoff.
+Version two defaults to Zstandard compression at level three; these storage measurements
+describe version one. In the initial
 512-box STEP experiment, compression reduced 1,998,793 JSON bytes to 578,659 package
 bytes but increased median encoding from 1.68 to 5.02 ms and decoding from 1.76 to
-4.18 ms. That regression is why compression is not the default. PNG/JPEG are stored
-directly in either policy; small parametric metadata uses Deflate level one.
+4.18 ms. That regression is why compression was not the version-one default. PNG/JPEG are stored
+directly in either version-one policy; small parametric metadata used Deflate level one.
 
 Plain JSON remains a supported Save As/export format; `.json` saves keep JSON and
 scripts may explicitly select either format. The CLI detects packages before attempting
@@ -440,7 +442,7 @@ from 611 to 856 ms for STEP and 3.84 to 4.60 s for the enclosure; small differen
 in full-opening medians should not be read as modelling speedups. Compact storage
 reduces this STEP example's size and atomic-save time, but costs slightly more save
 time on the enclosure. The default `cache: false` retains the phase-one save path;
-`compression: "compact"` is an explicit space/CPU choice. Larger or unsupported
+`compression: "compact"` was an explicit space/CPU choice in version one. Larger or unsupported
 geometry can exceed the documented budgets and reopen without a provisional image.
 
 A separate desktop check used a fresh 0.6.0 application process for each enclosure

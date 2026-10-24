@@ -78,8 +78,11 @@ the `.json` extension for plain JSON. **Export Design as JSON** writes an indepe
 self-contained copy without changing the current file. Scripts can explicitly pass
 `"format": "json"` to `file.save` or `file.save_as` even with a `.solidcraft` name.
 Opening detects the format from the contents, so existing JSON designs keep working.
-Containers favor fast reading and saving by default. Scripts can request
-`"compression": "compact"` when file size matters more than CPU time.
+Containers use Zstandard compression by default. Scripts can request
+`"compression": "fast"` to store mesh blobs, or `"compression": "compact"` to
+compress them with Deflate. STEP sources stay compressed in every policy so large
+imports fit within the file-size limit. Older SolidCraft builds reject version-two
+containers as unsupported; newer builds open and resave older ZIP containers.
 
 Containers deduplicate identical STEP, mesh and image payloads. Mesh coordinates retain
 their original double precision; this is not a conversion to STL. Geometry still rebuilds

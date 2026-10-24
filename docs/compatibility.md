@@ -166,7 +166,11 @@ longer finds updates. Point it at the current one:
 
 ## Draft design containers
 
-The #303 draft used `solvecraft-container/1`. `crates/io/src/design.rs` accepts that
-marker alongside `solidcraft-container/1`, and writes only the new marker. Optional
-old previews are discarded; required document/blob validation is unchanged. The
-`draft_container_marker_remains_readable` regression covers this shim.
+The #303 draft used `solvecraft-container/1`; the first published container marker was
+`solidcraft-container/1`. Current builds accept both markers and write
+`solidcraft-container/2`, which adds ZIP Zstandard entries. Older builds reject the
+version-two marker as an unsupported container version.
+Current builds can open the older ZIP markers and plain JSON designs, then convert them
+to version two when saved as containers. Optional old previews are discarded; required
+document/blob validation is unchanged. The `draft_container_marker_remains_readable` regression
+covers the draft marker shim.

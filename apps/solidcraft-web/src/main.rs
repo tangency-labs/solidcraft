@@ -373,7 +373,7 @@ mod web {
                     let result = self
                         .app
                         .session
-                        .design_container(solidcraft_engine::io::DesignCompression::Fast, false, false)
+                        .design_container(solidcraft_engine::io::DesignCompression::default(), false, false)
                         .map_err(|e| e.to_string())
                         .and_then(|bytes| files::download(&format!("{}.{}", d.name, solidcraft_engine::io::DESIGN_EXT), &bytes));
                     if let Err(e) = result {

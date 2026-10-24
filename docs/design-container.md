@@ -1,4 +1,4 @@
-# Design containers, version 1
+# Design containers, version 2
 
 New designs use `.solidcraft`; `.solvecraft` remains a supported legacy extension. Opening detects the ZIP
 local-header signature (`50 4b 03 04`) independently of the name; otherwise it uses
@@ -6,7 +6,7 @@ the existing JSON design reader and migrations. Plain JSON remains a fully suppo
 self-contained input/output format. `io::write_design` keeps its JSON contract;
 `io::write_design_container` is the fallible container writer.
 
-Packages have `container.json` with `{"format":"solidcraft-container/1"}` and
+Packages have `container.json` with `{"format":"solidcraft-container/2"}` and
 `document.json` with the versioned parametric document (`solidcraft/N`, the format in `crates/doc/src/format.rs`).
 The independent versions let document migrations evolve without changing blob encodings.
 Existing serialized document fields are retained automatically, without a second copy
@@ -34,13 +34,16 @@ Both counts must be divisible by three; the byte length must match exactly. Coor
 must be finite and at most 1e9 mm in magnitude; indices must address an existing vertex.
 Names and colours remain in JSON. Signed zero and full coordinate precision survive.
 
-The default `fast` policy stores STEP and binary meshes without Deflate for faster
-saving and reading. Small document metadata uses Deflate level one; PNG/JPEG are
-stored directly. An explicit `compact` policy compresses STEP and mesh payloads at
-level one. Readers support both policies. This deliberately favors interactive file
-operations over maximum compression; compressed STEP was slower in the storage benchmark.
-Use `"compression":"compact"` with `file.save` or `file.save_as` to favor file size,
-or `io::write_design_container_with_compression` from Rust.
+The default `zstd` policy compresses document metadata, STEP and mesh blobs, and the
+native model cache with ZIP's Zstandard method at level three. PNG/JPEG and the optional
+display preview remain stored directly. `fast` stores mesh blobs and uses Deflate for
+metadata and the model cache; `compact` also compresses mesh blobs with Deflate.
+STEP sources are always compressed: Deflate level two under `fast` and `compact`,
+Zstandard level three under the default policy. This lets large imports fit within
+the design-file size limit. Readers support both version-one containers and new zstd
+entries. Use `"compression":"fast"` or `"compression":"compact"` with `file.save`
+or `file.save_as` to select those methods, or
+`io::write_design_container_with_compression` from Rust.
 
 ## Bounds and recovery
 
@@ -51,9 +54,12 @@ path traversal, ZIP64 and multi-disk packages are refused. Entries are read in m
 no archive paths are extracted to the filesystem. Exact part lengths and ZIP CRCs are
 checked, along with blob hashes. Hashes detect correspondence and corruption, not trust.
 
-Saving retains the existing temporary-file/flush/rename protocol and `.bak` backup.
-Recovery reads both older JSON and new containers. Browser OPFS, downloads and recovery
-use the same container reader/writer; JSON export and Save As remain available.
+The container marker advances to version 2. Older builds reject it with an unsupported
+container version error. Newer builds accept version-one ZIP containers and plain JSON;
+saving as a container converts them to version-two zstd packages. Saving
+retains the temporary-file/flush/rename protocol and `.bak` backup. Browser OPFS,
+downloads and recovery use the same reader and writer; JSON export and Save As remain
+available.
 
 ## Provisional saved display
 
@@ -134,9 +140,10 @@ A design whose stored names predate format 14 (marked `?`) finds them through
 names worked out from geometry on demand, which the cache does not keep: it saves
 without a model.
 
-Both entries are Deflate-compressed (level one) under either compression policy: the
+Under `fast` and `compact`, both entries are Deflate-compressed (level one): the
 encoded bodies shrink about fourfold (an imported assembly) to tenfold (modelled parts),
-for a few tens of milliseconds.
+for a few tens of milliseconds. The default `zstd` policy compresses both entries with
+Zstandard at level three.
 
 `cache/bodies.bin` holds every distinct body once, in
 [SolidCraft's native B-rep encoding](native-brep.md), as contiguous slices. The

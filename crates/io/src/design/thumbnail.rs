@@ -25,7 +25,7 @@ pub(super) fn write(writer: &mut PackageWriter, png: &[u8], document: &[u8]) -> 
 }
 pub(super) fn read<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Vec<u8>> {
     let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
-    if container.get("format").and_then(Value::as_str) != Some(VERSION) {
+    if !supported_container_version(&container) {
         return Err(invalid("thumbnail container version"));
     }
     let key: Value = serde_json::from_slice(&reader.limited_part("cache/thumbnail.json", 4096)?).map_err(invalid)?;

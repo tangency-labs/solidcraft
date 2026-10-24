@@ -33,11 +33,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("save")
         .key("Ctrl+S")
         .noundo()
-        .params("path? (default: current file); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false)"),
+        .params("path? (default: current file); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact|zstd (default: zstd); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false)"),
     CommandSpec::new("file.save_as", "Save As", save_as)
         .icon("save")
         .noundo()
-        .params("path; format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false)"),
+        .params("path; format?: container|json (default: json for .json, otherwise container); compression?: fast|compact|zstd (default: zstd); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false)"),
     CommandSpec::new("doc.recovery_list", "Recoverable Designs", recovery_list).icon("restore")
         .noundo()
         .params("dir? (default: the recovery folder) → designs autosaved by apps that crashed or closed with unsaved changes"),
@@ -365,7 +365,8 @@ fn write_file(s: &mut Session, path: &str, format: &str, compression: &str, prev
     let compression = match compression {
         "fast" => solidcraft_io::DesignCompression::Fast,
         "compact" => solidcraft_io::DesignCompression::Compact,
-        _ => return Err(bad("file.save", "compression must be fast or compact")),
+        "zstd" => solidcraft_io::DesignCompression::Zstd,
+        _ => return Err(bad("file.save", "compression must be fast, compact or zstd")),
     };
     // Linked designs are kept relative to the folder the design is saved in.
     let links = super::component_link::rebased(&s.doc, s.path.as_deref(), path);
@@ -475,7 +476,7 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         s,
         &path,
         str_(p, "format").unwrap_or(default_design_format(&path)),
-        str_(p, "compression").unwrap_or("fast"),
+        str_(p, "compression").unwrap_or("zstd"),
         bool_(p, "preview").unwrap_or(false),
         bool_(p, "cache").unwrap_or(true),
     )
@@ -491,7 +492,7 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
         s,
         &path,
         str_(p, "format").unwrap_or(default_design_format(&path)),
-        str_(p, "compression").unwrap_or("fast"),
+        str_(p, "compression").unwrap_or("zstd"),
         bool_(p, "preview").unwrap_or(false),
         bool_(p, "cache").unwrap_or(true),
     )

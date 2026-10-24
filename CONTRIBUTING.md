@@ -27,8 +27,9 @@ are still taken as issues, and everything outside the kernel carries on as norma
 ## Get it running (about 10 minutes on a fast machine)
 
 You need stable Rust 1.95 or newer (required by egui/eframe 0.36). For the web
-build you also need `rustup target add wasm32-unknown-unknown` and [`trunk`](https://github.com/trunk-rs/trunk)
-([documentation](https://trunk-rs.github.io/trunk/)).
+build you also need `rustup target add wasm32-unknown-unknown`, [`trunk`](https://github.com/trunk-rs/trunk)
+([documentation](https://trunk-rs.github.io/trunk/)), and Clang with WebAssembly support to
+compile zstd. If Clang is not on `PATH`, set `CC_wasm32_unknown_unknown` to its executable.
 
 ```sh
 git clone https://github.com/tangency-labs/solidcraft && cd solidcraft

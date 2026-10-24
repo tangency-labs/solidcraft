@@ -16,16 +16,17 @@ use solidcraft_doc::{Document, FeatureKind, MeshData};
 
 use crate::{IoError, MAX_DESIGN_BYTES, Result, design_metadata::replace};
 
-const VERSION: &str = "solidcraft-container/1";
+const VERSION: &str = "solidcraft-container/2";
+const PREVIOUS_VERSION: &str = "solidcraft-container/1";
 const LEGACY_VERSION: &str = "solvecraft-container/1";
 const PREVIEW_VERSION: &str = "solidcraft-preview/1";
 const MAX_ENTRIES: usize = 10_000;
-/// An embedded STEP source may be as large as an import accepts. It is always stored
-/// Deflate-compressed, so the file itself stays within [`MAX_DESIGN_BYTES`] (#3221).
+/// An embedded STEP source may be as large as an import accepts. It is always compressed,
+/// so the file itself stays within [`MAX_DESIGN_BYTES`] (#3221).
 const MAX_STEP_PART: usize = crate::MAX_STEP_BYTES;
-/// Deflate level for STEP sources. Level 1 uses fixed Huffman codes: a 270 MiB STEP export
-/// shrank to 70 MB in 1.6 s, at level 2 to 47 MB in 3.1 s; higher levels gain little more.
+/// Deflate level for STEP sources under Fast and Compact. Higher levels gain little more.
 const STEP_LEVEL: i64 = 2;
+const ZSTD_LEVEL: i64 = 3;
 /// Every other part is bounded by the file size limit.
 const MAX_PART: usize = MAX_DESIGN_BYTES;
 const MAX_EXPANDED: usize = MAX_STEP_PART + MAX_DESIGN_BYTES;
@@ -39,12 +40,14 @@ pub struct DesignPreview {
     pub meshes: Vec<MeshData>,
 }
 
-/// Fast favors interactive file operations; Compact trades CPU time for space.
+/// Fast stores meshes; Compact uses Deflate; Zstd is the default. STEP sources are compressed
+/// under every policy so large imports fit within the design-file size limit.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DesignCompression {
-    #[default]
     Fast,
     Compact,
+    #[default]
+    Zstd,
 }
 
 fn invalid(message: impl std::fmt::Display) -> IoError {
@@ -54,6 +57,10 @@ fn invalid(message: impl std::fmt::Display) -> IoError {
 /// Detect the package signature independently of the file name.
 pub fn is_design_container(bytes: &[u8]) -> bool {
     bytes.starts_with(b"PK\x03\x04")
+}
+
+fn supported_container_version(value: &Value) -> bool {
+    matches!(value.get("format").and_then(Value::as_str), Some(VERSION | PREVIOUS_VERSION | LEGACY_VERSION))
 }
 
 fn fields(pairs: impl IntoIterator<Item = (&'static str, Value)>) -> Map<String, Value> {
@@ -66,6 +73,7 @@ fn digest(bytes: &[u8]) -> String {
 
 struct PackageWriter {
     zip: zip::ZipWriter<Cursor<Vec<u8>>>,
+    compression: DesignCompression,
     names: BTreeSet<String>,
     expanded: usize,
     resolved: usize,
@@ -83,9 +91,12 @@ impl PackageWriter {
         if self.expanded > MAX_EXPANDED || self.names.len() > MAX_ENTRIES {
             return Err(invalid("package too large"));
         }
-        let method = if compressed { zip::CompressionMethod::Deflated } else { zip::CompressionMethod::Stored };
-        let level = if name.ends_with(".step") { STEP_LEVEL } else { 1 };
-        let options = zip::write::SimpleFileOptions::default().compression_method(method).compression_level(compressed.then_some(level));
+        let (method, level) = match (compressed, self.compression) {
+            (false, _) => (zip::CompressionMethod::Stored, None),
+            (true, DesignCompression::Zstd) => (zip::CompressionMethod::Zstd, Some(ZSTD_LEVEL)),
+            (true, _) => (zip::CompressionMethod::Deflated, Some(if name.ends_with(".step") { STEP_LEVEL } else { 1 })),
+        };
+        let options = zip::write::SimpleFileOptions::default().compression_method(method).compression_level(level);
         self.zip.start_file(name, options).map_err(invalid)?;
         self.zip.write_all(bytes).map_err(invalid)
     }
@@ -154,31 +165,33 @@ pub fn check_step_storable(step: &str) -> Result<()> {
     if step.len() > MAX_STEP_PART {
         return Err(IoError::Invalid(format!("STEP file too large ({} MB, limit {} MB)", step.len() >> 20, MAX_STEP_PART >> 20)));
     }
-    // Deflate adds at most a few bytes per 16 KiB block: smaller text always fits.
+    // Both codecs stay within this margin for inputs that are this much smaller than the limit.
     if step.len() <= limit - (limit >> 10) {
         return Ok(());
     }
-    let mut zip = zip::ZipWriter::new(Measure::default());
-    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).compression_level(Some(STEP_LEVEL));
-    zip.start_file("blobs/source.step", options).map_err(invalid)?;
-    zip.write_all(step.as_bytes()).map_err(invalid)?;
-    let compressed = usize::try_from(zip.finish().map_err(invalid)?.length).unwrap_or(usize::MAX);
-    if compressed > limit {
-        return Err(IoError::Invalid(format!(
-            "STEP file too large to save in a design: {} MB of STEP text compresses to {} MB, over the {} MB a design file may hold",
-            step.len() >> 20,
-            compressed >> 20,
-            limit >> 20
-        )));
+    // Check each codec used by the writer: Fast/Compact use Deflate and the default uses Zstd.
+    for (method, level) in [(zip::CompressionMethod::Deflated, STEP_LEVEL), (zip::CompressionMethod::Zstd, ZSTD_LEVEL)] {
+        let mut zip = zip::ZipWriter::new(Measure::default());
+        let options = zip::write::SimpleFileOptions::default().compression_method(method).compression_level(Some(level));
+        zip.start_file("blobs/source.step", options).map_err(invalid)?;
+        zip.write_all(step.as_bytes()).map_err(invalid)?;
+        let compressed = usize::try_from(zip.finish().map_err(invalid)?.length).unwrap_or(usize::MAX);
+        if compressed > limit {
+            return Err(IoError::Invalid(format!(
+                "STEP file too large to save in a design: {} MB of STEP text compresses to {} MB, over the {} MB a design file may hold",
+                step.len() >> 20,
+                compressed >> 20,
+                limit >> 20
+            )));
+        }
     }
     Ok(())
 }
 
-/// Write a compact container, deduplicating payloads by SHA-256. Mesh arrays are
-/// stored directly for low save/open latency; STEP sources and small metadata use
-/// fast Deflate. Use the explicit Compact option to compress meshes too.
+/// Write a container, deduplicating payloads by SHA-256. Zstandard is the default;
+/// use Fast to store mesh blobs, or Compact to compress mesh blobs with Deflate.
 pub fn write_design_container(doc: &Document) -> Result<Vec<u8>> {
-    write_design_container_with_compression(doc, DesignCompression::Fast)
+    write_design_container_with_compression(doc, DesignCompression::default())
 }
 
 /// Write a container with an explicit payload compression policy.
@@ -225,7 +238,8 @@ fn write_container(
     thumbnail: Option<&[u8]>,
     budget: usize,
 ) -> Result<Vec<u8>> {
-    let mut writer = PackageWriter { zip: zip::ZipWriter::new(Cursor::new(Vec::new())), names: BTreeSet::new(), expanded: 0, resolved: 0 };
+    let mut writer =
+        PackageWriter { zip: zip::ZipWriter::new(Cursor::new(Vec::new())), compression, names: BTreeSet::new(), expanded: 0, resolved: 0 };
     let mut features = Vec::with_capacity(doc.features.len());
     for feature in &doc.features {
         let replacements = match &feature.kind {
@@ -239,7 +253,7 @@ fn write_container(
                 let mut metadata = Vec::with_capacity(meshes.len());
                 for mesh in meshes {
                     let bytes = encode_mesh(mesh)?;
-                    let blob = writer.blob(&bytes, "mesh", compression == DesignCompression::Compact)?;
+                    let blob = writer.blob(&bytes, "mesh", compression != DesignCompression::Fast)?;
                     let mut value = replace(mesh, fields([("positions", json!([])), ("triangles", json!([]))])).map_err(invalid)?;
                     value.as_object_mut().ok_or_else(|| invalid("mesh metadata"))?.insert("mesh_blob".into(), blob);
                     metadata.push(value);
@@ -279,8 +293,7 @@ fn write_container(
     let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
     if let Some((manifest, data)) = cache {
         let [manifest_entry, payload_entry] = native_cache::ENTRIES;
-        // Deflated whatever the policy: the encoded bodies shrink about fourfold to tenfold, faster
-        // than the extra bytes would be written and read.
+        // Keep the optional model cache compressed under every policy.
         writer.part(manifest_entry, &manifest, true)?;
         writer.part(payload_entry, &data, true)?;
     }
@@ -507,7 +520,7 @@ pub fn read_design_preview(bytes: &[u8]) -> Option<DesignPreview> {
 
 fn read_preview<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<DesignPreview> {
     let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
-    if !matches!(container.get("format").and_then(Value::as_str), Some(VERSION | LEGACY_VERSION)) {
+    if !supported_container_version(&container) {
         return Err(invalid("unsupported container version"));
     }
     let manifest: Value = serde_json::from_slice(&reader.limited_part("cache/preview.json", 65_536)?).map_err(invalid)?;
@@ -659,7 +672,7 @@ pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) 
 
 fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Document> {
     let version: Value = serde_json::from_slice(&reader.part("container.json")?).map_err(invalid)?;
-    if !matches!(version.get("format").and_then(Value::as_str), Some(VERSION | LEGACY_VERSION)) {
+    if !supported_container_version(&version) {
         return Err(invalid("unsupported container version"));
     }
     let bytes = reader.document(MAX_DESIGN_BYTES)?;
@@ -855,7 +868,9 @@ mod tests {
         }
         let model = saved_model(bodies);
         let doc = document();
-        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&model)).unwrap();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Zstd, None, Some(&model)).unwrap();
+        assert_eq!(method(&bytes, "cache/model.json"), zip::CompressionMethod::Zstd);
+        assert_eq!(method(&bytes, "cache/bodies.bin"), zip::CompressionMethod::Zstd);
         let manifest: Value = serde_json::from_slice(&parts(&bytes)["cache/model.json"]).unwrap();
         assert_eq!(manifest["slices"].as_array().unwrap().len(), 3, "the part and each placed copy, once each");
         let read = DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().unwrap();
@@ -1163,6 +1178,10 @@ mod tests {
             .collect()
     }
 
+    fn method(bytes: &[u8], name: &str) -> zip::CompressionMethod {
+        zip::ZipArchive::new(Cursor::new(bytes)).unwrap().by_name(name).unwrap().compression()
+    }
+
     fn package(parts: &BTreeMap<String, Vec<u8>>) -> Vec<u8> {
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
         for (name, bytes) in parts {
@@ -1285,22 +1304,50 @@ mod tests {
         assert_eq!(entries.keys().filter(|n| n.ends_with(".step")).count(), 1);
         assert_eq!(entries.keys().filter(|n| n.ends_with(".mesh")).count(), 1);
         assert_eq!(entries.keys().filter(|n| n.ends_with(".png")).count(), 1);
+        assert_eq!(method(&bytes, "document.json"), zip::CompressionMethod::Zstd);
+        assert_eq!(method(&bytes, "container.json"), zip::CompressionMethod::Stored);
+        assert_eq!(method(&bytes, entries.keys().find(|n| n.ends_with(".step")).unwrap()), zip::CompressionMethod::Zstd);
+        assert_eq!(method(&bytes, entries.keys().find(|n| n.ends_with(".mesh")).unwrap()), zip::CompressionMethod::Zstd);
+        assert_eq!(method(&bytes, entries.keys().find(|n| n.ends_with(".png")).unwrap()), zip::CompressionMethod::Stored);
         let json: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
         assert_eq!(json["features"][2]["meshes"][0]["positions"], json!([]));
         assert_eq!(crate::read_design(&crate::write_design(&reopened)).unwrap(), source);
         assert_eq!(write_design_container(&source).unwrap(), bytes, "deterministic archive");
+        let fast = write_design_container_with_compression(&source, DesignCompression::Fast).unwrap();
+        assert_eq!(method(&fast, "document.json"), zip::CompressionMethod::Deflated);
+        assert_eq!(method(&fast, entries.keys().find(|n| n.ends_with(".step")).unwrap()), zip::CompressionMethod::Deflated);
         let compact = write_design_container_with_compression(&source, DesignCompression::Compact).unwrap();
         assert_eq!(crate::read_design(&compact).unwrap(), source);
+        assert_eq!(method(&compact, "document.json"), zip::CompressionMethod::Deflated);
+        assert_eq!(method(&compact, entries.keys().find(|n| n.ends_with(".step")).unwrap()), zip::CompressionMethod::Deflated);
     }
 
     #[test]
     fn draft_container_marker_remains_readable() {
         let doc = Document::from_json(&document().to_json()).unwrap();
-        let mut entries = parts(&write_design_container(&doc).unwrap());
-        let marker: Value = serde_json::from_slice(&entries["container.json"]).unwrap();
-        assert_eq!(marker["format"], VERSION);
-        entries.insert("container.json".into(), serde_json::to_vec(&json!({"format": LEGACY_VERSION})).unwrap());
-        assert_eq!(crate::read_design(&package(&entries)).unwrap(), doc);
+        for compression in [DesignCompression::Fast, DesignCompression::Compact] {
+            let bytes = write_design_container_with_compression(&doc, compression).unwrap();
+            let mut source = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+            for old in [PREVIOUS_VERSION, LEGACY_VERSION] {
+                let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+                for i in 0..source.len() {
+                    let entry = source.by_index_raw(i).unwrap();
+                    if entry.name().unwrap() == "container.json" {
+                        zip.start_file("container.json", zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored))
+                            .unwrap();
+                        zip.write_all(&serde_json::to_vec(&json!({"format": old})).unwrap()).unwrap();
+                    } else {
+                        zip.raw_copy_file(entry).unwrap();
+                    }
+                }
+                let reopened = crate::read_design(&zip.finish().unwrap().into_inner()).unwrap();
+                assert_eq!(reopened, doc);
+                let converted = write_design_container(&reopened).unwrap();
+                let current: Value = serde_json::from_slice(&parts(&converted)["container.json"]).unwrap();
+                assert_eq!(current["format"], VERSION);
+                assert_eq!(method(&converted, "document.json"), zip::CompressionMethod::Zstd);
+            }
+        }
     }
 
     #[test]
