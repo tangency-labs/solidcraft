@@ -1666,3 +1666,36 @@ fn cancel_refuses_once_undo_has_gone_back_past_where_the_sketch_was_opened() {
     assert!(e.contains("Undo"), "{e}");
     assert_eq!(s.doc.to_json(), before, "nothing changed");
 }
+
+/// #6070: changing a rectangle side's dimension keeps the side's first corner where it is, so
+/// the side grows from where it was drawn, not from both ends. A centred rectangle (Symmetric
+/// about the axis) still grows both ways, as it must.
+#[test]
+fn a_changed_length_dimension_keeps_its_first_point() {
+    let at = |s: &Session, p: &str| {
+        let sk = sketch(s);
+        sk.point(sk.resolve_point(p).unwrap()).unwrap()
+    };
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [50, 30]}));
+    let bottom = r["sides"]["bottom"].as_str().unwrap().to_string();
+    let right = r["sides"]["right"].as_str().unwrap().to_string();
+    let width = run(&mut s, "sketch.dimension", json!({"entities": [bottom]}))["param"].as_str().unwrap().to_string();
+    let height = run(&mut s, "sketch.dimension", json!({"entities": [right]}))["param"].as_str().unwrap().to_string();
+    run(&mut s, "parameters.change", json!({"name": width, "expression": "60 mm"}));
+    assert!(at(&s, "p1").dist(solidcraft_geom::Vec2::new(10.0, 10.0)) < 1e-6, "the first corner stays: {:?}", at(&s, "p1"));
+    assert!(at(&s, "p2").dist(solidcraft_geom::Vec2::new(70.0, 10.0)) < 1e-6, "the far corner moves: {:?}", at(&s, "p2"));
+    // Several at once: the right side grows up from its start, the bottom-right corner.
+    run(&mut s, "parameters.change", json!({"changes": {height: "25 mm"}}));
+    assert!(at(&s, "p2").dist(solidcraft_geom::Vec2::new(70.0, 10.0)) < 1e-6, "{:?}", at(&s, "p2"));
+    assert!(at(&s, "p3").dist(solidcraft_geom::Vec2::new(70.0, 35.0)) < 1e-6, "{:?}", at(&s, "p3"));
+
+    // Centred on the Y axis: holding a corner can't keep it symmetric, so both ends move.
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-20, 0], "p1": [20, 10]}));
+    let bottom = r["sides"]["bottom"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": "p1", "b": "p2", "line": "y"}));
+    let width = run(&mut s, "sketch.dimension", json!({"entities": [bottom]}))["param"].as_str().unwrap().to_string();
+    run(&mut s, "parameters.change", json!({"name": width, "expression": "60 mm"}));
+    assert!((at(&s, "p1").x + 30.0).abs() < 1e-6 && (at(&s, "p2").x - 30.0).abs() < 1e-6, "{:?} {:?}", at(&s, "p1"), at(&s, "p2"));
+}

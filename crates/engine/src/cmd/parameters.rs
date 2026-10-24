@@ -3,7 +3,9 @@
 //! graph, CSV/JSON import and export, expression evaluation and autocomplete.
 
 use serde_json::{Value, json};
+use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::{self, Kind};
+use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, Hold, Sketch, solve_with};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_};
@@ -121,6 +123,9 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(f) = bool_(p, "favorite") {
         s.doc_mut().set_favorite(&name, f)?;
     }
+    if e.is_some() {
+        keep_dimension_start(s, &name);
+    }
     s.settle_value_edit(&solved)?;
     let (vals, _) = s.doc.param_values();
     out["name"] = json!(name);
@@ -131,6 +136,64 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     out["restored"] = json!(s.model.last_restored);
     out["errors"] = json!(failing(s));
     Ok(out)
+}
+
+/// The point a length dimension keeps when its value changes: the first it measures from (a
+/// line's start). None for other dimensions.
+fn dimension_start(sk: &Sketch, kind: &ConstraintKind) -> Option<usize> {
+    match kind {
+        ConstraintKind::Distance { p, .. } | ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } => Some(*p),
+        ConstraintKind::Length { l, .. } => match sk.curves.get(*l)?.kind {
+            CurveKind::Line { a, .. } => Some(a),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A length dimension driven by `name` keeps its first point where it is when the value
+/// changes, so a rectangle's side grows from its first corner, not from both ends (#6070). The
+/// sketch is solved here with that point held, before the design evaluates from its stored
+/// positions. Where holding it can't solve (a symmetry moves both ends), evaluation solves as
+/// before.
+fn keep_dimension_start(s: &mut Session, name: &str) {
+    let targets: Vec<(u64, usize)> = s
+        .doc
+        .features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            FeatureKind::Sketch { sketch, .. } => sketch
+                .constraints
+                .iter()
+                .find(|c| !c.driven && c.param.as_deref() == Some(name))
+                .and_then(|c| dimension_start(sketch, &c.kind))
+                .map(|p| (f.id, p)),
+            _ => None,
+        })
+        .collect();
+    if targets.is_empty() {
+        return;
+    }
+    let vals = s.doc.evaluation_values();
+    for (id, start) in targets {
+        let Ok(stored) = s.doc.sketch(id) else { continue };
+        let mut trial = stored.clone();
+        if s.doc.apply_dimension_values(&vals, &mut trial).is_err() {
+            continue;
+        }
+        let reference: Vec<_> = stored.points.iter().map(|p| p.pos).collect();
+        let hold = Hold { points: vec![start], radii: Vec::new() };
+        if !solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation() {
+            continue;
+        }
+        if let Ok(stored) = s.doc_mut().sketch_mut(id)
+            && stored.points.len() == trial.points.len()
+        {
+            for (p, q) in stored.points.iter_mut().zip(&trial.points) {
+                p.pos = q.pos;
+            }
+        }
+    }
 }
 
 /// `parameters.change {changes}`: several existing parameters set at once, so a design is
@@ -147,6 +210,9 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
         list.push((name.trim().to_string(), e));
     }
     s.doc_mut().change_params_atomic(&list)?;
+    for (name, _) in &list {
+        keep_dimension_start(s, name);
+    }
     s.settle_value_edit(solved)?;
     let (vals, _) = s.doc.param_values();
     let values: serde_json::Map<String, Value> = list.iter().map(|(n, _)| (n.clone(), json!(vals.get(n).map(|v| v.v)))).collect();
