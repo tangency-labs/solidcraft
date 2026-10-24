@@ -521,6 +521,119 @@ fn hid_api() -> hidapi::HidResult<HidApi> {
     HidApi::new()
 }
 
+/// An open 3D-mouse interface: the device, how its reports are laid out, and its vendor and
+/// product ids.
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
+struct Candidate<D> {
+    device: D,
+    layout: Layout,
+    ids: (u16, u16),
+}
+
+/// Input reports read with a timeout in milliseconds: hidapi's devices, and the tests' simulated
+/// ones. `Ok(0)` is a timeout; an error means the device is gone.
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
+trait ReportSource {
+    fn read_report(&self, report: &mut [u8], timeout_ms: i32) -> Result<usize, String>;
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+impl ReportSource for hidapi::HidDevice {
+    fn read_report(&self, report: &mut [u8], timeout_ms: i32) -> Result<usize, String> {
+        self.read_timeout(report, timeout_ms).map_err(|error| error.to_string())
+    }
+}
+
+/// What following the candidates tells the reader.
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
+enum Followed<'a> {
+    /// This device is the one read now, so its calibration applies. With the buttons it last
+    /// reported down, when it reported them while another was read: they are its baseline, so a
+    /// press that makes it the device in use counts as a press, not as a button already held.
+    Device((u16, u16), Option<u32>),
+    /// An input report from it.
+    Report(&'a Layout, &'a [u8]),
+    /// It is gone.
+    Gone,
+}
+
+/// Whether a report shows its device in use: an axis off zero or a button down. A cap at rest
+/// sends zeros at most, and an idle 3Dconnexion Universal Receiver sends nothing at all.
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
+fn shows_use(layout: Layout, report: &[u8]) -> bool {
+    layout.decode(report).is_some_and(|decoded| decoded.axes.iter().flatten().any(|axis| *axis != 0) || decoded.buttons.is_some_and(|down| down != 0))
+}
+
+/// Reads every candidate and follows the one in use (#3988). The first is followed from the start,
+/// as when it was the only one read. Another takes over once it shows use while the followed one
+/// has shown none for `STALE_AFTER`, so two devices moved together don't hand the reading back
+/// and forth. An idle Universal Receiver opens fine and never fails; read on its own it kept a
+/// SpaceMouse next to it from ever being read. A candidate that fails is dropped. If it was the
+/// followed one, the reading is reset and the next takes over. Returns when none is left.
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
+fn follow<D: ReportSource>(mut candidates: Vec<Candidate<D>>, now: impl Fn() -> Instant, mut emit: impl FnMut(Followed<'_>)) {
+    let Some(first) = candidates.first() else { return };
+    emit(Followed::Device(first.ids, None));
+    let mut followed = 0;
+    // When the followed device last showed use.
+    let mut used_at: Option<Instant> = None;
+    // The buttons each candidate last reported down, by index, as long as it has reported them.
+    let mut buttons: Vec<Option<u32>> = candidates.iter().map(|_| None).collect();
+    let mut report = [0_u8; REPORT_BUFFER_BYTES];
+    while !candidates.is_empty() {
+        // One device is waited on as before; several take turns, briefly, so none waits behind
+        // an idle one. Reports queue in the system meanwhile, so none is lost.
+        let timeout_ms = if candidates.len() == 1 { 100 } else { 10 };
+        let mut index = 0;
+        while let Some(candidate) = candidates.get(index) {
+            match candidate.device.read_report(&mut report, timeout_ms) {
+                Ok(0) => {}
+                Ok(size) => {
+                    let bytes = report.get(..size).unwrap_or_default();
+                    let before = buttons.get(index).copied().flatten();
+                    if let (Some(seen), Some(down)) = (buttons.get_mut(index), candidate.layout.decode(bytes).and_then(|decoded| decoded.buttons)) {
+                        *seen = Some(down);
+                    }
+                    if shows_use(candidate.layout, bytes) {
+                        let at = now();
+                        if index != followed && used_at.is_none_or(|used| at.duration_since(used) >= STALE_AFTER) {
+                            let (vendor, product) = candidate.ids;
+                            log::info!("3D mouse: reading {vendor:04x}:{product:04x}, the device in use");
+                            followed = index;
+                            emit(Followed::Device(candidate.ids, before));
+                        }
+                        if index == followed {
+                            used_at = Some(at);
+                        }
+                    }
+                    if index == followed {
+                        emit(Followed::Report(&candidate.layout, bytes));
+                    }
+                }
+                Err(error) => {
+                    log::info!("3D mouse disconnected: {error}");
+                    candidates.remove(index);
+                    if index < buttons.len() {
+                        buttons.remove(index);
+                    }
+                    if index == followed {
+                        emit(Followed::Gone);
+                        followed = 0;
+                        used_at = None;
+                        if let Some(next) = candidates.first() {
+                            emit(Followed::Device(next.ids, buttons.first().copied().flatten()));
+                        }
+                    } else if index < followed {
+                        followed -= 1;
+                    }
+                    continue;
+                }
+            }
+            index += 1;
+        }
+    }
+}
+
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 fn reader(ctx: Context, shared: Arc<Mutex<Reading>>) {
     let Ok(mut api) = hid_api() else {
@@ -528,36 +641,38 @@ fn reader(ctx: Context, shared: Arc<Mutex<Reading>>) {
         return;
     };
     loop {
-        if let Some((device, layout, ids)) = candidates(&mut api).into_iter().find_map(|path| {
-            let device = api
-                .open_path(&path)
-                .inspect_err(|error| {
-                    // On macOS: missing Input Monitoring permission, or the 3DxWare helper holding the device.
-                    // The driver having the device is the reason it cannot be opened, not a problem.
-                    if !DRIVER_CONNECTED.load(Ordering::Relaxed) && !DRIVER_REGISTERED.load(Ordering::Relaxed) {
-                        log::warn!("3D mouse: cannot open the device: {error}");
-                    }
-                })
-                .ok()?;
-            // Read when the device was opened, from this device alone.
-            let info = device.get_device_info().ok()?;
-            let layout = device_layout(&device, info.vendor_id())?;
-            Some((device, layout, (info.vendor_id(), info.product_id())))
-        }) {
-            connected(&ctx, &shared, Source::Hid(Some(ids)));
-            let mut report = [0_u8; REPORT_BUFFER_BYTES];
-            loop {
-                match device.read_timeout(&mut report, 100) {
-                    Ok(0) => {}
-                    Ok(size) => publish(&ctx, &shared, layout, report.get(..size).unwrap_or_default()),
-                    Err(error) => {
-                        log::info!("3D mouse disconnected: {error}");
-                        break;
-                    }
+        let open: Vec<_> = candidates(&mut api)
+            .into_iter()
+            .filter_map(|path| {
+                let device = api
+                    .open_path(&path)
+                    .inspect_err(|error| {
+                        // On macOS: missing Input Monitoring permission, or the 3DxWare helper holding the device.
+                        // The driver having the device is the reason it cannot be opened, not a problem.
+                        if !DRIVER_CONNECTED.load(Ordering::Relaxed) && !DRIVER_REGISTERED.load(Ordering::Relaxed) {
+                            log::warn!("3D mouse: cannot open the device: {error}");
+                        }
+                    })
+                    .ok()?;
+                // Read when the device was opened, from this device alone.
+                let info = device.get_device_info().ok()?;
+                let layout = device_layout(&device, info.vendor_id())?;
+                Some(Candidate { device, layout, ids: (info.vendor_id(), info.product_id()) })
+            })
+            .collect();
+        follow(open, Instant::now, |event| match event {
+            Followed::Device(ids, buttons) => {
+                connected(&ctx, &shared, Source::Hid(Some(ids)));
+                // Taken over from another device: what it reported meanwhile is its baseline.
+                if let Some(buttons) = buttons
+                    && let Ok(mut reading) = shared.lock()
+                {
+                    reading.set_buttons(buttons);
                 }
             }
-            reset(&ctx, &shared);
-        }
+            Followed::Report(layout, report) => publish(&ctx, &shared, *layout, report),
+            Followed::Gone => reset(&ctx, &shared),
+        });
         std::thread::sleep(RETRY_AFTER);
     }
 }
@@ -1292,6 +1407,174 @@ mod tests {
         publish(&ctx, &shared, layout, &[3, 1]);
         assert!(!asked(), "the same buttons again are no news");
         assert!(shared.lock().unwrap().arrived, "but the report did arrive");
+    }
+
+    /// A simulated 3D-mouse interface. Each read takes the next scripted step, a report or a
+    /// timeout (empty), and sets the shared clock to the step's time. Once the script runs out,
+    /// the device is unplugged.
+    struct Simulated<'a> {
+        clock: &'a std::cell::Cell<Instant>,
+        start: Instant,
+        steps: std::cell::RefCell<std::collections::VecDeque<(u64, Vec<u8>)>>,
+    }
+
+    impl ReportSource for Simulated<'_> {
+        fn read_report(&self, report: &mut [u8], _timeout_ms: i32) -> Result<usize, String> {
+            let (ms, bytes) = self.steps.borrow_mut().pop_front().ok_or_else(|| "unplugged".to_string())?;
+            self.clock.set(self.start + Duration::from_millis(ms));
+            report.get_mut(..bytes.len()).ok_or_else(|| "report too long".to_string())?.copy_from_slice(&bytes);
+            Ok(bytes.len())
+        }
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum Seen {
+        /// The product id now read.
+        Device(u16),
+        /// The buttons it had reported down before it was read, its baseline.
+        Baseline(u32),
+        /// A report published, the product id read when it was, and whether it showed use.
+        Report(u16, Vec<u8>, bool),
+        Gone,
+    }
+
+    /// Follows simulated devices, given as (product id, scripted steps in ms), and returns what
+    /// the reader was told.
+    fn follow_simulated(devices: &[(u16, &[(u64, &[u8])])]) -> Vec<Seen> {
+        follow_simulated_with(Layout::default(), devices)
+    }
+
+    /// As `follow_simulated`, with every device's reports laid out as `layout`.
+    fn follow_simulated_with(layout: Layout, devices: &[(u16, &[(u64, &[u8])])]) -> Vec<Seen> {
+        let start = Instant::now();
+        let clock = std::cell::Cell::new(start);
+        let candidates = devices
+            .iter()
+            .map(|(product, steps)| Candidate {
+                device: Simulated {
+                    clock: &clock,
+                    start,
+                    steps: std::cell::RefCell::new(steps.iter().map(|(ms, bytes)| (*ms, bytes.to_vec())).collect()),
+                },
+                layout,
+                ids: (0x256f, *product),
+            })
+            .collect();
+        let (mut seen, mut read) = (Vec::new(), 0);
+        follow(
+            candidates,
+            || clock.get(),
+            |event| match event {
+                Followed::Device((_, product), buttons) => {
+                    read = product;
+                    seen.push(Seen::Device(product));
+                    seen.extend(buttons.map(Seen::Baseline));
+                }
+                Followed::Report(layout, bytes) => seen.push(Seen::Report(read, bytes.to_vec(), shows_use(*layout, bytes))),
+                Followed::Gone => seen.push(Seen::Gone),
+            },
+        );
+        seen
+    }
+
+    const RECEIVER: u16 = 0xc652;
+    const SPACEMOUSE: u16 = 0xc63a;
+    const PUSH_X: &[u8] = &[1, 100, 0, 0, 0, 0, 0];
+    const AT_REST: &[u8] = &[1, 0, 0, 0, 0, 0, 0];
+    const TILT: &[u8] = &[2, 0, 0, 50, 0, 0, 0];
+
+    /// #3988: a Universal Receiver with nothing paired is found first and never fails, and a wired
+    /// SpaceMouse next to it was never read. The receiver is followed only until the SpaceMouse
+    /// moves; the SpaceMouse's reports, its zeros included, are read from then on.
+    #[test]
+    fn an_idle_receiver_does_not_keep_a_spacemouse_from_being_read() {
+        let receiver: &[(u64, &[u8])] = &[(0, &[]), (10, &[]), (20, &[]), (30, &[])];
+        let spacemouse: &[(u64, &[u8])] = &[(5, &[]), (15, PUSH_X), (25, AT_REST), (35, TILT)];
+        assert_eq!(
+            follow_simulated(&[(RECEIVER, receiver), (SPACEMOUSE, spacemouse)]),
+            [
+                Seen::Device(RECEIVER),
+                Seen::Device(SPACEMOUSE),
+                Seen::Report(SPACEMOUSE, PUSH_X.to_vec(), true),
+                Seen::Report(SPACEMOUSE, AT_REST.to_vec(), false),
+                Seen::Report(SPACEMOUSE, TILT.to_vec(), true),
+                // The receiver is unplugged first, then the SpaceMouse, the one being read.
+                Seen::Gone,
+            ]
+        );
+    }
+
+    /// Two devices in use at once don't trade the reading: the other takes over only after the
+    /// followed one has shown no use for `STALE_AFTER`. A report at rest or with an id the layout
+    /// doesn't know shows no use, and only the followed device's reports are published.
+    #[test]
+    fn another_device_takes_over_only_once_the_followed_one_is_still() {
+        let unknown_id: &[u8] = &[0x17, 80];
+        let first: &[(u64, &[u8])] = &[(0, PUSH_X), (100, AT_REST), (200, &[])];
+        let second: &[(u64, &[u8])] = &[(50, PUSH_X), (150, unknown_id), (250, TILT)];
+        assert_eq!(
+            follow_simulated(&[(0xc635, first), (SPACEMOUSE, second)]),
+            [
+                Seen::Device(0xc635),
+                Seen::Report(0xc635, PUSH_X.to_vec(), true),
+                // The second moves 50 ms after the first did: not yet. The first's own rest
+                // report is read, and the second's unknown report is not.
+                Seen::Report(0xc635, AT_REST.to_vec(), false),
+                // 250 ms after the first last moved, the second takes over.
+                Seen::Device(SPACEMOUSE),
+                Seen::Report(SPACEMOUSE, TILT.to_vec(), true),
+                Seen::Gone,
+            ]
+        );
+    }
+
+    /// One device is read as before: every report, until it fails. When the followed one of
+    /// several fails, the reading is reset and the next one is read.
+    #[test]
+    fn a_device_that_fails_hands_the_reading_to_the_next() {
+        let only: &[(u64, &[u8])] = &[(0, &[]), (1, AT_REST), (2, &[0x17, 80])];
+        assert_eq!(
+            follow_simulated(&[(SPACEMOUSE, only)]),
+            [
+                Seen::Device(SPACEMOUSE),
+                Seen::Report(SPACEMOUSE, AT_REST.to_vec(), false),
+                Seen::Report(SPACEMOUSE, vec![0x17, 80], false),
+                Seen::Gone
+            ]
+        );
+        let unplugged: &[(u64, &[u8])] = &[];
+        let next: &[(u64, &[u8])] = &[(1, PUSH_X)];
+        assert_eq!(
+            follow_simulated(&[(SPACEMOUSE, unplugged), (RECEIVER, next)]),
+            [Seen::Device(SPACEMOUSE), Seen::Gone, Seen::Device(RECEIVER), Seen::Report(RECEIVER, PUSH_X.to_vec(), true), Seen::Gone]
+        );
+        assert_eq!(follow_simulated(&[]), []);
+    }
+
+    /// A button press that makes a device the one in use is a press. The buttons it reported while
+    /// another was read are its baseline; the reader keeps them, so the press isn't taken for a
+    /// button already held, as a device's first button report is.
+    #[test]
+    fn a_press_that_takes_over_counts_as_a_press() {
+        let mut layout = Layout::default();
+        layout.buttons[0] =
+            Some(solidcraft_space_mouse::Field { report_id: 3, bit_offset: 0, bits: 1, logical_min: 0, logical_max: 1, relative: false });
+        let (none_down, first_down): (&[u8], &[u8]) = (&[3, 0], &[3, 1]);
+        let receiver: &[(u64, &[u8])] = &[(0, &[]), (10, &[]), (20, &[])];
+        let spacemouse: &[(u64, &[u8])] = &[(5, none_down), (15, first_down), (25, &[])];
+        assert_eq!(
+            follow_simulated_with(layout, &[(RECEIVER, receiver), (SPACEMOUSE, spacemouse)]),
+            [Seen::Device(RECEIVER), Seen::Device(SPACEMOUSE), Seen::Baseline(0), Seen::Report(SPACEMOUSE, first_down.to_vec(), true), Seen::Gone,]
+        );
+        // What the reader does with that: the press after the baseline is a tap.
+        let mut reading = Reading { buttons_known: false, ..Reading::new(Instant::now()) };
+        reading.set_buttons(0);
+        assert!(decode_report(first_down, layout, &mut reading, Instant::now()));
+        assert_eq!((reading.buttons, reading.taps), (1, 1));
+        // Without one, the same report is the baseline: held, not pressed.
+        let mut unseen = Reading { buttons_known: false, ..Reading::new(Instant::now()) };
+        assert!(decode_report(first_down, layout, &mut unseen, Instant::now()));
+        assert_eq!((unseen.buttons, unseen.taps), (1, 0));
     }
 
     #[test]

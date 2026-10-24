@@ -33,6 +33,11 @@ vendor and product id. Reload with `sudo udevadm control --reload && sudo udevad
 replug the device. The Flatpak sandbox does not expose hidraw devices, so the 3D mouse only works
 with native builds there for now.
 
+On Windows and macOS, with more than one 3D mouse connected, SolidCraft reads the one in use.
+For example, a 3Dconnexion Universal Receiver with nothing paired may sit next to a SpaceMouse
+on a cable. The first device found is read until another one moves, and then that one is. The
+Navigation page names the device being read, and its calibration applies.
+
 SolidCraft finds the axes from the device's report descriptor, so it doesn't matter how a device
 lays them out: translation and rotation in separate reports (3Dconnexion's wired devices), all six
 in one (its wireless ones and most homemade devices), after the buttons, or narrower than 16 bits.
