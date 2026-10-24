@@ -90,12 +90,30 @@ pub fn run_api(site: &str) -> Result<(), String> {
     server.set(Mode::Serve(site));
     let browser = Chrome::launch(&chrome, &work.0.join("profile"))?;
     let mut cdp = browser.connect()?;
+    let downloads = work.0.join("downloads");
+    std::fs::create_dir_all(&downloads).map_err(|e| e.to_string())?;
+    cdp.call("Browser.setDownloadBehavior", json!({"behavior": "allow", "downloadPath": downloads}))?;
     cdp.call("Emulation.setDeviceMetricsOverride", json!({"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": false}))?;
     // The page has the keyboard, as a tab the user is looking at does (for KEYS_TEST).
     cdp.call("Emulation.setFocusEmulationEnabled", json!({"enabled": true}))?;
-    cdp.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{}{PREFIX}?webgl", server.port)}))?;
+    // Use the app's normal backend selection, including WebGPU where available.
+    cdp.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{}{PREFIX}", server.port)}))?;
     wait_for(&mut cdp, "!!window.solidcraft && !document.getElementById('solidcraft_loading')", "the browser API is ready", |v| v == true)?;
     let result = cdp.eval(API_TEST)?;
+    let path = downloads.join("Untitled-view.dxf");
+    let started = Instant::now();
+    loop {
+        if let Ok(dxf) = std::fs::read_to_string(&path) {
+            if !(dxf.contains("ENTITIES") && dxf.contains("VISIBLE") && dxf.contains("EOF")) {
+                return Err("web-api-test: the view download is not a complete DXF drawing".into());
+            }
+            break;
+        }
+        if started.elapsed() > LAUNCH_TIMEOUT {
+            return Err("web-api-test: Export Current View did not download its DXF".into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
     println!("web-api-test: {result}");
     let keys = cdp.eval(KEYS_TEST)?;
     println!("web-api-test: {keys}");
@@ -158,7 +176,30 @@ const API_TEST: &str = r#"(async () => {
     check((await app.inspect()).bodies.length === 1, 'API still works after rejected requests');
     const ui = await app.request('ui.inspect');
     check(ui.home === false && ui.viewport[2] > 600, 'model viewport is visible');
-    return {commands: 'discovered', bodies: [0, 1, 0, 1], errors: 'rejected', queue: '256 completed, 1 rejected'};
+    // #3431: a native Instant compiles for wasm but panics when exporting in the browser.
+    // Exercise both the command timer and the projection/occlusion timers on the real target.
+    // A wasm abort stops the frame loop before it can settle the command's reply.
+    const crashed = new Promise((_, reject) => {
+        window.addEventListener('error', event => reject(event.error || new Error(event.message)), {once: true});
+    });
+    for (const hidden of ['omit', 'dashed']) {
+        const drawing = await Promise.race([app.execute('file.export_view_dxf', {camera: ui.camera, hidden}), crashed]);
+        check(drawing.units === 'mm' && drawing.visible > 0, 'view export contains visible edges in mm');
+        check(drawing.dxf.includes('ENTITIES') && drawing.dxf.includes('VISIBLE'), 'view export returns a DXF drawing');
+        check(drawing.dxf.includes('HIDDEN') === (hidden === 'dashed'), 'view export respects the hidden-edge option');
+        for (const stage of ['prepare_ms', 'projection_ms', 'occlusion_ms']) {
+            check(Number.isFinite(drawing.stats[stage]) && drawing.stats[stage] >= 0, stage + ' is a valid browser timing');
+        }
+    }
+    check((await app.inspect()).bodies.length === 1, 'view export preserves the document');
+    await app.request('ui.start', {command: 'file.export_view_dxf'});
+    // Let the new dialog finish its initial layout before taking the button's position.
+    await app.request('ui.inspect');
+    await app.request('ui.inspect');
+    const [x, y] = await app.request('ui.at', {handle: 'dialog:Export DXF…'});
+    await app.request('ui.click', {x, y});
+    return {commands: 'discovered', bodies: [0, 1, 0, 1], errors: 'rejected', queue: '256 completed, 1 rejected',
+        dxf: 'omit and dashed exported; dialog download checked'};
 })()"#;
 
 /// Run the test; `required: false` (from `cargo xtask ci`) skips it when Chrome is missing.

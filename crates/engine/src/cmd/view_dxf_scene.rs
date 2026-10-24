@@ -4,7 +4,7 @@
 //! subsequent nodes and instances, including the entire query once coverage is complete.
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
+use web_time::Instant;
 
 use solidcraft_doc::apply_point;
 use solidcraft_geom::{Aabb3, Mesh, Vec3};

@@ -56,7 +56,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(path) = path {
         solidcraft_io::vfs::check(path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
     }
-    let started = std::time::Instant::now();
+    let started = web_time::Instant::now();
     progress::Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, e))?;
     let meshes = meshes::prepare(s, tolerance)?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
