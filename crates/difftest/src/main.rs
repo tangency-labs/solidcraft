@@ -9,6 +9,7 @@
 //! cargo run -p difftest --features cpp -- --status-of <id>   # prints green|partial|fail
 //! options: --seeds N (default 16)  --filter <substr>  --perturb  --report-dir <dir>  --no-report
 //!          --baseline <dir>   # regression ratchet against earlier reports (see `difftest::baseline`)
+//!          --jobs N (-j; default 1, 0 = all cores)   # units in N child processes (`difftest::jobs`)
 //! cargo run -p difftest --features cpp -- --unit <id> --fuzz N [--fuzz-out <dir>]   # FFI guard probing
 //! cargo run -p difftest --features cpp -- --ssi-corpus [--tol 1e-6|default] [--jobs N] [glob]
 //! cargo run -p difftest -- --solidcraft-cases [glob]   # Rust only; no `cpp` feature needed
@@ -26,9 +27,9 @@ use difftest::baseline::{self, Check, Violation, Waivers};
 use difftest::case::repo_root;
 use difftest::{fuzz, plan, registry, report, run_unit, CaseContext, RunOptions, UnitStatus};
 
-const USAGE: &str = "usage: difftest [--unit <id>]... [--green] [--all] [--list] \
-[--status-of <id>] [--seeds N] [--filter <substr>] [--perturb] [--report-dir <dir>] [--no-report]
-       [--baseline <dir>]
+const USAGE: &str = "usage: difftest [--unit <id>]... [--green] [--all] [--list]
+       [--status-of <id>] [--seeds N] [--filter <substr>] [--perturb] [--report-dir <dir>] [--no-report] [--jobs N]
+       [--baseline <dir>] [--digest-dir <dir> [--digest-debug]]
        difftest --unit <id>... --fuzz N [--fuzz-out <dir>] [--seeds N] [--filter <substr>]
        difftest --ssi-corpus [--tol 1e-6|default] [--jobs N] [--report-dir <dir>] [--no-report] [case-glob]
        difftest --solidcraft-cases [--report-dir <dir>] [--no-report] [case-glob]";
@@ -156,6 +157,20 @@ fn main() -> ExitCode {
     };
 
     // Rust only, so it runs without the C++ kernel.
+    if args.baseline.is_some()
+        && (args.perturb
+            || args.list
+            || args.status_of.is_some()
+            || args.filter.is_some()
+            || args.digest_dir.is_some()
+            || args.fuzz.is_some()
+            || args.ssi_corpus
+            || args.solidcraft_cases)
+    {
+        eprintln!("difftest: --baseline requires an unfiltered comparison run");
+        return ExitCode::from(2);
+    }
+
     if args.solidcraft_cases {
         let opts = difftest::solidcraft::CasesOptions {
             glob: args.glob.clone(),
@@ -207,10 +222,6 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    if args.baseline.is_some() && (args.perturb || args.list || args.status_of.is_some()) {
-        eprintln!("difftest: --baseline does not combine with --perturb, --list or --status-of");
-        return ExitCode::from(2);
-    }
 
     if args.list {
         for u in &reg {
@@ -284,6 +295,45 @@ fn main() -> ExitCode {
     }
     let mut seen = std::collections::BTreeSet::new();
     wanted.retain(|w| seen.insert(w.clone()));
+    let mut setup_error = false;
+    // A unit that was green or partial in the baseline must still be run by --green.
+    let mut dropped = 0usize;
+    if let Some(dir) = &args.baseline {
+        let preflight = if args.green || args.all {
+            baseline::baseline_units(dir)
+        } else {
+            baseline::validate_selected_baselines(dir, &wanted).map(|()| Vec::new())
+        };
+        match preflight {
+            Ok(units) => {
+                for u in units.iter().filter(|u| args.green && !wanted.contains(u)) {
+                    let v = Violation {
+                        unit: u.clone(),
+                        check: Check::Ratchet,
+                        case: None,
+                        detail: format!(
+                            "unit `{u}` passed in the baseline but --green no longer runs it \
+                             (its plan status changed)"
+                        ),
+                    };
+                    println!("{u}:");
+                    if print_violations(&[v], &waivers) {
+                        dropped += 1;
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("difftest: {e}");
+                setup_error = true;
+            }
+        }
+    }
+    if setup_error {
+        return ExitCode::from(2);
+    }
+    if dropped > 0 {
+        return ExitCode::from(1);
+    }
     if wanted.is_empty() && args.green {
         println!("difftest: no units with status = \"green\" or \"partial\" yet");
         return ExitCode::SUCCESS;
@@ -327,11 +377,6 @@ fn main() -> ExitCode {
 
     let mut failed = 0usize;
     let mut partial = 0usize;
-    let mut stale = 0usize;
-    let mut setup_error = false;
-    if args.baseline.is_some() && args.filter.is_some() {
-        println!("difftest: --filter given, so the --baseline ratchet is skipped");
-    }
     for id in &wanted {
         let Some(unit) = reg.iter().find(|u| u.id() == id.as_str()) else {
             println!("FAIL {id} (no difftest runner registered for this unit)");
@@ -410,8 +455,10 @@ fn main() -> ExitCode {
         let mut unit_failed = match res.status() {
             UnitStatus::Fail => true,
             UnitStatus::Partial if plan_status == Some("green") => {
-                // A green unit must have zero deferred cases (AGENTS.md 4a).
-                println!("  FAIL {id}: plan status is green but cases are deferred");
+                // Green units cannot contain deferred or known mismatches.
+                println!(
+                    "  FAIL {id}: plan status is green but cases are deferred or known mismatches"
+                );
                 true
             }
             UnitStatus::Partial | UnitStatus::Green => false,
@@ -436,24 +483,6 @@ fn main() -> ExitCode {
             partial += 1;
         }
         if !args.no_report {
-            // The report about to be overwritten is normally the committed one.
-            let path = report_dir.join(format!("{id}.json"));
-            let old = std::fs::read_to_string(&path)
-                .ok()
-                .and_then(|t| report::ReportCounts::parse(&t));
-            let now = report::ReportCounts::of(&res);
-            if let Some(old) = old.filter(|o| *o != now) {
-                stale += 1;
-                let (old, now) = (old.describe(), now.describe());
-                println!("  STALE-REPORT committed {old}, this run {now}");
-                if std::env::var_os("GITHUB_ACTIONS").is_some() {
-                    let rel = path.strip_prefix(&root).unwrap_or(&path).display();
-                    println!(
-                        "::warning file={rel}::committed report is stale (committed {old}, \
-                         this run {now}); regenerate and commit it"
-                    );
-                }
-            }
             match report::write_unit_report(&report_dir, &res) {
                 Ok(p) => println!(
                     "  report: {}",
@@ -465,39 +494,6 @@ fn main() -> ExitCode {
                 }
             }
         }
-    }
-    // A unit that was green or partial in the baseline must still be run by --green.
-    let mut dropped = 0usize;
-    if let (Some(dir), true) = (&args.baseline, args.green) {
-        match baseline::baseline_units(dir) {
-            Ok(units) => {
-                for u in units.iter().filter(|u| !wanted.contains(u)) {
-                    let v = Violation {
-                        unit: u.clone(),
-                        check: Check::Ratchet,
-                        case: None,
-                        detail: format!(
-                            "unit `{u}` passed in the baseline but --green no longer runs it \
-                             (its plan status changed)"
-                        ),
-                    };
-                    println!("{u}:");
-                    if print_violations(&[v], &waivers) {
-                        dropped += 1;
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("difftest: {e}");
-                setup_error = true;
-            }
-        }
-    }
-    if stale > 0 {
-        println!(
-            "difftest: {stale} report(s) differed from this run (STALE-REPORT above); \
-             regenerate and commit them"
-        );
     }
     let dropped_note = if dropped > 0 {
         format!(", {dropped} dropped from --green")
@@ -543,6 +539,63 @@ fn print_violations(violations: &[Violation], waivers: &Waivers) -> bool {
         );
     }
     !open.is_empty()
+}
+
+/// `--digest-dir DIR`: the Rust side of each unit only, digests to `DIR/<unit>.digest`
+/// (and the outputs to `DIR/<unit>.debug` with `--digest-debug`). A unit fails only if
+/// its cases cannot be built or a file cannot be written.
+fn digest_main(
+    wanted: &[String],
+    reg: &[Box<dyn difftest::UnitDiff>],
+    ctx: &CaseContext,
+    opts: &RunOptions,
+    dir: &Path,
+    debug: bool,
+) -> ExitCode {
+    let mut failed = 0usize;
+    for id in wanted {
+        let Some(unit) = reg.iter().find(|u| u.id() == id.as_str()) else {
+            println!("FAIL {id} (no difftest runner registered for this unit)");
+            failed += 1;
+            continue;
+        };
+        let start = Instant::now();
+        let res = difftest::runner::digest_unit(unit.as_ref(), ctx, opts, debug);
+        if let Some(e) = &res.harness_error {
+            println!("FAIL {id} ({e})");
+            failed += 1;
+            continue;
+        }
+        let mut files = vec![(format!("{id}.digest"), &res.lines)];
+        if debug {
+            files.push((format!("{id}.debug"), &res.debug));
+        }
+        for (name, lines) in files {
+            let path = dir.join(name);
+            let body = lines.join("\n") + "\n";
+            if let Err(e) = std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&path, body))
+            {
+                eprintln!("difftest: {}: {e}", path.display());
+                return ExitCode::from(2);
+            }
+        }
+        println!(
+            "DIGEST {id} cases={} needs_cpp={} rust={:.3}s",
+            res.lines.len(),
+            res.needs_cpp,
+            start.elapsed().as_secs_f64()
+        );
+    }
+    println!(
+        "difftest: {} unit(s), {} passed, 0 partial, {failed} failed",
+        wanted.len(),
+        wanted.len() - failed
+    );
+    if failed > 0 {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 /// `--fuzz N`: probes each `--unit` with N mutated cases (see `difftest::fuzz`). No report.

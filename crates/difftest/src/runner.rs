@@ -571,6 +571,10 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
                 cr.diagnostics = r.diagnostics.as_deref().cloned().unwrap_or_default();
                 if opts.perturb {
                     cr.perturbed = perturb_output(&mut r);
+                    if cr.perturbed.is_some() {
+                        // The known-result waiver does not cover an injected error.
+                        cr.known_mismatch = None;
+                    }
                 }
                 cr.both_errored = c.error.is_some() && r.error.is_some();
                 cr.diff = compare(&c, &r, unit.abs_floors());
@@ -963,6 +967,20 @@ mod tests {
             crate::report::unit_report(&k)["cases"][1]["known_mismatch"],
             "w"
         );
+
+        let injected = run_unit(
+            &EmptyOrErr,
+            &known_root("perturbed-listed", &entry("err")),
+            &RunOptions {
+                perturb: true,
+                ..RunOptions::default()
+            },
+        );
+        assert_eq!(injected.perturb_stats(), (1, 1));
+        assert_eq!(injected.cases[1].perturbed, Some("error"));
+        assert_eq!(injected.cases[1].outcome(), CaseOutcome::Fail);
+        assert!(injected.cases[1].known_mismatch.is_none());
+        assert_eq!(injected.known_mismatches(), 0);
 
         // A listed case that passes, or one that does not exist, fails the unit.
         let stale = run_unit(

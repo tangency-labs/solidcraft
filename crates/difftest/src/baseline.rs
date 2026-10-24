@@ -1,11 +1,10 @@
 //! Regression gates over a unit run: the baseline ratchet and the value-share floor.
 //!
 //! * **Ratchet** (`--baseline <dir>`): compares a run with the unit's earlier report,
-//!   normally `reports/difftest/<unit>.json` from the base branch. Every case that
+//!   from the exact base revision's validated CI artifact. Every case that
 //!   passed there must still exist and pass, and must still compare values if it did;
 //!   no deferred or failing case may disappear either. A deferred case may turn into a
-//!   pass (progress); a rejected fixture may go away. Generated cases are only matched
-//!   when both runs used the same `--seeds`.
+//!   pass (progress); a rejected fixture may go away. Different `--seeds` are a gate failure, so generated cases cannot be hidden.
 //! * **Value share**: at least [`MIN_VALUE_SHARE`] of a unit's passing cases, and at
 //!   least one, must compare a value (a float, integer or topology entry) rather than
 //!   only an error string both sides agreed on.
@@ -13,7 +12,7 @@
 //! A violation is waived only by an entry in [`WAIVERS_PATH`] that names the unit,
 //! the check and (for the ratchet, optionally) the case, with a reason.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
@@ -73,12 +72,12 @@ pub struct Violation {
 pub struct BaselineCase {
     /// Case name (unique within the unit).
     pub name: String,
-    /// `pass`, `fail`, `deferred` or `rejected`.
+    /// `pass`, `fail`, `deferred`, `known_mismatch` or `rejected`.
     pub outcome: String,
     /// The case came from the generator (its inputs depend on `--seeds`).
     pub generated: bool,
     /// The case compared at least one value. Reports written before `exact_compared`
-    /// was recorded only know about floats, so integer-only cases read as `false`.
+    /// was recorded use #550 vacuity semantics to prove integer-only coverage.
     pub compared_values: bool,
 }
 
@@ -103,43 +102,200 @@ pub fn parse_baseline(text: &str) -> Result<Baseline, String> {
         .and_then(Value::as_str)
         .ok_or("missing `unit`")?
         .to_string();
-    let mut cases = Vec::new();
-    for (i, c) in v
+    if unit.is_empty()
+        || !unit
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_')
+    {
+        return Err("invalid unit id".into());
+    }
+    let status = v
+        .get("status")
+        .and_then(Value::as_str)
+        .ok_or("missing status")?;
+    if !matches!(status, "green" | "partial" | "fail") {
+        return Err("unknown report status".into());
+    }
+    let count = |object: &Value, key: &str, required: bool| -> Result<u64, String> {
+        match object.get(key) {
+            Some(n) => n
+                .as_u64()
+                .ok_or_else(|| format!("invalid nonnegative integer `{key}`")),
+            None if required => Err(format!("missing `{key}`")),
+            None => Ok(0),
+        }
+    };
+    let seeds = count(&v, "seeds", true)?;
+    let schema = v
+        .get("schema_version")
+        .map(|_| count(&v, "schema_version", true))
+        .transpose()?;
+    if schema.is_some_and(|n| n != 1) {
+        return Err("unsupported report schema".into());
+    }
+    let raw = v
         .get("cases")
         .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default()
-        .iter()
-        .enumerate()
-    {
+        .ok_or("missing cases array")?;
+    if count(&v, "cases_total", true)? != raw.len() as u64 {
+        return Err("cases_total disagrees with cases array".into());
+    }
+    let mut names = BTreeSet::new();
+    let mut counts = BTreeMap::<&str, u64>::new();
+    let mut cases = Vec::new();
+    let mut vacuous_count = 0;
+    let mut errored_count = 0;
+    for c in raw {
         let name = c
             .get("name")
             .and_then(Value::as_str)
-            .ok_or_else(|| format!("case #{i}: missing `name`"))?;
-        // Reports from before `outcome` existed only had `pass` and `deferred`.
-        let outcome = match c.get("outcome").and_then(Value::as_str) {
-            Some(o) => o.to_string(),
-            None if c.get("deferred").is_some() => "deferred".into(),
-            None if c.get("pass").and_then(Value::as_bool) == Some(true) => "pass".into(),
-            None => "fail".into(),
+            .filter(|n| !n.is_empty())
+            .ok_or("missing case name")?;
+        if !names.insert(name) {
+            return Err(format!("duplicate case `{name}`"));
+        }
+        let outcome = c
+            .get("outcome")
+            .and_then(Value::as_str)
+            .ok_or("missing case outcome")?;
+        if !matches!(
+            outcome,
+            "pass" | "fail" | "deferred" | "rejected" | "known_mismatch"
+        ) {
+            return Err(format!("unknown case outcome `{outcome}`"));
+        }
+        if c.get("pass").and_then(Value::as_bool) != Some(outcome == "pass") {
+            return Err(format!("case `{name}` pass/outcome disagree"));
+        }
+        *counts.entry(outcome).or_default() += 1;
+        let flag = |key: &str| -> Result<bool, String> {
+            match c.get(key) {
+                None => Ok(false),
+                Some(x) => x
+                    .as_bool()
+                    .ok_or_else(|| format!("invalid boolean `{key}`")),
+            }
         };
-        let count = |k: &str| c.get(k).and_then(Value::as_u64).unwrap_or(0);
+        let vacuous = flag("vacuous")?;
+        let both_errored = flag("both_errored")?;
+        flag("only_zeros")?;
+        vacuous_count += u64::from(vacuous);
+        errored_count += u64::from(both_errored);
+        let floats = count(c, "values_compared", true)?;
+        let exact = count(c, "exact_compared", schema == Some(1))?;
+        let mut compared_values = floats > 0 || exact > 0;
+        if (vacuous || both_errored) && compared_values {
+            return Err(format!(
+                "case `{name}` claims values and an empty/error result"
+            ));
+        }
+        if outcome == "pass"
+            && !compared_values
+            && !vacuous
+            && !both_errored
+            && c.get("exact_compared").is_none()
+        {
+            // #550 tested BOTH float and exact counts when setting vacuous, but
+            // omitted exact_compared. This proves presence, never an invented count.
+            if v.get("cases_vacuous").is_none() {
+                return Err("pre-550 integer coverage is ambiguous".into());
+            }
+            compared_values = true;
+        }
+        if schema == Some(1) && outcome == "pass" && !compared_values && !vacuous && !both_errored {
+            return Err(format!("case `{name}` has an unmarked zero-value success"));
+        }
+        if outcome == "known_mismatch" && !compared_values && c.get("exact_compared").is_none() {
+            if vacuous || both_errored || !legacy_known_integer_presence(c) {
+                return Err("legacy known-mismatch integer coverage is ambiguous".into());
+            }
+            compared_values = true;
+        }
         cases.push(BaselineCase {
             name: name.to_string(),
-            outcome,
+            outcome: outcome.to_string(),
             generated: c
                 .get("source")
                 .and_then(Value::as_str)
                 .is_some_and(|s| s.starts_with("generated")),
-            compared_values: count("values_compared") + count("exact_compared") > 0,
+            compared_values,
         });
+    }
+    for (outcome, field, required) in [
+        ("pass", "cases_passed", true),
+        ("fail", "cases_failed", true),
+        ("deferred", "cases_deferred", true),
+        ("rejected", "cases_rejected", false),
+        ("known_mismatch", "cases_known_mismatch", false),
+    ] {
+        if count(&v, field, required)? != counts.get(outcome).copied().unwrap_or(0) {
+            return Err(format!("{field} disagrees with case outcomes"));
+        }
+    }
+    for (field, actual) in [
+        ("cases_vacuous", vacuous_count),
+        ("cases_both_errored", errored_count),
+    ] {
+        if v.get(field).is_some() && count(&v, field, true)? != actual {
+            return Err(format!("{field} disagrees with cases"));
+        }
+    }
+    let n = |outcome| counts.get(outcome).copied().unwrap_or(0);
+    let expected_status = if v.get("harness_error").is_some_and(|e| !e.is_null())
+        || raw.is_empty()
+        || n("fail") > 0
+        || n("rejected") == raw.len() as u64
+    {
+        "fail"
+    } else if n("deferred") > 0 || n("known_mismatch") > 0 {
+        "partial"
+    } else {
+        "green"
+    };
+    if status != expected_status
+        || v.get("pass").and_then(Value::as_bool) != Some(expected_status != "fail")
+    {
+        return Err("report status/pass disagree with cases or harness error".into());
     }
     Ok(Baseline {
         unit,
-        status: v.get("status").and_then(Value::as_str).map(str::to_string),
-        seeds: v.get("seeds").and_then(Value::as_u64),
+        status: Some(status.to_string()),
+        seeds: Some(seeds),
         cases,
     })
+}
+
+// exact_list increments its counter before serializing an indexed integer
+// mismatch. Keys/length mismatches cannot establish integer value coverage.
+fn legacy_known_integer_presence(case: &Value) -> bool {
+    case.get("mismatches")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|mismatch| {
+                let field = mismatch.get("field").and_then(Value::as_str).unwrap_or("");
+                let indexed = field
+                    .strip_prefix("ints.")
+                    .and_then(|name| name.rsplit_once('['))
+                    .is_some_and(|(name, index)| {
+                        !name.is_empty()
+                            && index.strip_suffix(']').is_some_and(|digits| {
+                                !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+                            })
+                    });
+                indexed
+                    && ["cpp", "rust"].iter().all(|key| {
+                        mismatch
+                            .get(*key)
+                            .and_then(Value::as_str)
+                            .is_some_and(|value| {
+                                let digits = value.strip_prefix('-').unwrap_or(value);
+                                !digits.is_empty()
+                                    && digits.bytes().all(|b| b.is_ascii_digit())
+                                    && value.parse::<i64>().is_ok()
+                            })
+                    })
+            })
+        })
 }
 
 /// Reads `<dir>/<unit>.json`; `None` if there is no such report (a new unit).
@@ -151,6 +307,13 @@ pub fn load_baseline(dir: &Path, unit: &str) -> Result<Option<Baseline>, Harness
     let text = fs::read_to_string(&path)
         .map_err(|e| HarnessError::new(format!("{}: {e}", path.display())))?;
     parse_baseline(&text)
+        .and_then(|b| {
+            if b.unit == unit {
+                Ok(b)
+            } else {
+                Err("filename/unit mismatch".into())
+            }
+        })
         .map(Some)
         .map_err(|e| HarnessError::new(format!("{}: {e}", path.display())))
 }
@@ -171,17 +334,65 @@ pub fn baseline_units(dir: &Path) -> Result<Vec<String>, HarnessError> {
             .map_err(|e| HarnessError::new(format!("{}: {e}", path.display())))?;
         let b = parse_baseline(&text)
             .map_err(|e| HarnessError::new(format!("{}: {e}", path.display())))?;
+        if path.file_stem().and_then(|x| x.to_str()) != Some(b.unit.as_str()) {
+            return Err(HarnessError::new("baseline filename/unit mismatch"));
+        }
         if matches!(b.status.as_deref(), Some("green" | "partial")) {
             out.push(b.unit);
         }
+    }
+    if out.is_empty() {
+        return Err(HarnessError::new(
+            "baseline has no green/partial unit reports",
+        ));
     }
     out.sort();
     Ok(out)
 }
 
+/// Validate only explicitly selected unit reports before their work starts.
+///
+/// The `--green`/`--all` parent validates the complete directory separately.
+/// Repeating that full parse in every per-unit child would make setup quadratic.
+/// A new unit may have no baseline report; the directory must still contain at
+/// least one valid report so an empty or missing baseline cannot disable gates.
+pub fn validate_selected_baselines(dir: &Path, units: &[String]) -> Result<(), HarnessError> {
+    let entries =
+        fs::read_dir(dir).map_err(|e| HarnessError::new(format!("{}: {e}", dir.display())))?;
+    let mut first = None;
+    for entry in entries {
+        let path = entry
+            .map_err(|e| HarnessError::new(format!("{}: {e}", dir.display())))?
+            .path();
+        if path.extension().and_then(|x| x.to_str()) == Some("json")
+            && first.as_ref().is_none_or(|earlier| &path < earlier)
+        {
+            first = Some(path);
+        }
+    }
+    let first = first.ok_or_else(|| HarnessError::new("baseline has no unit reports"))?;
+    let mut found = false;
+    for unit in units {
+        found |= load_baseline(dir, unit)?.is_some();
+    }
+    if !found {
+        let unit = first
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| HarnessError::new("invalid baseline filename"))?;
+        if load_baseline(dir, unit)?.is_none() {
+            return Err(HarnessError::new(
+                "baseline report disappeared during validation",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Ratchet violations of `res` against `base` (empty: no regression).
 ///
-/// A case that now fails is not reported here: the failure already fails the unit.
+/// A formerly passing case that now fails already fails the unit. Known mismatch
+/// outcomes and previously exercised numerical coverage are also ratcheted.
 pub fn ratchet(base: &Baseline, res: &UnitResult) -> Vec<Violation> {
     let now: BTreeMap<&str, &crate::runner::CaseResult> =
         res.cases.iter().map(|c| (c.name.as_str(), c)).collect();
@@ -195,8 +406,14 @@ pub fn ratchet(base: &Baseline, res: &UnitResult) -> Vec<Violation> {
             detail,
         });
     };
+    if !same_seeds {
+        push(
+            "<seeds>",
+            "baseline/current seeds differ; generated coverage cannot be ratcheted".into(),
+        );
+    }
     for b in &base.cases {
-        if (b.generated && !same_seeds) || b.outcome == "rejected" {
+        if b.outcome == "rejected" {
             continue;
         }
         let Some(c) = now.get(b.name.as_str()) else {
@@ -207,10 +424,19 @@ pub fn ratchet(base: &Baseline, res: &UnitResult) -> Vec<Violation> {
             continue;
         };
         let o = c.outcome();
-        if b.outcome != "pass" || o == CaseOutcome::Fail {
+        if b.outcome == "known_mismatch"
+            && !matches!(o, CaseOutcome::KnownMismatch | CaseOutcome::Pass)
+        {
+            push(
+                &b.name,
+                format!("case `{}` was a known mismatch, now {}", b.name, o.as_str()),
+            );
             continue;
         }
-        if o != CaseOutcome::Pass {
+        if b.outcome == "pass" && o != CaseOutcome::Pass {
+            if o == CaseOutcome::Fail {
+                continue;
+            }
             push(
                 &b.name,
                 format!(
@@ -219,7 +445,9 @@ pub fn ratchet(base: &Baseline, res: &UnitResult) -> Vec<Violation> {
                     o.as_str()
                 ),
             );
-        } else if b.compared_values && !c.compared_values() {
+            continue;
+        }
+        if b.compared_values && !c.compared_values() {
             push(
                 &b.name,
                 format!(
@@ -243,7 +471,7 @@ pub fn value_share(res: &UnitResult) -> Option<Violation> {
     let passed = res.passed();
     let with_values = res.passed_with_values();
     // Exact integer arithmetic for `with_values / passed < MIN_VALUE_SHARE` (= 3/4).
-    let too_few = with_values == 0 || with_values * 4 < passed * 3;
+    let too_few = with_values == 0 || (with_values as u128) * 4 < (passed as u128) * 3;
     too_few.then(|| Violation {
         unit: res.unit.clone(),
         check: Check::ValueShare,
@@ -354,6 +582,8 @@ mod tests {
             rejected: None,
             deferred: None,
             perturbed: None,
+            diagnostics: BTreeMap::new(),
+            known_mismatch: None,
         };
         match outcome {
             "pass" => {}
@@ -365,6 +595,10 @@ mod tests {
             }
             "rejected" => c.rejected = Some("bad".into()),
             "fail" => c.diff.mismatch_count = 1,
+            "known_mismatch" => {
+                c.diff.mismatch_count = 1;
+                c.known_mismatch = Some("tracked mismatch".into());
+            }
             other => panic!("{other}"),
         }
         c
@@ -377,6 +611,7 @@ mod tests {
             harness_error: None,
             abs_floors: Vec::new(),
             seeds: 16,
+            timing: crate::runner::UnitTiming::default(),
         }
     }
 
@@ -398,36 +633,99 @@ mod tests {
     }
 
     #[test]
-    fn parses_current_and_old_reports() {
-        let text = r#"{"unit":"a.b","status":"partial","seeds":16,"cases":[
-            {"name":"f","source":"fixture:x.json#0","pass":true,"outcome":"pass","values_compared":3},
-            {"name":"g","source":"generated:seed=1","pass":true,"outcome":"pass","values_compared":0,"exact_compared":2},
-            {"name":"d","source":"inline","pass":false,"deferred":{"unit":"x","symbol":"F"},"values_compared":0},
-            {"name":"o","source":"inline","pass":true,"values_compared":0}]}"#;
-        let b = parse_baseline(text).unwrap();
-        assert_eq!(b.seeds, Some(16));
-        assert_eq!(b.status.as_deref(), Some("partial"));
-        let got: Vec<_> = b
-            .cases
-            .iter()
-            .map(|c| {
-                (
-                    c.name.as_str(),
-                    c.outcome.as_str(),
-                    c.generated,
-                    c.compared_values,
-                )
-            })
-            .collect();
+    fn parses_550_boolean_bridge_and_exact_counts_without_guessing() {
+        let old = serde_json::json!({"unit":"a.b","status":"green","pass":true,"seeds":16,
+            "cases_total":3,"cases_passed":3,"cases_failed":0,"cases_deferred":0,
+            "cases_vacuous":1,"cases_both_errored":1,
+            "cases":[
+              {"name":"integer","pass":true,"outcome":"pass","values_compared":0},
+              {"name":"error","pass":true,"outcome":"pass","values_compared":0,"both_errored":true},
+              {"name":"empty","pass":true,"outcome":"pass","values_compared":0,"vacuous":true}]});
+        let b = parse_baseline(&old.to_string()).unwrap();
         assert_eq!(
-            got,
-            [
-                ("f", "pass", false, true),
-                ("g", "pass", true, true),
-                ("d", "deferred", false, false),
-                ("o", "pass", false, false),
-            ]
+            b.cases
+                .iter()
+                .map(|c| c.compared_values)
+                .collect::<Vec<_>>(),
+            [true, false, false]
         );
+        let mut ambiguous = old.clone();
+        ambiguous.as_object_mut().unwrap().remove("cases_vacuous");
+        assert!(parse_baseline(&ambiguous.to_string()).is_err());
+        let mut modern = old.clone();
+        modern["schema_version"] = serde_json::json!(1);
+        assert!(parse_baseline(&modern.to_string()).is_err());
+        for c in modern["cases"].as_array_mut().unwrap() {
+            c["exact_compared"] = serde_json::json!(0);
+        }
+        modern["cases"][0]["exact_compared"] = serde_json::json!(7);
+        assert!(parse_baseline(&modern.to_string()).unwrap().cases[0].compared_values);
+        assert_eq!(modern["cases"][0]["exact_compared"], 7);
+        let mut duplicate = old.clone();
+        duplicate["cases"][1]["name"] = serde_json::json!("integer");
+        assert!(parse_baseline(&duplicate.to_string()).is_err());
+        for field in ["cases", "cases_total", "status", "seeds"] {
+            let mut missing = old.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(parse_baseline(&missing.to_string()).is_err(), "{field}");
+        }
+        for (field, value) in [
+            ("status", serde_json::json!("fail")),
+            ("pass", serde_json::json!(false)),
+            ("harness_error", serde_json::json!("broken")),
+        ] {
+            let mut invalid = old.clone();
+            invalid[field] = value;
+            assert!(parse_baseline(&invalid.to_string()).is_err(), "{field}");
+        }
+        let mut corrupt = old;
+        corrupt["cases_total"] = serde_json::json!(99);
+        assert!(parse_baseline(&corrupt.to_string()).is_err());
+    }
+
+    #[test]
+    fn passing_to_known_is_not_progress_and_known_cases_cannot_disappear() {
+        let b = base(&[
+            ("pass", "pass", false, true),
+            ("known", "known_mismatch", false, true),
+        ]);
+        let violations = ratchet(&b, &unit(vec![case("pass", "known_mismatch", 1)]));
+        assert_eq!(violations.len(), 2);
+    }
+
+    #[test]
+    fn known_mismatches_keep_outcomes_and_numerical_coverage() {
+        let b = base(&[("known", "known_mismatch", false, true)]);
+        for outcome in ["known_mismatch", "pass"] {
+            assert!(ratchet(&b, &unit(vec![case("known", outcome, 1)])).is_empty());
+            let violations = ratchet(&b, &unit(vec![case("known", outcome, 0)]));
+            assert_eq!(violations.len(), 1, "{outcome}");
+            assert!(violations[0].detail.contains("now compares nothing"));
+        }
+        for outcome in ["deferred", "rejected", "fail"] {
+            let violations = ratchet(&b, &unit(vec![case("known", outcome, 0)]));
+            assert_eq!(violations.len(), 1, "{outcome}");
+            assert!(violations[0].detail.contains("was a known mismatch"));
+        }
+    }
+
+    #[test]
+    fn legacy_indexed_integer_mismatch_proves_presence_without_a_count() {
+        let mut old = serde_json::json!({"unit":"a.b","status":"partial","pass":true,"seeds":16,
+            "cases_total":1,"cases_passed":0,"cases_failed":0,"cases_deferred":0,
+            "cases_known_mismatch":1,"cases_vacuous":0,
+            "cases":[{"name":"known","pass":false,"outcome":"known_mismatch","values_compared":0,
+                "mismatches":[{"field":"ints.status[0]","cpp":"1006","rust":"1001"}]}]});
+        assert!(parse_baseline(&old.to_string()).unwrap().cases[0].compared_values);
+        assert!(old["cases"][0].get("exact_compared").is_none());
+        for bad in [
+            serde_json::json!([]),
+            serde_json::json!([{"field":"ints.status.len","cpp":"1","rust":"2"}]),
+            serde_json::json!([{"field":"ints.status[0]","cpp":"missing","rust":"1"}]),
+        ] {
+            old["cases"][0]["mismatches"] = bad;
+            assert!(parse_baseline(&old.to_string()).is_err());
+        }
     }
 
     #[test]
@@ -475,7 +773,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_cases_are_skipped_when_seeds_differ() {
+    fn changed_seeds_cannot_hide_generated_case_loss() {
         let b = base(&[
             ("gen0000", "pass", true, true),
             ("fix", "pass", false, true),
@@ -483,7 +781,7 @@ mod tests {
         let mut r = unit(vec![case("fix", "pass", 1)]);
         assert_eq!(ratchet(&b, &r).len(), 1);
         r.seeds = 4;
-        assert_eq!(ratchet(&b, &r), []);
+        assert_eq!(ratchet(&b, &r).len(), 2);
     }
 
     #[test]

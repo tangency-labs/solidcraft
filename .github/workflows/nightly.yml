@@ -14,6 +14,9 @@ on:
         description: "Fuzz cases per unit"
         default: "300"
 
+permissions:
+  contents: read
+
 concurrency:
   group: nightly
   cancel-in-progress: false
@@ -27,7 +30,7 @@ env:
 
 jobs:
   fuzz:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 240
     env:
       SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
@@ -35,32 +38,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Clone upstream at pinned commit
-        run: |
-          git init upstream
-          git -C upstream remote add origin "$UPSTREAM_REPO"
-          git -C upstream fetch --depth 1 origin "$UPSTREAM_COMMIT" \
-            || git -C upstream fetch origin
-          git -C upstream checkout --detach "$UPSTREAM_COMMIT"
-
-      - name: Install C++ build tools
-        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake g++
-
-      # Same key as ci.yml, so the nightly reuses the PR jobs' C++ build.
-      - name: Cache C++ reference build
-        uses: actions/cache@v4
-        with:
-          path: .cpp
-          key: cpp-v2-${{ runner.os }}-${{ env.UPSTREAM_COMMIT }}-${{ hashFiles('harness/cpp/CMakeLists.txt', 'harness/cpp/build.sh', 'harness/cpp/stubs/**', 'harness/cpp/patches/**') }}
-
-      - name: Build C++ reference (when the cache did not provide the libs)
-        run: |
-          cpp=$SOLIDCORE_CPP_DIR
-          if [ -f "$cpp/lib/libSMLib.a" ] && [ -f "$cpp/lib/libSM_API.a" ] && [ -f "$cpp/ffi.env" ]; then
-            echo "C++ reference restored from cache"
-          else
-            harness/cpp/build.sh --jobs "$(nproc)"
-          fi
+      - name: Upstream sources, sccache and C++ reference
+        uses: ./.github/actions/cpp-reference
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -73,8 +52,13 @@ jobs:
       # One unit at a time so a failure names its unit and the rest still run.
       - name: Fuzz every green or partial unit
         run: |
+          case "$FUZZ_CASES" in
+            ''|*[!0-9]*) echo "fuzz_cases must be a positive integer" >&2; exit 2 ;;
+          esac
+          test "$FUZZ_CASES" -gt 0
           bin=bin/difftest/difftest
-          units=$("$bin" --list | awk -F'\t' '$2 == "status=green" || $2 == "status=partial" { print $1 }')
+          units=$(python3 scripts/ci/fuzz-units.py)
+          test -n "$units" || { echo "no green/partial units were selected" >&2; exit 1; }
           failed=0
           for u in $units; do
             "$bin" --unit "$u" --fuzz "$FUZZ_CASES" --fuzz-out bin/fuzz || failed=$((failed + 1))

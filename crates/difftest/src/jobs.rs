@@ -442,6 +442,30 @@ mod tests {
     }
 
     #[test]
+    fn forwards_baseline_and_seeds_to_each_child() {
+        let raw = s(&[
+            "--green",
+            "--jobs",
+            "2",
+            "--baseline",
+            "base dir/reports",
+            "--seeds",
+            "16",
+            "--no-report",
+        ]);
+        assert_eq!(
+            forwarded_args(&raw),
+            s(&[
+                "--baseline",
+                "base dir/reports",
+                "--seeds",
+                "16",
+                "--no-report"
+            ])
+        );
+    }
+
+    #[test]
     fn summary_lines() {
         assert_eq!(
             parse_summary("difftest: 1 unit(s), 0 passed, 1 partial, 0 failed"),

@@ -7,6 +7,14 @@ on:
   # The merge queue tests each PR merged with the latest main (and the PRs ahead of it).
   merge_group:
   workflow_dispatch:
+    inputs:
+      baseline_sha:
+        description: "Exact main revision used as baseline"
+        type: string
+      diagnostic_only:
+        description: "Explicitly skip the ratchet for a diagnostic manual run"
+        type: boolean
+        default: false
 
 # Every job runs on Blacksmith's hosted runners (blacksmith.sh; ephemeral VMs, sponsored
 # minutes, outside the org's 20-runner cap): pushes to main, every pull request (fork or not)
@@ -26,20 +34,22 @@ env:
   UPSTREAM_REPO: https://github.com/NVIDIA-Omniverse/usd-brep
   UPSTREAM_COMMIT: c9c5979f04cea8c38213004d4f04df0dcfb40d05  # c9c5979
 
+permissions:
+  contents: read
+
 jobs:
+  ci-scripts:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/ci/test-difftest-baseline.sh
+
   fmt:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - run: rustup show active-toolchain || rustup toolchain install
       - run: cargo fmt --all --check
-
-  # Shell tests for the CI scripts (no Rust build; a few seconds).
-  ci-scripts:
-    runs-on: ${{ (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'self-hosted-fast' || 'ubuntu-latest' }}
-    steps:
-      - uses: actions/checkout@v4
-      - run: scripts/ci/test-difftest-baseline.sh
 
   clippy:
     runs-on: blacksmith-8vcpu-ubuntu-2404
@@ -146,15 +156,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Skip when no unit is green
+      - name: Select optional native execution
         id: green
         run: |
           if grep -Eqs '^\s*status\s*=\s*"(green|partial)"' plan/units/*.toml; then
             echo "any=true" >> "$GITHUB_OUTPUT"
           else
             echo "any=false" >> "$GITHUB_OUTPUT"
-            echo "No green units in plan/units/; nothing to difftest."
+            echo "No current green units; exact-base retention is still required."
           fi
+
+      - name: Validate exact-base report artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.baseline_sha }}
+        run: |
+          arg=$(scripts/ci/difftest-baseline.sh "$EVENT" "$BASE" "$RUNNER_TEMP/difftest-baseline" --current-plan "$GITHUB_WORKSPACE")
+          echo "DIFFTEST_BASELINE=$arg" >> "$GITHUB_ENV"
 
       - name: Upstream sources, sccache and the C++ reference
         if: steps.green.outputs.any == 'true'
@@ -175,31 +194,48 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: scripts/fetch-reports.sh || echo "no previous reports; queue ordered by fixture size"
 
-      # The committed reports of the base commit (main for a PR, the previous main for a
-      # push) are the ratchet's baseline: no case that passed there may disappear, stop
-      # passing or stop comparing values (crates/difftest/README.md, "Regression gate").
-      # A failed fetch or extraction fails the job (it must never fall back to running
-      # --green without a baseline); only a push without a base commit or a manual run
-      # skips the ratchet. See scripts/ci/difftest-baseline.sh.
-      - name: Baseline reports from the base commit
-        if: steps.green.outputs.any == 'true'
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          arg=$(scripts/ci/difftest-baseline.sh "$EVENT" "$BASE" "$RUNNER_TEMP/difftest-baseline")
-          if [ -z "$arg" ]; then
-            echo "::notice::no base commit for this $EVENT run; the difftest ratchet is skipped"
-          fi
-          echo "DIFFTEST_BASELINE=$arg" >> "$GITHUB_ENV"
-
       - name: Difftest green units
         if: steps.green.outputs.any == 'true'
         # Optimised profile (Cargo.toml [profile.difftest]): identical results, about 20x
-        # faster than the debug build that used to take ~35 min here.
-        run: cargo run --profile difftest -p difftest --features cpp -- --green $DIFFTEST_BASELINE
+        # faster than the debug build that used to take ~35 min here. --jobs 0: one child
+        # process per unit, one per vCPU (same output and reports as a serial run).
+        run: |
+          baseline=()
+          if [ -n "$DIFFTEST_BASELINE" ]; then
+            baseline=(--baseline "$RUNNER_TEMP/difftest-baseline/reports")
+          fi
+          cargo run --profile difftest -p difftest --features cpp -- --green --jobs 0 "${baseline[@]}"
 
-      # Sensitivity: a runner whose comparison would not notice a changed output fails.
       - name: Difftest perturbation check
         if: steps.green.outputs.any == 'true'
-        run: cargo run --profile difftest -p difftest --features cpp -- --green --perturb
+        run: cargo run --profile difftest -p difftest --features cpp -- --green --perturb --jobs 0 --no-report
+
+      # main's reports are published from here (site, PROGRESS.md case counts,
+      # scripts/fetch-reports.sh), never committed.
+      - name: Keep only reports of green/partial units
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.green.outputs.any == 'true' && !cancelled()
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys
+          sys.path.insert(0, "harness/plan")
+          import units
+          keep = {u["id"] for u in units.load_units() if u.get("status") in ("green", "partial")}
+          for p in pathlib.Path("reports/difftest").glob("*.json"):
+              if p.stem not in keep:
+                  p.unlink()
+          PY
+
+      - name: Upload difftest reports
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.green.outputs.any == 'true' && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: difftest-reports
+          path: |
+            reports/difftest/*.json
+            reports/difftest/times.tsv
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: sccache stats
+        if: always() && steps.green.outputs.any == 'true'
+        run: sccache --show-stats || true

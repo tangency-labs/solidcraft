@@ -38,7 +38,7 @@ nice -n 10 cargo test -p difftest --features cpp                     # harness s
 | `--seeds N` | generated cases per unit (default 16) |
 | `--filter S` | only cases whose name contains `S` |
 | `--perturb` | change one item of each case's Rust output (below); passes only if **every** perturbed case is caught. No report written. |
-| `--baseline D` | regression ratchet: compare each unit with its earlier report `D/<unit>.json` (see [Regression gate](#regression-gate---baseline-value-share)). CI passes the base commit's `reports/difftest` |
+| `--baseline D` | regression ratchet: compare each unit with its earlier report `D/<unit>.json` (see [Regression gate](#regression-gate---baseline-value-share)). CI passes the exact base revision's validated report artifact |
 | `--report-dir D` / `--no-report` | report location (default `reports/difftest/`) / skip writing |
 | `--fuzz N` | with `--unit`: probe the unit's FFI guard with N mutated cases, each run in a child process (below). No report written. |
 | `--fuzz-out D` | where `--fuzz` writes failing inputs (default `bin/fuzz/`; files go to `D/<unit>/`) |
@@ -188,6 +188,49 @@ is written the same way (so it can be re-run), but does not fail the run.
 `.github/workflows/nightly.yml` runs `--fuzz 300` on every green and partial unit
 each night and uploads failing inputs as the `fuzz-failures` artifact.
 
+## Fuzzing the `.smb` readers (`examples/reader_fuzz.rs`)
+
+A mutation fuzzer for the Rust database readers only (no C++, not part of the
+gate). Build and run it with the difftest profile, so arithmetic overflow
+panics and is reported. Unix-only (the code is in `examples/reader_fuzz/fuzz.rs`;
+on other platforms the example only prints a notice and exits 2):
+
+```sh
+X="nice -n 10 cargo run --profile difftest -p difftest --example reader_fuzz --"
+$X sweep --seeds-dir upstream/TestFiles/pt_TestFiles --cases 2000 --jobs 4 \
+    --out reader-fuzz-out --tag read [--stage read|topo|full|persist] [--filter <substr>]
+$X repro --seed <seed file> --case <i> [--write out.smb]     # rebuild one case
+$X run --input f.smb [--binary] [--stage ..] [--stack-kb N]  # run one file in-process
+$X minimize --input f.smb [--binary] --expect <verdict prefix> [--output f.min]
+$X stats --seeds-dir <dir> --cases N [--stage ..]            # error-site histogram
+```
+
+* **Stages.** `read`: `BrepData::read_from_file`. `full`:
+  `topology::brep::p7::read_from_file`. `topo`: read, then
+  `p10::make_topology_from_data` without analytics, healing or UV checks.
+  `persist`: `BrepData::read_from_db` with persisted attributes and a small
+  attribute table. `selftest` checks that every bad verdict is detected.
+* **Cases.** Case `i` of a seed applies 1 to 5 mutations (bit and byte flips,
+  truncation, integer and float token swaps, line and section edits, type-code
+  swaps, nesting wrappers, raw 8-byte overwrites for binary files) chosen by
+  splitmix64 seeded from the seed's relative path and `i`, so `repro` rebuilds
+  any case. A seed under a directory named `corpus-bin` is read as binary.
+* **Isolation.** Batches (`--batch`, default 250) run in child processes under
+  `ulimit -v` (`--mem-mb`, default 3072), one thread per case with a fixed
+  stack (`--stack-kb`, default 8192), with a per-case timeout (`--timeout`,
+  default 20 s).
+* **Verdicts.** `ok`, `err`, `unported` are fine; `panic`, `oom`,
+  `stack-overflow`, `crash` and `timeout` are bad. Each bad case is written to
+  `<out>/crashes/` (mutated file plus a `.txt` with seed, case and mutations);
+  each sweep writes `<tag>-summary.txt`, `<tag>-findings.tsv` and
+  `<tag>-per-seed.tsv`. Exit status `1` on any bad verdict.
+* `stats` runs in-process (use it only after a clean sweep) and counts the
+  error site each case ended at, as a coverage proxy.
+* Binary and persisted-attribute seeds must be written by upstream
+  (`SmBrepData::WriteToFile(SM_BINARY)`, `WriteToDB(.., bPersistAttribs)`).
+  The tool that does this is not in the repo; it would go in `harness/cpp/`
+  as a small program (or shim functions) linked against the reference build.
+
 ## Deferred cases, `partial` units
 
 A unit's Rust code may call into a unit that is not ported yet; it then returns
@@ -223,40 +266,54 @@ summaries include a rejected count when nonzero. A run containing only rejected
 fixtures fails the gate: rejection cannot establish parity. Layout errors, native
 exceptions and errors from the operation itself must not be classified this way.
 
+The same mechanism covers inputs that are undefined in C++ (AGENTS.md section 4,
+step 5.6): an FFI guard that refuses an input upstream would crash on, or a shim's
+crash trap that ran the call in a forked child and saw it crash, returns
+`Output::rejected(reason)` with the reason naming the upstream issue (e.g.
+`topology.face_p1`'s UB-137 seam calls). The C++ side never returns
+`Output::deferred`: deferrals are decided by the Rust side only, and a C++-side
+deferral is a harness error.
+
 ## Regression gate (`--baseline`, value share)
 
-Passing every case is not enough: a unit that silently loses cases, turns passes
-into deferrals, or makes its generator reach only error paths stays green. Two
-checks, run on every unit that does not already fail, close that gap
-(`src/baseline.rs`):
+Passing cases must retain their identities, outcomes and value coverage.
+`--baseline D` compares a full unit run against `D/<unit>.json`: passing cases
+must remain passing, including against `known_mismatch`; cases that compared
+float/integer/topology values must keep value coverage. Deferred, failing and
+known-mismatch cases cannot disappear. A known mismatch must remain known or
+become a genuine pass; it cannot become deferred or rejected. Every retained case
+that compared values must keep value coverage. Rejected fixture constructors may be
+removed; new passing cases and genuine fixes are allowed. Changed seeds and
+`--filter` with `--baseline` are errors, so generated cases cannot silently vanish.
+With `--green`, dropped baseline units fail in the parent before parallel workers
+start. Children receive `--baseline` and enforce the same per-unit gates.
+Whole-set `--green`/`--all` preflight validates every report. Explicit `--unit`
+preflight validates selected reports and refuses an empty baseline; new units may
+have no earlier report. This avoids parsing the full corpus in every worker.
 
-* **Ratchet** (`--baseline D`): the run is compared case by case, by name, with
-  the unit's earlier report `D/<unit>.json`. CI uses the reports committed on the
-  base commit (main for a PR, the previous main for a push), extracted by
-  `scripts/ci/difftest-baseline.sh`; if that fails, the job fails (only a push
-  without a base commit, or a manual run, skips the ratchet). A **GATE-FAIL** is
-  printed when a case that **passed** there is missing, now deferred or rejected,
-  or compared values there but compares nothing now (e.g. both sides now return
-  the same error); when a **deferred or failing** case is missing; or, with
-  `--green`, when a unit that was green/partial there is no longer run. Allowed:
-  new cases, deferred → pass (a dependency landed), removing rejected fixtures.
-  Generated cases are matched only when both runs used the same `--seeds`; with
-  `--filter` the ratchet is skipped. A unit with no earlier report is new and
-  only gets the value-share check.
-* **Value share** (always on, also in `--status-of`): at least 75% of a unit's
-  passing cases, and at least one, must compare a value (float, integer or
-  topology entry), not only an error string both sides agreed on. When this
-  floor was set, every green/partial unit was at 78% or more.
+The separate value-share floor remains 75% of a unit's passing cases and at
+least one value-bearing case. Both-error and vacuous passes stay in the
+denominator. Known mismatches are not passes and cannot waive new discrepancies.
 
-Reports record `exact_compared` (integer/topology comparisons) per case when
-nonzero, so the ratchet can tell integer-only cases that compared something.
+CI retrieves the exact base SHA's successful push/main CI artifact through
+`scripts/ci/difftest-baseline.sh`. PRs use `pull_request.base.sha`, merge queues
+use `merge_group.base_sha`, and main pushes use `before`. Repository/workflow,
+run/attempt, artifact ownership, SHA256 and complete report set must validate.
+Missing/expired/corrupt baselines fail closed; no latest-main or committed-report
+fallback is allowed. Only a genuine zero-before first push, or a manual run with
+explicit `diagnostic_only`, skips the ratchet with a notice. Manual validation
+runs supply `baseline_sha`. The crate-wide `audit.recursion` review is excluded
+only when the exact base's selector explicitly declares this non-runner policy;
+other missing runner/report units fail. Provenance is stored beside the reports.
 
-**Stale reports.** Before overwriting `reports/difftest/<unit>.json`, a run compares
-the counts recorded there (status, cases, passed, failed, deferred, rejected) with
-its own and prints `STALE-REPORT` when they differ. On GitHub Actions this is also a
-warning annotation on the file. A stale committed report makes the next PR's ratchet
-baseline weaker, so regenerate and commit it, also for units your change affected
-indirectly (e.g. by wiring a back-edge). It warns and does not fail.
+Modern reports serialize actual `exact_compared` counts (including zero) with
+`schema_version = 1`. Old #550 reports omitted those counts, but their vacuity
+marker proves boolean integer coverage for a zero-float pass that is neither
+vacuous nor both-error. This bridge never invents an integer comparison count. Legacy known mismatches
+with zero floats need an indexed integer mismatch as proof of exact-value
+coverage; missing or ambiguous proof fails closed.
+Ambiguous older schemas fail rather than silently discarding coverage.
+Reports remain generated artifacts; never regenerate-and-commit baseline reports.
 
 A legitimate regression (a wrong fixture removed, a case renamed) needs a waiver
 in `plan/difftest-waivers.toml`, reviewed with the PR:
