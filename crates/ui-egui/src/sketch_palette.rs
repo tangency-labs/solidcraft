@@ -401,7 +401,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui.horizontal(|ui| {
                         let text = crate::i18n::format("sketch.untied_ends", &[("count", &untied_ends.to_string())]);
                         ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).on_hover_text(app.tr("ui.untied_ends_tip"));
-                        let button = crate::ui_kit::button(ui, "ui.tie_ends", crate::ui_kit::Button::Normal).on_hover_text(app.tr("ui.tie_ends_tip"));
+                        let button =
+                            crate::ui_kit::button(ui, app.tr("ui.tie_ends"), crate::ui_kit::Button::Normal).on_hover_text(app.tr("ui.tie_ends_tip"));
                         crate::scenario::publish_handle("sketch_palette:tie_ends", button.rect.center());
                         tie = button.clicked();
                     });
@@ -794,6 +795,7 @@ mod tests {
         h.settle();
         assert!(h.widget("Open 2").is_some(), "the status counts the open ends");
         assert!(h.widget("Untied 4").is_some(), "the status counts the untied ends");
+        assert!(h.widget("Tie").is_some(), "the Tie button shows its label, not its catalog key");
         let at = crate::scenario::handle_at("sketch_palette:tie_ends").unwrap();
         h.call("ui.click", json!({"x": at.x, "y": at.y}));
         h.settle();
