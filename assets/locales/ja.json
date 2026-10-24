@@ -397,6 +397,8 @@
   "Remove this point": "この点を削除",
   "Rename Feature": "フィーチャーの名前を変更",
   "Rename Folder": "フォルダーの名前を変更",
+  "Reopen designs": "デザインを再度開く",
+  "Reopen the designs that were open when SolidCraft was last closed": "前回 SolidCraft を閉じたときに開いていたデザインを再度開く",
   "Replace existing library file": "既存のライブラリファイルを置き換える",
   "Report a bug — review a screenshot and open a GitHub draft": "バグを報告 — スクリーンショットを確認してGitHub下書きを作成",
   "Report text copied. Paste it into GitHub and submit your report there.": "報告本文をコピーしました。GitHubに貼り付けて投稿してください。",

@@ -397,6 +397,8 @@
   "Remove this point": "移除此点",
   "Rename Feature": "重命名特征",
   "Rename Folder": "重命名文件夹",
+  "Reopen designs": "重新打开设计",
+  "Reopen the designs that were open when SolidCraft was last closed": "重新打开上次关闭 SolidCraft 时打开的设计",
   "Replace existing library file": "替换现有库文件",
   "Report a bug — review a screenshot and open a GitHub draft": "报告缺陷 — 复核截图并开启 GitHub 草稿",
   "Report text copied. Paste it into GitHub and submit your report there.": "报告文本已复制。请在GitHub中粘贴并提交。",

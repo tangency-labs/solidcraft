@@ -531,6 +531,10 @@ preference_settings! {
     /// Decimals shown for lengths and angles.
     length_decimals: u8 = 2, PAGE_DESIGN;
     angle_decimals: u8 = 1, PAGE_DESIGN;
+    /// Reopen the saved designs that were open when the app was last closed (#5542).
+    reopen_designs: bool = true, PAGE_GENERAL;
+    /// Those designs' files, in tab order, as the last quit left them.
+    open_designs: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// `dark`, `light` or `system` (follow the operating system), or a theme file's id: a
     /// built-in one (`gruvbox-dark`, …) or one of `custom_themes` (#2255).
     theme: String = "dark".into(), PAGE_INTERFACE;

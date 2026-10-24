@@ -769,6 +769,10 @@ fn main() -> eframe::Result {
                 open_documents::set_ui(&cc.egui_ctx);
                 [files, open_documents::take()].concat()
             };
+            // No design given: the designs open at the last quit, when the preference asks (#5542).
+            // Not when driven over the control channel, whose clients expect a fresh design.
+            let files =
+                if files.is_empty() && !sample && control_port.is_none() { solidcraft_ui_egui::documents::designs_to_reopen(&app) } else { files };
             for f in &files {
                 app.open_path_async(f);
             }

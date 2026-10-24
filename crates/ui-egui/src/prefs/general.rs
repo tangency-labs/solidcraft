@@ -30,6 +30,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             ui_kit::settings_autosave_timeline(ui, app.autosave_minutes);
         });
+        ui_kit::settings_block(ui, app.tr_label("Reopen designs"), labels, |ui| {
+            ui_kit::checkbox(
+                ui,
+                crate::i18n::tr_label("Reopen the designs that were open when SolidCraft was last closed"),
+                &mut app.preferences.reopen_designs,
+            );
+        });
         ui_kit::settings_block(ui, app.tr_label("Crash reports"), labels, |ui| {
             ui.horizontal(|ui| {
                 let count = app.crashes.saved_count();

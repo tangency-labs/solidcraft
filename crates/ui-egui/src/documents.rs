@@ -393,6 +393,12 @@ fn quit_step(app: &mut SolveApp) {
             }
             app.docs.quitting = None;
             app.quit_requested = true;
+            // The next launch reopens the designs saved to a file (#5542).
+            let sessions: Vec<&solidcraft_engine::Session> = match app.docs.slots.is_empty() {
+                true => vec![&app.session],
+                false => app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session)).collect(),
+            };
+            app.preferences.open_designs = sessions.into_iter().filter_map(|s| s.path.clone()).collect();
         }
     }
 }
@@ -422,6 +428,15 @@ pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
             None => (app.session.doc.name.clone(), app.session.is_dirty()),
         })
         .collect()
+}
+
+/// The designs a launch with no file to open reopens: those open at the last quit that still
+/// exist, when Preferences › General asks for it (#5542).
+pub fn designs_to_reopen(app: &SolveApp) -> Vec<String> {
+    if !app.preferences.reopen_designs {
+        return Vec::new();
+    }
+    app.preferences.open_designs.iter().filter(|p| std::path::Path::new(p.as_str()).is_file()).take(MAX_OPEN).cloned().collect()
 }
 
 /// The control channel's `ui.documents`: list, `new`, `switch`, `close` (by index; `force`
@@ -1170,7 +1185,15 @@ mod tests {
         assert_eq!(a.docs.closing, None);
         assert!(a.quit_requested, "every design answered: quit");
         assert!(!any_dirty(&a), "Don't Save discards: nothing is kept for recovery");
+        // The next launch reopens the saved design; the never-saved one has no file (#5542).
+        let path = file.to_string_lossy().to_string();
+        assert_eq!(a.preferences.open_designs, vec![path.clone()]);
+        assert_eq!(designs_to_reopen(&a), vec![path]);
+        a.preferences.reopen_designs = false;
+        assert!(designs_to_reopen(&a).is_empty(), "turned off in Preferences");
+        a.preferences.reopen_designs = true;
         let _ = std::fs::remove_file(&file);
+        assert!(designs_to_reopen(&a).is_empty(), "a file that is gone is skipped");
     }
 
     /// Cancel, Esc's answer, or a Save that saves nothing (a never-saved design whose Save As
