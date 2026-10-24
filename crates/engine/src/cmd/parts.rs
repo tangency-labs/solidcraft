@@ -42,7 +42,9 @@ const FAMILIES: [(&str, &str, &str); 7] = [
 ];
 
 /// ISO metric coarse: (size, d, pitch).
-const METRIC: [(&str, f64, f64); 9] = [
+const METRIC: [(&str, f64, f64); 14] = [
+    ("M2", 2.0, 0.4),
+    ("M2.5", 2.5, 0.45),
     ("M3", 3.0, 0.5),
     ("M4", 4.0, 0.7),
     ("M5", 5.0, 0.8),
@@ -50,12 +52,17 @@ const METRIC: [(&str, f64, f64); 9] = [
     ("M8", 8.0, 1.25),
     ("M10", 10.0, 1.5),
     ("M12", 12.0, 1.75),
+    ("M14", 14.0, 2.0),
     ("M16", 16.0, 2.0),
     ("M20", 20.0, 2.5),
+    ("M24", 24.0, 3.0),
+    ("M30", 30.0, 3.5),
 ];
 
 /// ISO 4762: (size, head diameter dk, head height k, socket s, socket depth t).
-const SHCS: [(&str, f64, f64, f64, f64); 9] = [
+const SHCS: [(&str, f64, f64, f64, f64); 14] = [
+    ("M2", 3.8, 2.0, 1.5, 1.0),
+    ("M2.5", 4.5, 2.5, 2.0, 1.1),
     ("M3", 5.5, 3.0, 2.5, 1.3),
     ("M4", 7.0, 4.0, 3.0, 2.0),
     ("M5", 8.5, 5.0, 4.0, 2.5),
@@ -63,12 +70,17 @@ const SHCS: [(&str, f64, f64, f64, f64); 9] = [
     ("M8", 13.0, 8.0, 6.0, 4.0),
     ("M10", 16.0, 10.0, 8.0, 5.0),
     ("M12", 18.0, 12.0, 10.0, 6.0),
+    ("M14", 21.0, 14.0, 12.0, 7.0),
     ("M16", 24.0, 16.0, 14.0, 8.0),
     ("M20", 30.0, 20.0, 17.0, 10.0),
+    ("M24", 36.0, 24.0, 19.0, 12.0),
+    ("M30", 45.0, 30.0, 22.0, 15.5),
 ];
 
 /// ISO 4014/4017 hex head: (size, across flats s, head height k).
-const HEX_BOLT: [(&str, f64, f64); 9] = [
+const HEX_BOLT: [(&str, f64, f64); 14] = [
+    ("M2", 4.0, 1.4),
+    ("M2.5", 5.0, 1.7),
     ("M3", 5.5, 2.0),
     ("M4", 7.0, 2.8),
     ("M5", 8.0, 3.5),
@@ -76,12 +88,17 @@ const HEX_BOLT: [(&str, f64, f64); 9] = [
     ("M8", 13.0, 5.3),
     ("M10", 16.0, 6.4),
     ("M12", 18.0, 7.5),
+    ("M14", 21.0, 8.8),
     ("M16", 24.0, 10.0),
     ("M20", 30.0, 12.5),
+    ("M24", 36.0, 15.0),
+    ("M30", 46.0, 18.7),
 ];
 
 /// ISO 4032: (size, across flats s, height m).
-const HEX_NUT: [(&str, f64, f64); 9] = [
+const HEX_NUT: [(&str, f64, f64); 14] = [
+    ("M2", 4.0, 1.6),
+    ("M2.5", 5.0, 2.0),
     ("M3", 5.5, 2.4),
     ("M4", 7.0, 3.2),
     ("M5", 8.0, 4.7),
@@ -89,12 +106,17 @@ const HEX_NUT: [(&str, f64, f64); 9] = [
     ("M8", 13.0, 6.8),
     ("M10", 16.0, 8.4),
     ("M12", 18.0, 10.8),
+    ("M14", 21.0, 12.8),
     ("M16", 24.0, 14.8),
     ("M20", 30.0, 18.0),
+    ("M24", 36.0, 21.5),
+    ("M30", 46.0, 25.6),
 ];
 
 /// ISO 7089: (size, inner d1, outer d2, thickness h).
-const WASHER: [(&str, f64, f64, f64); 9] = [
+const WASHER: [(&str, f64, f64, f64); 14] = [
+    ("M2", 2.2, 5.0, 0.3),
+    ("M2.5", 2.7, 6.0, 0.5),
     ("M3", 3.2, 7.0, 0.5),
     ("M4", 4.3, 9.0, 0.8),
     ("M5", 5.3, 10.0, 1.0),
@@ -102,8 +124,11 @@ const WASHER: [(&str, f64, f64, f64); 9] = [
     ("M8", 8.4, 16.0, 1.6),
     ("M10", 10.5, 20.0, 2.0),
     ("M12", 13.0, 24.0, 2.5),
+    ("M14", 15.0, 28.0, 2.5),
     ("M16", 17.0, 30.0, 3.0),
     ("M20", 21.0, 37.0, 3.0),
+    ("M24", 25.0, 44.0, 4.0),
+    ("M30", 31.0, 56.0, 4.0),
 ];
 
 /// ISO 4026: (size, socket s, socket depth t).
@@ -555,6 +580,35 @@ mod tests {
         let (lo, hi) = bbox(&b, "Bearing 608");
         assert!((hi.x - lo.x - 22.0).abs() < 1e-6 && (hi.z - lo.z - 7.0).abs() < 1e-6);
         assert!(b.execute("parts.insert", &json!({"family": "hex_nut", "size": "M7"})).is_err());
+    }
+
+    /// #2091: the second and larger ISO sizes, M2, M2.5, M14, M24 and M30, are in the screw, bolt,
+    /// nut and washer tables (they stopped at M3 and M20).
+    #[test]
+    fn small_and_large_iso_sizes_insert() {
+        for family in ["socket_head_cap_screw", "hex_bolt", "hex_nut", "washer"] {
+            let l = run(&mut Session::default(), "parts.library", json!({"family": family}));
+            let sizes: Vec<&str> = l["sizes"].as_array().unwrap().iter().filter_map(|x| x["size"].as_str()).collect();
+            for size in ["M2", "M2.5", "M14", "M24", "M30"] {
+                assert!(sizes.contains(&size), "{family} has {size}: {sizes:?}");
+            }
+        }
+        // An M2.5 x 8 cap screw: head Ø4.5 x 2.5, shank 8 long.
+        let mut s = Session::default();
+        run(&mut s, "parts.insert", json!({"family": "socket_head_cap_screw", "size": "M2.5", "length": 8}));
+        let (lo, hi) = bbox(&s, "SHCS M2.5x8");
+        assert!((hi.x - lo.x - 4.5).abs() < 1e-6 && (lo.z + 8.0).abs() < 1e-6 && (hi.z - 2.5).abs() < 1e-6, "{lo:?} {hi:?}");
+        // An M24 nut: 36 across flats, 21.5 high.
+        let mut n = Session::default();
+        run(&mut n, "parts.insert", json!({"family": "hex_nut", "size": "M24"}));
+        let (lo, hi) = bbox(&n, "Hex Nut M24");
+        let (w, h) = ((hi.x - lo.x).max(hi.y - lo.y), hi.z - lo.z);
+        assert!((w - 36.0 / (std::f64::consts::PI / 6.0).cos()).abs() < 1e-6 && (h - 21.5).abs() < 1e-6, "{w} {h}");
+        // An M30 washer: Ø56 x 4.
+        let mut w = Session::default();
+        run(&mut w, "parts.insert", json!({"family": "washer", "size": "M30"}));
+        let (lo, hi) = bbox(&w, "Washer M30");
+        assert!((hi.x - lo.x - 56.0).abs() < 1e-6 && (hi.z - lo.z - 4.0).abs() < 1e-6, "{lo:?} {hi:?}");
     }
 
     #[test]
