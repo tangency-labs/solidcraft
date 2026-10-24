@@ -1543,14 +1543,16 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         let sid = ss.feature;
         let shown = snapping.then(|| crate::dialogs::SnapPoints::of(&ss.sketch));
         let visible = solidcraft_engine::view::SketchPointVisibility::new(&ss.sketch);
-        for p in &ss.sketch.points {
+        for (p, locked) in ss.sketch.points.iter().zip(ss.sketch.locked_points()) {
             if !visible.takes(p) || shown.as_ref().is_some_and(|f| !f.takes(p)) {
                 continue;
             }
             if let Some(sp) = proj.to_screen(ss.plane.to_world(p.pos)) {
                 let dd = sp.distance(pos) - if s.active_sketch == Some(sid) { 2.0 } else { 0.0 };
-                if dd < 8.0 && best.wants(dd) {
-                    best.offer(dd, Hit::SketchPoint { sketch: sid, id: p.id.clone(), at: p.pos });
+                // On a distance tie, grab a movable point before the origin or a linked point.
+                let rank = (dd, locked);
+                if dd < 8.0 && best.wants(rank) {
+                    best.offer(rank, Hit::SketchPoint { sketch: sid, id: p.id.clone(), at: p.pos });
                 }
             }
         }
@@ -4721,6 +4723,36 @@ mod tests {
         assert_eq!(scene.shadow.len(), 48 * 5 * 3 * crate::gpu::TRI_SIZE, "all shadow rings are retained");
         assert!(scene.shadow.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().any(|v| v.get(27).is_some_and(|a| *a > 0)));
         Ok(())
+    }
+
+    #[test]
+    fn point_pick_tie_at_origin_prefers_the_drawn_point_after_deleting_coincident() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let drawn = s.execute("sketch.point", &json!({"point": [0, 0], "id": "drawn"})).unwrap();
+        let constraint = drawn["constraints"][0].as_str().unwrap();
+        s.execute("sketch.delete", &json!({"entities": [constraint]})).unwrap();
+        let sid = s.active_sketch.unwrap();
+        assert!(s.doc.sketch(sid).unwrap().constraints.is_empty());
+        let mut app = SolveApp::new(s, crate::Services::default());
+        let proj = projection(&app, Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)));
+        let at = proj.to_screen(Vec3::ZERO).unwrap();
+        let hits = pick(&app, &proj, at);
+        assert!(matches!(hits.first(), Some(Hit::SketchPoint { id, .. }) if id == "drawn"), "{hits:?}");
+        let all = pick_all(&app, &proj, at);
+        let points: Vec<_> = all
+            .iter()
+            .filter_map(|h| match h {
+                Hit::SketchPoint { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(points, ["drawn", "origin"], "Select Other keeps both points");
+        let Some(Hit::SketchPoint { id, .. }) = hits.first() else { panic!("no point picked") };
+        app.run("sketch.drag", json!({"entity": id, "from": [0, 0], "to": [10, 5]})).unwrap();
+        let sk = app.session.doc.sketch(sid).unwrap();
+        assert!(sk.point(sk.resolve_point("drawn").unwrap()).unwrap().dist(Vec2::new(10.0, 5.0)) < 1e-6);
+        assert_eq!(sk.point(0), Some(Vec2::ZERO));
     }
 
     /// Every tangent seam Continuity Analysis reports keeps its colour while the pointer rests on

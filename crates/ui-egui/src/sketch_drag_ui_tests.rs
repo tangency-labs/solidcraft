@@ -374,3 +374,27 @@ fn a_window_selected_circle_still_takes_its_radius_from_a_drag_on_its_edge() {
     let r = sk.radius(sk.curve_index("c1").expect("the circle")).expect("a radius");
     assert!((r - 15.0).abs() < 0.05, "{r}");
 }
+
+/// A circle drawn on the origin and freed from it (its Coincident deleted) moves by its centre:
+/// the centre and the fixed origin are equally near the pointer, and the free one wins (#4841).
+#[test]
+fn a_freed_circle_centre_on_the_origin_drags_instead_of_the_origin() {
+    let mut h = Harness::new();
+    run(&mut h, "sketch.create", json!({"plane": "XY"}));
+    run(&mut h, "sketch.circle.center", json!({"center": [0, 0], "radius": 10, "id": "c1"}));
+    let sid = h.app.session.active_sketch.expect("sketch mode");
+    let ids: Vec<String> = h.app.session.doc.sketch(sid).expect("the sketch").constraints.iter().map(|c| c.id.clone()).collect();
+    assert!(!ids.is_empty(), "the centre starts coincident with the origin");
+    run(&mut h, "sketch.delete", json!({"entities": ids}));
+    h.call("ui.view", json!({"view": "top"}));
+    h.app.cam.distance = 150.0;
+    h.frames(3);
+    let a = screen(&mut h, 0.0, 0.0);
+    let b = screen(&mut h, 15.0, 10.0);
+    let mut path = vec![a];
+    path.extend(steps(a, b, 6));
+    press_and_move(&mut h, &path);
+    release(&mut h, b);
+    assert!(point(&h, "c1.center").dist(Vec2::new(15.0, 10.0)) < 0.05, "{:?}", point(&h, "c1.center"));
+    assert!(point(&h, "origin").dist(Vec2::new(0.0, 0.0)) < 1e-9);
+}
