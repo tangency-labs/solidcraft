@@ -52,6 +52,10 @@ const HIDDEN_TOOLS: &[&str] = &["crash_reports"];
 /// Chat counter for OpenCode Go session IDs, next to the wall clock below.
 static GO_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
+/// Counter for synthesized Gemini call ids; unique across rounds so a later
+/// answer maps back to the right function name (see `go_call_names`).
+static GO_GEMINI_CALL_COUNTER: AtomicU64 = AtomicU64::new(1);
+
 /// A stable session ID for OpenCode Go's routing and prompt cache; one per chat,
 /// not per request. Unique per chat on this machine; the gateway only needs an
 /// opaque stable string.
@@ -61,9 +65,10 @@ fn new_session_id() -> String {
     format!("solidcraft-{t:x}-{n:x}-{:x}", std::process::id())
 }
 
-/// Whether `base_url` is an OpenCode Go endpoint: all of them need
-/// `x-opencode-session`, on every path (the `zen/go` gateway and the per-model
-/// `inference/go/...` endpoints alike).
+/// Whether `base_url` is an OpenCode Go endpoint: model requests to all of them
+/// carry `x-opencode-session` (the `zen/go` gateway and the per-model
+/// `inference/go/...` endpoints alike). The model list and connection test are
+/// plain GETs and send none.
 fn is_opencode_go(base_url: &str) -> bool {
     let u = base_url.trim().to_ascii_lowercase();
     u.starts_with("https://opencode.ai/") && u.contains("/go")
@@ -91,7 +96,12 @@ fn go_protocol(model: &str) -> GoProtocol {
     if m.starts_with("grok-") || m.starts_with("gpt-") || m.starts_with("muse-spark-") {
         return GoProtocol::Responses;
     }
-    if m == "minimax-m3" || m.starts_with("claude-") || m.starts_with("qwen") {
+    // MiniMax M3.1 Flash is chat/completions per the Go docs; the rest of the
+    // family (M3, M2.7, M2.5) speaks Messages.
+    if m.starts_with("minimax-m3.1-flash") {
+        return GoProtocol::Chat;
+    }
+    if m.starts_with("minimax-") || m.starts_with("claude-") || m.starts_with("qwen") {
         return GoProtocol::Messages;
     }
     GoProtocol::Chat
@@ -110,11 +120,15 @@ fn go_url(base_url: &str, model: &str, protocol: GoProtocol) -> String {
     }
 }
 
+/// The gateway's refusal wording, lowercased, from either error shape.
+fn go_error_detail(body: &Value) -> String {
+    body.pointer("/error/message").or_else(|| body.get("error")).and_then(Value::as_str).unwrap_or("").to_ascii_lowercase()
+}
+
 /// Whether the endpoint refused the request because the model speaks another
 /// protocol (the gateway's wording): those refusals are retried elsewhere.
 fn is_protocol_mismatch(body: &Value) -> bool {
-    let detail = body.pointer("/error/message").or_else(|| body.get("error")).and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
-    detail.contains("does not support this protocol")
+    go_error_detail(body).contains("does not support this protocol")
 }
 
 /// Whether another Go protocol may succeed after this refusal: the gateway
@@ -125,8 +139,7 @@ fn should_try_next_go(status: u16, body: &Value) -> bool {
         return true;
     }
     if status == 401 {
-        let detail = body.pointer("/error/message").or_else(|| body.get("error")).and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
-        return detail.contains("credential");
+        return go_error_detail(body).contains("credential");
     }
     false
 }
@@ -188,10 +201,11 @@ fn go_gemini_property(schema: &Value) -> Value {
     } else if out.get("type").and_then(Value::as_str) == Some("object") {
         out.insert("properties".to_string(), Value::Object(Map::new()));
     }
-    if let Some(req) = o.get("required").and_then(Value::as_array) {
-        if !req.is_empty() && req.iter().all(|r| r.is_string()) {
-            out.insert("required".to_string(), Value::Array(req.clone()));
-        }
+    if let Some(req) = o.get("required").and_then(Value::as_array)
+        && !req.is_empty()
+        && req.iter().all(|r| r.is_string())
+    {
+        out.insert("required".to_string(), Value::Array(req.clone()));
     }
     Value::Object(out)
 }
@@ -222,20 +236,28 @@ fn go_gemini_tools(tools: &[Value]) -> Vec<Value> {
         .collect()
 }
 
+/// Append `item` to the last message with `role` (creating one), so roles keep
+/// alternating: Anthropic/Messages merges into `content`, Gemini into `parts`.
+/// One turn answers each tool call with its own OpenAI `tool` message here.
+fn go_push_item(msgs: &mut Vec<Value>, role: &str, key: &str, item: Value) {
+    if let Some(last) = msgs.last_mut() {
+        let same = last.get("role").and_then(Value::as_str) == Some(role);
+        if same && let Some(items) = last.get_mut(key).and_then(Value::as_array_mut) {
+            items.push(item);
+            return;
+        }
+    }
+    let mut m = Map::new();
+    m.insert("role".to_string(), Value::String(role.to_string()));
+    m.insert(key.to_string(), Value::Array(vec![item]));
+    msgs.push(Value::Object(m));
+}
+
 /// Append `block` to `msgs`, merging into the last message when it already has
 /// `role` (Anthropic and Gemini both require alternating roles, and one turn
 /// answers each tool call with its own OpenAI `tool` message here).
 fn go_push_block(msgs: &mut Vec<Value>, role: &str, block: Value) {
-    if let Some(last) = msgs.last_mut() {
-        let same = last.get("role").and_then(Value::as_str) == Some(role);
-        if same {
-            if let Some(content) = last.get_mut("content").and_then(Value::as_array_mut) {
-                content.push(block);
-                return;
-            }
-        }
-    }
-    msgs.push(json!({"role": role, "content": [block]}));
+    go_push_item(msgs, role, "content", block);
 }
 
 /// A `data:<mime>;base64,<data>` URL as its parts.
@@ -261,14 +283,10 @@ fn go_anthropic_messages(history: &[Value]) -> Vec<Value> {
                     for p in parts {
                         if let Some(t) = p.get("text").and_then(Value::as_str) {
                             go_push_block(&mut out, "user", json!({"type": "text", "text": t}));
-                        } else if let Some(url) = p.pointer("/image_url/url").and_then(Value::as_str) {
-                            if let Some((mime, data)) = go_data_url(url) {
-                                go_push_block(
-                                    &mut out,
-                                    "user",
-                                    json!({"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}),
-                                );
-                            }
+                        } else if let Some(url) = p.pointer("/image_url/url").and_then(Value::as_str)
+                            && let Some((mime, data)) = go_data_url(url)
+                        {
+                            go_push_block(&mut out, "user", json!({"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}));
                         }
                     }
                 }
@@ -382,21 +400,14 @@ fn go_call_names(history: &[Value]) -> std::collections::HashMap<String, String>
 
 /// Append `part` to `contents`, merging into the last content with `role`.
 fn go_push_part(contents: &mut Vec<Value>, role: &str, part: Value) {
-    if let Some(last) = contents.last_mut() {
-        let same = last.get("role").and_then(Value::as_str) == Some(role);
-        if same {
-            if let Some(parts) = last.get_mut("parts").and_then(Value::as_array_mut) {
-                parts.push(part);
-                return;
-            }
-        }
-    }
-    contents.push(json!({"role": role, "parts": [part]}));
+    go_push_item(contents, role, "parts", part);
 }
 
 /// OpenAI-style history as Gemini contents (the system note is dropped; the
-/// caller sends its own instruction).
-fn go_gemini_contents(history: &[Value]) -> Vec<Value> {
+/// caller sends its own instruction). `sigs` carries the thought signatures of
+/// earlier function-call parts, by kept call id: Gemini 3 rejects a tool round
+/// whose first function call lacks the signature it sent.
+fn go_gemini_contents(history: &[Value], sigs: &std::collections::HashMap<String, String>) -> Vec<Value> {
     let names = go_call_names(history);
     let mut out: Vec<Value> = Vec::new();
     for m in history {
@@ -408,10 +419,10 @@ fn go_gemini_contents(history: &[Value]) -> Vec<Value> {
                     for p in parts {
                         if let Some(t) = p.get("text").and_then(Value::as_str) {
                             go_push_part(&mut out, "user", json!({"text": t}));
-                        } else if let Some(url) = p.pointer("/image_url/url").and_then(Value::as_str) {
-                            if let Some((mime, data)) = go_data_url(url) {
-                                go_push_part(&mut out, "user", json!({"inlineData": {"mimeType": mime, "data": data}}));
-                            }
+                        } else if let Some(url) = p.pointer("/image_url/url").and_then(Value::as_str)
+                            && let Some((mime, data)) = go_data_url(url)
+                        {
+                            go_push_part(&mut out, "user", json!({"inlineData": {"mimeType": mime, "data": data}}));
                         }
                     }
                 }
@@ -423,9 +434,19 @@ fn go_gemini_contents(history: &[Value]) -> Vec<Value> {
                 }
                 if let Some(calls) = m.get("tool_calls").and_then(Value::as_array) {
                     for c in calls {
+                        let id = c.get("id").and_then(Value::as_str).unwrap_or("");
                         let name = c.pointer("/function/name").and_then(Value::as_str).unwrap_or("");
                         let args = tool_arguments(c.pointer("/function/arguments")).unwrap_or_else(|_| json!({}));
-                        go_push_part(&mut out, "model", json!({"functionCall": {"name": name, "args": args}}));
+                        let call = json!({"name": name, "args": args});
+                        go_push_part(
+                            &mut out,
+                            "model",
+                            if let Some(sig) = sigs.get(id) {
+                                json!({"functionCall": call, "thoughtSignature": sig})
+                            } else {
+                                json!({"functionCall": call})
+                            },
+                        );
                     }
                 }
             }
@@ -441,6 +462,17 @@ fn go_gemini_contents(history: &[Value]) -> Vec<Value> {
     out
 }
 
+/// The tool loop's Reply from shown text and tool calls; the kept assistant
+/// message stays OpenAI-shaped so the loop stores one history shape for Go.
+fn go_reply_from_parts(text: Vec<(bool, String)>, calls: Vec<Call>, kept_calls: Vec<Value>) -> Reply {
+    let joined: String = text.iter().map(|(_, t)| t.as_str()).collect();
+    let mut assistant = json!({"role": "assistant", "content": if joined.is_empty() { Value::Null } else { Value::String(joined) }});
+    if !kept_calls.is_empty() {
+        assistant["tool_calls"] = Value::Array(kept_calls);
+    }
+    Reply { text, calls, assistant }
+}
+
 /// A Responses API answer as the tool loop's Reply; the kept assistant message
 /// is OpenAI-shaped so the loop stores one history shape for all of Go.
 fn go_responses_reply(body: &Value) -> Reply {
@@ -452,10 +484,11 @@ fn go_responses_reply(body: &Value) -> Reply {
             match item.get("type").and_then(Value::as_str) {
                 Some("message") => {
                     if let Some(parts) = item.get("content").and_then(Value::as_array) {
-                        for p in parts {
-                            if let Some(t) = p.get("text").and_then(Value::as_str).filter(|t| !t.is_empty()) {
-                                text.push((false, t.to_string()));
-                            }
+                        // One text entry per message, as on the Chat path: parts of a
+                        // single answer join instead of emitting one event each.
+                        let joined: String = parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).collect();
+                        if !joined.is_empty() {
+                            text.push((false, joined));
                         }
                     }
                 }
@@ -475,12 +508,7 @@ fn go_responses_reply(body: &Value) -> Reply {
             }
         }
     }
-    let joined: String = text.iter().map(|(_, t)| t.as_str()).collect();
-    let mut assistant = json!({"role": "assistant", "content": if joined.is_empty() { Value::Null } else { Value::String(joined) }});
-    if !kept_calls.is_empty() {
-        assistant["tool_calls"] = Value::Array(kept_calls);
-    }
-    Reply { text, calls, assistant }
+    go_reply_from_parts(text, calls, kept_calls)
 }
 
 /// An Anthropic messages answer as the tool loop's Reply (history stays OpenAI-shaped).
@@ -512,12 +540,7 @@ fn go_messages_reply(body: &Value) -> Reply {
             }
         }
     }
-    let joined: String = text.iter().map(|(_, t)| t.as_str()).collect();
-    let mut assistant = json!({"role": "assistant", "content": if joined.is_empty() { Value::Null } else { Value::String(joined) }});
-    if !kept_calls.is_empty() {
-        assistant["tool_calls"] = Value::Array(kept_calls);
-    }
-    Reply { text, calls, assistant }
+    go_reply_from_parts(text, calls, kept_calls)
 }
 
 /// A Gemini answer as the tool loop's Reply (history stays OpenAI-shaped).
@@ -526,7 +549,7 @@ fn go_gemini_reply(body: &Value) -> Reply {
     let mut calls = Vec::new();
     let mut kept_calls = Vec::new();
     if let Some(parts) = body.pointer("/candidates/0/content/parts").and_then(Value::as_array) {
-        for (i, p) in parts.iter().enumerate() {
+        for p in parts.iter() {
             if let Some(t) = p.get("text").and_then(Value::as_str).filter(|t| !t.is_empty()) {
                 text.push((false, t.to_string()));
             } else if let Some(call) = p.get("functionCall") {
@@ -540,18 +563,30 @@ fn go_gemini_reply(body: &Value) -> Reply {
                     Some(v @ Value::Object(_)) => Ok(v.clone()),
                     Some(_) => Err("the tool arguments must be a JSON object".to_string()),
                 };
-                let id = format!("call-{i}");
+                // Unique across rounds: `go_call_names` maps the whole history, so a
+                // repeated `call-0` would answer an old result with the newest name.
+                let id = format!("go-{}", GO_GEMINI_CALL_COUNTER.fetch_add(1, Ordering::Relaxed));
                 calls.push(Call { id: id.clone(), name: name.clone(), arguments: arguments.clone() });
                 kept_calls.push(json!({"id": id, "type": "function", "function": {"name": name, "arguments": raw_args}}));
             }
         }
     }
-    let joined: String = text.iter().map(|(_, t)| t.as_str()).collect();
-    let mut assistant = json!({"role": "assistant", "content": if joined.is_empty() { Value::Null } else { Value::String(joined) }});
-    if !kept_calls.is_empty() {
-        assistant["tool_calls"] = Value::Array(kept_calls);
-    }
-    Reply { text, calls, assistant }
+    go_reply_from_parts(text, calls, kept_calls)
+}
+
+/// A Gemini answer's thought signatures, in function-call part order, to replay
+/// on the next request (Gemini 3 requires them for tool rounds).
+fn go_gemini_signatures(body: &Value) -> Vec<Option<String>> {
+    body.pointer("/candidates/0/content/parts")
+        .and_then(Value::as_array)
+        .map(|parts| {
+            parts
+                .iter()
+                .filter(|p| p.get("functionCall").is_some())
+                .map(|p| p.get("thoughtSignature").and_then(Value::as_str).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub struct ApiConfig {
@@ -609,6 +644,7 @@ impl ApiBackend {
                 tool_names: Vec::new(),
                 history: Vec::new(),
                 session_id,
+                gemini_sigs: Default::default(),
                 events: ev_tx,
                 wake,
                 cancel: stop,
@@ -682,6 +718,9 @@ struct Worker {
     history: Vec<Value>,
     /// OpenCode Go's stable session ID for this chat (one per chat, not per request).
     session_id: String,
+    /// Thought signatures of Gemini function-call parts, by kept call id, for the
+    /// next tool request. Stays outside the history so other protocols never see it.
+    gemini_sigs: std::cell::RefCell<std::collections::HashMap<String, String>>,
     events: Sender<Event>,
     wake: Arc<dyn Fn() + Send + Sync>,
     cancel: Arc<AtomicBool>,
@@ -720,6 +759,7 @@ impl Worker {
                     self.history.clear();
                     // A new conversation gets a fresh Go session ID for routing and caching.
                     self.session_id = new_session_id();
+                    self.gemini_sigs.borrow_mut().clear();
                     self.cancel.store(false, Ordering::Relaxed);
                     self.emit(Event::Ready { agent: format!("{} · {}", self.cfg.name, self.cfg.model), images: true });
                 }
@@ -958,7 +998,20 @@ impl Worker {
                 }
             }
             if status == 200 {
-                return Ok(if protocol == GoProtocol::Chat { reply(self.cfg.protocol, &v) } else { Self::go_reply(protocol, &v) });
+                if protocol == GoProtocol::Chat {
+                    return Ok(reply(self.cfg.protocol, &v));
+                }
+                let made = Self::go_reply(protocol, &v);
+                if protocol == GoProtocol::Gemini {
+                    // Remember thought signatures for the next tool request in this turn.
+                    let mut sigs = self.gemini_sigs.borrow_mut();
+                    for (call, sig) in made.calls.iter().zip(go_gemini_signatures(&v)) {
+                        if let Some(s) = sig {
+                            sigs.insert(call.id.clone(), s);
+                        }
+                    }
+                }
+                return Ok(made);
             }
             let e = http_error(status, &v);
             if first_err.is_none() {
@@ -999,7 +1052,7 @@ impl Worker {
                 body
             }
             GoProtocol::Gemini => {
-                let mut body = json!({"contents": go_gemini_contents(&self.history)});
+                let mut body = json!({"contents": go_gemini_contents(&self.history, &self.gemini_sigs.borrow())});
                 body["systemInstruction"] = json!({"parts": [{"text": super::acp::SYSTEM_NOTE}]});
                 if !self.tools.is_empty() {
                     body["tools"] = json!([{"functionDeclarations": go_gemini_tools(&self.tools)}]);
@@ -1088,12 +1141,12 @@ impl Worker {
             body: Some(body.to_string().into_bytes()),
             timeout_s: self.limit_s(),
         };
-        self.send(&req)
+        self.send(req)
     }
 
     /// The request runs on a thread of its own so that Stop does not wait for the model: a
     /// cancelled one is abandoned (the host's own timeout ends it) and its answer dropped.
-    fn send(&self, req: &HttpRequest) -> Result<(u16, Value), String> {
+    fn send(&self, req: HttpRequest) -> Result<(u16, Value), String> {
         let (tx, rx) = channel();
         let http = self.cfg.http.clone();
         let started = std::time::Instant::now();
@@ -1230,6 +1283,21 @@ fn reply(protocol: Protocol, body: &Value) -> Reply {
     }
 }
 
+/// A `reasoning_details` array safe to replay: streaming-only `index` members
+/// are dropped (gateways reject them), thinking content is kept.
+fn sanitize_reasoning_details(details: Option<&Value>) -> Option<Value> {
+    let items = details?.as_array()?;
+    let clean: Vec<Value> = items
+        .iter()
+        .filter_map(|d| {
+            let mut c = d.as_object()?.clone();
+            c.remove("index");
+            Some(Value::Object(c))
+        })
+        .collect();
+    Some(Value::Array(clean))
+}
+
 fn openai_reply(body: &Value) -> Reply {
     let message = body.pointer("/choices/0/message").cloned().unwrap_or(Value::Null);
     let text = message.get("content").and_then(Value::as_str).filter(|t| !t.is_empty()).map(|t| vec![(false, t.to_string())]).unwrap_or_default();
@@ -1245,6 +1313,18 @@ fn openai_reply(body: &Value) -> Reply {
         })
         .collect();
     let mut assistant = json!({"role": "assistant", "content": message.get("content").cloned().unwrap_or(Value::Null)});
+    // Thinking models (Kimi K3 and kin) need their reasoning back on the next
+    // tool request: replay exactly what the endpoint sent, nothing invented.
+    for key in ["reasoning_content", "reasoning", "refusal"] {
+        if let Some(v) = message.get(key)
+            && !v.is_null()
+        {
+            assistant[key] = v.clone();
+        }
+    }
+    if let Some(clean) = sanitize_reasoning_details(message.get("reasoning_details")) {
+        assistant["reasoning_details"] = clean;
+    }
     if !raw.is_empty() {
         assistant["tool_calls"] = Value::Array(raw);
     }
@@ -1680,14 +1760,8 @@ mod tests {
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("measure it".into())]);
-        let mut events = Vec::new();
-        let start = std::time::Instant::now();
-        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
-            events.extend(b.poll());
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert_eq!(events.first(), Some(&Event::ToolsAvailable(false)));
-        assert!(events.iter().any(|e| matches!(e, Event::Ready { .. })), "{events:?}");
+        let events = wait_for_turn(&mut b);
+        assert!(matches!(events.first(), Some(Event::Ready { .. })), "{events:?}");
         assert!(events.iter().any(|e| matches!(e, Event::Tool { status: Some(ToolStatus::Failed), .. })), "{events:?}");
         assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text == "Done.")), "{events:?}");
         assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason.is_empty()), "{events:?}");
@@ -1743,9 +1817,7 @@ mod tests {
         };
         b.prompt(&[PromptPart::Text("long job".into())]);
         let start = std::time::Instant::now();
-        while seen.lock().unwrap().is_empty() && start.elapsed() < Duration::from_secs(10) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        wait_for_seen(&seen);
         b.cancel();
         let mut events = Vec::new();
         wait(&mut b, &mut events);
@@ -1846,28 +1918,60 @@ mod tests {
         assert_eq!(available.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["local", "big", "small"]);
         b.set_model("big");
         b.prompt(&[PromptPart::Text("hi".into())]);
-        let start = std::time::Instant::now();
-        while seen.lock().unwrap().is_empty() && start.elapsed() < Duration::from_secs(10) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        wait_for_seen(&seen);
         assert_eq!(seen.lock().unwrap()[0]["model"], "big");
         b.shutdown(true);
     }
 
     /// Go models route by family; the preset's base stays one URL for all of them.
+    /// Covers every model the public list returned, so each picks its protocol
+    /// at once instead of burning fallback requests on the first turn.
     #[test]
     fn go_models_route_to_their_protocol() {
-        for model in ["mimo-v2.6-flash", "deepseek-v4.1-flash", "glm-5.3", "kimi-k3", "hy3", "beam-free", "longcat-2.0", "something-new"] {
+        for model in [
+            "deepseek-v4.1-flash",
+            "deepseek-v4-pro",
+            "glm-5.1",
+            "glm-5.2",
+            "glm-5.3",
+            "glm-5.3-flash",
+            "hy3",
+            "hy4-preview",
+            "kimi-k2.6",
+            "kimi-k2.7-code",
+            "kimi-k3",
+            "kimi-k3.1-pro",
+            "longcat-2.0",
+            "mimo-v2.5",
+            "mimo-v2.5-pro",
+            "mimo-v2.6-flash",
+            "mimo-v2.6-pro",
+            // minimax-m3.1-flash-free is chat/completions per the Go docs, not messages.
+            "minimax-m3.1-flash",
+            "minimax-m3.1-flash-free",
+            "omen-alpha",
+            "step-5-preview",
+            "beam-free",
+            "something-new",
+        ] {
             assert_eq!(go_protocol(model), GoProtocol::Chat, "{model}");
         }
-        for model in ["grok-4.7", "gpt-6-luna", "gpt-5.6-luna", "muse-spark-1.3-contributor", "muse-spark-1.2-contributor"] {
+        for model in ["grok-4.6", "grok-4.7", "gpt-6-luna", "gpt-5.6-luna", "muse-spark-1.3-contributor", "muse-spark-1.2-contributor"] {
             assert_eq!(go_protocol(model), GoProtocol::Responses, "{model}");
         }
-        for model in ["claude-haiku-5-5", "minimax-m3", "qwen3.8-max", "qwen3.8-flash", "qwen3.7-plus"] {
+        for model in [
+            "claude-haiku-5-5",
+            "minimax-m2.5",
+            "minimax-m2.7",
+            "minimax-m3",
+            "qwen3.6-plus",
+            "qwen3.7-max",
+            "qwen3.7-plus",
+            "qwen3.8-max",
+            "qwen3.8-flash",
+        ] {
             assert_eq!(go_protocol(model), GoProtocol::Messages, "{model}");
         }
-        // minimax-m3.1-flash-free is chat/completions per the Go docs, not messages.
-        assert_eq!(go_protocol("minimax-m3.1-flash-free"), GoProtocol::Chat);
         assert_eq!(go_protocol("gemini-4-argon-contributor"), GoProtocol::Gemini);
         let gemini = go_url("https://opencode.ai/zen/go/v1", "gemini-4-argon-contributor", GoProtocol::Gemini);
         assert!(gemini.starts_with("https://opencode.ai/inference/go/") && gemini.contains("gemini-4-argon-contributor"), "{gemini}");
@@ -1892,6 +1996,27 @@ mod tests {
         StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) }
     }
 
+    /// Wait until a scripted endpoint saw a request (ten seconds at most).
+    fn wait_for_seen<T>(seen: &std::sync::Mutex<Vec<T>>) {
+        for _ in 0..1000 {
+            if !seen.lock().unwrap().is_empty() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Poll a scripted backend until its turn ends (ten seconds at most).
+    fn wait_for_turn(b: &mut ApiBackend) -> Vec<Event> {
+        let mut events = Vec::new();
+        let start = std::time::Instant::now();
+        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
+            events.extend(b.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        events
+    }
+
     /// Every Go protocol carries the session header; other endpoints see none.
     #[test]
     fn go_session_header_goes_on_every_protocol() {
@@ -1907,10 +2032,7 @@ mod tests {
             });
             let mut b = ApiBackend::start(go_cfg(model, http), go_ctx()).unwrap();
             b.prompt(&[PromptPart::Text("hi".into())]);
-            let start = std::time::Instant::now();
-            while seen.lock().unwrap().is_empty() && start.elapsed() < Duration::from_secs(10) {
-                std::thread::sleep(Duration::from_millis(10));
-            }
+            wait_for_seen(&seen);
             let reqs = seen.lock().unwrap();
             assert!(!reqs.is_empty(), "{model}: no request sent");
             assert!(
@@ -1942,10 +2064,7 @@ mod tests {
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
-        let start = std::time::Instant::now();
-        while seen.lock().unwrap().is_empty() && start.elapsed() < Duration::from_secs(10) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        wait_for_seen(&seen);
         let reqs = seen.lock().unwrap();
         assert!(reqs.iter().all(|r| r.headers.iter().all(|(name, _)| !name.eq_ignore_ascii_case("x-opencode-session"))));
         drop(reqs);
@@ -2029,6 +2148,90 @@ mod tests {
         }
     }
 
+    /// Gemini's thought signature survives the round trip: the next request
+    /// replays exactly the signature the answer carried (Gemini 3 rejects the
+    /// tool round without it).
+    #[test]
+    fn go_gemini_signatures_replay_on_the_next_request() {
+        let answer = json!({"candidates": [{"content": {"parts": [
+            {"functionCall": {"name": "measure", "args": {}}, "thoughtSignature": "sig-1"},
+        ]}}]});
+        let reply = go_gemini_reply(&answer);
+        assert_eq!(reply.calls.len(), 1);
+        let mut sigs = std::collections::HashMap::new();
+        for (call, sig) in reply.calls.iter().zip(go_gemini_signatures(&answer)) {
+            if let Some(s) = sig {
+                sigs.insert(call.id.clone(), s);
+            }
+        }
+        let contents = go_gemini_contents(&[reply.assistant], &sigs);
+        assert_eq!(contents.len(), 1);
+        assert_eq!(contents[0]["role"], "model");
+        assert_eq!(contents[0]["parts"][0]["functionCall"]["name"], "measure");
+        assert_eq!(contents[0]["parts"][0]["thoughtSignature"], "sig-1");
+    }
+
+    /// Two Gemini tool rounds never share a call id, so an old tool result
+    /// keeps the name of the function it answered.
+    #[test]
+    fn go_gemini_call_ids_are_unique_across_rounds() {
+        let first = go_gemini_reply(&json!({"candidates": [{"content": {"parts": [
+            {"functionCall": {"name": "measure", "args": {}}},
+        ]}}]}));
+        let second = go_gemini_reply(&json!({"candidates": [{"content": {"parts": [
+            {"functionCall": {"name": "batch", "args": {}}},
+        ]}}]}));
+        assert_ne!(first.calls[0].id, second.calls[0].id, "reused ids answer old results with the newest name");
+        let history = vec![
+            first.assistant.clone(),
+            json!({"role": "tool", "tool_call_id": first.calls[0].id, "content": "1mm"}),
+            second.assistant.clone(),
+            json!({"role": "tool", "tool_call_id": second.calls[0].id, "content": "ok"}),
+        ];
+        let contents = go_gemini_contents(&history, &std::collections::HashMap::new());
+        assert_eq!(contents[1]["parts"][0]["functionResponse"]["name"], "measure");
+        assert_eq!(contents[3]["parts"][0]["functionResponse"]["name"], "batch");
+    }
+
+    /// A Chat answer keeps the thinking fields the endpoint sent, so the next
+    /// tool request replays them (Kimi K3 needs its reasoning back); only the
+    /// streaming-only `index` members are dropped.
+    #[test]
+    fn openai_replies_keep_reasoning_fields_for_replay() {
+        let r = openai_reply(&json!({"choices": [{"message": {
+            "role": "assistant",
+            "content": "Measuring.",
+            "reasoning_content": "pick the tool",
+            "reasoning_details": [{"type": "reasoning.text", "text": "pick", "index": 0}],
+            "refusal": null,
+            "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "measure", "arguments": "{}"}}],
+        }}]}));
+        assert_eq!(r.assistant["reasoning_content"], "pick the tool");
+        assert_eq!(r.assistant["reasoning_details"][0]["text"], "pick");
+        assert!(r.assistant["reasoning_details"][0].get("index").is_none());
+        assert!(r.assistant.get("refusal").is_none(), "null fields stay out");
+        assert_eq!(r.calls.len(), 1);
+    }
+
+    /// The model list and connection test are plain GETs: no session header.
+    /// Conversation (POST) requests carry it instead (see the session tests).
+    #[test]
+    fn go_model_list_sends_no_session_header() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<HttpRequest>::new()));
+        let log = seen.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            log.lock().unwrap().push(r.clone());
+            Ok((200, b"{\"data\":[{\"id\":\"kimi-k3\"}]}".to_vec()))
+        });
+        let listed = model_list(&http, "https://opencode.ai/zen/go/v1", None).unwrap();
+        assert_eq!(listed.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["kimi-k3"]);
+        let reqs = seen.lock().unwrap();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].method, "GET");
+        assert!(reqs[0].headers.iter().all(|(name, _)| !name.eq_ignore_ascii_case("x-opencode-session")));
+        drop(reqs);
+    }
+
     /// OpenAI-shaped history converts per Go protocol: system handling, merged
     /// tool answers, output_text for Responses, id-to-name for Gemini.
     #[test]
@@ -2047,7 +2250,7 @@ mod tests {
         assert_eq!(roles, ["user", "assistant", "user"], "{messages:?}");
         assert_eq!(messages[2]["content"].as_array().unwrap().len(), 2, "both tool answers in one message");
         assert_eq!(messages[1]["content"][1]["type"], "tool_use");
-        let with_system = vec![vec![json!({"role": "system", "content": "sys"})], history.clone()].concat();
+        let with_system = [vec![json!({"role": "system", "content": "sys"})], history.clone()].concat();
         let input = go_responses_input(&with_system);
         assert_eq!(input[0]["type"], "message");
         assert!(input.iter().any(|i| i["type"] == "function_call"), "{input:?}");
@@ -2057,7 +2260,7 @@ mod tests {
                 && i.get("content").and_then(Value::as_array).is_some_and(|c| c.iter().any(|p| p["type"] == "output_text"))),
             "{input:?}"
         );
-        let contents = go_gemini_contents(&history);
+        let contents = go_gemini_contents(&history, &std::collections::HashMap::new());
         let groles: Vec<&str> = contents.iter().map(|m| m["role"].as_str().unwrap_or("")).collect();
         assert_eq!(groles, ["user", "model", "user"], "{contents:?}");
         assert_eq!(contents[2]["parts"][0]["functionResponse"]["name"], "measure");
@@ -2079,10 +2282,7 @@ mod tests {
             });
             let mut b = ApiBackend::start(go_cfg(model, http), go_ctx()).unwrap();
             b.prompt(&[PromptPart::Text("hi".into())]);
-            let start = std::time::Instant::now();
-            while seen.lock().unwrap().is_empty() && start.elapsed() < Duration::from_secs(10) {
-                std::thread::sleep(Duration::from_millis(10));
-            }
+            wait_for_seen(&seen);
             let reqs = seen.lock().unwrap();
             assert_eq!(reqs[0].url, want_url, "{model}");
             let body: Value = serde_json::from_slice(reqs[0].body.as_deref().unwrap_or(b"null")).unwrap();
@@ -2113,12 +2313,7 @@ mod tests {
         });
         let mut b = ApiBackend::start(go_cfg("something-new", http), go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
-        let mut events = Vec::new();
-        let start = std::time::Instant::now();
-        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
-            events.extend(b.poll());
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        let events = wait_for_turn(&mut b);
         assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text == "Hi.")), "{events:?}");
         let tried = urls.lock().unwrap();
         assert_eq!(tried.len(), 2, "{tried:?}");
@@ -2137,12 +2332,7 @@ mod tests {
         });
         let mut b = ApiBackend::start(go_cfg("mimo-v2.6-flash", http), go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
-        let mut events = Vec::new();
-        let start = std::time::Instant::now();
-        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
-            events.extend(b.poll());
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        let events = wait_for_turn(&mut b);
         assert_eq!(*seen.lock().unwrap(), 1);
         assert!(events.iter().any(|e| matches!(e, Event::Error(_))), "{events:?}");
         b.shutdown(true);
@@ -2165,12 +2355,7 @@ mod tests {
         });
         let mut b = ApiBackend::start(go_cfg("qwen3.8-max", http), go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
-        let mut events = Vec::new();
-        let start = std::time::Instant::now();
-        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
-            events.extend(b.poll());
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        let events = wait_for_turn(&mut b);
         assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text == "Hi.")), "{events:?}");
         let tried = urls.lock().unwrap();
         assert!(tried.len() >= 2 && tried[0].ends_with("/messages"), "{tried:?}");
@@ -2196,12 +2381,7 @@ mod tests {
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
-        let mut events = Vec::new();
-        let start = std::time::Instant::now();
-        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
-            events.extend(b.poll());
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        let events = wait_for_turn(&mut b);
         assert_eq!(*seen.lock().unwrap(), 1);
         assert!(events.iter().any(|e| matches!(e, Event::Error(_))), "{events:?}");
         b.shutdown(true);
@@ -2274,12 +2454,7 @@ mod tests {
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("go".into())]);
-        let mut events = Vec::new();
-        let start = std::time::Instant::now();
-        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
-            events.extend(b.poll());
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        let events = wait_for_turn(&mut b);
         let failed = events.iter().find_map(|e| match e {
             Event::Tool { status: Some(ToolStatus::Failed), output: Some(o), .. } => Some(o.clone()),
             _ => None,
@@ -2338,6 +2513,7 @@ mod tests {
             tool_names: vec!["measure".into()],
             history: vec![json!({"role": "user", "content": "hi"})],
             session_id: "test-session".to_string(),
+            gemini_sigs: Default::default(),
             events,
             wake: Arc::new(|| {}),
             cancel: Arc::new(AtomicBool::new(false)),
@@ -2460,14 +2636,8 @@ mod tests {
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("measure it".into())]);
-        let mut events = Vec::new();
-        let start = std::time::Instant::now();
-        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
-            events.extend(b.poll());
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert_eq!(events.first(), Some(&Event::ToolsAvailable(false)));
-        assert!(events.iter().any(|e| matches!(e, Event::Ready { .. })), "{events:?}");
+        let events = wait_for_turn(&mut b);
+        assert!(matches!(events.first(), Some(Event::Ready { .. })), "{events:?}");
         assert!(events.iter().any(|e| matches!(e, Event::Tool { status: Some(ToolStatus::Failed), .. })), "{events:?}");
         assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text == "Done.")), "{events:?}");
         assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason.is_empty()), "{events:?}");

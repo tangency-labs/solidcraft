@@ -227,7 +227,8 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   `http://localhost:1234/v1`, OpenAI, Mammouth AI `https://api.mammouth.ai/v1`, OpenCode Go `https://opencode.ai/zen/go/v1`) or a custom URL, the model name, and an optional key.
   OpenCode Go models are routed to their endpoint by themselves (`/responses`,
   `/messages` or Gemini for those families, `/chat/completions` for the rest),
-  each with the session header Go requires, so one preset covers every model.
+  each conversation request carrying the session header Go asks for, so one
+  preset covers every model.
   A model the list does not know is retried on the next protocol when Go names
   the mismatch.
 - **Anthropic-compatible API:** a preset (Anthropic) or a custom URL, for an endpoint that
