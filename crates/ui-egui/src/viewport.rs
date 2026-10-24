@@ -5365,6 +5365,36 @@ mod tests {
     }
 
     #[test]
+    fn history_marker_shows_only_its_sketch_without_changing_visibility() -> Result<(), Box<dyn std::error::Error>> {
+        for explicitly_hidden in [false, true] {
+            let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            app.ui.show_grid = false;
+            let mut sketches = Vec::new();
+            for (name, x) in [("First", 0), ("Second", 30)] {
+                app.run("sketch.create", json!({"plane":"XY","name":name}))?;
+                app.run("sketch.rectangle.two_point", json!({"p0":[x,0],"p1":[x+10,10]}))?;
+                app.run("sketch.finish", json!({}))?;
+                let id = app.session.doc.find_feature(name).ok_or("missing sketch")?.id;
+                sketches.push(id);
+                app.run("solid.extrude", json!({"sketch":name,"distance":5,"body_name":name}))?;
+            }
+            if explicitly_hidden {
+                app.session.visibility.hidden_sketches.clone_from(&sketches);
+            }
+            let stored = app.session.visibility.clone();
+            let rect = Rect::from_min_size(Pos2::ZERO, vec2(640., 480.));
+            for (position, expected) in [(0, None), (1, sketches.first().copied()), (2, None), (3, sketches.get(1).copied()), (4, None)] {
+                app.run("timeline.roll_to", json!({"position":position}))?;
+                assert_eq!(visible_sketches(&app), expected.into_iter().collect::<Vec<_>>(), "position {position}, hidden {explicitly_hidden}");
+                let scene = build_sketch_scene(&app, &projection(&app, rect)).merged();
+                assert_eq!(!scene.lines.is_empty(), expected.is_some(), "sketch lines at position {position}");
+                assert_eq!(app.session.visibility, stored, "stepping must preserve stored visibility");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn timeline_modifier_highlight_follows_edits_and_rollback() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();

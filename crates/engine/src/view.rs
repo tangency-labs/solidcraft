@@ -638,15 +638,27 @@ impl SectionIndex {
     }
 }
 
-/// Is a sketch drawn? The sketch being edited always is; otherwise not when hidden, nor in a
-/// hidden component, Sketches folder or group (even one shown on its own), and one used by a
-/// feature only when shown on its own.
+/// Is a sketch drawn? The sketch being edited always is; otherwise not in a hidden component,
+/// Sketches folder or group (even one shown on its own). The sketch immediately before a
+/// rollback marker is shown regardless of its individual visibility; other hidden sketches, and
+/// ones used by a feature unless shown on their own, retain their stored visibility.
 pub fn sketch_shown(s: &Session, id: u64) -> bool {
     let v = &s.visibility;
     if s.active_sketch == Some(id) {
         return true;
     }
-    if v.hidden_sketches.contains(&id) || !sketch_component_visible(s, id) || s.feature_folder_hidden(id, "sketches") {
+    if !sketch_component_visible(s, id) || s.feature_folder_hidden(id, "sketches") {
+        return false;
+    }
+    if s.doc
+        .marker
+        .and_then(|position| position.checked_sub(1))
+        .and_then(|index| s.doc.features.get(index))
+        .is_some_and(|f| f.id == id && matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. }))
+    {
+        return true;
+    }
+    if v.hidden_sketches.contains(&id) {
         return false;
     }
     v.shown_sketches.contains(&id) || !sketch_consumed(s, id)
