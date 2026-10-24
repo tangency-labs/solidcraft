@@ -2,6 +2,6 @@
   "unit": "topology.brep_p10",
   "cases": [
     {"name": "fuzz00790_guard_healing_a_face_use_the", "origin": "fuzz-out/n2000/topology.brep_p10/fuzz00790.json (crash: cpp: killed by signal 11)", "issue": "UB-237", "cpp": "rejected: guard: healing a face use the iges patch left without a shell", "rust": "ok", "inputs": {"file": "fixture:spine_doubled.smb", "patches": ["iges"]}},
-    {"name": "fuzz01957_guard_healing_after_a_set_patch", "origin": "fuzz-out/n2000/topology.brep_p10/fuzz01957.json (crash: cpp: killed by signal 11)", "issue": "UB-237", "cpp": "rejected: guard: healing after a set patch walks malformed indices", "rust": "ok", "inputs": {"file": "fixture:spine_fan.smb", "patches": [{"set": {"field": 2, "index": 1, "value": 0}}]}}
+    {"name": "fuzz01957_guard_healing_after_a_set_patch", "origin": "fuzz-out/n2000/topology.brep_p10/fuzz01957.json (crash: cpp: killed by signal 11)", "issue": "UB-237", "cpp": "rejected: guard: healing a b-rep a set patch left inconsistent", "rust": "ok", "inputs": {"file": "fixture:spine_fan.smb", "patches": [{"set": {"field": 2, "index": 1, "value": 0}}]}}
   ]
 }

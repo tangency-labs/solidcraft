@@ -171,8 +171,13 @@ fn to_output(items: &[Item]) -> Output {
 /// `MakeTopologyFromData` runs the healer (`bHealerIsEnabled` and either `bAlwaysHeal`
 /// or an old healer version) over a B-rep it builds unchecked from patched records.
 ///
-/// * After a `Set` patch: the healer walks the malformed indices the build kept (as
-///   the ops after the build would; the FFI refuses those itself).
+/// * After `Set` patches that change the data and leave records the build accepts
+///   (the Rust build, healing off, does not return `InvalidInput`; data it refuses is
+///   the shim's `-2`, and upstream never runs): the build keeps edge uses linked into
+///   loops their records do not name, loop rings of the wrong length or edges on
+///   another edge's curve, and the healer walks that B-rep unchecked (SIGSEGV and
+///   hangs in the C++ reference, UB-164; the ops after the build would too, and the
+///   FFI refuses those itself). A `Set` that changes nothing is compared.
 /// * After an `Iges` patch whose kept shells leave a face use record in no face use
 ///   shell (the crafted spine fixtures: region 1 has no shells): that face use is built
 ///   without a shell and `SmHealData::Fix_BadSheets` hands it to
@@ -188,13 +193,13 @@ fn heal_guard(i: &Inputs) -> Option<&'static str> {
     let path = path_of(i).ok()?;
     let bytes = std::fs::read(&path).ok()?;
     let k = Kernel::default();
-    let mut data = BrepData::read_from_file(&k, bytes, FileType::Ascii).ok()?;
+    let mut data = BrepData::read_from_file(&k, bytes.clone(), FileType::Ascii).ok()?;
     apply_patches(&mut data, &i.patches).ok()?;
     if !(always_heal || data.healer_version() < HEALER_VERSION) {
         return None;
     }
-    if i.patches.iter().any(|p| matches!(p, PatchIn::Set { .. })) {
-        return Some("healing after a set patch walks malformed indices");
+    if changes_indices(&k, &bytes, &i.patches) && builds(i, &data) {
+        return Some("healing a b-rep a set patch left inconsistent");
     }
     if i.patches.iter().any(|p| matches!(p, PatchIn::Iges)) {
         let in_shell = |f: usize| {
@@ -211,6 +216,60 @@ fn heal_guard(i: &Inputs) -> Option<&'static str> {
         }
     }
     None
+}
+
+/// Whether the case's `Set` patches change the patched data: the data with every patch
+/// differs from the data with the same patches but its `Set` patches left out. A `Set`
+/// past its array, or of a field to the value it holds, changes nothing.
+fn changes_indices(k: &Kernel, bytes: &[u8], patches: &[PatchIn]) -> bool {
+    let without: Vec<PatchIn> = patches
+        .iter()
+        .filter(|p| !matches!(p, PatchIn::Set { .. }))
+        .copied()
+        .collect();
+    let patched = |ps: &[PatchIn]| {
+        let mut d = BrepData::read_from_file(k, bytes.to_vec(), FileType::Ascii).ok()?;
+        apply_patches(&mut d, ps).ok()?;
+        Some(format!("{d:?}"))
+    };
+    match (patched(patches), patched(&without)) {
+        (Some(a), Some(b)) => a != b,
+        _ => true,
+    }
+}
+
+/// Whether upstream gets past the build to the healer: false only when the Rust build
+/// (healing off) returns `InvalidInput`, the data the shim's simulation of the build's
+/// record indexing keeps from upstream (`-2`, UB-164), so upstream never runs.
+fn builds(i: &Inputs, data: &BrepData) -> bool {
+    let mut k = Kernel::default();
+    let mut data = data.clone();
+    let Ok(mut b) = Brep::new_with_infinite_region() else {
+        return true;
+    };
+    let mut store = AttributeStore::new();
+    let mut records: BTreeMap<ObjectKey, Topology> = BTreeMap::new();
+    let mut env = TopologyEnv {
+        all_attributes: &[],
+        attributes: &mut store,
+        key_of: &key_of,
+        records: &mut records,
+        next_key: 1u64 << 50,
+    };
+    let [make_uv_trim_curves, add_analytics, force_same_tol, check_uv_trim_curves, always_heal, _] =
+        i.options;
+    let options = MakeTopologyOptions {
+        make_uv_trim_curves,
+        add_analytics,
+        force_same_tol,
+        check_uv_trim_curves,
+        always_heal,
+        healer_enabled: false,
+    };
+    !matches!(
+        make_topology_from_data(&mut k, &mut b, &mut data, &mut env, options),
+        Err(SolidError::InvalidInput { .. })
+    )
 }
 
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
