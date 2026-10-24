@@ -101,7 +101,10 @@ fn key_from(name: &str) -> Option<egui::Key> {
 fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
     let r = app.run(id, params);
     if r.is_ok()
-        && !matches!(id, "view.layout" | "view.navigate" | "view.ambient_occlusion" | "view.graphics_preset" | "view.history_layout")
+        && !matches!(
+            id,
+            "view.layout" | "view.navigate" | "view.ambient_occlusion" | "view.perspective" | "view.graphics_preset" | "view.history_layout"
+        )
         && app.session.active_sketch.is_none()
         && app.session.world_state().bodies.len() == 1
         && app.session.undo.len() <= 2

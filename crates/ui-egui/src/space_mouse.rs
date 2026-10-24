@@ -751,6 +751,25 @@ mod tests {
         assert_eq!((escapes(&raw), ctx.input(|i| i.modifiers.alt)), (0, true));
     }
 
+    #[test]
+    fn a_button_set_to_perspective_view_switches_it_once_per_press() {
+        let device = "hid 046d:c62b";
+        let mut app = app();
+        app.space_mouse.device = Some(device.into());
+        app.preferences.space_mouse_buttons.insert(device.into(), [(2, ButtonJob::Command("view.perspective".into()))].into());
+        let ctx = window(true);
+        let before = app.ui.perspective;
+        press(&mut app, &ctx, 0b10, vec![]);
+        assert_eq!(app.ui.perspective, !before);
+        // Held, it doesn't switch again; the next press switches back.
+        press(&mut app, &ctx, 0b10, vec![]);
+        assert_eq!(app.ui.perspective, !before);
+        press(&mut app, &ctx, 0, vec![]);
+        press(&mut app, &ctx, 0b10, vec![]);
+        assert_eq!(app.ui.perspective, before);
+        assert!(app.session.undo.is_empty(), "a view setting, not an edit");
+    }
+
     /// The keyboard and a button hold the same modifier: it stays down until both let go, whichever
     /// lets go first, for each of Shift, Ctrl and Alt.
     #[test]
