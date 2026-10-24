@@ -2392,9 +2392,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.viewport.dialog_rect = None;
     }
     let Some(mut d) = app.dialog.take() else {
-        if app.tree.redefine.is_none() && app.params.is_none() {
-            crate::frame::reset_dock_offset(ctx);
-        }
         return;
     };
     // Edit Text lasts as long as its text: other design changes leave it open.
@@ -2446,9 +2443,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.dialog = Some(d);
         return;
     }
-    // Dragged by its title band, the dialog keeps that offset from its docked place while it
-    // is open (#1335), kept inside the viewport.
-    let moved = crate::frame::dock_offset(ctx, title(&d.kind));
+    // Command dialogs share the last dragged offset on this side until the application
+    // exits, kept inside the viewport.
+    let drag_key = side.dialog_offset_key();
+    let moved = crate::frame::dock_offset(ctx, drag_key);
     let docked = egui::pos2(side.anchor_x(vp), top);
     let drag_bounds = crate::shell::tool_drag_rect(app, vp);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
@@ -2528,14 +2526,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let icon = spec.as_ref().map_or("", |s| s.icon);
             let label = spec.as_ref().map_or(heading.as_str(), |s| tr(s.label));
             let label = if d.editing.is_some() { heading.as_str() } else { label };
-            let heading = crate::ui_kit::FeatureOptions {
-                icon,
-                title: label,
-                drag_key: title(&d.kind),
-                moved,
-                docked,
-                apply_label: repeatable.then_some("Apply"),
-            };
+            let heading = crate::ui_kit::FeatureOptions { icon, title: label, drag_key, moved, docked, apply_label: repeatable.then_some("Apply") };
             let applying = app.applying.is_some();
             let mut collapsed = d.collapsed;
             let manager = matches!(
