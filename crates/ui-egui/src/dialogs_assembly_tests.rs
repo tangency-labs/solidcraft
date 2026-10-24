@@ -729,11 +729,11 @@ fn secondary_alignment_refuses_other_occurrences_and_static_offset_origins() {
         f.offset[0] = "2 mm".into();
     }
     assert!(apply_commands(&app, &d).unwrap_err().contains("Offset X"));
-    // One optional alignment still has to validate BOTH primary occurrences. Picking B:2
-    // must not silently preview or create a joint on B:1 while only A has an alignment.
+    // Upstream occurrence picking now preserves B:2 instead of aliasing it to B:1.
+    // Reject a reference on fixed A, then prove an alignment and the joint keep B:2.
     app.dialog = None;
     let component = app.session.doc.find_component("B").unwrap();
-    app.run("occurrence.copy", json!({"component": component, "translate": [70, 0, 0]})).unwrap();
+    let copied = app.run("occurrence.copy", json!({"component": component, "translate": [70, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
     app.start("joint.create");
     let mut d = app.dialog.clone().unwrap();
     d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
@@ -742,7 +742,15 @@ fn secondary_alignment_refuses_other_occurrences_and_static_offset_origins() {
     d.pick(&app.session, face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
     assert!(d.inputs[3].items.is_empty(), "only the first alignment is supplied");
     assert!(d.inputs[2].items.is_empty());
-    assert!(!alignment_input_available(&d, 2), "aliased primary occurrence must be corrected first");
+    assert!(alignment_input_available(&d, 2), "the correctly resolved copied occurrence supports alignment");
+    let params = apply_commands(&app, &d).unwrap()[0].1.clone();
+    assert_eq!(params["b"]["occurrence"], copied, "do not silently joint the first instance");
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(110.0, 20.0, 5.0)).unwrap());
+    let params = apply_commands(&app, &d).unwrap()[0].1.clone();
+    assert!(params["b_alignment"]["face"].is_string());
+    let mut scratch = app.session.scratch();
+    scratch.execute("joint.create", &params).unwrap();
+    assert_eq!(scratch.doc.assembly.joints.last().unwrap().b.occurrence, copied);
 }
 
 #[test]

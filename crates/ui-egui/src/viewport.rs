@@ -2627,7 +2627,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             selected_faces.entry(body.as_str()).or_default().insert(*index);
         }
     }
-    for b in st.bodies.iter().filter(|b| app.session.body_visible(&b.name) && (app.preview.interaction.is_some() || !app.preview.effective_replaced().contains(&b.name))) {
+    for b in st
+        .bodies
+        .iter()
+        .filter(|b| app.session.body_visible(&b.name) && (app.preview.interaction.is_some() || !app.preview.effective_replaced().contains(&b.name)))
+    {
         let whole = hovered_whole.contains(b.name.as_str());
         let faces: Vec<usize> =
             if whole { (0..b.body.face_count()).collect() } else { hovered_faces.get(b.name.as_str()).cloned().unwrap_or_default() };
