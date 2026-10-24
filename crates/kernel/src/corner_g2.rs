@@ -457,6 +457,7 @@ mod tests;
 #[allow(clippy::unwrap_used)]
 mod fillet_corner_tests {
     use super::*;
+    use crate::mm;
     use crate::{ContinuityTolerances, SeamReport, measure, seam_diagnostics};
 
     /// A 20 mm box with its three edges at one corner rounded by 4: the rolling ball fills that
@@ -464,7 +465,7 @@ mod fillet_corner_tests {
     fn cornered(g2: bool) -> crate::Body {
         let b = crate::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
         let edges = [Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)];
-        if g2 { crate::fillet_g2_corners(&b, &edges, 4.0).unwrap() } else { crate::fillet(&b, &edges, 4.0).unwrap() }
+        if g2 { crate::fillet_g2_corners(&b, &edges, mm(4.0)).unwrap() } else { crate::fillet(&b, &edges, mm(4.0)).unwrap() }
     }
 
     #[test]
@@ -494,7 +495,7 @@ mod fillet_corner_tests {
         // leaving the shell open, and leaves the ball the corner.
         let b = crate::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
         let edges = [Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)];
-        let err = crate::fillet_g2_corners(&b, &edges, 4.0).unwrap_err().to_string();
+        let err = crate::fillet_g2_corners(&b, &edges, mm(4.0)).unwrap_err().to_string();
         eprintln!("G2 corner: {err}");
         assert!(err.contains("not supported yet:") && err.contains("G2 corner"), "{err}");
     }

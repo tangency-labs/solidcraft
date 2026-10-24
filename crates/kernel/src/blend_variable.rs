@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use solidcraft_geom::Vec3;
+use solidcraft_geom::{Length, Vec3};
 use truck_modeling::{self as mt, builder};
 
 use crate::blend::{plane_normal, rebuild_face, too_large, unsupported, vtx};
@@ -514,11 +514,9 @@ pub struct Taper {
 /// where a face closes to a point. Its control radii are the target min(radius, share × room)
 /// at their Greville positions (Schoenberg's variation-diminishing spline), which stays under the
 /// target wherever the room is concave along the edge (a convex face); the blend checks the rest.
-pub fn taper(body: &Body, edge_at: Vec3, radius: f64) -> Result<Taper> {
+pub fn taper(body: &Body, edge_at: Vec3, radius: Length) -> Result<Taper> {
     body.require_brep("fillet")?;
-    if !(radius.is_finite() && radius > 1e-6 && radius < 1e6) {
-        return Err(KernelError::Invalid("fillet radii must be positive".into()));
-    }
+    let radius = *radius;
     let edge = crate::surfaces::edge_near(body, edge_at).ok_or_else(|| KernelError::Invalid(format!("no edge at {edge_at:?}")))?;
     guard("taper", || {
         let s = EdgeSetup::new(body, &edge)?;
@@ -554,7 +552,7 @@ pub fn taper(body: &Body, edge_at: Vec3, radius: f64) -> Result<Taper> {
 /// A constant fillet of `edges` at `radius`; where that is too large, each edge it doesn't fit
 /// on alone gets a [`taper`], and the rest the constant radius. The result and the taper of each
 /// edge (in `edges`' order; None where the radius is constant).
-pub fn fillet_tapered(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body, Vec<Option<Taper>>)> {
+pub fn fillet_tapered(body: &Body, edges: &[Vec3], radius: Length) -> Result<(Body, Vec<Option<Taper>>)> {
     let why = match crate::fillet(body, edges, radius) {
         Err(KernelError::TooLarge(why)) => why,
         other => return other.map(|b| (b, vec![None; edges.len()])),
@@ -591,11 +589,9 @@ pub fn fillet_tapered(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body,
 /// `chord / (2 cos(φ/2))` from its face angle and edges sharing that angle blended together; a
 /// curved edge, or one between curved faces (or a chain of selected edges running on into one),
 /// is rolled by a ball whose radius gives the same width, which follows the face angle along it.
-pub fn fillet_chord(body: &Body, edges: &[Vec3], chord: f64) -> Result<Body> {
+pub fn fillet_chord(body: &Body, edges: &[Vec3], chord: Length) -> Result<Body> {
     body.require_brep("fillet")?;
-    if !(chord.is_finite() && chord > 1e-6 && chord < 1e6) {
-        return Err(KernelError::Invalid("the chord length must be positive".into()));
-    }
+    let chord = *chord;
     if edges.is_empty() || edges.len() > 1000 {
         return Err(KernelError::Invalid("select 1…1000 edges".into()));
     }
@@ -642,7 +638,7 @@ pub fn fillet_chord(body: &Body, edges: &[Vec3], chord: f64) -> Result<Body> {
     let counts = crate::record::counts(&[body]);
     let mut cur = crate::boolean_record::operand(body, 0, &counts);
     for (r, pts) in groups {
-        cur = crate::record::after(crate::fillet(&cur, &pts, r)?, &cur, &counts);
+        cur = crate::record::after(crate::fillet(&cur, &pts, crate::length(r, "the chord's radius")?)?, &cur, &counts);
     }
     for picks in rolled {
         // The chain as the current body has it: the blends before it rebuilt the faces it runs
@@ -661,6 +657,7 @@ pub fn fillet_chord(body: &Body, edges: &[Vec3], chord: f64) -> Result<Body> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mm;
     use crate::{box_solid, measure};
 
     fn rel(a: f64, b: f64) -> f64 {
@@ -710,7 +707,7 @@ mod tests {
         assert!(rel(measure(&h).unwrap().volume, v) < 1e-9);
         // Equal radii give the constant fillet.
         let g = fillet_variable(&b, Vec3::new(10.0, 10.0, 30.0), Vec3::new(10.0, 0.0, 30.0), 3.0, 3.0).unwrap();
-        let k = crate::fillet(&b, &[Vec3::new(10.0, 10.0, 30.0)], 3.0).unwrap();
+        let k = crate::fillet(&b, &[Vec3::new(10.0, 10.0, 30.0)], mm(3.0)).unwrap();
         assert!(rel(measure(&g).unwrap().volume, measure(&k).unwrap().volume) < 1e-6);
         // Too big for the faces: refused.
         assert!(fillet_variable(&b, Vec3::new(10.0, 10.0, 30.0), Vec3::new(10.0, 0.0, 30.0), 2.0, 50.0).is_err());
@@ -811,8 +808,8 @@ mod tests {
     fn taper_follows_the_room_along_the_edge() {
         let (at, start) = (Vec3::new(20.0, 0.0, 15.0), Vec3::new(0.0, 0.0, 15.0));
         let wedge = prism(&[(0.0, 0.0), (40.0, 0.0), (0.0, 20.0)], 15.0);
-        assert!(matches!(crate::fillet(&wedge, &[at], 16.0), Err(KernelError::TooLarge(_))));
-        let t = taper(&wedge, at, 16.0).unwrap();
+        assert!(matches!(crate::fillet(&wedge, &[at], mm(16.0)), Err(KernelError::TooLarge(_))));
+        let t = taper(&wedge, at, mm(16.0)).unwrap();
         let law = if t.start.dist(start) < 1e-9 { t.spline.clone() } else { t.spline.reversed() };
         // The room: the top face is 20 (1 − u) wide, the front 15 high.
         for i in 0..=100 {
@@ -822,7 +819,7 @@ mod tests {
         }
         assert_eq!(law.eval(1.0), 0.0);
         assert!((law.eval(0.0) - 13.5).abs() < 1e-9);
-        let (f, tapers) = fillet_tapered(&wedge, &[at], 16.0).unwrap();
+        let (f, tapers) = fillet_tapered(&wedge, &[at], mm(16.0)).unwrap();
         assert_eq!(tapers, vec![Some(t)]);
         let v = fine_volume(&f);
         assert!(rel(v, 6000.0 - removed(&law, 40.0)) < 1e-4, "{v} vs {}", 6000.0 - removed(&law, 40.0));
@@ -831,17 +828,17 @@ mod tests {
         assert!(faces.iter().any(|fc| fc.edge_iter().count() == 3));
 
         let trap = prism(&[(0.0, 0.0), (40.0, 0.0), (40.0, 2.0), (0.0, 20.0)], 15.0);
-        assert!(matches!(crate::fillet(&trap, &[at], 3.0), Err(KernelError::TooLarge(_))));
-        let (f, tapers) = fillet_tapered(&trap, &[at], 3.0).unwrap();
+        assert!(matches!(crate::fillet(&trap, &[at], mm(3.0)), Err(KernelError::TooLarge(_))));
+        let (f, tapers) = fillet_tapered(&trap, &[at], mm(3.0)).unwrap();
         let t = tapers.into_iter().flatten().next().unwrap();
         let law = if t.start.dist(start) < 1e-9 { t.spline } else { t.spline.reversed() };
         assert!((law.eval(0.0) - 3.0).abs() < 1e-9 && (law.eval(1.0) - 1.8).abs() < 1e-9);
         let v = fine_volume(&f);
         assert!(rel(v, 6600.0 - removed(&law, 40.0)) < 1e-4, "{v} vs {}", 6600.0 - removed(&law, 40.0));
         // A radius that fits stays constant.
-        let (g, tapers) = fillet_tapered(&trap, &[at], 1.0).unwrap();
+        let (g, tapers) = fillet_tapered(&trap, &[at], mm(1.0)).unwrap();
         assert_eq!(tapers, vec![None]);
-        assert!(rel(measure(&g).unwrap().volume, measure(&crate::fillet(&trap, &[at], 1.0).unwrap()).unwrap().volume) < 1e-12);
+        assert!(rel(measure(&g).unwrap().volume, measure(&crate::fillet(&trap, &[at], mm(1.0)).unwrap()).unwrap().volume) < 1e-12);
     }
 
     /// A radius spline given directly: a cubic with its control radii pulling the radius up in
@@ -869,8 +866,8 @@ mod tests {
     fn chord_length_on_a_right_angle() {
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
         // A right angle: chord c gives radius c / √2.
-        let f = fillet_chord(&b, &[Vec3::new(10.0, 10.0, 30.0)], 4.0).unwrap();
-        let k = crate::fillet(&b, &[Vec3::new(10.0, 10.0, 30.0)], 4.0 / 2f64.sqrt()).unwrap();
+        let f = fillet_chord(&b, &[Vec3::new(10.0, 10.0, 30.0)], mm(4.0)).unwrap();
+        let k = crate::fillet(&b, &[Vec3::new(10.0, 10.0, 30.0)], mm(4.0 / 2f64.sqrt())).unwrap();
         assert!(rel(measure(&f).unwrap().volume, measure(&k).unwrap().volume) < 1e-9);
     }
 }

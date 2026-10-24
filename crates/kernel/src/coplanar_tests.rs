@@ -8,8 +8,8 @@ use solidcraft_geom::Vec3;
 /// its booleans are not done on sections.
 fn block(l: f64, w: f64, h: f64) -> Body {
     let b = box_solid(Vec3::ZERO, Vec3::new(l, w, h)).unwrap();
-    let b = chamfer(&b, &[Vec3::new(l / 2.0, w, 0.0)], 1.0).unwrap();
-    chamfer(&b, &[Vec3::new(l, w / 2.0, 0.0)], 1.0).unwrap()
+    let b = chamfer(&b, &[Vec3::new(l / 2.0, w, 0.0)], mm(1.0)).unwrap();
+    chamfer(&b, &[Vec3::new(l, w / 2.0, 0.0)], mm(1.0)).unwrap()
 }
 
 /// A 200 x 100 x 20 block with a rib across it: 20 wide over the block's 100, from the top

@@ -336,6 +336,7 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
 
 #[cfg(test)]
 mod tests {
+    use crate::mm;
     use solidcraft_geom::Vec3;
 
     use super::delete_faces;
@@ -360,7 +361,7 @@ mod tests {
     fn issue1557_delete_closed_fillet_ring_keeps_the_floor() {
         let b = box_solid(Vec3::ZERO, Vec3::new(25.0, 25.0, 10.0)).unwrap();
         let picks = [Vec3::new(12.5, 0.0, 0.0), Vec3::new(25.0, 12.5, 0.0), Vec3::new(12.5, 25.0, 0.0), Vec3::new(0.0, 12.5, 0.0)];
-        let rounded = fillet(&b, &picks, 2.0).unwrap();
+        let rounded = fillet(&b, &picks, mm(2.0)).unwrap();
         let rounds: Vec<usize> =
             rounded.solid.face_iter().enumerate().filter(|(_, f)| crate::blend::plane_normal(f).is_none()).map(|(i, _)| i).collect();
         assert_eq!(rounds.len(), 4);
@@ -408,7 +409,7 @@ mod tests {
         let sharp = 24000.0;
         let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
         // A fillet on a box edge: deleting it gives the sharp box back, exactly.
-        let f = fillet(&b, &[Vec3::new(20.0, 30.0, 20.0)], 5.0).unwrap();
+        let f = fillet(&b, &[Vec3::new(20.0, 30.0, 20.0)], mm(5.0)).unwrap();
         assert!(volume(&f) < sharp - 1.0);
         let fi = faces_where(&f, |p| p.y > 25.0 - 1e-6 && p.z > 15.0 - 1e-6 && (p.y < 30.0 - 1e-9 || p.z < 20.0 - 1e-9));
         assert_eq!(fi.len(), 1, "{fi:?}");
@@ -416,7 +417,7 @@ mod tests {
         assert!((volume(&back) - sharp).abs() < 1e-9 * sharp, "{}", volume(&back));
         assert_eq!(back.face_count(), 6);
         // A chamfer likewise.
-        let c = chamfer(&b, &[Vec3::new(20.0, 30.0, 20.0)], 4.0).unwrap();
+        let c = chamfer(&b, &[Vec3::new(20.0, 30.0, 20.0)], mm(4.0)).unwrap();
         let ci = faces_where(&c, |p| p.y > 26.0 - 1e-6 && p.z > 16.0 - 1e-6 && (p.y < 30.0 - 1e-9 || p.z < 20.0 - 1e-9));
         let back = delete_faces(&c, &ci).unwrap();
         assert!((volume(&back) - sharp).abs() < 1e-9 * sharp, "{}", volume(&back));

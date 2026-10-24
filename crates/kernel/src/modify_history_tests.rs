@@ -7,7 +7,7 @@ use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
 use crate::body::Body;
 use crate::boolean_record::tests::{self, Reach, changes, to_edge, to_face};
 use crate::history::{Change, EdgeOrigin, FaceOrigin, History};
-use crate::{BoolOp, boolean, box_solid, cylinder, extrude};
+use crate::{BoolOp, boolean, box_solid, cylinder, extrude, mm};
 
 const TOL: f64 = 0.05;
 
@@ -79,7 +79,7 @@ fn ell() -> Body {
 fn fillet_one_edge() {
     let b = cube();
     let at = Vec3::new(20.0, 30.0, 20.0);
-    let r = crate::fillet(&b, &[at], 5.0).unwrap();
+    let r = crate::fillet(&b, &[at], mm(5.0)).unwrap();
     let h = verified(&r, &b, reach(5.0));
     assert_eq!(with(h, &[edge(edge_at(&b, at))]).len(), 1);
     // Two faces along the edge and the two at its ends are trimmed, two are untouched.
@@ -95,7 +95,7 @@ fn fillet_an_edge_a_cut_split() {
     let at = Vec3::new(5.0, 30.0, 20.0);
     let piece = edge_at(&cut, at);
     assert_eq!(cut.history().unwrap().edges[piece].origins, [EdgeOrigin::Edge { operand: 0, edge: edge_at(&b, at) }]);
-    let r = crate::fillet(&cut, &[at], 3.0).unwrap();
+    let r = crate::fillet(&cut, &[at], mm(3.0)).unwrap();
     let h = verified(&r, &cut, reach(3.0));
     assert_eq!(blends(h), [vec![edge(piece)]]);
     // Through the cut: the blend stands in place of the box's edge, which the cut split.
@@ -109,7 +109,7 @@ fn fillet_an_edge_a_cut_split() {
 fn fillet_three_edges_at_a_corner() {
     let b = cube();
     let pts = [Vec3::new(20.0, 30.0, 20.0), Vec3::new(40.0, 15.0, 20.0), Vec3::new(40.0, 30.0, 10.0)];
-    let r = crate::fillet_radii(&b, &pts.map(|p| (p, 4.0))).unwrap();
+    let r = crate::fillet_radii(&b, &pts.map(|p| (p, mm(4.0)))).unwrap();
     let h = verified(&r, &b, reach(4.0 * 1.5));
     let edges: Vec<usize> = pts.iter().map(|p| edge_at(&b, *p)).collect();
     for e in &edges {
@@ -125,7 +125,7 @@ fn fillet_three_edges_at_a_corner() {
 fn fillet_a_whole_loop() {
     let b = cube();
     let pts = [Vec3::new(20.0, 0.0, 20.0), Vec3::new(40.0, 15.0, 20.0), Vec3::new(20.0, 30.0, 20.0), Vec3::new(0.0, 15.0, 20.0)];
-    let r = crate::fillet(&b, &pts, 3.0).unwrap();
+    let r = crate::fillet(&b, &pts, mm(3.0)).unwrap();
     let h = verified(&r, &b, reach(3.0 * 1.5));
     let mut made: Vec<FaceOrigin> = blends(h).into_iter().flatten().collect();
     made.sort();
@@ -138,7 +138,7 @@ fn fillet_a_whole_loop() {
 fn fillet_every_edge_of_a_box() {
     let b = cube();
     let pts: Vec<Vec3> = b.edges(TOL).unwrap().iter().map(|e| e.mid).collect();
-    let r = crate::fillet(&b, &pts, 2.0).unwrap();
+    let r = crate::fillet(&b, &pts, mm(2.0)).unwrap();
     let h = verified(&r, &b, reach(2.0 * 2.0));
     // Six faces shrunk, twelve cylinders, eight corners of three edges each.
     assert_eq!(changes(h), [0, 6, 0, 0, 20]);
@@ -152,7 +152,7 @@ fn fillet_a_rolling_ball_chain() {
     let branch = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 35.0).unwrap();
     let tee = boolean(&main, &branch, BoolOp::Union).unwrap().unwrap();
     let at = Vec3::new(0.0, 10.0, 125f64.sqrt());
-    let r = crate::fillet(&tee, &[at], 3.0).unwrap();
+    let r = crate::fillet(&tee, &[at], mm(3.0)).unwrap();
     let h = verified(&r, &tee, reach(3.0 * 2.0));
     assert!(!blends(h).is_empty());
     assert!(blends(h).iter().all(|o| o.len() == 1));
@@ -165,7 +165,7 @@ fn fillet_variable_and_chord() {
     let r = crate::fillet_variable(&b, at, Vec3::new(0.0, 30.0, 20.0), 2.0, 5.0).unwrap();
     let h = verified(&r, &b, reach(5.0));
     assert_eq!(blends(h), [vec![edge(edge_at(&b, at))]]);
-    let r = crate::fillet_chord(&b, &[at, Vec3::new(40.0, 15.0, 0.0)], 4.0).unwrap();
+    let r = crate::fillet_chord(&b, &[at, Vec3::new(40.0, 15.0, 0.0)], mm(4.0)).unwrap();
     let h = verified(&r, &b, reach(4.0));
     assert_eq!(blends(h).len(), 2);
 }
@@ -174,7 +174,7 @@ fn fillet_variable_and_chord() {
 fn chamfer_cuts_one_edge() {
     let b = cube();
     let at = Vec3::new(20.0, 30.0, 20.0);
-    let r = crate::chamfer(&b, &[at], 4.0).unwrap();
+    let r = crate::chamfer(&b, &[at], mm(4.0)).unwrap();
     let h = verified(&r, &b, reach(4.0));
     let chamfer = with(h, &[edge(edge_at(&b, at))]);
     assert_eq!(chamfer.len(), 1, "{h:?}");
@@ -186,7 +186,7 @@ fn chamfer_cuts_one_edge() {
 fn chamfer_cutters_mitre_at_a_corner() {
     let b = cube();
     let pts = [Vec3::new(20.0, 30.0, 20.0), Vec3::new(40.0, 15.0, 20.0)];
-    let r = crate::chamfer(&b, &pts, 3.0).unwrap();
+    let r = crate::chamfer(&b, &pts, mm(3.0)).unwrap();
     let h = verified(&r, &b, reach(3.0 * 1.5));
     for p in pts {
         assert_eq!(with(h, &[edge(edge_at(&b, p))]).len(), 1, "{h:?}");
@@ -200,7 +200,7 @@ fn chamfer_cutters_mitre_at_a_corner() {
 fn chamfer_with_two_sides() {
     let b = cube();
     let at = Vec3::new(20.0, 30.0, 20.0);
-    let r = crate::chamfer_sides(&b, &[at], 2.0, crate::ChamferSide::Distance(4.0), false).unwrap();
+    let r = crate::chamfer_sides(&b, &[at], mm(2.0), crate::ChamferSide::Distance(4.0), false).unwrap();
     let h = verified(&r, &b, reach(4.0));
     assert_eq!(blends(h), [vec![edge(edge_at(&b, at))]]);
 }
@@ -208,7 +208,7 @@ fn chamfer_with_two_sides() {
 #[test]
 fn delete_a_fillet() {
     let b = cube();
-    let r = crate::fillet(&b, &[Vec3::new(20.0, 30.0, 20.0)], 5.0).unwrap();
+    let r = crate::fillet(&b, &[Vec3::new(20.0, 30.0, 20.0)], mm(5.0)).unwrap();
     let round = with(r.history().unwrap(), &[edge(edge_at(&b, Vec3::new(20.0, 30.0, 20.0)))]);
     let back = crate::delete_faces(&r, &round).unwrap();
     let h = verified(&back, &r, Reach { made: 0.0, moved: 6.0 });
@@ -445,7 +445,7 @@ fn fillet_after_box_cuts() {
     for (b, painted) in [(cube(), false), (painted_cube(), true)] {
         let cuts = if painted { box_cuts_of(&b) } else { plain.clone() };
         for ((name, cut, tool), (_, whole, _)) in cuts.into_iter().zip(&plain) {
-            let r = crate::fillet(&cut, &[at], 2.0).unwrap();
+            let r = crate::fillet(&cut, &[at], mm(2.0)).unwrap();
             let h = verified(&r, &cut, reach(2.0 * 1.5));
             assert_eq!(blends(h), [vec![edge(edge_at(&cut, at))]], "{name}");
             let pieces = cut.face_count() > whole.face_count();
@@ -471,7 +471,7 @@ fn chamfer_after_box_cuts() {
     let at = Vec3::new(5.0, 0.0, 20.0);
     for (b, painted) in [(cube(), false), (painted_cube(), true)] {
         for (name, cut, tool) in box_cuts_of(&b) {
-            let r = crate::chamfer(&cut, &[at], 2.0).unwrap();
+            let r = crate::chamfer(&cut, &[at], mm(2.0)).unwrap();
             let h = verified(&r, &cut, reach(2.0 * 1.5));
             // On the painted block the chamfer face keeps the boundaries the cut left.
             let faces = with(h, &[edge(edge_at(&cut, at))]).len();

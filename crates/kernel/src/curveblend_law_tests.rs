@@ -8,7 +8,7 @@ use solidcraft_geom::Vec3;
 use super::*;
 use crate::blend::vtx;
 use crate::blend_variable::{RadiusSpline, fillet_chord, fillet_variable, fillet_variable_points, fillet_variable_spline};
-use crate::{Body, BoolOp, boolean, box_solid, cylinder, fillet, measure, step_export};
+use crate::{Body, BoolOp, boolean, box_solid, cylinder, fillet, measure, mm, step_export};
 
 /// An oblique boss: a rod of radius 8 whose axis leans 26.57° from the plate's normal, standing on
 /// a 5 mm plate. The edge where its side meets the plate's top plane is an ellipse whose two faces
@@ -154,8 +154,8 @@ fn a_chord_fillet_along_an_oblique_boss_edge_is_refused() {
     let (body, _, _) = oblique_boss();
     let pick = Vec3::new(7.5 + 8.944_271_909_999_16, 0.0, 5.0);
     // A fixed radius rolls along the same chain: the edge itself is supported.
-    assert!(fillet(&body, &[pick], 2.5).is_ok());
-    let e = fillet_chord(&body, &[pick], 4.0).unwrap_err();
+    assert!(fillet(&body, &[pick], mm(2.5)).is_ok());
+    let e = fillet_chord(&body, &[pick], mm(4.0)).unwrap_err();
     assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
 }
 
@@ -166,10 +166,10 @@ fn a_chord_fillet_along_an_oblique_boss_edge_is_refused() {
 fn chord_fillet_along_an_arc_edge() {
     let (chord, r) = (3.0, 3.0 / 2f64.sqrt());
     let (body, mid, axis, _) = arc_walled_box(false);
-    let blended = fillet_chord(&body, &[mid], chord).unwrap();
+    let blended = fillet_chord(&body, &[mid], mm(chord)).unwrap();
     assert!(blended.validity().is_empty(), "{:?}", blended.validity());
     assert_eq!(blended.unmeshed_faces(), 0);
-    let plain = fillet(&body, &[mid], r).unwrap();
+    let plain = fillet(&body, &[mid], mm(r)).unwrap();
     let (made, exact) = (measure(&blended).unwrap().volume, measure(&plain).unwrap().volume);
     assert!((made - exact).abs() < exact * 1e-6, "volume {made} vs {exact}");
     // The contact on the plane and the one on the wall at the same azimuth: the width across.
@@ -197,8 +197,8 @@ fn chord_fillet_along_an_arc_edge() {
 fn chord_fillet_on_a_straight_edge_is_unchanged() {
     let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
     let (at, chord) = (Vec3::new(10.0, 10.0, 30.0), 4.0);
-    let f = fillet_chord(&b, &[at], chord).unwrap();
-    let k = fillet(&b, &[at], chord / 2f64.sqrt()).unwrap();
+    let f = fillet_chord(&b, &[at], mm(chord)).unwrap();
+    let k = fillet(&b, &[at], mm(chord / 2f64.sqrt())).unwrap();
     assert_eq!(step_export(&[&f], "part").unwrap(), step_export(&[&k], "part").unwrap());
     assert_eq!(f.unmeshed_faces(), 0);
 }
@@ -296,9 +296,9 @@ fn a_law_running_to_zero_along_a_curved_edge_is_refused() {
 fn a_chord_or_radius_the_faces_cannot_hold_is_refused() {
     let (body, mid, _, _) = arc_walled_box(false);
     // A chord of 30 across a 40 mm wide wall (r ≈ 21, past the side walls and the block).
-    let e = fillet_chord(&body, &[mid], 30.0).unwrap_err();
+    let e = fillet_chord(&body, &[mid], mm(30.0)).unwrap_err();
     assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
-    assert!(fillet_chord(&body, &[mid], 3.0 / 2f64.sqrt()).is_ok());
+    assert!(fillet_chord(&body, &[mid], mm(3.0 / 2f64.sqrt())).is_ok());
     // A radius law too large for the wall.
     assert!(fillet_variable(&body, mid, Vec3::new(0.0, 30.0, 0.0), 2.0, 30.0).is_err());
     assert!(fillet_variable(&body, mid, Vec3::new(0.0, 30.0, 0.0), 20.0, 20.0).is_err());
@@ -311,5 +311,5 @@ fn a_chord_or_radius_the_faces_cannot_hold_is_refused() {
     assert!(fillet_variable_spline(&body, mid, mid, &RadiusSpline { degree: 1, knots: vec![0.0, 0.5, 1.0], radii: vec![2.0, 3.0] }).is_err());
     assert!(fillet_variable_points(&body, mid, mid, &[(0.0, 2.0), (1.5, 3.0)], false).is_err());
     // An edge the body does not have is refused by name, not approximated.
-    assert!(fillet_chord(&body, &[Vec3::new(500.0, 500.0, 500.0)], 3.0).is_err());
+    assert!(fillet_chord(&body, &[Vec3::new(500.0, 500.0, 500.0)], mm(3.0)).is_err());
 }

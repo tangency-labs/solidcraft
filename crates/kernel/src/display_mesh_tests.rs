@@ -7,7 +7,7 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use solidcraft_geom::{Loop2, Mesh, Plane, Region2, Seg2, UnitVec3, Vec2, Vec3};
 
 use super::{Body, DISPLAY_ANGLE};
-use crate::{FaceSurface, extrude, face_surface};
+use crate::{FaceSurface, extrude, face_surface, mm};
 
 /// The chord tolerance the application draws a body with.
 fn display_tol(b: &Body) -> f64 {
@@ -399,7 +399,7 @@ fn a_cylinder_wall_split_along_its_seam_meshes_round() {
 #[test]
 fn outline_bounds_hold_the_display_mesh() {
     let cube = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
-    let rounded = crate::fillet(&cube, &[Vec3::new(20., 0., 10.)], 3.).unwrap();
+    let rounded = crate::fillet(&cube, &[Vec3::new(20., 0., 10.)], mm(3.)).unwrap();
     let rod = crate::cylinder(Vec3::new(5., 5., 0.), Vec3::Z, 4., 25.).unwrap();
     for body in [cube, rounded, rod] {
         let outline = body.outline_bounds();

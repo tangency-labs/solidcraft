@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use solidcraft_geom::Vec3;
+use solidcraft_geom::{Length, Vec3};
 use truck_modeling::{self as mt};
 
 use crate::blend::{edge_mid, too_large, unsupported, vtx};
@@ -25,11 +25,8 @@ use crate::{BoolOp, KernelError, Result};
 
 /// Round the edges nearest the points, `radius` each. The three edges meeting at a vertex that
 /// all lie among them end in a sphere; the others are rounded as they would be alone.
-pub(crate) fn fillet_ball_vertices(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+pub(crate) fn fillet_ball_vertices(body: &Body, edges: &[Vec3], radius: Length) -> Result<Body> {
     body.require_brep("fillet")?;
-    if !(radius.is_finite() && radius > 1e-6 && radius < 1e6) {
-        return Err(KernelError::Invalid("fillet size must be positive".into()));
-    }
     if edges.len() < 3 {
         return Err(unsupported("a vertex with three rounded edges"));
     }
@@ -133,7 +130,8 @@ fn ball_at(faces: &[&mt::Face; 3], v: Vec3, r: f64, tol: f64) -> Result<Ball> {
 }
 
 /// Round the three edges at the vertex at `at`, ending in a sphere.
-fn round_vertex(cur: &Body, at: Vec3, r: f64) -> Result<Body> {
+fn round_vertex(cur: &Body, at: Vec3, radius: Length) -> Result<Body> {
+    let r = *radius;
     let size = cur.size();
     let tol = (size * 1e-7).max(1e-9);
     let solid = cur.deep_copy();
@@ -201,7 +199,7 @@ fn round_vertex(cur: &Body, at: Vec3, r: f64) -> Result<Body> {
         let mut ok = true;
         for k in order {
             let Some(p) = picks.get(k) else { return Err(KernelError::Failed("pick".into())) };
-            match crate::blend::fillet(&step, &[*p], r) {
+            match crate::blend::fillet(&step, &[*p], radius) {
                 Ok(b) => step = b,
                 Err(e) => {
                     last = Some(e);

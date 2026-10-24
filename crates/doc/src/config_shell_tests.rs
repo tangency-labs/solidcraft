@@ -1,7 +1,7 @@
 use super::*;
 use crate::{FeatureKind, Model, PlaneRef};
 use serde_json::json;
-use solidcraft_geom::{Vec2, Vec3};
+use solidcraft_geom::{Length, Vec2, Vec3};
 
 fn shell_document() -> (Document, u64, u64) {
     let mut doc = Document::new("certified shell");
@@ -372,7 +372,7 @@ fn saved_curved_strip_projection_is_lost_after_exact_wall_coalescence() {
     let cavity = solidcraft_kernel::fillet(
         &cavity_box,
         &[Vec3::new(38., 28., 15.), Vec3::new(-38., 28., 15.), Vec3::new(-38., -28., 15.), Vec3::new(38., -28., 15.)],
-        4.,
+        Length::new(4.).unwrap(),
     )
     .unwrap();
     let raw = solidcraft_kernel::boolean(&old_source, &cavity, solidcraft_kernel::BoolOp::Cut).unwrap().unwrap();

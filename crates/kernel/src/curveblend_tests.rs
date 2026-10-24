@@ -6,7 +6,7 @@ use mt::{BoundedCurve, ParametricCurve, ParametricSurface, ParametricSurface3D, 
 use super::*;
 use crate::blend::plane_normal;
 use crate::issue_851_tests::planned_volume;
-use crate::{Body, BoolOp, boolean, cylinder, fillet};
+use crate::{Body, BoolOp, boolean, cylinder, fillet, mm};
 
 #[test]
 fn issue_1303_chamfer_open_rim_after_end_chamfer() {
@@ -35,7 +35,7 @@ fn issue_1303_chamfer_open_rim_after_end_chamfer() {
     )
     .unwrap();
     let picks = [Vec3::new(-11.75, 0.0, 13.0), Vec3::new(15.0, 11.75, 13.0), Vec3::new(15.0, -11.75, 13.0)];
-    let result = crate::chamfer(&body, &picks, 1.0).unwrap();
+    let result = crate::chamfer(&body, &picks, mm(1.0)).unwrap();
     assert!(result.validity().is_empty(), "{:?}", result.validity());
     assert_eq!(result.crossed_face_loops().unwrap(), 0);
     // At height 12 + u, the removed half-ring area is pi/2 * (2*r*u + u^2).
@@ -49,11 +49,11 @@ fn issue_1303_chamfer_open_rim_after_end_chamfer() {
         assert!(result.solid.vertex_iter().any(|v| from_p3(v.point()).dist(p) < 1e-6));
     }
     for selection in [vec![picks[0]], picks.into_iter().rev().collect()] {
-        let other = crate::chamfer(&body, &selection, 1.0).unwrap();
+        let other = crate::chamfer(&body, &selection, mm(1.0)).unwrap();
         assert!(other.validity().is_empty(), "{:?}", other.validity());
         assert!((volume(&body) - volume(&other) - expected).abs() < 0.02);
     }
-    assert!(crate::chamfer(&body, &picks, 4.0).is_err());
+    assert!(crate::chamfer(&body, &picks, mm(4.0)).is_err());
 }
 
 fn tee(scale: f64, origin: Vec3) -> Body {
@@ -145,7 +145,7 @@ fn rolling_ball_matches_analytic_tee_and_contacts() {
     for (scale, origin) in [(1.0, Vec3::ZERO), (0.25, Vec3::new(23.0, -17.0, 9.0))] {
         let body = tee(scale, origin);
         let point = origin + Vec3::new(0.0, 10.0, 125f64.sqrt()) * scale;
-        let blend = fillet(&body, &[point], 3.0 * scale).unwrap();
+        let blend = fillet(&body, &[point], mm(3.0 * scale)).unwrap();
         assert!(blend.validity().is_empty(), "{:?}", blend.validity());
         let surfaces: Vec<_> = blend.solid.face_iter().map(|f| f.oriented_surface()).filter(|s| matches!(s, mt::Surface::NurbsSurface(_))).collect();
         assert!(!surfaces.is_empty());
@@ -308,7 +308,7 @@ fn rolling_ball_along_a_straight_edge_between_cylinders_trims_curved_end_seams()
     let along = (r1 * r1 - r2 * r2 + d * d) / (2.0 * d);
     let corner = c1 + u * along + Vec3::new(-u.y, u.x, 0.0) * (r1 * r1 - along * along).sqrt();
     let g = gap(c1, r1, c2, r2, corner, r);
-    let blend = fillet(&body, &[corner + Vec3::Z * (h / 2.0)], r).unwrap();
+    let blend = fillet(&body, &[corner + Vec3::Z * (h / 2.0)], mm(r)).unwrap();
     assert!(blend.validity().is_empty(), "{:?}", blend.validity());
     // One blend face; the edge is replaced by two contact lines and two end arcs.
     let (before, after) = (crate::measure(&body).unwrap(), crate::measure(&blend).unwrap());
@@ -362,9 +362,10 @@ fn rolling_ball_past_the_end_seam_is_too_large_and_reduces() {
     let along = (r1 * r1 - r2 * r2 + d * d) / (2.0 * d);
     let corner = Vec3::new(along, (r1 * r1 - along * along).sqrt(), 0.0);
     let at = [corner + Vec3::Z * (h / 2.0)];
-    let e = fillet(&body, &at, 3.0).unwrap_err();
+    let e = fillet(&body, &at, mm(3.0)).unwrap_err();
     assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
-    let (r, blend) = crate::fillet_max(&body, &at, 3.0).unwrap();
+    let (r, blend) = crate::fillet_max(&body, &at, mm(3.0)).unwrap();
+    let r = r.get();
     assert!(r > 1.5 && r < 3.0, "{r}");
     assert!(blend.validity().is_empty(), "{:?}", blend.validity());
     let g = gap(c1, r1, c2, r2, corner, r);
@@ -394,12 +395,12 @@ fn a_refused_edge_is_not_rolled_again_after_blends_far_from_it() {
     let seam = Vec3::new(along, (r1 * r1 - along * along).sqrt(), h / 2.0);
     let ends = [Vec3::new(-80.0, -5.0, h / 2.0), Vec3::new(-80.0, 5.0, h / 2.0)];
     crate::blend::ROLLS.with(|n| n.set(0));
-    let e = fillet(&body, &[seam, ends[0], ends[1]], 3.0).unwrap_err();
+    let e = fillet(&body, &[seam, ends[0], ends[1]], mm(3.0)).unwrap_err();
     assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
     let rolls = crate::blend::ROLLS.with(|n| n.get());
     assert_eq!(rolls, 1, "the seam was rolled {rolls} times");
     // The far edges alone still round.
-    assert!(fillet(&body, &ends, 3.0).is_ok());
+    assert!(fillet(&body, &ends, mm(3.0)).is_ok());
 }
 
 /// At a knife edge (the plane and the wall's normals opposite) the ball's centre is the same
@@ -440,12 +441,12 @@ fn a_smooth_seam_is_refused_as_having_no_corner() {
     for (y, z) in [(0.0, 0.0), (200.0, 0.0), (0.0, 70.0), (200.0, 70.0)] {
         edges.push(Vec3::new(75.0, y, z));
     }
-    let rounded = fillet(&b, &edges, 10.0).unwrap();
+    let rounded = fillet(&b, &edges, mm(10.0)).unwrap();
     // The seam on the top face beside the round of the edge along y at x = 0, and the seam
     // with the end face x = 0 beside the round of the top edge along y.
     for seam in [Vec3::new(10.0, 100.0, 70.0), Vec3::new(0.0, 100.0, 60.0)] {
         for chamfer in [false, true] {
-            let r = if chamfer { crate::chamfer(&rounded, &[seam], 1.0) } else { fillet(&rounded, &[seam], 1.0) };
+            let r = if chamfer { crate::chamfer(&rounded, &[seam], mm(1.0)) } else { fillet(&rounded, &[seam], mm(1.0)) };
             match r {
                 Err(KernelError::Invalid(m)) => assert!(m.contains("smooth") && m.contains("no corner"), "{m}"),
                 other => panic!("{seam:?}: {:?}", other.map(|_| "a body")),
@@ -453,9 +454,9 @@ fn a_smooth_seam_is_refused_as_having_no_corner() {
         }
     }
     // A sharp edge of a box with one round still takes a fillet beside the round's seams.
-    let one = fillet(&crate::box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap(), &[Vec3::new(40.0, 30.0, 10.0)], 5.0).unwrap();
-    assert!(fillet(&one, &[Vec3::new(20.0, 0.0, 20.0)], 1.0).is_ok());
-    assert!(matches!(fillet(&one, &[Vec3::new(35.0, 30.0, 10.0)], 1.0), Err(KernelError::Invalid(_))));
+    let one = fillet(&crate::box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap(), &[Vec3::new(40.0, 30.0, 10.0)], mm(5.0)).unwrap();
+    assert!(fillet(&one, &[Vec3::new(20.0, 0.0, 20.0)], mm(1.0)).is_ok());
+    assert!(matches!(fillet(&one, &[Vec3::new(35.0, 30.0, 10.0)], mm(1.0)), Err(KernelError::Invalid(_))));
 }
 
 /// A 40 × 40 × 20 box whose front wall is an arc of radius 40 about a Z axis: `concave` cuts a
@@ -507,7 +508,8 @@ fn rolling_ball_along_an_arc_ends_in_side_walls_at_an_angle() {
         let v0 = planned_volume(&body);
         for round in [true, false] {
             let what = format!("{} {}", if concave { "concave" } else { "convex" }, if round { "fillet" } else { "chamfer" });
-            let blend = if round { fillet(&body, &[mid], r) } else { crate::chamfer(&body, &[mid], r) }.unwrap_or_else(|e| panic!("{what}: {e}"));
+            let blend =
+                if round { fillet(&body, &[mid], mm(r)) } else { crate::chamfer(&body, &[mid], mm(r)) }.unwrap_or_else(|e| panic!("{what}: {e}"));
             assert!(blend.validity().is_empty(), "{what}: {:?}", blend.validity());
             let volume = planned_volume(&blend);
             let removed =
@@ -548,9 +550,10 @@ fn rolling_ball_past_a_slanted_end_face_is_too_large_and_reduces() {
     // before it reaches the side wall (the contact circle of radius 36 meets x = 0 at y ≈ 40.07):
     // too large, and the largest that fits rounds the edge.
     let (body, mid, _, _) = arc_walled_box(false);
-    let e = fillet(&body, &[mid], 4.0).unwrap_err();
+    let e = fillet(&body, &[mid], mm(4.0)).unwrap_err();
     assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
-    let (r, blend) = crate::fillet_max(&body, &[mid], 4.0).unwrap();
+    let (r, blend) = crate::fillet_max(&body, &[mid], mm(4.0)).unwrap();
+    let r = r.get();
     assert!(r > 3.0 && r < 4.0, "{r}");
     assert!(blend.validity().is_empty(), "{:?}", blend.validity());
 }
@@ -566,7 +569,7 @@ fn rolling_ball_runs_into_a_knife_edge_tip() {
     let body = boolean(&block, &cylinder(Vec3::new(21.0, -21.0, -1.0), Vec3::Z, 21.0, 12.0).unwrap(), BoolOp::Cut).unwrap().unwrap();
     let mid = Vec3::new(21.0 - 21.0 * std::f64::consts::FRAC_1_SQRT_2, -21.0 + 21.0 * std::f64::consts::FRAC_1_SQRT_2, 0.0);
     let r = 2.0;
-    let blend = fillet(&body, &[mid], r).unwrap();
+    let blend = fillet(&body, &[mid], mm(r)).unwrap();
     assert!(blend.validity().is_empty(), "{:?}", blend.validity());
     let (n, h) = (4000, r / 4000.0);
     let removed = (0..=n)
@@ -598,22 +601,23 @@ fn rolling_ball_turns_about_a_rounded_corner_of_its_radius() {
     // It is what the rolling round tends to as its radius tends to the corner's, too large past
     // it, and its mesh is closed.
     let (body, _, _, _) = arc_walled_box(true);
-    let body = fillet(&body, &[Vec3::new(0.0, 4.641016151377546, 10.0)], 2.0).unwrap();
+    let body = fillet(&body, &[Vec3::new(0.0, 4.641016151377546, 10.0)], mm(2.0)).unwrap();
     // The corner round's centre is 4 from the corner along its bisector, (2, 8.105): its arc's
     // middle is 2 back toward the corner.
     let ends = [Vec3::new(0.0, 25.0, 0.0), Vec3::new(1.0, 6.373, 0.0), Vec3::new(20.0, 10.0, 0.0)];
     let v0 = planned_volume(&body);
     let removed = |r: f64| {
-        let b = fillet(&body, &ends, r).unwrap_or_else(|e| panic!("r {r}: {e}"));
+        let b = fillet(&body, &ends, mm(r)).unwrap_or_else(|e| panic!("r {r}: {e}"));
         assert!(b.validity().is_empty(), "r {r}: {:?}", b.validity());
         v0 - planned_volume(&b)
     };
     let (a, b, at) = (removed(1.96), removed(1.98), removed(2.0));
     let expected = 2.0 * b - a;
     assert!((at - expected).abs() < expected * 2e-3, "removed {at} at r 2, {a} and {b} before it");
-    let e = fillet(&body, &ends, 2.5).unwrap_err();
+    let e = fillet(&body, &ends, mm(2.5)).unwrap_err();
     assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
-    let (r, _) = crate::fillet_max(&body, &ends, 2.5).unwrap();
+    let (r, _) = crate::fillet_max(&body, &ends, mm(2.5)).unwrap();
+    let r = r.get();
     assert!(r > 1.5 && r <= 2.0 + 1e-9, "{r}");
 }
 
@@ -626,7 +630,8 @@ fn rolling_ball_along_a_straight_edge_ends_in_a_curved_face() {
     let r = 2.0;
     for round in [true, false] {
         let blend =
-            if round { fillet(&body, &[Vec3::new(0.0, 25.0, 0.0)], r) } else { crate::chamfer(&body, &[Vec3::new(0.0, 25.0, 0.0)], r) }.unwrap();
+            if round { fillet(&body, &[Vec3::new(0.0, 25.0, 0.0)], mm(r)) } else { crate::chamfer(&body, &[Vec3::new(0.0, 25.0, 0.0)], mm(r)) }
+                .unwrap();
         assert!(blend.validity().is_empty(), "{:?}", blend.validity());
         let (n, h) = (4000, r / 4000.0);
         let removed = (0..=n)
@@ -677,7 +682,7 @@ fn chamfer_a_chain_of_a_line_and_an_arc_into_a_slanted_end() {
     ];
     let body = crate::extrude(&Plane::XY, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], 0.0, 20.0).unwrap().pop().unwrap();
     let volume = |b: &Body| b.tessellate_with(0.0005, true).unwrap().measure().volume;
-    let made = crate::chamfer(&body, &[Vec3::new(10.0, 0.0, 20.0)], 2.0).unwrap();
+    let made = crate::chamfer(&body, &[Vec3::new(10.0, 0.0, 20.0)], mm(2.0)).unwrap();
     let n = 2000;
     let h = 2.0 / n as f64;
     let arc = (0..=n)
@@ -706,7 +711,7 @@ fn round_along_long_lines_and_small_turns_measures_its_volume() {
     let (w, d, h) = (300.0, 60.0, 40.0);
     let bar = crate::build::box_solid(Vec3::new(-w / 2.0, 0.0, 0.0), Vec3::new(w / 2.0, d, h)).unwrap();
     let long = [Vec3::new(-w / 2.0, d / 2.0, 0.0), Vec3::new(w / 2.0, d / 2.0, 0.0), Vec3::new(-w / 2.0, d / 2.0, h), Vec3::new(w / 2.0, d / 2.0, h)];
-    let rounded = fillet(&bar, &long, 5.0).unwrap();
+    let rounded = fillet(&bar, &long, mm(5.0)).unwrap();
     // The rolling ball along the end face's loop (the exact blends would take this loop; a
     // loop next to free-form faces, as in the issue, comes here).
     let ids: Vec<mt::EdgeID> = crate::body::Body::unique_edges(&rounded.solid)

@@ -1854,7 +1854,7 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                 let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("boss body".into())) };
                 let mut warn = None;
                 let edges = resolve_edges(&mb.body, &[position.0 + x * r0], &[], &mut warn)?;
-                let nb = mb.traced().then(kernel::fillet(&mb.body, &edges, rf)?);
+                let nb = mb.traced().then(kernel::fillet(&mb.body, &edges, length(rf, "the boss fillet radius")?)?);
                 if let Some(slot) = st.bodies.get_mut(i) {
                     *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
                 }

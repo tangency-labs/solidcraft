@@ -1,4 +1,4 @@
-use solidcraft_geom::Vec3;
+use solidcraft_geom::{Length, Vec3};
 use solidcraft_kernel::{Body, BoolOp};
 
 use super::*;
@@ -113,7 +113,7 @@ fn bodies() -> Vec<(&'static str, Body)> {
         ("box with a hole", cut(&bx, &pin)),
         ("cross hole", cut(&pin, &cross)),
         ("torus", ok(solidcraft_kernel::torus(Vec3::ZERO, 6.0, 1.5))),
-        ("fillets", ok(solidcraft_kernel::fillet(&bx, &edges, 1.5))),
+        ("fillets", ok(solidcraft_kernel::fillet(&bx, &edges, Length::new(1.5).unwrap()))),
         (
             "mirrored",
             ok(solidcraft_kernel::transform_matrix(&pin, [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [3.0, 0.0, 1.0, 1.0]])),

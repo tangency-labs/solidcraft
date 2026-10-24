@@ -890,12 +890,13 @@ fn press_pieces(b: &Body, chosen: &[usize], distance: f64) -> Result<Body> {
 #[cfg(test)]
 mod rim_preflight_tests {
     use super::*;
+    use crate::mm;
 
     #[test]
     fn a_distant_shell_does_not_turn_a_smaller_local_round_into_a_zero_rim() {
         let block = crate::box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
         let edges = [Vec3::new(20.0, 0.0, 0.0), Vec3::new(40.0, 15.0, 0.0), Vec3::new(20.0, 30.0, 0.0), Vec3::new(0.0, 15.0, 0.0)];
-        let rounded = crate::fillet(&block, &edges, 1.5).unwrap();
+        let rounded = crate::fillet(&block, &edges, mm(1.5)).unwrap();
         let distant = crate::box_solid(Vec3::new(1_000_000.0, 0.0, 0.0), Vec3::new(1_000_010.0, 10.0, 10.0)).unwrap();
         let combined = crate::boolean(&rounded, &distant, crate::BoolOp::Union).unwrap().unwrap();
         let faces: Vec<_> = (0..combined.solid.face_iter().count()).collect();

@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcraft_geom::{Aabb3, Length, Vec3};
 use truck_modeling::{self as mt, builder};
 
 use crate::body::{Body, Solid, from_p3, p3, v3};
@@ -1110,11 +1110,9 @@ fn g2_controls(p: Vec3, t1: Vec3, t2: Vec3, setback: f64) -> [Vec3; 6] {
 /// `radius` sets the same setback as a circular fillet; the profile is not circular.
 /// Each end must meet one planar face, which may be oblique to the edge. Unsupported
 /// configurations are refused, never replaced with a G1 circular fillet.
-pub fn fillet_g2(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+pub fn fillet_g2(body: &Body, edges: &[Vec3], radius: Length) -> Result<Body> {
     body.require_brep("G2 fillet")?;
-    if !(radius.is_finite() && radius > 1e-6 && radius < 1e6) {
-        return Err(KernelError::Invalid("G2 fillet size must be positive and finite".into()));
-    }
+    let radius = *radius;
     if edges.is_empty() || edges.len() > 1000 || edges.iter().any(|p| ![p.x, p.y, p.z].into_iter().all(f64::is_finite)) {
         return Err(KernelError::Invalid("G2 fillet needs 1 to 1000 finite edge points".into()));
     }
@@ -1162,13 +1160,13 @@ fn orders<T: Clone>(items: &[T]) -> Vec<Vec<T>> {
 /// that is not the size, the other orders are tried too, and when its result has a face whose
 /// boundary leaves its surface (a blend that ran on past the end of a round's surface, which a
 /// round of a curved edge does not have) another order that has none is preferred.
-fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Result<Body> {
+fn blend(body: &Body, edges: &[Vec3], r: Length, shape: Shape, what: &str) -> Result<Body> {
     blend_with(body, edges, r, shape, what, false)
 }
 
 /// [`blend`]; `curved_ends`: also roll a ball along a straight edge between planes that ends at
 /// a curved face (the last resort, after the corner build for an earlier round there).
-fn blend_with(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, curved_ends: bool) -> Result<Body> {
+fn blend_with(body: &Body, edges: &[Vec3], r: Length, shape: Shape, what: &str, curved_ends: bool) -> Result<Body> {
     let sound = |b: &Body| crate::tess::boundaries_on_surfaces(&b.solid, (b.size() * 1e-4).max(1e-6));
     let first = blend_in_order(body, edges, r, shape, what, curved_ends);
     let reorder = (2..=MAX_REORDERED).contains(&edges.len())
@@ -1199,10 +1197,7 @@ fn blend_with(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, cur
     }
 }
 
-fn blend_in_order(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, curved_ends: bool) -> Result<Body> {
-    if !(r.is_finite() && r > 1e-6 && r < 1e6) {
-        return Err(KernelError::Invalid(format!("{what} size must be positive")));
-    }
+fn blend_in_order(body: &Body, edges: &[Vec3], r: Length, shape: Shape, what: &str, curved_ends: bool) -> Result<Body> {
     if edges.is_empty() {
         return Err(KernelError::Invalid("no edges selected".into()));
     }
@@ -1237,7 +1232,7 @@ fn blend_in_order(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str,
                 }
             }
             if hit.len() == all.len()
-                && let Ok(b) = crate::polyhedron::round_all_edges(&cur, r)
+                && let Ok(b) = crate::polyhedron::round_all_edges(&cur, *r)
             {
                 return Ok(record::after(b, &cur, &counts));
             }
@@ -1264,7 +1259,7 @@ fn blend_in_order(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str,
                 let size = lc.size();
                 let solid = lc.deep_copy();
                 let ids = edge_ids(&lc, &solid, &g)?;
-                match crate::loopblend::loop_blend(&solid, &ids, size, r, shape == Shape::Round) {
+                match crate::loopblend::loop_blend(&solid, &ids, size, *r, shape == Shape::Round) {
                     Some(res) => {
                         let (made, rec) = guard(what, || res)?;
                         lc = record::after(record::rebuilt(made, &[&solid], &rec)?, &lc, &counts);
@@ -1281,7 +1276,7 @@ fn blend_in_order(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str,
             Err(_) => {}
         }
     }
-    blend_each(cur, edges, r, shape, what, &counts, curved_ends)
+    blend_each(cur, edges, *r, shape, what, &counts, curved_ends)
 }
 
 /// The edges blended one at a time (see [`blend`]), `cur` being the healed body.
@@ -1844,11 +1839,11 @@ fn closed(input: &Body, b: Body) -> Result<Body> {
 /// Constant-radius fillet of the edges nearest to the given points. A radius too large for the
 /// faces around the edges is refused with [`KernelError::TooLarge`] ([`fillet_max`] finds the
 /// largest that works).
-pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+pub fn fillet(body: &Body, edges: &[Vec3], radius: Length) -> Result<Body> {
     body.require_brep("fillet")?;
     // A round that would run past its faces into other geometry or another round (#1080).
     // Checked once built, so a refusal of the build itself stands as it is.
-    let size = crate::blend_fit::Size::Round(radius);
+    let size = crate::blend_fit::Size::Round(*radius);
     match fillet_built(body, edges, radius) {
         Ok(b) => crate::blend_fit::accept(body, b, edges, size),
         Err(e) => Err(crate::blend_fit::explain(body, edges, size, e)),
@@ -1856,12 +1851,12 @@ pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
 }
 
 /// [`fillet`], once the radius is known to fit.
-fn fillet_built(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+fn fillet_built(body: &Body, edges: &[Vec3], radius: Length) -> Result<Body> {
     // Corners the local blends refuse (an earlier round at an edge's end): radius per edge.
     blend(body, edges, radius, Shape::Round, "fillet")
         .and_then(|b| closed(body, b))
         .or_else(|e| {
-            let sel: Vec<(Vec3, f64)> = edges.iter().map(|p| (*p, radius)).collect();
+            let sel: Vec<(Vec3, Length)> = edges.iter().map(|p| (*p, radius)).collect();
             // The local blend's refusal, unless only the corner build found the radius too large.
             crate::blend_corner::fillet_radii(body, &sel)
                 .and_then(|b| closed(body, b))
@@ -1879,7 +1874,7 @@ fn fillet_built(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
         // trimmed by the face. Refused, the refusal above stands.
         .or_else(|e| blend_with(body, edges, radius, Shape::Round, "fillet", true).and_then(|b| closed(body, b)).map_err(|_| e))
         // Blends meeting at corners on curved faces: all at once.
-        .or_else(|e| corners(body, edges, radius, Shape::Round, "fillet", false).and_then(|b| closed(body, b)).map_err(|e2| keep_size(e, e2)))
+        .or_else(|e| corners(body, edges, *radius, Shape::Round, "fillet", false).and_then(|b| closed(body, b)).map_err(|e2| keep_size(e, e2)))
 }
 
 /// The first refusal, unless only the second found the blend too large (a smaller one may fit).
@@ -1916,12 +1911,9 @@ fn corners(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, g2: bo
 /// sphere. The corner construction is the all-at-once corner blend, so a configuration it cannot
 /// hold is refused rather than quietly given the ball's sphere; [`fillet`] (the default) is
 /// unchanged.
-pub fn fillet_g2_corners(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+pub fn fillet_g2_corners(body: &Body, edges: &[Vec3], radius: Length) -> Result<Body> {
     body.require_brep("fillet")?;
-    if !(radius.is_finite() && radius > 0.0) {
-        return Err(KernelError::Invalid("the blend radius must be finite and positive".into()));
-    }
-    corners(body, edges, radius, Shape::Round, "fillet", true).and_then(|b| closed(body, b))
+    corners(body, edges, *radius, Shape::Round, "fillet", true).and_then(|b| closed(body, b))
 }
 
 /// The step of the radius search: three significant digits of the requested radius.
@@ -1933,30 +1925,28 @@ fn radius_step(radius: f64) -> f64 {
 /// these edges works, with its result; `None` when none does. Each candidate is a real fillet
 /// of the edges, so the radius returned is one that was built; the search runs up to 16 of
 /// them, so it is for an explicit request, not every refusal.
-pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body)> {
-    if !(radius.is_finite() && radius > 1e-6) {
-        return None;
-    }
+pub fn fillet_max(body: &Body, edges: &[Vec3], radius: Length) -> Option<(Length, Body)> {
+    let radius = *radius;
     let q = radius_step(radius);
     // Radii n·q for n in [0, hi): hi fails (it is the request, or above it), lo works.
     let mut hi = (radius / q).ceil() as u64;
     let mut lo = 0u64;
-    let mut best: Option<Body> = None;
+    let mut best: Option<(Length, Body)> = None;
     // log2(10⁴) steps reach the step size; the cap keeps a slow body from stalling.
     for _ in 0..16 {
         if hi - lo <= 1 {
             break;
         }
         let mid = lo + (hi - lo) / 2;
-        match fillet(body, edges, mid as f64 * q) {
-            Ok(b) => {
+        match Length::new(mid as f64 * q).map(|r| (r, fillet(body, edges, r))) {
+            Some((r, Ok(b))) => {
                 lo = mid;
-                best = Some(b);
+                best = Some((r, b));
             }
-            Err(_) => hi = mid,
+            _ => hi = mid,
         }
     }
-    best.map(|b| (lo as f64 * q, b))
+    best
 }
 
 /// [`fillet_max`] for each group of the edges that may limit each other's radius (sharing a
@@ -1965,7 +1955,7 @@ pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body
 /// one radius for all (as [`fillet_max`]) when a group is refused for another reason than its
 /// size, the groups don't build together, or there are too many to search (each search is up
 /// to 16 fillets, and this runs in the live preview).
-pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Option<(Vec<f64>, Body)> {
+pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: Length) -> Option<(Vec<Length>, Body)> {
     const MAX_GROUPS: usize = 8;
     const MAX_SEARCHES: usize = 2;
     let one = || fillet_max(body, edges, radius).map(|(r, b)| (vec![r; edges.len()], b));
@@ -1999,26 +1989,26 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Option<(Vec<
 
 /// The fillet of each edge at its own radius (`radii` in `edges`' order): built together where
 /// the corner build takes it, else the edges of each radius together, the largest first.
-pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
+pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[Length]) -> Result<Body> {
     if radii.len() != edges.len() {
         return Err(KernelError::Invalid("one radius per edge".into()));
     }
     if let Some(r) = radii.first().filter(|r| radii.iter().all(|x| x.to_bits() == r.to_bits())) {
         return fillet(body, edges, *r);
     }
-    let sel: Vec<(Vec3, f64)> = edges.iter().copied().zip(radii.iter().copied()).collect();
+    let sel: Vec<(Vec3, Length)> = edges.iter().copied().zip(radii.iter().copied()).collect();
     // Each round must fit beside its own edge (#1080); the edges of each radius are checked
     // together below.
     let fit = |b: Body| -> Result<Body> {
         for (p, r) in &sel {
-            crate::blend_fit::check(body, std::slice::from_ref(p), crate::blend_fit::Size::Round(*r))?;
+            crate::blend_fit::check(body, std::slice::from_ref(p), crate::blend_fit::Size::Round(**r))?;
         }
         Ok(b)
     };
     if let Ok(b) = crate::blend_corner::fillet_radii(body, &sel).and_then(|b| closed(body, b)).and_then(fit) {
         return Ok(b);
     }
-    let mut by_radius: Vec<(f64, Vec<Vec3>)> = Vec::new();
+    let mut by_radius: Vec<(Length, Vec<Vec3>)> = Vec::new();
     for (p, r) in sel {
         match by_radius.iter_mut().find(|(x, _)| x.to_bits() == r.to_bits()) {
             Some((_, pts)) => pts.push(p),
@@ -2080,17 +2070,14 @@ fn interacting_groups(body: &Body, pts: &[Vec3]) -> Option<Vec<Vec<usize>>> {
 /// Equal-distance chamfer of the edges nearest to the given points. Each edge is cut with a
 /// prism whose only face inside the body is the chamfer plane (so neighbouring chamfers meet in
 /// a mitre); the local operation is the fallback.
-pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+pub fn chamfer(body: &Body, edges: &[Vec3], distance: Length) -> Result<Body> {
     body.require_brep("chamfer")?;
-    if !(distance.is_finite() && distance > 1e-6 && distance < 1e6) {
-        return Err(KernelError::Invalid("chamfer size must be positive".into()));
-    }
     if edges.is_empty() || edges.len() > 1000 {
         return Err(KernelError::Invalid("select 1…1000 edges".into()));
     }
     // A chamfer that would run past its faces into other geometry or another chamfer, or whose
     // result changes more than the chamfers can (#1080).
-    let size = crate::blend_fit::Size::Chamfer(distance);
+    let size = crate::blend_fit::Size::Chamfer(*distance);
     match chamfer_built(body, edges, distance) {
         Ok(b) => crate::blend_fit::accept(body, b, edges, size),
         Err(e) => Err(crate::blend_fit::explain(body, edges, size, e)),
@@ -2098,7 +2085,8 @@ pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
 }
 
 /// [`chamfer`], once the size is known to fit.
-fn chamfer_built(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+fn chamfer_built(body: &Body, edges: &[Vec3], d: Length) -> Result<Body> {
+    let distance = *d;
     // Each step's result carries its history over `[body]`.
     let counts = record::counts(&[body]);
     // All cutters at once (their union mitres the corners), else one edge at a time.
@@ -2178,7 +2166,7 @@ fn chamfer_built(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
             .and_then(|id| all.iter().find(|e| e.id() == *id))
             .and_then(|e| smooth_chain(&solid, e))
             .is_some_and(|chain| ids.len() > 1 && ids.iter().all(|id| chain.contains(id)));
-        if same_chain && let Ok(result) = blend(&cur, edges, distance, Shape::Flat, "chamfer") {
+        if same_chain && let Ok(result) = blend(&cur, edges, d, Shape::Flat, "chamfer") {
             return Ok(result);
         }
     }
@@ -2189,8 +2177,8 @@ fn chamfer_built(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
         let mut progressed = false;
         // A chain running on into curved faces, or an edge ending at one: as for fillets.
         let blend_or_curved = |cur: &Body, p: &Vec3| -> Result<Body> {
-            blend(cur, std::slice::from_ref(p), distance, Shape::Flat, "chamfer")
-                .or_else(|e| blend_with(cur, std::slice::from_ref(p), distance, Shape::Flat, "chamfer", true).map_err(|_| e))
+            blend(cur, std::slice::from_ref(p), d, Shape::Flat, "chamfer")
+                .or_else(|e| blend_with(cur, std::slice::from_ref(p), d, Shape::Flat, "chamfer", true).map_err(|_| e))
                 .or_else(|e| {
                     chamfer_tool_curved(cur, *p, distance)
                         .and_then(|tool| cut_one(cur, &tool)?.ok_or_else(|| KernelError::Failed("the chamfer removed everything".into())))
@@ -2203,7 +2191,7 @@ fn chamfer_built(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
             // Where that blend cannot build the edge, the cutter is what used to succeed (#814).
             let inside = tool.as_ref().ok().is_some_and(|t| t.extension_inside);
             let step = if inside {
-                match blend(&cur, std::slice::from_ref(p), distance, Shape::Flat, "chamfer") {
+                match blend(&cur, std::slice::from_ref(p), d, Shape::Flat, "chamfer") {
                     Ok(b) => b,
                     Err(miss) => match tool.and_then(|t| cut_one(&cur, &t)) {
                         Ok(Some(b)) => b,
@@ -2312,14 +2300,13 @@ pub enum ChamferSide {
 /// Straight edges between planar faces are cut by prisms; curved edges where a planar face meets
 /// a wall (a circular rim between a plane and a cylinder or cone, convex or concave, and loops of
 /// lines and arcs) are chamfered along that face's loop.
-pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Body> {
+pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: Length, side: ChamferSide, flip: bool) -> Result<Body> {
     body.require_brep("chamfer")?;
-    let ok = |x: f64| x.is_finite() && x > 1e-6 && x < 1e6;
-    let valid = ok(d1)
-        && match side {
-            ChamferSide::Distance(d) => ok(d),
-            ChamferSide::Angle(a) => a.is_finite() && a > 1e-3 && a < std::f64::consts::PI - 1e-3,
-        };
+    let d1 = *d1;
+    let valid = match side {
+        ChamferSide::Distance(d) => Length::new(d).is_some(),
+        ChamferSide::Angle(a) => a.is_finite() && a > 1e-3 && a < std::f64::consts::PI - 1e-3,
+    };
     if !valid {
         return Err(KernelError::Invalid("chamfer sizes must be positive (the angle within 0°…180°)".into()));
     }
@@ -2616,13 +2603,14 @@ fn chamfer_tool_sides(cur: &Body, p: Vec3, s: f64, sides: Option<(ChamferSide, b
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mm;
     use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
 
     #[test]
     fn g2_fillet_has_zero_curvature_at_both_planar_rails() {
         use mt::{InnerSpace, ParametricCurve, ParametricSurface};
         let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
-        let out = fillet_g2(&body, &[Vec3::new(20.0, 0.0, 10.0)], 2.0).unwrap();
+        let out = fillet_g2(&body, &[Vec3::new(20.0, 0.0, 10.0)], mm(2.0)).unwrap();
         assert!(out.validity().is_empty(), "{:?}", out.validity());
         assert_eq!(out.face_count(), body.face_count() + 1);
         let solid = out.deep_copy();
@@ -2678,13 +2666,13 @@ mod tests {
             Vec2::new(0.0, 20.0),
         ]);
         let body = crate::build::extrude(&Plane::XY, &[Region2 { outer: lp, holes: vec![] }], 0.0, 20.0).unwrap().remove(0);
-        let out = fillet_g2(&body, &[Vec3::new(10.0, 10.0, 10.0)], 2.0).unwrap();
+        let out = fillet_g2(&body, &[Vec3::new(10.0, 10.0, 10.0)], mm(2.0)).unwrap();
         assert!(out.validity().is_empty(), "{:?}", out.validity());
         let volume = out.tessellate(0.0001).unwrap().measure().volume;
         let expected = 6000.0 + (113.0 / 756.0) * 4.0 * 20.0;
         assert!((volume - expected).abs() < 0.02, "{volume} vs {expected}");
         let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
-        let out = fillet_g2(&body, &[Vec3::new(20.0, 0.0, 10.0), Vec3::new(0.0, 20.0, 10.0)], 2.0).unwrap();
+        let out = fillet_g2(&body, &[Vec3::new(20.0, 0.0, 10.0), Vec3::new(0.0, 20.0, 10.0)], mm(2.0)).unwrap();
         assert!(out.validity().is_empty(), "{:?}", out.validity());
         assert_eq!(out.face_count(), body.face_count() + 2);
     }
@@ -2702,11 +2690,11 @@ mod tests {
             let body = crate::extrude(&plane, std::slice::from_ref(&region), 0.0, 20.0).unwrap().remove(0);
             let pick = plane.to_world(Vec2::ZERO) + plane.normal() * 10.0;
             assert_eq!(body.crossed_face_loops().unwrap(), 0);
-            let out = fillet_g2(&body, &[pick], 0.5).unwrap();
+            let out = fillet_g2(&body, &[pick], mm(0.5)).unwrap();
             assert!(out.validity().is_empty(), "{:?}", out.validity());
             assert_eq!(out.crossed_face_loops().unwrap(), 0);
             assert_eq!(out.face_count(), body.face_count() + 1);
-            let result = fillet_g2(&body, &[pick], 2.0);
+            let result = fillet_g2(&body, &[pick], mm(2.0));
             if let Ok(out) = &result {
                 eprintln!("accepted G2 result: validity={:?}, crossed_faces={}", out.validity(), out.crossed_face_loops().unwrap());
             }
@@ -2730,7 +2718,7 @@ mod tests {
                 };
                 let body = crate::extrude(&plane, &[region], 0.0, 20.0).unwrap().pop().unwrap();
                 let pick = plane.to_world(Vec2::new(20.0, 0.0)) + plane.normal() * 20.0;
-                let out = fillet_g2(&body, &[pick], 5.0).unwrap();
+                let out = fillet_g2(&body, &[pick], mm(5.0)).unwrap();
                 assert!(out.validity().is_empty(), "{:?}", out.validity());
                 assert_eq!(out.crossed_face_loops().unwrap(), 0);
                 assert_eq!(out.face_count(), 7);
@@ -2804,7 +2792,7 @@ mod tests {
         // z -> z + 0.3x + 0.4y tilts both caps while leaving the vertical edge
         // and its side planes unchanged. This shear preserves volume.
         let body = crate::transform_matrix(&body, [[1.0, 0.0, 0.3, 0.0], [0.0, 1.0, 0.4, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]).unwrap();
-        let out = fillet_g2(&body, &[Vec3::new(10.0, 10.0, 17.0)], 2.0).unwrap();
+        let out = fillet_g2(&body, &[Vec3::new(10.0, 10.0, 17.0)], mm(2.0)).unwrap();
         assert!(out.validity().is_empty(), "{:?}", out.validity());
         assert_eq!(out.crossed_face_loops().unwrap(), 0);
         let solid = out.deep_copy();
@@ -2830,20 +2818,17 @@ mod tests {
     fn g2_fillet_refuses_invalid_and_unsupported_geometry() {
         let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
         let edge = [Vec3::new(20.0, 0.0, 10.0)];
-        for radius in [0.0, -1.0, f64::NAN, f64::INFINITY, 1e7] {
-            assert!(fillet_g2(&body, &edge, radius).is_err());
-        }
-        assert!(fillet_g2(&body, &[], 2.0).is_err());
-        assert!(fillet_g2(&body, &[Vec3::new(f64::NAN, 0.0, 0.0)], 2.0).is_err());
-        assert!(fillet_g2(&body, &[Vec3::new(1000.0, 0.0, 0.0)], 2.0).is_err());
-        assert!(fillet_g2(&body, &edge, 25.0).is_err());
-        let rounded = fillet(&body, &edge, 2.0).unwrap();
-        assert!(fillet_g2(&rounded, &[Vec3::new(20.0, 2.0, 10.0)], 1.0).is_err());
+        assert!(fillet_g2(&body, &[], mm(2.0)).is_err());
+        assert!(fillet_g2(&body, &[Vec3::new(f64::NAN, 0.0, 0.0)], mm(2.0)).is_err());
+        assert!(fillet_g2(&body, &[Vec3::new(1000.0, 0.0, 0.0)], mm(2.0)).is_err());
+        assert!(fillet_g2(&body, &edge, mm(25.0)).is_err());
+        let rounded = fillet(&body, &edge, mm(2.0)).unwrap();
+        assert!(fillet_g2(&rounded, &[Vec3::new(20.0, 2.0, 10.0)], mm(1.0)).is_err());
         let boss = box_and_boss();
-        assert!(fillet_g2(&boss, &[Vec3::new(40.0, 4.0, 0.0)], 0.5).is_err());
+        assert!(fillet_g2(&boss, &[Vec3::new(40.0, 4.0, 0.0)], mm(0.5)).is_err());
         // The ordinary blend supports the boss's pieced end wall; G2 must still refuse it.
         assert!(matches!(
-            fillet_g2(&boss, &[Vec3::new(40.0, 4.0, 20.0)], 0.8),
+            fillet_g2(&boss, &[Vec3::new(40.0, 4.0, 20.0)], mm(0.8)),
             Err(KernelError::Failed(message)) if message.contains("G2 fillets require one planar end face")
         ));
     }
@@ -2880,7 +2865,7 @@ mod tests {
         // The edge (40, 0..8, 0) ends in the cylinder wall at y = 8.
         let len = 20.0 - (144.0f64 - 0.0).sqrt();
         for (shape, size, area) in [(Shape::Round, 0.5, (1.0 - std::f64::consts::PI / 4.0) * 0.25), (Shape::Flat, 0.5, 0.125)] {
-            let out = blend(&body, &[Vec3::new(40.0, 4.0, 0.0)], size, shape, "blend").unwrap();
+            let out = blend(&body, &[Vec3::new(40.0, 4.0, 0.0)], mm(size), shape, "blend").unwrap();
             assert!(out.validity().is_empty(), "{:?}", out.validity());
             let removed = v0 - vol(&out);
             // The section runs on a little past y = 8 under the cylinder wall.
@@ -2899,7 +2884,7 @@ mod tests {
         let vol = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
         let v0 = vol(&body);
         for (shape, area) in [(Shape::Round, (1.0 - std::f64::consts::PI / 4.0)), (Shape::Flat, 0.5)] {
-            let out = blend(&body, &[Vec3::new(5.0, 0.0, 10.0)], 1.0, shape, "blend").unwrap();
+            let out = blend(&body, &[Vec3::new(5.0, 0.0, 10.0)], mm(1.0), shape, "blend").unwrap();
             assert!(out.validity().is_empty(), "{:?}", out.validity());
             let removed = v0 - vol(&out);
             assert!(removed > area * 14.0 && removed < area * 15.2, "{removed}");
@@ -2913,7 +2898,7 @@ mod tests {
         let body = crate::ops::boolean(&plate, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
         let vol = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
         let v0 = vol(&body);
-        let one = chamfer(&body, &[Vec3::new(10.0, 10.0, 5.0)], 2.0).unwrap();
+        let one = chamfer(&body, &[Vec3::new(10.0, 10.0, 5.0)], mm(2.0)).unwrap();
         assert!(one.validity().is_empty(), "{:?}", one.validity());
         assert_eq!(one.unmeshed_faces(), 0);
         let added = vol(&one) - v0;
@@ -2921,7 +2906,7 @@ mod tests {
         assert!(added > 19.0 && added < 21.0, "added {added}, want 20");
         assert_eq!(one.face_count(), body.face_count() + 1, "one bevel face");
         let corners = [Vec3::new(10.0, 10.0, 5.0), Vec3::new(30.0, 10.0, 5.0), Vec3::new(30.0, 30.0, 5.0), Vec3::new(10.0, 30.0, 5.0)];
-        let all = chamfer(&body, &corners, 2.0).unwrap();
+        let all = chamfer(&body, &corners, mm(2.0)).unwrap();
         assert!(all.validity().is_empty(), "{:?}", all.validity());
         let added = vol(&all) - v0;
         assert!(added > 76.0 && added < 84.0, "added {added}, want 80");
@@ -2935,8 +2920,8 @@ mod tests {
         let k = 5.0;
         let b = crate::build::box_solid(Vec3::ZERO, Vec3::new(100.0, 50.0, 20.0)).unwrap();
         let outline = [Vec3::new(50.0, 0.0, 20.0), Vec3::new(100.0, 25.0, 20.0), Vec3::new(50.0, 50.0, 20.0), Vec3::new(0.0, 25.0, 20.0)];
-        let c = chamfer(&b, &outline, k).unwrap();
-        let out = blend(&c, &[Vec3::new(k / 2.0, k / 2.0, 20.0 - k / 2.0)], 1.0, Shape::Flat, "chamfer").unwrap();
+        let c = chamfer(&b, &outline, mm(k)).unwrap();
+        let out = blend(&c, &[Vec3::new(k / 2.0, k / 2.0, 20.0 - k / 2.0)], mm(1.0), Shape::Flat, "chamfer").unwrap();
         assert!(out.validity().is_empty(), "{:?}", out.validity());
         assert_eq!(out.lumps().unwrap().len(), 1);
         assert_eq!(out.face_count(), c.face_count() + 1);
@@ -2957,7 +2942,7 @@ mod tests {
         let vol = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
         let v0 = vol(&body);
         for shape in [Shape::Round, Shape::Flat] {
-            let out = blend(&body, &[Vec3::new(20.0, 0.0, 8.0)], 0.5, shape, "blend").unwrap();
+            let out = blend(&body, &[Vec3::new(20.0, 0.0, 8.0)], mm(0.5), shape, "blend").unwrap();
             assert!(out.validity().is_empty(), "{:?}", out.validity());
             // One blend face per piece of the arc (the groove's surface is in two faces).
             assert_eq!(out.face_count(), body.face_count() + 2);
@@ -2974,9 +2959,9 @@ mod tests {
         // A box with one vertical edge rounded: a top edge meeting that round smoothly is blended
         // with the round's top arc and the next top edge, as one smooth chain.
         let b = crate::build::box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
-        let rounded = blend(&b, &[Vec3::new(40.0, 30.0, 10.0)], 5.0, Shape::Round, "fillet").unwrap();
+        let rounded = blend(&b, &[Vec3::new(40.0, 30.0, 10.0)], mm(5.0), Shape::Round, "fillet").unwrap();
         for shape in [Shape::Round, Shape::Flat] {
-            let out = blend(&rounded, &[Vec3::new(20.0, 30.0, 20.0)], 1.0, shape, "blend").unwrap();
+            let out = blend(&rounded, &[Vec3::new(20.0, 30.0, 20.0)], mm(1.0), shape, "blend").unwrap();
             assert!(out.validity().is_empty(), "{:?}", out.validity());
             assert_eq!(out.face_count(), rounded.face_count() + 3);
         }
@@ -2991,7 +2976,7 @@ mod tests {
         let vol = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
         let v0 = vol(&body);
         for (shape, area) in [(Shape::Round, (1.0 - std::f64::consts::PI / 4.0) * 0.64), (Shape::Flat, 0.32)] {
-            let out = blend(&body, &[Vec3::new(40.0, 4.0, 20.0)], 0.8, shape, "blend").unwrap();
+            let out = blend(&body, &[Vec3::new(40.0, 4.0, 20.0)], mm(0.8), shape, "blend").unwrap();
             assert!(out.validity().is_empty(), "{:?}", out.validity());
             assert_eq!(out.lumps().unwrap().len(), 1);
             // Along y = 0 … 8 (and on a hair's breadth, to the cylinder's wall: y − 8 < 0.03).
@@ -3017,8 +3002,8 @@ mod tests {
         ] {
             let picks = [Vec3::new(52.0, 20.0, 0.0)];
             let out = match shape {
-                Shape::Round => fillet(&body, &picks, 0.8),
-                _ => chamfer(&body, &picks, 0.8),
+                Shape::Round => fillet(&body, &picks, mm(0.8)),
+                _ => chamfer(&body, &picks, mm(0.8)),
             }
             .unwrap();
             assert!(out.validity().is_empty(), "{:?}", out.validity());
@@ -3057,7 +3042,7 @@ mod tests {
         // The edge runs from x = −45 to where the wall meets the cylinder, x = 55 − √(25² − 5²).
         let len = 45.0 + 55.0 - (600f64).sqrt();
         for (shape, area) in [(Shape::Round, 1.0 - std::f64::consts::PI / 4.0), (Shape::Flat, 0.5)] {
-            let out = blend(&body, &[Vec3::new(0.0, 10.0, -15.0)], 1.0, shape, "blend").unwrap();
+            let out = blend(&body, &[Vec3::new(0.0, 10.0, -15.0)], mm(1.0), shape, "blend").unwrap();
             assert!(out.validity().is_empty(), "{:?}", out.validity());
             // A concave edge: the blend adds material.
             let added = vol(&out) - v0;
@@ -3074,7 +3059,7 @@ mod tests {
             };
             let body = crate::extrude(&Plane::XY, &[region], 0.0, 20.0).unwrap().pop().unwrap();
             let pick = [Vec3::new(20.0, 0.0, 20.0)];
-            let result = blend(&body, &pick, 2.0, Shape::Flat, "chamfer").unwrap();
+            let result = blend(&body, &pick, mm(2.0), Shape::Flat, "chamfer").unwrap();
             let removed = 2.0 * (40.0 - 2.0 * slope * 2.0 / 3.0);
             let actual = crate::measure(&body).unwrap().volume - crate::measure(&result).unwrap().volume;
             assert!((actual - removed).abs() < 1e-6, "{actual} vs {removed}");
@@ -3083,10 +3068,10 @@ mod tests {
             for point in [Vec3::new(slope * 2.0, 2.0, 20.0), Vec3::new(40.0 - slope * 2.0, 2.0, 20.0)] {
                 assert!(result.solid.vertex_iter().any(|v| vtx(&v).dist(point) < 1e-8));
             }
-            assert!(blend(&body, &pick, 25.0, Shape::Flat, "chamfer").is_err());
+            assert!(blend(&body, &pick, mm(25.0), Shape::Flat, "chamfer").is_err());
             // A fillet ends in each sloped end plane along an ellipse: the removed section's
             // length is taken at its centroid, c from the edge.
-            let rounded = blend(&body, &pick, 2.0, Shape::Round, "fillet").unwrap();
+            let rounded = blend(&body, &pick, mm(2.0), Shape::Round, "fillet").unwrap();
             let (area, c) =
                 ((1.0 - std::f64::consts::PI / 4.0) * 4.0, 2.0 * (10.0 - 3.0 * std::f64::consts::PI) / (3.0 * (4.0 - std::f64::consts::PI)));
             let removed = area * (40.0 - 2.0 * slope * c);

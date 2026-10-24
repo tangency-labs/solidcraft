@@ -1,4 +1,5 @@
 use super::*;
+use crate::mm;
 use mt::{ParameterDivision2D, ParametricSurface, ParametricSurface3D, SearchNearestParameter, SearchParameter};
 use truck_meshalgo::prelude::*;
 
@@ -7,7 +8,7 @@ fn wedge() -> (Body, RadiusSpline) {
     let outer = Loop2::polygon(&[Vec2::new(0., 0.), Vec2::new(40., 0.), Vec2::new(0., 20.)]);
     let body = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0., 15.).unwrap().pop().unwrap();
     let at = Vec3::new(20., 0., 15.);
-    let (filleted, tapers) = fillet_tapered(&body, &[at], 16.).unwrap();
+    let (filleted, tapers) = fillet_tapered(&body, &[at], mm(16.)).unwrap();
     let taper = tapers.into_iter().flatten().next().unwrap();
     (filleted, taper.spline)
 }

@@ -74,7 +74,7 @@ fn fillet_the_knife_edge() {
     for (name, body) in [("plate first", part()), ("corner first", part_other_order()), ("cut from a box", part_cut_from_a_box())] {
         let before = measure(&body).unwrap().volume;
         for r in [0.5, 2.0, 5.0] {
-            let rounded = fillet(&body, &[knife()], r).unwrap_or_else(|e| panic!("{name} r={r}: {e}"));
+            let rounded = fillet(&body, &[knife()], mm(r)).unwrap_or_else(|e| panic!("{name} r={r}: {e}"));
             assert!(rounded.validity().is_empty(), "{name} r={r}: {:?}", rounded.validity());
             assert_eq!(rounded.face_count(), body.face_count() + 1, "{name} r={r}: one blend face");
             let v = measure(&rounded).unwrap().volume;
@@ -89,7 +89,7 @@ fn chamfer_the_knife_edge() {
     for (name, body) in [("plate first", part()), ("corner first", part_other_order()), ("cut from a box", part_cut_from_a_box())] {
         let before = measure(&body).unwrap().volume;
         for d in [0.5, 2.0, 5.0] {
-            let cut = chamfer(&body, &[knife()], d).unwrap_or_else(|e| panic!("{name} d={d}: {e}"));
+            let cut = chamfer(&body, &[knife()], mm(d)).unwrap_or_else(|e| panic!("{name} d={d}: {e}"));
             assert!(cut.validity().is_empty(), "{name} d={d}: {:?}", cut.validity());
             assert_eq!(cut.face_count(), body.face_count() + 1, "{name} d={d}: one chamfer face");
             let v = measure(&cut).unwrap().volume;
@@ -106,7 +106,7 @@ fn knife_edge_sizes_never_panic() {
     let body = part();
     for r in [1e-5, 1e-3, 10.0, 21.0, 40.0, 1e3, 1e6 - 1.0] {
         for round in [true, false] {
-            let made = if round { fillet(&body, &[knife()], r) } else { chamfer(&body, &[knife()], r) };
+            let made = if round { fillet(&body, &[knife()], mm(r)) } else { chamfer(&body, &[knife()], mm(r)) };
             if let Ok(b) = made {
                 assert!(b.validity().is_empty(), "r={r}: {:?}", b.validity());
             }
@@ -118,7 +118,7 @@ fn knife_edge_sizes_never_panic() {
 #[test]
 fn knife_edge_blends_the_same_in_a_mirror() {
     let body = part();
-    let reference = measure(&fillet(&body, &[knife()], 2.0).unwrap()).unwrap().volume;
+    let reference = measure(&fillet(&body, &[knife()], mm(2.0)).unwrap()).unwrap().volume;
     let mirror = |axis: usize| {
         let mut m = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
         m[axis][axis] = -1.0;
@@ -126,7 +126,7 @@ fn knife_edge_blends_the_same_in_a_mirror() {
     };
     for (axis, at) in [(0, Vec3::new(-TIP_X, 0.0, 5.0)), (1, Vec3::new(TIP_X, 0.0, 5.0)), (2, Vec3::new(TIP_X, 0.0, -5.0))] {
         let mirrored = transform_matrix(&body, mirror(axis)).unwrap();
-        let v = measure(&fillet(&mirrored, &[at], 2.0).unwrap()).unwrap().volume;
+        let v = measure(&fillet(&mirrored, &[at], mm(2.0)).unwrap()).unwrap().volume;
         assert!((v - reference).abs() < 1e-6, "mirror {axis}: volume {v}, expected {reference}");
     }
 }
@@ -187,7 +187,7 @@ fn fillet_and_chamfer_the_arc_top_edge() {
         for r in [0.5, 2.0, 4.0, 8.0] {
             for round in [true, false] {
                 let what = if round { "fillet" } else { "chamfer" };
-                let made = if round { fillet(&body, &[arc_top()], r) } else { chamfer(&body, &[arc_top()], r) };
+                let made = if round { fillet(&body, &[arc_top()], mm(r)) } else { chamfer(&body, &[arc_top()], mm(r)) };
                 let made = made.unwrap_or_else(|e| panic!("{name} {what} r={r}: {e}"));
                 assert!(made.validity().is_empty(), "{name} {what} r={r}: {:?}", made.validity());
                 assert_eq!(made.face_count(), body.face_count() + 1, "{name} {what} r={r}: one blend face");
@@ -203,7 +203,7 @@ fn fillet_and_chamfer_the_arc_top_edge() {
 #[test]
 fn the_arc_top_edge_blends_the_same_in_a_mirror() {
     let body = part();
-    let reference = planned_volume(&fillet(&body, &[arc_top()], 2.0).unwrap());
+    let reference = planned_volume(&fillet(&body, &[arc_top()], mm(2.0)).unwrap());
     let mirror = |axis: usize| {
         let mut m = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
         m[axis][axis] = -1.0;
@@ -212,7 +212,7 @@ fn the_arc_top_edge_blends_the_same_in_a_mirror() {
     let at = arc_top();
     for (axis, p) in [(0, Vec3::new(-at.x, at.y, at.z)), (1, Vec3::new(at.x, -at.y, at.z)), (2, Vec3::new(at.x, at.y, -at.z))] {
         let mirrored = transform_matrix(&body, mirror(axis)).unwrap();
-        let v = planned_volume(&fillet(&mirrored, &[p], 2.0).unwrap_or_else(|e| panic!("mirror {axis}: {e}")));
+        let v = planned_volume(&fillet(&mirrored, &[p], mm(2.0)).unwrap_or_else(|e| panic!("mirror {axis}: {e}")));
         assert!((v - reference).abs() < 1e-4 * reference, "mirror {axis}: volume {v}, expected {reference}");
     }
 }
@@ -223,7 +223,7 @@ fn arc_top_edge_sizes_never_panic() {
     let body = part();
     for r in [1e-5, 1e-3, 6.0, 10.0, 21.0, 40.0, 1e3] {
         for round in [true, false] {
-            let made = if round { fillet(&body, &[arc_top()], r) } else { chamfer(&body, &[arc_top()], r) };
+            let made = if round { fillet(&body, &[arc_top()], mm(r)) } else { chamfer(&body, &[arc_top()], mm(r)) };
             if let Ok(b) = made {
                 assert!(b.validity().is_empty(), "r={r}: {:?}", b.validity());
             }
@@ -244,7 +244,7 @@ fn arc_top_blend_refuses_a_collapsed_wall() {
             let at = arc_top();
             let pick = [Vec3::new(at.x, at.y, at.z * z)];
             for round in [true, false] {
-                let blend = |r| if round { fillet(&body, &pick, r) } else { chamfer(&body, &pick, r) };
+                let blend = |r| if round { fillet(&body, &pick, mm(r)) } else { chamfer(&body, &pick, mm(r)) };
                 let error = blend(HEIGHT).unwrap_err();
                 assert!(matches!(error, KernelError::TooLarge(_)), "round={round}, mirror={z}: {error}");
                 let made = blend(HEIGHT - 0.5).unwrap();
@@ -271,7 +271,7 @@ fn fu() -> Vec3 {
 /// Volume two blends take off together: each alone, less the corner both would take.
 fn removed_together(body: &Body, picks: &[Vec3], r: f64, overlap: f64) -> f64 {
     let before = planned_volume(body);
-    picks.iter().map(|p| before - planned_volume(&fillet(body, &[*p], r).unwrap())).sum::<f64>() - overlap
+    picks.iter().map(|p| before - planned_volume(&fillet(body, &[*p], mm(r)).unwrap())).sum::<f64>() - overlap
 }
 
 /// The front's top edge and its left upright meet at a box corner; the edge's far end runs into
@@ -290,12 +290,12 @@ fn fillet_the_top_front_edge_and_the_front_left_upright() {
         assert!((removed - want).abs() < 0.02, "{name}: removed {removed}, expected {want}");
         made.face_count()
     };
-    let first = fillet(&body, &[tf()], r).unwrap();
-    let second = fillet(&body, &[fl()], r).unwrap();
+    let first = fillet(&body, &[tf()], mm(r)).unwrap();
+    let second = fillet(&body, &[fl()], mm(r)).unwrap();
     let faces = [
-        check("top front, then the upright", fillet(&first, &[fl()], r)),
-        check("upright, then the top front", fillet(&second, &[tf()], r)),
-        check("together", fillet(&body, &[tf(), fl()], r)),
+        check("top front, then the upright", fillet(&first, &[fl()], mm(r))),
+        check("upright, then the top front", fillet(&second, &[tf()], mm(r))),
+        check("together", fillet(&body, &[tf(), fl()], mm(r))),
     ];
     assert!(faces.iter().all(|f| *f == faces[0]), "face counts {faces:?}");
 }
@@ -314,15 +314,15 @@ fn fillet_the_top_front_edge_and_the_front_upright_at_the_arc() {
         let removed = before - planned_volume(&made);
         assert!((removed - want).abs() < 0.02, "{name}: removed {removed}, expected {want}");
     };
-    let first = fillet(&body, &[tf()], r).unwrap();
-    check("top front, then the upright", fillet(&first, &[fu()], r));
-    check("together", fillet(&body, &[tf(), fu()], r));
-    check("together, the other way", fillet(&body, &[fu(), tf()], r));
+    let first = fillet(&body, &[tf()], mm(r)).unwrap();
+    check("top front, then the upright", fillet(&first, &[fu()], mm(r)));
+    check("together", fillet(&body, &[tf(), fu()], mm(r)));
+    check("together, the other way", fillet(&body, &[fu(), tf()], mm(r)));
 }
 
 /// A blend of the edge nearest `p` (round or flat), size `r`.
 fn blend_one_edge(body: &Body, p: Vec3, r: f64, round: bool) -> Result<Body> {
-    if round { fillet(body, &[p], r) } else { chamfer(body, &[p], r) }
+    if round { fillet(body, &[p], mm(r)) } else { chamfer(body, &[p], mm(r)) }
 }
 
 /// The arc's top edge and the front's top edge meet at the wall, where the wall's edge with the
@@ -345,7 +345,7 @@ fn blend_the_arc_top_edge_and_the_top_front_edge() {
         let (a, t) = (blend_one_edge(&body, arc_top(), 2.0, round).unwrap(), blend_one_edge(&body, tf(), 2.0, round).unwrap());
         check("arc, then the front", blend_one_edge(&a, tf(), 2.0, round));
         check("front, then the arc", blend_one_edge(&t, arc_top(), 2.0, round));
-        let both = |picks: &[Vec3]| if round { fillet(&body, picks, 2.0) } else { chamfer(&body, picks, 2.0) };
+        let both = |picks: &[Vec3]| if round { fillet(&body, picks, mm(2.0)) } else { chamfer(&body, picks, mm(2.0)) };
         check("together", both(&[tf(), arc_top()]));
         check("together, the other way", both(&[arc_top(), tf()]));
     }
@@ -357,7 +357,7 @@ fn blend_the_arc_top_edge_and_the_top_front_edge() {
 fn fillet_the_arc_top_edge_and_the_front_upright_at_the_arc() {
     let body = part();
     let (before, r) = (planned_volume(&body), 2.0);
-    let alone = |p: Vec3| before - planned_volume(&fillet(&body, &[p], r).unwrap());
+    let alone = |p: Vec3| before - planned_volume(&fillet(&body, &[p], mm(r)).unwrap());
     let want = alone(arc_top()) + alone(fu()) - 0.682_379;
     let check = |how: &str, made: Result<Body>| {
         let made = made.unwrap_or_else(|e| panic!("{how}: {e}"));
@@ -367,10 +367,10 @@ fn fillet_the_arc_top_edge_and_the_front_upright_at_the_arc() {
     };
     // (The upright first, then the arc as a feature of its own, is not supported yet: the arc's
     // blend would run on over the upright's round, past the crease where the two meet.)
-    let a = fillet(&body, &[arc_top()], r).unwrap();
-    check("arc, then the upright", fillet(&a, &[fu()], r));
-    check("together", fillet(&body, &[arc_top(), fu()], r));
-    check("together, the other way", fillet(&body, &[fu(), arc_top()], r));
+    let a = fillet(&body, &[arc_top()], mm(r)).unwrap();
+    check("arc, then the upright", fillet(&a, &[fu()], mm(r)));
+    check("together", fillet(&body, &[arc_top(), fu()], mm(r)));
+    check("together, the other way", fillet(&body, &[fu(), arc_top()], mm(r)));
 }
 
 /// The three edges at the arc's front corner (the front's top edge, the arc's top edge and the
@@ -384,7 +384,7 @@ fn fillet_the_three_edges_at_the_arcs_front_corner() {
     let before = planned_volume(&body);
     let want = 67.05;
     for (name, picks) in [("as picked", [tf(), arc_top(), fu()]), ("another order", [fu(), tf(), arc_top()]), ("a third", [arc_top(), fu(), tf()])] {
-        let made = fillet(&body, &picks, 2.0).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let made = fillet(&body, &picks, mm(2.0)).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert!(made.validity().is_empty(), "{name}: {:?}", made.validity());
         // The body's six faces, the three rounds and the sphere's patch.
         assert_eq!(made.face_count(), 10, "{name}");
@@ -413,8 +413,8 @@ fn the_sphere_at_a_box_corner_is_the_planar_corner_builders() {
     let b = box_solid(Vec3::ZERO, Vec3::new(30.0, 20.0, 10.0)).unwrap();
     let picks = [Vec3::new(15.0, 0.0, 10.0), Vec3::new(0.0, 10.0, 10.0), Vec3::new(0.0, 0.0, 5.0)];
     for r in [1.0, 2.5] {
-        let local = crate::blend_corner::fillet_radii(&b, &picks.iter().map(|p| (*p, r)).collect::<Vec<_>>()).unwrap();
-        let ball = crate::blend_vertex::fillet_ball_vertices(&b, &picks, r).unwrap_or_else(|e| panic!("r={r}: {e}"));
+        let local = crate::blend_corner::fillet_radii(&b, &picks.iter().map(|p| (*p, mm(r))).collect::<Vec<_>>()).unwrap();
+        let ball = crate::blend_vertex::fillet_ball_vertices(&b, &picks, mm(r)).unwrap_or_else(|e| panic!("r={r}: {e}"));
         assert!(ball.validity().is_empty(), "r={r}: {:?}", ball.validity());
         assert_eq!(ball.face_count(), local.face_count(), "r={r}");
         let (a, c) = (planned_volume(&local), planned_volume(&ball));
@@ -427,7 +427,7 @@ fn the_sphere_at_a_box_corner_is_the_planar_corner_builders() {
 fn rounds_ending_in_a_sphere_of_any_size_never_panic() {
     let body = part();
     for r in [1e-5, 1e-3, 5.0, 9.0, 10.0, 21.0, 1e3] {
-        if let Ok(b) = fillet(&body, &[tf(), arc_top(), fu()], r) {
+        if let Ok(b) = fillet(&body, &[tf(), arc_top(), fu()], mm(r)) {
             assert!(b.validity().is_empty(), "r={r}: {:?}", b.validity());
         }
     }

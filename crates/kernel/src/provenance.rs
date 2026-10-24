@@ -385,6 +385,7 @@ pub fn compose(prov: &mut History, operand: usize, tool: &[FaceOrigin]) {
 
 #[cfg(test)]
 mod tests {
+    use crate::mm;
     use solidcraft_geom::Vec3;
 
     use super::{Change, FaceOrigin, trace};
@@ -481,7 +482,7 @@ mod tests {
         let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
         let bm = b.tessellate(1e-3).unwrap();
         let e = (0..bm.edges.len()).find(|i| bm.edges[*i].iter().all(|q| (q.y - 30.0).abs() < 1e-9 && (q.z - 20.0).abs() < 1e-9)).unwrap();
-        let f = crate::fillet(&b, &[Vec3::new(20.0, 30.0, 20.0)], 5.0).unwrap();
+        let f = crate::fillet(&b, &[Vec3::new(20.0, 30.0, 20.0)], mm(5.0)).unwrap();
         let mut p: History = trace(&f, &[&b]).unwrap();
         blend_origins(&f, &b, &[e], &mut p).unwrap();
         let blend = face_at(&f, Vec3::new(20.0, 25.0 + 5.0 * std::f64::consts::FRAC_1_SQRT_2, 15.0 + 5.0 * std::f64::consts::FRAC_1_SQRT_2));

@@ -303,6 +303,7 @@ fn span(s: &Surf, along: Vec3) -> Option<(f64, f64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mm;
     use crate::{BoolOp, boolean, box_solid, cylinder, fillet};
 
     fn clearance(body: &Body) -> Clearance<'_> {
@@ -353,7 +354,7 @@ mod tests {
         let hole = cylinder(Vec3::new(60.0, 50.0, -5.0), Vec3::Z, 8.0, 30.0).unwrap();
         let holed = boolean(&block, &hole, BoolOp::Cut).unwrap().unwrap();
         // The fillet (r = 4) along the edge y = 0 of the top face ends on the line y = 4, z = 20.
-        let rounded = fillet(&holed, &[Vec3::new(100.0, 0.0, 20.0)], 4.0).unwrap();
+        let rounded = fillet(&holed, &[Vec3::new(100.0, 0.0, 20.0)], mm(4.0)).unwrap();
         let c = clearance(&rounded);
         // The top face from x = `x0` to 190 and y = `y0` to 90.
         let rect = |x0: f64, y0: f64| {

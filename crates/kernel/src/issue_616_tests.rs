@@ -18,7 +18,7 @@ fn volume(b: &Body) -> f64 {
 fn lid() -> Body {
     let plate = bx([100., 0., 0.], [76.8, 89.3, 2.4]);
     let corners: Vec<Vec3> = [[100., 0.], [176.8, 0.], [100., 89.3], [176.8, 89.3]].iter().map(|p| Vec3::new(p[0], p[1], 1.2)).collect();
-    let plate = fillet(&plate, &corners, 3.0).unwrap();
+    let plate = fillet(&plate, &corners, mm(3.0)).unwrap();
     let ring = boolean(&bx([102.65, 2.65, 2.4], [71.5, 84., 3.]), &bx([104.15, 4.15, 2.0], [68.5, 81., 4.]), BoolOp::Cut).unwrap().unwrap();
     let mut b = boolean(&plate, &ring, BoolOp::Union).unwrap().unwrap();
     for (c, s) in [([104.4, 5.4, -1.], [68., 61., 8.]), ([116.4, 72., -1.], [44., 10., 8.]), ([127.4, 84., 2.4], [22., 6., 4.])] {
@@ -128,7 +128,7 @@ fn boxes_joined_flush_to_a_shelled_box_stay_local() {
     let (w, d, h, t) = (60.0, 40.0, 20.0, 2.0);
     let outer = bx([0., 0., 0.], [w, d, h]);
     let corners: Vec<Vec3> = [[0., 0.], [w, 0.], [0., d], [w, d]].iter().map(|p| Vec3::new(p[0], p[1], h / 2.0)).collect();
-    let outer = fillet(&outer, &corners, 3.0).unwrap();
+    let outer = fillet(&outer, &corners, mm(3.0)).unwrap();
     let shelled = boolean(&outer, &bx([t, t, t], [w - 2. * t, d - 2. * t, h]), BoolOp::Cut).unwrap().unwrap();
     // The window leaves a 1.5 ledge inside the walls.
     let (ledge, gap) = (t + 1.5, 6.0);

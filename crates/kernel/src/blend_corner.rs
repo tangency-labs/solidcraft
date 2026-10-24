@@ -17,7 +17,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use solidcraft_geom::Vec3;
+use solidcraft_geom::{Length, Vec3};
 use truck_modeling::{self as mt, builder};
 
 use crate::blend::{plane_normal, too_large, unsupported, vtx};
@@ -25,18 +25,18 @@ use crate::body::{Body, Solid, p3, v3};
 use crate::{KernelError, Result, guard};
 
 /// Fillet each edge nearest a point with its own radius.
-pub fn fillet_radii(body: &Body, edges: &[(Vec3, f64)]) -> Result<Body> {
+pub fn fillet_radii(body: &Body, edges: &[(Vec3, Length)]) -> Result<Body> {
     body.require_brep("fillet")?;
     if edges.is_empty() || edges.len() > 1000 {
         return Err(KernelError::Invalid("select 1…1000 edges".into()));
     }
-    if edges.iter().any(|(p, r)| !(p.is_finite() && r.is_finite() && *r > 1e-6 && *r < 1e6)) {
-        return Err(KernelError::Invalid("fillet size must be positive".into()));
+    if edges.iter().any(|(p, _)| !p.is_finite()) {
+        return Err(KernelError::Invalid("an edge point is not finite".into()));
     }
     // Each step's result carries its history over `[body]`.
     let counts = crate::record::counts(&[body]);
     let mut cur = crate::boolean_record::healed(body)?;
-    let mut sel = edges.to_vec();
+    let mut sel: Vec<(Vec3, f64)> = edges.iter().map(|(p, r)| (*p, **r)).collect();
     let mut first: Option<KernelError> = None;
     // Earlier rounds at the edges' ends come off and are blended again with the new edges.
     for _ in 0..4 {
@@ -1248,6 +1248,7 @@ fn fit_tangent(hp: &mut [[mt::Vector4; 5]; 5], s: [&Sel; 3], q31: Vec3, n31: Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mm;
     use crate::{box_solid, fillet, measure};
 
     /// The 20 mm box and the three edges at its corner (20, 0, 20): `a` along y, `b` along x,
@@ -1324,22 +1325,22 @@ mod tests {
     #[test]
     fn a_round_next_to_a_round_of_another_radius() {
         let (bx, a, b, _) = setup();
-        let ra = fillet(&bx, &[a], 2.0).unwrap();
+        let ra = fillet(&bx, &[a], mm(2.0)).unwrap();
         // Today's local blend refuses the edge that ends on the round; the corner path
         // takes the round off and blends both edges: their cylinders trim each other.
-        let r = fillet(&ra, &[b], 3.0).unwrap();
+        let r = fillet(&ra, &[b], mm(3.0)).unwrap();
         assert_eq!(r.face_count(), 8);
         assert_eq!(r.unmeshed_faces(), 0);
         assert!((vol(&r) - strips(2.0, 3.0, 0.0)).abs() < 0.05, "{} vs {}", vol(&r), strips(2.0, 3.0, 0.0));
         // The same in one go with a radius per edge, either way round.
-        for sel in [[(a, 2.0), (b, 3.0)], [(b, 3.0), (a, 2.0)]] {
+        for sel in [[(a, mm(2.0)), (b, mm(3.0))], [(b, mm(3.0)), (a, mm(2.0))]] {
             let s = fillet_radii(&bx, &sel).unwrap();
             assert!((vol(&s) - vol(&r)).abs() < 1e-3);
         }
-        let s = fillet_radii(&bx, &[(a, 3.0), (b, 2.0)]).unwrap();
+        let s = fillet_radii(&bx, &[(a, mm(3.0)), (b, mm(2.0))]).unwrap();
         assert!((vol(&s) - strips(3.0, 2.0, 0.0)).abs() < 0.05);
         // Equal radii: the mitre, as the local blend makes it.
-        let e = fillet(&ra, &[b], 2.0).unwrap();
+        let e = fillet(&ra, &[b], mm(2.0)).unwrap();
         assert!((vol(&e) - strips(2.0, 2.0, 0.0)).abs() < 0.05);
     }
 
@@ -1347,14 +1348,14 @@ mod tests {
     fn issue1557_vertical_after_bottom_rounds() {
         let b = box_solid(Vec3::ZERO, Vec3::new(25.0, 25.0, 10.0)).unwrap();
         let bottom = [Vec3::new(12.5, 0.0, 0.0), Vec3::new(25.0, 12.5, 0.0), Vec3::new(12.5, 25.0, 0.0), Vec3::new(0.0, 12.5, 0.0)];
-        let rounded = fillet(&b, &bottom, 2.0).unwrap();
+        let rounded = fillet(&b, &bottom, mm(2.0)).unwrap();
         let vertical = Vec3::new(25.0, 0.0, 6.0);
         let seam = Vec3::new(24.287266336668306, 0.7127336633316916, 0.48266373325510686);
         let mut together = bottom.to_vec();
         together.push(vertical);
-        let reference = fillet(&b, &together, 2.0).unwrap();
+        let reference = fillet(&b, &together, mm(2.0)).unwrap();
         for picks in [vec![vertical], vec![vertical, seam], vec![seam, vertical]] {
-            let result = fillet(&rounded, &picks, 2.0).unwrap();
+            let result = fillet(&rounded, &picks, mm(2.0)).unwrap();
             assert_eq!(result.face_count(), reference.face_count());
             assert_eq!(result.unmeshed_faces(), 0);
             assert!(result.validity().is_empty(), "{:?}", result.validity());
@@ -1368,14 +1369,14 @@ mod tests {
     fn issue1557_connected_rounds_keep_their_radii() {
         let b = box_solid(Vec3::ZERO, Vec3::new(25.0, 25.0, 10.0)).unwrap();
         let bottom = [Vec3::new(12.5, 0.0, 0.0), Vec3::new(25.0, 12.5, 0.0), Vec3::new(12.5, 25.0, 0.0), Vec3::new(0.0, 12.5, 0.0)];
-        let rounded = fillet(&b, &bottom, 2.0).unwrap();
+        let rounded = fillet(&b, &bottom, mm(2.0)).unwrap();
         let vertical = Vec3::new(25.0, 0.0, 6.0);
         let seam = Vec3::new(24.287266336668306, 0.7127336633316916, 0.48266373325510686);
         for radius in [0.5, 1.0, 3.0] {
-            let mut together: Vec<_> = bottom.iter().map(|p| (*p, 2.0)).collect();
-            together.push((vertical, radius));
+            let mut together: Vec<_> = bottom.iter().map(|p| (*p, mm(2.0))).collect();
+            together.push((vertical, mm(radius)));
             let reference = fillet_radii(&b, &together).unwrap();
-            let result = fillet(&rounded, &[seam, vertical], radius).unwrap();
+            let result = fillet(&rounded, &[seam, vertical], mm(radius)).unwrap();
             assert!(result.validity().is_empty(), "{:?}", result.validity());
             assert!((vol(&result) - vol(&reference)).abs() < 0.05, "radius {radius}");
             // The old bottom radius is still 2, away from the newly rounded corner.
@@ -1384,11 +1385,11 @@ mod tests {
         }
         // A tangent boundary of an earlier round is not a sharp edge, and cannot be
         // reinterpreted as the sharp edge exposed when that round is taken off.
-        assert!(fillet(&rounded, &[Vec3::new(12.5, 0.0, 2.0)], 1.0).is_err());
+        assert!(fillet(&rounded, &[Vec3::new(12.5, 0.0, 2.0)], mm(1.0)).is_err());
         // Consuming a mitre must not silently discard its independently requested radius,
         // or turn a mitre-only selection into a different sharp edge.
-        assert!(fillet_radii(&rounded, &[(vertical, 1.0), (seam, 2.0)]).is_err());
-        assert!(fillet_radii(&rounded, &[(seam, 2.0)]).is_err());
+        assert!(fillet_radii(&rounded, &[(vertical, mm(1.0)), (seam, mm(2.0))]).is_err());
+        assert!(fillet_radii(&rounded, &[(seam, mm(2.0))]).is_err());
     }
 
     #[test]
@@ -1402,11 +1403,11 @@ mod tests {
         for base in [b.clone(), crate::shell(&b, &[Vec3::new(15.0, 47.2, 25.0)], 1.0).unwrap()] {
             let mut rounded = base;
             for edge in bottom {
-                rounded = fillet(&rounded, &[edge], 2.0).unwrap();
+                rounded = fillet(&rounded, &[edge], mm(2.0)).unwrap();
             }
-            let reference = fillet(&rounded, &picks[..1], 2.0).unwrap();
+            let reference = fillet(&rounded, &picks[..1], mm(2.0)).unwrap();
             for selection in [picks, [picks[1], picks[0]]] {
-                let result = fillet(&rounded, &selection, 2.0).unwrap();
+                let result = fillet(&rounded, &selection, mm(2.0)).unwrap();
                 assert_eq!(result.face_count(), reference.face_count());
                 assert_eq!(result.unmeshed_faces(), 0);
                 assert!(result.validity().is_empty(), "{:?}", result.validity());
@@ -1425,8 +1426,8 @@ mod tests {
             [Vec3::new(12.5, 0.0, 0.0), Vec3::new(25.0, 12.5, 0.0), Vec3::new(12.5, 25.0, 0.0), Vec3::new(0.0, 12.5, 0.0)].map(|p| p + origin);
         let vertical =
             [Vec3::new(0.0, 0.0, 6.0), Vec3::new(25.0, 0.0, 6.0), Vec3::new(25.0, 25.0, 6.0), Vec3::new(0.0, 25.0, 6.0)].map(|p| p + origin);
-        let rounded = fillet(&b, &bottom, 2.0).unwrap();
-        let result = fillet(&rounded, &vertical, 2.0).unwrap();
+        let rounded = fillet(&b, &bottom, mm(2.0)).unwrap();
+        let result = fillet(&rounded, &vertical, mm(2.0)).unwrap();
         assert!(result.validity().is_empty(), "{:?}", result.validity());
         assert!(kink(&result) < 0.05);
         // Integrate rounded-square horizontal sections. Above z=r the area is
@@ -1443,14 +1444,16 @@ mod tests {
     fn three_rounds_at_a_corner() {
         let (bx, a, b, c) = setup();
         // Two rounds meeting in a mitre, then the third edge: a sphere octant.
-        let ab = fillet(&bx, &[a, b], 2.0).unwrap();
-        let r = fillet(&ab, &[c], 2.0).unwrap();
+        let ab = fillet(&bx, &[a, b], mm(2.0)).unwrap();
+        let r = fillet(&ab, &[c], mm(2.0)).unwrap();
         let sphere = 8000.0 - 3.0 * (1.0 - std::f64::consts::FRAC_PI_4) * 4.0 * 18.0 - 8.0 * (1.0 - std::f64::consts::PI / 6.0);
         assert_eq!(r.face_count(), 10);
         assert!((vol(&r) - sphere).abs() < 0.05, "{} vs {sphere}", vol(&r));
         assert!(kink(&r) < 0.01);
         // Different radii: a smooth patch over the corner, slightly more than the strips take.
-        for (rs, sel) in [((2.0, 2.0, 3.0), fillet(&ab, &[c], 3.0)), ((2.0, 3.0, 4.0), fillet_radii(&bx, &[(a, 2.0), (b, 3.0), (c, 4.0)]))] {
+        for (rs, sel) in
+            [((2.0, 2.0, 3.0), fillet(&ab, &[c], mm(3.0))), ((2.0, 3.0, 4.0), fillet_radii(&bx, &[(a, mm(2.0)), (b, mm(3.0)), (c, mm(4.0))]))]
+        {
             let r = sel.unwrap();
             assert_eq!(r.face_count(), 10);
             assert_eq!(r.unmeshed_faces(), 0);
@@ -1464,18 +1467,16 @@ mod tests {
     #[test]
     fn corners_refuse_what_they_cannot_build() {
         let (bx, a, b, c) = setup();
-        // Larger than the faces, or not a size: errors, no panic. Large but fitting is fine.
-        assert!(fillet_radii(&bx, &[(a, 15.0), (b, 2.0)]).is_ok_and(|r| r.unmeshed_faces() == 0));
-        assert!(fillet_radii(&bx, &[(a, 25.0), (b, 2.0)]).is_err());
-        assert!(fillet_radii(&bx, &[(a, f64::NAN)]).is_err());
-        assert!(fillet_radii(&bx, &[(a, 0.0)]).is_err());
+        // Larger than the faces: errors, no panic. Large but fitting is fine.
+        assert!(fillet_radii(&bx, &[(a, mm(15.0)), (b, mm(2.0))]).is_ok_and(|r| r.unmeshed_faces() == 0));
+        assert!(fillet_radii(&bx, &[(a, mm(25.0)), (b, mm(2.0))]).is_err());
         assert!(fillet_radii(&bx, &[]).is_err());
-        assert!(fillet_radii(&bx, &[(Vec3::new(500.0, 0.0, 0.0), 1.0)]).is_err());
+        assert!(fillet_radii(&bx, &[(Vec3::new(500.0, 0.0, 0.0), mm(1.0))]).is_err());
         // A concave edge is left to the other blends.
         let l = crate::ops::boolean(&bx, &box_solid(Vec3::new(10.0, -1.0, 10.0), Vec3::new(21.0, 21.0, 21.0)).unwrap(), crate::BoolOp::Cut)
             .unwrap()
             .unwrap();
-        assert!(fillet_radii(&l, &[(Vec3::new(10.0, 10.0, 10.0), 1.0), (c, 2.0)]).is_err());
+        assert!(fillet_radii(&l, &[(Vec3::new(10.0, 10.0, 10.0), mm(1.0)), (c, mm(2.0))]).is_err());
     }
 
     #[test]
@@ -1489,7 +1490,7 @@ mod tests {
         let basin = crate::boolean(&slab, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
         let picks = [Vec3::new(50.0, 4.0, 30.0), Vec3::new(80.0, 27.0, 30.0), Vec3::new(50.0, 50.0, 30.0), Vec3::new(20.0, 27.0, 30.0)];
         for count in 1..=4 {
-            let result = fillet(&basin, &picks[..count], 2.0).unwrap();
+            let result = fillet(&basin, &picks[..count], mm(2.0)).unwrap();
             assert!(result.validity().is_empty());
             assert_eq!(result.unmeshed_faces(), 0);
             assert!(vol(&result) < vol(&basin));
@@ -1520,8 +1521,8 @@ mod tests {
             let basin = crate::boolean(&slab, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
             let picks = [Vec3::new(50.0, margin, 30.0), Vec3::new(80.0, 27.0, 30.0), Vec3::new(50.0, 50.0, 30.0), Vec3::new(20.0, 27.0, 30.0)];
             for count in [1, 2, 4] {
-                assert!(fillet(&basin, &picks[..count], 4.0).is_err());
-                assert!(fillet(&basin, &picks[..count], margin * 0.5).is_ok());
+                assert!(fillet(&basin, &picks[..count], mm(4.0)).is_err());
+                assert!(fillet(&basin, &picks[..count], mm(margin * 0.5)).is_ok());
             }
         }
     }
@@ -1541,17 +1542,17 @@ mod tests {
             let picks = [Vec3::new(50.0, margin, 30.0), Vec3::new(80.0, 27.0, 30.0), Vec3::new(50.0, 50.0, 30.0), Vec3::new(20.0, 27.0, 30.0)];
             for count in [2, 3, 4] {
                 if margin == 1.0 {
-                    assert!(crate::chamfer(&basin, &picks[..count], 2.0).is_err());
-                    assert!(crate::chamfer(&basin, &picks[..count], 1.0).is_err());
+                    assert!(crate::chamfer(&basin, &picks[..count], mm(2.0)).is_err());
+                    assert!(crate::chamfer(&basin, &picks[..count], mm(1.0)).is_err());
                 }
                 let distance = if margin == 1.0 { 0.5 } else { 2.0 };
-                let result = crate::chamfer(&basin, &picks[..count], distance).unwrap();
+                let result = crate::chamfer(&basin, &picks[..count], mm(distance)).unwrap();
                 assert!(result.validity().is_empty());
                 assert_eq!(result.unmeshed_faces(), 0);
                 assert!(vol(&result) < vol(&basin));
                 assert!(vol(&basin) - vol(&result) < distance.powi(2) * (60.0 + 50.0 - margin));
                 let reverse: Vec<_> = picks[..count].iter().copied().rev().collect();
-                let reversed = crate::chamfer(&basin, &reverse, distance).unwrap();
+                let reversed = crate::chamfer(&basin, &reverse, mm(distance)).unwrap();
                 assert!((vol(&result) - vol(&reversed)).abs() < 1e-6);
                 // These are exact planes, with every boundary on its owning face.
                 for f in result.solid.face_iter() {
@@ -1575,9 +1576,9 @@ mod tests {
                 .unwrap();
         let basin = crate::boolean(&slab, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
         let picks = [Vec3::new(50.0, 1.0, 30.0), Vec3::new(80.0, 27.0, 30.0), Vec3::new(50.0, 50.0, 30.0), Vec3::new(20.0, 27.0, 30.0)];
-        assert!(crate::chamfer(&basin, &picks, 2.0).is_err());
-        assert!(fillet(&basin, &picks, 4.0).is_err());
-        assert!(crate::chamfer(&basin, &picks, 0.5).is_ok());
-        assert!(fillet(&basin, &picks, 0.5).is_ok());
+        assert!(crate::chamfer(&basin, &picks, mm(2.0)).is_err());
+        assert!(fillet(&basin, &picks, mm(4.0)).is_err());
+        assert!(crate::chamfer(&basin, &picks, mm(0.5)).is_ok());
+        assert!(fillet(&basin, &picks, mm(0.5)).is_ok());
     }
 }

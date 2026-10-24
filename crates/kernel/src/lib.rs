@@ -12,6 +12,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+use solidcraft_geom::Length;
+
 mod blend;
 mod blend_corner;
 mod blend_fit;
@@ -239,6 +241,18 @@ pub enum KernelError {
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
+
+/// `x` mm as a [`Length`], for tests.
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+pub(crate) fn mm(x: f64) -> Length {
+    Length::new(x).unwrap()
+}
+
+/// `x` as a [`Length`], or a refusal naming `what` it is.
+pub(crate) fn length(x: f64, what: &str) -> Result<Length> {
+    Length::new(x).ok_or_else(|| KernelError::Invalid(format!("{what} out of range: {x}")))
+}
 
 thread_local! {
     static GUARDED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };

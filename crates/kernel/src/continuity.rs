@@ -404,6 +404,7 @@ fn vec3(p: mt::Vector3) -> Vec3 {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::mm;
     use solidcraft_geom::Plane;
 
     fn tolerances() -> ContinuityTolerances {
@@ -437,7 +438,7 @@ mod tests {
     #[test]
     fn a_fillet_seam_is_tangent_with_the_fillets_curvature_jump() {
         let body = box_body();
-        let rounded = crate::fillet(&body, &[Vec3::new(10.0, 10.0, 5.0)], 4.0).unwrap();
+        let rounded = crate::fillet(&body, &[Vec3::new(10.0, 10.0, 5.0)], mm(4.0)).unwrap();
         let r = report(&rounded);
         // The rounded edge is replaced by the blend face: two tangent seams along it, the two
         // arcs where the blend meets the ends of the edge, and the box's other eleven edges.

@@ -3,9 +3,13 @@
 //! meets the tangent junction of the bar's straight and round walls. The chamfer must trim
 //! against the round wall instead of extending that short seam outside the solid.
 
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Length, Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel::{Body, BoolOp, boolean, chamfer, cylinder, extrude};
 use std::f64::consts::PI;
+
+fn mm(x: f64) -> Length {
+    Length::new(x).unwrap()
+}
 
 fn holder() -> Body {
     let segs = vec![
@@ -54,7 +58,7 @@ fn expected_removed(distance: f64) -> f64 {
 #[test]
 fn chamfer_the_top_lip_at_a_tangent_wall_junction() {
     let body = holder();
-    let made = chamfer(&body, &[Vec3::new(10.0, 10.0, 60.0)], 2.0).unwrap();
+    let made = chamfer(&body, &[Vec3::new(10.0, 10.0, 60.0)], mm(2.0)).unwrap();
     assert!(made.validity().is_empty(), "{:?}", made.validity());
     assert_eq!(made.crossed_face_loops().unwrap(), 0);
     let history = made.history().expect("the chamfer retains exact face provenance");
@@ -86,7 +90,7 @@ fn chamfer_the_top_lip_at_a_tangent_wall_junction() {
 #[test]
 fn a_chamfer_that_uses_up_the_holder_top_is_refused() {
     let body = holder();
-    assert!(chamfer(&body, &[Vec3::new(10.0, 10.0, 60.0)], 30.0).is_err());
+    assert!(chamfer(&body, &[Vec3::new(10.0, 10.0, 60.0)], mm(30.0)).is_err());
 }
 
 /// A plate of side `plate` with a 50 x 10 mm stadium boss, 10 mm tall, joined on top.
@@ -110,7 +114,7 @@ fn plate_with_stadium(plate: f64) -> Body {
 fn one_chamfer_pick_follows_the_tangent_chain_at_any_part_size() {
     for plate in [140.0, 145.0, 250.0] {
         let body = plate_with_stadium(plate);
-        let made = chamfer(&body, &[Vec3::new(0.0, 5.0, 20.0)], 1.0).unwrap();
+        let made = chamfer(&body, &[Vec3::new(0.0, 5.0, 20.0)], mm(1.0)).unwrap();
         assert!(made.validity().is_empty(), "{:?}", made.validity());
         // Two straight edges (c^2/2 * 40 each) and both end arcs (Pappus, c^2/2 * 2 pi (R - c/3)).
         let expected = 40.0 + 0.5 * 2.0 * PI * (5.0 - 1.0 / 3.0);

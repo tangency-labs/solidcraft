@@ -44,3 +44,16 @@ fn chamfer_that_fits_still_builds() {
         assert!((volume(&mut s) - want).abs() < 1e-6, "{d} mm: {} (want {want})", volume(&mut s));
     }
 }
+
+/// A size that is no length (zero, negative, too large) is refused by name before any blend is
+/// tried, and the part is left as it was.
+#[test]
+fn chamfer_of_no_length_is_refused() {
+    let mut s = open_fixture();
+    for d in ["0 mm", "-2 mm", "2e6 mm"] {
+        let err =
+            s.execute("timeline.edit", &json!({"feature": "Chamfer1", "set": {"distance": d}})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(err.contains("the blend size must be between 1e-6 and 1e6 mm"), "{d}: {err}");
+        assert!((volume(&mut s) - 4000.0).abs() < 1e-6, "{d}");
+    }
+}

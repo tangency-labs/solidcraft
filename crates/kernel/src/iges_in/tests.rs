@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Body, BoolOp, ExportBody, StepHeader, boolean, box_solid, cylinder, fillet, iges_export_bodies, measure, sphere, torus};
+use crate::{Body, BoolOp, ExportBody, StepHeader, boolean, box_solid, cylinder, fillet, iges_export_bodies, measure, mm, sphere, torus};
 use solidcraft_geom::Vec3;
 
 fn rel(a: f64, b: f64) -> f64 {
@@ -39,7 +39,7 @@ fn features_round_trip_through_iges() {
     let pin = cylinder(Vec3::new(20.0, 15.0, -1.0), Vec3::Z, 5.0, 12.0).unwrap();
     let holed = boolean(&plate, &pin, BoolOp::Cut).unwrap().unwrap();
     round_trip(&holed);
-    round_trip(&fillet(&plate, &[Vec3::new(20.0, 0.0, 10.0)], 3.0).unwrap());
+    round_trip(&fillet(&plate, &[Vec3::new(20.0, 0.0, 10.0)], mm(3.0)).unwrap());
 }
 
 /// Hostile files fail cleanly: garbage, truncation, missing and circular references, huge

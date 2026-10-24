@@ -1,8 +1,8 @@
 //! #871: a fillet that opened holes in the model must be refused, not accepted.
 
-use solidcraft_geom::Vec3;
+use solidcraft_geom::{Length, Vec3};
 
-use crate::{Body, BoolOp, build::box_solid, ops::boolean};
+use crate::{Body, BoolOp, build::box_solid, mm, ops::boolean};
 
 /// The part from #871: a plate with a narrower block on top and a window through both, filleted
 /// at radius 1 along every edge of both end faces.
@@ -40,10 +40,10 @@ fn edges() -> Vec<Vec3> {
 fn overlapping_rounds_are_refused() {
     let p = part();
     assert_eq!(p.crossed_face_loops().unwrap(), 0);
-    assert!(crate::fillet(&p, &edges(), 1.0).is_err(), "a fillet with openings in its surface was accepted");
+    assert!(crate::fillet(&p, &edges(), mm(1.0)).is_err(), "a fillet with openings in its surface was accepted");
     // The corner build makes that body (what #871 got): closed as topology, every face meshes,
     // but the loops of its end faces cross.
-    let sel: Vec<(Vec3, f64)> = edges().into_iter().map(|e| (e, 1.0)).collect();
+    let sel: Vec<(Vec3, Length)> = edges().into_iter().map(|e| (e, mm(1.0))).collect();
     if let Ok(b) = crate::blend_corner::fillet_radii(&p, &sel) {
         assert!(b.validity().is_empty() && b.crossed_face_loops().unwrap() > 0);
     }
@@ -53,7 +53,7 @@ fn overlapping_rounds_are_refused() {
 #[test]
 fn rounds_that_fit_are_closed() {
     let p = part();
-    let b = crate::fillet(&p, &edges(), 0.5).unwrap();
+    let b = crate::fillet(&p, &edges(), mm(0.5)).unwrap();
     assert!(b.validity().is_empty(), "{:?}", b.validity());
     assert_eq!(b.crossed_face_loops().unwrap(), 0);
     assert_eq!(b.face_count(), p.face_count() + edges().len());

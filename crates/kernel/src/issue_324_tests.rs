@@ -3,7 +3,7 @@
 
 use solidcraft_geom::Vec3;
 
-use crate::{Body, BoolOp, build::box_solid, build::cylinder, ops::boolean};
+use crate::{Body, BoolOp, build::box_solid, build::cylinder, mm, ops::boolean};
 
 /// A 40 x 20 x 10 block with a through hole of radius 3 at (20, `y`).
 fn block_with_hole(y: f64) -> Body {
@@ -20,7 +20,7 @@ fn block_with_hole(y: f64) -> Body {
 fn the_radius_offered_beside_a_hole_fits() {
     let b = block_with_hole(14.5);
     let edge = Vec3::new(10.0, 20.0, 10.0);
-    let m = crate::fillet(&b, &[edge], 4.0).unwrap_err().to_string();
+    let m = crate::fillet(&b, &[edge], mm(4.0)).unwrap_err().to_string();
     let offered: f64 = m
         .split("the largest radius that fits is ")
         .nth(1)
@@ -28,7 +28,7 @@ fn the_radius_offered_beside_a_hole_fits() {
         .and_then(|s| s.parse().ok())
         .unwrap_or_else(|| panic!("no radius offered: {m}"));
     assert!(offered > 2.0 && offered <= 2.5, "{m}");
-    let r = crate::fillet(&b, &[edge], offered).unwrap();
+    let r = crate::fillet(&b, &[edge], mm(offered)).unwrap();
     assert!(r.validity().is_empty(), "{:?}", r.validity());
     // The block, the hole and the round's corner: the round stays clear of the hole.
     let want = 8000.0 - std::f64::consts::PI * 9.0 * 10.0 - 40.0 * offered * offered * (1.0 - std::f64::consts::FRAC_PI_4);

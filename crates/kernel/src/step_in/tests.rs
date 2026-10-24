@@ -1,7 +1,7 @@
 use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
 
 use super::*;
-use crate::{BoolOp, boolean, box_solid, cylinder, extrude, fillet, measure, revolve, sphere, step_export, torus};
+use crate::{BoolOp, boolean, box_solid, cylinder, extrude, fillet, measure, mm, revolve, sphere, step_export, torus};
 
 fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-9)
@@ -377,7 +377,7 @@ fn round_trip_features() {
     let holed = boolean(&plate, &pin, BoolOp::Cut).unwrap().unwrap();
     round_trip(&holed);
     let edge = Vec3::new(20.0, 0.0, 10.0);
-    round_trip(&fillet(&plate, &[edge], 3.0).unwrap());
+    round_trip(&fillet(&plate, &[edge], mm(3.0)).unwrap());
     let ring = Region2 { outer: Loop2::circle(Vec2::new(10.0, 0.0), 3.0), holes: vec![] };
     let donut = revolve(&Plane::XZ, &[ring], Vec2::ZERO, Vec2::Y, 1.5).unwrap();
     round_trip(&donut[0]);
@@ -415,7 +415,7 @@ fn imported_bodies_take_features() {
     let imp = step_import(&step_export(&[&plate], "t").unwrap()).unwrap();
     let body = &imp.bodies[0].body;
     // Fillet an edge, cut a hole through it.
-    let rounded = fillet(body, &[Vec3::new(20.0, 0.0, 10.0)], 2.0).unwrap();
+    let rounded = fillet(body, &[Vec3::new(20.0, 0.0, 10.0)], mm(2.0)).unwrap();
     let v_fillet = 40.0 * (4.0 - std::f64::consts::PI);
     assert!(rel(measure(&rounded).unwrap().volume, 12000.0 - v_fillet) < 1e-3);
     let pin = cylinder(Vec3::new(20.0, 15.0, -1.0), Vec3::Z, 5.0, 12.0).unwrap();
@@ -1430,7 +1430,7 @@ fn tee_fillet_exports_byte_identical() {
     let branch = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 35.0).unwrap();
     let export = || {
         let tee = boolean(&main, &branch, BoolOp::Union).unwrap().unwrap();
-        let f = fillet(&tee, &[Vec3::new(0.0, 10.0, 125f64.sqrt())], 3.0).unwrap();
+        let f = fillet(&tee, &[Vec3::new(0.0, 10.0, 125f64.sqrt())], mm(3.0)).unwrap();
         step_export(&[&f], "tee").unwrap()
     };
     let first = export();
@@ -1477,7 +1477,7 @@ fn rounded_slot_exports_cylinders() {
     };
     let plate = extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0.0, 4.0).unwrap().pop().unwrap();
     let edges = [Vec3::new(30.0, -10.0, 4.0), Vec3::new(30.0, 10.0, 4.0), Vec3::new(0.0, 0.0, 4.0), Vec3::new(60.0, 0.0, 4.0)];
-    let b = fillet(&plate, &edges, 1.0).unwrap();
+    let b = fillet(&plate, &edges, mm(1.0)).unwrap();
     let text = step_export(&[&b], "t").unwrap();
     assert!(!text.contains("B_SPLINE_SURFACE"), "{text}");
     assert_eq!(text.matches("CYLINDRICAL_SURFACE(").count(), 4);
@@ -1516,7 +1516,7 @@ fn ramp_cut_slot_exports_sheets_bounded_by_their_faces() {
     };
     let plate = extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0.0, 4.0).unwrap().pop().unwrap();
     let outline = |z: f64| [Vec3::new(30.0, -10.0, z), Vec3::new(30.0, 10.0, z), Vec3::new(0.0, 0.0, z), Vec3::new(60.0, 0.0, z)];
-    let rounded = fillet(&fillet(&plate, &outline(4.0), 1.0).unwrap(), &outline(0.0), 1.0).unwrap();
+    let rounded = fillet(&fillet(&plate, &outline(4.0), mm(1.0)).unwrap(), &outline(0.0), mm(1.0)).unwrap();
     // The ramp: from the top at x = 40 down to z = 2 past the end, across the whole width.
     let side = Plane::new(Vec3::new(0.0, -6.0, 0.0), Vec3::X, Vec3::Z).unwrap();
     let ramp =
@@ -1708,8 +1708,8 @@ fn fillet_box(w: f64, d: f64, h: f64) -> Body {
     let b = box_solid(Vec3::ZERO, Vec3::new(w, d, h)).unwrap();
     let vertical = [Vec3::new(0.0, 0.0, h / 2.0), Vec3::new(w, 0.0, h / 2.0), Vec3::new(w, d, h / 2.0), Vec3::new(0.0, d, h / 2.0)];
     let top = [Vec3::new(w / 2.0, 0.0, h), Vec3::new(w, d / 2.0, h), Vec3::new(w / 2.0, d, h), Vec3::new(0.0, d / 2.0, h)];
-    let b = fillet(&b, &vertical, 0.3).unwrap_or(b);
-    fillet(&b, &top, 0.1).unwrap_or(b)
+    let b = fillet(&b, &vertical, mm(0.3)).unwrap_or(b);
+    fillet(&b, &top, mm(0.1)).unwrap_or(b)
 }
 
 /// Independent boxes as one STEP file (about 3 KB a box).

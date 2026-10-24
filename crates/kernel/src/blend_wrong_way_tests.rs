@@ -32,7 +32,7 @@ fn block_with_ball_cut() -> Body {
 fn a_chamfer_that_would_grow_the_part_on_a_convex_edge_is_refused() {
     let body = block_with_ball_cut();
     let rim = Vec3::new(3.1526309873924174, 22.5, 0.04277569594852188);
-    let e = chamfer(&body, &[rim], 0.5).expect_err("refused");
+    let e = chamfer(&body, &[rim], mm(0.5)).expect_err("refused");
     assert!(matches!(e, KernelError::TooLarge(_)) && e.to_string().contains("convex"), "{e}");
 }
 
@@ -44,7 +44,7 @@ fn a_chamfer_of_a_hole_rim_still_builds() {
     let hole = crate::cylinder(Vec3::new(20.0, 15.0, -1.0), Vec3::Z, 5.0, 12.0).unwrap();
     let body = boolean(&plate, &hole, BoolOp::Cut).unwrap().unwrap();
     let v0 = crate::measure(&body).unwrap().volume;
-    let out = chamfer(&body, &[Vec3::new(25.0, 15.0, 10.0)], 1.0).unwrap();
+    let out = chamfer(&body, &[Vec3::new(25.0, 15.0, 10.0)], mm(1.0)).unwrap();
     assert!(out.validity().is_empty(), "{:?}", out.validity());
     // A ring of a 1 mm chamfer round a 5 mm hole: (1/2)·2π·(5 + 1/3).
     let taken = v0 - crate::measure(&out).unwrap().volume;

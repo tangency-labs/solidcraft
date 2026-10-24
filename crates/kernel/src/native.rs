@@ -206,6 +206,7 @@ fn value_nodes(v: &Value) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mm;
     use solidcraft_geom::Vec3;
     fn equal(a: &Body, b: &Body) {
         assert_eq!(a.face_count(), b.face_count());
@@ -223,7 +224,7 @@ mod tests {
     #[test]
     fn native_solids_keep_geometry_metadata_and_later_modelling() {
         let cube = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
-        let rounded = crate::fillet(&cube, &[Vec3::new(20., 0., 10.)], 2.).unwrap();
+        let rounded = crate::fillet(&cube, &[Vec3::new(20., 0., 10.)], mm(2.)).unwrap();
         let bore = crate::cylinder(Vec3::new(10., 10., -1.), Vec3::Z, 3., 12.).unwrap();
         let cut = crate::boolean(&rounded, &bore, crate::BoolOp::Cut).unwrap().unwrap();
         for body in [cube, rounded, cut] {
@@ -270,7 +271,7 @@ mod tests {
     #[test]
     fn box_and_fillet_have_stable_wire_records() {
         let cube = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
-        let rounded = crate::fillet(&cube, &[Vec3::new(20., 0., 10.)], 2.).unwrap();
+        let rounded = crate::fillet(&cube, &[Vec3::new(20., 0., 10.)], mm(2.)).unwrap();
         let records: Vec<_> = [cube, rounded]
             .iter()
             .map(|body| {

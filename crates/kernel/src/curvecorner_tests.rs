@@ -1,6 +1,6 @@
 use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
-use crate::Body;
+use crate::{Body, mm};
 
 const X0: f64 = 41.0 + 1.0 / 6.0;
 /// The arc's axis.
@@ -48,7 +48,7 @@ fn volume(b: &Body) -> f64 {
 /// What a blend (radius or distance 2) of the edges at `pts` takes off the part.
 fn removed(round: bool, pts: &[Vec3]) -> f64 {
     let body = arc_part();
-    let b = if round { crate::fillet(&body, pts, 2.0) } else { crate::chamfer(&body, pts, 2.0) }.unwrap();
+    let b = if round { crate::fillet(&body, pts, mm(2.0)) } else { crate::chamfer(&body, pts, mm(2.0)) }.unwrap();
     volume(&body) - volume(&b)
 }
 
@@ -255,10 +255,10 @@ fn the_arc_rounded_after_the_back_edge_matches_both_together() {
 /// rounded together.
 fn one_then_the_other(first: Vec3, then: Vec3) {
     let body = arc_part();
-    let step = crate::fillet(&body, &[first], 2.0).unwrap();
-    let after = crate::fillet(&step, &[then], 2.0).unwrap();
+    let step = crate::fillet(&body, &[first], mm(2.0)).unwrap();
+    let after = crate::fillet(&step, &[then], mm(2.0)).unwrap();
     let v = volume(&after);
-    let together = volume(&crate::fillet(&body, &[first, then], 2.0).unwrap());
+    let together = volume(&crate::fillet(&body, &[first, then], mm(2.0)).unwrap());
     // Within the display meshes' accuracy (two different B-reps, meshed apart).
     assert!((v - together).abs() < 5e-3, "{first:?} then {then:?}: {v} vs together {together}");
 }
@@ -269,7 +269,7 @@ fn one_then_the_other(first: Vec3, then: Vec3) {
 fn rounds_together_in_any_order() {
     let body = arc_part();
     for (a, b) in [(UPRIGHT, LONG), (TIP, arc_top()), (TIP, BACK)] {
-        let v = |x: &[Vec3]| volume(&crate::fillet(&body, x, 2.0).unwrap());
+        let v = |x: &[Vec3]| volume(&crate::fillet(&body, x, mm(2.0)).unwrap());
         let (ab, ba) = (v(&[a, b]), v(&[b, a]));
         assert!((ab - ba).abs() < 1e-3, "{a:?} + {b:?}: {ab} vs {ba}");
     }
@@ -296,7 +296,7 @@ fn corner_blends_hold_at_any_scale() {
         let mut b = body.clone();
         for pts in steps {
             let pts: Vec<Vec3> = pts.iter().map(|p| *p * k).collect();
-            b = crate::fillet(&b, &pts, 2.0 * k).unwrap_or_else(|e| panic!("at {k}x: {steps:?}: {e}"));
+            b = crate::fillet(&b, &pts, mm(2.0 * k)).unwrap_or_else(|e| panic!("at {k}x: {steps:?}: {e}"));
             assert!(b.validity().is_empty(), "at {k}x: {steps:?}: {:?}", b.validity());
         }
         (volume(&body) - volume(&b)) / (k * k * k)

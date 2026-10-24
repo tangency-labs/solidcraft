@@ -3,14 +3,14 @@
 //! the exact rounding and ray classification of the original design are not available.
 
 use super::*;
-use crate::{box_solid, cylinder, fillet, measure, sphere, step_export, step_import};
+use crate::{box_solid, cylinder, fillet, measure, mm, sphere, step_export, step_import};
 use std::cell::Cell;
 use std::f64::consts::PI;
 
 #[test]
 fn shallow_cut_after_a_pocket_recovers_from_empty_numerical_attempts() {
     let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
-    let plate = fillet(&plate, &[Vec3::new(20.0, 0.0, 10.0)], 2.0).unwrap();
+    let plate = fillet(&plate, &[Vec3::new(20.0, 0.0, 10.0)], mm(2.0)).unwrap();
     let pocket = box_solid(Vec3::new(5.0, 15.0, 9.25), Vec3::new(35.0, 25.0, 10.25)).unwrap();
     let target = boolean(&plate, &pocket, BoolOp::Cut).unwrap().unwrap();
     let tool = cylinder(Vec3::new(12.0, 15.0, 8.5), Vec3::Z, 5.0, 1.75).unwrap();

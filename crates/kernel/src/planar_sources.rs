@@ -334,6 +334,7 @@ impl Body {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mm;
     use crate::{box_solid, fillet, shell, transform_matrix};
 
     #[test]
@@ -348,7 +349,7 @@ mod tests {
                     Vec3::new(-width / 2., -30., 15.),
                     Vec3::new(width / 2., -30., 15.),
                 ],
-                6.,
+                mm(6.),
             )
             .unwrap()
             .with_preserved_planar_sources(&box_body)

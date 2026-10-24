@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use solidcraft_geom::{Mesh, Vec3};
 
 use super::*;
-use crate::{Body, BoolOp};
+use crate::{Body, BoolOp, mm};
 
 /// Every triangle edge, with vertices merged by exact position, is shared by exactly two
 /// triangles: the mesh is closed and its faces meet exactly (no cracks, no T-junctions).
@@ -163,7 +163,7 @@ fn render_wireframes() {
     let pin = ok(crate::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 6.0));
     let cross = ok(crate::cylinder(Vec3::new(5.0, -1.0, 2.0), Vec3::Y, 1.0, 12.0));
     let filleted =
-        ok(crate::fillet(&bx, &[Vec3::new(5.0, 0.0, 4.0), Vec3::new(10.0, 5.0, 4.0), Vec3::new(5.0, 10.0, 4.0), Vec3::new(0.0, 5.0, 4.0)], 1.5));
+        ok(crate::fillet(&bx, &[Vec3::new(5.0, 0.0, 4.0), Vec3::new(10.0, 5.0, 4.0), Vec3::new(5.0, 10.0, 4.0), Vec3::new(0.0, 5.0, 4.0)], mm(1.5)));
     let shapes = [
         ("box_hole", cut(&bx, &pin)),
         ("cylinder", pin.clone()),

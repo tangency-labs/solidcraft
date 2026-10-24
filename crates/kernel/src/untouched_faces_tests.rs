@@ -3,7 +3,7 @@
 
 use solidcraft_geom::Vec3;
 
-use crate::{Body, BoolOp, FaceSurface, boolean, box_solid, face_surface, fillet, shell};
+use crate::{Body, BoolOp, FaceSurface, boolean, box_solid, face_surface, fillet, mm, shell};
 
 /// The faces of `b` lying in the plane through `point` with outward normal `normal`.
 fn faces_on(b: &Body, normal: Vec3, point: Vec3) -> usize {
@@ -31,7 +31,7 @@ fn sides(w: f64, d: f64) -> [(Vec3, Vec3); 5] {
 fn case(h: f64) -> Body {
     let b = box_solid(Vec3::new(-47.5, -33., 0.), Vec3::new(47.5, 33., h)).unwrap().with_box_certificate(7).unwrap();
     let corners = [(47.5, -33.), (-47.5, -33.), (47.5, 33.), (-47.5, 33.)].map(|(x, y)| Vec3::new(x, y, h / 2.));
-    let rounded = fillet(&b, &corners, 5.).unwrap().with_preserved_planar_sources(&b).unwrap();
+    let rounded = fillet(&b, &corners, mm(5.)).unwrap().with_preserved_planar_sources(&b).unwrap();
     shell(&rounded, &[Vec3::new(0., 0., h)], 2.).unwrap().with_shell_certificate(9).unwrap()
 }
 
