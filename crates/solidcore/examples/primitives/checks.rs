@@ -289,7 +289,7 @@ impl Evaluation {
     }
 }
 
-fn measure(k: &Kernel, b: &Brep) -> Measured {
+fn measure(k: &Kernel, b: &mut Brep) -> Measured {
     let counts = (|| {
         let faces = bl::faces(b, None)?;
         let edges = bl::edges(b, None)?;
@@ -311,22 +311,23 @@ fn measure(k: &Kernel, b: &Brep) -> Measured {
         tight: true,
         expand_by_zone_tol_3d: false,
     };
-    let bbox = calculate_bounding_box(k, b, opts).map(|ext| {
+    let bbox = calculate_bounding_box(k, &mut *b, opts).map(|ext| {
         (
             Point3::new(ext.min_at(0), ext.min_at(1), ext.min_at(2)),
             Point3::new(ext.max_at(0), ext.max_at(1), ext.max_at(2)),
         )
     });
-    let properties = calculate_bounding_box(k, b, BoundingBoxOptions::default()).and_then(|ext| {
-        brep_properties(
-            k,
-            b,
-            ACCURACY,
-            ext.mid(),
-            MassPropertyBehavior::default(),
-            &attributes,
-        )
-    });
+    let properties =
+        calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()).and_then(|ext| {
+            brep_properties(
+                k,
+                b,
+                ACCURACY,
+                ext.mid(),
+                MassPropertyBehavior::default(),
+                &attributes,
+            )
+        });
     Measured {
         counts,
         manifold_solid: is_manifold_solid(b),
@@ -378,7 +379,7 @@ fn unmeasured(name: &'static str, expected: Value, e: &solidcore::SolidError) ->
 /// Builds `spec`, measures it and runs every check (none stops the others).
 pub fn evaluate(spec: &Spec) -> Evaluation {
     let mut k = Kernel::default();
-    let b = match (spec.build)(&mut k) {
+    let mut b = match (spec.build)(&mut k) {
         Ok(b) => b,
         Err(e) => {
             return Evaluation {
@@ -388,7 +389,7 @@ pub fn evaluate(spec: &Spec) -> Evaluation {
             }
         }
     };
-    let m = measure(&k, &b);
+    let m = measure(&k, &mut b);
     let mut checks = Vec::new();
     checks.push(match &m.manifold_solid {
         Ok(ok) => Check {

@@ -41,7 +41,7 @@ fn precise_sphere_properties_scale_and_translate() {
     for (center, radius) in [(Vec3::ZERO, 2.0), (Vec3::new(1.0, -2.0, 0.5), 5.0)] {
         for no_pole in [false, true] {
             let mut k = Kernel::default();
-            let b = if no_pole {
+            let mut b = if no_pole {
                 create_sphere_no_pole_with_tolerance(&mut k, center, radius, 1e-9)
             } else {
                 create_sphere(&mut k, center, radius)
@@ -52,7 +52,7 @@ fn precise_sphere_properties_scale_and_translate() {
             let key_of = |_| ObjectKey(0);
             let properties = brep_properties(
                 &k,
-                &b,
+                &mut b,
                 1e-10,
                 bbox.mid(),
                 MassPropertyBehavior::default(),

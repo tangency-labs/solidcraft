@@ -626,7 +626,7 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
     Ok(())
 }
 
-fn measure(k: &Kernel, b: &Brep) -> Result<Measured, SolidError> {
+fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
         store: &store,
@@ -650,7 +650,7 @@ pub fn run_rust(case: &Case) -> Run {
             return stop;
         }
     }
-    match bodies.get(RESULT) {
+    match bodies.get_mut(RESULT) {
         Some(b) => measure(&k, b).map_or_else(|e| solid(&e), Run::Done),
         None => Run::Error(format!("no body `{RESULT}`")),
     }

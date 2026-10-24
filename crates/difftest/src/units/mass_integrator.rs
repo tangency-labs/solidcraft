@@ -415,7 +415,7 @@ fn geometry_rust(g: &Geometry) -> Output {
                     )?;
                     let p = props::brep_properties(
                         &wire_kernel,
-                        &brep,
+                        &mut brep,
                         accuracy,
                         Vec3::new(ox, oy, oz),
                         props::MassPropertyBehavior {
@@ -497,17 +497,20 @@ fn geometry_rust(g: &Geometry) -> Output {
                     };
                     let accuracy = p[12];
                     return match *query {
-                        2 => Ok(vec![0.0, props::face_area(&fk, &brep, face, accuracy)?]),
+                        2 => Ok(vec![0.0, props::face_area(&fk, &mut brep, face, accuracy)?]),
                         3 => {
-                            let (area, c) = props::face_centroid(&fk, &brep, face, accuracy)?;
+                            let (area, c) = props::face_centroid(&fk, &mut brep, face, accuracy)?;
                             Ok(vec![0.0, area, c.x, c.y, c.z])
                         }
-                        4 => Ok(vec![0.0, props::brep_area(&fk, &brep, accuracy)?]),
-                        5 => Ok(vec![0.0, props::brep_volume(&fk, &brep, accuracy, &attrs)?]),
+                        4 => Ok(vec![0.0, props::brep_area(&fk, &mut brep, accuracy)?]),
+                        5 => Ok(vec![
+                            0.0,
+                            props::brep_volume(&fk, &mut brep, accuracy, &attrs)?,
+                        ]),
                         6 => {
                             let m = props::brep_mass_properties(
                                 &fk,
-                                &brep,
+                                &mut brep,
                                 accuracy,
                                 1.0,
                                 Vec3::new(p[9], p[10], p[11]),
