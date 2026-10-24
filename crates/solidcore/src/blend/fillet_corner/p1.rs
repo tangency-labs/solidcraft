@@ -78,10 +78,11 @@
 //!   `SmEdge::SetCurve(NULL, TRUE)`'s notification effects to the pseudo B-rep's
 //!   records directly (no spatial cache: the pseudo B-rep has none).
 //! - **Corner geometry steps.** `CalcCornerVertGeom` / `CalcCornerEdgeGeom` call
-//!   `SmFilletVertex::CalcCornerVertGeom` / `SmFilletEdge::CalcCornerEdgeGeom` (unit
-//!   `blend.fillet_geom_p3`) per vertex / edge: with any vertex or edge they are
-//!   [`SolidError::Unported`] there; the rest of each routine is ported around those
-//!   calls. The variable-radius law-interval adjustment of `CalcCornerVertGeom` is
+//!   `SmFilletVertex::CalcCornerVertGeom` / `SmFilletEdge::CalcCornerEdgeGeom`
+//!   ([`FilletBrep::calc_corner_vert_geom`] /
+//!   [`FilletBrep::calc_corner_edge_geom_of_corner`]) per vertex / edge, with the
+//!   [`CornerEnv`]'s kernel, target B-rep and solvers. The edge calculators that read the
+//!   edge's corner get this corner (upstream asserts the edge is its own). The variable-radius law-interval adjustment of `CalcCornerVertGeom` is
 //!   ported; resolving a fillet geometry's solver to its variable-radius type
 //!   (`OffsetRadiiCanChange`, the `SmVariableRadiusFS` cast) needs the executive's
 //!   solver store and is `Unported`
@@ -1090,24 +1091,6 @@ const OP_EDGE_GEOM: &str = "blend::fillet_corner::p1::calc_corner_edge_geom";
 const OP_DEGENERACY: &str = "blend::fillet_corner::p1::check_and_fix_degeneracy";
 const OP_END_PATCH: &str = "blend::fillet_corner::p1::create_end_patch";
 
-/// `SmFilletVertex::CalcCornerVertGeom` (unit `blend.fillet_geom_p3`).
-fn fillet_vertex_calc_corner_vert_geom(_pseudo: &mut FilletBrep, _v: VertexId) -> Result<()> {
-    // UNPORTED(blend.fillet_geom_p3): SmFilletVertex::CalcCornerVertGeom
-    Err(SolidError::unported(
-        "SmFilletVertex::CalcCornerVertGeom",
-        "blend.fillet_geom_p3",
-    ))
-}
-
-/// `SmFilletEdge::CalcCornerEdgeGeom` (unit `blend.fillet_geom_p3`).
-fn fillet_edge_calc_corner_edge_geom(_pseudo: &mut FilletBrep, _e: EdgeId) -> Result<()> {
-    // UNPORTED(blend.fillet_geom_p3): SmFilletEdge::CalcCornerEdgeGeom
-    Err(SolidError::unported(
-        "SmFilletEdge::CalcCornerEdgeGeom",
-        "blend.fillet_geom_p3",
-    ))
-}
-
 /// `SmFilletExecutive::NoteFilletError(eErrorType, eCornerType, eStatus, cName, cpVertex,
 /// pSurface1, pSurface2, pEU1, pEU2, cComment)` (unit `blend.fillet_executive_p1`).
 #[allow(clippy::too_many_arguments)]
@@ -1186,7 +1169,7 @@ impl FilletCorner {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: every vertex calculation (`blend.fillet_geom_p3`), and
+    /// [`SolidError::Unported`]: those of the vertex calculations, and
     /// the solver store of the law-interval adjustment (`blend.fillet_executive_p1`,
     /// which resolves a fillet geometry's solver to its variable-radius type); `SM_ERR`
     /// for a vertex calculation that fails;
@@ -1207,7 +1190,9 @@ impl FilletCorner {
             already_processed.push(env.pseudo.fillet_vertex(fv)?.is_processed());
 
             // switch on FilletVertex->m_eType to call appropriate vertex calculator
-            let status = fillet_vertex_calc_corner_vert_geom(env.pseudo, fv);
+            let status = env
+                .pseudo
+                .calc_corner_vert_geom(env.k, fv, env.target, env.solvers);
 
             // for errors
             match status {
@@ -1338,7 +1323,7 @@ impl FilletCorner {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: every edge calculation (`blend.fillet_geom_p3`) and the
+    /// [`SolidError::Unported`]: those of the edge calculations, and the
     /// deletion of a failed edge (`SmBrep::DeleteEdge`, `topology.brep_p4`); `SM_ERR` for a
     /// failed edge the merge cannot absorb; `SM_ERR_NULL_POINTER` for a processed edge
     /// without curve; those of the squeeze.
@@ -1353,7 +1338,13 @@ impl FilletCorner {
 
             // Branch on SmFilletEdge->m_eType to pass call to
             // the appropriate edgeBuilding function
-            let calc = fillet_edge_calc_corner_edge_geom(env.pseudo, curr_edge);
+            let calc = env.pseudo.calc_corner_edge_geom_of_corner(
+                env.k,
+                curr_edge,
+                (env.corner, &*self),
+                env.solvers,
+                env.target,
+            );
             if let Err(e @ SolidError::Unported { .. }) = calc {
                 return Err(e);
             }

@@ -541,16 +541,10 @@ void c1_rail_rail(C1Corner& C, Rd& rd, std::vector<double>& o)
 }
 
 // The corner geometry steps. `CalcCornerVertGeom` / `CalcCornerEdgeGeom` call
-// SmFilletVertex::CalcCornerVertGeom / SmFilletEdge::CalcCornerEdgeGeom per vertex / edge,
-// whose Rust ports are stubs (blend.fillet_geom_p3): with any vertex / edge the case is not
-// run. Output `0 status` corner Model.
+// SmFilletVertex::CalcCornerVertGeom / SmFilletEdge::CalcCornerEdgeGeom per vertex / edge
+// (blend.fillet_geom_p3). Output `0 status` corner Model.
 void c1_vert_geom(C1Corner& C, std::vector<double>& o)
 {
-    if ((C.c->*P3CornerPeek::verts()).GetSize() > 0)
-    {
-        o.push_back(C1_NOT_RUN);
-        return;
-    }
     SmStatus r = C.c->CalcCornerVertGeom();
     o.push_back(0.0);
     o.push_back(st(r));
@@ -560,11 +554,6 @@ void c1_vert_geom(C1Corner& C, std::vector<double>& o)
 
 void c1_edge_geom(C1Corner& C, std::vector<double>& o)
 {
-    if ((C.c->*P3CornerPeek::edges()).GetSize() > 0)
-    {
-        o.push_back(C1_NOT_RUN);
-        return;
-    }
     SmStatus r = C.c->CalcCornerEdgeGeom();
     o.push_back(0.0);
     o.push_back(st(r));

@@ -74,9 +74,7 @@
 //! whose surviving vertex is the deleted one; for `GetTangentFilletSolver` of the closed
 //! Nx1 and Nx2 corners, unit `blend.fillet_corner_p2`, a curveless filleted edge that
 //! `sm_TestG1Continuity` would evaluate), `-3` "not run" (the Rust port of a callee is a
-//! stub: `SmFilletVertex::CalcCornerVertGeom` /
-//! `SmFilletEdge::CalcCornerEdgeGeom` of `blend.fillet_geom_p3` for a corner with any
-//! vertex / edge; `MakeFaceBrep` for an end patch with an original face).
+//! stub: `MakeFaceBrep` for an end patch with an original face).
 
 use crate::{call_with_buffer, FfiError};
 

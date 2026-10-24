@@ -2048,11 +2048,16 @@ fn gen_corner(rng: &mut Rng) -> Inputs {
     };
     let mut verts = subset(rng, nv);
     let mut edges = subset(rng, ne);
-    // the geometry steps run only on an empty list (their per-element callees are stubs)
-    if method == CornerMethod::VertGeom && rng.chance(0.5) {
+    // The geometry steps run on an empty list here. Their per-vertex / per-edge
+    // calculators (blend.fillet_geom_p2..p6) read corner, solver and executive data the
+    // generated models do not build, and upstream dereferences it unchecked (CalcVertOnVert,
+    // CalcSetBackVert, CalcRailIntExtendedEdgeuse, CalcFilletIntFillet, CalcMateGeom and
+    // the edge calculators of SmFilletEdge::CalcCornerEdgeGeom all crashed on random
+    // models); the fixtures compare them on hand-built corners.
+    if method == CornerMethod::VertGeom {
         verts.clear();
     }
-    if method == CornerMethod::EdgeGeom && rng.chance(0.5) {
+    if method == CornerMethod::EdgeGeom {
         edges.clear();
     }
     // the degeneracy fix: processed corner vertices at the filleted vertex

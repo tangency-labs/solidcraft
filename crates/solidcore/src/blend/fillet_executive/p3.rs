@@ -870,15 +870,11 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     /// raw `m_vVertexCornerMap` edge-use array cast to a corner (UB-209).
     fn solver_corner(&self, solver: O, index: usize) -> Result<Option<O>>;
 
-    /// `SmFilletSolver::GetOtherFilletCorner(pCorner)`; waiting for
-    /// `blend.fillet_solver_p3`.
-    fn solver_other_corner(&self, _solver: O, _corner: O) -> Result<Option<O>> {
-        // UNPORTED(blend.fillet_solver_p3): SmFilletSolver::GetOtherFilletCorner
-        Err(SolidError::unported(
-            "SmFilletSolver::GetOtherFilletCorner",
-            "blend.fillet_solver_p3",
-        ))
-    }
+    /// `SmFilletSolver::GetOtherFilletCorner(pCorner)`: delegate to the solver's
+    /// `FilletSolver::other_fillet_corner` (`blend.fillet_solver_p3`), which reads the
+    /// same corners as [`ExecutiveAccess::solver_corner`] (`None` when `corner` is not
+    /// one of the solver's).
+    fn solver_other_corner(&self, solver: O, corner: O) -> Result<Option<O>>;
 
     /// `SmFilletCorner::GetTangentFilletSolver(pFS)` (virtual); waiting for
     /// `blend.fillet_corner_p1` (the base, `SmFillet1x1Corner`, `SmFillet2x2Corner`) and

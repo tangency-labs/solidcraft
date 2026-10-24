@@ -641,6 +641,9 @@ impl ExecutiveAccess<Handle> for Access {
     fn solver_corner(&self, _: Handle, _: usize) -> Result<Option<Handle>> {
         absent()
     }
+    fn solver_other_corner(&self, _: Handle, _: Handle) -> Result<Option<Handle>> {
+        absent()
+    }
     fn corner_setback_distance(&self, _: Handle) -> Result<f64> {
         absent()
     }
