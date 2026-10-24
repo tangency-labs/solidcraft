@@ -25,11 +25,14 @@
 //! its stand-ins (`ObjIn::EdgeIvl`, `ObjIn::VertexTol`); the pool answers the port's
 //! [`ProtoBrep`](solidcore::topology::proto_topology::ProtoBrep) queries with them.
 //!
-//! Deferred: everything past `SmBrep::MakeEdgeInFace` (unit `topology.brep_p5`),
-//! bare-face `UpdateFaces` scripts without owning geometry, the B-rep walks of
-//! `sm_AreConnected` and point classifications on bare topology (units `topology.edge`,
-//! `topology.vertex`, `topology.face_p2`), and `SmProtoVertex::ContainsPoint` (unit
-//! `query.face_p2`).
+//! `UpdateFaces` runs on real faces: the fixtures and [`real_face_update_cases`] build the
+//! old and new face of a split in an owning B-rep on both sides; the shim refuses it on
+//! the random scripts' bare-face stand-ins, and so does the port (the same input guard).
+//!
+//! Deferred: everything past `SmBrep::MakeEdgeInFace` (unit `topology.brep_p5`), the
+//! B-rep walks of `sm_AreConnected` and point classifications on bare topology (units
+//! `topology.edge`, `topology.vertex`, `topology.face_p2`), and
+//! `SmProtoVertex::ContainsPoint` (unit `query.face_p2`).
 
 use serde_json::{json, Value};
 
@@ -608,15 +611,15 @@ pub(super) fn run_op(
                         || ed != -1
                         || r.n_pf != 0
                     {
-                        return Err(Fail::Deferred(Box::new(Output::deferred(
-                            "harness:proto-real-face-update",
-                            "UpdateFaces needs audited real owned-face fixtures",
-                        ))));
+                        // the shim's guard: bare-face stand-ins have no B-rep or loops
+                        // for `UpdateFaces` to walk, and splits with edges or proto faces
+                        // need fixtures the shim does not build; it refuses the op
+                        *skip = true;
+                        return Ok(());
                     }
                     if !face_update_edges_ok(r, w as i32, f1)? {
-                        return Err(Fail::Deferred(Box::new(Output::deferred(
-                            "harness:proto-real-face-update", "UpdateFaces edge continuation needs audited direct-UV fixtures",
-                        ))));
+                        *skip = true;
+                        return Ok(());
                     }
                     let (se, oe, ed) = (edge(se), edge(oe), r.ed(ed));
                     let _ = res(
@@ -1106,6 +1109,219 @@ fn gen_script(rng: &mut Rng) -> Script {
     }
 }
 
+// ---- real-face updates ------------------------------------------------------------------------
+
+/// Generated `UpdateFaces` scripts on real owned faces, beside the random scripts.
+pub const REAL_FACE_CASES: usize = 200;
+
+/// `UpdateFaces` scripts on real faces, [`REAL_FACE_CASES`] of them from fixed seeds: a
+/// bilinear patch (planar or twisted, at a random scale) twice, the old and the new face of
+/// a split of its domain (along `u` or `v`, with a common boundary, an overlap or a gap)
+/// created in one operand with an initial domain and sometimes shifted trims, then
+/// `UpdateFaces` with either proto vertices whose definitions classify on a face of the
+/// split (inside either face, on or near the split line, outside both) or the one proto
+/// edge with a direct UV segment the shim admits (inside, across or along the split).
+/// Inputs stay within the shim's `UpdateFaces` guard, so both sides run the update.
+fn real_face_update_cases() -> Vec<(String, Value)> {
+    let mut out = Vec::new();
+    for i in 0..REAL_FACE_CASES {
+        let mut rng = Rng::new(CaseContext::seed_for("topology.proto_topology_p2/real-face", i));
+        if let Ok(v) = serde_json::to_value(real_face_script(&mut rng)) {
+            out.push((format!("real_face_gen{i:03}"), v));
+        }
+    }
+    out
+}
+
+/// One generated real-face `UpdateFaces` script (see [`real_face_update_cases`]).
+#[allow(clippy::too_many_lines)]
+fn real_face_script(rng: &mut Rng) -> Script {
+    use super::topology_proto_topology_p1::{BSplineIn, SurfIn, NOW};
+    let s = match rng.below(4) {
+        0 => 1.0,
+        1 => 1e3,
+        2 => 1e-3,
+        _ => 10f64.powf(rng.uniform(-2.0, 2.0)),
+    };
+    // P(u, v) = (u s, v s, u v z s): planar or twisted
+    let z = if rng.chance(0.3) { rng.uniform(-0.5, 0.5) } else { 0.0 };
+    let eval = |u: f64, v: f64| [u * s, v * s, u * v * z * s];
+    let corner = |u: f64, v: f64| {
+        let p = eval(u, v);
+        [p[0], p[1], p[2], 1.0]
+    };
+    let patch = || {
+        ObjIn::Bsurf(SurfIn {
+            oob: false,
+            net: vec![
+                vec![corner(0.0, 0.0), corner(0.0, 1.0)],
+                vec![corner(1.0, 0.0), corner(1.0, 1.0)],
+            ],
+            p: 1,
+            q: 1,
+            u: vec![0.0, 0.0, 1.0, 1.0],
+            v: vec![0.0, 0.0, 1.0, 1.0],
+        })
+    };
+    // the split: the low side ends at `a`, the high side starts at `bb`
+    let along_v = rng.chance(0.5);
+    let a = rng.uniform(0.15, 0.85);
+    let bb = match rng.below(10) {
+        0..=4 => a,
+        5..=8 => a - rng.uniform(0.0, a.min(0.3)),
+        _ => a + rng.uniform(0.0, (1.0 - a).min(0.1)),
+    };
+    let rect = |lo: f64, hi: f64| {
+        if along_v {
+            [0.0, lo, 1.0, hi]
+        } else {
+            [lo, 0.0, hi, 1.0]
+        }
+    };
+    let (low, high) = (rect(0.0, a), rect(bb, 1.0));
+    let (old_dom, new_dom) = if rng.chance(0.75) { (low, high) } else { (high, low) };
+    let initial = |rng: &mut Rng, own: [f64; 4]| match rng.below(10) {
+        0..=5 => [-1.0, -1.0, 2.0, 2.0],
+        6..=7 => own,
+        _ => [
+            -rng.uniform(0.0, 2.0),
+            -rng.uniform(0.0, 2.0),
+            1.0 + rng.uniform(0.0, 2.0),
+            1.0 + rng.uniform(0.0, 2.0),
+        ],
+    };
+    let shift = |rng: &mut Rng, p: f64| {
+        if rng.chance(p) {
+            [rng.uniform(-3.0, 3.0), rng.uniform(-3.0, 3.0)]
+        } else {
+            [0.0, 0.0]
+        }
+    };
+    let which: u8 = if rng.chance(0.5) { 1 } else { 2 };
+    let mut objects = vec![patch(), patch()];
+    for (surface, domain, p_shift) in [(0, old_dom, 0.15), (1, new_dom, 0.1)] {
+        let initial_domain = initial(rng, domain);
+        let trim_shift = shift(rng, p_shift);
+        objects.push(ObjIn::TrimmedFace {
+            operand: which,
+            surface,
+            domain,
+            initial_domain,
+            trim_shift,
+        });
+    }
+    objects.push(ObjIn::Region);
+    let (old_face, new_face, region) = (2.0, 3.0, 4.0);
+    // a parameter across the split: inside either side, on or near it, or outside both
+    let param = |rng: &mut Rng| match rng.below(10) {
+        0..=3 => rng.uniform(-0.3, 1.3),
+        4 => a,
+        5 => bb,
+        6 => a + rng.uniform(-1e-6, 1e-6),
+        7 => rng.uniform(0.0, 1.0),
+        _ => {
+            if rng.chance(0.5) {
+                rng.uniform(0.0, a)
+            } else {
+                rng.uniform(bb, 1.0)
+            }
+        }
+    };
+    let across = |rng: &mut Rng| rng.uniform(-0.2, 1.2);
+    let uv_at = |t: f64, c: f64| if along_v { (c, t) } else { (t, c) };
+    let tol = |rng: &mut Rng| match rng.below(3) {
+        0 => 0.0,
+        1 => 1e-4 * s,
+        _ => rng.uniform(1e-7, 1e-3) * s,
+    };
+    let mut ops: Vec<Vec<f64>> = Vec::new();
+    if rng.chance(0.6) {
+        // proto vertices with definitions classified on a face of the split
+        for i in 0..=rng.below(3) {
+            let (u, v) = uv_at(param(rng), across(rng));
+            let pt = eval(u, v);
+            let ztol = tol(rng);
+            let pv = i as f64;
+            ops.push(opv(p::PV_NEW, &cat(&[&pt, &[ztol]])));
+            ops.push(opv(p::MGR_ADD_PV, &[pv]));
+            let face = if rng.chance(0.85) { old_face } else { new_face };
+            let gap = if rng.chance(0.7) { 0.0 } else { rng.uniform(0.0, 1e-3) * s };
+            let flags = if gap == 0.0 { 2.0 } else { 6.0 };
+            let on_face = pcv(102.0, face, ztol, flags, 0.0, u, v, gap);
+            let in_region = pcv(101.0, region, ztol, 0.0, 0.0, 0.0, 0.0, 0.0);
+            let (pc1, pc2) = if which == 1 {
+                (on_face, in_region)
+            } else {
+                (in_region, on_face)
+            };
+            ops.push(opv(p::VD_NEW, &cat(&[&pc1, &pc2, &pt, &[ztol, 0.0, pv]])));
+            ops.push(opv(p::PV_ADD_VD, &[pv, pv]));
+        }
+    } else {
+        // the one proto edge with a direct UV segment on the old face
+        let (t0, t1, c0, c1) = loop {
+            let (t0, t1) = match rng.below(4) {
+                // along the split line
+                0 => {
+                    let t = if rng.chance(0.5) { a } else { bb };
+                    (t, t)
+                }
+                // across the split
+                1 => (rng.uniform(-0.2, a), rng.uniform(bb, 1.2)),
+                _ => (param(rng), param(rng)),
+            };
+            let (c0, c1) = (across(rng), across(rng));
+            if (t1 - t0).abs() + (c1 - c0).abs() > 0.05 {
+                break (t0, t1, c0, c1);
+            }
+        };
+        let (u0, v0) = uv_at(t0, c0);
+        let (u1, v1) = uv_at(t1, c1);
+        let (p0, p1) = (eval(u0, v0), eval(u1, v1));
+        let segment = |dim: u64, p0: [f64; 3], p1: [f64; 3]| {
+            ObjIn::Curve(CurveIn::Bspline(BSplineIn {
+                dim,
+                oob: false,
+                cpts: vec![[p0[0], p0[1], p0[2], NOW], [p1[0], p1[1], p1[2], NOW]],
+                p: 1,
+                u: vec![0.0, 0.0, 1.0, 1.0],
+            }))
+        };
+        let (c3, uv) = (objects.len() as f64, objects.len() as f64 + 1.0);
+        objects.push(segment(3, p0, p1));
+        objects.push(segment(2, [u0, v0, 0.0], [u1, v1, 0.0]));
+        let (tol0, tol1, ed_tol) = (tol(rng), tol(rng), tol(rng));
+        ops.push(opv(p::PV_NEW, &cat(&[&p0, &[tol0]])));
+        ops.push(opv(p::PV_NEW, &cat(&[&p1, &[tol1]])));
+        ops.push(opv(p::MGR_ADD_PV, &[0.0]));
+        ops.push(opv(p::MGR_ADD_PV, &[1.0]));
+        ops.push(opv(p::PE_NEW, &[0.0, 1.0, 0.0, 1.0]));
+        ops.push(opv(p::MGR_ADD_PE, &[0.0]));
+        ops.push(opv(p::PV_ADD_PE, &[0.0, 0.0]));
+        ops.push(opv(p::PV_ADD_PE, &[1.0, 0.0]));
+        let (s1, s2, uv1, uv2) = if which == 1 {
+            (old_face, region, uv, -1.0)
+        } else {
+            (region, old_face, -1.0, uv)
+        };
+        ops.push(opv(p::ED_NEW, &[c3, 0.0, 1.0, s1, s2, ed_tol, uv1, uv2, 0.0]));
+        ops.push(opv(p::PE_ADD_ED, &[0.0, 0.0]));
+        ops.push(opv(p::ED_SET_FINAL, &[0.0, 1.0, -1.0]));
+        ops.push(opv(p::ED_SET_FINAL, &[0.0, 2.0, -1.0]));
+    }
+    ops.push(opv(
+        q::MGR_UPDATE_FACES,
+        &[f64::from(which), old_face, new_face, -1.0, -1.0, -1.0],
+    ));
+    Script::Proto {
+        objects,
+        approx_tol: 1e-5 * s,
+        capture: 1e-3 * s,
+        override_tol: -1.0,
+        ops,
+    }
+}
+
 // ---- cases built in code ----------------------------------------------------------------------
 
 /// Edge cases: the life cycle of a proto edge (create, add, find, combine, resolve,
@@ -1362,7 +1578,7 @@ impl UnitDiff for Runner {
             ..ctx.clone()
         };
         let mut cases = default_cases(self, &ctx)?;
-        for (name, inputs) in edge_cases() {
+        for (name, inputs) in edge_cases().into_iter().chain(real_face_update_cases()) {
             cases.push(Case {
                 unit: self.id().into(),
                 name,
@@ -1407,6 +1623,25 @@ mod tests {
         }
         assert!(total > 190, "{total}");
         assert!(deferred * 2 < total, "{deferred} of {total} deferred");
+    }
+
+    /// Every generated real-face script reaches `UpdateFaces` and runs it (no op refused,
+    /// nothing deferred).
+    #[test]
+    fn real_face_scripts_run_update_faces() {
+        for (name, v) in real_face_update_cases() {
+            let s: Script = serde_json::from_value(v).unwrap();
+            let Script::Proto { ops, .. } = &s else { panic!("{name}") };
+            let Ok(out) = rust_run(&s) else {
+                panic!("{name} did not run");
+            };
+            let mut at = 0;
+            for o in ops {
+                assert!(at + 2 < out.len(), "{name} ended early");
+                assert!(out[at + 1] != SKIP, "{name} refused op {}", o[0]);
+                at += 3 + out[at + 2] as usize;
+            }
+        }
     }
 
     /// Prints how often each op of this unit runs, is refused or ends in a deferral, and how
