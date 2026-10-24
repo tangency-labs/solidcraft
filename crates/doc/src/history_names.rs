@@ -13,6 +13,10 @@
 //! around them tells apart are numbered (`#1`, `#2`): in the order of what they came from when
 //! that differs (exact), else in the kernel's order (unverified). A face made of several (a
 //! coplanar join) takes one name and answers to the others (aliases).
+//!
+//! A piece that is split again keeps the face's stem and the bounds that told the piece it
+//! came from apart: its name lists the faces around it, not the qualifiers of the pieces
+//! before it, so a name does not grow with every split.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
@@ -244,7 +248,7 @@ fn merged(names: Vec<Named>) -> Option<Named> {
         }
         common = crate::naming::parent_piece(c);
     }
-    let name = common.map(str::to_string).unwrap_or(first);
+    let name = common_piece(&names).or_else(|| common.map(str::to_string)).unwrap_or(first);
     let mut aliases: Vec<String> = Vec::new();
     for n in names {
         for alias in std::iter::once(n.name).chain(n.aliases) {
@@ -254,6 +258,38 @@ fn merged(names: Vec<Named>) -> Option<Named> {
         }
     }
     Some(Named { name, aliases, verified, origins: None })
+}
+
+/// The name the faces have in common: their stem, the faces their qualifiers share and the
+/// number that told their pieces apart, when all of them have it. A face made of pieces that
+/// were split again keeps the name of the piece they came from (#5860).
+fn common_piece(names: &[Named]) -> Option<String> {
+    let first = names.first()?.name.as_str();
+    let (stem, around, tie) = split_piece(first);
+    let mut shared: BTreeSet<String> = around.into_iter().collect();
+    let mut same_tie = tie;
+    for n in names.iter().skip(1) {
+        let (other_stem, around, other_tie) = split_piece(&n.name);
+        if other_stem != stem {
+            return None;
+        }
+        let around: BTreeSet<String> = around.into_iter().collect();
+        shared = shared.intersection(&around).cloned().collect();
+        if same_tie != other_tie {
+            same_tie = None;
+        }
+    }
+    let mut name = stem;
+    if !shared.is_empty() {
+        name.push_str("#[");
+        name.push_str(&shared.into_iter().collect::<Vec<_>>().join(","));
+        name.push(']');
+    }
+    if let Some(tie) = same_tie {
+        name.push('#');
+        name.push_str(&tie);
+    }
+    Some(name)
 }
 
 /// Whether `name` is `stem` or a piece of it (at any depth).
@@ -330,11 +366,26 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
             })
             .unwrap_or_default();
         let own = |i: usize| -> Vec<&String> { bounds.get(i).unwrap_or(&empty).iter().filter(|x| !common.contains(x)).collect() };
+        // The face's stem, the faces the parent's qualifier lists (the bounds that told the
+        // parent apart from its siblings) and the number that told apart the pieces nothing
+        // else told apart.
+        let (stem, inherited, tie) = split_piece(base);
         let mut by_key: BTreeMap<String, Vec<usize>> = BTreeMap::new();
         for &i in members {
-            let key: Vec<&str> = own(i).into_iter().map(String::as_str).collect();
-            // Nothing around it of its own: the piece is only numbered (below).
-            let name = if key.is_empty() { base.to_string() } else { format!("{base}#[{}]", key.join(",")) };
+            let own = own(i);
+            // Nothing around it of its own: the piece keeps the name it had.
+            let name = if own.is_empty() {
+                base.to_string()
+            } else {
+                // The bounds that told the parent apart and the bounds that tell this piece
+                // apart: the name says which piece of the face it is without repeating the
+                // qualifiers of the pieces before it (the name grew with every split
+                // otherwise, #5860).
+                let mut key: BTreeSet<&str> = inherited.iter().map(String::as_str).collect();
+                key.extend(own.iter().map(|s| s.as_str()));
+                let key: Vec<&str> = key.into_iter().collect();
+                piece_name(&stem, &key, tie.as_deref())
+            };
             by_key.entry(name).or_default().push(i);
         }
         for (key, tied) in by_key {
@@ -392,6 +443,56 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
     }
     let info = named.into_iter().zip(bounds).zip(verified).map(|((x, bounds), verified)| FaceInfo { aliases: x.aliases, bounds, verified }).collect();
     Names { faces: Arc::new(names), info }
+}
+
+/// The most bytes a face name may take: a command takes a face name of at most this many
+/// bytes, so a longer name could not be used to find the face again.
+const MAX_NAME_BYTES: usize = 512;
+
+/// A piece's name: the face's stem, the faces around the piece that tell it apart, as many
+/// of them as the name can hold (`MAX_NAME_BYTES`), and the number that told the pieces of
+/// the same face apart.
+fn piece_name(stem: &str, faces: &[&str], tie: Option<&str>) -> String {
+    let mut kept: Vec<&str> = Vec::with_capacity(faces.len());
+    // The stem, the `#[` and the `]` the qualifier is written in.
+    let mut len = stem.len() + 3;
+    for face in faces {
+        let more = face.len() + if kept.is_empty() { 0 } else { 1 };
+        if len + more > MAX_NAME_BYTES {
+            break;
+        }
+        len += more;
+        kept.push(face);
+    }
+    let mut name = if kept.is_empty() { stem.to_string() } else { format!("{stem}#[{}]", kept.join(",")) };
+    if let Some(tie) = tie {
+        name.push('#');
+        name.push_str(tie);
+    }
+    name
+}
+
+/// A piece name's parts: the face's stem, the faces its qualifier lists and the number that
+/// tells apart the pieces of the same face that nothing else tells apart
+/// (`F2:top#[F3:side]#2`). A name that cannot be read is taken as it is: a hostile name never
+/// panics.
+fn split_piece(name: &str) -> (String, Vec<String>, Option<String>) {
+    let (stem, around) = match crate::piece_names::piece_parts(name) {
+        Some((stem, around)) => (stem.to_string(), around.iter().map(|face| face.to_string()).collect()),
+        None => (name.to_string(), Vec::new()),
+    };
+    (stem, around, tie_number(name))
+}
+
+/// The number at the end of a piece name (`#2` of `F2:top#[F3:side]#2`), when it has one: it
+/// tells apart the pieces of a face that nothing else tells apart.
+fn tie_number(name: &str) -> Option<String> {
+    let i = name.rfind('#')?;
+    let digits = name.get(i + 1..)?;
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(digits.to_string())
 }
 
 /// `origin` with the face or edge it names left out (its kind and operand kept).

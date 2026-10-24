@@ -79,6 +79,38 @@ fn pieces_nothing_tells_apart_are_numbered_and_unverified() {
     assert!(!names.verified(0) && !names.verified(1));
 }
 
+/// #5860: a piece of a split face that is split again must not stack another qualifier on
+/// its name: the name grew with every split (728 characters after eleven splits).
+#[test]
+fn a_piece_split_again_does_not_grow_its_name() {
+    // A face split in two: the pieces are told apart by the walls only they touch.
+    let first = qualify(named(&["top", "top", "wall:a", "wall:b"]), &[(0, 2), (1, 3)]);
+    assert_eq!(first.faces[0], "top#[wall:a]");
+    assert_eq!(first.faces[1], "top#[wall:b]");
+    // The piece that touches wall:a is split again, and again: its name lists the walls
+    // around it, not the qualifiers of the pieces it came from.
+    let mut piece = first.faces[0].clone();
+    for _ in 0..10 {
+        let names = qualify(named(&[piece.as_str(), piece.as_str(), "wall:a", "wall:b"]), &[(0, 2), (1, 3)]);
+        piece = names.faces[0].clone();
+    }
+    assert_eq!(piece, "top#[wall:a]");
+}
+
+/// A name has to stay within the length a command accepts for a face name (512 bytes), or
+/// the face could not be named again.
+#[test]
+fn a_piece_with_many_faces_around_it_keeps_a_name_that_can_be_used() {
+    let around: Vec<String> = (0..80).map(|i| format!("F{i}:blend:face:{i}")).collect();
+    let mut faces: Vec<&str> = vec!["top", "top"];
+    faces.extend(around.iter().map(String::as_str));
+    // Each piece touches forty faces of its own: none of them tells the pieces apart.
+    let adjacent: Vec<(usize, usize)> = (2..42).map(|i| (0, i)).chain((42..82).map(|i| (1, i))).collect();
+    let names = qualify(named(&faces), &adjacent);
+    assert!(names.faces.iter().all(|n| n.len() <= 512), "{:?}", names.faces);
+    assert_ne!(names.faces[0], names.faces[1], "the pieces are still told apart");
+}
+
 #[test]
 fn a_merged_face_takes_the_shared_stem_or_the_first_name_and_answers_to_the_others() {
     let m = merged(named(&["top#[a]", "top#[b]"])).unwrap();
