@@ -4,7 +4,13 @@
 //! `kind gap t pre_snap stored_point x y z`. Kinds: 0 unknown, 1 curve, 2 face,
 //! 3 edge, 4 vertex, 5 region, 6 nothing. Topology comes from a real unit box.
 //! Flags bit 0 selects vertices-only merging; bit 1 enables paired fillet handling.
-//! Geometry: 0 line, 1 circle, 2 ellipse, 3 quadratic B-spline, 4 constant B-spline.
+//! Geometry: 0 line, 1 circle, 2 ellipse, 3 quadratic B-spline, 4 constant B-spline,
+//! and lines placed on the box: 5 from vertex (0,0,0) across face z=0 (direction
+//! (0.5,1,0)), 6 along the edge (1,0,1)-(1,1,1), 7 from (0.25,0.25,0) along x inside
+//! face z=0. [`run_picked`] chooses which of the box's faces, edges, vertices and
+//! regions (indices into `GetFaces`, `GetEdges`, `GetVertices`, `GetRegions`) the
+//! classification kinds 2 to 5 name, and can enable the box's editing (the state its
+//! edge splits and `MakeEdgeInFaceWithVU` require); [`run`] names the first of each.
 //! The classified range is [0,1]; supplied intervals form a partition of that range.
 //! Native constructor status/null checks precede topology access. All objects are scoped.
 
@@ -33,8 +39,29 @@ mod sys {
             cap: i64,
             len: *mut i64,
         ) -> i32;
+        pub fn sc_intersect_curve_class_p6_run_picked(
+            op: i32,
+            kind: i32,
+            scale: f64,
+            tol: f64,
+            flags: i32,
+            index: i64,
+            a: *const f64,
+            na: i64,
+            b: *const f64,
+            nb: i64,
+            input: *const f64,
+            pick: *const i32,
+            editing: i32,
+            out: *mut f64,
+            cap: i64,
+            len: *mut i64,
+        ) -> i32;
     }
 }
+
+/// The box's face, edge, vertex and region counts (`SmApiCreateBox`'s unit box).
+pub const PICK_LIMITS: [i32; 4] = [6, 12, 8, 2];
 
 fn bad() -> FfiError {
     FfiError::InvalidArgument("invalid curve-classification fixture".into())
@@ -106,7 +133,7 @@ pub fn validate(
     input: &[f64],
 ) -> Result<(), FfiError> {
     if !(0..=3).contains(&op)
-        || !(0..=4).contains(&kind)
+        || !(0..=7).contains(&kind)
         || !scale.is_finite()
         || !(0.0..=1e100).contains(&scale)
         || scale == 0.0
@@ -144,6 +171,79 @@ pub fn validate(
     // Index is ignored by insert/homogenize, but must fit the native integer type.
     i64::try_from(index).map_err(|_| bad())?;
     Ok(())
+}
+
+/// [`validate`] with the objects [`run_picked`] names.
+///
+/// # Errors
+/// Those of [`validate`]; a pick outside the box's lists.
+#[allow(clippy::too_many_arguments)]
+pub fn validate_picked(
+    op: i32,
+    kind: i32,
+    scale: f64,
+    tol: f64,
+    flags: i32,
+    index: usize,
+    a: &[f64],
+    b: &[f64],
+    input: &[f64],
+    pick: [i32; 4],
+) -> Result<(), FfiError> {
+    if pick
+        .iter()
+        .zip(PICK_LIMITS)
+        .any(|(p, limit)| !(0..limit).contains(p))
+    {
+        return Err(bad());
+    }
+    validate(op, kind, scale, tol, flags, index, a, b, input)
+}
+
+/// [`run`] with the box's face, edge, vertex and region at `pick` (indices into its
+/// lists) as the objects of classification kinds 2 to 5, and the box's editing
+/// enabled (`m_bEditingEnabled`) when `editing`.
+///
+/// # Errors
+/// See [`validate_picked`]; construction failures are reported as shim errors.
+#[allow(clippy::too_many_arguments)]
+pub fn run_picked(
+    op: i32,
+    kind: i32,
+    scale: f64,
+    tol: f64,
+    flags: i32,
+    index: usize,
+    a: &[f64],
+    b: &[f64],
+    input: &[f64],
+    pick: [i32; 4],
+    editing: bool,
+) -> Result<Vec<f64>, FfiError> {
+    validate_picked(op, kind, scale, tol, flags, index, a, b, input, pick)?;
+    call_with_buffer(32768, |out, len| {
+        // SAFETY: as `run`; `pick` is four in-range indices, checked again natively.
+        unsafe {
+            sys::sc_intersect_curve_class_p6_run_picked(
+                op,
+                kind,
+                scale,
+                tol,
+                flags,
+                index as i64,
+                a.as_ptr(),
+                (a.len() / WIDTH) as i64,
+                b.as_ptr(),
+                (b.len() / WIDTH) as i64,
+                input.as_ptr(),
+                pick.as_ptr(),
+                i32::from(editing),
+                out.as_mut_ptr(),
+                out.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
 }
 
 /// Calls the real native operation and returns status plus complete classification state.

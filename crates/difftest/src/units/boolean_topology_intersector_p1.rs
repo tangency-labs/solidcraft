@@ -66,6 +66,8 @@ use solidcore::geom::object::{ObjectRef, ShapeMember};
 use solidcore::geom::solution_array::{ObjectKind, Solution, SolutionArray, SolutionObject};
 use solidcore::geom::tol::{update_object_tolerance, zone_tol3d, TopologyToUpdate, UNINIT_TOL};
 use solidcore::intersect::curve_class::p1::{CurveClassification, CurveInterval};
+use solidcore::intersect::curve_class::p5::ClassGeometryMut;
+use solidcore::intersect::curve_class::p6::{MergeContext, MergeIntervalBrep};
 use solidcore::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
@@ -100,7 +102,7 @@ use solidcore::topology::topology::Topology;
 use solidcore::topology::vertex as vx;
 use solidcore::query::brep::{BrepIdentity, BrepQuery};
 use solidcore::topology::{
-    Brep, BrepId, EdgeId, EdgeuseId, FaceId, LoopId, VertexId, VertexuseId,
+    Brep, BrepId, EdgeId, EdgeuseId, FaceId, LoopId, RegionId, VertexId, VertexuseId,
 };
 use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::boolean_topology_intersector_p1::{self as ffi, Op};
@@ -990,6 +992,62 @@ impl ClassGeometry<H> for Two {
                 .is_some_and(|x| std::ptr::eq(x, brep))
         })?;
         Self::entity_h(b, entity)
+    }
+}
+
+// The mutable access `MergeClassifications` imprints the classifications through
+// (unit `boolean.topology_intersector_p3`): the B-rep behind a handle, its vertex
+// notification store, and handles for the entities its edits make.
+impl ClassGeometryMut<H> for Two {
+    fn curve_mut(&mut self, o: H) -> Option<&mut SmCurve> {
+        ProtoGeometry::curve_mut(self, o)
+    }
+    fn topology_entity_mut(&mut self, o: H) -> Option<(&mut Brep, EntityRef)> {
+        let (_, e) = ClassGeometry::topology_entity(self, o)?;
+        Some((self.brep_mut(o)?, e))
+    }
+}
+
+impl MergeIntervalBrep<H> for Two {
+    fn merge_context(&mut self, o: H) -> Option<MergeContext<'_, H>> {
+        let target = match o.kind {
+            K_VERTEX => EntityRef::Vertex(vid(o)),
+            K_EDGE => EntityRef::Edge(eid(o)),
+            K_FACE => EntityRef::Face(fid(o)),
+            K_REGION => EntityRef::Region(RegionId::from_index(o.i)),
+            _ => return None,
+        };
+        let slot = usize::try_from(o.b).ok()?;
+        // an edit deletes the B-rep's cache (SmBrep::Notify PRE_EDIT); the next use
+        // rebuilds it
+        self.caches.get_mut(slot)?.take();
+        let brep = self.breps.get_mut(slot)?.as_mut()?;
+        let store = self.env.get_mut(slot)?;
+        let b = o.b;
+        Some(MergeContext {
+            brep,
+            target,
+            handle: Box::new(move |e| match e {
+                EntityRef::Vertexuse(vu) => hd(b, K_VERTEXUSE, vu.index()),
+                e => Two::entity_h(b, e).unwrap_or(hd(b, K_NULL as u8, 0)),
+            }),
+            notifications: solidcore::topology::edge::NotifyEnv {
+                records: &mut store.records,
+                attributes: &mut store.attributes,
+                context: None,
+                key_of: &p9_entity_ref,
+            },
+            curve_ref: &merge_curve_ref,
+        })
+    }
+}
+
+/// The identity of an edge's curve for the merge's edits (as `make_vertex_split_edge`
+/// gives it).
+fn merge_curve_ref(e: EdgeId, kind: i64) -> ObjectRef {
+    ObjectRef {
+        key: ObjectKey(((kind as u64) << 32) | u64::from(e.index())),
+        type_code: kind,
     }
 }
 

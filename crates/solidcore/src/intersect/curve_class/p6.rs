@@ -7,7 +7,8 @@
 //! | [`CurveClassification::homogenize`] | `SmCurveClassification::Homogenize` |
 //! | [`CurveClassification::insert_curve_interval`] | `SmCurveClassification::InsertCurveInterval` |
 //! | [`CurveClassification::fix_end_point_class`] | `SmCurveClassification::FixEndPointClass` |
-//! | [`CurveClassification::merge_interval`] | `SmCurveClassification::MergeInterval` |
+//! | [`CurveClassification::merge_interval`], [`CurveClassification::merge_interval_mut`] | `SmCurveClassification::MergeInterval` |
+//! | [`MergeIntervalBrep`], [`MergeContext`] | the non-const `SmVertex`, `SmEdge`, `SmFace`, `SmRegion` and `SmBrep` objects behind the classification's pointers |
 //!
 //! Deviations: handles and caller-provided geometry replace pointers, as in p1/p3.
 //! Status/out-parameters become Results. The optional classify-curve parameter passed
@@ -17,25 +18,56 @@
 //! order, bounded by the initial interval count plus one (every restart removes one).
 //! Homogenization's final squeezes must reduce the count. Nonempty boundary lookups
 //! await p2, as does interval splicing/squeezing.
-//! `MergeInterval` ports its early exits and the boundary zone tolerances
-//! (`GetPointObjZoneTol3d`, p2); the topology mutation after them is not implemented
-//! or certified here and returns `Unported` naming this unit.
+//!
+//! **`MergeInterval` edits the B-rep.** [`CurveClassification::merge_interval_mut`]
+//! makes the edits (`MergePointClass`, `GlueVertices`, `MakeWireEdge`,
+//! `FindVertexSector`, `MakeEdgeInFaceWithVU`, the edge and vertex tolerances) on the
+//! arena a [`MergeIntervalBrep`] hands out for each topology handle, through the ported
+//! `topology` functions. [`CurveClassification::merge_interval`] runs the same code over
+//! a read-only adapter, which defers at the first edit (`SmBrep mutable owning
+//! context`, unit `topology.brep_p1`, as part 5's read-only entry points do). The
+//! vertex uses of the face branch stay arena ids of the face's B-rep (upstream's
+//! `SmVertexuse*` locals). A classification object upstream casts to a face, edge or
+//! vertex that is missing or of another kind, a face without surface or B-rep, and an
+//! edge without vertices are dereferenced upstream: errors here. `FindVertexSector`
+//! of a vertex of another B-rep finds no sector, as upstream (the vertex has no use on
+//! the face). `GlueVertices` gets no notification environment (as the B-rep
+//! entry point `topology::brep::p5::glue_vertices`). `SetExact` is the no-op of the
+//! reference build (no `SM_TOLERANT_WATCH`). The reference build is `SM_USE_OLDTOL`, so
+//! the coincident-edge branch raises the edge's tolerance to the source tolerance and
+//! refreshes the edge's first vertex, as upstream's `SM_OLDTOL_LINE` code.
 
+use super::p1::{compute_face_point_class, compute_face_point_class_in, src_zone_tol_3d_of};
 use super::p3::{
     are_coincident_maybe, classify_crv_loc_by_index, connect_intervals, point_class_loc_by_index,
     Coincident,
 };
+use super::p5::ClassGeometryMut;
 use super::{
     curve_is_degenerate, fix_problems_by_squeezing, squeeze_out_smallest_interval,
     CurveClassification, CurveInterval, IntervalPosition,
 };
-use crate::error::{Result, SolidError};
-use crate::geom::tol::ScaledZero;
+use crate::curve::crv_on_surf::CrvOnSurf;
+use crate::curve::curve::p2::{Curve, CurveKind};
+use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::geom::extent1d::Extent1d;
+use crate::geom::global_solver::SolverOperation;
+use crate::geom::object::ObjectRef;
+use crate::geom::tol::{xsect_tol_3d_from_zones, zone_tol3d, ScaledZero};
 use crate::intersect::point_class::{
-    ClassGeometry, ClassObject, PointClassType as Pc, PointClassification, Precedence,
+    object_zone_tol_3d, BrepMerge, ClassGeometry, ClassObject, ClassObjectKind, MergeOutputs,
+    PointClassType as Pc, PointClassification, Precedence,
 };
 use crate::kernel::Kernel;
 use crate::math::{Point3, BIG_DOUBLE};
+use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::surface::Surface;
+use crate::topology::brep::p9::EdgeInFaceInput;
+use crate::topology::face::p4::FindVertexSectorArgs;
+use crate::topology::{
+    edge, edge as topo_edge, vertex as topo_vertex, Brep, EdgeId, VertexId, VertexuseId,
+};
 
 /// Topology created by [`CurveClassification::merge_interval`].
 /// These replace the three optional output arrays, which upstream clears on entry.
@@ -89,14 +121,14 @@ impl<O: ClassObject> CurveClassification<O> {
         fix_problems_by_squeezing(k, geometry, other, self)?;
         while self.size() > other.size() {
             let count = self.size();
-            crate::error::ignore_status(squeeze_out_smallest_interval(self))?;
+            ignore_status(squeeze_out_smallest_interval(self))?;
             if self.size() >= count {
                 return Err(SolidError::sm_err(OP));
             }
         }
         while other.size() > self.size() {
             let count = other.size();
-            crate::error::ignore_status(squeeze_out_smallest_interval(other))?;
+            ignore_status(squeeze_out_smallest_interval(other))?;
             if other.size() >= count {
                 return Err(SolidError::sm_err(OP));
             }
@@ -203,14 +235,10 @@ impl<O: ClassObject> CurveClassification<O> {
                     {
                         if ivl.start.deviation() < ivl.end.deviation() / 1000.0 {
                             // RemovePointClass's status is ignored upstream.
-                            crate::error::ignore_status(
-                                self.remove_point_class(index, IntervalPosition::End),
-                            )?;
+                            ignore_status(self.remove_point_class(index, IntervalPosition::End))?;
                             return Ok(true);
                         } else if ivl.end.deviation() < ivl.start.deviation() / 1000.0 {
-                            crate::error::ignore_status(
-                                self.remove_point_class(index, IntervalPosition::Start),
-                            )?;
+                            ignore_status(self.remove_point_class(index, IntervalPosition::Start))?;
                             return Ok(true);
                         }
                     }
@@ -308,14 +336,14 @@ impl<O: ClassObject> CurveClassification<O> {
         Ok(false)
     }
 
-    /// Merges an interval's classifications into topology (`MergeInterval`).
-    /// The unknown-interior and vertex/edge/vertex early exits and the boundary zone
-    /// tolerances (`GetPointObjZoneTol3d`) are implemented; the vertex and edge
-    /// imprinting after them is not ported yet.
+    /// Merges an interval's classifications into topology (`MergeInterval`), over a
+    /// read-only adapter: the code runs as upstream until the first B-rep edit, which
+    /// defers (`SmBrep mutable owning context`, see [`MergeIntervalBrep`]);
+    /// [`Self::merge_interval_mut`] makes the edits.
     ///
     /// # Errors
     /// Invalid interval indices, or [`SolidError::Unported`] for topology tolerances of
-    /// opaque handles, p7 fillet handling or the imprinting.
+    /// opaque handles, p7 fillet handling or the first B-rep edit.
     pub fn merge_interval(
         &mut self,
         k: &Kernel,
@@ -342,47 +370,1398 @@ impl<O: ClassObject> CurveClassification<O> {
         vertices_only: bool,
         other: Option<&CurveClassification<O>>,
     ) -> Result<MergeIntervalOutput<O>> {
-        let ivl = self.at(index)?;
+        self.merge_interval_in(
+            &mut ReadOnly { k, g: geometry },
+            index,
+            vertices_only,
+            other,
+        )
+    }
+
+    /// [`Self::merge_interval_with`] editing the B-reps behind the classification's
+    /// topology handles through [`MergeIntervalBrep`]: the end vertices are merged
+    /// (`MergePointClass`), and the interval becomes a wire edge in a region, an edge
+    /// in a face (splitting it when both ends lie on one loop) or updates the
+    /// tolerance of the coincident edge.
+    ///
+    /// # Errors
+    /// Those of [`Self::merge_interval_with`] and of the B-rep operations;
+    /// [`SolidError::InvalidInput`] for a topology handle the adapter cannot resolve
+    /// mutably and for the inputs upstream dereferences as null or as an object of
+    /// another kind (an interval whose ends are not vertices after merging them).
+    pub fn merge_interval_mut(
+        &mut self,
+        k: &mut Kernel,
+        geometry: &mut impl MergeIntervalBrep<O>,
+        index: usize,
+        vertices_only: bool,
+        other: Option<&CurveClassification<O>>,
+    ) -> Result<MergeIntervalOutput<O>> {
+        self.merge_interval_in(&mut Mutable { k, g: geometry }, index, vertices_only, other)
+    }
+
+    #[allow(clippy::too_many_lines)] // upstream's MergeInterval, in one piece
+    pub(super) fn merge_interval_in(
+        &mut self,
+        a: &mut impl Imprint<O>,
+        index: usize,
+        vertices_only: bool,
+        other: Option<&CurveClassification<O>>,
+    ) -> Result<MergeIntervalOutput<O>> {
+        // init outputs
+        let mut out = MergeIntervalOutput::default();
+
+        // locals
+        let src_zone_tol_3d = src_zone_tol_3d_of(a.kernel(), Some(&*self));
+        let ivl = *self.at(index)?;
+
+        // no work - skip intervals not classified inside
         if ivl.mid.point_class() == Pc::Unknown && !vertices_only {
-            return Ok(MergeIntervalOutput::default());
+            return Ok(out);
         }
+
+        // low work - skip intervals already merged
         if ivl.start.point_class() == Pc::Vertex
             && ivl.mid.point_class() == Pc::Edge
             && ivl.end.point_class() == Pc::Vertex
         {
-            // When DoingFillets with FilletData
-            if self.doing_fillets() && self.other_classification().is_some() {
-                let Some(other) = other else {
-                    // the caller did not supply the classification the handle names
-                    return Err(SolidError::unported(
-                        "SmCurveClassification::GetOtherClassification",
-                        "intersect.curve_class_p7",
-                    ));
-                };
-                // Make sure to use the FilletGeometry and not the OriginalBrep Geometry
-                // (1 | 2 | 4: start vertex, end vertex and mid edge; status ignored)
-                crate::error::ignored(super::p7::set_do_filleting_geometry(
-                    k,
-                    geometry,
-                    index,
-                    self,
-                    Some(other),
-                    7,
-                ))?;
-            }
-            return Ok(MergeIntervalOutput::default());
+            // When DoingFillets with FilletData: make sure to use the FilletGeometry and
+            // not the OriginalBrep Geometry (1 | 2 | 4: start vertex, end vertex and mid
+            // edge)
+            self.fillet_geometry(a, index, other, 7)?;
+            return Ok(out);
         }
-        // Get the interval start and stop tols.
-        let start_obj_zone_tol_3d = self.point_obj_zone_tol_3d(k, geometry, index)?;
-        let end_obj_zone_tol_3d = self.point_obj_zone_tol_3d(k, geometry, index + 1)?;
-        let _ = (start_obj_zone_tol_3d, end_obj_zone_tol_3d);
-        // The rest of MergeInterval (end points, closed / degenerate test, vertex and
-        // edge imprinting through MergePointClass and the B-rep) is not ported in this
-        // part yet; see plan/findings.md (intersect.curve_class_p2).
-        Err(SolidError::unported(
-            "SmCurveClassification::MergeInterval (imprinting)",
-            "intersect.curve_class_p6",
+
+        // Get the interval start and stop points and tols.
+        let start_obj_zone_tol_3d = self.point_obj_zone_tol_3d(a.kernel(), a.geometry(), index)?;
+        let end_obj_zone_tol_3d =
+            self.point_obj_zone_tol_3d(a.kernel(), a.geometry(), index + 1)?;
+        // Get SSSPoint when available, else Get SrcCurve(Ivl->EndPtParam)
+        let start_pt = self
+            .classify_crv_loc_by_index(a.kernel(), a.geometry(), index)?
+            .0;
+        let end_pt = self
+            .classify_crv_loc_by_index(a.kernel(), a.geometry(), index + 1)?
+            .0;
+        let end_end_dist = start_pt.distance(end_pt);
+        let closed_xsect_tol_3d =
+            xsect_tol_3d_from_zones(a.kernel(), start_obj_zone_tol_3d, end_obj_zone_tol_3d);
+
+        let mut closed = false;
+        if end_end_dist < closed_xsect_tol_3d {
+            // find out if interval is closed or degenerate
+            closed = !self.is_degenerate_interval(a, index, closed_xsect_tol_3d)?;
+        }
+
+        // add end vertices when needed
+        if ivl.start.point_class() != Pc::Vertex || ivl.end.point_class() != Pc::Vertex {
+            // Update unclassified startPoint of interval using the mid point classification
+            if self.at(index)?.start.point_class() == Pc::Unknown {
+                let mid = self.at(index)?.mid;
+                if mid.point_class() == Pc::Region {
+                    // set StartPoint to classify to that region (don't lose SSSPoint data)
+                    self.at_mut(index)?.start.copy_classification_only(&mid);
+                    // set next interval's mating endPointClassification to be the same
+                    let start = self.at(index)?.start;
+                    self.set_mate(a, index, &start)?;
+                } else if mid.point_class() == Pc::Face {
+                    // Check whether StartPoint also classifies to that face
+                    let face = face_object(&mid)?;
+                    let mut pc = self.at(index)?.start;
+                    let r = a.compute_face_point_class(start_pt, src_zone_tol_3d, face, &mut pc);
+                    self.at_mut(index)?.start = pc;
+                    if face_point_classified(r)? && pc.point_class() == Pc::Face {
+                        // set next interval's mating endPointClassification to be the same
+                        self.set_mate(a, index, &pc)?;
+                    }
+                    // else: point failed to project to face when it should have
+                }
+                // a mid EDGE with an UNKNOWN end is a classify error upstream only
+                // warns about; nothing to do for an UNKNOWN interval
+            }
+
+            // Update unclassified endPoint of interval using the mid point classification
+            if self.at(index)?.end.point_class() == Pc::Unknown {
+                let mid = self.at(index)?.mid;
+                if mid.point_class() == Pc::Region {
+                    // set endPoint to classify to that region (don't lose SSSPoint data)
+                    self.at_mut(index)?.end.copy_classification_only(&mid);
+                    // set next interval's mating endPointClassification to be the same
+                    let end = self.at(index)?.end;
+                    self.set_mate(a, index + 1, &end)?;
+                } else if mid.point_class() == Pc::Face {
+                    // Check whether endPoint also classifies to that face
+                    let face = face_object(&mid)?;
+                    let mut pc = self.at(index)?.end;
+                    let r = a.compute_face_point_class(end_pt, src_zone_tol_3d, face, &mut pc);
+                    self.at_mut(index)?.end = pc;
+                    if face_point_classified(r)? && pc.point_class() == Pc::Face {
+                        // set next interval's mating endPointClassification to be the
+                        // same (upstream names the mate of the interval's start here)
+                        self.set_mate(a, index, &pc)?;
+                    }
+                }
+            }
+
+            // When StartPt and EndPt are close together -
+            //  - handle closed curves so that ends share a vertex (use start vertex)
+            //  - handle short edges - add only start vertex to topology graph
+            if end_end_dist < closed_xsect_tol_3d {
+                // find out if interval is closed or degenerate
+                let degenerate = self.is_degenerate_interval(a, index, closed_xsect_tol_3d)?;
+                closed = !degenerate;
+
+                // Work from the lowest-dimensional topology: Vertex -> Edge -> Face, by
+                // setting both the start and end to the same topology.
+                let start_classif = self.point_class_by_index(index)?.0.point_class();
+                let end_classif = self.point_class_by_index(index + 1)?.0.point_class();
+
+                // Only do this for closed, degenerate curves.  [Fillet 2:202]
+                if degenerate {
+                    let start_pc = *self.point_class_by_index(index)?.0;
+                    let end_pc = *self.point_class_by_index(index + 1)?.0;
+                    if start_classif == Pc::Vertex && end_classif != Pc::Vertex {
+                        self.update_point_class(a.kernel(), a.geometry(), index + 1, &start_pc)?;
+                    } else if end_classif == Pc::Vertex && start_classif != Pc::Vertex {
+                        self.update_point_class(a.kernel(), a.geometry(), index, &end_pc)?;
+                    } else if start_classif == Pc::Edge && end_classif != Pc::Edge {
+                        self.update_point_class(a.kernel(), a.geometry(), index + 1, &start_pc)?;
+                    } else if end_classif == Pc::Edge && start_classif != Pc::Edge {
+                        self.update_point_class(a.kernel(), a.geometry(), index, &end_pc)?;
+                    }
+                }
+
+                // Save the original Edge.
+                let orig_start_edge = edge_cast(self.point_class_by_index(index)?.0);
+
+                // for closed or short curves - create just one vertex (the start vertex)
+                // and insert it into the topology graph
+                self.merge_point_class_in(
+                    a,
+                    index,
+                    Some(&mut out.new_edges),
+                    Some(&mut out.new_vertices),
+                )?;
+
+                // remember when vertex represents two distinct points within tolerance
+                let start_pc = *self.point_class_by_index(index)?.0;
+                if start_pc.point_class() == Pc::Vertex {
+                    let v = vertex_object(&start_pc)?;
+                    let scaled_zero = vertex_point(a.geometry(), v)?.scaled_zero();
+                    if end_end_dist > scaled_zero {
+                        a.set_vertex_exact(v, false)?;
+                    }
+                }
+
+                // For degenerate curves whose end is on a different Edge: split the
+                // ending Edge (a new Vertex), then combine the two Vertices.
+                if degenerate && end_classif == Pc::Edge {
+                    let orig_end_edge = edge_cast(self.point_class_by_index(index + 1)?.0);
+                    if orig_end_edge.is_some() && orig_end_edge != orig_start_edge {
+                        // Don't want this in pOptNewVertices.
+                        let mut temp_new_verts = Vec::new();
+                        self.merge_point_class_in(
+                            a,
+                            index + 1,
+                            Some(&mut out.new_edges),
+                            Some(&mut temp_new_verts),
+                        )?;
+                        let end_v = vertex_cast(self.point_class_by_index(index + 1)?.0);
+                        let start_v = vertex_cast(self.point_class_by_index(index)?.0);
+                        if let (Some(start_v), Some(end_v)) = (start_v, end_v) {
+                            if end_v != start_v {
+                                // SE: the status is ignored
+                                ignore_status(a.glue_vertices(start_v, end_v))?;
+                                self.point_class_by_index_mut(index + 1)?
+                                    .0
+                                    .set_class_object(Pc::Vertex, Some(start_v));
+                            }
+                        }
+                    }
+                }
+
+                // When DoingFillets with FilletData (1: start vertex)
+                self.fillet_geometry(a, index, other, 1)?;
+
+                // make nextPointClassification = thisPointClassification (cleans up
+                // tolerances)
+                let start_pc = *self.point_class_by_index(index)?.0;
+                self.update_point_class(a.kernel(), a.geometry(), index + 1, &start_pc)?;
+
+                // for degenerate curves - we're done: the curve segment is too small to
+                // bother with
+                if degenerate {
+                    return Ok(out);
+                }
+            } else {
+                // Merge StartPt into Topology graph possibly creating a new Vertex and
+                // Splitting an Edge if needed.
+                if matches!(
+                    self.at(index)?.start.point_class(),
+                    Pc::Region | Pc::Face | Pc::Edge
+                ) {
+                    self.merge_point_class_in(
+                        a,
+                        index,
+                        Some(&mut out.new_edges),
+                        Some(&mut out.new_vertices),
+                    )?;
+                }
+
+                // Merge EndPt into Topology graph
+                if matches!(
+                    self.at(index)?.end.point_class(),
+                    Pc::Region | Pc::Face | Pc::Edge
+                ) {
+                    self.merge_point_class_in(
+                        a,
+                        index + 1,
+                        Some(&mut out.new_edges),
+                        Some(&mut out.new_vertices),
+                    )?;
+                }
+
+                // When doing a fillet - use FilletGeometry and not OriginalBrep Geometry
+                // for tighter tols (1 | 2: start and end vertices)
+                self.fillet_geometry(a, index, other, 3)?;
+            }
+        }
+
+        // State: we just merged the Start and End, so they should be Vertices.
+        // Next:  merge Mid intervals as edges - may split faces
+
+        // low work - asked to insert vertices only
+        if vertices_only {
+            return Ok(out);
+        }
+
+        // Get the vertices from the modified classification
+        let ivl = *self.at(index)?;
+        let start_v = ivl.start.object();
+        let end_v = ivl.end.object();
+
+        if start_v == end_v && !closed {
+            // Curve segment is too small to bother with
+            let v = vertex_object(&ivl.start)?;
+            let scaled_zero = vertex_point(a.geometry(), v)?.scaled_zero();
+            if end_end_dist > scaled_zero {
+                a.set_vertex_exact(v, false)?;
+            }
+            return Ok(out);
+        }
+
+        // State: either Start and End are distinct and far enough apart, or the curve
+        // is closed.  Make an Edge between them.
+        let start_v = vertex_object(&ivl.start)?;
+        let end_v = vertex_object(&ivl.end)?;
+
+        // when the interval is within a region - make a wire edge
+        if ivl.mid.point_class() == Pc::Region {
+            let region = ivl.mid.object().ok_or_else(|| null_object("region"))?;
+            // copy and trim classification->Curve (may snap the interval by tol to
+            // existing knots; the status is ignored)
+            let mut curve = self.curve_geometry(a.geometry())?.copy(a.kernel())?;
+            let mut interval = ivl.interval;
+            ignore_status(curve.trim(a.kernel(), &mut interval, TrimMode::default()))?;
+            self.at_mut(index)?.interval = interval;
+
+            // create a new wire edge in region using the new curve
+            let new_e = a.make_wire_edge(region, start_v, end_v, curve, &interval)?;
+
+            // set output
+            out.new_edges.push(new_e);
+
+            // set the edge's tolerance - never let new tolerances be less than
+            // BrepZoneTol3d
+            let edge_tol = vertex_brep_tolerance(a.geometry(), start_v)?.max(src_zone_tol_3d);
+            a.set_edge_tolerance(new_e, edge_tol)?;
+
+            // update the classification object
+            self.at_mut(index)?
+                .mid
+                .set_class_object(Pc::Edge, Some(new_e));
+
+            // When DoingFillets with FilletData (4: mid edge)
+            self.fillet_geometry(a, index, other, 4)?;
+            return Ok(out);
+        }
+
+        // when merging an interval that classifies to a face
+        if ivl.mid.point_class() == Pc::Face {
+            return self.merge_face_interval(a, index, start_v, end_v, other, out);
+        }
+
+        // when merging an interval that classifies to a coincident edge
+        if ivl.mid.point_class() == Pc::Edge {
+            self.merge_edge_interval(a, index, other)?;
+            return Ok(out);
+        }
+
+        // merge error: Interval not merged by any handled case
+        Ok(out)
+    }
+
+    /// The face branch of `MergeInterval`: a trimmed copy of the interval (and of the
+    /// UV curve) becomes an edge between the face's vertex sectors at its ends.
+    #[allow(clippy::too_many_lines)] // upstream's branch, in one piece
+    fn merge_face_interval(
+        &mut self,
+        a: &mut impl Imprint<O>,
+        index: usize,
+        start_v: O,
+        end_v: O,
+        other: Option<&CurveClassification<O>>,
+        mut out: MergeIntervalOutput<O>,
+    ) -> Result<MergeIntervalOutput<O>> {
+        let src_zone_tol_3d = src_zone_tol_3d_of(a.kernel(), Some(&*self));
+        let face = face_object(&self.at(index)?.mid)?;
+
+        // Create a trimmed Curve3d copy of the interval (may snap the interval by tol
+        // to existing knots; the status is ignored)
+        let mut curve_3d = self.curve_geometry(a.geometry())?.copy(a.kernel())?;
+        let mut interval = self.at(index)?.interval;
+        ignore_status(curve_3d.trim(a.kernel(), &mut interval, TrimMode::default()))?;
+        self.at_mut(index)?.interval = interval;
+
+        // when interval has a UVTrimCurve - Create trimmed CurveUV copy of the Interval
+        let uv_curve = match self.uv_curve1() {
+            Some(h) => {
+                let uv = a
+                    .geometry()
+                    .curve(h)
+                    .ok_or_else(|| SolidError::invalid_input(OP, "unresolved UV curve"))?;
+                let mut uv = uv.copy(a.kernel())?;
+                // SM_CAST_PTR(SmBSplineCurve, ...) then NER
+                if !is_bspline_curve(&uv) {
+                    return Err(SolidError::null_pointer(OP));
+                }
+                uv.trim(a.kernel(), &mut interval, TrimMode::default())?;
+                self.at_mut(index)?.interval = interval;
+                Some(uv)
+            }
+            None => None,
+        };
+
+        // locals
+        let face_zone_tol_3d = object_zone_tol_3d(a.kernel(), a.geometry(), Some(face))?;
+        let brep_zone_tol_3d = face_brep_tolerance(a.geometry(), face)?;
+        let face_src_curve_xsect_tol_3d =
+            xsect_tol_3d_from_zones(a.kernel(), face_zone_tol_3d, src_zone_tol_3d);
+        let mut with_gap_zone_tol_3d = src_zone_tol_3d;
+
+        // Compute tolerance based on distance to surface of UV curve.
+        if let Some(uv) = &uv_curve {
+            let surface = face_surface(a.geometry(), face)?;
+            let crv_on_surf = Curve::from(CrvOnSurf::new(
+                a.kernel(),
+                uv.clone_for_evaluation()?,
+                surface.clone_for_evaluation()?,
+                None,
+                0,
+            )?);
+            let natural = crv_on_surf.natural_interval();
+
+            // get max dist estimate from 3DCurve to projected of UVTrimCurve
+            let mut max_dist_to_surf = curve_3d
+                .curve_max_distance_between(
+                    a.kernel(),
+                    &interval,
+                    &crv_on_surf,
+                    natural.min(),
+                    natural.max(),
+                    20,
+                    None,
+                )?
+                .distance;
+
+            // if estimate is large - get precise max dist measure
+            if max_dist_to_surf > face_zone_tol_3d / 2.0 {
+                max_dist_to_surf = curve_3d
+                    .curve_max_distance_between(
+                        a.kernel(),
+                        &interval,
+                        &crv_on_surf,
+                        natural.min(),
+                        natural.max(),
+                        0,
+                        None,
+                    )?
+                    .distance;
+
+                // increase the EdgeTol value as needed
+                if max_dist_to_surf > face_src_curve_xsect_tol_3d {
+                    with_gap_zone_tol_3d = zone_tol3d(
+                        a.kernel(),
+                        src_zone_tol_3d + (max_dist_to_surf - face_src_curve_xsect_tol_3d),
+                    );
+                }
+            }
+        }
+
+        // locals
+        let t_start = interval.min();
+        let t_end = interval.max();
+
+        // classify the curve against the face at the start and end vertices
+        let mut start_vu = a.find_vertex_sector(
+            face,
+            SectorQuery {
+                vertex: start_v,
+                curve: &curve_3d,
+                uv_curve: uv_curve.as_ref(),
+                param_at_vertex: t_start,
+                param_ivl_end: t_end,
+                orientation: OrientType::Same,
+                zone_tol_3d: brep_zone_tol_3d,
+            },
+        )?;
+        let mut end_vu = a.find_vertex_sector(
+            face,
+            SectorQuery {
+                vertex: end_v,
+                curve: &curve_3d,
+                uv_curve: uv_curve.as_ref(),
+                param_at_vertex: t_end,
+                param_ivl_end: t_start,
+                orientation: OrientType::Opposite,
+                zone_tol_3d: brep_zone_tol_3d,
+            },
+        )?;
+
+        // if either classification failed to find a sector on this face, try to find
+        // another face that contains the curve at both the start and end vertices.
+        //   note: When previous MergeIvl split Face, subsequent ClassifIvl Face
+        //   pointer values may be stale
+        if start_vu.is_none() || end_vu.is_none() {
+            // get all the faces attached to the start and end vertices through the Brep
+            let end_faces = vertex_faces(a.geometry(), end_v)?;
+            let start_faces = vertex_faces(a.geometry(), start_v)?;
+
+            // for every start vertex face
+            'start: for &start_f in &start_faces {
+                // for every end vertex face
+                for &end_f in &end_faces {
+                    // when the endVertex face and the startVertex face are the same
+                    if start_f == end_f {
+                        // classify the curve to the face at both endPoints
+                        start_vu = a.find_vertex_sector(
+                            start_f,
+                            SectorQuery {
+                                vertex: start_v,
+                                curve: &curve_3d,
+                                uv_curve: uv_curve.as_ref(),
+                                param_at_vertex: t_start,
+                                param_ivl_end: t_end,
+                                orientation: OrientType::Same,
+                                zone_tol_3d: brep_zone_tol_3d,
+                            },
+                        )?;
+                        end_vu = a.find_vertex_sector(
+                            start_f,
+                            SectorQuery {
+                                vertex: end_v,
+                                curve: &curve_3d,
+                                uv_curve: uv_curve.as_ref(),
+                                param_at_vertex: t_end,
+                                param_ivl_end: t_start,
+                                orientation: OrientType::Opposite,
+                                zone_tol_3d: brep_zone_tol_3d,
+                            },
+                        )?;
+
+                        // when both ends classified to sectors in this face: found a
+                        // keeper, exit both face iterations
+                        if start_vu.is_some() && end_vu.is_some() {
+                            break 'start;
+                        }
+                    }
+                }
+            }
+            // when the curve does not consistently classify to some face sector:
+            // upstream warns (SE_MSG) and presses on
+        }
+
+        // check state
+        let (Some(start_vu), Some(end_vu)) = (start_vu, end_vu) else {
+            return Err(SolidError::null_pointer(OP));
+        };
+
+        // insert the interval into the face
+        let (new_e, new_f) = a.make_edge_in_face_with_vu(
+            face,
+            [start_vu, end_vu],
+            curve_3d,
+            uv_curve,
+            interval,
+            with_gap_zone_tol_3d,
+        )?;
+
+        // update the outputs
+        if let Some(f) = new_f {
+            out.new_faces.push(f);
+        }
+        out.new_edges.push(new_e);
+
+        // update the edge tolerance
+        a.set_edge_tolerance(new_e, with_gap_zone_tol_3d)?;
+
+        // update the classification object
+        self.at_mut(index)?
+            .mid
+            .set_class_object(Pc::Edge, Some(new_e));
+
+        // When DoingFillets with FilletData (4: mid edge)
+        self.fillet_geometry(a, index, other, 4)?;
+
+        // Update interval Mids that classify to pFace to see if they now classify to
+        // pNewF
+        if let Some(new_f) = new_f {
+            for k in 0..self.size() {
+                a.classify_face_interval(self, k, new_f, face)?;
+            }
+        }
+
+        // update the newEdge's vertex tolerances as needed (FALSE: don't pass along
+        // RefreshTolerance() call to connected Edges and Faces)
+        let (v1, v2) = edge_vertices(a.geometry(), new_e)?;
+        a.refresh_vertex_tolerance(v1)?;
+        a.refresh_vertex_tolerance(v2)?;
+
+        Ok(out)
+    }
+
+    /// The coincident-edge branch of `MergeInterval`: the edge tolerance grows to the
+    /// largest gap between the interval and the edge.
+    fn merge_edge_interval(
+        &mut self,
+        a: &mut impl Imprint<O>,
+        index: usize,
+        other: Option<&CurveClassification<O>>,
+    ) -> Result<()> {
+        // When DoingFillets with FilletData (4: mid edge)
+        self.fillet_geometry(a, index, other, 4)?;
+
+        // edge locals
+        let ivl = *self.at(index)?;
+        let src_zone_tol_3d = src_zone_tol_3d_of(a.kernel(), Some(&*self));
+        let e = edge_object(&ivl.mid)?;
+        let edge_interval = super::p3::edge_interval(a.geometry(), e)?;
+        let mut d_start = edge_interval.min();
+        let mut d_end = edge_interval.max();
+        let edge_zone_tol_3d = object_zone_tol_3d(a.kernel(), a.geometry(), Some(e))?;
+        let xsect_tol_3d = xsect_tol_3d_from_zones(a.kernel(), src_zone_tol_3d, edge_zone_tol_3d);
+
+        let new_tolerance = {
+            let k = a.kernel();
+            let g = a.geometry();
+            let curve = super::p3::edge_curve(g, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let this_curve = self.curve_geometry(g)?;
+
+            // Drop classificationInterval MidPoint to Edge->curve
+            let pv = this_curve.evaluate(k, ivl.interval.evaluate(0.5), 1, true, true)?;
+            let p0 = *pv.first().ok_or_else(|| SolidError::sm_err(OP))?;
+            let t0 = *pv.get(1).ok_or_else(|| SolidError::sm_err(OP))?;
+            let drop = curve.drop_point(
+                k,
+                &edge_interval,
+                p0,
+                None,
+                xsect_tol_3d,
+                None,
+                SolverOperation::Minimize,
+            )?;
+
+            if drop.success {
+                // we have a candidate - approximate max interval/Edge->Curve distance
+                let pv2 = curve.evaluate(k, drop.parameter, 1, true, true)?;
+                let t2 = *pv2.get(1).ok_or_else(|| SolidError::sm_err(OP))?;
+                if t0.dot(t2) < 0.0 {
+                    core::mem::swap(&mut d_start, &mut d_end);
+                }
+                let mut max_dist_to_edge = this_curve
+                    .curve_max_distance_between(k, &ivl.interval, curve, d_start, d_end, 20, None)?
+                    .distance;
+
+                // when approxMaxDist is greater than XSectTol3d
+                if max_dist_to_edge > xsect_tol_3d {
+                    // get precise max interval/Edge->Curve distance
+                    max_dist_to_edge = this_curve
+                        .curve_max_distance_between(
+                            k,
+                            &ivl.interval,
+                            curve,
+                            d_start,
+                            d_end,
+                            0,
+                            None,
+                        )?
+                        .distance;
+                    Some(zone_tol3d(
+                        k,
+                        src_zone_tol_3d + (max_dist_to_edge - xsect_tol_3d),
+                    ))
+                } else {
+                    None
+                }
+            } else {
+                // merge error: midPoint of merge edge classified to an EDGE failed to
+                // drop to that EDGE
+                None
+            }
+        };
+        // set the new edge tolerance
+        if let Some(tol) = new_tolerance {
+            a.set_edge_tolerance(e, tol)?;
+        }
+
+        // (SM_USE_OLDTOL) increase coincident edge->Tol to this interval's tolerance
+        let src_zone_tol_3d = src_zone_tol_3d_of(a.kernel(), Some(&*self));
+        if src_zone_tol_3d > edge_zone_tol_3d {
+            a.set_edge_tolerance(e, src_zone_tol_3d)?;
+        }
+
+        // update the edge's vertex tolerances as needed (SM_USE_OLDTOL: the edge's
+        // vertex; FALSE: don't pass along RefreshTolerance() to connected objects)
+        let v1 = edge_vertex(a.geometry(), e)?;
+        a.refresh_vertex_tolerance(v1)
+    }
+
+    /// `sm_SetDoFilletingGeometry(index, *this, todo)` when doing fillets with fillet
+    /// data (its status is ignored).
+    fn fillet_geometry(
+        &self,
+        a: &mut impl Imprint<O>,
+        index: usize,
+        other: Option<&CurveClassification<O>>,
+        todo: u64,
+    ) -> Result<()> {
+        if !(self.doing_fillets() && self.other_classification().is_some()) {
+            return Ok(());
+        }
+        let Some(other) = other else {
+            // the caller did not supply the classification the handle names
+            return Err(SolidError::unported(
+                "SmCurveClassification::GetOtherClassification",
+                "intersect.curve_class_p7",
+            ));
+        };
+        ignore_status(a.set_do_filleting_geometry(self, index, Some(other), todo))
+    }
+
+    /// `SmTol::IsDegenerate(m_cpCurve, rIvl.m_vInterval, &tol)`.
+    fn is_degenerate_interval(&self, a: &impl Imprint<O>, index: usize, tol: f64) -> Result<bool> {
+        let curve = match self.curve() {
+            Some(c) => Some(
+                a.geometry()
+                    .curve(c)
+                    .ok_or_else(|| SolidError::invalid_input(OP, "unresolved curve handle"))?,
+            ),
+            None => None,
+        };
+        curve_is_degenerate(a.kernel(), curve, &self.at(index)?.interval, tol)
+    }
+
+    /// `if (pMate) (*pMate) = value` for `GetPointClassMateByIndex(boundary)`.
+    fn set_mate(
+        &mut self,
+        a: &impl Imprint<O>,
+        boundary: usize,
+        value: &PointClassification<O>,
+    ) -> Result<()> {
+        if let Some(m) = self.point_class_mate_interval(a.kernel(), a.geometry(), boundary)? {
+            self.at_mut(m)?.end = *value;
+        }
+        Ok(())
+    }
+}
+
+/// `SmCurveClassification::MergePointClass`'s and `MergeInterval`'s view of the B-rep
+/// behind a topology handle: the arena, the entity the handle names in it, the map from
+/// its ids to the caller's handles (new vertices, edges and faces included) and the
+/// notification state of its edits.
+pub struct MergeContext<'a, O> {
+    /// The arena holding the entity.
+    pub brep: &'a mut Brep,
+    /// The entity the handle names.
+    pub target: EntityRef,
+    /// The caller's handle of an entity of this arena.
+    pub handle: Box<dyn Fn(EntityRef) -> O + 'a>,
+    /// The notification records, attributes and identities of the arena's edits.
+    pub notifications: edge::NotifyEnv<'a>,
+    /// The identity of an edge's curve from its id and native type code (a split
+    /// edge's new curve included).
+    pub curve_ref: &'a dyn Fn(EdgeId, i64) -> ObjectRef,
+}
+
+/// Mutable access to the B-reps of a classification's topology handles, for the
+/// edits of [`CurveClassification::merge_interval_mut`] and
+/// [`CurveClassification::merge_point_class_mut`] (upstream edits the objects behind
+/// its `SmVertex*`, `SmEdge*`, `SmFace*` and `SmRegion*` pointers).
+pub trait MergeIntervalBrep<O>: ClassGeometryMut<O> {
+    /// The mutable context of topology handle `object` (a vertex, edge, face or
+    /// region); `None` for a handle the adapter cannot resolve (an invalid-input error
+    /// for the caller).
+    fn merge_context(&mut self, object: O) -> Option<MergeContext<'_, O>>;
+}
+
+/// `pc.MergeIntoObject(srcPoint)` on the B-rep a [`MergeIntervalBrep`] hands out for the
+/// classification's object ([`PointClassification::merge_into_brep`]); a classification
+/// without object or of an object that is not a vertex, edge, face or region returns
+/// [`PointClassification::merge_into_object`]'s error, as upstream.
+///
+/// # Errors
+/// Those of [`PointClassification::merge_into_brep`]; [`SolidError::InvalidInput`] for
+/// an object the adapter cannot resolve mutably.
+pub fn merge_into_object_mut<O: ClassObject>(
+    k: &mut Kernel,
+    geometry: &mut impl MergeIntervalBrep<O>,
+    pc: &mut PointClassification<O>,
+    src_point: Point3,
+) -> Result<MergeOutputs<O>> {
+    Mutable { k, g: geometry }.merge_into_object(pc, src_point)
+}
+
+/// A `FindVertexSector` call of `MergeInterval` (its other arguments are constant:
+/// `bValidateSector = FALSE`, `bUVSpaceOkay` at its default `TRUE`).
+pub(super) struct SectorQuery<'c, O> {
+    pub(super) vertex: O,
+    pub(super) curve: &'c Curve,
+    pub(super) uv_curve: Option<&'c Curve>,
+    pub(super) param_at_vertex: f64,
+    pub(super) param_ivl_end: f64,
+    pub(super) orientation: OrientType,
+    pub(super) zone_tol_3d: f64,
+}
+
+/// The B-rep edits of `MergeInterval` and `MergePointClass` over either kind of
+/// adapter: a read-only one defers each edit, a [`MergeIntervalBrep`] makes it.
+pub(super) trait Imprint<O: ClassObject> {
+    type Geometry: ClassGeometry<O>;
+    fn kernel(&self) -> &Kernel;
+    fn geometry(&self) -> &Self::Geometry;
+    /// `SmPointClassification::MergeIntoObject(srcPoint, pOptNewEdges, pOptNewVertices)`.
+    fn merge_into_object(
+        &mut self,
+        pc: &mut PointClassification<O>,
+        src_point: Point3,
+    ) -> Result<MergeOutputs<O>>;
+    /// `sm_ComputeFacePointClass(point, srcZoneTol3d, pFace, rPointClass)`.
+    fn compute_face_point_class(
+        &mut self,
+        point: Point3,
+        src_zone_tol_3d: f64,
+        face: O,
+        pc: &mut PointClassification<O>,
+    ) -> Result<()>;
+    /// `sm_SetDoFilletingGeometry(index, this, todo)`.
+    fn set_do_filleting_geometry(
+        &mut self,
+        this: &CurveClassification<O>,
+        index: usize,
+        other: Option<&CurveClassification<O>>,
+        todo: u64,
+    ) -> Result<()>;
+    /// `ClassifyFaceInterval(index, TRUE, pNewF, pFace)` (other arguments at their
+    /// defaults).
+    fn classify_face_interval(
+        &mut self,
+        cc: &mut CurveClassification<O>,
+        index: usize,
+        face: O,
+        old_face: O,
+    ) -> Result<()>;
+    /// `pBrep->GlueVertices(pSurvivor, pToDelete)`.
+    fn glue_vertices(&mut self, survivor: O, deleted: O) -> Result<()>;
+    /// `pBrep->MakeWireEdge(pRegion, pStartV, pEndV, curve, interval, SM_OT_SAME)`.
+    fn make_wire_edge(
+        &mut self,
+        region: O,
+        start: O,
+        end: O,
+        curve: Curve,
+        interval: &Extent1d,
+    ) -> Result<O>;
+    /// `pFace->FindVertexSector(...)`: the vertex use (of the face's B-rep) whose
+    /// sector holds the curve.
+    fn find_vertex_sector(
+        &mut self,
+        face: O,
+        query: SectorQuery<'_, O>,
+    ) -> Result<Option<VertexuseId>>;
+    /// `pBrep->MakeEdgeInFaceWithVU(pFace, vus, curve, uv, interval, SM_OT_SAME, tol)`:
+    /// the new edge and the new face of a split.
+    fn make_edge_in_face_with_vu(
+        &mut self,
+        face: O,
+        vertexuses: [VertexuseId; 2],
+        curve: Curve,
+        uv_curve: Option<Curve>,
+        interval: Extent1d,
+        curve_zone_tol_3d: f64,
+    ) -> Result<(O, Option<O>)>;
+    /// `pEdge->SetTolerance(tol)` (defaults: only if larger, cascade to boundaries).
+    fn set_edge_tolerance(&mut self, edge: O, tolerance: f64) -> Result<()>;
+    /// `pVertex->SetExact(exact)`.
+    fn set_vertex_exact(&mut self, vertex: O, exact: bool) -> Result<()>;
+    /// `pVertex->RefreshTolerance(FALSE)`.
+    fn refresh_vertex_tolerance(&mut self, vertex: O) -> Result<()>;
+}
+
+/// A read-only adapter: every B-rep edit defers.
+pub(super) struct ReadOnly<'a, G> {
+    pub(super) k: &'a Kernel,
+    pub(super) g: &'a G,
+}
+
+/// `Unported` for an edit a read-only adapter cannot make.
+fn read_only(upstream: &'static str) -> SolidError {
+    // UNPORTED(topology.brep_p1): SmBrep mutable owning context
+    SolidError::unported(upstream, "topology.brep_p1")
+}
+
+impl<O: ClassObject, G: ClassGeometry<O>> Imprint<O> for ReadOnly<'_, G> {
+    type Geometry = G;
+    fn kernel(&self) -> &Kernel {
+        self.k
+    }
+    fn geometry(&self) -> &G {
+        self.g
+    }
+    fn merge_into_object(
+        &mut self,
+        pc: &mut PointClassification<O>,
+        src_point: Point3,
+    ) -> Result<MergeOutputs<O>> {
+        pc.merge_into_object(self.k, src_point)
+    }
+    fn compute_face_point_class(
+        &mut self,
+        point: Point3,
+        src_zone_tol_3d: f64,
+        face: O,
+        pc: &mut PointClassification<O>,
+    ) -> Result<()> {
+        compute_face_point_class(point, src_zone_tol_3d, face, pc)
+    }
+    fn set_do_filleting_geometry(
+        &mut self,
+        this: &CurveClassification<O>,
+        index: usize,
+        other: Option<&CurveClassification<O>>,
+        todo: u64,
+    ) -> Result<()> {
+        super::p7::set_do_filleting_geometry(self.k, self.g, index, this, other, todo)
+    }
+    fn classify_face_interval(
+        &mut self,
+        cc: &mut CurveClassification<O>,
+        index: usize,
+        face: O,
+        old_face: O,
+    ) -> Result<()> {
+        cc.classify_face_interval(
+            self.k,
+            self.g,
+            index,
+            true,
+            face,
+            Some(old_face),
+            true,
+            None,
+        )
+    }
+    fn glue_vertices(&mut self, _survivor: O, _deleted: O) -> Result<()> {
+        Err(read_only(
+            "SmBrep mutable owning context (SmBrep::GlueVertices)",
         ))
+    }
+    fn make_wire_edge(
+        &mut self,
+        _region: O,
+        _start: O,
+        _end: O,
+        _curve: Curve,
+        _interval: &Extent1d,
+    ) -> Result<O> {
+        Err(read_only(
+            "SmBrep mutable owning context (SmBrep::MakeWireEdge)",
+        ))
+    }
+    fn find_vertex_sector(
+        &mut self,
+        _face: O,
+        _query: SectorQuery<'_, O>,
+    ) -> Result<Option<VertexuseId>> {
+        Err(read_only(
+            "SmBrep mutable owning context (SmFace::FindVertexSector)",
+        ))
+    }
+    fn make_edge_in_face_with_vu(
+        &mut self,
+        _face: O,
+        _vertexuses: [VertexuseId; 2],
+        _curve: Curve,
+        _uv_curve: Option<Curve>,
+        _interval: Extent1d,
+        _curve_zone_tol_3d: f64,
+    ) -> Result<(O, Option<O>)> {
+        Err(read_only(
+            "SmBrep mutable owning context (SmBrep::MakeEdgeInFaceWithVU)",
+        ))
+    }
+    fn set_edge_tolerance(&mut self, _edge: O, _tolerance: f64) -> Result<()> {
+        Err(read_only(
+            "SmBrep mutable owning context (SmEdge::SetTolerance)",
+        ))
+    }
+    fn set_vertex_exact(&mut self, _vertex: O, _exact: bool) -> Result<()> {
+        Err(read_only(
+            "SmBrep mutable owning context (SmVertex::SetExact)",
+        ))
+    }
+    fn refresh_vertex_tolerance(&mut self, _vertex: O) -> Result<()> {
+        Err(read_only(
+            "SmBrep mutable owning context (SmVertex::RefreshTolerance)",
+        ))
+    }
+}
+
+/// A mutable adapter: the B-rep edits are made.
+pub(super) struct Mutable<'a, G> {
+    pub(super) k: &'a mut Kernel,
+    pub(super) g: &'a mut G,
+}
+
+fn unresolved_mut() -> SolidError {
+    SolidError::invalid_input(OP, "topology handle does not resolve mutably")
+}
+
+/// The context of `object`, and the arena entity of each of `members` that belongs to
+/// the same B-rep (`None` for one of another B-rep).
+fn context_with<'g, O: ClassObject, G: MergeIntervalBrep<O>>(
+    g: &'g mut G,
+    object: O,
+    members: &[O],
+) -> Result<(MergeContext<'g, O>, Vec<Option<EntityRef>>)> {
+    let mut ids = Vec::new();
+    for &m in members {
+        let (_, e) = g.topology_entity(m).ok_or_else(unresolved_mut)?;
+        ids.push(e);
+    }
+    let ctx = g.merge_context(object).ok_or_else(unresolved_mut)?;
+    let ids = members
+        .iter()
+        .zip(ids)
+        .map(|(&m, e)| ((ctx.handle)(e) == m).then_some(e))
+        .collect();
+    Ok((ctx, ids))
+}
+
+/// The vertex of a member [`context_with`] resolved in the same B-rep.
+fn member_vertex(e: Option<&Option<EntityRef>>) -> Result<VertexId> {
+    match e {
+        Some(Some(EntityRef::Vertex(v))) => Ok(*v),
+        Some(None) => Err(SolidError::invalid_input(
+            OP,
+            "topology handles of different B-reps",
+        )),
+        _ => Err(SolidError::invalid_input(
+            OP,
+            "handle does not name a vertex",
+        )),
+    }
+}
+
+fn wrong_target(kind: &'static str) -> SolidError {
+    SolidError::invalid_input(OP, kind)
+}
+
+impl<O: ClassObject, G: MergeIntervalBrep<O>> Imprint<O> for Mutable<'_, G> {
+    type Geometry = G;
+    fn kernel(&self) -> &Kernel {
+        self.k
+    }
+    fn geometry(&self) -> &G {
+        self.g
+    }
+    fn merge_into_object(
+        &mut self,
+        pc: &mut PointClassification<O>,
+        src_point: Point3,
+    ) -> Result<MergeOutputs<O>> {
+        let topology = pc.object().filter(|o| {
+            matches!(
+                o.class_kind(),
+                ClassObjectKind::Region
+                    | ClassObjectKind::Face
+                    | ClassObjectKind::Edge
+                    | ClassObjectKind::Vertex
+            )
+        });
+        let Some(object) = topology else {
+            // no object, or not topology: upstream's error returns, before any edit
+            return pc.merge_into_object(self.k, src_point);
+        };
+        let MergeContext {
+            brep,
+            target,
+            handle,
+            mut notifications,
+            curve_ref,
+        } = self.g.merge_context(object).ok_or_else(unresolved_mut)?;
+        pc.merge_into_brep(
+            self.k,
+            src_point,
+            BrepMerge {
+                brep,
+                target,
+                handle: &*handle,
+                notifications: &mut notifications,
+                curve_ref,
+            },
+        )
+    }
+    fn compute_face_point_class(
+        &mut self,
+        point: Point3,
+        src_zone_tol_3d: f64,
+        face: O,
+        pc: &mut PointClassification<O>,
+    ) -> Result<()> {
+        let g = &*self.g;
+        let mut ids = pc.map_objects(&mut |o| {
+            g.topology_entity(o)
+                .map(|(_, e)| e)
+                .ok_or_else(unresolved_mut)
+        })?;
+        let (ctx, _) = context_with(&mut *self.g, face, &[])?;
+        let EntityRef::Face(f) = ctx.target else {
+            return Err(wrong_target("handle does not name a face"));
+        };
+        compute_face_point_class_in(self.k, ctx.brep, f, point, src_zone_tol_3d, &mut ids)?;
+        *pc = ids.map_objects(&mut |e| Ok((ctx.handle)(e)))?;
+        Ok(())
+    }
+    fn set_do_filleting_geometry(
+        &mut self,
+        this: &CurveClassification<O>,
+        index: usize,
+        other: Option<&CurveClassification<O>>,
+        todo: u64,
+    ) -> Result<()> {
+        super::p7::set_do_filleting_geometry_mut(self.k, self.g, index, this, other, todo)
+    }
+    fn classify_face_interval(
+        &mut self,
+        cc: &mut CurveClassification<O>,
+        index: usize,
+        face: O,
+        old_face: O,
+    ) -> Result<()> {
+        cc.classify_face_interval_mut(
+            self.k,
+            self.g,
+            index,
+            true,
+            face,
+            Some(old_face),
+            true,
+            None,
+        )
+    }
+    fn glue_vertices(&mut self, survivor: O, deleted: O) -> Result<()> {
+        // the B-rep of the vertex to delete (pEndPntClass->GetBrep())
+        let (ctx, ids) = context_with(&mut *self.g, deleted, &[survivor])?;
+        let EntityRef::Vertex(d) = ctx.target else {
+            return Err(wrong_target("handle does not name a vertex"));
+        };
+        let s = member_vertex(ids.first())?;
+        crate::topology::brep::p5::glue_vertices(self.k, ctx.brep, Some(s), Some(d), None)
+    }
+    fn make_wire_edge(
+        &mut self,
+        region: O,
+        start: O,
+        end: O,
+        curve: Curve,
+        interval: &Extent1d,
+    ) -> Result<O> {
+        let (mut ctx, ids) = context_with(&mut *self.g, region, &[start, end])?;
+        let EntityRef::Region(r) = ctx.target else {
+            return Err(wrong_target("handle does not name a region"));
+        };
+        let s = member_vertex(ids.first())?;
+        let e = member_vertex(ids.get(1))?;
+        let new_e = crate::topology::brep::p3::make_wire_edge(
+            self.k,
+            ctx.brep,
+            &mut ctx.notifications,
+            Some(r),
+            s,
+            e,
+            curve,
+            interval,
+            OrientType::Same,
+        )?;
+        Ok((ctx.handle)(EntityRef::Edge(new_e)))
+    }
+    fn find_vertex_sector(
+        &mut self,
+        face: O,
+        query: SectorQuery<'_, O>,
+    ) -> Result<Option<VertexuseId>> {
+        let (ctx, ids) = context_with(&mut *self.g, face, &[query.vertex])?;
+        let EntityRef::Face(f) = ctx.target else {
+            return Err(wrong_target("handle does not name a face"));
+        };
+        let v = match ids.first() {
+            // a vertex of another B-rep has no vertex use on this face
+            Some(None) => return Ok(None),
+            e => member_vertex(e)?,
+        };
+        let sector = crate::topology::face::p4::find_vertex_sector(
+            self.k,
+            ctx.brep,
+            f,
+            FindVertexSectorArgs {
+                vertex: v,
+                curve: query.curve,
+                uv_curve: query.uv_curve,
+                param_at_vertex: query.param_at_vertex,
+                param_ivl_end: query.param_ivl_end,
+                orientation: query.orientation,
+                zone_tol_3d: query.zone_tol_3d,
+                validate_sector: false,
+                uv_space_okay: true,
+            },
+        )?;
+        Ok(sector.vertexuse)
+    }
+    fn make_edge_in_face_with_vu(
+        &mut self,
+        face: O,
+        vertexuses: [VertexuseId; 2],
+        curve: Curve,
+        uv_curve: Option<Curve>,
+        interval: Extent1d,
+        curve_zone_tol_3d: f64,
+    ) -> Result<(O, Option<O>)> {
+        let (mut ctx, _) = context_with(&mut *self.g, face, &[])?;
+        let EntityRef::Face(f) = ctx.target else {
+            return Err(wrong_target("handle does not name a face"));
+        };
+        let [start, end] = vertexuses;
+        let made = crate::topology::brep::p9::make_edge_in_face_with_vu(
+            self.k,
+            ctx.brep,
+            EdgeInFaceInput {
+                face: Some(f),
+                vertices: [Some(start), Some(end)],
+                curve: Some(curve),
+                uv_trim: uv_curve,
+                drop_fail: None,
+                interval,
+                orientation: OrientType::Same,
+                curve_zone_tol_3d,
+            },
+            &mut ctx.notifications,
+            ctx.curve_ref,
+        )?;
+        Ok((
+            (ctx.handle)(EntityRef::Edge(made.edge)),
+            made.face.map(|f| (ctx.handle)(EntityRef::Face(f))),
+        ))
+    }
+    fn set_edge_tolerance(&mut self, edge: O, tolerance: f64) -> Result<()> {
+        let (ctx, _) = context_with(&mut *self.g, edge, &[])?;
+        let EntityRef::Edge(e) = ctx.target else {
+            return Err(wrong_target("handle does not name an edge"));
+        };
+        topo_edge::set_tolerance(ctx.brep, e, tolerance, true, true)
+    }
+    fn set_vertex_exact(&mut self, vertex: O, exact: bool) -> Result<()> {
+        let (ctx, _) = context_with(&mut *self.g, vertex, &[])?;
+        let EntityRef::Vertex(v) = ctx.target else {
+            return Err(wrong_target("handle does not name a vertex"));
+        };
+        topo_vertex::set_exact(ctx.brep, v, exact)
+    }
+    fn refresh_vertex_tolerance(&mut self, vertex: O) -> Result<()> {
+        let (ctx, _) = context_with(&mut *self.g, vertex, &[])?;
+        let EntityRef::Vertex(v) = ctx.target else {
+            return Err(wrong_target("handle does not name a vertex"));
+        };
+        topo_vertex::refresh_tolerance(ctx.brep, v, false)
+    }
+}
+
+// ---- the objects MergeInterval casts its classification objects to ------------------------
+
+fn null_object(what: &'static str) -> SolidError {
+    SolidError::invalid_input(OP, what)
+}
+
+/// The object of a classification `MergeInterval` casts to `kind` (`(SmFace*)`,
+/// `(SmVertex*)`, `(SmEdge*)`): a missing object or one of another kind is undefined
+/// behaviour upstream.
+fn object_of<O: ClassObject>(
+    pc: &PointClassification<O>,
+    kind: ClassObjectKind,
+    what: &'static str,
+) -> Result<O> {
+    pc.object()
+        .filter(|o| o.class_kind() == kind)
+        .ok_or_else(|| null_object(what))
+}
+
+fn face_object<O: ClassObject>(pc: &PointClassification<O>) -> Result<O> {
+    object_of(
+        pc,
+        ClassObjectKind::Face,
+        "classification object is not a face",
+    )
+}
+
+fn edge_object<O: ClassObject>(pc: &PointClassification<O>) -> Result<O> {
+    object_of(
+        pc,
+        ClassObjectKind::Edge,
+        "classification object is not an edge",
+    )
+}
+
+fn vertex_object<O: ClassObject>(pc: &PointClassification<O>) -> Result<O> {
+    object_of(
+        pc,
+        ClassObjectKind::Vertex,
+        "classification object is not a vertex",
+    )
+}
+
+/// `SM_CAST_PTR(SmEdge, pc->GetObject())`: `None` unless the object is an edge.
+fn edge_cast<O: ClassObject>(pc: &PointClassification<O>) -> Option<O> {
+    pc.object()
+        .filter(|o| o.class_kind() == ClassObjectKind::Edge)
+}
+
+/// `SM_CAST_PTR(SmVertex, pc->GetObject())`: `None` unless the object is a vertex.
+fn vertex_cast<O: ClassObject>(pc: &PointClassification<O>) -> Option<O> {
+    pc.object()
+        .filter(|o| o.class_kind() == ClassObjectKind::Vertex)
+}
+
+/// `SM_CAST_PTR(SmBSplineCurve, ...)` of a curve copy (the B-spline curve and the
+/// analytic curves derived from it).
+fn is_bspline_curve(curve: &Curve) -> bool {
+    matches!(
+        curve.kind(),
+        CurveKind::BSpline(_)
+            | CurveKind::Line(_)
+            | CurveKind::Ellipse(_)
+            | CurveKind::Hyperbola(_)
+            | CurveKind::Parabola(_)
+    )
+}
+
+fn entity_of<'g, O: ClassObject>(
+    g: &'g impl ClassGeometry<O>,
+    o: O,
+    upstream: &'static str,
+) -> Result<(&'g Brep, EntityRef)> {
+    g.topology_entity(o)
+        .ok_or_else(|| SolidError::invalid_input(OP, upstream))
+}
+
+fn handle_in<O: ClassObject>(g: &impl ClassGeometry<O>, b: &Brep, e: EntityRef) -> Result<O> {
+    g.topology_handle_in(b, e)
+        .ok_or_else(|| SolidError::invalid_input(OP, "topology entity has no handle"))
+}
+
+/// `SmVertex::GetPoint`.
+fn vertex_point<O: ClassObject>(g: &impl ClassGeometry<O>, v: O) -> Result<Point3> {
+    match entity_of(g, v, "unresolved vertex (SmVertex::GetPoint)")? {
+        (b, EntityRef::Vertex(v)) => topo_vertex::point(b, v),
+        _ => Err(wrong_target("handle does not name a vertex")),
+    }
+}
+
+/// `SmTol::GetZoneTol3d(pVertex->GetBrep())` (a null B-rep is dereferenced upstream).
+fn vertex_brep_tolerance<O: ClassObject>(g: &impl ClassGeometry<O>, v: O) -> Result<f64> {
+    match entity_of(g, v, "unresolved vertex (SmVertex::GetBrep)")? {
+        (b, EntityRef::Vertex(v)) => Ok(topo_vertex::brep(b, v)?
+            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .tolerance()),
+        _ => Err(wrong_target("handle does not name a vertex")),
+    }
+}
+
+/// `SmTol::GetZoneTol3d(pFace->GetBrep())` (a null B-rep is dereferenced upstream).
+fn face_brep_tolerance<O: ClassObject>(g: &impl ClassGeometry<O>, f: O) -> Result<f64> {
+    match entity_of(g, f, "unresolved face (SmFace::GetBrep)")? {
+        (b, EntityRef::Face(f)) => Ok(crate::topology::face::p4::brep(b, f)?
+            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .tolerance()),
+        _ => Err(wrong_target("handle does not name a face")),
+    }
+}
+
+/// `pFace->GetSurface()` (dereferenced upstream).
+fn face_surface<O: ClassObject>(g: &impl ClassGeometry<O>, f: O) -> Result<&Surface> {
+    match entity_of(g, f, "unresolved face (SmFace::GetSurface)")? {
+        (b, EntityRef::Face(f)) => {
+            crate::topology::face::p2::surface(b, f)?.ok_or_else(|| SolidError::null_pointer(OP))
+        }
+        _ => Err(wrong_target("handle does not name a face")),
+    }
+}
+
+/// `pVertex->GetFaces(rFaces)`.
+fn vertex_faces<O: ClassObject>(g: &impl ClassGeometry<O>, v: O) -> Result<Vec<O>> {
+    match entity_of(g, v, "unresolved vertex (SmVertex::GetFaces)")? {
+        (b, EntityRef::Vertex(v)) => topo_vertex::faces(b, v)?
+            .into_iter()
+            .map(|f| handle_in(g, b, EntityRef::Face(f)))
+            .collect(),
+        _ => Err(wrong_target("handle does not name a vertex")),
+    }
+}
+
+/// `SM_SUCCESS == sm_ComputeFacePointClass(...)`: a failed projection is a classify
+/// error upstream only warns about; unported callees and undefined behaviour
+/// (invalid input) still propagate.
+fn face_point_classified(r: Result<()>) -> Result<bool> {
+    match r {
+        Ok(()) => Ok(true),
+        Err(e) if matches!(e, SolidError::InvalidInput { .. }) => Err(e),
+        Err(e) => Ok(ignored(Err::<(), _>(e))?.is_some()),
+    }
+}
+
+/// `pEdge->GetVertex()` (dereferenced upstream).
+fn edge_vertex<O: ClassObject>(g: &impl ClassGeometry<O>, e: O) -> Result<O> {
+    match entity_of(g, e, "unresolved edge (SmEdge::GetVertex)")? {
+        (b, EntityRef::Edge(e)) => {
+            let v = topo_edge::vertex(b, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            handle_in(g, b, EntityRef::Vertex(v))
+        }
+        _ => Err(wrong_target("handle does not name an edge")),
+    }
+}
+
+/// `pEdge->GetVertex()` and `pEdge->GetOtherVertex(that)` (both dereferenced
+/// upstream).
+fn edge_vertices<O: ClassObject>(g: &impl ClassGeometry<O>, e: O) -> Result<(O, O)> {
+    match entity_of(g, e, "unresolved edge (SmEdge::GetVertex)")? {
+        (b, EntityRef::Edge(e)) => {
+            let v1 = topo_edge::vertex(b, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let v2 = topo_edge::other_vertex(b, e, Some(v1))?
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            Ok((
+                handle_in(g, b, EntityRef::Vertex(v1))?,
+                handle_in(g, b, EntityRef::Vertex(v2))?,
+            ))
+        }
+        _ => Err(wrong_target("handle does not name an edge")),
     }
 }
 

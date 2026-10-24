@@ -55,7 +55,10 @@
 //! - **B-rep edits and walks of other units** are [`IntersectorBrepP3`] hooks:
 //!   `SmBrep::DeleteEdge` (`topology.brep_p4`) is [`IntersectorBrep::brep_delete_edge`],
 //!   `SmFace::GetEdges` [`IntersectorBrep::face_edges`] and `GetUpwardLoopuses` an
-//!   [`IntersectorBrepP3`] hook (`topology.face_p4`).
+//!   [`IntersectorBrepP3`] hook (`topology.face_p4`). `MergeClassifications` and the
+//!   degenerate curve's `MergeIntoObject` edit the B-reps through the
+//!   [`MergeIntervalBrep`] context [`IntersectorBrepP3`] requires
+//!   (`merge_classifications_mut`, `merge_into_object_mut`).
 //! - **Undefined behaviour upstream** (a null or deleted object dereferenced, a
 //!   classification object of the wrong kind used as an edge or vertex, an index past
 //!   a list) is [`SolidError::InvalidInput`].
@@ -77,6 +80,7 @@ use crate::geom::solution_array::SolutionObject;
 use crate::geom::tol::zone_tol3d;
 use crate::intersect::curve_class::p1::CurveClassification;
 use crate::intersect::curve_class::p4::ClassificationInit;
+use crate::intersect::curve_class::p6::{merge_into_object_mut, MergeIntervalBrep};
 use crate::intersect::point_class::{
     ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
@@ -103,8 +107,10 @@ pub const MAX_COINCIDENT_SURFACE_PASSES: usize = 1 << 16;
 
 // ---- what part 3 needs from the B-reps beyond part 1 -----------------------------------
 
-/// The B-rep walks of this part, on top of [`IntersectorBrep`].
-pub trait IntersectorBrepP3<O>: IntersectorBrepP2<O> {
+/// The B-rep walks of this part, on top of [`IntersectorBrep`], and the mutable B-rep
+/// context `MergeClassifications` imprints the classifications through
+/// ([`MergeIntervalBrep`]).
+pub trait IntersectorBrepP3<O>: IntersectorBrepP2<O> + MergeIntervalBrep<O> {
     /// `SmSurface::GetFace` (`surface::surface::p1`, `Surface::face`): the face that
     /// owns a surface, `None` for none.
     ///
@@ -551,7 +557,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // Merge results of two classifications into the SmBrep topology graphs.
         //    Only intervals classified to topology in both SmBreps will be inserted.
         let (merged, merged_other) =
-            crv_class1.merge_classifications(k, &*brep, crv_class2, merge_singularities)?;
+            crv_class1.merge_classifications_mut(k, brep, crv_class2, merge_singularities)?;
         let new_edges = merged.edges;
         let new_edges_other = merged_other.edges;
 
@@ -982,8 +988,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 && point_class2.point_class() != PointClassType::Unknown
             {
                 // merge the point classification (not the curve) onto both faces
-                point_class1.merge_into_object(k, pnt)?;
-                point_class2.merge_into_object(k, pnt)?;
+                merge_into_object_mut(k, brep, &mut point_class1, pnt)?;
+                merge_into_object_mut(k, brep, &mut point_class2, pnt)?;
 
                 // each merge creates a vertex in its SmBrep - relate those vertices
                 let v1 = point_class1.object();

@@ -33,8 +33,10 @@
 //! for a degenerate curve, `SmFace::GetEdges` (`topology.face_p4`) through the face
 //! classification, `SmBrep::DeleteEdge` (`topology.brep_p4`) when repairing an edge
 //! relation, `CombineCoincidentVertices` (`topology.brep_p5`) when squeezing, the
-//! global point solve of `DropPoint` (`curve.curve_p1`) when relating new edges, and the
-//! topology edits of `MergeClassifications`.
+//! global point solve of `DropPoint` (`curve.curve_p1`) when relating new edges. The
+//! topology edits of `MergeClassifications` (`MergeInterval`, `MergePointClass`) and of
+//! the degenerate curve's `MergeIntoObject` run on the adapter's B-reps
+//! (`MergeIntervalBrep`, implemented by the p1 runner's `Two`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

@@ -71,6 +71,7 @@ use crate::intersect::curve_class::p1::{
     object_dimension, xsect_tol_2d_or_3d_for_classify_pair, CurveClassification, CurveInterval,
     IntervalPosition,
 };
+use crate::intersect::curve_class::p6::{Imprint, MergeIntervalBrep, Mutable, ReadOnly};
 use crate::intersect::curve_class::p7::{edge_of, vertex_of, CoincidentMaybe};
 use crate::intersect::point_class::{
     object_zone_tol_3d, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
@@ -1298,16 +1299,58 @@ impl<O: ClassObject> CurveClassification<O> {
         opt_new_edges: Option<&mut Vec<O>>,
         opt_new_vertices: Option<&mut Vec<O>>,
     ) -> Result<()> {
+        self.merge_point_class_in(
+            &mut ReadOnly { k, g: geometry },
+            index,
+            opt_new_edges,
+            opt_new_vertices,
+        )
+    }
+
+    /// [`CurveClassification::merge_point_class`] editing the B-rep behind the
+    /// classification object through a [`MergeIntervalBrep`]
+    /// ([`PointClassification::merge_into_brep`]): the region, face, edge or vertex
+    /// the point classifies to gets (or is) the vertex.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`CurveClassification::merge_point_class`], without the deferral of the
+    /// edit; [`SolidError::InvalidInput`] for an object the adapter cannot resolve
+    /// mutably.
+    pub fn merge_point_class_mut(
+        &mut self,
+        k: &mut Kernel,
+        geometry: &mut impl MergeIntervalBrep<O>,
+        index: usize,
+        opt_new_edges: Option<&mut Vec<O>>,
+        opt_new_vertices: Option<&mut Vec<O>>,
+    ) -> Result<()> {
+        self.merge_point_class_in(
+            &mut Mutable { k, g: geometry },
+            index,
+            opt_new_edges,
+            opt_new_vertices,
+        )
+    }
+
+    /// `MergePointClass` over either kind of adapter.
+    pub(super) fn merge_point_class_in(
+        &mut self,
+        a: &mut impl Imprint<O>,
+        index: usize,
+        opt_new_edges: Option<&mut Vec<O>>,
+        opt_new_vertices: Option<&mut Vec<O>>,
+    ) -> Result<()> {
         // get the min point's classification and param value for this interval
         let loc = point_class_loc_by_index(self, index)?;
 
         // Get the PointClass from the adjacent interval that corresponds to the same
         // location as this one (the first and last have a mate only for closed curves).
-        let adjacent = point_class_mate_loc_by_index(k, geometry, self, index)?;
+        let adjacent = point_class_mate_loc_by_index(a.kernel(), a.geometry(), self, index)?;
 
         // evaluate the interval's min-point's position in 3 space using the curve
         // definition (gets SSSPoint when available else the curve point)
-        let vert_pnt = classify_crv_loc_by_index(k, geometry, self, index)?;
+        let vert_pnt = classify_crv_loc_by_index(a.kernel(), a.geometry(), self, index)?;
 
         // when the point classifies to an edge - remember that edge
         let (point_class_type, point_class_object) = {
@@ -1322,7 +1365,10 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // merge the point classification into its m_pObject's topology structure
         let src_zone_tol_3d = self.src_zone_tol_3d();
-        let merged = self.pc_at_mut(loc)?.merge_into_object(k, vert_pnt)?;
+        let mut pc = *self.pc_at(loc)?;
+        let merged = a.merge_into_object(&mut pc, vert_pnt);
+        *self.pc_at_mut(loc)? = pc;
+        let merged = merged?;
         let new_edges = merged.new_edges;
         if let Some(vertices) = opt_new_vertices {
             vertices.extend(merged.new_vertices);
@@ -1345,6 +1391,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // when a vertex splits an existing edge - set interval m_pObject = One of NewEdges
         if let [new_e1, new_e2] = new_edges[..] {
+            let (k, geometry) = (a.kernel(), a.geometry());
             // update old edge pointers
 
             // for every classification interval

@@ -22,6 +22,7 @@
 #include <SmTol.h>
 #include <SmVertex.h>
 #include <nurbs.h>
+#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -35,6 +36,9 @@ struct Objects
     SmTArray<SmEdge*> edges;
     SmTArray<SmFace*> faces;
     SmTArray<SmRegion*> regions;
+    // which face, edge, vertex and region (index into GetFaces, GetEdges, GetVertices,
+    // GetRegions) the classification kinds 2 to 5 name
+    int32_t pick[4] = {0, 0, 0, 0};
 
     SmObject* object(int kind) const
     {
@@ -42,10 +46,10 @@ struct Objects
         {
         case 0: return nullptr;
         case 1: case 6: return curve.get();
-        case 2: return faces[0];
-        case 3: return edges[0];
-        case 4: return vertices[0];
-        case 5: return regions[0];
+        case 2: return faces[(ULONG)pick[0]];
+        case 3: return edges[(ULONG)pick[1]];
+        case 4: return vertices[(ULONG)pick[2]];
+        case 5: return regions[(ULONG)pick[3]];
         }
         return nullptr;
     }
@@ -176,14 +180,48 @@ void put_cc(std::vector<double>& o, const SmCurveClassification& cc, const Objec
         }
     }
 }
+
+// The box after MergeInterval: its vertex, edge, face and region counts, the sorted
+// vertex and edge tolerances (walked again: a merge may glue away a vertex), then
+// each new vertex's point and tolerance and each new edge's tolerance.
+void put_brep(std::vector<double>& o, SmBrep* box, const SmTArray<SmVertex*>& new_vertices,
+    const SmTArray<SmEdge*>& new_edges)
+{
+    SmTArray<SmVertex*> vs;
+    SmTArray<SmEdge*> es;
+    SmTArray<SmFace*> fs;
+    SmTArray<SmRegion*> rs;
+    box->GetVertices(vs);
+    box->GetEdges(es);
+    box->GetFaces(fs);
+    box->GetRegions(rs);
+    o.insert(o.end(), {(double)vs.GetSize(), (double)es.GetSize(), (double)fs.GetSize(),
+        (double)rs.GetSize()});
+    std::vector<double> tols;
+    for (ULONG i = 0; i < vs.GetSize(); ++i) tols.push_back(vs[i]->GetTolerance());
+    std::sort(tols.begin(), tols.end());
+    o.insert(o.end(), tols.begin(), tols.end());
+    tols.clear();
+    for (ULONG i = 0; i < es.GetSize(); ++i) tols.push_back(es[i]->GetTolerance());
+    std::sort(tols.begin(), tols.end());
+    o.insert(o.end(), tols.begin(), tols.end());
+    for (ULONG i = 0; i < new_vertices.GetSize(); ++i)
+    {
+        SmPoint3d p = new_vertices[i]->GetPoint();
+        o.insert(o.end(), {p.x, p.y, p.z, (double)new_vertices[i]->GetTolerance()});
+    }
+    for (ULONG i = 0; i < new_edges.GetSize(); ++i)
+        o.push_back(new_edges[i]->GetTolerance());
+}
 }
 
-SC_EXPORT int32_t sc_intersect_curve_class_p6_run(
+static int32_t run_impl(
     int32_t op, int32_t kind, double scale, double tol, int32_t flags, int64_t index,
     const double* a, int64_t na, const double* b, int64_t nb, const double* input,
-    double* out, int64_t cap, int64_t* len)
+    const int32_t* pick, int32_t editing, double* out, int64_t cap, int64_t* len)
 {
-    if (op < 0 || op > 3 || kind < 0 || kind > 4 || flags < 0 || flags > 3 ||
+    if (op < 0 || op > 3 || kind < 0 || kind > 7 || flags < 0 || flags > 3 ||
+        editing < 0 || editing > 1 ||
         na < 0 || na > 32 || nb < 0 || nb > 32 || index < 0 ||
         (op == 3 && (index >= na || ((flags & 2) && nb != na))))
         return SC_ERR_ARG;
@@ -199,13 +237,30 @@ SC_EXPORT int32_t sc_intersect_curve_class_p6_run(
     box->GetEdges(objs.edges);
     box->GetFaces(objs.faces);
     box->GetRegions(objs.regions);
-    if (objs.vertices.GetSize() == 0 || objs.edges.GetSize() == 0 ||
-        objs.faces.GetSize() == 0 || objs.regions.GetSize() == 0)
+    // the state a B-rep edit (MergeIntoObject's edge split, MakeEdgeInFaceWithVU)
+    // requires, as the callers of MergeInterval set it
+    if (editing) box->m_bEditingEnabled = TRUE;
+    for (int i = 0; i < 4; ++i) objs.pick[i] = pick[i];
+    if (pick[0] < 0 || (ULONG)pick[0] >= objs.faces.GetSize() ||
+        pick[1] < 0 || (ULONG)pick[1] >= objs.edges.GetSize() ||
+        pick[2] < 0 || (ULONG)pick[2] >= objs.vertices.GetSize() ||
+        pick[3] < 0 || (ULONG)pick[3] >= objs.regions.GetSize())
         return SC_ERR_ARG;
 
     if (kind == 0)
         objs.curve.reset(new(ctx) SmLine(SmPoint3d(0, 0, 0), SmVector3d(1, 0, 0),
             SmExtent1d(0, 1), scale, 3, ctx));
+    else if (kind >= 5)
+    {
+        // lines placed on the box: 5 from vertex (0,0,0) across face z=0 to the
+        // middle of its far edge, 6 along the edge (1,0,1)-(1,1,1), 7 inside face z=0
+        const double o[3][3] = {{0, 0, 0}, {1, 0, 1}, {0.25, 0.25, 0}};
+        const double d[3][3] = {{0.5, 1, 0}, {0, 1, 0}, {1, 0, 0}};
+        const double* oo = o[kind - 5];
+        const double* dd = d[kind - 5];
+        objs.curve.reset(new(ctx) SmLine(SmPoint3d(oo[0], oo[1], oo[2]),
+            SmVector3d(dd[0], dd[1], dd[2]), SmExtent1d(0, 1), scale, 3, ctx));
+    }
     else if (kind == 1)
         objs.curve.reset(new(ctx) SmCircle(SmPoint3d(0, 0, 0), SmVector3d(1, 0, 0),
             SmVector3d(0, 1, 0), SmExtent1d(0, 1), scale, 3, ctx));
@@ -273,7 +328,30 @@ SC_EXPORT int32_t sc_intersect_curve_class_p6_run(
         }
         put_cc(o, cc, objs);
         put_cc(o, other, objs);
+        if (op == 3) put_brep(o, box, new_vertices, new_edges);
     }
     return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, len);
     SC_CATCH
+}
+
+SC_EXPORT int32_t sc_intersect_curve_class_p6_run(
+    int32_t op, int32_t kind, double scale, double tol, int32_t flags, int64_t index,
+    const double* a, int64_t na, const double* b, int64_t nb, const double* input,
+    double* out, int64_t cap, int64_t* len)
+{
+    const int32_t first[4] = {0, 0, 0, 0};
+    return run_impl(op, kind, scale, tol, flags, index, a, na, b, nb, input, first, 0, out,
+        cap, len);
+}
+
+// sc_intersect_curve_class_p6_run with the face, edge, vertex and region the
+// classification kinds 2 to 5 name chosen by `pick` (indices into the box's lists),
+// and with the box's editing enabled when `editing` is 1.
+SC_EXPORT int32_t sc_intersect_curve_class_p6_run_picked(
+    int32_t op, int32_t kind, double scale, double tol, int32_t flags, int64_t index,
+    const double* a, int64_t na, const double* b, int64_t nb, const double* input,
+    const int32_t* pick, int32_t editing, double* out, int64_t cap, int64_t* len)
+{
+    return run_impl(op, kind, scale, tol, flags, index, a, na, b, nb, input, pick, editing,
+        out, cap, len);
 }
