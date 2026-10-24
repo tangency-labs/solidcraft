@@ -346,6 +346,39 @@ mod tests {
         commands[0].1 = json!({"distance":2,"taper":"3deg"});
         assert!(preview.compute(&harness.app, &commands, colors).is_none());
     }
+
+    #[test]
+    fn side_face_preview_and_value_arrow_follow_the_selected_normal() {
+        let mut harness = Harness::new();
+        harness.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
+        harness.app.run("solid.move", json!({"bodies":["Stock"],"axis":[0,1,0],"angle":"30 deg"})).unwrap();
+        let state = harness.app.session.world_state();
+        let base_bounds = state.body("Stock").unwrap().mesh().bounds();
+        let face = state
+            .body("Stock")
+            .unwrap()
+            .body
+            .faces(0.001)
+            .unwrap()
+            .into_iter()
+            .find(|face| face.plane_normal.is_some_and(|normal| normal.x > 0.8 && normal.z.abs() > 0.2))
+            .unwrap();
+        let normal = face.plane_normal.unwrap();
+        harness.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];
+        harness.app.start("solid.extrude");
+        let dialog = harness.app.dialog.as_mut().unwrap();
+        if let Kind::Extrude { distance, operation, auto_op, .. } = &mut dialog.kind {
+            *distance = "2 mm".into();
+            *operation = 0;
+            *auto_op = false;
+        }
+        let (_, arrow) = crate::canvas::anchor(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
+        assert!((arrow.unwrap() - normal).len() < 1e-8);
+        let commands = crate::dialogs::apply_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
+        let scene = StraightPreview::default().compute(&harness.app, &commands, Colors::from_tokens(&crate::theme::Tokens::get())).unwrap().unwrap();
+        let bounds = scene.bounds;
+        assert!((bounds.max.x - (base_bounds.max.x + normal.x * 2.0)).abs() < 1e-5, "{bounds:?}");
+    }
     #[test]
     fn identity_component_feedback_skips_moved_and_repeated_placements() {
         let mut h = Harness::new();
