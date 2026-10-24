@@ -319,9 +319,8 @@ fn groups(t: &Tokens) -> Vec<Group> {
             ],
             &[("body", t.body), ("viewport_top", t.viewport_top)],
         ),
-        // The scale's three stops, unlit. Shaded (a stop at one angle to the light, the next at
-        // another), middle and tight merge for a red-green loss (3.3 protan, 5.2 deutan) and flat
-        // and middle for tritan (4.6). That is the scale's own fault, in Off too: #975.
+        // The scale's three stops, unlit. Along the scale, see
+        // `the_curvature_scale_lightens_steadily_for_every_eye` (#975).
         group(
             "curvature map",
             &[
@@ -1040,4 +1039,25 @@ fn cancel_puts_the_mode_back_ok_keeps_it_and_restore_defaults_resets_interface_o
     control(&mut app, json!({"button": "defaults"}));
     assert_eq!(app.preferences.color_vision, ColorVision::Off);
     control(&mut app, json!({"button": "ok"}));
+}
+
+/// #975: the Curvature Map reads from flat to tight with hue lost too. Along the shader's two
+/// blends its lightness rises the whole way, and each quarter of the scale is a clear step, for
+/// normal vision and each simulated loss. The former blue, green, red scale rose and fell.
+#[test]
+fn the_curvature_scale_lightens_steadily_for_every_eye() {
+    let c = Tokens::light().analysis.curvature;
+    // Flat to middle over the first half, middle to tight over the second, as the shader mixes.
+    let at = |t: f64| -> Rgb8 {
+        let (a, b, u) = if t < 0.5 { (c[0], c[1], t * 2.0) } else { (c[1], c[2], t * 2.0 - 1.0) };
+        std::array::from_fn(|k| ((f64::from(a[k]) + (f64::from(b[k]) - f64::from(a[k])) * u) * 255.0).round().clamp(0.0, 255.0) as u8)
+    };
+    for eye in [Eye::Normal, Eye::Protan, Eye::Deutan, Eye::Tritan] {
+        let labs: Vec<V3> = (0..=4).map(|i| lab(simulate(at(f64::from(i) / 4.0), eye, Instrument::Machado))).collect();
+        for w in labs.windows(2) {
+            assert!(w[1][0] > w[0][0], "{eye:?}: the lightness falls along the scale: {labs:?}");
+            let step = de2000(w[0], w[1]);
+            assert!(step >= 10.0, "{eye:?}: a quarter of the scale is only {step:.1} apart: {labs:?}");
+        }
+    }
 }
