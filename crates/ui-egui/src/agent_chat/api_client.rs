@@ -107,16 +107,16 @@ fn go_protocol(model: &str) -> GoProtocol {
     GoProtocol::Chat
 }
 
-/// Request URL for a Go `protocol` (`base_url` is the preset's base).
-fn go_url(base_url: &str, model: &str, protocol: GoProtocol) -> String {
+/// The documented Go endpoint for a model's protocol family.
+fn go_url(model: &str, protocol: GoProtocol) -> String {
     match protocol {
         GoProtocol::Gemini => {
             let m = model.trim().to_ascii_lowercase();
             format!("https://opencode.ai/inference/go/google/v1beta/models/{m}:generateContent")
         }
-        GoProtocol::Responses => format!("{base_url}/responses"),
-        GoProtocol::Messages => format!("{base_url}/messages"),
-        GoProtocol::Chat => format!("{base_url}/chat/completions"),
+        GoProtocol::Responses => "https://opencode.ai/inference/go/openai/v1/responses".into(),
+        GoProtocol::Messages => "https://opencode.ai/inference/go/anthropic/v1/messages".into(),
+        GoProtocol::Chat => "https://opencode.ai/inference/go/openai/v1/chat/completions".into(),
     }
 }
 
@@ -1136,7 +1136,7 @@ impl Worker {
         }
         let req = HttpRequest {
             method: "POST",
-            url: go_url(&self.cfg.base_url, &self.cfg.model, protocol),
+            url: go_url(&self.cfg.model, protocol),
             headers,
             body: Some(body.to_string().into_bytes()),
             timeout_s: self.limit_s(),
@@ -1973,11 +1973,11 @@ mod tests {
             assert_eq!(go_protocol(model), GoProtocol::Messages, "{model}");
         }
         assert_eq!(go_protocol("gemini-4-argon-contributor"), GoProtocol::Gemini);
-        let gemini = go_url("https://opencode.ai/zen/go/v1", "gemini-4-argon-contributor", GoProtocol::Gemini);
+        let gemini = go_url("gemini-4-argon-contributor", GoProtocol::Gemini);
         assert!(gemini.starts_with("https://opencode.ai/inference/go/") && gemini.contains("gemini-4-argon-contributor"), "{gemini}");
         assert_eq!(
-            go_url("https://opencode.ai/zen/go/v1", "muse-spark-1.3-contributor", GoProtocol::Responses),
-            "https://opencode.ai/zen/go/v1/responses"
+            go_url("muse-spark-1.3-contributor", GoProtocol::Responses),
+            "https://opencode.ai/inference/go/openai/v1/responses"
         );
     }
 
@@ -1985,7 +1985,7 @@ mod tests {
         ApiConfig {
             name: "Test".into(),
             protocol: Protocol::OpenAi,
-            base_url: "https://opencode.ai/zen/go/v1".into(),
+            base_url: "https://opencode.ai/inference/go/v1".into(),
             model: model.into(),
             key: None,
             http,
@@ -2223,11 +2223,12 @@ mod tests {
             log.lock().unwrap().push(r.clone());
             Ok((200, b"{\"data\":[{\"id\":\"kimi-k3\"}]}".to_vec()))
         });
-        let listed = model_list(&http, "https://opencode.ai/zen/go/v1", None).unwrap();
+        let listed = model_list(&http, "https://opencode.ai/inference/go/v1", None).unwrap();
         assert_eq!(listed.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["kimi-k3"]);
         let reqs = seen.lock().unwrap();
         assert_eq!(reqs.len(), 1);
         assert_eq!(reqs[0].method, "GET");
+        assert_eq!(reqs[0].url, "https://opencode.ai/inference/go/v1/models");
         assert!(reqs[0].headers.iter().all(|(name, _)| !name.eq_ignore_ascii_case("x-opencode-session")));
         drop(reqs);
     }
@@ -2266,10 +2267,10 @@ mod tests {
         assert_eq!(contents[2]["parts"][0]["functionResponse"]["name"], "measure");
         // Each Go protocol posts its own URL and body shape.
         for (model, want_url) in [
-            ("muse-spark-1.3-contributor", "https://opencode.ai/zen/go/v1/responses"),
-            ("claude-haiku-5-5", "https://opencode.ai/zen/go/v1/messages"),
+            ("muse-spark-1.3-contributor", "https://opencode.ai/inference/go/openai/v1/responses"),
+            ("claude-haiku-5-5", "https://opencode.ai/inference/go/anthropic/v1/messages"),
             ("gemini-4-argon-contributor", "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon-contributor:generateContent"),
-            ("mimo-v2.6-flash", "https://opencode.ai/zen/go/v1/chat/completions"),
+            ("mimo-v2.6-flash", "https://opencode.ai/inference/go/openai/v1/chat/completions"),
         ] {
             let seen = Arc::new(std::sync::Mutex::new(Vec::<HttpRequest>::new()));
             let log = seen.clone();
