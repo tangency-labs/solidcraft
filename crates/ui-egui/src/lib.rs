@@ -176,6 +176,7 @@ pub(crate) mod pick_index;
 pub(crate) mod plugins;
 pub mod prefs;
 pub mod prefs_notice;
+mod prefs_search;
 #[cfg(test)]
 mod preselect_tests;
 pub mod preview;

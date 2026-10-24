@@ -37,6 +37,9 @@ pub(crate) fn settings_scroll<R>(ui: &mut Ui, id: impl egui::AsIdSalt, add: impl
 }
 
 pub(crate) fn settings_heading(ui: &mut Ui, title: &str, description: &str) {
+    if crate::prefs_search::querying(ui) {
+        return;
+    }
     let t = Tokens::get();
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = t.space_3;
@@ -48,7 +51,34 @@ pub(crate) fn settings_heading(ui: &mut Ui, title: &str, description: &str) {
 }
 
 /// Settings reuse the same disclosure, uppercase typography and rule as the design system.
-pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, mut add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+    if crate::prefs_search::querying(ui) {
+        crate::prefs_search::begin_section(ui, title);
+        if !ui.is_visible() {
+            return Some(add(ui));
+        }
+        if crate::prefs_search::shows_all(ui) {
+            let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-section", key), false);
+            let result = add(&mut child);
+            crate::prefs_search::place_search_child(ui, &child);
+            return Some(result);
+        }
+        let mark = crate::prefs_search::search_layout_mark(ui);
+        let before = crate::prefs_search::hits(ui);
+        let (gained, missed) = {
+            let mut probe = crate::prefs_search::detached_child(ui, ("prefs-search-section-probe", key), true);
+            let missed = add(&mut probe);
+            (crate::prefs_search::hits(ui) > before, missed)
+        };
+        crate::prefs_search::restore_search_layout(ui, mark);
+        if !gained {
+            return Some(missed);
+        }
+        let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-section", key), false);
+        let result = add(&mut child);
+        crate::prefs_search::place_search_child(ui, &child);
+        return Some(result);
+    }
     let t = Tokens::get();
     ui.add_space(t.space_8);
     super::section(ui, key, title, true, |ui| {
@@ -77,6 +107,10 @@ impl From<Tokens> for ThemeSwatch {
 
 /// Controls and one explanatory specimen side by side, stacked on narrow viewports.
 pub(crate) fn settings_pair<R>(ui: &mut Ui, controls: impl FnOnce(&mut Ui) -> R, preview: impl FnOnce(&mut Ui, R)) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        let _ = controls(ui);
+        return;
+    }
     let t = Tokens::get();
     let preview_width = t.form_card_width - t.space_8;
     let gap = t.space_16 + t.space_4;
@@ -101,6 +135,14 @@ pub(crate) fn settings_pair<R>(ui: &mut Ui, controls: impl FnOnce(&mut Ui) -> R,
 /// A horizontally scrollable, draggable tile rail with its import action pinned outside it.
 /// The hidden scrollbar never reserves vertical space; a vertical wheel also moves the rail.
 pub(crate) fn theme_rail(ui: &mut Ui, tiles: impl FnOnce(&mut Ui), import: impl FnOnce(&mut Ui)) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = Tokens::get().space_8;
+            tiles(ui);
+        });
+        import(ui);
+        return;
+    }
     let t = Tokens::get();
     let action_width = t.form_label_width + t.space_24 + t.space_6;
     let rail_width = (dimension(ui.available_width()) - action_width - t.space_8).max(0.0);
@@ -127,6 +169,9 @@ pub(crate) fn theme_rail(ui: &mut Ui, tiles: impl FnOnce(&mut Ui), import: impl 
 
 /// Dashed import tile matches the swatch tiles, while remaining permanently visible.
 pub(crate) fn theme_import_tile(ui: &mut Ui, label: &str, note: &str) -> Response {
+    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[label, note]) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     let t = Tokens::get();
     let width = t.form_label_width + t.space_24 + t.space_6;
     let height = t.control_height + t.space_6 * 2.0 + t.space_4 + t.space_16 * 2.0;
@@ -162,6 +207,9 @@ pub(crate) fn theme_import_tile(ui: &mut Ui, label: &str, note: &str) -> Respons
 
 /// Compact informational state badge for settings; never an interactive control.
 pub(crate) fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
+    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[text]) {
+        return;
+    }
     let t = Tokens::get();
     let ink =
         if warning { if crate::theme::contrast_ratio(t.warning, t.dialog_body) >= 4.5 { t.warning } else { t.form_ink } } else { t.form_success };
@@ -185,6 +233,15 @@ pub(crate) enum PreferenceFigure {
 /// Reusable illustrated radio card. Width comes from the figure, and wrapping is owned by
 /// the parent; labels remain accessible even when translations need an ellipsis.
 pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected: bool, enabled: bool, figure: PreferenceFigure) -> Response {
+    if crate::prefs_search::querying(ui) {
+        let show = match note {
+            Some(note) => crate::prefs_search::visible(ui, &[label, note]),
+            None => crate::prefs_search::visible(ui, &[label]),
+        };
+        if !show {
+            return crate::prefs_search::hidden_response(ui);
+        }
+    }
     let t = Tokens::get();
     let theme = matches!(figure, PreferenceFigure::Theme { .. });
     let width = match figure {
@@ -435,6 +492,9 @@ pub(crate) fn layout_preview(ui: &mut Ui, state: LayoutPreview) {
 }
 
 pub(crate) fn tab_accent_strip(ui: &mut Ui) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let t = Tokens::get();
     super::text(ui, crate::i18n::tr("prefs.tab_accent_note"), super::Text::Hint("tab_accent"));
     let names =
@@ -517,6 +577,9 @@ pub(crate) fn settings_font_row(ui: &mut Ui, label: &str, mut add: impl FnMut(&m
 
 /// Natural-width dim text, for inline suffixes and metadata without a full-width note row.
 pub(crate) fn settings_inline_note(ui: &mut Ui, text: &str) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let t = Tokens::get();
     let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_body), t.form_dim);
     let (r, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
@@ -526,6 +589,9 @@ pub(crate) fn settings_inline_note(ui: &mut Ui, text: &str) {
 
 /// Framed font specimen, inheriting the chosen application font and its fallback glyphs.
 pub(crate) fn font_specimen(ui: &mut Ui, text: &str) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let t = Tokens::get();
     let (r, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height + t.space_10), Sense::hover());
     t.container_rect(ui.painter(), r, t.control_radius, t.control_fill, t.dialog_rule);
@@ -534,6 +600,9 @@ pub(crate) fn font_specimen(ui: &mut Ui, text: &str) {
 
 /// Intrinsically sized segments, retaining the usual row label for accessibility and automation.
 pub(crate) fn settings_segments(ui: &mut Ui, label: &str, selected: &mut usize, options: &[&str]) -> bool {
+    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[label]) && !crate::prefs_search::texts_hit(ui, options) {
+        return false;
+    }
     let t = Tokens::get();
     let widest = options.iter().map(|s| super::ContentWidth::name(ui, s)).fold(0.0, f32::max);
     let width = ((widest + t.space_16) * options.len() as f32).min(dimension(ui.available_width()));
@@ -548,6 +617,9 @@ pub(crate) fn settings_segments(ui: &mut Ui, label: &str, selected: &mut usize, 
 }
 
 pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let t = Tokens::get();
     let colours = Tokens::themed(crate::theme::is_dark(), mode);
     ui.horizontal_wrapped(|ui| {

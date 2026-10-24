@@ -141,9 +141,16 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     };
     let path = dir.display().to_string();
-    ui.add(egui::Label::new(RichText::new(crate::i18n::format("ui.plugins_note", &[("path", &path)])).size(t.font_small).color(t.text_dim)).wrap());
+    let searching = crate::prefs_search::querying(ui);
+    if searching {
+        crate::prefs_search::begin_section(ui, crate::i18n::tr("ui.plugins"));
+    } else {
+        ui.add(
+            egui::Label::new(RichText::new(crate::i18n::format("ui.plugins_note", &[("path", &path)])).size(t.font_small).color(t.text_dim)).wrap(),
+        );
+    }
     ui.add_space(8.0);
-    if crate::ui_kit::button(ui, crate::i18n::tr_label("Show in folder"), crate::ui_kit::Button::Normal).clicked() {
+    if !searching && crate::ui_kit::button(ui, crate::i18n::tr_label("Show in folder"), crate::ui_kit::Button::Normal).clicked() {
         // `show_in_folder` opens the parent of the path it is given, so the argument is a name
         // inside the plugins directory (it need not exist).
         if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -154,10 +161,17 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     ui.add_space(8.0);
     let (plugins, skipped) = scan(&dir);
-    if plugins.is_empty() {
+    if plugins.is_empty() && !searching {
         ui.label(crate::i18n::tr("ui.plugins_empty"));
     }
     for plugin in &plugins {
+        if searching && !crate::prefs_search::texts_hit(ui, &[&plugin.name, &plugin.id, &plugin.description]) {
+            continue;
+        }
+        if searching {
+            crate::prefs_search::reveal(ui);
+            crate::prefs_search::push_force(ui);
+        }
         let mut on = enabled(app, &plugin.id);
         ui.horizontal(|ui| {
             let check = crate::ui_kit::checkbox(ui, "", &mut on);
@@ -180,6 +194,9 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         ui.separator();
+        if searching {
+            crate::prefs_search::pop_force(ui);
+        }
     }
     if !skipped.is_empty() {
         ui.add_space(6.0);

@@ -94,6 +94,25 @@ pub(crate) fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usiz
 
 /// Internal form geometry for controls which need several lines (e.g. text areas).
 pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
+    let mut passthrough = false;
+    if crate::prefs_search::querying(ui) {
+        crate::prefs_search::set_control(ui, text);
+        if !crate::prefs_search::visible(ui, &[text]) {
+            let result = crate::prefs_search::run_hidden(ui, text, control);
+            crate::prefs_search::recheck(ui, &[text]);
+            return result;
+        }
+        crate::prefs_search::push_passthrough(ui);
+        passthrough = true;
+    }
+    let result = sized_row_body(ui, text, height, control);
+    if passthrough {
+        crate::prefs_search::pop_passthrough(ui);
+    }
+    result
+}
+
+fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get();
     let width = dimension(ui.available_width());
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
@@ -133,6 +152,9 @@ pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl F
 /// row's control. It says in words what a colour or an icon shows, so colour is never the only cue.
 /// Dim helper beneath a row control. Tokens: `form_icon_size, font_small, text_dim, space_8; label-column tokens`.
 pub(crate) fn caption(ui: &mut Ui, aligned_to: &str, text: &str) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let t = Tokens::get();
     let width = dimension(ui.available_width());
     let (rect, _) = ui.allocate_exact_size(vec2(width, t.form_icon_size), egui::Sense::hover());
@@ -214,10 +236,16 @@ pub(crate) fn section_count<R>(
     count: Option<impl std::fmt::Display>,
     add: impl FnOnce(&mut Ui) -> R,
 ) -> Option<R> {
+    // A search still walks the body, so a setting inside a folded section can match, without
+    // leaving the folded heading on screen for every query.
+    if crate::prefs_search::querying(ui) && crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[title]) {
+        return Some(add(ui));
+    }
+    let searching = crate::prefs_search::querying(ui);
     let t = Tokens::get();
     ui.add_space(t.space_2);
     let id = ui.make_persistent_id(id);
-    let mut open = ui.ctx().data_mut(|data| data.get_persisted::<bool>(id)).unwrap_or(default_open);
+    let mut open = searching || ui.ctx().data_mut(|data| data.get_persisted::<bool>(id)).unwrap_or(default_open);
     let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::click());
     if response.hovered() || response.has_focus() {
         ui.painter().rect_filled(rect.shrink2(vec2(0.0, 1.0)), t.radius_sm, t.hover);
@@ -263,11 +291,84 @@ pub(crate) fn section_count<R>(
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, ui.is_enabled(), open, crate::i18n::tr_label(title)));
     scenario::publish_handle(&format!("dialog:section:{title}"), response.rect.center());
     scenario::publish_rect(&format!("dialog:section:{title}"), rect);
+    if response.clicked() && !searching {
+        open = !open;
+    }
+    if !searching {
+        ui.ctx().data_mut(|data| data.insert_persisted(id, open));
+    }
+    open.then(|| ui.push_id(id, add).inner)
+}
+
+/// Shortcut matches during Preferences search. Closed until opened, and closed again when the
+/// query changes, so a short word does not lay out every command.
+pub(crate) fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+    let t = Tokens::get();
+    let id = egui::Id::new(("prefs_search_fold", title));
+    let query = crate::prefs_search::query(ui);
+    let mut open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
+    let previous = ui.data(|data| data.get_temp::<String>(id.with("query"))).unwrap_or_default();
+    if previous != query {
+        open = false;
+    }
+    crate::prefs_search::reveal(ui);
+    ui.add_space(t.space_2);
+    let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::click());
+    if response.hovered() || response.has_focus() {
+        ui.painter().rect_filled(rect.shrink2(vec2(0.0, 1.0)), t.radius_sm, t.hover);
+    }
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + t.form_section_icon_size / 2.0, rect.center().y),
+        vec2(t.form_section_icon_size, t.form_section_icon_size),
+    );
+    super::disclosure(ui.painter(), icon_rect.center(), open, t.form_dim);
+    let text_rect = egui::Rect::from_min_max(egui::pos2((icon_rect.right() + t.form_gap_y).min(rect.right()), rect.top()), rect.max);
+    let caption = title.to_uppercase();
+    let badge_value = count.to_string();
+    let badge_width = label_width(ui, &badge_value) + t.space_12;
+    let reserved = badge_width + t.space_12;
+    let mut format = egui::TextFormat::simple(crate::fonts::semibold(t.font_caption), t.form_dim);
+    format.extra_letter_spacing = t.font_caption * t.font_section_tracking;
+    let title_width = ui
+        .fonts_mut(|fonts| fonts.layout_job(egui::text::LayoutJob::single_section(caption.clone(), format)))
+        .size()
+        .x
+        .ceil()
+        .min((text_rect.width() - reserved).max(0.0));
+    let title_rect = egui::Rect::from_min_max(text_rect.min, egui::pos2(text_rect.left() + title_width, text_rect.bottom()));
+    paint_text(ui, title_rect, &caption, crate::fonts::semibold(t.font_caption), t.form_dim, true);
+    let mut rule_left = title_rect.right() + t.space_12;
+    let width = badge_width.min((rect.right() - rule_left).max(0.0));
+    let badge = egui::Rect::from_min_size(egui::pos2(rule_left.min(rect.right()), rect.center().y - t.space_10), vec2(width, t.space_10 * 2.0));
+    ui.painter().rect_filled(badge, t.radius_xl, t.dialog_footer);
+    ui.painter().with_clip_rect(ui.clip_rect().intersect(badge)).text(
+        badge.center(),
+        egui::Align2::CENTER_CENTER,
+        &badge_value,
+        egui::FontId::proportional(t.font_small),
+        t.form_dim,
+    );
+    rule_left = badge.right() + t.space_12;
+    if rule_left < rect.right() {
+        t.secondary_hline(ui.painter(), rule_left..=rect.right(), rect.center().y, t.dialog_rule);
+    }
+    let accessible = format!("{title} ({count})");
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, ui.is_enabled(), open, &accessible));
+    scenario::publish_rect("prefs:search:shortcuts", rect);
+    scenario::publish_handle("prefs:search:shortcuts", response.rect.center());
     if response.clicked() {
         open = !open;
     }
-    ui.ctx().data_mut(|data| data.insert_persisted(id, open));
-    open.then(|| ui.push_id(id, add).inner)
+    ui.data_mut(|data| {
+        data.insert_temp(id.with("query"), query);
+        data.insert_temp(id, open);
+    });
+    open.then(|| {
+        crate::prefs_search::push_force(ui);
+        let result = add(ui);
+        crate::prefs_search::pop_force(ui);
+        result
+    })
 }
 
 /// Picked-item list entry with a remove action. Returns that action's Response.
@@ -288,6 +389,9 @@ pub(crate) fn list_row(ui: &mut Ui, key: &str, text: &str) -> Response {
 /// Full-width rule; Tokens: dialog_rule. Use between groups without extra padding.
 /// Full-width rule without extra padding. Tokens: `dialog_rule`.
 pub(crate) fn divider(ui: &mut Ui, key: &str) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), 1.0), egui::Sense::hover());
     Tokens::get().secondary_hline(ui.painter(), rect.x_range(), rect.top(), Tokens::get().dialog_rule);
     scenario::publish_rect(&format!("dialog:divider:{key}"), rect);
@@ -342,6 +446,22 @@ pub(crate) enum Text<'a> {
 }
 
 pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
+    if crate::prefs_search::querying(ui) {
+        let heading = matches!(style, Text::Heading(_));
+        if heading {
+            let hit = crate::prefs_search::texts_hit(ui, &[text]);
+            crate::prefs_search::set_heading_open(ui, hit);
+            if hit {
+                crate::prefs_search::reveal(ui);
+            } else if crate::prefs_search::suppress_chrome(ui) {
+                return crate::prefs_search::hidden_response(ui);
+            }
+        } else if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[text]) {
+            return crate::prefs_search::hidden_response(ui);
+        } else if crate::prefs_search::texts_hit(ui, &[text]) && !crate::prefs_search::shows_all(ui) {
+            crate::prefs_search::reveal(ui);
+        }
+    }
     let t = Tokens::get();
     let fixed = matches!(style, Text::Cell | Text::NameCell(_) | Text::MonoCell | Text::Value(_, _));
     let ink = match style {
