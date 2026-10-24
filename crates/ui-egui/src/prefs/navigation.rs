@@ -72,6 +72,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         if app.preferences.free_orbit {
             ui_kit::text(ui, crate::i18n::tr("nav.free_orbit.help"), ui_kit::Text::Hint("free_orbit"));
         }
+        let right_click = setting::right_click_confirms(app, ui);
+        crate::scenario::publish_target("prefs:right_click_confirms", right_click.rect);
         let help = if app.preferences.nav == TOUCHPAD_NAV {
             app.tr("nav.touchpad.help").to_owned()
         } else if !app.preferences.free_orbit && app.preferences.nav != OPENSCAD_NAV {

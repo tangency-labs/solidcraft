@@ -3261,12 +3261,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .collect();
             let _ = app.run("select.set", json!({ "items": items, "add": add }));
         }
-        // A right-click, unless the same press opened the mouse gestures' ring.
+        // A right-click, unless the same press opened the mouse gestures' ring: it finishes a
+        // tool, confirms a dialog's input (when that preference is on), or opens the menu.
         if resp.secondary_clicked() && delta == egui::Vec2::ZERO && !crate::mouse_gesture::took_press(app) {
             if app.tool.is_some() {
                 crate::tools::finish(app);
             } else if app.dialog.is_none() {
                 crate::context_menu::open(app, p);
+            } else if app.preferences.right_click_confirms {
+                crate::dialogs::right_click(app);
             }
         }
     }
