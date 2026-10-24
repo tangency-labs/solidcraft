@@ -2317,3 +2317,95 @@ fn step_conformance_parts_read_back_their_exact_shape() {
         }
     }
 }
+
+/// A planar square bounded by one closed degree-1 spline, with its vertex near the seam.
+fn closed_spline_square_step(t: f64, reverse: bool) -> String {
+    let (x, y) = if t <= 0.25 { (80.0 * t, 0.0) } else { (0.0, 80.0 * (1.0 - t)) };
+    let orientation = if reverse { "F" } else { "T" };
+    format!(
+        "ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('closed spline edge, vertex just past the curve start'),'2;1');
+FILE_NAME('closed-edge.step','',(''),(''),'','','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN {{ 1 0 10303 214 1 1 1 1 }}'));
+ENDSEC;
+DATA;
+#1=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));
+#2=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));
+#3=(NAMED_UNIT(*)SI_UNIT($,.STERADIAN.)SOLID_ANGLE_UNIT());
+#4=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-06),#1,'distance_accuracy_value','');
+#5=(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#4))GLOBAL_UNIT_ASSIGNED_CONTEXT((#1,#2,#3))REPRESENTATION_CONTEXT('',''));
+#6=APPLICATION_CONTEXT('core data for automotive mechanical design processes');
+#7=PRODUCT_CONTEXT('',#6,'mechanical');
+#8=PRODUCT_DEFINITION_CONTEXT('part definition',#6,'design');
+#9=PRODUCT('square','square','',(#7));
+#10=PRODUCT_DEFINITION_FORMATION('','',#9);
+#11=PRODUCT_DEFINITION('design','',#10,#8);
+#12=PRODUCT_DEFINITION_SHAPE('','',#11);
+#13=CARTESIAN_POINT('',(0.0,0.0,0.0));
+#14=CARTESIAN_POINT('',(20.0,0.0,0.0));
+#15=CARTESIAN_POINT('',(20.0,20.0,0.0));
+#16=CARTESIAN_POINT('',(0.0,20.0,0.0));
+#17=CARTESIAN_POINT('',(0.0,0.0,0.0));
+#18=B_SPLINE_CURVE_WITH_KNOTS('',1,(#13,#14,#15,#16,#17),.UNSPECIFIED.,.T.,.F.,(2,1,1,1,2),(0.,0.25,0.5,0.75,1.),.UNSPECIFIED.);
+#19=CARTESIAN_POINT('',({x:.16},{y:.16},0.0));
+#20=VERTEX_POINT('',#19);
+#21=EDGE_CURVE('',#20,#20,#18,.T.);
+#22=ORIENTED_EDGE('',*,*,#21,.{orientation}.);
+#23=EDGE_LOOP('',(#22));
+#24=FACE_OUTER_BOUND('',#23,.T.);
+#25=CARTESIAN_POINT('',(0.0,0.0,0.0));
+#26=DIRECTION('',(0.,0.,1.));
+#27=DIRECTION('',(1.,0.,0.));
+#28=AXIS2_PLACEMENT_3D('',#25,#26,#27);
+#29=PLANE('',#28);
+#30=ADVANCED_FACE('',(#24),#29,.T.);
+#31=OPEN_SHELL('',(#30));
+#32=SHELL_BASED_SURFACE_MODEL('square',(#31));
+#33=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('square',(#28,#32),#5);
+#34=SHAPE_DEFINITION_REPRESENTATION(#12,#33);
+ENDSEC;
+END-ISO-10303-21;"
+    )
+}
+
+#[test]
+fn closed_spline_vertex_near_seam_keeps_square_face() {
+    for t in [2e-7, 8e-7, 0.0, 1.0 - 8e-7] {
+        for reverse in [false, true] {
+            let imp = step_import(&closed_spline_square_step(t, reverse)).unwrap();
+            assert_eq!(imp.bodies.len(), 1, "t={t}, reverse={reverse}: {:?}", imp.warnings);
+            let body = &imp.bodies[0];
+            assert_eq!(body.file_faces, 1);
+            let faces = body.body.faces(0.001).unwrap();
+            assert_eq!(faces.len(), 1);
+            assert!((faces[0].area - 400.0).abs() < 0.01, "t={t}, reverse={reverse}: area {}", faces[0].area);
+        }
+    }
+}
+
+#[test]
+fn spline_trims_reject_near_zero_parameter_ranges() {
+    use mt::{ParametricCurve, Point3};
+
+    for span in [1.0, 100.0] {
+        let curve =
+            mt::BSplineCurve::new(mt::KnotVec::from(vec![0.0, 0.0, span, span]), vec![Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 0.0, 0.0)]);
+        let ps = curve.subs(span * 0.25);
+        let pe = curve.subs(span * (0.25 + 5e-8));
+        let g = geom::CurveGeo::BSpline(curve);
+        for sense in [false, true] {
+            let (start, end) = if sense { (ps, pe) } else { (pe, ps) };
+            let result = geom::edge_pieces(&g, start, end, sense, false, 1e-6);
+            assert!(result.is_err(), "span={span}, sense={sense}: near-zero trim accepted");
+        }
+    }
+    // The whole curve is valid, but neither half of a closed edge can be evaluated.
+    let curve = mt::BSplineCurve::new(
+        mt::KnotVec::from(vec![0.0, 0.0, 0.75e-6, 1.5e-6, 1.5e-6]),
+        vec![Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 0.0, 0.0), Point3::new(0.0, 0.0, 0.0)],
+    );
+    let p = curve.subs(0.0);
+    let result = geom::edge_pieces(&geom::CurveGeo::BSpline(curve), p, p, true, true, 1e-6);
+    assert!(result.is_err(), "near-zero halves accepted");
+}
