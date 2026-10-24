@@ -924,9 +924,14 @@ impl SolveApp {
         true
     }
 
-    /// Start a command the way a toolbar click does: interactive tools and dialogs for commands
+    /// Start a command the way a toolbar click does: interactive tools, menus and dialogs for commands
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
+        self.start_at(id, None);
+    }
+
+    /// Start an interactive command with its menu anchored below the invoking button.
+    pub(crate) fn start_at(&mut self, id: &str, opener: Option<egui::Rect>) {
         if id == "ui.palette" {
             shortcut_box::open(self, None);
             return;
@@ -1038,6 +1043,15 @@ impl SolveApp {
         }
         if solidcraft_engine::find_command(id).is_some_and(|c| c.info(&self.session).enabled) {
             self.preferences.sketch_variants.remember(id);
+        }
+        if id == "document.units" {
+            if let Some(rect) = opener {
+                context_menu::toggle_for(self, rect, rect.left_bottom(), context_menu::Target::Units);
+            } else {
+                let at = self.viewport.rect.map(|rect| rect.center()).unwrap_or(egui::pos2(300.0, 200.0));
+                context_menu::open_for(self, at, context_menu::Target::Units);
+            }
+            return;
         }
         if id == "parameters.change" {
             params_dialog::open(self);

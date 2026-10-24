@@ -1964,6 +1964,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn units_toolbar_start_offers_choices_and_one_undo_step() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.start", json!({"command":"document.units"}));
+        assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+        assert_eq!(h.app.menu.target, Target::Units);
+        assert!(h.app.viewport.context_menu.is_some());
+        let menu = describe(&h.app);
+        let choices = menu["items"].as_array().unwrap();
+        assert_eq!(choices.iter().map(|item| item["label"].as_str().unwrap()).collect::<Vec<_>>(), crate::prefs::UNITS);
+        assert!(choices.iter().all(|item| item["enabled"] == true));
+        assert!(h.app.session.undo.is_empty());
+        h.call("ui.menuPick", json!({"item":"in"}));
+        assert_eq!(h.app.session.doc.units, "in");
+        assert!(h.app.viewport.context_menu.is_none());
+        assert_eq!(h.app.session.undo.len(), 1);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.units, "mm");
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.units, "in");
+    }
+
+    #[test]
+    fn units_toolbar_menu_is_anchored_and_programmatic_calls_stay_headless() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let missing = h.call("engine.execute", json!({"command":"document.units","params":{}}));
+        assert_eq!(missing["ok"], false);
+        assert!(h.app.viewport.context_menu.is_none());
+        let changed = h.call("engine.execute", json!({"command":"document.units","params":{"units":"cm"}}));
+        assert_eq!(changed["ok"], true);
+        assert_eq!(h.app.session.doc.units, "cm");
+        assert!(h.app.viewport.context_menu.is_none());
+        h.app.status = None;
+        h.step(&json!({"click":{"handle":"tab:MANAGE"}})).unwrap();
+        let button = crate::scenario::rect_of("button:document.units").unwrap();
+        h.step(&json!({"click":{"handle":"button:document.units"}})).unwrap();
+        assert_eq!(h.app.viewport.context_menu, Some(button.left_bottom()));
+        assert_eq!(h.app.menu.target, Target::Units);
+        assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+        assert_eq!(items(&h.app, &Target::Units).iter().find(|item| item.label == "cm").unwrap().shortcut, "current");
+        h.step(&json!({"click":{"handle":"button:document.units"}})).unwrap();
+        assert!(h.app.viewport.context_menu.is_none());
+    }
+
+    #[test]
     fn line_offset_context_menu_breaks_association_and_allows_trim() {
         use solidcraft_engine::{geom::Vec2, sketch::Shape};
 
