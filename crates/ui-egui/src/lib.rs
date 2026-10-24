@@ -1087,7 +1087,9 @@ impl SolveApp {
             self.last_command = Some((spec.id.to_string(), spec.label.to_string()));
         }
         if let Some(mut t) = tools::Tool::for_command(id) {
-            if let Some(params) = tools::constraint_preselection(id, &self.session.selection) {
+            let state = self.session.world_state();
+            let sketch = self.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| &ss.sketch);
+            if let Some(params) = tools::constraint_preselection(id, &self.session.selection, sketch) {
                 if self.run(id, params).is_ok() {
                     let _ = self.session.execute("select.clear", &json!({}));
                     self.set_status("Constraint applied", false);
