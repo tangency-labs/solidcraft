@@ -345,27 +345,16 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     for it in &items {
         match it {
             Shown::Sketch(id) => {
-                v.hidden_sketches.retain(|x| x != id);
-                v.shown_sketches.retain(|x| x != id);
-                if visible { v.shown_sketches.push(*id) } else { v.hidden_sketches.push(*id) }
+                v.set_sketch_shown(*id, visible);
             }
             Shown::Body(n) => {
-                v.hidden_bodies.retain(|x| x != n);
-                if !visible {
-                    v.hidden_bodies.push(n.clone());
-                }
+                v.set_body_hidden(n, !visible);
             }
             Shown::Origin(n) => {
-                v.hidden_origin.retain(|x| x != n);
-                if !visible {
-                    v.hidden_origin.push(n.clone());
-                }
+                v.set_origin_hidden(n, !visible);
             }
             Shown::Joint(id) => {
-                v.hidden_joints.retain(|x| x != id);
-                if !visible {
-                    v.hidden_joints.push(*id);
-                }
+                v.set_joint_hidden(*id, !visible);
             }
         }
     }
@@ -675,9 +664,7 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, e));
     }
     d.rename_body_keys(&old, name);
-    for b in s.visibility.hidden_bodies.iter_mut().filter(|b| **b == old) {
-        *b = name.to_string();
-    }
+    s.visibility.rename_body(&old, name);
     Ok(json!({"body": old, "name": name}))
 }
 

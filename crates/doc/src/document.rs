@@ -2542,6 +2542,10 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Display states: named snapshots of what is shown (and optionally the camera). Applying
+    /// one is view state (not an undo step); saving, renaming and deleting them are.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub display_states: Vec<crate::display_state::NamedDisplayState>,
     /// What was hidden when the design was saved. A session takes it from here when the design
     /// opens and keeps the live state itself (`browser.visibility`: saved, not an undo step), so
     /// a document in a session leaves this empty; the session puts it back when it saves.
@@ -2584,6 +2588,65 @@ impl Visibility {
             && self.shown_sketches.is_empty()
             && self.hidden_joints.is_empty()
             && self.hidden_folders.is_empty()
+    }
+
+    /// Hide bodies (by name); ones already hidden keep their place in the list.
+    pub fn hide_bodies(&mut self, names: impl IntoIterator<Item = String>) {
+        for n in names {
+            if !self.hidden_bodies.contains(&n) {
+                self.hidden_bodies.push(n);
+            }
+        }
+    }
+    /// Show bodies (by name).
+    pub fn show_bodies(&mut self, names: &[String]) {
+        self.hidden_bodies.retain(|b| !names.contains(b));
+    }
+    /// Hide or show one body.
+    pub fn set_body_hidden(&mut self, name: &str, hidden: bool) {
+        self.hidden_bodies.retain(|x| x != name);
+        if hidden {
+            self.hidden_bodies.push(name.to_string());
+        }
+    }
+    /// Hide or show one origin item or construction geometry (by name).
+    pub fn set_origin_hidden(&mut self, name: &str, hidden: bool) {
+        self.hidden_origin.retain(|x| x != name);
+        if hidden {
+            self.hidden_origin.push(name.to_string());
+        }
+    }
+    /// Show the standard origin items (O, X, Y, Z, XY, XZ, YZ).
+    pub fn show_standard_origin(&mut self) {
+        self.hidden_origin.retain(|h| !["O", "X", "Y", "Z", "XY", "XZ", "YZ"].contains(&h.as_str()));
+    }
+    /// Hide or show one joint's glyph.
+    pub fn set_joint_hidden(&mut self, id: u64, hidden: bool) {
+        self.hidden_joints.retain(|x| *x != id);
+        if hidden {
+            self.hidden_joints.push(id);
+        }
+    }
+    /// Show or hide one sketch by its own eye (an explicit entry either way).
+    pub fn set_sketch_shown(&mut self, id: u64, shown: bool) {
+        self.hidden_sketches.retain(|x| *x != id);
+        self.shown_sketches.retain(|x| *x != id);
+        if shown {
+            self.shown_sketches.push(id);
+        } else {
+            self.hidden_sketches.push(id);
+        }
+    }
+    /// Show every sketch and every hidden Browser folder and group.
+    pub fn show_all_sketches_and_folders(&mut self) {
+        self.hidden_sketches.clear();
+        self.hidden_folders.clear();
+    }
+    /// A body was renamed: its hidden entry follows.
+    pub fn rename_body(&mut self, old: &str, new: &str) {
+        for b in self.hidden_bodies.iter_mut().filter(|b| *b == old) {
+            *b = new.to_string();
+        }
     }
 }
 
@@ -2747,6 +2810,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            display_states: Vec::new(),
             visibility: Visibility::default(),
         }
     }
@@ -2761,6 +2825,9 @@ impl Document {
     pub fn rename_body_keys(&mut self, old: &str, new: &str) {
         if old.strip_prefix("Body").and_then(|n| n.parse::<usize>().ok()).is_some() {
             self.reserved_body_names.insert(old.to_string());
+        }
+        for state in &mut self.display_states {
+            state.snapshot.visibility.rename_body(old, new);
         }
         if let Some(m) = self.materials.remove(old) {
             self.materials.insert(new.to_string(), m);

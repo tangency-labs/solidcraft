@@ -98,6 +98,8 @@ mod material_card_review;
 mod material_editor;
 
 #[cfg(test)]
+mod display_state_ui_tests;
+#[cfg(test)]
 mod measurement_ui_tests;
 #[cfg(test)]
 mod menu_tests;
