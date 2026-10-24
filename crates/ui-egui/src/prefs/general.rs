@@ -9,9 +9,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_form(ui, labels, |ui| {
             ui_kit::row(ui, app.tr("prefs.interface_language"), |ui| {
                 ui_kit::settings_control_width(ui, t.form_card_width - t.space_4, |ui| {
-                    ui_kit::dropdown_menu(ui, "pref_language", crate::i18n::Locale::for_language(&app.preferences.language).name(), |ui| {
+                    ui_kit::dropdown_menu(ui, "pref_language", &crate::i18n::Locale::for_language(&app.preferences.language).display_name(), |ui| {
                         for locale in crate::i18n::LOCALES {
-                            if ui_kit::list_picker(ui, locale.id, locale.name, app.preferences.language == locale.id).clicked() {
+                            if ui_kit::list_picker(ui, locale.id, &locale.display_name(), app.preferences.language == locale.id).clicked() {
                                 app.preferences.language = locale.id.into();
                             }
                         }
