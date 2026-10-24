@@ -99,6 +99,33 @@ fn a_single_hole_takes_one_point_and_no_flip() {
     }
 }
 
+/// #1023: a small hole drilled from the back of a blind hole meets its conical tip.
+/// The failed cut used to traverse the numerical fallback tree for minutes.
+#[test]
+fn opposing_drilled_holes_stop_at_the_retry_limit_and_preserve_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 6, "height": 30, "corner": [0, 6, 0]}));
+    run(&mut s, "solid.hole", json!({"position": [11, 12, 20], "direction": [0, -1, 0], "diameter": 8.5, "depth": 2.5, "tip_angle": 118}));
+    assert!(!solid_at(&s, Vec3::new(11., 8., 20.)), "the first hole has a drill point below its shoulder");
+    assert!(solid_at(&s, Vec3::new(11., 6.5, 20.)), "the first hole leaves material at the opposite face");
+    let before = s.doc.to_json();
+    let v = volume(&mut s);
+    let result = s.execute("solid.hole", &json!({"position": [11, 6, 20], "direction": [0, 1, 0], "diameter": 5, "depth": 10, "tip_angle": 118}));
+    match result {
+        Ok(_) => {
+            assert!(volume(&mut s) < v, "the second hole removes material");
+            assert!(!solid_at(&s, Vec3::new(11.0, 6.5, 20.0)), "the new bore is open");
+        }
+        Err(e) => {
+            assert!(e.to_string().contains("boolean retry limit reached"), "{e}");
+            assert_eq!(s.doc.to_json(), before, "a refused hole leaves the design unchanged");
+            assert!((volume(&mut s) - v).abs() < 1e-9);
+        }
+    }
+    // A refused operation must not leave the thread's retry budget exhausted.
+    run(&mut s, "solid.hole", json!({"position": [5, 6, 5], "direction": [0, 1, 0], "diameter": 2}));
+}
+
 /// A lid (rounded corners) with a countersunk hole 1.5 mm from its edge, and a second body `far` away from it.
 /// Returns the lid's volume (the total less the far body's) after the hole and the bodies the hole changed.
 fn lid_with_far_body(far_size: [f64; 3]) -> (f64, Value) {

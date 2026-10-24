@@ -2608,7 +2608,16 @@ fn apply_traced(state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Ope
                 for t in &tools {
                     let t = &tool_in(t, into)?;
                     acc = match acc {
-                        Some(a) => kernel::boolean(&a.body, &t.body, bop)?.map(|r| Traced::step(r, &[&a, t])),
+                        Some(a) => {
+                            // Cutting an earlier drill point can exhaust the numerical retries
+                            // (#1023). Bound those hole cuts, including their nested booleans.
+                            // Holes away from the earlier cones still need the full fallback
+                            // tree: a sloping back face can require reseaming the tool (#2387).
+                            let drilled_target = matches!(f.kind, FeatureKind::Hole { .. }) && kernel::may_cut_conical_face(&a.body, &t.body);
+                            let cut = || kernel::boolean(&a.body, &t.body, bop);
+                            let result = if drilled_target { kernel::with_attempt_budget(8, cut) } else { cut() };
+                            result?.map(|r| Traced::step(r, &[&a, t]))
+                        }
                         None => None,
                     };
                 }

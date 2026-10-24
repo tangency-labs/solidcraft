@@ -73,6 +73,7 @@ pub(super) fn cut(target: &Body, tool: &Body) -> Option<Body> {
         let counts = record::counts(&[target, tool]);
         // Bounded exact retries. Keep the original error if neither can be verified.
         for angle in [0.3, -0.3, 0.7, -0.7] {
+            super::check_attempt_budget()?;
             let turned = transform(tool, Vec3::ZERO, origin, axis, angle)?;
             let (result, diagnostics) = capture_boolean_diagnostics(|| boolean_via(target, &turned, BoolOp::Cut, &boolean_whole));
             if let Ok(Some(body)) = result

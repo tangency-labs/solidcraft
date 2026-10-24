@@ -560,6 +560,45 @@ mod shortcut_tests {
     use super::*;
 
     #[test]
+    fn exhausted_boolean_budget_does_not_enter_more_fallbacks() {
+        let a = crate::cylinder(Vec3::new(0., 0., -10.), Vec3::Z, 3., 20.).unwrap();
+        let b = crate::cylinder(Vec3::new(-10., 0., 0.), Vec3::X, 2., 20.).unwrap();
+        for attempts in [0, 1] {
+            let calls = std::cell::Cell::new(0);
+            let fail = |_: &Body, _: &Body, _: BoolOp, _: Option<mt::Vector3>, _: f64| {
+                calls.set(calls.get() + 1);
+                assert!(take_attempt(), "an exhausted budget must stop before another strategy runs");
+                Err(KernelError::Failed("intersection refused".into()))
+            };
+            let result = with_attempt_budget(attempts, || boolean_whole_with(&a, &b, BoolOp::Intersect, false, &fail));
+            assert!(result.unwrap_err().to_string().contains("boolean retry limit reached"));
+            assert_eq!(calls.get(), attempts);
+        }
+    }
+
+    #[test]
+    fn conical_dispatch_requires_nearby_faces() {
+        use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+        let profile = Region2 { outer: Loop2::polygon(&[Vec2::ZERO, Vec2::new(4., 5.), Vec2::new(0., 5.)]), holes: vec![] };
+        let cone = crate::revolve(&Plane::XZ, &[profile], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
+        let moved = |z| transform(&cone, Vec3::new(0., 0., z), Vec3::ZERO, Vec3::Z, 0.).unwrap();
+        assert!(conical_cut_junction(&cone, &moved(1.)));
+        assert!(!conical_cut_junction(&cone, &moved(20.)));
+        // Rotating both operands keeps the same decision.
+        let tilted = |body: &Body| transform(body, Vec3::ZERO, Vec3::ZERO, Vec3::new(1., 2., 3.), 0.7).unwrap();
+        assert!(conical_cut_junction(&tilted(&cone), &tilted(&moved(1.))));
+        assert!(!conical_cut_junction(&tilted(&cone), &tilted(&moved(20.))));
+        // A flat-ended cutter can meet a drill point too; a later hole far from that
+        // point must retain its ordinary retries, including tool reseaming.
+        let cutter = crate::cylinder(Vec3::new(0., 0., -1.), Vec3::Z, 1., 8.).unwrap();
+        let far = transform(&cutter, Vec3::new(20., 0., 0.), Vec3::ZERO, Vec3::Z, 0.).unwrap();
+        assert!(may_cut_conical_face(&cone, &cutter));
+        assert!(!may_cut_conical_face(&cone, &far));
+        assert!(may_cut_conical_face(&tilted(&cone), &tilted(&cutter)));
+        assert!(!may_cut_conical_face(&tilted(&cone), &tilted(&far)));
+    }
+
+    #[test]
     fn seam_roundoff_is_not_a_thin_meeting_but_real_thin_solids_are() {
         use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
 
@@ -910,6 +949,16 @@ fn take_attempt() -> bool {
     })
 }
 
+/// Exhausting a caller's budget also stops the fallback tree: making shifted or reseamed
+/// copies and meshing them again can cost much more than the intersections it refuses.
+fn check_attempt_budget() -> Result<()> {
+    if ATTEMPTS.with(|c| c.get() == Some(0)) {
+        Err(KernelError::Failed("boolean retry limit reached; simplify the intersecting geometry".into()))
+    } else {
+        Ok(())
+    }
+}
+
 /// Boolean of two bodies. The result may be empty (`Ok(None)`) for a cut that removes
 /// everything or an intersection of disjoint bodies. Results are checked against volume bounds
 /// and retried with shifted copies and other tolerances when they fail or look wrong.
@@ -921,6 +970,7 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
 }
 
 fn boolean_untimed(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
+    check_attempt_budget()?;
     // Earlier coarse bores can leave a junction a later pattern copy cannot intersect.
     // Resolve conical-cut junctions from the first copy, while the operands are unchanged.
     if op == BoolOp::Cut && !APART.with(|c| c.get()) && conical_cut_junction(a, b) {
@@ -928,8 +978,12 @@ fn boolean_untimed(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         if let Ok(result) = boolean_via(a, b, op, &refined) {
             return Ok(result);
         }
+        check_attempt_budget()?;
     }
     let r = boolean_via(a, b, op, &boolean_whole);
+    if r.is_err() {
+        check_attempt_budget()?;
+    }
     if r.is_err()
         && op == BoolOp::Cut
         && !APART.with(|c| c.get())
@@ -948,22 +1002,78 @@ fn boolean_untimed(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     boolean_via(a, b, op, &split).or(r)
 }
 
-/// A conical cutter meeting a body with an earlier conical cut needs finer tracing at
-/// their junctions. Guard the analytic recognition as well as the Boolean itself.
+/// Conical face indices. Called inside the dispatch queries' guards.
+fn conical_faces(body: &Body) -> Vec<usize> {
+    let tol = (body.size() * 1e-5).max(1e-7);
+    body.solid
+        .face_iter()
+        .enumerate()
+        .filter_map(|(i, face)| matches!(crate::offset::surf_of(face, tol), Some(crate::offset::Surf::Cone { .. })).then_some(i))
+        .collect()
+}
+
+/// Bounds of the sorted face indices returned by [`conical_faces`].
+fn face_boxes(body: &Body, faces: &[usize]) -> Option<Vec<solidcraft_geom::Aabb3>> {
+    let tol = (body.size() * 1e-3).max(1e-6);
+    let mesh = body.tessellate(tol).ok()?;
+    let mut bounds = vec![solidcraft_geom::Aabb3::EMPTY; faces.len()];
+    for (tri, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        let Ok(index) = faces.binary_search(&(*face as usize)) else { continue };
+        let bound = bounds.get_mut(index)?;
+        for p in mesh.tri(tri)? {
+            bound.add(p);
+        }
+    }
+    // A missing face is uncertain, not evidence of separation. Leave room for the
+    // mesh's chord errors before excluding a face from a dispatch query.
+    (!bounds.iter().any(|b| b.is_empty())).then(|| bounds.into_iter().map(|b| b.inflated(4.0 * tol)).collect())
+}
+
+/// Whether a cutter may meet a conical target face, using inflated mesh bounds. This is
+/// a conservative dispatch hint, not an intersection test; uncertain meshes return true.
+/// A caller limiting difficult drill-point cuts need not limit holes far from those points.
+pub fn may_cut_conical_face(target: &Body, cutter: &Body) -> bool {
+    guard("conical cut bounds", || {
+        let cones = conical_faces(target);
+        if cones.is_empty() {
+            return Ok(false);
+        }
+        let Some(boxes) = face_boxes(target, &cones) else { return Ok(true) };
+        let tol = (cutter.size() * 1e-3).max(1e-6);
+        let Ok(mesh) = cutter.tessellate(tol) else { return Ok(true) };
+        let bounds = mesh.bounds();
+        Ok(bounds.is_empty() || boxes.iter().any(|b| b.meets(&bounds.inflated(4.0 * tol))))
+    })
+    .unwrap_or(true)
+}
+
+/// Conical faces that meet need finer tracing at their junctions. A cone elsewhere in either
+/// body is not a junction: refining it can make an unrelated hole take seconds per attempt.
 fn conical_cut_junction(a: &Body, b: &Body) -> bool {
     guard("conical cut junction", || {
-        let conical = |body: &Body| {
-            let tol = (body.size() * 1e-5).max(1e-7);
-            body.solid.face_iter().any(|face| matches!(crate::offset::surf_of(face, tol), Some(crate::offset::Surf::Cone { .. })))
-        };
-        Ok(conical(b) && conical(a))
+        let cb = conical_faces(b);
+        if cb.is_empty() {
+            return Ok(false);
+        }
+        let ca = conical_faces(a);
+        if ca.is_empty() {
+            return Ok(false);
+        }
+        Ok(match (face_boxes(a, &ca), face_boxes(b, &cb)) {
+            (Some(a), Some(b)) => a.iter().any(|a| b.iter().any(|b| a.meets(b))),
+            _ => true,
+        })
     })
     .unwrap_or(false)
 }
 
 /// [`boolean`], the boolean of the whole bodies taken by `whole`.
 fn boolean_via(a: &Body, b: &Body, op: BoolOp, whole: &dyn Fn(&Body, &Body, BoolOp) -> Result<Option<Body>>) -> Result<Option<Body>> {
+    check_attempt_budget()?;
     let (mut r, mut diagnostics) = capture_boolean_diagnostics(|| whole(a, b, op));
+    if r.is_err() {
+        check_attempt_budget()?;
+    }
     // Bodies in several pieces: when the whole failed (or came out empty), a piece at a time.
     let retry = match &r {
         Err(_) => true,
@@ -1223,6 +1333,7 @@ fn boolean_whole_with<F>(a: &Body, b: &Body, op: BoolOp, refine: bool, intersect
 where
     F: Fn(&Body, &Body, BoolOp, Option<mt::Vector3>, f64) -> Result<(Solid, Option<recorded::Shapeops>)>,
 {
+    check_attempt_budget()?;
     if let Some(body) = swept_prism(a, b, op) {
         return Ok(Some(body));
     }
@@ -1332,6 +1443,7 @@ where
         let keep: Vec<Vec<Vec3>> = a.split_keep().iter().chain(b.split_keep()).cloned().collect();
         // Bounded to two finer meshes; no tool displacement or relaxed acceptance tests.
         for k in [1e-5, 1e-6] {
+            check_attempt_budget()?;
             let tol = (size * k).max(1e-6);
             if let Ok((solid, history)) = intersect(a, b, op, None, tol)
                 && !solid.boundaries().is_empty()
@@ -1503,6 +1615,7 @@ where
         for (attempt, j) in JITTER.iter().enumerate().take(2) {
             let shift = mt::Vector3::new(j[0], j[1], j[2]) * (feature * 0.01);
             for &tol in &fine_tols {
+                check_attempt_budget().ok()?;
                 match intersect(a, b, op, if attempt > 0 { Some(shift) } else { None }, tol) {
                     Ok((s, _)) if s.boundaries().is_empty() || s.face_iter().next().is_none() => *last = "empty result".into(),
                     Ok((s, h)) => match guard("boolean result", || recorded::truck_result(s, h, size, &keep, &counts)) {
@@ -1530,6 +1643,7 @@ where
         None
     };
     for (attempt, j) in JITTER.iter().enumerate() {
+        check_attempt_budget()?;
         // The operands as they lie failed. A planar tool beside the target's curved faces (a tooth
         // or a pocket cut next to a round edge) is decided exactly in the slab it lies in, where
         // the target is planar too, before the shifted tries: that is where they end anyway, as a
@@ -1601,6 +1715,7 @@ where
         }
         let shift = mt::Vector3::new(j[0], j[1], j[2]) * (size * 0.01);
         for k in [2e-3, 5e-4] {
+            check_attempt_budget()?;
             let tol = (size * k).max(1e-5);
             let r = intersect(a, b, op, if attempt > 0 { Some(shift) } else { None }, tol);
             match r {
@@ -1653,6 +1768,7 @@ where
             return Ok(None);
         }
     }
+    check_attempt_budget()?;
     last.push_str(&apart_failed);
     // Coincident faces defeat the B-rep boolean; bodies with only planar faces have an exact
     // polygon fallback.
@@ -1692,6 +1808,7 @@ where
         let nudge = |screw: usize, sign: f64| {
             let axis = SCREWS.get(screw).map_or(Vec3::Z, |s| Vec3::new(s.1[0], s.1[1], s.1[2]));
             capture_boolean_diagnostics(|| {
+                check_attempt_budget()?;
                 transform(b, translation(screw) * sign, c, axis, 2e-6 * sign).and_then(|nb| Ok(boolean(a, &nb, op)?.map(|r| nudged(r, &nb, &counts))))
             })
         };
@@ -1770,6 +1887,7 @@ where
             Err(e) => last = format!("{last}; nudged: {e}"),
         }
     }
+    check_attempt_budget()?;
     // A join whose coincident planar faces cannot be pushed apart because the neighbours of one of them curve (a flange
     // flush with the end of a lofted tube): the faces are grown instead, and what the growth leaves beyond the plane is cut
     // off by editing the faces. After every route above, the nudge included, has failed, so that a join any of them takes
