@@ -193,6 +193,16 @@ pub(crate) struct ProfileRoles<'a> {
     pub region: Option<&'a Region2>,
     /// The start and end caps' roles (`None`: not known).
     pub caps: [Option<String>; 2],
+    /// A thin wall: its sides lie off the sketch curves, and are named by the curve they run
+    /// beside.
+    pub thin: Option<&'a ThinWallRoles>,
+}
+
+/// What names the sides of a thin extrude's wall: the curves it follows and how far its sides lie
+/// from them (the thickness either side).
+pub(crate) struct ThinWallRoles {
+    pub curves: Vec<String>,
+    pub distances: [f64; 2],
 }
 
 impl<'a> ProfileRoles<'a> {
@@ -210,7 +220,12 @@ impl<'a> ProfileRoles<'a> {
         // Every curve the segment is drawn on (one, or several coincident or collinear ones).
         let curve = |segment: usize| -> Vec<String> {
             let (Some(curves), Some(segment)) = (curves.as_ref(), segments.get(segment)) else { return Vec::new() };
-            curves.find_all_along(segment).into_iter().map(|id| format!("side:{id}")).collect()
+            let drawn: Vec<String> = curves.find_all_along(segment).into_iter().map(|id| format!("side:{id}")).collect();
+            match self.thin {
+                // A thin wall's side beside its curve (the other side may lie on it).
+                Some(thin) if drawn.is_empty() => curves.find_offset(segment, &thin.curves, thin.distances),
+                _ => drawn,
+            }
         };
         let roles = history
             .faces
@@ -242,7 +257,7 @@ impl<'a> ProfileRoles<'a> {
     /// A body swept from a profile (revolve, sweep, loft): its sides named by the sketch curves,
     /// its caps `start` and `end`.
     pub fn swept(sketch: Option<&'a SolvedSketch>, region: Option<&'a Region2>) -> ProfileRoles<'a> {
-        ProfileRoles { sketch, region, caps: [Some("start".into()), Some("end".into())] }
+        ProfileRoles { sketch, region, caps: [Some("start".into()), Some("end".into())], thin: None }
     }
 
     /// A tool built from the profile (and then moved, from `built`, when given), its faces named

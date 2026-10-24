@@ -526,6 +526,89 @@ impl ExactSketchCurves<'_> {
     }
 }
 
+impl ExactSketchCurves<'_> {
+    /// The roles of a thin wall's side that runs parallel to some of the wall's `curves`, off
+    /// them by one of the wall's `distances`: `wall:<curve>:left` (or `:right`) for the side of
+    /// that curve, left or right of the direction it is drawn in. A thin wall's sides lie off the
+    /// sketch (by half its thickness, say), so [`find_all_along`](Self::find_all_along) finds no
+    /// curve under them. Every curve the side runs along and overlaps names it (the first its
+    /// name, the others aliases), in the sketch's order; empty when it is parallel to none, or
+    /// its distance is not one of the wall's.
+    pub(crate) fn find_offset(&self, generated: &Seg2, curves: &[String], distances: [f64; 2]) -> Vec<String> {
+        let wanted = |offset: f64, scale: f64| {
+            let tolerance = 1e-7 * scale.max(1.);
+            offset.abs() > tolerance && distances.iter().any(|d| (d - offset.abs()).abs() <= tolerance)
+        };
+        let side = |offset: f64| if offset > 0. { "left" } else { "right" };
+        let tau = std::f64::consts::TAU;
+        let mut roles = Vec::new();
+        for (id, _, originals) in &self.segments {
+            if !curves.iter().any(|c| c == id) {
+                continue;
+            }
+            let found = originals.iter().find_map(|original| match (*original, *generated) {
+                (Seg2::Line { a, b }, Seg2::Line { a: c, b: d }) => {
+                    let direction = b - a;
+                    let length = direction.len();
+                    let scale = length.max((d - c).len());
+                    if length <= 1e-12 {
+                        return None;
+                    }
+                    let (left_c, left_d) = (direction.cross(c - a) / length, direction.cross(d - a) / length);
+                    if (left_c - left_d).abs() > 1e-9 * scale.max(1.) || !wanted(left_c, scale) {
+                        return None;
+                    }
+                    let (tc, td) = ((c - a).dot(direction) / direction.len2(), (d - a).dot(direction) / direction.len2());
+                    (tc.min(td).max(0.) < tc.max(td).min(1.) - 1e-9).then(|| side(left_c))
+                }
+                (Seg2::Arc { center: oc, radius: or, start: os, sweep: ow }, Seg2::Arc { center: gc, radius: gr, start: gs, sweep: gw }) => {
+                    let scale = or.max(gr);
+                    if oc.dist(gc) > 1e-9 * scale.max(1.) || !wanted(gr - or, scale) || ow == 0. || gw == 0. {
+                        return None;
+                    }
+                    // Drawn counter-clockwise, the curve's left is towards its centre.
+                    let left = if ow > 0. { gr < or } else { gr > or };
+                    let inside = |start: f64, sweep: f64, angle: f64| {
+                        let low = if sweep >= 0. { start } else { start + sweep };
+                        (angle - low).rem_euclid(tau) <= sweep.abs() + 1e-9
+                    };
+                    let overlaps = inside(os, ow, gs)
+                        || inside(os, ow, gs + gw)
+                        || inside(os, ow, gs + gw / 2.)
+                        || inside(gs, gw, os)
+                        || inside(gs, gw, os + ow / 2.)
+                        || ow.abs() >= tau - 1e-9
+                        || gw.abs() >= tau - 1e-9;
+                    overlaps.then_some(if left { "left" } else { "right" })
+                }
+                _ => None,
+            });
+            // The end of an open chain: a straight cut across the curve, through its end point.
+            let cap = || {
+                let Seg2::Line { a: c, b: d } = *generated else { return None };
+                let width = (d - c).len();
+                if width <= 1e-12 || (width - (distances[0] + distances[1])).abs() > 1e-7 * width.max(1.) {
+                    return None;
+                }
+                originals.iter().find_map(|original| {
+                    [("start", original.start(), original.start_tangent()), ("end", original.end(), original.end_tangent())].into_iter().find_map(
+                        |(end, point, tangent)| {
+                            let across = (d - c) * (1. / width);
+                            let on_line = across.cross(point - c).abs() <= 1e-7 * width.max(1.);
+                            let along = (point - c).dot(across);
+                            (tangent.dot(across).abs() <= 1e-7 && on_line && (-1e-7..=width + 1e-7).contains(&along)).then_some(end)
+                        },
+                    )
+                })
+            };
+            if let Some(side) = found.or_else(cap) {
+                roles.push(format!("wall:{id}:{side}"));
+            }
+        }
+        roles
+    }
+}
+
 fn exact_segment_contains(original: &Seg2, generated: &Seg2) -> bool {
     match (original, generated) {
         (Seg2::Line { a, b }, Seg2::Line { a: c, b: d }) => {

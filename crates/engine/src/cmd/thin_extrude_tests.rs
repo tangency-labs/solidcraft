@@ -282,3 +282,99 @@ fn no_errors(s: &Session, context: &str) {
         s.model.results.iter().filter_map(|r| r.error.as_ref()).collect::<Vec<_>>()
     );
 }
+
+/// How far a face's plane lies from the origin along its own normal.
+fn plane_offset(plane: &solidcraft_geom::Plane) -> f64 {
+    plane.normal().dot(plane.origin)
+}
+
+#[test]
+fn the_walls_of_an_open_thin_extrude_take_sketches_that_follow_their_thickness() {
+    // Three lines make an open wall; its sides lie off the sketch lines (a hair either side of
+    // each), so no sketch curve is under them. Each side still has a name its history can tell
+    // apart, so a sketch on it attaches and follows the wall when the thickness changes.
+    for side in ["center", "inside", "outside"] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+        let lines = run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 30], [0, 30]], "closed": false}));
+        run(&mut s, "sketch.finish", json!({}));
+        let curves = lines["created"]["curves"].clone();
+        let thin = |t: &str| json!({"feature": "Wall", "set": {"thin": {"curves": curves, "thickness": t, "side": side}}});
+        run(
+            &mut s,
+            "solid.extrude",
+            json!({"sketch": "Outline", "thin": true, "curves": curves, "thickness": "2", "side": side, "distance": 20, "name": "Wall"}),
+        );
+        no_errors(&s, side);
+        let picks = flat_side_faces(&s);
+        assert!(picks.len() >= 6, "{side}: {picks:?}");
+        let mut moved_by_one = 0;
+        for (k, (label, at)) in picks.iter().enumerate() {
+            let name = format!("S{k}");
+            let mut t = s.scratch();
+            sketch_on(&mut t, *at, &name);
+            let (plane, _) = attached(&t, &name);
+            // Twice as thick, then back: the sketch stays on its face.
+            run(&mut t, "timeline.edit", thin("4"));
+            no_errors(&t, &format!("{side} {label}"));
+            let (thick, _) = attached(&t, &name);
+            if side == "center" {
+                // A side of a centred wall is half the thickness off its line: 1 -> 2 mm. The
+                // wall's two ends stay where they are.
+                let moved = (plane_offset(&thick).abs() - plane_offset(&plane).abs()).abs();
+                assert!(moved < 1e-6 || (moved - 1.0).abs() < 1e-6, "{label}: moved {moved}");
+                moved_by_one += usize::from(moved > 0.5);
+            }
+            let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&t.doc.to_json()).unwrap().into(), ..Session::default() };
+            reopened.refresh();
+            no_errors(&reopened, side);
+            same_plane(&attached(&reopened, &name).0, &thick);
+        }
+        if side == "center" {
+            assert_eq!(moved_by_one, 6, "two sides of each of the three lines move with the thickness");
+        }
+    }
+}
+
+/// A point inside each flat, vertical face of the first body: (what it is, point).
+fn flat_side_faces(s: &Session) -> Vec<(String, [f64; 3])> {
+    let world = s.world_state();
+    let mut out = Vec::new();
+    let Some(body) = world.bodies.first() else { return out };
+    let mesh = body.mesh();
+    let mut best: std::collections::BTreeMap<usize, (solidcraft_geom::Vec3, f64)> = std::collections::BTreeMap::new();
+    for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        if let Some([a, b, c]) = mesh.tri(triangle) {
+            let area = (b - a).cross(c - a).len();
+            let entry = best.entry(*face as usize).or_insert(((a + b + c) * (1. / 3.), -1.));
+            if area > entry.1 {
+                *entry = ((a + b + c) * (1. / 3.), area);
+            }
+        }
+    }
+    for (index, (point, _)) in best {
+        if let Some(plane) = body.body.planar_face(index)
+            && plane.normal().z.abs() < 1e-6
+        {
+            out.push((format!("face {index} normal {:?}", plane.normal()), [point.x, point.y, point.z]));
+        }
+    }
+    out
+}
+
+#[test]
+fn the_round_sides_of_a_thin_ring_are_named_by_the_circle_they_run_beside() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Outline", "thin": true, "thickness": 2, "distance": 5, "name": "Ring"}));
+    let world = s.world_state();
+    let names = solidcraft_doc::naming::face_names(world.bodies.first().unwrap());
+    // Each round side is two half cylinders, told apart by their numbers.
+    let walls: Vec<_> = names.iter().filter(|name| name.contains(":wall:")).collect();
+    assert_eq!(walls.len(), 4, "{names:?}");
+    for side in ["left", "right"] {
+        assert_eq!(walls.iter().filter(|name| name.contains(&format!(":wall:c1:{side}#"))).count(), 2, "{walls:?}");
+    }
+}

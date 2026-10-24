@@ -4203,11 +4203,12 @@ fn whole_face_tool(
         sketch: Some(ss),
         region: Some(region),
         caps: [Some(crate::lineage::extrude_cap_role(lo)), Some(crate::lineage::extrude_cap_role(hi))],
+        thin: None,
     };
     match operation {
         // Out of the body from the face.
         Operation::Join if (up && at_lo) || (!up && at_hi) => {
-            let built = centered_extrude(&ss.plane, r, lo, hi, Some(ss)).ok()?;
+            let built = centered_extrude(&ss.plane, r, lo, hi, Some(ss), None).ok()?;
             let [built] = built.as_slice() else { return None };
             let exact = kernel::face_prism(&target.body, face, hi - lo, true, &built.body).ok()?;
             kernel::can_join_touching_faces(&target.body, &exact).then(|| (roles(r).tool(exact, Some(&built.body)), (lo, hi)))
@@ -4215,7 +4216,7 @@ fn whole_face_tool(
         // Into the body from the face, its walls touching it at most.
         Operation::Cut if ((up && at_hi) || (!up && at_lo)) && !kernel::cut_takes_only_the_face(&target.body, face, hi - lo) => {
             // Some walls go into the body: those that only touch it are moved off.
-            let built = centered_extrude(&ss.plane, r, lo, hi, Some(ss)).ok()?;
+            let built = centered_extrude(&ss.plane, r, lo, hi, Some(ss), None).ok()?;
             let [built] = built.as_slice() else { return None };
             let (tool, off) = kernel::cut_tool(&target.body, face, hi - lo, Some(&built.body))?;
             let span = if up { (lo, hi + off) } else { (lo - off, hi) };
@@ -4231,7 +4232,7 @@ fn whole_face_tool(
             let segs = (0..4).filter_map(|i| Some(line(*corners.get(i)?, *corners.get((i + 1) % 4)?))).collect();
             let slab = Region2 { outer: solidcraft_geom::Loop2 { segs }, holes: vec![] };
             let (l, h) = if up { (lo, hi + reach) } else { (lo - reach, hi) };
-            let built = centered_extrude(&ss.plane, &slab, l, h, None).ok()?;
+            let built = centered_extrude(&ss.plane, &slab, l, h, None, None).ok()?;
             let [built] = built.as_slice() else { return None };
             #[cfg(test)]
             whole_face_tests::slab_taken();
@@ -4242,7 +4243,14 @@ fn whole_face_tool(
 }
 
 /// Construct planar caps locally before placing the completed tool.
-fn centered_extrude(plane: &Plane, region: &Region2, start: f64, end: f64, sketch: Option<&SolvedSketch>) -> Result<Vec<Traced>> {
+fn centered_extrude(
+    plane: &Plane,
+    region: &Region2,
+    start: f64,
+    end: f64,
+    sketch: Option<&SolvedSketch>,
+    thin: Option<&crate::lineage::ThinWallRoles>,
+) -> Result<Vec<Traced>> {
     if !plane.origin.is_finite()
         || !plane.x.is_finite()
         || !plane.y.is_finite()
@@ -4258,6 +4266,7 @@ fn centered_extrude(plane: &Plane, region: &Region2, start: f64, end: f64, sketc
         sketch,
         region: Some(region),
         caps: [Some(crate::lineage::extrude_cap_role(lo)), Some(crate::lineage::extrude_cap_role(hi))],
+        thin,
     };
     // Fit cap surfaces in their own coordinates. Fitting a distant world-space
     // wire can tilt an otherwise exact planar cap through numeric cancellation.
@@ -4282,11 +4291,8 @@ fn centered_extrude(plane: &Plane, region: &Region2, start: f64, end: f64, sketc
         .collect()
 }
 
-/// The regions a thin extrude's wall covers in its sketch.
-pub(crate) fn thin_regions(vals: &BTreeMap<String, Value>, ss: &SolvedSketch, thin: &crate::ThinWall) -> Result<Vec<Region2>> {
-    if thin.curves.is_empty() || thin.curves.len() > 1000 {
-        return Err(DocError::Invalid("a thin extrude needs 1…1000 sketch curves".into()));
-    }
+/// How far a thin extrude's wall reaches either side of its curves: (inside, outside).
+fn thin_distances(vals: &BTreeMap<String, Value>, thin: &crate::ThinWall) -> Result<(f64, f64)> {
     let t = val(vals, &thin.thickness, Kind::Length)?;
     let (inside, outside) = match thin.side {
         crate::ThinSide::Center => (t / 2.0, t / 2.0),
@@ -4300,6 +4306,15 @@ pub(crate) fn thin_regions(vals: &BTreeMap<String, Value>, ss: &SolvedSketch, th
     if !(inside >= 0.0 && outside >= 0.0 && inside + outside > 0.0) {
         return Err(DocError::Invalid("the wall thickness must be positive".into()));
     }
+    Ok((inside, outside))
+}
+
+/// The regions a thin extrude's wall covers in its sketch.
+pub(crate) fn thin_regions(vals: &BTreeMap<String, Value>, ss: &SolvedSketch, thin: &crate::ThinWall) -> Result<Vec<Region2>> {
+    if thin.curves.is_empty() || thin.curves.len() > 1000 {
+        return Err(DocError::Invalid("a thin extrude needs 1…1000 sketch curves".into()));
+    }
+    let (inside, outside) = thin_distances(vals, thin)?;
     let curves = thin
         .curves
         .iter()
@@ -4333,6 +4348,14 @@ fn feature_tools_with_constructor(
             let regions = match thin {
                 Some(thin) => thin_regions(vals, &ss, thin)?,
                 None => solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?),
+            };
+            // A thin wall's sides are named by the curves they run beside.
+            let thin_roles = match thin {
+                Some(thin) => {
+                    let (inside, outside) = thin_distances(vals, thin)?;
+                    Some(crate::lineage::ThinWallRoles { curves: thin.curves.clone(), distances: [inside, outside] })
+                }
+                None => None,
             };
             // From / To Object: where the face or point lies along the normal, measured over the
             // middle of the profiles. The points are in this feature's component frame, so the
@@ -4408,7 +4431,8 @@ fn feature_tools_with_constructor(
                         // sides standing on a face are curved where they meet it (along text, say),
                         // and the boolean finds no result there. The sides keep their slope, so
                         // the profile stays the section at the start.
-                        let roles = crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r), caps: caps.clone() };
+                        let roles =
+                            crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r), caps: caps.clone(), thin: thin_roles.as_ref() };
                         // A start that is a whole face of the target (a foot under a part's base) is sewn on
                         // along it, as it lies: run on, the sides would leave the face through its edges.
                         if on_face
@@ -4514,7 +4538,7 @@ fn feature_tools_with_constructor(
             {
                 let exact = regions
                     .iter()
-                    .map(|region| centered_extrude(&ss.plane, region, lo + off, hi + off, Some(&ss)))
+                    .map(|region| centered_extrude(&ss.plane, region, lo + off, hi + off, Some(&ss), thin_roles.as_ref()))
                     .collect::<Result<Vec<_>>>()?
                     .into_iter()
                     .flatten()
@@ -4563,7 +4587,7 @@ fn feature_tools_with_constructor(
                     continue;
                 }
                 if *operation == Operation::Join {
-                    let exact = centered_extrude(&ss.plane, r, lo + off, hi + off, Some(&ss))?;
+                    let exact = centered_extrude(&ss.plane, r, lo + off, hi + off, Some(&ss), thin_roles.as_ref())?;
                     if exact.iter().all(|tool| {
                         st.bodies
                             .iter()
@@ -4597,14 +4621,14 @@ fn feature_tools_with_constructor(
                 let mut r = filled(grown(&|pieces| {
                     surroundings.as_ref().is_some_and(|sur| sur.harmless(&ss.plane, pieces, -sur.skin, l2 + sur.skin, h2 - sur.skin))
                 }));
-                let mut built = centered_extrude(&ss.plane, &r, l2, h2, Some(&ss));
+                let mut built = centered_extrude(&ss.plane, &r, l2, h2, Some(&ss), thin_roles.as_ref());
                 if built.is_err() {
                     // A profile the kernel cannot build as drawn (a square some hundredths of a
                     // micrometre across, away from the origin, defeats truck's plane fit) grows
                     // wherever the samples find room, as it used to.
                     let loose = filled(grown(&|_| true));
                     if loose != r {
-                        built = centered_extrude(&ss.plane, &loose, l2, h2, Some(&ss));
+                        built = centered_extrude(&ss.plane, &loose, l2, h2, Some(&ss), thin_roles.as_ref());
                         r = loose;
                     }
                 }
@@ -7779,7 +7803,7 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
         // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
         let section = Some("section".to_string());
         let caps = if positive { [section, None] } else { [None, section] };
-        let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps }.tool(tool, None);
+        let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, thin: None }.tool(tool, None);
         parts.push(Traced::step(part, &[input, &tool]));
     }
     Ok(parts)
