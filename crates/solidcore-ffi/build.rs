@@ -97,8 +97,15 @@ fn main() {
     let lib_dir = cpp_dir.join("lib");
     let env_file = cpp_dir.join("ffi.env");
     let cc_json = cpp_dir.join("compile_commands.json");
+    // Cargo treats a missing rerun-if-changed path as always stale and reruns this
+    // script on every build. `ffi.env` is watched unconditionally (both the prebuilt
+    // reference and harness/cpp/build.sh write it, and if it is absent the rerun is
+    // what picks it up once it appears). `compile_commands.json` is only written by a
+    // from-source build, so it is watched only when it exists.
     println!("cargo:rerun-if-changed={}", env_file.display());
-    println!("cargo:rerun-if-changed={}", cc_json.display());
+    if cc_json.is_file() {
+        println!("cargo:rerun-if-changed={}", cc_json.display());
+    }
     println!("cargo:rerun-if-changed={}", lib_dir.display());
 
     let cfg = if env_file.is_file() {
