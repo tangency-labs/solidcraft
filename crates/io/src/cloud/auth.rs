@@ -13,7 +13,7 @@ pub trait NativeAccess: Send + Sync {
 pub(super) fn apply(command: &mut Command, connection: &Connection, token: &str) -> Result<()> {
     solidcraft_cloud::setup::check_token(token)?;
     let repository = solidcraft_cloud::setup::github_repository(&connection.repository)?;
-    if connection.provider != "github" || connection.remote != format!("https://github.com/{repository}.git") {
+    if connection.provider != "github" {
         return Err(Error::Invalid("reconnect this repository to use its GitHub token".into()));
     }
     // No interpolation into the shell snippet. Values read from Git are compared as data.

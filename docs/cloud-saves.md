@@ -174,7 +174,7 @@ continue beyond that limit.
 
 Native connection settings live in the private recovery root's `connections.json`,
 outside repository checkouts and ordinary UI preferences. Its
-`solidcraft-connections/1` envelope is bounded to 1 MiB, preserves compatible
+`solidcraft-connections/1` or `/2` envelope is bounded to 1 MiB, preserves compatible
 optional metadata (including connection fields matched by id), and refuses
 future formats before any replacement. Writes use the existing atomic writer
 and a separate settings lock; they do not wait on network synchronization.
@@ -261,3 +261,26 @@ from Start continues to apply the connection directly. Disconnect changes settin
 only; durable queues and credential storage retain their data. Restore Defaults
 uses `Settings::restore_behavior_defaults`, preserving connections and defaults.
 Testing and synchronization use the applied connection through existing commands.
+
+## Verified native remotes
+
+`cloud.test` accepts either a saved connection id or a `proposed` connection,
+plus an optional `git_executable` for that test. A native test returns the
+verified connection in the completed operation's `result`. The result includes
+the canonical checkout path and a `git_remote` record containing one fetch URL
+and all push URLs. Configure that returned connection through `cloud.configure`
+to retain the verified destinations. Testing itself leaves settings unchanged.
+An initial generic connection can use `id: "git"`; verification supplies a stable
+id derived from its checkout, branch and resolved destinations.
+
+Git resolves named remotes and URL rewrites. The adapter checks the stored
+endpoints before publication, fetches existing branch heads from the fetch and
+push destinations, and advances the checkout with fast-forward merges. Diverged
+histories retain the local save for the user to reconcile through Git. A missing
+remote branch receives its first publication. Pushes use the verified URLs, and
+publication is acknowledged only after every push destination confirms the commit.
+A changed remote requires verification before the captured save can be published.
+
+GitHub HTTPS credentials remain scoped to the chosen repository when a named
+remote resolves to that same repository. Endpoint checks run before credentialed
+network operations; Git's credential protocol still supplies the token.

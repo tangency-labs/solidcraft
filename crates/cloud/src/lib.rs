@@ -17,7 +17,7 @@ pub use configuration::{Configuration, MAX_SETTINGS_BYTES};
 pub use outbox::{PendingSave, StagedSave};
 pub use project::{Destination, PROJECT_MARKER, Project, check_path};
 pub use publication::{Publication, Published, revision};
-pub use settings::{Authentication, Connection, HostSetup, Settings, SshIdentity, github_setup};
+pub use settings::{Authentication, Connection, GitRemote, HostSetup, Settings, SshIdentity, github_setup};
 pub use snapshot::{Asset, CHUNK_BYTES, Chunk, Codec, FORMAT, MAX_ASSET_BYTES, MAX_MANIFEST_BYTES, Manifest, Snapshot, digest};
 
 /// Errors are classified so every host can offer the same recovery action.

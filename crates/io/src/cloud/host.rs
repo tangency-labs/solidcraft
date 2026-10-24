@@ -86,8 +86,11 @@ impl NativeHost {
             }
             Operation::Synchronize(connection) => Self::synchronize(connection, executable, outbox, job, None, access)?,
             Operation::Test(connection) => {
-                open_repository(connection, executable, job, access)?.test_connection()?;
-                job.update(|status| status.phase = Phase::Ready)?;
+                let connection = open_repository(connection, executable, job, access)?.verified_connection()?;
+                job.update(|status| {
+                    status.result = Some(serde_json::json!(connection));
+                    status.phase = Phase::Ready;
+                })?;
             }
             Operation::List(connection) => {
                 let mut destinations = BTreeMap::new();

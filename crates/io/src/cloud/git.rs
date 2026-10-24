@@ -8,6 +8,8 @@ use std::process::Command;
 pub use solidcraft_cloud::Published;
 use solidcraft_cloud::{Connection, Destination, Error, Manifest, PROJECT_MARKER, PendingSave, Publication, Result, Snapshot, SshIdentity};
 
+mod remotes;
+
 fn storage(error: impl std::fmt::Display) -> Error {
     Error::Storage(error.to_string())
 }
@@ -54,22 +56,11 @@ impl GitRepository {
     }
 
     fn check_token_destination(&self) -> Result<()> {
-        let remote = &self.connection.remote;
-        let fetch = self.text(&["ls-remote", "--get-url", remote])?;
-        if fetch != *remote {
-            return Err(storage("Git URL rewriting changes this GitHub destination; use advanced settings or remove that rewrite"));
-        }
-        // `remote get-url` does not resolve push rules for a literal URL. Reject matching
-        // push rewrites rather than maintaining a second implementation of Git's matching.
-        let config = self.run(&["config", "--null", "--list"], None)?;
-        for entry in config.split(|b| *b == 0).filter(|entry| !entry.is_empty()) {
-            let entry = std::str::from_utf8(entry).map_err(storage)?;
-            let (key, value) = entry.split_once('\n').unwrap_or((entry, ""));
-            if (key.starts_with("url.") && key.ends_with(".pushinsteadof") && remote.starts_with(value))
-                || (key == format!("remote.{remote}.pushurl") && value != remote)
-            {
-                return Err(storage("Git push URL rewriting changes this GitHub destination; use advanced settings or remove that rewrite"));
-            }
+        let repository = solidcraft_cloud::setup::github_repository(&self.connection.repository)?;
+        let expected = format!("https://github.com/{repository}.git");
+        let remote = self.remote_identity()?.ok_or_else(|| storage("choose this GitHub repository's remote"))?;
+        if remote.fetch != expected || remote.push.iter().any(|url| url != &expected) {
+            return Err(storage("Git URL rewriting changes this GitHub destination; verify the remote in Cloud Saves settings"));
         }
         Ok(())
     }
@@ -171,8 +162,10 @@ impl GitRepository {
         if self.token.is_some() {
             self.check_token_destination()?;
         }
-        if !self.connection.remote.is_empty() {
-            self.run(&["ls-remote", "--", &self.connection.remote], None)?;
+        if let Some(remote) = self.pinned_remote()? {
+            for url in std::iter::once(&remote.fetch).chain(&remote.push) {
+                self.run(&["ls-remote", "--", url], None)?;
+            }
         }
         Ok(())
     }
@@ -253,9 +246,9 @@ impl GitRepository {
             self.check_token_destination()?;
         }
         super::check_document(&snapshot.document)?;
-        if !self.connection.remote.is_empty() {
-            self.run(&["fetch", "--no-tags", "--", &self.connection.remote, &self.connection.branch], None)?;
-            self.run(&["merge", "--ff-only", "FETCH_HEAD"], None)?;
+        let remote = self.pinned_remote()?;
+        if let Some(remote) = &remote {
+            self.fetch_destinations(remote)?;
         }
         let base = self.text(&["rev-parse", "HEAD"])?;
         let prefix = save.destination.design_path()?;
@@ -352,13 +345,8 @@ impl GitRepository {
         if solidcraft_cloud::revision(&Manifest::read(&confirmed)?) != Some(save.id.as_str()) {
             return Err(Error::Conflict);
         }
-        if !self.connection.remote.is_empty() {
-            let refspec = format!("{commit}:refs/heads/{}", self.connection.branch);
-            self.run(&["-c", "push.followTags=false", "push", "--", &self.connection.remote, &refspec], None)?;
-            let remote = self.text(&["ls-remote", "--heads", "--", &self.connection.remote, &self.connection.branch])?;
-            if remote.split_whitespace().next() != Some(commit.as_str()) {
-                return Err(storage("remote publication could not be confirmed; queued copy retained"));
-            }
+        if let Some(remote) = &remote {
+            self.push_destinations(remote, &commit)?;
         }
         Ok(Published { destination: publication.destination, revision: save.id.clone(), commit, conflict: publication.conflict })
     }
@@ -507,10 +495,78 @@ mod tests {
         // A named origin is irrelevant: the guided connection uses an explicit destination.
         let safe = GitRepository::authenticated(connection.clone(), "", job.clone(), Some("test-token".into())).unwrap();
         assert_eq!(safe.setup_text(&["ls-remote", "--get-url", &connection.remote]).unwrap(), connection.remote);
+        Fixture::git(&fixture.checkout, &["config", "remote.guided.url", &connection.remote]);
+        let named = Connection { remote: "guided".into(), ..connection.clone() };
+        GitRepository::authenticated(named.clone(), "", job.clone(), Some("test-token".into())).unwrap();
+        Fixture::git(&fixture.checkout, &["config", "remote.guided.pushurl", "ssh://evil.test/other.git"]);
+        assert!(GitRepository::authenticated(named, "", job.clone(), Some("test-token".into())).is_err());
         Fixture::git(&fixture.checkout, &["config", "url.ssh://evil.test/.pushInsteadOf", "https://github.com/"]);
         assert!(GitRepository::authenticated(connection.clone(), "", job.clone(), Some("test-token".into())).is_err());
         Fixture::git(&fixture.checkout, &["config", "--unset-all", "url.ssh://evil.test/.pushInsteadOf"]);
         Fixture::git(&fixture.checkout, &["config", "url.ssh://evil.test/.insteadOf", "https://github.com/"]);
         assert!(GitRepository::authenticated(connection, "", job, Some("test-token".into())).is_err());
+    }
+
+    #[test]
+    fn named_remotes_confirm_every_push_destination_and_pin_their_configuration() {
+        let fixture = Fixture::new();
+        let generic = Connection { id: "git".into(), provider: String::new(), credential: String::new(), ..fixture.connection() };
+        let verified = GitRepository::open(generic.clone(), "").unwrap().verified_connection().unwrap();
+        assert!(verified.id.starts_with("git-"));
+        assert_eq!(GitRepository::open(generic, "").unwrap().verified_connection().unwrap(), verified);
+        Fixture::git(&fixture.root, &["clone", "--bare", "remote.git", "mirror.git"]);
+        let first = fixture.root.join("remote.git").to_string_lossy().into_owned();
+        let second = fixture.root.join("mirror.git").to_string_lossy().into_owned();
+        for url in [&first, &second] {
+            Fixture::git(&fixture.checkout, &["config", "--add", "remote.origin.pushurl", url]);
+        }
+        let connection = GitRepository::open(fixture.connection(), "").unwrap().verified_connection().unwrap();
+        assert_eq!(connection.git_remote.as_ref().unwrap().push, vec![first.clone(), second.clone()]);
+        let snapshot = super::super::prepare_document(&solidcraft_doc::Document::new("Pinned mirrors")).unwrap();
+        let staged = PendingSave::stage(&connection, "Robot project", "parts/bracket", None, snapshot).unwrap();
+        let repository = GitRepository::open(connection.clone(), "").unwrap();
+        let published = repository.publish(&staged.record, staged.record.recover(|p| Ok(staged.objects[p].clone())).unwrap()).unwrap();
+        for path in ["remote.git", "mirror.git"] {
+            assert_eq!(String::from_utf8(Fixture::git(&fixture.root.join(path), &["rev-parse", "main"])).unwrap().trim(), published.commit);
+        }
+        Fixture::git(&fixture.checkout, &["config", "--unset-all", "remote.origin.pushurl"]);
+        Fixture::git(&fixture.checkout, &["config", "remote.origin.pushurl", &second]);
+        assert!(repository.test_connection().unwrap_err().to_string().contains("destinations changed"));
+        let next = PendingSave::stage(
+            &connection,
+            "Robot project",
+            "parts/second",
+            None,
+            super::super::prepare_document(&solidcraft_doc::Document::new("Keep queued")).unwrap(),
+        )
+        .unwrap();
+        assert!(repository.publish(&next.record, next.record.recover(|p| Ok(next.objects[p].clone())).unwrap()).is_err());
+        assert!(!fixture.checkout.join("Robot project/parts/second").exists());
+    }
+
+    #[test]
+    fn a_distinct_push_destination_receives_its_first_branch_and_fetch_stays_intact() {
+        let fixture = Fixture::new();
+        Fixture::git(&fixture.root, &["init", "--bare", "--initial-branch=main", "empty push.git"]);
+        let push = format!("file://{}", fixture.root.join("empty push.git").display());
+        Fixture::git(&fixture.checkout, &["config", "remote.origin.pushurl", &push]);
+        let rewritten = format!("url.file://{}/redirect/.pushInsteadOf", fixture.root.display());
+        Fixture::git(&fixture.checkout, &["config", &rewritten, &format!("file://{}/", fixture.root.display())]);
+        let before = Fixture::git(&fixture.root.join("remote.git"), &["rev-parse", "main"]);
+        let connection = GitRepository::open(fixture.connection(), "").unwrap().verified_connection().unwrap();
+        let staged = PendingSave::stage(
+            &connection,
+            "Robot project",
+            "parts/bracket",
+            None,
+            super::super::prepare_document(&solidcraft_doc::Document::new("First push")).unwrap(),
+        )
+        .unwrap();
+        let repository = GitRepository::open(connection, "").unwrap();
+        let publication = repository.publish(&staged.record, staged.record.recover(|p| Ok(staged.objects[p].clone())).unwrap()).unwrap();
+        assert_eq!(Fixture::git(&fixture.root.join("remote.git"), &["rev-parse", "main"]), before);
+        assert_eq!(String::from_utf8(Fixture::git(&fixture.root.join("empty push.git"), &["rev-parse", "main"])).unwrap().trim(), publication.commit);
+        let again = repository.publish(&staged.record, staged.record.recover(|p| Ok(staged.objects[p].clone())).unwrap()).unwrap();
+        assert_eq!(again.commit, publication.commit);
     }
 }

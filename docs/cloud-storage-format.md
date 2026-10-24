@@ -67,3 +67,19 @@ recognize completed revisions without republishing or replacing a newer cached
 head. Browser receipts, cache updates and queue removal commit together in one
 IndexedDB transaction. Both adapters reject future local metadata formats before
 replacement. See [the implementation guide](cloud-saves.md#native-publication-catalog).
+
+## Local connection and queue versions
+
+Local connection envelopes support `solidcraft-connections/1` and `/2`.
+A configuration containing a verified native `git_remote` uses `/2`; it records
+the resolved fetch URL and the push URL list. Captures carrying those endpoints
+use `solidcraft-outbox/2`. Unpinned captures retain `solidcraft-outbox/1` and their
+existing revision identities. Both queue versions can be recovered by this reader.
+
+Readers that support only `/1` recognize `/2` as an upgrade requirement before
+using its data. Reading older records preserves their bytes; an explicit settings
+update atomically publishes the newer local envelope when required. These local
+records use the existing bounded, atomic settings and durable queue mechanisms.
+Endpoint pins become part of the captured connection identity, so changing or
+removing them cannot redirect that queued capture. Credentials are represented by
+local identifiers. Repository snapshots continue to use `solidcraft-cloud/1`.

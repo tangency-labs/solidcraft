@@ -67,6 +67,28 @@ fn configured() -> (Session, Arc<MockHost>, Destination) {
 }
 
 #[test]
+fn a_proposed_connection_can_be_tested_without_changing_saved_preferences() {
+    let (mut session, host, _) = configured();
+    let before = session.cloud_settings().clone();
+    let proposed = Connection {
+        id: "git".into(),
+        provider: String::new(),
+        checkout: "/example/checkout".into(),
+        credential: String::new(),
+        ..Default::default()
+    };
+    session.execute("cloud.test", &json!({"proposed":proposed, "git_executable":"/example/git"})).unwrap();
+    assert_eq!(session.cloud_settings(), &before);
+    let jobs = host.0.lock().unwrap();
+    let (_, Operation::Test(actual)) = jobs.last().unwrap() else { panic!("connection test") };
+    assert_eq!(actual, &proposed);
+    drop(jobs);
+    assert!(session.execute("cloud.test", &json!({"connection":"github","proposed":proposed})).is_err());
+    assert!(session.execute("cloud.test", &json!({"proposed":proposed,"git_executable":"git\nother"})).is_err());
+    assert_eq!(session.cloud_settings(), &before);
+}
+
+#[test]
 fn configuration_is_adopted_after_storage_and_failure_keeps_previous_settings() {
     struct SettingsHost(Mutex<Vec<Job>>);
     impl Host for SettingsHost {

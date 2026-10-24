@@ -29,7 +29,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("inspect")
         .noundo()
         .doc_only()
-        .params("connection?: connection id, defaults to selected destination; returns operation id"),
+        .params("connection?: saved connection id, or proposed?: connection to verify before configuring; git_executable?: override for this test; returns operation id and verified host metadata"),
     CommandSpec::new("cloud.list", "Open Repository", list)
         .icon("open")
         .noundo()
@@ -123,6 +123,11 @@ fn configure_operation(session: &mut Session, operation: Operation) -> Result<Va
 }
 
 fn submit(session: &mut Session, operation: Operation) -> Result<Value> {
+    let executable = session.cloud.settings.git_executable.clone();
+    submit_using(session, operation, executable)
+}
+
+fn submit_using(session: &mut Session, operation: Operation, executable: String) -> Result<Value> {
     // Retain active saves; bound terminal history to avoid unbounded state on long sessions.
     if session.cloud.jobs.len() >= 128 {
         let removable = session.cloud.jobs.iter().find_map(|(id, job)| {
@@ -150,7 +155,7 @@ fn submit(session: &mut Session, operation: Operation) -> Result<Value> {
         }
     }
     let host = session.cloud.host.as_ref().ok_or_else(|| bad("cloud", "cloud storage is unavailable in this host"))?;
-    let job = host.submit(operation, session.cloud.settings.git_executable.clone()).map_err(error)?;
+    let job = host.submit(operation, executable).map_err(error)?;
     let status = job.status().map_err(error)?;
     session.cloud.jobs.insert(status.operation.clone(), job);
     Ok(json!(status))
@@ -170,9 +175,34 @@ fn connection(session: &Session, params: &Value) -> Result<solidcraft_cloud::Con
     session.cloud.settings.destination(input.connection.as_deref()).cloned().map_err(error)
 }
 
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct Test {
+    connection: Option<String>,
+    proposed: Option<solidcraft_cloud::Connection>,
+    git_executable: Option<String>,
+}
+
 fn test(session: &mut Session, params: &Value) -> Result<Value> {
     session.poll_cloud()?;
-    submit(session, Operation::Test(connection(session, params)?))
+    if session.cloud_configuring() {
+        return Err(bad("cloud.test", "connection settings are still being stored or loaded"));
+    }
+    let input: Test = serde_json::from_value(params.clone()).map_err(|e| bad("cloud.test", e.to_string()))?;
+    let candidate = match input.proposed {
+        Some(connection) => {
+            if input.connection.is_some() {
+                return Err(bad("cloud.test", "choose a saved or proposed connection"));
+            }
+            connection.validate().map_err(error)?;
+            connection
+        }
+        None => session.cloud.settings.destination(input.connection.as_deref()).cloned().map_err(error)?,
+    };
+    let executable = input.git_executable.unwrap_or_else(|| session.cloud.settings.git_executable.clone());
+    let settings = Settings { git_executable: executable.clone(), ..Default::default() };
+    settings.validate().map_err(error)?;
+    submit_using(session, Operation::Test(candidate), executable)
 }
 fn list(session: &mut Session, params: &Value) -> Result<Value> {
     session.poll_cloud()?;
