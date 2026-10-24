@@ -1102,6 +1102,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let mut menu: Option<(egui::Pos2, &'static str)> = None;
         // A drop-down row's pin icon clicked: pin or unpin that command.
         let mut toggle: Option<&'static str> = None;
+        // A command dragged to another place in its own drop-down: (panel, command, before).
+        let mut menu_move: Option<(&'static str, &'static str, Option<&'static str>)> = None;
         // The open drop-down (a button dropped on it leaves the toolbar).
         let mut popup_rect: Option<Rect> = None;
         let mut overflow = Vec::new();
@@ -1199,6 +1201,10 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let gallery: Vec<_> = shown.iter().copied().filter(|c| app.toolbar_custom.in_gallery(&tab, panel, c.id)).collect();
             let large: Vec<_> = shown.iter().copied().filter(|c| !gallery.iter().any(|g| g.id == c.id)).collect();
             let drawn = if collapsed { 0 } else { plan.shown.min(button_widths.len()) };
+            // The commands the ribbon shows as buttons now (a narrow window shows fewer), which
+            // `ribbon_menus_skip_pinned` leaves out of the drop-down.
+            let on_ribbon: Vec<&str> =
+                large.iter().take(drawn).map(|c| c.id).chain(gallery.iter().filter(|_| !collapsed && drawn > large.len()).map(|c| c.id)).collect();
             // Buttons narrower than the panel's minimum width (a one-button panel) are centred.
             let buttons_width = button_widths.iter().take(drawn).sum::<f32>() + drawn.saturating_sub(1) as f32 * BUTTON_GAP;
             let inset = if drawn == 0 { 0.0 } else { ((width - 8.0 - buttons_width) / 2.0).max(0.0).floor() };
@@ -1446,6 +1452,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let open = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::new("sc_panel_open"))) == Some(popup_id);
             if open {
                 let cmds = if collapsed || trimmed { menu_commands(&cmds, &shown) } else { cmds.clone() };
+                let cmds = if app.preferences.ribbon_menus_skip_pinned { skip_on_ribbon(cmds, &on_ribbon) } else { cmds };
                 let area = Container::new(ui.ctx(), Surface::Popup).area(popup_id).fixed_pos(lr.left_bottom()).order(egui::Order::Foreground).show(
                     ui.ctx(),
                     |ui| {
@@ -1457,12 +1464,29 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                             } else if cmds.is_empty() {
                                 ui.label(egui::RichText::new(crate::i18n::tr_label("Not available yet")).color(t.text_dim));
                             }
-                            if sketch_create {
-                                sketch_create_menu(app, ui, &cmds, &mut menu, &mut toggle);
-                                section_footer(ui);
+                            if sketch_create && app.preferences.ribbon_icon_grid && !cmds.is_empty() {
+                                // Built from the families, not the panel's order: no reordering here.
+                                let action = dropdown_grid(app, ui, &tab, &sketch_create_grouped(&cmds), &mut Vec::new());
+                                grid_action(app, ui, action, &mut menu, &mut toggle);
                                 return;
                             }
-                            let grouped = crate::workspace::grouped_commands(&tab, panel, &cmds);
+                            if sketch_create {
+                                sketch_create_menu(app, ui, &cmds, &mut menu, &mut toggle);
+                                section_footer(ui, "ui.ribbon_pin_footer");
+                                return;
+                            }
+                            let grouped =
+                                crate::toolbar_custom::order_grouped(app, &tab, panel, crate::workspace::grouped_commands(&tab, panel, &cmds));
+                            // Where each command was drawn, for a drag to another place (#5080).
+                            let mut placed: Vec<(&'static str, Rect)> = Vec::new();
+                            if app.preferences.ribbon_icon_grid && !grouped.is_empty() {
+                                let action = dropdown_grid(app, ui, &tab, &grouped, &mut placed);
+                                if let Some((id, before)) = menu_drop(ui, &placed, true) {
+                                    menu_move = Some((*panel, id, before));
+                                }
+                                grid_action(app, ui, action, &mut menu, &mut toggle);
+                                return;
+                            }
                             let cmds: Vec<_> = grouped.iter().map(|(_, c)| *c).collect();
                             let row_w = dropdown_width(app, ui, &cmds);
                             ui.set_width(row_w);
@@ -1497,6 +1521,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                                         section_heading(ui, heading, row_w);
                                     }
                                     let pinned = crate::toolbar_custom::pinned_on(app, &tab, c.id).is_some();
+                                    placed.push((c.id, Rect::from_min_size(ui.cursor().min, vec2(row_w, ROW_H))));
                                     match dropdown_row(app, ui, c, row_w, pinned) {
                                         RowAction::None => {}
                                         RowAction::Menu(at) => menu = Some((at, c.id)),
@@ -1508,7 +1533,10 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     }
                                 }
                             });
-                            section_footer(ui);
+                            if let Some((id, before)) = menu_drop(ui, &placed, false) {
+                                menu_move = Some((*panel, id, before));
+                            }
+                            section_footer(ui, "ui.ribbon_pin_footer");
                         });
                     },
                 );
@@ -1578,6 +1606,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if let Some((id, panel, before)) = drop {
             crate::toolbar_custom::reorder(app, &tab, id, panel, before);
+        }
+        if let Some((panel, id, before)) = menu_move {
+            crate::toolbar_custom::move_in_menu(app, &tab, panel, id, before);
         }
         if let Some(id) = toggle {
             crate::toolbar_custom::toggle(app, &tab, id);
@@ -1695,26 +1726,31 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
     })
 }
 
+/// A group heading inside a panel drop-down (Edges, Faces…; Line, Rectangle…), in the list and
+/// the grid: a step below the drop-down's own header (`font_caption`) and written as named, not
+/// in capitals, so it reads as part of the menu rather than above it.
+fn group_heading_font() -> FontId {
+    crate::fonts::semibold(Tokens::get().font_micro)
+}
+
+/// A group heading's text: its name in the interface language, as written.
+fn group_heading_text(label: &str) -> String {
+    crate::i18n::tr_label(label).to_string()
+}
+
 fn section_heading(ui: &mut egui::Ui, label: &str, width: f32) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(width, 24.0), Sense::hover());
-    ui.painter().text(
-        rect.left_center() + vec2(6.0, 0.0),
-        Align2::LEFT_CENTER,
-        crate::i18n::tr_label(label).to_uppercase(),
-        crate::fonts::semibold(crate::theme::Tokens::get().font_small),
-        t.text_dim,
-    );
+    ui.painter().text(rect.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, group_heading_text(label), group_heading_font(), t.text_dim);
 }
 
-fn section_footer(ui: &mut egui::Ui) {
+/// The note under a panel drop-down on how pinning works: `message` is its catalog id.
+fn section_footer(ui: &mut egui::Ui, message: &str) {
     ui.separator();
     ui.add_space(4.0);
     ui.add(
-        egui::Label::new(
-            egui::RichText::new(crate::i18n::tr("ui.ribbon_pin_footer")).size(crate::theme::Tokens::get().font_small).color(Tokens::get().text_dim),
-        )
-        .wrap(),
+        egui::Label::new(egui::RichText::new(crate::i18n::tr(message)).size(crate::theme::Tokens::get().font_small).color(Tokens::get().text_dim))
+            .wrap(),
     );
     ui.add_space(4.0);
 }
@@ -1792,6 +1828,388 @@ fn dropdown_row(app: &SolveApp, ui: &mut egui::Ui, c: &'static solidcraft_engine
         Some(tip) => crate::command_help::tooltip(resp, c.id, tip),
         None => resp,
     };
+    if resp.secondary_clicked() {
+        return RowAction::Menu(resp.interact_pointer_pos().unwrap_or(rect.left_bottom()));
+    }
+    if resp.clicked() && info.enabled {
+        return RowAction::Start;
+    }
+    RowAction::None
+}
+
+/// A command of this drop-down dragged over it (#5080): a marker shows where it would go, before
+/// or after the command under the pointer (the nearer side: across in the grid, up or down in
+/// the list), and on release it goes there. `placed`: where each command was drawn, in order.
+/// Returns the command and the one it goes before (None: after the last).
+fn menu_drop(ui: &egui::Ui, placed: &[(&'static str, Rect)], grid: bool) -> Option<(&'static str, Option<&'static str>)> {
+    let dragged = egui::DragAndDrop::payload::<ToolbarDrag>(ui.ctx()).filter(|d| d.from_menu)?.id;
+    if !placed.iter().any(|(id, _)| *id == dragged) {
+        return None;
+    }
+    let pointer = ui.ctx().pointer_latest_pos()?;
+    let (at, &(_, rect)) = placed.iter().enumerate().find(|(_, (_, r))| r.contains(pointer))?;
+    let after = if grid { pointer.x > rect.center().x } else { pointer.y > rect.center().y };
+    let before = if after { placed.get(at + 1).map(|(id, _)| *id) } else { placed.get(at).map(|(id, _)| *id) };
+    let t = Tokens::get();
+    let painter = ui.ctx().layer_painter(ui.layer_id());
+    let stroke = Stroke::new(2.0, t.accent);
+    if grid {
+        let x = if after { rect.right() - 1.0 } else { rect.left() + 1.0 };
+        painter.line_segment([pos2(x, rect.top() + 4.0), pos2(x, rect.bottom() - 4.0)], stroke);
+    } else {
+        let y = if after { rect.bottom() - 1.0 } else { rect.top() + 1.0 };
+        painter.line_segment([pos2(rect.left() + 4.0, y), pos2(rect.right() - 4.0, y)], stroke);
+    }
+    crate::scenario::publish_handle("menu_drop_marker", pos2(if grid { rect.center().x } else { rect.left() }, rect.center().y));
+    if !ui.input(|i| i.pointer.any_released()) {
+        return None;
+    }
+    egui::DragAndDrop::take_payload::<ToolbarDrag>(ui.ctx())?;
+    Some((dragged, before))
+}
+
+/// Take up what was done in a grid drop-down, as for a list row: start the command (and close
+/// the drop-down), open its menu, or pin or unpin it.
+fn grid_action(
+    app: &mut SolveApp,
+    ui: &egui::Ui,
+    action: Option<(&'static str, RowAction)>,
+    menu: &mut Option<(egui::Pos2, &'static str)>,
+    toggle: &mut Option<&'static str>,
+) {
+    match action {
+        Some((id, RowAction::Menu(at))) => *menu = Some((at, id)),
+        Some((id, RowAction::TogglePin)) => *toggle = Some(id),
+        Some((id, RowAction::Start)) => {
+            app.start(id);
+            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sc_panel_open")));
+        }
+        Some((_, RowAction::None)) | None => {}
+    }
+}
+
+/// Sketch › Create in the grid: each family of variants under its own heading (Line, Rectangle,
+/// Circle…), then the other tools under "More". The list keeps its family sub-menus.
+fn sketch_create_grouped(cmds: &[&'static solidcraft_engine::CommandSpec]) -> Vec<(Option<&'static str>, &'static solidcraft_engine::CommandSpec)> {
+    let mut out = Vec::new();
+    for f in crate::sketch_families::FAMILIES {
+        let mut heading = Some(f.label);
+        for id in f.commands {
+            if let Some(c) = cmds.iter().find(|c| c.id == *id) {
+                out.push((heading.take(), *c));
+            }
+        }
+    }
+    let mut heading = Some("More");
+    for c in cmds.iter().filter(|c| crate::sketch_families::family(c.id).is_none()) {
+        out.push((heading.take(), *c));
+    }
+    out
+}
+
+/// A drop-down's commands without those the ribbon shows as buttons (`ribbon_menus_skip_pinned`),
+/// unless that leaves none.
+fn skip_on_ribbon(cmds: Vec<&'static solidcraft_engine::CommandSpec>, on_ribbon: &[&str]) -> Vec<&'static solidcraft_engine::CommandSpec> {
+    let rest: Vec<_> = cmds.iter().copied().filter(|c| !on_ribbon.contains(&c.id)).collect();
+    if rest.is_empty() { cmds } else { rest }
+}
+
+/// A grid drop-down's cell (#4739): the icon twice the size of a list row's, with room around it.
+const GRID_CELL: f32 = 48.0;
+const GRID_ICON: f32 = 32.0;
+/// Columns a grid fills before a second row; a panel with fewer commands is as wide as it needs.
+const GRID_COLUMNS: usize = 5;
+/// Rows at most: a bigger menu grows to the right instead (unless the window is too narrow).
+const GRID_ROWS: usize = 3;
+
+/// The height of a group's heading in a grid drop-down.
+const GRID_HEADING: f32 = 24.0;
+/// Icons side by side in a group's column, when groups stand side by side.
+const GROUP_COLUMNS: usize = 2;
+
+/// Where a grid drop-down puts things, relative to its top left: each command's icon with its
+/// (row, column) for the arrow keys, each group heading (where, how wide), the separators
+/// between groups side by side (their x), and the whole size.
+struct GridLayout {
+    cells: Vec<(Rect, (usize, usize))>,
+    headings: Vec<(egui::Pos2, f32, &'static str)>,
+    separators: Vec<f32>,
+    size: egui::Vec2,
+}
+
+/// Lay out a grid drop-down, at most [`GRID_ROWS`] high, growing to the right. A menu of two or
+/// more headed groups (Sketch › Create's families, Model › Modify's Edges, Faces…) puts the
+/// groups side by side, each heading over a column of its icons, [`GROUP_COLUMNS`] across (more
+/// for a group too big for three rows), when that fits in `room` (wide). Any other menu, or one
+/// too wide for the window, fills rows: [`GRID_COLUMNS`] across, more when that would take over
+/// three rows, fewer when the window is narrower; a heading starts a new row.
+fn grid_layout(grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)], room: f32) -> GridLayout {
+    let mut groups: Vec<(Option<&'static str>, Vec<usize>)> = Vec::new();
+    for (i, (heading, _)) in grouped.iter().enumerate() {
+        if heading.is_some() || groups.is_empty() {
+            groups.push((*heading, Vec::new()));
+        }
+        if let Some((_, items)) = groups.last_mut() {
+            items.push(i);
+        }
+    }
+    let group_columns = |n: usize| n.div_ceil(GRID_ROWS).max(GROUP_COLUMNS);
+    let headed = groups.iter().filter(|(h, _)| h.is_some()).count();
+    let side_columns: usize = groups.iter().map(|(_, items)| group_columns(items.len())).sum();
+    let side_by_side = headed >= 2 && side_columns as f32 * GRID_CELL <= room;
+    let mut cells = vec![(Rect::NOTHING, (0, 0)); grouped.len()];
+    let mut headings = Vec::new();
+    let mut separators = Vec::new();
+    let cell = |x: f32, y: f32| Rect::from_min_size(pos2(x, y), vec2(GRID_CELL, GRID_CELL));
+    let size = if side_by_side {
+        let (mut first_column, mut rows) = (0, 0);
+        for (g, (heading, items)) in groups.iter().enumerate() {
+            let columns = group_columns(items.len());
+            let x = first_column as f32 * GRID_CELL;
+            if g > 0 {
+                separators.push(x);
+            }
+            if let Some(h) = heading {
+                headings.push((pos2(x, 0.0), columns as f32 * GRID_CELL, *h));
+            }
+            for (k, i) in items.iter().enumerate() {
+                let (row, column) = (k / columns, k % columns);
+                if let Some(slot) = cells.get_mut(*i) {
+                    *slot = (cell(x + column as f32 * GRID_CELL, GRID_HEADING + row as f32 * GRID_CELL), (row, first_column + column));
+                }
+            }
+            rows = rows.max(items.len().div_ceil(columns));
+            first_column += columns;
+        }
+        vec2(first_column as f32 * GRID_CELL, GRID_HEADING + rows as f32 * GRID_CELL)
+    } else {
+        let n = grouped.len();
+        let fit = ((room / GRID_CELL).floor() as usize).max(1);
+        let columns = n.div_ceil(GRID_ROWS).max(n.min(GRID_COLUMNS)).min(fit).max(1);
+        let (mut y, mut first_row) = (0.0, 0);
+        for (heading, items) in &groups {
+            if let Some(h) = heading {
+                headings.push((pos2(0.0, y), columns as f32 * GRID_CELL, *h));
+                y += GRID_HEADING;
+            }
+            for (k, i) in items.iter().enumerate() {
+                let (row, column) = (k / columns, k % columns);
+                if let Some(slot) = cells.get_mut(*i) {
+                    *slot = (cell(column as f32 * GRID_CELL, y + row as f32 * GRID_CELL), (first_row + row, column));
+                }
+            }
+            let rows = items.len().div_ceil(columns);
+            y += rows as f32 * GRID_CELL;
+            first_row += rows;
+        }
+        vec2(columns as f32 * GRID_CELL, y)
+    };
+    GridLayout { cells, headings, separators, size }
+}
+
+/// An arrow key in a grid drop-down.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum GridKey {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// Where an arrow key moves the focus in a grid drop-down, as an index into `enabled` (the
+/// enabled commands, as indices into `cells`): Left and Right step through them in order, Up and
+/// Down to the nearest one in the row above or below, all wrapping. From none focused, Right
+/// and Down go to the first, Left and Up to the last.
+fn grid_step(cells: &[(usize, usize)], enabled: &[usize], at: Option<usize>, key: GridKey) -> Option<usize> {
+    let n = enabled.len();
+    if n == 0 {
+        return None;
+    }
+    let Some(at) = at.filter(|at| *at < n) else {
+        return Some(if matches!(key, GridKey::Right | GridKey::Down) { 0 } else { n - 1 });
+    };
+    let cell = |k: usize| enabled.get(k).and_then(|i| cells.get(*i)).copied();
+    match key {
+        GridKey::Right => Some((at + 1) % n),
+        GridKey::Left => Some((at + n - 1) % n),
+        GridKey::Up | GridKey::Down => {
+            let (row, column) = cell(at)?;
+            let rows: Vec<usize> = (0..n).filter_map(|k| cell(k).map(|c| c.0)).collect();
+            let target = if key == GridKey::Down {
+                rows.iter().copied().filter(|r| *r > row).min().or_else(|| rows.iter().copied().min())
+            } else {
+                rows.iter().copied().filter(|r| *r < row).max().or_else(|| rows.iter().copied().max())
+            }?;
+            (0..n)
+                .filter_map(|k| cell(k).filter(|c| c.0 == target).map(|c| (k, c.1.abs_diff(column))))
+                .min_by_key(|(_, distance)| *distance)
+                .map(|(k, _)| k)
+        }
+    }
+}
+
+/// Arrow keys move the keyboard focus through a grid drop-down's enabled icons ([`grid_step`]).
+fn grid_keys(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engine::CommandSpec], cells: &[(usize, usize)]) {
+    let key = ui.input(|i| {
+        [
+            (egui::Key::ArrowLeft, GridKey::Left),
+            (egui::Key::ArrowRight, GridKey::Right),
+            (egui::Key::ArrowUp, GridKey::Up),
+            (egui::Key::ArrowDown, GridKey::Down),
+        ]
+        .into_iter()
+        .find(|(k, _)| i.key_pressed(*k))
+        .map(|(_, key)| key)
+    });
+    let Some(key) = key else { return };
+    let enabled: Vec<usize> = cmds.iter().enumerate().filter(|(_, c)| c.info(&app.session).enabled).map(|(i, _)| i).collect();
+    let focused = ui.ctx().memory(|m| m.focused());
+    let at = enabled.iter().position(|i| cmds.get(*i).is_some_and(|c| focused == Some(dropdown_row_id(c.id))));
+    if let Some(c) = grid_step(cells, &enabled, at, key).and_then(|k| enabled.get(k)).and_then(|i| cmds.get(*i)) {
+        ui.ctx().memory_mut(|m| {
+            m.request_focus(dropdown_row_id(c.id));
+            m.move_focus(egui::FocusDirection::None);
+        });
+    }
+}
+
+/// A panel drop-down drawn as a grid of large icons (the `ribbon_icon_grid` preference, #4739):
+/// the same commands, headings and actions as the list, the names in the tooltips. Returns the
+/// command acted on, and how.
+fn dropdown_grid(
+    app: &SolveApp,
+    ui: &mut egui::Ui,
+    tab: &str,
+    grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)],
+    placed: &mut Vec<(&'static str, Rect)>,
+) -> Option<(&'static str, RowAction)> {
+    // Wide enough for groups side by side, short of the window's edge.
+    let room = ui.ctx().content_rect().right() - ui.cursor().left() - 24.0;
+    let layout = grid_layout(grouped, room);
+    let width = layout.size.x.max(200.0);
+    // A narrow grid sits in the middle of the drop-down's least width.
+    let inset = ((width - layout.size.x) / 2.0).max(0.0);
+    ui.set_width(width);
+    let cmds: Vec<_> = grouped.iter().map(|(_, c)| *c).collect();
+    let keys: Vec<(usize, usize)> = layout.cells.iter().map(|(_, at)| *at).collect();
+    grid_keys(app, ui, &cmds, &keys);
+    // Like the list, the grid scrolls when it would run past the window's bottom (#874).
+    let height = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(GRID_CELL * 2.0);
+    let mut action = None;
+    egui::ScrollArea::vertical().id_salt("panel_menu_grid").max_height(height).min_scrolled_height(height).show(ui, |ui| {
+        let (area, _) = ui.allocate_exact_size(vec2(width, layout.size.y), Sense::hover());
+        let origin = area.left_top() + vec2(inset, 0.0);
+        let t = Tokens::get();
+        for (at, w, heading) in &layout.headings {
+            let text = group_heading_text(heading);
+            let clip = ui.clip_rect().intersect(Rect::from_min_size(origin + at.to_vec2(), vec2(*w, GRID_HEADING)));
+            let painter = ui.painter().with_clip_rect(clip);
+            // Centred over its group's icons.
+            painter.text(origin + at.to_vec2() + vec2(w / 2.0, GRID_HEADING / 2.0), Align2::CENTER_CENTER, text, group_heading_font(), t.text_dim);
+        }
+        // A line between groups side by side, as between the ribbon's sections.
+        for x in &layout.separators {
+            let x = origin.x + x;
+            ui.painter().line_segment([pos2(x, origin.y + 4.0), pos2(x, origin.y + layout.size.y - 4.0)], Stroke::new(1.0, t.border));
+        }
+        for ((_, c), (rect, _)) in grouped.iter().zip(&layout.cells) {
+            let rect = rect.translate(origin.to_vec2());
+            let pinned = crate::toolbar_custom::pinned_on(app, tab, c.id).is_some();
+            placed.push((c.id, rect));
+            match dropdown_cell(app, ui, c, rect, pinned) {
+                RowAction::None => {}
+                done => action = Some((c.id, done)),
+            }
+        }
+    });
+    action
+}
+
+/// How long the pointer rests on a grid icon before its corner pin can be clicked (seconds).
+const PIN_DELAY: f64 = 2.0;
+
+/// Whether the corner pin of grid icon `id` takes clicks: the pointer (`on`) has rested on the
+/// icon for [`PIN_DELAY`]. One icon is timed at a time; the window redraws when the pin is due.
+fn pin_armed(ui: &egui::Ui, id: &'static str, on: bool) -> bool {
+    let key = egui::Id::new("sc_grid_pin_hover");
+    let now = ui.input(|i| i.time);
+    let since = ui.ctx().data_mut(|d| {
+        let rest = d.get_temp::<(&'static str, f64)>(key).filter(|(at, _)| *at == id);
+        match (on, rest) {
+            (true, Some((_, since))) => Some(since),
+            (true, None) => {
+                d.insert_temp(key, (id, now));
+                Some(now)
+            }
+            (false, Some(_)) => {
+                d.remove::<(&'static str, f64)>(key);
+                None
+            }
+            (false, None) => None,
+        }
+    });
+    let Some(since) = since else { return false };
+    let left = PIN_DELAY - (now - since);
+    if left > 0.0 {
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
+    }
+    left <= 0.0
+}
+
+/// One icon of a grid drop-down: clicked, dragged onto the ribbon (to pin it) or right-clicked
+/// like a list row; its tooltip is a ribbon button's (name, shortcut, help, why it is off), and a
+/// pin in its corner says it is on the ribbon.
+fn dropdown_cell(app: &SolveApp, ui: &mut egui::Ui, c: &'static solidcraft_engine::CommandSpec, rect: Rect, pinned: bool) -> RowAction {
+    let t = Tokens::get();
+    let info = c.info(&app.session);
+    let sense = if info.enabled { Sense::click_and_drag() } else { Sense::drag() };
+    let resp = ui.interact(rect, dropdown_row_id(c.id), sense);
+    if resp.has_focus() && !ui.clip_rect().contains_rect(rect) {
+        resp.scroll_to_me_animation(None, egui::style::ScrollAnimation::none());
+    }
+    if resp.drag_started() {
+        resp.dnd_set_drag_payload(ToolbarDrag { id: c.id, from_menu: true });
+    }
+    // The pin in the corner, as at a list row's end. It takes clicks (above the cell) only once
+    // the pointer has rested on the icon for PIN_DELAY: until then a click anywhere starts the
+    // command, so a quick click near the corner never pins or unpins it by accident.
+    let pr = Rect::from_min_size(pos2(rect.right() - 15.0, rect.top()), vec2(15.0, 15.0));
+    let dragging = egui::DragAndDrop::has_any_payload(ui.ctx());
+    let armed = pin_armed(ui, c.id, ui.rect_contains_pointer(rect) && !dragging);
+    let pin = armed.then(|| ui.interact(pr, ui.id().with(("dropdown_pin", c.id)), Sense::click()));
+    let pin_hovered = pin.as_ref().is_some_and(egui::Response::hovered);
+    let label = app.tr_label(c.label).to_string();
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && info.enabled, &label));
+    crate::scenario::publish_handle(&format!("toolbar:{}", c.id), rect.center());
+    crate::scenario::publish_handle(&format!("dropdown:{}", c.id), rect.center());
+    let pointer_on = (resp.hovered() || pin_hovered) && !dragging;
+    let hot = info.enabled && (pointer_on || resp.has_focus());
+    let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
+    let cell = rect.shrink(2.0);
+    if hot {
+        painter.rect_filled(cell, t.control_radius, t.accent_soft);
+        crate::scenario::publish_handle(&format!("dropdown_hot:{}", c.id), rect.center());
+    }
+    if resp.has_focus() {
+        painter.rect_stroke(cell, t.control_radius, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+    }
+    icons::paint_icon(&painter, Rect::from_center_size(rect.center(), vec2(GRID_ICON, GRID_ICON)), c.icon, if info.enabled { 1.0 } else { 0.4 });
+    // A pinned command always shows its pin, clear of the icon's own artwork; any other shows one
+    // to pin it once it can be clicked.
+    if pinned || armed {
+        if pin_hovered {
+            painter.rect_filled(pr, 3.0, t.border.gamma_multiply(0.6));
+        }
+        pin_icon(&painter, pr.shrink(2.5), pinned, if pinned { t.accent } else { t.text_dim });
+    }
+    if let Some(pin) = pin {
+        crate::scenario::publish_handle(&format!("dropdown_pin:{}", c.id), pr.center());
+        let tip = if pinned { "Remove from Toolbar" } else { "Pin to Toolbar" };
+        if pin.on_hover_text(crate::i18n::tr_label(tip)).clicked() {
+            return RowAction::TogglePin;
+        }
+    }
+    let resp = ribbon_tooltip(app, resp, c, info.disabled_reason.as_deref());
     if resp.secondary_clicked() {
         return RowAction::Menu(resp.interact_pointer_pos().unwrap_or(rect.left_bottom()));
     }
@@ -2736,6 +3154,393 @@ mod dropdown_tests {
         for (id, at) in &rows {
             assert!(menu.contains(*at), "{id} at {at:?} is cut off by the drop-down {menu:?}");
         }
+    }
+
+    /// The grid's rows: a heading starts a new one, and the arrow keys move along and between
+    /// them over the enabled icons only, wrapping at the ends (#4739).
+    #[test]
+    fn grid_rows_break_at_headings_and_arrow_keys_skip_disabled_icons() {
+        let c = |id| solidcraft_engine::find_command(id).unwrap();
+        let grouped = [
+            (Some("Primitives"), c("solid.box")),
+            (None, c("solid.cylinder")),
+            (None, c("solid.sphere")),
+            (None, c("solid.torus")),
+            (None, c("solid.pipe")),
+            (Some("Other"), c("solid.extrude")),
+            (None, c("solid.revolve")),
+        ];
+        // Too narrow for the groups side by side (two icons wide): rows as wide as the window, a
+        // heading starting a row.
+        let rows = grid_layout(&grouped, 100.0);
+        let at = |l: &GridLayout| l.cells.iter().map(|(_, at)| *at).collect::<Vec<_>>();
+        assert_eq!(at(&rows), [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (3, 0), (3, 1)]);
+        assert_eq!(rows.headings.len(), 2);
+        // Room enough: each group a column of two under its heading, the groups side by side.
+        let side = grid_layout(&grouped, 1000.0);
+        assert_eq!(at(&side), [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (0, 2), (0, 3)]);
+        let headings: Vec<_> = side.headings.iter().map(|(p, _, h)| (p.x, *h)).collect();
+        assert_eq!(headings, [(0.0, "Primitives"), (2.0 * GRID_CELL, "Other")]);
+        assert_eq!(side.size, vec2(4.0 * GRID_CELL, GRID_HEADING + 3.0 * GRID_CELL));
+        assert_eq!(side.separators, [2.0 * GRID_CELL], "a line between the two groups");
+        assert!(rows.separators.is_empty(), "rows have none");
+        assert!(side.cells.iter().all(|(r, _)| r.top() >= GRID_HEADING), "icons below the headings");
+        // A menu without groups keeps its rows of five.
+        let plain: Vec<_> = grouped.iter().map(|(_, c)| (None, *c)).collect();
+        assert_eq!(at(&grid_layout(&plain, 1000.0)), [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 0), (1, 1)]);
+        let cells = at(&side);
+        // `solid.pipe` (index 4) is disabled: `enabled` holds the others.
+        let enabled = [0, 1, 2, 3, 5, 6];
+        let step = |at, key| grid_step(&cells, &enabled, at, key).map(|k: usize| enabled[k]);
+        assert_eq!((step(None, GridKey::Right), step(None, GridKey::Down)), (Some(0), Some(0)));
+        assert_eq!((step(None, GridKey::Left), step(None, GridKey::Up)), (Some(6), Some(6)));
+        assert_eq!(step(Some(2), GridKey::Right), Some(3), "Right runs on into the next row");
+        assert_eq!(step(Some(0), GridKey::Left), Some(6), "and wraps");
+        assert_eq!(step(Some(1), GridKey::Down), Some(3), "Down goes to the nearest enabled icon below");
+        assert_eq!(step(Some(4), GridKey::Down), Some(3), "from the next group's column too");
+        assert_eq!(step(Some(2), GridKey::Down), Some(0), "from the last enabled row Down wraps to the first");
+        assert_eq!(step(Some(5), GridKey::Up), Some(3), "from the first row Up wraps to the last, nearest column");
+        assert_eq!(step(Some(1), GridKey::Up), Some(3));
+        assert_eq!(grid_step(&cells, &[], None, GridKey::Down), None);
+    }
+
+    /// Group headings sit below the drop-down's own header in the hierarchy: a smaller font than
+    /// the header's, and written as named rather than in capitals (list and grid alike).
+    #[test]
+    fn group_headings_are_smaller_than_the_drop_down_header() {
+        let t = Tokens::get();
+        assert!(group_heading_font().size < t.font_caption, "{} vs the header's {}", group_heading_font().size, t.font_caption);
+        assert_eq!(group_heading_text("Edges"), "Edges", "written as named, not in capitals");
+    }
+
+    /// Every panel's drop-down of every tab, and Sketch › Create's families, is at most
+    /// GRID_ROWS high in the grid when the window is wide enough: big menus grow to the right.
+    #[test]
+    fn every_grid_menu_is_at_most_three_rows_high() {
+        let rows = |l: &GridLayout| l.cells.iter().map(|(r, _)| r.top().round() as i32).collect::<std::collections::BTreeSet<_>>().len();
+        let tabs: std::collections::BTreeSet<&str> = crate::workspace::SECTIONS.iter().map(|s| s.tab).collect();
+        for tab in tabs {
+            for (panel, cmds, _) in crate::toolbar_custom::panel_lists(tab) {
+                let grouped = crate::workspace::grouped_commands(tab, panel, &cmds);
+                let layout = grid_layout(&grouped, 4000.0);
+                assert!(rows(&layout) <= GRID_ROWS, "{tab} {panel}: {} rows", rows(&layout));
+                if tab == "SKETCH" && panel == "CREATE" {
+                    let families = grid_layout(&sketch_create_grouped(&cmds), 4000.0);
+                    assert!(rows(&families) <= GRID_ROWS, "Sketch › Create families: {} rows", rows(&families));
+                }
+            }
+        }
+        // A window too narrow for the width wraps into more rows instead of running off it.
+        let c = |id| solidcraft_engine::find_command(id).unwrap();
+        let many: Vec<_> = solidcraft_engine::command_specs().into_iter().take(30).map(|c| (None, c)).collect();
+        let narrow = grid_layout(&many, 4.0 * GRID_CELL);
+        assert!(narrow.size.x <= 4.0 * GRID_CELL && rows(&narrow) > GRID_ROWS);
+        let few = [(None, c("solid.box")), (None, c("solid.sphere"))];
+        assert_eq!(grid_layout(&few, 4000.0).size, vec2(2.0 * GRID_CELL, GRID_CELL), "a small menu is one row");
+    }
+
+    /// With `ribbon_icon_grid` on, a panel's drop-down shows the same commands as its list, as
+    /// large icons in rows of at most five; arrow keys move across and down; a click starts the
+    /// command, and a drag pins it, as from the list (#4739).
+    #[test]
+    fn the_icon_grid_shows_the_lists_commands_and_acts_like_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1000}));
+        let open = |h: &mut crate::scenario::Harness| {
+            h.frames(4);
+            h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+            h.frames(6);
+            let menu = crate::scenario::rect_of("toolbar_dropdown").expect("the drop-down is open");
+            (menu, crate::scenario::handles("dropdown:"))
+        };
+        let (_, list) = open(&mut h);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(!h.app.preferences.ribbon_icon_grid, "the list stays the default");
+        h.call("ui.prefs", json!({"ribbon_icon_grid": true}));
+        assert!(h.app.preferences.ribbon_icon_grid);
+        let (menu, grid) = open(&mut h);
+        let ids = |rows: &[(String, egui::Pos2)]| rows.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&grid), ids(&list), "the grid shows the list's commands in its order");
+        assert!(grid.len() > GRID_COLUMNS * GRID_ROWS, "MODEL CREATE is a big menu: {grid:?}");
+        for (id, at) in &grid {
+            assert!(menu.contains(*at), "{id} at {at:?} is outside the drop-down {menu:?}");
+        }
+        let ys: std::collections::BTreeSet<i32> = grid.iter().map(|(_, at)| at.y.round() as i32).collect();
+        assert_eq!(ys.len(), GRID_ROWS, "laid out in {GRID_ROWS} rows, growing to the right: {ys:?}");
+        let columns = grid.len().div_ceil(GRID_ROWS);
+        assert!(menu.width() <= columns as f32 * GRID_CELL + 40.0, "no wider than its columns: {menu:?}");
+
+        let hot = |h: &mut crate::scenario::Harness, key: &str| {
+            h.step(&json!({"key": key})).unwrap();
+            h.frames(3);
+            let hot = crate::scenario::handles("dropdown_hot:");
+            let [(_, at)] = hot.as_slice() else { panic!("one highlighted icon after {key}: {hot:?}") };
+            *at
+        };
+        let first = hot(&mut h, "ArrowRight");
+        let second = hot(&mut h, "ArrowRight");
+        assert!(second.x > first.x && (second.y - first.y).abs() < 1.0, "Right moves along the row: {first:?} → {second:?}");
+        let below = hot(&mut h, "ArrowDown");
+        assert!(below.y > second.y, "Down moves to the row below: {second:?} → {below:?}");
+
+        h.step(&json!({"click":{"handle":"dropdown:solid.box"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("toolbar_dropdown").is_none(), "a click closes the drop-down");
+        assert!(h.app.dialog.is_some() || h.app.tool.is_some(), "and starts the command");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(3);
+
+        open(&mut h);
+        let label = crate::scenario::handle_at("panel:MODEL:CREATE").unwrap();
+        h.step(&json!({"drag":[{"handle":"dropdown:solid.cylinder"}, [label.x, label.y]],"steps":12})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.cylinder").is_some(), "dragged onto the ribbon, it is pinned");
+        assert!(h.app.session.doc.features.is_empty(), "pinning does not run the command");
+    }
+
+    /// A right-click on a drop-down's command, in the list and in the grid, opens its menu:
+    /// Pin to Toolbar, Remove from Toolbar and Pin to Shortcuts act on that command.
+    #[test]
+    fn a_right_click_in_the_drop_down_pins_and_unpins() {
+        for grid in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1000}));
+            h.app.preferences.ribbon_icon_grid = grid;
+            let pick = |h: &mut crate::scenario::Harness, item: &str| {
+                h.frames(4);
+                h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+                h.frames(4);
+                h.step(&json!({"click":{"handle":"dropdown:solid.box"},"button":"right"})).unwrap();
+                h.frames(4);
+                assert!(h.app.viewport.context_menu.is_some(), "grid {grid}: the right-click opens the command's menu");
+                h.step(&json!({"widget": item})).unwrap_or_else(|e| panic!("grid {grid}: {item}: {e}"));
+                h.frames(4);
+            };
+            pick(&mut h, "Pin to Toolbar");
+            assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), "grid {grid}: pinned");
+            pick(&mut h, "Remove from Toolbar");
+            assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_none(), "grid {grid}: unpinned");
+            pick(&mut h, "Pin to Shortcuts");
+            assert!(h.app.sbox.pinned.iter().any(|p| p == "solid.box"), "grid {grid}: a shortcut");
+            // The pin shown on the pointed-at row or icon pins it, and again unpins it. A grid
+            // icon's pin takes clicks only after the pointer has rested on it for PIN_DELAY.
+            for pinned in [true, false] {
+                h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+                h.frames(4);
+                h.step(&json!({"move":{"handle":"dropdown:solid.box"}})).unwrap();
+                h.frames(3);
+                if grid {
+                    assert!(crate::scenario::handle_at("dropdown_pin:solid.box").is_none(), "no pin to click straight away");
+                    h.frames((PIN_DELAY * 60.0) as usize + 5);
+                }
+                h.step(&json!({"click":{"handle":"dropdown_pin:solid.box"}})).unwrap();
+                h.frames(3);
+                h.step(&json!({"key":"Escape"})).unwrap();
+                assert_eq!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), pinned, "grid {grid}: the hover pin");
+            }
+            assert!(h.app.session.doc.features.is_empty(), "grid {grid}: pinning does not run the command");
+        }
+    }
+
+    /// A quick click on a grid icon's corner, where its pin appears after PIN_DELAY, starts the
+    /// command instead of pinning it.
+    #[test]
+    fn a_quick_click_on_the_pin_corner_starts_the_command() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1000}));
+        h.app.preferences.ribbon_icon_grid = true;
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+        h.frames(4);
+        let at = crate::scenario::handle_at("dropdown:solid.box").unwrap() + vec2(GRID_CELL / 2.0 - 7.0, -GRID_CELL / 2.0 + 7.0);
+        h.step(&json!({"click":[at.x, at.y]})).unwrap();
+        h.frames(3);
+        assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_none(), "not pinned");
+        assert!(h.app.dialog.is_some() || h.app.tool.is_some(), "the command starts");
+    }
+
+    /// A command pinned from the grid becomes a ribbon button; Remove from Toolbar in the
+    /// button's own right-click menu takes it off again, with both options on.
+    #[test]
+    fn a_pinned_button_is_removed_from_its_own_menu() {
+        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+            a_pinned_button_is_removed_in(mode);
+        }
+    }
+
+    fn a_pinned_button_is_removed_in(mode: crate::shell::LayoutMode) {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.set", json!({"layout":mode}));
+        h.call("ui.resize", json!({"width":1600,"height":1000}));
+        h.app.preferences.ribbon_icon_grid = true;
+        h.app.preferences.ribbon_menus_skip_pinned = true;
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+        h.frames(4);
+        h.step(&json!({"move":{"handle":"dropdown:solid.loft"}})).unwrap();
+        h.frames((PIN_DELAY * 60.0) as usize + 5);
+        h.step(&json!({"click":{"handle":"dropdown_pin:solid.loft"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(4);
+        assert!(crate::scenario::handle_at("button:solid.loft").is_some(), "pinned, Loft is a ribbon button");
+        h.step(&json!({"click":{"handle":"button:solid.loft"},"button":"right"})).unwrap();
+        h.frames(4);
+        assert!(h.app.viewport.context_menu.is_some(), "the button's menu opens");
+        h.step(&json!({"widget":"Remove from Toolbar"})).unwrap();
+        h.frames(4);
+        assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.loft").is_none(), "removed: {:?}", h.app.toolbar_custom.panels);
+        assert!(crate::scenario::handle_at("button:solid.loft").is_none(), "and gone from the ribbon");
+    }
+
+    /// A command dragged out of the drop-down, list or grid, and dropped on the ribbon (on a
+    /// button, the panel's label or its free space) is pinned there, in both layouts and with
+    /// pinned commands left out of the menus.
+    #[test]
+    fn a_command_dragged_from_the_drop_down_onto_the_ribbon_is_pinned() {
+        for (mode, labels) in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked].into_iter().flat_map(|m| [(m, true), (m, false)])
+        {
+            for grid in [false, true] {
+                for target in ["button", "label", "free"] {
+                    let mut h = crate::scenario::Harness::new();
+                    h.app.home.open = false;
+                    h.call("ui.set", json!({"layout":mode}));
+                    h.call("ui.resize", json!({"width":1600,"height":1000}));
+                    h.app.preferences.ribbon_labels = labels;
+                    h.app.preferences.ribbon_icon_grid = grid;
+                    h.app.preferences.ribbon_menus_skip_pinned = true;
+                    h.frames(4);
+                    let label = crate::scenario::handle_at("panel:MODEL:CREATE").unwrap();
+                    let panel = crate::scenario::rect_of("panel:MODEL:CREATE").unwrap();
+                    let to = match target {
+                        "button" => crate::scenario::handle_at("button:solid.revolve").unwrap(),
+                        "label" => label,
+                        _ => pos2(panel.right() - 3.0, label.y - 30.0),
+                    };
+                    h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+                    h.frames(4);
+                    // Slowly, as a hand drags: long enough for tooltips to show on the way.
+                    let from = crate::scenario::handle_at("dropdown:solid.box").unwrap();
+                    h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": to.x, "y1": to.y, "steps": 60, "hold_end": 60}));
+                    h.frames(4);
+                    let why = format!("{mode:?}, labels {labels}, grid {grid}, onto the {target}");
+                    assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), "{why}: pinned");
+                    assert!(h.app.session.doc.features.is_empty(), "{why}: not run");
+                }
+            }
+        }
+    }
+
+    /// #5080: a command dragged to another place in its drop-down (list or grid) goes there,
+    /// a marker showing where while dragging; the order stays after a restart, and dropped on
+    /// itself nothing changes. It is not pinned.
+    #[test]
+    fn a_command_dragged_inside_its_drop_down_moves_there() {
+        for grid in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1000}));
+            h.app.preferences.ribbon_icon_grid = grid;
+            let order = |h: &mut crate::scenario::Harness| {
+                h.frames(4);
+                h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+                h.frames(4);
+                let mut rows = crate::scenario::handles("dropdown:");
+                rows.sort_by_key(|(_, at)| (at.y.round() as i32, at.x.round() as i32));
+                rows.into_iter().map(|(id, _)| id.trim_start_matches("dropdown:").to_string()).collect::<Vec<_>>()
+            };
+            let before = order(&mut h);
+            let at_box = crate::scenario::handle_at("dropdown:solid.box").unwrap();
+            // The near side of Box: its left in the grid, its top in the list.
+            let to = at_box - if grid { vec2(GRID_CELL / 4.0, 0.0) } else { vec2(0.0, ROW_H / 4.0) };
+            let from = crate::scenario::handle_at("dropdown:solid.sphere").unwrap();
+            h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": to.x, "y1": to.y, "steps": 30, "hold_end": 10}));
+            h.frames(4);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            let after = order(&mut h);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            let pos = |v: &[String], id: &str| v.iter().position(|x| x == id).unwrap();
+            assert_eq!(pos(&after, "solid.sphere") + 1, pos(&after, "solid.box"), "grid {grid}: Sphere now before Box: {after:?}");
+            assert_eq!(after.len(), before.len());
+            assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.sphere").is_none(), "grid {grid}: not pinned");
+            h.step(&json!({"restart":"close"})).unwrap();
+            h.app.home.open = false;
+            h.app.preferences.ribbon_icon_grid = grid;
+            assert_eq!(order(&mut h), after, "grid {grid}: kept after a restart");
+        }
+    }
+
+    /// Sketch › Create in the grid shows every variant of each family (Line, Rectangle, …) under
+    /// the family's heading, then the other tools, as large icons; a click starts the tool.
+    #[test]
+    fn sketch_create_in_the_grid_shows_every_variant() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1000}));
+        h.app.preferences.ribbon_icon_grid = true;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"panel:SKETCH:CREATE"}})).unwrap();
+        h.frames(4);
+        let cells: Vec<String> = crate::scenario::handles("dropdown:").into_iter().map(|(id, _)| id).collect();
+        for id in ["sketch.line", "sketch.rectangle.center", "sketch.circle.three_point", "sketch.arc.tangent", "sketch.polygon.edge", "sketch.point"]
+        {
+            assert!(cells.iter().any(|c| *c == format!("dropdown:{id}")), "{id} is an icon of the grid: {cells:?}");
+        }
+        let grouped = sketch_create_grouped(
+            &solidcraft_engine::command_specs().into_iter().filter(|c| c.id.starts_with("sketch.rectangle")).collect::<Vec<_>>(),
+        );
+        assert_eq!(grouped.first().and_then(|(h, _)| *h), Some("Rectangle"));
+        assert!(grouped.iter().skip(1).all(|(h, _)| h.is_none()), "one heading per family");
+        h.step(&json!({"click":{"handle":"dropdown:sketch.rectangle.center"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("toolbar_dropdown").is_none(), "a click closes the drop-down");
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.rectangle.center"), "and starts the tool");
+    }
+
+    /// With `ribbon_menus_skip_pinned`, a drop-down leaves out the commands the ribbon shows as
+    /// buttons, in the list and in the grid; a panel too narrow for its buttons lists them again.
+    #[test]
+    fn pinned_commands_can_be_left_out_of_the_drop_down() {
+        for grid in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1000}));
+            h.app.preferences.ribbon_icon_grid = grid;
+            let rows = |h: &mut crate::scenario::Harness, panel: &str| {
+                h.frames(4);
+                h.step(&json!({"click":{"handle":panel}})).unwrap();
+                h.frames(4);
+                let rows: Vec<String> = crate::scenario::handles("dropdown:").into_iter().map(|(id, _)| id).collect();
+                h.step(&json!({"key":"Escape"})).unwrap();
+                rows
+            };
+            let all = rows(&mut h, "panel:MODEL:CREATE");
+            assert!(all.iter().any(|id| id == "dropdown:solid.extrude"), "grid {grid}: listed by default: {all:?}");
+            h.call("ui.prefs", json!({"ribbon_menus_skip_pinned": true}));
+            let rest = rows(&mut h, "panel:MODEL:CREATE");
+            for pinned in ["solid.extrude", "solid.revolve", "solid.hole"] {
+                assert!(!rest.iter().any(|id| *id == format!("dropdown:{pinned}")), "grid {grid}: {pinned} is on the ribbon: {rest:?}");
+            }
+            assert_eq!(rest.len() + 3, all.len(), "grid {grid}: only the ribbon's buttons are left out");
+            // In a window too narrow for the Extrude button, MODEL CREATE's menu lists it again.
+            let narrow = (3..=16).rev().map(|w| w as f32 * 100.0).find(|w| {
+                h.call("ui.resize", json!({"width": w, "height": 1000}));
+                h.frames(4);
+                crate::scenario::handle_at("button:solid.extrude").is_none()
+            });
+            assert!(narrow.is_some(), "grid {grid}: a narrow window has no room for the Extrude button");
+            let panel = ["panel:MODEL:CREATE", "collapsed:MODEL:CREATE"].into_iter().find(|p| crate::scenario::handle_at(p).is_some());
+            let Some(panel) = panel else { panic!("grid {grid}: MODEL CREATE is in the » menu at {narrow:?}") };
+            let folded = rows(&mut h, panel);
+            assert!(folded.iter().any(|id| id == "dropdown:solid.extrude"), "grid {grid}: Extrude, off the ribbon, is listed: {folded:?}");
+        }
+        let box_ = solidcraft_engine::find_command("solid.box").unwrap();
+        assert_eq!(skip_on_ribbon(vec![box_], &["solid.box"]).len(), 1, "a drop-down is never left empty");
     }
 }
 
