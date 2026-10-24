@@ -473,6 +473,22 @@ fn fits_note(size: Size, largest: Option<f64>) -> String {
     largest.map(|v| format!("; the largest {unit} that fits is {} mm", show(v))).unwrap_or_default()
 }
 
+// Whether a blend build is running only to verify the size a refusal's note names: a refusal
+// from inside such a build keeps the model's note (its text is usually thrown away, and
+// following it would explain blends by building blends).
+thread_local! {
+    static VERIFYING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Restore the previous state even if a verifying build unwinds to the kernel/session guard.
+struct RestoreVerification(bool);
+
+impl Drop for RestoreVerification {
+    fn drop(&mut self) {
+        VERIFYING.set(self.0);
+    }
+}
+
 /// Refuse a blend of `edges` at `size` that runs into other faces of `body` or into another of
 /// the blends, with [`KernelError::TooLarge`] naming the largest size that fits.
 pub(crate) fn check(body: &Body, edges: &[Vec3], size: Size) -> Result<()> {
@@ -493,9 +509,14 @@ fn check_in(sel: &Selection, size: Size) -> Result<()> {
     Err(KernelError::TooLarge(format!("{} mm is too large for this {what}: {into}{}", show(size.value()), fits_note(size, largest))))
 }
 
-/// A blend's refusal `e`, with the largest size that fits added when the size is why.
+/// A blend's refusal `e`, with a size that fits added when the size is why. The wedges
+/// model what fits geometrically, not everything the build refuses (#1955: a frame whose fillet
+/// fails at every radius was told the largest radius that fits is 4 mm), so at the top level the
+/// note names a size the build itself vouched for; inside a verifying build the model's word
+/// stands.
 pub(crate) fn explain(body: &Body, edges: &[Vec3], size: Size, e: KernelError) -> KernelError {
     let note = match misfit(body, edges, size) {
+        Ok(Some((_, Some(largest)))) if !VERIFYING.with(std::cell::Cell::get) => verified_note(size, largest, body, edges),
         Ok(Some((_, largest @ Some(_)))) => fits_note(size, largest),
         _ => return e,
     };
@@ -504,6 +525,36 @@ pub(crate) fn explain(body: &Body, edges: &[Vec3], size: Size, e: KernelError) -
         KernelError::Failed(m) => KernelError::Failed(format!("{m}{note}")),
         other => other,
     }
+}
+
+/// A size that fits and builds: the model's answer when a blend of `edges` really builds at
+/// it, else a smaller size found in at most four bisections. Nothing when none does: the model
+/// does not know every reason the build refuses. The bounded search does not establish a maximum.
+fn verified_note(size: Size, largest: f64, body: &Body, edges: &[Vec3]) -> String {
+    let asked = size.value();
+    verified_note_with(size, largest, |v| crate::blend::blend_builds(body, edges, size.scaled(v / asked)))
+}
+
+fn verified_note_with(size: Size, largest: f64, mut builds: impl FnMut(f64) -> bool) -> String {
+    let _restore = RestoreVerification(VERIFYING.replace(true));
+    let note = |v| {
+        let unit = if matches!(size, Size::Round(_)) { "radius" } else { "size" };
+        format!("; a {unit} that fits is {} mm", show(v))
+    };
+    if builds(largest) {
+        return note(largest);
+    }
+    let q = step(size.value());
+    let (mut lo, mut hi) = (0u64, (largest / q) as u64);
+    for _ in 0..4 {
+        let Some(mid) = (hi.saturating_sub(lo) > 1).then(|| lo + (hi - lo) / 2).filter(|m| *m > 0) else { break };
+        if builds(mid as f64 * q) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    if lo > 0 { note(lo as f64 * q) } else { String::new() }
 }
 
 /// A blend of `edges` at `size` that turned `input` into `out`, if it fits ([`check`]) and
@@ -649,4 +700,60 @@ fn show(v: f64) -> String {
 
 fn show_rounded(v: f64) -> String {
     format!("{v:.0}")
+}
+
+#[cfg(test)]
+mod verification_tests {
+    use super::*;
+
+    #[test]
+    fn verification_recovers_after_a_caught_panic() {
+        assert!(!VERIFYING.get());
+        let result = crate::guard("verification regression", || -> Result<()> {
+            verified_note_with(Size::Round(5.0), 4.0, |_| {
+                assert!(VERIFYING.get());
+                panic!("a blend build panicked");
+            });
+            Ok(())
+        });
+        assert!(matches!(result, Err(KernelError::Internal(_))));
+        assert!(!VERIFYING.get(), "later notes must still verify their suggestions");
+        let note = verified_note_with(Size::Round(5.0), 4.0, |_| {
+            assert!(VERIFYING.get());
+            true
+        });
+        assert_eq!(note, "; a radius that fits is 4 mm");
+        assert!(!VERIFYING.get());
+    }
+
+    #[test]
+    fn nested_verification_restores_the_previous_flag() {
+        verified_note_with(Size::Round(5.0), 4.0, |_| {
+            verified_note_with(Size::Round(2.0), 1.0, |_| true);
+            assert!(VERIFYING.get());
+            true
+        });
+        assert!(!VERIFYING.get());
+    }
+
+    #[test]
+    fn bounded_search_names_a_built_radius_without_claiming_a_maximum() {
+        let mut tried = Vec::new();
+        let note = verified_note_with(Size::Round(5.0), 4.0, |v| {
+            tried.push(v);
+            v <= 1.9
+        });
+        assert_eq!(tried, [4.0, 2.0, 1.0, 1.5, 1.75]);
+        assert_eq!(note, "; a radius that fits is 1.75 mm");
+        assert!(!VERIFYING.get());
+        let mut count = 0;
+        assert!(
+            verified_note_with(Size::Round(5.0), 4.0, |_| {
+                count += 1;
+                false
+            })
+            .is_empty()
+        );
+        assert_eq!(count, 5, "at most five extra builds per refusal");
+    }
 }

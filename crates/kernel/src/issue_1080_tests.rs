@@ -46,12 +46,25 @@ fn chamfer_into_a_pocket_is_refused_with_the_size_that_fits() {
 #[test]
 fn fillet_into_a_pocket_is_refused_and_one_that_fits_builds() {
     let p = pocketed();
-    // The round build refuses it itself; the largest radius that fits is added.
+    // The round build refuses it itself; a radius verified by a real build is added.
     let m = crate::fillet(&p, &[EDGE], 5.0).unwrap_err().to_string();
-    assert!(m.contains("the largest radius that fits is 4 mm"), "{m}");
+    assert!(m.contains("a radius that fits is 4 mm"), "{m}");
     let b = crate::fillet(&p, &[EDGE], 3.0).unwrap();
     assert!(b.validity().is_empty(), "{:?}", b.validity());
     assert_eq!(b.face_count(), p.face_count() + 1);
+}
+
+#[test]
+fn automatic_fitting_skips_the_verified_suggestion() {
+    let p = pocketed();
+    let quiet = crate::fillet_quiet(&p, &[EDGE], 5.0).unwrap_err();
+    assert!(!quiet.to_string().contains("radius that fits"), "{quiet}");
+    let explained = crate::fillet(&p, &[EDGE], 5.0).unwrap_err().to_string();
+    assert_eq!(explained, format!("{quiet}; a radius that fits is 4 mm"));
+    let quiet = crate::fillet_quiet(&p, &[EDGE], 3.0).unwrap();
+    let explained = crate::fillet(&p, &[EDGE], 3.0).unwrap();
+    assert!(quiet.validity().is_empty());
+    assert!((crate::measure(&quiet).unwrap().volume - crate::measure(&explained).unwrap().volume).abs() < 1e-6);
 }
 
 /// A rib 4 mm wide: chamfers of its two top edges meet in the middle of its top face at 2 mm;
@@ -64,7 +77,7 @@ fn chamfers_crossing_each_other_are_refused() {
     let m = too_large(crate::chamfer(&rib, &edges, 3.0));
     assert!(m.contains("would cross each other") && m.contains("the largest size that fits is 2 mm"), "{m}");
     let m = crate::fillet(&rib, &edges, 3.0).unwrap_err().to_string();
-    assert!(m.contains("the largest radius that fits is 2 mm"), "{m}");
+    assert!(m.contains("a radius that fits is 2 mm"), "{m}");
     // Below half the width both build.
     let b = crate::chamfer(&rib, &edges, 1.5).unwrap();
     assert!((b.volume_at(0.01).unwrap() - (3200.0 - 2.0 * 0.5 * 1.5 * 1.5 * 40.0)).abs() < 1e-6);
