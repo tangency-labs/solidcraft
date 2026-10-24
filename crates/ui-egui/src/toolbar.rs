@@ -864,7 +864,7 @@ fn ribbon_button_galley(painter: &egui::Painter, label: &str, width: f32, color:
 /// Ribbon headings use the translated labels, with normal word casing instead of registry caps.
 fn ribbon_label(app: &SolveApp, label: &str) -> String {
     let label = app
-        .tr_label(label)
+        .tr_label(crate::workspace::tab_label(label))
         .split_whitespace()
         .map(|word| {
             let lower = word.to_lowercase();
@@ -912,7 +912,32 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
     let floating = Container::for_layout(app.ui.layout, Surface::Panel).floating();
     let inset = RIBBON_TAB_INSET;
     let corner = if floating { t.radius_lg.saturating_sub(inset as u8).max(t.radius_sm / 2) } else { t.control_radius.saturating_sub(1) };
-    let search = Rect::from_min_size(pos2(row.right() - search_width - inset, row.top() + inset), vec2(search_width, TAB_ROW_HEIGHT - 2.0 * inset));
+    let render = crate::render_workspace::active(app);
+    let action_labels = [app.tr_label("Render").to_string(), app.tr_label("Cancel").to_string()];
+    let action_widths = action_labels
+        .each_ref()
+        .map(|label| ui.painter().layout_no_wrap(label.clone(), crate::fonts::semibold(t.font_button), t.text).size().x + 24.0);
+    let action_width = if render { action_widths.iter().sum::<f32>() + 2.0 * t.space_2 } else { 0.0 };
+    let search = Rect::from_min_size(
+        pos2(row.right() - search_width - inset - action_width, row.top() + inset),
+        vec2(search_width, TAB_ROW_HEIGHT - 2.0 * inset),
+    );
+    if render {
+        let mut x = search.right() + t.space_2;
+        for ((id, label), width) in ["render.start", "render.cancel"].into_iter().zip(action_labels).zip(action_widths) {
+            let rect = Rect::from_min_size(pos2(x, row.top() + inset), vec2(width, search.height()));
+            let ready = crate::render_workspace::job_ready(app, id);
+            let response = crate::ui_kit::button_at(ui, id, rect, label, crate::ui_kit::Button::Enabled(ready.is_ok()));
+            crate::scenario::publish_target(&format!("ribbon:{id}"), response.rect);
+            if response.clicked() {
+                app.start(id);
+            }
+            if let Err(reason) = ready {
+                response.on_disabled_hover_text(reason);
+            }
+            x += width + t.space_2;
+        }
+    }
     // The single editor is drawn on the foreground layer by shortcut_box::show, so it
     // can grow over the ribbon without being clipped to the tab row.
     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_ribbon_search"), search));
@@ -1151,17 +1176,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let right = r.right();
         // The Sketch exit group follows the last sketch panel, and is always kept room for so it
         // stays reachable at every width; when panels go into the » menu it moves to the far right.
-        let finish_plan = sizes.last().and_then(|size| {
-            if tab == "SKETCH" {
-                Some(Plan::full(size))
-            } else if tab == "RENDER" {
-                // Personal pins remain uncapped: extra Image actions use the same
-                // trimming/menu policy rather than overflowing a fixed reservation.
-                fit(std::slice::from_ref(size), (right - 4.0 - px).clamp(0.0, 240.0)).pop()
-            } else {
-                None
-            }
-        });
+        let finish_plan = sizes.last().and_then(|size| if tab == "SKETCH" { Some(Plan::full(size)) } else { None });
         let finish_width = finish_plan.as_ref().map_or(0.0, |p| p.width().max(80.0));
         let normal_count = sizes.len().saturating_sub(usize::from(finish_plan.is_some()));
         let mut plans = fit(sizes.get(..normal_count).unwrap_or_default(), right - 4.0 - px - finish_width);
@@ -1182,7 +1197,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let collapsed = plan.fit == Fit::Collapsed;
             let trimmed = plan.shown < plan.widths.len();
             let finish = tab == "SKETCH" && *panel == "FINISH SKETCH";
-            let pinned = finish || (tab == "RENDER" && *panel == "IMAGE");
+            let pinned = finish;
             let width = if pinned { finish_width } else { plan.width() };
             if pinned && finish_right {
                 px = right - finish_width;
@@ -1274,7 +1289,12 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 let accent = crate::theme::TabAccent::for_tab(&t, &tab);
                 let family_open = family.is_some_and(|f| egui::Popup::is_id_open(ui.ctx(), ui.id().with(("family", f.label)).with("popup")));
-                if !finish && (resp.is_pointer_button_down_on() || running.as_deref() == Some(selected.id) || family_open) {
+                if !finish
+                    && (resp.is_pointer_button_down_on()
+                        || running.as_deref() == Some(selected.id)
+                        || family_open
+                        || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip))
+                {
                     painter.rect(whole, t.radius_sm, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
                 } else if resp.hovered() && info.enabled {
                     painter.rect_filled(whole, t.radius_sm, t.hover);
@@ -1690,7 +1710,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
             ui.add(egui::Label::new(egui::RichText::new(help).color(t.text_dim)).wrap());
         }
         if let Some(reason) = disabled {
-            ui.add(egui::Label::new(egui::RichText::new(reason).color(t.text_dim)).wrap());
+            ui.add(egui::Label::new(egui::RichText::new(app.tr_label(reason)).color(t.text_dim)).wrap());
         }
     })
 }
@@ -1767,6 +1787,9 @@ fn dropdown_row(app: &SolveApp, ui: &mut egui::Ui, c: &'static solidcraft_engine
     let hot = info.enabled && (pointer_on || resp.has_focus());
     let mut row = crate::ui_kit::MenuItem::new(c.id, &label, c.icon);
     row.enabled = info.enabled;
+    if c.id == "view.shots_strip" {
+        row.checked = Some(app.preferences.render_shots_strip);
+    }
     row.highlighted = hot;
     let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
     row.shortcut = &shortcut;
@@ -1787,7 +1810,7 @@ fn dropdown_row(app: &SolveApp, ui: &mut egui::Ui, c: &'static solidcraft_engine
         return RowAction::TogglePin;
     }
     // A disabled row says why; a documented command also shows its help (#2758).
-    let reason = info.disabled_reason.as_deref().filter(|_| !info.enabled);
+    let reason = info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason));
     let resp = match crate::command_help::row_tip(c.id, &label, c.shortcut, reason) {
         Some(tip) => crate::command_help::tooltip(resp, c.id, tip),
         None => resp,

@@ -9,16 +9,17 @@ fn fixture() -> Harness {
     h
 }
 #[test]
-fn native_inspector_defaults_to_scene_and_keeps_job_actions_on_screen_in_both_shells() {
+fn native_inspector_defaults_to_output_and_keeps_job_actions_on_screen_in_both_shells() {
     for dark in [false, true] {
         for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
             let mut h = fixture();
             h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
             h.app.ui.layout = layout;
             h.call("ui.resize", json!({"width":1280,"height":900}));
-            assert_eq!(h.app.render_workspace.view.inspector.page, Page::Scene);
+            assert_eq!(h.app.render_workspace.view.inspector.page, Page::Output);
             let before = h.app.session.doc.to_json();
             let revision = h.app.session.revision;
+            let history = (h.app.session.undo.len(), h.app.session.redo.len());
             for page in Page::ALL {
                 h.app.render_workspace.view.inspector.page = page;
                 h.frames(3);
@@ -31,6 +32,9 @@ fn native_inspector_defaults_to_scene_and_keeps_job_actions_on_screen_in_both_sh
                 }
                 assert_eq!(h.app.session.doc.to_json(), before);
                 assert_eq!(h.app.session.revision, revision);
+                assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+                assert!(h.app.render_workspace.view.job.is_none());
+                assert!(h.app.render_workspace.view.completed.is_none());
             }
         }
     }
@@ -41,7 +45,7 @@ fn icon_page_navigation_is_local_and_never_switches_executor_or_overwrites_draft
     let before = h.app.session.doc.to_json();
     h.app.render_workspace.view.samples = 37;
     h.app.render_workspace.view.draft.width = 777;
-    for page in [Page::Appearance, Page::Camera, Page::Output, Page::Diagnostics, Page::Scene] {
+    for page in Page::ALL {
         h.step(&json!({"click":{"handle":format!("render:page:{}",page.handle())}})).unwrap();
         assert_eq!(h.app.render_workspace.view.inspector.page, page);
         assert_eq!(h.app.render_workspace.view.method, ImageMethod::Raster);
@@ -273,7 +277,7 @@ fn ribbon_navigation_reuses_inspector_and_preserves_exact_unsaved_intent() {
     h.app.render_workspace.view.samples = 37;
     h.app.render_workspace.view.draft.width = 777;
     let doc = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
     for (id, page) in [
         ("render.preset.resolve", Page::Scene),
         ("render.settings.get", Page::Scene),
@@ -287,6 +291,22 @@ fn ribbon_navigation_reuses_inspector_and_preserves_exact_unsaved_intent() {
         ("render.status", Page::Diagnostics),
         ("render.camera.get", Page::Camera),
         ("render.camera.set", Page::Camera),
+        ("render.preset.apply", Page::Scene),
+        ("render.shot.duplicate", Page::Scene),
+        ("render.shot.rename", Page::Scene),
+        ("render.shot.remove", Page::Scene),
+        ("render.optics.bind", Page::Appearance),
+        ("render.optics.unbind", Page::Appearance),
+        ("render.library.surface.prepare", Page::Appearance),
+        ("render.library.surface.unbind", Page::Appearance),
+        ("render.library.physical.prepare", Page::Appearance),
+        ("render.stage.ground", Page::Background),
+        ("render.stage.clear", Page::Background),
+        ("render.hdr.inspect", Page::Environment),
+        ("render.settings.capture_hdr", Page::Environment),
+        ("render.aging.describe", Page::Aging),
+        ("render.effects.describe", Page::Effects),
+        ("render.backends", Page::Diagnostics),
     ] {
         h.app.start(id);
         h.frames(3);
@@ -294,32 +314,49 @@ fn ribbon_navigation_reuses_inspector_and_preserves_exact_unsaved_intent() {
         assert_eq!(h.app.render_workspace.view.samples, 37);
         assert_eq!(h.app.render_workspace.view.draft.width, 777);
         assert_eq!(h.app.session.doc.to_json(), doc, "navigation may not execute a parameterless apply");
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert!(h.app.render_workspace.view.job.is_none());
+        assert!(h.app.render_workspace.view.completed.is_none());
         assert!(!crate::icon_svg::resolve(solidcraft_engine::find_command(id).unwrap().icon).placeholder);
     }
 }
 
 #[test]
-fn render_ribbon_has_six_shared_groups_and_keeps_image_actions_at_narrow_widths() {
-    assert_eq!(crate::workspace::panels("RENDER"), vec!["SCENE", "APPEARANCE", "LIGHTING", "ENVIRONMENT", "CAMERA", "IMAGE"]);
+fn render_ribbon_has_task_groups_and_preserves_personal_pins_at_narrow_widths() {
+    assert_eq!(crate::workspace::panels("RENDER"), vec!["IMAGE", "RENDER", "RESULT", "BATCH"]);
     for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
         let mut h = fixture();
         h.app.ui.layout = layout;
         for width in [800, 1024, 1440, 2000] {
             h.call("ui.resize", json!({"width":width,"height":900}));
             h.frames(3);
-            for id in ["render.start", "render.preflight"] {
-                let r = crate::scenario::rect_of(&format!("button:{id}")).expect("pinned Image action");
-                assert!(r.left() >= 0. && r.right() <= width as f32, "{layout:?} {width} {id}: {r:?}");
+            for tab in crate::workspace::RENDER_TABS {
+                h.app.ui.tab = (*tab).into();
+                h.frames(3);
+                let start = crate::scenario::rect_of("ribbon:render.start").unwrap();
+                let cancel = crate::scenario::rect_of("ribbon:render.cancel").unwrap();
+                assert!(start.right() <= cancel.left());
+                assert!(cancel.right() <= width as f32, "{layout:?} {width} {tab}: {cancel:?}");
+                for id in ["render:check", "render:start"] {
+                    let r = crate::scenario::rect_of(id).expect("pinned inspector job action");
+                    assert!(r.left() >= 0. && r.right() <= width as f32, "{layout:?} {width} {id}: {r:?}");
+                }
+                assert!(super::super::job_ready(&h.app, "render.cancel").is_err());
+                h.app.status = None;
+                h.step(&json!({"click":{"handle":"ribbon:render.cancel"}})).unwrap();
+                assert!(h.app.render_workspace.view.job.is_none());
+                assert!(h.app.status.is_none(), "disabled Cancel cannot execute");
             }
         }
-        h.app.toolbar_custom.panels.insert("DESIGN/RENDER/SCENE".into(), vec!["render.scene".into()]);
-        h.app.toolbar_custom.panels.insert("DESIGN/RENDER/IMAGE".into(), vec!["render.export".into(), "render.start".into()]);
+        h.app.ui.tab = "RENDER".into();
+        h.app.toolbar_custom.panels.insert("DESIGN/RENDER CAMERA/VIEW".into(), vec!["render.scene".into()]);
+        h.app.toolbar_custom.panels.insert("DESIGN/RENDER/RESULT".into(), vec!["render.export".into(), "render.start".into()]);
         let before = h.app.toolbar_custom.prefs();
         h.frames(3);
         assert_eq!(h.app.toolbar_custom.prefs(), before, "default expansion must not replace personal pins");
-        assert!(crate::scenario::rect_of("button:render.scene").is_some());
         assert!(crate::scenario::rect_of("button:render.export").is_some());
+        h.step(&json!({"click":{"handle":"tab:RENDER CAMERA"}})).unwrap();
+        assert!(crate::scenario::rect_of("button:render.scene").is_some());
     }
 }
 
@@ -335,7 +372,7 @@ fn ribbon_and_sticky_footer_submit_the_current_draft_not_defaults_or_saved_shot(
     assert!(export.info(&h.app.session).enabled, "UI state must not alter direct engine API semantics");
     h.app.start("render.preflight");
     let request = super::super::image_request(&h.app).unwrap();
-    h.app.start("render.start");
+    h.step(&json!({"click":{"handle":"ribbon:render.start"}})).unwrap();
     let job = h.app.render_workspace.view.job.expect("ribbon submitted an actual job");
     let handle = h.app.session.render_job_handle(job).unwrap();
     assert_eq!((handle.status().unwrap().request.width, handle.status().unwrap().request.height), (32, 24));
@@ -658,4 +695,39 @@ fn camera_draft_uses_render_command_and_keeps_saved_design_unchanged() {
         assert_eq!(h.app.session.doc.to_json(), document);
         assert_eq!(h.app.session.undo.len(), undo);
     }
+}
+
+#[test]
+fn shots_strip_uses_the_existing_dirty_shot_confirmation() {
+    let mut h = fixture();
+    h.app.render_workspace.view.name = "A".into();
+    setups::save(&mut h.app).unwrap();
+    h.app.run("render.settings.set", json!({"name":"B","set":{"width":321,"job":{"method":"raster"}}})).unwrap();
+    h.app.render_workspace.view.draft.width = 123;
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"render:shots:setup:B"}})).unwrap();
+    assert!(confirmation_open(&h.app));
+    assert_eq!(h.app.render_workspace.view.name, "A");
+    h.step(&json!({"widget":h.app.tr("render.keep_editing")})).unwrap();
+    assert_eq!(h.app.render_workspace.view.draft.width, 123);
+    h.step(&json!({"click":{"handle":"render:shots:setup:B"}})).unwrap();
+    h.step(&json!({"widget":h.app.tr("render.discard_continue")})).unwrap();
+    assert_eq!(h.app.render_workspace.view.name, "B");
+    assert_eq!(h.app.render_workspace.view.draft.width, 321);
+}
+
+#[test]
+fn shots_strip_render_submits_the_current_job_request() {
+    let mut h = fixture();
+    h.app.render_workspace.view.draft.width = 24;
+    h.app.render_workspace.view.draft.height = 16;
+    h.app.render_workspace.view.draft.background = [31, 57, 83];
+    let document = h.app.session.doc.clone();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"render:shots:render"}})).unwrap();
+    let job = h.app.render_workspace.view.job.unwrap();
+    let status = h.app.session.render_job_handle(job).unwrap().status().unwrap();
+    assert_eq!((status.request.width, status.request.height), (24, 16));
+    assert_eq!(status.request.background, [31, 57, 83]);
+    assert_eq!(h.app.session.doc, document);
 }

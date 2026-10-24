@@ -25,6 +25,14 @@ preferences, manager cards, prompts, context menus and the sketch palette. Impor
   expression, hinted expression, plain text and dropdown controls. They preserve row order,
   labels, focus IDs and completion; callers keep Enter/change ownership and explicit dropdown IDs.
   `count_row` composes `row` with `count_field` for pattern quantities.
+- `Panel::workspace` owns grip-based left/right placement and bounded width resizing for
+  floating workspace cards, including in Compact ribbon layouts. It reuses the 40 pt
+  Panel/Window header and padded body, with no second top inset below the ribbon.
+  Persistent workspace cards omit the close action. `Panel::bottom_strip`
+  uses `Container::bottom_strip_rect`, the same placement as Design History.
+  `Container::navigation_card` supplies the shared Navigation surface for anchored HUDs.
+  Register measured card rectangles and reserved edges with `shell::register_panel` so
+  fitting and pointer shielding agree. Feature modules provide content, never outer chrome.
 - `Panel` owns bounded windows, feature/palette composition, scrolling bodies,
   pinned actions, compute status and keyboard routing. `wide()` uses three card
   widths. `feature_frame` and `palette_frame` retain docked/floating surfaces.

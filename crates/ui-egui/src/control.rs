@@ -412,8 +412,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                             v.hidden_folders.push(SKETCHES_FOLDER.to_string());
                         }
                     }
-                    if (u.tab == "RENDER") != crate::render_workspace::active(app)
-                        && let Err(e) = crate::render_workspace::enter(app, u.tab == "RENDER")
+                    if crate::workspace::render_tab(&u.tab) != crate::render_workspace::active(app)
+                        && let Err(e) = crate::render_workspace::enter(app, crate::workspace::render_tab(&u.tab))
                     {
                         return err(e);
                     }

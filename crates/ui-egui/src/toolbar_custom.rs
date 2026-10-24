@@ -40,10 +40,11 @@ impl ToolbarCustom {
     }
 
     pub fn prefs(&self) -> Value {
-        json!({"version": 2, "panels": self.panels, "gallery_buttons": self.gallery_buttons})
+        json!({"version": 3, "panels": self.panels, "gallery_buttons": self.gallery_buttons})
     }
     pub fn load(&mut self, v: &Value) {
-        let current = v.get("version").and_then(Value::as_u64) == Some(2);
+        let version = v.get("version").and_then(Value::as_u64).unwrap_or(0);
+        let current = version >= 2;
         let panels = if current { v.get("panels").unwrap_or(&Value::Null) } else { v };
         self.panels = panels
             .as_object()
@@ -73,7 +74,57 @@ impl ToolbarCustom {
         if !current {
             self.migrate();
         }
+        if version < 3 {
+            self.migrate_render_tabs();
+        }
     }
+    /// Split the former six-section Render ribbon without losing personal pins or removals.
+    fn migrate_render_tabs(&mut self) {
+        let mut migrated_panels: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (old_tab, old, targets) in [
+            ("RENDER", "SCENE", &[("RENDER CAMERA", "SHOTS"), ("RENDER CAMERA", "VIEW"), ("RENDER SCENE", "STUDIO")][..]),
+            ("RENDER", "APPEARANCE", &[("RENDER APPEARANCE", "APPEARANCE")][..]),
+            ("RENDER", "LIGHTING", &[("RENDER SCENE", "STUDIO")][..]),
+            ("RENDER", "ENVIRONMENT", &[("RENDER SCENE", "STAGE")][..]),
+            ("RENDER", "CAMERA", &[("RENDER CAMERA", "LENS"), ("RENDER CAMERA", "FRAME"), ("RENDER CAMERA", "VIEW")][..]),
+            ("RENDER", "IMAGE", &[("RENDER", "IMAGE"), ("RENDER", "RENDER"), ("RENDER", "RESULT")][..]),
+            ("RENDER LIGHTING", "LIGHTING", &[("RENDER SCENE", "STUDIO"), ("RENDER SCENE", "LIGHTS")][..]),
+            ("RENDER LIGHTING", "ENVIRONMENT", &[("RENDER SCENE", "STAGE"), ("RENDER SCENE", "STUDIO")][..]),
+            ("RENDER", "OUTPUT", &[("RENDER", "RENDER"), ("RENDER", "IMAGE")][..]),
+            ("RENDER", "RESULTS", &[("RENDER", "RESULT"), ("RENDER", "IMAGE")][..]),
+        ] {
+            let Some(ids) = self.panels.remove(&key(old_tab, old)) else { continue };
+            for &(tab, panel) in targets {
+                let k = key(tab, panel);
+                let migrated: Vec<_> = ids
+                    .iter()
+                    .filter(|id| solidcraft_engine::find_command(id).and_then(crate::workspace::destination) == Some((tab, panel)))
+                    .cloned()
+                    .collect();
+                let list = migrated_panels.entry(k).or_default();
+                for id in migrated {
+                    if !list.contains(&id) {
+                        list.push(id);
+                    }
+                }
+            }
+            // Preserve deliberately cross-pinned commands with no destination in this split.
+            if let Some(&(tab, panel)) = targets.first() {
+                let list = migrated_panels.entry(key(tab, panel)).or_default();
+                for id in ids {
+                    let destination = solidcraft_engine::find_command(&id).and_then(crate::workspace::destination);
+                    if !targets.iter().any(|target| Some(*target) == destination) && !list.contains(&id) {
+                        list.push(id);
+                    }
+                }
+            }
+        }
+        for (k, ids) in migrated_panels {
+            // New-layout customisation is authoritative when both versions are present.
+            self.panels.entry(k).or_insert(ids);
+        }
+    }
+
     fn migrate(&mut self) {
         use std::collections::BTreeSet;
         let specs = command_specs();

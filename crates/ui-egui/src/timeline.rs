@@ -364,9 +364,7 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 pub(crate) fn floating_rect(available: Rect) -> Rect {
-    let gap = crate::shell::SHELL_GAP;
-    let inset = available.shrink(gap);
-    Rect::from_min_max(pos2(inset.left(), (inset.bottom() - 40.0).max(inset.top())), inset.max)
+    Container::floating_card(Surface::Panel).bottom_strip_rect(available, 40.0)
 }
 
 fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {

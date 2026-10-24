@@ -3,7 +3,7 @@
   {"expect":{"shown_handles":["ribbon:workspace","ribbon:search","ribbon:section:MODEL:CREATE","tab:MODEL"],"spans":{"inner":"ribbon:workspace","outer":"toolbar","axis":"y","tol":1}}},
   {"click":{"handle":"ribbon:workspace"}},
   {"call":"ui.menuPick","params":{"item":"ui.workspace.render"}},
-  {"expect":{"shown_handles":["tab:RENDER","ribbon:search","ribbon:workspace"]}},
+  {"expect":{"shown_handles":["tab:RENDER APPEARANCE","tab:RENDER SCENE","tab:RENDER CAMERA","tab:RENDER","ribbon:search","ribbon:workspace"]}},
   {"click":{"handle":"ribbon:workspace"}},
   {"call":"ui.menuPick","params":{"item":"ui.workspace.design"}},
   {"click":{"handle":"ribbon:section:MODEL:CREATE"}},

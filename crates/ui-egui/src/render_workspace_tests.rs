@@ -408,7 +408,6 @@ fn clicked_image_controls_complete_cancel_and_export_without_dirtying_the_design
         let check = h.app.tr("cmd.render_preflight").to_string();
         let start = h.app.tr("render.image_start").to_string();
         let export = h.app.tr("render.image_export").to_string();
-        let cancel = h.app.tr("cmd.render_cancel").to_string();
         h.call("ui.resize", json!({"width":1600,"height":1400}));
         enter(&mut h.app, true).unwrap();
         h.app.render_workspace.view.inspector.page = inspector::Page::All;
@@ -432,7 +431,8 @@ fn clicked_image_controls_complete_cancel_and_export_without_dirtying_the_design
         h.app.render_workspace.view.draft.width = 1024;
         h.app.render_workspace.view.draft.height = 768;
         h.step(&json!({"widget":start})).unwrap();
-        h.step(&json!({"widget":cancel})).unwrap();
+        assert!(job_ready(&h.app, "render.cancel").is_ok());
+        h.step(&json!({"click":{"handle":"ribbon:render.cancel"}})).unwrap();
         h.frames(5);
         assert_eq!(h.app.render_workspace.view.completed, Some(good));
         assert_eq!(
@@ -462,12 +462,15 @@ fn saved_camera_survives_frames_and_product_fit_ignores_selection() {
     assert_eq!(h.app.cam, camera);
     assert_eq!(h.app.render_workspace.view.draft.background, [21, 43, 65]);
     h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: "Product".into() }];
-    let bounds = solidcraft_engine::product_scene::extract(&h.app.session).unwrap().bounds;
-    let mut expected = camera;
-    expected.fit(&bounds);
     h.app.animate_view("fit");
     h.frames(3);
-    assert_eq!(h.app.cam, expected);
+    let selected_fit = h.app.cam;
+    assert_product_fits_canvas(&h.app);
+    h.app.session.selection.clear();
+    h.app.cam = camera;
+    h.app.animate_view("fit");
+    h.frames(3);
+    assert_eq!(h.app.cam, selected_fit, "Fit Product ignores the selected subset");
     enter(&mut h.app, false).unwrap();
     assert_eq!(h.app.cam, design);
 }
@@ -1506,10 +1509,8 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
         enter(&mut h.app, true).unwrap();
         h.app.render_workspace.view.inspector.page = inspector::Page::All;
         h.frames(3);
-        let bounds = solidcraft_engine::product_scene::extract(&h.app.session).unwrap().bounds;
         let mut home = h.app.cam;
         home.set_view(solidcraft_engine::render::StandardView::Iso);
-        home.fit(&bounds);
         let off = |h: &mut Harness| {
             h.app.cam.yaw += 0.7;
             h.app.cam.pitch = 0.1;
@@ -1519,17 +1520,27 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
         };
         // F6 fits, keeping the direction.
         off(&mut h);
-        let mut fitted = h.app.cam;
-        fitted.fit(&bounds);
+        let before = h.app.cam;
         h.step(&json!({"key":"F6"})).unwrap();
         h.settle();
-        assert_eq!(h.app.cam, fitted, "{style:?}: F6");
+        assert_eq!(
+            (h.app.cam.yaw, h.app.cam.pitch, h.app.cam.roll, h.app.cam.up),
+            (before.yaw, before.pitch, before.roll, before.up),
+            "{style:?}: F6 retains orientation"
+        );
+        assert!(h.app.cam.distance < before.distance, "{style:?}: F6 frames the product");
+        assert_product_fits_canvas(&h.app);
         // A middle double-click goes Home.
         off(&mut h);
         let centre = h.app.viewport.rect.unwrap().center();
         h.step(&json!({"click":[centre.x, centre.y], "double":true, "button":"middle"})).unwrap();
         h.settle();
-        assert_eq!(h.app.cam, home, "{style:?}: middle double-click");
+        assert_eq!(
+            (h.app.cam.yaw, h.app.cam.pitch, h.app.cam.roll, h.app.cam.up),
+            (home.yaw, home.pitch, home.roll, home.up),
+            "{style:?}: middle double-click"
+        );
+        assert_product_fits_canvas(&h.app);
         // The navigator's Home control.
         off(&mut h);
         let handle = match style {
@@ -2041,11 +2052,25 @@ fn clicked_setup_save_reload_and_switch_keep_gpu_numeric_intent_without_a_host()
     let completed = h.app.render_workspace.view.completed;
     let result_camera = h.app.render_workspace.view.result_camera;
     h.frames(3);
-    // Open the real editors: merely displaying degree controls and RGB fields must be lossless.
+    // Open the real editors inside the bounded, scrolling floating card.
+    let open_section = |h: &mut Harness, handle: String| {
+        for _ in 0..4 {
+            let at = crate::scenario::handle_at(&handle).unwrap();
+            let top = crate::scenario::rect_of("render:page:all").unwrap().bottom() + Tokens::get().space_8;
+            let bottom = crate::scenario::rect_of("render:job-footer").unwrap().top() - Tokens::get().space_8;
+            if (top..=bottom).contains(&at.y) {
+                break;
+            }
+            let x = crate::scenario::rect_of("render:inspector").unwrap().center().x;
+            h.call("ui.scroll", json!({"x":x,"y":(top+bottom)/2.0,"delta":at.y.clamp(top,bottom)-at.y}));
+            h.frames(20);
+        }
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+    };
     for key in ["render.image_advanced", "render.studio_environment", "render.studio_lighting"] {
-        h.step(&json!({"click":{"handle":format!("dialog:section:{}", h.app.tr(key))}})).unwrap();
+        open_section(&mut h, format!("dialog:section:{}", crate::i18n::tr(key)));
     }
-    h.step(&json!({"click":{"handle":format!("dialog:section:{} 1", h.app.tr("render.studio_area"))}})).unwrap();
+    open_section(&mut h, format!("dialog:section:{} 1", crate::i18n::tr("render.studio_area")));
     h.frames(3);
     assert_eq!(setups::snapshot(&h.app).unwrap(), expected);
     assert!(!h.app.render_workspace.view.dirty);
@@ -2711,11 +2736,11 @@ fn product_preview_error_uses_shared_wrapped_surface_and_explicit_retry_target()
     h.frames(3);
     let rect = egui::Rect::from_min_size(egui::pos2(260.0, 200.0), egui::vec2(550.0, 360.0));
     let message = "The original captured product geometry exceeds its bounded preview admission. The renderer must preserve all exact body identities and cannot silently simplify or drop geometry to paint this view.";
-    let output = h.ctx.run_ui(
+    let mut output = h.ctx.run_ui(
         egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))), ..Default::default() },
         |ui| preview_error(&mut h.app, ui, rect, message),
     );
-    let _ = output;
+    output.textures_delta.clear();
     let note = crate::scenario::rect_of("dialog:report:render.preview_failure").unwrap();
     let retry = crate::scenario::rect_of("render:preview-retry").unwrap();
     assert!(rect.contains_rect(note) && rect.contains_rect(retry));
@@ -2780,4 +2805,356 @@ fn missing_linear_master_is_never_reconstructed_from_a_finished_png() {
     assert!(h.app.session.execute("render.export", &json!({"job":id,"path":temp,"format":"exr"})).is_err());
     assert!(!temp.exists());
     assert_eq!(h.app.session.render_job_handle(id).unwrap().frame().unwrap().unwrap().png(), bytes);
+}
+
+#[test]
+fn render_workspace_task_tabs_keep_commands_and_shared_activation() {
+    let mut h = Harness::new();
+    enter(&mut h.app, true).unwrap();
+    assert_eq!(crate::workspace::visible_tabs(&h.app), ["RENDER APPEARANCE", "RENDER SCENE", "RENDER CAMERA", "RENDER"]);
+    for (tab, expected) in [
+        (
+            "RENDER APPEARANCE",
+            vec![
+                "render.library.appearance.apply",
+                "render.library.surface.bind",
+                "render.aging.describe",
+                "render.library.surface.prepare",
+                "render.library.surface.unbind",
+                "render.library.physical.prepare",
+                "appearance.paint",
+                "appearance.pick_up",
+                "appearance.replace",
+            ],
+        ),
+        (
+            "RENDER SCENE",
+            vec![
+                "render.preset.resolve",
+                "render.preset.apply",
+                "render.library.studio.prepare",
+                "render.library.studio.apply",
+                "render.library.environment.apply",
+                "render.stage.backdrop",
+                "render.stage.ground",
+                "render.stage.clear",
+                "render.hdr.inspect",
+                "render.settings.capture_hdr",
+                "render.lights.solo",
+            ],
+        ),
+        (
+            "RENDER CAMERA",
+            vec![
+                "render.settings.get",
+                "render.settings.set",
+                "render.settings.apply",
+                "render.shot.duplicate",
+                "render.shot.rename",
+                "render.shot.remove",
+                "render.camera.get",
+                "render.camera.set",
+                "render.camera.fit",
+                "render.scene",
+                "view.shots_strip",
+            ],
+        ),
+        (
+            "RENDER",
+            vec![
+                "render.start",
+                "render.preflight",
+                "render.effects.describe",
+                "render.cancel",
+                "render.export",
+                "render.result.regrade",
+                "render.quality.prepare",
+                "render.status",
+                "render.backends",
+                "render.compare",
+                "render.batch",
+            ],
+        ),
+    ] {
+        let lists = crate::toolbar_custom::panel_lists(tab);
+        for id in expected {
+            assert!(lists.iter().any(|(_, commands, _)| commands.iter().any(|c| c.id == id)), "{tab}: {id}");
+            assert_eq!(crate::workspace::destination(solidcraft_engine::find_command(id).unwrap()).unwrap().0, tab);
+        }
+        let t = Tokens::get();
+        assert_eq!(crate::theme::TabAccent::for_tab(&t, tab).color, t.render_fill);
+    }
+}
+
+#[test]
+fn render_workspace_tab_changes_follow_inspector_without_overriding_page_navigation() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1440,"height":1000}));
+    enter(&mut h.app, true).unwrap();
+    let document = h.app.session.doc.clone();
+    let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+    for (tab, page) in [
+        ("RENDER APPEARANCE", inspector::Page::Appearance),
+        ("RENDER SCENE", inspector::Page::Lighting),
+        ("RENDER CAMERA", inspector::Page::Camera),
+        ("RENDER", inspector::Page::Output),
+    ] {
+        h.frames(2);
+        h.step(&json!({"click":{"handle":format!("tab:{tab}")}})).unwrap();
+        assert_eq!(h.app.render_workspace.view.inspector.page, page);
+        assert_eq!(h.app.session.doc, document);
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert!(h.app.render_workspace.view.job.is_none());
+        assert!(h.app.render_workspace.view.completed.is_none());
+        for id in ["ribbon:render.start", "ribbon:render.cancel"] {
+            assert!(crate::scenario::rect_of(id).is_some(), "{tab}: {id}");
+        }
+        h.step(&json!({"click":{"handle":"render:page:diagnostics"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.render_workspace.view.inspector.page, inspector::Page::Diagnostics);
+    }
+}
+
+#[test]
+fn render_workspace_shots_toggle_persists_and_design_roundtrip_preserves_state() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1440,"height":1000}));
+    h.app.run("solid.box", json!({"length":20,"width":15,"height":10,"body_name":"Subject"})).unwrap();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: "Subject".into() }];
+    h.app.cam.yaw = 0.71;
+    h.app.cam.pitch = 0.23;
+    h.app.cam.roll = 0.17;
+    let camera = h.app.cam;
+    let selection = h.app.session.selection.clone();
+    let document = h.app.session.doc.clone();
+    let state = (
+        h.app.session.undo.len(),
+        h.app.session.redo.len(),
+        h.app.session.revision,
+        h.app.ui.show_timeline,
+        h.app.preferences.timeline_left,
+        h.app.preferences.timeline_collapsed,
+    );
+    enter(&mut h.app, true).unwrap();
+    h.frames(3);
+    let strip = crate::scenario::rect_of("render:shots_strip").unwrap();
+    assert!((strip.height() - 48.0).abs() <= 1.0, "{strip:?}");
+    h.step(&json!({"click":{"handle":"render:shots:hide"}})).unwrap();
+    assert!(!h.app.preferences.render_shots_strip);
+    enter(&mut h.app, false).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.cam, camera);
+    assert_eq!(h.app.session.selection, selection);
+    assert_eq!(h.app.session.doc, document);
+    assert_eq!(
+        state,
+        (
+            h.app.session.undo.len(),
+            h.app.session.redo.len(),
+            h.app.session.revision,
+            h.app.ui.show_timeline,
+            h.app.preferences.timeline_left,
+            h.app.preferences.timeline_collapsed
+        )
+    );
+    enter(&mut h.app, true).unwrap();
+    h.frames(3);
+    assert!(crate::scenario::rect_of("render:shots_strip").is_none());
+    assert!(crate::scenario::rect_of("render:shots:show").is_some());
+    let saved = h.app.prefs();
+    let mut next = Harness::new();
+    next.app.load_prefs(&saved);
+    assert!(!next.app.preferences.render_shots_strip);
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"tab:RENDER CAMERA"}})).unwrap();
+    h.step(&json!({"click":{"handle":"button:view.shots_strip"}})).unwrap();
+    assert!(h.app.preferences.render_shots_strip);
+    h.frames(3);
+    assert!(crate::scenario::rect_of("render:shots_strip").is_some());
+    assert_eq!(h.app.session.doc, document);
+    assert_eq!(h.app.session.undo.len(), state.0);
+}
+
+#[test]
+fn render_workspace_canvas_controls_and_fit_respect_panels_and_shots_in_both_layouts() {
+    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        let mut h = Harness::new();
+        h.app.ui.layout = layout;
+        h.call("ui.resize", json!({"width":1600,"height":1000}));
+        h.app.run("solid.box", json!({"length":60,"width":40,"height":30})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        h.app.cam.fov = 0.9;
+        h.app.start("render.camera.fit");
+        h.frames(4);
+        assert_eq!(h.app.cam.fov, 0.9);
+        let free = crate::shell::content_rect(&h.app, h.app.viewport.rect.unwrap());
+        let layout = h.app.viewport.layout.as_ref().unwrap();
+        assert!(free.contains_rect(layout.navigation), "{free:?} {layout:?}");
+        assert!((layout.navigation.center().x - free.center().x).abs() < 1.0);
+        assert_product_fits_canvas(&h.app);
+    }
+}
+
+#[test]
+fn render_workspace_old_personal_pins_migrate_once_to_task_tabs() {
+    let mut custom = crate::toolbar_custom::ToolbarCustom::default();
+    custom.load(&json!({"version":2,"panels":{
+        "DESIGN/RENDER/SCENE":["render.settings.get","render.preset.resolve","solid.box"],
+        "DESIGN/RENDER/LIGHTING":["render.library.studio.apply"],
+        "DESIGN/RENDER/CAMERA":["render.settings.apply","render.camera.fit"],
+        "DESIGN/RENDER/IMAGE":["render.export","render.start"],
+        "DESIGN/RENDER/OUTPUT":["render.preflight"]
+    }}));
+    assert_eq!(custom.panels["DESIGN/RENDER CAMERA/SHOTS"], ["render.settings.get", "solid.box"]);
+    assert_eq!(custom.panels["DESIGN/RENDER SCENE/STUDIO"], ["render.preset.resolve", "render.library.studio.apply"]);
+    assert_eq!(custom.panels["DESIGN/RENDER CAMERA/VIEW"], ["render.settings.apply"]);
+    assert_eq!(custom.panels["DESIGN/RENDER/RESULT"], ["render.export"]);
+    assert_eq!(custom.panels["DESIGN/RENDER/RENDER"], ["render.start", "render.preflight"]);
+    let saved = custom.prefs();
+    custom.load(&saved);
+    assert_eq!(custom.prefs(), saved);
+}
+
+#[test]
+fn render_workspace_scene_vocabulary_migrates_previous_shell_pins_once() {
+    let mut custom = crate::toolbar_custom::ToolbarCustom::default();
+    custom.load(&json!({"version":2,"panels":{
+        "DESIGN/RENDER LIGHTING/LIGHTING":["render.library.studio.apply","render.lights.solo"],
+        "DESIGN/RENDER LIGHTING/ENVIRONMENT":["render.library.environment.apply","render.hdr.inspect"],
+        "DESIGN/RENDER/OUTPUT":["render.preflight","render.quality.prepare"],
+        "DESIGN/RENDER/RESULTS":["render.export","render.effects.describe"]
+    }}));
+    assert_eq!(custom.panels["DESIGN/RENDER SCENE/STUDIO"], ["render.library.studio.apply", "render.library.environment.apply"]);
+    assert_eq!(custom.panels["DESIGN/RENDER SCENE/LIGHTS"], ["render.lights.solo"]);
+    assert_eq!(custom.panels["DESIGN/RENDER SCENE/STAGE"], ["render.hdr.inspect"]);
+    assert_eq!(custom.panels["DESIGN/RENDER/IMAGE"], ["render.quality.prepare", "render.effects.describe"]);
+    assert_eq!(custom.panels["DESIGN/RENDER/RENDER"], ["render.preflight"]);
+    assert_eq!(custom.panels["DESIGN/RENDER/RESULT"], ["render.export"]);
+    let saved = custom.prefs();
+    custom.load(&saved);
+    assert_eq!(custom.prefs(), saved);
+}
+
+fn assert_product_fits_canvas(app: &SolveApp) {
+    let layout = app.viewport.layout.as_ref().unwrap();
+    let free = crate::shell::content_rect(app, layout.viewport);
+    assert!(free.contains_rect(layout.drawable), "fit region {:?} outside canvas {free:?}", layout.drawable);
+    let bounds = solidcraft_engine::product_scene::extract(&app.session).unwrap().bounds;
+    for x in [bounds.min.x, bounds.max.x] {
+        for y in [bounds.min.y, bounds.max.y] {
+            for z in [bounds.min.z, bounds.max.z] {
+                let (sx, sy, _) = app
+                    .cam
+                    .to_screen(
+                        solidcraft_engine::geom::Vec3::new(x, y, z),
+                        f64::from(layout.viewport.width()),
+                        f64::from(layout.viewport.height()),
+                        bounds.diagonal().max(10.0),
+                    )
+                    .unwrap();
+                let at = layout.viewport.min + egui::vec2(sx as f32, sy as f32);
+                assert!(layout.drawable.contains(at), "product corner {at:?} outside {:?}", layout.drawable);
+            }
+        }
+    }
+}
+
+#[test]
+fn render_workspace_hosts_float_and_shield_input_in_both_ribbon_layouts() {
+    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        let mut h = Harness::new();
+        h.app.ui.layout = layout;
+        h.call("ui.resize", json!({"width":1600,"height":1000}));
+        h.app.run("solid.box", json!({"length":30,"width":20,"height":10})).unwrap();
+        h.frames(4);
+        let design_gap = h.app.shell.browser.unwrap().top() - h.app.shell.cards.iter().map(|r| r.bottom()).fold(0.0, f32::max);
+        enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        let viewport = h.app.viewport.rect.unwrap();
+        let history = crate::timeline::floating_rect(viewport);
+        let shots = crate::scenario::rect_of("render:shots_strip").unwrap();
+        assert!((shots.height() - 48.0).abs() <= 1.0, "{layout:?}: {shots:?}");
+        assert!(
+            (shots.left() - history.left()).abs() < 1.0
+                && (shots.right() - history.right()).abs() < 1.0
+                && (shots.bottom() - history.bottom()).abs() < 1.0,
+            "Shots must reuse History's floating placement: {shots:?} {history:?}"
+        );
+        for key in ["render:inspector", "render:browser", "render:shots_strip", "render:hud"] {
+            let (card, _) = h.app.shell.workspace_panels.get(key).unwrap();
+            assert!(viewport.contains_rect(*card), "{layout:?} {key}: {card:?} outside {viewport:?}");
+            assert!(crate::shell::covered(&h.app, card.center()), "{key} must shield the viewport");
+        }
+        let inspector = h.app.shell.workspace_panels["render:inspector"].0;
+        let browser = h.app.shell.workspace_panels["render:browser"].0;
+        let ribbon_bottom = h.app.shell.cards.iter().map(|r| r.bottom()).fold(0.0, f32::max);
+        for key in ["render:browser", "render:inspector", "render:hud"] {
+            let card = h.app.shell.workspace_panels[key].0;
+            assert!(
+                (card.top() - ribbon_bottom - design_gap).abs() < 1.0,
+                "{layout:?} {key}: gap {} must match Design {design_gap}",
+                card.top() - ribbon_bottom
+            );
+        }
+        for key in ["render:browser", "render:inspector"] {
+            let card = h.app.shell.workspace_panels[key].0;
+            let header = crate::scenario::rect_of(&format!("{key}:header")).unwrap();
+            assert!((header.height() - crate::ui_kit::header_height()).abs() < 0.1, "{key}: {header:?}");
+            assert!((header.top() - card.top()).abs() <= 1.0, "header must have no outer content padding");
+            let control = crate::scenario::rect_of(if key == "render:browser" { "render:browser-library" } else { "render:page:output" }).unwrap();
+            assert!(control.top() >= header.bottom(), "navigation must be below the standard header: {control:?} {header:?}");
+        }
+
+        assert!(browser.left() > viewport.left() && inspector.right() < viewport.right());
+        assert!(inspector.bottom() < shots.top() && browser.bottom() < shots.top());
+        let camera = h.app.cam;
+        h.step(
+            &json!({"drag":[[inspector.center().x,inspector.center().y],[inspector.center().x-30.0,inspector.center().y+20.0]],"button":"middle"}),
+        )
+        .unwrap();
+        assert_eq!(h.app.cam, camera, "middle dragging over the card must not reach the model");
+        h.step(&json!({"click":{"handle":"render:shots:hide"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.viewport.rect, Some(viewport), "floating strips must preserve the viewport projection");
+        let pill = h.app.shell.workspace_panels["render:shots:show"].0;
+        assert!(crate::shell::covered(&h.app, pill.center()));
+        enter(&mut h.app, false).unwrap();
+        h.frames(3);
+        assert!(h.app.shell.workspace_panels.is_empty(), "Render card reservations must not leak into Design");
+    }
+}
+
+#[test]
+fn render_workspace_card_grips_swap_sides_and_resize_without_design_edits() {
+    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        let mut h = Harness::new();
+        h.app.ui.layout = layout;
+        h.call("ui.resize", json!({"width":1600,"height":1000}));
+        enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        let document = h.app.session.doc.clone();
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        let camera = h.app.cam;
+        h.step(&json!({"drag":[{"handle":"render:inspector:grip"},[100.0,350.0]],"steps":8})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.render_inspector_side, "left");
+        assert_eq!(h.app.preferences.render_browser_side, "right");
+        assert!(h.app.shell.workspace_panels["render:inspector"].0.right() < h.app.shell.workspace_panels["render:browser"].0.left());
+        let width = h.app.preferences.render_inspector_width;
+        let rail = crate::scenario::handle_at("render:inspector:resize").unwrap();
+        h.step(&json!({"drag":[[rail.x,rail.y],[rail.x+50.0,rail.y]],"steps":8})).unwrap();
+        h.frames(3);
+        assert!(h.app.preferences.render_inspector_width > width);
+        h.step(&json!({"click":{"handle":"render:browser-library"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"drag":[{"handle":"render:browser:grip"},[100.0,350.0]],"steps":8})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.render_browser_side, "left");
+        assert_eq!(h.app.preferences.render_inspector_side, "right");
+        assert!(h.app.shell.workspace_panels["render:browser"].0.right() < h.app.shell.workspace_panels["render:inspector"].0.left());
+        assert_eq!(h.app.cam, camera, "card gestures must not move the camera");
+        assert_eq!(h.app.session.doc, document);
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    }
 }

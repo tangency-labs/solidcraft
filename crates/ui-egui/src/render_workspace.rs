@@ -67,6 +67,7 @@ pub struct State {
     pub view: ViewState,
     revision: u64,
     design_camera: Option<(Camera, bool)>,
+    inspector_tab: Option<String>,
     slot: SceneSlot,
     key: Option<u64>,
     scene_signature: Option<(u64, usize, u64)>,
@@ -300,6 +301,7 @@ impl Default for State {
             view: Default::default(),
             revision: u64::MAX,
             design_camera: None,
+            inspector_tab: None,
             slot: Arc::new(Mutex::new(None)),
             key: None,
             scene_signature: None,
@@ -336,7 +338,7 @@ impl State {
 }
 
 pub fn active(app: &SolveApp) -> bool {
-    app.ui.tab == "RENDER"
+    crate::workspace::render_tab(&app.ui.tab)
 }
 
 pub(crate) fn result_active(app: &SolveApp) -> bool {
@@ -437,6 +439,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 pub fn reset_document(app: &mut SolveApp) {
+    crate::render_ui::reset_shell(app);
     app.ui.ribbon_context = None;
     let host = app.render_workspace.host.clone();
     let image_host = app.render_workspace.image_host.clone();
@@ -478,9 +481,10 @@ pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
         if !active(app) {
             app.render_workspace.design_camera = Some((app.cam, app.ui.perspective));
             app.ui.tab = "RENDER".into();
+            sync_inspector_tab(app);
             let scene = solidcraft_engine::product_scene::extract(&app.session).map_err(|e| e.to_string())?;
             if !scene.bounds.is_empty() {
-                app.cam.fit(&scene.bounds);
+                app.fit_bounds(scene.bounds);
             }
         }
         setups::refresh_dirty(app);
@@ -496,12 +500,38 @@ pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
             app.ui.perspective = perspective;
         }
         app.ui.tab = "MODEL".into();
+        app.render_workspace.inspector_tab = None;
+        crate::render_ui::reset_shell(app);
     }
-    app.cancel_view_animation();
+    app.cam_anim = None;
+    if !render {
+        app.pending_fit = None;
+    }
     Ok(())
 }
 
+pub(crate) fn sync_inspector_tab(app: &mut SolveApp) {
+    if !active(app) || app.render_workspace.inspector_tab.as_deref() == Some(&app.ui.tab) {
+        return;
+    }
+    app.render_workspace.view.inspector.page = match app.ui.tab.as_str() {
+        "RENDER APPEARANCE" => inspector::Page::Appearance,
+        "RENDER SCENE" => inspector::Page::Lighting,
+        "RENDER CAMERA" => inspector::Page::Camera,
+        _ => inspector::Page::Output,
+    };
+    app.render_workspace.inspector_tab = Some(app.ui.tab.clone());
+}
+
+pub(crate) fn switch_shot(app: &mut SolveApp, name: String) {
+    inspector::switch_shot(app, name);
+}
+pub(crate) fn job_ready(app: &SolveApp, id: &str) -> Result<(), String> {
+    ribbon::action_ready(app, id)
+}
+
 pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
+    sync_inspector_tab(app);
     inspector::panel(app, ui);
 }
 
