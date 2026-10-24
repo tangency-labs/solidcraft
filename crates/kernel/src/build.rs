@@ -2504,7 +2504,7 @@ pub(crate) fn interpolate_cubic_chordal(pts: &[Vec3]) -> Option<(mt::BSplineCurv
 }
 
 /// The cubic B-spline through `pts` at parameters `u` (rising from 0 to 1), its knots averaged.
-fn interpolate_cubic_at(pts: &[Vec3], u: &[f64]) -> Option<mt::BSplineCurve<mt::Point3>> {
+pub(crate) fn interpolate_cubic_at(pts: &[Vec3], u: &[f64]) -> Option<mt::BSplineCurve<mt::Point3>> {
     let m = pts.len();
     if m < 4 || u.len() != m {
         return None;

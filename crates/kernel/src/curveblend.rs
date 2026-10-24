@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use solidcraft_geom::Vec3;
 use truck_modeling::{self as mt, builder};
 
-use crate::blend::too_large;
+use crate::blend::{ChamferSide, too_large};
 use crate::blend_variable::RadiusSpline;
 use crate::body::{Solid, from_p3, p3};
 use crate::record::Rebuild;
@@ -66,6 +66,9 @@ enum Size<'a> {
     /// The radius at the station's arc-length fraction along the chain, 0 at the front and 1 at
     /// the back of its edge.
     Law(&'a RadiusSpline),
+    /// A flat chamfer set back `d1` on its first side and its second side by `side`
+    /// ([`curve_chamfer_sides`]).
+    Sides { d1: f64, side: ChamferSide, flip: bool },
 }
 
 struct Fit {
@@ -550,6 +553,24 @@ fn solve_from(
     tol: f64,
     start: Option<Vec3>,
 ) -> Option<Section> {
+    solve_offsets(f1, f2, p, t, (r, r), sigma, cusp, extra, tol, start)
+}
+
+/// [`solve_from`] with the centre `r.0` from side 1 and `r.1` from side 2: equal for a ball, apart
+/// for a chamfer whose two setbacks differ (its contacts are the centre's feet on the faces).
+#[allow(clippy::too_many_arguments)]
+fn solve_offsets(
+    f1: &[&mt::Face],
+    f2: &[&mt::Face],
+    p: Vec3,
+    t: Vec3,
+    (r, r2): (f64, f64),
+    sigma: f64,
+    cusp: f64,
+    extra: Option<Extra<'_>>,
+    tol: f64,
+    start: Option<Vec3>,
+) -> Option<Section> {
     // The nearest face of a side (several faces on one smooth surface group). Each face's
     // search starts from its last answer: the centre moves little between iterations. An
     // answer outside the surface's parameters, or farther than that last point (the search
@@ -587,7 +608,7 @@ fn solve_from(
         let gap = |s: f64| -> Option<f64> {
             let c = centre(s)?;
             let (q2, n2) = near(f2, c)?;
-            Some((c - q2).dot(n2) - sigma * r)
+            Some((c - q2).dot(n2) - sigma * r2)
         };
         let (mut lo, mut g_lo) = (0.0, gap(0.0)?);
         let mut hi = None;
@@ -615,13 +636,16 @@ fn solve_from(
         if den.abs() < 1e-9 {
             return None;
         }
-        p + (n1 + n2) * (sigma * r / den)
+        // The point `r` off side 1 and `r2` off side 2 where both are planes through `p`.
+        let k = n1.dot(n2);
+        let (a, b) = ((r - r2 * k) / (1.0 - k * k).max(1e-12), (r2 - r * k) / (1.0 - k * k).max(1e-12));
+        if r == r2 { p + (n1 + n2) * (sigma * r / den) } else { p + (n1 * a + n2 * b) * sigma }
     };
     for _ in 0..60 {
         let (q1, n1) = near(f1, c)?;
         let (q2, n2) = near(f2, c)?;
         let g1 = (c - q1).dot(n1) - sigma * r;
-        let g2 = (c - q2).dot(n2) - sigma * r;
+        let g2 = (c - q2).dot(n2) - sigma * r2;
         // Third row: stay in the section plane, or put a contact on the seam plane.
         let (row3, g3) = match extra {
             None => (t, (c - p).dot(t)),
@@ -705,6 +729,8 @@ fn solve_chord(
 /// The rolling ball at one station, sized by the blend's law.
 struct Sizer<'a> {
     size: Size<'a>,
+    /// For [`Size::Sides`]: whether side 1 of the chain is the chamfer's first side (set back `d1`).
+    first_is_1: bool,
     /// The tolerance the section's equations are solved at.
     tol: f64,
 }
@@ -733,6 +759,36 @@ impl Sizer<'_> {
                     return None;
                 }
                 solve(f1, f2, p, t, r, sigma, cusp, extra, self.tol).map(|x| (x, r))
+            }
+            Size::Sides { d1, side, .. } => {
+                // The angle between the faces at `p` (through the chamfered side), from their
+                // normals. The centre `o1` off side 1 and `o2` off side 2 has its feet on them the
+                // setbacks `a1`, `a2` from the edge: exact where both are planes, and where one is
+                // a plane and the other a wall square to it (an extruded outline).
+                let normal =
+                    |fs: &[&mt::Face]| fs.iter().filter_map(|f| project(f, p, None)).min_by(|a, b| a.0.dist(p).total_cmp(&b.0.dist(p))).map(|x| x.1);
+                let (n1, n2) = (normal(f1)?, normal(f2)?);
+                let phi = (-n1.dot(n2)).clamp(-1.0, 1.0).acos();
+                if !(phi > 1e-3 && phi < std::f64::consts::PI - 1e-3) {
+                    return None;
+                }
+                let d2 = match side {
+                    ChamferSide::Distance(d) => d,
+                    // The triangle edge–A–B: angle φ at the edge, `a` at A (on the first side).
+                    ChamferSide::Angle(a) => {
+                        let den = (phi + a).sin();
+                        if den <= 1e-9 {
+                            return None;
+                        }
+                        d1 * a.sin() / den
+                    }
+                };
+                let (a1, a2) = if self.first_is_1 { (d1, d2) } else { (d2, d1) };
+                let (o1, o2) = ((a2 - a1 * phi.cos()) / phi.sin(), (a1 - a2 * phi.cos()) / phi.sin());
+                if !(o1.is_finite() && o2.is_finite() && o1 > 1e-9 && o2 > 1e-9) {
+                    return None;
+                }
+                solve_offsets(f1, f2, p, t, (o1, o2), sigma, cusp, extra, self.tol, None).map(|x| (x, o1.max(o2)))
             }
         }
     }
@@ -1075,6 +1131,12 @@ pub(crate) fn curve_blend_law(solid: &Solid, ids: &[mt::EdgeID], size: f64, law:
     curve_blend_sized(solid, ids, size, Size::Law(law), round, MAX_SAMPLES)
 }
 
+/// A flat chamfer of the chain set back `d1` on its first side (the one facing up most, the other
+/// with `flip`, as [`crate::chamfer_sides`] takes it) and its second side by `side`.
+pub(crate) fn curve_chamfer_sides(solid: &Solid, ids: &[mt::EdgeID], size: f64, d1: f64, side: ChamferSide, flip: bool) -> Result<(Solid, Rebuild)> {
+    curve_blend_sized(solid, ids, size, Size::Sides { d1, side, flip }, false, MAX_SAMPLES)
+}
+
 fn curve_blend_with_limit(solid: &Solid, ids: &[mt::EdgeID], size: f64, r: f64, round: bool, max_samples: usize) -> Result<(Solid, Rebuild)> {
     curve_blend_sized(solid, ids, size, Size::Constant(r), round, max_samples)
 }
@@ -1089,6 +1151,19 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         Size::Constant(r) | Size::Chord(r) => {
             if !(r.is_finite() && r > 1e-6 && r < 1e6) {
                 return Err(KernelError::Invalid("curve blend size and radius must be finite and positive".into()));
+            }
+        }
+        Size::Sides { d1, side, .. } => {
+            let ok = |x: f64| x.is_finite() && x > 1e-6 && x < 1e6;
+            let side_ok = match side {
+                ChamferSide::Distance(d) => ok(d),
+                ChamferSide::Angle(a) => a.is_finite() && a > 1e-6 && a < std::f64::consts::PI,
+            };
+            if !(ok(d1) && side_ok) {
+                return Err(KernelError::Invalid("chamfer distances must be finite and positive".into()));
+            }
+            if round {
+                return Err(KernelError::Invalid("a chamfer with two sides is flat".into()));
             }
         }
         Size::Law(law) => {
@@ -1244,6 +1319,8 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
     let scale = match size_law {
         Size::Constant(r) | Size::Chord(r) => r,
         Size::Law(law) => law.eval(0.5).max(1e-6),
+        Size::Sides { d1, side: ChamferSide::Distance(d2), .. } => d1.max(d2),
+        Size::Sides { d1, .. } => d1,
     };
     let (convex, cusp) = if knife {
         let w = n1.cross(t1).normalized().ok_or_else(|| KernelError::Failed("blend: cusp direction".into()))?;
@@ -1290,7 +1367,34 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         let s = sampled(table, along).unwrap_or(0.0);
         ((lo + s) / total).clamp(0.0, 1.0)
     };
-    let sizer = Sizer { size: size_law, tol: tol * 100.0 };
+    // An unequal chamfer's first side: as for a straight edge, the one facing up most (each side
+    // by its mean normal along the chain), the other with `flip`.
+    let first_is_1 = match size_law {
+        Size::Sides { flip, .. } => {
+            use mt::{BoundedCurve, ParametricCurve};
+            let up = Vec3::new(1e-6, 1e-3, 1.0);
+            let (mut u1, mut u2, mut m) = (0.0, 0.0, 0usize);
+            for (k, e) in chain.iter().enumerate() {
+                let (Some(g1), Some(g2)) = (s1.get(k), s2.get(k)) else { continue };
+                let c = e.curve();
+                let (t0, t1) = c.range_tuple();
+                for j in 0..=8 {
+                    let q = from_p3(c.subs(t0 + (t1 - t0) * f64::from(j) / 8.0));
+                    if let (Some(a), Some(b)) = (project(g1, q, None), project(g2, q, None)) {
+                        u1 += a.1.dot(up);
+                        u2 += b.1.dot(up);
+                        m += 1;
+                    }
+                }
+            }
+            if m == 0 {
+                return Err(KernelError::Failed("chamfer: normals".into()));
+            }
+            (u1 >= u2) != flip
+        }
+        _ => true,
+    };
+    let sizer = Sizer { size: size_law, first_is_1, tol: tol * 100.0 };
     // Arcs on a planar side that curve round the ball: its centre runs round them at their
     // radius less the blend's. Less than nothing is too large; nothing is a pivot.
     let mut pivots: Vec<Option<Pivot>> = vec![None; n];
@@ -1545,7 +1649,17 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         if cos < 0.15 && tangent.is_none() {
             return Err(unsupported("an end face almost along the edge"));
         }
-        let width = at.q1.dist(*p).max(at.q2.dist(*p)).max(at.c.dist(*p)) + vradius.get(*k).copied().unwrap_or(scale);
+        let width = match size_law {
+            // A chamfer's sections are set back further along one side than the other: how far
+            // each point lies behind the end face is what the run has to cross, not its distance
+            // from the vertex (a chamfer 7 down a wall square to the end face is past it as soon
+            // as its top contact is). A longer run leaves the faces it is solved on.
+            Size::Sides { .. } => {
+                let behind = [at.c, at.q1, at.q2].iter().map(|x| (*x - *p).dot(ng).abs()).fold(0.0, f64::max);
+                behind + at.q1.dist(at.q2).min(at.c.dist(at.q1).min(at.c.dist(at.q2)))
+            }
+            _ => at.q1.dist(*p).max(at.q2.dist(*p)).max(at.c.dist(*p)) + vradius.get(*k).copied().unwrap_or(scale),
+        };
         let reach = 1.5 * width / if tangent.is_some() { 1.0 } else { cos };
         let out = if *k == 0 { -*t } else { *t };
         // The run on past the end only gives the fit its context (the end face cuts it back), but
@@ -1925,7 +2039,7 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         // one radius of a constant blend, exactly as before).
         let rad = |s: &Section| match size_law {
             Size::Constant(r) => r,
-            Size::Chord(_) | Size::Law(_) => s.c.dist(s.q1),
+            Size::Chord(_) | Size::Law(_) | Size::Sides { .. } => s.c.dist(s.q1),
         };
         let mut arcs: Vec<Option<mt::Edge>> = Vec::with_capacity(nv);
         let mut split_arcs: HashMap<usize, Vec<mt::Edge>> = HashMap::new();
