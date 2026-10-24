@@ -79,6 +79,9 @@ pub trait ChatBackend {
     fn poll(&mut self) -> Vec<Event>;
     /// Send a message (the panel only sends one after [`Event::Ready`] and while no turn runs).
     fn prompt(&mut self, parts: &[PromptPart]);
+    /// How many model requests the next message may make. Backends that run their own tool
+    /// loop honour it; the default is to ignore it. Called just before [`ChatBackend::prompt`].
+    fn set_turn_requests(&mut self, _n: u32) {}
     /// Stop the message being answered; open permission questions count as cancelled.
     fn cancel(&mut self);
     /// Start a fresh conversation on the running backend (no restart); [`Event::Ready`] follows.

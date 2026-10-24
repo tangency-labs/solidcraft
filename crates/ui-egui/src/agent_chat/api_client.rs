@@ -20,8 +20,6 @@ use super::agents::Protocol;
 use super::backend::{ChatBackend, Event, HttpFn, HttpRequest, PromptPart, StartContext, ToolStatus};
 use super::process::{AgentProcess, FromAgent, ProcessHandle};
 
-/// Model requests for one message, at most (each answer with tool calls is one).
-pub const MAX_REQUESTS_PER_TURN: usize = 24;
 /// Longest tool result handed back to the model.
 const MAX_TOOL_TEXT: usize = 20_000;
 /// Messages kept in the conversation (the system note stays).
@@ -54,7 +52,7 @@ pub struct ApiConfig {
 }
 
 enum Cmd {
-    Prompt(Vec<PromptPart>),
+    Prompt { parts: Vec<PromptPart>, requests: usize },
     NewChat,
     SetModel(String),
 }
@@ -64,6 +62,8 @@ pub struct ApiBackend {
     events: Receiver<Event>,
     cancel: Arc<AtomicBool>,
     mcp: Option<ProcessHandle>,
+    /// Model requests the next message may make (the AI page's "Changes per message").
+    turn_requests: u32,
 }
 
 impl ApiBackend {
@@ -100,7 +100,7 @@ impl ApiBackend {
             };
             w.run(cmd_rx);
         });
-        Ok(ApiBackend { cmds: Some(cmd_tx), events, cancel, mcp: handle })
+        Ok(ApiBackend { cmds: Some(cmd_tx), events, cancel, mcp: handle, turn_requests: super::gate::DEFAULT_TURN_LIMIT })
     }
 }
 
@@ -108,10 +108,13 @@ impl ChatBackend for ApiBackend {
     fn poll(&mut self) -> Vec<Event> {
         self.events.try_iter().take(512).collect()
     }
+    fn set_turn_requests(&mut self, n: u32) {
+        self.turn_requests = n.clamp(1, super::gate::MAX_REQUESTS_PER_TURN);
+    }
     fn prompt(&mut self, parts: &[PromptPart]) {
         self.cancel.store(false, Ordering::Relaxed);
         if let Some(c) = &self.cmds {
-            let _ = c.send(Cmd::Prompt(parts.to_vec()));
+            let _ = c.send(Cmd::Prompt { parts: parts.to_vec(), requests: self.turn_requests as usize });
         }
     }
     fn cancel(&mut self) {
@@ -189,7 +192,7 @@ impl Worker {
         }
         for cmd in cmds {
             match cmd {
-                Cmd::Prompt(parts) => self.turn(parts),
+                Cmd::Prompt { parts, requests } => self.turn(parts, requests),
                 Cmd::SetModel(m) => self.cfg.model = m,
                 Cmd::NewChat => {
                     self.history.clear();
@@ -263,10 +266,11 @@ impl Worker {
         Ok(())
     }
 
-    fn turn(&mut self, parts: Vec<PromptPart>) {
+    fn turn(&mut self, parts: Vec<PromptPart>, requests: usize) {
         self.history.push(user_message(self.cfg.protocol, &parts));
         self.trim_history();
-        for _ in 0..MAX_REQUESTS_PER_TURN {
+        let requests = requests.clamp(1, super::gate::MAX_REQUESTS_PER_TURN as usize);
+        for _ in 0..requests {
             // The history as of here is complete (every tool call answered): a cancelled request
             // goes back to it, so no half-finished round is left to confuse the next message.
             let sound = self.history.len();
@@ -346,7 +350,10 @@ impl Worker {
                 self.history.push(json!({"role": "user", "content": results}));
             }
         }
-        self.emit(Event::Text { thought: false, text: format!("\n({})", crate::i18n::tr("ui.ai_request_limit")) });
+        self.emit(Event::Text {
+            thought: false,
+            text: format!("\n({})", crate::i18n::format("ui.ai_request_limit", &[("limit", &requests.to_string())])),
+        });
         self.emit(Event::TurnEnded { reason: "max_turn_requests".into() });
     }
 
@@ -916,6 +923,48 @@ mod tests {
         let sent = seen.lock().unwrap();
         assert_eq!(sent.len(), 2);
         assert_eq!(sent[1]["messages"].as_array().unwrap().last().unwrap()["role"], "tool");
+        b.shutdown(true);
+    }
+
+    /// #3881: "Changes per message" is how many model requests the API agent may make.
+    /// A model that keeps calling tools used to stop at 24 no matter what the AI page said.
+    #[test]
+    fn the_request_cap_follows_changes_per_message() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let n = calls.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            if r.method == "GET" {
+                return Ok((200, br#"{"data":[]}"#.to_vec()));
+            }
+            n.fetch_add(1, Ordering::Relaxed);
+            Ok((
+                200,
+                json!({"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "c", "type": "function", "function": {"name": "measure", "arguments": "{}"}}]}}]})
+                    .to_string()
+                    .into_bytes(),
+            ))
+        });
+        let cfg = ApiConfig {
+            name: "Test".into(),
+            protocol: Protocol::OpenAi,
+            base_url: "http://localhost:1/v1".into(),
+            model: "m".into(),
+            key: None,
+            http,
+        };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut b = ApiBackend::start(cfg, ctx).unwrap();
+        b.set_turn_requests(3);
+        b.prompt(&[PromptPart::Text("keep going".into())]);
+        let mut events = Vec::new();
+        let start = std::time::Instant::now();
+        while !events.iter().any(|e| matches!(e, Event::TurnEnded { .. })) && start.elapsed() < Duration::from_secs(10) {
+            events.extend(b.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(calls.load(Ordering::Relaxed), 3, "three requests, not the old cap of 24");
+        assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text.contains('3'))), "{events:?}");
+        assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason == "max_turn_requests"), "{events:?}");
         b.shutdown(true);
     }
 

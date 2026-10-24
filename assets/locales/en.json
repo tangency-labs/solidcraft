@@ -1759,7 +1759,7 @@
   "ui.ai_preset": "Preset",
   "ui.ai_protocol": "Protocol",
   "ui.ai_remove": "Remove",
-  "ui.ai_request_limit": "stopped after 24 requests for one message; send another message to go on",
+  "ui.ai_request_limit": "stopped after {limit} requests for one message; send another message to go on",
   "ui.ai_reset": "Reset",
   "ui.ai_settings": "AI settings…",
   "ui.ai_show_features": "Show AI features",
