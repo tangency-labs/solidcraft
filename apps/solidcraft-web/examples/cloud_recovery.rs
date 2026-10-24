@@ -26,6 +26,9 @@ pub mod files;
 #[path = "cloud_recovery/lineage.rs"]
 mod lineage;
 #[cfg(target_arch = "wasm32")]
+#[path = "cloud_recovery/live.rs"]
+mod live;
+#[cfg(target_arch = "wasm32")]
 #[path = "cloud_recovery/previews.rs"]
 mod previews;
 #[cfg(target_arch = "wasm32")]
