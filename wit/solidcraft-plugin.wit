@@ -1,0 +1,238 @@
+package solidcraft:plugin@0.1.0;
+
+/// Values the other interfaces share.
+interface types {
+    /// JSON text. Whoever receives it parses it with size and depth caps.
+    type json = string;
+
+    /// Why a call failed.
+    variant plugin-error {
+        /// The command, request or export failed; the text says why.
+        failed(string),
+        /// plugin.json does not ask for this, the user did not allow it, or it is not
+        /// available in this kind of call (the network inside a transaction).
+        denied(string),
+        /// A size, count or time limit was reached.
+        limit(string),
+        /// Malformed input: bad JSON, an unknown id, a value out of range.
+        invalid(string),
+    }
+}
+
+/// The model API: SolidCraft's engine commands, as MCP and the control channel run them.
+interface engine {
+    use types.{json, plugin-error};
+
+    /// Run one command (its dialog-free JSON form) on the active design.
+    ///
+    /// In a transaction (`command.execute`) any command plugin.json lists may run, and the
+    /// whole transaction is one undo step. In a handler (`panel.*`) only the host's short
+    /// list of handler-safe commands runs (inspect, select, view).
+    run: func(command: string, args: json) -> result<json, plugin-error>;
+}
+
+/// Messages for the user and for crash reports.
+interface log {
+    enum level { debug, info, warn, error }
+
+    log: func(level: level, message: string);
+}
+
+/// This plugin's own data on this computer, not in the design. Needs `store`.
+interface store {
+    use types.{plugin-error};
+
+    get: func(key: string) -> result<option<list<u8>>, plugin-error>;
+    set: func(key: string, value: list<u8>) -> result<_, plugin-error>;
+    remove: func(key: string) -> result<_, plugin-error>;
+    keys: func() -> result<list<string>, plugin-error>;
+}
+
+/// HTTPS to the origins plugin.json names. Handlers only; a transaction gets `denied`.
+interface net {
+    use types.{plugin-error};
+
+    enum method { get, post, put, patch, delete }
+
+    record request {
+        method: method,
+        /// An absolute `https://` URL on an origin plugin.json lists.
+        url: string,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    record response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    /// Send one request and wait for its answer. When the user stored the origin's secret,
+    /// the host adds it as the header plugin.json names; the plugin never sees the secret.
+    fetch: func(req: request) -> result<response, plugin-error>;
+
+    /// Whether the user stored the secret named `name` in plugin.json.
+    has-secret: func(name: string) -> bool;
+}
+
+/// Work the host does once the current handler returns.
+interface host {
+    use types.{json, plugin-error};
+
+    /// Run `entry` as a transaction after this handler returns. The panel gets `executed`.
+    request-execute: func(entry: string, params: json) -> result<_, plugin-error>;
+}
+
+/// Entries: what scripts, the CLI and agents can call (`plugin.run`, `plugin.act`).
+interface command {
+    use types.{json, plugin-error};
+
+    /// Run one entry plugin.json lists. A `transaction` entry may edit the design and is one
+    /// undo step; an error or a trap leaves the design as it was. An `action` entry gets the
+    /// rights of a panel handler (network, no design edits).
+    execute: func(entry: string, params: json) -> result<json, plugin-error>;
+}
+
+/// A panel the host draws with the app's widgets, and pins in the 3D view.
+interface panel {
+    use types.{json, plugin-error};
+
+    enum tone { normal, dim, accent, warning, error, done }
+
+    record button { id: string, label: string, enabled: bool }
+    record checkbox { id: string, label: string, checked: bool }
+    record text-input { id: string, label: string, value: string, multiline: bool, max-chars: u32 }
+    record number-input { id: string, label: string, value: f64, min: f64, max: f64, step: f64, unit: string }
+    record choice { id: string, label: string, options: list<string>, selected: u32 }
+    record styled { text: string, tone: tone }
+
+    /// One thing on a row.
+    variant cell {
+        text(styled),
+        button(button),
+        checkbox(checkbox),
+    }
+
+    /// One line of the panel, top to bottom.
+    variant item {
+        heading(string),
+        text(styled),
+        row(list<cell>),
+        button(button),
+        checkbox(checkbox),
+        text-input(text-input),
+        number-input(number-input),
+        choice(choice),
+        separator,
+    }
+
+    record vec3 { x: f64, y: f64, z: f64 }
+
+    /// The viewport camera, in the form `view.apply` takes (mm, radians).
+    record camera { target: vec3, yaw: f64, pitch: f64, distance: f64 }
+
+    /// A pin in the 3D view, in design coordinates (mm).
+    record marker { id: string, at: vec3, label: string, tone: tone }
+
+    /// An input's value when an action happened.
+    variant value { text(string), number(f64), checked(bool), selected(u32) }
+
+    /// `camera` is the viewport camera at the click (none in a headless host).
+    record action { id: string, inputs: list<tuple<string, value>>, camera: option<camera> }
+    record executed { entry: string, outcome: result<json, string> }
+
+    variant event {
+        /// The panel was opened.
+        opened,
+        /// A button was clicked, or a checkbox or choice changed; `inputs` holds every input.
+        action(action),
+        /// A pin was clicked.
+        marker(string),
+        /// The active design changed: an edit, undo, another tab. Coalesced.
+        design-changed,
+        /// What a `host.request-execute` did.
+        executed(executed),
+    }
+
+    handle: func(e: event) -> result<_, plugin-error>;
+    render: func() -> list<item>;
+    markers: func() -> list<marker>;
+}
+
+/// A plugin whose entries change the design (a part generator).
+world command-plugin {
+    import engine;
+    import log;
+    import store;
+    export command;
+}
+
+/// A plugin with a panel and pins, which may also use the network.
+world panel-plugin {
+    import engine;
+    import log;
+    import store;
+    import net;
+    import host;
+    export command;
+    export panel;
+}
+
+/// The file an importer converts, and the files next to it. Unstable: feature `file-formats`.
+@unstable(feature = file-formats)
+interface input {
+    @unstable(feature = file-formats)
+    use types.{plugin-error};
+
+    /// The file being imported: its name without folders, and its size in bytes.
+    @unstable(feature = file-formats)
+    record file-info { name: string, size: u64 }
+
+    /// Read at most 8 MiB at `offset`. `path` is "" for the file being imported, or a path
+    /// relative to its folder (only with `reads_input_folder`; no `..`, no absolute paths, no
+    /// hidden files).
+    @unstable(feature = file-formats)
+    read: func(path: string, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
+
+    /// The size of such a file, or none when it does not exist or may not be read.
+    @unstable(feature = file-formats)
+    size: func(path: string) -> result<option<u64>, plugin-error>;
+}
+
+/// Where an importer writes the converted design. Unstable: feature `file-formats`.
+@unstable(feature = file-formats)
+interface output {
+    @unstable(feature = file-formats)
+    use types.{plugin-error};
+
+    /// Append bytes of the `.solidcraft` design: at most 8 MiB per call, 256 MiB in all.
+    @unstable(feature = file-formats)
+    write: func(bytes: list<u8>) -> result<_, plugin-error>;
+}
+
+/// File importers. Unstable: feature `file-formats`.
+@unstable(feature = file-formats)
+interface importer {
+    @unstable(feature = file-formats)
+    use types.{plugin-error};
+    @unstable(feature = file-formats)
+    use input.{file-info};
+
+    /// Convert `main`, writing the design through `output`, and return the loss report (plain
+    /// text, at most 64 KiB). An error or a trap fails this one import.
+    @unstable(feature = file-formats)
+    import-design: func(main: file-info) -> result<string, plugin-error>;
+}
+
+/// A plugin that converts files from other formats into SolidCraft designs.
+@unstable(feature = file-formats)
+world importer-plugin {
+    import log;
+    @unstable(feature = file-formats)
+    import input;
+    @unstable(feature = file-formats)
+    import output;
+    @unstable(feature = file-formats)
+    export importer;
+}
