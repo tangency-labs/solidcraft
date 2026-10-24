@@ -24,6 +24,132 @@ fn volume(s: &mut Session, b: &str) -> f64 {
 
 const SIZES: [(f64, f64); 9] = [(3.0, 0.5), (4.0, 0.7), (5.0, 0.8), (6.0, 1.0), (8.0, 1.25), (10.0, 1.5), (12.0, 1.75), (16.0, 2.0), (20.0, 2.5)];
 
+fn assert_tapped_depth(state: &solidcraft_doc::ModelState, entry: Vec3, inward: Vec3, offset: f64, depth: f64) {
+    assert_eq!(state.threads.len(), 1);
+    let thread = &state.threads[0];
+    assert!(thread.internal);
+    let a = (thread.axis_point + thread.axis * thread.start - entry).dot(inward);
+    let b = (thread.axis_point + thread.axis * thread.end - entry).dot(inward);
+    assert!((a.min(b) - offset).abs() < 1e-6, "thread entry {} mm, expected {offset} mm", a.min(b));
+    assert!((a.max(b) - offset - depth).abs() < 1e-6, "thread end {} mm, expected {} mm", a.max(b), offset + depth);
+}
+
+#[test]
+fn tapped_thread_depth_keeps_reference_edge_placement_after_reopen() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":60,"width":60,"height":12}));
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position":[30,30,12],"thread":"M6","depth":8,"thread_depth":3,
+            "references":[{"edge":[0,25,12],"distance":"10 mm"},{"edge":[25,0,12],"distance":"12 mm"}]}),
+    );
+    let inward = Vec3::new(0.0, 0.0, -1.0);
+    let entry = Vec3::new(10.0, 12.0, 12.0);
+    assert_tapped_depth(&s.model.state(), entry, inward, 0.0, 3.0);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_tapped_depth(&reopened.model.state(), entry, inward, 0.0, 3.0);
+    let solidcraft_doc::FeatureKind::Hole { references, thread_depth, .. } = &reopened.doc.features.last().unwrap().kind else {
+        panic!("expected a referenced tapped hole");
+    };
+    assert_eq!(references.len(), 2);
+    assert_eq!(thread_depth.as_ref().unwrap().to_string(), "3");
+    assert!(!reopened.model.state().bodies[0].body.contains(Vec3::new(10.0, 12.0, 10.0)));
+}
+
+#[test]
+fn tapped_thread_depth_is_independent_through_preview_redefine_undo_and_reload() {
+    for (height, mut params, full) in
+        [(12.0, json!({"depth":8,"type":"drilled"}), 8.0), (12.0, json!({}), 12.0), (12.0, json!({"to":[30,30,5]}), 7.0)]
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":60,"width":60,"height":height,"body_name":"Plate"}));
+        params["position"] = json!([30, 30, height]);
+        params["direction"] = json!([0, 0, -1]);
+        params["thread"] = json!("M6");
+        let hole = run(&mut s, "solid.hole", params.clone())["feature"].as_u64().unwrap();
+        let entry = Vec3::new(30.0, 30.0, height);
+        let inward = Vec3::new(0.0, 0.0, -1.0);
+        assert_tapped_depth(&s.model.state(), entry, inward, 0.0, full);
+        let before = s.doc.to_json();
+        let physical_volume = volume(&mut s, "Plate");
+
+        // Version 29 never saved this field: its default remains the full wall.
+        let mut legacy: Value = serde_json::from_str(&before).unwrap();
+        legacy["format"] = json!("solidcraft/29");
+        let reopened = Session::new(solidcraft_doc::Document::from_json(&legacy.to_string()).unwrap());
+        assert_tapped_depth(&reopened.model.state(), entry, inward, 0.0, full);
+
+        params["thread_depth"] = json!(4);
+        let redefine = json!({"feature":hole,"command":"solid.hole","params":params});
+        let preview = s.preview(&[("timeline.redefine".into(), redefine.clone())]).unwrap();
+        assert_tapped_depth(&preview.after, entry, inward, 0.0, 4.0);
+        assert_eq!(s.doc.to_json(), before, "preview must not change the design");
+        run(&mut s, "timeline.redefine", redefine);
+        assert_tapped_depth(&s.model.state(), entry, inward, 0.0, 4.0);
+        assert!((volume(&mut s, "Plate") - physical_volume).abs() < 1e-6, "thread depth must not change the drill geometry");
+        let saved = s.doc.to_json();
+        let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        assert_tapped_depth(&reopened.model.state(), entry, inward, 0.0, 4.0);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.to_json(), before);
+        assert_tapped_depth(&s.model.state(), entry, inward, 0.0, full);
+    }
+}
+
+#[test]
+fn tapped_thread_depth_uses_the_cylinder_beyond_recesses_and_in_shallow_holes() {
+    for (height, mut params, offset, full) in [
+        (12.0, json!({"thread":"M6","type":"counterbore","cb_diameter":12,"cb_depth":5,"depth":9}), 5.0, 4.0),
+        (12.0, json!({"thread":"G 1/4","type":"counterbore","cb_diameter":20,"cb_depth":5,"depth":9}), 5.0, 4.0),
+        (12.0, json!({"thread":"1/4-20 UNC","type":"counterbore","cb_diameter":12,"cb_depth":5,"depth":9}), 5.0, 4.0),
+        (12.0, json!({"thread":"M6","type":"countersink","cs_diameter":11,"cs_angle":"90 deg","depth":9}), 3.0, 6.0),
+        (12.0, json!({"thread":"M36","type":"drilled","depth":3}), 0.0, 3.0),
+        (5.0, json!({"thread":"M36"}), 0.0, 5.0),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":60,"width":60,"height":height,"body_name":"Plate"}));
+        params["position"] = json!([30, 30, height]);
+        params["direction"] = json!([0, 0, -1]);
+        let hole = run(&mut s, "solid.hole", params.clone())["feature"].as_u64().unwrap();
+        let entry = Vec3::new(30.0, 30.0, height);
+        let inward = Vec3::new(0.0, 0.0, -1.0);
+        assert_tapped_depth(&s.model.state(), entry, inward, offset, full);
+        params["thread_depth"] = json!(2);
+        run(&mut s, "timeline.redefine", json!({"feature":hole,"command":"solid.hole","params":params}));
+        assert_tapped_depth(&s.model.state(), entry, inward, offset, 2.0);
+    }
+}
+
+#[test]
+fn tapped_thread_depth_starts_at_the_entry_for_both_axis_directions() {
+    for (entry, inward) in [(Vec3::new(0.0, 10.0, 6.0), Vec3::new(1.0, 0.0, 0.0)), (Vec3::new(20.0, 10.0, 6.0), Vec3::new(-1.0, 0.0, 0.0))] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":20,"width":20,"height":12}));
+        run(
+            &mut s,
+            "solid.hole",
+            json!({"position":[entry.x,entry.y,entry.z],"direction":[inward.x,inward.y,inward.z],"thread":"M6","depth":8,"thread_depth":3}),
+        );
+        assert_tapped_depth(&s.model.state(), entry, inward, 0.0, 3.0);
+    }
+}
+
+#[test]
+fn tapped_thread_depth_rejects_invalid_or_excessive_values_atomically() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10}));
+    let before = s.doc.to_json();
+    for depth in [json!(0), json!(-1), json!(20), json!(true), json!(""), json!("NaN mm"), json!("1e999 mm"), json!("3 deg")] {
+        let result = s.execute("solid.hole", &json!({"position":[10,10,10],"thread":"M6","depth":8,"thread_depth":depth}));
+        assert!(result.is_err(), "invalid thread depth {depth}: {result:?}");
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.model.state().threads.is_empty());
+    }
+    assert!(s.execute("solid.hole", &json!({"position":[10,10,10],"diameter":5,"thread_depth":3})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}
+
 /// Keep the original 48-station reproduction of the shell error even though new fine
 /// threads now use more stations. The same cut polygons must rebuild as a closed solid.
 #[test]

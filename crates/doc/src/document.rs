@@ -721,6 +721,11 @@ pub enum FeatureKind {
         /// A cosmetic thread in the holes (e.g. "M6x1").
         #[serde(default, skip_serializing_if = "Option::is_none")]
         thread: Option<String>,
+        /// Threaded depth from the cylindrical wall's entry; `None` = its full useful length.
+        /// Independent of the drill depth and excluding the drill point and entry recess.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Thread depth")]
+        thread_depth: Option<Expr>,
         /// To Object: drill down to the face (or point) here instead of `depth`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<FacePick>,
@@ -2015,12 +2020,20 @@ pub enum HoleKind {
         cb_diameter: Expr,
         #[walk(length = "Counterbore depth")]
         cb_depth: Expr,
+        /// Optional drill point below the narrow cylindrical bore; absent stays flat.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Tip angle")]
+        tip_angle: Option<Expr>,
     },
     Countersink {
         #[walk(length = "Countersink diameter")]
         cs_diameter: Expr,
         #[walk(angle = "Countersink angle")]
         cs_angle: Expr,
+        /// Optional drill point, independent of the entry countersink.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Tip angle")]
+        tip_angle: Option<Expr>,
     },
 }
 

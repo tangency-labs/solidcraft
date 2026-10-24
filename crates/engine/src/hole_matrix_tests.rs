@@ -801,3 +801,58 @@ fn hole_matrix() {
         report.join(" | ")
     );
 }
+
+#[test]
+fn recessed_drill_point_geometry_roundtrip_preview_and_undo() {
+    for kind in ["counterbore", "countersink"] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        let mut p = json!({"position":[20,15,20],"direction":[0,0,-1],"diameter":6,"depth":8,"type":kind,"cb_diameter":12,"cb_depth":3,"cs_diameter":12,"cs_angle":"90 deg"});
+        let hole = run(&mut s, "solid.hole", p.clone()).unwrap()["feature"].as_u64().unwrap();
+        let probe = Vec3::new(20.0, 15.0, 11.5);
+        assert!(solid_at(&s, probe), "legacy absent tip is flat");
+        let mut legacy: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        legacy["format"] = json!("solidcraft/30");
+        legacy.as_object_mut().unwrap().remove("format_pending");
+        let old = Session::new(solidcraft_doc::Document::from_json(&legacy.to_string()).unwrap());
+        assert!(solid_at(&old, probe), "format-30 recessed holes keep their flat bottom");
+        p["tip_angle"] = json!("118 deg");
+        run(&mut s, "timeline.redefine", json!({"feature":hole,"command":"solid.hole","params":p})).unwrap();
+        assert!(!solid_at(&s, probe), "{kind}: drill point must remove the axis below the shoulder");
+        assert!(solid_at(&s, Vec3::new(23.1, 15.0, 11.5)), "point must not widen the cylindrical bore");
+        let saved = s.doc.to_json();
+        let loaded = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        assert!(!solid_at(&loaded, probe), "chosen bottom must survive reopen");
+        p.as_object_mut().unwrap().remove("tip_angle");
+        let redefine = json!({"feature":hole,"command":"solid.hole","params":p});
+        let preview = s.preview(&[("timeline.redefine".into(), redefine.clone())]).unwrap();
+        assert!(preview.after.bodies.iter().any(|b| b.body.contains(probe)));
+        assert_eq!(s.doc.to_json(), saved, "preview cannot accept the bottom change");
+        run(&mut s, "timeline.redefine", redefine).unwrap();
+        assert!(solid_at(&s, probe));
+        run(&mut s, "edit.undo", json!({})).unwrap();
+        assert!(!solid_at(&s, probe));
+        run(&mut s, "edit.redo", json!({})).unwrap();
+        assert!(solid_at(&s, probe));
+    }
+}
+
+#[test]
+fn recessed_drill_point_through_and_exact_shoulder_keep_the_existing_exit() {
+    for kind in ["counterbore", "countersink"] {
+        for exact in [false, true] {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+            let mut p = json!({"position":[20,15,20],"direction":[0,0,-1],"diameter":6,"type":kind,"cb_diameter":12,"cb_depth":3,"cs_diameter":12,"cs_angle":"90 deg"});
+            if exact {
+                p["depth"] = json!(20);
+            }
+            let hole = run(&mut s, "solid.hole", p.clone()).unwrap()["feature"].as_u64().unwrap();
+            let flat = measure(&mut s).unwrap().0;
+            p["tip_angle"] = json!("118 deg");
+            run(&mut s, "timeline.redefine", json!({"feature":hole,"command":"solid.hole","params":p})).unwrap();
+            assert!((measure(&mut s).unwrap().0 - flat).abs() < 1e-6, "point beyond the exit must not change the part");
+            assert!(!solid_at(&s, Vec3::new(20.0, 15.0, 0.01)));
+        }
+    }
+}
