@@ -1208,6 +1208,7 @@
   "pattern.flip_direction": "Flip direction",
   "pick a hole to seat it, or OK places it at the origin": "pick a hole to seat it, or OK places it at the origin",
   "pick one or two vertices, edges or faces": "pick one or two vertices, edges or faces",
+  "prefs.above_browser": "Above browser",
   "prefs.add_item": "Add the item",
   "prefs.alt_frees_manipulators": "Alt / Option also frees manipulator arrows",
   "prefs.anti_aliasing_note": "Smooths jagged edges.",

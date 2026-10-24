@@ -820,7 +820,8 @@ impl SolveApp {
                 }
                 if let Some(dock) = v.get("dock").and_then(Value::as_str) {
                     self.preferences.timeline_left = dock != "bottom";
-                    self.preferences.timeline_under_browser = dock == "under_browser";
+                    self.preferences.timeline_under_browser = matches!(dock, "under_browser" | "above_browser");
+                    self.preferences.timeline_above_browser = dock == "above_browser";
                     self.preferences.timeline_collapsed = false;
                     self.preferences.timeline_left_browser_collapsed = false;
                 }

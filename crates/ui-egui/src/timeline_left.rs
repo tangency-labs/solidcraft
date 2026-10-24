@@ -145,15 +145,21 @@ fn column_rects_at(app: &SolveApp, available: Rect, browser_fold: f32, history_f
         let history = Rect::from_min_size(column.min, vec2(column.width(), height));
         return (Rect::NOTHING, history);
     }
+    let (first_fold, second_fold) = if app.preferences.timeline_above_browser { (history_fold, browser_fold) } else { (browser_fold, history_fold) };
+    let (first, second) = stack_rects(column, gap, first_fold, second_fold);
+    if app.preferences.timeline_above_browser { (second, first) } else { (first, second) }
+}
+
+/// Two cards sharing the column: the first on top, each folding to its header.
+fn stack_rects(column: Rect, gap: f32, first_fold: f32, second_fold: f32) -> (Rect, Rect) {
     let budget = (column.height() - gap).max(0.0);
     let header = header_outer_height().min(budget / 2.0);
-    let expanded_browser = egui::lerp(budget / 2.0..=(budget - header).max(0.0), history_fold);
-    let browser_height = egui::lerp(expanded_browser..=header, browser_fold);
-    let browser = Rect::from_min_size(column.min, vec2(column.width(), browser_height));
-    let history_top = (browser.bottom() + gap).min(column.bottom());
-    let history_height = egui::lerp((column.bottom() - history_top).max(0.0)..=header, history_fold);
-    let history = Rect::from_min_size(pos2(column.left(), history_top), vec2(column.width(), history_height));
-    (browser, history)
+    let expanded_first = egui::lerp(budget / 2.0..=(budget - header).max(0.0), second_fold);
+    let first_height = egui::lerp(expanded_first..=header, first_fold);
+    let first = Rect::from_min_size(column.min, vec2(column.width(), first_height));
+    let second_top = (first.bottom() + gap).min(column.bottom());
+    let second_height = egui::lerp((column.bottom() - second_top).max(0.0)..=header, second_fold);
+    (first, Rect::from_min_size(pos2(column.left(), second_top), vec2(column.width(), second_height)))
 }
 
 pub(crate) fn floating_rect(app: &SolveApp, available: Rect) -> Rect {
@@ -1305,6 +1311,34 @@ mod tests {
             assert!(h.app.preferences.timeline_left_browser_collapsed && h.app.preferences.timeline_collapsed);
             assert!((h.app.shell.browser.unwrap().top() - browser.top()).abs() < 1.0);
             assert!(h.app.shell.history.unwrap().bottom() < browser.top() + header_outer_height() * 2.0 + crate::shell::SHELL_GAP + 1.0);
+        }
+    }
+
+    #[test]
+    fn history_above_browser_stacks_the_history_first_and_folds_in_place() {
+        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.ui.layout = mode;
+            h.call("ui.resize", json!({"width":1400,"height":1000}));
+            h.app.run("view.history_layout", json!({"dock":"above_browser"})).unwrap();
+            assert!(h.app.preferences.timeline_left && h.app.preferences.timeline_under_browser && h.app.preferences.timeline_above_browser);
+            h.frames(6);
+            let (browser, history) = (h.app.shell.browser.unwrap(), h.app.shell.history.unwrap());
+            let gap = Container::for_layout(mode, Surface::Panel).gap();
+            assert!((browser.top() - history.bottom() - gap).abs() < 1.0, "{mode:?}: {history:?} {browser:?}");
+            assert!((browser.width() - history.width()).abs() < 1.0);
+            assert!((browser.height() - history.height()).abs() < 1.0);
+            h.app.preferences.timeline_collapsed = true;
+            h.frames(12);
+            let (browser, history) = (h.app.shell.browser.unwrap(), h.app.shell.history.unwrap());
+            assert!(history.height() <= header_outer_height() + 1.0 && browser.height() > history.height() * 3.0);
+            assert!((browser.top() - history.bottom() - gap).abs() < 1.0);
+            // Switching back to "under browser" restores the browser on top.
+            h.app.run("view.history_layout", json!({"dock":"under_browser"})).unwrap();
+            assert!(!h.app.preferences.timeline_above_browser && h.app.preferences.timeline_under_browser);
+            h.frames(12);
+            assert!(h.app.shell.browser.unwrap().top() < h.app.shell.history.unwrap().top());
         }
     }
 

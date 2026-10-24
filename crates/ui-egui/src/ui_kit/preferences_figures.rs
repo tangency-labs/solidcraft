@@ -196,13 +196,14 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     let left_history = if state.history == 1 { 10.0 + gap } else { 0.0 };
     let bx = inset + left_history;
     let bw = 30.0;
-    let browser_height = if state.history == 2 {
+    let browser_height = if matches!(state.history, 2 | 3) {
         (bottom - top - gap) * 0.5
     } else if state.history == 0 {
         bottom - top - 10.0 - gap
     } else {
         bottom - top
     };
+    let browser_top = if state.history == 3 { top + browser_height + gap } else { top };
     let panel = |x: f32, y: f32, w: f32, h: f32, label: &str, fill: Color32| {
         let rect = Rect::from_min_max(c.at(x, y), c.at(x + w, y + h));
         p.rect(rect, if state.compact { 0 } else { t.radius_sm }, fill, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
@@ -213,7 +214,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
         rect
     };
     panel(inset, inset, 120.0 - inset * 2.0, ribbon_height, "", t.toolbar);
-    panel(bx, top, bw, browser_height, "Browser", if state.translucent && !state.compact { t.panel.gamma_multiply(0.60) } else { t.panel });
+    panel(bx, browser_top, bw, browser_height, "Browser", if state.translucent && !state.compact { t.panel.gamma_multiply(0.60) } else { t.panel });
     // A full row of quiet tool symbols, with label marks only when labels are enabled.
     let quiet = t.form_dim.lerp_to_gamma(t.viewport_top, 0.55);
     for index in 0..10 {
@@ -225,8 +226,8 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
         }
     }
     for index in 0..3 {
-        let y = top + 15.0 + index as f32 * 5.0;
-        if y < top + browser_height - 3.0 {
+        let y = browser_top + 15.0 + index as f32 * 5.0;
+        if y < browser_top + browser_height - 3.0 {
             let indent = if index == 1 { 2.5 } else { 0.0 };
             p.line_segment([c.at(bx + 5.0 + indent, y), c.at(bx + bw - 5.0, y)], Stroke::new(c.width(0.7), t.form_dim.gamma_multiply(0.4)));
         }
@@ -239,6 +240,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     let history = match state.history {
         1 => panel(inset, top, 10.0, bottom - top, "", t.selected_bg),
         2 => panel(bx, top + browser_height + gap, bw, bottom - top - browser_height - gap, "History", t.selected_bg),
+        3 => panel(bx, top, bw, bottom - top - browser_height - gap, "History", t.selected_bg),
         _ => panel(inset, bottom - 10.0, 120.0 - inset * 2.0, 10.0, "History", t.selected_bg),
     };
     if state.history == 1 {
