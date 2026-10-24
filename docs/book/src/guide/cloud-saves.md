@@ -56,8 +56,7 @@ with **Connect GitHub**; each connection has independent credentials and queues.
 The picker refuses names already shown in that project. If another device creates
 the same name after listing, synchronization preserves a conflict copy. Changing
 the active design while the picker is open cancels the choice so it cannot save a
-different tab by accident. The full settings editor and thumbnail previews remain
-under development.
+different tab by accident. Thumbnail previews are under development.
 
 Saving first records the captured design on this device, then synchronizes it.
 **Saved on this device** means it is recoverable here and still needs publication.
@@ -76,6 +75,27 @@ Cancelling synchronization keeps queued designs. When a conflicting design edit
 is found, SolidCraft preserves a conflict copy rather than replacing either edit.
 Newer storage formats ask you to upgrade before opening or saving.
 
+## Manage connections
+
+Open **Cloud Saves Settings** from Start, or choose **Settings → Cloud Saves**.
+Select a repository to rename it, make it the default for new cloud saves, test
+its connection, synchronize it, or reconnect with a replacement token.
+
+Connection changes take effect when you choose **Apply** or **OK** and local
+storage confirms them. A failed Apply keeps the page open so you can retry.
+**Cancel** discards changes made since the last successful Apply. Connecting or
+reconnecting from this page verifies the repository first, then waits for Apply.
+
+Choose **Disconnect**, then Apply to remove a connection from the app. Its queued
+saves remain on this device; reconnecting the same repository restores access to
+them. Existing designs keep their destinations when you change the default.
+**Restore Defaults** resets synchronization preferences and preserves connections.
+
+**Synchronize after saving** publishes each locally recorded save in the background.
+**Retry pending saves automatically** retries after startup and at regular intervals.
+You can also synchronize a selected repository immediately or cancel an active
+operation. Cancelling an upload keeps its durable local save.
+
 ## Reconnect and desktop Git
 
 Use **Connect GitHub** again with the same repository and a replacement token.
@@ -90,8 +110,7 @@ the app uses `SolidCraft <cloud@solidcraft.invalid>` for that save only.
 
 Advanced connection commands also support existing checkouts and SSH, HTTPS,
 `file://` or local remotes. System SSH configuration and an explicitly selected
-key work through Git. The dedicated settings editor and generated-key workflow
-are still being developed. Do not put tokens into remote URLs.
+key work through Git. The generated-key workflow is under development. Do not put tokens into remote URLs.
 
 See GitHub's [token guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 for token expiration, organization approval and revocation.

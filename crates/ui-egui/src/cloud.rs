@@ -9,6 +9,7 @@ use crate::SolveApp;
 pub(crate) struct State {
     pub setup: Option<crate::cloud_setup::Wizard>,
     pub browser: crate::cloud_browser::Browser,
+    pub editor: Option<crate::cloud_settings::Editor>,
     retry_at: f64,
     messages: BTreeMap<String, String>,
 }

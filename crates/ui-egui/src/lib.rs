@@ -19,6 +19,7 @@ pub mod browser_prompts;
 pub mod canvas;
 mod cloud;
 mod cloud_browser;
+mod cloud_settings;
 mod cloud_setup;
 #[cfg(test)]
 mod colour_tokens_tests;
@@ -948,6 +949,10 @@ impl SolveApp {
     /// Start a command the way a toolbar click does: interactive tools and dialogs for commands
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
+        if id == "cloud.settings" {
+            prefs::open_at(self, prefs::PAGE_CLOUD);
+            return;
+        }
         if id == "cloud.connect" {
             cloud_setup::open(self);
             return;

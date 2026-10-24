@@ -281,7 +281,10 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
             if connection.is_some() && button(ui, "cloud:save", tr("cmd.cloud.save"), !app.session.cloud_save_pending()) {
                 app.start("cloud.save");
             }
-            ui.hyperlink_to(tr("Help"), "https://tangency-labs.github.io/solidcraft/guide/cloud-saves.html");
+            if button(ui, "cloud:settings", tr("cmd.cloud.settings"), true) {
+                app.start("cloud.settings");
+            }
+            ui.hyperlink_to(crate::i18n::tr_label("Help"), "https://tangency-labs.github.io/solidcraft/guide/cloud-saves.html");
         });
         ui.add_space(t.space_8);
         if let Some(c) = &mut connection {
@@ -439,7 +442,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
             if let Some(error) = &app.cloud.browser.error {
                 ui_kit::text(ui, error, ui_kit::Text::Report("cloud_save_error", true));
             }
-            ui.hyperlink_to(tr("Help"), "https://tangency-labs.github.io/solidcraft/guide/cloud-saves.html");
+            ui.hyperlink_to(crate::i18n::tr_label("Help"), "https://tangency-labs.github.io/solidcraft/guide/cloud-saves.html");
         });
     if closed || action == ui_kit::Action::Cancel {
         return;

@@ -21,7 +21,7 @@ with persistent settings, Performance/Quality graphics presets (Quality combines
 Git-backed Cloud Saves (#4838) is in progress: portable project snapshots, durable offline
 queues, desktop/browser workers and guided GitHub setup with scoped HTTPS credentials are
 implemented on the feature branch, along with Start-page repository browsing and initial
-save destination selection. Thumbnail previews, the Cloud Saves settings editor, SSH key
+save destination selection and the Cloud Saves settings editor. Thumbnail previews, SSH key
 generation and integrated host validation remain. See the [implementation guide](docs/cloud-saves.md).
 
 ## Scope (owner decision, 2026-10-07)

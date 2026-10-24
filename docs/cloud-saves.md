@@ -189,8 +189,8 @@ binding and prevents an old asynchronous capture from reattaching it.
 
 These foundations, commands, platform workers, connection persistence, browser
 recovery storage, native credentials, guided setup, and Home browsing/saving are
-implemented. The dedicated Cloud Saves preferences editor and authenticated host
-acceptance remain unfinished; the feature is unreleased.
+implemented. The Cloud Saves preferences editor is implemented; authenticated host acceptance
+is in progress. The feature is unreleased.
 
 
 ## Guided setup and native credentials
@@ -244,5 +244,20 @@ unavailable keychain does not prevent local checkout opens. Commits use the conf
 identity; missing identity fields get per-command fallbacks without editing Git config.
 
 The Start page opens this wizard and browses connected repositories. The Cloud
-Saves preference editor is the next UI integration step. All setup labels cover the 25
+Saves preference editor manages pending connection edits. All setup labels cover the 25
 supported locale catalogs, including en-GB.
+
+## Cloud Saves preferences
+
+`crates/ui-egui/src/cloud_settings.rs` owns a pending editor over the current
+connection settings. The existing Preferences window supplies its page and
+Apply/OK/Cancel lifecycle. `cloud.configure` persists changes asynchronously;
+only durable completion advances the preferences snapshot or closes the window.
+Failed persistence retains the editor for retry. Settings changed by another tab
+refresh an untouched editor; a dirty editor asks the user to reload before Apply.
+
+Guided setup from this page stages its verified connection in the editor. Setup
+from Start continues to apply the connection directly. Disconnect changes settings
+only; durable queues and credential storage retain their data. Restore Defaults
+uses `Settings::restore_behavior_defaults`, preserving connections and defaults.
+Testing and synchronization use the applied connection through existing commands.
