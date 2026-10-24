@@ -99,7 +99,8 @@ fn sound_or_empty(s: &Session) {
 
 #[test]
 fn extend_cases() {
-    // A line extends to a circle; to a spline; with nothing to reach it is a clear error.
+    // A line extends to a circle; to a spline; with nothing to reach it runs on as far as the
+    // preview showed.
     let mut s = new_sketch();
     add(&mut s, "sketch.circle.center", json!({"center": [20, 0], "radius": 5}));
     let l = add(&mut s, "sketch.line", json!({"points": [[0, 0], [5, 0]]}))[0].clone();
@@ -119,8 +120,15 @@ fn extend_cases() {
     sound(&s);
     let mut s = new_sketch();
     let l = add(&mut s, "sketch.line", json!({"points": [[0, 0], [5, 0]]}))[0].clone();
-    assert!(s.execute("sketch.extend", &json!({"curve": l, "at": [5, 0]})).is_err());
+    s.execute("sketch.extend", &json!({"curve": l, "at": [5, 0]})).unwrap();
     sound(&s);
+    let id = s.active_sketch.unwrap();
+    let st = s.model.state();
+    let ss = st.sketch(id).unwrap();
+    let li = ss.sketch.curve_index(&l).unwrap();
+    let end = ss.sketch.segs(li).iter().map(|g| g.end().x.max(g.start().x)).fold(f64::NEG_INFINITY, f64::max);
+    assert!((end - (5.0 + super::EXTEND_REACH)).abs() < 1e-6, "{end}");
+    drop(st);
     // An arc extends along its circle to a line.
     let mut s = new_sketch();
     add(&mut s, "sketch.line", json!({"points": [[-20, -3], [20, -3]]}));

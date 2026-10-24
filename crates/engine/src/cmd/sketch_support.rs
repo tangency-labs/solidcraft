@@ -88,7 +88,9 @@ pub(super) fn hits(support: &Shape, seg: &Seg2, budget: &mut usize) -> Result<Ve
         if let Shape::Line { a: pa, b: pb } = *support
             && (pb - pa).normalized().is_some_and(|d| d.cross(a - pa).abs() < 1e-9 && d.cross(b - pa).abs() < 1e-9)
         {
-            return Err(bad("sketch.extend", "the continuation overlaps another curve"));
+            // A collinear line is passed over (no hits) so extend can find the next target on
+            // its way instead of failing.
+            return Ok(Vec::new());
         }
         return Ok(intersections(support, &other)
             .into_iter()
@@ -105,7 +107,8 @@ pub(super) fn hits(support: &Shape, seg: &Seg2, budget: &mut usize) -> Result<Ve
             && c.dist(center) < 1e-9
             && (r - radius).abs() < 1e-9
         {
-            return Err(bad("sketch.extend", "the continuation overlaps another curve"));
+            // The same circle is passed over, so extend can find the next target.
+            return Ok(Vec::new());
         }
         return Ok(intersections(support, &other)
             .into_iter()
@@ -144,7 +147,9 @@ pub(super) fn hits(support: &Shape, seg: &Seg2, budget: &mut usize) -> Result<Ve
         }
     };
     if c.iter().all(|v| v.abs() < 1e-28) {
-        return Err(bad("sketch.extend", "the continuation overlaps another curve"));
+        // A zero polynomial: the curve lies on the support (infinite line or circle). Pass it
+        // over, so extend can find the next target.
+        return Ok(Vec::new());
     }
     let mut out = Vec::new();
     for t in roots(&c, budget)? {

@@ -225,6 +225,177 @@ fn exact_extend_arc_rejects_interior_hit_atomically() {
 }
 
 #[test]
+fn arc_extend_grows_a_free_end_in_place_to_the_first_geometry() {
+    let mut s = new_sketch();
+    let arc = ids(&run(&mut s, "sketch.arc.center_point", json!({"center":[0,0],"start":[10,0],"end":[0,10],"connect":false}))["curves"])[0].clone();
+    // A cutter crossing the circle at `deg`, two millimetres either side of it.
+    let cut = |s: &mut Session, deg: f64| {
+        let a = deg.to_radians();
+        let (ux, uy) = (a.cos(), a.sin());
+        let (x, y) = (10.0 * ux, 10.0 * uy);
+        run(s, "sketch.line", json!({"points": [[x - 2.0 * ux, y - 2.0 * uy], [x + 2.0 * ux, y + 2.0 * uy]], "connect": false, "infer": false}));
+    };
+    // Past the arc's end there are two: the extension stops at the nearer one.
+    cut(&mut s, 200.0);
+    cut(&mut s, 260.0);
+    let before = sketch(&s);
+    let round = |sk: &solidcraft_sketch::Sketch, ci: usize| match sk.shape(ci) {
+        Some(solidcraft_sketch::Shape::Round { start, sweep, .. }) => (start.to_degrees(), sweep.to_degrees()),
+        other => panic!("{other:?}"),
+    };
+    // A free end grows in place: the arc itself reaches the 200° stop, so the sketch gains no
+    // curve and no point.
+    run(&mut s, "sketch.extend", json!({"curve": arc, "at": [0, 10]}));
+    let sk = sketch(&s);
+    let ci = sk.curve_index(&arc).unwrap();
+    assert_eq!((sk.curves.len(), sk.points.len()), (before.curves.len(), before.points.len()), "the arc itself reaches the stop");
+    let (start, sweep) = round(&sk, ci);
+    assert!(start.abs() < 1e-6 && (sweep - 200.0).abs() < 1e-6, "{start}, {sweep}");
+    assert!(sk.shape(ci).is_some_and(|sh| sh.dist(Vec2::new(10.0 * 200.0_f64.to_radians().cos(), 10.0 * 200.0_f64.to_radians().sin())) < 1e-6));
+    // The other way round: clockwise from the arc's start to the 300° cutter, again in place.
+    cut(&mut s, 300.0);
+    let before = sketch(&s);
+    run(&mut s, "sketch.extend", json!({"curve": arc, "at": [10, 0]}));
+    let sk = sketch(&s);
+    assert_eq!((sk.curves.len(), sk.points.len()), (before.curves.len(), before.points.len()), "the arc itself reaches the stop");
+    let (start, sweep) = round(&sk, ci);
+    assert!((start.rem_euclid(360.0) - 300.0).abs() < 1e-6 && (sweep - 260.0).abs() < 1e-6, "{start}, {sweep}");
+}
+
+#[test]
+fn arc_extend_joins_an_end_that_already_carries_geometry_with_a_new_arc() {
+    let mut s = new_sketch();
+    let arc = ids(&run(&mut s, "sketch.arc.center_point", json!({"center":[0,0],"start":[10,0],"end":[0,10],"connect":false}))["curves"])[0].clone();
+    // A line running on from the arc's end, and a circle crossing the arc's circle further round.
+    let line = ids(&run(&mut s, "sketch.line", json!({"points":[[0,10],[0,20]],"connect":true,"infer":false}))["curves"])[0].clone();
+    run(&mut s, "sketch.circle.center", json!({"center":[12,0],"radius":10,"connect":false}));
+    let before = sketch(&s);
+    let end = before.resolve_point(&format!("{arc}.end")).expect("the arc's end");
+    let line_start = before.resolve_point(&format!("{line}.start")).expect("the line's start");
+    // `connect` ties the line's own point to the arc's end, so the end carries geometry there.
+    assert!(before.point(end).zip(before.point(line_start)).is_some_and(|(a, b)| a.dist(b) < 1e-9));
+    assert!(
+        before
+            .constraints
+            .iter()
+            .any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (end, line_start) || (p, q) == (line_start, end)))
+    );
+    run(&mut s, "sketch.extend", json!({"curve": arc, "at": [0, 10]}));
+    let sk = sketch(&s);
+    let ci = sk.curve_index(&arc).unwrap();
+    // The end the line starts at stays where it is, so the arc keeps its geometry...
+    assert!(matches!(sk.shape(ci).unwrap(), solidcraft_sketch::Shape::Round { sweep, .. } if (sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-9));
+    // ...and the extension is a new arc from that end to the circle's crossing.
+    let grown = (0..sk.curves.len())
+        .find(|i| sk.curves[*i].id != arc && sk.curves[*i].id != line && matches!(sk.curves[*i].kind, CurveKind::Arc { .. }))
+        .expect("a new arc");
+    let sh = sk.shape(grown).unwrap();
+    assert!(sh.dist(Vec2::new(0.0, 10.0)) < 1e-6 && sh.dist(Vec2::new(6.0, -8.0)) < 1e-6, "{sh:?}");
+    assert_eq!(sk.points.len(), before.points.len() + 1, "the crossing point is new");
+}
+
+#[test]
+fn arc_extend_closes_the_gap_onto_the_arcs_own_far_end() {
+    let mut s = new_sketch();
+    let arc = ids(&run(&mut s, "sketch.arc.center_point", json!({"center":[0,0],"start":[10,0],"end":[0,10],"connect":false}))["curves"])[0].clone();
+    // A line touching the circle at the arc's far end: the only geometry on the way round.
+    run(&mut s, "sketch.line", json!({"points":[[-3,10],[3,10]],"connect":false,"infer":false}));
+    let before = sketch(&s);
+    // Growing the arc's start clockwise runs three quarters round to its end.
+    run(&mut s, "sketch.extend", json!({"curve": arc, "at": [10, 0]}));
+    let sk = sketch(&s);
+    let ci = sk.curve_index(&arc).unwrap();
+    assert!(matches!(sk.shape(ci).unwrap(), solidcraft_sketch::Shape::Round { sweep, .. } if (sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-9));
+    let closed = (0..sk.curves.len()).find(|i| *i != ci && matches!(sk.curves[*i].kind, CurveKind::Arc { .. })).expect("a new arc");
+    let sh = sk.shape(closed).unwrap();
+    assert!(sh.dist(Vec2::new(0.0, 10.0)) < 1e-6 && sh.dist(Vec2::new(10.0, 0.0)) < 1e-6, "{sh:?}");
+    assert!(matches!(sh, solidcraft_sketch::Shape::Round { sweep, .. } if (sweep - 3.0 * std::f64::consts::FRAC_PI_2).abs() < 1e-9), "{sh:?}");
+    // The new arc joins the arc's far end instead of laying a second point over it.
+    assert_eq!(sk.points.len(), before.points.len());
+}
+
+#[test]
+fn arc_extend_stops_on_another_circle_or_arc() {
+    let arc_from = |s: &mut Session| {
+        ids(&run(s, "sketch.arc.center_point", json!({"center":[0,0],"start":[10,0],"end":[0,10],"connect":false}))["curves"])[0].clone()
+    };
+    // A whole circle crossing the arc's circle stops the extension where they cross: a free end
+    // grows to that point, so the arc itself reaches it without new geometry.
+    let mut s = new_sketch();
+    let arc = arc_from(&mut s);
+    run(&mut s, "sketch.circle.center", json!({"center":[12,0],"radius":10}));
+    let before = sketch(&s);
+    run(&mut s, "sketch.extend", json!({"curve": arc, "at": [0,10]}));
+    let sk = sketch(&s);
+    assert_eq!((sk.curves.len(), sk.points.len()), (before.curves.len(), before.points.len()), "the arc itself reaches the crossing");
+    let sh = sk.shape(sk.curve_index(&arc).unwrap()).unwrap();
+    assert!(sh.dist(Vec2::new(6.0, -8.0)) < 1e-6 && sh.dist(Vec2::new(0.0, 10.0)) < 1e-6, "{sh:?}");
+    // The arc keeps its quarter and grows by the 216.9° it travelled to the crossing.
+    let grown = std::f64::consts::FRAC_PI_2 + 216.869_897_f64.to_radians();
+    assert!(matches!(sh, solidcraft_sketch::Shape::Round { sweep, .. } if (sweep - grown).abs() < 1e-6), "{sh:?}");
+
+    // The same stop when another arc ends exactly on the crossing: the growing end is free, so the
+    // arc itself grows onto that point instead of laying a second point over it.
+    let mut s = new_sketch();
+    let arc = arc_from(&mut s);
+    let other =
+        ids(&run(&mut s, "sketch.arc.center_point", json!({"center":[12,0],"start":[2,0],"end":[6,-8],"connect":false}))["curves"])[0].clone();
+    let sk = sketch(&s);
+    let other_end = match sk.curves[sk.curve_index(&other).expect("the other arc")].kind {
+        CurveKind::Arc { b, .. } => b,
+        _ => panic!("an arc"),
+    };
+    let before = sketch(&s);
+    run(&mut s, "sketch.extend", json!({"curve": arc, "at": [0,10]}));
+    let sk = sketch(&s);
+    assert_eq!((sk.curves.len(), sk.points.len()), (before.curves.len(), before.points.len()), "the arc itself reaches the point that is there");
+    let ci = sk.curve_index(&arc).expect("the arc");
+    // The arc keeps its own end point, tied to the point that was already there.
+    let end = sk.resolve_point(&format!("{arc}.end")).expect("the arc's end");
+    assert!(sk.point(end).zip(sk.point(other_end)).is_some_and(|(a, b)| a.dist(b) < 1e-9), "the arc ends on the other arc's end");
+    assert!(
+        sk.constraints
+            .iter()
+            .any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (end, other_end) || (p, q) == (other_end, end)))
+    );
+    let sh = sk.shape(ci).expect("the arc's shape");
+    assert!(sh.dist(Vec2::new(6.0, -8.0)) < 1e-6, "{sh:?}");
+}
+
+#[test]
+fn extend_with_nothing_in_the_way_adds_the_line_the_preview_shows() {
+    // The preview paints the extension [`EXTEND_REACH`] past the end when nothing stops it: the
+    // click adds that line instead of reporting that there is nothing to reach.
+    let mut s = new_sketch();
+    let line = ids(&run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]],"connect":false,"infer":false}))["curves"])[0].clone();
+    let sk = sketch(&s);
+    let ci = sk.curve_index(&line).expect("the line");
+    let preview = super::extend_preview(&sk, ci, Vec2::new(10.0, 0.0)).expect("a preview with nothing in the way");
+    assert!(preview.dist(Vec2::new(60.0, 0.0)) < 1e-9, "{preview:?}");
+    // A free end moves out there, so the sketch keeps one line.
+    run(&mut s, "sketch.extend", json!({"curve": line, "at": [10.0, 0.0]}));
+    let sk = sketch(&s);
+    assert_eq!(sk.curves.len(), 1);
+    let end = sk.point(sk.resolve_point(&format!("{line}.end")).expect("the line's end")).expect("a point");
+    assert!(end.dist(Vec2::new(60.0, 0.0)) < 1e-6, "{end:?}");
+
+    // An end joined to other geometry stays where it is, so the same click adds a new line out to
+    // the preview's end.
+    let mut s = new_sketch();
+    let lines = ids(&run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0],[10,10]],"connect":false,"infer":false}))["curves"]);
+    let sk = sketch(&s);
+    let ci = sk.curve_index(&lines[0]).expect("the line");
+    let preview = super::extend_preview(&sk, ci, Vec2::new(10.0, 0.0)).expect("a preview with nothing in the way");
+    assert!(preview.dist(Vec2::new(60.0, 0.0)) < 1e-9, "{preview:?}");
+    run(&mut s, "sketch.extend", json!({"curve": lines[0], "at": [10.0, 0.0]}));
+    let sk = sketch(&s);
+    assert_eq!(sk.curves.len(), 3);
+    let added = sk.curves.len() - 1;
+    assert!(sk.shape(added).is_some_and(|sh| sh.dist(Vec2::new(60.0, 0.0)) < 1e-6), "{added}");
+    assert!(sk.shape(ci).is_some_and(|sh| sh.dist(Vec2::new(10.0, 0.0)) < 1e-6), "the line being extended stays put");
+}
+
+#[test]
 fn exact_extend_refuses_ambiguous_stop_without_history_change() {
     let mut s = new_sketch();
     run(&mut s, "sketch.line", json!({"points":[[0,0],[5,0]],"connect":false,"infer":false}));
