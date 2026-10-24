@@ -148,6 +148,7 @@ origin	false
 pan	false
 params	false
 paste	false
+path_flange	false
 pattern_circ	false
 pattern_path	false
 pattern_rect	false

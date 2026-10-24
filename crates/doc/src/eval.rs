@@ -989,6 +989,37 @@ impl Clone for KeptSlot {
 }
 
 impl SolvedSketch {
+    /// The curves `ids` in order along the open chain they make, from one free end to the other,
+    /// whatever order they were given in. Refused unless they join end to end into one open chain.
+    pub fn chain_order(&self, ids: &[String]) -> Result<Vec<String>> {
+        let tol = 1e-5;
+        let mut ends = Vec::with_capacity(ids.len());
+        for id in ids {
+            let ci = self.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("curve `{id}`")))?;
+            let segs = self.sketch.segs(ci);
+            let (Some(first), Some(last)) = (segs.first(), segs.last()) else { return Err(DocError::Invalid(format!("curve `{id}` has no length"))) };
+            ends.push((id.clone(), first.start(), last.end()));
+        }
+        let joined = |p: Vec2, skip: usize| ends.iter().enumerate().any(|(k, e)| k != skip && (e.1.dist(p) < tol || e.2.dist(p) < tol));
+        // Start at a curve with a free end, walking away from it.
+        let Some((start, at)) = ends.iter().enumerate().find_map(|(k, e)| match (joined(e.1, k), joined(e.2, k)) {
+            (false, _) => Some((k, e.2)),
+            (_, false) => Some((k, e.1)),
+            _ => None,
+        }) else {
+            return Err(DocError::Invalid("the curves close into a loop: an open chain is needed".into()));
+        };
+        let (mut order, mut at) = (vec![start], at);
+        while order.len() < ends.len() {
+            let Some((k, e)) = ends.iter().enumerate().find(|(k, e)| !order.contains(k) && (e.1.dist(at) < tol || e.2.dist(at) < tol)) else {
+                return Err(DocError::Invalid("the curves are not joined end to end into one chain".into()));
+            };
+            at = if e.1.dist(at) < tol { e.2 } else { e.1 };
+            order.push(k);
+        }
+        Ok(order.iter().filter_map(|k| ends.get(*k).map(|e| e.0.clone())).collect())
+    }
+
     /// Rough heap footprint (see [`ModelState::retained_bytes`]).
     pub fn retained_bytes(&self) -> usize {
         let entities = self.sketch.points.len() + self.sketch.curves.len() + self.sketch.constraints.len() + self.sketch.links.len();
@@ -6185,6 +6216,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::SheetHem { .. }
         | FeatureKind::SheetPerforate { .. }
         | FeatureKind::SheetFold { .. }
+        | FeatureKind::SheetPath { .. }
         | FeatureKind::SheetUnfold { .. }
         | FeatureKind::SheetConvert { .. } => more::sheet_eval(doc, vals, f, st, warning),
         FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => {

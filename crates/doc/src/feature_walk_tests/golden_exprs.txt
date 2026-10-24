@@ -281,6 +281,10 @@ sheet_fold
     Angle = fold.angle (Angle)
     Bend radius = fold.radius (Length)
   expressions: fold.angle, fold.radius
+sheet_path
+  inputs:
+    Bend radius = path.radius (Length)
+  expressions: path.radius
 sheet_unfold
 sheet_convert
 boss

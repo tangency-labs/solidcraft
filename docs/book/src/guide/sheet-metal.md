@@ -119,6 +119,38 @@ per edge with an angle and a height box; an empty box takes the value above.
  "height":38.6,"angle":"75 deg"}}
 ```
 
+An edge flange can bend more than once: `then` lists further bends, each an `angle` and a
+`height`, and each is a flange on the far edge of the one before it, made in the same command
+and undone with one step. It is the way to make a flap with two or more bends that is part of
+the same sheet (a Contour Flange is always a sheet of its own). The example bends the end edge of
+a wall 45° outward, then 45° again, the second leg 80 mm long. Each bend is a flange feature of
+its own in the timeline, so each can be edited there. In the Flange dialog, an edge flange has
+**Further Bends** under Bend Position: **Add bend** adds a row with an angle and a height, and the
+bin beside a row takes it out.
+
+```json
+{"command":"sheet.flange","params":{"edges":[[1,0,20]],"height":40,"angle":"45 deg",
+ "then":[{"angle":"45 deg","height":80}]}}
+```
+
+A further bend turns the way the one before it did. `"flip": true` on a bend turns it the other
+way, which makes an offset (a jog): bend 45° out, then 45° back, and the last leg runs parallel to
+the first. In the dialog each further bend has a **turns** choice, Same way or Other way.
+
+When the shape is easier to draw than to count out, **Path Flange** (`sheet.path_flange`) makes
+the same chain from a sketch. Sketch an open chain of lines on a plane across the edge (square to
+it), starting at the edge, then pick the edge and the lines. Each line becomes a flange as long
+as the line (measured like an edge flange's height: to the outer face from the virtual sharp),
+and each corner a bend. The first line's angle to the sheet sets the first bend, and the path's
+turns set which way each later bend goes, so a jog is just a path that turns back. Changing the
+sketch changes the flap. It is one feature in the timeline and part of the same sheet. Lines
+that run straight on from each other count as one; a line that does not turn from the sheet is
+refused, and so is a line too short for its bend. Arcs are not supported yet.
+
+```json
+{"command":"sheet.path_flange","params":{"edge":[1,0,20],"sketch":"Path","curves":["p1","p2"]}}
+```
+
 A flange can also stand on the far edge of another flange: a return, such as a lip turned in
 along the top of a tray's walls. It runs along that edge from end to end, so it follows the
 closed end of the flange it stands on, slanted or not. Two returns of one feature whose flanges

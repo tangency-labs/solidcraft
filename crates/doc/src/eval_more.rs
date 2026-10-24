@@ -620,6 +620,43 @@ pub(super) fn sheet_eval(
             tag_flanges(sh, n0, f.id);
             rebuild_sheet(st, i)
         }
+        FeatureKind::SheetPath { edge, sketch, curves, radius, body } => {
+            let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
+            if curves.is_empty() || curves.len() > sheet::MAX_PATH_LINES {
+                return Err(DocError::Invalid(format!("a path flange's path must have 1…{} lines", sheet::MAX_PATH_LINES)));
+            }
+            for id in curves {
+                let ci = ss.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("curve `{id}`")))?;
+                if !ss.sketch.segs(ci).iter().all(|s| matches!(s, Seg2::Line { .. })) {
+                    return Err(DocError::Invalid("not supported yet: arcs in a path flange's path (use lines; the bends are made for you)".into()));
+                }
+            }
+            let path: Vec<Vec3> = chain_points(&ss, &ss.chain_order(curves)?)?.into_iter().map(|p| ss.plane.to_world(p)).collect();
+            let i = sheet_for(st, body, Some(edge.0))?;
+            let rr = match radius {
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => {
+                    let rule = st.sheets.get(i).map(|s| s.rule.clone()).unwrap_or_default();
+                    doc.rule_values(vals, &doc.sheet_rule(Some(&rule)))?.bend_radius
+                }
+            };
+            let sh = st.sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            if sh.flat {
+                return Err(DocError::Invalid("refold the sheet before adding flanges".into()));
+            }
+            let pick = sheet_picks(sh, f, &[edge.0], warning).first().copied().unwrap_or(edge.0);
+            let n0 = sh.flanges.len();
+            let (_, notes) = sh.add_path_flange(pick, &path, rr, sheet::ReliefOverride::default())?;
+            if !notes.is_empty() {
+                let notes = notes.join("; ");
+                *warning = Some(match warning.take() {
+                    Some(w) => format!("{w}; {notes}"),
+                    None => notes,
+                });
+            }
+            tag_flanges(sh, n0, f.id);
+            rebuild_sheet(st, i)
+        }
         FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body } => {
             // Without a body name the field goes on the newest sheet, as the command's own body lookup does.
             let i = match body {

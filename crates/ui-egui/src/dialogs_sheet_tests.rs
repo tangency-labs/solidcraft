@@ -629,6 +629,80 @@ fn edge_flanges_can_have_an_angle_and_a_height_of_their_own() {
     }
 }
 
+/// The Flange dialog's Further Bends make the command's `then` (#4094): a flap with two bends is
+/// one flange command, one body and one undo step, and a bend with no height is refused.
+#[test]
+fn further_bends_in_the_flange_dialog_make_one_chained_flap() {
+    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        let mut app = plate(mode);
+        app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        app.run("sheet.flange", json!({"edges": [[0, 30, 2.5]], "height": 30})).unwrap();
+        let features = app.session.doc.features.len();
+        let end = edge_sel(&app.session, Vec3::new(1.25, 0.0, 15.0)).expect("the wall's end edge");
+        app.session.selection = vec![end];
+        app.start("sheet.flange");
+        let mut d = app.dialog.clone().unwrap();
+        let Kind::Sheet(Sm::Flange { height, angle, then, .. }) = &mut d.kind else { panic!("not a flange dialog") };
+        *height = "30 mm".into();
+        *angle = "45 deg".into();
+        // A bend added with the button starts at 45° and 20 mm; give the first a height of its own.
+        then.push(("45 deg".into(), String::new(), false));
+        assert!(apply_commands(&app, &d).is_err(), "a bend needs a height");
+        let Kind::Sheet(Sm::Flange { then, .. }) = &mut d.kind else { panic!("not a flange dialog") };
+        then[0].1 = "50 mm".into();
+        let c = apply_commands(&app, &d).unwrap();
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].1["then"], json!([{"height": "50 mm", "angle": "45 deg"}]));
+        // A bend that turns the other way says so, against the flange's own side.
+        let Kind::Sheet(Sm::Flange { then, .. }) = &mut d.kind else { panic!("not a flange dialog") };
+        then.push(("45 deg".into(), "30 mm".into(), true));
+        assert_eq!(
+            apply_commands(&app, &d).unwrap()[0].1["then"],
+            json!([{"height": "50 mm", "angle": "45 deg"}, {"height": "30 mm", "angle": "45 deg", "flip": true}])
+        );
+        let Kind::Sheet(Sm::Flange { then, .. }) = &mut d.kind else { panic!("not a flange dialog") };
+        then.pop();
+        run_all(&mut app, c);
+        assert_eq!(app.session.model.state().bodies.len(), 1, "the flap is part of the sheet");
+        assert_eq!(app.session.doc.features.len(), features + 2, "one flange per bend");
+        assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+        // A dialog with no further bends sends no `then`.
+        app.session.selection = vec![edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).expect("an edge")];
+        app.dialog = None;
+        app.start("sheet.flange");
+        let d = app.dialog.clone().unwrap();
+        assert!(apply_commands(&app, &d).unwrap()[0].1.get("then").is_none());
+    }
+}
+
+/// The Add bend button and a further bend's bin work in the real dialog.
+#[test]
+fn add_bend_and_remove_bend_buttons_work() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.run("sheet.flange", json!({"edges": [[0, 30, 2.5]], "height": 30})).unwrap();
+    h.app.session.selection = vec![edge_sel(&h.app.session, Vec3::new(1.25, 0.0, 15.0)).expect("the wall's end edge")];
+    h.step(&json!({"start": "sheet.flange"})).unwrap();
+    h.frames(6);
+    let bends = |h: &crate::scenario::Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        Kind::Sheet(Sm::Flange { then, .. }) => then.clone(),
+        _ => panic!("not a flange dialog"),
+    };
+    assert!(bends(&h).is_empty(), "no further bends to start with");
+    for want in 1..=2 {
+        h.step(&json!({"widget": "Add bend"})).unwrap();
+        h.frames(3);
+        assert_eq!(bends(&h).len(), want);
+    }
+    assert_eq!(bends(&h)[0], ("45 deg".to_string(), "20 mm".to_string(), false));
+    h.step(&json!({"click": {"handle": "dialog:button:Bend 2:Delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(bends(&h).len(), 1, "the bin takes one bend out");
+}
+
 /// Convert takes a fixed face and, for a solid or shelled body, its bend edges; Edit Feature
 /// brings both back.
 #[test]
@@ -952,4 +1026,46 @@ fn flat_perforations_cull_offscreen_and_subpixel_holes() {
     app.flat_view.cam.target.x = 50.0;
     app.flat_view.cam.distance = fitted_distance * 1000.0;
     assert!(flat_circles(&mut app, &dialog, rect).is_empty());
+}
+
+/// The Path Flange dialog takes the edge and the path's sketch lines: one feature, one body,
+/// and Edit Feature brings the edge and the path back.
+#[test]
+fn path_flange_dialog_follows_the_path() {
+    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        let mut app = plate(mode);
+        app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        app.run("sheet.flange", json!({"edges": [[0, 30, 2.5]], "height": 30})).unwrap();
+        // A path across the wall's end edge: 30 mm out at 45°, then 30 mm on along the wall.
+        let a = 30.0 / 2f64.sqrt();
+        app.run("sketch.create", json!({"plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Path"})).unwrap();
+        app.run("sketch.line", json!({"points": [[0, 0], [a, -a], [a + 30.0, -a]], "ids": ["p1", "p2"]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let features = app.session.doc.features.len();
+        app.start("sheet.path_flange");
+        let mut d = app.dialog.clone().unwrap();
+        assert!(apply_commands(&app, &d).is_err(), "no edge picked yet");
+        d.inputs[0].items = vec![edge_sel(&app.session, Vec3::new(1.25, 0.0, 15.0)).expect("the wall's end edge")];
+        assert!(apply_commands(&app, &d).is_err(), "no path picked yet");
+        // One line picked takes the whole path, and the dialog shows the flanges it makes.
+        d.inputs[1].items = vec![Sel::SketchCurve { id: "p2".into() }];
+        path_chain(&app, &mut d.inputs);
+        assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { id: "p1".into() }, Sel::SketchCurve { id: "p2".into() }], "in order along the path");
+        let lengths = path_lengths(&app, &d.inputs);
+        assert!(lengths.len() == 2 && lengths.iter().all(|l| (l - 30.0).abs() < 1e-6), "{lengths:?}");
+        d.inputs[1].items = vec![Sel::SketchCurve { id: "p1".into() }, Sel::SketchCurve { id: "p2".into() }];
+        let c = apply_commands(&app, &d).unwrap();
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].0, "sheet.path_flange");
+        assert_eq!(c[0].1["curves"], json!(["p1", "p2"]));
+        run_all(&mut app, c);
+        assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+        assert_eq!(app.session.doc.features.len(), features + 1, "one feature");
+        assert_eq!(app.session.model.state().bodies.len(), 1, "the flap is part of the sheet");
+        let f = app.session.doc.features.last().cloned().unwrap();
+        let e = edit_dialog(&app, f.id, None).unwrap();
+        assert!(matches!(&e.kind, Kind::Sheet(Sm::Path { .. })));
+        assert_eq!((e.inputs[0].items.len(), e.inputs[1].items.len()), (1, 2));
+        assert!(apply_commands(&app, &e).is_ok());
+    }
 }

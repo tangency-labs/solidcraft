@@ -499,6 +499,9 @@ pub struct EdgeFlange {
     pub angle: f64,
 }
 
+/// The most lines a path flange's path may have (each one flange and its bend).
+pub const MAX_PATH_LINES: usize = 64;
+
 /// A sheet metal body (see the module docs).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SheetBody {
@@ -1040,6 +1043,18 @@ impl SheetBody {
             _ => IDENTITY,
         };
         mat_mul(&self.frame_mat(), &f)
+    }
+
+    /// A world point on flange `i`'s far edge, nearer the top face than the bottom one: where to
+    /// pick that edge for a flange that stands on it (a chain of bends, one flange after another).
+    /// The side is not left to a tie in the middle of the thickness: it decides which way the
+    /// flange bends, and `flip` turns it the other way.
+    pub fn far_edge_pick(&self, i: usize) -> Option<Vec3> {
+        let f = self.flanges.get(i)?;
+        let (u0, u1) = self.far_edge(f);
+        let mid = f.p + f.n * (self.allowance(f) + f.leg) + f.d * ((u0 + u1) / 2.0);
+        let at = apply_point(&self.world(Some(i)), v3(mid) + Vec3::Z * (self.t * 0.75));
+        (at.x.is_finite() && at.y.is_finite() && at.z.is_finite()).then_some(at)
     }
 
     /// Where a flat point of a piece lands (folded), at height `z` in the sheet.
@@ -2302,6 +2317,102 @@ impl SheetBody {
     ) -> Result<(Vec<usize>, Vec<String>)> {
         let each: Vec<EdgeFlange> = picks.iter().map(|&pick| EdgeFlange { pick, height, angle }).collect();
         self.add_flanges_each(&each, radius, position, flip, ReliefOverride::default())
+    }
+
+    /// A path flange: a chain of edge flanges on the edge nearest `pick` that follows `path`, an
+    /// open chain of world points drawn on a plane across that edge, from the end nearer the edge.
+    /// Each line of the path is one flange, its length the flange's height (to the outer face from
+    /// the virtual sharp, as for an edge flange), and each corner one bend: the first line's angle
+    /// to the sheet makes the first bend, the turn between two lines the next. Which way the path
+    /// turns says which way each bend goes. Returns the flanges made, in order, and the notes of
+    /// the first one's corners.
+    pub fn add_path_flange(&mut self, pick: Vec3, path: &[Vec3], radius: f64, relief: ReliefOverride) -> Result<(Vec<usize>, Vec<String>)> {
+        if path.len() < 2 || path.len() > MAX_PATH_LINES + 1 {
+            return Err(DocError::Invalid(format!("a path flange's path must have 1…{MAX_PATH_LINES} lines")));
+        }
+        if !path.iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
+            return Err(DocError::Invalid("the path flange's path is not finite".into()));
+        }
+        let (panel, a, b, top, dist) = self.edge_at(pick).ok_or_else(|| DocError::Invalid("no sheet edge there".into()))?;
+        if dist > self.t * 2.0 + 1e-3 {
+            return Err(DocError::Invalid("pick an edge of the sheet's top or bottom face".into()));
+        }
+        let d = (b - a).normalized().ok_or_else(|| DocError::Invalid("edge".into()))?;
+        // The edge's frame in the world: along it, out of the sheet past it, and the top face's normal.
+        let w = self.world(panel);
+        let at = apply_point(&w, v3(a));
+        let dir = |v: Vec3| apply_point(&w, v3(a) + v) - at;
+        let (along, out, up) = (dir(v3(d)), dir(v3(Vec2::new(d.y, -d.x))), dir(Vec3::Z));
+        // From the end nearer the edge.
+        let off = |p: Vec3| {
+            let q = p - at;
+            (q - along * q.dot(along)).len()
+        };
+        let path: Vec<Vec3> = match (path.first(), path.last()) {
+            (Some(&f), Some(&l)) if off(l) < off(f) => path.iter().rev().copied().collect(),
+            _ => path.to_vec(),
+        };
+        // Each line's length and its direction in the plane across the edge (out, up).
+        let mut lines: Vec<(f64, f64)> = Vec::with_capacity(path.len() - 1);
+        for (k, pair) in path.windows(2).enumerate() {
+            let [p, q] = pair else { continue };
+            let v = *q - *p;
+            let len = v.len();
+            if !(len > 1e-6) {
+                return Err(DocError::Invalid(format!("line {} of the path flange's path has no length", k + 1)));
+            }
+            if v.dot(along).abs() > len * 1e-4 {
+                return Err(DocError::Invalid("draw the path flange's path on a plane across the edge (square to it)".into()));
+            }
+            let heading = v.dot(up).atan2(v.dot(out));
+            // A line straight on from the one before lengthens it.
+            match lines.last_mut() {
+                Some((l, h)) if (heading - *h).abs() < 1e-9 => *l += len,
+                _ => lines.push((len, heading)),
+            }
+        }
+        // Each bend's turn: the first from the sheet, the others from the line before. A turn
+        // toward the panel's top face is positive.
+        let mut turns = Vec::with_capacity(lines.len());
+        let mut before = 0.0;
+        for (k, &(len, heading)) in lines.iter().enumerate() {
+            let mut turn = heading - before;
+            while turn > std::f64::consts::PI {
+                turn -= std::f64::consts::TAU;
+            }
+            while turn <= -std::f64::consts::PI {
+                turn += std::f64::consts::TAU;
+            }
+            if !(turn.abs() > 1e-6 && turn.abs() < std::f64::consts::PI - 1e-6) {
+                let what = if k == 0 { "the sheet" } else { "the line before it" };
+                return Err(DocError::Invalid(format!(
+                    "line {} of the path flange's path runs straight on from {what} or back over it: each line must turn",
+                    k + 1
+                )));
+            }
+            turns.push((len, turn));
+            before = heading;
+        }
+        let mut made = Vec::with_capacity(turns.len());
+        let mut notes = Vec::new();
+        for (k, &(height, turn)) in turns.iter().enumerate() {
+            let line = |e: DocError| match e {
+                DocError::Invalid(m) => DocError::Invalid(format!("line {}: {m}", k + 1)),
+                e => e,
+            };
+            // The first bend on the picked face's side; each after it on the last flange's far
+            // edge, picked nearer its top face, so `flip` turns it toward the bottom one.
+            let (at, flip) = match made.last() {
+                None => (pick, top == (turn < 0.0)),
+                Some(&i) => (self.far_edge_pick(i).ok_or_else(|| DocError::Invalid("the flange has no far edge to bend again".into()))?, turn < 0.0),
+            };
+            let each = [EdgeFlange { pick: at, height, angle: turn.abs() }];
+            let own = if k == 0 { relief } else { ReliefOverride::default() };
+            let (new, more) = self.add_flanges_each(&each, radius, "inside", flip, own).map_err(line)?;
+            made.extend(new);
+            notes.extend(more);
+        }
+        Ok((made, notes))
     }
 
     /// Edge flanges that each have their own height and angle, in one go: every edge is trimmed
