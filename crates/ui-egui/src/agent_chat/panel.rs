@@ -272,8 +272,6 @@ const MAX_CHIPS: usize = 6;
 /// A chip's longest label (characters), and what its frame adds to the text's width.
 const CHIP_CHARS: usize = 26;
 const CHIP_PAD: f32 = 13.0;
-/// What a chip's × adds.
-const CHIP_CROSS: f32 = 14.0;
 
 /// One thing in a group's rows: its heading, a chip for an item, or the "+N more" note.
 #[cfg(not(target_arch = "wasm32"))]
@@ -289,7 +287,7 @@ enum ChipPart<'a> {
 /// hand: egui wraps plain widgets, not framed ones, and one row wider than the chat would widen
 /// the whole panel.
 #[cfg(not(target_arch = "wasm32"))]
-fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool, gone: &[bool], handle: &str) -> ChipEvents {
+fn context_chips(ui: &mut egui::Ui, context: &Context, gone: &[bool], handle: &str) -> ChipEvents {
     let mut events = ChipEvents::default();
     if context.is_empty() {
         return events;
@@ -313,7 +311,7 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool, gone: &[
             .iter()
             .map(|p| match p {
                 ChipPart::Heading(s) | ChipPart::More(s) => text_width(ui, s),
-                ChipPart::Chip(_, i) => text_width(ui, &shorten(&i.label, CHIP_CHARS)) + CHIP_PAD + if removable { CHIP_CROSS } else { 0.0 },
+                ChipPart::Chip(_, i) => text_width(ui, &shorten(&i.label, CHIP_CHARS)) + CHIP_PAD,
             })
             .collect();
         let mut rows: Vec<Vec<usize>> = vec![Vec::new()];
@@ -349,15 +347,7 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool, gone: &[
                                         if is_gone {
                                             text = text.color(t.text_dim).strikethrough();
                                         }
-                                        let label = ui.add(egui::Label::new(text).wrap_mode(egui::TextWrapMode::Extend));
-                                        if removable {
-                                            let cross = ui_kit::button(ui, "×", ui_kit::Button::Small);
-                                            crate::scenario::publish_handle(&format!("{handle}:remove:{place}"), cross.rect.center());
-                                            if cross.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                                                events.removed = Some(*place);
-                                            }
-                                        }
-                                        label
+                                        ui.add(egui::Label::new(text).wrap_mode(egui::TextWrapMode::Extend))
                                     })
                                     .inner
                                 })
@@ -387,11 +377,10 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool, gone: &[
     events
 }
 
-/// What happened to a row of chips this frame: one's × was pressed, the pointer is on one.
+/// What happened to a row of chips this frame: the pointer is on one.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
 struct ChipEvents {
-    removed: Option<usize>,
     hovered: Option<usize>,
 }
 
@@ -893,22 +882,11 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         (false, false)
     };
     let (mut send_clicked, mut stop_clicked, mut enter, mut pick_clicked) = (false, false, false, false);
-    let mut remove_picked_at = None;
     let frame = Container::new(ui.ctx(), Surface::Viewport).edge_frame(egui::Color32::TRANSPARENT);
     let composer = Container::new(ui.ctx(), Surface::Viewport).edge(Id::new("sc_agent_chat_composer"), Edge::Bottom);
     composer.resizable(false).show_separator_line(false).frame(frame).show(ui, |ui| {
         let footer = ui_kit::assistant_composer_footer(ui, |ui| {
             let boxed = ui_kit::assistant_composer(ui, focused, |ui| {
-                // What Pick context chose for this message, each item with an ×.
-                if !app.agent_chat.picked_context.is_empty() {
-                    let tray = app.agent_chat.picked_context.clone();
-                    let gone = app.agent_chat.gone.tray.clone();
-                    let events = context_chips(ui, &tray, true, &gone, "agent_chat:tray");
-                    remove_picked_at = events.removed;
-                    if let Some(at) = events.hovered {
-                        app.agent_chat.hover = tray.items.get(at).map(|i| i.sels.clone()).unwrap_or_default();
-                    }
-                }
                 // The files for the next message (#1744), as chips of their own.
                 attachment_chips(app, ui);
                 // Ctrl/Cmd+V: files and pictures on the clipboard attach; text goes to the box below.
@@ -924,12 +902,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .min_scrolled_height(edit_max)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        ui_kit::assistant_input(
-                            ui,
-                            Id::new("sc_agent_chat_input"),
-                            &mut app.agent_chat.input,
-                            tr(if busy { "ui.agent_chat_placeholder_busy" } else { "ui.agent_chat_placeholder" }),
-                        )
+                        pill_input(app, ui, focused, tr(if busy { "ui.agent_chat_placeholder_busy" } else { "ui.agent_chat_placeholder" }))
                     })
                     .inner;
                 crate::scenario::publish_rect("agent_chat:input", r.rect);
@@ -1046,11 +1019,8 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         crate::scenario::publish_rect("agent_chat:composer_footer", footer.response.rect);
     });
-    if let Some(at) = remove_picked_at {
-        remove_picked(app, at);
-    }
     if pick_clicked {
-        start_pick(app);
+        start_pick(app, caret(ui.ctx()));
     }
     egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_scroll")
@@ -1703,7 +1673,8 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let before = ui.cursor();
                 ui_kit::assistant_bubble(ui, |ui| {
                     if !text.is_empty() {
-                        ui.add(egui::Label::new(RichText::new(text).color(t.text)).selectable(true).wrap());
+                        let gone = app.agent_chat.gone.sent.get(&n).map_or(&[][..], Vec::as_slice);
+                        user_text(ui, text, context, gone);
                     }
                     if !pictures.is_empty() {
                         if let Some(at) = picture_strip(ui, n, pictures) {
@@ -1714,7 +1685,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(t.font_small));
                     }
                     let flags = app.agent_chat.gone.sent.get(&n).map(Vec::as_slice).unwrap_or_default();
-                    if let Some(at) = context_chips(ui, context, false, flags, &format!("agent_chat:sent:{n}")).hovered {
+                    if let Some(at) = context_chips(ui, context, flags, &format!("agent_chat:sent:{n}")).hovered {
                         hover_sels = context.items.get(at).map(|i| i.sels.clone());
                     }
                     files_line(ui, files.iter().map(String::as_str));
@@ -1919,12 +1890,12 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     _ => {
                         if !p.text.is_empty() {
-                            ui.add(egui::Label::new(RichText::new(&p.text).color(t.text)).selectable(true).wrap());
+                            user_text(ui, &p.text, &p.context, &[]);
                         }
                         if p.image {
                             ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(crate::theme::Tokens::get().font_small));
                         }
-                        let _ = context_chips(ui, &p.context, false, &[], "agent_chat:queued");
+                        let _ = context_chips(ui, &p.context, &[], "agent_chat:queued");
                         files_line(ui, p.files.iter().map(|f| f.name.as_str()));
                     }
                 }
@@ -2008,6 +1979,131 @@ fn files_line<'a>(ui: &mut egui::Ui, names: impl Iterator<Item = &'a str>) {
 
 /// The widest a file chip gets; a narrower chat makes them narrower.
 const CHIP_W: f32 = 170.0;
+
+/// A sent message's text, its pills drawn as pills: `gone` flags the context's items that have left
+/// the design, which strikes through the pills they are in.
+fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool]) {
+    let t = Tokens::get();
+    if context.groups.is_empty() {
+        ui.add(egui::Label::new(RichText::new(text).color(t.text)).selectable(true).wrap());
+        return;
+    }
+    let look = |id: u32| {
+        context.groups.iter().any(|(n, _)| *n == id).then(|| {
+            let gone = context.items.iter().enumerate().any(|(at, item)| item.group == id && gone.get(at).copied().unwrap_or(false));
+            // The bubble is the accent colour itself: a pill in it is darker, not the same.
+            pills::Look { background: egui::Color32::from_black_alpha(70), text: if gone { t.text_dim } else { t.text }, gone }
+        })
+    };
+    let font = egui::FontId::proportional(ui.style().text_styles.get(&egui::TextStyle::Body).map_or(t.font_label, |f| f.size));
+    ui.add(egui::Label::new(pills::job(text, &font, t.text, ui.available_width(), &look)).selectable(true).wrap());
+}
+
+/// The id of the message box.
+fn input_id() -> Id {
+    Id::new("sc_agent_chat_input")
+}
+
+/// Where the caret is in the message box (a character), if it has been in it.
+fn caret(ctx: &egui::Context) -> Option<usize> {
+    egui::TextEdit::load_state(ctx, input_id()).and_then(|s| s.cursor.char_range()).map(|r| r.primary.index.0)
+}
+
+/// Put the caret of the message box at a character, and focus the box.
+fn place_caret(ctx: &egui::Context, at: usize) {
+    let mut state = egui::TextEdit::load_state(ctx, input_id()).unwrap_or_default();
+    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(at))));
+    egui::TextEdit::store_state(ctx, input_id(), state);
+    ctx.memory_mut(|m| m.request_focus(input_id()));
+}
+
+/// The message box, with the pills of its picks drawn as pills. A pill is text (see [`pills`]), so
+/// the box edits, selects and pastes as always; what is added here: the caret goes after a pill just
+/// made, Backspace and Delete take a pill whole, typing `@` opens the picker where the `@` was, and
+/// the pointer on a pill lights what it stands for.
+#[cfg(not(target_arch = "wasm32"))]
+fn pill_input(app: &mut SolveApp, ui: &mut egui::Ui, focused: bool, hint: &str) -> egui::Response {
+    let ctx = ui.ctx().clone();
+    let t = Tokens::get();
+    if let Some(at) = app.agent_chat.caret_to.take() {
+        place_caret(&ctx, at);
+    }
+    // Backspace right after a pill, Delete right before one: the whole pill goes.
+    if focused
+        && let Some(r) = egui::TextEdit::load_state(&ctx, input_id()).and_then(|s| s.cursor.char_range())
+        && r.primary == r.secondary
+    {
+        let at = r.primary.index.0;
+        let known = |id: u32| app.agent_chat.pills.iter().any(|p| p.id == id);
+        let spans = pills::spans(&app.agent_chat.input);
+        let back = spans.iter().find(|s| s.end == at && known(s.id)).cloned();
+        let forward = spans.iter().find(|s| s.start == at && known(s.id)).cloned();
+        // Plain, and with the word-delete modifiers (Ctrl, Alt): a word would take only part of a mark.
+        let modifiers = |k: egui::Key, ui: &egui::Ui| {
+            [egui::Modifiers::NONE, egui::Modifiers::CTRL, egui::Modifiers::ALT]
+                .into_iter()
+                .find(|m| ui.input(|i| i.key_pressed(k) && i.modifiers.matches_exact(*m)))
+        };
+        let hit = match (back, forward) {
+            (Some(span), _) if let Some(m) = modifiers(egui::Key::Backspace, ui) => Some((span, egui::Key::Backspace, m)),
+            (_, Some(span)) if let Some(m) = modifiers(egui::Key::Delete, ui) => Some((span, egui::Key::Delete, m)),
+            _ => None,
+        };
+        if let Some((span, key, m)) = hit {
+            ui.input_mut(|i| i.consume_key(m, key));
+            app.agent_chat.input = pills::remove(&app.agent_chat.input, span.start, span.end);
+            place_caret(&ctx, span.start);
+        }
+    }
+    let before = app.agent_chat.input_chars;
+    let font = egui::FontId::proportional(t.font_label);
+    let look = {
+        let ids: Vec<(u32, bool)> =
+            app.agent_chat.pills.iter().enumerate().map(|(n, p)| (p.id, app.agent_chat.gone.pills.get(n).copied().unwrap_or(false))).collect();
+        move |id: u32| {
+            ids.iter().find(|(pill, _)| *pill == id).map(|(_, gone)| pills::Look {
+                background: t.accent_soft,
+                text: if *gone { t.text_dim } else { t.text },
+                gone: *gone,
+            })
+        }
+    };
+    let mut layouter =
+        |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| ui.fonts_mut(|f| f.layout_job(pills::job(text.as_str(), &font, t.text, wrap, &look)));
+    let out = ui_kit::assistant_input_laid_out(ui, input_id(), &mut app.agent_chat.input, hint, &mut layouter);
+    let chars = app.agent_chat.input.chars().count();
+    app.agent_chat.input_chars = chars;
+    // `@` typed as a new word opens the picker, and is not left in the text.
+    if out.response.changed()
+        && chars == before + 1
+        && let Some(at) = out.cursor_range.map(|r| r.primary.index.0).filter(|at| *at > 0)
+    {
+        let typed: Vec<char> = app.agent_chat.input.chars().skip(at.saturating_sub(2)).take(2).collect();
+        let (prev, last) = if at >= 2 { (typed.first().copied(), typed.get(1).copied()) } else { (None, typed.first().copied()) };
+        // Not while another tool or dialog is open (the picker would not open and the @ would be lost),
+        // and not in the middle of an input method's composition.
+        let composing = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Ime(_))));
+        if last == Some('@') && prev.is_none_or(char::is_whitespace) && app.dialog.is_none() && !composing {
+            app.agent_chat.input = pills::remove(&app.agent_chat.input, at - 1, at);
+            app.agent_chat.input_chars = chars - 1;
+            place_caret(&ctx, at - 1);
+            start_pick(app, Some(at - 1));
+        }
+    }
+    // The pointer on a pill lights what it stands for in the model, and says what that is.
+    if out.response.hovered()
+        && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
+    {
+        let at = out.galley.cursor_from_pos(pos - out.galley_pos).index.0;
+        let over = pills::spans(&app.agent_chat.input).into_iter().find(|s| s.start <= at && at < s.end);
+        if let Some(pill) = over.and_then(|s| app.agent_chat.pills.iter().find(|p| p.id == s.id)) {
+            app.agent_chat.hover = pill.context.items.iter().flat_map(|i| i.sels.iter().cloned()).collect();
+            let tip = pill.context.items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>().join("\n");
+            return out.response.response.on_hover_text(tip);
+        }
+    }
+    out.response.response
+}
 
 /// The files for the next message, as chips in rows that fit the chat: a picture's thumbnail (or
 /// a file mark), the name cut to fit, and a × that takes the file off. Laid out by hand: egui

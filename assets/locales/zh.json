@@ -4210,7 +4210,7 @@
   "ui.agent_chat_permission": "智能体请求运行：{title}",
   "ui.agent_chat_pick": "智能体",
   "ui.agent_chat_pick_context": "选择上下文",
-  "ui.agent_chat_pick_context_tip": "在模型中选择要让智能体查看的面、边、特征和实体,然后点击确定",
+  "ui.agent_chat_pick_context_tip": "在模型中选择面、边、特征和实体,然后点击确定:它们会作为标签放入消息中光标所在的位置(输入 @ 效果相同)",
   "ui.agent_chat_placeholder": "让智能体修改设计…",
   "ui.agent_chat_placeholder_busy": "输入消息，待智能体完成后发送（Ctrl+Enter：立即发送）",
   "ui.agent_chat_pop_out": "在独立窗口中打开（可移到另一个屏幕）",

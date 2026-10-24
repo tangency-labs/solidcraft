@@ -384,7 +384,7 @@ The agent reaches the open design only through SolidCraft's own tools (the
   Faces and edges go with the names and numbers the agent's tools take and with their size and
   place (so they can be found again after an edit), features with their name and kind, bodies with
   their name. The agent gets them as text after your message; the conversation shows your message
-  as typed with the things as chips below it, grouped (Elements, Features, Bodies) with a count;
+  as typed (picks as pills) with the things as chips below it, grouped (Elements, Features, Bodies) with a count;
   hover a chip to light its target in the model and to see what the agent was told about it. A chip
   whose target has since left the design (deleted, or changed so its face or edge is gone) is
   struck through, with a note on hover. At most 64 things go with one message; the
@@ -394,9 +394,17 @@ The agent reaches the open design only through SolidCraft's own tools (the
   three lists, **Elements** (faces, edges, vertices), **Features** (steps of the timeline) and
   **Bodies**; click things in the model, the timeline or the browser to put them in the list that
   is active (click a list to make it active; click a picked thing again to take it out). **OK**
-  puts them as chips above the message box, each with a **×**; they go with the next message like
-  an attached selection (and are shown the same way), and the box is empty again afterwards.
-  **Cancel** keeps what was picked before.
+  puts the pick into the message as a **pill**, `«1: Plate · 3 faces»`, at the text cursor (at the
+  end when the box was never used). Typing `@` where a word starts does the same: the `@` is
+  taken out and the picker opens, and the pill goes where it was. Pick as often as you like; each
+  pick is a pill of its own, so "make `«1: …»` match `«2: …»`" says which is which. A pill is part
+  of the text: it is edited, selected, cut and pasted like text, drawn as a pill, and Backspace
+  or Delete next to it takes it whole (taking the mark out drops the pick). Hold the pointer on a
+  pill to light its target in the model and to list what it holds; a pill whose target has left
+  the design is struck through. The agent gets your text with the marks numbered 1, 2, 3 in
+  reading order, and under it each numbered group with the faces, edges, features and bodies in
+  it; what **Attach selection** adds is listed apart, as not placed in the message.
+  **Cancel**, or **OK** with nothing picked, adds nothing.
 
 ## Permissions
 
