@@ -316,6 +316,8 @@ pub struct ThreadInfo {
     pub major_diameter: f64,
     pub pitch: f64,
     pub internal: bool,
+    #[serde(default)]
+    pub handedness: crate::ThreadHandedness,
     pub axis_point: Vec3,
     pub axis: UnitVec3,
     /// Threaded part along the axis from `axis_point`.
@@ -390,13 +392,21 @@ pub(crate) fn format_thread(d: f64, p: f64) -> String {
 /// The automatic ISO metric designation for a cylindrical face, using the same fit check as
 /// a thread feature without an explicit size. This query does not change the model.
 pub fn suggested_thread(st: &ModelState, p: Vec3) -> Result<String> {
-    thread_on(st, 0, p, None, None, false).map(|t| t.designation)
+    thread_on(st, 0, p, None, None, false, crate::ThreadHandedness::Right).map(|t| t.designation)
 }
 
 /// A cosmetic thread on the cylindrical face at `p`. A `turned` (modelled) thread also fits a
 /// shaft thicker than it, which it turns down to its major diameter first.
-fn thread_on(st: &ModelState, feature: u64, p: Vec3, designation: Option<&str>, length: Option<f64>, turned: bool) -> Result<ThreadInfo> {
-    thread_on_impl(st, feature, p, designation, length, false, turned)
+fn thread_on(
+    st: &ModelState,
+    feature: u64,
+    p: Vec3,
+    designation: Option<&str>,
+    length: Option<f64>,
+    turned: bool,
+    handedness: crate::ThreadHandedness,
+) -> Result<ThreadInfo> {
+    thread_on_impl(st, feature, p, designation, length, false, turned, handedness)
 }
 
 // Tapped holes admit verified Unified and parallel pipe sizes; the separate Thread feature remains metric,
@@ -409,6 +419,7 @@ fn thread_on_impl(
     length: Option<f64>,
     tapped: bool,
     turned: bool,
+    handedness: crate::ThreadHandedness,
 ) -> Result<ThreadInfo> {
     let (body, cyl) = st
         .bodies
@@ -468,6 +479,7 @@ fn thread_on_impl(
         major_diameter: major,
         pitch,
         internal: cyl.internal,
+        handedness,
         axis_point: cyl.axis_point,
         axis: cyl.axis,
         start: a,
@@ -558,7 +570,58 @@ fn thread_groove(t: &ThreadInfo, radius: f64, open: (bool, bool)) -> Result<soli
     if !stations.is_finite() || stations > 720.0 {
         return Err(DocError::Invalid("the modelled thread is too fine for this diameter; use a cosmetic thread".into()));
     }
-    Ok(kernel::sweep_helix_mesh(&plane, &section, base, *k, p, (s1 - s0) / p, stations as usize)?)
+    // The kernel rotates positively about its sweep axis. Reversing both that axis and the
+    // pitch mirrors the angular motion while the lift stays +k * p per turn. The physical
+    // axis, start/end, radial profile and station count remain exactly as for a right thread.
+    let (sweep_axis, sweep_pitch) = match t.handedness {
+        crate::ThreadHandedness::Right => (*k, p),
+        crate::ThreadHandedness::Left => (-*k, -p),
+    };
+    Ok(kernel::sweep_helix_mesh(&plane, &section, base, sweep_axis, sweep_pitch, (s1 - s0) / p, stations as usize)?)
+}
+
+#[cfg(test)]
+mod thread_handedness_tests {
+    use super::*;
+
+    #[test]
+    fn thread_handedness_groove_reflects_exactly_about_the_physical_axis() {
+        for direction in [Vec3::Z, Vec3::X, Vec3::new(1.0, 2.0, 3.0)] {
+            for internal in [false, true] {
+                let axis = UnitVec3::new(direction).unwrap();
+                let mut info = ThreadInfo {
+                    feature: 1,
+                    body: "Stock".into(),
+                    designation: "M6x1".into(),
+                    major_diameter: 6.0,
+                    pitch: 1.0,
+                    internal,
+                    handedness: crate::ThreadHandedness::Right,
+                    axis_point: Vec3::new(7.0, -5.0, 2.0),
+                    axis,
+                    start: 1.3,
+                    end: 4.3,
+                };
+                let radius = if internal { 2.5 } else { 3.0 };
+                let right = thread_groove(&info, radius, (false, true)).unwrap();
+                info.handedness = crate::ThreadHandedness::Left;
+                let left = thread_groove(&info, radius, (false, true)).unwrap();
+                // Reflection in the radial plane of the initial profile, independent of the
+                // helix parameterization: the projected coordinate along the axis stays fixed.
+                let seed = if axis.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+                let normal = (seed - *axis * axis.dot(seed)).normalized().unwrap();
+                assert_eq!(right.positions.len(), left.positions.len());
+                for (r, l) in right.positions.iter().zip(&left.positions) {
+                    let expected = *r - normal * (2.0 * (*r - info.axis_point).dot(normal));
+                    assert!((*l - expected).len() < 1e-10, "physical reflection: {direction:?}/{internal}");
+                    assert!(((*r - *l).dot(*axis)).abs() < 1e-10, "axial extent must not change");
+                }
+                let (r, l) = (right.measure(), left.measure());
+                assert!(r.volume > 0.0 && l.volume > 0.0, "outward, watertight sweep");
+                assert!((r.volume - l.volume).abs() < r.volume * 1e-12, "exact tool volume: {r:?}/{l:?}");
+            }
+        }
+    }
 }
 
 /// What a modelled external thread turns off a shaft thicker than its major diameter before it
@@ -6281,7 +6344,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             apply_traced(st, f, tools, *operation, &crate::plain(targets))
         }
-        FeatureKind::Hole { thread, diameter, .. } => {
+        FeatureKind::Hole { thread, diameter, handedness, .. } => {
             let (spots, dir) = hole_spots(vals, st, f)?;
             let tools = hole_feature_tools(vals, st, f)?;
             let handled = sheet_hole_cut(st, f, &tools, warning)?;
@@ -6301,18 +6364,18 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     } else {
                         p + dir.any_perp() * r + dir * (r * 0.5)
                     };
-                    let t = thread_on_impl(st, f.id, wall, Some(d), None, true, false)?;
+                    let t = thread_on_impl(st, f.id, wall, Some(d), None, true, false, *handedness)?;
                     st.threads.push(t);
                 }
             }
             Ok(())
         }
-        FeatureKind::Thread { face, designation, length, modeled } => {
+        FeatureKind::Thread { face, designation, length, modeled, handedness } => {
             let l = match length {
                 Some(e) => Some(val(vals, e, Kind::Length)?),
                 None => None,
             };
-            let t = thread_on(st, f.id, face.0, designation.as_deref(), l, *modeled)?;
+            let t = thread_on(st, f.id, face.0, designation.as_deref(), l, *modeled, *handedness)?;
             if !*modeled {
                 st.threads.push(t);
                 return Ok(());
