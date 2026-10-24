@@ -58,6 +58,9 @@ pub(crate) fn checkbox(ui: &mut Ui, label: &str, value: &mut bool) -> Response {
 /// Mixed values become checked when activated; the caller owns whether selection is mixed.
 /// Tokens: space_14/3/2/6, radius_sm, control_fill/border, form_primary/ink, hover, on_accent.
 pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool, mixed: bool) -> Response {
+    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[label]) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_label);
     let galley = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), t.form_ink);

@@ -94,6 +94,14 @@ pub(crate) fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usiz
 
 /// Internal form geometry for controls which need several lines (e.g. text areas).
 pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
+    if crate::prefs_search::querying(ui) {
+        crate::prefs_search::set_control(ui, text);
+        if !crate::prefs_search::visible(ui, &[text]) {
+            let result = crate::prefs_search::run_hidden(ui, text, control);
+            crate::prefs_search::recheck(ui, &[text]);
+            return result;
+        }
+    }
     let t = Tokens::get();
     let width = dimension(ui.available_width());
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());

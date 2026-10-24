@@ -168,6 +168,7 @@ pub(crate) fn searchable_dropdown(
     custom: Option<&str>,
     pending: Option<&str>,
 ) -> Option<String> {
+    crate::prefs_search::note_current(ui, current);
     let mut chosen = None;
     let row = label(ui).to_owned();
     let response = egui::ComboBox::from_id_salt(id)
@@ -270,6 +271,7 @@ pub(crate) fn dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&
 /// Dropdown with caller-supplied kit choices/actions, including disabled entries and stable
 /// application handles. Tokens: dropdown tokens. Use `dropdown` for a simple indexed list.
 pub(crate) fn dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, add: impl FnOnce(&mut Ui)) -> Response {
+    crate::prefs_search::note_current(ui, current);
     let response = egui::ComboBox::from_id_salt(id)
         .width(dimension(ui.available_width()))
         .height(Tokens::get().space_24 * 14.0)
