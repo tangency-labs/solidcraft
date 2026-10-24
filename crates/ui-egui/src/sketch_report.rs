@@ -156,5 +156,14 @@ mod tests {
     fn the_command_is_on_the_sketch_tab() {
         let spec = solidcraft_engine::find_command("sketch.inspect").unwrap();
         assert_eq!((spec.tab, spec.panel), ("SKETCH", "INSPECT"));
+        // While a sketch is open the Sketch tab shows it, not the Inspect tab's drop-down.
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.frames(3);
+        let at = crate::scenario::handle_at("toolbar:sketch.inspect").expect("the button is on the ribbon");
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        h.frames(2);
+        assert!(h.app.sketch_report.is_some(), "clicking the ribbon button opens the report");
     }
 }
