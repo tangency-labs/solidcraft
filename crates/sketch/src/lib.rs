@@ -69,7 +69,7 @@ pub use solver::{
     Analysis, CONSISTENT, DrivingValues, Hold, SolveReport, SolveStatus, constraint_residual, determined_by, measure_dimension, move_line_towards,
     move_point_towards, solve, solve_after_edit, solve_after_value_edit, solve_holding, solve_with,
 };
-pub use text::{MAX_TEXT_CHARS, TextAlign, TextStyle, text_geometry, text_geometry_in, text_geometry_styled};
+pub use text::{MAX_TEXT_CHARS, TextAlign, TextMetrics, TextStyle, text_geometry, text_geometry_in, text_geometry_styled};
 pub use thin::{MAX_THIN_SEGMENTS, thin_wall_regions};
 pub use wire::{MAX_FIT_POINTS, MAX_WIRE_POINTS, Wire, WireSpace, fit_polyline};
 

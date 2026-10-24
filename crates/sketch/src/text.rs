@@ -4,12 +4,13 @@
 //! holes of A, B, 8…) are loops inside its outline; profile detection makes them holes.
 //!
 //! The default font is embedded (Liberation Sans, SIL OFL 1.1; see `assets/fonts/liberation-sans/OFL.txt` and
-//! ATTRIBUTION.md); [`crate::fonts`] finds others by file path or installed family name.
+//! ATTRIBUTION.md); [`crate::fonts`] finds others by file path or installed family name. [`TextMetrics`] measures
+//! text by the rule that draws it.
 
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Ring, Vec2};
 
-use crate::fonts::font_data_styled;
+use crate::fonts::{FontData, font_data_styled};
 use crate::link::{LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES};
 use crate::model::{Result, Sketch, SketchError};
 
@@ -160,6 +161,99 @@ const SLANT_DEG: f64 = 12.0;
 const MAX_LETTER_SPACING: f64 = 1e5;
 const LINE_SPACING_RANGE: (f64, f64) = (0.05, 100.0);
 
+/// A capital height (mm) text can be set at: finite, above a micrometre and below a kilometre.
+fn check_height(height: f64) -> Result<()> {
+    if height.is_finite() && height > 1e-6 && height < 1e6 { Ok(()) } else { Err(SketchError::Invalid("text height must be positive".into())) }
+}
+
+/// A style's spacing: a finite letter spacing of at most [`MAX_LETTER_SPACING`] either way, and a line spacing in
+/// [`LINE_SPACING_RANGE`].
+fn check_spacing(style: &TextStyle) -> Result<()> {
+    if !(style.letter_spacing.is_finite() && style.letter_spacing.abs() <= MAX_LETTER_SPACING) {
+        return Err(SketchError::Invalid("the letter spacing must be a finite length".into()));
+    }
+    if !(style.line_spacing.is_finite() && (LINE_SPACING_RANGE.0..=LINE_SPACING_RANGE.1).contains(&style.line_spacing)) {
+        return Err(SketchError::Invalid(format!(
+            "the line spacing must be between {} and {} times the font's",
+            LINE_SPACING_RANGE.0, LINE_SPACING_RANGE.1
+        )));
+    }
+    Ok(())
+}
+
+/// How a font sets text in a style, read once from its face: the scale for a capital height, the distance between
+/// lines, the width of a line and the characters the font has no glyph for. Sketch text is laid out with it, so a
+/// line measures what it draws. Kerning stays off, as in sketch text.
+pub struct TextMetrics<'a> {
+    face: ttf_parser::Face<'a>,
+    /// The capital height, in font units.
+    cap: f64,
+    /// The distance between baselines in font units: ascender to descender, plus the line gap (none when not positive).
+    pitch: f64,
+    /// What a character the font lacks is set as: its `?`, when it has one.
+    fallback: Option<ttf_parser::GlyphId>,
+    letter_spacing: f64,
+    line_spacing: f64,
+}
+
+impl<'a> TextMetrics<'a> {
+    /// The face of `font` set in `style`: its letter and line spacing (its bold and italic chose the face).
+    pub fn new(font: &'a FontData, style: &TextStyle) -> Result<TextMetrics<'a>> {
+        check_spacing(style)?;
+        let face = ttf_parser::Face::parse(font.bytes(), font.index).map_err(|e| SketchError::Invalid(format!("font: {e}")))?;
+        Ok(TextMetrics {
+            cap: cap_height(&face),
+            pitch: f64::from(face.ascender()) - f64::from(face.descender()) + f64::from(face.line_gap()),
+            fallback: face.glyph_index('?'),
+            letter_spacing: style.letter_spacing,
+            line_spacing: style.line_spacing,
+            face,
+        })
+    }
+
+    /// Millimetres per font unit at a capital height of `height` mm.
+    pub fn scale(&self, height: f64) -> Result<f64> {
+        check_height(height)?;
+        Ok(height / self.cap)
+    }
+
+    /// The distance between baselines (mm) at a capital height of `height` mm: the font's own (one and a half heights
+    /// when it gives none) times the line spacing.
+    pub fn line_pitch(&self, height: f64) -> Result<f64> {
+        let k = self.scale(height)?;
+        let own = if self.pitch > 0.0 { self.pitch * k } else { height * 1.5 };
+        Ok(own * self.line_spacing)
+    }
+
+    /// The width (mm) of one line at a capital height of `height` mm, as it is drawn: from its first glyph's origin to
+    /// the end of its last glyph's advance. A line break in it is a character like any other.
+    pub fn line_width(&self, line: &str, height: f64) -> Result<f64> {
+        let k = self.scale(height)?;
+        Ok(self.glyphs(line, k).last().map(|(_, x, advance)| x + advance).unwrap_or(0.0))
+    }
+
+    /// The characters of one line the font has no glyph for, in order and each time they come: those its character map
+    /// lacks (set as its `?`, or left out when it has none) and those it sends to its missing-glyph box (`.notdef`, drawn
+    /// as it is).
+    pub fn missing(&self, line: &str) -> Vec<char> {
+        line.chars().filter(|ch| self.face.glyph_index(*ch).is_none_or(|g| g.0 == 0)).collect()
+    }
+
+    /// The one rule that lays out a line, at `k` mm per font unit: each glyph, where its origin is along the line and
+    /// its advance. No kerning; a character the font lacks is set as its `?` (left out when it has none either); the
+    /// letter spacing goes between glyphs, not after the last.
+    fn glyphs(&self, line: &str, k: f64) -> impl Iterator<Item = (ttf_parser::GlyphId, f64, f64)> {
+        let mut pen = 0.0f64;
+        line.chars().filter_map(move |ch| {
+            let gid = self.face.glyph_index(ch).or(self.fallback)?;
+            let advance = f64::from(self.face.glyph_hor_advance(gid).unwrap_or(0)) * k;
+            let x = pen;
+            pen += advance + self.letter_spacing;
+            Some((gid, x, advance))
+        })
+    }
+}
+
 /// Outline geometry of `text` in the built-in font (see [`text_geometry_in`]).
 pub fn text_geometry(text: &str, at: Vec2, height: f64, angle: f64) -> Result<Vec<LinkGeom>> {
     text_geometry_in(None, text, at, height, angle)
@@ -187,52 +281,28 @@ pub fn text_geometry_styled(
     if text.chars().count() > MAX_TEXT_CHARS {
         return Err(SketchError::TooLarge);
     }
-    if !(height.is_finite() && height > 1e-6 && height < 1e6 && angle.is_finite() && at.is_finite()) {
-        return Err(SketchError::Invalid("text height must be positive".into()));
+    // The numbers first: finding an installed font can mean reading its folders.
+    check_height(height)?;
+    if !(angle.is_finite() && at.is_finite()) {
+        return Err(SketchError::Invalid("the text's place and angle must be finite".into()));
     }
-    if !(style.letter_spacing.is_finite() && style.letter_spacing.abs() <= MAX_LETTER_SPACING) {
-        return Err(SketchError::Invalid("the letter spacing must be a finite length".into()));
-    }
-    if !(style.line_spacing.is_finite() && (LINE_SPACING_RANGE.0..=LINE_SPACING_RANGE.1).contains(&style.line_spacing)) {
-        return Err(SketchError::Invalid(format!(
-            "the line spacing must be between {} and {} times the font's",
-            LINE_SPACING_RANGE.0, LINE_SPACING_RANGE.1
-        )));
-    }
+    check_spacing(style)?;
     let (data, slant) = font_data_styled(font, style.bold, style.italic)?;
-    let face = ttf_parser::Face::parse(data.bytes(), data.index).map_err(|e| SketchError::Invalid(format!("font: {e}")))?;
-    let k = height / cap_height(&face);
-    let line_gap = f64::from(face.ascender()) - f64::from(face.descender()) + f64::from(face.line_gap());
-    let line_gap = if line_gap > 0.0 { line_gap * k } else { height * 1.5 } * style.line_spacing;
+    let metrics = TextMetrics::new(&data, style)?;
+    let (k, pitch) = (metrics.scale(height)?, metrics.line_pitch(height)?);
     let shear = if slant { SLANT_DEG.to_radians().tan() } else { 0.0 };
-    // Each line's glyphs (glyph, where its origin is along the line, its advance) and width.
-    let lines: Vec<(Vec<(ttf_parser::GlyphId, f64, f64)>, f64)> = text
-        .split('\n')
-        .map(|line| {
-            let mut pen = 0.0f64;
-            let mut glyphs = Vec::new();
-            for ch in line.chars() {
-                let Some(gid) = face.glyph_index(ch).or_else(|| face.glyph_index('?')) else { continue };
-                let advance = f64::from(face.glyph_hor_advance(gid).unwrap_or(0)) * k;
-                glyphs.push((gid, pen, advance));
-                pen += advance + style.letter_spacing;
-            }
-            let width = glyphs.last().map(|(_, x, advance)| x + advance).unwrap_or(0.0);
-            (glyphs, width)
-        })
-        .collect();
     let along = path.map(|pts| Path::new(pts, style.reverse)).transpose()?;
     let anchor = along.as_ref().map(|p| p.anchor(style.align)).unwrap_or(0.0);
     let (sin, cos) = angle.sin_cos();
     let mut out = Vec::new();
-    for (row, (glyphs, width)) in lines.iter().enumerate() {
-        let base_y = -(row as f64) * line_gap;
+    for (row, line) in text.split('\n').enumerate() {
+        let base_y = -(row as f64) * pitch;
         let start = match style.align {
             TextAlign::Left => 0.0,
-            TextAlign::Center => -width / 2.0,
-            TextAlign::Right => -width,
+            TextAlign::Center => -metrics.line_width(line, height)? / 2.0,
+            TextAlign::Right => -metrics.line_width(line, height)?,
         };
-        for &(gid, x, advance) in glyphs {
+        for (gid, x, advance) in metrics.glyphs(line, k) {
             // The glyph's frame: its origin on the baseline and the way the baseline runs.
             let (origin, dir) = match &along {
                 None => {
@@ -250,7 +320,7 @@ pub fn text_geometry_styled(
                 origin + dir * (gx + gy * shear) + up * gy
             });
             let mut ob = Outline { out: Vec::new(), start: origin, cur: origin, map };
-            let _ = face.outline_glyph(gid, &mut ob);
+            let _ = metrics.face.outline_glyph(gid, &mut ob);
             out.extend(ob.out);
             // A font can give a glyph any number of points: stop where the link would be refused anyway.
             if out.len() > MAX_LINK_ENTITIES {

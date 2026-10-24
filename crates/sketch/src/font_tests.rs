@@ -293,6 +293,33 @@ fn a_text_that_the_font_makes_too_large_is_refused() {
     std::fs::write(&path, font).unwrap();
     assert_eq!(text_geometry_in(Some(&path), &"H".repeat(66), Vec2::ZERO, 5.0, 0.0).unwrap().len(), 66 * 300);
     assert!(matches!(text_geometry_in(Some(&path), &"H".repeat(67), Vec2::ZERO, 5.0, 0.0), Err(SketchError::TooLarge)));
+    // Too large to draw, not to measure: 67 times one H.
+    let font = font_data(Some(&path)).unwrap();
+    let m = TextMetrics::new(&font, &TextStyle::default()).unwrap();
+    let (one, all) = (m.line_width("H", 5.0).unwrap(), m.line_width(&"H".repeat(67), 5.0).unwrap());
+    assert!(one > 0.0 && (all - 67.0 * one).abs() < 1e-12 * all, "{one} {all}");
+}
+
+#[test]
+fn a_font_file_is_measured_by_its_own_tables() {
+    let folder = Folder::new("metrics");
+    let font = font_data(Some(&folder.font())).unwrap();
+    let m = TextMetrics::new(&font, &TextStyle::default()).unwrap();
+    // Its H is 700 units tall, so at 7 mm a unit is 0.01 mm; ascender 800, descender -200 and no line gap put lines
+    // 10 mm apart; H, I and O advance 700, 200 and 900 units.
+    assert!((m.scale(7.0).unwrap() - 0.01).abs() < 1e-15);
+    assert!((m.line_pitch(7.0).unwrap() - 10.0).abs() < 1e-12);
+    assert!((m.line_width("HIO", 7.0).unwrap() - 18.0).abs() < 1e-12);
+    // It has neither an x nor a `?`: an x is left out, taking no room and drawing nothing, but it is named.
+    assert_eq!(m.line_width("HxI", 7.0).unwrap(), m.line_width("HI", 7.0).unwrap());
+    assert_eq!(m.missing("xHx"), ['x', 'x']);
+    let draw = |text: &str| text_geometry_in(Some(&folder.font()), text, Vec2::ZERO, 7.0, 0.0).unwrap();
+    assert_eq!(draw("HxI"), draw("HI"));
+    assert!(draw("xx").is_empty() && m.line_width("xx", 7.0).unwrap() == 0.0);
+    // A face the file does not have (it is no collection) is an error.
+    let mut elsewhere = font.clone();
+    elsewhere.index = 1;
+    assert!(TextMetrics::new(&elsewhere, &TextStyle::default()).is_err());
 }
 
 #[test]
