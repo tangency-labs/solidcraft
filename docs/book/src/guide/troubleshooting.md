@@ -61,6 +61,10 @@ saying what failed (earlier versions closed without a word). Things to try:
 - In a virtual machine, turn on 3D acceleration. Over Remote Desktop, try it on the machine itself.
 - Run `solidcraft --crash-log` to list recent crash reports, and attach the newest one to an
   issue.
+- On an Intel Mac (Intel Iris graphics, macOS 12), "Parent device is lost" at start comes from
+  the Metal compiler refusing wgpu's indirect-call validation shader. SolidCraft leaves that
+  validation off on Intel Macs. To change it, set `WGPU_VALIDATION_INDIRECT_CALL=1` (on) or `0`
+  (off) before starting; a value you set is always kept.
 
 ## The desktop stutters or freezes while SolidCraft builds bodies
 

@@ -189,6 +189,18 @@ pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
     adapters.iter().any(|a| a.get_info().device_type != eframe::wgpu::DeviceType::Cpu)
 }
 
+/// The environment variable that switches wgpu's indirect-call validation on or off.
+pub const INDIRECT_VALIDATION_ENV: &str = "WGPU_VALIDATION_INDIRECT_CALL";
+
+/// The instance flags for the window. wgpu's indirect-call validation compiles a compute shader
+/// when the device is created, and on Intel Macs (macOS 12 with Intel Iris graphics, #3024,
+/// #3080, #4605) the Metal compiler refuses it: the device is lost and the window never opens.
+/// So on an Intel Mac the validation is left off, unless the user turned it on or off with
+/// `WGPU_VALIDATION_INDIRECT_CALL` themselves.
+pub fn window_instance_flags(flags: eframe::wgpu::InstanceFlags, intel_mac: bool, env: Option<&str>) -> eframe::wgpu::InstanceFlags {
+    if intel_mac && env.map(str::trim).is_none_or(str::is_empty) { flags - eframe::wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL } else { flags }
+}
+
 /// The message shown when no window could be opened at all.
 pub fn no_window_message(error: &str, settings: Option<&Path>) -> String {
     let folder = settings.map(|d| d.display().to_string()).unwrap_or_else(|| "the SolidCraft settings folder".into());
@@ -212,6 +224,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn intel_macs_start_without_indirect_call_validation() {
+        use eframe::wgpu::InstanceFlags as F;
+        let on = F::VALIDATION | F::VALIDATION_INDIRECT_CALL;
+        assert_eq!(window_instance_flags(on, true, None), F::VALIDATION);
+        assert_eq!(window_instance_flags(on, true, Some("  ")), F::VALIDATION);
+        // The user's own choice stands, on or off.
+        assert_eq!(window_instance_flags(on, true, Some("1")), on);
+        assert_eq!(window_instance_flags(F::VALIDATION, true, Some("0")), F::VALIDATION);
+        // Every other machine keeps what it had.
+        assert_eq!(window_instance_flags(on, false, None), on);
     }
 
     #[test]

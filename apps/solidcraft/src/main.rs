@@ -850,6 +850,9 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
             eprintln!("SolidCraft graphics: starting {backends:?}");
             setup.instance_descriptor.backends = backends;
         }
+        let intel_mac = cfg!(all(target_os = "macos", target_arch = "x86_64"));
+        let indirect = std::env::var(startup::INDIRECT_VALIDATION_ENV).ok();
+        setup.instance_descriptor.flags = startup::window_instance_flags(setup.instance_descriptor.flags, intel_mac, indirect.as_deref());
         if cpu {
             setup.native_adapter_selector = Some(std::sync::Arc::new(startup::pick_cpu_adapter));
         }
