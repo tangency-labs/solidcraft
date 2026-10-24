@@ -63,8 +63,6 @@ fn lost_attachment_ghost_rebind_preview_cancel_apply_and_undo_preserve_sketch() 
     assert!(h.app.session.world_state().sketch(sketch).is_none(), "saved repair guides are not solved sketch geometry");
     let raw = raw_sketch(&h, sketch);
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
-    let redo = h.app.session.redo.len();
     h.app.edit_sketch(sketch);
     h.frames(4);
     assert_eq!(h.app.tree.redefine, Some(sketch));
@@ -82,6 +80,9 @@ fn lost_attachment_ghost_rebind_preview_cancel_apply_and_undo_preserve_sketch() 
     assert!(h.app.session.selection.is_empty(), "saved lost-plane guides must not be selectable geometry");
     assert!(h.app.session.active_sketch.is_none());
     h.app.run("browser.visibility", json!({"items":["ControlBox"],"visible":true})).unwrap();
+    // After the setup's two hide/show commands: each is an undo step of its own now (#2219).
+    let undo = h.app.session.undo.len();
+    let redo = h.app.session.redo.len();
     h.frames(4);
     h.step(&json!({"click":{"world":[3,4,30]}})).unwrap();
     assert!(matches!(h.app.session.selection.first(), Some(solidcraft_engine::Sel::Face { body, .. }) if body=="ControlBox"));

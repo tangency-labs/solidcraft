@@ -1043,23 +1043,26 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.hide" => {
-            for b in bodies {
-                if !app.session.visibility.hidden_bodies.contains(&b) {
-                    app.session.visibility.hidden_bodies.push(b);
-                }
-            }
+            // Through the command, so hiding is one undo step (#2219).
+            let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": false }));
         }
-        "ui.show" => app.session.visibility.hidden_bodies.retain(|b| !bodies.contains(b)),
+        "ui.show" => {
+            let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true }));
+        }
         "ui.showAll" => {
-            let _ = app.run("browser.visibility", json!({"folder":"bodies", "visible":true}));
-            app.session.visibility.hidden_sketches.clear();
-            // Hidden folders and groups too, so everything really shows.
-            app.session.visibility.hidden_folders.clear();
+            // One command and so one undo step: everything shown, folders and placements included.
             app.ui.show_sketches = true;
+            let _ = app.run("browser.visibility", json!({ "folder": "all", "visible": true }));
         }
         "ui.isolate" => {
-            app.session.visibility.hidden_bodies =
-                app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
+            // The picked bodies stay (shown first if they were hidden), everything else goes.
+            let others: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
+            if !bodies.is_empty() {
+                let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true }));
+            }
+            if !others.is_empty() {
+                let _ = app.run("browser.visibility", json!({ "items": others, "visible": false }));
+            }
         }
         "ui.lock" => {
             let locked = bodies.iter().all(|b| app.ui.locked_bodies.contains(b));
@@ -1256,15 +1259,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.originAll" => {
             app.ui.show_origin = true;
-            app.session.visibility.hidden_origin.retain(|h| !["O", "X", "Y", "Z", "XY", "XZ", "YZ"].contains(&h.as_str()));
+            let _ = app.run("browser.visibility", json!({ "items": ["O", "X", "Y", "Z", "XY", "XZ", "YZ"], "visible": true }));
         }
         "ui.originPart" => {
             let show = p.get("show").and_then(Value::as_bool).unwrap_or(true);
-            for k in strs(&p, "keys") {
-                app.session.visibility.hidden_origin.retain(|h| *h != k);
-                if !show {
-                    app.session.visibility.hidden_origin.push(k);
-                }
+            let keys = strs(&p, "keys");
+            if !keys.is_empty() {
+                let _ = app.run("browser.visibility", json!({ "items": keys, "visible": show }));
             }
         }
         "ui.editFeature" => {
@@ -1396,14 +1397,13 @@ pub fn toggle_visibility(app: &mut SolveApp) {
         || origin.iter().any(|o| !app.session.visibility.hidden_origin.contains(o))
         || app.session.doc.canvases.iter().any(|c| canvases.contains(&c.id) && c.visible);
     let hide = any_visible;
-    app.session.visibility.hidden_bodies.retain(|b| !bodies.contains(b));
-    app.session.visibility.hidden_origin.retain(|o| !origin.contains(o));
-    if hide {
-        app.session.visibility.hidden_bodies.extend(bodies);
-        app.session.visibility.hidden_origin.extend(origin);
-    }
-    for s in sketches {
-        crate::browser::set_sketch_visible(app, s, !hide);
+    // One command for the picked bodies, construction items and sketches: the same step the
+    // menus run, so hiding from the viewport (V) is undone like any other hide (#2219).
+    let mut items: Vec<Value> = bodies.iter().map(|b| json!(b)).collect();
+    items.extend(origin.iter().map(|o| json!(o)));
+    items.extend(sketches.iter().map(|s| json!(s)));
+    if !items.is_empty() {
+        let _ = app.run("browser.visibility", json!({ "items": items, "visible": !hide }));
     }
     if !joints.is_empty() {
         let _ = app.run("browser.visibility", json!({ "joints": joints, "visible": !hide }));

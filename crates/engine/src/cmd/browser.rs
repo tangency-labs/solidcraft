@@ -39,12 +39,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         "view?: front|back|top|bottom|left|right|iso|home (frames the model) | a named view's name; or camera?: {target: [x,y,z], yaw, pitch, distance, fov?, roll?} (radians, mm; roll defaults to 0, must be finite and is clamped to ±π; up is refused: the up axis comes from the design settings) → camera. The viewport (and the MCP screenshot) moves there. View state: not saved, not an undo step",
     ),
     CommandSpec::new("browser.order", "Order Browser Items", order).icon("reorder").params("folder, component?, order: [keys] (the folder's items in display order)"),
-    CommandSpec::new("browser.visibility", "Show/Hide", visibility).icon("eye").noundo().params(
+    CommandSpec::new("browser.visibility", "Show/Hide", visibility).icon("eye").params(
         "visible: bool; items?: [sketch id or name | body name | construction name | joint name | O|X|Y|Z|XY|XZ|YZ]; \
          or joints?: [joint id or name] (their glyphs; they still constrain and move parts); \
-         or folder?: bodies|sketches|construction|origin|joints (all of it; showing also shows its browser folders and groups); \
+         or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, c0/g7, c0/joints, c0/canvases] (the folder or group itself: its items keep their own state); \
-         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (requires paths and visible:true). Saved with the design; not an undo step",
+         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (requires paths and visible:true). Saved with the design and undone like any other change (the camera is not)",
     ),
 ];
 
@@ -319,7 +319,17 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         (Some("construction"), None) => s.doc.features.iter().filter(|f| is_construction(&f.kind)).map(|f| Shown::Origin(f.name.clone())).collect(),
         (Some("origin"), None) => ORIGIN.iter().map(|o| Shown::Origin(o.to_string())).collect(),
         (Some("joints"), None) => s.doc.assembly.joints.iter().map(|j| Shown::Joint(j.id)).collect(),
-        (Some(f), None) => return Err(bad(cmd, format!("unknown folder `{f}` (bodies, sketches, construction, origin, joints)"))),
+        // Everything at once, for a single "show all" step: every body, sketch, construction
+        // item, origin item and joint.
+        (Some("all"), None) => {
+            let mut all: Vec<Shown> = s.world_state().bodies.iter().map(|b| Shown::Body(b.name.clone())).collect();
+            all.extend(s.model.state().sketches.iter().map(|x| Shown::Sketch(x.feature)));
+            all.extend(s.doc.features.iter().filter(|f| is_construction(&f.kind)).map(|f| Shown::Origin(f.name.clone())));
+            all.extend(ORIGIN.iter().map(|o| Shown::Origin(o.to_string())));
+            all.extend(s.doc.assembly.joints.iter().map(|j| Shown::Joint(j.id)));
+            all
+        }
+        (Some(f), None) => return Err(bad(cmd, format!("unknown folder `{f}` (bodies, sketches, construction, origin, joints, all)"))),
         (None, Some(_)) => {
             let keys = keys(p, "items", cmd)?;
             if keys.is_empty() {
@@ -334,36 +344,55 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // Showing all of a kind also shows the browser folders and groups that hold it.
     if visible && let Some(f) = str_(p, "folder") {
-        let groups: Vec<String> = s.doc.browser_groups.iter().filter(|g| g.folder == f).map(|g| format!("/g{}", g.id)).collect();
-        let own = format!("/{f}");
-        s.visibility.hidden_folders.retain(|k| !k.ends_with(&own) && !groups.iter().any(|g| k.ends_with(g.as_str())));
+        if f == "all" {
+            // Everything includes the folders and groups themselves.
+            s.visibility.hidden_folders.clear();
+        } else {
+            let groups: Vec<String> = s.doc.browser_groups.iter().filter(|g| g.folder == f).map(|g| format!("/g{}", g.id)).collect();
+            let own = format!("/{f}");
+            s.visibility.hidden_folders.retain(|k| !k.ends_with(&own) && !groups.iter().any(|g| k.ends_with(g.as_str())));
+        }
     }
     let v = &mut s.visibility;
-    if visible && str_(p, "folder") == Some("bodies") {
+    if visible && matches!(str_(p, "folder"), Some("bodies" | "all")) {
         v.hidden_occurrences.clear();
     }
     for it in &items {
+        // Each item ends in the state asked for, and asking for the state it already has leaves
+        // the lists exactly as they were: no reordering, so a redundant hide shows up as no
+        // change at all (no undo step, no unsaved changes).
         match it {
             Shown::Sketch(id) => {
-                v.hidden_sketches.retain(|x| x != id);
-                v.shown_sketches.retain(|x| x != id);
-                if visible { v.shown_sketches.push(*id) } else { v.hidden_sketches.push(*id) }
+                if visible {
+                    v.hidden_sketches.retain(|x| x != id);
+                    if !v.shown_sketches.contains(id) {
+                        v.shown_sketches.push(*id);
+                    }
+                } else {
+                    v.shown_sketches.retain(|x| x != id);
+                    if !v.hidden_sketches.contains(id) {
+                        v.hidden_sketches.push(*id);
+                    }
+                }
             }
             Shown::Body(n) => {
-                v.hidden_bodies.retain(|x| x != n);
-                if !visible {
+                if visible {
+                    v.hidden_bodies.retain(|x| x != n);
+                } else if !v.hidden_bodies.contains(n) {
                     v.hidden_bodies.push(n.clone());
                 }
             }
             Shown::Origin(n) => {
-                v.hidden_origin.retain(|x| x != n);
-                if !visible {
+                if visible {
+                    v.hidden_origin.retain(|x| x != n);
+                } else if !v.hidden_origin.contains(n) {
                     v.hidden_origin.push(n.clone());
                 }
             }
             Shown::Joint(id) => {
-                v.hidden_joints.retain(|x| x != id);
-                if !visible {
+                if visible {
+                    v.hidden_joints.retain(|x| x != id);
+                } else if !v.hidden_joints.contains(id) {
                     v.hidden_joints.push(*id);
                 }
             }
@@ -1161,12 +1190,14 @@ mod tests {
         };
         let (n0, undo0, doc0) = (lines(&s), s.undo.len(), s.doc.clone());
         assert_eq!(shown(&mut s), 2);
-        // By id and by name; the view loses their lines, the design and its history don't change.
+        // By id and by name; the view loses their lines, the design still doesn't change: hiding
+        // is an undo step of its own (#2219), and the step carries no document change.
         let r = run(&mut s, "browser.visibility", json!({"items": [floor, drain_name], "visible": false}));
         assert_eq!(r["changed"], 2);
         assert_eq!(shown(&mut s), 0);
         assert!(lines(&s) < n0);
-        assert!(std::sync::Arc::ptr_eq(&s.doc, &doc0) && s.undo.len() == undo0, "view state, not a design change");
+        assert!(std::sync::Arc::ptr_eq(&s.doc, &doc0), "view state, not a design change");
+        assert_eq!(s.undo.len(), undo0 + 1, "hiding is one undo step");
         run(&mut s, "browser.visibility", json!({"folder": "sketches", "visible": true}));
         assert_eq!(lines(&s), n0);
         // The browser's Sketches folder hidden: sketches shown one by one aren't drawn either,
@@ -1199,6 +1230,75 @@ mod tests {
             assert!(s.execute("browser.visibility", &p).is_err(), "{p}");
         }
         assert_eq!(s.visibility, before);
+    }
+
+    /// #2219: hiding is a step of its own, so Ctrl+Z brings the body back instead of undoing the
+    /// command before the hide, and Ctrl+Y hides it again.
+    #[test]
+    fn hiding_a_body_is_undone_and_redone() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
+        s.mark_saved();
+        let cam = solidcraft_render::Camera::default();
+        let drawn = |s: &Session| crate::view::scene(s, &cam).meshes.len();
+        assert!(drawn(&s) > 0, "the box is drawn");
+        assert!(!s.is_dirty());
+        let steps = s.undo.len();
+
+        // Hide: one step, no document change, the view loses the body, the design has changes.
+        let doc = s.doc.clone();
+        run(&mut s, "browser.visibility", json!({"items": ["Box"], "visible": false}));
+        assert_eq!(s.undo.len(), steps + 1, "hiding is one undo step");
+        assert!(std::sync::Arc::ptr_eq(&s.doc, &doc), "hiding leaves the document alone");
+        assert!(!s.body_visible("Box") && drawn(&s) == 0);
+        assert!(s.is_dirty(), "hiding is a change to save");
+
+        // Undo: the hide is what goes back, not the box the hide came after.
+        let r = run(&mut s, "edit.undo", json!({}));
+        assert_eq!(r["undone"], "Show/Hide", "{r}");
+        assert!(s.body_visible("Box") && drawn(&s) > 0);
+        assert!(s.model.state().bodies.iter().any(|b| b.name == "Box"), "the box itself stays");
+        assert!(!s.is_dirty(), "back to what the file holds");
+
+        // Redo hides it again, and undoing twice more leaves the design as it was.
+        run(&mut s, "edit.redo", json!({}));
+        assert!(!s.body_visible("Box") && s.is_dirty());
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.body_visible("Box") && !s.is_dirty());
+
+        // Hiding a whole folder is one step too, and undoing it brings the body back.
+        run(&mut s, "browser.visibility", json!({"folder": "bodies", "visible": false}));
+        assert!(!s.body_visible("Box"));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.body_visible("Box") && s.visibility.is_empty() && !s.is_dirty());
+
+        // Hiding or showing what is already so changes nothing: no step, and the lists are not
+        // even reordered, so the design is not left with unsaved changes either.
+        let steps = s.undo.len();
+        run(&mut s, "browser.visibility", json!({"items": ["Box"], "visible": true}));
+        assert_eq!(s.undo.len(), steps, "showing a body that is already shown is no change");
+        run(&mut s, "browser.visibility", json!({"items": ["Box"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["Box"], "visible": false}));
+        assert_eq!(s.undo.len(), steps + 1, "the first hide is one step, hiding it again is none");
+        assert_eq!(s.visibility.hidden_bodies, vec!["Box".to_string()], "no duplicate, no reordering");
+        assert!(s.is_dirty(), "the first hide is still a change to save");
+        run(&mut s, "browser.visibility", json!({"items": ["Box"], "visible": true}));
+        assert_eq!(s.undo.len(), steps + 2, "showing it again is one step");
+        assert!(s.visibility.hidden_bodies.is_empty() && !s.is_dirty());
+
+        // `all` shows everything (folders and occurrence hides included) as one step.
+        run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [30, 0, 0], "operation": "new", "body_name": "Second"}));
+        run(&mut s, "browser.visibility", json!({"folder": "bodies", "visible": false}));
+        run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": false}));
+        assert_eq!(s.visibility.hidden_bodies.len(), 2);
+        assert_eq!(s.visibility.hidden_folders, vec!["c0/bodies".to_string()]);
+        let steps = s.undo.len();
+        run(&mut s, "browser.visibility", json!({"folder": "all", "visible": true}));
+        assert!(s.visibility.is_empty(), "all shows everything: {:?}", s.visibility);
+        assert_eq!(s.undo.len(), steps + 1, "one step for all of it");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.visibility.hidden_bodies.len(), 2, "and one undo puts it back");
+        assert_eq!(s.visibility.hidden_folders, vec!["c0/bodies".to_string()]);
     }
 
     /// A design file can carry any id, the largest a `u64` holds too: a new group then has no id

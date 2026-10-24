@@ -149,13 +149,8 @@ pub fn sketch_visible(app: &SolveApp, id: u64) -> bool {
 }
 
 pub fn set_sketch_visible(app: &mut SolveApp, id: u64, on: bool) {
-    app.session.visibility.hidden_sketches.retain(|x| *x != id);
-    app.session.visibility.shown_sketches.retain(|x| *x != id);
-    if on {
-        app.session.visibility.shown_sketches.push(id);
-    } else {
-        app.session.visibility.hidden_sketches.push(id);
-    }
+    // Through the command, so showing or hiding a sketch is an undo step too (#2219).
+    let _ = app.run("browser.visibility", json!({ "items": [id], "visible": on }));
 }
 
 pub fn redefine_sketch(app: &mut SolveApp, id: u64) {
@@ -1335,11 +1330,8 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actio
             &Row { depth: depth + 1, eye: Some(visible), icon, label, selected, dim: !visible || !app.ui.show_origin, mark, ..Default::default() },
         );
         if r.eye {
-            if visible {
-                app.session.visibility.hidden_origin.push(k.into());
-            } else {
-                app.session.visibility.hidden_origin.retain(|h| h != k);
-            }
+            // Through the command, so the Origin row's eye is an undo step (#2219).
+            let _ = app.run("browser.visibility", json!({ "items": [k], "visible": !visible }));
         }
         if let Some(p) = r.secondary
             && icon == "plane"
@@ -1795,14 +1787,13 @@ fn arrange(app: &SolveApp, comp: u64, folder: &str, all: Vec<Entry>) -> (Vec<(so
     (grouped, loose)
 }
 
-/// Show or hide items of a folder.
+/// Show or hide items of a folder, through `browser.visibility` so each is an undo step (#2219).
 fn set_visible(app: &mut SolveApp, folder: &str, items: &[&Entry], on: bool) {
     for e in items {
         match folder {
             "bodies" => {
-                app.session.visibility.hidden_bodies.retain(|b| !e.bodies.contains(b));
-                if !on {
-                    app.session.visibility.hidden_bodies.extend(e.bodies.clone());
+                if !e.bodies.is_empty() {
+                    let _ = app.run("browser.visibility", json!({ "items": e.bodies.clone(), "visible": on }));
                 }
             }
             "sketches" => {
@@ -1811,10 +1802,7 @@ fn set_visible(app: &mut SolveApp, folder: &str, items: &[&Entry], on: bool) {
                 }
             }
             _ => {
-                app.session.visibility.hidden_origin.retain(|p| *p != e.label);
-                if !on {
-                    app.session.visibility.hidden_origin.push(e.label.clone());
-                }
+                let _ = app.run("browser.visibility", json!({ "items": [e.label], "visible": on }));
             }
         }
     }

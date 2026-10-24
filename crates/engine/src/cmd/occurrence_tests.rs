@@ -490,10 +490,10 @@ fn temp_design(tag: &str, ext: &str) -> (std::path::PathBuf, String) {
 }
 
 /// #531: hiding a placement and a body is saved with the design and comes back when it opens.
-/// It is not an undo step (undoing a later feature leaves it hidden), but the design then has
-/// unsaved changes, and showing it again is saved the same way.
+/// Each hide is an undo step of its own (#2219, so undoing a later feature still leaves it
+/// hidden), the design then has unsaved changes, and showing it again is saved the same way.
 #[test]
-fn hidden_placements_and_bodies_are_saved_with_the_design_but_not_undone() {
+fn hidden_placements_and_bodies_are_saved_with_the_design() {
     let (dir, path) = temp_design("saved", "solidcraft");
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":4,"width":4,"height":4,"body_name":"Base"}));
@@ -507,7 +507,7 @@ fn hidden_placements_and_bodies_are_saved_with_the_design_but_not_undone() {
     let undo = s.undo.len();
     run(&mut s, "browser.visibility", json!({"visible":false,"paths":[[second]]}));
     run(&mut s, "browser.visibility", json!({"visible":false,"items":["Base"]}));
-    assert_eq!(s.undo.len(), undo, "hiding is not an undo step");
+    assert_eq!(s.undo.len(), undo + 2, "each hide is one undo step");
     assert!(s.is_dirty(), "hiding leaves the design with unsaved changes");
     run(&mut s, "solid.box", json!({"length":1,"width":1,"height":1,"corner":[50,0,0],"operation":"new","body_name":"Later"}));
     run(&mut s, "edit.undo", json!({}));

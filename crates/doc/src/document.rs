@@ -2543,13 +2543,14 @@ pub struct Document {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
     /// What was hidden when the design was saved. A session takes it from here when the design
-    /// opens and keeps the live state itself (`browser.visibility`: saved, not an undo step), so
-    /// a document in a session leaves this empty; the session puts it back when it saves.
+    /// opens and keeps the live state itself (`browser.visibility`: saved, and undone like any
+    /// other change), so a document in a session leaves this empty; the session puts it back when
+    /// it saves.
     #[serde(default, skip_serializing_if = "Visibility::is_empty")]
     pub visibility: Visibility,
 }
 
-/// Items hidden or shown one by one. Saved with the design, but not an undo step.
+/// Items hidden or shown one by one. Saved with the design and an undo step of its own.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Visibility {

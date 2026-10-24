@@ -92,15 +92,28 @@ fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
 
 /// Put the session at `snap`; returns where it was, under the same label.
 fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
-    let was = Snapshot { label: snap.label, doc: s.doc.clone(), active_sketch: s.active_sketch, pending_moves: s.pending_moves.clone() };
+    let was = Snapshot {
+        label: snap.label,
+        doc: s.doc.clone(),
+        active_sketch: s.active_sketch,
+        pending_moves: s.pending_moves.clone(),
+        visibility: s.visibility.clone(),
+    };
     let same = std::sync::Arc::ptr_eq(&s.doc, &snap.doc);
+    // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating.
+    let display_only = same && s.visibility != snap.visibility;
     s.doc = snap.doc;
     s.active_sketch = snap.active_sketch;
     s.pending_moves = snap.pending_moves;
+    s.visibility = snap.visibility;
     s.selection.clear();
     // A new document is evaluated by `execute`.
     if same {
-        s.refresh();
+        if display_only {
+            s.refresh_display();
+        } else {
+            s.refresh();
+        }
     }
     was
 }

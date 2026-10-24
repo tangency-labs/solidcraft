@@ -40,7 +40,7 @@ Visibility is an independent view setting for exact placements. Hide a path and 
 {"visible":false,"paths":[[2,4]]}
 ```
 
-`visible:true` removes that path's own hide setting. A hidden ancestor still hides its descendants. Add `isolate:true` to a visible path list to hide other branches. Show the bodies folder to clear occurrence hides. Selection and activation paths are session state. Visibility is saved with the design (hidden bodies, placements, sketches and origin items) but is not an undo step; the saved document also retains occurrence IDs and transforms. Undo follows the existing behavior of clearing selection.
+`visible:true` removes that path's own hide setting. A hidden ancestor still hides its descendants. Add `isolate:true` to a visible path list to hide other branches. Show the bodies folder to clear occurrence hides. Selection and activation paths are session state. Visibility is saved with the design (hidden bodies, placements, sketches and origin items) and is an undo step of its own, so undo brings a hidden body or placement back; the saved document also retains occurrence IDs and transforms. Undo follows the existing behavior of clearing selection.
 
 Paths are checked for missing links, repeated IDs, component mismatches and a maximum depth of 64. Descendant expansion rejects more than 100,000 placements or bodies instead of returning incomplete results. Computed body names normally retain their readable occurrence labels; collisions use full occurrence IDs so visibility and body commands still address the correct source.
 

@@ -165,6 +165,9 @@ pub struct Snapshot {
     pub doc: Arc<Document>,
     pub active_sketch: Option<u64>,
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    /// What was hidden or shown then (`browser.visibility`). It is saved with the design, so
+    /// hiding a body is undone and redone like any other change.
+    pub visibility: Visibility,
 }
 
 /// Where the open sketch was entered (`sketch.create`, `sketch.edit`): the design before it and
@@ -302,8 +305,9 @@ pub struct Session {
     /// The seams `inspect.continuity` last measured, for the viewport to shade. View state: not
     /// part of the design and not an undo step.
     pub continuity: Vec<ContinuitySeam>,
-    /// What is hidden or shown in the view (`browser.visibility`): saved with the design, not an
-    /// undo step. A design brings its saved visibility when it opens (`Session::new`).
+    /// What is hidden or shown in the view (`browser.visibility`): saved with the design and an
+    /// undo step of its own ([`Snapshot::visibility`]). A design brings its saved visibility when
+    /// it opens (`Session::new`).
     pub visibility: Visibility,
     /// The camera `view.apply` asked the view to use (view state, not saved). The desktop app
     /// moves its viewport there and takes it; headless renders keep using it until a standard
@@ -345,6 +349,7 @@ pub(crate) struct Checkpoint {
     pub doc: Arc<Document>,
     pub active_sketch: Option<u64>,
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    pub visibility: Visibility,
     pub undo: Vec<Snapshot>,
     pub redo: Vec<Snapshot>,
 }
@@ -414,7 +419,7 @@ impl Session {
     /// `doc`'s evaluation ([`Model::adopt`]); otherwise the timeline is evaluated.
     /// `SOLIDCRAFT_NO_MODEL_CACHE` set always evaluates.
     pub fn opened(mut doc: Document, saved: Option<&solidcraft_doc::SavedModel>) -> Self {
-        // The session keeps what is hidden (not an undo step); the design file carries it.
+        // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
         let doc = Arc::new(doc);
         let adopted = saved
@@ -773,6 +778,12 @@ impl Session {
             && (self.doc.differs_only_in_render(&before.doc) || self.doc.differs_only_in_part_properties(&before.doc))
     }
 
+    /// Only what is hidden or shown changed (`browser.visibility`): the document and the model
+    /// are untouched, so the view refreshes without evaluating anything again.
+    pub(crate) fn visibility_only_change(&self, before: &Snapshot) -> bool {
+        Arc::ptr_eq(&self.doc, &before.doc) && self.visibility != before.visibility
+    }
+
     fn refresh_render(&mut self, previous: &Arc<Document>) {
         self.revision += 1;
         // Geometry/placements have been proved identical. Retarget the cache's document key
@@ -783,6 +794,12 @@ impl Session {
         {
             cache.doc = self.doc.clone();
         }
+    }
+
+    /// Only what is hidden or shown changed: the model is untouched, so only the view revision
+    /// moves (the visibility caches are keyed on it) and the viewport redraws.
+    pub(crate) fn refresh_display(&mut self) {
+        self.revision += 1;
     }
 
     /// Show the sketch a live frame changed, leaving the features after it as they were last
@@ -875,6 +892,7 @@ impl Session {
             doc: self.doc.clone(),
             active_sketch: self.active_sketch,
             pending_moves: self.pending_moves.clone(),
+            visibility: self.visibility.clone(),
         };
         // Where new geometry goes: not in the design, but a replay needs it (component.activate).
         let active_before = (self.active_component, self.active_occurrence_path.clone());
@@ -925,11 +943,15 @@ impl Session {
             crash::command_done(self.crash_journal, changed, &before.doc, after, spec.id, given, failed.map_or(Ok(()), Err));
         }
         let changed = !Arc::ptr_eq(&self.doc, &before.doc);
+        // Hiding or showing (`browser.visibility`) leaves the document alone, so it needs its own
+        // test: it is saved with the design and has an undo step of its own.
+        let hidden = self.visibility != before.visibility;
         match r {
             Ok((v, live_edit)) => {
                 let v = if changed { self.with_created(spec.id, params, &before, v) } else { v };
-                if changed {
+                if changed || hidden {
                     let render_only = self.render_only_change(&before);
+                    let display_only = !changed && hidden;
                     let previous_doc = before.doc.clone();
                     if spec.undoable {
                         self.undo.push(before);
@@ -941,16 +963,18 @@ impl Session {
                     match live_edit {
                         Some(edit) => self.refresh_live(edit),
                         None if render_only => self.refresh_render(&previous_doc),
+                        None if display_only => self.refresh_display(),
                         None => self.refresh_from(&previous_doc),
                     }
                 }
                 Ok(v)
             }
             Err(e) => {
-                if changed || self.pending_moves != before.pending_moves {
+                if changed || hidden || self.pending_moves != before.pending_moves {
                     self.doc = before.doc;
                     self.active_sketch = before.active_sketch;
                     self.pending_moves = before.pending_moves;
+                    self.visibility = before.visibility;
                     self.refresh();
                 }
                 Err(e)
@@ -989,6 +1013,7 @@ impl Session {
             active_sketch: self.active_sketch,
             undo: self.undo.clone(),
             pending_moves: self.pending_moves.clone(),
+            visibility: self.visibility.clone(),
             redo: self.redo.clone(),
         });
         if self.checkpoints.len() > MAX_CHECKPOINTS {
@@ -1002,16 +1027,24 @@ impl Session {
     pub fn restore_checkpoint(&mut self, id: u64) -> Result<()> {
         let i = self.checkpoints.iter().position(|c| c.id == id).ok_or_else(|| EngineError::Other(format!("no checkpoint {id}")))?;
         let Some(c) = self.checkpoints.drain(i..).next() else { return Err(EngineError::Other(format!("no checkpoint {id}"))) };
-        let before =
-            Snapshot { label: String::new(), doc: self.doc.clone(), active_sketch: self.active_sketch, pending_moves: self.pending_moves.clone() };
+        let before = Snapshot {
+            label: String::new(),
+            doc: self.doc.clone(),
+            active_sketch: self.active_sketch,
+            pending_moves: self.pending_moves.clone(),
+            visibility: self.visibility.clone(),
+        };
         self.doc = c.doc;
         self.active_sketch = c.active_sketch;
         self.pending_moves = c.pending_moves;
+        self.visibility = c.visibility;
         self.undo = c.undo;
         self.redo = c.redo;
         self.selection.clear();
         if self.render_only_change(&before) {
             self.refresh_render(&before.doc);
+        } else if self.visibility_only_change(&before) {
+            self.refresh_display();
         } else if !Arc::ptr_eq(&self.doc, &before.doc) || self.active_sketch != before.active_sketch || self.pending_moves != before.pending_moves {
             self.refresh();
         }

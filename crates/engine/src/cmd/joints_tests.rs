@@ -1019,9 +1019,9 @@ fn joint(s: &Session, name: &str) -> u64 {
     s.doc.assembly.joints.iter().find(|j| j.name == name).map(|j| j.id).unwrap()
 }
 
-/// #1160: hiding a joint hides only its glyph. It is saved with the design (not an undo step,
-/// like other visibility), the hinge still drives its leaf while hidden, and the folder hides
-/// and shows every joint at once.
+/// #1160: hiding a joint hides only its glyph. It is saved with the design and is an undo step
+/// of its own (#2219, like other visibility), the hinge still drives its leaf while hidden, and
+/// the folder hides and shows every joint at once.
 #[test]
 fn hidden_joints_still_drive_and_are_saved_with_the_design() {
     let (dir, path) = temp_design("saved", "json");
@@ -1032,7 +1032,7 @@ fn hidden_joints_still_drive_and_are_saved_with_the_design() {
     let r = run(&mut s, "browser.visibility", json!({"joints": ["Hinge"], "visible": false}));
     assert_eq!(r["changed"], 1, "{r}");
     assert!(!s.joint_visible(hinge) && s.joint_visible(glue));
-    assert_eq!(s.undo.len(), undo, "hiding is not an undo step");
+    assert_eq!(s.undo.len(), undo + 1, "hiding is one undo step");
     assert!(s.is_dirty(), "hiding leaves unsaved changes");
     let l = run(&mut s, "joint.list", json!({}));
     assert_eq!(l["joints"].as_array().unwrap().iter().map(|j| j["visible"].clone()).collect::<Vec<_>>(), [json!(false), json!(true)]);

@@ -175,6 +175,7 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         doc: d.clone(),
         active_sketch: None,
         pending_moves: Default::default(),
+        visibility: Default::default(),
     };
     let docs: Vec<_> = (0..6).map(doc).collect();
     // The turn began at depth 3 with docs[3]; the history then lost its oldest step.
