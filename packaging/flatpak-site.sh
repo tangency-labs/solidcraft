@@ -35,6 +35,9 @@ repo_dir="$site/flatpak/repo"
 mkdir -p "$repo_dir"
 ostree --repo="$repo_dir" init --mode=archive-z2
 base_url="${PAGES_BASE_URL%/}"
+# Pages reports its base URL as http:// for a custom domain; the repository is always fetched over
+# HTTPS (the remote URL is stored by every client that adds it).
+base_url="https://${base_url#*://}"
 previous_url="$base_url/flatpak/repo"
 if curl --fail --silent --location --output /dev/null "$previous_url/summary"; then
   ostree --repo="$repo_dir" remote add --no-gpg-verify previous "$previous_url"
