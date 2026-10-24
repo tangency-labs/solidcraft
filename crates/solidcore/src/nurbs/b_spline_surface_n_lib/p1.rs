@@ -12,7 +12,7 @@
 //! | [`build_nlib_curve`]                                  | `sm_BuildNlibCurve` (static)                     |
 //! | [`create_nlib_curve`]                                 | `sm_CreateNlibCurve` (static)                    |
 //! | [`create_nlib_surface`]                               | `sm_CreateNlibSurface` (static)                  |
-//! | [`BSplineSurface::approximate_offset_surface`], [`OffsetParamType`] | `ApproximateOffsetSurface`         |
+//! | [`BSplineSurface::approximate_offset_surface`], [`BSplineSurface::approximate_offset_surface_with`], [`OffsetParamType`] | `ApproximateOffsetSurface` |
 //! | [`create_non_rational_curve`]                         | `sm_CreateNonRationalCurve` (static)             |
 //! | [`create_coons_srf`], [`CoonsWarning`]                | `sm_CreateCoonsSrf` (static)                     |
 //! | [`BSplineSurface::create_coons_patch`]                | `CreateCoonsPatch`                               |
@@ -38,6 +38,9 @@
 //! other units.
 //!
 //! Deviations:
+//! - `approximate_offset_surface_with` exposes the opt-in corrections of
+//!   [`crate::nurbs::srf_offset::OffsetOptions`] for issue #471; the original entry
+//!   point retains SMLib's behavior.
 //! - **Memory and contexts.** `SmNLibStackHandler`, the `NL_STACKS` arguments and the
 //!   `SmContext` arguments only manage memory and are dropped; new surfaces and curves
 //!   are return values (upstream out-params), surface lists are `Vec`s.
@@ -1023,6 +1026,24 @@ impl BSplineSurface {
         approx_tol_3d: f64,
         param_type: OffsetParamType,
     ) -> Result<BSplineSurface> {
+        self.approximate_offset_surface_with(
+            offset_distance,
+            approx_tol_3d,
+            param_type,
+            crate::nurbs::srf_offset::OffsetOptions::default(),
+        )
+    }
+
+    /// [`BSplineSurface::approximate_offset_surface`] with explicit corrections for
+    /// extrusion recognition and sliver-span sampling (issue #471).
+    /// The default [`crate::nurbs::srf_offset::OffsetOptions`] preserves SMLib.
+    pub fn approximate_offset_surface_with(
+        &self,
+        offset_distance: f64,
+        approx_tol_3d: f64,
+        param_type: OffsetParamType,
+        options: crate::nurbs::srf_offset::OffsetOptions,
+    ) -> Result<BSplineSurface> {
         let nl_surf_p = self
             .nurb
             .as_ref()
@@ -1047,13 +1068,14 @@ impl BSplineSurface {
 
         // pass the call along to NLib
         let mut nl_surf = nl_surf_p
-            .offset(
+            .offset_with(
                 offset_distance,
                 ln_deg,
                 ln_deg,
                 nl_param,
                 10.0 * approx_tol_3d,
                 approx_tol_3d,
+                options,
             )
             .map_err(SolidError::nl_ser(OP_OFFSET))?;
 

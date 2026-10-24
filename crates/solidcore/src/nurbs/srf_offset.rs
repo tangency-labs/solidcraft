@@ -7,7 +7,7 @@
 //!
 //! | Rust                 | Upstream                        |
 //! |----------------------|---------------------------------|
-//! | [`Surface::offset`]  | `N_SrfOffset`                   |
+//! | [`Surface::offset`], [`Surface::offset_with`] | `N_SrfOffset` |
 //! | `SLM`, `TOTAL_MAX`   | `slm`, `totalmax` (file statics) |
 //! | `UNIT_SQUARE`        | `NL_UNITSQUARE`                 |
 //!
@@ -30,6 +30,15 @@
 //! - `N_SrfReparamToInterval` errors are ignored, as upstream. `N_SrfCompress` only
 //!   trims storage and is kept for fidelity. The unreachable `mu < 0 || mv < 0`
 //!   check has no counterpart.
+//! - Issue #471: [`OffsetOptions`] explicitly opts into a unit-direction extrusion
+//!   test (and inherited-domain restoration on that path), plus independent u/v
+//!   sampling. The latter scales the minimum density by relative span width, uses
+//!   directional second derivatives with `|d|`, keeps one step on flat slivers even
+//!   when capping the grid, and reserves part of `tol` for knot removal. Defaults
+//!   retain the unmodified C++ algorithm and differential-test tolerances.
+//!   With inherited parameters, fits are checked on cell edges and centers and
+//!   refined for at most 24 iterations, still within the 10000-point grid budget;
+//!   exhausting either bound returns an error instead of an unchecked surface.
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::{max2, Vec3};
@@ -58,6 +67,18 @@ const TOTAL_MAX: isize = 10000;
 
 /// Upstream `NL_UNITSQUARE`.
 const UNIT_SQUARE: Rectangle = Rectangle::new(0.0, 1.0, 0.0, 1.0);
+
+/// Optional corrections to `N_SrfOffset` (issue #471). The default preserves SMLib.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OffsetOptions {
+    /// Compare unit extrusion and profile-normal directions, independent of extrusion
+    /// length. Preserve the input domain when the inherited extrusion shortcut runs.
+    pub normalize_extrusion_direction: bool,
+    /// Choose independent u/v sample counts from each patch's directional curvature
+    /// and relative span width, instead of a shared minimum for every patch.
+    /// Inherited fits also refine cells whose sampled offset error exceeds `tol/2`.
+    pub condition_sampling: bool,
+}
 
 const fn invalid(reason: &'static str) -> SolidError {
     SolidError::InvalidInput {
@@ -240,6 +261,21 @@ impl Surface {
         eps: f64,
         tol: f64,
     ) -> Result<Surface> {
+        self.offset_with(d, pp, qq, par, eps, tol, OffsetOptions::default())
+    }
+
+    /// [`Surface::offset`] with explicit corrections to upstream's extrusion test
+    /// and sliver-span sampling. See [`OffsetOptions`].
+    pub fn offset_with(
+        &self,
+        d: f64,
+        pp: usize,
+        qq: usize,
+        par: OffsetParam,
+        eps: f64,
+        tol: f64,
+        options: OffsetOptions,
+    ) -> Result<Surface> {
         // Get surface type.
         let st = self.surface_type(eps)?;
         let stp = st.kind;
@@ -329,7 +365,12 @@ impl Surface {
                 let (_, nn) = planarity
                     .plane
                     .ok_or_else(|| invalid("flat curve without a plane"))?;
-                let f1 = aa.cross(nn).length();
+                let axis = if options.normalize_extrusion_direction {
+                    normalize(aa)?.0
+                } else {
+                    aa
+                };
+                let f1 = axis.cross(nn).length();
                 if f1 < MODEL_TOL {
                     let pq = if dir == Some(Direction::U) { qq } else { pp };
 
@@ -343,12 +384,16 @@ impl Surface {
                     let mut cur_p = cur_a.offset_pt_sampling(nn, d, pq, false, par, tol)?;
                     let dir = dir.ok_or(SolidError::nlib(OP, NlibCode::Call))?;
                     let sur_q = extrude_crv(&mut cur_p, aa, st.r1, dir)?;
-                    return orient(sur_q, np);
+                    let mut sur_q = orient(sur_q, np)?;
+                    if options.normalize_extrusion_direction && par == OffsetParam::Inherited {
+                        sur_q.reparam_to_interval(self.parameter_bounds(), Direction::UV)?;
+                    }
+                    return Ok(sur_q);
                 }
             }
         }
 
-        self.offset_general(d, pp, qq, par, tol)
+        self.offset_general(d, pp, qq, par, tol, options.condition_sampling)
     }
 
     /// The free-form path of [`Surface::offset`].
@@ -359,6 +404,7 @@ impl Surface {
         qq: usize,
         par: OffsetParam,
         tol: f64,
+        condition_sampling: bool,
     ) -> Result<Surface> {
         // Offset general surface.
         let up = self.u_knots();
@@ -397,19 +443,41 @@ impl Surface {
         }
 
         // Get number of sampling points.
-        let mut np = vec![vec![0_isize; lv]; ku];
+        let mut np = vec![vec![(0_isize, 0_isize); lv]; ku];
         for (bez_row, np_row) in bez.iter_mut().zip(np.iter_mut()) {
             for (patch, npij) in bez_row.iter_mut().zip(np_row.iter_mut()) {
                 let b = patch.parameter_bounds();
-                if b.ur - b.ul <= du || b.vt - b.vb <= dv {
-                    *npij = 1;
+                if !condition_sampling && (b.ur - b.ul <= du || b.vt - b.vb <= dv) {
+                    *npij = (1, 1);
                     continue;
                 }
 
                 // Upstream ignores the error.
                 let _ = patch.reparam_to_interval(UNIT_SQUARE, Direction::UV);
 
-                let md = offset_get_max_deriv(patch, d)?;
+                let md = offset_get_max_deriv(patch, if condition_sampling { d.abs() } else { d })?;
+
+                if condition_sampling {
+                    let bounds = self.parameter_bounds();
+                    let fu = (b.ur - b.ul) / (bounds.ur - bounds.ul);
+                    let fv = (b.vt - b.vb) / (bounds.vt - bounds.vb);
+                    let samples = |fraction: f64, second: f64, mixed: f64| -> Result<isize> {
+                        // Only curvature needs the tolerance-dependent density.
+                        // Multiplying the degree floor by f1 oversamples even a
+                        // straight ruling and consumes the refinement budget.
+                        let curvature = f1 * (0.125 * second + 0.125 * mixed).sqrt();
+                        let n = max2(f2 * fraction, curvature).ceil();
+                        if !n.is_finite() {
+                            return Err(invalid("non-finite sample count"));
+                        }
+                        count(n.clamp(1.0, SLM))
+                    };
+                    *npij = (
+                        samples(fu, md.muu, md.muv * fu / fv)?,
+                        samples(fv, md.mvv, md.muv * fv / fu)?,
+                    );
+                    continue;
+                }
 
                 let num = 0.125 * (md.muu + md.mvv) + 0.25 * md.muv;
                 let gro = max2(f2, num.sqrt());
@@ -417,18 +485,19 @@ impl Surface {
                 del = del.ceil();
 
                 if del >= SLM {
-                    *npij = SLM as isize;
+                    *npij = (SLM as isize, SLM as isize);
                     patch.offset_patch_net(d, pu, qu)?;
 
                     let al = patch.average_len();
                     let mut del = (al.area / tol).sqrt();
                     del = del.ceil();
                     let jj = count(del)?;
-                    if jj < *npij {
-                        *npij = jj;
+                    if jj < npij.0 {
+                        *npij = (jj, jj);
                     }
                 } else {
-                    *npij = count(del)?;
+                    let n = count(del)?;
+                    *npij = (n, n);
                 }
             }
         }
@@ -437,8 +506,8 @@ impl Surface {
         let mut nu: Vec<isize> = Vec::with_capacity(ku);
         let mut mu: isize = 0;
         for row in &np {
-            let mut x = row.first().copied().unwrap_or(0);
-            for &y in row.iter().skip(1) {
+            let mut x = row.first().map_or(0, |n| n.0);
+            for &(y, _) in row.iter().skip(1) {
                 if y > x {
                     x = y;
                 }
@@ -451,7 +520,7 @@ impl Surface {
         let mut nv: Vec<isize> = Vec::with_capacity(lv);
         let mut mv: isize = 0;
         for j in 0..lv {
-            let col = |i: usize| np.get(i).and_then(|r| r.get(j)).copied().unwrap_or(0);
+            let col = |i: usize| np.get(i).and_then(|r| r.get(j)).map_or(0, |n| n.1);
             let mut x = col(0);
             for i in 1..ku {
                 if col(i) > x {
@@ -474,8 +543,9 @@ impl Surface {
             for x in &mut nu {
                 let ddd = *x as f64;
                 *x = (ddd * per) as isize;
-                if *x < p {
-                    *x = p;
+                let minimum = if condition_sampling { 1 } else { p };
+                if *x < minimum {
+                    *x = minimum;
                 }
                 mu += *x;
             }
@@ -484,14 +554,24 @@ impl Surface {
             for x in &mut nv {
                 let ddd = *x as f64;
                 *x = (ddd * per) as isize;
-                if *x < q {
-                    *x = q;
+                let minimum = if condition_sampling { 1 } else { q };
+                if *x < minimum {
+                    *x = minimum;
                 }
                 mv += *x;
             }
         }
 
         // Adjust output surface control point size (least-squares fit only).
+        if condition_sampling
+            && ((mu + 1).checked_mul(mv + 1).is_none_or(|n| n > TOTAL_MAX)
+                || mu < sx(pp, OP)?
+                || mv < sx(qq, OP)?)
+        {
+            return Err(invalid(
+                "sample budget cannot accommodate spans and degrees",
+            ));
+        }
         if nnn > mu {
             nnn = mu;
         }
@@ -502,6 +582,10 @@ impl Surface {
         // Compute parameters.
         let mut u = sample_params(up, p, rp, &nu, mu)?;
         let mut v = sample_params(vp, q, sp, &nv, mv)?;
+
+        if condition_sampling && par == OffsetParam::Inherited {
+            return self.offset_refined(d, pp, qq, u, v, tol);
+        }
 
         // Sample surface.
         let g = grid_pts_normals(self, &u, &v, Side::Left, Side::Left)?;
@@ -539,7 +623,8 @@ impl Surface {
         };
 
         // Remove knots.
-        sur_q = remove_all_knots(&sur_q, tol, Direction::UV)?;
+        let removal_tol = if condition_sampling { 0.5 * tol } else { tol };
+        sur_q = remove_all_knots(&sur_q, removal_tol, Direction::UV)?;
 
         // Compact output surface.
         let (n, m, _, _) = sur_q.array_sizes();
@@ -577,6 +662,92 @@ impl Surface {
         }
 
         Ok(sur_q)
+    }
+
+    /// Fit inherited parameters and refine only directions with measured error.
+    /// This is a bounded sampling check, not a proof against offset singularities.
+    fn offset_refined(
+        &self,
+        d: f64,
+        p: usize,
+        q: usize,
+        mut u: Vec<f64>,
+        mut v: Vec<f64>,
+        tol: f64,
+    ) -> Result<Surface> {
+        const MAX_REFINEMENTS: u32 = 24;
+        for _ in 0..MAX_REFINEMENTS {
+            let grid = grid_pts_normals(self, &u, &v, Side::Left, Side::Left)?;
+            let pts: Vec<Vec<Vec3>> = grid
+                .points
+                .iter()
+                .zip(&grid.normals)
+                .map(|(pr, nr)| {
+                    pr.iter()
+                        .zip(nr)
+                        .map(|(&pt, &n)| pt_along_vector(pt, d, n))
+                        .collect()
+                })
+                .collect();
+            let ku = interp_knot_vector(&u, p)?;
+            let kv = interp_knot_vector(&v, q)?;
+            let ku = KnotVector::from_slice(&ku)?;
+            let kv = KnotVector::from_slice(&kv)?;
+            let fit = interp_given_knots(&pts, &u, &v, &ku, &kv, p, q)?;
+            let fit = remove_all_knots(&fit, 0.25 * tol, Direction::UV)?;
+            let inaccurate = |u: f64, v: f64| -> Result<bool> {
+                let e = self.eval_pt_deriv_normal_fast(u, v, Side::Left, Side::Left)?;
+                let target = pt_along_vector(e.p, d, e.n);
+                let actual = fit.eval(u, v, Side::Left, Side::Left)?;
+                let error = (actual - target).length();
+                if !error.is_finite() {
+                    return Err(SolidError::nlib(OP, NlibCode::Numerical));
+                }
+                Ok(error > 0.5 * tol)
+            };
+            // A bad interpolant at its own samples cannot be repaired by adding
+            // more samples to the same ill-conditioned system.
+            for &uu in &u {
+                for &vv in &v {
+                    if inaccurate(uu, vv)? {
+                        return Err(SolidError::nlib(OP, NlibCode::Numerical));
+                    }
+                }
+            }
+            let mut refine_u = vec![false; u.len().saturating_sub(1)];
+            let mut refine_v = vec![false; v.len().saturating_sub(1)];
+            for (span_u, ru) in u.windows(2).zip(&mut refine_u) {
+                let &[u0, u1] = span_u else {
+                    return Err(invalid("missing sample interval"));
+                };
+                let um = u0 + 0.5 * (u1 - u0);
+                for (span_v, rv) in v.windows(2).zip(&mut refine_v) {
+                    let &[v0, v1] = span_v else {
+                        return Err(invalid("missing sample interval"));
+                    };
+                    let vm = v0 + 0.5 * (v1 - v0);
+                    let bad_u = inaccurate(um, v0)? || inaccurate(um, v1)?;
+                    let bad_v = inaccurate(u0, vm)? || inaccurate(u1, vm)?;
+                    let interior = !bad_u && !bad_v && inaccurate(um, vm)?;
+                    *ru |= bad_u || interior;
+                    *rv |= bad_v || interior;
+                }
+            }
+            if !refine_u.contains(&true) && !refine_v.contains(&true) {
+                return Ok(fit);
+            }
+            let nu = u.len() + refine_u.iter().filter(|&&b| b).count();
+            let nv = v.len() + refine_v.iter().filter(|&&b| b).count();
+            if nu.checked_mul(nv).is_none_or(|n| n > TOTAL_MAX as usize) {
+                return Err(invalid("offset refinement exceeds sample budget"));
+            }
+            u = refine_parameters(&u, &refine_u)?;
+            v = refine_parameters(&v, &refine_v)?;
+        }
+        Err(SolidError::NotConverged {
+            operation: OP,
+            iterations: MAX_REFINEMENTS,
+        })
     }
 
     /// The `del >= slm` branch of `N_SrfOffset` on this unit-square Bezier patch:
@@ -618,6 +789,32 @@ impl Surface {
     }
 }
 
+/// Insert each requested midpoint, keeping the existing parameters and their order.
+fn refine_parameters(parameters: &[f64], refine: &[bool]) -> Result<Vec<f64>> {
+    let mut result = Vec::new();
+    for (span, &split) in parameters.windows(2).zip(refine) {
+        let &[lo, hi] = span else {
+            return Err(invalid("missing sample interval"));
+        };
+        result.push(lo);
+        if split {
+            let mid = lo + 0.5 * (hi - lo);
+            if !(lo < mid && mid < hi) {
+                return Err(invalid(
+                    "offset samples cannot be refined at this precision",
+                ));
+            }
+            result.push(mid);
+        }
+    }
+    result.push(
+        *parameters
+            .last()
+            .ok_or_else(|| invalid("missing sample interval"))?,
+    );
+    Ok(result)
+}
+
 /// Sample parameters of one direction: `ns[j]` equal steps on the `j`-th non-zero
 /// knot span of `kn` (degree `p`, highest knot index `r`), `hi + 1` values.
 fn sample_params(kn: &[f64], p: isize, r: isize, ns: &[isize], hi: isize) -> Result<Vec<f64>> {
@@ -653,6 +850,101 @@ mod tests {
     use super::*;
     use crate::nurbs::crv_fit::p1::ParamMethod;
     use crate::nurbs::math::NOW;
+    use crate::nurbs::srf_tool::p1::insert_knot;
+
+    fn check_offset(s: &Surface, q: &Surface, d: f64, tol: f64) {
+        assert_eq!(s.parameter_bounds(), q.parameter_bounds());
+        let b = s.parameter_bounds();
+        for i in 0..=40 {
+            for j in 0..=20 {
+                let u = b.ul + (b.ur - b.ul) * (f64::from(i) / 40.0);
+                let v = b.vb + (b.vt - b.vb) * (f64::from(j) / 20.0);
+                let e = s
+                    .eval_pt_deriv_normal_fast(u, v, Side::Left, Side::Left)
+                    .unwrap();
+                let p = q.eval(u, v, Side::Left, Side::Left).unwrap();
+                let error = (p - pt_along_vector(e.p, d, e.n)).length();
+                assert!(error <= tol, "u={u} v={v} error={error} tol={tol}");
+            }
+        }
+    }
+
+    #[test]
+    fn conditioned_sampling_handles_slivers_in_either_parameter_direction() {
+        for width in [2.1e-4, 1e-6] {
+            let s = grid(3, 3, |x, y| 0.2 * x * x - 0.1 * y * y + 0.05 * x * y);
+            let s = insert_knot(&s, 0.5, 3, Direction::U).unwrap();
+            let mut s = insert_knot(&s, 0.5 + width, 3, Direction::U).unwrap();
+            s.reparam_to_interval(Rectangle::new(20.0, 60.0, -2.0, 3.0), Direction::UV)
+                .unwrap();
+            for _ in 0..2 {
+                for d in [-0.25, 0.25] {
+                    let q = s
+                        .offset_with(
+                            d,
+                            3,
+                            3,
+                            OffsetParam::Inherited,
+                            1e-6,
+                            1e-4,
+                            OffsetOptions {
+                                condition_sampling: true,
+                                ..OffsetOptions::default()
+                            },
+                        )
+                        .unwrap();
+                    check_offset(&s, &q, d, 1e-4);
+                    assert!(q
+                        .cpts()
+                        .iter()
+                        .flatten()
+                        .all(|p| p.to_euclid().length() < 10.0));
+                }
+                s.swap_uv();
+            }
+        }
+    }
+
+    #[test]
+    fn extrusion_test_is_independent_of_length_and_rejects_oblique_axes() {
+        let options = OffsetOptions {
+            normalize_extrusion_direction: true,
+            ..OffsetOptions::default()
+        };
+        for length in [0.1, 100.0] {
+            for tilt in [1e-8, 1e-3] {
+                for dir in [Direction::U, Direction::V] {
+                    let mut curve = Curve::new(
+                        vec![
+                            CPoint::from_point(Vec3::new(0.0, 0.0, 0.0)),
+                            CPoint::from_point(Vec3::new(1.0, 2.0, 0.0)),
+                            CPoint::from_point(Vec3::new(3.0, 1.0, 0.0)),
+                            CPoint::from_point(Vec3::new(4.0, 0.0, 0.0)),
+                        ],
+                        3,
+                        vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+                    )
+                    .unwrap();
+                    let mut s =
+                        extrude_crv(&mut curve, Vec3::new(tilt, 0.0, 1.0), length, dir).unwrap();
+                    s.reparam_to_interval(Rectangle::new(20.0, 60.0, -2.0, 3.0), Direction::UV)
+                        .unwrap();
+                    let q = s
+                        .offset_with(0.1, 3, 3, OffsetParam::Inherited, 1e-6, 1e-4, options)
+                        .unwrap();
+                    let expected = if tilt == 1e-3 {
+                        (3, 3)
+                    } else if dir == Direction::U {
+                        (1, 3)
+                    } else {
+                        (3, 1)
+                    };
+                    assert_eq!(q.degrees(), expected);
+                    check_offset(&s, &q, 0.1, 1e-4);
+                }
+            }
+        }
+    }
 
     fn grid(n: usize, m: usize, f: impl Fn(f64, f64) -> f64) -> Surface {
         let net: Vec<Vec<CPoint>> = (0..=n)

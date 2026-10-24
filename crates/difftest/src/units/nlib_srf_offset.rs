@@ -689,7 +689,68 @@ mod tests {
 
     use solidcore::nurbs::geom::Rectangle;
     use solidcore::nurbs::srf_adv::p1::offset_get_max_deriv;
+    use solidcore::nurbs::srf_offset::OffsetOptions;
     use solidcore::nurbs::srf_tool::p1::decompose_to_bez;
+
+    /// Check interior samples of every original knot span, including the sliver and
+    /// the short extensions. A global uniform grid would miss the failing region.
+    fn span_parameters(knots: &[f64]) -> Vec<f64> {
+        knots
+            .windows(2)
+            .filter(|w| w[0] < w[1])
+            .flat_map(|w| (0..=32).map(move |i| w[0] + (w[1] - w[0]) * f64::from(i) / 32.0))
+            .collect()
+    }
+
+    #[test]
+    fn issue471_conditioned_offsets_of_the_actual_drafted_rounds() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/nlib.srf_offset/issue471.json"
+        ))
+        .unwrap();
+        for case in data["cases"].as_array().unwrap() {
+            let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+            let mut s = build(&resolve(&i.sur).unwrap()).unwrap();
+            for swap in [false, true] {
+                if swap {
+                    s.swap_uv();
+                }
+                for normalized in [false, true] {
+                    for d in [i.d, -i.d] {
+                        let base =
+                            solidcore::nurbs::b_spline_surface::BSplineSurface::from_gw_nurb(&s);
+                        let offset = base.approximate_offset_surface_with(d, i.tol,
+                            solidcore::nurbs::b_spline_surface_n_lib::p1::OffsetParamType::Inherited,
+                            OffsetOptions { normalize_extrusion_direction: normalized, condition_sampling: true }).unwrap();
+                        let q = offset.gw_nurb().unwrap();
+                        assert_eq!(q.parameter_bounds(), s.parameter_bounds());
+                        // The original failing net contains points more than 4 m
+                        // from the origin, although this box is only 120x80x40 mm.
+                        assert!(q
+                            .cpts()
+                            .iter()
+                            .flatten()
+                            .all(|p| p.to_euclid().length() < 100.0));
+                        let mut worst = 0.0_f64;
+                        for u in span_parameters(s.u_knots()) {
+                            for v in span_parameters(s.v_knots()) {
+                                let e = s
+                                    .eval_pt_deriv_normal_fast(u, v, Side::Left, Side::Left)
+                                    .unwrap();
+                                let p = q.eval(u, v, Side::Left, Side::Left).unwrap();
+                                worst = worst.max((p - (e.p + e.n * d)).length());
+                            }
+                        }
+                        assert!(
+                            worst <= i.tol,
+                            "{} swap={swap} normalize={normalized} d={d} error={worst}",
+                            case["name"]
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     /// Some Bezier patch of `sur` gets a sample count of at least `slm` (1000).
     fn slm_reached(sur: &Surface, i: &Inputs) -> bool {
