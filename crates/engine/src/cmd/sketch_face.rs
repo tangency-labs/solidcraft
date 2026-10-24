@@ -79,6 +79,7 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
         by_component.entry(doc.model_body_component(body)).or_default().push(body);
     }
     let mut chosen = None;
+    let mut non_planar = false;
     let mut sheet_face: Option<(String, Plane)> = None;
     let mut work = state.bodies.len().saturating_add(doc.occurrences.len());
     for (component, path, placement) in placements {
@@ -136,6 +137,8 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 } else {
                     body.body.face_plane(face.index).or_else(|| body.body.planar_face(face.index))
                 }) else {
+                    // The point lies on a face without an exact plane: a curved or imported one.
+                    non_planar |= super::face_contains(&mesh, face.index, local_point, tolerance * 10.0);
                     continue;
                 };
                 let normal = exact_plane.normal();
@@ -161,8 +164,16 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
         }
         return Ok(PlaneRef::Face { plane, at: apply_point(&author_inverse, point), name: Some(name), anchor: None });
     }
-    let (body, index, path, plane) =
-        chosen.ok_or_else(|| bad(cmd, "the selected planar face no longer exists; choose another face or an explicit fixed plane"))?;
+    let Some((body, index, path, plane)) = chosen else {
+        return Err(bad(
+            cmd,
+            if non_planar {
+                "the selected face is not an exact plane (curved, or its plane is not known); choose a flat face or an explicit fixed plane"
+            } else {
+                "the selected planar face no longer exists; choose another face or an explicit fixed plane"
+            },
+        ));
+    };
     if fixed {
         return Ok(PlaneRef::Custom { plane });
     }
