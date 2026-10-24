@@ -40,6 +40,16 @@ use truck_modeling as mt;
 use crate::body::{Solid, edge_order};
 use crate::{KernelError, Result};
 
+/// Whether [`plan_face`] may leave out of its constrained Delaunay the boundary sides that cross
+/// a side already kept, and not hold the triangles to every side: the last resort for a face
+/// that crosses itself in (u, v) (a cusp, a sliver whose sides sag across each other). Its
+/// points stay in (u, v), so a curved face is still drawn on its surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Lenient {
+    No,
+    Yes,
+}
+
 /// How the faces of a plan were meshed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PlanStats {
@@ -154,7 +164,7 @@ pub(crate) fn plan(solid: &Solid, tol: f64, turn: Option<size::Turn>, boundary_t
         let (eval, size) = surface_of(fi)?;
         let (loops3, known) = boundary(face, &eval, nodes)?;
         let mut stats = PlanStats::default();
-        let replan = |stats: &mut PlanStats| match plan_face(fi, &eval, &loops3, &known, rules, size, stats) {
+        let replan = |stats: &mut PlanStats| match plan_face(fi, &eval, &loops3, &known, rules, size, stats, Lenient::No) {
             Ok(fp) => Ok(fp),
             // A boundary that doubles straight back on itself (a zero-width slit in the face,
             // which some STEP writers leave where two surfaces were trimmed apart) encloses no
@@ -171,7 +181,7 @@ pub(crate) fn plan(solid: &Solid, tol: f64, turn: Option<size::Turn>, boundary_t
                     return Ok(FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), ..FacePlan::default() });
                 }
                 *stats = PlanStats::default();
-                plan_face(fi, &eval, &slit3, &slitq, rules, size, stats).map_err(|_| first)
+                plan_face(fi, &eval, &slit3, &slitq, rules, size, stats, Lenient::No).map_err(|_| first)
             }
         };
         let fp = replan(&mut stats)?;
@@ -220,15 +230,19 @@ pub(crate) fn plan(solid: &Solid, tol: f64, turn: Option<size::Turn>, boundary_t
             }
         }
     }
-    // A face refused however finely its edges are divided is filled flat from its boundary
-    // nodes (see `fallback`), so the rest of the body keeps its plan.
+    // A face refused however finely its edges are divided: a lenient fill in (u, v) (see
+    // [`Lenient`]), else filled flat from its boundary nodes (see `fallback`), so the rest of the
+    // body keeps its plan.
     for (fi, slot) in planned.iter_mut().enumerate() {
         if slot.is_ok() {
             continue;
         }
-        let (Some(face), Ok((eval, _))) = (faces.get(fi), surface_of(fi)) else { continue };
-        let Ok((loops3, _)) = boundary(face, &eval, &nodes) else { continue };
-        if let Some(fp) = fallback::fill(fi, &eval, &loops3, off_surface(&rules), rules.tol) {
+        let (Some(face), Ok((eval, size))) = (faces.get(fi), surface_of(fi)) else { continue };
+        let Ok((loops3, known)) = boundary(face, &eval, &nodes) else { continue };
+        let mut stats = PlanStats::default();
+        if let Ok(fp) = plan_face(fi, &eval, &loops3, &known, &rules, size, &mut stats, Lenient::Yes) {
+            *slot = Ok((oriented_face(face, fp), eval, stats));
+        } else if let Some(fp) = fallback::fill(fi, &eval, &loops3, off_surface(&rules), rules.tol) {
             *slot = Ok((oriented_face(face, fp), eval, PlanStats { filled: 1, ..PlanStats::default() }));
         }
     }
@@ -468,6 +482,8 @@ fn off_surface(rules: &size::Rules) -> f64 {
 
 /// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
 /// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
+/// `lenient`: the last resort for a face no method could plan (see [`Lenient`]).
+#[allow(clippy::too_many_arguments)]
 fn plan_face(
     fi: usize,
     s: &EvalSurface,
@@ -476,6 +492,7 @@ fn plan_face(
     rules: &size::Rules,
     size: (f64, [f64; 2]),
     stats: &mut PlanStats,
+    lenient: Lenient,
 ) -> Result<FacePlan> {
     let tol = rules.tol;
     let (h, speed) = size;
@@ -583,13 +600,21 @@ fn plan_face(
         let seeds = cdt::lattice(bbox, [h / speed[0], h / speed[1]], &polys, speed);
         let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
         let sag = cdt::Sag { eval: &eval, tol, h, turn: rules.turn, scale: speed };
-        let fill = cdt::Fill { seeds: &seeds, refine: Some((sag, MAX_REFINE)), shape: !matches!(s, EvalSurface::Plane { .. }), lenient: false };
+        let fill = cdt::Fill {
+            seeds: &seeds,
+            refine: Some((sag, MAX_REFINE)),
+            shape: !matches!(s, EvalSurface::Plane { .. }),
+            lenient: lenient == Lenient::Yes,
+        };
         cdt::triangulate(&uvs, &ranges, fill).ok_or_else(|| fail("boundary crosses itself"))
     };
     // Planar and curved faces alike: a structured grid where the boundary runs along the
     // parameter box (a rectangle, a cylinder half), a Coons grid on four corners, else Delaunay.
     let planar = matches!(s, EvalSurface::Plane { .. });
-    let (extra, triangles) = {
+    let (extra, triangles) = if lenient == Lenient::Yes {
+        stats.filled += 1;
+        delaunay()?
+    } else {
         let mut us = uv::divide(s, 0, bbox[0], bbox[1], rules, h, MAX_LINES);
         let mut vs = uv::divide(s, 1, bbox[1], bbox[0], rules, h, MAX_LINES);
         thin(&mut us, &mut vs, grid::MAX_FACE_GRID);
@@ -671,7 +696,8 @@ fn plan_face(
     let pole_pair = |i: u32, j: u32| i != j && fixed.get(i as usize).zip(fixed.get(j as usize)).is_some_and(|(p, q)| p == q);
     let mut triangles = triangles;
     triangles.retain(|t| !(pole_pair(t[0], t[1]) || pole_pair(t[1], t[2]) || pole_pair(t[2], t[0])));
-    if !closed_boundary(&ranges, &fixed, &triangles) {
+    // A lenient fill leaves out the sides that cross: the boundary is followed everywhere else.
+    if lenient == Lenient::No && !closed_boundary(&ranges, &fixed, &triangles) {
         return Err(fail("triangulation does not follow the boundary"));
     }
     let mut all = uvs;

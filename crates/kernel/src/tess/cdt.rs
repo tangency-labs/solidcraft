@@ -492,6 +492,11 @@ mod tests {
         let b = [[0.0, 0.0], [1.0, 1.0], [1.0, 0.0], [0.0, 1.0]];
         let whole = std::slice::from_ref(&(0..4));
         assert!(triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false, lenient: false }).is_none());
+        // Lenient, the crossing side is left out and what the rest encloses is filled.
+        let Some((_, tris)) = triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false, lenient: true }) else {
+            panic!("a lenient fill")
+        };
+        assert!(!tris.is_empty());
     }
 
     #[test]

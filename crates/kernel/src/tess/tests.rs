@@ -449,3 +449,49 @@ fn a_boundary_running_back_along_itself_is_all_slit() {
     let (kept, _) = drop_slits(std::slice::from_ref(&lens), &[Vec::new()], 1e-9);
     assert_eq!(kept, vec![lens]);
 }
+
+/// A curved face whose boundary folds back over itself at a cusp crosses itself in (u, v), so no
+/// method plans it; the lenient fill leaves the crossing side out and plans the rest in (u, v),
+/// with points inside the face on its surface (the GPU evaluates them there), not flat between
+/// boundary nodes.
+#[test]
+fn a_curved_face_crossing_itself_is_filled_on_its_surface() {
+    // A doubly curved patch, 40 mm across.
+    let mut ctrl = Vec::new();
+    for j in 0..3 {
+        for i in 0..3 {
+            let bump = if i == 1 && j == 1 { 12.0 } else { 0.0 };
+            ctrl.push([20.0 * f64::from(i), 20.0 * f64::from(j), bump, 1.0]);
+        }
+    }
+    let s = EvalSurface::Nurbs {
+        degree: [2, 2],
+        knots: [vec![0., 0., 0., 1., 1., 1.], vec![0., 0., 0., 1., 1., 1.]],
+        count: [3, 3],
+        ctrl,
+        closed: [false, false],
+    };
+    // A square in (u, v) whose right side folds back past itself near the top: the last chord of
+    // the fold crosses the side.
+    let corners = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.7], [0.7, 0.95], [0.86, 0.8], [0.1, 0.9]];
+    let mut uvs: Vec<[f64; 2]> = Vec::new();
+    for k in 0..corners.len() {
+        let (a, b) = (corners[k], corners[(k + 1) % corners.len()]);
+        for t in 0..8 {
+            let f = f64::from(t) / 8.0;
+            uvs.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
+        }
+    }
+    let loop3: Vec<Vec3> = uvs.iter().filter_map(|q| s.derivs(q[0], q[1]).map(|(p, _, _)| p)).collect();
+    let known = vec![uvs.iter().map(|q| Some(*q)).collect::<Vec<_>>()];
+    let rules = size::Rules::new(0.05, 40.0, None, None);
+    let dom = uv::domain(&s);
+    let size = size::face_size(&s, &dom, &rules);
+    let mut stats = PlanStats::default();
+    assert!(plan_face(0, &s, std::slice::from_ref(&loop3), &known, &rules, size, &mut stats, Lenient::No).is_err());
+    let Ok(fp) = plan_face(0, &s, std::slice::from_ref(&loop3), &known, &rules, size, &mut stats, Lenient::Yes) else { panic!("a lenient fill") };
+    assert!(!fp.triangles.is_empty());
+    // Points inside the face, each on the surface where its parameters put it.
+    assert!(fp.uv.len() > fp.fixed.len(), "{} points, {} on the boundary", fp.uv.len(), fp.fixed.len());
+    assert_eq!(stats.filled, 1);
+}
