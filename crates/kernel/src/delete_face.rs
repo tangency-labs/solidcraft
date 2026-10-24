@@ -314,6 +314,7 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                 }
                 wires.push(new_edges.into());
             }
+            crate::build::refuse_intersection_curves(&wires, &format!("Delete Face: face {fi}"))?;
             let face = builder::try_attach_plane(&wires).map_err(|e| fail(format!("face {fi} cannot close: {e}")))?;
             // Keep the face's outward side.
             let (nrm, _) = planes.get(&fi).copied().ok_or_else(|| fail("plane"))?;
@@ -354,6 +355,42 @@ mod tests {
                 m.triangles.iter().zip(&m.tri_face).filter(|(_, x)| **x as usize == *f).all(|(t, _)| m.tri(t).unwrap().iter().all(|p| keep(*p)))
             })
             .collect()
+    }
+
+    /// #1559: a flat face rebuilt by Delete Face kept an edge where two surfaces were intersected
+    /// (a boolean's seam), and truck panicked fitting a plane through it (`lift_up` of an
+    /// intersection curve is `unimplemented!`). It is refused with an ordinary error instead.
+    #[test]
+    fn issue1559_delete_beside_an_intersection_edge_is_refused_not_a_panic() {
+        use truck_meshalgo::prelude::PolylineCurve;
+        use truck_modeling as mt;
+        let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+        let rounded = fillet(&b, &[Vec3::new(40.0, 15.0, 20.0)], 3.0).unwrap();
+        // The top's left edge (z 20, x 0), which the rebuilt top keeps as it is, becomes the seam
+        // of the planes it lies on, as a boolean leaves it.
+        let plane =
+            |o: [f64; 3], a: [f64; 3], b: [f64; 3]| mt::Surface::Plane(mt::Plane::new(mt::Point3::from(o), mt::Point3::from(a), mt::Point3::from(b)));
+        let mut seams = 0;
+        for e in rounded.solid.edge_iter() {
+            let (a, b) = (e.front().point(), e.back().point());
+            if let mt::Curve::Line(_) = e.curve()
+                && [a, b].iter().all(|p| p.x.abs() < 1e-9 && (p.z - 20.0).abs() < 1e-9)
+            {
+                let ends = if e.orientation() { vec![a, b] } else { vec![b, a] };
+                let leader = mt::Leader::Polyline(PolylineCurve(ends));
+                let top = plane([0.0, 0.0, 20.0], [1.0, 0.0, 20.0], [0.0, 1.0, 20.0]);
+                let left = plane([0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+                e.set_curve(mt::Curve::IntersectionCurve(mt::IntersectionCurve::new_unchecked(Box::new(top), Box::new(left), leader, 0.01)));
+                seams += 1;
+            }
+        }
+        assert_eq!(seams, 1);
+        let rounds: Vec<usize> =
+            rounded.solid.face_iter().enumerate().filter(|(_, f)| crate::blend::plane_normal(f).is_none()).map(|(i, _)| i).collect();
+        assert_eq!(rounds.len(), 1);
+        let err = delete_faces(&rounded, &rounds).err().unwrap();
+        assert!(!matches!(err, crate::KernelError::Internal(_)), "{err}");
+        assert!(err.to_string().contains("not supported yet"), "{err}");
     }
 
     #[test]
