@@ -518,6 +518,74 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
 
 // ---- SmFilletExecutive: the object ---------------------------------------------------------
 
+/// The live objects read or written by `LoadFilletSolver`.
+///
+/// A production session can load its concrete solvers without implementing unrelated
+/// executive operations. Full adapters retain their behavior through delegation.
+pub trait SolverLoadingAccess<O: ClassObject + SolutionObject + Ord> {
+    /// The retained concrete solver's mutable base.
+    ///
+    /// # Errors
+    /// Caller object resolution or the delegated native query failure.
+    fn load_solver_base_mut(
+        &mut self,
+        solver: O,
+    ) -> Result<&mut crate::blend::fillet_solver::p1::FilletSolver>;
+    /// Actual `GetSurface(rail)`, including geometry-backed surfaces.
+    ///
+    /// # Errors
+    /// Caller object resolution or the delegated native query failure.
+    fn load_solver_has_surface(&self, solver: O, rail: usize) -> Result<bool>;
+    /// Actual edge knots whose curve-cache continuity is G1, in order.
+    ///
+    /// # Errors
+    /// Caller object resolution or the delegated native query failure.
+    fn load_edge_g1_knots(&mut self, k: &Kernel, edge: O) -> Result<Vec<f64>>;
+    /// Actual `GetEdgeuse(rail)` of the retained solver.
+    ///
+    /// # Errors
+    /// Caller object resolution or the delegated native query failure.
+    fn load_solver_edgeuse(&self, solver: O, rail: usize) -> Result<Option<O>>;
+    /// The edge use's owning edge.
+    ///
+    /// # Errors
+    /// Caller object resolution or the delegated native query failure.
+    fn load_edgeuse_edge(&self, edgeuse: O) -> Result<Option<O>>;
+    /// The edge use's start vertex (a null vertex stays null).
+    ///
+    /// # Errors
+    /// Caller object resolution or the delegated native query failure.
+    fn load_edgeuse_vertex(&self, edgeuse: O) -> Result<Option<O>>;
+}
+
+impl<O, A> SolverLoadingAccess<O> for A
+where
+    O: ClassObject + SolutionObject + Ord,
+    A: ExecutiveAccess<O> + ?Sized,
+{
+    fn load_solver_base_mut(
+        &mut self,
+        solver: O,
+    ) -> Result<&mut crate::blend::fillet_solver::p1::FilletSolver> {
+        ExecutiveAccess::solver_base_mut(self, solver)
+    }
+    fn load_solver_has_surface(&self, solver: O, rail: usize) -> Result<bool> {
+        ExecutiveAccess::solver_has_surface(self, solver, rail)
+    }
+    fn load_edge_g1_knots(&mut self, k: &Kernel, edge: O) -> Result<Vec<f64>> {
+        ExecutiveAccess::edge_g1_knots(self, k, edge)
+    }
+    fn load_solver_edgeuse(&self, solver: O, rail: usize) -> Result<Option<O>> {
+        ExecutiveAccess::solver_edgeuse(self, solver, rail)
+    }
+    fn load_edgeuse_edge(&self, edgeuse: O) -> Result<Option<O>> {
+        ExecutiveAccess::edgeuse_edge(self, edgeuse)
+    }
+    fn load_edgeuse_vertex(&self, edgeuse: O) -> Result<Option<O>> {
+        ExecutiveAccess::edgeuse_vertex(self, edgeuse)
+    }
+}
+
 /// The objects `SmFilletExecutive(crContext, pTargetBrep)` allocates, made by the owner of
 /// the handles ([`ExecutiveAccess::new_executive_objects`]).
 #[derive(Debug, Clone, Copy)]
@@ -571,7 +639,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// Missing offset surfaces, unresolved caller objects, or a native undefined
     /// vertex-array read when an absent rail reaches an existing vertex entry.
     /// Earlier native mutations remain visible on a later error.
-    pub fn load_fillet_solver<A: ExecutiveAccess<O> + ?Sized>(
+    pub fn load_fillet_solver<A: SolverLoadingAccess<O> + ?Sized>(
         &mut self,
         k: &Kernel,
         access: &mut A,
@@ -579,21 +647,21 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ) -> Result<()> {
         const OP: &str = "blend::fillet_executive::p1::load_fillet_solver";
         for rail in 0..2 {
-            if !access.solver_has_surface(solver, rail)? {
+            if !access.load_solver_has_surface(solver, rail)? {
                 return Err(SolidError::null_pointer(OP));
             }
         }
-        if let Some(edgeuse) = access.solver_edgeuse(solver, 0)? {
+        if let Some(edgeuse) = access.load_solver_edgeuse(solver, 0)? {
             let edge = access
-                .edgeuse_edge(edgeuse)?
+                .load_edgeuse_edge(edgeuse)?
                 .ok_or_else(|| SolidError::invalid_input(OP, "edge use without edge"))?;
-            for knot in access.edge_g1_knots(k, edge)? {
-                access.solver_base_mut(solver)?.g1_knots.push(knot);
+            for knot in access.load_edge_g1_knots(k, edge)? {
+                access.load_solver_base_mut(solver)?.g1_knots.push(knot);
             }
         }
         self.solvers.push(solver);
         access
-            .solver_base_mut(solver)?
+            .load_solver_base_mut(solver)?
             .set_fillet_executive(Some(crate::blend::fillet_solver::p1::FilletExecutiveRef));
         let mut edgeuses = [None; 2];
         // Outer None is an unwritten native pVerts entry; inner None is a null vertex.
@@ -601,10 +669,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         for (rail, (edgeuse_slot, vertex_slot)) in
             edgeuses.iter_mut().zip(vertices.iter_mut()).enumerate()
         {
-            let edgeuse = access.solver_edgeuse(solver, rail)?;
+            let edgeuse = access.load_solver_edgeuse(solver, rail)?;
             if let Some(edgeuse) = edgeuse {
                 self.edgeuse_solver_map.insert(edgeuse, solver);
-                *vertex_slot = Some(access.edgeuse_vertex(edgeuse)?);
+                *vertex_slot = Some(access.load_edgeuse_vertex(edgeuse)?);
             }
             *edgeuse_slot = edgeuse;
         }
@@ -636,10 +704,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                             "native pending array would read an absent edge use",
                         )
                     })?;
-                    let edge = access.edgeuse_edge(edgeuse)?;
+                    let edge = access.load_edgeuse_edge(edgeuse)?;
                     let mut coincident = false;
                     for &pending_edgeuse in pending.iter() {
-                        if edge == access.edgeuse_edge(pending_edgeuse)? {
+                        if edge == access.load_edgeuse_edge(pending_edgeuse)? {
                             coincident = true;
                             break;
                         }

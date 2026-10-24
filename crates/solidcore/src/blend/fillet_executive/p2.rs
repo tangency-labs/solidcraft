@@ -55,6 +55,7 @@
 //! - Calls into units that are not ported return [`SolidError::Unported`]:
 //!   `LoadFilletSolver` and `CreateSmoothEdgeSequence` (`blend.fillet_executive_p1`), and the adapter defaults of [`ExecutiveAccess`].
 
+use crate::blend::fillet_executive::p1::SolverLoadingAccess;
 use crate::blend::fillet_executive::p3::{
     ContextMark, ErrorInfo, ExecutionOptions, ExecutiveAccess, FilletExecutive,
 };
@@ -305,6 +306,76 @@ fn create_smooth_edge_sequence<O>(
 
 // ---- SetFilletParameters -------------------------------------------------------------------
 
+/// Live construction and topology operations used by `SetFilletParameters`.
+/// Full executive adapters retain their behavior through exact delegation.
+pub trait FilletParametersAccess<O: ClassObject + SolutionObject + Ord>:
+    SolverLoadingAccess<O>
+{
+    /// The actual B-rep tolerance (or its approximation tolerance).
+    ///
+    /// # Errors
+    /// Object resolution or tolerance query failures.
+    fn parameters_tolerance(&self, k: &Kernel, brep: O, approx: bool) -> Result<f64>;
+    /// Allocate the actual generator descriptor in its owning store.
+    ///
+    /// # Errors
+    /// Allocation or identity exhaustion.
+    fn parameters_new_generator(
+        &mut self,
+        k: &mut Kernel,
+        generator: FilletSurfaceGenerator,
+    ) -> Result<O>;
+    /// The actual solid-sector edge use selected by `GetBlendEdgeuse`.
+    ///
+    /// # Errors
+    /// The native topology or geometry query failures.
+    fn parameters_blend_edgeuse(&mut self, k: &mut Kernel, edge: O) -> Result<Option<O>>;
+    /// The actual edge tolerance.
+    ///
+    /// # Errors
+    /// Object resolution or tolerance query failures.
+    fn parameters_edge_tolerance(&self, edge: O) -> Result<f64>;
+    /// Construct and retain the concrete solver selected by its native spec.
+    ///
+    /// # Errors
+    /// Constructor failures or an unsupported concrete constructor in this adapter.
+    fn parameters_new_solver(&mut self, k: &mut Kernel, spec: &SolverSpec<'_, O>) -> Result<O>;
+    /// Assign the actual generator to the actual solver.
+    ///
+    /// # Errors
+    /// Solver or generator resolution failures.
+    fn parameters_set_generator(&mut self, solver: O, generator: O) -> Result<()>;
+}
+
+impl<O, A> FilletParametersAccess<O> for A
+where
+    O: ClassObject + SolutionObject + Ord,
+    A: ExecutiveAccess<O> + ?Sized,
+{
+    fn parameters_tolerance(&self, k: &Kernel, brep: O, approx: bool) -> Result<f64> {
+        ExecutiveAccess::tolerance(self, k, brep, approx)
+    }
+    fn parameters_new_generator(
+        &mut self,
+        k: &mut Kernel,
+        generator: FilletSurfaceGenerator,
+    ) -> Result<O> {
+        ExecutiveAccess::new_surface_generator(self, k, generator)
+    }
+    fn parameters_blend_edgeuse(&mut self, k: &mut Kernel, edge: O) -> Result<Option<O>> {
+        ExecutiveAccess::blend_edgeuse(self, k, edge)
+    }
+    fn parameters_edge_tolerance(&self, edge: O) -> Result<f64> {
+        ExecutiveAccess::edge_tolerance(self, edge)
+    }
+    fn parameters_new_solver(&mut self, k: &mut Kernel, spec: &SolverSpec<'_, O>) -> Result<O> {
+        ExecutiveAccess::new_fillet_solver(self, k, spec)
+    }
+    fn parameters_set_generator(&mut self, solver: O, generator: O) -> Result<()> {
+        ExecutiveAccess::set_surface_generator(self, solver, generator)
+    }
+}
+
 /// The arguments of `SetFilletParameters` (edge pointers, possibly different
 /// parameters on each edge). A type or value list holds one entry for all edges or
 /// one per edge.
@@ -374,7 +445,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         params: &FilletParameters<'_, O>,
     ) -> Result<()>
     where
-        A: ExecutiveAccess<O> + ?Sized,
+        A: FilletParametersAccess<O> + ?Sized,
     {
         self.initialized = false;
 
@@ -416,7 +487,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // Note, dApproxTol will be reset for each edge: the default (10 times the B-rep
         // tolerance) is computed but never read.
         if params.approx_tol <= EFF_ZERO {
-            let _ = 10.0 * access.tolerance(k, brep, false)?;
+            let _ = 10.0 * access.parameters_tolerance(k, brep, false)?;
         }
         let mut ang_tol_deg = params.ang_tol_deg;
         if ang_tol_deg <= EFF_ZERO {
@@ -472,7 +543,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 );
                 return Err(status(SM_ERR_INVALID_INPUT));
             };
-            let fsg = access.new_surface_generator(k, spec)?;
+            let fsg = access.parameters_new_generator(k, spec)?;
             generator = Some(fsg);
             // Save it, so that we can delete it when filleting is finished.
             self.add_fillet_surface_generator(fsg);
@@ -481,7 +552,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // Now for each Filleted Edge.
         for (ii, &edge) in params.edges.iter().enumerate() {
             // 1. Find the appropriate Edgeuse for the fillet.
-            let Some(eu) = access.blend_edgeuse(k, edge)? else {
+            let Some(eu) = access.parameters_blend_edgeuse(k, edge)? else {
                 // This edge is not filletable.
                 self.error.note_edge_error(
                     Some(edge),
@@ -507,7 +578,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
 
             // Note, this works well in practice.  [B332]
-            let approx_tol = TOL_FACTOR * access.edge_tolerance(edge)?;
+            let approx_tol = TOL_FACTOR * access.parameters_edge_tolerance(edge)?;
 
             let spec = match radius_type {
                 FilletSolverType::ConstRadius => Some(SolverSpec::ConstantRadius {
@@ -566,7 +637,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 );
                 return Err(status(SM_ERR_INVALID_INPUT));
             };
-            let fs = access.new_fillet_solver(k, &spec)?;
+            let fs = access.parameters_new_solver(k, &spec)?;
             self.load_fillet_solver(k, access, fs)?;
 
             // 3. Fillet Surface Generator: switch on cross-section type.
@@ -582,13 +653,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     );
                     return Err(status(SM_ERR_INVALID_INPUT));
                 };
-                let fsg = access.new_surface_generator(k, spec)?;
+                let fsg = access.parameters_new_generator(k, spec)?;
                 generator = Some(fsg);
                 // Save it, so that we can delete it when filleting is finished.
                 self.add_fillet_surface_generator(fsg);
             }
             let fsg = generator.ok_or_else(|| null!("no surface generator"))?;
-            access.set_surface_generator(fs, fsg)?;
+            access.parameters_set_generator(fs, fsg)?;
         }
 
         // Give the ok to proceed with the filleting.
