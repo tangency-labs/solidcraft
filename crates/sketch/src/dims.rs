@@ -10,7 +10,7 @@
 
 use solidcraft_geom::Vec2;
 
-use crate::model::{ConstraintKind, CurveKind, Sketch};
+use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
 use crate::union_find::{find, union};
 
 /// What a dimension measures, in a form that can be drawn.
@@ -103,6 +103,26 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
             let p1 = centre - normal * r;
             let p0 = a + d * (p1 - a).dot(d);
             DimFrame::Linear { p0, p1, dir: unit(p1 - p0, normal) }
+        }
+        PointCircleDistance { p, c, .. } => {
+            // From the circle's edge, where the radius through the point crosses it, to the point.
+            let q = sk.point(p)?;
+            let (centre, r) = (sk.center(c)?, sk.radius(c)?);
+            let u = unit(q - centre, Vec2::X);
+            let edge = centre + u * r;
+            DimFrame::Linear { p0: edge, p1: q, dir: unit(q - edge, u) }
+        }
+        CircleCircleDistance { a, b, circles, .. } => {
+            // Along the line through the centres, between the edge points that face each other:
+            // for nested circles, where the inner one comes nearest the outer one.
+            let ((ca, ra), (cb, rb)) = ((sk.center(a)?, sk.radius(a)?), (sk.center(b)?, sk.radius(b)?));
+            let u = unit(cb - ca, Vec2::X);
+            let (p0, p1) = match circles {
+                TwoCircles::Nested if ra >= rb => (cb + u * rb, ca + u * ra),
+                TwoCircles::Nested => (ca - u * ra, cb - u * rb),
+                TwoCircles::Apart | TwoCircles::Crossing => (ca + u * ra, cb - u * rb),
+            };
+            DimFrame::Linear { p0, p1, dir: u }
         }
         Radius { c, .. } | Diameter { c, .. } => {
             let (radius, arc) = match sk.curves.get(c)?.kind {

@@ -450,6 +450,8 @@ fn anchor(sk: &Sketch, k: &ConstraintKind) -> Option<Vec2> {
         Distance { p, q, .. } | DistanceX { p, q, .. } | DistanceY { p, q, .. } => Some((pt(p)? + pt(q)?) * 0.5),
         PointLineDistance { p, .. } | LinearDiameter { p, .. } => pt(p),
         LineCircleDistance { c, .. } => sk.center(c),
+        PointCircleDistance { p, .. } => pt(p),
+        CircleCircleDistance { a, b, .. } => Some((sk.center(a)? + sk.center(b)?) * 0.5),
         Length { l, .. } | LineAngle { l, .. } => mid(l),
         Radius { c, .. } | Diameter { c, .. } | ArcLength { c, .. } | ArcSweep { c, .. } => mid(c),
         SlotOverallLength { a, b, .. } => Some((sk.center(a)? + sk.center(b)?) * 0.5),

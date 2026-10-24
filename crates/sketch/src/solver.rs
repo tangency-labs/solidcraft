@@ -18,7 +18,7 @@ use solidcraft_geom::{Seg2, Vec2};
 
 use crate::decompose::Budget;
 use crate::linalg::{Mat, determined_vars, solve as lin_solve};
-use crate::model::{ConstraintKind, CurveKind, Sketch};
+use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
 #[cfg(feature = "solver-profiling")]
 use crate::profiling::{self, Decision, Phase, StopReason};
 use crate::union_find::{find, union};
@@ -357,6 +357,19 @@ impl State<'_> {
         let d = line_dist(cc, a, b).abs();
         if inside { r - d } else { d - r }
     }
+    /// What a point-to-circle distance measures: the gap from point `p` to the edge of circle
+    /// or arc `c`, or (`inside`) how far within the edge the point lies.
+    fn point_circle_gap(&self, p: usize, c: usize, inside: bool) -> f64 {
+        let (cc, r) = self.round(c);
+        let d = self.p(p).dist(cc);
+        if inside { r - d } else { d - r }
+    }
+    /// What a distance between two circles or arcs measures, as they lie (`circles`).
+    fn circle_circle_gap(&self, a: usize, b: usize, circles: TwoCircles) -> f64 {
+        let (ca, ra) = self.round(a);
+        let (cb, rb) = self.round(b);
+        circles.gap(ca.dist(cb), ra, rb)
+    }
     fn slot_length(&self, a: usize, b: usize) -> f64 {
         let (ca, ra) = self.round(a);
         let (cb, rb) = self.round(b);
@@ -558,6 +571,8 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
             out.push(line_dist(s.p(p), a, b).abs() - value);
         }
         LineCircleDistance { l, c, value, inside } => out.push(s.line_circle_gap(l, c, inside) - value),
+        PointCircleDistance { p, c, value, inside } => out.push(s.point_circle_gap(p, c, inside) - value),
+        CircleCircleDistance { a, b, value, circles } => out.push(s.circle_circle_gap(a, b, circles) - value),
         Length { l, value } => {
             let (a, b) = s.line(l);
             out.push(a.dist(b) - value);
@@ -621,6 +636,8 @@ fn measure(s: &State, k: &ConstraintKind) -> Option<f64> {
             line_dist(s.p(p), a, b).abs()
         }
         LineCircleDistance { l, c, inside, .. } => s.line_circle_gap(l, c, inside),
+        PointCircleDistance { p, c, inside, .. } => s.point_circle_gap(p, c, inside),
+        CircleCircleDistance { a, b, circles, .. } => s.circle_circle_gap(a, b, circles),
         Length { l, .. } => {
             let (a, b) = s.line(l);
             a.dist(b)
@@ -829,6 +846,8 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
             PointOnCurve { p, c } => vec![P(p), C(c)],
             Midpoint { p, l } | PointLineDistance { p, l, .. } | LinearDiameter { p, l, .. } => vec![P(p), L(l)],
             LineCircleDistance { l, c, .. } => vec![L(l), R(c)],
+            PointCircleDistance { p, c, .. } => vec![P(p), R(c)],
+            CircleCircleDistance { a, b, .. } => vec![R(a), R(b)],
             Horizontal { l } | Vertical { l } | Length { l, .. } | LineAngle { l, .. } => vec![L(l)],
             // Another kind reads a constant value, whatever its points: as good as any.
             ArcSweep { c, .. } | Radius { c, .. } | Diameter { c, .. } | ArcLength { c, .. } => vec![C(c)],

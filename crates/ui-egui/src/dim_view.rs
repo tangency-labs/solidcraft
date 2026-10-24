@@ -601,7 +601,12 @@ fn first_point(sk: &solidcraft_engine::sketch::Sketch, k: &ConstraintKind) -> Op
     use ConstraintKind::*;
     match *k {
         Length { l, .. } => sk.curves.get(l).and_then(|c| c.kind.point_ids().first().copied()),
-        Distance { p, .. } | DistanceX { p, .. } | DistanceY { p, .. } | PointLineDistance { p, .. } | LinearDiameter { p, .. } => Some(p),
+        Distance { p, .. }
+        | DistanceX { p, .. }
+        | DistanceY { p, .. }
+        | PointLineDistance { p, .. }
+        | PointCircleDistance { p, .. }
+        | LinearDiameter { p, .. } => Some(p),
         _ => None,
     }
 }

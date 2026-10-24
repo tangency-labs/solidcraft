@@ -196,8 +196,8 @@ Scripts use the same command, with a midpoint reference in the `points` array:
 The solver is SolidCraft's own (damped Gauss–Newton with degree-of-freedom analysis). Constraints:
 coincident, horizontal/vertical, parallel, perpendicular, tangent, equal, concentric, collinear,
 midpoint, symmetry, fix, curvature (G2) and polygon. **Sketch Dimension** (D) adds linear,
-aligned, horizontal, vertical, point-to-line, line-to-circle, radius, diameter and angle
-dimensions. Each is a parameter
+aligned, horizontal, vertical, point-to-line, line-to-circle, point-to-circle, circle-to-circle,
+radius, diameter and angle dimensions. Each is a parameter
 (`d1`, `d2`, …), so it can hold an expression.
 
 Press D, click what you want to measure and type the value: as soon as the click settles the
@@ -224,6 +224,13 @@ the circle touches the line. When the line cuts through the circle, the dimensio
 far the edge reaches past the line instead. An arc is measured to the circle it lies on. For
 the distance to the centre, click the centre point instead of the edge. In scripts:
 `{"command": "sketch.dimension", "params": {"entities": ["l1", "c1"], "value": 5}}`.
+
+A point and a circle or arc measure from the point to the circle's edge, along the radius
+through the point: 0 puts the point on the circle, and a point inside the circle measures how
+far within the edge it lies. Two circles or arcs measure between their edges, along the line
+through their centres: the gap between them (0 when they touch), how far they overlap when they
+cross, or, when one lies inside the other, the narrowest gap between them (the thinnest part of
+the wall). For the distance between the centres, click the two centre points instead.
 
 A dimension the sketch can't take, because the geometry is already fixed by other constraints
 and dimensions, is added as a driven (reference) dimension instead: it is shown in

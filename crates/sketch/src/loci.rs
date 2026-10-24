@@ -895,6 +895,23 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
                     ties.push(Tie::Offset { p: rd.c, l, len: Len::Value(d) });
                 }
             }
+            // The point lies radius ± the gap from the centre.
+            PointCircleDistance { p, c, value, inside } => {
+                if let (Some(rd), Some(r)) = (round(c), r_of(c))
+                    && let Some(d) = dim(if inside { r - value } else { r + value })
+                {
+                    rel(rd.c, p, Rel::Dist(d));
+                }
+            }
+            // The centres lie the radii and the gap apart, as the circles lie.
+            CircleCircleDistance { a, b, value, circles } => {
+                if let (Some(ra), Some(rb)) = (round(a), round(b))
+                    && let (Some(r_a), Some(r_b)) = (r_of(a), r_of(b))
+                    && let Some(d) = dim(circles.centres_apart(value, r_a, r_b))
+                {
+                    rel(ra.c, rb.c, Rel::Dist(d));
+                }
+            }
             Tangent { a, b } => {
                 let (l, curve) = if line(a).is_some() { (a, b) } else { (b, a) };
                 if line(l).is_some()

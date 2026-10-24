@@ -241,6 +241,9 @@ completed drawings publish atomically. The browser still exports synchronously.
 - Sketch Dimension takes a line and a circle or arc (#1803): it measures from the line to the
   circle's edge (the gap, 0 when tangent, or how far the edge reaches past a line that cuts
   it), drives it like any other dimension and keeps the circle on its side of the line.
+- Sketch Dimension takes a point and a circle or arc, or two circles or arcs (#4064): it
+  measures to the circle's edge (from the point, or between the two edges: the gap, 0 when
+  they touch, how far they overlap, or the narrowest gap between nested circles).
 - Sketch annotations, live drawing lengths and Measure use document units. Inches show
   three decimals and retain a meaningful fourth digit. Bare length dimension entry captures
   the current design unit; changing units leaves existing geometry and expressions intact.
