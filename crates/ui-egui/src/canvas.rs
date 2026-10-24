@@ -127,6 +127,11 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
             (at, along_face.or_else(|| st.body(body).and_then(|b| blend_grow_dir(&b.mesh(), *index, at))))
         }
         Kind::Fillet { .. } | Kind::Shell { .. } => (at, normal.map(|n| -n)),
+        // A hem's handle starts on the centre line of its layer and runs to its tip (#5828).
+        Kind::Sheet(crate::dialogs_sheet::Sm::Hem { .. }) => match crate::dialogs_sheet::hem_handle(app, d) {
+            Some((start, dir)) => (start, Some(dir)),
+            None => (at, normal),
+        },
         Kind::Sheet(_) => (at, crate::dialogs_sheet::arrow(app, d).or(normal)),
         Kind::Plastic(_) => (at, normal),
         Kind::PatternRect { .. } => (at, d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| crate::dialogs::axis_of(app, x)).map(|a| a.1)),

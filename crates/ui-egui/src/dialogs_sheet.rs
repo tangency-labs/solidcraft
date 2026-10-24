@@ -715,15 +715,24 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
 
 // ---- view ----
 
-/// The direction an edge flange or hem grows from its first edge: out of the sheet's larger
-/// neighbouring face for a flange, toward it for a hem (flipped with Flip).
+/// The direction an edge flange grows from its first edge: out of the sheet's larger
+/// neighbouring face (flipped with Flip). A hem's handle runs along the hem instead
+/// ([`hem_handle`]).
 pub fn arrow(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
     let Kind::Sheet(k) = &d.kind else { return None };
     let flip = match k {
         Sm::Flange { ty: 1, flip, .. } => *flip,
-        Sm::Hem { flip, .. } => !flip,
+        Sm::Hem { .. } => return hem_handle(app, d).map(|(_, dir)| dir),
         _ => return None,
     };
+    let (n, _, _) = edge_frame(app, d)?;
+    Some(if flip { -n } else { n })
+}
+
+/// The sheet at the dialog's first picked edge: the unit normal of the larger neighbouring face
+/// (out of the sheet), the unit normal of the other neighbour (the edge's end face, pointing away
+/// from the sheet), and the sheet's thickness along the first.
+fn edge_frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3, f64)> {
     let Sel::Edge { body, index, point } = d.inputs.first()?.items.first()? else { return None };
     let st = app.session.world_state();
     let m = st.body(body)?.mesh();
@@ -737,16 +746,40 @@ pub fn arrow(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
             .map(|[a, b, c]| (b - a).cross(c - a).len() * 0.5)
             .sum()
     };
+    let normal = |f: u32| -> Option<Vec3> {
+        m.triangles
+            .iter()
+            .zip(&m.tri_face)
+            .filter(|(_, tf)| **tf == f)
+            .filter_map(|(t, _)| m.tri(t))
+            .min_by(|a, b| ((a[0] + a[1] + a[2]) / 3.0).dist(*point).total_cmp(&((b[0] + b[1] + b[2]) / 3.0).dist(*point)))
+            .and_then(|[a, b, c]| (b - a).cross(c - a).normalized())
+    };
     let f = faces.iter().copied().max_by(|a, b| area(*a).total_cmp(&area(*b)))?;
-    let n = m
-        .triangles
-        .iter()
-        .zip(&m.tri_face)
-        .filter(|(_, tf)| **tf == f)
-        .filter_map(|(t, _)| m.tri(t))
-        .min_by(|a, b| ((a[0] + a[1] + a[2]) / 3.0).dist(*point).total_cmp(&((b[0] + b[1] + b[2]) / 3.0).dist(*point)))
-        .and_then(|[a, b, c]| (b - a).cross(c - a).normalized())?;
-    Some(if flip { -n } else { n })
+    let g = faces.iter().copied().find(|g| *g != f)?;
+    let (n, end) = (normal(f)?, normal(g)?);
+    // The end face spans the sheet's thickness along the normal.
+    let heights = m.triangles.iter().zip(&m.tri_face).filter(|(_, tf)| **tf == g).filter_map(|(t, _)| m.tri(t)).flatten().map(|v| v.dot(n));
+    let (lo, hi) = heights.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), h| (lo.min(h), hi.max(h)));
+    let thickness = hi - lo;
+    (thickness.is_finite() && thickness > 0.0).then_some((n, end, thickness))
+}
+
+/// Where a hem's handle starts and where it points (#5828). Its Length is measured from the outer
+/// face of the fold to the hem's tip, so the handle starts on the centre line of the hem layer at
+/// that face and runs along the hem toward the tip: square to the picked edge, back over the sheet.
+/// The layer lies on the far side of the sheet from the larger face unless flipped. The Gap is
+/// taken from the dialog when it holds a number; otherwise the layer sits flat against the sheet.
+pub fn hem_handle(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
+    let Kind::Sheet(Sm::Hem { gap, flip, .. }) = &d.kind else { return None };
+    let Sel::Edge { point, .. } = d.inputs.first()?.items.first()? else { return None };
+    let (n, end, thickness) = edge_frame(app, d)?;
+    let gap = app.session.doc.eval(gap, ValueKind::Length).ok().filter(|g| g.is_finite() && *g >= 0.0).unwrap_or(0.0);
+    // The hem's side of the sheet, as a unit vector along the larger face's normal, and the
+    // distance of the layer's centre line from the face the edge lies on.
+    let (side, depth) = if *flip { (n, gap + thickness / 2.0) } else { (-n, thickness + gap + thickness / 2.0) };
+    let start = *point + end * (thickness + gap) + side * depth;
+    Some((start, -end))
 }
 
 /// Bend line colours: up and down (theme tokens, legible on either theme and in every colour
