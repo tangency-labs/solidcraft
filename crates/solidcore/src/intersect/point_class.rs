@@ -57,7 +57,7 @@
 //! | [`object_zone_tol_3d`]                            | `SmTol::GetZoneTol3d(const SmObject*)`           |
 //! | [`PointClassification::xsect_tol_3d`]             | `SmTol::GetXSectTol3d(const SmPointClassification*)` |
 //! | [`PointClassification::set_src_zone_tol_3d`]      | `SetSrcZoneTol3d`                                |
-//! | [`PointClassification::combine`], [`PointClassification::combine_in_brep`], [`Precedence`] | `Combine` |
+//! | [`PointClassification::combine`], [`PointClassification::combine_in_brep`], [`PointClassification::combine_setting_vertex_point`], [`Precedence`] | `Combine` |
 //! | [`CombineBrep`]                                   | the arena behind the classified object           |
 //! | [`PointClassification::compute_point_parameters`], [`PointClassification::compute_point_parameters_mut`]| `ComputePointParameters`                         |
 //! | [`PointClassification::find_obj_point_3d`]        | `FindObjPoint3d`                                 |
@@ -72,7 +72,9 @@
 //! - **Mutable topology.** [`BrepMerge`] supplies an arena, resolved target,
 //!   handle mapping and notification environment for [`PointClassification::merge_into_brep`],
 //!   and [`CombineBrep`] the arena and notifications
-//!   [`PointClassification::combine_in_brep`] writes a propagated vertex point to.
+//!   [`PointClassification::combine_in_brep`] writes a propagated vertex point to;
+//!   [`PointClassification::combine_setting_vertex_point`] takes the caller's
+//!   `SmVertex::SetPoint` instead (an adapter resolving the vertex on demand).
 //!   The older opaque-handle entrypoints cannot resolve their object's arena and return
 //!   an `Unported(topology.brep_p1)` / `Unported(topology.vertex)` deferral until the
 //!   caller supplies that context. Region/face owner queries retain their own blockers.
@@ -1045,14 +1047,66 @@ impl<O: ClassObject> PointClassification<O> {
         other: &Self,
         context: CombineBrep<'_, '_, O>,
     ) -> Result<Precedence> {
-        self.combine_with(other, Some(context))
+        let CombineBrep {
+            brep,
+            target,
+            handle,
+            notifications,
+        } = context;
+        self.combine_with(
+            other,
+            Some(&mut |object: Option<O>, point: Point3| {
+                if object.is_some_and(|object| handle(target) != object) {
+                    return Err(SolidError::invalid_input(
+                        OP_COMBINE,
+                        "target does not resolve classification object",
+                    ));
+                }
+                let EntityRef::Vertex(v) = target else {
+                    return Err(SolidError::invalid_input(
+                        OP_COMBINE,
+                        "combine target is not a vertex",
+                    ));
+                };
+                let key_of = notifications.key_of;
+                let this = key_of(EntityRef::Vertex(v));
+                vertex::set_point(
+                    brep,
+                    v,
+                    point,
+                    notifications.records,
+                    notifications.attributes,
+                    notifications.context.as_deref_mut(),
+                    this,
+                    &|vu| key_of(EntityRef::Vertexuse(vu)),
+                )
+            }),
+        )
     }
 
-    /// [`Self::combine`] with an optional arena for the propagated vertex point.
+    /// `Combine(other)` with the caller's `SmVertex::SetPoint`: a surf/surf/surf point
+    /// propagated to a vertex classification is written by
+    /// `set_vertex_point(object, point)`, with this classification's object (the
+    /// vertex upstream casts `m_pObject` to) and the point, at the moment upstream
+    /// calls `pVertex->SetPoint(m_vSSSPoint)`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::combine`], without the deferral; those of `set_vertex_point`.
+    pub fn combine_setting_vertex_point(
+        &mut self,
+        other: &Self,
+        set_vertex_point: &mut dyn FnMut(Option<O>, Point3) -> Result<()>,
+    ) -> Result<Precedence> {
+        self.combine_with(other, Some(set_vertex_point))
+    }
+
+    /// [`Self::combine`] with an optional `SmVertex::SetPoint` for the propagated vertex
+    /// point.
     fn combine_with(
         &mut self,
         other: &Self,
-        arena: Option<CombineBrep<'_, '_, O>>,
+        set_vertex_point: Option<&mut dyn FnMut(Option<O>, Point3) -> Result<()>>,
     ) -> Result<Precedence> {
         use PointClassType as Pc;
         let this_class = self.point_class;
@@ -1100,40 +1154,14 @@ impl<O: ClassObject> PointClassification<O> {
 
             // set vertex position when appropriate
             if self.point_class == Pc::Vertex {
-                let Some(arena) = arena else {
+                let Some(set_vertex_point) = set_vertex_point else {
                     // UNPORTED(topology.vertex): SmVertex::SetPoint
                     return Err(SolidError::unported(
                         "SmVertex::SetPoint",
                         "topology.vertex",
                     ));
                 };
-                if self
-                    .object
-                    .is_some_and(|object| (arena.handle)(arena.target) != object)
-                {
-                    return Err(SolidError::invalid_input(
-                        OP_COMBINE,
-                        "target does not resolve classification object",
-                    ));
-                }
-                let EntityRef::Vertex(v) = arena.target else {
-                    return Err(SolidError::invalid_input(
-                        OP_COMBINE,
-                        "combine target is not a vertex",
-                    ));
-                };
-                let key_of = arena.notifications.key_of;
-                let this = key_of(EntityRef::Vertex(v));
-                vertex::set_point(
-                    arena.brep,
-                    v,
-                    self.sss_point,
-                    arena.notifications.records,
-                    arena.notifications.attributes,
-                    arena.notifications.context.as_deref_mut(),
-                    this,
-                    &|vu| key_of(EntityRef::Vertexuse(vu)),
-                )?;
+                set_vertex_point(self.object, self.sss_point)?;
             }
         }
 

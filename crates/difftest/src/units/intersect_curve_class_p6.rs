@@ -12,6 +12,9 @@
 //! Each case works on a fresh copy of that box (the shim builds one per case), and
 //! `MergeInterval` edits it through `MergeIntervalBrep`; a merge also reports the box
 //! after it (counts, sorted vertex and edge tolerances, the new vertices and edges).
+//! `InsertCurveInterval` runs through `insert_curve_interval_mut` (its `Combine` may move
+//! the picked vertex to a surf/surf/surf point, `SmVertex::SetPoint`) and reports that
+//! vertex's point after it.
 //! The `imprint_*` cases pick other box objects and place lines on the box, with its
 //! editing enabled, so the vertex, face-split, coincident-edge and wire-edge branches
 //! run to completion.
@@ -597,9 +600,13 @@ impl UnitDiff for Runner {
         let mut b = classification(&k, &i.b, i.tol, &g.first)?;
         a.set_fillet_data((i.flags & 2 != 0).then_some(Handle::Other), i.flags & 2 != 0);
         let result = match i.op {
-            0 => a
-                .insert_curve_interval(&k, &g, &ivl(&i.input, i.tol, &g.first)?)
-                .map(|()| (None, None)),
+            // a surf/surf/surf point combined into a vertex boundary moves the box's
+            // vertex (SmVertex::SetPoint), as the shim's InsertCurveInterval does
+            0 => {
+                let input = ivl(&i.input, i.tol, &g.first)?;
+                a.insert_curve_interval_mut(&mut k, &mut g, &input)
+                    .map(|()| (None, None))
+            }
             1 => a.homogenize(&k, &g, &mut b).map(|()| (None, None)),
             2 => a
                 .fix_end_point_class(&k, &g, i.index, Vec3::new(x, y, z))
@@ -628,6 +635,15 @@ impl UnitDiff for Runner {
                 put_cc(&k, &mut out, &b, &g)?;
                 if let Some(merged) = &merged {
                     put_brep(&mut out, &g, merged).map_err(|e| h(e.to_string()))?;
+                }
+                // the picked vertex after InsertCurveInterval (a combined
+                // surf/surf/surf point moves it through SmVertex::SetPoint)
+                if i.op == 0 {
+                    let Some(EntityRef::Vertex(v)) = g.first.get(2).copied() else {
+                        return Err(h("picked vertex is not a vertex"));
+                    };
+                    let p = topo_vertex::point(&g.brep, v).map_err(|e| h(e.to_string()))?;
+                    out.extend([p.x, p.y, p.z]);
                 }
                 Ok(Output::new().values("out", out))
             }

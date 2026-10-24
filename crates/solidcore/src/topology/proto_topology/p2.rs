@@ -7,7 +7,7 @@
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`ProtoBrep`] | the B-rep members these functions read through `SmEdge*` / `SmFace*` / `SmVertex*` (`GetInterval`, `GetCurve`, `GetTolerance`, `GetUVDomain`, `SetUVDomain`, `GetSurface`, `GetEdgeuseOfFace`, `IsConnectedToFace`) and `SmCurve::Copy`'s allocation |
+//! | [`ProtoBrep`] | the B-rep members these functions read through `SmEdge*` / `SmFace*` / `SmVertex*` (`GetInterval`, `GetCurve`, `GetTolerance`, `GetUVDomain`, `SetUVDomain`, `GetSurface`, `GetEdgeuseOfFace`, `IsConnectedToFace`), `SmCurve::Copy`'s allocation, and the B-rep edits of `SmPointClassification::MergeIntoObject` ([`ProtoBrep::merge_point_class_into_brep`]) |
 //! | [`ProtoTopologyManager::imprint_vertex_definition`] | `SmVertexDefinition::Imprint` |
 //! | [`ProtoTopologyManager::imprint_edge_definition`] | `SmEdgeDefinition::Imprint` |
 //! | [`ProtoTopologyManager::resolve_proto_vertex`] | `SmProtoVertex::Resolve` |
@@ -90,7 +90,8 @@ use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::geom::tol::{xsect_tol3d, ScaledZero};
 use crate::intersect::curve_class::{CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
-    object_zone_tol_3d, ClassObject, ClassObjectKind, PointClassType, PointClassification,
+    object_zone_tol_3d, ClassObject, ClassObjectKind, MergeOutputs, PointClassType,
+    PointClassification,
 };
 use crate::kernel::Kernel;
 use crate::math::{max2, max3, max4, Point2, Point3, Vec3, EFF_ZERO};
@@ -218,6 +219,29 @@ pub trait ProtoBrep<O>: ProtoGeometry<O> + ProtoTopology<O> {
         tolerance: f64,
         boundary_intersections: bool,
     ) -> Result<PointClassification<O>>;
+    /// `rPC.MergeIntoObject(srcPoint, &newEdges, &newVertices)` of
+    /// `SmVertexDefinition::Imprint`: the classification's point merged into the B-rep
+    /// behind its object, which upstream edits through the object's pointer (a new
+    /// shell vertex, vertex loop or edge split, or the existing vertex moved by
+    /// `SmVertex::SetPoint`). The owner of mutable B-reps implements it with
+    /// [`merge_into_object_mut`](crate::intersect::curve_class::p6::merge_into_object_mut);
+    /// the default has no mutable owning context and returns
+    /// [`PointClassification::merge_into_object`]'s result.
+    ///
+    /// # Errors
+    ///
+    /// Those of the merge.
+    fn merge_point_class_into_brep(
+        &mut self,
+        k: &mut Kernel,
+        pc: &mut PointClassification<O>,
+        src_point: Point3,
+    ) -> Result<MergeOutputs<O>>
+    where
+        O: ClassObject,
+    {
+        pc.merge_into_object(k, src_point)
+    }
 }
 
 /// The handle the curve point solves name (only the solution count and values are
@@ -522,13 +546,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ///
     /// # Errors
     ///
-    /// Those of [`PointClassification::merge_into_object`]; `SM_ERR` when a merge
+    /// Those of [`ProtoBrep::merge_point_class_into_brep`]; `SM_ERR` when a merge
     /// made no single vertex and the classification is not on a vertex; those of
     /// [`ProtoTopologyManager::update_edges`]; [`SolidError::InvalidInput`] for a
     /// definition without a proto vertex (upstream reaches the manager through it).
     pub fn imprint_vertex_definition(
         &mut self,
-        k: &Kernel,
+        k: &mut Kernel,
         brep: &mut impl ProtoBrep<O>,
         vd: VertexDefId,
     ) -> Result<()> {
@@ -544,9 +568,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let position = v.position();
 
             let v = self.vd_mut(vd)?;
-            let outputs = v
-                .brep_point_classif_mut(which)
-                .merge_into_object(k, position)?;
+            let outputs =
+                brep.merge_point_class_into_brep(k, v.brep_point_classif_mut(which), position)?;
 
             if outputs.new_vertices.len() == 1 {
                 v.set_final_vertex(which, outputs.new_vertices.first().copied());

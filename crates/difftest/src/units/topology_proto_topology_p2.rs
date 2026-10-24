@@ -230,7 +230,7 @@ pub(super) fn run_op(
                 *skip = true;
                 return Ok(());
             };
-            let _ = res(r.mgr.imprint_vertex_definition(&r.k, &mut r.pool, d), st, skip)?;
+            let _ = res(r.mgr.imprint_vertex_definition(&mut r.k, &mut r.pool, d), st, skip)?;
             if let Some(v) = r.mgr.vertex_def(d) {
                 out.push(r.pool.id(v.final_vertex(1)));
                 out.push(r.pool.id(v.final_vertex(2)));

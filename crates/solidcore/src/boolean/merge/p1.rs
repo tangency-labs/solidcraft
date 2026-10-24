@@ -32,6 +32,12 @@
 //! bounding boxes before any mutation; no translation is faked. Destruction is
 //! Rust ownership; the temporary-transform token is restored explicitly after the
 //! caller's complete scope, including error exits. There is no input-dependent recursion.
+//! `BooleanPostProcess`'s `DeleteTopologicalVertex` runs without the caller's
+//! notification identities, so the survivor edge's joined curve comes back owned under
+//! a kernel-issued identity of that edge; the owner identity the curve of each
+//! surviving edge had before the call is put back (upstream the owner is the same
+//! `SmEdge*`), so the caller's identity-keyed walks (the temporary transform's inverse
+//! `Transform`) still find the curve.
 
 use std::collections::BTreeMap;
 
@@ -545,6 +551,18 @@ pub fn boolean_post_process(
         }
         if vertex::is_topological_vertex(k, brep, v)? {
             let editing = brep.editing_enabled();
+            // The owners of the two edges' curves: the survivor's joined curve is owned
+            // by the same edge (`SetCurve`), under the caller's identity of that edge.
+            let mut owners = Vec::new();
+            for e in vertex::edges(brep, v, None)? {
+                owners.push((
+                    e,
+                    brep.edge(e)?
+                        .curve
+                        .as_ref()
+                        .and_then(crate::curve::curve::p2::Curve::owner),
+                ));
+            }
             ignore_failure(crate::topology::brep::p5::delete_topological_vertex(
                 k,
                 brep,
@@ -552,6 +570,16 @@ pub fn boolean_post_process(
                 Some(v),
                 None,
             ))?;
+            for (e, owner) in owners {
+                if !brep.edge_list().contains(&e) {
+                    continue;
+                }
+                if let Some(curve) = brep.edge_mut(e)?.curve.as_mut() {
+                    if curve.owner() != owner {
+                        curve.set_owner(owner, None);
+                    }
+                }
+            }
         }
     }
     // Combine a wire shell with a faceuse shell when the B-rep has just those two

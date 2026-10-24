@@ -30,10 +30,13 @@
 //! state (see unit `intersect.curve_class_p1`, [`BareTopology`]), so their zone tolerances are
 //! compared too.
 //!
+//! `InsertPointClass` runs through `insert_point_class_mut` on the pool's B-reps (the
+//! `Combine` of a boundary merge moves a vertex to a surf/surf/surf point,
+//! `SmVertex::SetPoint`), and both sides then report every vertex object's point.
+//!
 //! Deferred cases: the zone tolerance of an edge, vertex or face classification on a bare
 //! stand-in next to a real B-rep (`topology.edge`, `topology.vertex`, `topology.face_p2`),
-//! `MergeIntoObject` (`SmVertex::SetPoint`) and the 2D tolerance mapping that needs a surface
-//! point solve. Generated scripts are filtered by the shim's run-time checks (scripts it
+//! `MergeIntoObject` and the 2D tolerance mapping that needs a surface point solve. Generated scripts are filtered by the shim's run-time checks (scripts it
 //! rejects as undefined upstream are dropped).
 
 use serde::{Deserialize, Serialize};
@@ -63,7 +66,14 @@ use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::volume::Volume;
 use solidcore::{EntityRef, SolidError};
-use solidcore::topology::Brep;
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::object::ObjectRef;
+use solidcore::intersect::curve_class::p5::ClassGeometryMut;
+use solidcore::intersect::curve_class::p6::{MergeContext, MergeIntervalBrep};
+use solidcore::topology::edge::NotifyEnv;
+use solidcore::topology::topology::Topology;
+use solidcore::topology::{Brep, EdgeId};
+use std::collections::BTreeMap;
 use solidcore_ffi::units::heal_face_props::FaceSpec;
 use solidcore_ffi::units::intersect_curve_class_p3::{self as ffi, kind, op};
 
@@ -585,6 +595,79 @@ struct Pool {
     /// Without `topo`: the vertex, edge and face stand-ins as B-rep records
     /// ([`BareTopology`]).
     bare: BareTopology,
+    /// The notification records and attributes of the B-rep edits
+    /// ([`MergeIntervalBrep`]: `Combine`'s `SmVertex::SetPoint`).
+    records: BTreeMap<ObjectKey, Topology>,
+    attributes: AttributeStore,
+}
+
+/// The identity of an edge's curve (none of this unit's edits makes one).
+fn pool_curve_ref(e: EdgeId, kind: i64) -> ObjectRef {
+    ObjectRef {
+        key: ObjectKey(((kind as u64) << 32) | u64::from(e.index())),
+        type_code: kind,
+    }
+}
+
+impl ClassGeometryMut<H> for Pool {
+    fn curve_mut(&mut self, o: H) -> Option<&mut Curve> {
+        match self.objs.get_mut(o.0) {
+            Some(PoolObj::Curve(c)) => Some(c),
+            _ => None,
+        }
+    }
+    fn topology_entity_mut(&mut self, o: H) -> Option<(&mut Brep, EntityRef)> {
+        if let Some(t) = self.topo.as_mut() {
+            let e = *t.entities.get(o.0.checked_sub(t.first)?)?;
+            Some((&mut t.brep, e))
+        } else {
+            let e = self.bare.ent(o.0)?;
+            Some((&mut self.bare.brep, e))
+        }
+    }
+}
+
+/// The B-rep of the pool's topology handles, for the vertex move of `Combine` in
+/// `InsertPointClass` ([`CurveClassification::insert_point_class_mut`]).
+impl MergeIntervalBrep<H> for Pool {
+    fn merge_context(&mut self, o: H) -> Option<MergeContext<'_, H>> {
+        let handles = self.handles.clone();
+        let (brep, target, handle): (&mut Brep, EntityRef, Box<dyn Fn(EntityRef) -> H>) =
+            if let Some(t) = self.topo.as_mut() {
+                let target = *t.entities.get(o.0.checked_sub(t.first)?)?;
+                let (first, entities) = (t.first, t.entities.clone());
+                let handle = move |e: EntityRef| {
+                    entities
+                        .iter()
+                        .position(|x| *x == e)
+                        .and_then(|i| handles.get(first + i).copied())
+                        .unwrap_or(H(usize::MAX, ClassObjectKind::Other))
+                };
+                (&mut t.brep, target, Box::new(handle))
+            } else {
+                let target = self.bare.ent(o.0)?;
+                let ents = self.bare.ents.clone();
+                let handle = move |e: EntityRef| {
+                    ents.iter()
+                        .position(|t| *t == Some(e))
+                        .and_then(|i| handles.get(i).copied())
+                        .unwrap_or(H(usize::MAX, ClassObjectKind::Other))
+                };
+                (&mut self.bare.brep, target, Box::new(handle))
+            };
+        Some(MergeContext {
+            brep,
+            target,
+            handle,
+            notifications: NotifyEnv {
+                records: &mut self.records,
+                attributes: &mut self.attributes,
+                context: None,
+                key_of: &super::boolean_topology_intersector_p1::p9_entity_ref,
+            },
+            curve_ref: &pool_curve_ref,
+        })
+    }
 }
 
 impl ClassGeometry<H> for Pool {
@@ -696,6 +779,8 @@ fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
         handles: Vec::new(),
         topo: None,
         bare: BareTopology::default(),
+        records: BTreeMap::new(),
+        attributes: AttributeStore::default(),
     };
     for (i, o) in objects.iter().enumerate() {
         // the curve of an edge object, the surface of a face object (earlier pool objects;
@@ -864,7 +949,7 @@ fn build_pc(k: &Kernel, pool: &Pool, p: &PcIn) -> Result<PointClassification<H>,
 
 #[allow(clippy::too_many_lines)]
 fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
-    let k = Kernel::default();
+    let mut k = Kernel::default();
     let mut pool = build_pool(&s.objects)?;
     if let Some(face) = &s.face {
         add_face(&k, &mut pool, face)?;
@@ -1050,10 +1135,25 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     }
                     OpIn::Insert { pc, prm, last, force, .. } => {
                         let pc = build_pc(&k, &pool, pc)?;
-                        let r = cc.insert_point_class(&k, &pool, &pc, *prm, *last, *force);
+                        // a merge's surf/surf/surf point moves a vertex
+                        // (`Combine`'s SmVertex::SetPoint), as in the shim
+                        let r = cc
+                            .insert_point_class_mut(&mut k, &mut pool, &pc, *prm, *last, *force);
                         match st(r)? {
                             Ok(made) => o.extend([0.0, b(made)]),
                             Err(s) => o.push(s),
+                        }
+                        // every vertex object's point: a merged surf/surf/surf point
+                        // moves one (`Combine`'s SmVertex::SetPoint)
+                        for h in &pool.handles {
+                            if h.1 == ClassObjectKind::Vertex {
+                                // a stand-in next to the real B-rep is a bare record
+                                let p = pool
+                                    .classification_vertex_point(*h)
+                                    .or_else(|| pool.bare.vertex_point(h.0))
+                                    .ok_or_else(|| harness("vertex object without a point"))?;
+                                o.extend([p.x, p.y, p.z]);
+                            }
                         }
                     }
                     OpIn::RemovePc { j, pos, .. } => {

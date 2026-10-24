@@ -5,7 +5,7 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`CurveClassification::homogenize`] | `SmCurveClassification::Homogenize` |
-//! | [`CurveClassification::insert_curve_interval`] | `SmCurveClassification::InsertCurveInterval` |
+//! | [`CurveClassification::insert_curve_interval`], [`CurveClassification::insert_curve_interval_mut`] | `SmCurveClassification::InsertCurveInterval` |
 //! | [`CurveClassification::fix_end_point_class`] | `SmCurveClassification::FixEndPointClass` |
 //! | [`CurveClassification::merge_interval`], [`CurveClassification::merge_interval_mut`] | `SmCurveClassification::MergeInterval` |
 //! | [`MergeIntervalBrep`], [`MergeContext`] | the non-const `SmVertex`, `SmEdge`, `SmFace`, `SmRegion` and `SmBrep` objects behind the classification's pointers |
@@ -36,6 +36,14 @@
 //! reference build (no `SM_TOLERANT_WATCH`). The reference build is `SM_USE_OLDTOL`, so
 //! the coincident-edge branch raises the edge's tolerance to the source tolerance and
 //! refreshes the edge's first vertex, as upstream's `SM_OLDTOL_LINE` code.
+//!
+//! **`Combine` moves a vertex.** A surf/surf/surf point `Combine` propagates to a vertex
+//! classification moves that vertex (`SmVertex::SetPoint`, which notifies
+//! `ChangeGeometry` and sets the point; no tolerance or cache side effect).
+//! [`CurveClassification::insert_curve_interval_mut`] (and part 3's
+//! `insert_point_class_mut`) make the move on the arena a [`MergeIntervalBrep`] hands
+//! out for the vertex, at the moment upstream makes it; the read-only entry points defer
+//! there (`Unported(topology.vertex)`).
 
 use super::p1::{compute_face_point_class, compute_face_point_class_in, src_zone_tol_3d_of};
 use super::p3::{
@@ -93,11 +101,14 @@ impl<O> Default for MergeIntervalOutput<O> {
 
 const OP: &str = "intersect::curve_class::p6";
 
-fn combine<O: ClassObject>(
+/// `target = target.Combine(other)` through adapter `a` (which makes or defers the
+/// vertex move of the propagated surf/surf/surf point).
+fn combine_in<O: ClassObject>(
+    a: &mut impl Imprint<O>,
     target: &mut PointClassification<O>,
     other: &PointClassification<O>,
 ) -> Result<()> {
-    if target.combine(other)? == Precedence::Other {
+    if a.combine(target, other)? == Precedence::Other {
         *target = *other;
     }
     Ok(())
@@ -141,15 +152,43 @@ impl<O: ClassObject> CurveClassification<O> {
     /// # Errors
     /// Propagates tolerance, geometry and unported p2/p7 failures. Invalid indices and
     /// a restart without progress return an error instead of recursing indefinitely.
+    /// A surf/surf/surf point propagated to a vertex classification defers
+    /// (`SmVertex::SetPoint`; [`Self::insert_curve_interval_mut`] makes the move).
     pub fn insert_curve_interval(
         &mut self,
         k: &Kernel,
         geometry: &impl ClassGeometry<O>,
         input: &CurveInterval<O>,
     ) -> Result<()> {
+        self.insert_curve_interval_in(&mut ReadOnly { k, g: geometry }, input)
+    }
+
+    /// [`CurveClassification::insert_curve_interval`] moving the vertex of a vertex
+    /// classification a combined surf/surf/surf point propagates to
+    /// (`SmVertex::SetPoint`) in the B-rep a [`MergeIntervalBrep`] hands out.
+    ///
+    /// # Errors
+    /// Those of [`CurveClassification::insert_curve_interval`], without the deferral of
+    /// the move; [`SolidError::InvalidInput`] for a vertex the adapter cannot resolve
+    /// mutably.
+    pub fn insert_curve_interval_mut(
+        &mut self,
+        k: &mut Kernel,
+        geometry: &mut impl MergeIntervalBrep<O>,
+        input: &CurveInterval<O>,
+    ) -> Result<()> {
+        self.insert_curve_interval_in(&mut Mutable { k, g: geometry }, input)
+    }
+
+    /// `InsertCurveInterval` over either kind of adapter.
+    fn insert_curve_interval_in(
+        &mut self,
+        a: &mut impl Imprint<O>,
+        input: &CurveInterval<O>,
+    ) -> Result<()> {
         let mut restarts = self.size().saturating_add(1);
         loop {
-            if !self.insert_curve_interval_step(k, geometry, input)? {
+            if !self.insert_curve_interval_step(a, input)? {
                 return Ok(());
             }
             restarts = restarts
@@ -161,14 +200,13 @@ impl<O: ClassObject> CurveClassification<O> {
     // true means upstream's tail-recursive restart after removal of an interval.
     fn insert_curve_interval_step(
         &mut self,
-        k: &Kernel,
-        geometry: &impl ClassGeometry<O>,
+        a: &mut impl Imprint<O>,
         input: &CurveInterval<O>,
     ) -> Result<bool> {
-        let tol = input.mid.obj_zone_tol_3d(k, geometry)?;
-        let a = self.find_interval(k, geometry, input.min(), BIG_DOUBLE, tol)?;
-        let b = self.find_interval(k, geometry, input.max(), BIG_DOUBLE, tol)?;
-        let (mut i, mut j, mut pa, mut pb) = (a.index, b.index, a.position, b.position);
+        let tol = input.mid.obj_zone_tol_3d(a.kernel(), a.geometry())?;
+        let fa = self.find_interval(a.kernel(), a.geometry(), input.min(), BIG_DOUBLE, tol)?;
+        let fb = self.find_interval(a.kernel(), a.geometry(), input.max(), BIG_DOUBLE, tol)?;
+        let (mut i, mut j, mut pa, mut pb) = (fa.index, fb.index, fa.position, fb.position);
         if pb == IntervalPosition::Start && j > i {
             pb = IntervalPosition::End;
             j -= 1;
@@ -179,7 +217,8 @@ impl<O: ClassObject> CurveClassification<O> {
         }
         if i != j {
             for index in [i, j] {
-                let (coin, end) = are_coincident_maybe(k, geometry, self, self, index)?;
+                let (coin, end) =
+                    are_coincident_maybe(a.kernel(), a.geometry(), self, self, index)?;
                 match coin {
                     Coincident::Unsure => return Err(SolidError::sm_err(OP)),
                     Coincident::Yes => {
@@ -198,18 +237,18 @@ impl<O: ClassObject> CurveClassification<O> {
             {
                 for index in i..=j {
                     let ivl = self.at_mut(index)?;
-                    combine(&mut ivl.start, &input.start)?;
-                    combine(&mut ivl.mid, &input.mid)?;
-                    combine(&mut ivl.end, &input.end)?;
+                    combine_in(a, &mut ivl.start, &input.start)?;
+                    combine_in(a, &mut ivl.mid, &input.mid)?;
+                    combine_in(a, &mut ivl.end, &input.end)?;
                 }
                 return Ok(false);
             }
             while i < j {
                 let first = *self.at(i)?;
                 let last = *self.at(j)?;
-                if interval_degenerate(k, geometry, self, &first)? {
+                if interval_degenerate(a.kernel(), a.geometry(), self, &first)? {
                     i += 1;
-                } else if interval_degenerate(k, geometry, self, &last)? {
+                } else if interval_degenerate(a.kernel(), a.geometry(), self, &last)? {
                     j -= 1;
                 } else {
                     break;
@@ -255,21 +294,14 @@ impl<O: ClassObject> CurveClassification<O> {
             } else {
                 &mut ivl.end
             };
-            combine(end, &input.start)?;
-            combine(end, &input.end)?;
+            combine_in(a, end, &input.start)?;
+            combine_in(a, end, &input.end)?;
             return Ok(false);
         }
         if pa == IntervalPosition::Start {
-            combine(&mut self.at_mut(i)?.start, &input.start)?;
+            combine_in(a, &mut self.at_mut(i)?.start, &input.start)?;
         } else if pa == IntervalPosition::Inside {
-            if !self.insert_point_class(
-                k,
-                geometry,
-                &input.start,
-                input.min(),
-                BIG_DOUBLE,
-                false,
-            )? {
+            if !self.insert_point_class_in(a, &input.start, input.min(), BIG_DOUBLE, false)? {
                 return Ok(false);
             }
             i += 1;
@@ -277,17 +309,18 @@ impl<O: ClassObject> CurveClassification<O> {
             return Err(SolidError::sm_err(OP));
         }
         if pb == IntervalPosition::End {
-            combine(&mut self.at_mut(i)?.end, &input.end)?;
+            combine_in(a, &mut self.at_mut(i)?.end, &input.end)?;
         } else if pb == IntervalPosition::Inside {
-            let found = self.find_interval(k, geometry, input.max(), BIG_DOUBLE, tol)?;
+            let found =
+                self.find_interval(a.kernel(), a.geometry(), input.max(), BIG_DOUBLE, tol)?;
             if found.position != IntervalPosition::Inside {
                 return Ok(false);
             }
-            self.insert_point_class(k, geometry, &input.end, input.max(), BIG_DOUBLE, false)?;
+            self.insert_point_class_in(a, &input.end, input.max(), BIG_DOUBLE, false)?;
         } else {
             return Err(SolidError::sm_err(OP));
         }
-        combine(&mut self.at_mut(i)?.mid, &input.mid)?;
+        combine_in(a, &mut self.at_mut(i)?.mid, &input.mid)?;
         Ok(false)
     }
 
@@ -1205,6 +1238,13 @@ pub(super) trait Imprint<O: ClassObject> {
     fn set_vertex_exact(&mut self, vertex: O, exact: bool) -> Result<()>;
     /// `pVertex->RefreshTolerance(FALSE)`.
     fn refresh_vertex_tolerance(&mut self, vertex: O) -> Result<()>;
+    /// `target.Combine(other)`, whose propagated surf/surf/surf point moves the
+    /// vertex of a vertex classification (`SmVertex::SetPoint`).
+    fn combine(
+        &mut self,
+        target: &mut PointClassification<O>,
+        other: &PointClassification<O>,
+    ) -> Result<Precedence>;
 }
 
 /// A read-only adapter: every B-rep edit defers.
@@ -1323,6 +1363,13 @@ impl<O: ClassObject, G: ClassGeometry<O>> Imprint<O> for ReadOnly<'_, G> {
         Err(read_only(
             "SmBrep mutable owning context (SmVertex::RefreshTolerance)",
         ))
+    }
+    fn combine(
+        &mut self,
+        target: &mut PointClassification<O>,
+        other: &PointClassification<O>,
+    ) -> Result<Precedence> {
+        target.combine(other)
     }
 }
 
@@ -1592,6 +1639,33 @@ impl<O: ClassObject, G: MergeIntervalBrep<O>> Imprint<O> for Mutable<'_, G> {
             return Err(wrong_target("handle does not name a vertex"));
         };
         topo_vertex::refresh_tolerance(ctx.brep, v, false)
+    }
+    fn combine(
+        &mut self,
+        target: &mut PointClassification<O>,
+        other: &PointClassification<O>,
+    ) -> Result<Precedence> {
+        let g = &mut *self.g;
+        target.combine_setting_vertex_point(other, &mut |object, point| {
+            // `(SmVertex *)m_pObject`: no vertex is undefined behaviour upstream
+            let object = object.ok_or_else(|| null_object("classification has no vertex"))?;
+            let ctx = g.merge_context(object).ok_or_else(unresolved_mut)?;
+            let EntityRef::Vertex(v) = ctx.target else {
+                return Err(wrong_target("handle does not name a vertex"));
+            };
+            let env = ctx.notifications;
+            let key_of = env.key_of;
+            topo_vertex::set_point(
+                ctx.brep,
+                v,
+                point,
+                env.records,
+                env.attributes,
+                env.context,
+                key_of(EntityRef::Vertex(v)),
+                &|vu| key_of(EntityRef::Vertexuse(vu)),
+            )
+        })
     }
 }
 

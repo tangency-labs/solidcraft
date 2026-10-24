@@ -329,6 +329,13 @@ static int32_t run_impl(
         put_cc(o, cc, objs);
         put_cc(o, other, objs);
         if (op == 3) put_brep(o, box, new_vertices, new_edges);
+        // the picked vertex after InsertCurveInterval (a combined surf/surf/surf
+        // point moves it through SmVertex::SetPoint)
+        if (op == 0)
+        {
+            SmPoint3d p = objs.vertices[(ULONG)pick[2]]->GetPoint();
+            o.insert(o.end(), {p.x, p.y, p.z});
+        }
     }
     return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, len);
     SC_CATCH

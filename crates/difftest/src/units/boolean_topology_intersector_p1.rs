@@ -1131,6 +1131,14 @@ impl CurveOnClassifyObjects<H> for Objs<'_> {
 }
 
 impl ProtoBrep<H> for Two {
+    fn merge_point_class_into_brep(
+        &mut self,
+        k: &mut Kernel,
+        pc: &mut PointClassification<H>,
+        src_point: Point3,
+    ) -> solidcore::Result<solidcore::intersect::point_class::MergeOutputs<H>> {
+        solidcore::intersect::curve_class::p6::merge_into_object_mut(k, self, pc, src_point)
+    }
     fn brep_squeeze_edge(
         &mut self,
         k: &mut Kernel,

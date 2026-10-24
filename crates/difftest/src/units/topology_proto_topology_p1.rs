@@ -1644,6 +1644,53 @@ impl ProtoTopology<H> for Pool {
 /// The bare stand-ins' members (upstream `SmEdge::GetInterval`, `GetCurve`, `GetTolerance`
 /// of the stand-in objects the shim makes), and new curves appended to the pool.
 impl ProtoBrep<H> for Pool {
+    /// A vertex stand-in merges in its record (upstream's default-constructed
+    /// `SmVertex`: the `SetPoint` / `SetExact` / `SetTolerance` of `MergeIntoObject`
+    /// need no B-rep); an edge, face or region stand-in is joined to no B-rep, so its
+    /// edit keeps the default deferral.
+    fn merge_point_class_into_brep(
+        &mut self,
+        k: &mut Kernel,
+        pc: &mut PointClassification<H>,
+        src_point: Point3,
+    ) -> solidcore::Result<solidcore::intersect::point_class::MergeOutputs<H>> {
+        let target = pc
+            .object()
+            .filter(|o| o.1 == ClassObjectKind::Vertex)
+            .and_then(|o| self.topo_entity(o));
+        let Some(target @ EntityRef::Vertex(_)) = target else {
+            return pc.merge_into_object(k, src_point);
+        };
+        let ents = self.topo.ents.clone();
+        let kinds = self.kinds.clone();
+        let handle = move |e: EntityRef| {
+            let i = ents.iter().position(|t| *t == Some(e)).unwrap_or(usize::MAX);
+            H(i, class_kind_of(kinds.get(i).copied().unwrap_or(-1)))
+        };
+        let mut records = BTreeMap::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = solidcore::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &super::boolean_topology_intersector_p1::p9_entity_ref,
+        };
+        let curve_ref = |e: solidcore::topology::EdgeId, kind: i64| ObjectRef {
+            key: ObjectKey(((kind as u64) << 32) | u64::from(e.index())),
+            type_code: kind,
+        };
+        pc.merge_into_brep(
+            k,
+            src_point,
+            solidcore::intersect::point_class::BrepMerge {
+                brep: &mut self.topo.brep,
+                target,
+                handle: &handle,
+                notifications: &mut env,
+                curve_ref: &curve_ref,
+            },
+        )
+    }
     fn brep_squeeze_edge(
         &mut self,
         _k: &mut Kernel,

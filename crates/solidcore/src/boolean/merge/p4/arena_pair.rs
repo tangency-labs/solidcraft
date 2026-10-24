@@ -29,7 +29,7 @@ use crate::intersect::curve_class::p1::CurveClassification;
 use crate::intersect::curve_class::p5::ClassGeometryMut;
 use crate::intersect::curve_class::p6::{MergeContext, MergeIntervalBrep};
 use crate::intersect::point_class::{
-    ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
+    ClassGeometry, ClassObject, ClassObjectKind, MergeOutputs, PointClassType, PointClassification,
 };
 use crate::intersect::topology_solver::p1::TopologyObjects;
 use crate::kernel::Kernel;
@@ -495,6 +495,16 @@ impl CurveOnClassifyObjects<H> for Objs<'_, '_> {
 }
 
 impl ProtoBrep<H> for ArenaPair<'_> {
+    /// `MergeIntoObject` on the operand the classification's object names, through
+    /// [`MergeIntervalBrep::merge_context`].
+    fn merge_point_class_into_brep(
+        &mut self,
+        k: &mut Kernel,
+        pc: &mut PointClassification<H>,
+        src_point: Point3,
+    ) -> crate::Result<MergeOutputs<H>> {
+        crate::intersect::curve_class::p6::merge_into_object_mut(k, self, pc, src_point)
+    }
     fn edge_interval(&self, edge: H) -> Option<Extent1d> {
         ed::interval(self.brep(edge)?, eid(edge)).ok()
     }

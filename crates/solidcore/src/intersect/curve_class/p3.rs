@@ -11,7 +11,7 @@
 //! | [`CurveClassification::find_interval`], [`FoundInterval`] | `SmCurveClassification::FindInterval`          |
 //! | [`CurveClassification::find_point_class`]               | `SmCurveClassification::FindPointClass`          |
 //! | [`CurveClassification::is_coincident`]                  | `SmCurveClassification::IsCoincident`            |
-//! | [`CurveClassification::insert_point_class`]             | `SmCurveClassification::InsertPointClass`        |
+//! | [`CurveClassification::insert_point_class`], [`CurveClassification::insert_point_class_mut`] | `SmCurveClassification::InsertPointClass` |
 //! | [`CurveClassification::remove_point_class`]             | `SmCurveClassification::RemovePointClass`        |
 //! | [`CurveClassification::merge_point_class`]              | `SmCurveClassification::MergePointClass`         |
 //! | [`CurveClassification::cleanup_and_validate`]           | `SmCurveClassification::CleanupAndValidate`      |
@@ -26,6 +26,10 @@
 //!   through [`ClassGeometry::topology_entity`] (and [`ClassGeometry::topology_handle`]
 //!   for the vertices of an edge); an adapter without those hooks keeps the
 //!   [`SolidError::Unported`] deferral, as in `intersect::point_class`.
+//! - **Vertex moves.** The `Combine` of a boundary merge moves the vertex of a vertex
+//!   classification to a propagated surf/surf/surf point (`SmVertex::SetPoint`):
+//!   [`CurveClassification::insert_point_class_mut`] makes it through a
+//!   [`MergeIntervalBrep`]; [`CurveClassification::insert_point_class`] defers there.
 //! - **Out-params.** `FindInterval` returns a [`FoundInterval`]; `InsertPointClass` returns
 //!   `rbInsertionMade`; `sm_ChangeEdgePointClassToNearVertex` returns
 //!   `rbChangedToVertexFlag`; `MergePointClass`'s optional output arrays are
@@ -797,7 +801,9 @@ impl<O: ClassObject> CurveClassification<O> {
     ///
     /// Those of [`CurveClassification::find_interval`] and
     /// [`CurveClassification::insert_at`]; [`SolidError::Unported`] for topology
-    /// objects.
+    /// objects, and for a surf/surf/surf point a merge propagates to a vertex
+    /// classification (`SmVertex::SetPoint`; [`Self::insert_point_class_mut`] makes
+    /// the move).
     pub fn insert_point_class(
         &mut self,
         k: &Kernel,
@@ -807,6 +813,53 @@ impl<O: ClassObject> CurveClassification<O> {
         last_curve_param: f64,
         force_insertion: bool,
     ) -> Result<bool> {
+        self.insert_point_class_in(
+            &mut ReadOnly { k, g: geometry },
+            point_class,
+            curve_param,
+            last_curve_param,
+            force_insertion,
+        )
+    }
+
+    /// [`CurveClassification::insert_point_class`] moving the vertex of a boundary
+    /// classification a merged surf/surf/surf point propagates to
+    /// (`SmVertex::SetPoint` of `Combine`) in the B-rep a [`MergeIntervalBrep`] hands
+    /// out.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`CurveClassification::insert_point_class`], without the deferral of
+    /// the move; [`SolidError::InvalidInput`] for a vertex the adapter cannot resolve
+    /// mutably.
+    pub fn insert_point_class_mut(
+        &mut self,
+        k: &mut Kernel,
+        geometry: &mut impl MergeIntervalBrep<O>,
+        point_class: &PointClassification<O>,
+        curve_param: f64,
+        last_curve_param: f64,
+        force_insertion: bool,
+    ) -> Result<bool> {
+        self.insert_point_class_in(
+            &mut Mutable { k, g: geometry },
+            point_class,
+            curve_param,
+            last_curve_param,
+            force_insertion,
+        )
+    }
+
+    /// `InsertPointClass` over either kind of adapter.
+    pub(super) fn insert_point_class_in(
+        &mut self,
+        a: &mut impl Imprint<O>,
+        point_class: &PointClassification<O>,
+        curve_param: f64,
+        last_curve_param: f64,
+        force_insertion: bool,
+    ) -> Result<bool> {
+        let (k, geometry) = (a.kernel(), a.geometry());
         // init output
         let mut insertion_made = false;
         let mut curve_param = curve_param;
@@ -1194,7 +1247,7 @@ impl<O: ClassObject> CurveClassification<O> {
         // when merging a start boundary point classification
         else if position == IntervalPosition::Start {
             let found_ivl = self.at_mut(index)?;
-            if found_ivl.start.combine(point_class)? == Precedence::Other {
+            if a.combine(&mut found_ivl.start, point_class)? == Precedence::Other {
                 found_ivl.start = *point_class;
             }
             insertion_made = true;
@@ -1202,7 +1255,7 @@ impl<O: ClassObject> CurveClassification<O> {
             // remember to merge the neighbor interval's boundary point
             if index > 0 {
                 let found2 = self.at_mut(index - 1)?;
-                if found2.end.combine(point_class)? == Precedence::Other {
+                if a.combine(&mut found2.end, point_class)? == Precedence::Other {
                     found2.end = *point_class;
                 }
             }
@@ -1210,7 +1263,7 @@ impl<O: ClassObject> CurveClassification<O> {
         // when merging an end boundary point classification
         else if position == IntervalPosition::End {
             let found_ivl = self.at_mut(index)?;
-            if found_ivl.end.combine(point_class)? == Precedence::Other {
+            if a.combine(&mut found_ivl.end, point_class)? == Precedence::Other {
                 found_ivl.end = *point_class;
             }
             insertion_made = true;
@@ -1218,7 +1271,7 @@ impl<O: ClassObject> CurveClassification<O> {
             // remember to merge the neighbor interval's boundary point
             if index + 1 < self.size() {
                 let found2 = self.at_mut(index + 1)?;
-                if found2.start.combine(point_class)? == Precedence::Other {
+                if a.combine(&mut found2.start, point_class)? == Precedence::Other {
                     found2.start = *point_class;
                 }
             }

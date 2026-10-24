@@ -1459,6 +1459,14 @@ int32_t run(Rd& rd, std::vector<double>& o)
             o.push_back(st(s));
             if (s == SM_SUCCESS)
                 o.push_back(flg(made));
+            // every vertex object's point: a merged surf/surf/surf point moves one
+            // (SmPointClassification::Combine's SmVertex::SetPoint)
+            for (size_t i = 0; i < pool.kinds.size(); ++i)
+                if (pool.kinds[i] == K_VERTEX)
+                {
+                    SmPoint3d p = ((SmVertex*)pool.ptrs[i])->GetPoint();
+                    o.insert(o.end(), {p.x, p.y, p.z});
+                }
             break;
         }
         case OP_REMOVE_PC:
