@@ -698,11 +698,14 @@ mod tests {
     #[test]
     fn a_blend_of_an_edge_running_into_a_rounded_corner_follows_it() {
         // A box with one vertical edge rounded: a top edge meeting that round smoothly is blended
-        // with the round's top arc and the next top edge, as one smooth chain.
+        // with the round's top arc and the next top edge, as one smooth chain (its tangent chain,
+        // as the Fillet and Chamfer features ask for it).
         let b = crate::build::box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
         let rounded = fillet(&b, &[Vec3::new(40.0, 30.0, 10.0)], 5.0).unwrap();
+        let chain = tangent_chain(&rounded, &[Vec3::new(20.0, 30.0, 20.0)]).unwrap();
+        assert_eq!(chain.len(), 3, "the top edge, the round's top arc and the next top edge");
         for round in [true, false] {
-            let out = blend(&rounded, &[Vec3::new(20.0, 30.0, 20.0)], 1.0, round).unwrap();
+            let out = blend(&rounded, &chain, 1.0, round).unwrap();
             assert!(out.validity().is_empty(), "{:?}", out.validity());
             assert_eq!(out.face_count(), rounded.face_count() + 3);
         }
@@ -733,7 +736,8 @@ mod tests {
             (true, (1.0 - std::f64::consts::PI / 4.0) * 0.64, 0.8 * (10.0 - 3.0 * std::f64::consts::PI) / (3.0 * (4.0 - std::f64::consts::PI))),
             (false, 0.32, 0.8 / 3.0),
         ] {
-            let out = blend(&body, &[Vec3::new(52.0, 20.0, 0.0)], 0.8, round).unwrap();
+            // The half circle's tangent chain, as the Fillet and Chamfer features ask for it.
+            let out = blend(&body, &tangent_chain(&body, &[Vec3::new(52.0, 20.0, 0.0)]).unwrap(), 0.8, round).unwrap();
             assert!(out.validity().is_empty(), "{:?}", out.validity());
             // Pappus: the section turned half round the axis at its centroid's radius.
             let want = area * std::f64::consts::PI * (12.0 - c);

@@ -128,8 +128,10 @@ mod tests {
         let mut together = bottom.to_vec();
         together.push(vertical);
         let reference = fillet(&b, &together, 2.0).unwrap();
+        // The vertical edge, alone or with the seam, with its tangent chain (as the Fillet feature
+        // asks for it): every pick gives the same body.
         for picks in [vec![vertical], vec![vertical, seam], vec![seam, vertical]] {
-            let result = fillet(&rounded, &picks, 2.0).unwrap();
+            let result = fillet(&rounded, &crate::tangent_chain(&rounded, &picks).unwrap(), 2.0).unwrap();
             assert_eq!(result.face_count(), reference.face_count());
             assert_eq!(result.unmeshed_faces(), 0);
             assert!(result.validity().is_empty(), "{:?}", result.validity());
@@ -201,7 +203,9 @@ mod tests {
         let vertical =
             [Vec3::new(0.0, 0.0, 6.0), Vec3::new(25.0, 0.0, 6.0), Vec3::new(25.0, 25.0, 6.0), Vec3::new(0.0, 25.0, 6.0)].map(|p| p + origin);
         let rounded = fillet(&b, &bottom, 2.0).unwrap();
-        let result = fillet(&rounded, &vertical, 2.0).unwrap();
+        // Each vertical edge with its tangent chain (on through the bottom rounds' corners), as
+        // the Fillet feature asks for it.
+        let result = fillet(&rounded, &crate::tangent_chain(&rounded, &vertical).unwrap(), 2.0).unwrap();
         assert!(result.validity().is_empty(), "{:?}", result.validity());
         assert!(kink(&result) < 0.05);
         // Integrate rounded-square horizontal sections. Above z=r the area is
