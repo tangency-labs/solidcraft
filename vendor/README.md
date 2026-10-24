@@ -152,6 +152,16 @@ Changes:
   surface can return an angle millions of turns from its hint; the loop then spanned those turns,
   the polyline closing it across the seam had millions of points, and meshing never finished,
   which hung the STEP export that reads its own file back (#1985).
+- `tessellation/triangulation.rs`, bounded work: a polyline that closes an open boundary loop
+  along the surface's domain with more than 20 000 points leaves the face unmeshed (reported by
+  `Body::validity`) instead of meshing it. A sound loop's closing polylines have a few points;
+  a loop laid out across millions of periods had 4.3 million, and meshing them never finished,
+  which hung the STEP export that reads its own file back (#1985). The division of that polyline
+  is bounded as well (`bounded_parameter_division`, truck's bisection made iterative: `None` past
+  the same 20 000 points, and the other closing polylines are then skipped), where truck's
+  `parameter_division` took 31 s and over a gigabyte for 200 000 turns, and ran out of memory for
+  millions (#1374). `boundary_test_hooks`, behind the `test-hooks` feature, lets
+  `crates/kernel/tests/closing_polyline_budget.rs` check it.
 - `tessellation/triangulation.rs`: parameter searches that land outside a surface's bounded,
   non-periodic domain are rejected (a hinted B-spline search can run off and extrapolate to
   thousands of parameter units, and meshing that grid never finishes); the last-resort nearest
