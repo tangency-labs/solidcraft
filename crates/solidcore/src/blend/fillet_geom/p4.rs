@@ -2256,11 +2256,7 @@ impl FilletBrep {
         }
         let nets: Vec<Option<BlendNeighbour<'_>>> = ordered_surfs
             .iter()
-            .map(|s| {
-                s.and_then(|surface| {
-                    b_spline_net(surface).map(|b_spline| BlendNeighbour { surface, b_spline })
-                })
-            })
+            .map(|s| s.map(|surface| BlendNeighbour { surface }))
             .collect();
         let surfaces = BSplineSurface::create_corner_blend(
             k,

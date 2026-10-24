@@ -21,11 +21,9 @@
 //! - **Curve and surface types.** `CreateCornerBlend` takes [`BSplineCurve`] 3D curves
 //!   and [`BlendNeighbour`] neighbour surfaces (upstream `SmCurve*` / `SmSurface*`;
 //!   `sm_CreateNonRationalCurve` fails with `NER` for any other curve type). A
-//!   neighbour is the caller's surface (its kind and owner, for the virtual `DropCurve`
-//!   of `sm_CreateNonRationalCurve`) with its B-spline representation, which the
-//!   cross-tangent construction evaluates (B-spline evaluators are the only ones it
-//!   takes so far). `NULL` UV curves and surfaces
-//!   are `None`. Where upstream indexes past the end of the orientation, UV curve or
+//!   neighbour is the caller's surface of any kind, evaluated through the virtual
+//!   `SmSurface` methods (`DropCurve`, `EvaluateNormal`, `EvaluateNormalSection`,
+//!   `Evaluate`, `GetNaturalUVDomain`). `NULL` UV curves and surfaces are `None`. Where upstream indexes past the end of the orientation, UV curve or
 //!   surface arrays, or dereferences a `NULL` UV curve or surface (n-sided blends,
 //!   bilinear blends with more than four curves), the port returns `InvalidInput`.
 //! - **`CreateSkinnedSurface`**'s many arguments are the fields of
@@ -100,6 +98,7 @@ use crate::nurbs::srf_adv::p5::{
 };
 use crate::nurbs::srf_basic::{Direction, Surface};
 use crate::nurbs::srf_tool::p1::extract_patch;
+use crate::surface::surface::Surface as SmSurface;
 
 use super::p1::{create_nlib_curve, create_nlib_surface, create_non_rational_curve, make_knots};
 
@@ -130,10 +129,10 @@ pub enum OrientType {
 #[derive(Debug, Clone, Copy)]
 pub struct BlendNeighbour<'a> {
     /// The surface itself, with its kind and owner: `sm_CreateNonRationalCurve`
-    /// drops rational curves onto it through the virtual `SmSurface::DropCurve`.
-    pub surface: &'a crate::surface::surface::Surface,
-    /// Its B-spline representation, which the cross-tangent construction evaluates.
-    pub b_spline: &'a BSplineSurface,
+    /// drops rational curves onto it through the virtual `SmSurface::DropCurve`, and
+    /// the cross-tangent construction evaluates it through the virtual
+    /// `SmSurface` evaluators.
+    pub surface: &'a SmSurface,
 }
 
 /// Options of [`BSplineSurface::trim_with_domain_with`]. `Default` is upstream's
@@ -238,7 +237,7 @@ const OP_APPROX_FIELD: &str = "nurbs::b_spline_surface_n_lib::p2::approximate_ta
 
 /// A tangent field seen as an `SmCurve` (its virtual `Evaluate`, `EvaluatePoint`,
 /// `GetNaturalInterval` and `GetDim` as `SmCurve::ApproximateCurve` reaches them).
-struct FieldCurve<'f, 'a>(&'f TangentField<'a, BSplineSurface>);
+struct FieldCurve<'f, 'a>(&'f TangentField<'a, SmSurface>);
 
 impl CurveEvaluate for FieldCurve<'_, '_> {
     fn dim(&self) -> u64 {
@@ -392,7 +391,7 @@ fn field_span_accuracy(
 /// the "input curve is better" copy applies).
 fn approximate_tangent_field(
     k: &crate::kernel::Kernel,
-    field: &TangentField<'_, BSplineSurface>,
+    field: &TangentField<'_, SmSurface>,
     breaks: &[f64],
     approx_tol_3d: f64,
 ) -> Result<BSplineCurve> {
@@ -547,7 +546,7 @@ fn tangent_field_curve(
     tol: f64,
     boundary: &BSplineCurve,
     uv_curve: &BSplineCurve,
-    surface: &BSplineSurface,
+    surface: &SmSurface,
     (start, start_param): (&BSplineCurve, f64),
     (end, end_param): (&BSplineCurve, f64),
     ang_tol: f64,
@@ -584,7 +583,7 @@ fn tangent_field_curve(
 fn interpolated_tangent_field_curve(
     k: &crate::kernel::Kernel,
     uv_curve: &BSplineCurve,
-    surface: &BSplineSurface,
+    surface: &SmSurface,
     start: Vec3,
     end: Vec3,
     knots: &[f64],
@@ -603,37 +602,27 @@ fn interpolated_tangent_field_curve(
 }
 
 /// `SmSurface::EvaluateNormal(uv, TRUE, TRUE, normal)`.
-fn evaluate_normal(
-    k: &crate::kernel::Kernel,
-    surface: &BSplineSurface,
-    uv: Point2,
-) -> Result<Vec3> {
-    crate::surface::surface::p7::base_evaluate_normal(k, surface, uv, Side::Left, Side::Left)
+fn evaluate_normal(k: &crate::kernel::Kernel, surface: &SmSurface, uv: Point2) -> Result<Vec3> {
+    surface.evaluate_normal(k, uv, Side::Left, Side::Left)
 }
 
 /// `SmSurface::EvaluateNormalSection(uv, TRUE, TRUE, direction, ..)`: the cross
 /// tangent (the unit projection of `direction` into the tangent plane).
 fn evaluate_normal_section(
     k: &crate::kernel::Kernel,
-    surface: &BSplineSurface,
+    surface: &SmSurface,
     uv: Point2,
     dir: Vec3,
 ) -> Result<Vec3> {
-    Ok(crate::surface::surface::p3::evaluate_normal_section_of(
-        k,
-        surface,
-        uv,
-        Side::Left,
-        Side::Left,
-        dir,
-    )?
-    .tangent)
+    Ok(surface
+        .evaluate_normal_section(k, uv, Side::Left, Side::Left, dir)?
+        .tangent)
 }
 
 /// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`: `(Su, Sv)`.
 fn evaluate_1st_derivatives(
     k: &crate::kernel::Kernel,
-    surface: &BSplineSurface,
+    surface: &SmSurface,
     uv: Point2,
 ) -> Result<(Vec3, Vec3)> {
     let (_, du, dv) = crate::surface::surface::p1::evaluate_1st_derivatives(
@@ -728,8 +717,8 @@ impl BSplineSurface {
     /// corner gaps above `approx_tol` and the failures of the called routines;
     /// `SM_ERR_NULL_POINTER` when a G1 blend misses too many UV curves or surfaces;
     /// `InvalidInput` for input arrays shorter than `curves_3d` or missing UV curves or
-    /// surfaces where upstream dereferences them; [`SolidError::Unported`] where the
-    /// tangent fields or surface normals are needed.
+    /// surfaces where upstream dereferences them; [`SolidError::Unported`] from the
+    /// neighbour surfaces' evaluators.
     pub fn create_corner_blend(
         k: &crate::kernel::Kernel,
         curves_3d: &[BSplineCurve],
@@ -747,8 +736,8 @@ impl BSplineSurface {
             return Err(SolidError::sm_err(OP));
         }
         let curve_cnt = curves_3d.len();
-        let surfaces: Vec<Option<&BSplineSurface>> =
-            neighbours.iter().map(|n| n.map(|n| n.b_spline)).collect();
+        let surfaces: Vec<Option<&SmSurface>> =
+            neighbours.iter().map(|n| n.map(|n| n.surface)).collect();
         let surfaces = surfaces.as_slice();
         if uv_curves.len() < curve_cnt || surfaces.len() < curve_cnt {
             return Err(SolidError::invalid_input(
@@ -1746,7 +1735,7 @@ fn corner_blend_4(
     mut boundaries: Vec<BSplineCurve>,
     mut uv_crvs: Vec<Option<BSplineCurve>>,
     curve_orients: &[OrientType],
-    surfaces: &[Option<&BSplineSurface>],
+    surfaces: &[Option<&SmSurface>],
     approx_tol: f64,
     tangency_tol_radians: f64,
     create_bilinear_patch: bool,
@@ -1916,7 +1905,7 @@ fn corner_blend_n(
     mut boundaries: Vec<BSplineCurve>,
     mut uv_crvs: Vec<Option<BSplineCurve>>,
     curve_orients: &[OrientType],
-    surfaces: &[Option<&BSplineSurface>],
+    surfaces: &[Option<&SmSurface>],
     approx_tol: f64,
     tangency_tol_radians: f64,
 ) -> Result<Vec<BSplineSurface>> {
@@ -1952,8 +1941,7 @@ fn corner_blend_n(
         let next = boundaries.get(next_i).ok_or_else(oob)?;
 
         let uv_of = |i: usize| uv_crvs.get(i).and_then(Option::as_ref).ok_or_else(missing);
-        let srf_of =
-            |i: usize| -> Result<&BSplineSurface> { at(surfaces, i, OP)?.ok_or_else(missing) };
+        let srf_of = |i: usize| -> Result<&SmSurface> { at(surfaces, i, OP)?.ok_or_else(missing) };
         let curr_uv = uv_of(ii)?;
         let prev_uv = uv_of(prev_i)?;
         let next_uv = uv_of(next_i)?;

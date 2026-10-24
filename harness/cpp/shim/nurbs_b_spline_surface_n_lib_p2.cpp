@@ -10,16 +10,21 @@
 #include "sc_shim.h"
 
 #include "StdAfx.h"
+#include <SmAxis2Placement.h>
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
+#include <SmCone.h>
 #include <SmContext.h>
+#include <SmCylinder.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
 #include <SmGeomUtility.h>
 #include <SmNurbsCrv.h>
 #include <SmNurbsSrf.h>
+#include <SmSphere.h>
 #include <SmSurface.h>
 #include <SmTArray.h>
+#include <SmTorus.h>
 #include <SmVector2d.h>
 #include <SmVector3d.h>
 #include <nurbs.h>
@@ -184,6 +189,63 @@ SmBSplineSurface* read_plain_surface(Rd& rd, const SmContext& ctx)
     return new (ctx) SmBSplineSurface(read_nurb(rd), FALSE, NULL);
 }
 
+// Reads `kind origin[3] x[3] y[3] p[4]` into an analytic surface: kind 0
+// SmCone::CreateCanonical(bot, top, height), 1 SmCylinder(radius, start, end, height) +
+// MakeNurb, 2 SmSphere::CreateCanonical(radius), 3 SmTorus::CreateCanonical(major, minor).
+// `rStt` is the construction status (the surface is NULL when it fails).
+SmSurface* read_analytic(Rd& rd, const SmContext& ctx, SmStatus& rStt)
+{
+    int64_t kind = rd.idx();
+    double v[9];
+    for (int i = 0; i < 9; i++)
+        v[i] = rd.num();
+    double p[4];
+    for (int i = 0; i < 4; i++)
+        p[i] = rd.num();
+    SmPoint3d org(v[0], v[1], v[2]);
+    SmVector3d x(v[3], v[4], v[5]);
+    SmVector3d y(v[6], v[7], v[8]);
+    SmAxis2Placement a2p(org, x, y);
+    SmBSplineSurface* s = NULL;
+    switch (kind)
+    {
+    case 0:
+    {
+        SmCone* c = NULL;
+        rStt = SmCone::CreateCanonical(ctx, a2p, p[0], p[1], p[2], c, FALSE, FALSE);
+        s = c;
+        break;
+    }
+    case 1:
+    {
+        SmCylinder* c = new (ctx) SmCylinder(org, x, y, p[0], p[1], p[2], p[3], FALSE, FALSE, FALSE, &ctx);
+        rStt = c->MakeNurb();
+        s = c;
+        break;
+    }
+    case 2:
+    {
+        SmSphere* c = NULL;
+        rStt = SmSphere::CreateCanonical(ctx, a2p, p[0], c);
+        s = c;
+        break;
+    }
+    default:
+    {
+        SmTorus* c = NULL;
+        rStt = SmTorus::CreateCanonical(ctx, a2p, p[0], p[1], c);
+        s = c;
+        break;
+    }
+    }
+    if (rStt != SM_SUCCESS)
+    {
+        delete s;
+        s = NULL;
+    }
+    return s;
+}
+
 void surface_op(int32_t op, Rd& rd, SmBSplineSurface* s, std::vector<double>& o)
 {
     switch (op)
@@ -285,14 +347,32 @@ void static_op(int32_t op, Rd& rd, const SmContext& ctx, std::vector<double>& o)
             orients.Add((SmOrientType)rd.idx());
         for (int64_t i = 0; i < k; i++)
             uvs.Add(rd.flag() ? read_curve(rd, ctx) : (SmBSplineCurve*)NULL);
+        // neighbours: 0 NULL, 1 SmBSplineSurface, 2 analytic (the first failing
+        // construction is the status; the rest are not read into surfaces)
+        SmStatus built = SM_SUCCESS;
         for (int64_t i = 0; i < k; i++)
-            srfs.Add(rd.flag() ? (SmSurface*)read_plain_surface(rd, ctx) : (SmSurface*)NULL);
+        {
+            int64_t kind = rd.idx();
+            SmSurface* srf = NULL;
+            if (kind == 1)
+                srf = read_plain_surface(rd, ctx);
+            else if (kind == 2)
+            {
+                SmStatus sb = SM_SUCCESS;
+                srf = read_analytic(rd, ctx, sb);
+                if (built == SM_SUCCESS)
+                    built = sb;
+            }
+            srfs.Add(srf);
+        }
         double tol = rd.num();
         double ang = rd.num();
         bool bilinear = rd.flag();
         SmTArray<SmSurface*> res;
-        SmStatus stt = SmBSplineSurface::CreateCornerBlend(ctx, crvs, orients, uvs, srfs, tol, ang,
-                                                           res, bilinear ? TRUE : FALSE);
+        SmStatus stt = built;
+        if (stt == SM_SUCCESS)
+            stt = SmBSplineSurface::CreateCornerBlend(ctx, crvs, orients, uvs, srfs, tol, ang, res,
+                                                      bilinear ? TRUE : FALSE);
         o.push_back(st(stt));
         if (stt == SM_SUCCESS)
         {

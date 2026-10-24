@@ -17,7 +17,7 @@
 //! | `Eval`   | `Evaluate`             | `u v hu hv u_left v_left upper non_zero_tangents`              |
 //! | `Trim`   | `TrimWithDomain`       | `D[4]`                                                         |
 //! | `Skin`   | `CreateSkinnedSurface` | `k` `k` curves, `sync dir tol has_r1 [curve] has_r2 [curve] spine has_params [np params[np]] has_derivs [has0 [surface] has1 [surface]] degree` |
-//! | `Corner` | `CreateCornerBlend`    | `k` `k` curves, `k` orients, `k` x (`has` [curve]), `k` x (`has` [surface]), `tol ang_tol bilinear` |
+//! | `Corner` | `CreateCornerBlend`    | `k` `k` curves, `k` orients, `k` x (`has` [curve]), `k` x neighbour, `tol ang_tol bilinear` |
 //!
 //! `Skin` and `Corner` are static (`ctor == 0`). The output is the op status (`0` =
 //! `SM_SUCCESS`, else the `SmStatus`), then: `Eval` on success the `(hu+1)(hv+1)`
@@ -25,6 +25,12 @@
 //! the (possibly snapped) domain and the state of `this`; `Skin` on success `has` and
 //! the surface state; `Corner` on success the surface count and their states. A
 //! surface state is `has_nurb oob borrowed knot_type form [n m p q r s cpts u v]`.
+//! A `Corner` neighbour is `0` (`NULL`), `1` surface (an `SmBSplineSurface`) or `2 kind
+//! origin[3] x[3] y[3] p[4]`, an analytic surface on the placement `origin x y`: kind
+//! `0` `SmCone::CreateCanonical(bot, top, height)`, `1` `SmCylinder(radius, start, end,
+//! height)` + `MakeNurb`, `2` `SmSphere::CreateCanonical(radius)`, `3`
+//! `SmTorus::CreateCanonical(major, minor)` (`Corner` then gives that status when it
+//! fails, before `CreateCornerBlend`).
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour:
 //! well-formed clamped 3D surfaces and curves (`r = n+p+1`, `1 <= p <= n`, degrees at
@@ -36,7 +42,8 @@
 //! a degree of 1 to 5, at least `k` (`2k` with a second rail) intersection parameters
 //! when given, compatible cross sections when `sync` is set, and no `sync` with a
 //! derivative surface; `Corner` takes at most 8 curves, orientations `0..=2`, a UV
-//! curve exactly where a surface is given, non-rational UV curves, no surface for a
+//! curve exactly where a surface is given, non-rational UV curves, analytic placements
+//! with axes at least `1e-6` long and far from parallel, no surface for a
 //! rational curve (upstream drops it with `SmSurface::DropCurve`, which crashes for a
 //! standalone surface), and with more than four curves all UV curves and surfaces
 //! unless the blend is not bilinear.
@@ -306,6 +313,28 @@ fn validate_skin(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     Ok(())
 }
 
+/// Reads and validates an analytic surface `kind origin[3] x[3] y[3] p[4]`.
+fn analytic(rd: &mut Reader<'_>) -> Result<(), FfiError> {
+    rd.index(3)?;
+    let v = rd.finites(9)?;
+    let [_, _, _, x0, x1, x2, y0, y1, y2] = v[..] else {
+        return Err(bad("analytic: placement"));
+    };
+    // the placement's axes: long enough and far from parallel (as unit surface.cone_p1
+    // requires)
+    let (lx, ly) = (
+        (x0 * x0 + x1 * x1 + x2 * x2).sqrt(),
+        (y0 * y0 + y1 * y1 + y2 * y2).sqrt(),
+    );
+    let c = [x1 * y2 - x2 * y1, x2 * y0 - x0 * y2, x0 * y1 - x1 * y0];
+    let lc = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+    if lx < 1e-6 || ly < 1e-6 || lc < 1e-3 * lx * ly {
+        return Err(bad("analytic: degenerate or parallel axes"));
+    }
+    rd.finites(4)?;
+    Ok(())
+}
+
 fn validate_corner(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     let k = rd.index(8)?;
     let crvs = (0..k).map(|_| curve(rd)).collect::<Result<Vec<_>, _>>()?;
@@ -322,11 +351,15 @@ fn validate_corner(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     }
     let mut has_srf = Vec::with_capacity(k);
     for _ in 0..k {
-        let has = rd.flag()?;
-        if has {
-            surface(rd)?;
+        let kind = rd.index(2)?;
+        match kind {
+            1 => {
+                surface(rd)?;
+            }
+            2 => analytic(rd)?,
+            _ => {}
         }
-        has_srf.push(has);
+        has_srf.push(kind != 0);
     }
     rd.positive("corner tol")?;
     rd.positive("corner angle tol")?;

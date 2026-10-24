@@ -98,8 +98,8 @@
 //!   tagged `UNPORTED(<unit>)`, one stub per call site with the code after it ported):
 //!   `SmFace::FaceIntersect` (`topology.face_p3`), `SmBrep::CalculateBoundingBox`, `LockBoundingBox`,
 //!   `UnLockBoundingBox` (`query.brep`), `SmBSplineSurface::CreateCornerBlend` with a
-//!   non-B-spline neighbour surface (`nurbs.b_spline_surface_n_lib_p2`, whose port takes
-//!   B-spline neighbours only).
+//!   rational 3D curve before a non-B-spline one (`nurbs.b_spline_surface_n_lib_p2`,
+//!   whose port takes B-spline curves only).
 //! - `CreateEdgeEdgeBlend` takes each edge use's B-rep (the second `None` when both are
 //!   in one B-rep), mutably: the edge use evaluations of `topology.edgeuse_p3` take it so.
 //!   It ignores both `EvaluateBinormal` statuses as upstream and goes on with the outputs
@@ -135,7 +135,7 @@ use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::{BlendNeighbour, OrientType};
 use crate::nurbs::knots::Side;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
-use crate::surface::surface::p2::{BlendEndType, CurvatureType, DerivSurfDefinition, SurfaceKind};
+use crate::surface::surface::p2::{BlendEndType, CurvatureType, DerivSurfDefinition};
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 use crate::topology::brep_cache::{arena_identity, CacheObject};
@@ -2097,26 +2097,6 @@ fn bspline_part(curve: &Curve) -> Option<BSplineCurve> {
     }
 }
 
-/// The neighbour surface `SmBSplineSurface::CreateCornerBlend` gets: the
-/// `SmBSplineSurface` part of a surface (`SmPlane` and `SmSurfOfRevolution` are B-splines
-/// upstream).
-fn bspline_surface(surface: &Surface) -> Result<&BSplineSurface> {
-    match surface.kind() {
-        SurfaceKind::BSpline(s) => Ok(s),
-        SurfaceKind::Plane(p) => Ok(p.base()),
-        SurfaceKind::SurfOfRevolution(s) => Ok(s.base()),
-        SurfaceKind::SurfOfExtrusion(s) => Ok(s.base()),
-        // Upstream passes any SmSurface*; the port of SmBSplineSurface::CreateCornerBlend
-        // takes B-spline neighbours only (its Deviations): the other kinds are that
-        // partial unit's own unported part.
-        // UNPORTED(nurbs.b_spline_surface_n_lib_p2): SmBSplineSurface::CreateCornerBlend with a non-B-spline neighbour surface
-        _ => Err(SolidError::unported(
-            "SmBSplineSurface::CreateCornerBlend (non-B-spline neighbour SmSurface)",
-            "nurbs.b_spline_surface_n_lib_p2",
-        )),
-    }
-}
-
 /// `sm_MakeVertexSplitUVTrimCurve` (a helper of `SmBrep::MakeVertexSplitEdge`): splits
 /// the UV trim curve of `eu_orig` at `edge_split_parameter` into the parts of the
 /// original and the new edge use (`eu_new`), reparameterised to the two halves of the
@@ -2548,9 +2528,6 @@ pub fn create_corner_blend(
 
             // pF->GetSurface(): the face's own surface (kind and owner), read below once
             // the edge uses are done editing the B-rep
-            if let Some(s) = face2::surface(b, face)? {
-                bspline_surface(s)?;
-            }
             ordered_surfs.push(Some(face));
         } else {
             ordered_uv.push(None);
@@ -2606,17 +2583,9 @@ pub fn create_corner_blend(
             Some(f) => face2::surface(b, *f)?,
             None => None,
         };
-        surfs.push(match surface {
-            Some(surface) => Some(BlendNeighbour {
-                surface,
-                b_spline: bspline_surface(surface)?,
-            }),
-            None => None,
-        });
+        surfs.push(surface.map(|surface| BlendNeighbour { surface }));
     }
-    let b_splines: Vec<Option<&BSplineSurface>> =
-        surfs.iter().map(|s| s.map(|n| n.b_spline)).collect();
-    let ordered_3d = corner_blend_bspline_curves(&ordered_3d, &ordered_uv, &b_splines)?;
+    let ordered_3d = corner_blend_bspline_curves(&ordered_3d, &ordered_uv, &surfs)?;
     BSplineSurface::create_corner_blend(
         k,
         &ordered_3d,
@@ -2641,7 +2610,7 @@ pub fn create_corner_blend(
 fn corner_blend_bspline_curves(
     curves: &[Curve],
     uv_curves: &[Option<BSplineCurve>],
-    surfaces: &[Option<&BSplineSurface>],
+    surfaces: &[Option<BlendNeighbour<'_>>],
 ) -> Result<Vec<BSplineCurve>> {
     let parts: Vec<Option<BSplineCurve>> = curves.iter().map(bspline_part).collect();
     if parts.iter().all(Option::is_some) {
