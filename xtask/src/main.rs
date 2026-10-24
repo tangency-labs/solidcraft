@@ -49,7 +49,7 @@ commands:
                   nightly shards' artifacts in DIR instead of running, and --bless then also
                   rewrites tests/action_matrix/costs.json). See docs/action-matrix.md
   book [--no-build]
-                  generate docs/book's command reference and screenshots, then mdbook build
+                  generate English reference and screenshots, then build documentation languages
                   into target/book
   licences [--check]
                   write THIRD-PARTY-LICENSES.txt (the licences of every shipped crate, embedded

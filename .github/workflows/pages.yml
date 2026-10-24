@@ -1,4 +1,4 @@
-# The documentation site on GitHub Pages: the book (docs/book) at https://docs.solidcraft.io/
+# The multilingual documentation site on GitHub Pages at https://docs.solidcraft.io/
 # and the bundled web app at /app/. Needs Settings → Pages → Source = GitHub Actions; skipped while the
 # repository is private.
 name: Pages
@@ -52,6 +52,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
+      - name: Test documentation language fallback
+        run: python3 -m unittest discover -s scripts/docs -p 'test_*.py'
       - name: Build the book
         env:
           SOLIDCRAFT_GPU: software

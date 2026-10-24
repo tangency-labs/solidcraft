@@ -1,0 +1,150 @@
+{
+  "pages": {
+    "SUMMARY.md": {
+      "source": "6c5130e3cacc430faf384fb9ab4d80fee240b5b499f4500646be5cf5dfd9ec67",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "6c5130e3cacc430faf384fb9ab4d80fee240b5b499f4500646be5cf5dfd9ec67"
+    },
+    "dev/architecture.md": {
+      "source": "5906c59f83a669a68e7789fc91f0ae0adf631810500db857a4f44281aa23efd7",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "5906c59f83a669a68e7789fc91f0ae0adf631810500db857a4f44281aa23efd7"
+    },
+    "dev/commands.md": {
+      "source": "7be238d39901ed4b8489eea9cb5467aacd7e34fc88e09f0b0844a23949c761af",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "7be238d39901ed4b8489eea9cb5467aacd7e34fc88e09f0b0844a23949c761af"
+    },
+    "dev/contributing.md": {
+      "source": "6b19823b4b9a16d0737b65a78e460b03cc02b29614b6d110ce824d170e902186",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "6b19823b4b9a16d0737b65a78e460b03cc02b29614b6d110ce824d170e902186"
+    },
+    "dev/control-protocol.md": {
+      "source": "5a9394407d5b8f800515d9a262d206bdcd8553b9116bc9b558028c615c2a82fa",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "e93e6ac93fd1b5c6aed5d7d29a0ea939ddab1e9572c574685f491ecbe325511f"
+    },
+    "dev/features.md": {
+      "source": "f91ac454b9774254d8bf913c55a2831cc4817a7ed2df47871fc81f9c97343dc8",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "46da2cdfe235f433a45008a0a4dbf371467696693c1ffdb93b4182123b5a54f7"
+    },
+    "dev/kernel.md": {
+      "source": "839dce894d731a112f40214c0c990babfb4717059833aebd045469316f07218a",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "839dce894d731a112f40214c0c990babfb4717059833aebd045469316f07218a"
+    },
+    "dev/libraries.md": {
+      "source": "b26336640008d65c73351a25b96244c7c39f319c85625938bbd711521338aee6",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "b26336640008d65c73351a25b96244c7c39f319c85625938bbd711521338aee6"
+    },
+    "dev/local-libraries.md": {
+      "source": "59002b2d12fdeca9ecb7730c6601f6b253362e6f027ff3005b0b151ae960130f",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "59002b2d12fdeca9ecb7730c6601f6b253362e6f027ff3005b0b151ae960130f"
+    },
+    "dev/naming.md": {
+      "source": "dfb423b74cb34d77c44c23c15edcc7f7c2309260f18be72447af26ecef66274c",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "dfb423b74cb34d77c44c23c15edcc7f7c2309260f18be72447af26ecef66274c"
+    },
+    "dev/oracle.md": {
+      "source": "501edc125a1d6ca119a213fbf6bee5f528a748f52a7f078c04cca8463b72600a",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "501edc125a1d6ca119a213fbf6bee5f528a748f52a7f078c04cca8463b72600a"
+    },
+    "dev/step-import.md": {
+      "source": "efce3c45758870972ffdd12247ca75f6f4aec0fa239dd7525867b8b4b4c20dd6",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "efce3c45758870972ffdd12247ca75f6f4aec0fa239dd7525867b8b4b4c20dd6"
+    },
+    "dev/testing.md": {
+      "source": "cdd289332fbea7175d0cd303e1a415ef72e46cf4297fbb92f3280b4204b33410",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "cdd289332fbea7175d0cd303e1a415ef72e46cf4297fbb92f3280b4204b33410"
+    },
+    "guide/agent-chat.md": {
+      "source": "ef2c1e0901eff05d104b388afb8a0f991cf3b60482f562e08c17e5992b44b016",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "ef2c1e0901eff05d104b388afb8a0f991cf3b60482f562e08c17e5992b44b016"
+    },
+    "guide/assemblies.md": {
+      "source": "5b91941cc8ca3854c7efc606bcbceb04ec8ca4a453f62a45a060090ddd0d81d9",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "aa349507f1aaaf857f8ee28aea77c2ea2f8bf6517768d5dcc0372c22c1b092df"
+    },
+    "guide/features.md": {
+      "source": "f0959e04a6b737e2ee29532f0ee66fa3983d57661a3bbb69a1695cb900ad4c27",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "f0959e04a6b737e2ee29532f0ee66fa3983d57661a3bbb69a1695cb900ad4c27"
+    },
+    "guide/files.md": {
+      "source": "a68d2bc25e45c597f60ac7b1d5e0e4ec722ce034ca83210375b6b03ca16d8bcb",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "46e9c505e65cededa5d80f35117ab586d32d5866794830c97896c96ff4ce3c71"
+    },
+    "guide/getting-started.md": {
+      "source": "9371bebe0eb1ee9b4e8150000dfbc9b277cfd13000d76d23147ad5fa169a2b9a",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "9371bebe0eb1ee9b4e8150000dfbc9b277cfd13000d76d23147ad5fa169a2b9a"
+    },
+    "guide/mcp.md": {
+      "source": "a346b5c9843cb1b0c87976c4ad9c24281ac7ed625750a0b152a45074e11a485a",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "636199ce3ed308e5dd6a7817e436648877dfa8d03e248f57ea8b698f4040828f"
+    },
+    "guide/parameters.md": {
+      "source": "57f42747d39172c08844ce66830a1fdd8e49990be7488315e16359eec153b4b6",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "dc338f990395cf6e1e808538416fb4a42c0d30e9c116d32e211965372adb41db"
+    },
+    "guide/plastic.md": {
+      "source": "48af3406c9c20b8a8929e9d9e9bec599d71a1a588280dd77aeaa8eee528d1d7c",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "48af3406c9c20b8a8929e9d9e9bec599d71a1a588280dd77aeaa8eee528d1d7c"
+    },
+    "guide/sheet-metal.md": {
+      "source": "e75c2fc2195194ba58c140aedbd30714fe3dca6e9f0c366195e0e279fd3238af",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "e75c2fc2195194ba58c140aedbd30714fe3dca6e9f0c366195e0e279fd3238af"
+    },
+    "guide/shortcuts.md": {
+      "source": "6da4afe4948cb1693e986af6c6dcb20a1a65398ac3e72c6411b02cf84fe65b86",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "6da4afe4948cb1693e986af6c6dcb20a1a65398ac3e72c6411b02cf84fe65b86"
+    },
+    "guide/sketching.md": {
+      "source": "2f466fde152f445837a7d0ce70b2be47267d6b0196d95d30b53abe44a08c2d94",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "33ef3840ccbff59930e30b42571898b060d5eb5a508e5d48b93b9bbac0f9cb7b"
+    },
+    "guide/troubleshooting.md": {
+      "source": "cad594444f0376f78ea7bd63c66383e518adb59f5265f1ae92e7624bfd7d7341",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "cad594444f0376f78ea7bd63c66383e518adb59f5265f1ae92e7624bfd7d7341"
+    },
+    "guide/ui-tour.md": {
+      "source": "3669a7149f843574da8637e9053494eba469e7a99f0c7f9c184602470003ceed",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "3669a7149f843574da8637e9053494eba469e7a99f0c7f9c184602470003ceed"
+    },
+    "guide/updates.md": {
+      "source": "6d60a394b19cf31850a3514237222c00082624ab77ce04071e71c7c611343a9d",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "6d60a394b19cf31850a3514237222c00082624ab77ce04071e71c7c611343a9d"
+    },
+    "introduction.md": {
+      "source": "ffbb17e6a6456f2d26b4c8a1439fd7bbdf60a6ef26d4fd9d4193cb3e70063a82",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "ffbb17e6a6456f2d26b4c8a1439fd7bbdf60a6ef26d4fd9d4193cb3e70063a82"
+    },
+    "reference/glossary.md": {
+      "source": "e6194e68a280bdbfe34e029ae6000164c4aa25e8ae4571ba7db572446aab92eb",
+      "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6",
+      "copy": "e6194e68a280bdbfe34e029ae6000164c4aa25e8ae4571ba7db572446aab92eb"
+    }
+  },
+  "revision": "d8eb65d26e36af74fc573c094f3106d0626fbcb6"
+}

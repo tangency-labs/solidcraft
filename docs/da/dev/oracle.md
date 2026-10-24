@@ -1,0 +1,136 @@
+# Reference Tests (referencetests)
+
+Genereret af `cargo xtask oracle`. Hvert testtilfælde i [`tests/oracle/`](../tests/oracle/) beskriver et emne med en `recipe.json` i SolidCrafts eget format. Kommandoerne i opskriften udføres gennem kommandosystemet, og resultatet sammenlignes med `expected.json`: antal emner, volumen og areal (relativ tolerance 1e-3 medmindre andet er angivet), tyngdepunkt og Bounding Box (inden for 1e-3 af emnets størrelse), antal flader når geometrien fastlægger dette, og, hvis `reference.stl` findes, samplet symmetrisk Hausdorff-afstand mellem overfladerne samt de vigtigste andetmomenter i de to trianguleringer. Hvert genopbygget emne eksporteres desuden til STEP, valideres og læses ind igen.
+
+De forventede værdier kommer fra følgende kilder (**Source**-kolonnen):
+
+- **analytic (analytisk):** Eksakte geometriske formler beregnet manuelt, herunder prismer, cylindre, kegler, kugler, torus, Pappus' sætninger, Fillet med konstant eller varierende radius på lige kanter og bukninger i pladekonstruktion som ringsektorer. Scripts i [`tools/oracle-analytic/`](../tools/oracle-analytic/) beregner værdierne og dokumenterer formlerne.
+- **freecad &lt;version&gt;:** Samme opskrift opbygget med FreeCADs offentlige Python-API af [`tools/freecad-oracle/`](../tools/freecad-oracle/), en uafhængig kernel kørt som eksternt program. SolidCraft er ikke afhængig af FreeCAD. Hvor de to kerner lovligt producerer lidt forskellige overflader (f.eks. hvor afrundinger mødes i et hjørne), sammenlignes kun volumen og areal inden for testtilfældets tolerance.
+
+Ingen forventede værdier kommer fra kommercielle CAD-produkter.
+
+**83 af 83 testtilfælde består**; kilder: 62 analytiske, 21 FreeCAD. Ingen kendte fejl er registreret i issues, og ingen tilfælde mangler forventede værdier.
+
+| Testtilfælde | Kilde | Resultat | Overfladeafstand i mm (maks. / gennemsnit) | Metode | Bemærkninger |
+|---|---|---|---|---|---|
+| 01-box | analytisk | bestået |  | boks 40 x 30 x 20 fra origo: V = abc, A = 2(ab + bc + ca) |  |
+| 02-cylinder | analytisk | bestået |  | cylinder r=15 h=50 on XY: V = pi r^2 h, A = 2 pi r^2 + 2 pi r h |  |
+| 03-box-through-hole | analytisk | bestået |  | boks 60x40x20 minus centred through cylinder r=6: V = abc - pi r^2 c, A = 2(ab+bc+ca) - 2 pi r^2 + 2 pi r c; hole is centred so the centroid stays at the boks centre |  |
+| 04-revolve-vase | analytisk | bestået |  | revolve of a line/3-point-arc profile (XZ, x = radius, z = -sketch y) 360 deg about Z. Pappus/Green: V = 2 pi * int x dA, z_c = int x z dA / int x dA, A = sum over profile edges of 2 pi int x ds (bottom disk r20, frustum r20->25, torus zone of the arc (centre (-16.000000, 33.000000), R=41.109610), frustum r15->18, top disk r18) |  |
+| 05-taper-extrude | analytisk | bestået |  | square frustum: base 40 at z=0, top a1 = 40 + 2*30*tan10 at z=30 (positive taper grows outward); V = h/3 (A0 + A1 + sqrt(A0 A1)), z_c = h (A0 + 2 sqrt(A0A1) + 3 A1) / (4 (A0 + sqrt(A0A1) + A1)), sides = 4 trapezoids (a0+a1)/2 * h/cos(10) |  |
+| 06-symmetric-extrude | analytisk | bestået |  | 50 (x) by 20 (z) rectangle on XZ extruded +-15 along Y: boks 50x30x20 centreret omkring origo |  |
+| 07-fillet-all-edges | analytisk | bestået |  | boks 40x30x20 med alle kanter afrundet r=3 = inner boks (34x24x14) grown by a ball r (Steiner): V = abc + 2r(ab+bc+ca) + pi r^2 (a+b+c) + 4/3 pi r^3, A = 2(ab+bc+ca) + 2 pi r (a+b+c) + 4 pi r^2; faces 6 planes + 12 quarter cylinders + 8 sphere octants |  |
+| 08-chamfer | analytisk | bestået |  | boks 40x30x20 with the 4 top edges chamfered 2: lower boks 40x30x18 + top slab with section (36+2u)x(26+2u) at depth u (V, moment by exact polynomial integration); A = bottom + sides(h=18) + top 36x26 + 4 trapezoid bevels of slant 2 sqrt2 |  |
+| 09-shell | analytisk | bestået |  | 50x40x30 boks shelled inward 2 with the top open: boks minus cavity [2,48]x[2,38]x[2,30]; A = outer bottom + outer sides + rim + cavity floor + cavity walls |  |
+| 10-rect-pattern-holes | analytisk | bestået |  | plate 90x70x5 minus 12 gennemgående cylindre r=3 at (15+20i, 15+20j), i<4, j<3: V = abc - 12 pi r^2 t, A = 2(ab+bc+ca) + 12(2 pi r t - 2 pi r^2) |  |
+| 11-circular-pattern-flange | analytisk | bestået |  | annulus R50/r15 h10 minus 6 gennemgående cylindre r=5 on a 40 radius: V = pi(R^2-r^2)h - 6 pi rh^2 h, A = 2 pi(R^2-r^2) + 2 pi(R+r)h + 6(2 pi rh h - 2 pi rh^2); 6-fold symmetry keeps the centroid on the axis |  |
+| 12-mirror-feature | analytisk | bestået |  | block [-30,30]x[0,30]x[0,10] + two bosses r=6 h=15 at (+-15,15) on top (mirror across YZ): V = abc + 2 pi r^2 h, A = 2(ab+bc+ca) + 2 * 2 pi r h |  |
+| 13-combine-join | analytisk | bestået |  | boks [0,40]^2x[0,20] union cylinder r=12 at (40,20) z 0..40: V = boks + half-cylinder (x>40, z<20, centroid 40 + 4r/3pi) + full cylinder z 20..40; A = bottom (1600 + pi r^2/2) + boks top (1600 - pi r^2/2) + cyl top + 3 full sides + x=40 side minus 24x20 + cyl side (pi r 40 outside half + pi r 20 upper inside half) |  |
+| 14-combine-cut | analytisk | bestået |  | boks [-25,25]^2x[-20,0] minus sphere r=15 at the origin (lower hemisphere removed): V = abc - 2/3 pi r^3, hemisphere centroid z = -3r/8; A = 2(ab+bc+ca) - pi r^2 + 2 pi r^2 |  |
+| 15-combine-intersect | analytisk | bestået |  | cube [-20,20]^3 intersect sphere R=25: sphere minus 6 disjoint caps of height h=5 (caps cannot overlap: two would need x^2+y^2 > 800 > R^2); V = 4/3 pi R^3 - 6 pi h^2 (3R-h)/3, A = 4 pi R^2 - 6 * 2 pi R h + 6 pi (R^2-20^2) |  |
+| 16-sweep | analytisk | bestået |  | circle r=3 swept along line 30 (+Z) + tangent R20 quarter arc + line 30 (+X): two cylinders + quarter torus (Pappus: V = pi r^2 R theta, A = 2 pi r R theta; torus centroid at rho = (R^2 + r^2/4)/R * sin(theta/2)/(theta/2) from the bend axis along the bisector) + 2 end disks |  |
+| 17-loft | freecad 1.1.4 | bestået | 0.013 / 0.0019 (worst at -7.9, -10.8, 31.2) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part.makeLoft |  |
+| 18-hole-features | analytisk | bestået |  | plate 60x40x15 minus: counterbore (r7 x 5 deep + r4 through), countersink (90 deg cone frustum r6->r3 over 3 mm + r3 through), blind r3 hole 10 deep to the shoulder with a 118 deg cone point (height 3/tan59, centroid 1/4 up from the apex); areas: removed top/bottom disks, cylinder walls 2 pi r h, cb floor annulus, cone laterals pi r s |  |
+| 19-l-bracket-constrained | analytisk | bestået |  | solved L: (0,0)-(60,0)-(60,8)-(8,8)-(8,40)-(0,40); area 60x8 + 8x32, extruded 20: V = A2 h, A = 2 A2 + perimeter*h, centroid of the two rectangles |  |
+| 20-slot-constrained | analytisk | bestået |  | obround: arc centres (0,0) and (40,0), R6, tangent horizontal lines y=+-6: A2 = 2rL + pi r^2, V = A2 h, A = 2 A2 + perimeter (2L + 2 pi r) h |  |
+| 21-draft | analytisk | bestået |  | 40x40x30 box, 5 deg draft hinged on the bottom (z=0), pull -Z: square frustum 40 -> 40 + 2*30*tan5; V = h/3 (A0 + A1 + sqrt(A0A1)), sides 4 trapezoids of slant h/cos5 |  |
+| 22-split-body | analytisk | bestået |  | cylinder r20 z -30..30 split by the plane through the X axis tilted 30 deg (z = y tan30, stays within /z/<=11.6 inside the cylinder): 2 congruent halves (point symmetry), V total = pi r^2 h, A total = cylinder + 2 ellipses pi r (r/cos30) |  |
+| 23-bracket-multifeature | freecad 1.1.4 | bestået | 0.007 / 0.0010 (worst at 57.3, 49.3, 25.8) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part extrude join, Part makeFillet, Part extrude join, Part extrude cut, Part makeChamfer |  |
+| 24-user-parameters | analytisk | bestået |  | width 60 x depth 40 x height 15 block fra origo with a centred d10 through hole: V = (wd - pi r^2) h, A = 2(wd - pi r^2) + 2(w+d)h + 2 pi r h |  |
+| 25-sketch-triangle | analytisk | bestået |  | solved triangle (0,0), (50,0), P = t(cos60, sin60) with t = 25 + sqrt(150) from /P-(50,0)/ = 45 (the root nearest the drawn apex); V = (1/2 * 50 * Py) * 5, A = 2 A2 + perimeter*5, centroid = vertex mean |  |
+| 26-sketch-belt | analytisk | bestået |  | belt: convex hull of circles R20 @ (0,0) and r10 @ (50,0) (external tangents, sin a = (R-r)/d) minus the d8 hole at (50,0), extruded 5 as one body; hull area = (R+r) sqrt(d^2-(R-r)^2) + R^2(pi+2a)/2 + r^2(pi-2a)/2; moments by Green's theorem over the line/arc boundary |  |
+| 27-sketch-trapezoid | analytisk | bestået |  | solved trapezoid bottom (-30,0)-(30,0), top (-15,25)-(15,25) minus two d6 holes at (+-18, 8) (symmetric about the axis, 36 apart, 8 above l1); trapezoid centroid y = H(a+2b)/(3(a+b)); V = A2 t, A = 2 A2 + perimeter t |  |
+| 28-blind-pocket-fillets | freecad 1.1.4 | bestået | 0.009 / 0.0015 (worst at 60.0, 15.1, 13.4) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part extrude cut, Part makeFillet |  |
+| 29-two-sided-and-partial-revolve | analytisk | bestået |  | block [-20,20]x[-25,10]x[0,20] minus the 270 deg revolve (from +X towards +Y) of the 8x8 square r 4..12, z 12..20; the removed section is the annular sector minus the circular segment y > 10 (R^2 acos(d/R) - d sqrt(R^2-d^2), y-moment 2/3 (R^2-d^2)^1.5) that lies outside the block; sector moments (R^3-r^3)/3 (sin, 1-cos); A = boks - top opening + floor - front-face notch 2 sqrt(44) x 8 + inner wall r th h + outer wall (th - pi + 2 asin(5/6)) R h + 2 end caps |  |
+| 30-fillet-after-shell | freecad 1.1.4 | bestået | 0.008 / 0.0025 (worst at 56.3, 35.7, 3.5) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, makeThickness shell, Part makeFillet |  |
+| 31-fillet-l-all-edges | freecad 1.1.4 | bestået | 0.009 / 0.0018 (worst at 7.9, 38.6, 18.0) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part makeFillet |  |
+| 32-boss-plate-fillets | analytisk | bestået |  | plate 60x60x8 + boss (r10, z 8..23) with R3 concave base and R2 convex top fillets taken as one solid of revolution: V, z-moment and lateral area from Pappus/Green on its (r,z) profile (quarter-circle fillet arcs); plate top loses the r13 disc |  |
+| 33-fillet-tangent-chain | analytisk | bestået |  | obround (R8, centres 40 apart) x 10 minus R2 fillet spandrel R^2(1-pi/4) and 1 mm chamfer triangle swept round the whole loop (Pappus: section x path of its centroid, inset R(10-3pi)/(3(4-pi)) resp. c/3); surfaces likewise (fillet arc centroid inset R-2R/pi) |  |
+| 34-chamfer-then-fillet | freecad 1.1.4 | bestået | 0.009 / 0.0022 (worst at 38.5, 5.6, 19.9) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part makeChamfer, Part makeFillet |  |
+| 35-fillet-curved-curved | freecad 1.1.4 | bestået | 0.011 / 0.0024 (worst at -9.5, 5.3, 14.6) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part extrude join, Part makeFillet |  |
+| 36-corner-blend-two-radii | freecad 1.1.4 | bestået | 0.012 / 0.0026 (worst at 45.4, 39.2, 26.5) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part makeFillet |  |
+| 37-pyramid-apex-blend | freecad 1.1.4 | bestået | 0.020 / 0.0029 (worst at -0.0, 0.0, 28.4) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part.makeLoft, Part makeFillet |  |
+| 38-coincident-cylinders | analytisk | bestået |  | union of r10 z0..30 and r10 z20..50 = cylinder r10 h50: V = pi r^2 h, A = 2 pi r h + 2 pi r^2 |  |
+| 39-tee-pipe | freecad 1.1.4 | bestået | 0.008 / 0.0014 (worst at -9.7, 2.4, 40.0) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part extrude join, Part extrude cut |  |
+| 40-box-sphere-torus | analytisk | bestået |  | boks 60x60x10 (z -10..0) + upper hemisphere r12 + spherical cap h2 below z=-10 (V = pi h^2(3R-h)/3, A = 2 pi R h) - lower half torus R22 r4 (Pappus: V = pi r^2/2 * 2 pi R, centroid -4r/3pi, A = pi r * 2 pi R); top loses disc r12 and annulus 18..26, bottom loses disc r sqrt(44) | faces: bottom, 4 sides, top split by the groove into an annulus (r 12..18) and the outer part, upper sphere, lower cap, torus |
+| 41-tube-radial-holes | freecad 1.1.4 | bestået | 0.010 / 0.0012 (worst at 1.9, 19.9, 24.8) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part extrude cut, pattern (tools transformed and re-applied) |  |
+| 42-overlapping-patterns | freecad 1.1.4 | bestået | 0.009 / 0.0010 (worst at -1.0, -10.1, 2.2) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part extrude cut, pattern (tools transformed and re-applied), Part extrude cut, pattern (tools transformed and re-applied) |  |
+| 43-cut-splits-body | analytisk | bestået |  | two boxes 35x20x20 (x 0..35 and 45..80): V = 2abc, A = 2*2(ab+bc+ca) |  |
+| 44-shell-l-bracket | analytisk | bestået |  | L prism (area 736, perimeter 200) x 20 minus cavity = L shrunk by 2 (SolidCraft's intersection-join shell convention: inner faces offset by 2 and extended to meet, sharp inner corner at (6,6); area 352) from z=2 to 20. A rounded (arc) join would give V 8368.5487, A 8768.5487, 16 faces |  |
+| 45-shell-boss-plate | analytisk | bestået |  | plate 60x60x10 + boss r12 h20 minus cavity (box 56x56x8 + cylinder r10 z8..28) under SolidCraft's intersection-join shell convention (offset faces extended to meet: sharp circular inner edge at r10, z8). A rounded (arc) join would give V 13620.2567, A 14104.4455, 16 faces (torus round r2) |  |
+| 46-shell-two-open-faces | analytisk | bestået |  | boks 50x40x30 minus cavity x3..47, y0..37, z3..30 (3 mm walls, top and front open) |  |
+| 47-draft-curved-pocket | freecad 1.1.4 | bestået | 0.008 / 0.0019 (worst at 22.1, 21.3, 15.0) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part extrude cut, PartDesign Draft |  |
+| 48-pulley | analytisk | bestået |  | revolve of the 12-segment (r,z) polygon about Z: V = 2 pi int r dA, Mz = 2 pi int r z dA, A = 2 pi int r ds (Pappus) |  |
+| 49-helical-sweep | analytisk | bestået |  | true helix coil (screw motion of the axial d4 section, R20, pitch 8, 3 turns): V = turns * 2 pi R * pi a^2; lateral A = turns * 2 pi * int sqrt(r^2 + (p/2pi)^2 (dr/ds)^2) ds (periodic trapezoid, exact to round-off) + two end discs; COM z = pitch*turns/2 |  |
+| 50-sweep-tight-bend | analytisk | bestået |  | tube r5 along line 20 + R5 quarter bend + line 20: V = pi r^2 L, A = 2 pi r L + 2 pi r^2 (Pappus, valid while bend radius >= r; here equal so the inner side pinches to a line); bend centroid at (R^2 + r^2/4)/R * sinc(pi/4) along the bisector |  |
+| 51-loft-rect-circle-offset | freecad 1.1.4 | bestået | 0.025 / 0.0030 (worst at -11.7, 15.0, 0.4) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part.makeLoft |  |
+| 52-circular-pattern-fillet | analytisk | bestået |  | disc r40 h8 + 6 x (boss r6 h10 with R2 concave base fillet as a solid of revolution, Pappus/Green on its (r,z) profile) at radius 28; disc top loses 6 discs r8 |  |
+| 53-path-pattern | analytisk | bestået |  | plate 120x60x5 minus 7 through holes d6 at arc lengths k*17.875031 along the arc through (100,15),(60,45),(20,15) (centre (60,10/3), R 125/3), translated copies |  |
+| 54-mirror-body-fillets | analytisk | bestået |  | prism h10 of the 60x40 rectangle with four R5 corner rounds and two d8 holes at (+-15,20): V = A h, area = 2A + perimeter*h |  |
+| 55-tapped-hole-cosmetic | analytisk | bestået |  | plate 40x30x15 minus d6.8 cylinder 12 deep (to the shoulder) and 118 deg drill point cone (h = r/tan59, V = pi r^2 h/3, lateral pi r * r/sin59); cosmetic thread adds no geometry |  |
+| 56-holes-on-curved-face | freecad 1.1.4 | bestået | 0.009 / 0.0018 (worst at -16.9, 18.5, 0.0) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, hole tool (cylinder/cone) cut |  |
+| 57-hole-pattern-sketch-points | analytisk | bestået |  | plate 80x50x10 minus 6 counterbored through holes (cb d10 x 5.5, hole d5.5) at x 15/40/65, y 15/35 |  |
+| 58-phone-stand | freecad 1.1.4 | bestået | 0.007 / 0.0010 (worst at 82.5, 11.7, 6.1) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part makeFillet, Part extrude cut |  |
+| 59-enclosure-base | freecad 1.1.4 | bestået | 0.008 / 0.0017 (worst at 90.9, 53.0, 6.0) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part makeFillet, makeThickness shell, Part extrude join, Part extrude cut |  |
+| 60-pipe-flange | freecad 1.1.4 | bestået |  | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part revolve, Part extrude cut, pattern (tools transformed and re-applied), Part makeChamfer, Part makeFillet | No reference.stl: over 409600 bytes even at 0.02 mm deflection (11380 facets). |
+| 61-shaft-keyway | freecad 1.1.4 | bestået | 0.008 / 0.0019 (worst at 12.2, 2.8, 72.1) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part revolve, Part makeChamfer, Part extrude cut |  |
+| 62-heat-sink | analytisk | bestået |  | base 60x50x5 + 15 fins 1.5x50x25 at x = 2 + 4k: sums of boxes; fin ends coplanar with the base ends | faces: bottom, x=0, x=60, y=0 and y=50 (each merged with the fin ends), 16 base-top strips, 15x3 fin faces |
+| 63-hinge-knuckle | freecad 1.1.4 | bestået | 0.008 / 0.0016 (worst at 28.0, 36.9, 4.7) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part extrude join, Part extrude cut |  |
+| 64-sketch-tangent-arc-chain | analytisk | bestået |  | solved sketch: 80x20 rectangle whose top is 4 tangent R12 arcs on 20 mm chords alternating up/down (net area 1600); prism h3: V = A h, area = 2A + perimeter*h, Green's theorem for centroid |  |
+| 65-sketch-gear-tooth | freecad 1.1.4 | bestået | 0.008 / 0.0017 (worst at -6.5, 39.5, 0.0) | FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Sketcher-solved sketch, Part extrude |  |
+| 66-sketch-linkage | analytisk | bestået |  | solved sketch: hull of circles R12 at (0,0) and R8 at (60,0) (outer tangent lines, cos a = 4/60) minus holes d12, d8 (concentric) and d4 at (30,+-4) (symmetry keeps radii equal); prism h6 |  |
+| 67-sm-base-flange | analytisk | bestået |  | plate 100 x 60 x t, t = 2.5 (Steel (mm) rule), thickness along +Z: V = 100*60*t, A = 2(ab+bc+ca) |  |
+| 68-sm-edge-flange | analytisk | bestået |  | extrusion along x (100) of the YZ section: base y 5..60 x t; 90 deg bend annulus R 2.5..5 about (y 5, z 5); flange y 0..2.5, z 5..20. Setback (R+t)tan45 = 5 (inside bend position, outer-face height datum: outer face of flange reaches z = 20); V = L*A_sec, A = 2 A_sec + L P_sec | trim/setback and height datum are SolidCraft's documented edge-flange conventions (sheet.rs add_flanges) |
+| 69-sm-tray | analytisk | bestået |  | tray: base 90 x 50 x 2.5 (each edge trimmed by the setback 5); four 90 deg bends R 2.5..5 along the trimmed edges (90, 50, 90, 50 long); four walls 2.5 thick, z 5..25, each running on past its bend by ext = (R+t) - (t + gap/sqrt2) = 0.732233047 at both ends; open corners. A = sum of prisms - 2 x joints | corner treatment is SolidCraft's convention (sheet.rs close_corners: panels extended until their inner corners are the rule gap = t apart; no corner fill, open corner relief below the walls) |
+| 70-sm-flange-45 | analytisk | bestået |  | as 68 with a 45 deg bend: setback (R+t)tan22.5 = 2.071068, base y 2.071068..60, bend annulus 2.5..5 over 45 deg about (y 2.071068, z 5), flat leg 15 - setback = 12.928932 turned 45 deg; extrusion along x 100 | SolidCraft convention: flange height (15) is measured along the flange's outer face from the virtual sharp at the original edge (y 0, z 0), so the outer top corner is at (y, z) = (-15 cos45, 15 sin45). |
+| 71-sm-custom-rule | analytisk | bestået |  | U channel, rule t 1.5, R 3, K 0.33 (K unused folded): base y 4.5..45.5 x 1.5; two 90 deg bend annuli R 3..4.5; flanges y 0..1.5 and 48.5..50, z 4.5..20; extrusion along x 80 | the rule edit applies to the whole sheet body (base built before it is 1.5 thick too, as the recipe's edge picks at z = 1.5 state) |
+| 72-sm-contour-flange | analytisk | bestået |  | contour flange, width 50 along +Y, XZ section: plate x 0..35 z 0..2.5; bend R 2.5..5 about (35, 5) (sketch corner = outer virtual sharp, setback R+t); wall x 37.5..40 z 5..27.5; bend R 2.5..5 about (42.5, 27.5) (sketch corner = inner virtual sharp, setback R); plate x 42.5..70 z 30..32.5 | SolidCraft convention: the sketch lines are the sheet face away from the material (material right of travel); thickness grows to the material side |
+| 73-sm-hem | analytisk | bestået |  | 68's part (height 20) plus a flat hem on the flange top edge: 180 deg bend, inner radius = hem gap 0.01, outer 2.51, about (y 2.51, z 20), folded toward +y (inside); hem leg 8 - (0.01 + 2.5) = 5.49: y 2.52..5.02, z 14.51..20; extrusion along x 100 | SolidCraft conventions: hem gap 0.01 mm (rule hem_gap), hem length measured to the outer face of the hem bend (top at z 22.51), hem folds over the flange's inner face. |
+| 74-sm-unfold-refold | analytisk | bestået |  | U channel 80x50 (t 2.5, R 2.5, base y 5..45, flanges z 5..20) with the flat-pattern slot x 35..45, y -12..10 refolded: BA = (pi/2)(R + K t) = 5.654866776, so the slot removes base y 5..10, the whole y=0 bend and the flange from z 5 to 5 + (12 - (BA - 5)) = 16.345133224; x-segments 0..35 / 35..45 / 45..80 | unfold/refold maps flat distance through the K-factor neutral layer (K 0.44) |
+| 75-sm-bracket-holes | analytisk | bestået |  | base x 0..75, y 5..40, z 0..2.5 (trimmed 5 by each flange's setback); bend 1 (R 2.5..5 about y 5, z 5) x 0..75; flange 1 y 0..2.5, z 5..30, x 0..80; bend 2 (R 2.5..5 about x 75, z 5) y 5..40; flange 2 x 77.5..80, z 5..15, y 5..40; minus two d6 through holes at (25,20), (55,20) in the base. A = sum of prism areas - 2 x 4 joint areas (75t, 75t, 35t, 35t) + hole walls - hole discs | SolidCraft convention: the second flange trims the base under the first bend, so bend 1 stops at x 75 while flange 1's panel runs to x 80 (open corner relief, no fill). |
+| 76-sm-thickness-variant | analytisk | bestået |  | final rule thickness 3 (bend radius = Thickness = 3): base y 6..60 x 3; bend annulus R 3..6 about (y 6, z 6); flange y 0..3, z 6..20; extrusion along x 100 | the rule's thickness edits regenerate the whole sheet body; only the final 3 mm state matters |
+| 77-fillet-variable-linear | analytisk | bestået |  | boks 40x30x20 with its top front edge (y=0, z=20) rounded at a radius running straight from 2 (x=0) to 5 (x=40): sections are quarter rounds, V = abc - (1 - pi/4) L (a^2 + ab + b^2) / 3; moments and the round's area integrated along the edge (tools/oracle-analytic/cases_fillets.py) |  |
+| 78-fillet-variable-to-zero | analytisk | bestået |  | as 77 with the radius running from 4 (x=0) down to 0 (x=40), where the round closes to the corner: V = abc - (1 - pi/4) L a^2 / 3; the round is three-sided and the corner at x=40 stays |  |
+| 79-fillet-chord-length | analytisk | bestået |  | boks 40x30x20, top front edge rounded 4 wide across (chord c): r = c / (2 cos 45 deg) = 2 sqrt 2; V = abc - (1 - pi/4) r^2 L, A = 2(ab + bc + ca) - 2 r L + (pi/2) r L - 2 (1 - pi/4) r^2 |  |
+| 80-fillet-taper-to-fit | analytisk | bestået |  | plate (top 20 -> 2 wide over x 0..40, 15 high) with its top front edge filleted at 3, fit: taper. The radius is the taper law: a clamped cubic B-spline in u = x/40 on 8 equal spans, control radii min(3, 0.9 room) at the Greville abscissae, room = min(20 - 18u, 15) tan 45 deg (top face width, front face height): 3.0000, 3.0000, 3.0000, 3.0000, 3.0000, 3.0000, 3.0000, 3.0000, 3.0000, 2.4750, 1.8000. Sections are quarter rounds; V, moments and areas integrated along the edge |  |
+| 81-fillet-spline-radius | analytisk | bestået |  | boks 40x30x20 with its top front edge (y=0, z=20) rounded at a radius that is a clamped cubic B-spline in u = x/40, knots 0,0,0,0,0.25,0.6,1,1,1,1, control radii 2, 5, 1.5, 4, 1, 3 (r(0) = 2, r(40) = 3). Sections are quarter rounds; V, moments and areas integrated along the edge, exactly per knot span |  |
+| 82-thin-extrude-frame | analytisk | bestået |  | square frame: the lines' 40 mm square walled 3 mm inside and 1 mm outside (mitred corners) is 42 x 42 less 34 x 34, 10 mm tall: V = (42^2 - 34^2) * 10, A = 2 (42^2 - 34^2) + 4 * 42 * 10 + 4 * 34 * 10 |  |
+| 83-boundary-loop-thicken | analytisk | bestået |  | region = 10 x 10 square + half disc r 5 on its top side: A = 100 + 12.5 pi, centroid by moments (half disc's at 4r / (3 pi) above its diameter); slab of thickness 2 over it (symmetric about z = 0): V = 2A, area = 2A + 2 (30 + 5 pi) |  |
+
+## Ikke dækket af et referencetesttilfælde
+
+| Feature | Kontrolleres af |
+|---|---|
+| Boss (draft, root fillet, hole, ribs) | volumen af stolpe, hul og ribber (`boss_with_hole_fillet_and_ribs`) |
+| Lip / Groove | forskydninger af bånd og frigang i not på en udhulet boks (`lip_and_groove_on_a_shelled_box`, `groove_takes_the_rule_clearance`) |
+| Snap Fit | armens og modholdets volumen samt krogens retning (`snap_fit_arm_and_catch`) |
+| Rest | rektangulære, runde, hule og skråtstillede støtteflader (`rest_pads`) |
+| Plastic Rules (manage, assign) | biblioteksværdier, tykkelsesstyrede værdier og reglens formslip som standard for skruefæster (`plastic_rules_library_edit_and_assign`) |
+
+## Ordliste – engelsk til dansk
+
+| Engelsk udtryk | Dansk betydning |
+|---|---|
+| Reference Tests | Referencetests |
+| Case | Testtilfælde |
+| Expected Values | Forventede værdier |
+| Analytic | Analytisk |
+| Source | Kilde |
+| Result | Resultat |
+| Pass | Bestået |
+| Method | Metode |
+| Notes | Bemærkninger |
+| Surface Distance | Overfladeafstand |
+| Hausdorff Distance | Hausdorff-afstand |
+| Centre of Mass | Tyngdepunkt |
+| Bounding Box | Afgrænsningskasse |
+| Second Moment | Andetmoment |
+| Triangulation | Triangulering |
+| Tolerance | Tolerance |
+| Reference Geometry | Referencegeometri |
+| FreeCAD Oracle | Uafhængig FreeCAD-reference |
+| Recipe | Opskrift på modelopbygning |
+| Solid | Massivt emne |
+| Fillet | Afrunding |
+| Sheet Metal Bend | Pladebukning |
+| Not Covered | Ikke dækket |
