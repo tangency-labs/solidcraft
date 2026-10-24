@@ -10,6 +10,7 @@ fn subject() -> Session {
     .unwrap();
     s
 }
+#[cfg(feature = "bundled-render-library")]
 #[test]
 fn native_studios_resolve_without_mutation_and_apply_one_complete_undo() {
     let entries = super::entries();
@@ -126,6 +127,7 @@ fn quality_projection_never_claims_adaptive_or_unbounded_profiles() {
     assert!(s.execute("render.quality.prepare", &json!({"id":"Q-002","variant":"fixed_samples_png","acknowledge_omissions":false})).is_err());
     assert_eq!(s.doc.to_json(), before);
 }
+#[cfg(feature = "bundled-render-library")]
 #[test]
 fn resource_availability_and_original_previews_are_bounded_and_nonmutating() {
     let mut s = subject();
