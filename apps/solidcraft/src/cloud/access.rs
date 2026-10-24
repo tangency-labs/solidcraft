@@ -17,7 +17,7 @@ fn storage() -> Error {
     Error::Storage("system credential store unavailable; unlock it and reconnect".into())
 }
 
-fn entry(id: &str) -> Result<keyring::Entry> {
+pub(super) fn entry(id: &str) -> Result<keyring::Entry> {
     if id.is_empty() || id.len() > 4096 || id.chars().any(char::is_control) {
         return Err(storage());
     }
@@ -35,6 +35,20 @@ impl NativeAccess for Access {
     fn store_credential(&self, id: &str, token: &str) -> Result<()> {
         solidcraft_cloud::setup::check_token(token)?;
         entry(id)?.set_password(token).map_err(|_| storage())
+    }
+    fn store_ssh_passphrase(&self, path: &str, passphrase: &str) -> Result<()> {
+        entry(&solidcraft_cloud::jobs::ssh_credential(path))?.set_password(passphrase).map_err(|_| storage())
+    }
+    fn ssh_askpass(&self, path: &str) -> Result<Option<std::path::PathBuf>> {
+        // Existing keys continue using system authentication when no saved secret is
+        // available. Only a key with an accessible entry opts into our helper.
+        match entry(&solidcraft_cloud::jobs::ssh_credential(path))?.get_password() {
+            Ok(secret) => {
+                let _secret = zeroize::Zeroizing::new(secret);
+                std::env::current_exe().map(Some).map_err(|_| storage())
+            }
+            Err(_) => Ok(None),
+        }
     }
     fn prepare(&self, connection: Connection, job: &Job) -> Result<Connection> {
         let token = self.credential(&connection.credential)?.ok_or_else(storage)?;

@@ -14,7 +14,7 @@ struct Worker {
 impl Host for Worker {
     fn submit(&self, operation: Operation, _: String) -> solidcraft_cloud::Result<Job> {
         let connection = match &operation {
-            Operation::LoadSettings | Operation::Configure(_) => String::new(),
+            Operation::LoadSettings | Operation::Configure(_) | Operation::GenerateSshKey(_) => String::new(),
             Operation::Setup(c)
             | Operation::Test(c)
             | Operation::List(c)

@@ -12,7 +12,42 @@ use crate::{Connection, Destination, Error, Published, Result, Settings, Snapsho
 
 static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 
+/// One-shot secret input. Never serialize or include it in command parameters or logs.
+#[derive(Default)]
+pub struct SshKeyInput {
+    pub passphrase: zeroize::Zeroizing<String>,
+    pub remember: bool,
+}
+
+impl SshKeyInput {
+    pub fn validate(&self) -> Result<()> {
+        if self.passphrase.len() > 1024 || self.passphrase.chars().any(char::is_control) {
+            return Err(Error::Invalid("SSH passphrase must be at most 1024 bytes without control characters".into()));
+        }
+        if self.remember && self.passphrase.is_empty() {
+            return Err(Error::Invalid("enter a passphrase before remembering it".into()));
+        }
+        Ok(())
+    }
+}
+
+/// Public result of local key generation. Contains no private key or passphrase.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SshKey {
+    pub path: String,
+    pub public_key: String,
+    pub encrypted: bool,
+    pub remembered: bool,
+}
+
+/// Stable local keychain identity; never written into a shared repository.
+pub fn ssh_credential(path: &str) -> String {
+    format!("ssh-key:{}", crate::digest(path.as_bytes()))
+}
+
 pub enum Operation {
+    GenerateSshKey(SshKeyInput),
     LoadSettings,
     Configure(Settings),
     /// Verify provider access and prepare a checkout; settings apply separately.

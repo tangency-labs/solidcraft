@@ -10,6 +10,11 @@ use crate::{
 };
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("cloud.ssh.generate", "Generate SSH Key", generate_key)
+        .icon("settings")
+        .noundo()
+        .doc_only()
+        .params("no parameters; creates a local Ed25519 pair asynchronously; optional secret input supplied through Session::set_cloud_ssh_key_input; returns operation id then public key and private-key path"),
     CommandSpec::new("cloud.connect", "Connect GitHub", connect)
         .icon("settings")
         .noundo()
@@ -66,6 +71,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .params("operation: operation id; pending local saves are retained"),
 ];
+
+fn generate_key(session: &mut Session, params: &Value) -> Result<Value> {
+    let input = session.cloud.ssh_key_input.take().unwrap_or_default();
+    if !params.as_object().is_some_and(|p| p.is_empty()) {
+        return Err(bad("cloud.ssh.generate", "pass secret input directly; this command takes no parameters"));
+    }
+    input.validate().map_err(error)?;
+    submit(session, Operation::GenerateSshKey(input))
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

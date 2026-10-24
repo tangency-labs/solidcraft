@@ -33,6 +33,7 @@ pub(crate) struct State {
     pub binding: Option<Binding>,
     pub configuration: Option<String>,
     pub settings_changed: bool,
+    pub ssh_key_input: Option<solidcraft_cloud::jobs::SshKeyInput>,
 }
 
 impl State {
@@ -46,6 +47,19 @@ pub(crate) fn error(error: solidcraft_cloud::Error) -> EngineError {
 }
 
 impl Session {
+    /// Supply a passphrase directly, outside the command recorder. The next
+    /// cloud.ssh.generate consumes it, including when submission fails.
+    pub fn set_cloud_ssh_key_input(&mut self, input: solidcraft_cloud::jobs::SshKeyInput) -> Result<()> {
+        self.cloud.ssh_key_input = None;
+        input.validate().map_err(error)?;
+        self.cloud.ssh_key_input = Some(input);
+        Ok(())
+    }
+
+    pub fn clear_cloud_ssh_key_input(&mut self) {
+        self.cloud.ssh_key_input = None;
+    }
+
     pub fn set_cloud_host(&mut self, host: Option<Arc<dyn Host>>) {
         self.cloud.host = host;
     }

@@ -22,8 +22,8 @@ Git-backed Cloud Saves (#4838) is in progress: portable project snapshots, durab
 queues, desktop/browser workers and guided GitHub setup with scoped HTTPS credentials are
 implemented on the feature branch, along with Start-page repository browsing and initial
 save destination selection, Cloud Saves settings and verified native Git connections
-with system or chosen SSH keys. Thumbnail previews, SSH key
-generation and integrated host validation remain. See the [implementation guide](docs/cloud-saves.md).
+with system, chosen or generated SSH keys. Thumbnail previews and integrated host
+validation remain. See the [implementation guide](docs/cloud-saves.md).
 
 ## Scope (owner decision, 2026-10-07)
 

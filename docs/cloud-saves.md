@@ -158,6 +158,7 @@ the durable host store, independently of the engine's bounded status history.
 | Commands | Behavior |
 | --- | --- |
 | `cloud.configure`, `cloud.settings` | Validate local connections/defaults and inspect the current design binding. With a host installed, configuration returns an operation id and applies after durable persistence; `cloud.settings {"reload":true}` reloads it asynchronously. Configuration contains credential identifiers only. |
+| `cloud.ssh.generate` | Generate a native local Ed25519 pair; returns an operation id, then private-key path and public key. Optional passphrase input uses `Session::set_cloud_ssh_key_input` outside JSON/logs; it is consumed once. |
 | `cloud.test`, `cloud.list`, `cloud.sync` | Submit a connection-scoped operation and return its operation identifier. |
 | `cloud.open` | Submit an opening operation for `{connection, project, file}`. |
 | `cloud.open.finish` | Validate and adopt the completed snapshot, preserving the host and connection settings. |
@@ -294,3 +295,37 @@ stops the test; delayed picker replies carry an editor identity so a closed or
 replaced editor cannot receive them. Directory selection is injected by the
 desktop host alongside the existing asynchronous file pickers. System and chosen
 SSH keys stay connection-scoped; the Git executable is a shared setting.
+
+
+### Native SSH key generation
+
+`io::cloud::ssh` reuses `ssh-key` 0.6.7 for Ed25519 and encrypted OpenSSH
+serialization. A fallible OS entropy read seeds `rand_chacha` before calling the
+crate's infallible RNG interface. Files use exclusive creation in a new private
+`cloud/ssh/key-…/` directory (0700 directory / 0600 files on Unix; owner-only
+inherited ACL on Windows). Generation never changes Git/SSH configuration or
+replaces existing keys. Cancellation before publication drops the temporary pair;
+a cancellation racing completed generation can leave an unused local pair.
+
+The registered `cloud.ssh.generate` command submits `Operation::GenerateSshKey`.
+Secret input uses the one-shot session API, is zeroized on drop, and is not copied
+into scratch sessions, JSON command parameters, crash recordings or public results.
+The UI clears unused input if command dispatch fails. Results contain only path,
+public key, and encryption/remembering flags. Generation and connection Apply are
+separate: after registering the public key, the selected identity must pass the
+normal proposed-connection test.
+
+`NativeAccess::store_ssh_passphrase` is called only on explicit opt-in. The desktop
+adapter uses the existing keyring service with a hashed path identity distinct
+from repository-token entries. `NativeAccess::ssh_askpass` provides the current
+executable only when that entry is accessible. Git gets a per-process askpass
+executable and opaque keychain id; the passphrase is retrieved in the helper.
+The helper runs before GUI initialization and answers only an exact selected-key
+passphrase prompt in the C locale. It rejects host confirmations and account
+password prompts. Standard SSH agents and system prompts remain usable for other
+keys and when the keychain entry is unavailable. Each connection's helper setup
+is confined to its own subprocess environment.
+
+The key form and result actions live in `cloud_settings/git/key.rs`. Host SSH
+settings links use the setup adapter; adding another host can reuse generation,
+credential storage, the connection test, and Git unchanged.

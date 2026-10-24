@@ -20,6 +20,7 @@ pub struct GitRepository {
     connection: Connection,
     job: Option<solidcraft_cloud::jobs::Job>,
     token: Option<String>,
+    ssh_askpass: Option<PathBuf>,
 }
 
 impl GitRepository {
@@ -43,7 +44,14 @@ impl GitRepository {
         }
         crate::vfs::check(&connection.checkout).map_err(storage)?;
         let checkout = fs::canonicalize(&connection.checkout).map_err(storage)?;
-        let repository = Self { checkout, executable: if executable.is_empty() { "git".into() } else { executable.into() }, connection, job, token };
+        let repository = Self {
+            checkout,
+            executable: if executable.is_empty() { "git".into() } else { executable.into() },
+            connection,
+            job,
+            token,
+            ssh_askpass: None,
+        };
         let root = repository.text(&["rev-parse", "--show-toplevel"])?;
         if fs::canonicalize(root.trim()).map_err(storage)? != repository.checkout {
             return Err(storage("checkout location must be the repository's top-level folder"));
@@ -53,6 +61,11 @@ impl GitRepository {
         }
         repository.check_ready()?;
         Ok(repository)
+    }
+
+    pub(super) fn with_ssh_askpass(mut self, executable: Option<PathBuf>) -> Self {
+        self.ssh_askpass = executable;
+        self
     }
 
     fn check_token_destination(&self) -> Result<()> {
@@ -72,10 +85,19 @@ impl GitRepository {
             crate::vfs::check(key).map_err(storage)?;
             // Git uses its shell for this override, including Git for Windows. Reuse a shell
             // quoting library instead of maintaining another quoting implementation.
+            let credential = solidcraft_cloud::jobs::ssh_credential(key);
             #[cfg(windows)]
             let key = key.replace('\\', "/");
             let ssh = shlex::try_join(["ssh", "-i", key.as_str(), "-o", "IdentitiesOnly=yes"]).map_err(storage)?;
             command.env("GIT_SSH_COMMAND", ssh);
+            if let Some(helper) = &self.ssh_askpass {
+                command
+                    .env("SSH_ASKPASS", helper)
+                    .env("SSH_ASKPASS_REQUIRE", "force")
+                    .env("SOLIDCRAFT_CLOUD_SSH_KEY", key.as_str())
+                    .env("LC_ALL", "C")
+                    .env("SOLIDCRAFT_CLOUD_SSH_ASKPASS", credential);
+            }
         }
         if let Some(token) = &self.token {
             super::auth::apply(&mut command, &self.connection, token)?;
@@ -486,6 +508,26 @@ mod tests {
         let parts: Vec<_> = parsed.stdout.split(|b| *b == 0).filter(|s| !s.is_empty()).collect();
         assert_eq!(parts, [b"ssh".as_slice(), b"-i", key.to_str().unwrap().as_bytes(), b"-o", b"IdentitiesOnly=yes"]);
     }
+    #[test]
+    fn remembered_ssh_helper_is_process_and_identity_scoped() {
+        let fixture = Fixture::new();
+        let key = fixture.root.join("key with 'quotes'");
+        fs::write(&key, b"example").unwrap();
+        let path = key.to_str().unwrap();
+        let connection = Connection { ssh_identity: SshIdentity::File(path.into()), ..fixture.connection() };
+        let repository = GitRepository::open(connection, "").unwrap().with_ssh_askpass(Some("/app path/solidcraft".into()));
+        let command = repository.command().unwrap();
+        let env: std::collections::BTreeMap<_, _> =
+            command.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        assert_eq!(env["SSH_ASKPASS"].as_deref(), Some("/app path/solidcraft"));
+        assert_eq!(env["SSH_ASKPASS_REQUIRE"].as_deref(), Some("force"));
+        assert_eq!(env["SOLIDCRAFT_CLOUD_SSH_ASKPASS"].as_deref(), Some(solidcraft_cloud::jobs::ssh_credential(path).as_str()));
+        #[cfg(not(windows))]
+        assert_eq!(env["SOLIDCRAFT_CLOUD_SSH_KEY"].as_deref(), Some(path));
+        let other = GitRepository::open(fixture.connection(), "").unwrap().command().unwrap();
+        assert!(other.get_envs().all(|(k, _)| k != "SSH_ASKPASS" && k != "SOLIDCRAFT_CLOUD_SSH_ASKPASS"));
+    }
+
     #[test]
     fn guided_https_refuses_git_url_rewrites_before_network_access() {
         let fixture = Fixture::new();

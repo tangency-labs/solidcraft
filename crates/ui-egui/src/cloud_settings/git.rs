@@ -3,6 +3,8 @@ use super::*;
 use solidcraft_cloud::{Authentication, SshIdentity};
 use std::sync::Arc;
 
+mod key;
+
 pub(crate) struct Wizard {
     connection: Connection,
     executable: String,
@@ -11,6 +13,7 @@ pub(crate) struct Wizard {
     verified: Option<(Connection, String)>,
     error: Option<String>,
     owner: Arc<()>,
+    key: Option<key::Editor>,
 }
 
 pub(crate) fn open(app: &mut SolveApp) {
@@ -35,6 +38,7 @@ pub(crate) fn open(app: &mut SolveApp) {
         verified: None,
         error: None,
         owner: Arc::new(()),
+        key: None,
     });
 }
 
@@ -53,6 +57,9 @@ pub(crate) fn cancel(app: &mut SolveApp) {
 }
 
 fn cancel_test(app: &mut SolveApp, wizard: &Wizard) {
+    if let Some(key) = &wizard.key {
+        key.cancel(app);
+    }
     if let Some(operation) = &wizard.pending {
         let _ = app.run("cloud.cancel", json!({"operation":operation}));
     }
@@ -147,7 +154,8 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         wizard.pending = None;
         wizard.error = Some(error);
     }
-    let busy = wizard.pending.is_some();
+    key::poll(app, &mut wizard);
+    let busy = wizard.pending.is_some() || wizard.key.as_ref().is_some_and(key::Editor::busy);
     let enabled = !busy && !app.file_picker_busy() && !app.session.cloud_configuring();
     let mut browse = None;
     let primary = tr(if wizard.verified() { "cloud.git_use" } else { "cmd.cloud.test" });
@@ -155,7 +163,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .fields()
         .cards(2.2)
         .actions(primary, "Cancel", None)
-        .show(ctx, enabled && wizard.valid(), |ui| {
+        .show(ctx, enabled && wizard.valid() && !wizard.key.as_ref().is_some_and(key::Editor::editing), |ui| {
             ui_kit::text(ui, tr("cloud.git_hint"), ui_kit::Text::Inline);
             ui.add_enabled_ui(enabled, |ui| {
                 field(ui, "cloud.connection_name", &mut wizard.connection.name, false);
@@ -202,6 +210,9 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 ui_kit::text(ui, tr("cloud.git_executable_hint"), ui_kit::Text::Hint("cloud_git_executable_hint"));
             });
+            if wizard.connection.authentication == Authentication::Ssh {
+                key::show(app, ui, &mut wizard, enabled);
+            }
             if busy {
                 ui.spinner();
                 ui.label(tr("cloud.connecting"));
@@ -230,7 +241,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     // Revalidate after this frame's edits: a formerly verified destination cannot slip through.
-    if action == ui_kit::Action::Ok && enabled && wizard.valid() {
+    if action == ui_kit::Action::Ok && enabled && wizard.valid() && !wizard.key.as_ref().is_some_and(key::Editor::editing) {
         let result = if wizard.verified() {
             let editor = app.cloud.editor.as_mut();
             editor.ok_or_else(|| tr("cloud.settings_changed").to_owned()).and_then(|editor| {

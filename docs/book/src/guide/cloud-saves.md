@@ -119,7 +119,7 @@ the app uses `SolidCraft <cloud@solidcraft.invalid>` for that save only.
    helpers and SSH configuration. **HTTPS** reuses a guided GitHub connection's
    saved token, or the system credential helpers for other connections. For
    **SSH**, choose **System keys and agent** or **Choose key** and browse to the
-   private key. An encrypted key can be unlocked in your SSH agent.
+   private key. An encrypted key can be unlocked in your SSH agent or system prompt.
 5. Choose **Test Repository Connection**. Review the fetch and push destinations,
    then choose **Use this connection → Apply**. Failed tests keep your entries for retry.
 
@@ -137,3 +137,27 @@ does not redirect existing saves. Restore the original connection to publish the
 
 See GitHub's [token guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 for token expiration, organization approval and revocation.
+
+### Generate an SSH key
+
+In the Git connection editor, choose **SSH → Generate SSH Key**. Enter an optional
+passphrase, then choose **Generate SSH Key** again. SolidCraft creates an Ed25519
+pair in its local data folder under `cloud/ssh/key-…/`. Existing keys are preserved.
+The private key is selected for this connection automatically.
+
+Choose **Copy public key** and add it to your Git host's SSH settings. GitHub
+connections also offer **Open host SSH settings**. Choose **Test Repository
+Connection**, then **Use this connection → Apply** after the test succeeds.
+Generation creates local files immediately; Cancel leaves the pair available
+locally while discarding the proposed connection changes.
+
+**Remember passphrase in system keychain** is optional. When enabled, SolidCraft's
+OpenSSH helper retrieves the passphrase from the system credential store to unlock
+that key. Otherwise, use your SSH agent or system passphrase prompt. Unlocking the
+system keychain may be necessary after login. The helper answers only the selected
+key's passphrase prompt; host trust and account password prompts remain with system
+SSH. A new host may require confirming its identity through your normal SSH tools
+before the connection test can succeed.
+
+Private keys and remembered passphrases stay on this device. Keep a secure backup
+of keys you need, or register a new public key when moving to another device.

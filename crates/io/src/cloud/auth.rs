@@ -7,6 +7,14 @@ use std::process::Command;
 pub trait NativeAccess: Send + Sync {
     fn credential(&self, id: &str) -> Result<Option<String>>;
     fn store_credential(&self, id: &str, token: &str) -> Result<()>;
+    fn store_ssh_passphrase(&self, _path: &str, _passphrase: &str) -> Result<()> {
+        Err(Error::Storage("SSH passphrase storage is unavailable".into()))
+    }
+    /// Path to a platform askpass helper for a remembered key. Only an opaque keychain
+    /// id enters the subprocess environment; the helper retrieves the secret itself.
+    fn ssh_askpass(&self, _path: &str) -> Result<Option<std::path::PathBuf>> {
+        Ok(None)
+    }
     fn prepare(&self, connection: Connection, job: &solidcraft_cloud::jobs::Job) -> Result<Connection>;
 }
 

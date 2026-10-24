@@ -190,6 +190,7 @@ pub trait HostSetup {
     fn id(&self) -> &'static str;
     fn create_repository_url(&self) -> &'static str;
     fn create_token_url(&self) -> &'static str;
+    fn matches_remote(&self, remote: &str) -> bool;
     fn ssh_settings_url(&self) -> &'static str;
 }
 
@@ -204,9 +205,17 @@ impl HostSetup for GitHub {
     fn create_token_url(&self) -> &'static str {
         "https://github.com/settings/personal-access-tokens/new?name=SolidCraft&description=Save+SolidCraft+designs&contents=write&metadata=read&expires_in=none"
     }
+    fn matches_remote(&self, remote: &str) -> bool {
+        remote.starts_with("git@github.com:") || remote.starts_with("ssh://git@github.com/") || remote.starts_with("https://github.com/")
+    }
     fn ssh_settings_url(&self) -> &'static str {
         "https://github.com/settings/ssh/new"
     }
+}
+
+/// Host-specific convenience actions are selected here, independently of Git access.
+pub fn host_setup(provider: &str, remote: &str) -> Option<&'static dyn HostSetup> {
+    [github_setup()].into_iter().find(|host| host.id() == provider || host.matches_remote(remote))
 }
 
 pub fn github_setup() -> &'static dyn HostSetup {

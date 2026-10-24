@@ -222,3 +222,79 @@ fn editing_a_connection_preserves_its_credentials_and_other_destinations() {
     assert_eq!(edited.connections[0].credential, first.credential);
     assert!(edited.connections[0].git_remote.is_some());
 }
+
+#[test]
+fn key_generation_keeps_secrets_out_of_commands_and_stages_only_the_selected_path() {
+    for dark in [false, true] {
+        let (mut h, worker) = setup(dark);
+        fill(&mut h);
+        click(&mut h, "cloud_git:cloud.git_ssh");
+        click(&mut h, "cloud_git:generate");
+        h.frames(3);
+        click(&mut h, "cloud_git:passphrase");
+        h.step(&json!({"text":"local secret"})).unwrap();
+        click(&mut h, "cloud_git:remember");
+        h.frames(3);
+        click(&mut h, "cloud_git:create_key");
+        let job = {
+            let jobs = worker.0.lock().unwrap();
+            let (job, Operation::GenerateSshKey(input), _) = jobs.last().unwrap() else { panic!("generate") };
+            assert_eq!(&**input.passphrase, "local secret");
+            assert!(input.remember);
+            job.clone()
+        };
+        assert!(wizard(&mut h).key.as_ref().unwrap().busy());
+        assert!(!apply(&mut h.app, false));
+        documents::open_tab(&mut h.app, Default::default()).unwrap();
+        let key = solidcraft_cloud::jobs::SshKey {
+            path: "/private/key with 'spaces'".into(),
+            public_key: "ssh-ed25519 AAAA example".into(),
+            encrypted: true,
+            remembered: true,
+        };
+        job.update(|s| {
+            s.phase = Phase::Ready;
+            s.result = Some(json!(key));
+        })
+        .unwrap();
+        h.frames(3);
+        assert_eq!(wizard(&mut h).connection.ssh_identity, SshIdentity::File(key.path.clone()));
+        assert!(!wizard(&mut h).verified());
+        click(&mut h, "cloud_git:copy_key");
+        click(&mut h, "dialog:ok");
+        assert_eq!(test_job(&worker).1.ssh_identity, SshIdentity::File(key.path));
+        verified(&worker);
+        h.frames(3);
+        click(&mut h, "dialog:ok");
+        assert!(h.app.session.cloud_settings().connections.is_empty());
+        click(&mut h, "prefs:cancel");
+        assert!(h.app.session.cloud_settings().connections.is_empty());
+    }
+}
+
+#[test]
+fn failed_key_generation_retries_and_cancel_ignores_a_late_pair() {
+    let (mut h, worker) = setup(true);
+    fill(&mut h);
+    click(&mut h, "cloud_git:cloud.git_ssh");
+    click(&mut h, "cloud_git:generate");
+    h.frames(3);
+    click(&mut h, "cloud_git:create_key");
+    let job = worker.0.lock().unwrap().last().unwrap().0.clone();
+    job.fail(solidcraft_cloud::Error::Storage("keychain unavailable".into())).unwrap();
+    h.frames(3);
+    assert!(wizard(&mut h).error.as_ref().unwrap().contains("keychain"));
+    click(&mut h, "cloud_git:create_key");
+    let job = worker.0.lock().unwrap().last().unwrap().0.clone();
+    click(&mut h, "dialog:cancel");
+    assert_eq!(job.status().unwrap().phase, Phase::Cancelled);
+    job.update(|s| {
+        s.result = Some(json!({"path":"/late/key"}));
+        s.phase = Phase::Ready;
+    })
+    .unwrap();
+    open(&mut h.app);
+    h.frames(3);
+    assert!(wizard(&mut h).key.is_none());
+    assert_eq!(wizard(&mut h).connection.ssh_identity, SshIdentity::System);
+}
