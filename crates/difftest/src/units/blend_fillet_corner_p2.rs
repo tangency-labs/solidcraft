@@ -411,7 +411,7 @@ fn corner_rust(
     split: [usize; 2],
 ) -> Result<Output, HarnessError> {
     corner_rust_status(k, model, c, |c, env, faces| match method {
-        CornerMethod::AdjustConcave => c.adjust_topology(k, env).map(|()| 0.0),
+        CornerMethod::AdjustConcave => c.adjust_topology(env).map(|()| 0.0),
         CornerMethod::UpdateSplitFace => {
             let (Some(&orig), Some(&new)) = (faces.get(split[0]), faces.get(split[1])) else {
                 return Err(SolidError::invalid_input("difftest", "split face index"));

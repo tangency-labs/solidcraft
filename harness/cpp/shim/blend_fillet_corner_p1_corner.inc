@@ -29,6 +29,9 @@ enum : int32_t
     C1_EDGE_GEOM = 7,
     C1_FIX_DEGENERACY = 8,
     C1_END_PATCH = 9,
+    C1_MAKE_FACE = 10,
+    C1_INSERT = 11,
+    C1_CONST_RAD = 12,
 };
 
 const double C1_REFUSE = -2.0;
@@ -43,6 +46,7 @@ struct C1ExecPeek : SmFilletExecutive
         return &C1ExecPeek::m_vEdgeuseSolverMap;
     }
     static SmTArray<SmEdge*> SmFilletExecutive::*topo() { return &C1ExecPeek::m_vTopoEdges; }
+    static SmBrep* SmFilletExecutive::*fillet() { return &C1ExecPeek::m_pFilletBrep; }
 };
 
 // The solvers registered in the executive's edge-use-to-solver map (owned here).
@@ -664,35 +668,245 @@ void c1_fix_degeneracy(C1Corner& C, Rd& rd, std::vector<double>& o)
     M.put(o);
 }
 
-// -> `status` corner Model: CreateEndPatch; its MakeFaceBrep is a Rust stub, so a corner
-// whose first fillet-side-face edge has an original face is not run.
+// m_pFilletBrep of the corner ops that build faces: a new SmBrep (as
+// SmFilletExecutive::CreateFilletBrep makes it). Left alive (leaked): its faces own surfaces
+// the corner's m_vSurfaces still points to.
+SmBrep* c1_new_fillet_brep(C1Corner& C)
+{
+    SmBrep* fb = new (C.M.ctx) SmBrep();
+    C.exec->*C1ExecPeek::fillet() = fb;
+    return fb;
+}
+
+// The record of the face-building ops: `0 status` corner Model fillet-B-rep.
+void c1_put_face_op(C1Corner& C, SmStatus r, SmBrep* fb, std::vector<double>& o)
+{
+    o.push_back(0.0);
+    o.push_back(st(r));
+    c1_put_corner(o, C.c, C.M);
+    C.M.put(o);
+    p3_put_fillet_brep(o, fb);
+    C.exec->*C1ExecPeek::fillet() = NULL;
+}
+
+// `ns surface..` (B-spline surfaces): added to m_vSurfaces.
+bool c1_read_surfaces(C1Corner& C, Rd& rd)
+{
+    int64_t ns = rd.idx();
+    if (rd.bad || ns < 0 || ns > 16)
+    {
+        rd.bad = true;
+        return false;
+    }
+    for (int64_t i = 0; i < ns && !rd.bad; ++i)
+        (C.c->*P3CornerPeek::surfs()).Add(read_surface(rd, C.M.ctx));
+    return !rd.bad;
+}
+
+// -> `status` corner Model fillet-B-rep: CreateEndPatch (refused where it or its MakeFaceBrep
+// dereferences NULL, p3_check_end_patch).
 void c1_end_patch(C1Corner& C, std::vector<double>& o)
 {
     SmFilletCorner* c = C.c;
+    if (p3_check_end_patch(c, p3_edges(c)) == P3C_REFUSE)
+    {
+        o.push_back(C1_REFUSE);
+        return;
+    }
+    SmBrep* fb = c1_new_fillet_brep(C);
+    SmStatus r = c->CreateEndPatch();
+    c1_put_face_op(C, r, fb, o);
+}
+
+// `ns surface..` -> `status` corner Model fillet-B-rep: MakeFaceBrep on those m_vSurfaces
+// (refused where it dereferences NULL, p3_check_make_face).
+void c1_make_face(C1Corner& C, Rd& rd, std::vector<double>& o)
+{
+    SmFilletCorner* c = C.c;
+    if (!c1_read_surfaces(C, rd))
+        return;
+    if (p3_check_make_face(c, p3_edges(c), P3Override(), 0) != 0.0)
+    {
+        o.push_back(C1_REFUSE);
+        return;
+    }
+    SmBrep* fb = c1_new_fillet_brep(C);
+    SmStatus r = c->MakeFaceBrep();
+    c1_put_face_op(C, r, fb, o);
+}
+
+// `ns surface..` -> `status` corner Model: InsertIntersectionTopology on those m_vSurfaces,
+// with the Model's fillet B-rep as m_pFilletBrep. Not run where it reaches the executive's
+// topology intersector (RegisterExistingSSI: a blending corner with faces at its vertex and
+// surfaces) or edge attribute (m_pAttributeE, NULL here: a corner edge on an original face
+// with fillet-B-rep edges): Rust stubs of unit blend.fillet_executive_p1. A blending corner
+// without vertex is refused (m_cpVertex->GetFaces).
+void c1_insert(C1Corner& C, Rd& rd, std::vector<double>& o)
+{
+    SmFilletCorner* c = C.c;
+    if (!c1_read_surfaces(C, rd))
+        return;
+    if (c->*P3CornerPeek::blending())
+    {
+        if (C.vertex == NULL)
+        {
+            o.push_back(C1_REFUSE);
+            return;
+        }
+        SmTArray<SmFace*> vf;
+        C.vertex->GetFaces(vf);
+        if (vf.GetSize() > 0 && (c->*P3CornerPeek::surfs()).GetSize() > 0)
+        {
+            o.push_back(C1_NOT_RUN);
+            return;
+        }
+    }
     SmTArray<SmFilletEdge*>& E = c->*P3CornerPeek::edges();
     for (ULONG i = 0; i < E.GetSize(); ++i)
     {
-        if (E[i]->GetFilletEdgeType() != SM_FE_FILLET_X_SIDE_FACE)
+        if (E[i] == NULL || E[i]->GetOriginalFace() == NULL)
             continue;
-        SmFace* f = E[i]->GetOriginalFace();
-        if (f == NULL)
-            break; // NER: a status
-        SmSurface* s = c->GetExtendedSurface(f);
-        if (s == NULL)
-            s = f->GetSurface();
-        if (s == NULL)
+        SmTArray<SmEdge*> es;
+        E[i]->GetFilletBrepEdges(es);
+        if (es.GetSize() > 0)
         {
-            o.push_back(C1_REFUSE); // CopyAndAddAnalytics on NULL
+            o.push_back(C1_NOT_RUN);
             return;
         }
-        o.push_back(C1_NOT_RUN); // MakeFaceBrep
-        return;
     }
-    SmStatus r = c->CreateEndPatch();
+    C.exec->*C1ExecPeek::fillet() = C.M.filletBrep;
+    SmStatus r = c->InsertIntersectionTopology();
+    C.exec->*C1ExecPeek::fillet() = NULL;
     o.push_back(0.0);
     o.push_back(st(r));
     c1_put_corner(o, c, C.M);
     C.M.put(o);
+}
+
+// The surface generators of the C1_CONST_RAD solvers (owned here).
+struct C1Fsgs
+{
+    std::vector<SmFilletSurfaceGenerator*> v;
+    ~C1Fsgs()
+    {
+        for (size_t i = 0; i < v.size(); ++i)
+            delete v[i];
+    }
+};
+
+// `ng (kind scale continuity)..` -> `status` [surface] corner Model: MakeConstantRadiusFillet
+// with a solver per Model geometry (`kind` -1: none, 0 circular (defaults), 1 blend curve
+// (scale, continuity), 2 linear, 3 the base generator, 4 no generator). Refused where it
+// dereferences NULL (p3_const_rad's refusals other than the solver's) or reaches
+// SmFilletSolver::GetFilletExecutive-dependent code with an unknown generator (pNewFS NULL).
+void c1_const_rad(C1Corner& C, Rd& rd, std::vector<double>& o)
+{
+    SmFilletCorner* c = C.c;
+    Model& M = C.M;
+    const SmContext& ctx = M.ctx;
+    int64_t ng = rd.idx();
+    if (rd.bad || ng != (int64_t)M.geoms.size())
+    {
+        rd.bad = true;
+        return;
+    }
+    C1Solvers S;
+    C1Fsgs F;
+    std::vector<int64_t> kinds;
+    for (int64_t i = 0; i < ng && !rd.bad; ++i)
+    {
+        int64_t kind = rd.idx();
+        double scale = rd.num();
+        int64_t cont = rd.idx();
+        if (kind < -1 || kind > 4 || cont < 0 || cont > 2)
+        {
+            rd.bad = true;
+            return;
+        }
+        kinds.push_back(kind);
+        if (kind < 0)
+        {
+            M.geoms[(size_t)i]->*P4GeomPeek::solver() = NULL;
+            continue;
+        }
+        P4Solver* s = new (ctx) P4Solver(ctx, 1e-3, SM_EFF_ZERO_RAD, 1e-2);
+        S.v.push_back(s);
+        SmFilletSurfaceGenerator* g = NULL;
+        switch (kind)
+        {
+        case 0: g = new (ctx) SmCircularCrossSectionFSG(); break;
+        case 1: g = new (ctx) SmBlendCurveCrossSectionFSG(scale, (ULONG)cont); break;
+        case 2: g = new (ctx) SmLinearCrossSectionFSG(); break;
+        case 3: g = new (ctx) SmFilletSurfaceGenerator(); break;
+        default: break;
+        }
+        if (g != NULL)
+            F.v.push_back(g);
+        s->SetFilletSurfaceGenerator(g);
+        M.geoms[(size_t)i]->*P4GeomPeek::solver() = s;
+    }
+    if (rd.bad)
+        return;
+    // upstream's own code up to the solvers' generators (p3_const_rad, without its final
+    // refusal), then the generators: none (refused), types or scales that differ, linear
+    // (statuses), the base generator (no solver is made: refused)
+    std::vector<SmFilletEdge*> E = p3_edges(c);
+    P3Analytic pre = p3_const_rad(c, E, M, P3Override());
+    bool run = true;
+    if (pre == P3A_REFUSE)
+    {
+        // p3_const_rad refuses at the solvers' generators only after both projections
+        // succeed: then look at them
+        run = false;
+        ULONG n = (ULONG)E.size();
+        bool solverStage = n == 3;
+        ULONG found = 9999;
+        double minDist = SM_BIG_DOUBLE;
+        for (ULONG ii = 0; ii < n && solverStage; ++ii)
+        {
+            SmVertex* v = E[ii]->GetVertex();
+            SmVertex* w = v != NULL ? E[ii]->GetOtherVertex(v) : NULL;
+            if (v == NULL || w == NULL)
+                solverStage = false;
+            else if (v->GetPoint().DistanceBetween(w->GetPoint()) < minDist)
+            {
+                minDist = v->GetPoint().DistanceBetween(w->GetPoint());
+                found = ii;
+            }
+        }
+        if (solverStage && found < n && SM_CAST_PTR(SmBSplineCurve, E[found]->GetCurve()) != NULL &&
+            E[(found + n - 1) % n]->GetPrimaryEdgeuse() != NULL && E[(found + 1) % n]->GetPrimaryEdgeuse() != NULL)
+        {
+            SmFilletGeom* g0 = ((SmFilletEdgeuse*)E[(found + n - 1) % n]->GetPrimaryEdgeuse())->GetFilletGeom();
+            SmFilletGeom* g1 = ((SmFilletEdgeuse*)E[(found + 1) % n]->GetPrimaryEdgeuse())->GetFilletGeom();
+            SmFilletSolver* s0 = g0 ? g0->GetFilletSolver() : NULL;
+            SmFilletSolver* s1 = g1 ? g1->GetFilletSolver() : NULL;
+            SmFilletSurfaceGenerator* f0 = s0 ? s0->GetFilletSurfaceGenerator() : NULL;
+            SmFilletSurfaceGenerator* f1 = s1 ? s1->GetFilletSurfaceGenerator() : NULL;
+            if (f0 != NULL && f1 != NULL)
+            {
+                SmFilletSurfaceGeneratorType t = f0->GetFilletSurfaceGeneratorType();
+                // an unknown type (equal on both) makes no solver: pNewFS->SetFilletExecutive
+                run = !(t == SM_FSG_UNKNOWN && f1->GetFilletSurfaceGeneratorType() == SM_FSG_UNKNOWN);
+            }
+        }
+    }
+    if (!run)
+    {
+        o.push_back(C1_REFUSE);
+        return;
+    }
+    SM_FILLETSURF_TYPE* surface = NULL;
+    SmStatus r = c->MakeConstantRadiusFillet(surface);
+    o.push_back(0.0);
+    o.push_back(st(r));
+    o.push_back(flg(r == SM_SUCCESS && surface != NULL));
+    if (r == SM_SUCCESS && surface != NULL)
+        p3_put_surface(o, surface);
+    c1_put_corner(o, c, M);
+    M.put(o);
+    for (size_t i = 0; i < M.geoms.size(); ++i)
+        M.geoms[i]->*P4GeomPeek::solver() = NULL;
 }
 
 int32_t c1_run(int32_t op, Rd& rd, std::vector<double>& o)
@@ -716,6 +930,9 @@ int32_t c1_run(int32_t op, Rd& rd, std::vector<double>& o)
     case C1_EDGE_GEOM: c1_edge_geom(C, o); break;
     case C1_FIX_DEGENERACY: c1_fix_degeneracy(C, rd, o); break;
     case C1_END_PATCH: c1_end_patch(C, o); break;
+    case C1_MAKE_FACE: c1_make_face(C, rd, o); break;
+    case C1_INSERT: c1_insert(C, rd, o); break;
+    case C1_CONST_RAD: c1_const_rad(C, rd, o); break;
     default: return SC_ERR_ARG;
     }
     return rd.bad ? SC_ERR_ARG : SC_OK;
@@ -725,7 +942,7 @@ int32_t c1_run(int32_t op, Rd& rd, std::vector<double>& o)
 SC_EXPORT int32_t sc_blend_fillet_corner_p1_corner(int32_t op, const double* in, int64_t n_in, double* out,
                                                    int64_t cap, int64_t* out_len)
 {
-    if (op < C1_PEEK || op > C1_END_PATCH)
+    if (op < C1_PEEK || op > C1_CONST_RAD)
         return SC_ERR_ARG;
     if (out == NULL || out_len == NULL || n_in < 0 || cap < 0)
         return SC_ERR_ARG;

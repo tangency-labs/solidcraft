@@ -347,11 +347,17 @@ pub enum CornerOp {
     FixDegeneracy = 8,
     /// `CreateEndPatch`.
     EndPatch = 9,
+    /// `MakeFaceBrep` on given corner surfaces.
+    MakeFace = 10,
+    /// `InsertIntersectionTopology` with given corner surfaces.
+    Insert = 11,
+    /// `MakeConstantRadiusFillet` with a solver per model geometry.
+    ConstRad = 12,
 }
 
 impl CornerOp {
     /// Every corner op, in code order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 13] = [
         Self::Peek,
         Self::Solvers,
         Self::ExtSurface,
@@ -362,6 +368,9 @@ impl CornerOp {
         Self::EdgeGeom,
         Self::FixDegeneracy,
         Self::EndPatch,
+        Self::MakeFace,
+        Self::Insert,
+        Self::ConstRad,
     ];
 }
 
@@ -482,6 +491,27 @@ pub fn validate_corner(op: CornerOp, input: &[f64]) -> Result<(), FfiError> {
                 ));
             }
             p1_curve(&mut rd, 3, "rail-rail curve")?;
+        }
+        CornerOp::MakeFace | CornerOp::Insert => {
+            let ns = rd.index(MAX_CORNER_LIST)?;
+            for _ in 0..ns {
+                super::blend_fillet_geom_p1::surface(&mut rd)?;
+            }
+        }
+        CornerOp::ConstRad => {
+            let ng = rd.index(b.geom_surfaces.len())?;
+            if ng != b.geom_surfaces.len() {
+                return Err(bad("constant radius: one solver kind per model geometry"));
+            }
+            for _ in 0..ng {
+                // -1 none, 0 circular, 1 blend curve, 2 linear, 3 base, 4 no generator
+                rd.opt_index(5)?;
+                let scale = rd.finite()?;
+                if scale <= 0.0 {
+                    return Err(bad("constant radius: blend scale must be positive"));
+                }
+                rd.index(2)?;
+            }
         }
         CornerOp::FixDegeneracy => {
             let nt = rd.index(MAX_CORNER_LIST)?;

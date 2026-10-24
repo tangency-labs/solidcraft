@@ -46,6 +46,7 @@
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
 #include <SmFace.h>
+#include <SmFaceuse.h>
 #include <SmFilletCorner.h>
 #include <SmFilletGeom.h>
 #include <SmFilletIntersector.h>

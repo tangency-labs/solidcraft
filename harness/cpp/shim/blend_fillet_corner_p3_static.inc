@@ -50,6 +50,7 @@ struct P3ExecPeek : SmFilletExecutive
 {
     P3ExecPeek(const SmContext& c) : SmFilletExecutive(c) {}
     static SmFilletBrep* SmFilletExecutive::*pseudo() { return &P3ExecPeek::m_pPseudoBrep; }
+    static SmBrep* SmFilletExecutive::*fillet() { return &P3ExecPeek::m_pFilletBrep; }
 };
 
 struct P3CornerPeek : SmFilletCorner
@@ -178,8 +179,8 @@ int64_t p3_index_of_vertex(Model& M, SmFilletVertex* v) { return index_of(M.vert
 // What SmFilletCorner::MakeAnalyticCornerSurface (blend.fillet_corner_p2) does on the corner's
 // edges E, without changing anything (P3_ANALYTIC runs it, the default corner patch calls it
 // first): P3A_REFUSE where it dereferences NULL, P3A_TRUE / P3A_FALSE for its return (its SER /
-// NER exits return a non-zero status, which its callers read as TRUE), P3A_DEFER where it
-// calls SmFilletCorner::MakeConstantRadiusFillet (a Rust stub of unit blend.fillet_corner_p1).
+// NER exits return a non-zero status, which its callers read as TRUE; a failed
+// SmFilletCorner::MakeConstantRadiusFillet makes it FALSE, p3_const_rad).
 // The surface fits are run (the file-static sm_CreatePlanarSurface / sm_CreateSrfOfRevolution
 // through blend_fillet_corner_p2_static.inc, CreateSphereFromArcs, the chamfer edges'
 // sm_SrfSrfIntersection) and their results deleted. The model's fillet geometries have no
@@ -190,7 +191,6 @@ enum P3Analytic
     P3A_REFUSE,
     P3A_TRUE,
     P3A_FALSE,
-    P3A_DEFER,
 };
 
 struct P3Override
@@ -203,6 +203,83 @@ struct P3Override
 SmBSplineCurve* p3_curve_of(SmFilletEdge* e, const P3Override& ov)
 {
     return e == ov.edge ? ov.curve : SM_CAST_PTR(SmBSplineCurve, e->GetCurve());
+}
+
+// What SmFilletCorner::MakeConstantRadiusFillet (blend.fillet_corner_p1) does on the corner's
+// edges E up to where it reads its fillet geometries' solvers: P3A_REFUSE where it dereferences
+// NULL or reads m_vEdges[9999], P3A_FALSE for a status (MakeAnalyticCornerSurface then returns
+// FALSE). The model's fillet geometries have no solver, so a corner that gets past both
+// projections is refused (GetFilletSolver()->GetFilletSurfaceGenerator()).
+P3Analytic p3_const_rad(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, Model& M, const P3Override& ov)
+{
+    ULONG n = (ULONG)E.size();
+    if (n != 3)
+        return P3A_FALSE;
+    ULONG found = 9999;
+    double minDist = SM_BIG_DOUBLE;
+    for (ULONG ii = 0; ii < n; ++ii)
+    {
+        SmFilletEdge* e = E[ii];
+        if (e->GetFilletEdgeType() != SM_FE_CROSS_SECTION)
+            return P3A_FALSE;
+        SmVertex* v = e->GetVertex();
+        SmVertex* ov2 = v != NULL ? e->GetOtherVertex(v) : NULL;
+        if (v == NULL || ov2 == NULL)
+            return P3A_REFUSE; // GetPoint()
+        double d = v->GetPoint().DistanceBetween(ov2->GetPoint());
+        if (d < minDist)
+        {
+            minDist = d;
+            found = ii;
+        }
+    }
+    if (found >= n)
+        return P3A_REFUSE; // m_vEdges[9999]
+    SmFilletEdge* base = E[found];
+    SmBSplineCurve* arc = p3_curve_of(base, ov);
+    if (arc == NULL)
+        return P3A_REFUSE; // pBaseArc->IsArc()
+    double tol = c->*P3CornerPeek::tol();
+    SmAxis2Placement frame;
+    double rad = 0.0, a0 = 0.0, a1 = 0.0;
+    if (!arc->IsArc(5, tol, frame, rad, a0, a1))
+        return P3A_FALSE;
+    SmFilletEdge* e0 = E[(found + n - 1) % n];
+    SmFilletEdge* e1 = E[(found + 1) % n];
+    SmSurface* srf[2] = {NULL, NULL};
+    SmFilletEdge* es[2] = {e0, e1};
+    for (int i = 0; i < 2; ++i)
+    {
+        SmFilletEdgeuse* prim = (SmFilletEdgeuse*)es[i]->GetPrimaryEdgeuse();
+        if (prim == NULL)
+            return P3A_REFUSE; // GetFilletGeom()
+        SmFilletGeom* fg = prim->GetFilletGeom();
+        if (fg == NULL || fg->GetFilletSurface() == NULL)
+            return P3A_FALSE; // NER
+        srf[i] = fg->GetFilletSurface();
+    }
+    SmPoint3d opp = e0->GetVertex()->GetPoint();
+    double t = 0.0;
+    SmVector3d z = frame.GetZAxis();
+    if (smgu_LineClosestPoint(frame.GetOriginRef(), z, opp, t) != SM_SUCCESS)
+        return P3A_FALSE;
+    SmLine* line = NULL;
+    SmStatus ls = SmLine::CreateLineSegment(M.ctx, 3, frame.GetOriginRef() + z * t, frame.GetOriginRef(), line);
+    delete line;
+    if (ls != SM_SUCCESS)
+        return P3A_FALSE;
+    SmVertex* v = base->GetVertex();
+    SmVertex* pts[2] = {v, base->GetOtherVertex(v)};
+    for (int i = 0; i < 2; ++i)
+    {
+        SmSolutionArray sols;
+        SmExtent2d dom = srf[i]->GetNaturalUVDomain();
+        if (srf[i]->GlobalPointSolve(dom, SM_SO_INTERSECT, pts[i]->GetPoint(), tol, NULL, SM_SR_ALL, sols) !=
+                SM_SUCCESS ||
+            sols.GetSize() != 1)
+            return P3A_FALSE;
+    }
+    return P3A_REFUSE; // pFG0->GetFilletSolver()->GetFilletSurfaceGenerator()
 }
 
 P3Analytic p3_analytic(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, Model& M,
@@ -356,16 +433,36 @@ P3Analytic p3_analytic(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, M
     SmBSplineSurface* sphere = NULL;
     SmStatus sst = SmBSplineSurface::CreateSphereFromArcs(M.ctx, curves, tol, ccw, orients, sphere);
     delete sphere;
-    return sst == SM_SUCCESS ? P3A_TRUE : P3A_DEFER; // else MakeConstantRadiusFillet
+    if (sst == SM_SUCCESS)
+        return P3A_TRUE;
+    // else MakeConstantRadiusFillet: its status makes the function return FALSE
+    return p3_const_rad(c, E, M, ov);
+}
+
+// SmFilletCorner::MakeFaceBrep after `added` more surfaces on the corner whose m_vEdges are
+// `E` (curves overridden by `ov`): with one surface it copies every edge's curve and reads
+// the end tangents of the second and third edges and the third edge's vertex: P3C_REFUSE
+// where that dereferences NULL or reads past m_vEdges, else 0.0 (it runs).
+double p3_check_make_face(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, const P3Override& ov,
+                          ULONG added)
+{
+    if ((c->*P3CornerPeek::surfs()).GetSize() + added != 1)
+        return 0.0;
+    if (E.size() < 3)
+        return P3C_REFUSE;
+    for (SmFilletEdge* e : E)
+        if ((e == ov.edge ? (SmCurve*)ov.curve : e->GetCurve()) == NULL)
+            return P3C_REFUSE;
+    if (E[2]->GetVertex() == NULL)
+        return P3C_REFUSE;
+    return 0.0;
 }
 
 // The default corner patch (SmFilletCorner::CreateCornerPatch) over corner edges E and
 // vertices V, through its Coons patch when MakeAnalyticCornerSurface returns FALSE: -2 where
-// it dereferences NULL or reads past m_vVertices, 0 when it returns a status before
-// SmFilletCorner::MakeFaceBrep (NER, a failed point curve or CreateCornerBlend: the op runs
-// and both sides return it), else -3 (MakeFaceBrep is a Rust stub of unit
-// blend.fillet_corner_p1). CreateCornerBlend runs on the patch's arrays, as upstream
-// assembles them, and its blends are deleted.
+// it dereferences NULL or reads past m_vVertices (or SmFilletCorner::MakeFaceBrep would,
+// p3_check_make_face), else 0 (the op runs). CreateCornerBlend runs on the patch's arrays, as
+// upstream assembles them, and its blends are deleted.
 double p3_check_default_patch(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E,
                               const std::vector<SmFilletVertex*>& V, Model& M,
                               const P3Override& ov = P3Override())
@@ -373,8 +470,7 @@ double p3_check_default_patch(SmFilletCorner* c, const std::vector<SmFilletEdge*
     switch (p3_analytic(c, E, M, ov))
     {
     case P3A_REFUSE: return P3C_REFUSE;
-    case P3A_TRUE: return P3C_NOT_RUN;
-    case P3A_DEFER: return P3C_NOT_RUN;
+    case P3A_TRUE: return p3_check_make_face(c, E, ov, 1);
     case P3A_FALSE: break;
     }
     ULONG n = (ULONG)E.size();
@@ -505,11 +601,12 @@ double p3_check_default_patch(SmFilletCorner* c, const std::vector<SmFilletEdge*
     SmTArray<SmSurface*> blends;
     SmStatus bst = SmBSplineSurface::CreateCornerBlend(M.ctx, c3d, orients, uv, surfs, c->*P3CornerPeek::tol(),
                                                       c->*P3CornerPeek::tantol(), blends, ext ? 0 : 1);
+    ULONG nblends = blends.GetSize();
     for (ULONG i = 0; i < blends.GetSize(); ++i)
         delete blends[i];
     delete pc;
     delete upc;
-    return bst == SM_SUCCESS ? P3C_NOT_RUN : 0.0;
+    return bst == SM_SUCCESS ? p3_check_make_face(c, E, ov, nblends) : 0.0;
 }
 
 // m_vVertices as a vector, without `drop` and at most `count` of them.
@@ -533,6 +630,33 @@ std::vector<SmFilletEdge*> p3_edges(SmFilletCorner* c, ULONG count = ~0UL)
     return out;
 }
 
+// SmFilletCorner::CreateEndPatch on m_vEdges `E`: without a fillet-side-face edge it returns
+// SM_SUCCESS without a surface (-1: m_vSurfaces[0] then reads an empty array), without an
+// original face a status (0), a face without surface is dereferenced (P3C_REFUSE), else a copy
+// of the surface is added and MakeFaceBrep runs (1, or P3C_REFUSE where p3_check_make_face
+// refuses it).
+// The fillet vertex the 3x2 patch the current op runs deletes (set by p3_check_patch).
+SmFilletVertex* p3_deleted_vertex = NULL;
+
+double p3_check_end_patch(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E)
+{
+    for (SmFilletEdge* e : E)
+    {
+        if (e->GetFilletEdgeType() != SM_FE_FILLET_X_SIDE_FACE)
+            continue;
+        SmFace* f = e->GetOriginalFace();
+        if (f == NULL)
+            return 0.0;
+        SmSurface* s = c->GetExtendedSurface(f);
+        if (s == NULL)
+            s = f->GetSurface();
+        if (s == NULL)
+            return P3C_REFUSE;
+        return p3_check_make_face(c, E, P3Override(), 1) == 0.0 ? 1.0 : P3C_REFUSE;
+    }
+    return -1.0;
+}
+
 double p3_check_patch(int64_t kind, SmFilletCorner* c, Model& M)
 {
     SmTArray<SmFilletEdge*>& E = c->*P3CornerPeek::edges();
@@ -554,6 +678,13 @@ double p3_check_patch(int64_t kind, SmFilletCorner* c, Model& M)
         }
         if (onEdge == NULL || onExt == NULL)
             return 0.0;
+        // upstream deletes pFEOnEdge but removes only one m_vEdges entry: a repeated
+        // on-edge edge is used after its free
+        ULONG uses = 0;
+        for (ULONG i = 0; i < 4; ++i)
+            uses += E[i] == onEdge ? 1 : 0;
+        if (uses > 1)
+            return P3C_REFUSE;
         SmFilletVertex* cornerV = (SmFilletVertex*)onEdge->GetVertex();
         if (cornerV == NULL)
             return P3C_REFUSE;
@@ -596,7 +727,7 @@ double p3_check_patch(int64_t kind, SmFilletCorner* c, Model& M)
         // DropCurve here (a pure function of the surface and the joined copy; the model's
         // faces are unit bilinear patches, so UB-182 / HANG-38 do not arise): when it (or the
         // one-curve check) fails, upstream returns having deleted the Model's objects (refused,
-        // like a missing original face above); else the op reaches the unported MakeFaceBrep.
+        // like a missing original face above); else the default patch over the rest follows.
         SmSurface* srf = onExt->GetOriginalFace()->GetSurface();
         if (srf == NULL)
         {
@@ -628,6 +759,10 @@ double p3_check_patch(int64_t kind, SmFilletCorner* c, Model& M)
             ov.curve = SM_CAST_PTR(SmBSplineCurve, k1);
             ov.mate_uv = uv[0];
             pre = p3_check_default_patch(c, rest, p3_verts(c, ~0UL, cornerV), M, ov);
+            // the op runs and deletes the corner vertex (upstream `delete`s it): the Model
+            // must not export it
+            if (pre == 0.0)
+                p3_deleted_vertex = cornerV;
         }
         for (ULONG i = 0; i < uv.GetSize(); ++i)
             delete uv[i];
@@ -641,29 +776,30 @@ double p3_check_patch(int64_t kind, SmFilletCorner* c, Model& M)
             return 0.0; // SM_DBG_WARN only
         if (!(c->*P3CornerPeek::ext()))
             return p3_check_default_patch(c, p3_edges(c), p3_verts(c), M); // the default patch
-        // CreateEndPatch (blend.fillet_corner_p1, ported): the first fillet-side-face edge's
-        // original face's extended surface or surface is copied, then MakeFaceBrep (a Rust
-        // stub); without such an edge it returns SM_SUCCESS, without an original face a
-        // status (NER), and a face without surface is dereferenced
-        for (ULONG i = 0; i < E.GetSize(); ++i)
-        {
-            if (E[i]->GetFilletEdgeType() != SM_FE_FILLET_X_SIDE_FACE)
-                continue;
-            SmFace* f = E[i]->GetOriginalFace();
-            if (f == NULL)
-                return 0.0;
-            SmSurface* s = c->GetExtendedSurface(f);
-            if (s == NULL)
-                s = f->GetSurface();
-            return s == NULL ? P3C_REFUSE : P3C_NOT_RUN;
-        }
-        return 0.0;
+        // CreateEndPatch (blend.fillet_corner_p1): the first fillet-side-face edge's
+        // original face's extended surface or surface is copied, then MakeFaceBrep
+        return p3_check_end_patch(c, p3_edges(c)) == P3C_REFUSE ? P3C_REFUSE : 0.0;
     }
     case 7: // Nx2
         if (E.GetSize() > 3 && E.GetSize() != 6 && V.GetSize() == 0)
             return P3C_REFUSE; // unsigned index wraps around
         if (E.GetSize() == 6)
-            return P3C_NOT_RUN; // CreateEndPatch: SmFilletCorner::MakeFaceBrep
+        {
+            // CreateEndPatch over the last three edges, then m_vSurfaces[0]
+            std::vector<SmFilletEdge*> last;
+            for (ULONG i = 3; i < 6; ++i)
+                last.push_back(E[i]);
+            double end = p3_check_end_patch(c, last);
+            if (end == 0.0)
+                return 0.0; // SER: a status
+            if (end != 1.0)
+                return P3C_REFUSE;
+            if (V.GetSize() == 0)
+                return P3C_REFUSE; // unsigned index wraps around
+            // the default patch over the first three edges, on an empty m_vSurfaces
+            if ((c->*P3CornerPeek::surfs()).GetSize() != 0)
+                return P3C_REFUSE; // (not built by the generators)
+        }
         // the default patch over the first three edges
         return p3_check_default_patch(c, p3_edges(c, 3), p3_verts(c, 3), M);
     default:
@@ -1135,20 +1271,67 @@ void p3_put_corner(std::vector<double>& o, SmFilletCorner* c, Model& M)
 // The corner's surfaces (m_vSurfaces) after the model export: per surface its kind (`1`
 // SmPlane, `2` SmSurfOfRevolution, `0` any other) and its B-spline record (put_surface:
 // SmPlane and SmSurfOfRevolution are SmBSplineSurfaces).
+void p3_put_surface(std::vector<double>& o, SmSurface* s)
+{
+    double kind = 0.0;
+    if (s != NULL && s->IsKindOf(SmPlane_TYPE))
+        kind = 1.0;
+    else if (s != NULL && s->IsKindOf(SmSurfOfRevolution_TYPE))
+        kind = 2.0;
+    o.push_back(kind);
+    put_surface(o, s);
+}
+
 void p3_put_surfaces(std::vector<double>& o, SmFilletCorner* c)
 {
     SmTArray<SmSurface*>& S = c->*P3CornerPeek::surfs();
     o.push_back((double)S.GetSize());
     for (ULONG i = 0; i < S.GetSize(); ++i)
+        p3_put_surface(o, S[i]);
+}
+
+// The executive's fillet B-rep (m_pFilletBrep, where SmFilletCorner::MakeFaceBrep builds the
+// corner's faces): `nf` and per face (GetFaces order) its surface (p3_put_surface), the
+// orientation of its first face use, `nl` and per loop (GetLoops) `ne` and per edge use
+// (GetEdgeuses, CCW) its orientation, its vertex's point, its edge's interval, its edge's
+// 3D curve and its UV trim curve (put_curve).
+void p3_put_fillet_brep(std::vector<double>& o, SmBrep* b)
+{
+    SmTArray<SmFace*> faces;
+    if (b != NULL)
+        b->GetFaces(faces);
+    o.push_back((double)faces.GetSize());
+    for (ULONG i = 0; i < faces.GetSize(); ++i)
     {
-        SmSurface* s = S[i];
-        double kind = 0.0;
-        if (s != NULL && s->IsKindOf(SmPlane_TYPE))
-            kind = 1.0;
-        else if (s != NULL && s->IsKindOf(SmSurfOfRevolution_TYPE))
-            kind = 2.0;
-        o.push_back(kind);
-        put_surface(o, s);
+        SmFace* f = faces[i];
+        p3_put_surface(o, f->GetSurface());
+        SmFaceuse* fu1 = NULL;
+        SmFaceuse* fu2 = NULL;
+        f->GetFaceuses(fu1, fu2);
+        o.push_back(fu1 != NULL ? (double)fu1->GetOrientation() : -1.0);
+        SmTArray<SmLoop*> loops;
+        f->GetLoops(loops);
+        o.push_back((double)loops.GetSize());
+        for (ULONG j = 0; j < loops.GetSize(); ++j)
+        {
+            SmTArray<SmEdgeuse*> eus;
+            loops[j]->GetEdgeuses(eus);
+            o.push_back((double)eus.GetSize());
+            for (ULONG k = 0; k < eus.GetSize(); ++k)
+            {
+                SmEdgeuse* eu = eus[k];
+                o.push_back((double)eu->GetOrientation());
+                SmVertexuse* vu = eu->GetVertexuse();
+                SmVertex* v = vu != NULL ? vu->GetVertex() : NULL;
+                put_pt(o, v != NULL ? v->GetPoint() : SmPoint3d(0.0, 0.0, 0.0));
+                SmEdge* e = eu->GetEdge();
+                SmExtent1d ivl = e != NULL ? e->GetInterval() : SmExtent1d(0.0, 0.0);
+                o.push_back(ivl.GetMin());
+                o.push_back(ivl.GetMax());
+                put_curve(o, e != NULL ? e->GetCurve() : NULL);
+                put_curve(o, eu->GetUVTrimCurvePointer());
+            }
+        }
     }
 }
 
@@ -1286,6 +1469,11 @@ int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
     exec->*P3ExecPeek::pseudo() = M.pseudo;
     SmFilletCorner* c = p3_make_corner(kind, ctx, vertex, solverEUs, allEUs, exec, tol, tan);
     exec->*P3ExecPeek::pseudo() = own;
+    // m_pFilletBrep, where MakeFaceBrep builds the corner's faces (`new (ctx) SmBrep()`, as
+    // SmFilletExecutive::CreateFilletBrep makes it). Left alive (leaked): its faces may own
+    // surfaces the corner's m_vSurfaces still points to.
+    SmBrep* filletBrep = new (ctx) SmBrep();
+    exec->*P3ExecPeek::fillet() = filletBrep;
     for (SmFilletVertex* v : verts)
         (c->*P3CornerPeek::verts()).Add(v);
     for (SmFilletEdge* e : edges)
@@ -1299,6 +1487,7 @@ int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
     c->*P3CornerPeek::setback() = setback;
 
     double pre = 0.0;
+    p3_deleted_vertex = NULL;
     switch (op)
     {
     case P3_CALC_GEOM: pre = p3_check_calc(kind, c, M); break;
@@ -1309,7 +1498,6 @@ int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
         switch (p3_analytic(c, p3_edges(c), M))
         {
         case P3A_REFUSE: pre = P3C_REFUSE; break;
-        case P3A_DEFER: pre = P3C_NOT_RUN; break; // SmFilletCorner::MakeConstantRadiusFillet
         default: break;
         }
         break;
@@ -1321,6 +1509,13 @@ int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
     }
     else
     {
+        if (p3_deleted_vertex != NULL)
+            for (size_t k = 0; k < M.verts.size(); ++k)
+                if (M.verts[k] == p3_deleted_vertex)
+                {
+                    M.verts.erase(M.verts.begin() + (std::ptrdiff_t)k);
+                    break;
+                }
         SmStatus r = SM_SUCCESS;
         switch (op)
         {
@@ -1369,7 +1564,9 @@ int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
         p3_put_corner(o, c, M);
         M.put(o);
         p3_put_surfaces(o, c);
+        p3_put_fillet_brep(o, filletBrep);
     }
+    exec->*P3ExecPeek::fillet() = NULL;
     // the Model owns the fillet vertices; the corner owns its edge use arrays
     (c->*P3CornerPeek::verts()).ReSet();
     delete c;

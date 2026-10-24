@@ -77,8 +77,8 @@
 //!   (`blend.fillet_corner_p3`): `CalcCornerVertGeom` with its status ignored, the
 //!   seam moves of the rail ends' UV points and the two `ReCalcFilletGeom`s with the
 //!   solver's geometry for the surfaces set to each half.
-//! - **Unported callees.** `SmFilletCorner::MakeConstantRadiusFillet` (unit
-//!   `blend.fillet_corner_p1`, not ported there) returns [`SolidError::Unported`].
+//! - **`MakeConstantRadiusFillet`** is unit `blend.fillet_corner_p1`'s
+//!   [`FilletCorner::make_constant_radius_fillet`].
 //!
 //! Every loop runs over a given list once; there is no recursion.
 
@@ -1435,7 +1435,7 @@ impl FilletCorner {
                 None => {
                     // When a Sphere could not be found to fill Boundary Curves try to
                     // convert it to a constant-radius fillet.
-                    match soft(make_constant_radius_fillet(self, env))? {
+                    match soft(self.make_constant_radius_fillet(env))? {
                         Some(s) => s,
                         // when both tries fail - quit
                         None => return Ok(false),
@@ -2065,18 +2065,6 @@ fn unitize_ser(v: Vec3, operation: &'static str) -> Result<Vec3> {
     })
 }
 
-/// `SmFilletCorner::MakeConstantRadiusFillet` (unit `blend.fillet_corner_p1`).
-fn make_constant_radius_fillet(
-    _corner: &FilletCorner,
-    _env: &mut CornerEnv<'_>,
-) -> Result<Surface> {
-    // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::MakeConstantRadiusFillet
-    Err(SolidError::unported(
-        "SmFilletCorner::MakeConstantRadiusFillet",
-        "blend.fillet_corner_p1",
-    ))
-}
-
 /// A call whose failing status upstream turns into a soft `FALSE` / `SM_ERR` return
 /// (`if (SM_SUCCESS != f(..)) return FALSE;`): `None` on failure;
 /// [`SolidError::Unported`] and [`SolidError::InvalidInput`] (undefined upstream) still
@@ -2091,7 +2079,7 @@ fn soft<T>(r: Result<T>) -> Result<Option<T>> {
 
 /// `SM_CAST_PTR(SmBSplineCurve, pCurve)` succeeds: a B-spline or one of the analytic
 /// curves derived from it.
-const fn is_b_spline_kind(c: &Curve) -> bool {
+pub(super) const fn is_b_spline_kind(c: &Curve) -> bool {
     matches!(
         c.kind(),
         CurveKind::BSpline(_)
@@ -2257,18 +2245,19 @@ mod tests {
     }
 
     fn with_env<T>(pseudo: &mut FilletBrep, run: impl FnOnce(&mut CornerEnv<'_>) -> T) -> T {
-        let k = Kernel::default();
+        let mut k = Kernel::default();
         let mut target = Brep::new();
         let surfaces = std::collections::BTreeMap::new();
         let mut exec = FilletExecutiveData::default();
         let mut env = CornerEnv {
-            k: &k,
+            k: &mut k,
             target: &mut target,
             pseudo,
             exec: &mut exec,
             corner: None,
             tsect_surfaces: &surfaces,
             solvers: &mut [],
+            fillet: None,
         };
         run(&mut env)
     }
