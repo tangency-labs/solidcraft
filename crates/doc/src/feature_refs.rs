@@ -28,6 +28,17 @@ impl FeatureKind {
         v
     }
 
+    /// The bodies the feature names (the bodies it works on), in the order it holds them.
+    pub fn body_refs(&self) -> Vec<String> {
+        let mut v = Vec::new();
+        self.walk_refs(&mut |r| {
+            if let Ref::Body(name) = r {
+                v.push(name.as_ref().to_string());
+            }
+        });
+        v
+    }
+
     /// Whether the feature names the feature `name` (the construction plane a plane is built on,
     /// a patterned or mirrored feature).
     pub fn names_feature(&self, name: &str) -> bool {

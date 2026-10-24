@@ -986,6 +986,7 @@
   "cmd.timeline_add": "Add Recorded Feature",
   "cmd.timeline_compute_all": "Compute All",
   "cmd.timeline_copy": "Copy Features",
+  "cmd.timeline_cut": "Cut Features",
   "cmd.timeline_dependents": "Feature Dependents",
   "cmd.timeline_export_script": "Export Command Script",
   "cmd.timeline_inspect": "Inspect Feature",

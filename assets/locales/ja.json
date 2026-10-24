@@ -986,6 +986,7 @@
   "cmd.timeline_add": "記録したフィーチャーを追加",
   "cmd.timeline_compute_all": "すべて再計算",
   "cmd.timeline_copy": "フィーチャーをコピー",
+  "cmd.timeline_cut": "フィーチャーを切り取り",
   "cmd.timeline_dependents": "従属フィーチャー",
   "cmd.timeline_export_script": "コマンド スクリプトをエクスポート",
   "cmd.timeline_inspect": "フィーチャーを検査",

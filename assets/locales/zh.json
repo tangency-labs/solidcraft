@@ -986,6 +986,7 @@
   "cmd.timeline_add": "添加记录的特征",
   "cmd.timeline_compute_all": "全部重新計算",
   "cmd.timeline_copy": "复制特征",
+  "cmd.timeline_cut": "剪切特征",
   "cmd.timeline_dependents": "特征依存项",
   "cmd.timeline_export_script": "导出命令脚本",
   "cmd.timeline_inspect": "检查特征",

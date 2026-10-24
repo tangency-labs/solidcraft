@@ -295,6 +295,9 @@ pub struct Session {
     contact_meshes: std::sync::Arc<std::sync::Mutex<cmd::motion::contact_sweep::ContactMeshes>>,
     /// Features copied with `timeline.copy` (pasted by `timeline.paste`).
     pub clipboard: Vec<solidcraft_doc::Feature>,
+    /// Features cut with `timeline.cut` (Cut & Paste), by ID in timeline order. Session only: the
+    /// cut does not change the document.
+    pub timeline_cut: Vec<u64>,
     /// Sketch geometry copied with `sketch.copy` (pasted by `sketch.paste`).
     pub sketch_clipboard: Option<cmd::sketch_clipboard::SketchClip>,
     /// Section Analysis: a view cut by a plane (origin, unit normal; the normal side is hidden).
@@ -454,6 +457,7 @@ impl Session {
             body_renames: Vec::new(),
             contact_meshes: Default::default(),
             clipboard: Vec::new(),
+            timeline_cut: Vec::new(),
             sketch_clipboard: None,
             section: None,
             section_hatch: true,
@@ -1057,6 +1061,7 @@ impl Session {
             body_renames: Vec::new(),
             contact_meshes: self.contact_meshes.clone(),
             clipboard: self.clipboard.clone(),
+            timeline_cut: self.timeline_cut.clone(),
             sketch_clipboard: self.sketch_clipboard.clone(),
             section: None,
             section_hatch: true,
