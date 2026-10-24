@@ -1143,6 +1143,13 @@ impl Worker {
         }
     }
 
+    /// POST `body` to `url` with `headers`: the shared envelope under `post`
+    /// and `go_post`, which differ only in URL, extra headers, and key header.
+    fn post_to(&self, url: String, headers: Vec<(String, String)>, body: &Value) -> Result<(u16, Value), String> {
+        let req = HttpRequest { method: "POST", url, headers, body: Some(body.to_string().into_bytes()), timeout_s: self.limit_s() };
+        self.send(req)
+    }
+
     fn post(&self, body: &Value) -> Result<(u16, Value), String> {
         let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
         let url = match self.cfg.protocol {
@@ -1158,8 +1165,7 @@ impl Worker {
                 Protocol::Anthropic => headers.push(("x-api-key".into(), k.clone())),
             }
         }
-        let req = HttpRequest { method: "POST", url, headers, body: Some(body.to_string().into_bytes()), timeout_s: self.limit_s() };
-        self.send(&req)
+        self.post_to(url, headers, body)
     }
 
     /// POST for one Go protocol attempt: its own URL, always the session header,
@@ -1173,14 +1179,7 @@ impl Worker {
         if let Some(k) = &self.cfg.key {
             headers.push(("Authorization".into(), format!("Bearer {k}")));
         }
-        let req = HttpRequest {
-            method: "POST",
-            url: go_url(&self.cfg.model, protocol),
-            headers,
-            body: Some(body.to_string().into_bytes()),
-            timeout_s: self.limit_s(),
-        };
-        self.send(req)
+        self.post_to(go_url(&self.cfg.model, protocol), headers, body)
     }
 
     /// The request runs on a thread of its own so that Stop does not wait for the model: a
