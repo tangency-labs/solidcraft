@@ -713,6 +713,7 @@ impl SolveApp {
             "browser_expanded": self.tree.expanded,
             "recent": self.home.recent,
             "recent_opened_at": self.home.opened_at,
+            "recent_forgotten": self.home.forgotten,
             "shortcut_box": self.sbox.prefs(),
             "shortcuts": self.keymap.prefs(),
             "toolbar": self.toolbar_custom.prefs(),
@@ -764,6 +765,7 @@ impl SolveApp {
             .and_then(Value::as_array)
             .map(|a| a.iter().filter_map(Value::as_str).take(home::MAX_RECENT).map(str::to_string).collect())
             .unwrap_or_default();
+        self.home.forgotten = keys("recent_forgotten");
         if let Some(s) = v.get("shortcut_box") {
             self.sbox.load(s);
         }

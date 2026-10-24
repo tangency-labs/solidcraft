@@ -230,13 +230,15 @@ mod web {
         fn sync_recents(&mut self) {
             let mut entries = self.files.entries.borrow().clone();
             entries.sort_by(|a, b| b.modified.total_cmp(&a.modified));
+            let forgotten = self.app.home.forgotten.clone();
             let recent = &mut self.app.home.recent;
             let known = self.files.disk_known.borrow().clone();
             // A design on the computer's disk stays listed while its file is remembered.
             recent.retain(|p| vfs::exists(p) || disk::parse(p).is_some_and(|(id, _)| known.contains(id)));
             for e in entries.iter().filter(|e| solidcraft_engine::io::is_design_path(&e.name)) {
                 let p = format!("{}{}", files::OPFS, e.name);
-                if !recent.contains(&p) {
+                // A design the user removed from the list is not added back while it is stored.
+                if !recent.contains(&p) && !forgotten.contains(&p) {
                     recent.push(p);
                 }
             }
@@ -245,6 +247,10 @@ mod web {
             let recovered = self.files.recovery.borrow().as_ref().and_then(|(_, p)| p.clone());
             let keep = recent.iter().chain(recovered.as_ref()).filter_map(|p| disk::parse(p)).map(|(id, _)| id.to_string()).collect();
             disk::prune(keep);
+            // Drop forgotten entries whose stored design is gone, so the set does not grow without bound.
+            let stored: std::collections::BTreeSet<String> =
+                entries.iter().filter(|e| solidcraft_engine::io::is_design_path(&e.name)).map(|e| format!("{}{}", files::OPFS, e.name)).collect();
+            self.app.home.forgotten.retain(|p| stored.contains(p));
         }
 
         /// The stored designs: open, insert, rename, delete, download; open from the computer.
@@ -383,6 +389,8 @@ mod web {
                 "delete" => {
                     files::delete(&self.files, &name);
                     self.app.home.recent.retain(|r| *r != path);
+                    // The file is gone, so there is nothing left to keep forgotten.
+                    self.app.home.forgotten.remove(&path);
                 }
                 "rename_cancel" => self.renaming = None,
                 "rename" => {
@@ -395,6 +403,10 @@ mod web {
                                     if *r == old {
                                         *r = new.clone();
                                     }
+                                }
+                                // A forgotten design follows its new name.
+                                if self.app.home.forgotten.remove(&old) {
+                                    self.app.home.forgotten.insert(new);
                                 }
                             }
                             Err(e) => self.app.set_status(e, true),
