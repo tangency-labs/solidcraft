@@ -17,10 +17,11 @@
 //!   outputs each step's status and results and, at the end, the whole healer state
 //!   (targets, every props record ever allocated, every problem array with its labels,
 //!   histograms, statistics and the vertex voxel model). The C++ side preserves exactly
-//!   exported analytic surfaces and replaces other surfaces and edge curves by the
-//!   plain B-splines the Rust import rebuilds; the Rust side
-//!   imports the C++ export (the `topology.vertexuse` importer) and restores each
-//!   vertex's vertex use order from the shim.
+//!   exported analytic surfaces and edge curves (circles/ellipses, with their polar
+//!   mapping and flags) and replaces other surfaces and edge curves by the plain
+//!   B-splines the Rust import rebuilds; the Rust side imports the C++ export (the
+//!   `topology.vertexuse` importer) and restores each vertex's vertex use order from the
+//!   shim.
 //!
 //! Deferred: `Fix_TolSizes` (`SmBrep::GetThisModelSizeEstimate`, `topology.brep_p1`),
 //! `Cache_DegenFaces` with a face (`SmFace::IsDegenerate` classifies its edges with
@@ -186,6 +187,19 @@ pub(crate) enum Prim {
         radius: f64,
         #[serde(default)]
         swap: bool,
+    },
+    /// The shared native planar ellipse/circle fixture (`sc_topology_fixture::ellipse_face`,
+    /// block kind 9): one analytic edge curve plus its B-spline UV trim and, for an arc,
+    /// a line closing chord.
+    EllipseFace {
+        circle: bool,
+        origin: [f64; 3],
+        axis: u8,
+        radii: [f64; 2],
+        angles: [f64; 2],
+        natural: [f64; 2],
+        inside_out: bool,
+        oob: bool,
     },
 }
 
@@ -370,6 +384,25 @@ fn block_of(
         }
         BIn::Prim(Prim::Sphere { radius, swap }) => {
             v.extend([5.0, *radius, flag(*swap)]);
+            String::new()
+        }
+        BIn::Prim(Prim::EllipseFace {
+            circle,
+            origin,
+            axis,
+            radii,
+            angles,
+            natural,
+            inside_out,
+            oob,
+        }) => {
+            v.extend([9.0, flag(*circle)]);
+            v.extend(origin);
+            v.push(f64::from(*axis));
+            v.extend(radii);
+            v.extend(angles);
+            v.extend(natural);
+            v.extend([flag(*inside_out), flag(*oob)]);
             String::new()
         }
         BIn::Std(s) => {
@@ -2072,6 +2105,99 @@ mod tests {
             let surface = face.surface.as_ref().unwrap();
             assert!(matches!(surface.kind(), SurfaceKind::Sphere(_)));
         }
+    }
+
+    /// The healer transport must keep a native circle/ellipse edge curve as its
+    /// analytic kind (with the polar mapping and flags), not flatten it to the plain
+    /// B-spline copy the old `normalise()` made. The closing chord stays a line.
+    #[test]
+    fn ellipse_face_preserves_native_edge_curve() {
+        use solidcore::curve::curve::p2::{CurveKind, CIRCLE_TYPE, ELLIPSE_TYPE};
+        use solidcore::geom::extent1d::Extent1d;
+
+        for circle in [false, true] {
+            let (angles, radii) = if circle {
+                ([-90.0, 90.0], [0.03, 0.03])
+            } else {
+                ([-90.0, 90.0], [0.03, 0.01])
+            };
+            let input = BIn::Prim(Prim::EllipseFace {
+                circle,
+                origin: [0.02, -0.03, 0.01],
+                axis: 0,
+                radii,
+                angles,
+                natural: [-4.0, 3.0],
+                inside_out: false,
+                oob: false,
+            });
+            let (path, block) = block_of(&input, false, false).unwrap();
+            let (export, counts) = export_of(&path, &block).unwrap();
+            assert!(counts.is_some(), "ellipse face construction failed");
+            let (brep, _) = import_raw(&export).unwrap();
+            let ty = if circle { CIRCLE_TYPE } else { ELLIPSE_TYPE };
+            let mut found = 0;
+            let mut plain = 0;
+            for (_, edge) in brep.edges().iter() {
+                let Some(curve) = edge.curve.as_ref() else {
+                    continue;
+                };
+                if curve.type_code() != ty {
+                    plain += 1;
+                    continue;
+                }
+                found += 1;
+                let CurveKind::Ellipse(ellipse) = curve.kind() else {
+                    panic!("analytic edge curve changed kind");
+                };
+                assert_eq!(ellipse.is_circle_class(), circle);
+                assert_eq!(ellipse.x_radius(), radii[0]);
+                assert_eq!(ellipse.y_radius(), radii[1]);
+                assert_eq!(ellipse.step_interval(), Extent1d::from_raw(angles[0], angles[1]));
+                assert_eq!(
+                    ellipse.base().natural_interval(),
+                    Extent1d::from_raw(-4.0, 3.0)
+                );
+                assert!(!ellipse.inside_out());
+                assert!(!ellipse.base().is_out_of_bounds_enabled());
+                assert!(ellipse.base().gw_nurb().is_some());
+            }
+            assert_eq!(found, 1, "circle={circle}: analytic edge curve was flattened");
+            assert!(plain >= 1, "circle={circle}: the closing chord disappeared");
+        }
+    }
+
+    /// Cache steps on the analytic edge still compare real edge/vertex props values.
+    #[test]
+    fn ellipse_face_heal_cache_compares_values() {
+        let input = Inputs::Heal {
+            brep: Box::new(BIn::Prim(Prim::EllipseFace {
+                circle: false,
+                origin: [0.02, -0.03, 0.01],
+                axis: 0,
+                radii: [0.03, 0.01],
+                angles: [-90.0, 270.0],
+                natural: [-4.0, 3.0],
+                inside_out: false,
+                oob: false,
+            })),
+            validate_only: false,
+            init_gaps: false,
+            targets: Targets {
+                v: Sel::All,
+                e: Sel::All,
+                f: Sel::All,
+            },
+            voxels: default_voxels(),
+            steps: vec![Step::CacheEdgeProps, Step::CacheVertexProps],
+        };
+        let cpp = run_cpp(&input).unwrap();
+        let rust = run_rust(&input).unwrap();
+        assert!(cpp.error.is_none(), "C++ failed: {cpp:?}");
+        assert!(rust.error.is_none(), "Rust failed: {rust:?}");
+        assert!(rust.deferred.is_none(), "Rust deferred: {rust:?}");
+        let diff = crate::compare(&cpp, &rust, Runner.abs_floors());
+        assert!(diff.pass() && diff.values_compared > 0, "{diff:?}");
     }
 
     /// Object counts the C++ guard refuses are a harness error on the Rust side too,

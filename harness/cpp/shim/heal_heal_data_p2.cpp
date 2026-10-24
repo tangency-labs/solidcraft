@@ -10,9 +10,10 @@
 // validates every input. B-rep blocks are those of sc_topology_fixture.h (kinds 0..3)
 // plus kind 4 (SmPrimitiveCreation::CreateBox, as prog_test
 // my_test_squeeze_edge_tracks_removal) and kind 5 (a full SmSphere face, as prog_test
-// my_test_closed_sphere_properties). Analytic face surfaces and edge curves other than
-// SmPlane / SmLine are replaced by plain B-spline copies (what the Rust import
-// rebuilds, as the heal.gap shim does), then the graph is walked (with the vertex
+// my_test_closed_sphere_properties). Surfaces and edge curves the shared exporters can
+// carry as their exact analytic kind (planes, circles and ellipses) are kept; any other
+// surface or edge curve is replaced by a plain B-spline copy (what the Rust import
+// rebuilds, as the heal.gap shim does). Then the graph is walked (with the vertex
 // lists) and exported, followed by each vertex's vertex use list.
 #include "sc_topology_fixture.h"
 
@@ -55,9 +56,21 @@ SmBSplineCurve* plain_curve(SmCurve* c)
     return new (the_context()) SmBSplineCurve(sm_AllocateAndCopyNurbCurve(nurb), b->GetDim(), FALSE);
 }
 
-// Match the shared export/import: preserve exact analytic surfaces, and replace
-// other surfaces and edge curves with plain B-splines, as the heal.gap shim does.
-// Replaced originals are left unowned and leaked.
+// Whether the shared graph exporter transports `c` as its exact analytic kind.
+// Probe that exporter instead of duplicating its eligibility and round-trip rules,
+// so normalise() keeps exactly the curves the Rust import rebuilds natively.
+bool exact_curve(const SmCurve* c)
+{
+    if (c == nullptr || (c->GetType() != SmEllipse_TYPE && c->GetType() != SmCircle_TYPE))
+        return false;
+    std::vector<double> head;
+    sc_exact_curve_export::put_export_curve(head, c, the_context(), put_curve);
+    return !head.empty() && head.front() == -3.0;
+}
+
+// Match the shared export/import: preserve exact analytic surfaces and edge curves,
+// and replace other surfaces and edge curves with plain B-splines, as the heal.gap
+// shim does. Replaced originals are left unowned and leaked.
 void normalise(Graph& g)
 {
     for (SmFace* f : g.faces)
@@ -81,7 +94,12 @@ void normalise(Graph& g)
     }
     for (SmEdge* e : g.edges)
     {
-        SmBSplineCurve* nc = plain_curve(e->*EdgePeek::curve());
+        SmCurve* c = e->*EdgePeek::curve();
+        // Keep circles/ellipses that the shared exporter can carry exactly; the
+        // healer then sees the same native kind as the imported Rust B-rep.
+        if (exact_curve(c))
+            continue;
+        SmBSplineCurve* nc = plain_curve(c);
         if (nc != nullptr)
             e->*EdgePeek::curve() = nc;
     }
