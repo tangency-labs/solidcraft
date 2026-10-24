@@ -25,7 +25,7 @@ use super::{
 };
 use crate::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
 use crate::blend::fillet_geom::p1::{
-    CliffHandle, FilStatus, FilletEdgeType, FilletVertex, FilletVertexType,
+    CliffHandle, CornerLookup, FilStatus, FilletEdgeType, FilletVertex, FilletVertexType,
 };
 use crate::blend::fillet_solver::p1::{FilletSolverOffsetsData, OffsetSurfaceSlot};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
@@ -228,10 +228,14 @@ pub(super) trait RecoveryOps {
         // ProcessRollOver visits this solver's own geometries, so c.solver
         // is the solver identified by geom.fillet_solver().
         let solver_id = required(c.fillets.geom(geom)?.fillet_solver())?;
+        // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::m_vFilletCorners (the
+        // rollover recovery holds no corner table; CalcRailIntEdgeuse reads the vertex's
+        // corner)
         c.fillets.calc_rail_int_edgeuse_with_solver(
             c.k,
             vertex,
             Some(geom),
+            CornerLookup::default(),
             solver_id,
             c.solver,
             c.target,

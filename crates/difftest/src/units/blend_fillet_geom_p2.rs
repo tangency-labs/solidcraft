@@ -22,7 +22,10 @@
 //! corner: the shim refuses the block's opaque corner tags, upstream asks the corner
 //! for its filleted vertex first), `rail_rail` (an edge between two vertices with
 //! incoming rails, its original face a B-spline face, a real plane or a surface of
-//! revolution; the edge's status, curve and its edge uses' UV curves are compared) or
+//! revolution, sometimes with a corner whose fillet edge list the routine reads first:
+//! more than four edges, or up to four with the test edge two places on, sometimes a
+//! cross-section edge without geometry; the edge's status, curve and its edge uses' UV
+//! curves are compared) or
 //! `split_face` (the original face, then `UpdateSplitFace`; the face indices are
 //! compared; only the path where the edge is not on the split face runs: the other
 //! one reaches `ShouldSwapFaces`, `blend.fillet_geom_p6`, which the shim refuses).
@@ -35,7 +38,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use solidcore::blend::fillet_geom::p1::FilletSolverId;
+use solidcore::blend::fillet_corner::p3::{FilletCorner, FilletCornerKind};
+use solidcore::blend::fillet_geom::p1::{CornerLookup, FilletCornerId, FilletSolverId};
 use solidcore::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use solidcore::blend::fillet_solver::p1::FilletSolver;
 use solidcore::curve::curve::Curve;
@@ -127,6 +131,9 @@ enum Query {
         /// The original face's tolerance.
         #[serde(default)]
         face_tol: f64,
+        /// `pCorner`: a corner with these fillet edges (model edges), `None` for `NULL`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        corner: Option<Vec<usize>>,
     },
     SplitFace {
         e: usize,
@@ -228,13 +235,25 @@ fn cpp_input(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
         Query::CrossSection { v, param } => {
             o.extend([*v as f64, flag(param.is_some()), param.unwrap_or(0.0)]);
         }
-        Query::RailRail { e, face, face_tol } => {
+        Query::RailRail {
+            e,
+            face,
+            face_tol,
+            corner,
+        } => {
             o.push(*e as f64);
             match face {
                 None => o.push(-1.0),
                 Some(s) => {
                     push_surf(&mut o, s)?;
                     o.push(*face_tol);
+                }
+            }
+            match corner {
+                None => o.push(-1.0),
+                Some(edges) => {
+                    o.push(edges.len() as f64);
+                    o.extend(edges.iter().map(|&e| e as f64));
                 }
             }
         }
@@ -493,9 +512,11 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
         | Query::CrossSection { v, .. }
         | Query::SetBack { v } => {
             let vid = rm.vertex(*v)?;
+            // the queried vertex has no corner (module docs)
+            let no_corners = CornerLookup::default();
             let r = match &i.query {
                 Query::RailIntRail { .. } => {
-                    rm.fb.calc_rail_int_rail(&k, vid, &mut solvers, &mut rm.target)
+                    rm.fb.calc_rail_int_rail(&k, vid, no_corners, &mut solvers, &mut rm.target)
                 }
                 Query::RailIntEdgeuse { g, .. } => {
                     let g = match usize::try_from(*g) {
@@ -503,20 +524,25 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
                         Err(_) => None,
                     };
                     rm.fb
-                        .calc_rail_int_edgeuse(&k, vid, g, &mut solvers, &mut rm.target)
+                        .calc_rail_int_edgeuse(&k, vid, g, no_corners, &mut solvers, &mut rm.target)
                 }
                 Query::CrossSection { param, .. } => {
                     rm.fb
-                        .calc_vert_on_cross_section(&k, vid, *param, &mut solvers, &mut rm.target)
+                        .calc_vert_on_cross_section(&k, vid, *param, no_corners, &mut solvers, &mut rm.target)
                 }
-                _ => rm.fb.calc_set_back_vert(&k, vid, &mut solvers, &rm.target),
+                _ => rm.fb.calc_set_back_vert(&k, vid, no_corners, &mut solvers, &rm.target),
             };
             o.push(status_of!(r));
             let p: Point3 = rm.fb.vertex_point(vid).map_err(h)?;
             o.extend([p.x, p.y, p.z]);
             o.push(rm.fb.fillet_vertex(vid).map_err(h)?.status() as i64 as f64);
         }
-        Query::RailRail { e, face, face_tol } => {
+        Query::RailRail {
+            e,
+            face,
+            face_tol,
+            corner,
+        } => {
             let eid: EdgeId = rm.edge(*e)?;
             if let Some(s) = face {
                 let surface = match surf(&k, s)? {
@@ -541,9 +567,26 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
                     .set_original_face(Some(f));
             }
             o.push(0.0);
-            let r = rm
-                .fb
-                .calc_rail_rail_interpolation(&k, eid, None, &mut solvers, &mut rm.target);
+            // the shim's corner: its fillet edges only, of type SM_FCR_UNKNOWN, which no
+            // FilletCornerKind has; the routine tests the type only for
+            // SM_FCR_N_x_N_CONCAVE, which neither is
+            let mut table = Vec::new();
+            if let Some(edges) = corner {
+                let mut c = FilletCorner::new(FilletCornerKind::OneByOne, None, None, None, 1.0e-6, 0.01);
+                for &ce in edges {
+                    c.edges.push(rm.edge(ce)?);
+                }
+                table.push(c);
+            }
+            let opt_corner = corner.as_ref().map(|_| FilletCornerId(0));
+            let r = rm.fb.calc_rail_rail_interpolation(
+                &k,
+                eid,
+                opt_corner,
+                CornerLookup::table(&table),
+                &mut solvers,
+                &mut rm.target,
+            );
             o.push(status_of!(r));
             o.push(rm.fb.fillet_edge(eid).map_err(h)?.status() as i64 as f64);
             let brep = rm.fb.brep();
@@ -1084,6 +1127,20 @@ fn gen_rail_rail(rng: &mut Rng) -> Option<Inputs> {
     if rng.chance(0.97) {
         model.edges.push(r2);
     }
+    // a cross-section edge (between vertices of its own, no geometry) the corner's
+    // edge list may hold opposite the queried edge
+    if rng.chance(0.4) {
+        let nv = model.vertices.len();
+        let far = [p0[0], p0[1], p0[2] + scale];
+        model.vertices.push(vertex_at(far));
+        model.vertices.push(vertex_at([far[0] + scale, far[1], far[2]]));
+        let mut cs = model.edges.first().cloned()?;
+        cs.vs = nv;
+        cs.ve = nv + 1;
+        cs.etype = 2; // SM_FE_CROSS_SECTION
+        model.edges.push(cs);
+    }
+    let corner = gen_rail_rail_corner(rng, model.edges.len());
     Some(Inputs {
         model,
         solvers: Vec::new(),
@@ -1092,8 +1149,47 @@ fn gen_rail_rail(rng: &mut Rng) -> Option<Inputs> {
             e: 0,
             face_tol: scale * *rng.choose(&[1e-6, 1e-6, 1e-4, 1e-9, 0.0]).unwrap_or(&1e-6),
             face: if rng.chance(0.03) { None } else { Some(face) },
+            corner,
         },
     })
+}
+
+/// The fillet edges of `CalcRailRailInterpolation`'s corner (`None`: no corner) among the
+/// `ne` model edges (the queried edge is `0`): more than four (the interpolation runs as
+/// without a corner), or up to four with the queried edge mostly in the list, so the edge
+/// two places on (a cross-section edge or not) is tested.
+fn gen_rail_rail_corner(rng: &mut Rng, ne: usize) -> Option<Vec<usize>> {
+    if ne == 0 || rng.chance(0.5) {
+        return None;
+    }
+    let pick = |rng: &mut Rng| rng.below(ne as u64) as usize;
+    if rng.chance(0.35) {
+        let n = 5 + rng.below(3) as usize;
+        let mut edges: Vec<usize> = (0..n).map(|_| pick(rng)).collect();
+        if rng.chance(0.8) {
+            if let Some(slot) = edges.get_mut(rng.below(n as u64) as usize) {
+                *slot = 0;
+            }
+        }
+        return Some(edges);
+    }
+    let n = rng.below(5) as usize;
+    let mut edges: Vec<usize> = (0..n).map(|_| pick(rng)).collect();
+    if n > 0 && rng.chance(0.75) {
+        let at = rng.below(n as u64) as usize;
+        if let Some(slot) = edges.get_mut(at) {
+            *slot = 0;
+        }
+        // the test edge (two places on) is the cross-section edge when there is one
+        if ne > 3 && rng.chance(0.6) {
+            if let Some(slot) = edges.get_mut((at + 2) % n) {
+                if (at + 2) % n != at {
+                    *slot = ne - 1;
+                }
+            }
+        }
+    }
+    Some(edges)
 }
 
 /// `UpdateSplitFace` on p1's random model with target faces.

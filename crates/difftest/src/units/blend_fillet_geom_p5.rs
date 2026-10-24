@@ -49,7 +49,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use solidcore::blend::fillet_geom::p1::{BoundaryTrimmingType, FilletSolverId};
+use solidcore::blend::fillet_geom::p1::{BoundaryTrimmingType, CornerLookup, FilletSolverId};
 use solidcore::blend::fillet_solver::p1::FilletSolver;
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::kernel::Kernel;
@@ -387,7 +387,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
     match &i.query {
         Query::IntFillet { v } => {
             let vid = rm.vertex(*v)?;
-            let r = rm.fb.calc_fillet_int_fillet(&k, vid, &solvers, &target);
+            let r = rm.fb.calc_fillet_int_fillet(&k, vid, CornerLookup::default(), &solvers, &target);
             o.push(status_of!(r));
             let p = rm.fb.vertex_point(vid).map_err(h)?;
             o.extend([p.x, p.y, p.z]);
@@ -395,7 +395,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
         }
         Query::CrossSection { e } => {
             let eid = rm.edge(*e)?;
-            let r = rm.fb.calc_cross_section(&k, eid, None, &solvers, &target);
+            let r = rm.fb.calc_cross_section(&k, eid, None, CornerLookup::default(), &solvers, &target);
             o.push(status_of!(r));
             let b = rm.fb.brep();
             dump_bcurve(&mut o, b_spline_of(edge::curve(b, eid).map_err(h)?));
@@ -415,14 +415,14 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
             let eid = rm.edge(*e)?;
             let r = rm
                 .fb
-                .calc_fillet_int_side_face(&k, eid, None, &solvers, &target);
+                .calc_fillet_int_side_face(&k, eid, None, CornerLookup::default(), &solvers, &target);
             o.push(status_of!(r));
             o.push(rm.fb.fillet_edge(eid).map_err(h)?.status() as i64 as f64);
             sides(&rm, &mut o)?;
         }
         Query::ExtEdge { e } => {
             let eid = rm.edge(*e)?;
-            let r = rm.fb.calc_edge_on_extended_edge(&k, eid, None, &target);
+            let r = rm.fb.calc_edge_on_extended_edge(&k, eid, None, CornerLookup::default(), &target);
             o.push(status_of!(r));
         }
         Query::TrimRails { g } => {
@@ -559,7 +559,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
             };
             let r = rm
                 .fb
-                .make_rail_edgeuse(gid, *rail, fv, orient, belonging, &solvers, &target);
+                .make_rail_edgeuse(gid, *rail, fv, orient, belonging, CornerLookup::default(), &solvers, &target);
             o.push(status_of!(r));
             o.push(rm.fb.edge_list().len() as f64);
             if r.is_ok() {

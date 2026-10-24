@@ -26,6 +26,59 @@ enum : int32_t
     P2_SPLIT_FACE = 6,
 };
 
+// The pCorner of CalcRailRailInterpolation: a corner with the given fillet edges
+// (m_vEdges) and nothing else. Its type is SM_FCR_UNKNOWN (never SM_FCR_N_x_N_CONCAVE, whose
+// TestRailRailInterpolationCurve reads the filleted vertex it does not have). The
+// SmFilletCorner constructor reads pExec->m_pPseudoBrep and nothing else of the executive,
+// so it gets zeroed storage standing in for one (a NULL pseudo B-rep).
+alignas(SmFilletExecutive) unsigned char g_p2_exec_storage[sizeof(SmFilletExecutive)] = {};
+
+struct P2Corner : SmFilletCorner
+{
+    P2Corner(const SmContext& ctx)
+        : SmFilletCorner(ctx, NULL, NULL, NULL, (SmFilletExecutive*)(void*)g_p2_exec_storage, 1.0e-6, 0.01)
+    {
+    }
+    virtual SmStatus MakeCornerTopology() { return SM_ERR; }
+    virtual SmFilletCornerType GetCornerType() const { return SM_FCR_UNKNOWN; }
+    virtual void GetName(TCHAR* pc, size_t n) const
+    {
+        if (n > 0)
+            pc[0] = 0;
+    }
+    void add_edge(SmFilletEdge* e) { m_vEdges.Add(e); }
+};
+
+// CalcRailRailInterpolation's corner branch (SmFilletGeom.cpp:6672-6707) with fillet edges
+// `ce`: `early` when it returns SM_ERR / SM_ERR_NULL_POINTER before the interpolation; false
+// when it would dereference the test edge's primary edge use (NULL) or its geometry's solver
+// and surface generator (the harness's solvers have none).
+bool p2_rail_rail_corner_safe(SmFilletEdge* e, const std::vector<SmFilletEdge*>& ce, bool& early)
+{
+    early = false;
+    if (ce.size() > 4)
+        return true;
+    size_t index = 0;
+    while (index < ce.size() && ce[index] != e)
+        ++index;
+    if (index == ce.size())
+    {
+        early = true; // FindElement fails: SER(SM_ERR)
+        return true;
+    }
+    SmFilletEdge* test = ce[(index + 2) % ce.size()];
+    if (test->GetFilletEdgeType() != SM_FE_CROSS_SECTION)
+    {
+        early = true; // SER(SM_ERR)
+        return true;
+    }
+    SmFilletEdgeuse* p = (SmFilletEdgeuse*)test->GetPrimaryEdgeuse();
+    if (p == NULL || p->GetFilletGeom() != NULL)
+        return false;
+    early = true; // NER(pFilletGeom)
+    return true;
+}
+
 // `type has dim n p m cpts knots`: the curve's SM type (0 for none) and its B-spline data.
 void p2_put_curve(std::vector<double>& o, const SmCurve* c)
 {
@@ -222,7 +275,23 @@ int32_t p2_run(int32_t op, Rd& rd, std::vector<double>& o)
             s = p2_read_surface(rd, ctx, cs);
         }
         double face_tol = face_kind >= 0 ? rd.num() : 0.0;
+        // the corner's fillet edges (`-1`: pCorner NULL)
+        int64_t nc = rd.idx();
+        std::vector<SmFilletEdge*> ce;
+        for (int64_t i = 0; i < nc && !rd.bad; ++i)
+        {
+            SmFilletEdge* c = M.edge(rd.idx());
+            if (c == NULL)
+                rd.bad = true;
+            ce.push_back(c);
+        }
         if (rd.bad || e == NULL || (face_kind >= 0 && s == NULL && cs == SM_SUCCESS))
+        {
+            delete s;
+            return SC_ERR_ARG;
+        }
+        bool early = false;
+        if (nc >= 0 && !p2_rail_rail_corner_safe(e, ce, early))
         {
             delete s;
             return SC_ERR_ARG;
@@ -241,9 +310,17 @@ int32_t p2_run(int32_t op, Rd& rd, std::vector<double>& o)
             f->SetTolerance(SmZoneTol3d(face_tol), FALSE, FALSE);
             e->SetOriginalFace(f);
         }
-        if (!p2_rail_rail_curves_present(ctx, e))
+        if (!early && !p2_rail_rail_curves_present(ctx, e))
             return SC_ERR_ARG; // a NULL rail curve or edge use would be dereferenced
-        SmStatus r = e->CalcRailRailInterpolation(ctx, NULL);
+        P2Corner* corner = NULL;
+        if (nc >= 0)
+        {
+            corner = new (ctx) P2Corner(ctx);
+            for (size_t i = 0; i < ce.size(); ++i)
+                corner->add_edge(ce[i]);
+        }
+        SmStatus r = e->CalcRailRailInterpolation(ctx, corner);
+        delete corner;
         o.push_back(st(r));
         o.push_back((double)e->GetStatus());
         p2_put_curve(o, e->GetCurve());

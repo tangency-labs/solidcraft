@@ -30,8 +30,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
+use solidcore::blend::fillet_corner::p3::{FilletCorner, FilletCornerKind};
 use solidcore::blend::fillet_geom::p1::{
-    FilStatus, FilletBrep, FilletCornerId, FilletEdgeType, FilletEdgeuse, FilletGeomId,
+    CornerLookup, FilStatus, FilletBrep, FilletCornerId, FilletEdgeType, FilletEdgeuse, FilletGeomId,
     FilletGeomType, FilletSolverId, FilletVertex, FilletVertexType, FilletVertexuse,
 };
 use solidcore::blend::fillet_geom::p3::new_solver_fillet_geom;
@@ -952,6 +953,30 @@ fn status(e: &SolidError) -> f64 {
     }
 }
 
+/// The shim's corners (`ShimCorner`, one per tag the model uses, indexed by tag): no
+/// filleted vertex, edge uses, fillet vertices or edges, `dApproxTol3d` `1e-6`,
+/// `dTangencyTolRadians` `0.01`. Their type is `SM_FCR_UNKNOWN`, which no
+/// [`FilletCornerKind`] has; the compared paths never read it (the shim refuses the
+/// vertex and edge calculators that would, and `CalcRailRailInterpolation` returns
+/// `SM_ERR` at the corner's empty edge list first).
+fn shim_corners(m: &RustModel) -> Result<Vec<FilletCorner>, HarnessError> {
+    let mut count = 0;
+    let mut tag = |c: Option<FilletCornerId>| {
+        if let Some(c) = c {
+            count = count.max(c.0 as usize + 1);
+        }
+    };
+    for &v in &m.vertices {
+        tag(m.fb.fillet_vertex(v).map_err(h)?.fillet_corner());
+    }
+    for &e in &m.edges {
+        tag(m.fb.fillet_edge(e).map_err(h)?.fillet_corner());
+    }
+    Ok((0..count)
+        .map(|_| FilletCorner::new(FilletCornerKind::OneByOne, None, None, None, 1.0e-6, 0.01))
+        .collect())
+}
+
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut tg = match target(&i.brep)? {
         Ok(t) => t,
@@ -960,25 +985,27 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut m = RustModel::build(i, &tg)?;
     let k = std::mem::take(&mut m.k);
     let mut bases: Vec<FilletSolver> = m.solvers.iter().map(|s| s.base.clone()).collect();
+    let corners = shim_corners(&m)?;
+    let corners = CornerLookup::table(&corners);
     let res = match &i.op {
         OpIn::Export => Ok(()),
         OpIn::CornerVert { v } => {
             let v = *m.vertices.get(*v).ok_or_else(|| harness("vertex"))?;
-            m.fb.calc_corner_vert_geom(&k, v, &mut tg.brep, &mut bases)
+            m.fb.calc_corner_vert_geom(&k, v, corners, &mut tg.brep, &mut bases)
         }
         OpIn::Mate { v } => {
             let v = *m.vertices.get(*v).ok_or_else(|| harness("vertex"))?;
-            m.fb.calc_mate_geom(&k, v, &mut tg.brep, &mut bases)
+            m.fb.calc_mate_geom(&k, v, corners, &mut tg.brep, &mut bases)
         }
         OpIn::CornerEdge { e } => {
             let e = *m.edges.get(*e).ok_or_else(|| harness("edge"))?;
             // the shim refuses the part 6 calculators (its corners carry no data)
-            m.fb.calc_corner_edge_geom(&k, e, &[], &mut bases, &mut tg.brep)
+            m.fb.calc_corner_edge_geom(&k, e, corners, &mut bases, &mut tg.brep)
         }
         OpIn::FilletIntFillet { e } => {
             let e = *m.edges.get(*e).ok_or_else(|| harness("edge"))?;
             let corner = m.fb.fillet_edge(e).map_err(h)?.fillet_corner();
-            m.fb.calc_edge_fillet_int_fillet(&k, e, corner, &bases, &tg.brep)
+            m.fb.calc_edge_fillet_int_fillet(&k, e, corner, corners, &bases, &tg.brep)
         }
         OpIn::ReCalc {
             g,

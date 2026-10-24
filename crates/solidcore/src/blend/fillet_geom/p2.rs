@@ -59,11 +59,10 @@
 //!   fails part-way may have appended curves upstream; the Rust intersectors return
 //!   nothing on failure. `FindParameterAtArcLength`'s `SM_ERR_NOT_CONVERGING` is an
 //!   error where upstream `SER`s it.
-//! - **Fillet corners.** `SmFilletCorner` (unit `blend.fillet_corner_p1`) is an opaque
-//!   [`FilletCornerId`] here: its filleted vertex, set-back distance, flags, fillet
-//!   edges, type and `TestRailRailInterpolationCurve` are `UNPORTED(blend.fillet_corner_p1)`
-//!   stubs (the four vertex calculators stop at the filleted vertex, right after the
-//!   corner's null check; `CalcRailRailInterpolation` only with a corner).
+//! - **Fillet corners.** A vertex's or edge's `SmFilletCorner*` is a [`FilletCornerId`]
+//!   that the caller's [`CornerLookup`] resolves to the [`FilletCorner`] (unit
+//!   `blend.fillet_corner_p1`) whose filleted vertex, set-back distance, flags, fillet
+//!   edges, type and `TestRailRailInterpolationCurve` the calculators read.
 //! - **Solver virtuals.** The `solvers` table holds base [`FilletSolver`]s, so
 //!   `RailRailIntersect` and the virtual `PointOnPlaneSolve` run with the base
 //!   `SmFilletSolver` virtuals (`impl FilletSolverOps for FilletSolver`), as for the
@@ -119,9 +118,9 @@ use crate::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, VertexId, Vertexuse
 
 use super::p1::{
     adjust_uv_on_seam, create_cubic_rail_rail_interpolant, evaluate_mate,
-    interpolate_endpts_and_tangents, two_pnts_intersection, FilStatus, FilletBrep, FilletCornerId,
-    FilletCornerType, FilletEdgeType, FilletGeomId, FilletSolverId, FilletVertexType,
-    SurfaceHandle,
+    interpolate_endpts_and_tangents, two_pnts_intersection, CornerLookup, FilStatus, FilletBrep,
+    FilletCornerId, FilletCornerType, FilletEdgeType, FilletGeomId, FilletSolverId,
+    FilletVertexType, SurfaceHandle,
 };
 use super::p4::{set_edge_curve, set_vertex_point};
 
@@ -407,80 +406,6 @@ fn with_lazy_nurb(s: &Surface) -> Cow<'_, Surface> {
     Cow::Borrowed(s)
 }
 
-// ---- unported callees -----------------------------------------------------------------
-
-/// `SmFilletCorner::GetFilletedVertex` (unit `blend.fillet_corner_p1`).
-/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
-/// id; wired in a follow-up once it merges.
-fn corner_filleted_vertex(corner: FilletCornerId) -> Result<Option<VertexId>> {
-    // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::GetFilletedVertex
-    unported_on(
-        corner,
-        "SmFilletCorner::GetFilletedVertex",
-        "blend.fillet_corner_p1",
-    )
-}
-
-/// `SmFilletCorner::GetSetBackDist` (unit `blend.fillet_corner_p1`).
-/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
-/// id; wired in a follow-up once it merges.
-fn corner_set_back_dist(corner: FilletCornerId) -> Result<f64> {
-    // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::GetSetBackDist
-    unported_on(
-        corner,
-        "SmFilletCorner::GetSetBackDist",
-        "blend.fillet_corner_p1",
-    )
-}
-
-/// `SmFilletCorner::IsCalcAsConstRad` (unit `blend.fillet_corner_p1`).
-/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
-/// id; wired in a follow-up once it merges.
-fn corner_is_calc_as_const_rad(corner: Option<FilletCornerId>) -> Result<bool> {
-    // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::IsCalcAsConstRad
-    unported_on(
-        corner,
-        "SmFilletCorner::IsCalcAsConstRad",
-        "blend.fillet_corner_p1",
-    )
-}
-
-/// `SmFilletCorner::IsBlendingCorner` (unit `blend.fillet_corner_p1`).
-/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
-/// id; wired in a follow-up once it merges.
-fn corner_is_blending(corner: FilletCornerId) -> Result<bool> {
-    // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::IsBlendingCorner
-    unported_on(
-        corner,
-        "SmFilletCorner::IsBlendingCorner",
-        "blend.fillet_corner_p1",
-    )
-}
-
-/// `SmFilletCorner::GetFilletEdges` (unit `blend.fillet_corner_p1`).
-/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
-/// id; wired in a follow-up once it merges.
-fn corner_fillet_edges(corner: FilletCornerId) -> Result<Vec<EdgeId>> {
-    // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::GetFilletEdges
-    unported_on(
-        corner,
-        "SmFilletCorner::GetFilletEdges",
-        "blend.fillet_corner_p1",
-    )
-}
-
-/// `SmFilletCorner::GetCornerType` (unit `blend.fillet_corner_p1`).
-/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
-/// id; wired in a follow-up once it merges.
-fn corner_type(corner: FilletCornerId) -> Result<FilletCornerType> {
-    // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::GetCornerType
-    unported_on(
-        corner,
-        "SmFilletCorner::GetCornerType",
-        "blend.fillet_corner_p1",
-    )
-}
-
 /// The `SmBSplineCurve` (base) of a curve kind derived from it (`SmLine`,
 /// `SmEllipse`/`SmCircle`, `SmHyperbola`, `SmParabola`), `None` for the others.
 const fn b_spline_base(c: &Curve) -> Option<&BSplineCurve> {
@@ -504,22 +429,6 @@ fn b_spline_base_mut(c: &mut Curve) -> Option<&mut BSplineCurve> {
         CurveKind::Parabola(p) => Some(p.base_mut()),
         _ => None,
     }
-}
-
-/// `SmFilletConcaveNxNCorner::TestRailRailInterpolationCurve` (unit
-/// `blend.fillet_corner_p1`).
-/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
-/// id; wired in a follow-up once it merges.
-fn corner_test_rail_rail_interpolation_curve(
-    corner: FilletCornerId,
-    curve: &BSplineCurve,
-) -> Result<bool> {
-    // UNPORTED(blend.fillet_corner_p1): SmFilletConcaveNxNCorner::TestRailRailInterpolationCurve
-    unported_on(
-        (corner, curve),
-        "SmFilletConcaveNxNCorner::TestRailRailInterpolationCurve",
-        "blend.fillet_corner_p1",
-    )
 }
 
 /// `pFilSolver1->RailRailIntersect(sUVGuess, lRailIndex1, pFilSolver2, lRailIndex2,
@@ -1098,14 +1007,15 @@ impl FilletBrep {
     /// `SM_ERR_NULL_POINTER` without corner, solver, offset surface, edge use, curve or
     /// UV trim curve; `SM_ERR` without exactly two fillet geometries and when the rails
     /// do not meet (the vertex is then `SM_FV_SOLVER_NOT_CONVERGE`); those of the
-    /// evaluations; [`SolidError::Unported`] for the corner's filleted vertex
-    /// (`blend.fillet_corner_p1`) and those of `RailRailIntersect` (its
-    /// `SmTemporaryRadiusChange`, `blend.fillet_executive_p2`).
+    /// evaluations; those of [`CornerLookup::corner`] (`corners` resolves the vertex's corner) and those
+    /// of `RailRailIntersect` (its `SmTemporaryRadiusChange`,
+    /// `blend.fillet_executive_p2`).
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn calc_rail_int_rail(
         &mut self,
         k: &Kernel,
         v: VertexId,
+        corners: CornerLookup<'_>,
         solvers: &mut [FilletSolver],
         target: &mut Brep,
     ) -> Result<()> {
@@ -1124,7 +1034,7 @@ impl FilletBrep {
             _ => return Err(SolidError::sm_err(OP)),
         };
 
-        let cp_vertex = corner_filleted_vertex(corner)?;
+        let cp_vertex = corners.corner(corner)?.filleted_vertex();
         let s1 = self.geom_solver_index(fillet_geom1, solvers, OP)?;
         let s2 = self.geom_solver_index(fillet_geom2, solvers, OP)?;
         let fs1 = solver_at(solvers, s1, OP)?;
@@ -1230,14 +1140,15 @@ impl FilletBrep {
     /// `SM_ERR_NULL_POINTER` without corner, side edge use, curve, mate face or solver;
     /// `SM_ERR` without a fillet geometry and, for a blending corner, when no
     /// intersection is found; those of the evaluations and solves;
-    /// [`SolidError::Unported`] for the corner (`blend.fillet_corner_p1`), the
-    /// temporary radius change of a solver (`blend.fillet_executive_p2`) and those of
-    /// `SmFilletSolver::RailEdgeuseIntersect`.
+    /// those of [`CornerLookup::corner`] (`corners` resolves the vertex's corner);
+    /// [`SolidError::Unported`] for the temporary radius change of a solver
+    /// (`blend.fillet_executive_p2`) and those of `SmFilletSolver::RailEdgeuseIntersect`.
     pub fn calc_rail_int_edgeuse(
         &mut self,
         k: &Kernel,
         v: VertexId,
         opt_fg: Option<FilletGeomId>,
+        corners: CornerLookup<'_>,
         solvers: &mut [FilletSolver],
         target: &mut Brep,
     ) -> Result<()> {
@@ -1245,6 +1156,7 @@ impl FilletBrep {
             k,
             v,
             opt_fg,
+            corners,
             &mut RailSolvers::Indexed(solvers),
             target,
         )
@@ -1261,6 +1173,7 @@ impl FilletBrep {
         k: &Kernel,
         v: VertexId,
         opt_fg: Option<FilletGeomId>,
+        corners: CornerLookup<'_>,
         solver_id: FilletSolverId,
         solver: &mut FilletSolver,
         target: &mut Brep,
@@ -1269,6 +1182,7 @@ impl FilletBrep {
             k,
             v,
             opt_fg,
+            corners,
             &mut RailSolvers::Single(solver_id, solver),
             target,
         )
@@ -1280,6 +1194,7 @@ impl FilletBrep {
         k: &Kernel,
         v: VertexId,
         opt_fg: Option<FilletGeomId>,
+        corners: CornerLookup<'_>,
         solvers: &mut RailSolvers<'_>,
         target: &mut Brep,
     ) -> Result<()> {
@@ -1290,7 +1205,7 @@ impl FilletBrep {
             .ok_or_else(|| SolidError::null_pointer(OP))?;
 
         // get original Brep vertex
-        let cp_vertex = corner_filleted_vertex(corner)?;
+        let cp_vertex = corners.corner(corner)?.filleted_vertex();
 
         // get this filletVertex->filletEdgeuse[type == SM_FE_RAIL]->FilletGeom(s)
         let geoms = self.vertex_fillet_geoms(v)?;
@@ -1382,7 +1297,7 @@ impl FilletBrep {
             let mut edgeuse_parameter = 0.0;
             for &guess in &guess_edge_parameters {
                 // Temporarily change this to a constant-radius function.
-                let fs_for_change = if corner_is_calc_as_const_rad(Some(corner))? {
+                let fs_for_change = if corners.corner(corner)?.is_calc_as_const_rad() {
                     let si = RailSolvers::geom_solver(self, g1)?;
                     Some(solvers.solver(si)?)
                 } else {
@@ -1450,7 +1365,7 @@ impl FilletBrep {
                 self.fillet_vertex_mut(v)?
                     .set_status(FilStatus::NoIntRailEu);
                 // Sometimes the fillet can still succeed.
-                if corner_is_blending(corner)? {
+                if corners.corner(corner)?.is_blending_corner() {
                     return Err(SolidError::sm_err(OP));
                 }
                 return Ok(());
@@ -1630,14 +1545,15 @@ impl FilletBrep {
     /// # Errors
     ///
     /// `SM_ERR_NULL_POINTER` without corner, solver, edge use, curve or surface; `SM_ERR`
-    /// without a fillet geometry; those of the evaluations; [`SolidError::Unported`] for
-    /// the corner (`blend.fillet_corner_p1`).
+    /// without a fillet geometry; those of the evaluations; those of [`CornerLookup::corner`]
+    /// (`corners` resolves the vertex's corner).
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn calc_vert_on_cross_section(
         &mut self,
         k: &Kernel,
         v: VertexId,
         opt_edge_param: Option<f64>,
+        corners: CornerLookup<'_>,
         solvers: &mut [FilletSolver],
         target: &mut Brep,
     ) -> Result<()> {
@@ -1646,7 +1562,7 @@ impl FilletBrep {
             .fillet_vertex(v)?
             .fillet_corner()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let cp_vertex = corner_filleted_vertex(corner)?;
+        let cp_vertex = corners.corner(corner)?.filleted_vertex();
 
         // Determine where the cross-sectional plane is
         let geoms = self.vertex_fillet_geoms(v)?;
@@ -1832,13 +1748,14 @@ impl FilletBrep {
     ///
     /// `SM_ERR_NULL_POINTER` without corner, solver, edge use, curve, surface or face;
     /// `SM_ERR` without exactly one fillet geometry and unless each surface has exactly
-    /// one closest point; those of the evaluations and solves;
-    /// [`SolidError::Unported`] for the corner (`blend.fillet_corner_p1`).
+    /// one closest point; those of the evaluations and solves; those of [`CornerLookup::corner`]
+    /// (`corners` resolves the vertex's corner).
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn calc_set_back_vert(
         &mut self,
         k: &Kernel,
         v: VertexId,
+        corners: CornerLookup<'_>,
         solvers: &mut [FilletSolver],
         target: &Brep,
     ) -> Result<()> {
@@ -1847,8 +1764,8 @@ impl FilletBrep {
             .fillet_vertex(v)?
             .fillet_corner()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let cp_vertex = corner_filleted_vertex(corner)?;
-        let set_back_dist = corner_set_back_dist(corner)?;
+        let cp_vertex = corners.corner(corner)?.filleted_vertex();
+        let set_back_dist = corners.corner(corner)?.set_back_dist();
 
         let geoms = self.vertex_fillet_geoms(v)?;
         if geoms.len() != 1 {
@@ -1983,14 +1900,15 @@ impl FilletBrep {
     /// `SM_ERR_NULL_POINTER` without original face, B-spline surface, rail, edge use or
     /// curve; `SM_ERR` when a vertex does not drop onto its rail within 100 times the
     /// tolerance or a drop gives other than one UV curve; those of the evaluations,
-    /// constructions, lifts and `SmSurface::DropCurve`; [`SolidError::Unported`] for the
-    /// corner (`blend.fillet_corner_p1`).
+    /// constructions, lifts and `SmSurface::DropCurve`; those of [`CornerLookup::corner`] (`corners`
+    /// resolves `opt_corner`) and of the corner's `TestRailRailInterpolationCurve`.
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn calc_rail_rail_interpolation(
         &mut self,
         k: &Kernel,
         e: EdgeId,
         opt_corner: Option<FilletCornerId>,
+        corners: CornerLookup<'_>,
         solvers: &mut [FilletSolver],
         target: &mut Brep,
     ) -> Result<()> {
@@ -2000,7 +1918,8 @@ impl FilletBrep {
 
         // when given a corner - use its properties to pick a lNumDerivatives value
         if let Some(corner) = opt_corner {
-            let fillet_edges = corner_fillet_edges(corner)?;
+            let mut fillet_edges = Vec::new();
+            corners.corner(corner)?.fillet_edges(&mut fillet_edges);
             let total_edges = fillet_edges.len();
             if total_edges <= 4 {
                 let index = fillet_edges
@@ -2235,13 +2154,15 @@ impl FilletBrep {
         }
 
         if let Some(corner) = opt_corner {
-            if corner_type(corner)? == FilletCornerType::NByNConcave {
+            let the_corner = corners.corner(corner)?;
+            if the_corner.corner_type() == FilletCornerType::NByNConcave {
+                // p3DCurve is an SmBSplineCurve* (its virtuals dispatch on the curve)
                 let c3 = curve_3d
                     .as_ref()
-                    .and_then(b_spline_base)
+                    .filter(|c| b_spline_base(c).is_some())
                     .ok_or_else(|| SolidError::null_pointer(OP))?;
                 // Test and see if this edge intersects with the original corner
-                if corner_test_rail_rail_interpolation_curve(corner, c3)? {
+                if the_corner.test_rail_rail_interpolation_curve(k, target, c3)? {
                     // Corner vertex is on the opposite side of the curve
                     let solver_of_single_geom = |fb: &Self, fv: VertexId| -> Result<usize> {
                         let geoms = fb.vertex_fillet_geoms(fv)?;
@@ -2265,7 +2186,9 @@ impl FilletBrep {
                     let pv = uv.evaluate(k, ivl.max(), 1, true, true)?;
                     let end_uv_pnt = pv.first().copied().ok_or_else(|| SolidError::sm_err(OP))?;
                     let end_uv_vec = -pv.get(1).copied().ok_or_else(|| SolidError::sm_err(OP))?;
-                    let corner_vertex = corner_filleted_vertex(corner)?
+                    let corner_vertex = corners
+                        .corner(corner)?
+                        .filleted_vertex()
                         .ok_or_else(|| SolidError::null_pointer(OP))?;
                     let new_uv = with_solver_pair(solvers, si1, si2, OP, |s1, s2| {
                         create_cubic_rail_rail_interpolant(
@@ -2513,9 +2436,11 @@ mod tests {
         let mut solvers: Vec<FilletSolver> = Vec::new();
         let null =
             |r: Result<()>| matches!(r, Err(SolidError::Upstream { code, .. }) if code == 1006);
+        let none = CornerLookup::default();
         assert!(null(fb.calc_rail_int_rail(
             &k,
             v,
+            none,
             &mut solvers,
             &mut target
         )));
@@ -2523,6 +2448,7 @@ mod tests {
             &k,
             v,
             None,
+            none,
             &mut solvers,
             &mut target
         )));
@@ -2530,22 +2456,53 @@ mod tests {
             &k,
             v,
             None,
+            none,
             &mut solvers,
             &mut target
         )));
-        assert!(null(fb.calc_set_back_vert(&k, v, &mut solvers, &target)));
-        // with a corner: no rail geometries is SM_ERR, the filleted vertex is the
-        // corner unit's
+        assert!(null(fb.calc_set_back_vert(
+            &k,
+            v,
+            none,
+            &mut solvers,
+            &target
+        )));
+        // with a corner: no rail geometries is SM_ERR; without a corner store the
+        // corner's filleted vertex is the executive's
         fb.fillet_vertex_mut(v)
             .unwrap()
             .set_fillet_corner(Some(FilletCornerId(0)));
         assert!(matches!(
-            fb.calc_rail_int_rail(&k, v, &mut solvers, &mut target),
+            fb.calc_rail_int_rail(&k, v, none, &mut solvers, &mut target),
             Err(SolidError::Upstream { code: 1001, .. })
         ));
         assert!(fb
-            .calc_rail_int_edgeuse(&k, v, None, &mut solvers, &mut target)
+            .calc_rail_int_edgeuse(&k, v, None, none, &mut solvers, &mut target)
             .unwrap_err()
             .is_unported());
+        // an id outside the table is invalid; a corner in it gets to the geometry check
+        assert!(matches!(
+            fb.calc_set_back_vert(&k, v, CornerLookup::table(&[]), &mut solvers, &target),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        let corners = [FilletCorner::new(
+            crate::blend::fillet_corner::p3::FilletCornerKind::OneByOne,
+            None,
+            None,
+            None,
+            1e-6,
+            1e-3,
+        )];
+        let table = CornerLookup::table(&corners);
+        for r in [
+            fb.calc_rail_int_edgeuse(&k, v, None, table, &mut solvers, &mut target),
+            fb.calc_vert_on_cross_section(&k, v, None, table, &mut solvers, &mut target),
+            fb.calc_set_back_vert(&k, v, table, &mut solvers, &target),
+        ] {
+            assert!(
+                matches!(r, Err(SolidError::Upstream { code: 1001, .. })),
+                "{r:?}"
+            );
+        }
     }
 }

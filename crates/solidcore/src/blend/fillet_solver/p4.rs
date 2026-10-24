@@ -73,7 +73,9 @@
 
 use super::p1::{FilletSolver, FilletSolverOps};
 use crate::blend::fillet_custom_solver::OffsetSurface;
-use crate::blend::fillet_geom::p1::{FilletBrep, FilletErrorType, FilletGeomId, FilletGeomType};
+use crate::blend::fillet_geom::p1::{
+    CornerLookup, FilletBrep, FilletErrorType, FilletGeomId, FilletGeomType,
+};
 use crate::blend::fillet_intersector::{FilletIntersector, StepSolve as StepSolveFlags};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{Result, SolidError};
@@ -3656,8 +3658,14 @@ fn calc_blending_geom(
 fn calc_cross_section(cx: &mut Cx<'_>, edge: EdgeId) -> Result<()> {
     // default pCorner = NULL; the solvers of the edge's geometries come from the
     // executive's table
-    cx.fillets
-        .calc_cross_section(cx.k, edge, None, cx.solvers, cx.target)
+    cx.fillets.calc_cross_section(
+        cx.k,
+        edge,
+        None,
+        CornerLookup::default(),
+        cx.solvers,
+        cx.target,
+    )
 }
 
 // =====================================================================================

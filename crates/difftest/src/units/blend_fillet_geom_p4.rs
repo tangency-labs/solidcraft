@@ -26,7 +26,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use solidcore::blend::fillet_geom::p1::{FilletGeomId, FilletSolverId};
+use solidcore::blend::fillet_geom::p1::{CornerLookup, FilletGeomId, FilletSolverId};
 use solidcore::blend::fillet_geom::p4::create_uv_curve;
 use solidcore::blend::fillet_solver::p1::FilletSolver;
 use solidcore::kernel::Kernel;
@@ -406,9 +406,9 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
             let r = match &i.query {
                 Query::RailIntExtended { .. } => rm
                     .fb
-                    .calc_rail_int_extended_edgeuse(&k, vid, &solvers, &target),
+                    .calc_rail_int_extended_edgeuse(&k, vid, CornerLookup::default(), &solvers, &target),
                 Query::Int2Fillets { .. } => {
-                    rm.fb.calc_fillet_int_2_fillets(&k, vid, &solvers, &target)
+                    rm.fb.calc_fillet_int_2_fillets(&k, vid, CornerLookup::default(), &solvers, &target)
                 }
                 _ => rm.fb.calc_nx2_vert_fillet_x_fillet(&k, vid, &solvers),
             };
