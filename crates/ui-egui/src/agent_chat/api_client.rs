@@ -487,12 +487,38 @@ fn go_reply_from_parts(text: Vec<(bool, String)>, calls: Vec<Call>, kept_calls: 
     Reply { text, calls, assistant }
 }
 
+/// Shared text + capped tool-call accumulator for the three Go reply parsers.
+/// The kept assistant message stays OpenAI-shaped: one history shape for all Go.
+#[derive(Default)]
+struct GoCallAccum {
+    text: Vec<(bool, String)>,
+    calls: Vec<Call>,
+    kept_calls: Vec<Value>,
+}
+
+impl GoCallAccum {
+    fn push_text(&mut self, text: &str) {
+        self.text.push((false, text.to_string()));
+    }
+
+    fn full(&self) -> bool {
+        self.calls.len() >= 32
+    }
+
+    fn push_call(&mut self, id: String, name: String, arguments: Result<Value, String>, raw_args: String) {
+        self.calls.push(Call { id: id.clone(), name: name.clone(), arguments: arguments.clone() });
+        self.kept_calls.push(json!({"id": id, "type": "function", "function": {"name": name, "arguments": raw_args}}));
+    }
+
+    fn into_reply(self) -> Reply {
+        go_reply_from_parts(self.text, self.calls, self.kept_calls)
+    }
+}
+
 /// A Responses API answer as the tool loop's Reply; the kept assistant message
 /// is OpenAI-shaped so the loop stores one history shape for all of Go.
 fn go_responses_reply(body: &Value) -> Reply {
-    let mut text = Vec::new();
-    let mut calls = Vec::new();
-    let mut kept_calls = Vec::new();
+    let mut acc = GoCallAccum::default();
     if let Some(items) = body.get("output").and_then(Value::as_array) {
         for item in items {
             match item.get("type").and_then(Value::as_str) {
@@ -502,12 +528,12 @@ fn go_responses_reply(body: &Value) -> Reply {
                         // single answer join instead of emitting one event each.
                         let joined: String = parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).collect();
                         if !joined.is_empty() {
-                            text.push((false, joined));
+                            acc.push_text(&joined);
                         }
                     }
                 }
-                Some("function_call") if calls.len() < 32 => {
-                    let id = item.get("call_id").and_then(Value::as_str).map_or_else(|| format!("call-{}", calls.len()), str::to_string);
+                Some("function_call") if !acc.full() => {
+                    let id = item.get("call_id").and_then(Value::as_str).map_or_else(|| format!("call-{}", acc.calls.len()), str::to_string);
                     let name = item.get("name").and_then(Value::as_str).unwrap_or("").to_string();
                     let raw_args = match item.get("arguments") {
                         Some(Value::String(s)) => s.clone(),
@@ -515,55 +541,49 @@ fn go_responses_reply(body: &Value) -> Reply {
                         None => "{}".to_string(),
                     };
                     let arguments = tool_arguments(item.get("arguments"));
-                    calls.push(Call { id: id.clone(), name: name.clone(), arguments: arguments.clone() });
-                    kept_calls.push(json!({"id": id, "type": "function", "function": {"name": name, "arguments": raw_args}}));
+                    acc.push_call(id, name, arguments, raw_args);
                 }
                 _ => {}
             }
         }
     }
-    go_reply_from_parts(text, calls, kept_calls)
+    acc.into_reply()
 }
 
 /// An Anthropic messages answer as the tool loop's Reply (history stays OpenAI-shaped).
 fn go_messages_reply(body: &Value) -> Reply {
-    let mut text = Vec::new();
-    let mut calls = Vec::new();
-    let mut kept_calls = Vec::new();
+    let mut acc = GoCallAccum::default();
     if let Some(blocks) = body.get("content").and_then(Value::as_array) {
         for b in blocks {
             match b.get("type").and_then(Value::as_str) {
                 Some("text") => {
                     if let Some(t) = b.get("text").and_then(Value::as_str).filter(|t| !t.trim().is_empty()) {
-                        text.push((false, t.to_string()));
+                        acc.push_text(t);
                     }
                 }
-                Some("tool_use") if calls.len() < 32 => {
-                    let id = b.get("id").and_then(Value::as_str).map_or_else(|| format!("toolu-{}", calls.len()), str::to_string);
+                Some("tool_use") if !acc.full() => {
+                    let id = b.get("id").and_then(Value::as_str).map_or_else(|| format!("toolu-{}", acc.calls.len()), str::to_string);
                     let name = b.get("name").and_then(Value::as_str).unwrap_or("").to_string();
                     let raw_args = b.get("input").map(|i| i.to_string()).unwrap_or_else(|| "{}".to_string());
                     let arguments = go_args_object(b.get("input"));
-                    calls.push(Call { id: id.clone(), name: name.clone(), arguments: arguments.clone() });
-                    kept_calls.push(json!({"id": id, "type": "function", "function": {"name": name, "arguments": raw_args}}));
+                    acc.push_call(id, name, arguments, raw_args);
                 }
                 _ => {}
             }
         }
     }
-    go_reply_from_parts(text, calls, kept_calls)
+    acc.into_reply()
 }
 
 /// A Gemini answer as the tool loop's Reply (history stays OpenAI-shaped).
 fn go_gemini_reply(body: &Value) -> Reply {
-    let mut text = Vec::new();
-    let mut calls = Vec::new();
-    let mut kept_calls = Vec::new();
+    let mut acc = GoCallAccum::default();
     if let Some(parts) = body.pointer("/candidates/0/content/parts").and_then(Value::as_array) {
         for p in parts.iter() {
             if let Some(t) = p.get("text").and_then(Value::as_str).filter(|t| !t.is_empty()) {
-                text.push((false, t.to_string()));
+                acc.push_text(t);
             } else if let Some(call) = p.get("functionCall") {
-                if calls.len() >= 32 {
+                if acc.full() {
                     continue;
                 }
                 let name = call.get("name").and_then(Value::as_str).unwrap_or("").to_string();
@@ -572,12 +592,11 @@ fn go_gemini_reply(body: &Value) -> Reply {
                 // Unique across rounds: `go_call_names` maps the whole history, so a
                 // repeated `call-0` would answer an old result with the newest name.
                 let id = format!("go-{}", GO_GEMINI_CALL_COUNTER.fetch_add(1, Ordering::Relaxed));
-                calls.push(Call { id: id.clone(), name: name.clone(), arguments: arguments.clone() });
-                kept_calls.push(json!({"id": id, "type": "function", "function": {"name": name, "arguments": raw_args}}));
+                acc.push_call(id, name, arguments, raw_args);
             }
         }
     }
-    go_reply_from_parts(text, calls, kept_calls)
+    acc.into_reply()
 }
 
 /// A Gemini answer's thought signatures, in function-call part order, to replay
