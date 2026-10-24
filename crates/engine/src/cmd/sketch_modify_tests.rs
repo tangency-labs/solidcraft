@@ -345,6 +345,102 @@ fn offset_chain_mirror_patterns_move_scale() {
     assert!(sk.center(sk.curve_index(&cp).unwrap()).unwrap().dist(Vec2::new(-110.0, 0.0)) < 1e-7);
 }
 
+/// #4645: rotating a constrained 40 × 10 rectangle turns it at its size. Horizontal and vertical
+/// relations and dimensions swap at odd quarter turns, stay at half turns and go at other angles;
+/// lengths stay. A rotated copy is unconstrained and leaves the original as it was.
+#[test]
+fn move_rotation_turns_axis_constraints() {
+    for (angle, swap) in [(90.0, Some(true)), (-90.0, Some(true)), (450.0, Some(true)), (180.0, Some(false)), (30.0, None)] {
+        for dims in ["none", "length", "horizontal"] {
+            for copy in [false, true] {
+                let at = format!("angle={angle}, dims={dims}, copy={copy}");
+                let mut s = new_sketch();
+                let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 10]}));
+                let source = ids(&r["curves"]);
+                if dims != "none" {
+                    for (i, value, ty) in [(0, 40, dims), (1, 10, if dims == "length" { "length" } else { "vertical" })] {
+                        run(&mut s, "sketch.dimension", json!({"entities": [source[i]], "value": value, "type": ty}));
+                    }
+                }
+                let before = sketch(&s);
+                let out = run(&mut s, "sketch.move", json!({"entities": source, "angle": angle, "center": [0, 0], "copy": copy}));
+                assert_eq!(out["sketch"]["solved"], true, "{at}: {out}");
+                let after = sketch(&s);
+                let (sin, cos) = f64::to_radians(angle).sin_cos();
+                for (i, id) in ids(&out["curves"]).iter().enumerate() {
+                    let new = after.curve_index(id).unwrap();
+                    let old = before.curves[before.curve_index(&source[i]).unwrap()].kind.point_ids();
+                    for (p, q) in old.iter().zip(&after.curves[new].kind.point_ids()) {
+                        let p = before.point(*p).unwrap();
+                        let expected = Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
+                        assert!(after.point(*q).unwrap().dist(expected) < 1e-6, "{at}: {after:?}");
+                    }
+                    let horizontal_source = i % 2 == 0;
+                    let axes: Vec<bool> = after
+                        .constraints
+                        .iter()
+                        .filter_map(|c| match c.kind {
+                            ConstraintKind::Horizontal { l } if l == new => Some(true),
+                            ConstraintKind::Vertical { l } if l == new => Some(false),
+                            _ => None,
+                        })
+                        .collect();
+                    let expected = match (copy, swap) {
+                        (false, Some(swap)) => vec![horizontal_source ^ swap],
+                        _ => vec![],
+                    };
+                    assert_eq!(axes, expected, "{at}: line {i}");
+                }
+                let measured: Vec<(&str, f64)> = after.constraints[if copy { before.constraints.len() } else { 0 }..]
+                    .iter()
+                    .filter_map(|c| match c.kind {
+                        ConstraintKind::Length { value, .. } => Some(("length", value)),
+                        ConstraintKind::DistanceX { value, .. } => Some(("x", value)),
+                        ConstraintKind::DistanceY { value, .. } => Some(("y", value)),
+                        _ => None,
+                    })
+                    .collect();
+                let expected: Vec<(&str, f64)> = match (copy, dims, swap) {
+                    (true, ..) | (_, "none", _) => vec![],
+                    (_, "length", _) => vec![("length", 40.0), ("length", 10.0)],
+                    (_, _, Some(true)) => vec![("y", 40.0), ("x", 10.0)],
+                    (_, _, Some(false)) => vec![("x", 40.0), ("y", 10.0)],
+                    (_, _, None) => vec![],
+                };
+                assert_eq!(measured, expected, "{at}");
+                if copy {
+                    assert_eq!(&after.points[..before.points.len()], before.points.as_slice(), "{at}");
+                    assert_eq!(&after.constraints[..before.constraints.len()], before.constraints.as_slice(), "{at}");
+                }
+            }
+        }
+    }
+}
+
+/// #4645: a line's angle dimension turns with the line, and so does its parameter.
+#[test]
+fn move_rotation_turns_line_angle_dimension() {
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0]], "connect": false}));
+    let line = ids(&r["curves"]).remove(0);
+    run(&mut s, "sketch.dimension", json!({"entities": [line], "type": "angle", "value": 30}));
+    let length = {
+        let sk = sketch(&s);
+        let ends = sk.curves[sk.curve_index(&line).unwrap()].kind.point_ids();
+        sk.point(ends[0]).unwrap().dist(sk.point(ends[1]).unwrap())
+    };
+    let out = run(&mut s, "sketch.move", json!({"entities": [line], "angle": 90, "center": [0, 0]}));
+    assert_eq!(out["sketch"]["solved"], true, "{out}");
+    let sk = sketch(&s);
+    let c = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::LineAngle { .. })).unwrap();
+    let value = if let ConstraintKind::LineAngle { value, .. } = c.kind { value } else { f64::NAN };
+    assert!(close(value, 120f64.to_radians()), "{value}");
+    assert_eq!(s.doc.param(c.param.as_deref().unwrap()).unwrap().expr, "120 deg");
+    let ends = sk.curves[sk.curve_index(&line).unwrap()].kind.point_ids();
+    let d = sk.point(ends[1]).unwrap() - sk.point(ends[0]).unwrap();
+    assert!(close(d.len(), length) && close(d.angle(), 120f64.to_radians()), "{d:?}");
+}
+
 /// #1485: after a circle is trimmed between two construction lines, clicking the trimmed end
 /// picks the construction line's end lying there, not the arc's own; the tangent arc still starts
 /// from the trimmed arc, tangent to it.

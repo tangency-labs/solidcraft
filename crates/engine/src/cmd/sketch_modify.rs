@@ -1,7 +1,7 @@
 //! Sketch modify tools: trim, extend, break, fillet, chamfer, offset, mirror, circular and
 //! rectangular patterns, move/copy and scale.
 
-use std::f64::consts::TAU;
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use serde_json::{Value, json};
 use solidcraft_doc::ProfileSel;
@@ -85,7 +85,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
         .enabled(in_sketch)
-        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool; picking a text outline or linked point transforms its whole text source once, and copies remain editable text", created_doc!())),
+        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool; a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text", created_doc!())),
     CommandSpec::new("sketch.mirror", "Mirror", mirror)
         .at("SKETCH", "PATTERN")
         .icon("sketch_mirror")
@@ -2004,12 +2004,78 @@ fn transform_in_place(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Ve
     Ok(())
 }
 
+/// Turn the constraints tied to the sketch axes with geometry rotated by `angle` (radians), when
+/// every point they refer to is in `moved`: horizontal and vertical relations and dimensions swap
+/// at odd quarter turns and stay at half turns, and a line's angle dimension turns with the line,
+/// its parameter too. Horizontal and vertical relations and dimensions cannot hold at any other
+/// angle and are removed. Every other constraint keeps its meaning under a rigid move.
+fn rotate_axis_constraints(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, moved: &[usize], angle: f64) -> Result<()> {
+    let quarters = angle.rem_euclid(TAU) / FRAC_PI_2;
+    let turns = quarters.round();
+    if turns.rem_euclid(4.0) == 0.0 && (quarters - turns).abs() < 1e-10 {
+        return Ok(());
+    }
+    let square = (quarters - turns).abs() < 1e-10;
+    let odd = square && turns.rem_euclid(2.0) == 1.0;
+    let curves = &sk.curves;
+    let mut angles = Vec::new();
+    sk.constraints.retain_mut(|c| {
+        if c.driven {
+            return true;
+        }
+        let (mut points, refs) = c.kind.indices();
+        for l in refs {
+            match curves.get(l) {
+                Some(curve) => points.extend(curve.kind.point_ids()),
+                None => return true,
+            }
+        }
+        if points.is_empty() || !points.iter().all(|q| moved.contains(q)) {
+            return true;
+        }
+        use ConstraintKind::*;
+        let swapped = match c.kind {
+            Horizontal { l } => Vertical { l },
+            Vertical { l } => Horizontal { l },
+            HorizontalPoints { p, q } => VerticalPoints { p, q },
+            VerticalPoints { p, q } => HorizontalPoints { p, q },
+            DistanceX { p, q, value } => DistanceY { p, q, value },
+            DistanceY { p, q, value } => DistanceX { p, q, value },
+            LineAngle { l, value } => {
+                let turned = (value + angle + PI).rem_euclid(TAU) - PI;
+                c.kind = LineAngle { l, value: turned };
+                if let Some(name) = &c.param {
+                    angles.push((name.clone(), turned));
+                }
+                return true;
+            }
+            _ => return true,
+        };
+        if odd {
+            c.kind = swapped;
+        }
+        square
+    });
+    for (name, turned) in angles {
+        let Some(param) = doc.param(&name) else { continue };
+        let degrees = (angle.to_degrees() * 1e6).round() / 1e6;
+        // A literal becomes the new angle; a formula keeps its references and gains the turn.
+        let expr = if solidcraft_doc::expr::references(&param.expr).is_empty() {
+            format!("{} deg", (turned.to_degrees() * 1e6).round() / 1e6)
+        } else {
+            format!("({}) + {degrees} deg", param.expr)
+        };
+        doc.set_param(&name, &expr, None, None)?;
+    }
+    Ok(())
+}
+
 fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.move";
     let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
     let ang = if p.get("angle").is_some() { num(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be finite"))? } else { 0.0 }.to_radians();
     let copy = bool_(p, "copy").unwrap_or(false);
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (mut cs, mut ps) = entities(sk, p, cmd)?;
         let c = if p.get("center").is_some() { point_or_ref(sk, p, "center", cmd)? } else { Vec2::ZERO };
         let rot = rotate(c, ang);
@@ -2034,9 +2100,12 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(ids_of(sk, &m));
         }
         transform_in_place(sk, &cs, &ps, &f, 1.0, cmd)?;
+        let moved = involved_points(sk, &cs, &ps);
+        rotate_axis_constraints(sk, doc, &moved, ang)?;
         cs.extend(text_curves);
         Ok(ids_of(sk, &cs))
     })?;
+    s.doc_mut().prune_model_params();
     Ok(json!({"curves": out, "sketch": info}))
 }
 
