@@ -4,11 +4,12 @@
 # comes from [workspace.package] in Cargo.toml. An agent verifies the artifacts and publishes
 # the draft separately; see docs/releasing.md. Tags and pushes to main do not trigger releases.
 # At midnight Eastern, changed main commits build and publish a nightly pre-release.
-# A version with a suffix (0.2.0-rc.1) is a pre-release. Nothing is signed yet.
+# A version with a suffix (0.2.0-rc.1) is a pre-release.
+# The macOS app is signed and notarized when the APPLE_* secrets exist, nothing else is signed yet.
 #
 #   Linux x86_64, aarch64   AppImage (+ .zsync), .deb, .rpm, .flatpak, .snap, .tar.gz packaging/linux
 #   FreeBSD x86_64          .tar.gz (built in a FreeBSD VM)                        packaging/freebsd
-#   macOS universal         .dmg, and the CLI as a .zip                            packaging/macos
+#   macOS universal         .dmg, and the CLI as a .zip (both archs built in parallel)  packaging/macos
 #   Windows x64, x86, arm64 .msi and a portable .zip; x64 also the plain .exe      packaging/windows
 #   Web                     a .zip of the static site                              packaging/web
 #
@@ -295,11 +296,19 @@ jobs:
           path: dist/release/*
           if-no-files-found: error
 
-  macos:
-    name: macOS universal
+  # The two halves of the universal binary build in parallel on their own runners (each alone
+  # took about half of the old single job's 45 minutes); `macos` below joins and packages them.
+  macos-build:
+    name: macOS build ${{ matrix.arch }}
     needs: version
     if: needs.version.outputs.build == 'true'
     runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: aarch64, target: aarch64-apple-darwin }
+          - { arch: x86_64, target: x86_64-apple-darwin }
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -307,12 +316,58 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin, x86_64-apple-darwin
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: release-macos-universal
-      - name: Build and package (dmg, CLI zip; the dmg is mounted and checked)
-        run: packaging/macos/package.sh --arch universal
+          key: release-macos-${{ matrix.arch }}
+      - name: Build
+        run: packaging/macos/package.sh --build-only ${{ matrix.target }}
+      # Not named release-*: the release job collects every release-* artifact as an asset.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-bin-${{ matrix.arch }}
+          path: |
+            target/${{ matrix.target }}/release/solidcraft
+            target/${{ matrix.target }}/release/solidcraft-cli
+            target/${{ matrix.target }}/release/solvecraft-cli
+          if-no-files-found: error
+
+  macos:
+    name: macOS universal
+    needs: [version, macos-build]
+    if: needs.version.outputs.build == 'true'
+    runs-on: macos-14
+    env:
+      SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
+      SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-bin-aarch64
+          path: target/aarch64-apple-darwin/release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-bin-x86_64
+          path: target/x86_64-apple-darwin/release
+      - name: Set up Developer ID signing and notarization
+        # Optional until the APPLE_* secrets exist (docs/releasing.md, "macOS signing"). Without
+        # them (forks, dry runs) the app keeps its ad-hoc signature and is not notarized.
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: packaging/macos/signing.sh --setup
+      - name: Join, sign, package and check (dmg, CLI zip; the dmg is mounted and checked)
+        run: |
+          # Artifacts don't keep the executable bit.
+          chmod +x target/*-apple-darwin/release/solidcraft target/*-apple-darwin/release/solidcraft-cli target/*-apple-darwin/release/solvecraft-cli
+          packaging/macos/package.sh --arch universal --skip-build ${MACOS_SIGN_IDENTITY:+--sign}
+      - name: Remove the signing keychain and API key
+        if: always()
+        run: packaging/macos/signing.sh --cleanup
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-macos
