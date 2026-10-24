@@ -32,9 +32,8 @@
 //! loops, its face containment is done, so `PointClassify` classifies through the
 //! leaf node containing the point before the vertex and loop tests (`query.face_p1`
 //! `gen0160`: C++ FACE from an inside leaf, the vertex test alone gives VERTEX). The
-//! cache is built with the face ([`make_trim_srf_cache_with_face`] over
-//! [`BrepCacheFace`]: `CreateUVTrimCurves` and the face walk change the B-rep as
-//! upstream's do). Upstream switches the cache's point test off around the point
+//! cache is obtained with the face ([`face_surface_cache`]:
+//! `CreateUVTrimCurves` and the face walk change the B-rep as upstream's do). Upstream switches the cache's point test off around the point
 //! solves (SmFace.cpp:12801); the Rust solves take no cache, so the global solve is
 //! [`Surface::global_point_solve_point_test_off`] (its face check keeps every
 //! solution without fetching a cache); the cache check-out has nothing to act on. `EdgeCurveOnClassify` lifts a 2D curve to a
@@ -56,8 +55,7 @@ use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::LazyBrep;
-use crate::query::face::p2::BrepCacheFace;
-use crate::surface::surface::p1::{make_surface_cache, make_trim_srf_cache_with_face};
+use crate::query::face::p2::{face_surface_cache, FaceSurfaceCache};
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::volume::Volume;
@@ -432,6 +430,16 @@ fn solution_uv(parameters: &[f64]) -> Result<Point2> {
     ))
 }
 
+struct FaceSurfaceCacheGuard(Option<FaceSurfaceCache>);
+
+impl Drop for FaceSurfaceCacheGuard {
+    fn drop(&mut self) {
+        if let Some(lease) = self.0.take() {
+            lease.release();
+        }
+    }
+}
+
 /// `SmFace::Point3DClassify`: classifies the 3D point `point` against face `f` into `pc`:
 /// the point is dropped onto the face's surface within `src_zone_tol_3d` (a local drop
 /// from [`Point3dClassifyOptions::guess_uv`] first, else the global drop over the face's
@@ -471,25 +479,17 @@ pub fn point_3d_classify(
     // surface cache (built with its face containment when the face has loops), else
     // its surface cache. PointClassify below finds the trimmed one again
     // (SmCacheMgr::GetObjectCache) and classifies through its leaf nodes first.
-    let mut trim_cache = {
-        // (a copy: building the cache with the face changes the B-rep)
-        let surface = fp2::surface(b, f)?
-            .ok_or_else(|| SolidError::invalid_input(OP_POINT, "face without surface"))?
-            .clone_for_evaluation()?;
-        match make_trim_srf_cache_with_face(
-            k,
-            &surface,
-            None::<EntityRef>,
-            &mut BrepCacheFace { b: &mut *b, f },
-        ) {
-            Ok(c) => Some(c),
-            Err(e) if e.is_unported() => return Err(e),
-            Err(_) => {
-                ignored(make_surface_cache(k, &surface, None::<EntityRef>))?;
-                None
-            }
+    let mut lease = FaceSurfaceCacheGuard(match face_surface_cache(k, b, f) {
+        Ok(lease) => Some(lease),
+        Err(e) if e.is_unported() => return Err(e),
+        Err(SolidError::Upstream {
+            code: crate::error::SM_ERR_NULL_POINTER,
+            ..
+        }) => {
+            return Err(SolidError::invalid_input(OP_POINT, "face without surface"));
         }
-    };
+        Err(_) => None,
+    });
 
     let uv = {
         let surface = fp2::surface(b, f)?
@@ -555,7 +555,10 @@ pub fn point_3d_classify(
             tgt_loops_only: opts.tgt_loops_only,
             tgt_loops: opts.tgt_loops,
             uv_space_okay: opts.uv_space_okay,
-            trim_cache: trim_cache.as_mut(),
+            trim_cache: lease
+                .0
+                .as_mut()
+                .and_then(|l| l.trimmed.then_some(&mut l.cache)),
         },
     )?;
 

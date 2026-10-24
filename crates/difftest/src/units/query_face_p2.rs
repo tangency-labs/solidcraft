@@ -777,6 +777,27 @@ impl solidcore::intersect::point_class::ClassGeometry<H> for Objects<'_> {
     fn point(&self, _o: H) -> Option<solidcore::math::Point3> {
         None
     }
+    fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+        let e = match o {
+            H::Face(f) => EntityRef::Face(f),
+            H::Vertex(v) => EntityRef::Vertex(v),
+            H::Edge(e) => EntityRef::Edge(e),
+            H::Vertexuse(vu) => EntityRef::Vertexuse(vu),
+            H::Edgeuse(eu) => EntityRef::Edgeuse(eu),
+            _ => return None,
+        };
+        Some((self.brep, e))
+    }
+    fn topology_handle(&self, e: EntityRef) -> Option<H> {
+        Some(match e {
+            EntityRef::Face(f) => H::Face(f),
+            EntityRef::Vertex(v) => H::Vertex(v),
+            EntityRef::Edge(e) => H::Edge(e),
+            EntityRef::Vertexuse(vu) => H::Vertexuse(vu),
+            EntityRef::Edgeuse(eu) => H::Edgeuse(eu),
+            _ => return None,
+        })
+    }
 }
 
 /// A Rust error as the case outcome: deferred for [`SolidError::Unported`], else an
@@ -972,12 +993,10 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let curve = Curve::from(line);
             let interval = curve.natural_interval();
             let objects = Objects { brep: b, curve };
-            let mut cc: CurveClassification<H> = CurveClassification::with_curve_interval(
-                &k,
-                H::Curve,
-                interval,
-                zone_tol3d(&k, *tol),
-            );
+            let tol_val = zone_tol3d(&k, *tol);
+            let src_tol = if tol_val > 0.0 { tol_val } else { 1.23456e-61 };
+            let mut cc: CurveClassification<H> =
+                CurveClassification::with_curve_interval(&k, H::Curve, interval, src_tol);
             let (status, modified) = match qf::curve_on_classify(
                 &k, b, f, &objects, *do_pc, &mut cc, *big_gaps, *check3d, true,
             ) {
