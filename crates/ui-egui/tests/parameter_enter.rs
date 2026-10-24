@@ -142,6 +142,27 @@ fn parameter_rename_arrow_keys_move_cursor_and_keep_editing() {
     let result = h.app.session.execute("parameters.list", &json!({})).unwrap();
     assert!(result["parameters"].as_array().unwrap().iter().any(|p| p["name"] == "plate_width"));
 }
+/// #3965: leaving an invalid name and clicking back into it must edit the name.
+/// Refusing the add used to put focus back on the field being left, so the
+/// correction was typed into the expression instead.
+#[test]
+fn invalid_parameter_name_stays_editable_after_leaving_it() {
+    let mut h = open();
+    fill(&mut h, "name", "bad name");
+    h.run(&json!([
+        {"click":{"handle":"param:new:expression"}},
+        {"click":{"handle":"param:new:name"}},
+        {"key":"A","cmd":true},
+        {"text":"width"}
+    ]))
+    .unwrap();
+    let d = h.app.params.as_ref().unwrap();
+    assert_eq!(d.new_name, "width", "typing after returning to Name edits the name");
+    assert_eq!(d.new_expr, "10 mm", "the expression keeps the draft");
+    let result = h.app.session.execute("parameters.list", &json!({})).unwrap();
+    assert!(!result["parameters"].as_array().unwrap().iter().any(|p| p["name"] == "bad name" || p["name"] == "width"));
+}
+
 #[test]
 fn parameter_add_resets_expression_for_next_row() {
     let mut h = open();
