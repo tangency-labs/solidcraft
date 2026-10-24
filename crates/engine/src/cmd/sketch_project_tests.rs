@@ -677,3 +677,31 @@ fn a_face_sketch_saved_with_fitted_letters_reopens_and_builds_the_same() {
         sketch.curves.iter().filter(|c| c.link.is_some() && matches!(c.kind, solidcraft_sketch::CurveKind::Spline { control: true, .. })).count();
     assert!(pieces > 0, "{pieces}");
 }
+
+/// A sketch put on a face already shows the face's border. Projecting that face, or one of the
+/// border's edges, again laid a second copy over it (extra points and lines on a rounded
+/// corner); those are skipped now, and a pick of nothing new is refused, so it adds no step.
+#[test]
+fn projecting_what_the_face_sketch_already_shows_adds_no_second_copy() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10}));
+    run(&mut s, "solid.fillet", json!({"edges":[[0,0,5],[40,0,5],[40,30,5],[0,30,5]],"radius":5}));
+    run(&mut s, "sketch.create", json!({"plane":{"face":[20,15,10]}}));
+    let shown = |s: &mut Session| {
+        let si = inspect(s);
+        (si["curves"].as_array().unwrap().len(), si["points"].as_array().unwrap().len())
+    };
+    let border = shown(&mut s);
+    assert_eq!(border.0, 8, "four sides and four rounded corners");
+    let corner = 5.0 - 5.0 * std::f64::consts::FRAC_1_SQRT_2;
+    for refs in [json!([{"face":[20,15,10]}]), json!([{"edge":[20,0,10]}]), json!([{"edge":[corner,corner,10]}])] {
+        let e = s.execute("sketch.project", &json!({"refs": refs})).unwrap_err().to_string();
+        assert!(e.contains("already projected"), "{refs}: {e}");
+        assert_eq!(shown(&mut s), border, "{refs}");
+    }
+    // Something new still projects, and alongside it a reference already shown is skipped.
+    let r = run(&mut s, "sketch.project", json!({"refs":[{"edge":[20,0,10]},{"axis":"X"}]}));
+    assert_eq!(r["links"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(r["already_projected"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(shown(&mut s).0, border.0 + 1);
+}

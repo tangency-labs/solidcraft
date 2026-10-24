@@ -600,6 +600,29 @@ impl Sketch {
         curves.first().copied().map(Some).ok_or_else(|| SketchError::Invalid(format!("sketch {name} axis")))
     }
 
+    /// Is all of `geom` already linked into this sketch: the border of the face the sketch was
+    /// put on, or an edge projected before? Linking it again would lay a second copy over the
+    /// first. Lines match with either end first, circles by centre and radius, arcs by centre
+    /// and ends; other curves, and points on their own (the origin, a vertex), never count as
+    /// present.
+    pub fn link_geometry_present(&self, geom: &[LinkGeom]) -> bool {
+        let Ok(lay) = layout(geom) else { return false };
+        if lay.curves.is_empty() || !lay.lone.is_empty() {
+            return false;
+        }
+        let at = |i: usize| self.points.get(i).map(|p| p.pos);
+        let near = |i: usize, q: Option<Vec2>| lay.pts.get(i).zip(q).is_some_and(|(p, q)| p.dist(q) <= MERGE_TOL);
+        let curve_present = |c: &LCurve| {
+            self.curves.iter().filter(|k| k.link.is_some()).any(|k| match (*c, &k.kind) {
+                (LCurve::Line(a, b), CurveKind::Line { a: p, b: q }) => (near(a, at(*p)) && near(b, at(*q))) || (near(a, at(*q)) && near(b, at(*p))),
+                (LCurve::Circle(c, r), CurveKind::Circle { c: p, r: s }) => near(c, at(*p)) && (r - s).abs() <= MERGE_TOL,
+                (LCurve::Arc(c, a, b), CurveKind::Arc { c: p, a: q, b: e }) => near(c, at(*p)) && near(a, at(*q)) && near(b, at(*e)),
+                _ => false,
+            })
+        };
+        lay.curves.iter().all(curve_present)
+    }
+
     /// Add linked geometry. Returns the link id; the new curve and point ids are
     /// [`Sketch::link_curves`] / [`Sketch::link_points`] of it.
     pub fn add_link(&mut self, kind: LinkKind, source: LinkSource, geom: &[LinkGeom]) -> Result<String> {

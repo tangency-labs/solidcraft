@@ -211,6 +211,20 @@ pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> 
 
 /// Add a link for `src` to sketch `id` in `doc` (not stored in the session). Returns the link id.
 pub(super) fn add_link(s: &Session, doc: &Document, id: u64, sk: &mut Sketch, kind: LinkKind, src: LinkSource) -> Result<String> {
+    add_link_unless_present(s, doc, id, sk, kind, src, false).map(|l| l.unwrap_or_default())
+}
+
+/// [`add_link`], or `None` (nothing added) when `skip_present` and everything `src` resolves to
+/// is linked into the sketch already.
+fn add_link_unless_present(
+    s: &Session,
+    doc: &Document,
+    id: u64,
+    sk: &mut Sketch,
+    kind: LinkKind,
+    src: LinkSource,
+    skip_present: bool,
+) -> Result<Option<String>> {
     let doc = placed_candidate(s, doc);
     let (vals, _) = doc.param_values();
     let st = s.model.state_before(id);
@@ -218,6 +232,9 @@ pub(super) fn add_link(s: &Session, doc: &Document, id: u64, sk: &mut Sketch, ki
     let st = state_for_sketch(s, &doc, id, &st)?;
     let plane = sketch_plane(&doc, id, &st)?;
     let r = resolve(&doc, &vals, &st, &plane, kind, &src)?;
+    if skip_present && r.wires.is_empty() && sk.link_geometry_present(&r.geom) {
+        return Ok(None);
+    }
     let name = if let LinkSource::Face { body, at } = &r.source {
         st.body(body).and_then(|body| {
             if let Some(index) = r.face_index {
@@ -236,7 +253,7 @@ pub(super) fn add_link(s: &Session, doc: &Document, id: u64, sk: &mut Sketch, ki
         l.face_name = name;
         l.edge_name = edge_name;
     }
-    Ok(link)
+    Ok(Some(link))
 }
 
 fn link_json(sk: &Sketch, link: &str) -> Value {
@@ -260,14 +277,27 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind) -> Result<Va
     let mut sk = doc.sketch(id)?.clone();
     refresh(s, &doc, id, &mut sk);
     let mut out = Vec::new();
+    // Projecting what the sketch already shows (the border of the face it is on, an edge
+    // projected before) would lay a second copy over the first: those references are skipped.
+    let mut present = Vec::new();
     for src in sources {
         let what = src.describe();
-        let l = add_link(s, &doc, id, &mut sk, kind, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
-        out.push(link_json(&sk, &l));
+        match add_link_unless_present(s, &doc, id, &mut sk, kind, src, kind == LinkKind::Project) {
+            Ok(Some(l)) => out.push(link_json(&sk, &l)),
+            Ok(None) => present.push(what),
+            Err(e) => return Err(bad(cmd, format!("{what}: {e}"))),
+        }
+    }
+    if out.is_empty() {
+        return Err(bad(cmd, format!("already projected into this sketch: {}", present.join(", "))));
     }
     *doc.sketch_mut(id)? = sk;
     *s.doc_mut() = doc;
-    Ok(json!({"links": out}))
+    let mut r = json!({"links": out});
+    if !present.is_empty() {
+        r["already_projected"] = json!(present);
+    }
+    Ok(r)
 }
 
 fn project_cmd(s: &mut Session, p: &Value) -> Result<Value> {
