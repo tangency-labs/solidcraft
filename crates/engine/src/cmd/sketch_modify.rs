@@ -2006,6 +2006,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
     let ang = if p.get("angle").is_some() { num(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be finite"))? } else { 0.0 }.to_radians();
     let copy = bool_(p, "copy").unwrap_or(false);
+    let mut released = Vec::new();
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let (mut cs, mut ps) = entities(sk, p, cmd)?;
         let c = if p.get("center").is_some() { point_or_ref(sk, p, "center", cmd)? } else { Vec2::ZERO };
@@ -2030,11 +2031,50 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             m.extend(text_curves);
             return Ok(ids_of(sk, &m));
         }
+        let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, 1.0, cmd)?;
+        released = release_broken(sk, &held);
         cs.extend(text_curves);
         Ok(ids_of(sk, &cs))
     })?;
-    Ok(json!({"curves": out, "sketch": info}))
+    Ok(json!({"curves": out, "released": released, "sketch": info}))
+}
+
+/// The constraints that tie the points about to move to points that stay (a corner on the
+/// origin, a distance to a line left behind) and hold now (ids). Constraints among the moved
+/// points alone (a rectangle's sides, a line's typed angle) move with them and are kept.
+fn holding(sk: &Sketch, moved: &[usize]) -> Vec<String> {
+    sk.constraints
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| {
+            let touched = sk.constraint_points(&c.kind);
+            touched.iter().any(|q| moved.contains(q)) && touched.iter().any(|q| !moved.contains(q))
+        })
+        .filter(|(ci, _)| solidcraft_sketch::constraint_residual(sk, *ci).is_some_and(|r| r <= broken_at(sk)))
+        .map(|(_, c)| c.id.clone())
+        .collect()
+}
+
+/// After a move: the constraints of `held` that no longer hold are let go, and their ids
+/// returned. Kept, the solve would pull the moved geometry back to what stays and bend it
+/// (#2980).
+fn release_broken(sk: &mut Sketch, held: &[String]) -> Vec<String> {
+    let broken: Vec<String> = sk
+        .constraints
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| held.contains(&c.id))
+        .filter(|(ci, _)| solidcraft_sketch::constraint_residual(sk, *ci).is_some_and(|r| r > broken_at(sk)))
+        .map(|(_, c)| c.id.clone())
+        .collect();
+    sk.constraints.retain(|c| !broken.contains(&c.id));
+    broken
+}
+
+/// A residual above this (mm, or radians) is a constraint that doesn't hold.
+fn broken_at(sk: &Sketch) -> f64 {
+    1e-7 * sk.points.iter().map(|p| p.pos.len()).fold(1.0, f64::max)
 }
 
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {
