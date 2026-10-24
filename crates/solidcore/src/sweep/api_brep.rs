@@ -690,10 +690,6 @@ mod tests {
         matches!(r, Err(SolidError::InvalidInput { .. }))
     }
 
-    fn unported<T>(r: &Result<T>) -> bool {
-        r.as_ref().err().is_some_and(SolidError::is_unported)
-    }
-
     #[test]
     fn consuming_sweeps_copy_then_run_or_defer() {
         let mut k = Kernel::default();
@@ -727,9 +723,16 @@ mod tests {
         assert!(invalid(&create_rotational_sweep(
             &mut k, &ok, o, z, 90.0, false
         )));
-        assert!(unported(&create_draft_sweep(
-            &mut k, &ok, 10.0, -5.0, true, 3
-        )));
+        // the draft runs through the taper's merges (boolean.merge_p2 is ported)
+        let b = create_draft_sweep(&mut k, &ok, 10.0, -5.0, true, 3).expect("draft sweep");
+        assert_eq!(
+            (
+                b.face_list().len(),
+                b.edge_list().len(),
+                b.vertex_list().len()
+            ),
+            (2, 3, 2)
+        );
         // no curves: CreateTaperExtrude's SM_ERR
         assert!(
             create_draft_sweep(&mut k, &[], 10.0, -5.0, false, 3).is_err_and(|e| !e.is_unported())
@@ -768,9 +771,15 @@ mod tests {
             3,
             false
         )));
-        assert!(unported(&create_taper_extrude(
-            &mut k, &ok, 10.0, 5.0, 3, true
-        )));
+        let b = create_taper_extrude(&mut k, &ok, 10.0, 5.0, 3, true).expect("taper extrude");
+        assert_eq!(
+            (
+                b.face_list().len(),
+                b.edge_list().len(),
+                b.vertex_list().len()
+            ),
+            (2, 3, 2)
+        );
         assert!(invalid(&create_linear_sweep_with_repetitions(
             &mut k,
             &[],
