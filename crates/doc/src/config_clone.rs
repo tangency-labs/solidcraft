@@ -69,11 +69,7 @@ impl ConfigTable {
                     maps.bodies.get(&target.body).zip(maps.features.get(&target.origin_feature)).map(|(body, origin)| {
                         let mut target = target.clone();
                         target.body = body.clone();
-                        target.name = target
-                            .name
-                            .strip_prefix(&format!("F{}:", target.origin_feature))
-                            .map(|role| format!("F{origin}:{role}"))
-                            .unwrap_or_else(|| target.name.clone());
+                        target.name = crate::persistent_name::map_features(&target.name, &maps.features).unwrap_or_else(|| target.name.clone());
                         target.origin_feature = *origin;
                         if let Some(certificate) = &mut target.certificate {
                             certificate.remap_features(&maps.features);

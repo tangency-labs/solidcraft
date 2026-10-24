@@ -361,7 +361,7 @@ fn column_menu(app: &mut SolveApp, ui: &mut egui::Ui, error: &mut Option<String>
                                 if !supported || !seen.insert(target.name.clone()) {
                                     continue;
                                 }
-                                let Some((_, role)) = target.name.split_once(':') else { continue };
+                                let Some((_, role)) = solidcraft_engine::doc::persistent_name::split_feature(&target.name) else { continue };
                                 if ui_kit::button(ui, role, ui_kit::Button::Normal).clicked() {
                                     pick = Some(json!({"face_appearance":{"target":target}}));
                                     ui.close();

@@ -180,7 +180,11 @@ fn show(s: &mut Session, _p: &Value) -> Result<Value> {
                     format!("Component: {}", s.doc.components.iter().find(|c| c.id == *id).map(|c| c.name.clone()).unwrap_or_else(|| id.to_string()))
                 }
                 Column::FaceAppearance(target) => {
-                    format!("Face: {} / {}", target.body, target.name.split_once(':').map(|(_, role)| role).unwrap_or(&target.name))
+                    format!(
+                        "Face: {} / {}",
+                        target.body,
+                        solidcraft_doc::persistent_name::split_feature(&target.name).map(|(_, role)| role).unwrap_or(&target.name)
+                    )
                 }
                 _ => s.doc.config_key(column),
             };

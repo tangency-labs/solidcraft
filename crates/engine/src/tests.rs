@@ -2699,6 +2699,18 @@ fn press_pull_on_curved_faces() {
     run(&mut s, "solid.press_pull", json!({"face": [25, 15, 10], "distance": 1}));
     let v1 = volume(&mut s);
     assert!(rel(v1 - v0, PI * (25.0 - 16.0) * 20.0) < 1e-3, "{v0} {v1}");
+    // A shell's inner wall behind a fillet (`F3:inner:F2:blend:…`) only names the fillet: it is
+    // offset like any curved face, not taken for the shell's fillet. (The offset itself is
+    // refused: the wall is tangent to its neighbours.)
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20}));
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 40, 10]], "radius": 5}));
+    run(&mut s, "solid.shell", json!({"faces": [[20, 20, 20]], "thickness": 2}));
+    let on = Vec3::new(35.0, 35.0, 10.0) + Vec3::new(1.0, 1.0, 0.0).normalized().unwrap() * 3.0;
+    let err =
+        s.execute("solid.press_pull", &json!({"face": [on.x, on.y, on.z], "distance": 0.5})).map(|v| v.to_string()).unwrap_or_else(|e| e.to_string());
+    assert!(!err.contains("not a fillet's or a chamfer's"), "{err}");
+    assert!(err.contains("offset"), "{err}");
 }
 
 /// A cut in one component leaves other components' bodies alone unless they are named as

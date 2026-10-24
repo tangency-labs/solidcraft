@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use solidcraft_doc::Document;
 use solidcraft_doc::joints::cam::CamProfile;
 use solidcraft_doc::joints::{Assembly, Coupling, JointOrigin, Size};
+use solidcraft_doc::persistent_name::{Base, FaceName, FeatureId, Place};
 
 use crate::{EngineError, Result};
 
@@ -182,6 +183,27 @@ fn validate_map<K: Ord, V: Ord>(map: &BTreeMap<K, V>) -> Result<()> {
 /// alter F10). Body-based legacy names are remapped only through an explicit identity map.
 fn face_name(name: &str, features: &BTreeMap<u64, u64>, bodies: &BTreeMap<String, String>) -> Option<String> {
     let body = name.match_indices(':').filter_map(|(end, _)| bodies.get_key_value(name.get(..end)?)).next_back();
+    // A name that reads, on no copied body's prefix (whose name may look like a feature token),
+    // is remapped by its structure: every feature that made a face must map; one around a piece
+    // (`#[…]`) maps when it was copied too.
+    if body.is_none()
+        && let Ok(face) = FaceName::parse(name)
+        && !matches!(face.base, Base::Other(_))
+    {
+        let mut body_mapped = false;
+        let out = face.map(
+            &mut |id, place| match place {
+                Place::Name => features.get(&id.0).map(|n| FeatureId(*n)),
+                Place::Qualifier => Some(features.get(&id.0).map_or(id, |n| FeatureId(*n))),
+            },
+            &mut |b| {
+                let n = bodies.get(b).cloned();
+                body_mapped |= n.is_some();
+                n
+            },
+        )?;
+        return (body_mapped || face.made_by().is_some()).then(|| out.to_string());
+    }
     let mut out = String::new();
     let mut last = 0usize;
     let mut mapped = false;

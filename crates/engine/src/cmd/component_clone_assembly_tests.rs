@@ -153,6 +153,9 @@ fn naming_remaps_exact_tokens_unicode_and_legacy_body_identity() {
     assert!(face_name("F1:start@F99.1", &features, &bodies).is_none());
     assert!(face_name("Foreign:face:0", &features, &bodies).is_none());
     assert!(face_name("Foreign:face:0@F1.1", &features, &bodies).is_none());
+    // A piece's faces around it are copied too; one from a feature not copied stays.
+    assert_eq!(face_name("F1:top#[F1:side:l2,F10:side:l2]", &features, &bodies).as_deref(), Some("F21:top#[F21:side:l2,F30:side:l2]"));
+    assert_eq!(face_name("F1:top#[F99:x]", &features, &bodies).as_deref(), Some("F21:top#[F99:x]"));
     let bodies = BTreeMap::from([("F1:Housing".into(), "F1:Housing (copy)".into())]);
     assert_eq!(face_name("F1:Housing:face:0@F10.1", &features, &bodies).as_deref(), Some("F1:Housing (copy):face:0@F30.1"));
 }

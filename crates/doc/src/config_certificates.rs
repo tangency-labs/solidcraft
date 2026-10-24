@@ -580,18 +580,14 @@ impl Document {
             | Some(solidcraft_kernel::FaceSource::ShellPlanar { producer: Some(producer), .. })
             | Some(solidcraft_kernel::FaceSource::Box { producer: Some(producer), .. })
             | Some(solidcraft_kernel::FaceSource::CylinderCap { producer, .. }) => *producer,
-            _ => name
-                .strip_prefix('F')
-                .and_then(|name| name.split_once(':'))
-                .and_then(|(id, _)| id.parse().ok())
-                .ok_or_else(|| DocError::Invalid("face source producer missing".into()))?,
+            _ => crate::persistent_name::made_by(&name).ok_or_else(|| DocError::Invalid("face source producer missing".into()))?,
         };
         let certificate = self.configuration_face_certificate(body, index)?;
         if let Some(FaceCertificate::ExtrudeSide { curve, .. }) = &certificate {
             name = format!("F{origin}:side:{curve}");
         } else if let Some(FaceCertificate::ShellPlanar { source, inner, .. }) = &certificate {
             name = format!("F{origin}:{}", shell_certificate_role(source, *inner)?);
-        } else if !name.starts_with(&format!("F{origin}:")) {
+        } else if crate::persistent_name::made_by(&name) != Some(origin) {
             name = format!("F{origin}:face:{index}");
         }
         let inverse = crate::mat_inverse(&body.source_transform).ok_or_else(|| DocError::Invalid("invalid definition placement".into()))?;
@@ -725,7 +721,7 @@ impl Document {
         }
         let full = names.faces.get(index)?;
         let stem = crate::naming::strip_piece(full);
-        let origin = stem.strip_prefix('F')?.split_once(':')?.0.parse::<u64>().ok()?;
+        let origin = crate::persistent_name::made_by(stem)?;
         let inverse = crate::mat_inverse(&body.source_transform)?;
         let mut candidates = vec![stem];
         if full != stem {
@@ -819,10 +815,13 @@ impl Document {
             return Ok(indices);
         }
         let names = crate::naming::names(body);
-        let own = format!("F{origin}:");
         let stem = |index: usize| names.faces.get(index).map(|name| crate::naming::strip_piece(name));
-        let seed: Vec<usize> =
-            indices.into_iter().filter(|index| stem(*index).is_some_and(|name| name.starts_with(&own) && !name.contains('@'))).collect();
+        let seed: Vec<usize> = indices
+            .into_iter()
+            .filter(|index| {
+                stem(*index).is_some_and(|name| crate::persistent_name::made_by(name) == Some(origin) && !crate::persistent_name::is_copy(name))
+            })
+            .collect();
         let feature = self.feature(origin).map_or_else(|| format!("F{origin}"), |feature| feature.name.clone());
         let ambiguous = || DocError::Invalid(format!("the attached flat face of {feature} on `{}` is missing or ambiguous", body.name));
         let first = seed.first().and_then(|index| stem(*index)).ok_or_else(ambiguous)?;
@@ -841,7 +840,7 @@ impl Document {
             return indices;
         }
         let names = crate::naming::names(body);
-        let copy = |index: &usize| names.faces.get(*index).is_some_and(|name| crate::naming::strip_piece(name).contains('@'));
+        let copy = |index: &usize| names.faces.get(*index).is_some_and(|name| crate::persistent_name::is_copy(name));
         if indices.iter().all(copy) {
             return indices;
         }

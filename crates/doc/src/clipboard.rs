@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::persistent_name::{Base, FaceName, FeatureId};
 use crate::{FeatureKind, PlaneRef};
 
 /// Remap persistent topology tokens without rewriting arbitrary user expressions or labels.
@@ -21,6 +22,14 @@ pub fn remap_topology(name: &str, ids: &BTreeMap<u64, u64>, bodies: &BTreeMap<St
         && let Some(new) = bodies.get(body)
     {
         return format!("{new}:face:{suffix}");
+    }
+    // A name that reads is remapped by its structure: every feature it names, and a body
+    // face's body. Text of no known form is remapped token by token below.
+    if let Ok(face) = FaceName::parse(name)
+        && !matches!(face.base, Base::Other(_))
+        && let Some(mapped) = face.map(&mut |id, _| Some(ids.get(&id.0).map_or(id, |n| FeatureId(*n))), &mut |b| bodies.get(b).cloned())
+    {
+        return mapped.to_string();
     }
     let mut out = String::new();
     let mut at = 0;

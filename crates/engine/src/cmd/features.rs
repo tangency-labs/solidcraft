@@ -1191,8 +1191,8 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
         && super::face::face_is_planar(s, fp) == Some(false)
     {
         let name = solidcraft_doc::naming::face_names_at(&s.model.state(), &[fp]).into_iter().next().unwrap_or_default();
-        let fid = name.strip_prefix('F').and_then(|r| r.split(':').next()).and_then(|x| x.parse::<u64>().ok());
-        if name.contains(":blend") {
+        let fid = solidcraft_doc::persistent_name::made_by(&name);
+        if solidcraft_doc::persistent_name::is_blend(&name) {
             let f = fid.and_then(|id| s.doc.feature(id)).cloned().ok_or_else(|| bad(cmd, "the blend's feature is gone"))?;
             let (key, old) = match &f.kind {
                 FeatureKind::Fillet { radius, .. } => ("radius", radius.clone()),

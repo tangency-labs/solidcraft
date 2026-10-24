@@ -5,7 +5,8 @@
 
 use serde_json::{Value, json};
 use solidcraft_doc::joints::{self, Joint, JointOrigin, Snap, XRef};
-use solidcraft_doc::naming::{legacy_name, strip_piece};
+use solidcraft_doc::naming::legacy_name;
+use solidcraft_doc::persistent_name::{Base, EdgeName, FaceName, Role};
 use solidcraft_doc::{Document, MAX_PLACEMENT_DEPTH, ModelState};
 
 use super::{component_of, joint_id, link_json, named_values, occurrence_name};
@@ -171,26 +172,20 @@ fn face_ref(doc: &Document, name: &str) -> Value {
         }
         None => name,
     };
-    let stem = strip_piece(bare);
-    let Some((fid, role)) = stem.strip_prefix('F').and_then(|r| r.split_once(':')).and_then(|(id, role)| Some((id.parse::<u64>().ok()?, role)))
-    else {
-        return v;
-    };
-    v["role_in_feature"] = json!(role);
+    let Ok(face) = FaceName::parse(bare) else { return v };
+    let Some(fid) = face.made_by().map(|id| id.0) else { return v };
+    let stem = face.stem().to_string();
+    v["role_in_feature"] = json!(stem.strip_prefix(&format!("F{fid}:")).unwrap_or(&stem));
     let Some(f) = doc.feature(fid) else {
         v["feature"] = json!({"id": fid, "error": format!("feature {fid} is gone")});
         return v;
     };
     v["feature"] = json!({"id": f.id, "name": f.name, "type": f.kind.type_name()});
-    if let Some(curve) = role.strip_prefix("side:") {
-        // A later profile's side is `s<k>.<curve>`.
-        let curve = curve
-            .split_once('.')
-            .filter(|(k, _)| k.strip_prefix('s').is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())))
-            .map_or(curve, |(_, c)| c);
+    // A side swept from a sketch curve (a later profile's too, `side:s<k>.<curve>`).
+    if let Base::Made { role: Role::Side { curve, .. }, .. } = &face.base {
         let found = f.kind.input_sketches().into_iter().find_map(|id| {
             let sk = doc.sketch(id).ok()?;
-            let c = sk.curves.iter().find(|c| c.id == curve)?;
+            let c = sk.curves.iter().find(|c| c.id == *curve)?;
             let curve_type = serde_json::to_value(&c.kind).ok().and_then(|k| k.get("type").cloned()).unwrap_or(Value::Null);
             let name = doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
             Some(json!({"id": id, "name": name, "curve": curve, "curve_type": curve_type}))
@@ -204,20 +199,9 @@ fn face_ref(doc: &Document, name: &str) -> Value {
 /// what each of its faces refers to.
 fn edge_ref(doc: &Document, name: &str) -> Value {
     let bare = legacy_name(name).unwrap_or(name);
-    let bare = bare.rsplit_once('~').filter(|(_, k)| !k.is_empty() && k.bytes().all(|b| b.is_ascii_digit())).map_or(bare, |(e, _)| e);
-    // Split at the `|` outside a piece's `#[…]`.
-    let mut depth = 0i32;
-    let split = bare.char_indices().find(|(_, c)| {
-        match c {
-            '[' => depth += 1,
-            ']' => depth -= 1,
-            _ => {}
-        }
-        *c == '|' && depth == 0
-    });
-    let faces: Vec<Value> = match split {
-        Some((i, _)) => [bare.get(..i), bare.get(i + 1..)].into_iter().flatten().map(|f| face_ref(doc, f)).collect(),
-        None => Vec::new(),
+    let faces: Vec<Value> = match EdgeName::parse(bare) {
+        Ok(e) => e.faces.iter().map(|f| face_ref(doc, &f.to_string())).collect(),
+        Err(_) => Vec::new(),
     };
     let mut v = json!({"name": name, "faces": faces});
     if legacy_name(name).is_some() {

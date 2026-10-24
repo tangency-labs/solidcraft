@@ -122,12 +122,13 @@ impl Document {
     /// Certify named generator lineage; generic index-derived naming is unsupported.
     pub fn certify_config_face(&self, target: &ConfigFaceTarget) -> Result<()> {
         target.validate()?;
-        let prefix = format!("F{}:", target.origin_feature);
-        let role = target.name.strip_prefix(&prefix).ok_or_else(|| DocError::Invalid("face lineage does not match its feature".into()))?;
+        let role = crate::persistent_name::split_feature(&target.name)
+            .filter(|(id, _)| *id == target.origin_feature)
+            .map(|(_, role)| role)
+            .ok_or_else(|| DocError::Invalid("face lineage does not match its feature".into()))?;
         // An exact history name may name a piece by the faces around it (`F2:top#[F2:side:l4,…]`),
         // never by a number (an older design's piece, or a tie the faces around it left).
-        let numbered =
-            target.name.match_indices('#').any(|(i, _)| target.name.get(i + 1..).is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit())));
+        let numbered = crate::persistent_name::is_numbered_piece(&target.name);
         let lineage_piece = matches!(target.certificate, Some(super::FaceCertificate::Lineage)) && !numbered;
         if crate::naming::strip_piece(&target.name) != target.name && !lineage_piece {
             return Err(DocError::Invalid("configure a face lineage, not a numbered split piece".into()));
@@ -316,7 +317,7 @@ impl Document {
             }
             return Ok(indices);
         }
-        if target.name.ends_with(":side") {
+        if crate::persistent_name::is_wall(&target.name) {
             if indices.len() != 1 {
                 return Err(DocError::Invalid("split curved face lineage is not yet certified".into()));
             }

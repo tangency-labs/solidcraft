@@ -1768,7 +1768,6 @@ fn feature_geometry(app: &SolveApp, id: u64) -> Vec<Sel> {
         return Vec::new();
     }
     let st = crate::open_meshing::shown_world(app);
-    let prefix = format!("F{id}:");
     let mut out = Vec::new();
     for b in &st.bodies {
         if !app.session.body_visible(&b.name) || app.preview.effective_replaced().contains(&b.name) {
@@ -1780,7 +1779,7 @@ fn feature_geometry(app: &SolveApp, id: u64) -> Vec<Sel> {
         }
         let names = solidcraft_engine::doc::naming::face_names(b);
         let m = b.mesh();
-        for (index, _) in names.iter().enumerate().filter(|(_, n)| n.starts_with(&prefix)) {
+        for (index, _) in names.iter().enumerate().filter(|(_, n)| solidcraft_engine::doc::persistent_name::made_by(n) == Some(id)) {
             if let Some(point) = m.triangles.iter().zip(&m.tri_face).find_map(|(t, f)| {
                 if *f as usize != index {
                     return None;

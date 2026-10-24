@@ -447,8 +447,7 @@ fn picked_face_feature(app: &SolveApp) -> Option<u64> {
     let body = state.body(body)?;
     let names = solidcraft_engine::doc::naming::face_names(body);
     let name = names.get(index)?;
-    let (creator, _) = name.strip_prefix('F')?.split_once(':')?;
-    let id = creator.parse::<u64>().ok()?;
+    let id = solidcraft_engine::doc::persistent_name::made_by(name)?;
     let owner = app.session.doc.feature(body.feature)?;
     if matches!(owner.kind, solidcraft_engine::doc::FeatureKind::Import { .. } | solidcraft_engine::doc::FeatureKind::MeshImport { .. })
         && id != owner.id

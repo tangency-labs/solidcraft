@@ -3312,9 +3312,9 @@ impl Document {
                 _ => true,
             })
             .collect();
-        self.appearances
-            .faces
-            .retain(|face| !face.strict_name || !face.name.as_ref().is_some_and(|name| gone.iter().any(|id| name.starts_with(&format!("F{id}:")))));
+        self.appearances.faces.retain(|face| {
+            !face.strict_name || !face.name.as_ref().and_then(|name| crate::persistent_name::made_by(name)).is_some_and(|made| gone.contains(&made))
+        });
         if keep.contains(&false) {
             let mut k = keep.iter();
             self.configs.columns.retain(|_| k.next().copied().unwrap_or(true));

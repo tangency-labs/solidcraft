@@ -213,7 +213,7 @@ impl Document {
             let (p, look) = (crate::apply_point(&b.source_transform, f.point), f.look.clone());
             if f.strict_name {
                 let Some(name) = f.name.as_ref() else { continue };
-                let Some(origin_feature) = name.strip_prefix('F').and_then(|name| name.split_once(':')).and_then(|(id, _)| id.parse().ok()) else {
+                let Some(origin_feature) = crate::persistent_name::made_by(name) else {
                     continue;
                 };
                 let target = crate::config::ConfigFaceTarget {
