@@ -166,6 +166,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 [[package]]
 name = "android-activity"
 version = "0.6.1"
+source = "git+https://github.com/Hawaii-005/android-activity?branch=nonblocking-callbacks-and-ime-host#e55405262926ba651d43d8a4bd64bb8e52b3d10c"
 dependencies = [
  "android-properties",
  "bitflags 2.13.2",
@@ -1201,6 +1202,11 @@ name = "downcast-rs"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
+
+[[package]]
+name = "dpi"
+version = "0.1.1"
+source = "git+https://github.com/Hawaii-005/winit?branch=android-stylus-hover-and-palm#6312fa2acbd9256de849e1a9d488a78871d7140b"
 
 [[package]]
 name = "dpi"
@@ -2540,7 +2546,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4340e89c178916e62879c5c36b7f699019369be413e496178a6983ce91b8bc03"
 dependencies = [
  "crossbeam-channel",
- "dpi",
+ "dpi 0.1.2",
  "keyboard-types",
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
@@ -4303,7 +4309,7 @@ version = "0.24.1"
 
 [[package]]
 name = "solidcraft-android"
-version = "0.21.0-rc.1"
+version = "0.21.0"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -5913,6 +5919,7 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 [[package]]
 name = "winit"
 version = "0.30.13"
+source = "git+https://github.com/Hawaii-005/winit?branch=android-stylus-hover-and-palm#6312fa2acbd9256de849e1a9d488a78871d7140b"
 dependencies = [
  "ahash",
  "android-activity",
@@ -5926,7 +5933,7 @@ dependencies = [
  "core-foundation 0.9.4",
  "core-graphics",
  "cursor-icon",
- "dpi",
+ "dpi 0.1.1",
  "js-sys",
  "libc",
  "memmap2",

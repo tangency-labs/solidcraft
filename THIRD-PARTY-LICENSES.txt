@@ -114,6 +114,7 @@ displaydoc 0.2.7  (MIT OR Apache-2.0)
 dlib 0.5.3  (MIT)
 document-features 0.2.12  (MIT OR Apache-2.0)
 downcast-rs 1.2.1  (MIT/Apache-2.0)
+dpi 0.1.1  (Apache-2.0)
 dpi 0.1.2  (Apache-2.0 AND MIT)
 dyn-clone 1.0.20  (MIT OR Apache-2.0)
 ecolor 0.36.2  (MIT OR Apache-2.0)
@@ -3823,9 +3824,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-crc32fast 1.5.2, dpi 0.1.2, foreign-types 0.5.0, foreign-types-macros 0.2.4, foreign-types-shared
-0.3.1, hex 0.4.3, jni-sys 0.3.1, jni-sys 0.4.1, quick-error 2.0.1, toml_edit 0.25.15+spec-1.1.0,
-unicode-general-category 1.1.0, winit 0.30.13
+crc32fast 1.5.2, dpi 0.1.1, dpi 0.1.2, foreign-types 0.5.0, foreign-types-macros 0.2.4,
+foreign-types-shared 0.3.1, hex 0.4.3, jni-sys 0.3.1, jni-sys 0.4.1, quick-error 2.0.1, toml_edit
+0.25.15+spec-1.1.0, unicode-general-category 1.1.0, winit 0.30.13
 ================================================================================
 
 Apache License

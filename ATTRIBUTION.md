@@ -591,8 +591,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | vendor/winit/examples/data/icon.png | winit contributors | unmodified example asset of the winit 0.30.13 release vendored as the Android patch base (https://github.com/rust-windowing/winit); not used by SolidCraft | Apache-2.0 |
 | vendor/winit/examples/data/cross.png | winit contributors | unmodified example asset of the winit 0.30.13 release vendored as the Android patch base (https://github.com/rust-windowing/winit); not used by SolidCraft | Apache-2.0 |
 | vendor/winit/examples/data/cross2.png | winit contributors | unmodified example asset of the winit 0.30.13 release vendored as the Android patch base (https://github.com/rust-windowing/winit); not used by SolidCraft | Apache-2.0 |
-| vendor/winit/examples/data/gradient.png | winit contributors | unmodified example asset of the winit 0.30.13 release vendored as the Android patch base (https://github.com/rust-windowing/winit); not used by SolidCraft | Apache-2.0 |
-## Code adapted from sibling projects
+| vendor/winit/examples/data/gradient.png | winit contributors | unmodified example asset of the winit 0.30.13 release vendored as the Android patch base (https://github.com/rust-windowing/winit); not used by SolidCraft | Apache-2.0 |## Code adapted from sibling projects
 
 | SolidCraft file | Adapted from | Licence |
 |---|---|---|
@@ -655,8 +654,6 @@ copied into SolidCraft.
 | vendor/truck-shapeops | truck-shapeops 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | robust meshing and nearest-parameter fallback in booleans; degenerate intersection-curve rejection; face and edge history of booleans; trace macro; corner choice at vertices several intersection curves end on; reuse of an operand's meshes (vendor/README.md) |
 | vendor/truck-geometry | truck-geometry 0.5.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | intersection curves divided from their neighbours' surface parameters; surface second derivatives (vendor/README.md) |
 | vendor/matext4cgmath | matext4cgmath 0.1.0, https://github.com/ricosjp/matext4cgmath (RICOS Co. Ltd.) | Apache-2.0 | root refinement stops after 100 Newton steps (vendor/README.md) |
-| vendor/winit | winit 0.30.13, https://github.com/rust-windowing/winit | Apache-2.0 | Android backend: pen hover arrives as a pointer move, and finger input is ignored while the stylus is down (palm rejection) (vendor/README.md) |
-| vendor/android-activity | android-activity 0.6.1, https://github.com/rust-mobile/android-activity | MIT OR Apache-2.0 | non-blocking lifecycle callbacks (`set_nonblocking_callbacks`) so a blocking SAF pick cannot park `android_main`, which returned the app to an ANR (vendor/README.md) |
 
 ## Vendored renderer compatibility fix
 

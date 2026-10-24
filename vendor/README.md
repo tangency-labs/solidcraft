@@ -330,18 +330,25 @@ SolidCraft changes:
   `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through
   eframe so startup can retry another backend instead of invoking wgpu's panic handler.
 ## winit 0.30.13 (Apache-2.0, © the winit contributors, https://github.com/rust-windowing/winit)
+## winit 0.30.13 / android-activity 0.6.1 (Android input and lifecycle)
+These two are no longer vendored: the Android input backend needs two changes that belong upstream,
+so they live as `[patch.crates-io]` git dependencies until a release carries them.
 
-A full copy of the release, because the Android input backend is the part this fork changes.
-Changes (all in `src/platform_impl/android/mod.rs`):
-- `HoverMove`/`HoverEnter` (a stylus in the air, or a mouse over the glass with no button down)
-  emit `WindowEvent::CursorMoved` instead of falling through to the untouched pointer branch:
-  the viewport can then show what a tap would pick before it lands.
-- A `static STYLUS_DOWN` records that a pointer with `ToolType::Stylus` is touching the glass, and
-  finger motion events are dropped until the pen lifts (palm rejection). Without it, the palm that
-  rests on the screen while the pen draws arrives as a second finger and the view reads a pinch.
-  `STYLUS_DOWN` is cleared by a stylus `HoverMove`/`HoverEnter`, so a lost `Up` cannot keep it set.
-
-## android-activity 0.6.1 (MIT OR Apache-2.0, © the android-activity contributors, https://github.com/rust-mobile/android-activity)
+- `Hawaii-005/winit`, branch `android-stylus-hover-and-palm` (no upstream PR yet: the 0.30 line has
+  no maintenance branch, and the 0.31 rewrite moved the backend into `winit-android`, so the port
+  there is still to be written): a stylus
+  hovering above the glass (`HoverMove`/`HoverEnter`) is reported as `WindowEvent::CursorMoved`, so
+  the viewport can show what a tap would pick before it lands; and finger input is ignored while the
+  stylus is down, because the palm resting next to a drawing pen otherwise arrives as a second finger
+  and every stroke reads as a pinch. A hover also clears that flag, so a lost `Up` cannot leave touch
+  dead.
+- `rust-mobile/android-activity#255` (`Hawaii-005/android-activity`, branch
+  `nonblocking-callbacks-and-ime-host`): `set_nonblocking_callbacks(true)` makes the JVM-thread
+  lifecycle callbacks hand their state over and return instead of waiting for `poll_events` — a
+  blocking SAF pick parks the Rust main thread, and the wait was long enough for Android to ANR the
+  app. `show_soft_input`/`hide_soft_input` also call the activity's own `imeShow`/`imeHide` when it
+  provides them, since a bare `NativeActivity` has no editable view and `showSoftInput` on the decor
+  view never delivers text.
 
 Changes:
 - `src/native_activity/glue.rs`: `set_nonblocking_callbacks(bool)`, re-exported from `src/lib.rs`
@@ -354,3 +361,5 @@ Changes:
   `imeShow`/`imeHide` when it provides them (the launcher's `SolidCraftActivity` hosts a real
   `EditText`). A bare `NativeActivity` has no editable view, so `showSoftInput` on the decor view
   never delivers text; Activities that do not opt in keep the stock path.
+When either release ships these, the `[patch.crates-io]` entry goes away and the dependency goes
+back to crates.io.

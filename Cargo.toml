@@ -152,12 +152,13 @@ debug = "line-tables-only"
 
 # truck-shapeops with SolidCraft fixes (Apache-2.0, see vendor/truck-shapeops and ATTRIBUTION.md).
 [patch.crates-io]
-# Android: blocking SAF picks park `android_main`, so lifecycle callbacks must not wait for it
-# (adds `set_nonblocking_callbacks`, used by apps/solidcraft-android/src/saf_bridge.rs).
-android-activity = { path = "vendor/android-activity" }
-# Android: pen hover (a stylus in the air) is a pointer move, and a palm resting on the glass
-# while the pen draws is not a second finger.
-winit = { path = "vendor/winit" }
+# Android: blocking SAF picks park `android_main`, so the lifecycle callbacks must not wait for it,
+# and the activity hosts its own IME view. Upstream PR: rust-mobile/android-activity#255.
+android-activity = { git = "https://github.com/Hawaii-005/android-activity", branch = "nonblocking-callbacks-and-ime-host" }
+# Android: pen hover (a stylus in the air) is a pointer move, and a palm resting on the glass while
+# the pen draws is not a second finger. Branch `android-stylus-hover-and-palm` of Hawaii-005/winit;
+# a port to the 0.31 `winit-android` backend is still open.
+winit = { git = "https://github.com/Hawaii-005/winit", branch = "android-stylus-hover-and-palm" }
 truck-geometry = { path = "vendor/truck-geometry" }
 truck-shapeops = { path = "vendor/truck-shapeops" }
 truck-stepio = { path = "vendor/truck-stepio" }
