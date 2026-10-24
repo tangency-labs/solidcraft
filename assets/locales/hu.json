@@ -1325,6 +1325,7 @@
   "ui.ai_http_busy": "a végpont foglalt vagy túllépte a korlátját; próbálja később",
   "ui.ai_http_key": "a végpont elutasította a kulcsot: ellenőrizze a Beállítások > AI menüben",
   "ui.ai_http_not_found": "nincs ilyen végpont vagy modell: ellenőrizze az alap-URL-t és a modell nevét",
+  "ui.ai_http_too_large": "a beszélgetés túl nagy ehhez a végponthoz; kezdjen új csevegést",
   "ui.ai_key": "API-kulcs",
   "ui.ai_key_hint": "opcionális; a rendszer kulcstartójában tárolódik",
   "ui.ai_key_needs_https": "A kulcs csak HTTPS-en vagy erre a számítógépre kerül elküldésre.",

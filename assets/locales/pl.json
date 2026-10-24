@@ -1568,6 +1568,7 @@
   "ui.ai_http_busy": "punkt końcowy jest zajęty lub przekroczył limit; spróbuj ponownie później",
   "ui.ai_http_key": "punkt końcowy odrzucił klucz: sprawdź go w Preferencje > AI",
   "ui.ai_http_not_found": "nie ma takiego punktu końcowego lub modelu: sprawdź bazowy URL i nazwę modelu",
+  "ui.ai_http_too_large": "rozmowa jest za duża dla tego punktu końcowego; rozpocznij nowy czat",
   "ui.ai_key": "Klucz API",
   "ui.ai_key_hint": "opcjonalny; przechowywany w systemowym pęku kluczy",
   "ui.ai_key_needs_https": "Klucz jest wysyłany tylko przez HTTPS albo do tego komputera.",

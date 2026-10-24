@@ -1730,6 +1730,7 @@
   "ui.ai_http_busy": "the endpoint is busy or over its limit; try again later",
   "ui.ai_http_key": "the endpoint refused the key: check it in Preferences > AI",
   "ui.ai_http_not_found": "no such endpoint or model: check the base URL and the model name",
+  "ui.ai_http_too_large": "the conversation is too large for this endpoint; start a new chat",
   "ui.ai_key": "API key",
   "ui.ai_key_hint": "optional; kept in the system keychain",
   "ui.ai_key_needs_https": "A key is only sent over HTTPS, or to this computer.",

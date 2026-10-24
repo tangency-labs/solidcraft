@@ -1382,6 +1382,7 @@
   "ui.ai_http_busy": "o endpoint está ocupado ou acima do limite; tente de novo mais tarde",
   "ui.ai_http_key": "o endpoint recusou a chave: verifique-a em Preferências > IA",
   "ui.ai_http_not_found": "endpoint ou modelo inexistente: verifique a URL base e o nome do modelo",
+  "ui.ai_http_too_large": "a conversa é grande demais para este endpoint; comece um novo chat",
   "ui.ai_key": "Chave de API",
   "ui.ai_key_hint": "opcional; guardada no chaveiro do sistema",
   "ui.ai_key_needs_https": "Uma chave só é enviada por HTTPS ou para este computador.",

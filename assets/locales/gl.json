@@ -1382,6 +1382,7 @@
   "ui.ai_http_busy": "o punto de acceso está ocupado ou superou o seu límite; téntao de novo máis tarde",
   "ui.ai_http_key": "o punto de acceso rexeitou a clave: compróbaa en Preferencias > IA",
   "ui.ai_http_not_found": "non existe ese punto de acceso ou modelo: comproba o URL base e o nome do modelo",
+  "ui.ai_http_too_large": "a conversa é demasiado grande para este punto de acceso; comeza un chat novo",
   "ui.ai_key": "Clave da API",
   "ui.ai_key_hint": "opcional; gárdase no chaveiro do sistema",
   "ui.ai_key_needs_https": "A clave só se envía por HTTPS ou a este ordenador.",

@@ -1390,6 +1390,7 @@
   "ui.ai_http_busy": "le point d'accès est occupé ou a dépassé sa limite ; réessayez plus tard",
   "ui.ai_http_key": "le point d'accès a refusé la clé : vérifiez-la dans Préférences › IA",
   "ui.ai_http_not_found": "point d'accès ou modèle introuvable : vérifiez l'URL de base et le nom du modèle",
+  "ui.ai_http_too_large": "la conversation est trop volumineuse pour ce point d'accès ; commencez une nouvelle discussion",
   "ui.ai_key": "Clé d'API",
   "ui.ai_key_hint": "facultative ; conservée dans le trousseau de clés du système",
   "ui.ai_key_needs_https": "Une clé n'est envoyée qu'en HTTPS, ou vers cet ordinateur.",

@@ -1382,6 +1382,7 @@
   "ui.ai_http_busy": "endpoint je zaneprázdněný nebo překročil limit; zkuste to později",
   "ui.ai_http_key": "endpoint odmítl klíč: zkontrolujte jej v Předvolby > AI",
   "ui.ai_http_not_found": "takový endpoint nebo model neexistuje: zkontrolujte základní URL a název modelu",
+  "ui.ai_http_too_large": "konverzace je pro tento endpoint příliš velká; začněte nový chat",
   "ui.ai_key": "API klíč",
   "ui.ai_key_hint": "volitelné; uloženo v systémové klíčence",
   "ui.ai_key_needs_https": "Klíč se odesílá pouze přes HTTPS nebo na tento počítač.",

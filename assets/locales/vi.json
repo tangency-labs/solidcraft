@@ -1382,6 +1382,7 @@
   "ui.ai_http_busy": "điểm cuối đang bận hoặc vượt quá giới hạn; vui lòng thử lại sau",
   "ui.ai_http_key": "điểm cuối từ chối khóa API: hãy kiểm tra trong Tùy chọn cài đặt > AI",
   "ui.ai_http_not_found": "không tìm thấy điểm cuối hoặc mô hình: hãy kiểm tra URL cơ sở và tên mô hình",
+  "ui.ai_http_too_large": "cuộc trò chuyện quá lớn đối với điểm cuối này; hãy bắt đầu cuộc trò chuyện mới",
   "ui.ai_key": "Khóa API",
   "ui.ai_key_hint": "tùy chọn; lưu trữ bảo mật trong chuỗi khóa hệ thống",
   "ui.ai_key_needs_https": "Khóa chỉ được gửi qua HTTPS, hoặc trực tiếp trên máy tính này.",
