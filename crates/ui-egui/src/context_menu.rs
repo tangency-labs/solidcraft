@@ -518,6 +518,9 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "solid.shell", "Shell"));
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
         v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
+        let planar =
+            sel.iter().any(|s| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some()));
+        v.push(act("ui.lookAt", "Look At", "lookat").on(planar));
         v.push(Item::sep());
         v.push(act("ui.appearance", "Appearance", "appearance").key("A"));
         v.push(act("ui.properties", "Properties", "measure").with(json!({ "bodies": [face] })));
@@ -554,6 +557,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         // Empty space, or a plane, which leads with a sketch on it.
         if let Some(plane) = &app.menu.plane {
             v.push(cmd(app, "sketch.create", "Create Sketch").with(json!({ "plane": plane })));
+            v.push(act("ui.lookAt", "Look At", "lookat").with(json!({ "plane": plane })));
             v.push(Item::sep());
         }
         v.push(act("ui.nav", "Pan", "pan").with(json!({ "mode": "pan" })));
@@ -1322,6 +1326,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if let Some(ss) = id_of(&p, "sketch").and_then(|id| st.sketch(id)) {
                 let to = crate::dialogs::onto_sketch(app.cam.looking_from(ss.plane.normal()), ss);
                 app.animate_to(to);
+            } else if let Some(plane) = p.get("plane").and_then(Value::as_str).and_then(solidcraft_engine::geom::Plane::named) {
+                let mut to = app.cam.looking_from(crate::dialogs::facing(app, plane.normal(), true));
+                to.target = plane.origin;
+                app.animate_to(to);
+            } else if p.get("sketch").is_none() {
+                crate::viewport::look_at_selection(app);
             }
         }
         "ui.nav" => {

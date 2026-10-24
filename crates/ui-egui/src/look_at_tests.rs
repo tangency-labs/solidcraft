@@ -60,3 +60,32 @@ fn an_empty_sketch_keeps_its_planes_origin() {
     assert!(near(h.app.cam.target, Vec3::new(0.0, 0.0, 8.0)), "{:?}", h.app.cam.target);
     assert_eq!(h.app.cam.distance, 123.0);
 }
+
+/// The viewport menu's Look At (#4105): the same turn as the navigation bar's, for the planar
+/// face under the right-click and for a plane.
+#[test]
+fn the_viewport_menu_looks_at_a_planar_face() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+    let body = h.app.session.model.state().bodies[0].clone();
+    let face = body.body.faces(0.01).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.z > 0.99)).unwrap();
+    h.app.run("select.set", json!({"items": [{"type": "face", "body": body.name, "index": face.index, "point": face.centroid}]})).unwrap();
+    let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    let look = items.iter().find(|i| i.id == "ui.lookAt").cloned().expect("a face's menu has Look At");
+    assert!(look.enabled);
+    crate::context_menu::run_item(&mut h.app, &look, egui::Pos2::ZERO);
+    assert!((h.app.cam.back() - Vec3::new(0.0, 0.0, 1.0)).len() < 1e-6, "facing the top face: {:?}", h.app.cam.back());
+}
+
+#[test]
+fn the_viewport_menu_looks_at_a_plane_under_the_cursor() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.menu.plane = Some("XZ".to_string());
+    let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    let look = items.iter().find(|i| i.id == "ui.lookAt").cloned().expect("a plane's menu has Look At");
+    crate::context_menu::run_item(&mut h.app, &look, egui::Pos2::ZERO);
+    let normal = solidcraft_engine::geom::Plane::named("XZ").unwrap().normal();
+    assert!((h.app.cam.back().cross(normal)).len() < 1e-6, "facing the plane along its normal: {:?}", h.app.cam.back());
+}

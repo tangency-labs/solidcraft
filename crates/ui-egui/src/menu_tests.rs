@@ -879,7 +879,7 @@ fn right_click_on_a_plane_offers_a_sketch_on_it() {
         let menu = h.call("ui.menu", json!({}))["result"].clone();
         let items = menu["items"].as_array().unwrap();
         let labels: Vec<&str> = items.iter().filter_map(|i| i["label"].as_str()).filter(|l| !l.is_empty()).collect();
-        assert_eq!(labels[..3], ["Select Other…", "Create Sketch", "Pan"], "{plane}: {labels:?}");
+        assert_eq!(labels[..4], ["Select Other…", "Create Sketch", "Look At", "Pan"], "{plane}: {labels:?}");
         let sketch = items.iter().find(|i| i["label"] == "Create Sketch").unwrap();
         assert_eq!(sketch["params"], json!({"plane": plane}));
         assert!(h.app.session.selection.is_empty(), "the right-click leaves the plane unselected");
