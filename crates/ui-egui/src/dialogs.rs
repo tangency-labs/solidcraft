@@ -23,6 +23,7 @@ use crate::viewport::Hit;
 
 #[path = "dialogs_dense.rs"]
 mod dense;
+pub(crate) use dense::chamfer_point_ids;
 
 const SELECT_ONLY: &[Scope] = &[Scope::Selection, Scope::FeaturePreview];
 const SELECT_MANIP: &[Scope] = &[Scope::Selection, Scope::Manipulator, Scope::FeaturePreview];
@@ -2921,7 +2922,7 @@ fn mid_points(extra: &serde_json::Map<String, Value>) -> Vec<(f64, String)> {
         .collect()
 }
 
-pub(crate) const CHAMFER_TYPES: [&str; 3] = ["Equal Distance", "Two Distances", "Distance and Angle"];
+pub(crate) const CHAMFER_TYPES: [&str; 4] = ["Equal Distance", "Two Distances", "Distance and Angle", "Variable Distance"];
 
 /// A new Fillet or Chamfer dialog's values.
 fn fillet_kind(size: &str, chamfer: bool) -> Kind {
@@ -3434,9 +3435,58 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 match *ctype {
                     1 => p["distance2"] = json!(distance2),
                     2 => p["angle"] = json!(angle),
+                    3 => {
+                        if edges.len() != 1 {
+                            return Err("select one straight edge for a variable chamfer".into());
+                        }
+                        let (first, last) = sels(d, 0)
+                            .iter()
+                            .find_map(|selection| match selection {
+                                Sel::Edge { body, index, .. } => st
+                                    .body(body)
+                                    .and_then(|body| body.mesh().edges.get(*index).and_then(|edge| Some((*edge.first()?, *edge.last()?)))),
+                                _ => None,
+                            })
+                            .ok_or("select a straight edge for a variable chamfer")?;
+                        let swap = d.extra.get("swap_ends").and_then(Value::as_bool).unwrap_or(false);
+                        p["type"] = json!("variable");
+                        p["start"] = pt(if swap { last } else { first });
+                        p["end_distance"] = d.extra.get("end_distance").cloned().unwrap_or_else(|| json!(radius));
+                        let two = d.extra.get("two_distances").and_then(Value::as_bool).unwrap_or(false);
+                        let points = mid_points(&d.extra);
+                        if two {
+                            p["distance2"] = json!(distance2);
+                            p["end_distance2"] = d.extra.get("end_distance2").cloned().unwrap_or_else(|| json!(distance2));
+                            p["mid"] = json!(
+                                points
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, (position, value))| {
+                                        let other = d
+                                            .extra
+                                            .get("mid2")
+                                            .and_then(Value::as_array)
+                                            .and_then(|values| values.get(index))
+                                            .cloned()
+                                            .unwrap_or_else(|| json!(distance2));
+                                        json!([position, value, other])
+                                    })
+                                    .collect::<Vec<_>>()
+                            );
+                            p["flip"] = json!(flip);
+                        } else {
+                            p["mid"] = json!(points);
+                        }
+                        for key in ["start_offset", "end_offset", "transition_length"] {
+                            if let Some(value) = d.extra.get(key) {
+                                p[key] = value.clone();
+                            }
+                        }
+                        p["smooth"] = json!(d.extra.get("smooth").and_then(Value::as_bool).unwrap_or(false));
+                    }
                     _ => {}
                 }
-                if *ctype > 0 && *flip {
+                if matches!(*ctype, 1 | 2) && *flip {
                     p["flip"] = json!(true);
                 }
                 ("solid.chamfer", p)
@@ -4512,6 +4562,33 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     }
                     *flip = *f;
                 }
+            }
+            if let FeatureKind::Chamfer { profile: Some(profile), .. } = &f.kind {
+                if let Kind::Fillet { ctype, .. } = &mut d.kind {
+                    *ctype = 3;
+                }
+                d.extra.insert("end_distance".into(), json!(profile.end_distance));
+                d.extra.insert("mid".into(), json!(profile.mid));
+                d.extra.insert("two_distances".into(), json!(profile.end_distance2.is_some()));
+                d.extra.insert("mid2".into(), json!(profile.mid2));
+                for (key, value) in [
+                    ("end_distance2", &profile.end_distance2),
+                    ("start_offset", &profile.start_offset),
+                    ("end_offset", &profile.end_offset),
+                    ("transition_length", &profile.transition_length),
+                ] {
+                    if let Some(value) = value {
+                        d.extra.insert(key.into(), json!(value));
+                    }
+                }
+                d.extra.insert("smooth".into(), json!(profile.smooth));
+                let last = edges.first().and_then(|point| edge_sel(s, point.0)).and_then(|selection| match selection {
+                    Sel::Edge { body, index, .. } => {
+                        s.world_state().body(&body).and_then(|body| body.mesh().edges.get(index).and_then(|edge| edge.last().copied()))
+                    }
+                    _ => None,
+                });
+                d.extra.insert("swap_ends".into(), json!(last.is_some_and(|last| last.dist(profile.start.0) < 1e-6)));
             }
             if let FeatureKind::Fillet { corner, .. } = &f.kind
                 && !corner.is_rolling()

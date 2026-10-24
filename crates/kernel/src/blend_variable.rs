@@ -1,5 +1,5 @@
 //! Fillets beyond a constant radius: a radius that varies along the edge (from one end to the
-//! other) and chord-length fillets (the width across the blend given instead of the radius).
+//! other), chord-length fillets, and chamfers with a setback that varies along a straight edge.
 //!
 //! Variable radius: a straight, convex or concave edge between two planar faces whose ends each
 //! touch one more planar face square to the edge (the configuration of `blend`). Every section
@@ -162,6 +162,10 @@ impl RadiusSpline {
     /// Refused unless it is a clamped B-spline from 0 to 1 of degree 1 to 3 with 2 to 100 control
     /// radii, positive along the edge and zero at most at one end.
     fn check(&self) -> Result<()> {
+        self.check_ends(false)
+    }
+
+    fn check_ends(&self, both_ends: bool) -> Result<()> {
         let (n, deg) = (self.radii.len(), self.degree);
         if !(1..=3).contains(&deg) || !(2..=100).contains(&n) || n <= deg || self.knots.len() != n + deg + 1 {
             return Err(KernelError::Invalid("a radius spline has degree 1…3, 2…100 control radii and as many knots as both and one more".into()));
@@ -174,7 +178,7 @@ impl RadiusSpline {
             return Err(KernelError::Invalid("fillet radii must be positive (zero only at an end)".into()));
         }
         let zeros: Vec<usize> = (0..n).filter(|i| self.radii.get(*i) == Some(&0.0)).collect();
-        if !matches!(zeros[..], [] | [0]) && zeros[..] != [n - 1] {
+        if !matches!(zeros[..], [] | [0]) && zeros[..] != [n - 1] && !(both_ends && zeros == [0, n - 1]) {
             return Err(KernelError::Invalid("the radius may be zero at one end of the edge only".into()));
         }
         // Positive inside the edge (a zero end is given exactly, as a control radius).
@@ -189,19 +193,127 @@ impl RadiusSpline {
 /// positions 0 (the end nearest `start`) to 1 (the other end) and any between, the radius
 /// straight between them or `smooth`. One end's radius may be zero.
 pub fn fillet_variable_points(body: &Body, edge_at: Vec3, start: Vec3, points: &[(f64, f64)], smooth: bool) -> Result<Body> {
+    fillet_variable_spline(body, edge_at, start, &point_law(points, smooth)?)
+}
+
+fn point_law(points: &[(f64, f64)], smooth: bool) -> Result<RadiusSpline> {
     if points.len() < 2 || points.len() > 100 {
-        return Err(KernelError::Invalid("a variable radius needs 2…100 points".into()));
+        return Err(KernelError::Invalid("a variable blend needs 2…100 points".into()));
     }
     if points.iter().any(|(t, _)| !(t.is_finite() && (0.0..=1.0).contains(t))) {
-        return Err(KernelError::Invalid("radius positions run from 0 to 1 along the edge".into()));
+        return Err(KernelError::Invalid("blend positions run from 0 to 1 along the edge".into()));
     }
     let mut pts = points.to_vec();
     pts.sort_by(|a, b| a.0.total_cmp(&b.0));
     pts.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-9);
     if pts.first().map(|p| p.0) != Some(0.0) || pts.last().map(|p| p.0) != Some(1.0) || pts.len() < 2 {
-        return Err(KernelError::Invalid("give the radius at both ends of the edge".into()));
+        return Err(KernelError::Invalid("give the blend size at both ends of the edge".into()));
     }
-    fillet_variable_spline(body, edge_at, start, &RadiusSpline::through(&pts, smooth))
+    let law = RadiusSpline::through(&pts, smooth);
+    law.check()?;
+    Ok(law)
+}
+
+/// Chamfer a straight edge between planar faces with equal setbacks on both faces.
+/// Positions run from the end nearest `start` (0) to the other end (1); distances
+/// interpolate linearly or smoothly through the supplied points. One end may be zero.
+/// The end faces must be planar and perpendicular to the edge.
+pub fn chamfer_variable_points(body: &Body, edge_at: Vec3, start: Vec3, points: &[(f64, f64)], smooth: bool) -> Result<Body> {
+    if points.len() > 100 {
+        return Err(KernelError::Invalid("a variable chamfer takes at most 100 points".into()));
+    }
+    let points: Vec<_> = points.iter().map(|(position, distance)| (*position, *distance, *distance)).collect();
+    chamfer_variable_two_distances(body, edge_at, start, &points, &VariableChamferOptions { smooth, ..Default::default() })
+}
+
+/// Shape and extent of a variable chamfer. Offsets leave the edge unchanged outside the
+/// selected interval. At an offset end, a transition joins the edge to the setback profile.
+#[derive(Clone, Debug, Default)]
+pub struct VariableChamferOptions {
+    /// Cubic interpolation through the profile points instead of straight segments.
+    pub smooth: bool,
+    /// Exchange the supporting faces assigned to the two distances.
+    pub flip: bool,
+    /// Unmodified length from the end nearest `start`, in millimetres.
+    pub start_offset: f64,
+    /// Unmodified length from the opposite end, in millimetres.
+    pub end_offset: f64,
+    /// Length of each transition inside the selected interval; defaults to 10% of it.
+    pub transition_length: Option<f64>,
+}
+
+/// Chamfer a straight edge with independent in-face setbacks at common profile positions.
+/// Each point is `(position, distance_1, distance_2)`, with positions from 0 to 1 within
+/// the profile between the optional zero-size transitions. Non-offset ends retain their
+/// specified sizes and require planar end faces perpendicular to the edge.
+pub fn chamfer_variable_two_distances(
+    body: &Body,
+    edge_at: Vec3,
+    start: Vec3,
+    points: &[(f64, f64, f64)],
+    options: &VariableChamferOptions,
+) -> Result<Body> {
+    body.require_brep("chamfer")?;
+    if ![edge_at.x, edge_at.y, edge_at.z, start.x, start.y, start.z].into_iter().all(f64::is_finite) {
+        return Err(KernelError::Invalid("variable chamfer positions must be finite".into()));
+    }
+    if points.len() > 100 || ![options.start_offset, options.end_offset].into_iter().all(|v| v.is_finite() && v >= 0.0) {
+        return Err(KernelError::Invalid("chamfer offsets must be finite and nonnegative, with at most 100 profile points".into()));
+    }
+    let mut points = points.to_vec();
+    points.sort_by(|a, b| a.0.total_cmp(&b.0));
+    if points.windows(2).any(|pair| (pair[1].0 - pair[0].0).abs() < 1e-9) {
+        return Err(KernelError::Invalid("chamfer profile positions must be distinct".into()));
+    }
+    let first: Vec<_> = points.iter().map(|p| (p.0, p.1)).collect();
+    let second: Vec<_> = points.iter().map(|p| (p.0, p.2)).collect();
+    point_law(&first, options.smooth)?;
+    point_law(&second, options.smooth)?;
+    if points.iter().any(|p| (p.1 == 0.0) != (p.2 == 0.0)) {
+        return Err(KernelError::Invalid("both chamfer distances must reach zero together".into()));
+    }
+    let edge = crate::surfaces::edge_near(body, edge_at).ok_or_else(|| KernelError::Invalid(format!("no edge at {edge_at:?}")))?;
+    guard("variable chamfer", || {
+        let setup = EdgeSetup::new(body, &edge)?;
+        let length = setup.p0.dist(setup.p1);
+        let active = length - options.start_offset - options.end_offset;
+        if !active.is_finite() || active <= setup.tol * 10.0 {
+            return Err(KernelError::Invalid("chamfer offsets must leave a nonzero interval on the edge".into()));
+        }
+        let transition = options.transition_length.unwrap_or(active * 0.1);
+        let (head, tail) = (options.start_offset > 0.0, options.end_offset > 0.0);
+        let count = usize::from(head) + usize::from(tail);
+        if !transition.is_finite() || (count > 0 && (transition <= setup.tol || transition * count as f64 >= active - setup.tol)) {
+            return Err(KernelError::Invalid("chamfer transition length must be positive and fit inside the selected interval".into()));
+        }
+        let (lo, hi) = (if head { transition / active } else { 0.0 }, if tail { 1.0 - transition / active } else { 1.0 });
+        let make = |values: &[(f64, f64)]| -> Result<RadiusSpline> {
+            let mut stations = Vec::new();
+            if head {
+                stations.push((0.0, 0.0));
+            }
+            stations.extend(values.iter().map(|(position, distance)| (lo + (hi - lo) * position, *distance)));
+            if tail {
+                stations.push((1.0, 0.0));
+            }
+            let law = RadiusSpline::through(&stations, options.smooth);
+            law.check_ends(true)?;
+            Ok(law)
+        };
+        let (mut law, mut other) = (make(&first)?, make(&second)?);
+        let up = Vec3::new(1e-6, 1e-3, 1.0);
+        let second_up = setup.faces.get(setup.fr.i2).and_then(|face| plane_normal(face)).is_some_and(|normal| normal.dot(up) > setup.fr.n1.dot(up));
+        if options.flip != second_up {
+            std::mem::swap(&mut law, &mut other);
+        }
+        let mut range = (options.start_offset / length, 1.0 - options.end_offset / length);
+        if setup.p1.dist(start) < setup.p0.dist(start) {
+            law = law.reversed();
+            other = other.reversed();
+            range = (1.0 - range.1, 1.0 - range.0);
+        }
+        build(body, &setup, &edge, &law, Some(&other), range)
+    })
 }
 
 /// Fillet one straight edge with the radius `spline` along it, its positions from the end
@@ -217,7 +329,7 @@ pub fn fillet_variable_spline(body: &Body, edge_at: Vec3, start: Vec3, spline: &
         };
         // Positions from the end nearest `start` (the edge keeps its own direction).
         let law = if s.p1.dist(start) < s.p0.dist(start) { spline.reversed() } else { spline.clone() };
-        build(body, &s, &edge, &law)
+        build(body, &s, &edge, &law, None, (0.0, 1.0))
     })
 }
 
@@ -334,12 +446,23 @@ fn leaving(edge: &mt::Edge, v: &mt::Vertex, tol: f64) -> Option<Vec3> {
 }
 
 /// Build the blend of the edge of `s` with the radius `law` (its positions from the edge's front).
-fn build(body: &Body, s: &EdgeSetup, edge: &mt::Edge, law: &RadiusSpline) -> Result<Body> {
+fn build(body: &Body, s: &EdgeSetup, edge: &mt::Edge, law: &RadiusSpline, other: Option<&RadiusSpline>, range: (f64, f64)) -> Result<Body> {
     let (faces, fr, tol) = (&s.faces, &s.fr, s.tol);
-    let (v0, v1, p0, p1, d) = (&s.v0, &s.v1, s.p0, s.p1, s.d);
+    let round = other.is_none();
+    let other = other.unwrap_or(law);
+    let (p0, p1, d) = (s.p0 + (s.p1 - s.p0) * range.0, s.p0 + (s.p1 - s.p0) * range.1, s.d);
+    let v0 = if range.0 == 0.0 { s.v0.clone() } else { builder::vertex(p3(p0)) };
+    let v1 = if range.1 == 1.0 { s.v1.clone() } else { builder::vertex(p3(p1)) };
+    let mut connectors = Vec::new();
+    if range.0 > 0.0 {
+        connectors.push(builder::line(&s.v0, &v0));
+    }
+    if range.1 < 1.0 {
+        connectors.push(builder::line(&v1, &s.v1));
+    }
     // The end radii are the first and last control radii (exact: a zero end closes the blend).
     let (ra, rb) = (law.radii.first().copied().unwrap_or(0.0), law.radii.last().copied().unwrap_or(0.0));
-    let back = |r: f64| s.back(r);
+    let back = |r: f64| if round { s.back(r) } else { r };
     let arc_mid = |p: Vec3, sb: f64, r: f64| {
         let c = p + fr.t1 * sb + fr.n1 * (r * fr.side);
         c + (p - c).normalized().unwrap_or(-fr.n1) * r
@@ -360,7 +483,8 @@ fn build(body: &Body, s: &EdgeSetup, edge: &mt::Edge, law: &RadiusSpline) -> Res
         arc: Option<Arc>,
     }
     let mut ends = Vec::new();
-    for (v, p, r) in [(v0, p0, ra), (v1, p1, rb)] {
+    let (oa, ob) = (other.radii.first().copied().unwrap_or(0.0), other.radii.last().copied().unwrap_or(0.0));
+    for (v, p, r, second) in [(&v0, p0, ra, oa), (&v1, p1, rb, ob)] {
         if r == 0.0 {
             ends.push(End { a: v.clone(), b: v.clone(), arc: None });
             continue;
@@ -380,7 +504,7 @@ fn build(body: &Body, s: &EdgeSetup, edge: &mt::Edge, law: &RadiusSpline) -> Res
                 .ok_or_else(|| unsupported("unexpected corner topology"))
         };
         let (e1, e2) = (shared(fr.i1)?, shared(fr.i2)?);
-        for (e, t) in [(&e1, fr.t1), (&e2, fr.t2)] {
+        for (e, t, size) in [(&e1, fr.t1, r), (&e2, fr.t2, second)] {
             if !matches!(e.curve(), mt::Curve::Line(_)) {
                 return Err(unsupported("the edges at the corners must be straight"));
             }
@@ -389,13 +513,13 @@ fn build(body: &Body, s: &EdgeSetup, edge: &mt::Edge, law: &RadiusSpline) -> Res
             if (other - p - t * along).len() > tol * 100.0 + 1e-7 {
                 return Err(unsupported("the faces at the edge ends must be perpendicular to the edge"));
             }
-            if along <= back(r) + tol {
+            if along <= back(size) + tol {
                 return Err(too_large("the blend is larger than the neighbouring faces"));
             }
         }
         let sb = back(r);
-        let (a, b) = (builder::vertex(p3(p + fr.t1 * sb)), builder::vertex(p3(p + fr.t2 * sb)));
-        let arc = builder::circle_arc(&a, &b, p3(arc_mid(p, sb, r)));
+        let (a, b) = (builder::vertex(p3(p + fr.t1 * sb)), builder::vertex(p3(p + fr.t2 * back(second))));
+        let arc = if round { builder::circle_arc(&a, &b, p3(arc_mid(p, sb, r))) } else { builder::line(&a, &b) };
         ends.push(End { a, b, arc: Some(Arc { v: v.clone(), g, e1, e2, edge: arc }) });
     }
     let [end0, end1] = &ends[..] else { return Err(KernelError::Failed("ends".into())) };
@@ -406,21 +530,27 @@ fn build(body: &Body, s: &EdgeSetup, edge: &mt::Edge, law: &RadiusSpline) -> Res
     }
     // Along the edge the band the blend takes from each face stays inside it.
     const STATIONS: usize = 256;
-    if (1..STATIONS).any(|k| !s.band_fits(k as f64 / STATIONS as f64, law.eval(k as f64 / STATIONS as f64))) {
+    if (1..STATIONS).any(|k| {
+        let u = k as f64 / STATIONS as f64;
+        let p = p0 + (p1 - p0) * u;
+        [(fr.i1, fr.t1, law), (fr.i2, fr.t2, other)]
+            .into_iter()
+            .any(|(i, t, profile)| !faces.get(i).is_some_and(|face| crate::blend::extension_fits(face, p, p + t * back(profile.eval(u)), tol)))
+    }) {
         return Err(too_large("the blend is larger than the neighbouring faces"));
     }
     // Contact curves: the edge moved along each face by the setback of the radius there.
     let g = law.greville();
-    let contact = |t: Vec3, a: &mt::Vertex, b: &mt::Vertex| -> Result<mt::Edge> {
-        if law.degree == 1 && law.radii.len() == 2 {
+    let contact = |t: Vec3, a: &mt::Vertex, b: &mt::Vertex, profile: &RadiusSpline| -> Result<mt::Edge> {
+        if profile.degree == 1 && profile.radii.len() == 2 {
             return Ok(builder::line(a, b));
         }
-        let ctrl: Vec<mt::Point3> = g.iter().zip(&law.radii).map(|(gj, rj)| p3(p0 + (p1 - p0) * *gj + t * back(*rj))).collect();
+        let ctrl: Vec<mt::Point3> = g.iter().zip(&profile.radii).map(|(gj, rj)| p3(p0 + (p1 - p0) * *gj + t * back(*rj))).collect();
         let c = mt::BSplineCurve::try_new(mt::KnotVec::from(law.knots.clone()), ctrl).map_err(|e| KernelError::Failed(format!("fillet: {e}")))?;
         mt::Edge::try_new(a, b, mt::Curve::BSplineCurve(c)).map_err(|e| KernelError::Failed(format!("fillet: {e}")))
     };
-    let la = contact(fr.t1, &end0.a, &end1.a)?;
-    let lb = contact(fr.t2, &end0.b, &end1.b)?;
+    let la = contact(fr.t1, &end0.a, &end1.a, law)?;
+    let lb = contact(fr.t2, &end0.b, &end1.b, other)?;
     let arcs = || [end0, end1].into_iter().filter_map(|end| end.arc.as_ref().map(|arc| (end, arc)));
     let mut subst: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
     for (end, arc) in arcs() {
@@ -438,11 +568,11 @@ fn build(body: &Body, s: &EdgeSetup, edge: &mt::Edge, law: &RadiusSpline) -> Res
         let nf = if i == fr.i1 {
             let mut m = subst.clone();
             m.insert(edge.id(), la.clone());
-            rebuild_face(f, &m, &[])?
+            rebuild_face(f, &m, &connectors)?
         } else if i == fr.i2 {
             let mut m = subst.clone();
             m.insert(edge.id(), lb.clone());
-            rebuild_face(f, &m, &[])?
+            rebuild_face(f, &m, &connectors)?
         } else if let Some((_, arc)) = arcs().find(|(_, arc)| arc.g == i) {
             rebuild_face(f, &subst, std::slice::from_ref(&arc.edge))?
         } else {
@@ -455,17 +585,22 @@ fn build(body: &Body, s: &EdgeSetup, edge: &mt::Edge, law: &RadiusSpline) -> Res
     // weight sin(φ/2)) at each end, joined along the radius spline.
     let w = (fr.phi / 2.0).sin();
     let h = |p: Vec3, wt: f64| mt::Vector4::new(p.x * wt, p.y * wt, p.z * wt, wt);
-    let row = |t: Vec3, wt: f64, off: bool| -> Vec<mt::Vector4> {
-        g.iter().zip(&law.radii).map(|(gj, rj)| h(p0 + (p1 - p0) * *gj + if off { t * back(*rj) } else { Vec3::ZERO }, wt)).collect()
+    let row = |t: Vec3, wt: f64, off: bool, profile: &RadiusSpline| -> Vec<mt::Vector4> {
+        g.iter().zip(&profile.radii).map(|(gj, rj)| h(p0 + (p1 - p0) * *gj + if off { t * back(*rj) } else { Vec3::ZERO }, wt)).collect()
     };
-    let ctrl = vec![row(fr.t1, 1.0, true), row(fr.t1, w, false), row(fr.t2, 1.0, true)];
-    let bsp = mt::BSplineSurface::new((mt::KnotVec::bezier_knot(2), mt::KnotVec::from(law.knots.clone())), ctrl);
+    let ctrl = if round {
+        vec![row(fr.t1, 1.0, true, law), row(fr.t1, w, false, law), row(fr.t2, 1.0, true, other)]
+    } else {
+        vec![row(fr.t1, 1.0, true, law), row(fr.t2, 1.0, true, other)]
+    };
+    let bsp = mt::BSplineSurface::new((mt::KnotVec::bezier_knot(if round { 2 } else { 1 }), mt::KnotVec::from(law.knots.clone())), ctrl);
     let mut surf = mt::Surface::NurbsSurface(mt::NurbsSurface::new(bsp));
     // Outward: away from the arc centre on a convex edge, toward it on a concave one (at an
     // end with a radius).
     let (p, r) = if end0.arc.is_none() { (p1, rb) } else { (p0, ra) };
     let (c, mid) = (p + fr.t1 * back(r) + fr.n1 * (r * fr.side), arc_mid(p, back(r), r));
-    let outward = (mid - c) * (-fr.side);
+    let outward = if round { (mid - c) * (-fr.side) } else { (fr.t1 + fr.t2) * fr.side };
+    let mid = if round { mid } else { (p0 + p1) * 0.5 + (fr.t1 * law.eval(0.5) + fr.t2 * other.eval(0.5)) * 0.5 };
     {
         use mt::{ParametricSurface3D, SearchParameter};
         if let Some((u, v)) = surf.search_parameter(p3(mid), None, 100) {
@@ -477,7 +612,9 @@ fn build(body: &Body, s: &EdgeSetup, edge: &mt::Edge, law: &RadiusSpline) -> Res
     }
     // The blend face uses each new edge opposite to its neighbour; a closed end has no arc.
     let arc_of = |end: &End| end.arc.as_ref().map(|a| a.edge.clone());
-    let f1_forward = faces.get(fr.i1).is_some_and(|f| f.boundaries().iter().any(|w| w.edge_iter().any(|e| e.id() == edge.id() && e.front() == v0)));
+    let f1_forward = faces
+        .get(fr.i1)
+        .is_some_and(|f| f.boundaries().iter().any(|w| w.edge_iter().any(|e| e.id() == edge.id() && e.front() == edge.absolute_front())));
     let wire: mt::Wire = if f1_forward {
         [arc_of(end0), Some(lb.clone()), arc_of(end1).map(|a| a.inverse()), Some(la.inverse())].into_iter().flatten().collect()
     } else {
@@ -714,6 +851,93 @@ mod tests {
         assert!(rel(measure(&g).unwrap().volume, measure(&k).unwrap().volume) < 1e-6);
         // Too big for the faces: refused.
         assert!(fillet_variable(&b, Vec3::new(10.0, 10.0, 30.0), Vec3::new(10.0, 0.0, 30.0), 2.0, 50.0).is_err());
+    }
+
+    #[test]
+    fn variable_chamfer_on_a_box_edge() {
+        let body = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let at = Vec3::new(10.0, 10.0, 30.0);
+        let start = Vec3::new(10.0, 0.0, 30.0);
+        let end = Vec3::new(10.0, 20.0, 30.0);
+        for (first, last) in [(2.0, 5.0), (0.0, 5.0), (5.0, 0.0), (3.0, 3.0)] {
+            let result = chamfer_variable_points(&body, at, start, &[(0.0, first), (1.0, last)], false).unwrap();
+            let expected = 6000.0 - 20.0 * (first * first + first * last + last * last) / 6.0;
+            let volume = measure(&result).unwrap().volume;
+            assert!(rel(volume, expected) < 1e-6, "{first} to {last}: {volume} vs {expected}");
+            assert_eq!(result.unmeshed_faces(), 0);
+            let reversed = chamfer_variable_points(&body, at, end, &[(0.0, last), (1.0, first)], false).unwrap();
+            assert!(rel(measure(&reversed).unwrap().volume, volume) < 1e-9);
+        }
+    }
+
+    #[test]
+    fn variable_chamfer_middle_points_and_invalid_inputs() {
+        let body = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let at = Vec3::new(10.0, 10.0, 30.0);
+        let start = Vec3::new(10.0, 0.0, 30.0);
+        let points = [(0.0, 2.0), (0.5, 4.0), (1.0, 2.0)];
+        for smooth in [false, true] {
+            let result = chamfer_variable_points(&body, at, start, &points, smooth).unwrap();
+            let law = RadiusSpline::through(&points, smooth);
+            let count = 20000;
+            let removed = (0..count).map(|index| law.eval((index as f64 + 0.5) / count as f64).powi(2)).sum::<f64>() * 10.0 / count as f64;
+            assert!(rel(fine_volume(&result), 6000.0 - removed) < 1e-5);
+            assert_eq!(result.unmeshed_faces(), 0);
+        }
+        for points in [vec![], vec![(0.0, 2.0)], vec![(0.0, 0.0), (1.0, 0.0)], vec![(0.0, 2.0), (1.0, 50.0)], vec![(0.0, 2.0), (1.0, f64::NAN)]] {
+            assert!(chamfer_variable_points(&body, at, start, &points, false).is_err());
+        }
+        assert!(chamfer_variable_points(&body, at, Vec3::new(f64::NAN, 0.0, 0.0), &points, false).is_err());
+    }
+
+    #[test]
+    fn variable_two_distance_chamfer_volume_and_direction() {
+        let body = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let at = Vec3::new(10.0, 10.0, 30.0);
+        let start = Vec3::new(10.0, 0.0, 30.0);
+        let end = Vec3::new(10.0, 20.0, 30.0);
+        let expected = 6000.0 - 10.0 * (4.0 + 6.0 + 6.0 + 36.0) / 6.0;
+        for flip in [false, true] {
+            let options = VariableChamferOptions { flip, ..Default::default() };
+            let result = chamfer_variable_two_distances(&body, at, start, &[(0.0, 2.0, 1.0), (1.0, 6.0, 3.0)], &options).unwrap();
+            assert!(rel(fine_volume(&result), expected) < 1e-6);
+            assert_eq!(result.unmeshed_faces(), 0);
+            let reversed = chamfer_variable_two_distances(&body, at, end, &[(0.0, 6.0, 3.0), (1.0, 2.0, 1.0)], &options).unwrap();
+            assert!(rel(fine_volume(&reversed), expected) < 1e-6);
+        }
+    }
+
+    #[test]
+    fn partial_chamfer_keeps_edge_outside_offsets() {
+        let body = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let at = Vec3::new(10.0, 10.0, 30.0);
+        let start = Vec3::new(10.0, 0.0, 30.0);
+        let points = [(0.0, 4.0, 2.0), (1.0, 4.0, 2.0)];
+        for (head, tail) in [(3.0, 4.0), (0.0, 4.0), (3.0, 0.0)] {
+            let options = VariableChamferOptions { start_offset: head, end_offset: tail, transition_length: Some(2.0), ..Default::default() };
+            let result = chamfer_variable_two_distances(&body, at, start, &points, &options).unwrap();
+            let transitions = (usize::from(head > 0.0) + usize::from(tail > 0.0)) as f64;
+            let expected = 6000.0 - 4.0 * (20.0 - head - tail - transitions * 2.0 + transitions * 2.0 / 3.0);
+            assert!(rel(fine_volume(&result), expected) < 1e-6);
+            assert_eq!(result.unmeshed_faces(), 0);
+            for corner in [start + Vec3::Y * head, start + Vec3::Y * (20.0 - tail)] {
+                if corner != start && corner != Vec3::new(10.0, 20.0, 30.0) {
+                    assert!(
+                        result.solid.boundaries().iter().flat_map(|shell| shell.face_iter()).flat_map(|face| face.vertex_iter()).any(|vertex| vtx(
+                            &vertex
+                        )
+                        .dist(corner)
+                            < 1e-9)
+                    );
+                }
+            }
+        }
+        for (head, tail, transition) in [(f64::NAN, 0.0, 2.0), (-1.0, 0.0, 2.0), (10.0, 10.0, 2.0), (3.0, 4.0, 7.0), (3.0, 4.0, 0.0)] {
+            let options = VariableChamferOptions { start_offset: head, end_offset: tail, transition_length: Some(transition), ..Default::default() };
+            assert!(chamfer_variable_two_distances(&body, at, start, &points, &options).is_err());
+        }
+        assert!(chamfer_variable_two_distances(&body, at, start, &[(0.0, 2.0, 1.0), (0.0, 3.0, 1.0), (1.0, 4.0, 2.0)], &Default::default()).is_err());
+        assert!(chamfer_variable_two_distances(&body, at, start, &[(0.0, 0.0, 1.0), (1.0, 4.0, 2.0)], &Default::default()).is_err());
     }
 
     /// A radius through a middle point: straight pieces (exact: each piece removes

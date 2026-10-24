@@ -5716,6 +5716,11 @@ fn replay(
                 let ti = blend_target(st, &None, &moved)?;
                 let Some(mb) = st.bodies.get(ti).cloned() else { continue };
                 let nb = match &src.kind {
+                    FeatureKind::Chamfer { profile: Some(_), .. } => {
+                        return Err(DocError::Invalid(
+                            "not supported yet: feature patterns of variable chamfers; pattern the finished body instead".into(),
+                        ));
+                    }
                     FeatureKind::Chamfer { distance2, angle, flip, .. } => chamfer_with(vals, &mb.body, &moved, r, distance2, angle, *flip)?,
                     // A copy is congruent to the original: the radius it was reduced to first.
                     FeatureKind::Fillet { fit, .. } => match st.fitted.get(&src.id) {
@@ -6737,6 +6742,38 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                         st.fitted.insert(f.id, used);
                     }
                     (b, input)
+                }
+                FeatureKind::Chamfer { profile: Some(profile), distance2, angle, flip, .. } => {
+                    if angle.is_some() || edges.len() != 1 || profile.mid.len() > 98 {
+                        return Err(DocError::Invalid("a variable chamfer takes one edge, no angle and at most 98 middle points".into()));
+                    }
+                    let two = distance2.is_some();
+                    if two != profile.end_distance2.is_some()
+                        || (two && profile.mid2.len() != profile.mid.len())
+                        || (!two && !profile.mid2.is_empty())
+                    {
+                        return Err(DocError::Invalid("both chamfer sides need distances at the same profile positions".into()));
+                    }
+                    let end = val(vals, &profile.end_distance, Kind::Length)?;
+                    let second = distance2.as_ref().map(|value| val(vals, value, Kind::Length)).transpose()?.unwrap_or(r);
+                    let end_second = profile.end_distance2.as_ref().map(|value| val(vals, value, Kind::Length)).transpose()?.unwrap_or(end);
+                    let mut points = vec![(0.0, r, second), (1.0, end, end_second)];
+                    for (index, (position, expression)) in profile.mid.iter().enumerate() {
+                        if !(position.is_finite() && *position > 0.0 && *position < 1.0) {
+                            return Err(DocError::Invalid("middle chamfer positions lie strictly between 0 and 1".into()));
+                        }
+                        let distance = val(vals, expression, Kind::Length)?;
+                        let distance2 = profile.mid2.get(index).map(|value| val(vals, value, Kind::Length)).transpose()?.unwrap_or(distance);
+                        points.push((*position, distance, distance2));
+                    }
+                    let options = kernel::VariableChamferOptions {
+                        smooth: profile.smooth,
+                        flip: *flip,
+                        start_offset: profile.start_offset.as_ref().map(|value| val(vals, value, Kind::Length)).transpose()?.unwrap_or(0.0),
+                        end_offset: profile.end_offset.as_ref().map(|value| val(vals, value, Kind::Length)).transpose()?.unwrap_or(0.0),
+                        transition_length: profile.transition_length.as_ref().map(|value| val(vals, value, Kind::Length)).transpose()?,
+                    };
+                    one_by_one(input, &edges, |body, edge| kernel::chamfer_variable_two_distances(body, edge, profile.start.0, &points, &options))?
                 }
                 FeatureKind::Chamfer { distance2, angle, flip, .. } => (chamfer_with(vals, &mb.body, &edges, r, distance2, angle, *flip)?, input),
                 _ => return Err(DocError::Invalid("blend".into())),

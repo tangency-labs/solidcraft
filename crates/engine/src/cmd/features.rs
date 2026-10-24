@@ -49,7 +49,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("fillet")
         .key("F")
         .params("edges: [[x,y,z] point on edge | {body, index}]; radius: expr; body?; type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); radius2?; start?: [x,y,z]; radii?: [expr, …]; knots?: [number, …]; mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); smooth?: bool (smooth instead of straight between the radii); corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; g2: a patch repeating each blend's surface up to the second order, constant-radius exact fillets only, refused where it cannot be built); fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)"),
-    CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
+    CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); type?: constant|variable (one straight edge between planar faces; non-offset ends require perpendicular planar end faces); end_distance?: expr (variable: first-side setback at the profile end); end_distance2?: expr (required with distance2 in variable mode); start?: [x,y,z] (variable: near the end taking distance); mid?: [[position 0…1, distance expr], …] or [[position, distance1, distance2], …] (common profile positions, at most 98); smooth?: bool; start_offset?, end_offset?: expr (unchanged edge lengths, default 0); transition_length?: expr (positive zero-to-profile transition at each offset end, default 10% of active length; remaining interval carries the profile); body?"),
     CommandSpec::new("solid.combine", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
@@ -1339,6 +1339,77 @@ fn chamfer(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "give `distance2` or `angle`, not both"));
     }
     let flip = bool_(p, "flip").unwrap_or(false);
+    let profile = match str_(p, "type").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("constant") => None,
+        Some("variable") => {
+            if edges.len() != 1 || angle.is_some() {
+                return Err(bad(cmd, "a variable chamfer takes one edge and no angle"));
+            }
+            let end_distance = req_expr(cmd, p, "end_distance")?;
+            check_expr(s, &end_distance, Kind::Length, cmd, "end_distance")?;
+            let end_distance2 = if distance2.is_some() { Some(req_expr(cmd, p, "end_distance2")?) } else { None };
+            if distance2.is_none() && p.get("end_distance2").is_some() {
+                return Err(bad(cmd, "`end_distance2` requires `distance2`"));
+            }
+            let (start_offset, end_offset, transition_length) = (expr(p, "start_offset"), expr(p, "end_offset"), expr(p, "transition_length"));
+            for (key, value) in [
+                ("end_distance2", &end_distance2),
+                ("start_offset", &start_offset),
+                ("end_offset", &end_offset),
+                ("transition_length", &transition_length),
+            ] {
+                if let Some(value) = value {
+                    check_expr(s, value, Kind::Length, cmd, key)?;
+                } else if p.get(key).is_some() {
+                    return Err(bad(cmd, format!("`{key}` must be a length expression")));
+                }
+            }
+            let start = p.get("start").and_then(vec3).ok_or_else(|| bad(cmd, "a variable chamfer needs `start`: [x,y,z] near the start end"))?;
+            if ![start.x, start.y, start.z].into_iter().all(f64::is_finite) {
+                return Err(bad(cmd, "the start point must be finite"));
+            }
+            let mut mid = Vec::new();
+            let mut mid2 = Vec::new();
+            if let Some(points) = p.get("mid") {
+                let points = points.as_array().ok_or_else(|| bad(cmd, "`mid` must be an array of [position, distance] pairs"))?;
+                if points.len() > 98 {
+                    return Err(bad(cmd, "a variable chamfer takes at most 98 middle points"));
+                }
+                for point in points {
+                    let pair = point.as_array().filter(|pair| pair.len() == if distance2.is_some() { 3 } else { 2 }).ok_or_else(|| {
+                        bad(cmd, "`mid` entries are [position, distance], or [position, distance1, distance2] in two-distance mode")
+                    })?;
+                    let position = pair
+                        .first()
+                        .and_then(Value::as_f64)
+                        .filter(|position| position.is_finite() && *position > 0.0 && *position < 1.0)
+                        .ok_or_else(|| bad(cmd, "middle chamfer positions lie strictly between 0 and 1"))?;
+                    let value = pair.get(1).ok_or_else(|| bad(cmd, "a middle distance is required"))?;
+                    let expression = req_expr(cmd, &json!({"distance": value}), "distance")?;
+                    check_expr(s, &expression, Kind::Length, cmd, "mid distance")?;
+                    mid.push((position, expression));
+                    if distance2.is_some() {
+                        let value = pair.get(2).ok_or_else(|| bad(cmd, "a second middle distance is required"))?;
+                        let expression = req_expr(cmd, &json!({"distance": value}), "distance")?;
+                        check_expr(s, &expression, Kind::Length, cmd, "mid distance 2")?;
+                        mid2.push(expression);
+                    }
+                }
+            }
+            Some(solidcraft_doc::ChamferProfile {
+                start: Position(start),
+                end_distance,
+                mid,
+                end_distance2,
+                mid2,
+                start_offset,
+                end_offset,
+                transition_length,
+                smooth: bool_(p, "smooth").unwrap_or(false),
+            })
+        }
+        Some(other) => return Err(bad(cmd, format!("unknown chamfer type `{other}` (constant or variable)"))),
+    };
     add_feature(
         s,
         p,
@@ -1348,6 +1419,7 @@ fn chamfer(s: &mut Session, p: &Value) -> Result<Value> {
             distance2,
             angle,
             flip,
+            profile,
             body: str_(p, "body").map(BodyName::from),
         },
     )

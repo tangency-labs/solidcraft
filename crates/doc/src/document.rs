@@ -612,6 +612,9 @@ pub enum FeatureKind {
         /// Swap which face is the first (by default the one facing up most).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
+        /// One or two setbacks varying along a possibly partial straight edge.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile: Option<ChamferProfile>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },
@@ -1693,6 +1696,43 @@ pub enum ExtendTo {
     Face(FaceAt),
     /// The surface's own bounds (natural only): a trim undone.
     Bounds,
+}
+
+/// Setbacks along one straight edge, measured from the end nearest `start`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct ChamferProfile {
+    /// Reference point near the end that takes the feature's `distance`.
+    pub start: Position,
+    /// Setback at the other end of the edge.
+    #[walk(length = "End distance")]
+    pub end_distance: Expr,
+    /// Setbacks at positions strictly between 0 and 1.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[walk(length = "Mid distance")]
+    pub mid: Vec<(f64, Expr)>,
+    /// Second-face setback at the profile end; paired with the feature's `distance2`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "End distance 2")]
+    pub end_distance2: Option<Expr>,
+    /// Second-face setbacks at the same middle positions as `mid`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[walk(length = "Mid distance 2")]
+    pub mid2: Vec<Expr>,
+    /// Unmodified edge length at the start; omitted means zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Start offset")]
+    pub start_offset: Option<Expr>,
+    /// Unmodified edge length at the opposite end; omitted means zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "End offset")]
+    pub end_offset: Option<Expr>,
+    /// Length of each zero-to-profile transition at an offset end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Transition length")]
+    pub transition_length: Option<Expr>,
+    /// Smooth interpolation through the distances instead of piecewise linear interpolation.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub smooth: bool,
 }
 
 /// How a fillet's size is given.

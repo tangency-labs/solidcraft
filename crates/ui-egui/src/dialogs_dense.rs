@@ -143,6 +143,276 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
     }
 }
 
+fn variable_points_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, size: &str, chamfer: bool) -> bool {
+    let tokens = Tokens::get();
+    let mut enter = false;
+    form_row(ui, if chamfer { "End Distance" } else { "End Radius" }, |ui| {
+        enter |= extra_field(ui, extra, if chamfer { "end_distance" } else { "radius2" }, size);
+    });
+    form_row(ui, "Swap Ends", |ui| {
+        extra_check(ui, extra, "swap_ends");
+    });
+    let mut points = mid_points(extra);
+    let mut remove = None;
+    for (index, (position, value)) in points.iter_mut().enumerate() {
+        ui.push_id(index, |ui| {
+            form_row(ui, if chamfer { "Mid Distance" } else { "Mid Radius" }, |ui| {
+                ui.horizontal(|ui| {
+                    ui_kit::fraction_field(ui, position).on_hover_text(tr("Position along the edge, 0 at the start end, 1 at the other"));
+                    let width = (ui.available_width() - tokens.space_24 - tokens.space_4).max(0.0);
+                    ui.allocate_ui_with_layout(vec2(width, tokens.space_24), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        enter |= field(ui, value);
+                    });
+                    if ui_kit::button(ui, "×", ui_kit::Button::Small).on_hover_text(tr("Remove this point")).clicked() {
+                        remove = Some(index);
+                    }
+                });
+            });
+        });
+    }
+    if let Some(index) = remove {
+        points.remove(index);
+    }
+    form_row(ui, "", |ui| {
+        if ui_kit::button(ui, tr(if chamfer { "Add Mid Distance" } else { "Add Mid Radius" }), ui_kit::Button::Normal).clicked() && points.len() < 20
+        {
+            let position = if points.is_empty() { 0.5 } else { (points.iter().map(|point| point.0).fold(0.0, f64::max) + 1.0) * 0.5 };
+            points.push((position.min(0.99), size.to_owned()));
+        }
+    });
+    extra.insert("mid".into(), json!(points));
+    form_row(ui, "Smooth", |ui| {
+        extra_check(ui, extra, "smooth");
+    });
+    enter
+}
+
+pub(crate) fn chamfer_point_ids(extra: &mut serde_json::Map<String, Value>) -> Vec<u64> {
+    let count = mid_points(extra).len();
+    let ids: Vec<u64> = extra.get("_chamfer_ids").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
+    if ids.len() == count {
+        return ids;
+    }
+    let ids: Vec<u64> = (2..count as u64 + 2).collect();
+    extra.insert("_chamfer_ids".into(), json!(ids));
+    extra.insert("_chamfer_sort".into(), json!(true));
+    ids
+}
+
+pub(crate) fn sort_chamfer_points(extra: &mut serde_json::Map<String, Value>) {
+    let ids = chamfer_point_ids(extra);
+    let other = extra.get("mid2").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut points: Vec<_> = mid_points(extra)
+        .into_iter()
+        .zip(ids)
+        .enumerate()
+        .map(|(index, (point, id))| {
+            let second = other.get(index).cloned().unwrap_or_else(|| json!(point.1));
+            (point, id, second)
+        })
+        .collect();
+    points.sort_by(|first, second| first.0.0.total_cmp(&second.0.0));
+    extra.insert("mid".into(), json!(points.iter().map(|point| &point.0).collect::<Vec<_>>()));
+    extra.insert("mid2".into(), json!(points.iter().map(|point| &point.2).collect::<Vec<_>>()));
+    extra.insert("_chamfer_ids".into(), json!(points.iter().map(|point| point.1).collect::<Vec<_>>()));
+    extra.remove("_chamfer_sort");
+}
+
+fn chamfer_cell(ui: &mut egui::Ui, width: f32, contents: impl FnOnce(&mut egui::Ui)) -> egui::Response {
+    let height = Tokens::get().space_24 + Tokens::get().space_4;
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
+    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    cell.set_clip_rect(ui.clip_rect().intersect(rect));
+    contents(&mut cell);
+    response
+}
+
+fn chamfer_point_row(
+    ui: &mut egui::Ui,
+    id: u64,
+    label: &str,
+    position: Option<&mut f64>,
+    first: &mut String,
+    second: Option<&mut String>,
+    selected: bool,
+) -> (bool, bool, bool, bool) {
+    let tokens = Tokens::get();
+    let mut enter = false;
+    let mut commit = false;
+    let mut remove = false;
+    let mut picked = false;
+    let focus_before = ui.memory(|memory| memory.focused());
+    let background = ui.painter().add(egui::Shape::Noop);
+    let count = if second.is_some() { 2.0 } else { 1.0 };
+    let value_width = ((ui.available_width() - 40.0 - 52.0 - 24.0 - tokens.space_4 * (count + 2.0)) / count).max(1.0);
+    let row = ui
+        .push_id(("chamfer_point", id), |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = tokens.space_4;
+                chamfer_cell(ui, 40.0, |ui| {
+                    picked |= ui.selectable_label(selected, tr(label)).clicked();
+                });
+                chamfer_cell(ui, 52.0, |ui| {
+                    if let Some(position) = position {
+                        let mut percent = *position * 100.0;
+                        let response =
+                            ui.add(egui::DragValue::new(&mut percent).speed(0.25).range(0.001..=99.999).min_decimals(0).max_decimals(2).suffix(" %"));
+                        crate::scenario::publish_handle(&format!("chamfer:position:{id}"), response.rect.center());
+                        if response.changed() {
+                            *position = percent / 100.0;
+                        }
+                        commit |= response.drag_stopped() || response.lost_focus();
+                        if response.has_focus() || response.lost_focus() {
+                            commit |= ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                        }
+                    } else {
+                        ui.label(if id == 0 { "0 %" } else { "100 %" });
+                    }
+                });
+                for (side, value) in std::iter::once(first).chain(second).enumerate() {
+                    let response = chamfer_cell(ui, value_width, |ui| {
+                        enter |= field(ui, value);
+                    });
+                    crate::scenario::publish_handle(&format!("chamfer:side:{}:{id}", side + 1), response.rect.center());
+                }
+                chamfer_cell(ui, 24.0, |ui| {
+                    if id >= 2 {
+                        remove = ui_kit::button(ui, "×", ui_kit::Button::Small).on_hover_text(tr("Remove this point")).clicked();
+                    }
+                });
+            })
+        })
+        .inner
+        .response;
+    picked |= ui.input(|input| input.pointer.primary_pressed())
+        && row.rect.contains(ui.input(|input| input.pointer.interact_pos()).unwrap_or(egui::Pos2::ZERO));
+    let focus_after = ui.memory(|memory| memory.focused());
+    picked |= focus_before != focus_after
+        && focus_after.and_then(|id| ui.ctx().read_response(id)).is_some_and(|response| row.rect.contains_rect(response.rect));
+    if selected {
+        ui.painter().set(background, egui::Shape::rect_filled(row.rect, 2.0, tokens.accent.linear_multiply(0.14)));
+    }
+    crate::scenario::publish_handle(&format!("chamfer:row:{id}"), row.rect.center());
+    (enter, picked, remove, commit)
+}
+
+fn chamfer_profile_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, size: &mut String, mut second: Option<&mut String>) -> bool {
+    let mut ids = chamfer_point_ids(extra);
+    if extra.get("_chamfer_sort").and_then(Value::as_bool).unwrap_or(false) {
+        sort_chamfer_points(extra);
+        ids = chamfer_point_ids(extra);
+    }
+    let mut selected = extra.get("_chamfer_selected").and_then(Value::as_u64).unwrap_or(0);
+    let mut enter = false;
+    let two = second.is_some();
+    let fallback = second.as_deref().cloned().unwrap_or_else(|| size.clone());
+    let tokens = Tokens::get();
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = tokens.space_4;
+        let count = if two { 2.0 } else { 1.0 };
+        let width = ((ui.available_width() - 40.0 - 52.0 - 24.0 - tokens.space_4 * (count + 2.0)) / count).max(1.0);
+        chamfer_cell(ui, 40.0, |ui| {
+            ui.label(tr("Point"));
+        });
+        chamfer_cell(ui, 52.0, |ui| {
+            ui.label(tr("Position"));
+        });
+        for label in if two { vec!["Side 1", "Side 2"] } else { vec!["Setback"] } {
+            chamfer_cell(ui, width, |ui| {
+                ui.label(tr(label));
+            });
+        }
+        chamfer_cell(ui, 24.0, |_| {});
+    });
+    let (applied, picked, _, _) = chamfer_point_row(ui, 0, "Start", None, size, second.as_deref_mut(), selected == 0);
+    enter |= applied;
+    if picked {
+        selected = 0;
+    }
+    let mut points = mid_points(extra);
+    let mut other: Vec<String> = points
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            extra.get("mid2").and_then(Value::as_array).and_then(|values| values.get(index)).and_then(Value::as_str).unwrap_or(&fallback).to_owned()
+        })
+        .collect();
+    let mut remove = None;
+    let mut sort = false;
+    for (index, (position, value)) in points.iter_mut().enumerate() {
+        let Some(id) = ids.get(index).copied() else { continue };
+        let (applied, picked, removed, committed) =
+            chamfer_point_row(ui, id, "Mid", Some(position), value, if two { other.get_mut(index) } else { None }, selected == id);
+        enter |= applied;
+        sort |= committed;
+        if picked {
+            selected = id;
+        }
+        if removed {
+            remove = Some(index);
+        }
+    }
+    let mut end = extra.get("end_distance").and_then(Value::as_str).unwrap_or(size).to_owned();
+    let mut end2 = extra.get("end_distance2").and_then(Value::as_str).unwrap_or(&fallback).to_owned();
+    let (applied, picked, _, _) = chamfer_point_row(ui, 1, "End", None, &mut end, if two { Some(&mut end2) } else { None }, selected == 1);
+    enter |= applied;
+    if picked {
+        selected = 1;
+    }
+    extra.insert("end_distance".into(), json!(end));
+    if two {
+        extra.insert("end_distance2".into(), json!(end2));
+    }
+    let mut positions: Vec<f64> = points.iter().map(|point| point.0).chain([0.0, 1.0]).collect();
+    positions.sort_by(f64::total_cmp);
+    if positions.windows(2).any(|pair| (pair[1] - pair[0]).abs() <= 1e-9) {
+        ui.label(RichText::new(tr("Profile points must have different positions.")).color(tokens.warning));
+    }
+    if let Some(index) = remove {
+        if ids.get(index) == Some(&selected) {
+            selected = 0;
+        }
+        points.remove(index);
+        other.remove(index);
+        ids.remove(index);
+    }
+    if ui_kit::button(ui, tr("Add Profile Point"), ui_kit::Button::Normal).clicked() && points.len() < 20 {
+        let position = positions
+            .windows(2)
+            .max_by(|first, second| (first[1] - first[0]).total_cmp(&(second[1] - second[0])))
+            .map(|gap| (gap[0] + gap[1]) * 0.5)
+            .unwrap_or(0.5);
+        points.push((position, size.to_owned()));
+        other.push(fallback);
+        selected = ids.iter().copied().max().unwrap_or(1).saturating_add(1);
+        ids.push(selected);
+        sort = true;
+    }
+    extra.insert("mid".into(), json!(points));
+    extra.insert("mid2".into(), json!(other));
+    extra.insert("_chamfer_ids".into(), json!(ids));
+    extra.insert("_chamfer_selected".into(), json!(selected));
+    if sort {
+        extra.insert("_chamfer_sort".into(), json!(true));
+    }
+    form_row(ui, "Swap Ends", |ui| {
+        extra_check(ui, extra, "swap_ends");
+    });
+    form_row(ui, "Smooth", |ui| {
+        extra_check(ui, extra, "smooth");
+    });
+    ui_kit::section(ui, "chamfer_extent", "Extent", true, |ui| {
+        for (label, key, default) in
+            [("Start Offset", "start_offset", "0 mm"), ("End Offset", "end_offset", "0 mm"), ("Transition Length", "transition_length", "1 mm")]
+        {
+            form_row(ui, label, |ui| {
+                enter |= extra_field(ui, extra, key, default);
+            });
+        }
+    });
+    enter
+}
+
 pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let t = Tokens::get();
     let mut enter = false;
@@ -342,8 +612,29 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::Fillet { radius, chamfer, chain, ctype, distance2, angle, flip } => {
             if *chamfer {
                 choice_row(ui, "Chamfer Type", "ch_type", ctype, &CHAMFER_TYPES);
+                if *ctype == 3 {
+                    *chain = false;
+                    let mut mode = usize::from(d.extra.get("two_distances").and_then(Value::as_bool).unwrap_or(false));
+                    choice_row(ui, "Distances", "ch_variable_distances", &mut mode, &["Equal", "Two Distances"]);
+                    d.extra.insert("two_distances".into(), json!(mode == 1));
+                }
             }
-            enter |= expr_row(ui, if *chamfer { if *ctype == 0 { "Distance" } else { "Distance 1" } } else { "Radius" }, radius);
+            let variable_two = *chamfer && *ctype == 3 && d.extra.get("two_distances").and_then(Value::as_bool).unwrap_or(false);
+            if !(*chamfer && *ctype == 3) {
+                enter |= expr_row(
+                    ui,
+                    if *chamfer {
+                        match *ctype {
+                            0 => "Distance",
+                            3 => "Start Setback",
+                            _ => "Distance 1",
+                        }
+                    } else {
+                        "Radius"
+                    },
+                    radius,
+                );
+            }
             let mut rtype = fillet_type(&d.extra);
             if !*chamfer {
                 form_row(ui, "Type", |ui| {
@@ -370,11 +661,18 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if *chamfer && *ctype == 2 {
                 enter |= expr_row(ui, "Angle", angle);
             }
-            if *chamfer && *ctype > 0 {
+            if *chamfer && (matches!(*ctype, 1 | 2) || variable_two) {
                 form_row(ui, "Flip", |ui| check(ui, flip));
             }
+            if *chamfer && *ctype == 3 {
+                enter |= chamfer_profile_rows(ui, &mut d.extra, radius, if variable_two { Some(distance2) } else { None });
+            }
             ui_kit::section(ui, "fillet_options", "Options", true, |ui| {
-                ui_kit::checkbox_grid(ui, &mut [("Tangent Chain", chain), ("Preview", &mut d.preview_enabled)], 2);
+                if *chamfer && *ctype == 3 {
+                    ui_kit::checkbox_grid(ui, &mut [("Preview", &mut d.preview_enabled)], 1);
+                } else {
+                    ui_kit::checkbox_grid(ui, &mut [("Tangent Chain", chain), ("Preview", &mut d.preview_enabled)], 2);
+                }
             });
             if !*chamfer {
                 ui.add_enabled_ui(matches!(rtype, 2 | 4), |ui| {
@@ -383,45 +681,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                             ui.add_enabled(false, egui::Label::new(tr("Choose Variable radius or Spline in Type.")).wrap());
                         }
                         if rtype == 2 {
-                            form_row(ui, "End Radius", |ui| {
-                                enter |= extra_field(ui, &mut d.extra, "radius2", "1 mm");
-                            });
-                            // Which end of the first edge takes the start radius.
-                            form_row(ui, "Swap Ends", |ui| {
-                                extra_check(ui, &mut d.extra, "swap_ends");
-                            });
-                            // Radii between the ends: position along the edge (from the start end)
-                            // and radius.
-                            let mut mids = mid_points(&d.extra);
-                            let mut remove = None;
-                            for (k, (position, r)) in mids.iter_mut().enumerate() {
-                                form_row(ui, "Mid Radius", |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui_kit::fraction_field(ui, position)
-                                            .on_hover_text(tr("Position along the edge, 0 at the start end, 1 at the other"));
-                                        let width = (ui.available_width() - t.space_24 - t.space_4).max(0.0);
-                                        ui.allocate_ui_with_layout(vec2(width, t.space_24), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                            enter |= field(ui, r);
-                                        });
-                                        if ui_kit::button(ui, "×", ui_kit::Button::Small).on_hover_text(tr("Remove this point")).clicked() {
-                                            remove = Some(k);
-                                        }
-                                    });
-                                });
-                            }
-                            if let Some(k) = remove {
-                                mids.remove(k);
-                            }
-                            form_row(ui, "", |ui| {
-                                if ui_kit::button(ui, tr("Add Mid Radius"), ui_kit::Button::Normal).clicked() && mids.len() < 20 {
-                                    let t = if mids.is_empty() { 0.5 } else { (mids.iter().map(|m| m.0).fold(0.0, f64::max) + 1.0) * 0.5 };
-                                    mids.push((t.min(0.99), radius.clone()));
-                                }
-                            });
-                            d.extra.insert("mid".into(), json!(mids.iter().map(|(t, r)| json!([t, r])).collect::<Vec<_>>()));
-                            form_row(ui, "Smooth", |ui| {
-                                extra_check(ui, &mut d.extra, "smooth");
-                            });
+                            enter |= variable_points_rows(ui, &mut d.extra, radius, false);
                         }
                         if rtype == 4 {
                             // The radius along the edge as a B-spline: its control radii from the

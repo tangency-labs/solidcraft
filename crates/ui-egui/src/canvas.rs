@@ -123,6 +123,19 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // A chamfer of two distances measures Distance 1 along its own face, not along the bisector.
         Kind::Fillet { .. } if matches!(first, Sel::Edge { .. }) => {
             let Sel::Edge { body, index, .. } = first else { return None };
+            let at = chamfer_extent(app, d)
+                .and_then(|(start, end, head, tail)| {
+                    let direction = (end - start).normalized()?;
+                    let transition = d
+                        .extra
+                        .get("transition_length")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(|value| app.session.doc.eval(value, ValueKind::Length).ok())
+                        .unwrap_or((start.dist(end) - head - tail) * 0.1);
+                    Some(start + direction * (head + if head > 0.0 { transition } else { 0.0 }))
+                })
+                .filter(|point| point.is_finite())
+                .unwrap_or(at);
             let along_face = chamfer_face_dirs(app, d, at).map(|(first_face, _)| first_face);
             (at, along_face.or_else(|| st.body(body).and_then(|b| blend_grow_dir(&b.mesh(), *index, at))))
         }
@@ -248,7 +261,10 @@ pub(crate) fn blend_grow_dir(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
 /// `at`: along the face that faces up most, or the other one with Flip, and along the remaining
 /// face (the kernel's `chamfer_tool_sides` picks them the same way). None for any other dialog.
 pub(crate) fn chamfer_face_dirs(app: &SolveApp, d: &Dialog, at: Vec3) -> Option<(Vec3, Vec3)> {
-    let Kind::Fillet { chamfer: true, ctype: 1, flip, .. } = &d.kind else { return None };
+    let Kind::Fillet { chamfer: true, ctype, flip, .. } = &d.kind else { return None };
+    if *ctype != 1 && !(*ctype == 3 && d.extra.get("two_distances").and_then(serde_json::Value::as_bool).unwrap_or(false)) {
+        return None;
+    }
     let Some(Sel::Edge { body, index, .. }) = d.inputs.first()?.items.first() else { return None };
     let st = app.session.world_state();
     let mesh = st.body(body)?.mesh();
@@ -273,6 +289,172 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
         || (app.dialog.is_none()
             && app.tool.is_none()
             && crate::browser::occurrence_triad_model(app).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p)))
+        || app.dialog.as_ref().and_then(|dialog| chamfer_extent(app, dialog)).is_some_and(|(start, end, head, tail)| {
+            let direction = (end - start).normalized().unwrap_or(Vec3::ZERO);
+            [start + direction * head, end - direction * tail]
+                .into_iter()
+                .filter_map(|point| proj.to_screen(point))
+                .any(|point| point.distance(p) <= 10.0)
+        })
+        || app.dialog.as_ref().and_then(|dialog| chamfer_profile_span(app, dialog).map(|span| (dialog, span))).is_some_and(
+            |(dialog, (start, delta))| {
+                let positions = dialog
+                    .extra
+                    .get("mid")
+                    .and_then(serde_json::Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|point| point.get(0).and_then(serde_json::Value::as_f64));
+                positions.chain([0.0, 1.0]).filter_map(|position| proj.to_screen(start + delta * position)).any(|point| point.distance(p) <= 10.0)
+            },
+        )
+}
+
+fn chamfer_extent(app: &SolveApp, dialog: &Dialog) -> Option<(Vec3, Vec3, f64, f64)> {
+    if !matches!(dialog.kind, Kind::Fillet { chamfer: true, ctype: 3, .. }) {
+        return None;
+    }
+    let Sel::Edge { body, index, .. } = dialog.inputs.first()?.items.first()? else { return None };
+    let state = app.session.world_state();
+    let mesh = state.body(body)?.mesh();
+    let edge = mesh.edges.get(*index)?;
+    let (mut start, mut end) = (*edge.first()?, *edge.last()?);
+    if dialog.extra.get("swap_ends").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+        std::mem::swap(&mut start, &mut end);
+    }
+    let offset = |key| app.session.doc.eval(dialog.extra.get(key).and_then(serde_json::Value::as_str).unwrap_or("0 mm"), ValueKind::Length).ok();
+    let (head, tail) = (offset("start_offset")?, offset("end_offset")?);
+    (head.is_finite() && tail.is_finite() && head >= 0.0 && tail >= 0.0 && head + tail < start.dist(end)).then_some((start, end, head, tail))
+}
+
+fn chamfer_profile_span(app: &SolveApp, dialog: &Dialog) -> Option<(Vec3, Vec3)> {
+    let (start, end, head, tail) = chamfer_extent(app, dialog)?;
+    let active = start.dist(end) - head - tail;
+    let transition = dialog
+        .extra
+        .get("transition_length")
+        .and_then(serde_json::Value::as_str)
+        .map(|value| app.session.doc.eval(value, ValueKind::Length))
+        .transpose()
+        .ok()?
+        .unwrap_or(active * 0.1);
+    let first = head + if head > 0.0 { transition } else { 0.0 };
+    let last = tail + if tail > 0.0 { transition } else { 0.0 };
+    let direction = (end - start).normalized()?;
+    (transition.is_finite() && first + last < start.dist(end)).then_some((start + direction * first, direction * (start.dist(end) - first - last)))
+}
+
+fn chamfer_profile_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, dialog: &mut Dialog) {
+    let Some((start, delta)) = chamfer_profile_span(app, dialog) else { return };
+    let tokens = Tokens::get();
+    let ids = crate::dialogs::chamfer_point_ids(&mut dialog.extra);
+    let mut selected = dialog.extra.get("_chamfer_selected").and_then(serde_json::Value::as_u64).unwrap_or(0);
+    let points: Vec<(u64, f64, Option<usize>)> = dialog
+        .extra
+        .get("mid")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .zip(ids)
+        .enumerate()
+        .filter_map(|(index, (point, id))| Some((id, point.get(0)?.as_f64()?, Some(index))))
+        .chain([(0, 0.0, None), (1, 1.0, None)])
+        .collect();
+    if let (Some(first), Some(last)) = (proj.to_screen(start), proj.to_screen(start + delta)) {
+        painter.line_segment([first, last], Stroke::new(3.0, tokens.accent));
+    }
+    for (id, position, index) in points {
+        let Some(point) = proj.to_screen(start + delta * position) else { continue };
+        crate::scenario::publish_handle(&format!("chamfer:point:{id}"), point);
+        let response = ui.interact(
+            egui::Rect::from_center_size(point, vec2(20.0, 20.0)),
+            egui::Id::new(("chamfer_point", id)),
+            if index.is_some() { egui::Sense::click_and_drag() } else { egui::Sense::click() },
+        );
+        if response.clicked() || response.dragged() {
+            selected = id;
+            dialog.focus = false;
+        }
+        if response.dragged()
+            && let (Some(index), Some(pointer), Some(direction)) = (index, response.interact_pointer_pos(), delta.normalized())
+            && let Some(distance) = along(proj, pointer, start, direction)
+        {
+            crate::tool_modifiers::set_manipulator_dragging(true);
+            let percent = distance / delta.dist(Vec3::ZERO) * 100.0;
+            let percent = if crate::tool_modifiers::manipulator_free() { percent } else { (percent * 4.0).round() / 4.0 };
+            if let Some(value) = dialog
+                .extra
+                .get_mut("mid")
+                .and_then(serde_json::Value::as_array_mut)
+                .and_then(|points| points.get_mut(index))
+                .and_then(serde_json::Value::as_array_mut)
+                .and_then(|point| point.first_mut())
+            {
+                *value = serde_json::json!(percent.clamp(0.001, 99.999) / 100.0);
+            }
+        }
+        if response.drag_stopped() {
+            dialog.extra.insert("_chamfer_sort".into(), serde_json::json!(true));
+            ui.ctx().request_repaint();
+        }
+        painter.circle(point, 4.5, tokens.overlay, Stroke::new(2.0, tokens.accent));
+        if selected == id {
+            painter.circle_stroke(point, 8.5, Stroke::new(2.0, tokens.accent));
+        }
+        if selected == id || response.hovered() {
+            painter.text(
+                point + vec2(12.0, -14.0),
+                egui::Align2::LEFT_BOTTOM,
+                format!("{:.2} %", position * 100.0),
+                egui::TextStyle::Body.resolve(ui.style()),
+                tokens.text,
+            );
+        }
+        response.on_hover_text(format!("{}: {:.2} %", crate::i18n::tr("Position"), position * 100.0));
+    }
+    dialog.extra.insert("_chamfer_selected".into(), serde_json::json!(selected));
+}
+
+fn chamfer_extent_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, dialog: &mut Dialog) {
+    let Some((start, end, head, tail)) = chamfer_extent(app, dialog) else { return };
+    let length = start.dist(end);
+    let Some(direction) = (end - start).normalized() else { return };
+    let tokens = Tokens::get();
+    if let (Some(first), Some(last)) = (proj.to_screen(start + direction * head), proj.to_screen(end - direction * tail)) {
+        painter.line_segment([first, last], Stroke::new(2.0, tokens.manipulator));
+    }
+    for (key, label, base, axis, value, other) in
+        [("start_offset", "Start Offset", start, direction, head, tail), ("end_offset", "End Offset", end, -direction, tail, head)]
+    {
+        let Some(point) = proj.to_screen(base + axis * value) else { continue };
+        let offset = vec2(0.0, 16.0);
+        let marker = point + offset;
+        crate::scenario::publish_handle(key, marker);
+        let response = ui
+            .interact(egui::Rect::from_center_size(marker, vec2(20.0, 20.0)), egui::Id::new(("chamfer_extent", key)), egui::Sense::click_and_drag())
+            .on_hover_text(crate::i18n::tr(label));
+        let hot = response.hovered() || response.dragged();
+        painter.line_segment([point, marker], Stroke::new(1.0, tokens.manipulator));
+        painter.rect_filled(egui::Rect::from_center_size(marker, vec2(8.0, 8.0)), 0.0, tokens.overlay);
+        painter.rect_stroke(
+            egui::Rect::from_center_size(marker, vec2(8.0, 8.0)),
+            0.0,
+            Stroke::new(2.0, if hot { tokens.accent } else { tokens.manipulator }),
+            egui::StrokeKind::Outside,
+        );
+        if hot {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+        if response.dragged()
+            && let Some(pointer) = response.interact_pointer_pos()
+            && let Some(distance) = along(proj, pointer - offset, base, axis)
+        {
+            crate::tool_modifiers::set_manipulator_dragging(true);
+            let step = snap_step(app.cam.half_height());
+            let distance = if crate::tool_modifiers::manipulator_free() { distance } else { (distance / step).round() * step };
+            dialog.extra.insert(key.into(), serde_json::json!(format_len(distance.clamp(0.0, (length - other - 1e-4).max(0.0)))));
+        }
+    }
 }
 
 /// Draw the manipulator and the value box (called by the viewport after the model is drawn).
@@ -339,11 +521,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         app.dialog = Some(d);
         return;
     }
+    chamfer_extent_handles(app, ui, painter, proj, &mut d);
     if let Some((base, dir)) = anchor(app, &d)
         && let Some(bs) = proj.to_screen(base)
+        && (!matches!(d.kind, Kind::Fillet { chamfer: true, ctype: 3, .. })
+            || d.extra.get("_chamfer_selected").and_then(serde_json::Value::as_u64).unwrap_or(0) == 0)
     {
         draw(app, ui, painter, proj, &mut d, base, bs, dir);
     }
+    chamfer_profile_handles(app, ui, painter, proj, &mut d);
     app.dialog = Some(d);
     // A Single hole's handles, over the depth arrow's stem: a press on a hole moves it.
     crate::hole_place::show(app, ui, painter, proj);
