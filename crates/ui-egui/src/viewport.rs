@@ -1519,33 +1519,38 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         }
     }
     hits.extend(best.hits());
-    // Sketch curves (the active sketch wins ties).
+    // Sketch curves: the active sketch's own before projected and other sketches' ones, then
+    // nearest (the active sketch wins ties).
     let mut bestc = Near::new(all);
     for sid in visible_sketches(app) {
         let Some(ss) = st.sketch(sid) else { continue };
-        let bonus = if s.active_sketch == Some(sid) { 2.0 } else { 0.0 };
+        let active = s.active_sketch == Some(sid);
+        let bonus = if active { 2.0 } else { 0.0 };
+        let tier = |own: bool| u8::from(!(active && own));
         for (i, c) in ss.sketch.curves.iter().enumerate() {
             if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) {
                 continue;
             }
             let straight = matches!(c.kind, CurveKind::Line { .. });
+            let tier = tier(c.link.is_none() || ss.sketch.is_text_curve(i));
             for part in &crate::sketch_display::curve_sample(app, sid, i, &ss.plane, proj).parts {
                 let pts: Vec<Pos2> = part.iter().filter_map(|q| proj.to_screen(*q)).collect();
                 for w in pts.windows(2) {
                     let dd = seg_dist(pos, w[0], w[1]) - bonus;
-                    if dd < 6.0 && bestc.wants(dd) {
-                        bestc.offer(dd, Hit::SketchCurve { sketch: sid, id: c.id.clone(), straight });
+                    if dd < 6.0 && bestc.wants((tier, dd)) {
+                        bestc.offer((tier, dd), Hit::SketchCurve { sketch: sid, id: c.id.clone(), straight });
                     }
                 }
             }
         }
         // 3D sketch curves (paths for sweeps and pipes).
         for w in &ss.sketch.wires {
+            let tier = tier(w.link.is_none());
             let pts: Vec<Pos2> = w.pts.iter().filter_map(|q| proj.to_screen(*q)).collect();
             for seg in pts.windows(2) {
                 let dd = seg_dist(pos, seg[0], seg[1]) - bonus;
-                if dd < 6.0 && bestc.wants(dd) {
-                    bestc.offer(dd, Hit::SketchCurve { sketch: sid, id: w.id.clone(), straight: false });
+                if dd < 6.0 && bestc.wants((tier, dd)) {
+                    bestc.offer((tier, dd), Hit::SketchCurve { sketch: sid, id: w.id.clone(), straight: false });
                 }
             }
         }
