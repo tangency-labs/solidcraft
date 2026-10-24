@@ -178,3 +178,26 @@ fn measurement_axis_distances_can_be_disabled_saved_and_restored_in_preferences(
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert!(h.app.preferences.measure_axis_distances, "Cancel restores the last Apply");
 }
+
+#[test]
+fn the_distance_row_has_a_copy_button_that_copies_the_shown_value() {
+    let mut h = vertex_measurement([0., 0., 0.], [3., 4., 0.]);
+    h.frames(4);
+    let want = crate::prefs::show_mm(&h.app, 5.0, 1);
+    assert!(crate::scenario::handle_at("measure:copy:distance").is_some(), "the Distance row publishes its copy button");
+    let at = crate::scenario::handle_at("measure:copy:distance").unwrap_or_default();
+    let (hover, _) = crate::control::ControlRequest::new("ui.move", json!({"x": f64::from(at.x), "y": f64::from(at.y)}));
+    crate::control::handle(&mut h.app, &h.ctx, &hover);
+    h.frames(2);
+    let (request, _reply) = crate::control::ControlRequest::new("ui.click", json!({"x": f64::from(at.x), "y": f64::from(at.y)}));
+    crate::control::handle(&mut h.app, &h.ctx, &request);
+    let mut copied = Vec::new();
+    for _ in 0..8 {
+        h.frame();
+        copied.extend(h.output.commands.iter().filter_map(|c| match c {
+            egui::OutputCommand::CopyText(text) => Some(text.clone()),
+            _ => None,
+        }));
+    }
+    assert_eq!(copied, [want]);
+}
