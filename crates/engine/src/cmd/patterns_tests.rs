@@ -803,3 +803,28 @@ fn patterns_and_mirrors_of_patterns_and_mirrors() {
         assert!(rel(after, want) < 1e-5, "{what}: {after} mm³, {added} more holes than {before} = {want}");
     }
 }
+
+/// A gear's tooth extruded To Object up to the disc's top, patterned 6 times: after the disc is
+/// made twice as thick, every copy reaches the new top like the tooth itself, so the whole part
+/// doubles (#2121). The copies kept the 5 mm height of the face where it was picked.
+#[test]
+fn copies_of_a_to_object_extrude_follow_the_moved_face() {
+    let mut s = Session::default();
+    for (id, p) in [
+        ("sketch.create", json!({"plane":"XY","name":"Disc"})),
+        ("sketch.circle.center", json!({"center":[0,0],"radius":20})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance":5})),
+        ("sketch.create", json!({"plane":"XY","name":"Tooth"})),
+        ("sketch.rectangle.two_point", json!({"p0":[18,-2],"p1":[24,2]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch":"Tooth","profiles":[0],"to":[0,0,5],"operation":"join"})),
+        ("solid.pattern.circular", json!({"features":["Extrude2"],"axis":"Z","count":6,"angle":"360 deg"})),
+    ] {
+        run(&mut s, id, p);
+    }
+    let thin = volume(&mut s);
+    run(&mut s, "timeline.edit", json!({"feature":"Extrude1","set":{"extent.distance":"10 mm"}}));
+    let thick = volume(&mut s);
+    assert!(rel(thick, 2.0 * thin) < 1e-6, "5 mm: {thin} mm³, 10 mm: {thick} mm³ (expected {})", 2.0 * thin);
+}

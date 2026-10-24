@@ -1916,52 +1916,15 @@ impl Model {
             // Face references by name: move each face point onto its named face (on the body the
             // feature names, when it names one and the face is there).
             let renamed;
-            // Cylindrical emboss resolves its named face in the selected body's frame
-            // and certifies an analytic anchor; mesh projection here would undo that.
-            let explicit_emboss = matches!(&f.kind, FeatureKind::Emboss { face: Some(_), .. });
-            let f = if !explicit_emboss && f.face_names.iter().any(|n| !n.is_empty()) {
-                let mut g = f.clone();
-                let mut notes = Vec::new();
-                // A hole's position is a place on its face, not a pick of the face: it follows
-                // the face along the hole's axis and never slides sideways to the face's nearest
-                // point when the face no longer reaches it.
-                let hole_axis = match &f.kind {
-                    FeatureKind::Hole { direction, points: None | Some(crate::SketchPoints { single: true, .. }), .. } => direction.normalized(),
-                    _ => None,
-                };
-                let fst = face_point_state(doc, &state, &f.kind, f.component);
-                for (k, (p, n)) in g.kind.face_points_mut().into_iter().zip(&f.face_names).enumerate() {
-                    if n.is_empty() {
-                        continue;
+            let f = match with_named_face_points(doc, &state, f) {
+                Some((g, notes)) => {
+                    if !notes.is_empty() {
+                        warning = Some(notes.join("; "));
                     }
-                    match crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, *p) {
-                        Some(hit) => {
-                            if let Some(note) = hit.note(n) {
-                                notes.push(note);
-                            }
-                            match (k, hole_axis) {
-                                (0, Some(axis)) => match hit.along(&fst, *p, axis) {
-                                    Some(q) => *p = q,
-                                    // The place still lies on the face (the axis may run along it).
-                                    None if hit.on_point => {}
-                                    None => notes.push(format!(
-                                        "the hole's position [{}, {}, {}] is no longer on face `{n}`: it stays where it was placed",
-                                        p.x, p.y, p.z
-                                    )),
-                                },
-                                _ => *p = hit.point,
-                            }
-                        }
-                        None => notes.push(format!("face `{n}` no longer exists; using the face at the picked point")),
-                    }
+                    renamed = g;
+                    &renamed
                 }
-                if !notes.is_empty() {
-                    warning = Some(notes.join("; "));
-                }
-                renamed = g;
-                &renamed
-            } else {
-                f
+                None => f,
             };
             // A parameter with an error fails the features using it, with that error.
             let bad_param = param_names(f).into_iter().find_map(|n| self.param_errors.get(&n).map(|e| format!("parameter `{n}`: {e}")));
@@ -5611,6 +5574,54 @@ fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelSta
 /// own sources, at each of its transforms moved by each of ours. Those copies are numbered after
 /// `mats`' own (which keep the numbers they always had), each nested source in a block of its
 /// own, so no two copies of one feature share an instance. Suppressed sources copy nothing.
+/// `f` with each face point moved onto its named face (on the body the feature names, when it
+/// names one and the face is there) in `state`, and notes for names that no longer find their
+/// face. `None` when `f` names no face.
+fn with_named_face_points(doc: &Document, state: &ModelState, f: &Feature) -> Option<(Feature, Vec<String>)> {
+    // Cylindrical emboss resolves its named face in the selected body's frame
+    // and certifies an analytic anchor; mesh projection here would undo that.
+    let explicit_emboss = matches!(&f.kind, FeatureKind::Emboss { face: Some(_), .. });
+    if explicit_emboss || !f.face_names.iter().any(|n| !n.is_empty()) {
+        return None;
+    }
+    let mut g = f.clone();
+    let mut notes = Vec::new();
+    // A hole's position is a place on its face, not a pick of the face: it follows
+    // the face along the hole's axis and never slides sideways to the face's nearest
+    // point when the face no longer reaches it.
+    let hole_axis = match &f.kind {
+        FeatureKind::Hole { direction, points: None | Some(crate::SketchPoints { single: true, .. }), .. } => direction.normalized(),
+        _ => None,
+    };
+    let fst = face_point_state(doc, state, &f.kind, f.component);
+    for (k, (p, n)) in g.kind.face_points_mut().into_iter().zip(&f.face_names).enumerate() {
+        if n.is_empty() {
+            continue;
+        }
+        match crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, *p) {
+            Some(hit) => {
+                if let Some(note) = hit.note(n) {
+                    notes.push(note);
+                }
+                match (k, hole_axis) {
+                    (0, Some(axis)) => match hit.along(&fst, *p, axis) {
+                        Some(q) => *p = q,
+                        // The place still lies on the face (the axis may run along it).
+                        None if hit.on_point => {}
+                        None => notes.push(format!(
+                            "the hole's position [{}, {}, {}] is no longer on face `{n}`: it stays where it was placed",
+                            p.x, p.y, p.z
+                        )),
+                    },
+                    _ => *p = hit.point,
+                }
+            }
+            None => notes.push(format!("face `{n}` no longer exists; using the face at the picked point")),
+        }
+    }
+    Some((g, notes))
+}
+
 fn copy_plan<'a>(
     doc: &'a Document,
     vals: &BTreeMap<String, Value>,
@@ -5777,8 +5788,11 @@ fn replay(
                 }
             }
         } else {
-            // Each copy's faces are named as the source feature's, with the instance.
-            let tools = feature_tools_with_constructor(doc, vals, src, st, &mut None)?;
+            // Each copy's faces are named as the source feature's, with the instance. Its face
+            // points follow their named faces, as the feature's own did (#2121): a To Object
+            // extrude's copies reach the face where it is now, not where it was picked.
+            let moved = with_named_face_points(doc, st, src).map(|(g, _)| g);
+            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None)?;
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
                 for t in &tools {
