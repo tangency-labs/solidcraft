@@ -7,6 +7,7 @@
 //! |---------------|------------------------------------------------------------|
 //! | [`spatial`]   | `sc_geom_tree_spatial_ints`, `sc_geom_tree_spatial_floats` |
 //! | [`subdiv`]    | `sc_geom_tree_subdiv`                                      |
+//! | [`subdiv_patches`] | `sc_geom_tree_subdiv_patches`                         |
 //!
 //! Both run a small program against an upstream tree; the encodings are
 //! documented in the shim and validated here before any call.
@@ -36,6 +37,16 @@ mod sys {
             prog: *const i64,
             n_prog: i64,
             out: *mut i64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+        pub fn sc_geom_tree_subdiv_patches(
+            desc: *const i64,
+            n_nodes: i64,
+            prog: *const i64,
+            n_prog: i64,
+            scale: f64,
+            out: *mut f64,
             cap: i64,
             out_len: *mut i64,
         ) -> i32;
@@ -181,9 +192,8 @@ fn well_formed(desc: &[i64], n_nodes: i64) -> Result<(), FfiError> {
     Ok(())
 }
 
-/// Runs a subdivision-tree program over `desc` (9 ints per node, see the shim);
-/// returns its output stream.
-pub fn subdiv(desc: &[i64], prog: &[i64]) -> Result<Vec<i64>, FfiError> {
+/// Checks a subdivision descriptor (9 ints per node) and its program.
+fn validate_subdiv(desc: &[i64], prog: &[i64]) -> Result<(), FfiError> {
     if desc.is_empty() || !desc.len().is_multiple_of(9) {
         return Err(bad("desc"));
     }
@@ -207,7 +217,7 @@ pub fn subdiv(desc: &[i64], prog: &[i64]) -> Result<Vec<i64>, FfiError> {
     while i < prog.len() {
         let op = at(prog, i)?;
         let sz = match op {
-            0 | 1 | 4 | 5 => 1,
+            0 | 1 | 4..=7 => 1,
             2 => 4,
             3 => 0,
             _ => return Err(bad("op")),
@@ -218,14 +228,24 @@ pub fn subdiv(desc: &[i64], prog: &[i64]) -> Result<Vec<i64>, FfiError> {
         let a = prog
             .get(i + 1..i + 1 + sz)
             .ok_or_else(|| bad("truncated program"))?;
-        if sz >= 1 && !(0..n_nodes).contains(&at(a, 0)?) {
+        if sz >= 1 && op != 7 && !(0..n_nodes).contains(&at(a, 0)?) {
             return Err(bad("node index"));
         }
         if op == 2 && (!(0..=3).contains(&at(a, 2)?) || !obj(at(a, 3)?)) {
             return Err(bad("set operands"));
         }
+        if op == 7 && !obj(at(a, 0)?) {
+            return Err(bad("owner surface"));
+        }
         i += 1 + sz;
     }
+    Ok(())
+}
+
+/// Runs a subdivision-tree program, returning presence flags and node relations.
+pub fn subdiv(desc: &[i64], prog: &[i64]) -> Result<Vec<i64>, FfiError> {
+    validate_subdiv(desc, prog)?;
+    let n_nodes = (desc.len() / 9) as i64;
     call_with_buffer(256, |buf: &mut [i64], len| {
         // SAFETY: desc/prog valid for their lengths (checked above); buf valid for
         // buf.len() writes; len valid.
@@ -235,6 +255,33 @@ pub fn subdiv(desc: &[i64], prog: &[i64]) -> Result<Vec<i64>, FfiError> {
                 n_nodes,
                 prog.as_ptr(),
                 prog.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}
+
+/// Exports each non-null `GetFirstBezierPatch` result as native NURBS data:
+/// `n m p q r s`, homogeneous control points (V fastest), then U and V knots.
+/// The shim constructs rational bilinear patches using the documented seed recipe
+/// in `geom_tree.cpp`; `scale` multiplies their Cartesian coordinates.
+pub fn subdiv_patches(desc: &[i64], prog: &[i64], scale: f64) -> Result<Vec<f64>, FfiError> {
+    validate_subdiv(desc, prog)?;
+    if !scale.is_finite() {
+        return Err(bad("patch scale"));
+    }
+    call_with_buffer(256, |buf: &mut [f64], len| {
+        // SAFETY: validated, well-formed node links and complete program; all buffers
+        // are valid for their supplied lengths, and len is a valid output pointer.
+        unsafe {
+            sys::sc_geom_tree_subdiv_patches(
+                desc.as_ptr(),
+                (desc.len() / 9) as i64,
+                prog.as_ptr(),
+                prog.len() as i64,
+                scale,
                 buf.as_mut_ptr(),
                 buf.len() as i64,
                 &raw mut *len,

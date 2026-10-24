@@ -27,23 +27,33 @@
 // Subdivision trees: sc_geom_tree_subdiv(nodes, n_nodes, prog, n_prog, out, cap, out_len)
 // builds n_nodes SmTreeNodes (node 0 = top) of an SmTree(NULL), each from 9 int64s:
 // parent c1 c2 aux_type split_dir marked node_class face surface (-1 = NULL), every node
-// with its own SmBezierAux2d. Program (int64):
+// with its own SmBezierPatch (a SmBezierAux2d subclass). Program (int64):
 //   0 node   neighbours: Left, Right, Bot, Top, GetNeighbors (each n, indices)
 //   1 node   PropagateToParents
 //   2 node marked class face   set aux fields
 //   3        dump marks: per node marked, class, face
-//   4 node   GetFirstBezierPatch: 0 = NULL, 1 = non-NULL; -2 = not run (path needs
-//            SmBezierPatch / subdivision surfaces this harness does not build)
+//   4 node   GetFirstBezierPatch: ints: 0 = NULL, 1 = non-NULL;
+//            floats: native n m p q r s, homogeneous control net, U/V knots.
 //   5 node   SmTreeNode::GetOwnerObject: 0 = NULL
+//   6 node   clear construction Bezier pointer (keep subdivision surface).
+//   7 surface attach a real SmSurfaceCache owner for surface id (-1 = no owner).
+// Native payloads are rational bilinear surfaces: construction seed = node + 1,
+// subdivision seed = surface id + n_nodes + 1. See native_patch in the runner.
 #include "sc_shim.h"
 
+#include <SmBSplineSurface.h>
+#include <SmContext.h>
+#include <SmExtent2d.h>
 #include <SmExtent3d.h>
+#include <SmNurbsSrf.h>
 #include <SmSurfaceCache.h>
 #include <SmTArray.h>
 #include <SmTree.h>
 
 #include <map>
+#include <memory>
 #include <vector>
+#include <nurbs.h>
 
 namespace
 {
@@ -281,8 +291,8 @@ SC_EXPORT int32_t sc_geom_tree_spatial_floats(const double* prog, int64_t n, dou
     SC_CATCH
 }
 
-SC_EXPORT int32_t sc_geom_tree_subdiv(const int64_t* desc, int64_t n_nodes, const int64_t* prog, int64_t n_prog,
-                                      int64_t* out, int64_t cap, int64_t* out_len)
+static int32_t run_subdiv(const int64_t* desc, int64_t n_nodes, const int64_t* prog, int64_t n_prog,
+                          double scale, std::vector<int64_t>& o, std::vector<double>& values)
 {
     if (n_nodes < 1 || n_prog < 0)
         return SC_ERR_ARG;
@@ -298,9 +308,40 @@ SC_EXPORT int32_t sc_geom_tree_subdiv(const int64_t* desc, int64_t n_nodes, cons
             return SC_ERR_ARG;
     }
     SC_TRY
+    SmContext ctx;
+    std::vector<std::unique_ptr<SmBSplineSurface>> surfaces;
+    auto make_surface = [&](int64_t seed) -> SmBSplineSurface* {
+        gw_SURFACE* s = sm_AllocateNurbSurface(1, 1, 1, 1, 3, 3);
+        if (!s)
+            throw std::bad_alloc();
+        for (int u = 0; u < 2; ++u)
+            for (int v = 0; v < 2; ++v)
+            {
+                auto& p = s->net->Pw[u][v];
+                p.w = 1.0 + 0.25 * (seed % 3 + u + v);
+                p.x = (seed + u) * scale * p.w;
+                p.y = (v - seed) * scale * p.w;
+                p.z = (seed + u * v) * scale * p.w;
+            }
+        for (int k = 0; k < 4; ++k)
+        {
+            s->knu->U[k] = k < 2 ? -2.0 : 3.0;
+            s->knv->U[k] = k < 2 ? 0.5 : 4.0;
+        }
+        surfaces.emplace_back(new (ctx) SmBSplineSurface(s, FALSE, nullptr));
+        return surfaces.back().get();
+    };
+    std::unique_ptr<SmSurfaceCache> owner_cache;
     SmTree tree((SmObject*)nullptr);
     std::vector<SmTreeNode> nodes((size_t)n_nodes);
-    std::vector<SmBezierAux2d> aux((size_t)n_nodes);
+    std::vector<SmBezierPatch> aux((size_t)n_nodes);
+    std::map<int64_t, SmBSplineSurface*> subdivisions;
+    auto surface_for = [&](int64_t id) -> SmBSplineSurface* {
+        auto it = subdivisions.find(id);
+        if (it == subdivisions.end())
+            it = subdivisions.emplace(id, make_surface(id + n_nodes + 1)).first;
+        return it->second;
+    };
     auto ptr = [&](int64_t k) -> SmTreeNode* { return k < 0 ? nullptr : &nodes[(size_t)k]; };
     for (int64_t k = 0; k < n_nodes; k++)
     {
@@ -311,24 +352,28 @@ SC_EXPORT int32_t sc_geom_tree_subdiv(const int64_t* desc, int64_t n_nodes, cons
         nd.m_pChild1 = ptr(d[1]);
         nd.m_pChild2 = ptr(d[2]);
         nd.m_eAuxDataType = (SmAuxDataType)d[3];
-        SmBezierAux2d& a = aux[(size_t)k];
+        SmBezierPatch& a = aux[(size_t)k];
         a.m_eSplitDir = (SmSurfParamType)d[4];
         a.m_bIsMarked = d[5] != 0 ? TRUE : FALSE;
         a.m_eNodeClass = (SmNodeClassType)d[6];
         a.m_pFace = obj_ptr((double)d[7]);
-        a.mBA_pSurface = (const SmSurface*)obj_ptr((double)d[8]);
+        if (d[3] == SM_AD_BEZIER_SURFACE)
+            a.m_pBezier = make_surface(k + 1)->GetGwNurbPointer();
+        if (d[8] >= 0)
+        {
+            a.mBA_pSurface = surface_for(d[8]);
+        }
         nd.m_pData = &a;
     }
-    std::vector<int64_t> o;
     int64_t i = 0;
     while (i < n_prog)
     {
         int64_t op = prog[i];
-        int64_t sz = op == 0 || op == 1 || op == 4 || op == 5 ? 1 : op == 2 ? 4 : op == 3 ? 0 : -1;
+        int64_t sz = op == 0 || op == 1 || (op >= 4 && op <= 7) ? 1 : op == 2 ? 4 : op == 3 ? 0 : -1;
         if (sz < 0 || i + 1 + sz > n_prog)
             return SC_ERR_ARG;
         const int64_t* a = prog + i + 1;
-        if (sz >= 1 && (a[0] < 0 || a[0] >= n_nodes))
+        if (sz >= 1 && op != 7 && (a[0] < 0 || a[0] >= n_nodes))
             return SC_ERR_ARG;
         switch (op)
         {
@@ -373,22 +418,70 @@ SC_EXPORT int32_t sc_geom_tree_subdiv(const int64_t* desc, int64_t n_nodes, cons
             break;
         case 4:
         {
-            // Walk the upstream decision path without touching the parts this harness
-            // does not build (SmBezierPatch, subdivision surfaces); with a NULL owner the
-            // remaining paths return NULL.
-            const SmTreeNode& nd = nodes[(size_t)a[0]];
-            SmAuxDataType t = nd.m_eAuxDataType;
-            bool skip = t == SM_AD_BEZIER_SURFACE
-                        || ((t == SM_AD_BEZIER_SURFACE_HEAD || t == SM_AD_AUX_DATA)
-                            && ((const SmBezierAux2d*)nd.m_pData)->mBA_pSurface != nullptr);
-            o.push_back(skip ? -2 : (nodes[(size_t)a[0]].GetFirstBezierPatch() == nullptr ? 0 : 1));
+            const gw_SURFACE* s = nodes[(size_t)a[0]].GetFirstBezierPatch();
+            o.push_back(s == nullptr ? 0 : 1);
+            if (s)
+            {
+                values.insert(values.end(), {(double)s->net->n, (double)s->net->m,
+                    (double)s->p, (double)s->q, (double)s->knu->m, (double)s->knv->m});
+                for (gw_INDEX u = 0; u <= s->net->n; ++u)
+                    for (gw_INDEX v = 0; v <= s->net->m; ++v)
+                    {
+                        const auto& p = s->net->Pw[u][v];
+                        values.insert(values.end(), {p.x, p.y, p.z, p.w});
+                    }
+                for (gw_INDEX k = 0; k <= s->knu->m; ++k)
+                    values.push_back(s->knu->U[k]);
+                for (gw_INDEX k = 0; k <= s->knv->m; ++k)
+                    values.push_back(s->knv->U[k]);
+            }
             break;
         }
         case 5: o.push_back(nodes[(size_t)a[0]].GetOwnerObject() == nullptr ? 0 : 1); break;
+        case 6: aux[(size_t)a[0]].m_pBezier = nullptr; break;
+        case 7:
+            if (a[0] < -1 || a[0] >= kMaxObjects)
+                return SC_ERR_ARG;
+            tree.SetOwnerObject(nullptr);
+            owner_cache.reset();
+            if (a[0] >= 0)
+            {
+                owner_cache.reset(new (ctx) SmSurfaceCache(*surface_for(a[0]),
+                                                          SmExtent2d(-2.0, 0.5, 3.0, 4.0)));
+                tree.SetOwnerObject(owner_cache.get());
+            }
+            break;
         default: return SC_ERR_ARG;
         }
         i += 1 + sz;
     }
-    return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
+    return SC_OK;
+    SC_CATCH
+}
+
+SC_EXPORT int32_t sc_geom_tree_subdiv(const int64_t* desc, int64_t n_nodes, const int64_t* prog, int64_t n_prog,
+                                      int64_t* out, int64_t cap, int64_t* out_len)
+{
+    SC_TRY
+    std::vector<int64_t> ints;
+    std::vector<double> values;
+    int32_t status = run_subdiv(desc, n_nodes, prog, n_prog, 1.0, ints, values);
+    if (status != SC_OK)
+        return status;
+    return sc_copy_out(ints.data(), (int64_t)ints.size(), out, cap, out_len);
+    SC_CATCH
+}
+
+SC_EXPORT int32_t sc_geom_tree_subdiv_patches(const int64_t* desc, int64_t n_nodes, const int64_t* prog,
+                                              int64_t n_prog, double scale, double* out, int64_t cap,
+                                              int64_t* out_len)
+{
+    SC_TRY
+    std::vector<int64_t> ints;
+    std::vector<double> values;
+    int32_t status = run_subdiv(desc, n_nodes, prog, n_prog, scale, ints, values);
+    if (status != SC_OK)
+        return status;
+    return sc_copy_out(values.data(), (int64_t)values.size(), out, cap, out_len);
     SC_CATCH
 }

@@ -12,11 +12,11 @@
 //! | `subdiv`  | nodes given explicitly (`SmTree(NULL)` + `SmBezierAux2d` data) | `neighbors` (`GetLeft/Right/Bot/TopNeighbors`, `GetNeighbors`), `propagate` (`PropagateToParents`), `set`, `dump`, `first_patch` (`GetFirstBezierPatch`), `owner_object` (`SmTreeNode::GetOwnerObject`) |
 //!
 //! Outputs: `ints` (statuses, flags, node indices in allocation order, object
-//! ids; `-1` = null) and `floats` (boxes). `first_patch` on a path that needs
-//! `SmBezierPatch` or a subdivision surface reports `-2` (not run) on both sides:
-//! the shim builds neither, and the Rust resolvers answer the same; those reads
-//! are compared by `surface.surface_cache_p1`. Every run has at least [`MIN_GENERATED`] generated
-//! cases.
+//! ids; `-1` = null), `floats` (boxes), and `patches` (native NURBS control nets,
+//! degrees and knots selected by `first_patch`). Construction patches and temporary
+//! subdivision surfaces carry distinct rational bilinear payloads; Rust supplies
+//! those same payloads through the tree's existing caller-owned resolvers.
+//! Every run has at least [`MIN_GENERATED`] generated cases.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -24,6 +24,7 @@ use serde_json::Value;
 use solidcore::geom::extent3d::Extent3d;
 use solidcore::geom::tree::{
     AuxDataType, NodeClass, NodeData, NodeGeomType, NodeId, SplitDir, SurfaceAux, Tree, TreeNode,
+    TreeOwner,
 };
 use solidcore::math::Vec3;
 use solidcore::SolidError;
@@ -98,13 +99,31 @@ enum DOp {
     OwnerObject {
         node: i64,
     },
+    ClearPatch {
+        node: i64,
+    },
+    Owner {
+        surface: i64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Inputs {
-    Spatial { ctor: Ctor, ops: Vec<SOp> },
-    Subdiv { nodes: Vec<NodeDesc>, ops: Vec<DOp> },
+    Spatial {
+        ctor: Ctor,
+        ops: Vec<SOp>,
+    },
+    Subdiv {
+        nodes: Vec<NodeDesc>,
+        ops: Vec<DOp>,
+        #[serde(default = "default_patch_scale")]
+        patch_scale: f64,
+    },
+}
+
+fn default_patch_scale() -> f64 {
+    1.0
 }
 
 fn harness(msg: impl Into<String>) -> HarnessError {
@@ -353,12 +372,38 @@ fn subdiv_prog(ops: &[DOp]) -> Vec<i64> {
             DOp::Dump => v.push(3),
             DOp::FirstPatch { node } => v.extend([4, *node]),
             DOp::OwnerObject { node } => v.extend([5, *node]),
+            DOp::ClearPatch { node } => v.extend([6, *node]),
+            DOp::Owner { surface } => v.extend([7, *surface]),
         }
     }
     v
 }
 
-fn run_subdiv_rust(nodes: &[NodeDesc], ops: &[DOp]) -> solidcore::Result<Vec<i64>> {
+// Same fixture geometry as the native shim, not a replacement for the tree walk.
+// Homogeneous coordinates, V fastest; non-unit weights and non-unit domains make
+// returning a different patch (or just its presence) observable.
+fn native_patch(seed: i64, scale: f64) -> Vec<f64> {
+    let mut values = vec![1.0, 1.0, 1.0, 1.0, 3.0, 3.0];
+    for u in 0..2 {
+        for v in 0..2 {
+            let w = 1.0 + 0.25 * (seed % 3 + u + v) as f64;
+            values.extend([
+                (seed + u) as f64 * scale * w,
+                (v - seed) as f64 * scale * w,
+                (seed + u * v) as f64 * scale * w,
+                w,
+            ]);
+        }
+    }
+    values.extend([-2.0, -2.0, 3.0, 3.0, 0.5, 0.5, 4.0, 4.0]);
+    values
+}
+
+fn run_subdiv_rust(
+    nodes: &[NodeDesc],
+    ops: &[DOp],
+    scale: f64,
+) -> solidcore::Result<(Vec<i64>, Vec<f64>)> {
     let mut t: Tree<i64> = Tree::new(None);
     for d in nodes {
         t.add_node(TreeNode {
@@ -379,6 +424,8 @@ fn run_subdiv_rust(nodes: &[NodeDesc], ops: &[DOp]) -> solidcore::Result<Vec<i64
     }
     t.set_top_node(Some(NodeId(0)));
     let mut o = Vec::new();
+    let mut values = Vec::new();
+    let mut cleared = vec![false; nodes.len()];
     let put = |o: &mut Vec<i64>, l: &[NodeId]| {
         o.push(l.len() as i64);
         o.extend(l.iter().map(|n| n.0 as i64));
@@ -418,29 +465,42 @@ fn run_subdiv_rust(nodes: &[NodeDesc], ops: &[DOp]) -> solidcore::Result<Vec<i64
                 }
             }
             DOp::FirstPatch { node } => {
-                // The shim builds no SmBezierPatch and no subdivision surface, so it
-                // reports -2 (not run) where the walk would read one; the resolvers
-                // do the same here. The patch reads themselves are compared by
-                // surface.surface_cache_p1 (SurfaceCache::first_bezier_patch).
                 let p = t.first_bezier_patch(
                     NodeId(*node as usize),
-                    |_| Ok(Some(-2_i64)),
-                    |_| Ok(Some(-2_i64)),
+                    |id| {
+                        let is_cleared = cleared.get(id.0).ok_or(SolidError::InvalidInput {
+                            operation: "difftest::geom_tree::first_patch",
+                            reason: "invalid construction patch node",
+                        })?;
+                        Ok((!*is_cleared).then(|| native_patch(id.0 as i64 + 1, scale)))
+                    },
+                    |surface| Ok(Some(native_patch(*surface + nodes.len() as i64 + 1, scale))),
                 )?;
-                o.push(match p {
-                    None => 0,
-                    Some(-2) => -2,
-                    Some(_) => 1,
-                });
+                o.push(i64::from(p.is_some()));
+                if let Some(patch) = p {
+                    values.extend(patch);
+                }
             }
             DOp::OwnerObject { node } => {
                 o.push(i64::from(
                     t.node_owner_object(NodeId(*node as usize))?.is_some(),
                 ));
             }
+            DOp::ClearPatch { node } => {
+                *cleared
+                    .get_mut(*node as usize)
+                    .ok_or(SolidError::InvalidInput {
+                        operation: "difftest::geom_tree::clear_patch",
+                        reason: "invalid construction patch node",
+                    })? = true;
+            }
+            DOp::Owner { surface } => {
+                t.set_owner_object((*surface >= 0).then_some(TreeOwner::SurfaceCache));
+                t.set_owner_surface(obj(*surface));
+            }
         }
     }
-    Ok(o)
+    Ok((o, values))
 }
 
 fn rust_err(e: &SolidError) -> Output {
@@ -603,7 +663,7 @@ fn gen_subdiv(rng: &mut Rng) -> Inputs {
             1 => 8,
             2 => 1,
             3..=7 => 4,
-            8..=11 if !first_patch => 3,
+            8..=11 => 3,
             _ => 6,
         };
         if n.c1 >= 0 && rng.chance(0.03) {
@@ -629,6 +689,11 @@ fn gen_subdiv(rng: &mut Rng) -> Inputs {
         ops.push(DOp::OwnerObject {
             node: rng.range_i64(0, count - 1),
         });
+        for node in 0..count {
+            ops.push(DOp::FirstPatch { node });
+            ops.push(DOp::ClearPatch { node });
+            ops.push(DOp::FirstPatch { node });
+        }
     } else {
         for k in 0..count {
             if count < 16 || rng.chance(0.5) {
@@ -649,7 +714,13 @@ fn gen_subdiv(rng: &mut Rng) -> Inputs {
         }
         ops.push(DOp::Dump);
     }
-    Inputs::Subdiv { nodes, ops }
+    Inputs::Subdiv {
+        nodes,
+        ops,
+        patch_scale: *rng
+            .choose(&[0.0, 1e-100, 1e-3, 1.0, -7.0, 1e100])
+            .unwrap_or(&1.0),
+    }
 }
 
 impl UnitDiff for Runner {
@@ -663,10 +734,17 @@ impl UnitDiff for Runner {
                 let (oi, of) = ffi::spatial(&spatial_prog(&ctor, &ops)).map_err(|e| ffi_err(&e))?;
                 Ok(Output::new().ints("ints", oi).values("floats", of))
             }
-            Inputs::Subdiv { nodes, ops } => {
-                let o = ffi::subdiv(&subdiv_desc(&nodes), &subdiv_prog(&ops))
-                    .map_err(|e| ffi_err(&e))?;
-                Ok(Output::new().ints("ints", o))
+            Inputs::Subdiv {
+                nodes,
+                ops,
+                patch_scale,
+            } => {
+                let desc = subdiv_desc(&nodes);
+                let prog = subdiv_prog(&ops);
+                let o = ffi::subdiv(&desc, &prog).map_err(|e| ffi_err(&e))?;
+                let patches =
+                    ffi::subdiv_patches(&desc, &prog, patch_scale).map_err(|e| ffi_err(&e))?;
+                Ok(Output::new().ints("ints", o).values("patches", patches))
             }
         }
     }
@@ -677,8 +755,12 @@ impl UnitDiff for Runner {
                 Ok((oi, of)) => Ok(Output::new().ints("ints", oi).values("floats", of)),
                 Err(e) => Ok(rust_err(&e)),
             },
-            Inputs::Subdiv { nodes, ops } => match run_subdiv_rust(&nodes, &ops) {
-                Ok(o) => Ok(Output::new().ints("ints", o)),
+            Inputs::Subdiv {
+                nodes,
+                ops,
+                patch_scale,
+            } => match run_subdiv_rust(&nodes, &ops, patch_scale) {
+                Ok((o, patches)) => Ok(Output::new().ints("ints", o).values("patches", patches)),
                 Err(e) => Ok(rust_err(&e)),
             },
         }
@@ -698,6 +780,104 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut cases = default_cases(self, &ctx)?;
+        for scale in [0.0, 1e-100, 1e-3, 1.0, -7.0, 1e100] {
+            let nodes = [
+                // Construction patch wins over a distinct subdivision surface.
+                (3, 7),
+                // Surface-head and aux-data paths resolve the real B-spline.
+                (4, 8),
+                (6, 7),
+                // Empty construction patch and non-surface data return null.
+                (3, -1),
+                (0, 7),
+            ]
+            .into_iter()
+            .map(|(aux, surface)| NodeDesc {
+                parent: -1,
+                c1: -1,
+                c2: -1,
+                aux,
+                split: 2,
+                marked: false,
+                class: 0,
+                face: -1,
+                surface,
+            })
+            .collect();
+            let ops = (0..5)
+                .flat_map(|node| {
+                    [
+                        DOp::FirstPatch { node },
+                        DOp::ClearPatch { node },
+                        DOp::FirstPatch { node },
+                    ]
+                })
+                .collect();
+            cases.push(Case {
+                unit: self.id().into(),
+                name: format!("native-first-patch-scale-{scale}"),
+                source: crate::case::CaseSource::Inline,
+                inputs: serde_json::to_value(Inputs::Subdiv {
+                    nodes,
+                    ops,
+                    patch_scale: scale,
+                })
+                .map_err(|e| harness(e.to_string()))?,
+            });
+            let root = NodeDesc {
+                parent: -1,
+                c1: 1,
+                c2: 2,
+                aux: 3,
+                split: 0,
+                marked: false,
+                class: 0,
+                face: -1,
+                surface: 7,
+            };
+            let mut child = root.clone();
+            child.parent = 0;
+            child.c1 = -1;
+            child.c2 = -1;
+            child.aux = 6;
+            child.surface = -1;
+            let mut sibling = child.clone();
+            sibling.aux = 3;
+            sibling.surface = 7;
+            // Keep the explicit parent/child structure: null child surface climbs
+            // to the ancestor only with a non-null owner; matching owner surfaces
+            // on non-root nodes are suppressed, but a root may return its owner.
+            let inputs = Inputs::Subdiv {
+                nodes: vec![root, child, sibling],
+                ops: vec![
+                    DOp::Owner { surface: 7 },
+                    DOp::OwnerObject { node: 0 },
+                    DOp::FirstPatch { node: 1 },
+                    DOp::FirstPatch { node: 2 },
+                    DOp::ClearPatch { node: 2 },
+                    DOp::FirstPatch { node: 2 },
+                    DOp::FirstPatch { node: 0 },
+                    DOp::ClearPatch { node: 0 },
+                    DOp::FirstPatch { node: 1 },
+                    DOp::FirstPatch { node: 0 },
+                    DOp::Owner { surface: 8 },
+                    DOp::FirstPatch { node: 2 },
+                    DOp::FirstPatch { node: 1 },
+                    DOp::Owner { surface: -1 },
+                    DOp::FirstPatch { node: 1 },
+                    DOp::FirstPatch { node: 2 },
+                    DOp::OwnerObject { node: 0 },
+                ],
+                patch_scale: scale,
+            };
+            cases.push(Case {
+                unit: self.id().into(),
+                name: format!("native-first-patch-owner-ancestor-scale-{scale}"),
+                source: crate::case::CaseSource::Inline,
+                inputs: serde_json::to_value(inputs).map_err(|e| harness(e.to_string()))?,
+            });
+        }
+        Ok(cases)
     }
 }
