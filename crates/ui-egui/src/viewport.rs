@@ -3122,7 +3122,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && app.dialog.is_none()
             && crate::dim_view::pick_reference(ui.ctx(), p, resp.double_clicked());
         if resp.clicked() && !held && !reference_pick {
-            if app.tool.is_some() {
+            if crate::browser_canvas::pick_click(app, &proj, p) {
+                // Calibrate Canvas took the click as Point A or B.
+            } else if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p, mods.shift);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
                 if let Some((hit, Some(sel))) = cand {
@@ -3455,6 +3457,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     crate::preview::paint_sketches(app, &painter, &proj);
     crate::ref_images::show(app, ui, &painter, &proj);
+    crate::browser_canvas::show_points(app, &painter, &proj);
     crate::dialogs_assembly::origins(app, &painter, &proj);
     crate::dialogs_assembly::joint_glyphs(app, &painter, &proj);
     overlays(app, &painter, &proj);

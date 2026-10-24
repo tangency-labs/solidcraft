@@ -1622,6 +1622,8 @@ pub struct CanvasPanel {
     pub a: [f64; 2],
     pub b: [f64; 2],
     pub distance: f64,
+    /// Calibrating: the point (0: A, 1: B) the next click on the canvas's plane sets (#4940).
+    pub(crate) picking: Option<usize>,
 }
 
 impl CanvasPanel {
@@ -1635,7 +1637,7 @@ impl CanvasPanel {
             .find(|c| c.id == canvas)
             .map(|c| ([c.center.x - c.width / 2.0, c.center.y], [c.center.x + c.width / 2.0, c.center.y], c.width))
             .unwrap_or(([0.0, 0.0], [100.0, 0.0], 100.0));
-        CanvasPanel { canvas, calibrate, depth: app.session.undo.len(), a, b, distance: d }
+        CanvasPanel { canvas, calibrate, depth: app.session.undo.len(), a, b, distance: d, picking: None }
     }
 }
 

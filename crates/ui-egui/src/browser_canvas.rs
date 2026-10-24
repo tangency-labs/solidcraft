@@ -26,14 +26,30 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         .actions(ok, cancel, None)
         .show(ctx, true, |ui| {
             if calibrate {
-                for (label, p) in [("Point A", &mut m.a), ("Point B", &mut m.b)] {
+                let picking = m.picking;
+                let mut pick = None;
+                for (i, (label, p)) in [("Point A", &mut m.a), ("Point B", &mut m.b)].into_iter().enumerate() {
                     ui_kit::row(ui, crate::i18n::tr_label(label), |ui| {
                         let [x, y] = p;
                         ui.horizontal(|ui| {
                             ui_kit::length_field(ui, x, &units, decimals);
                             ui_kit::length_field(ui, y, &units, decimals);
+                            // Or click it on the image (#4940).
+                            let style = if picking == Some(i) { ui_kit::Button::Primary } else { ui_kit::Button::Normal };
+                            let r = ui_kit::button(ui, crate::i18n::tr_label("Pick"), style)
+                                .on_hover_text(crate::i18n::tr_label("Click the point on the image"));
+                            crate::scenario::publish_handle(&format!("canvas:pick:{i}"), r.rect.center());
+                            if r.clicked() {
+                                pick = Some(if picking == Some(i) { None } else { Some(i) });
+                            }
                         });
                     });
+                }
+                if let Some(next) = pick {
+                    m.picking = next;
+                }
+                if m.picking.is_some() {
+                    ui.label(crate::i18n::tr_label("Click the point on the image"));
                 }
                 ui_kit::row(ui, crate::i18n::tr_label("Distance"), |ui| ui_kit::length_field(ui, &mut m.distance, &units, decimals));
                 m.distance = m.distance.clamp(0.001, 1e6);
@@ -72,6 +88,47 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     app.tree.canvas_panel = if closed || action == ui_kit::Action::Cancel { None } else { Some(m) };
+}
+
+/// The canvas being calibrated and its plane in the world.
+fn calibrating(app: &SolveApp) -> Option<(&crate::browser::CanvasPanel, solidcraft_engine::geom::Plane)> {
+    let m = app.tree.canvas_panel.as_ref().filter(|m| m.calibrate)?;
+    let c = app.session.doc.canvases.iter().find(|c| c.id == m.canvas)?;
+    let (vals, _) = app.session.doc.param_values();
+    Some((m, app.session.doc.canvas_plane(&vals, c).ok()?))
+}
+
+/// A click in the view while Calibrate waits for Point A or B: the point where it meets the
+/// canvas's plane (#4940). True when the click was taken.
+pub(crate) fn pick_click(app: &mut SolveApp, proj: &crate::viewport::Proj, at: egui::Pos2) -> bool {
+    let Some((m, plane)) = calibrating(app) else { return false };
+    let Some(i) = m.picking else { return false };
+    let (origin, dir) = proj.ray(at);
+    let Some(hit) = plane.intersect_ray(origin, dir) else { return true };
+    let p = plane.to_local(hit);
+    if let Some(m) = app.tree.canvas_panel.as_mut() {
+        if i == 0 {
+            m.a = [p.x, p.y]
+        } else {
+            m.b = [p.x, p.y]
+        }
+        m.picking = None;
+    }
+    true
+}
+
+/// Point A and B (and the line between them) on the canvas while it is calibrated, so the
+/// typed or picked points show where they are on the image.
+pub(crate) fn show_points(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewport::Proj) {
+    let Some((m, plane)) = calibrating(app) else { return };
+    let t = crate::theme::Tokens::get();
+    let screen = |p: [f64; 2]| proj.to_screen(plane.to_world(solidcraft_engine::geom::Vec2::new(p[0], p[1])));
+    let (Some(a), Some(b)) = (screen(m.a), screen(m.b)) else { return };
+    painter.line_segment([a, b], egui::Stroke::new(1.5, t.accent));
+    for (p, name) in [(a, "A"), (b, "B")] {
+        painter.circle(p, 4.0, t.accent, egui::Stroke::new(1.5, t.on_accent));
+        painter.text(p + egui::vec2(7.0, -7.0), egui::Align2::LEFT_BOTTOM, name, egui::FontId::proportional(t.font_label), t.accent);
+    }
 }
 
 #[cfg(test)]
@@ -125,5 +182,27 @@ mod tests {
         h.frames(2);
         assert!(h.app.tree.canvas_panel.is_none());
         assert!((width(&h) - 40.0).abs() < 1e-6, "calibrating to half the distance halves the image: {}", width(&h));
+    }
+
+    /// #4940: Pick, then a click on the image, sets Point A (or B) where the click meets the
+    /// canvas's plane; Pick again cancels.
+    #[test]
+    fn calibrate_points_are_picked_on_the_image() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let id = canvas(&mut h);
+        h.app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(&h.app, id, true));
+        h.frames(4);
+        let panel = |h: &crate::scenario::Harness| h.app.tree.canvas_panel.clone().unwrap();
+        h.step(&json!({"click": {"handle": "canvas:pick:0"}})).unwrap();
+        assert_eq!(panel(&h).picking, Some(0));
+        h.step(&json!({"click": {"world": [12, 5, 0]}})).unwrap();
+        let m = panel(&h);
+        assert!((m.a[0] - 12.0).abs() < 0.5 && (m.a[1] - 5.0).abs() < 0.5, "{:?}", m.a);
+        assert_eq!(m.picking, None, "one click per Pick");
+        assert!(h.app.session.selection.is_empty(), "the click selects nothing");
+        h.step(&json!({"click": {"handle": "canvas:pick:1"}})).unwrap();
+        h.step(&json!({"click": {"handle": "canvas:pick:1"}})).unwrap();
+        assert_eq!(panel(&h).picking, None, "Pick again cancels");
     }
 }
