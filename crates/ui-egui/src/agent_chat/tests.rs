@@ -2019,3 +2019,26 @@ fn add_agent_opens_its_dialog_from_home() {
     assert!(h.app.agent_chat.settings.add.is_some(), "Add agent opened its dialog");
     assert!(handle_at("ai_add:add").is_some(), "the dialog is drawn over Home");
 }
+
+/// An adapter run by a Node.js too old for it says so after Node's own error (#2207).
+#[test]
+fn an_agent_stopped_by_an_old_node_says_which_node_is_too_old() {
+    let tail = |v: &str| {
+        vec![
+            "SyntaxError: Unexpected token 'with'".to_string(),
+            "    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:152:18)".into(),
+            String::new(),
+            format!("Node.js v{v}"),
+        ]
+    };
+    for (v, old) in
+        [("18.19.1", true), ("16.20.2", true), ("19.9.0", true), ("20.9.0", true), ("18.20.4", false), ("20.10.0", false), ("22.11.0", false)]
+    {
+        assert_eq!(old_node_version(&tail(v)).is_some(), old, "{v}");
+    }
+    assert_eq!(old_node_version(&["error: something else".to_string()]), None);
+    let mut c = chat();
+    c.on_event(Event::Exited { tail: tail("18.19.1") });
+    let notices: Vec<&str> = c.items.iter().filter_map(|i| if let Item::Notice { text, .. } = i { Some(text.as_str()) } else { None }).collect();
+    assert!(notices.iter().any(|n| n.contains("v18.19.1") && n.contains("20.10")), "{notices:?}");
+}

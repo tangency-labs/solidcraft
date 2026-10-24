@@ -2308,6 +2308,7 @@
   "ui.agent_chat_none_found_short": "エージェントが見つかりません",
   "ui.agent_chat_not_installed": "未インストール",
   "ui.agent_chat_not_signed_in": "未サインイン",
+  "ui.agent_chat_old_node": "Node.js v{version} はこのエージェントには古すぎます。Node.js 20.10 以降（22 LTS を推奨）をインストールして PATH の先頭に来るようにし、エージェントを再起動してください。",
   "ui.agent_chat_open_settings": "環境設定を開く",
   "ui.agent_chat_own_window": "独立したウィンドウ",
   "ui.agent_chat_paste_picture": "画像を貼り付け",

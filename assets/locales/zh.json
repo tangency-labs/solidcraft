@@ -2308,6 +2308,7 @@
   "ui.agent_chat_none_found_short": "未找到智能体",
   "ui.agent_chat_not_installed": "未安装",
   "ui.agent_chat_not_signed_in": "未登录",
+  "ui.agent_chat_old_node": "Node.js v{version} 对此智能体来说太旧：请安装 Node.js 20.10 或更高版本（推荐 22 LTS），使其在 PATH 中排在最前，然后重新启动智能体。",
   "ui.agent_chat_open_settings": "打开首选项",
   "ui.agent_chat_own_window": "独立窗口",
   "ui.agent_chat_paste_picture": "粘贴图片",
