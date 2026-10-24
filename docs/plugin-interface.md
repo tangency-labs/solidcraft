@@ -126,6 +126,14 @@ Preferences > Plugins        plugin.json (static)          Session (engine, L4)
   on the same design, and `plugin.act` returns `{result, executed: [{entry, outcome}]}`. Both call the same export,
   `command.execute`; the host picks the rights from plugin.json. This is how scripts, the CLI and
   MCP agents reach what a panel button does, so every user-visible plugin behaviour is a command.
+- **Entries are listed like commands.** Every entry of an approved, enabled plugin appears in the
+  command listings agents read (`engine.commands`, MCP `list_commands`, the agent chat's tool list)
+  as `plugin.<id>.<entry>`, with its label, kind and `params` doc from plugin.json, marked as coming
+  from that plugin. `engine.execute` accepts that id as a shorthand: it runs `plugin.run` or
+  `plugin.act` (by kind) with the same rights, limits and journal entry, so it adds no
+  `CommandSpec` and nothing a plugin could not already do. Static command ids always win over the
+  shorthand, and plugin ids that would shadow the static `plugin.*` commands (`run`, `act`,
+  `panel`, `list`, `import`) are refused.
   `plugin.act` never holds the window thread on the network. In the desktop app, an `engine.execute`
   of `plugin.act` from the control channel, MCP or the agent chat hands the action to the plugin's
   worker and the window goes on drawing; the reply is sent when the worker finishes, through the
@@ -452,7 +460,7 @@ still refused):
   "entries": [
     { "name": "bind", "label": "Record the repository in the design" },
     { "name": "connect", "label": "Connect design to a repository", "kind": "action" },
-    { "name": "list", "label": "List notes", "kind": "action" },
+    { "name": "list", "label": "List notes", "kind": "action", "params": "state?: open|all" },
     { "name": "add", "label": "Add note", "kind": "action" },
     { "name": "reply", "label": "Reply to a note", "kind": "action" },
     { "name": "resolve", "label": "Resolve a note", "kind": "action" },
@@ -477,7 +485,7 @@ still refused):
 | `api` | `"0.1"`; the host refuses an unknown major (and, while `0.x`, an unknown minor) |
 | `component` | a file name (no separators) inside the folder, at most 16 MiB (6.2) |
 | `world` | `command-plugin`, `panel-plugin`, or `importer-plugin` (only on a host with the `file-formats` feature, 9a); checked against the component's exports at load |
-| `entries` | 0-64; `name` `[a-z0-9_-]{1,32}`, unique; `label` 1-80 chars; `kind` `transaction` (default) or `action`; a `plugin.run` or `host.request-execute` of an unlisted or `action` entry, or a `plugin.act` of a `transaction` entry, is `invalid` |
+| `entries` | 0-64; `name` `[a-z0-9_-]{1,32}`, unique; `label` 1-80 chars; `kind` `transaction` (default) or `action`; optional `params`, a one-line parameter doc in the style of `CommandSpec::params` (at most 1 KiB, no control characters), shown in the command listings; a `plugin.run` or `host.request-execute` of an unlisted or `action` entry, or a `plugin.act` of a `transaction` entry, is `invalid` |
 | `panel` | required for `panel-plugin`, refused otherwise; `label` 1-40 chars |
 | `commands` | 0-256 engine command ids, each byte-equal to a `CommandSpec::id` in this build (`find_command` also matches case-insensitively, so the host compares the found spec's `id` with the listed one); otherwise the plugin does not load and the page says which id is missing. `engine.run` compares the same way |
 | `permissions.store` | private storage (section 6.6) |
@@ -704,8 +712,8 @@ Plugins page offers to delete its data.
   today refuses `ui.start` params for every command except `joint.drive` and `motion.study`
   (`crates/ui-egui/src/control.rs:427-430`); S3 adds `plugin.panel {plugin}` to that list; `engine.execute` returns
   an error saying the panel opens in the app window. `plugin.list` (read-only) returns installed
-  plugins, approval state, entries with their kinds and whether a panel is open, so MCP and agents
-  can find entries and call `plugin.run` or `plugin.act`. Opening the panel of a plugin that is
+  plugins, approval state, entries with their kinds and `params` docs, and whether a panel is open,
+  so MCP and agents can find entries and call them (`plugin.<id>.<entry>`, section 3). Opening the panel of a plugin that is
   not approved, turned off, still compiling or failed to load shows the panel window with that state
   and a button to the Plugins page, instead of plugin content; nothing of the plugin runs.
 - The panel window is an `ui_kit::Window` (the universal container `cargo xtask ui-containers`
@@ -1050,6 +1058,10 @@ feature), so they need no guest toolchain.
   50 ms in the test), its panel disappears, and the late response is discarded.
 - T10e an `action` entry through `plugin.act` may fetch but gets `denied` for an undoable command;
   `plugin.run` of an `action` entry and `plugin.act` of a `transaction` entry are `invalid`.
+- T10j an approved plugin's entries appear in `engine.commands` and MCP `list_commands` as
+  `plugin.<id>.<entry>` with their `params` docs; `engine.execute` of that id runs the entry with the
+  rights of its kind; a disabled or unapproved plugin's entries are neither listed nor callable; a
+  plugin with the id `run` does not load.
 - T10f in the app, `plugin.act` over the control channel against a server that never answers: the
   window keeps drawing frames (a `ui.screenshot` succeeds meanwhile) and the request's reply comes
   through `control.pending` with `limit` after 30 s.
@@ -1123,8 +1135,14 @@ Frozen depth for 0.1 (findings beyond this are out of scope, not defects):
   command registry, while here every entry is reached through the static `plugin.run` /
   `plugin.act` commands. Both can hold if a Utilities button or palette item for an entry runs
   `plugin.run {plugin, entry, params}` with the parameters its host-rendered form collected, and an
-  id such as `plugin.<id>.<entry>` is a display and search name for it rather than a new
-  `CommandSpec`.
+  id such as `plugin.<id>.<entry>` is the name it is listed and called by (section 3) rather than a
+  new `CommandSpec`.
+- An `annotate(command, args, result)` export, which would let a plugin append a note to every
+  command's result (suggested in #1221 for helping AI agents), is not in 0.1. It would call into a
+  plugin after every command, including the user's own, on the session thread; and text added to
+  results that a model reads is a channel for steering that model, which needs its own threat model
+  before it is offered. Lookups and plans for agents (the `how`/`plan` kind of plugin) already fit
+  as `action` entries with no permissions, listed and called like commands.
 - Events by subscription: the engine has none; the coalesced `design-changed` over `Session.revision`
   covers the pilots.
 - Later interfaces (each as a new interface in `1.x` with `@since`): an exporter world (importers
