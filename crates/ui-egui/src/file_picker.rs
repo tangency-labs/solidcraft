@@ -79,6 +79,15 @@ impl SolveApp {
         self.begin_picker(future, Box::new(complete));
     }
 
+    /// Choose a library folder without blocking the event loop or changing a design.
+    pub(crate) fn pick_folder(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
+        if self.file_picker_busy() {
+            return;
+        }
+        let future = self.services.pick_folder.as_ref().map(|pick| pick());
+        self.begin_picker(future, Box::new(complete));
+    }
+
     fn begin_picker(&mut self, future: Option<FilePickerFuture>, complete: Completion) {
         let Some(future) = future else {
             complete(self, None);

@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use egui::vec2;
+use egui::{Color32, vec2};
 use solidcraft_engine::Session;
 use solidcraft_engine::render::{Camera, StandardView};
 
@@ -433,6 +433,35 @@ fn want(h: &mut HomeState, key: &str) {
         h.queued.push(key.to_string());
         h.thumbs.insert(key.to_string(), None);
     }
+}
+
+/// Draw document-browser thumbnails with a neutral image tint.
+pub(crate) fn paint_document_thumbnail(painter: &egui::Painter, texture: &egui::TextureHandle, rect: egui::Rect, dim: bool) {
+    let tint = if dim { Color32::from_white_alpha(90) } else { Color32::WHITE };
+    painter.image(texture.id(), rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), tint);
+}
+
+/// Share the existing background thumbnail cache with the document browser.
+pub(crate) fn document_thumbnail(app: &mut SolveApp, ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
+    poll(app, ctx);
+    if !app.home.thumbs.contains_key(path)
+        && let Some(i) = path.strip_prefix("sample:").and_then(|i| i.parse::<usize>().ok())
+    {
+        install(&mut app.home, ctx, path, sample_picture(i));
+    }
+    if !app.home.thumbs.contains_key(path) {
+        // Library browsing can visit many files; retain Home's recents and samples.
+        if app.home.thumbs.len() >= 256 {
+            let discard: Vec<_> =
+                app.home.thumbs.keys().filter(|key| !key.starts_with("sample:") && !app.home.recent.contains(key)).take(128).cloned().collect();
+            for key in discard {
+                app.home.thumbs.remove(&key);
+            }
+        }
+        want(&mut app.home, path);
+        ctx.request_repaint();
+    }
+    app.home.thumbs.get(path).and_then(Clone::clone)
 }
 
 /// Open a built-in sample (a copy of the design made for its picture).
@@ -1008,6 +1037,18 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn library_sample_previews_do_not_build_or_queue_models() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home = HomeState::default();
+        for i in 0..solidcraft_engine::sample::samples().len() {
+            assert!(document_thumbnail(&mut h.app, &h.ctx, &format!("sample:{i}")).is_some());
+        }
+        assert!(h.app.home.samples.is_empty());
+        assert!(h.app.home.queued.is_empty());
+        assert!(h.app.home.wanted.is_none());
+    }
 
     #[test]
     fn recent_paths_only_abbreviate_complete_home_ancestors() {
