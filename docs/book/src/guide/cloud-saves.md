@@ -108,9 +108,32 @@ and unstaged changes. It waits for external merges or rebases to finish.
 Git configuration and signing remain in effect. If no author identity is available,
 the app uses `SolidCraft <cloud@solidcraft.invalid>` for that save only.
 
-Advanced connection commands also support existing checkouts and SSH, HTTPS,
-`file://` or local remotes. System SSH configuration and an explicitly selected
-key work through Git. The generated-key workflow is under development. Do not put tokens into remote URLs.
+### Connect an existing checkout
+
+1. Open **Settings → Cloud Saves → Open Git checkout…**.
+2. Name the connection and choose the checkout's top-level folder with **Browse…**.
+   Enter the branch currently checked out in that folder.
+3. Enter a remote name such as `origin`, an HTTPS or SSH URL, a `file://` URL,
+   or a local path. Leave Remote empty to keep revisions only in this checkout.
+4. Choose authentication. **System configuration** uses Git's existing credential
+   helpers and SSH configuration. **HTTPS** reuses a guided GitHub connection's
+   saved token, or the system credential helpers for other connections. For
+   **SSH**, choose **System keys and agent** or **Choose key** and browse to the
+   private key. An encrypted key can be unlocked in your SSH agent.
+5. Choose **Test Repository Connection**. Review the fetch and push destinations,
+   then choose **Use this connection → Apply**. Failed tests keep your entries for retry.
+
+Select an existing connection and choose **Git connection settings** to edit it.
+Changes must pass another test. Cancelling the editor or Preferences preserves the
+previous connection. The optional **Git executable** field applies to all connections;
+leave it empty to find Git through PATH. Private keys remain on this device.
+Do not put tokens into remote URLs.
+
+SolidCraft records the verified destinations. If Git configuration later changes
+them, publication pauses and saves remain on this device. Open the connection's
+Git settings to test and review its destinations again. Queued saves retain their
+captured destination: changing a connection's repository, branch or pinned URLs
+does not redirect existing saves. Restore the original connection to publish them.
 
 See GitHub's [token guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 for token expiration, organization approval and revocation.

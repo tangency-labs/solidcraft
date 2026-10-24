@@ -347,6 +347,8 @@ pub struct Services {
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Choose an existing directory; absent on browser hosts.
+    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
     /// Where the host reads the anti-aliasing preference at start (a small JSON file).
     pub graphics_path: Option<String>,
@@ -949,6 +951,11 @@ impl SolveApp {
     /// Start a command the way a toolbar click does: interactive tools and dialogs for commands
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if id == "cloud.configure" {
+            cloud_settings::git::open(self);
+            return;
+        }
         if id == "cloud.settings" {
             prefs::open_at(self, prefs::PAGE_CLOUD);
             return;
@@ -1724,6 +1731,8 @@ impl SolveApp {
         issue_report::CadInput::block(self, ui, &mut report_input);
         self.cad_ui(ui, &mut report_input);
         cloud_setup::show(self, ui.ctx());
+        #[cfg(not(target_arch = "wasm32"))]
+        cloud_settings::git::show(self, ui.ctx());
         cloud_browser::show(self, ui.ctx());
         drop(report_input);
         // After everything else, on every page (the start page too, which returns early from

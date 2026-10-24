@@ -284,3 +284,13 @@ A changed remote requires verification before the captured save can be published
 GitHub HTTPS credentials remain scoped to the chosen repository when a named
 remote resolves to that same repository. Endpoint checks run before credentialed
 network operations; Git's credential protocol still supplies the token.
+
+The native editor lives in `ui-egui/src/cloud_settings/git.rs`. Interactive
+`cloud.configure` opens it within Cloud Saves preferences. It uses `cloud.test`
+with a proposed connection and Git executable, shows the resolved endpoints, and
+stages the verified result through the parent editor. Apply owns the durable
+configuration write. Editing any tested field invalidates the result. Cancellation
+stops the test; delayed picker replies carry an editor identity so a closed or
+replaced editor cannot receive them. Directory selection is injected by the
+desktop host alongside the existing asynchronous file pickers. System and chosen
+SSH keys stay connection-scoped; the Git executable is a shared setting.

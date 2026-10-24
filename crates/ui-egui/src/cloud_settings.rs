@@ -6,6 +6,9 @@ use solidcraft_cloud::{
     jobs::{JobStatus, Phase},
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod git;
+
 pub(crate) const HELP: &str = "https://tangency-labs.github.io/solidcraft/guide/cloud-saves.html";
 
 pub(crate) struct Editor {
@@ -15,6 +18,8 @@ pub(crate) struct Editor {
     pending: Option<(String, bool)>,
     error: Option<String>,
     test: Option<String>,
+    #[cfg(not(target_arch = "wasm32"))]
+    git: Option<git::Wizard>,
 }
 
 pub(crate) fn begin(app: &mut SolveApp) {
@@ -27,6 +32,8 @@ pub(crate) fn begin(app: &mut SolveApp) {
             pending: None,
             error: None,
             test: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            git: None,
         });
     }
 }
@@ -40,6 +47,8 @@ pub(crate) fn cancel(app: &mut SolveApp) {
         return;
     }
     crate::cloud_setup::cancel_preferences(app);
+    #[cfg(not(target_arch = "wasm32"))]
+    git::cancel(app);
     app.cloud.editor = None;
 }
 
@@ -52,29 +61,47 @@ pub(crate) fn defaults(app: &mut SolveApp) {
 
 pub(crate) fn stage(app: &mut SolveApp, connection: Connection) -> Result<(), String> {
     let editor = app.cloud.editor.as_mut().ok_or_else(|| tr("cloud.settings_changed").to_owned())?;
-    if editor.pending.is_some() {
-        return Err(tr("cloud.apply_pending").into());
+    editor.stage(connection)
+}
+
+impl Editor {
+    fn dialog_open(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.git.is_some()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            false
+        }
     }
-    let mut proposed = editor.draft.clone();
-    let added = proposed.connection(&connection.id).is_none();
-    if let Some(existing) = proposed.connections.iter_mut().find(|c| c.id == connection.id) {
-        *existing = connection.clone();
-    } else {
-        proposed.connections.push(connection.clone());
+
+    fn stage(&mut self, connection: Connection) -> Result<(), String> {
+        let editor = self;
+        if editor.pending.is_some() {
+            return Err(tr("cloud.apply_pending").into());
+        }
+        let mut proposed = editor.draft.clone();
+        let added = proposed.connection(&connection.id).is_none();
+        if let Some(existing) = proposed.connections.iter_mut().find(|c| c.id == connection.id) {
+            *existing = connection.clone();
+        } else {
+            proposed.connections.push(connection.clone());
+        }
+        if added && proposed.default_connection.is_none() {
+            proposed.default_connection = Some(connection.id.clone());
+        }
+        proposed.validate().map_err(|e| e.to_string())?;
+        editor.draft = proposed;
+        editor.selected = Some(connection.id);
+        Ok(())
     }
-    if added && proposed.default_connection.is_none() {
-        proposed.default_connection = Some(connection.id.clone());
-    }
-    proposed.validate().map_err(|e| e.to_string())?;
-    editor.draft = proposed;
-    editor.selected = Some(connection.id);
-    Ok(())
 }
 
 /// True means the ordinary Preferences action can finish immediately.
 pub(crate) fn apply(app: &mut SolveApp, close: bool) -> bool {
     let Some(mut editor) = app.cloud.editor.take() else { return true };
-    let result = if editor.pending.is_some() || app.cloud.setup.is_some() || app.session.cloud_configuring() {
+    let result = if editor.pending.is_some() || editor.dialog_open() || app.cloud.setup.is_some() || app.session.cloud_configuring() {
         Err(tr("cloud.apply_pending").to_owned())
     } else if editor.draft == editor.baseline {
         app.cloud.editor = Some(editor);
@@ -132,7 +159,7 @@ pub(crate) fn advance(app: &mut SolveApp) -> Option<bool> {
             }
             _ => {}
         }
-    } else if editor.draft == editor.baseline && editor.baseline != live {
+    } else if !editor.dialog_open() && editor.draft == editor.baseline && editor.baseline != live {
         editor.baseline = live.clone();
         editor.draft = live;
     }
@@ -149,10 +176,14 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     begin(app);
     let Some(mut editor) = app.cloud.editor.take() else { return };
     let all = statuses(app);
-    let enabled = editor.pending.is_none() && !app.session.cloud_configuring() && app.cloud.setup.is_none();
+    let enabled = editor.pending.is_none() && !editor.dialog_open() && !app.session.cloud_configuring() && app.cloud.setup.is_none();
     ui_kit::settings_heading(ui, tr("cloud.title"), tr("cloud.settings_hint"));
     let mut reconnect = None;
     let mut connect = false;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut advanced = false;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut edit = None;
     ui.add_enabled_ui(enabled && app.services.cloud_host.is_some(), |ui| {
         ui_kit::settings_section(ui, "cloud_repositories", tr("cloud.connections"), |ui| {
             if editor.draft.connection(editor.selected.as_deref().unwrap_or("")).is_none() {
@@ -172,7 +203,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let r = ui.add(egui::TextEdit::singleline(&mut c.name).char_limit(4096));
                     crate::scenario::publish_target("cloud_settings:name", r.rect);
                 });
-                ui.label(&c.repository);
+                ui.label(if c.repository.is_empty() { &c.checkout } else { &c.repository });
                 let mut default = editor.draft.default_connection.as_deref() == Some(&c.id);
                 let r = ui.checkbox(&mut default, tr("cloud.default_repository"));
                 crate::scenario::publish_target("cloud_settings:default", r.rect);
@@ -198,6 +229,10 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     if c.provider == "github" && button(ui, "cloud_settings:reconnect", tr("cloud.reconnect"), true) {
                         reconnect = Some(c.clone());
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if button(ui, "cloud_settings:advanced", tr("cloud.git_edit"), !active) {
+                        edit = Some(c.clone());
                     }
                 });
                 if !applied {
@@ -235,6 +270,10 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::text(ui, tr("cloud.disconnect_hint"), ui_kit::Text::Hint("cloud_disconnect_hint"));
             }
             connect = button(ui, "cloud_settings:connect", tr("cmd.cloud.connect"), editor.draft.connections.len() < 128);
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                advanced = button(ui, "cloud_settings:add_git", tr("cloud.git_add"), editor.draft.connections.len() < 128);
+            }
         });
         ui_kit::settings_section(ui, "cloud_sync", tr("cmd.cloud.sync"), |ui| {
             let r = ui.checkbox(&mut editor.draft.sync_after_save, tr("cloud.sync_after_save"));
@@ -263,6 +302,13 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(connection) = reconnect {
         app.start("cloud.connect");
         crate::cloud_setup::prefill(app, connection);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if advanced || edit.is_some() {
+        app.start("cloud.configure");
+        if let Some(connection) = edit {
+            git::prefill(app, connection);
+        }
     }
 }
 
