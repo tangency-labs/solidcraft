@@ -8,6 +8,9 @@ use crate::{CurveKind, Sketch, SketchError, fit_beziers_mode};
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Seg2, Vec2};
 
+mod trim;
+pub use trim::FreeformOffsetOutput;
+
 pub const OFFSET_TOLERANCE: f64 = 0.002;
 const MAX_PIECES: usize = 256;
 const MAX_ASSOCIATIONS: usize = 128;

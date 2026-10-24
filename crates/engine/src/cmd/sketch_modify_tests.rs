@@ -1972,3 +1972,160 @@ fn fillet_radius_accepts_a_leading_equals_sign() {
     let plain = run(&mut s, "sketch.fillet", json!({"point": "c.end", "radius": "= 2 mm"}));
     assert!(plain["curves"].is_array());
 }
+
+/// A point midway between an offset output and its source, inside the wall they bound.
+fn inside_offset_wall(s: &Session, output: &str) -> Vec2 {
+    let sk = sketch(s);
+    let index = sk.curve_index(output).unwrap();
+    let q = sk.exact_pieces(index)[0].point_at(0.5);
+    let source: Vec<_> = (0..sk.curves.len()).filter(|i| *i < index && !sk.freeform_offsets.iter().any(|o| o.output == sk.curves[*i].id)).collect();
+    let p = source
+        .iter()
+        .flat_map(|i| sk.exact_pieces(*i))
+        .flat_map(|seg| (0..=2000).map(move |k| seg.point_at(k as f64 / 2000.0)))
+        .min_by(|a, b| a.dist(q).total_cmp(&b.dist(q)))
+        .unwrap();
+    p.lerp(q, 0.5)
+}
+
+#[test]
+fn freeform_offsets_trim_folds_and_round_chain_corners_into_an_extrudable_wall() {
+    // A cookie-cutter outline whose notch near (4.2, 36) bends with a radius of about
+    // 0.3 mm: 1.26 mm outwards its plain offset folds over itself there. The offset is
+    // trimmed to the parallel boundary (open splines meeting at a corner), unlinked.
+    let cookie = json!([
+        [0, 0],
+        [-1.6, 12.8],
+        [-7.4, 23.4],
+        [-4.8, 26.6],
+        [-8.6, 39],
+        [2.8, 41.6],
+        [4.2, 36],
+        [11.8, 43.2],
+        [17.2, 43.2],
+        [37.2, 24.6],
+        [38.6, 23],
+        [35.8, 16.4],
+        [35.8, 0],
+        [24.2, 0],
+        [9.6, 0]
+    ]);
+    let mut s = new_sketch();
+    run(&mut s, "sketch.spline.fit_point", json!({"points": cookie, "periodic": true}));
+    let (before, params) = (s.doc.to_json(), s.doc.params.len());
+    let out = run(&mut s, "sketch.offset", json!({"curves": ["s1"], "distance": 1.26}));
+    let curves = ids(&out["curves"]);
+    assert!(!curves.is_empty(), "{out}");
+    assert_eq!(out["param"], Value::Null, "a trimmed offset has no distance to drive: {out}");
+    assert_eq!(out["sketch"]["dof"], 30, "the offset adds no freedom (only the source's fit points move): {out}");
+    assert_eq!(s.doc.params.len(), params, "no orphan distance parameter");
+    let sk = sketch(&s);
+    assert!(sk.freeform_offsets.is_empty() && !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::OffsetDistance { .. })));
+    // The source and its offset bound the inner region and the wall around it.
+    let areas = profiles(&s);
+    assert_eq!(areas.len(), 2, "{areas:?}");
+    let wall = inside_offset_wall(&s, &curves[0]);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "profiles": [{"point": [wall.x, wall.y]}]}));
+    let volume = body_volumes(&mut s);
+    assert_eq!(volume.len(), 1);
+    assert!((volume[0] - 10.0 * areas[0]).abs() < 0.01 * volume[0], "{volume:?} for a wall of {} mm²", areas[0]);
+
+    // An outline the way drawing programs save it: cubic Bézier curves with two corners,
+    // a joint kinked by a few thousandths of a degree, and a zero-length handle. Each
+    // side is the parallel boundary, rounded at outer corners and trimmed at inner ones.
+    let svg = r#"<svg width="60mm" height="60mm" viewBox="-15 -15 60 60"><path d="M0,0 C10,-5 20,-5 30,0 C35,10 35,20 30,30 C25.0002,40 10,40 5,35 C4,31 8,20 8,20 C0,15 -5,5 0,0 Z"/></svg>"#;
+    for distance in [1.26, -1.26] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.insert_svg", json!({"text": svg}));
+        let sources = sketch(&s).curves.iter().map(|c| c.id.clone()).collect::<Vec<_>>();
+        assert_eq!(sources.len(), 5);
+        // Picking every curve of the chain makes one offset, not one per curve.
+        let out = run(&mut s, "sketch.offset", json!({"curves": sources, "distance": distance}));
+        let curves = ids(&out["curves"]);
+        let sk = sketch(&s);
+        assert!(
+            curves.iter().any(|c| matches!(sk.curves[sk.curve_index(c).unwrap()].kind, CurveKind::Arc { .. })),
+            "an outer corner is rounded: {out}"
+        );
+        assert_eq!(sk.curves.len(), 5 + curves.len());
+        let source: Vec<_> = (0..5).flat_map(|i| sk.exact_pieces(i)).collect();
+        for c in &curves {
+            for seg in sk.exact_pieces(sk.curve_index(c).unwrap()) {
+                for k in 0..=8 {
+                    let p = seg.point_at(k as f64 / 8.0);
+                    let d = source.iter().flat_map(|s| (0..=2000).map(move |j| s.point_at(j as f64 / 2000.0).dist(p))).fold(f64::INFINITY, f64::min);
+                    assert!((d - 1.26).abs() < solidcraft_sketch::OFFSET_TOLERANCE, "distance {d} at {p:?}");
+                }
+            }
+        }
+        let areas = profiles(&s);
+        assert_eq!(areas.len(), 2, "{areas:?}");
+        let wall = inside_offset_wall(&s, &curves[0]);
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 10, "profiles": [{"point": [wall.x, wall.y]}]}));
+        let volume = body_volumes(&mut s);
+        let ring = areas.iter().copied().fold(f64::INFINITY, f64::min).min((areas[1] - areas[0]).abs());
+        assert_eq!(volume.len(), 1);
+        assert!(volume[0] > 0.0 && (volume[0] - 10.0 * ring).abs() < 0.02 * volume[0], "{volume:?} against {areas:?}");
+    }
+}
+
+#[test]
+fn freeform_chain_offsets_take_the_straight_pieces_of_the_chain_along() {
+    // Outlines mix straight pieces with free-form ones: an SVG path with `L` commands, a
+    // text glyph (lines and conics). Picking one curve offsets the whole chain, lines too.
+    let distance = 1.26;
+    let certified = |s: &Session, curves: &[String]| {
+        let sk = sketch(s);
+        let offsets: Vec<usize> = curves.iter().map(|c| sk.curve_index(c).unwrap()).collect();
+        let source: Vec<_> = (0..sk.curves.len()).filter(|i| !offsets.contains(i)).flat_map(|i| sk.exact_pieces(i)).collect();
+        for &c in &offsets {
+            for seg in sk.exact_pieces(c) {
+                for k in 0..=8 {
+                    let p = seg.point_at(k as f64 / 8.0);
+                    let d = source.iter().flat_map(|s| (0..=2000).map(move |j| s.point_at(j as f64 / 2000.0).dist(p))).fold(f64::INFINITY, f64::min);
+                    assert!((d - distance).abs() < solidcraft_sketch::OFFSET_TOLERANCE, "distance {d} at {p:?}");
+                }
+            }
+        }
+    };
+
+    let svg = r#"<svg width="60mm" height="60mm" viewBox="-15 -15 60 60"><path d="M0,0 L30,0 C35,10 35,20 30,30 L0,30 Z"/></svg>"#;
+    for d in [distance, -distance] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.insert_svg", json!({"text": svg}));
+        let sk = sketch(&s);
+        let kinds = sk.curves.iter().map(|c| matches!(c.kind, CurveKind::Line { .. })).collect::<Vec<_>>();
+        assert_eq!(kinds, [true, false, true, true], "lines and one Bézier curve");
+        let line = sk.curves[0].id.clone();
+        let out = run(&mut s, "sketch.offset", json!({"curves": [line], "distance": d}));
+        let curves = ids(&out["curves"]);
+        assert!(!curves.is_empty(), "{out}");
+        assert_eq!(sketch(&s).curves.len(), 4 + curves.len());
+        certified(&s, &curves);
+        let areas = profiles(&s);
+        assert_eq!(areas.len(), 2, "{areas:?}");
+        let wall = inside_offset_wall(&s, &curves[0]);
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 10, "profiles": [{"point": [wall.x, wall.y]}]}));
+        assert_eq!(body_volumes(&mut s).len(), 1);
+    }
+
+    // The letter D: a straight stem and conic bowls, outside and inside.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.text", json!({"text": "D", "at": [0, 0], "height": 30}));
+    let sk = sketch(&s);
+    assert!(
+        sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Line { .. }))
+            && sk.curves.iter().any(|c| sk.shape(sk.curve_index(&c.id).unwrap()).is_none())
+    );
+    let line = sk.curves.iter().find(|c| matches!(c.kind, CurveKind::Line { .. })).unwrap().id.clone();
+    let out = run(&mut s, "sketch.offset", json!({"curves": [line], "distance": distance}));
+    let curves = ids(&out["curves"]);
+    assert!(!curves.is_empty(), "{out}");
+    certified(&s, &curves);
+}
