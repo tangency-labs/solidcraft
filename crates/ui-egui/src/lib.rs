@@ -812,6 +812,20 @@ impl SolveApp {
                 self.preferences.layout = layout;
                 self.ui.layout = layout;
             }
+            if matches!(id, "browser.expand_all" | "browser.collapse_all") {
+                let strings = |key: &str| -> Vec<String> {
+                    v.get(key)
+                        .and_then(Value::as_array)
+                        .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).take(10_000).collect())
+                        .unwrap_or_default()
+                };
+                browser::apply_fold(
+                    self,
+                    v.get("open").and_then(Value::as_bool).unwrap_or(id == "browser.expand_all"),
+                    &strings("open_by_default"),
+                    &strings("closed_by_default"),
+                );
+            }
             if id == "view.history_layout" {
                 if let Some(width) = v.get("width").and_then(Value::as_f64) {
                     self.preferences.timeline_left_width = ui_kit::history_snap_width(width as f32);

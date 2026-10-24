@@ -570,6 +570,26 @@ pub(crate) fn toggle(app: &mut SolveApp, key: &str, default: bool) {
     }
 }
 
+/// Apply Expand All / Collapse All: open-by-default keys live in `collapsed` when closed;
+/// closed-by-default keys live in `expanded` when open.
+pub fn apply_fold(app: &mut SolveApp, open: bool, open_by_default: &[String], closed_by_default: &[String]) {
+    if open {
+        for key in open_by_default {
+            app.tree.collapsed.remove(key);
+        }
+        for key in closed_by_default {
+            app.tree.expanded.insert(key.clone());
+        }
+    } else {
+        for key in open_by_default {
+            app.tree.collapsed.insert(key.clone());
+        }
+        for key in closed_by_default {
+            app.tree.expanded.remove(key);
+        }
+    }
+}
+
 /// Everything a frame's rows want done, applied after drawing.
 #[derive(Default)]
 struct Actions {

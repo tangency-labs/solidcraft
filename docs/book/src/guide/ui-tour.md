@@ -17,7 +17,9 @@
 - **Browser** (left). The design as a tree: document settings and units, named views, the
   origin, bodies, sketches, construction planes, canvases, joints and components. The eye shows or
   hides an item, a component's radio button makes it the active component, and right-clicking any
-  row gives that item's menu. Rows drag into groups and other components.
+  row gives that item's menu. Right-click the design or a component and choose **Expand All** or
+  **Collapse All** to open or close every folder under that row (the design row stays visible
+  when the whole tree is collapsed). Rows drag into groups and other components.
 - **Viewport.** Click to select, Shift or Ctrl to add (Preferences › Selection), drag for a window or crossing box. While sketching, Ctrl/Cmd or Alt/Option suppress auto-snap by default; Shift prefers a midpoint. To
   reach something under something else (two lines drawn on top of each other, coincident points,
   an edge in front of a face, overlapping bodies), hold the left button still for half a second

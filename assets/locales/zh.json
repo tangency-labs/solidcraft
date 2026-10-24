@@ -634,6 +634,8 @@
   "cmd.appearance_list": "列出外观",
   "cmd.assembly_bom": "物料清单",
   "cmd.body_rename": "重命名实体",
+  "cmd.browser_collapse_all": "全部折叠",
+  "cmd.browser_expand_all": "全部展开",
   "cmd.browser_group": "新建组",
   "cmd.browser_move": "移动浏览器项目",
   "cmd.browser_order": "排列浏览器项目",

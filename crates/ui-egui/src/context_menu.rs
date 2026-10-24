@@ -759,6 +759,7 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
                 item.params = Some(json!({"path": path}));
             }
             "ui.export" | "ui.saveMesh" => item.params = Some(json!({"bodies": bodies})),
+            "browser.expand_all" | "browser.collapse_all" => item.params = Some(json!({"path": path})),
             _ => {}
         }
     }
@@ -849,6 +850,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     v.push(act("ui.showAll", "Show All Bodies", "eye"));
     v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
     v.push(act("ui.newGroup", "New Group", "folder").with(json!({ "component": id })));
+    v.push(Item::sep());
+    v.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
+    v.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({ "component": id })));
     v
 }
 

@@ -634,6 +634,8 @@
   "cmd.appearance_list": "List Appearances",
   "cmd.assembly_bom": "Bill of Materials",
   "cmd.body_rename": "Rename Body",
+  "cmd.browser_collapse_all": "Collapse All",
+  "cmd.browser_expand_all": "Expand All",
   "cmd.browser_group": "New Group",
   "cmd.browser_move": "Move Browser Items",
   "cmd.browser_order": "Order Browser Items",

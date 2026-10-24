@@ -2,7 +2,10 @@
 //! groups and item order (kept in the design, so they are saved and undone like features).
 //!
 //! Browser items are keyed per component folder (`bodies`, `sketches`, `construction`): a body
-//! by name, a sketch or construction plane by feature id.
+//! by name, a sketch or construction plane by feature id. Expand All / Collapse All return the
+//! tree keys the UI opens or closes; they do not change the design.
+
+use std::collections::BTreeSet;
 
 use std::collections::BTreeMap;
 
@@ -45,6 +48,15 @@ pub static COMMANDS: &[CommandSpec] = &[
          or folder?: bodies|sketches|construction|origin|joints (all of it; showing also shows its browser folders and groups); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, c0/g7, c0/joints, c0/canvases] (the folder or group itself: its items keep their own state); \
          or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (requires paths and visible:true). Saved with the design; not an undo step",
+    ),
+    CommandSpec::new("browser.expand_all", "Expand All", expand_all).icon("folder").noundo().params(
+        "path?: [occurrence ids] (that placement and its descendants); component?: id (that component's own folders); \
+         omit both for the whole tree, including folders that start closed (Origin, Named Views, Features). \
+         Display only: open/closed rows are not saved in the design and are not an undo step → open, open_by_default, closed_by_default",
+    ),
+    CommandSpec::new("browser.collapse_all", "Collapse All", collapse_all).icon("folder").noundo().params(
+        "path?: [occurrence ids]; component?: id; omit both for the whole tree (the design row stays open so the first level remains visible). \
+         Display only; not an undo step → open, open_by_default, closed_by_default",
     ),
 ];
 
@@ -371,6 +383,156 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.revision += 1;
     Ok(json!({ "visible": visible, "changed": items.len(), "visibility": s.visibility }))
+}
+
+/// Browser rows that start open (`c0`, Bodies, placements) vs closed (Origin, Features).
+struct FoldKeys {
+    open: BTreeSet<String>,
+    closed: BTreeSet<String>,
+}
+
+enum FoldScope {
+    Tree,
+    Component(u64),
+    Occurrence(Vec<u64>),
+}
+
+const MAX_FOLD_KEYS: usize = 10_000;
+const MAX_FOLD_PLACEMENTS: usize = 100_000;
+
+fn occurrence_fold_key(path: &[u64]) -> String {
+    format!("o:{}", path.iter().map(u64::to_string).collect::<Vec<_>>().join("/"))
+}
+
+fn fold_path(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
+    let value = p.get("path").ok_or_else(|| bad(cmd, "`path` is required"))?;
+    let path = value
+        .as_array()
+        .filter(|a| !a.is_empty() && a.len() <= 64)
+        .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
+        .ok_or_else(|| bad(cmd, "`path` must list 1..64 occurrence ids"))?;
+    s.occurrence_placement(&path).map_err(|e| bad(cmd, e.to_string()))?;
+    Ok(path)
+}
+
+fn fold_scope(s: &Session, p: &Value, cmd: &str) -> Result<FoldScope> {
+    let has_path = p.get("path").is_some();
+    let has_component = p.get("component").is_some();
+    if has_path && has_component {
+        return Err(bad(cmd, "give `path` or `component`, not both"));
+    }
+    if has_path {
+        return Ok(FoldScope::Occurrence(fold_path(s, p, cmd)?));
+    }
+    if has_component {
+        let id = p.get("component").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`component` must be a component id"))?;
+        if id != 0 && !s.doc.components.iter().any(|c| c.id == id) {
+            return Err(bad(cmd, format!("no component {id}")));
+        }
+        return Ok(if id == 0 { FoldScope::Tree } else { FoldScope::Component(id) });
+    }
+    Ok(FoldScope::Tree)
+}
+
+fn folder_has_items(s: &Session, component: u64, folder: &str) -> bool {
+    match folder {
+        "bodies" => s.model.state().bodies.iter().any(|b| s.doc.model_body_component(b) == component),
+        "sketches" => s.doc.features.iter().any(|f| f.component == component && matches!(f.kind, FeatureKind::Sketch { .. })),
+        "construction" => s.doc.features.iter().any(|f| f.component == component && is_construction(&f.kind)),
+        _ => false,
+    }
+}
+
+fn has_native_features(s: &Session, component: u64) -> bool {
+    s.doc.features.iter().any(|f| f.component == component && !matches!(f.kind, FeatureKind::Sketch { .. }))
+}
+
+fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras: bool, keys: &mut FoldKeys) {
+    keys.open.insert(prefix.to_string());
+    for folder in FOLDERS {
+        if folder_has_items(s, component, folder) {
+            keys.open.insert(format!("{prefix}/{folder}"));
+        }
+    }
+    for g in s.doc.browser_groups.iter().filter(|g| g.component == component) {
+        keys.open.insert(format!("{prefix}/g{}", g.id));
+    }
+    if has_native_features(s, component) {
+        keys.closed.insert(format!("{prefix}/features"));
+    }
+    let occurrence = prefix.starts_with("o:");
+    for f in s.doc.features.iter().filter(|f| f.component == component) {
+        if let FeatureKind::Sketch { sketch, .. } = &f.kind
+            && !sketch.patterns.is_empty()
+        {
+            let key = if occurrence { format!("{prefix}/s:{}/patterns", f.id) } else { format!("s:{}/patterns", f.id) };
+            keys.open.insert(key);
+        }
+    }
+    if root_extras {
+        keys.closed.insert("docsettings".into());
+        keys.closed.insert("namedviews".into());
+        keys.closed.insert("origin".into());
+        if !s.doc.canvases.is_empty() {
+            keys.open.insert("canvases".into());
+        }
+        if !s.doc.assembly.joints.is_empty() {
+            keys.open.insert("c0/joints".into());
+        }
+        if s.section.is_some() {
+            keys.open.insert("analysis".into());
+        }
+    }
+}
+
+fn walk_fold(s: &Session, start: &[u64], root_extras: bool, keys: &mut FoldKeys, cmd: &str) -> Result<()> {
+    let mut stack = vec![start.to_vec()];
+    let mut count = 0usize;
+    while let Some(path) = stack.pop() {
+        count += 1;
+        if count > MAX_FOLD_PLACEMENTS {
+            return Err(bad(cmd, "expand/collapse exceeds 100000 placements"));
+        }
+        let component = if path.is_empty() { 0 } else { s.occurrence_placement(&path)?.component };
+        let prefix = if path.is_empty() { "c0".to_string() } else { occurrence_fold_key(&path) };
+        collect_component_keys(s, &prefix, component, root_extras && path.is_empty(), keys);
+        for child in s.occurrence_children(&path)? {
+            if child.path.len() > 64 {
+                continue;
+            }
+            stack.push(child.path);
+        }
+    }
+    Ok(())
+}
+
+fn fold_tree(s: &mut Session, p: &Value, open: bool, cmd: &str) -> Result<Value> {
+    let scope = fold_scope(s, p, cmd)?;
+    let mut keys = FoldKeys { open: BTreeSet::new(), closed: BTreeSet::new() };
+    match &scope {
+        FoldScope::Component(id) => collect_component_keys(s, &format!("c{id}"), *id, false, &mut keys),
+        FoldScope::Tree => walk_fold(s, &[], true, &mut keys, cmd)?,
+        FoldScope::Occurrence(path) => walk_fold(s, path, false, &mut keys, cmd)?,
+    }
+    if !open && matches!(scope, FoldScope::Tree) {
+        keys.open.remove("c0");
+    }
+    if keys.open.len().saturating_add(keys.closed.len()) > MAX_FOLD_KEYS {
+        return Err(bad(cmd, "expand/collapse exceeds 10000 browser rows"));
+    }
+    Ok(json!({
+        "open": open,
+        "open_by_default": keys.open.into_iter().collect::<Vec<_>>(),
+        "closed_by_default": keys.closed.into_iter().collect::<Vec<_>>(),
+    }))
+}
+
+fn expand_all(s: &mut Session, p: &Value) -> Result<Value> {
+    fold_tree(s, p, true, "browser.expand_all")
+}
+
+fn collapse_all(s: &mut Session, p: &Value) -> Result<Value> {
+    fold_tree(s, p, false, "browser.collapse_all")
 }
 
 fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1339,5 +1501,73 @@ mod tests {
             assert!(s.execute("browser.visibility", &p).is_err(), "{p}");
         }
         assert_eq!(s.visibility.hidden_folders, vec!["o:4/sketches".to_string()]);
+    }
+
+    fn strs(v: &Value, k: &str) -> Vec<String> {
+        v.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default()
+    }
+
+    #[test]
+    fn expand_and_collapse_all_return_tree_keys_and_are_not_undoable() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        let g = run(&mut s, "browser.group", json!({"folder": "bodies"}))["group"].as_u64().unwrap();
+        let created = run(&mut s, "component.create", json!({"name": "Part"}));
+        let occ = created["occurrence"].as_u64().unwrap();
+        let n = s.undo.len();
+
+        let expanded = run(&mut s, "browser.expand_all", json!({}));
+        assert_eq!(expanded["open"], true);
+        let open = strs(&expanded, "open_by_default");
+        let closed = strs(&expanded, "closed_by_default");
+        assert!(open.contains(&"c0".into()), "{open:?}");
+        assert!(open.contains(&"c0/bodies".into()), "{open:?}");
+        assert!(open.contains(&format!("c0/g{g}")), "{open:?}");
+        assert!(open.contains(&"c0/sketches".into()), "{open:?}");
+        assert!(open.contains(&format!("o:{occ}")), "{open:?}");
+        assert!(closed.contains(&"origin".into()) && closed.contains(&"namedviews".into()) && closed.contains(&"docsettings".into()), "{closed:?}");
+        assert!(closed.contains(&"c0/features".into()), "{closed:?}");
+        assert_eq!(s.undo.len(), n, "display-only: no undo step");
+
+        let collapsed = run(&mut s, "browser.collapse_all", json!({}));
+        assert_eq!(collapsed["open"], false);
+        let open = strs(&collapsed, "open_by_default");
+        assert!(!open.contains(&"c0".into()), "the design row stays visible: {open:?}");
+        assert!(open.contains(&"c0/bodies".into()) && open.contains(&format!("o:{occ}")), "{open:?}");
+
+        let below = run(&mut s, "browser.collapse_all", json!({"path": [occ]}));
+        let open = strs(&below, "open_by_default");
+        assert!(open.contains(&format!("o:{occ}")), "{open:?}");
+        assert!(!open.contains(&"c0/bodies".into()), "{open:?}");
+        assert!(strs(&below, "closed_by_default").iter().all(|k| !k.starts_with("c0") && k != "origin"), "{below}");
+
+        let only = run(&mut s, "browser.expand_all", json!({"component": created["component"]}));
+        let open = strs(&only, "open_by_default");
+        assert!(open.iter().any(|k| k.starts_with('c') && k != "c0" && !k.starts_with("c0/")), "{open:?}");
+        assert!(!open.contains(&format!("o:{occ}")), "{open:?}");
+    }
+
+    #[test]
+    fn expand_and_collapse_all_refuse_hostile_scope() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        let created = run(&mut s, "component.create", json!({"name": "Part"}));
+        let occ = created["occurrence"].as_u64().unwrap();
+        for (cmd, p) in [
+            ("browser.expand_all", json!({"path": []})),
+            ("browser.expand_all", json!({"path": "o:1"})),
+            ("browser.expand_all", json!({"path": [999]})),
+            ("browser.expand_all", json!({"component": "root"})),
+            ("browser.collapse_all", json!({"component": 99})),
+            ("browser.collapse_all", json!({"path": [occ], "component": 0})),
+            (
+                "browser.expand_all",
+                json!({"path": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65]}),
+            ),
+        ] {
+            assert!(s.execute(cmd, &p).is_err(), "{cmd} {p}");
+        }
+        assert!(s.execute("browser.expand_all", &json!({})).is_ok());
     }
 }
