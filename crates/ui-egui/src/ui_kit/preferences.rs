@@ -51,13 +51,32 @@ pub(crate) fn settings_heading(ui: &mut Ui, title: &str, description: &str) {
 }
 
 /// Settings reuse the same disclosure, uppercase typography and rule as the design system.
-pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, mut add: impl FnMut(&mut Ui) -> R) -> Option<R> {
     if crate::prefs_search::querying(ui) {
         crate::prefs_search::begin_section(ui, title);
+        if !ui.is_visible() {
+            return Some(add(ui));
+        }
+        if crate::prefs_search::shows_all(ui) {
+            let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-section", key), false);
+            let result = add(&mut child);
+            crate::prefs_search::place_search_child(ui, &child);
+            return Some(result);
+        }
+        let mark = crate::prefs_search::search_layout_mark(ui);
         let before = crate::prefs_search::hits(ui);
-        let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-section", key));
+        let (gained, missed) = {
+            let mut probe = crate::prefs_search::detached_child(ui, ("prefs-search-section-probe", key), true);
+            let missed = add(&mut probe);
+            (crate::prefs_search::hits(ui) > before, missed)
+        };
+        crate::prefs_search::restore_search_layout(ui, mark);
+        if !gained {
+            return Some(missed);
+        }
+        let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-section", key), false);
         let result = add(&mut child);
-        crate::prefs_search::commit_search_child(ui, &child, before);
+        crate::prefs_search::place_search_child(ui, &child);
         return Some(result);
     }
     let t = Tokens::get();

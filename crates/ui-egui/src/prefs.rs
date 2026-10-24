@@ -1698,10 +1698,24 @@ fn up_axis_changed(app: &mut SolveApp) {
 fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     let _search = crate::prefs_search::begin(ui, &app.prefs_window.filter);
     if crate::prefs_search::querying(ui) {
+        // Paint only the pages that match. A first pass is invisible, so the 3D mouse rows and the
+        // agent list cannot draw on top of the setting that did match.
+        let mut keep = vec![false; WINDOW_PAGES.len()];
         for (index, item) in WINDOW_PAGES.iter().enumerate() {
             crate::prefs_search::begin_page(ui, crate::i18n::tr(item.label));
             let before = crate::prefs_search::hits(ui);
-            let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-page", index));
+            let mut probe = crate::prefs_search::detached_child(ui, ("prefs-search-probe", index), true);
+            draw_page(app, &mut probe, index, t);
+            keep[index] = crate::prefs_search::hits(ui) > before;
+        }
+        crate::prefs_search::rewind_search_layout(ui);
+        for (index, item) in WINDOW_PAGES.iter().enumerate() {
+            if !keep.get(index).copied().unwrap_or(false) {
+                continue;
+            }
+            crate::prefs_search::begin_page(ui, crate::i18n::tr(item.label));
+            let before = crate::prefs_search::hits(ui);
+            let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-page", index), false);
             draw_page(app, &mut child, index, t);
             crate::prefs_search::commit_search_child(ui, &child, before);
         }

@@ -120,9 +120,11 @@ pub(crate) fn settings_axis_row(
     source: impl FnOnce(&mut Ui),
 ) {
     if crate::prefs_search::querying(ui) && crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[name]) {
-        invert(ui);
-        speed(ui);
-        source(ui);
+        crate::prefs_search::run_hidden(ui, name, |ui| {
+            invert(ui);
+            speed(ui);
+            source(ui);
+        });
         return;
     }
     if crate::prefs_search::querying(ui) {
@@ -186,6 +188,9 @@ pub(crate) fn live_axis_bar_in(ui: &Ui, live_rect: Rect, value: f32, dead_zone: 
 
 /// Compact per-axis gain uses a consistent two-decimal specimen and the real accepted range.
 pub(crate) fn settings_axis_gain(ui: &mut Ui, gain: &mut f32) -> egui::Response {
+    if !ui.is_visible() || crate::prefs_search::suppress_chrome(ui) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     let response =
         ui.add(egui::DragValue::new(gain).range(0.0..=3.0).speed(0.05).suffix("×").fixed_decimals(2).custom_parser(crate::prefs::parse_number));
     response.widget_info(|| {
