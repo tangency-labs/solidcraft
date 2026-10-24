@@ -303,6 +303,17 @@ pub struct Pending {
     pub files: Vec<attach::Attachment>,
 }
 
+impl Pending {
+    /// After its text was edited: the marks that still stand for a group are numbered 1, 2, 3 again,
+    /// a mark of no group is plain text, and the items of a group whose mark was taken out are
+    /// not placed any more (they show as chips).
+    fn regroup(&mut self) {
+        let (text, order) = pills::renumber(&self.text, &self.context.groups);
+        self.text = text;
+        self.context = std::mem::take(&mut self.context).regrouped(&order);
+    }
+}
+
 /// A request held for Allow or Deny.
 struct Held {
     id: u64,
@@ -1485,7 +1496,6 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.items.clear();
     chat.turn_warning = None;
     chat.gallery = None;
-    chat.pills.clear();
     chat.chips_version += 1;
     chat.pending.clear();
     chat.attachments.clear();

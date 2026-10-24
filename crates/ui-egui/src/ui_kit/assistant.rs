@@ -278,7 +278,7 @@ pub(crate) fn assistant_hint_galley(ui: &Ui, hint: &str, width: f32) -> std::syn
 }
 
 /// The composer's editor with a caller-supplied text layout (the pills of a message are drawn by
-/// it). Everything else is as [`assistant_input`]; the output carries the galley and the caret.
+/// it). Everything else is as `assistant_input`; the output carries the galley and the caret.
 /// Tokens: as `assistant_input`.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn assistant_input_laid_out(

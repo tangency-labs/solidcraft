@@ -1690,7 +1690,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let flags = app.agent_chat.gone.sent.get(&n).map(Vec::as_slice).unwrap_or_default();
                     let (rest, rest_flags) = unplaced(context, flags);
                     if let Some(at) = context_chips(ui, &rest, &rest_flags, &format!("agent_chat:sent:{n}")).hovered {
-                        hover_sels = rest.items.get(at).map(|i| lit(&app.session, std::iter::once(i)));
+                        hover_sels = rest.items.get(at).map(|i| lit(ui.ctx(), &app.session, std::iter::once(i)));
                     }
                     files_line(ui, files.iter().map(String::as_str));
                     if copyable {
@@ -1894,15 +1894,17 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     _ => {
                         if !p.text.is_empty()
-                            && let Some(sels) = user_text(ui, &app.session, &p.text, &p.context, &[], "agent_chat:queued")
+                            && let Some(sels) = user_text(ui, &app.session, &p.text, &p.context, &[], &format!("agent_chat:queued:{n}"))
                         {
                             hover_sels = Some(sels);
                         }
                         if p.image {
                             ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(crate::theme::Tokens::get().font_small));
                         }
-                        let (rest, _) = unplaced(&p.context, &[]);
-                        let _ = context_chips(ui, &rest, &[], "agent_chat:queued");
+                        let (rest, rest_flags) = unplaced(&p.context, &[]);
+                        if let Some(at) = context_chips(ui, &rest, &rest_flags, &format!("agent_chat:queued:{n}")).hovered {
+                            hover_sels = rest.items.get(at).map(|i| lit(ui.ctx(), &app.session, std::iter::once(i)));
+                        }
                         files_line(ui, p.files.iter().map(|f| f.name.as_str()));
                     }
                 }
@@ -1943,6 +1945,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some((n, text)) = edit_done {
         if let (Some(text), Some(p)) = (text.filter(|t| !t.trim().is_empty()), app.agent_chat.pending.get_mut(n)) {
             p.text = text;
+            p.regroup();
         }
         app.agent_chat.pending_edit = None;
     }
@@ -1988,16 +1991,40 @@ fn files_line<'a>(ui: &mut egui::Ui, names: impl Iterator<Item = &'a str>) {
 const CHIP_W: f32 = 170.0;
 
 /// What the entries stand for in the design as it is now, to light up (see `context::current_sels`).
-fn lit<'a>(session: &solidcraft_engine::Session, entries: impl Iterator<Item = &'a context::Entry>) -> Vec<solidcraft_engine::Sel> {
+///
+/// Worked out again only when the design or the entries change: while the pointer rests on a pill
+/// this is asked every frame.
+fn lit<'a>(
+    ctx: &egui::Context,
+    session: &solidcraft_engine::Session,
+    entries: impl Iterator<Item = &'a context::Entry>,
+) -> Vec<solidcraft_engine::Sel> {
+    use std::hash::{Hash, Hasher};
+    let entries: Vec<&context::Entry> = entries.collect();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (Arc::as_ptr(&session.doc) as usize).hash(&mut hasher);
+    for e in &entries {
+        (&e.label, &e.detail, e.group, &e.names).hash(&mut hasher);
+    }
+    let key = hasher.finish();
+    let id = Id::new("sc_agent_chat_lit");
+    if let Some((cached, sels)) = ctx.data(|d| d.get_temp::<(u64, Vec<solidcraft_engine::Sel>)>(id))
+        && cached == key
+    {
+        return sels;
+    }
     let mut names = context::NameCache::new();
-    entries.flat_map(|e| context::current_sels(session, e, &mut names)).collect()
+    let sels: Vec<solidcraft_engine::Sel> = entries.iter().flat_map(|e| context::current_sels(session, e, &mut names)).collect();
+    ctx.data_mut(|d| d.insert_temp(id, (key, sels.clone())));
+    sels
 }
 
 /// The items of a message that are not pills in its text (those of Attach selection, or all of them
 /// when the message has no pills), with their "gone" flags: the chips below the message.
-fn unplaced(context: &Context, gone: &[bool]) -> (Context, Vec<bool>) {
+fn unplaced<'a>(context: &'a Context, gone: &'a [bool]) -> (std::borrow::Cow<'a, Context>, std::borrow::Cow<'a, [bool]>) {
+    use std::borrow::Cow;
     if context.groups.is_empty() {
-        return (context.clone(), gone.to_vec());
+        return (Cow::Borrowed(context), Cow::Borrowed(gone));
     }
     let mut rest = Context { omitted: context.omitted, ..Context::default() };
     let mut flags = Vec::new();
@@ -2005,7 +2032,7 @@ fn unplaced(context: &Context, gone: &[bool]) -> (Context, Vec<bool>) {
         rest.items.push(item.clone());
         flags.push(gone.get(at).copied().unwrap_or(false));
     }
-    (rest, flags)
+    (Cow::Owned(rest), Cow::Owned(flags))
 }
 
 /// A sent message's text, its pills drawn as pills: `gone` flags the context's items that have left
@@ -2040,10 +2067,10 @@ fn user_text(
         crate::scenario::publish_handle(&format!("{handle}:pill:{}", span.id), response.rect.min + row.center().to_vec2());
     }
     // The pointer on a pill: which one is read from the text layout, which starts at the label's corner.
-    let pos = ui.input(|i| i.pointer.hover_pos()).filter(|p| response.rect.contains(*p))?;
+    let pos = response.hover_pos()?;
     let at = galley.cursor_from_pos(pos - response.rect.min).index.0;
     let id = pills::spans(text).into_iter().find(|s| s.start <= at && at < s.end).map(|s| s.id)?;
-    Some(lit(session, context.items.iter().filter(|i| i.group == id)))
+    Some(lit(ui.ctx(), session, context.items.iter().filter(|i| i.group == id)))
 }
 
 /// The id of the message box.
@@ -2144,7 +2171,7 @@ fn pill_input(app: &mut SolveApp, ui: &mut egui::Ui, focused: bool, hint: &str) 
         let at = out.galley.cursor_from_pos(pos - out.galley_pos).index.0;
         let over = pills::spans(&app.agent_chat.input).into_iter().find(|s| s.start <= at && at < s.end);
         if let Some(pill) = over.and_then(|s| app.agent_chat.pills.iter().find(|p| p.id == s.id)) {
-            app.agent_chat.hover = lit(&app.session, pill.context.items.iter());
+            app.agent_chat.hover = lit(&ctx, &app.session, pill.context.items.iter());
             let tip = pill.context.items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>().join("\n");
             return out.response.response.on_hover_text(tip);
         }

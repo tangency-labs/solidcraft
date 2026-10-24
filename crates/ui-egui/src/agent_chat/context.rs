@@ -134,6 +134,28 @@ impl Context {
         self
     }
 
+    /// The same with the groups renumbered: `order` lists the old number of each group that is
+    /// still in the text, in reading order (it becomes 1, 2, ...); the items of any other group
+    /// are not placed any more.
+    pub fn regrouped(mut self, order: &[u32]) -> Context {
+        let number = |old: u32| order.iter().position(|o| *o == old).map(|n| u32::try_from(n + 1).unwrap_or(u32::MAX)).unwrap_or(0);
+        let labels: Vec<(u32, String)> = order
+            .iter()
+            .enumerate()
+            .filter_map(|(n, old)| {
+                let label = self.groups.iter().find(|(g, _)| g == old)?.1.clone();
+                Some((u32::try_from(n + 1).unwrap_or(u32::MAX), label))
+            })
+            .collect();
+        for item in &mut self.items {
+            if item.group > 0 {
+                item.group = number(item.group);
+            }
+        }
+        self.groups = labels;
+        self
+    }
+
     /// The highest pill number.
     pub fn last_group(&self) -> u32 {
         self.groups.iter().map(|(n, _)| *n).max().unwrap_or(0)
@@ -242,8 +264,25 @@ impl Context {
     }
 }
 
-/// Persistent names of a body's faces and of its edges, kept per body while checking a batch.
-pub type NameCache = HashMap<String, (Vec<String>, Vec<String>)>;
+/// Persistent names of a body's faces and of its edges, kept per body while checking a batch, and
+/// only worked out for what is asked (edge names cost more than face names).
+#[derive(Default)]
+pub struct NameCache {
+    faces: HashMap<String, Vec<String>>,
+    edges: HashMap<String, Vec<String>>,
+}
+
+impl NameCache {
+    pub fn new() -> NameCache {
+        NameCache::default()
+    }
+
+    /// The names of a body's faces (`edges`: of its edges), made by `make` the first time.
+    fn names(&mut self, body: &str, edges: bool, make: impl FnOnce() -> Vec<String>) -> &[String] {
+        let map = if edges { &mut self.edges } else { &mut self.faces };
+        map.entry(body.to_string()).or_insert_with(make)
+    }
+}
 
 /// Whether what `entry` stands for has left the design: its body or feature is gone, or none of its
 /// faces or edges has its persistent name any more (they survive edits, so the item was changed
@@ -259,10 +298,14 @@ pub fn is_gone(session: &Session, entry: &Entry, names: &mut NameCache) -> bool 
             if entry.names.is_empty() {
                 return false;
             }
-            let (faces, edges) = names.entry(body.clone()).or_insert_with(|| {
-                (solidcraft_engine::doc::naming::face_names(model_body).to_vec(), solidcraft_engine::doc::naming::edge_names(model_body))
+            let edges = !matches!(sel, Sel::Face { .. });
+            let current = names.names(body, edges, || {
+                if edges {
+                    solidcraft_engine::doc::naming::edge_names(model_body)
+                } else {
+                    solidcraft_engine::doc::naming::face_names(model_body).to_vec()
+                }
             });
-            let current = if matches!(sel, Sel::Face { .. }) { faces } else { edges };
             !entry.names.iter().any(|n| current.contains(n))
         }
         _ => false,
@@ -287,10 +330,9 @@ pub fn current_sels(session: &Session, entry: &Entry, names: &mut NameCache) -> 
     }
     let state = session.world_state();
     let Some(model_body) = state.body(body) else { return Vec::new() };
-    let (faces, edges) = names
-        .entry(body.clone())
-        .or_insert_with(|| (solidcraft_engine::doc::naming::face_names(model_body).to_vec(), solidcraft_engine::doc::naming::edge_names(model_body)));
-    let current = if is_face { faces } else { edges };
+    let current = names.names(body, !is_face, || {
+        if is_face { solidcraft_engine::doc::naming::face_names(model_body).to_vec() } else { solidcraft_engine::doc::naming::edge_names(model_body) }
+    });
     // The names go with the pieces in order; the point to look at stays the piece's.
     let paired = entry.names.len() == entry.sels.len();
     let mut lit = Vec::new();
@@ -402,7 +444,7 @@ fn join_pieces(session: &mut Session, group: &[Sel], item: &mut Entry, listings:
             _ => None,
         };
         if let Some(f) = found {
-            if let Some(n) = f["name"].as_str() {
+            if let Some(n) = f["name"].as_str().filter(|n| !n.is_empty()) {
                 names.push(n.to_string());
             }
             if let Some(v) = f[if unit == "mm" { "length" } else { "area" }].as_f64() {
@@ -456,7 +498,7 @@ fn entry(session: &mut Session, sel: &Sel, listings: &mut HashMap<(&'static str,
             }
             parts.push(format!("pick point {}", point3(&json!(point))));
             let mut entry = Entry::new(Kind::Element, format!("{shape} · {body}"), parts.join(", "));
-            entry.names = face.as_ref().and_then(|f| f["name"].as_str()).map(str::to_string).into_iter().collect();
+            entry.names = face.as_ref().and_then(|f| f["name"].as_str()).filter(|n| !n.is_empty()).map(str::to_string).into_iter().collect();
             entry
         }
         Sel::Edge { body, index, point } => {
@@ -476,7 +518,7 @@ fn entry(session: &mut Session, sel: &Sel, listings: &mut HashMap<(&'static str,
             }
             parts.push(format!("pick point {}", point3(&json!(point))));
             let mut entry = Entry::new(Kind::Element, format!("{shape} · {body}"), parts.join(", "));
-            entry.names = edge.as_ref().and_then(|e| e["name"].as_str()).map(str::to_string).into_iter().collect();
+            entry.names = edge.as_ref().and_then(|e| e["name"].as_str()).filter(|n| !n.is_empty()).map(str::to_string).into_iter().collect();
             entry
         }
         Sel::Vertex { body, point } => Entry::new(Kind::Element, format!("Vertex of {body}"), format!("at {}", point3(&json!(point)))),

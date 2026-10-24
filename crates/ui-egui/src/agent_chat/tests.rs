@@ -4600,6 +4600,7 @@ fn enter_and_the_control_channel_send_the_box_with_its_pills() {
     h.call("ui.agent_chat", json!({"send_input": true}));
     assert!(matches!(last_user(&h), Some(Item::User { context, .. }) if context.groups.len() == 1), "the control channel sent it");
     assert!(h.app.agent_chat.input.is_empty());
+    assert!(h.app.agent_chat.pills.is_empty(), "the picks went with the message");
 }
 
 /// A pill (or chip) lights the face it was made for even after an edit has renumbered the faces:
@@ -4619,8 +4620,8 @@ fn a_chip_lights_its_face_by_name_after_the_faces_are_renumbered() {
     let mut entry = context::describe(&mut app.session, std::slice::from_ref(&sel)).items[0].clone();
     let mut names = context::NameCache::new();
     assert_eq!(context::current_sels(&app.session, &entry, &mut names), vec![sel.clone()], "untouched: as picked");
-    // An edit renumbers the faces: what was picked as number 5 is now number 0 (the chip keeps the
-    // number it was made with, and its name).
+    // An edit has renumbered the faces: the chip still holds the number it was made with (here the
+    // number of another face), and the name of the face it stands for.
     let was = entry.sels.clone();
     entry.sels = vec![pick(&first)];
     entry.names = context::describe(&mut app.session, &was).items[0].names.clone();
@@ -4632,4 +4633,36 @@ fn a_chip_lights_its_face_by_name_after_the_faces_are_renumbered() {
     // A name no face has any more: gone, lights nothing.
     entry.names = vec!["F99:nowhere".into()];
     assert!(context::current_sels(&app.session, &entry, &mut names).is_empty());
+}
+
+/// Editing a queued message: the marks that are left keep their groups (numbered 1, 2, ... again), a
+/// group whose mark was taken out is not placed any more (its items show as chips), and a mark typed
+/// by hand stands for nothing.
+#[test]
+fn editing_a_queued_message_keeps_its_marks_and_groups_together() {
+    let (mut app, _script, _ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    let mut context = context::describe(&mut app.session, &sels[3..]).in_group(1, "Body1");
+    context.merge(context::describe(&mut app.session, &sels[2..3]).in_group(2, "the feature"));
+    let mut queued = Pending { text: "fit «1: Body1» to «2: the feature» now".into(), image: false, context, files: Vec::new() };
+    queued.text = "fit «2: the feature» to «9: typed» now".into();
+    queued.regroup();
+    assert_eq!(queued.text, "fit «1: the feature» to ‹9: typed› now");
+    assert_eq!(queued.context.groups, vec![(1, "the feature".to_string())]);
+    let group_of = |kind: context::Kind| queued.context.items.iter().find(|i| i.kind == kind).map(|i| i.group);
+    assert_eq!(group_of(context::Kind::Feature), Some(1), "the feature is the first mark now");
+    assert_eq!(group_of(context::Kind::Body), Some(0), "the body's mark was taken out: it is not placed");
+    assert_eq!(queued.context.items.iter().filter(|i| i.group == 0).count(), 1, "one chip is left for the body");
+}
+
+/// New chat keeps the box as it is, with the picks its marks stand for.
+#[test]
+fn new_chat_keeps_the_draft_and_its_picks() {
+    let (mut app, _script, _ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.input = "see ".into();
+    pick_pill(&mut app, 4, &sels[3..]);
+    new_chat(&mut app);
+    assert_eq!(app.agent_chat.pills.len(), 1, "the mark is still in the box, and so is what it stands for");
+    assert_eq!(pills::spans(&app.agent_chat.input).len(), 1);
 }
