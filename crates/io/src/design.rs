@@ -225,6 +225,7 @@ fn write_container(
     thumbnail: Option<&[u8]>,
     budget: usize,
 ) -> Result<Vec<u8>> {
+    doc.render.validate().map_err(invalid)?;
     let mut writer = PackageWriter { zip: zip::ZipWriter::new(Cursor::new(Vec::new())), names: BTreeSet::new(), expanded: 0, resolved: 0 };
     let mut features = Vec::with_capacity(doc.features.len());
     for feature in &doc.features {
@@ -270,7 +271,17 @@ fn write_container(
         value.as_object_mut().ok_or_else(|| invalid("canvas metadata"))?.insert("image_blob".into(), blob);
         canvases.push(value);
     }
-    let metadata = replace(doc, fields([("features", Value::Array(features)), ("canvases", Value::Array(canvases))])).map_err(invalid)?;
+    let mut replacements = fields([("features", Value::Array(features)), ("canvases", Value::Array(canvases))]);
+    if !doc.render.resources.is_empty() {
+        let mut resources = Map::new();
+        for (id, resource) in doc.render.resources.iter() {
+            let blob = writer.blob(resource.bytes(), "hdr", false)?;
+            resources.insert(id.to_string(), json!({"kind":"radiance_hdr","data":"","hdr_blob":blob}));
+        }
+        let render = replace(doc.render.as_ref(), fields([("resources", Value::Object(resources))])).map_err(invalid)?;
+        replacements.insert("render".into(), render);
+    }
+    let metadata = replace(doc, replacements).map_err(invalid)?;
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
     writer.part("container.json", &serde_json::to_vec(&json!({"format": VERSION})).map_err(invalid)?, false)?;
@@ -436,7 +447,8 @@ impl<R: Read + Seek> PackageReader<R> {
         if expected > limit as u64 {
             return Err(invalid("part too large"));
         }
-        let mut bytes = Vec::with_capacity(expected as usize);
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(expected as usize).map_err(|_| invalid("could not reserve required part"))?;
         // A compressed part may expand beyond its declared size (a decompression bomb): stop
         // one byte past it instead of at the limit.
         part.take(expected + 1).read_to_end(&mut bytes).map_err(invalid)?;
@@ -446,6 +458,9 @@ impl<R: Read + Seek> PackageReader<R> {
         Ok(bytes)
     }
     fn blob(&mut self, value: &Value, field: &str, extension: &str) -> Result<&[u8]> {
+        self.limited_blob(value, field, extension, if extension == "step" { MAX_STEP_PART } else { MAX_PART })
+    }
+    fn limited_blob(&mut self, value: &Value, field: &str, extension: &str, limit: usize) -> Result<&[u8]> {
         let name = value.get(field).and_then(Value::as_str).ok_or_else(|| invalid(format!("missing `{field}` reference")))?;
         let hash = name
             .strip_prefix("blobs/")
@@ -453,13 +468,16 @@ impl<R: Read + Seek> PackageReader<R> {
             .filter(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
             .ok_or_else(|| invalid("invalid blob reference"))?;
         if !self.blobs.contains_key(name) {
-            let bytes = self.part(name)?;
+            let bytes = self.limited_part(name, limit)?;
             if digest(&bytes) != hash {
                 return Err(invalid(format!("blob hash mismatch: {name}")));
             }
             self.blobs.insert(name.to_owned(), bytes);
         }
         let bytes = self.blobs.get(name).ok_or_else(|| invalid("missing blob"))?;
+        if bytes.len() > limit {
+            return Err(invalid("blob exceeds its resource budget"));
+        }
         // Count repeated references too: a tiny archive must not expand into unbounded
         // owned document strings/arrays when the same blob is referenced repeatedly.
         self.hydrated =
@@ -663,8 +681,18 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         return Err(invalid("unsupported container version"));
     }
     let bytes = reader.document(MAX_DESIGN_BYTES)?;
-    let metadata: Value = serde_json::from_slice(&bytes).map_err(invalid)?;
-    let text = std::str::from_utf8(&bytes).map_err(invalid)?;
+    check_hdr_manifest(&bytes)?;
+    let mut metadata: Value = serde_json::from_slice(&bytes).map_err(invalid)?;
+    // HDR's typed JSON representation is deliberately strict: no empty placeholders or
+    // container-only blob fields may reach the document deserializer.
+    let hydrated_hdr = hydrate_hdr_resources(&mut metadata, reader)?;
+    let hydrated_text;
+    let text = if hydrated_hdr {
+        hydrated_text = serde_json::to_string(&metadata).map_err(invalid)?;
+        &hydrated_text
+    } else {
+        std::str::from_utf8(&bytes).map_err(invalid)?
+    };
     // Migrations and all document validation run on the small parametric metadata.
     // Binary arrays have their own equivalent numeric/index validation below.
     let mut doc = Document::from_json(text)?;
@@ -701,6 +729,121 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         canvas.data = solidcraft_doc::canvas::base64_encode(bytes);
     }
     Ok(doc)
+}
+
+/// Admit the resource map before Value allocation or duplicate-key coalescing. Encoded
+/// sources in a container are mandatory blobs, never arbitrary inline base64 strings.
+fn check_hdr_manifest(bytes: &[u8]) -> Result<()> {
+    use serde::{
+        Deserialize,
+        de::{MapAccess, Visitor},
+    };
+    use solidcraft_doc::render_resources::{HdrId, MAX_HDR_RESOURCES};
+    #[derive(Default, Deserialize)]
+    struct Render {
+        #[serde(default, deserialize_with = "resources")]
+        resources: (),
+    }
+    #[derive(Deserialize)]
+    struct Metadata {
+        #[serde(default)]
+        render: Render,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Entry {
+        #[serde(deserialize_with = "kind")]
+        kind: (),
+        #[serde(deserialize_with = "data")]
+        data: (),
+        #[serde(deserialize_with = "blob")]
+        hdr_blob: (),
+    }
+    fn marker<'de, D: serde::Deserializer<'de>>(d: D, expected: &'static str) -> std::result::Result<(), D::Error> {
+        let raw = <&serde_json::value::RawValue>::deserialize(d)?;
+        let maximum = match expected {
+            "radiance_hdr" => 12,
+            "empty data" => 0,
+            _ => 74,
+        };
+        if raw.get().len() > maximum * 6 + 2 {
+            return Err(serde::de::Error::custom("HDR metadata marker exceeds its budget"));
+        }
+        let value: String = serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?;
+        let valid = match expected {
+            "radiance_hdr" => value == "radiance_hdr",
+            "empty data" => value.is_empty(),
+            _ => value
+                .strip_prefix("blobs/")
+                .and_then(|v| v.strip_suffix(".hdr"))
+                .is_some_and(|v| v.len() == 64 && v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))),
+        };
+        if valid { Ok(()) } else { Err(serde::de::Error::custom(format!("HDR metadata requires {expected}"))) }
+    }
+    fn kind<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        marker(d, "radiance_hdr")
+    }
+    fn data<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        marker(d, "empty data")
+    }
+    fn blob<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        marker(d, "an HDR blob reference")
+    }
+    fn resources<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        struct Resources;
+        impl<'de> Visitor<'de> for Resources {
+            type Value = ();
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("unique bounded HDR blob references")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+                let mut keys = BTreeSet::new();
+                while let Some(id) = map.next_key::<HdrId>()? {
+                    if keys.len() == MAX_HDR_RESOURCES || !keys.insert(id) {
+                        return Err(serde::de::Error::custom("too many or duplicate embedded HDR resources"));
+                    }
+                    let Entry { kind: (), data: (), hdr_blob: () } = map.next_value()?;
+                }
+                Ok(())
+            }
+        }
+        d.deserialize_map(Resources)
+    }
+    let Metadata { render: Render { resources: () } } = serde_json::from_slice(bytes).map_err(invalid)?;
+    Ok(())
+}
+
+fn hydrate_hdr_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut PackageReader<R>) -> Result<bool> {
+    use solidcraft_doc::render_resources::{HdrId, MAX_HDR_RESOURCE_BYTES, MAX_HDR_RESOURCES, encode_hdr_base64};
+
+    let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("resources")) else {
+        return Ok(false);
+    };
+    let resources = resources.as_object_mut().ok_or_else(|| invalid("HDR resources must be an object"))?;
+    if resources.len() > MAX_HDR_RESOURCES {
+        return Err(invalid("at most 64 embedded HDR resources"));
+    }
+    let mut total = 0usize;
+    for (key, value) in resources.iter_mut() {
+        let id: HdrId = serde_json::from_value(Value::String(key.clone())).map_err(invalid)?;
+        if !value.as_object().is_some_and(|fields| fields.len() == 3)
+            || value.get("kind").and_then(Value::as_str) != Some("radiance_hdr")
+            || value.get("data").and_then(Value::as_str) != Some("")
+        {
+            return Err(invalid("HDR metadata requires radiance_hdr, empty data and one blob; inline data plus blob is ambiguous"));
+        }
+        let remaining = MAX_HDR_RESOURCE_BYTES.saturating_sub(total).min(solidcraft_doc::render_resources::MAX_HDR_BYTES);
+        let bytes = reader.limited_blob(value, "hdr_blob", "hdr", remaining)?;
+        if HdrId::of(bytes) != id {
+            return Err(invalid("HDR resource key does not match its blob hash"));
+        }
+        total = total.checked_add(bytes.len()).ok_or_else(|| invalid("HDR resource size overflow"))?;
+        let encoded = encode_hdr_base64(bytes).map_err(invalid)?;
+        let fields = value.as_object_mut().ok_or_else(|| invalid("invalid HDR metadata"))?;
+        fields.remove("hdr_blob");
+        fields.insert("data".into(), Value::String(encoded));
+    }
+    Ok(!resources.is_empty())
 }
 
 #[cfg(test)]
@@ -1560,6 +1703,117 @@ mod tests {
         let expected = crate::read_design(&crate::write_design(&doc)).unwrap();
         assert_eq!(expected, doc);
         assert_eq!(crate::read_design(&write_design_container(&doc).unwrap()).unwrap(), expected);
+    }
+
+    #[test]
+    fn portable_numerical_render_jobs_survive_json_and_design_container_reopen() {
+        let mut doc = document();
+        let before = doc.clone();
+        doc.render = std::sync::Arc::new(serde_json::from_value(json!({"setups":{
+            "CPU":{"exposure_ev":1.25,"job":{"method":"cpu_raytrace","options":{"primary_samples":4,"lights":[],"shadows":false,
+                "area_lights":[{"center_mm":[0,0,20],"edge_u_mm":[10,0,0],"edge_v_mm":[0,-10,0],"color":[0.4,0.6,1],"intensity":2}],"area_samples":16,"seed":123}}},
+            "GPU":{"exposure_ev":-1.5,"job":{"method":"gpu_path","transparent_background":true,"options":{"samples":91,"max_depth":11,"seed":456,
+                "tone_map":"aces_fitted","denoise":true,"lighting":{"environment":[0,0,0],"area_lights":[]},
+                "environment":{"kind":"sky","rotation_rad":0.25,"intensity":0.5,"gradient":{"zenith":[0.4,0.2,0.1],"horizon":[0.7,0.6,0.3],"ground":[0.2,0.1,0.05]}}}}}
+        }})).unwrap());
+        assert!(doc.differs_only_in_render(&before));
+        for bytes in [crate::write_design(&doc), write_design_container(&doc).unwrap()] {
+            let reopened = crate::read_design(&bytes).unwrap();
+            assert_eq!(reopened, doc);
+            assert_eq!(reopened.render, doc.render);
+        }
+    }
+
+    #[test]
+    fn embedded_hdr_is_one_required_blob_shared_by_cpu_gpu_and_strictly_hydrated() {
+        use solidcraft_doc::{render_resources::HdrResource, render_settings::RenderSettings};
+        let mut source = b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\nPRIMARIES=0.64 0.33 0.30 0.60 0.15 0.06 0.3127 0.3290\n\n-Y 2 +X 4\n".to_vec();
+        for _ in 0..8 {
+            source.extend_from_slice(&[128, 64, 32, 129]);
+        }
+        let resource = HdrResource::new(source.clone()).unwrap();
+        let id = resource.id().to_string();
+        let mut render = RenderSettings::default();
+        render.resources.insert(resource).unwrap();
+        for (name, job) in [
+            ("CPU", json!({"method":"cpu_raytrace","options":{"lights":[],"hdr":{"resource":id,"rotation_rad":0.75,"intensity":2,"samples":64}}})),
+            (
+                "GPU",
+                json!({"method":"gpu_path","options":{"samples":37,"hdr":{"resource":id,"rotation_rad":-0.25,"intensity":1,"assume_linear_srgb":false}}}),
+            ),
+        ] {
+            render.setups.insert(name.into(), serde_json::from_value(json!({"exposure_ev":1.25,"job":job})).unwrap());
+        }
+        let mut doc = document();
+        doc.render = Arc::new(render);
+        let bytes = write_design_container(&doc).unwrap();
+        assert_eq!(crate::read_design(&bytes).unwrap(), doc);
+        assert_eq!(crate::read_design(&crate::write_design(&doc)).unwrap(), doc);
+        let original = parts(&bytes);
+        let blob = format!("blobs/{id}.hdr");
+        assert_eq!(original.keys().filter(|name| name.ends_with(".hdr")).count(), 1);
+        assert_eq!(original[&blob], source);
+        let metadata: Value = serde_json::from_slice(&original["document.json"]).unwrap();
+        assert_eq!(metadata["render"]["resources"][&id], json!({"kind":"radiance_hdr","data":"","hdr_blob":blob}));
+        assert!(Document::from_json(&metadata.to_string()).is_err(), "container metadata is not standalone JSON");
+        let mut missing = original.clone();
+        missing.remove(&blob);
+        assert!(crate::read_design(&package(&missing)).unwrap_err().to_string().contains("required part"));
+        let mut corrupt = original.clone();
+        corrupt.get_mut(&blob).unwrap()[0] ^= 1;
+        assert!(crate::read_design(&package(&corrupt)).unwrap_err().to_string().contains("hash mismatch"));
+        for (field, value) in
+            [("kind", json!("png")), ("data", json!("AAAA")), ("path", json!("original.hdr")), ("hdr_blob", json!(format!("blobs/{id}.png")))]
+        {
+            let mut entries = original.clone();
+            let mut altered = metadata.clone();
+            altered["render"]["resources"][&id][field] = value;
+            entries.insert("document.json".into(), serde_json::to_vec(&altered).unwrap());
+            assert!(crate::read_design(&package(&entries)).is_err(), "{field}");
+        }
+        let mut entries = original.clone();
+        let mut altered = metadata.clone();
+        let value = altered["render"]["resources"].as_object_mut().unwrap().remove(&id).unwrap();
+        altered["render"]["resources"]["0".repeat(64)] = value;
+        entries.insert("document.json".into(), serde_json::to_vec(&altered).unwrap());
+        assert!(crate::read_design(&package(&entries)).unwrap_err().to_string().contains("resource key"));
+        let entry = &metadata["render"]["resources"][&id];
+        let duplicate = format!("{{\"render\":{{\"resources\":{{\"{id}\":{entry},\"{id}\":{entry}}}}}}}");
+        entries.insert("document.json".into(), duplicate.into_bytes());
+        assert!(crate::read_design(&package(&entries)).unwrap_err().to_string().contains("duplicate"));
+    }
+
+    #[test]
+    fn embedded_hdr_container_refuses_oversized_part_before_reading_payload() {
+        use solidcraft_doc::render_resources::{HdrId, MAX_HDR_BYTES};
+        let source = vec![0u8; MAX_HDR_BYTES + 1];
+        let id = HdrId::of(&source).to_string();
+        let blob = format!("blobs/{id}.hdr");
+        let mut metadata = serde_json::to_value(Document::default()).unwrap();
+        metadata["render"] = json!({"setups":{},"resources":{(id):{"kind":"radiance_hdr","data":"","hdr_blob":blob}}});
+        let entries = BTreeMap::from([
+            ("container.json".into(), serde_json::to_vec(&json!({"format":VERSION})).unwrap()),
+            ("document.json".into(), serde_json::to_vec(&metadata).unwrap()),
+            (blob, source),
+        ]);
+        let bytes = package(&entries);
+        let count = std::rc::Rc::new(std::cell::Cell::new(0));
+        let reader = DesignContainerReader::new(CountingReader { source: Cursor::new(bytes), count: count.clone() }).unwrap();
+        assert!(reader.read_document().unwrap_err().to_string().contains("part too large"));
+        assert!(count.get() < 256 * 1024, "read {} bytes before refusing an oversized HDR", count.get());
+    }
+
+    #[test]
+    fn embedded_hdr_manifest_rejects_escaped_inline_payload_before_value_materialization() {
+        let id = "0".repeat(64);
+        let escaped = "\\u0041".repeat(4096);
+        let wire = format!(
+            "{{\"render\":{{\"resources\":{{\"{id}\":{{\"kind\":\"radiance_hdr\",\"data\":\"{escaped}\",\"hdr_blob\":\"blobs/{id}.hdr\"}}}}}}}}"
+        );
+        assert!(check_hdr_manifest(wire.as_bytes()).unwrap_err().to_string().contains("marker exceeds its budget"));
+        let oversized = "\\u0030".repeat(4096);
+        let wire = format!("{{\"render\":{{\"resources\":{{\"{id}\":{{\"kind\":\"radiance_hdr\",\"data\":\"\",\"hdr_blob\":\"{oversized}\"}}}}}}}}");
+        assert!(check_hdr_manifest(wire.as_bytes()).unwrap_err().to_string().contains("marker exceeds its budget"));
     }
 
     /// Public-safe generated data, no geometry evaluation. Print medians without

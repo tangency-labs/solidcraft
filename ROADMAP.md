@@ -143,6 +143,12 @@ completed drawings publish atomically. The browser still exports synchronously.
 
 ## Render foundation
 
+- Original starter appearances (#1722): 34 opaque recipes through existing commands, with six explicitly unavailable glass recipes and preserved legacy looks; see [the contract](docs/render-starter-appearances.md).
+
+- Bounded linear film accumulation (#1696) supplies caller-admitted mean/variance storage and complete-pass views; actual progressive consumers remain separate. See [the film contract](docs/render-film.md).
+
+- Definition-local visual mapping (#1214) supplies a bounded numerical frame, physical repeat coordinates and a deterministic one-time grain-axis suggestion. It adds no saved record or texture consumer; see [the mapping contract](docs/render-visual-mapping.md).
+
 - Explicit texture normalization (#1218) produces completed float RGBA with
   role-aware linear color/data semantics, bounded matrix/TRC ICC conversion and
   opt-in EXIF orientation. It retains high-precision raw samples and records lossy

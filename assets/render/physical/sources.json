@@ -1,0 +1,505 @@
+{
+  "schema": "solidcraft-physical-sources/1",
+  "sources": [
+    {
+      "id": "sandmeyer-304",
+      "title": "Sandmeyer Steel Alloy 304/304L plate",
+      "url": "https://www.sandmeyersteel.com/alloy-304-304l/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Main Physical Properties and Typical Mechanical Properties (.375 in plate), not FAQ",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "alfa-6061",
+      "title": "Alfa Chemistry aluminium alloy 6061",
+      "url": "https://alloys.alfa-chemistry.com/aluminum-alloy-6061.html",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical properties and T6 sheet (0.020-0.500 in) typical properties",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "metalcor-ti5",
+      "title": "Metalcor titanium grade 5 3.7164/65",
+      "url": "https://www.metalcor.de/en/datenblatt/125/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Mechanical and Physical Properties at 20 C",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "cda-c11000",
+      "title": "Copper Development Association C11000",
+      "url": "https://alloys.copper.org/alloy/C11000",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical properties table; property-specific temperatures",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "cda-c36000",
+      "title": "Copper Development Association C36000",
+      "url": "https://alloys.copper.org/alloy/C36000",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical properties table; property-specific temperatures",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "cda-c93200",
+      "title": "Copper Development Association C93200",
+      "url": "https://alloys.copper.org/alloy/C93200",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical properties table; property-specific temperatures",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "elgiloy-ni200",
+      "title": "Elgiloy Nickel 200 and 201 strip",
+      "url": "https://www.elgiloy.com/strip-nickel-200-and-201-alloys",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical properties; room-temperature modulus table",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "feinhuette-sac305",
+      "title": "Feinhuette SAC305 electronic solder",
+      "url": "https://www.feinhuette.de/en/metals/sn965ag3cu05",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical Data",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "ensinger-abs-stock",
+      "title": "Ensinger TECARAN ABS grey",
+      "url": "https://www.ensingerplastics.com/en/shapes/tecaran-abs-grey",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Facts and Technical details; exact grade/stock-shape values",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "ensinger-pom-c",
+      "title": "Ensinger TECAFORM AH natural POM-C",
+      "url": "https://www.ensingerplastics.com/en-gb/shapes/acetal-tecaform-ah-natural",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Facts and Technical details; exact grade/stock-shape values",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "ensinger-peek",
+      "title": "Ensinger TECAPEEK natural PEEK",
+      "url": "https://www.ensingerplastics.com/en/shapes/peek-tecapeek-natural",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Facts and Technical details; exact grade/stock-shape values",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "ensinger-pc",
+      "title": "Ensinger TECANAT natural PC",
+      "url": "https://www.ensingerplastics.com/en-gb/shapes/polycarbonate-tecanat-natural",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Facts and Technical details; exact grade/stock-shape values",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "ensinger-pa6-stock",
+      "title": "Ensinger TECAMID 6 natural PA6",
+      "url": "https://www.ensingerplastics.com/en/shapes/pa6-tecamid-6-natural",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Facts and Technical details; exact grade/stock-shape values",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "ensinger-ptfe",
+      "title": "Ensinger TECAFLON PTFE natural",
+      "url": "https://www.ensingerplastics.com/en/shapes/tecaflon-ptfe-natural",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Facts and Technical details",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "goodfellow-kapton",
+      "title": "Goodfellow Kapton HN PI coil",
+      "url": "https://www.goodfellow.com/global/kapton-hn-pi-coil-group",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Technical properties of supplied coil",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "ovako-c45",
+      "title": "Ovako C45 steel navigator",
+      "url": "https://steelnavigator.ovako.com/steel-grades/c45/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Other properties; general grade, not an unspecified heat-treatment strength",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "ensinger-pp",
+      "title": "Ensinger TECAFINE PP grey",
+      "url": "https://www.ensingerplastics.com/en-sg/shapes/polypropylene-tecafine-pp-grey",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Technical details for stock shape",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "ensinger-hdpe",
+      "title": "Ensinger TECAFINE PE 300 black",
+      "url": "https://www.ensingerplastics.com/en-gb/shapes/polyethylene-tecafine-pe-300-black",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Technical details for stock shape",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "schott-borofloat",
+      "title": "SCHOTT BOROFLOAT 33 technical details",
+      "url": "https://www.schott.com/en-us/products/borofloat-p1000314/technical-details",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical, thermal, mechanical and optical tables",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "crystran-silica",
+      "title": "Crystran fused silica SiO2",
+      "url": "https://www.crystran.com/optical-materials/fused-silica-sio2/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Optical material data table; inconsistent molecular/softening labels not imported",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "crystran-sapphire",
+      "title": "Crystran sapphire Al2O3",
+      "url": "https://www.crystran.com/optical-materials/sapphire-al2o3/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical and optical constants; crystal orientation explicit",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "coorstek-ad96",
+      "title": "CoorsTek alumina AD-96",
+      "url": "https://www2.coorstek.com/en/materials/alumina/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "AD-96 column, nominal material-property comparison",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "smoothon-ds20",
+      "title": "Smooth-On Dragon Skin 20",
+      "url": "https://www.smooth-on.com/products/dragon-skin-20/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Technical data; 100% modulus is a finite-strain stress, not Young modulus",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "smoothon-ep690",
+      "title": "Smooth-On EpoxAcast 690",
+      "url": "https://www.smooth-on.com/products/epoxacast-690/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Cured casting technical properties",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "polymaker-pla",
+      "title": "Polymaker PolyLite PLA technical sheet",
+      "url": "https://wiki.polymaker.com/polymaker-products/more-about-our-products/documents/technical-data-sheets/pla/polylite-tm-pla",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Thermal and XY/Z mechanical properties of specified printed test specimens",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "polymaker-abs",
+      "title": "Polymaker PolyLite ABS product specification",
+      "url": "https://shop.polymaker.com/products/polylite-abs/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Mechanical XY/Z and thermal table; conflicting density/modulus excluded",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "polymaker-abs-wiki",
+      "title": "Polymaker PolyLite ABS wiki sheet",
+      "url": "https://wiki.polymaker.com/polymaker-products/more-about-our-products/documents/technical-data-sheets/abs-asa/polylite-tm-abs",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Density discrepancy, retained for resolution rather than averaged",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "polymaker-tpu",
+      "title": "Polymaker PolyFlex TPU95 technical sheet",
+      "url": "https://wiki.polymaker.com/polymaker-products/more-about-our-products/documents/technical-data-sheets/tpu/polyflex-tm-tpu95",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Material density range and nominal Shore hardness",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "eos-pa2200",
+      "title": "EOS PA 2200 PA12 reference",
+      "url": "https://www.eos.info/polymer-solutions/polymer-materials/biocompatible",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "PA 2200 typical part properties; not the different CarbonReduced record",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "isola-370hr",
+      "title": "Isola 370HR laminate and prepreg",
+      "url": "https://www.isola-group.com/pcb-laminates-prepreg/370hr-laminate-prepreg/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Typical Values, revision E (2024-06); not construction-specific Dk tables",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "hexcel-as4",
+      "title": "Hexcel HexTow AS4 continuous fibre and laminate data",
+      "url": "https://www.hexcel.com/Products/Carbon-Fiber/HexTow-Continuous-Carbon-Fiber/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "AS4 12K fibre and AS4/8552 unidirectional laminate columns",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "usda-wood-2021",
+      "title": "USDA Wood Handbook 2021 Chapter 5",
+      "url": "https://research.fs.usda.gov/download/treesearch/62244.pdf",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Table 5-3a, printed pages 5-4, 5-6 and 5-7; 12% moisture clear wood",
+      "license": "US federal government publication; source notice should still be reviewed",
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "amorim-md-facade",
+      "title": "Amorim MDFACADE decorative cork board",
+      "url": "https://www.amorimcorkinsulation.com/en/applications/Decorative-board-Cork-at-sight/162/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Technical Features, additive-free decorative expanded cork",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "amorim-tps",
+      "title": "Amorim aerospace TPS P45/P50",
+      "url": "https://amorimcorksolutions.com/en-us/materials-applications/aerospace/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Metric TPS materials table; this page is distinct from legacy brand-page values",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "std-polyester-powder",
+      "title": "Standard Group MT-D1036 polyester powder",
+      "url": "https://www.std-coatings.com/Powder/564.html",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Powder properties, colour-dependent specific-gravity range; not an Interpon product",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "az93",
+      "title": "AZ Technology AZ-93 inorganic coating",
+      "url": "https://www.aztechnology.com/product/1/az-93",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Cured AZ-93 specifications; radiative properties are not visible RGB or volumetric emission",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "az-primer",
+      "title": "AZ Technology MLP-300-AZ primer",
+      "url": "https://www.aztechnology.com/product/29/mlp-300-az",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Cured primer specifications",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "medite-premier",
+      "title": "MEDITE PREMIER datasheet prem-ds-en-13",
+      "url": "https://medite-smartply.files.svdcdn.com/production/files/MEDITE-PREMIER-Datasheet-prem-ds-en-13.pdf",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "PDF page 5, Technical Specification Sheet; >12 to 19 mm column",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "exolith-lms-1",
+      "title": "Exolith Lab LMS-1 mare simulant",
+      "url": "https://exolithsimulants.com/collections/regolith-simulants/products/lms-1-lunar-mare-simulant",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical Properties; terrestrial simulant reference, not an Apollo sample",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "exolith-lhs-1",
+      "title": "Exolith Lab LHS-1 highlands simulant",
+      "url": "https://exolithsimulants.com/collections/regolith-simulants/products/lhs-1-lunar-highlands-simulant",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical Properties; terrestrial simulant reference, not an Apollo sample",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "exolith-lms-1d",
+      "title": "Exolith Lab LMS-1D mare dust simulant",
+      "url": "https://exolithsimulants.com/collections/regolith-simulants/products/lms-1d",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical Properties; terrestrial simulant reference, not an Apollo sample",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "exolith-lhs-1d",
+      "title": "Exolith Lab LHS-1D highlands dust simulant",
+      "url": "https://exolithsimulants.com/collections/regolith-simulants/products/lhs-1d-lunar-highland-dust-simulant",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical Properties; terrestrial simulant reference, not an Apollo sample",
+      "license": null,
+      "review": "Selected numerical facts transcribed with original structure; no supplier document, image, implementation or complete table is redistributed."
+    },
+    {
+      "id": "goodfellow-pmma-sheet",
+      "title": "Goodfellow PMMA film and sheet reference",
+      "url": "https://www.goodfellow.com/eu/pmma-film-group",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical, electrical, mechanical and thermal property sections; ranges retain their endpoints.",
+      "license": null,
+      "review": "Selected numerical facts and explicit source conditions, not a copied supplier table. Publicly indexed manufacturer/supplier data were reviewed; publisher rights are not relicensed. No safety or grade certificate is implied."
+    },
+    {
+      "id": "goodfellow-kevlar49",
+      "title": "Goodfellow Kevlar 49 polyaramid fibre",
+      "url": "https://www.goodfellow.com/global/kevlar-49-polyaramid-fibre-group",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Physical, thermal and mechanical properties of the supplied fibre, not a cured woven laminate.",
+      "license": null,
+      "review": "Selected numerical facts and explicit source conditions, not a copied supplier table. Publicly indexed manufacturer/supplier data were reviewed; publisher rights are not relicensed. No safety or grade certificate is implied."
+    },
+    {
+      "id": "kuhn-pvc-stock",
+      "title": "Kuhn PVC stock-material reference",
+      "url": "https://www.kuhn-marsberg.de/en/product/PVC/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Density, thermal conductivity and electrical properties; ambiguous hardness-unit and empty cells excluded.",
+      "license": null,
+      "review": "Selected numerical facts and explicit source conditions, not a copied supplier table. Publicly indexed manufacturer/supplier data were reviewed; publisher rights are not relicensed. No safety or grade certificate is implied."
+    },
+    {
+      "id": "sika-161-cured",
+      "title": "Sika Sikafloor 161 HC cured resin reference",
+      "url": "https://phl.sika.com/en/construction/flooring/industry-wet-areas/epoxy-flooring-system/sikafloor-161-hc.html",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Cured resin hardness at 7 days and strengths at 28 days, +23 C. Mixed-resin density is not cured density.",
+      "license": null,
+      "review": "Selected numerical facts and explicit source conditions, not a copied supplier table. Publicly indexed manufacturer/supplier data were reviewed; publisher rights are not relicensed. No safety or grade certificate is implied."
+    },
+    {
+      "id": "masterbond-uv22",
+      "title": "Master Bond UV22 UV-cured epoxy",
+      "url": "https://www.masterbond.com/tds/uv22",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Typical properties and cure-specific glass-transition ranges; no numerical outgassing result imported.",
+      "license": null,
+      "review": "Selected numerical facts and explicit source conditions, not a copied supplier table. Publicly indexed manufacturer/supplier data were reviewed; publisher rights are not relicensed. No safety or grade certificate is implied."
+    },
+    {
+      "id": "hmg-c71",
+      "title": "HMG C71 Speedline machinery enamel",
+      "url": "https://hmgpaint.mybigcommerce.com/c71-speedline/",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Manufacturer product description: temperature resistance up to 170 C, dependent on colour; matt, satin and gloss variants.",
+      "license": null,
+      "review": "Selected numerical facts and explicit source conditions, not a copied supplier table. Publicly indexed manufacturer/supplier data were reviewed; publisher rights are not relicensed. No safety or grade certificate is implied."
+    },
+    {
+      "id": "hmg-hammer-stoving",
+      "title": "HMG Stoving Enamel Hammer TOPSTV",
+      "url": "https://www.hmgpaint.com/products/all-products/topcoat/1928/stoving-enamel-hammer",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Technical properties: coverage basis at 25 micrometres DFT and temperature resistance 160 C.",
+      "license": null,
+      "review": "Selected numerical facts and explicit source conditions, not a copied supplier table. Publicly indexed manufacturer/supplier data were reviewed; publisher rights are not relicensed. No safety or grade certificate is implied."
+    },
+    {
+      "id": "hmg-sc601-clear",
+      "title": "HMG Acrythane SC601 Clearcoat",
+      "url": "https://hmgpaint.com/products/all-products/topcoat/1942/acrythane-sc601-clearcoat",
+      "accessed_on": "2026-10-22",
+      "kind": "public_reference",
+      "locator": "Two-component acrylic/isocyanate clearcoat; stated coverage basis 25 micrometres DFT. No cured density or modulus stated.",
+      "license": null,
+      "review": "Selected numerical facts and explicit source conditions, not a copied supplier table. Publicly indexed manufacturer/supplier data were reviewed; publisher rights are not relicensed. No safety or grade certificate is implied."
+    }
+  ]
+}

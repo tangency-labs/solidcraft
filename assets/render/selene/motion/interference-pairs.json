@@ -1,0 +1,9 @@
+[
+  ["Shoulder link -9", "Elbow link -9"],
+  ["Elbow link -9", "Distal wrist link -9"],
+  ["Tool wrist machined tongue", "Tool tilt joint shaft"],
+  ["Gripper jaw -1", "Gripper jaw 1"],
+  ["Raspberry Pi 5 PCB", "Pi5 USB2 mounting tab 1"],
+  ["Raspberry Pi 5 PCB", "Pi5 USB3 mounting tab 2"],
+  ["Raspberry Pi 5 PCB", "Pi5 GPIO pin 40"]
+]

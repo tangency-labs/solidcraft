@@ -1,5 +1,5 @@
 //! Physical materials defined in a design (`material.create`, `material.edit`,
-//! `material.delete`): a name, a density and, optionally, a look. They are assigned like the
+//! `material.delete`): a name, a density and optional visual and engineering records. They are assigned like the
 //! built-in library's (`material.assign`), set masses (`component.properties`) and fill
 //! configuration material cells. The design keeps them, so they are saved and undone like
 //! features.
@@ -7,7 +7,7 @@
 use serde_json::{Value, json};
 use solidcraft_doc::appearance::{Look, library};
 use solidcraft_doc::config::Column;
-use solidcraft_doc::{DEFAULT_MATERIAL, MATERIALS, UserMaterial, valid_density};
+use solidcraft_doc::{DEFAULT_MATERIAL, MATERIALS, MAX_USER_MATERIALS, UserMaterial, valid_density};
 
 use super::CommandSpec;
 use super::inspect::{color_param, look_json};
@@ -16,18 +16,22 @@ use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("material.create", "New Physical Material", create).icon("material").params(
-        "name (not a built-in material's); density_g_cm3: (0, 1000]; appearance?: library name (appearance.library) | color?: \"#rrggbb\" or [r, g, b] (0–255), opacity? (0–1), pbr?: {metallic:0..1, roughness:0.045..1, dielectric_ior:1..3} (opaque only, needs color/appearance): the default look. Optical edits do not change density. Assign it with material.assign",
+        "name (not a built-in material's); density_g_cm3: (0, 1000]; appearance?: library name (appearance.library) | color?: \"#rrggbb\" or [r, g, b] (0–255), opacity? (0–1), pbr?: {metallic:0..1, roughness:0.045..1, dielectric_ior:1..3} (opaque only, needs color/appearance): the default look. A named appearance keeps its preset response when pbr is omitted; pbr: null selects scalar shading. Optical edits do not change density. physical_card?: validated SI candidate record (null/omitted means unknown); card density never changes assigned density. Assign it with material.assign",
     ),
     CommandSpec::new("material.edit", "Edit Physical Material", edit).icon("material").enabled(has_user_materials).params(
-        "material: a material defined in this design; name? (bodies and configuration cells follow); density_g_cm3?; appearance? | color?, opacity?, pbr? (as material.create; color: null clears the look). Omitted appearance/color retains the entire current look",
+        "material: a material defined in this design; name? (bodies and configuration cells follow); density_g_cm3?; appearance? | color?, opacity?, pbr? (as material.create; color: null clears the look). physical_card?: validated SI candidate record (omitted retains, null clears). Omitted appearance/color retains the entire current look",
+    ),
+    CommandSpec::new("material.inspect", "Inspect Physical Material", inspect).icon("material").noundo().doc_only().params(
+        "material: built-in or design-owned name. Returns assigned density, default appearance, optional physical_card, validation and density comparison. Read-only; missing engineering data remains unknown and card density does not change mass",
     ),
     CommandSpec::new("material.delete", "Delete Physical Material", delete).icon("delete").enabled(has_user_materials).params(
         "material: a material defined in this design; replace?: material for the bodies and configuration cells that use it (without it, a material in use is refused)",
     ),
 ];
 
-/// Most materials a design defines.
-const MAX_USER_MATERIALS: usize = 1000;
+#[cfg(test)]
+#[path = "material_card_persistence_tests.rs"]
+mod persistence_tests;
 
 fn has_user_materials(s: &Session) -> std::result::Result<(), String> {
     if s.doc.user_materials.is_empty() { Err("the design defines no physical materials (material.create)".into()) } else { Ok(()) }
@@ -86,8 +90,56 @@ fn look(cmd: &str, p: &Value, material: &str) -> Result<Option<Option<Look>>> {
     Ok(Some(Some(l)))
 }
 
-fn material_json(m: &UserMaterial) -> Value {
-    json!({"name": m.name, "density_g_cm3": m.density, "appearance": m.appearance.as_ref().map(look_json), "user": true})
+pub(super) fn material_json(m: &UserMaterial) -> Result<Value> {
+    let mut out = json!({"name": m.name, "density_g_cm3": m.density, "appearance": m.appearance.as_ref().map(look_json), "user": true});
+    if let Some(record) = &m.physical_card {
+        let card = record.card();
+        out["physical_card"] = json!(record);
+        out["physical_validation"] = json!(card.validate()?);
+        let measured = card.properties.iter().find_map(|p| match p.data {
+            solidcraft_doc::physical_material::PropertyData::Density { kg_m3 } => Some(kg_m3),
+            _ => None,
+        });
+        if let Some(measured) = measured {
+            let assigned = m.density * 1000.0;
+            let relative_difference = (assigned - measured).abs() / assigned.max(measured);
+            out["density_comparison"] = json!({"assigned_density_kg_m3":assigned,"card_density_kg_m3":measured,
+                "relative_difference":relative_difference,"matches_within_relative_tolerance":relative_difference <= 1e-9,
+                "relative_tolerance":1e-9});
+        }
+    }
+    Ok(out)
+}
+
+fn physical_card(cmd: &str, p: &Value) -> Result<Option<Option<solidcraft_doc::physical_material::ValidatedCard>>> {
+    match p.get("physical_card") {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(None)),
+        Some(value) => {
+            solidcraft_doc::physical_material::ValidatedCard::from_value(value).map(|card| Some(Some(card))).map_err(|e| bad(cmd, e.to_string()))
+        }
+    }
+}
+
+fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "material.inspect";
+    let name = str_(p, "material").ok_or_else(|| bad(cmd, "`material` must be a material name"))?;
+    let canonical = s.doc.material_name(name).ok_or_else(|| bad(cmd, format!("unknown material `{name}` (see material.list)")))?;
+    let mut out = if let Some(material) = s.doc.user_materials.iter().find(|m| m.name == canonical) {
+        material_json(material)?
+    } else {
+        let density = MATERIALS
+            .iter()
+            .find(|(n, _)| *n == canonical.as_str())
+            .map(|(_, density)| *density)
+            .ok_or_else(|| bad(cmd, "material is unavailable"))?;
+        json!({"name":canonical,"density_g_cm3":density,"user":false})
+    };
+    out["appearance"] = json!(s.doc.material_look(&canonical).as_ref().map(look_json));
+    if out.get("physical_card").is_none() {
+        out["physical_card"] = Value::Null;
+    }
+    Ok(out)
 }
 
 /// The index of the design material `material` names.
@@ -106,8 +158,9 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     if s.doc.user_materials.len() >= MAX_USER_MATERIALS {
         return Err(bad(cmd, format!("a design defines at most {MAX_USER_MATERIALS} materials")));
     }
-    let material = UserMaterial { density: density(cmd, p)?, appearance: look(cmd, p, &name)?.flatten(), name };
-    let out = material_json(&material);
+    let material =
+        UserMaterial { density: density(cmd, p)?, appearance: look(cmd, p, &name)?.flatten(), name, physical_card: physical_card(cmd, p)?.flatten() };
+    let out = material_json(&material)?;
     s.doc_mut().user_materials.push(material);
     Ok(out)
 }
@@ -173,8 +226,9 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             l
         }),
     };
-    let material = UserMaterial { name: name.clone(), density, appearance };
-    let mut out = material_json(&material);
+    let physical_card = physical_card(cmd, p)?.unwrap_or(old.physical_card);
+    let material = UserMaterial { name: name.clone(), density, appearance, physical_card };
+    let mut out = material_json(&material)?;
     if let Some(m) = s.doc_mut().user_materials.get_mut(i) {
         *m = material;
     }

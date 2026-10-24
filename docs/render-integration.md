@@ -1,8 +1,13 @@
 # Phased render and material integration
 
+The native GPU image path is described in [Progressive product images](render-path.md).
+Optional [CPU progressive camera sampling](render-cpu-progressive.md)
+through its existing CPU executor and shared image-job protocol.
+
 Tracked in #842, with parent render design #620 and physical/visual material roadmap
-#922. The combined integration keeps contribution ancestry; it is an alternative
-review path, not evidence that the individual PRs have merged. Each result in GitHub
+#922. The combined integration records retained merge ancestry and scoped donor
+adaptations separately in the [source ledger](render-materials-lab.md). It is an
+alternative review path, not evidence that individual PRs have merged. Each result in GitHub
 is pinned to its tested source revision. Do not reuse an older green result for a new
 merge or describe compiled wasm as verified browser interaction.
 
@@ -17,22 +22,29 @@ merge or describe compiled wasm as verified browser interaction.
 | 5 | Environment consumer #813, then texture/wood mapping #1004/#786 using resource admission #909 | Actual linear/sRGB interpretation and lighting, persistent object-local frames, cancellation/memory bounds, transformed instances, separate native/browser evidence |
 | 6 | Family-specific optical/data quality under #922 | Wood L/R/T and moisture/grade conditions; polymer grade/process/temperature/rate; glass thickness/IOR/absorption; metal alloy/temper/conductor response and brushed anisotropy; source/license review before shipping data |
 
-The released document format is 20 (v0.11.0); render setups and opaque PBR looks are saved
-under format 21. Saved render setups migrate from older formats with older-reader refusal. The Design
-viewport retains upstream display-plan tessellation; Render uses its separate
-prepared product meshes. Neither runtime jobs nor device handles are persisted.
-See the versioned contracts rather than reserving another format independently.
+The original setup and opaque-PBR integration introduced format 21. The current
+document version is derived from `doc::format` and its pending descriptors; that
+historical number is not the combined branch's current format. Saved setups
+migrate from older formats with older-reader refusal. The Design viewport
+retains upstream display-plan tessellation; Render uses its separate prepared
+product meshes. Numerical intent and embedded HDR sources are saved, while
+runtime jobs and device handles are not. See the versioned contracts rather
+than reserving another format independently.
 
-## Current foundation boundary
+## Raster foundation and current image paths
 
-The GPU host provides a product **viewport**. The CPU product executor provides
-bounded preview **PNG images**, with opt-in opaque PBR and approximate sorted transparency.
-The [fixed studio consumer](render-opaque-pbr.md) provides direct lighting only;
-it has no HDRI, cast shadows, transmission or indirect bounces. The Radiance
-utility prepares linear RGB in the source colour space; it is not lighting. The
-numerical opaque surface contract is not proof that a host renders those properties.
-Imported resources or saved intent never silently add HDRI/refraction/final/EXR
-support. Unsupported requests fail and preserve the last valid image and CAD state.
+The GPU product **viewport** and bounded CPU product raster **PNG** executor
+remain available. The raster [fixed studio consumer](render-opaque-pbr.md) provides
+direct lighting, opt-in opaque PBR and approximate sorted transparency; it does
+not add HDRI, cast shadows, transmission or indirect bounces. Those raster limits
+do not describe the separate CPU raytrace and GPU path consumers now integrated
+in the personal branch. Their illumination, certified transmission and progressive
+sampling contracts are recorded in the [branch capability table](render-materials-lab.md),
+[CPU progressive contract](render-cpu-progressive.md) and [HDR resources](render-hdr-resources.md).
+The Radiance utility alone prepares linear RGB; supported consumers apply the
+explicit color policy and lighting. Imported data or saved intent never silently
+adds an unsupported capability or EXR output. Unsupported requests fail and
+preserve the last valid image and CAD state.
 See [backends](render-backends.md), [settings](render-settings.md),
 [workspace](render-workspace.md), [jobs](render-jobs.md),
 [HDR input](render-hdr-input.md) and [surface reference](render-surface.md).
@@ -41,9 +53,9 @@ Both atomic PNG publication modes check the existing caller file scope. The
 control-channel regression rejects outside folders and traversal and permits a
 valid destination, including explicit overwrite. This guard and document-adoption
 regression now belong to standalone R4a, so its safety does not depend on this
-combined integration. Render engine and scene production code match that foundation. The combined UI
-additionally consumes the async picker candidate described below; it does not add
-a second renderer or file-access service.
+combined integration. Subsequent CPU/GPU image paths and the Render workspace
+retain the shared job ownership and file-access services, including the async
+picker described below.
 
 ## Picker integration before release
 
@@ -81,7 +93,8 @@ file rather than the CAD design. Applying a definition is one undoable design ed
 Use original synthetic fixtures first. A licence string in imported data is a source
 claim, not redistribution permission. Any shipped dataset or texture needs actual
 source/license review and attribution. Commercial reference artwork is not copied.
-No second renderer, certified material database or simulation solver is implied.
+These material and resource contracts do not imply a certified material database
+or simulation solver.
 
 ## Verification and collaboration
 

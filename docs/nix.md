@@ -97,7 +97,13 @@ under niri's XWayland. The trade-off: **on native Wayland, dropping files onto t
 window does not work**; use File > Open or pass the file on the command line.
 This applies to every build, not only the Nix package.
 
-Override the choice with `SOLIDCRAFT_WAYLAND=1` (always native Wayland) or
+Choose it in Preferences › Graphics › **Window system** (Automatic, Wayland or X11; it applies
+at the next start). The pane says which one is running and, on native Wayland, links to
+winit's issue about dropping files there. Native Wayland is the better choice with
+**fractional scaling** (a monitor at 125 % or 140 %): XWayland windows are drawn at 100 % and
+stretched by the compositor, so the interface looks soft and small.
+
+The environment overrides the preference: `SOLIDCRAFT_WAYLAND=1` (always native Wayland) or
 `SOLIDCRAFT_WAYLAND=0` (XWayland whenever an X display is available).
 
 ## Development shells

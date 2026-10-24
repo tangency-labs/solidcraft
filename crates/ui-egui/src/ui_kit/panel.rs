@@ -100,6 +100,20 @@ pub(crate) enum Part {
 }
 
 impl<'a> Panel<'a> {
+    /// Pinned inline actions inside an existing feature/card surface. This is not
+    /// a second window or painted card: the parent owns the chrome. Tokens:
+    /// control_height, space_24/8; bounded row count preserves finite geometry.
+    pub(crate) fn pinned_footer<R>(ui: &mut Ui, key: &'static str, rows: usize, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
+        let t = Tokens::get();
+        // This band is content inside the enclosing card, not a second adaptive card.
+        let host = super::Container::new(ui.ctx(), super::Surface::Viewport);
+        host.edge(key, super::Edge::Bottom)
+            .exact_size(t.control_height * rows.clamp(1, 8) as f32 + t.space_24 + t.space_8)
+            .resizable(false)
+            .frame(host.edge_frame(egui::Color32::TRANSPARENT))
+            .show(ui, add)
+    }
+
     /// Shared floating card surface for panels, windows and modal confirmations.
     pub(super) fn card_frame(ctx: &egui::Context) -> egui::Frame {
         let t = Tokens::get();

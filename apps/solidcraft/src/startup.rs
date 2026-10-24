@@ -21,6 +21,25 @@ pub const RENDERER_ENV: &str = "SOLIDCRAFT_RENDERER";
 pub const FAILED_STARTS_FOR_SAFE_MODE: u32 = 2;
 const MARKER: &str = "starting";
 
+/// Explicit application-settings isolation for side-by-side builds and native UI
+/// acceptance. A supplied invalid path refuses startup rather than falling back
+/// to the user's ordinary settings. No directory is read or created here.
+pub fn settings_directory(override_path: Option<&std::ffi::OsStr>, default: Option<PathBuf>) -> Result<Option<PathBuf>, String> {
+    match override_path {
+        None => Ok(default),
+        Some(raw) => {
+            let path = PathBuf::from(raw);
+            if raw.is_empty() || !path.is_absolute() {
+                return Err("SOLIDCRAFT_SETTINGS_DIR must be a nonempty absolute directory path".into());
+            }
+            if path.exists() && !path.is_dir() {
+                return Err("SOLIDCRAFT_SETTINGS_DIR names a file, not a directory".into());
+            }
+            Ok(Some(path))
+        }
+    }
+}
+
 /// Whether an environment value switches something on.
 pub fn env_on(v: Option<&str>) -> bool {
     v.map(str::trim).is_some_and(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
@@ -212,6 +231,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn isolated_settings_are_explicit_absolute_and_never_fall_back() {
+        let default = std::env::temp_dir().join("ordinary-settings");
+        assert_eq!(settings_directory(None, Some(default.clone())).unwrap(), Some(default.clone()));
+        let selected = std::env::temp_dir().join("solidcraft-isolated-settings-fixture");
+        assert_eq!(settings_directory(Some(selected.as_os_str()), Some(default.clone())).unwrap(), Some(selected));
+        for raw in ["", "relative/settings", "../ordinary"] {
+            assert!(settings_directory(Some(std::ffi::OsStr::new(raw)), Some(default.clone())).is_err());
+        }
+        let file = std::env::current_exe().unwrap();
+        assert!(settings_directory(Some(file.as_os_str()), Some(default)).is_err());
     }
 
     #[test]

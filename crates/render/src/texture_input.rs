@@ -94,6 +94,10 @@ fn admitted_format(bytes: &[u8], capacity: usize) -> Result<ImageFormat> {
     Ok(format)
 }
 impl TextureSource {
+    #[cfg(test)]
+    pub(crate) fn shares_encoded_storage(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.bytes, &other.bytes)
+    }
     pub fn new(bytes: Vec<u8>, role: MapRole) -> Result<Self> {
         let format = admitted_format(&bytes, bytes.capacity())?;
         let (width, height) = guarded(|| {

@@ -1,0 +1,150 @@
+{
+  "metadata": {
+    "schema_version": "0.2.0",
+    "language": "en",
+    "status": "authorship_and_reference_ledger",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG"
+  },
+  "items": [
+    {
+      "id": "ORIGINAL-2026-10-CATALOG",
+      "name": "Original SolidCraft catalog contribution",
+      "license": "MIT OR Apache-2.0",
+      "author": "SolidCraft contributors",
+      "authorship": "Original AI-assisted specification and developer tooling prepared for the repository owner.",
+      "external_assets_bundled": false,
+      "commercial_product_extraction": false,
+      "gpl_implementation_reference": false,
+      "sources": [
+        "SRC-SOLIDCRAFT-BASE",
+        "SRC-SETTINGS",
+        "SRC-SELENE-V7",
+        "SRC-SELENE-ATTRIBUTION",
+        "SRC-MOON-FACTSHEET",
+        "SRC-MOON-FACTS",
+        "SRC-POLAR-LIGHT",
+        "SRC-LUNAR-DUST",
+        "SRC-OPENPBR",
+        "SRC-SELENE-SHOWCASE",
+        "SRC-SELENE-EXPORT",
+        "SRC-SELENE-ANALYSIS",
+        "SRC-SELENE-MECHANISMS",
+        "SRC-SUN-FACTSHEET"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "SRC-SOLIDCRAFT-BASE",
+      "name": "SolidCraft personal integration base",
+      "url": "https://github.com/0xlillith/solidcraft/tree/93a2922c5ee272fb605703ae84c05825b4a74607",
+      "use": "Own-project rules and documented architecture.",
+      "accessed": "2026-10-21",
+      "redistribution": "Reference only; no external source assets or implementation bundled."
+    },
+    {
+      "id": "SRC-SETTINGS",
+      "name": "Published render settings contract",
+      "url": "https://github.com/0xlillith/solidcraft/blob/93a2922c5ee272fb605703ae84c05825b4a74607/docs/render-settings.md",
+      "use": "Bounds and fields for six baseline examples.",
+      "accessed": "2026-10-21",
+      "redistribution": "Reference only; no external source assets or implementation bundled."
+    },
+    {
+      "id": "SRC-SELENE-V7",
+      "name": "Historical SELENE v7 source revision",
+      "url": "https://github.com/0xlillith/solidcraft-rover/tree/b32437915372d32b71419dc8f5143fe22ff1e869",
+      "use": "Historical pinned inventory only; excluded as the selected improved source.",
+      "accessed": "2026-10-21",
+      "redistribution": "Reference only; no external source assets or implementation bundled."
+    },
+    {
+      "id": "SRC-SELENE-ATTRIBUTION",
+      "name": "SELENE source attribution",
+      "url": "https://github.com/0xlillith/solidcraft-rover/blob/b32437915372d32b71419dc8f5143fe22ff1e869/ATTRIBUTION.md",
+      "use": "Notices required for a later model derivative.",
+      "accessed": "2026-10-21",
+      "redistribution": "Reference only; no external source assets or implementation bundled."
+    },
+    {
+      "id": "SRC-MOON-FACTSHEET",
+      "name": "NASA Moon Fact Sheet",
+      "url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/moonfact.html",
+      "use": "Reference surface gravity.",
+      "accessed": "2026-10-21",
+      "redistribution": "Reference only; no external source assets or implementation bundled."
+    },
+    {
+      "id": "SRC-MOON-FACTS",
+      "name": "NASA Moon Facts",
+      "url": "https://science.nasa.gov/moon/facts/",
+      "use": "Broad regolith and exosphere context.",
+      "accessed": "2026-10-21",
+      "redistribution": "Reference only; no external source assets or implementation bundled."
+    },
+    {
+      "id": "SRC-POLAR-LIGHT",
+      "name": "NASA SVS lunar south-pole illumination",
+      "url": "https://svs.gsfc.nasa.gov/5228/",
+      "use": "Low Sun and terrain occlusion context.",
+      "accessed": "2026-10-21",
+      "redistribution": "Reference only; no external source assets or implementation bundled."
+    },
+    {
+      "id": "SRC-LUNAR-DUST",
+      "name": "NASA NTRS PELT record",
+      "url": "https://ntrs.nasa.gov/citations/20090022233",
+      "use": "Ballistic particle-motion context.",
+      "accessed": "2026-10-21",
+      "redistribution": "Reference only; no external source assets or implementation bundled."
+    },
+    {
+      "id": "SRC-OPENPBR",
+      "name": "ASWF OpenPBR Surface specification",
+      "url": "https://academysoftwarefoundation.github.io/OpenPBR/",
+      "use": "Layered surface authoring concept; no code or artwork copied.",
+      "accessed": "2026-10-21",
+      "redistribution": "Reference only; no external source assets or implementation bundled."
+    },
+    {
+      "id": "SRC-SELENE-SHOWCASE",
+      "name": "Improved SELENE mechanism demonstration",
+      "url": "https://github.com/tangency-labs/solidcraft/pull/1540#issuecomment-6205857321",
+      "use": "Documented improved mechanisms; the owner-supplied native file is now pinned separately in assets/render/selene/source-lock.json.",
+      "accessed": "2026-10-21",
+      "redistribution": "This public comment is reference only; published demonstration media are not bundled. The separately supplied native file has its own admission and retained-notice record."
+    },
+    {
+      "id": "SRC-SELENE-EXPORT",
+      "name": "SELENE motion export demonstration",
+      "url": "https://github.com/tangency-labs/solidcraft/pull/1680",
+      "use": "Identification of SELENE-showcase.solidcraft and existing motion export behavior.",
+      "accessed": "2026-10-21",
+      "redistribution": "Reference only; no external source assets, media or implementation bundled."
+    },
+    {
+      "id": "SRC-SELENE-ANALYSIS",
+      "name": "SELENE motion analysis demonstration",
+      "url": "https://github.com/tangency-labs/solidcraft/pull/1712",
+      "use": "Existing sampled kinematic analysis and its limitations.",
+      "accessed": "2026-10-21",
+      "redistribution": "Reference only; no external source assets, media or implementation bundled."
+    },
+    {
+      "id": "SRC-SELENE-MECHANISMS",
+      "name": "Pinned SolidCraft mechanism reference",
+      "url": "https://github.com/tangency-labs/solidcraft/blob/463cea0615a22be2f7d6c30512211f9eda97ff28/skills/solidcraft-mechanisms/reference.md",
+      "use": "Project command conventions and documented actuator planning geometry.",
+      "accessed": "2026-10-21",
+      "redistribution": "Reference only; no external source assets, media or implementation bundled."
+    },
+    {
+      "id": "SRC-SUN-FACTSHEET",
+      "name": "NASA Sun Fact Sheet",
+      "url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html",
+      "use": "Approximate solar angular-diameter context; no calibrated site illumination.",
+      "accessed": "2026-10-21",
+      "redistribution": "Reference only; no external source assets, media or implementation bundled."
+    }
+  ]
+}

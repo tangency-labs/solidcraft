@@ -507,10 +507,16 @@ impl Session {
         }
         if let Some(executor) = &self.render_jobs.descriptor {
             let mut executor = executor.clone();
-            if self.render_jobs.host.as_ref().is_none_or(|host| !host.is_available()) {
-                executor.availability = render::Availability::Unavailable { reason: "CPU image host is unavailable".into() };
-            }
+            executor.availability = image_host_availability(self.render_jobs.host.as_ref(), &executor.id);
             backend.executors.push(executor);
+        }
+        if let Some(raytrace) = render_jobs::cpu_raytrace_descriptor(self.render_jobs.host.as_ref()) {
+            backend.executors.push(raytrace);
+        }
+        for (host, descriptor) in &self.render_jobs.additional {
+            let mut descriptor = descriptor.clone();
+            descriptor.availability = image_host_availability(Some(host), &descriptor.id);
+            backend.executors.push(descriptor);
         }
         backend
     }
@@ -525,6 +531,9 @@ impl Session {
             return Ok(());
         }
         if let Some(executor) = &viewport {
+            if executor.id.as_str() == "cpu-raytrace" {
+                return Err(EngineError::Other("cpu-raytrace is reserved for the native CPU raytrace integrator".into()));
+            }
             if executor.profiles.is_empty() || executor.profiles.iter().any(|p| p.operation != render::RenderOperation::Viewport) {
                 return Err(EngineError::Other("host viewport executor must contain only viewport profiles".into()));
             }
@@ -532,6 +541,10 @@ impl Session {
             if let Some(executor) = &self.render_jobs.descriptor {
                 backend.executors.push(executor.clone());
             }
+            if let Some(raytrace) = render_jobs::cpu_raytrace_descriptor(self.render_jobs.host.as_ref()) {
+                backend.executors.push(raytrace);
+            }
+            backend.executors.extend(self.render_jobs.additional.iter().map(|(_, d)| d.clone()));
             backend.executors.push(executor.clone());
             // Resolution validates the whole registry, including duplicate executor IDs.
             let request = render::RenderRequest {
@@ -851,6 +864,7 @@ impl Session {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         let host_viewport = self.render_viewport.clone();
         let host_jobs = self.render_jobs.host.clone();
+        let additional_jobs = self.render_jobs.additional.clone();
         let live = spec.live.filter(|_| params.get("live").and_then(Value::as_bool) == Some(true));
         if live.is_none() && spec.reads_model && self.model.is_stale() {
             self.refresh();
@@ -893,6 +907,9 @@ impl Session {
         self.render_viewport = host_viewport;
         if self.render_jobs.host.is_none() && host_jobs.is_some() {
             self.set_render_job_host(host_jobs)?;
+        }
+        for (host, _) in additional_jobs {
+            self.register_render_job_host(host)?;
         }
         if outermost && crash::enabled() {
             // A failed command leaves the design as it was (restored below).
@@ -1294,4 +1311,14 @@ fn own_values(sk: &solidcraft_sketch::Sketch) -> std::collections::BTreeMap<Stri
         }
     }
     values
+}
+
+/// Capabilities are fixed at registration; availability is live device/host state.
+fn image_host_availability(host: Option<&render::job::ImageHost>, expected: &render::ExecutorId) -> render::Availability {
+    match host.map(render::job::ImageHost::descriptor) {
+        Some(Ok(current)) if current.id == *expected => current.availability,
+        Some(Ok(_)) => render::Availability::Unavailable { reason: "image executor identity changed after registration".into() },
+        Some(Err(error)) => render::Availability::Unavailable { reason: format!("image executor status unavailable: {error}") },
+        None => render::Availability::Unavailable { reason: "image host is unavailable".into() },
+    }
 }

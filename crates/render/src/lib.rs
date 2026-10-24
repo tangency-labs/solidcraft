@@ -5,21 +5,30 @@
 #![forbid(unsafe_code)]
 
 mod analysis;
+pub mod anisotropic_surface;
 mod backend;
 mod camera;
+pub mod clear_coat;
 mod curve_display;
+pub mod film;
 mod gif;
 pub mod job;
 pub mod lighting;
+pub mod mapping;
 mod product;
 mod raster;
+#[cfg(feature = "raytrace-cpu")]
+pub mod raytrace;
 mod scene;
+pub mod stage;
 pub mod studio;
 pub mod surface;
+pub mod surface_patterns;
 pub mod texture_input;
 pub mod texture_interpolation;
 pub mod texture_lod;
 pub mod texture_sampling;
+pub mod transmission;
 
 pub use analysis::{AnalysisColors, AnalysisMode, SceneAnalysis};
 pub use backend::{

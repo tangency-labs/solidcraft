@@ -91,7 +91,7 @@ impl Policy {
         }
     }
 
-    fn admits(self, tier: Tier) -> bool {
+    pub(crate) fn admits(self, tier: Tier) -> bool {
         match self {
             Policy::Auto => true,
             Policy::Hardware => tier == Tier::Hardware,
@@ -139,7 +139,7 @@ pub fn native_backends() -> wgpu::Backends {
     }
 }
 
-fn tier_of(t: wgpu::DeviceType) -> Tier {
+pub(crate) fn tier_of(t: wgpu::DeviceType) -> Tier {
     match t {
         wgpu::DeviceType::Cpu => Tier::Software,
         wgpu::DeviceType::DiscreteGpu | wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::VirtualGpu | wgpu::DeviceType::Other => Tier::Hardware,
@@ -199,6 +199,28 @@ pub fn survey(policy: Policy) -> Survey {
     let chosen = found.iter().position(|r| policy.admits(r.tier));
     let lands_on = policy.lands_on(chosen.and_then(|i| found.get(i)).map(|r| r.tier));
     Survey { backends: format!("{:?}", native_backends()), adapters: found, chosen, lands_on }
+}
+
+/// The Vulkan adapter `policy` picks among those `keep` accepts, with its report; `None` where
+/// the native backends (or `WGPU_BACKEND`) leave out Vulkan, as on macOS. The GPU path tracer
+/// runs on Vulkan only (#3217): D3D12 was never faster in our measurements and needs minutes to
+/// compile its shader at every start, where Vulkan keeps compiled pipelines between runs.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn pick_vulkan(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> Option<(wgpu::Adapter, AdapterReport)> {
+    if !native_backends().contains(wgpu::Backends::VULKAN) {
+        return None;
+    }
+    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    desc.backends = wgpu::Backends::VULKAN;
+    let mut all = pollster::block_on(wgpu::Instance::new(desc).enumerate_adapters(wgpu::Backends::VULKAN));
+    all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
+    all.into_iter()
+        .filter(|a| keep(&a.get_info()))
+        .map(|a| {
+            let r = report(&a.get_info());
+            (a, r)
+        })
+        .find(|(_, r)| policy.admits(r.tier))
 }
 
 /// The adapter `policy` picks, with its report; `None` when no adapter qualifies.

@@ -1,11 +1,22 @@
 use super::*;
 use crate::{Camera, ProductMesh, StandardView};
 use solidcraft_geom::{Aabb3, Mesh};
+use std::sync::Arc;
 
 fn request() -> ImageRequest {
     let mut camera = Camera { distance: 50.0, ..Default::default() };
     camera.set_view(StandardView::Front);
-    ImageRequest { camera, width: 64, height: 64, background: [20, 40, 60], transparent_background: true }
+    ImageRequest {
+        environment: None,
+        textures: None,
+        integrator: Default::default(),
+        raytrace: None,
+        camera,
+        width: 64,
+        height: 64,
+        background: [20, 40, 60],
+        transparent_background: true,
+    }
 }
 
 fn square(name: &str, colour: [u8; 3], opacity: f64, offset: Vec3) -> ProductMesh {
@@ -21,7 +32,7 @@ fn square(name: &str, colour: [u8; 3], opacity: f64, offset: Vec3) -> ProductMes
         tri_face: vec![0, 1],
         ..Default::default()
     };
-    ProductMesh { name: name.into(), mesh: Arc::new(mesh), color: colour, opacity, surface: None, faces: Vec::new() }
+    ProductMesh { name: name.into(), mesh: Arc::new(mesh), color: colour, opacity, surface: None, transmission: None, faces: Vec::new() }
 }
 
 fn scene(meshes: Vec<ProductMesh>) -> ProductScene {
@@ -69,6 +80,29 @@ fn glass_is_sorted_back_to_front_independently_of_body_order() {
 }
 
 #[test]
+fn physical_transmission_keeps_the_exact_scalar_cpu_preview() {
+    let original = square("Glass", [80, 180, 140], 0.25, Vec3::ZERO);
+    let mut glass = original.clone();
+    glass.surface = Some(crate::surface::OpaqueSurface::new(Vec3::new(0.2, 0.4, 0.3), 0.0, 0.1, 1.5).unwrap());
+    glass.transmission = Some(crate::transmission::Transmission::new(Vec3::new(-0.7_f64.ln(), -0.9_f64.ln(), 0.0) / 10.0, None).unwrap());
+    let expected = finish(ImageTask::new(scene(vec![original]), request(), CancelToken::default()).unwrap());
+    let actual = finish(ImageTask::new(scene(vec![glass]), request(), CancelToken::default()).unwrap());
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn cpu_raytrace_refuses_physical_transmission_before_preparation() {
+    let mut glass = square("Glass", [200; 3], 1.0, Vec3::ZERO);
+    glass.transmission = Some(crate::transmission::Transmission::new(Vec3::ZERO, Some(1.0)).unwrap());
+    let mut input = request();
+    input.integrator = super::super::Integrator::Raytrace;
+    input.transparent_background = false;
+    let error = admit(&scene(vec![glass]), &input).unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidRequest);
+    assert!(error.message.contains("physical transmission"));
+}
+
+#[test]
 fn cancellation_is_observed_during_preparation_sort_pixels_and_encoding() {
     for stage in [Stage::Looks, Stage::Prepare, Stage::Sort, Stage::Clear, Stage::Glass, Stage::Downsample, Stage::Encode] {
         let cancel = CancelToken::default();
@@ -93,9 +127,9 @@ fn encoding_yields_between_rows_and_completed_result_is_consumed_once() {
     while task.stage != Stage::Encode {
         assert!(matches!(task.step(64).unwrap(), TaskPoll::Pending(_)));
     }
-    let before = task.row;
+    let before = task.encoder.as_ref().unwrap().row();
     assert!(matches!(task.step(usize::MAX).unwrap(), TaskPoll::Pending(_)));
-    assert!(task.row - before <= 4);
+    assert!(task.encoder.as_ref().unwrap().row() - before <= 4);
     loop {
         if let TaskPoll::Complete(bytes) = task.step(4096).unwrap() {
             assert_eq!(image::load_from_memory(&bytes).unwrap().width(), 64);
@@ -116,7 +150,7 @@ fn invalid_sizes_indices_opacity_and_large_work_lists_fail_without_a_frame() {
         if bad == 0 {
             Arc::make_mut(&mut body.mesh).triangles[0][0] = u32::MAX;
         } else {
-            body.faces.push(FaceAppearance { face: 0, color: [0; 3], opacity: f64::NAN, surface: None });
+            body.faces.push(FaceAppearance { face: 0, color: [0; 3], opacity: f64::NAN, surface: None, transmission: None });
         }
         let mut task = ImageTask::new(scene(vec![body]), request(), CancelToken::default()).unwrap();
         let error = loop {
@@ -133,15 +167,23 @@ fn invalid_sizes_indices_opacity_and_large_work_lists_fail_without_a_frame() {
 }
 
 #[test]
-fn png_output_budget_and_cancellation_fail_without_partial_publication() {
-    let bytes = Arc::new(Mutex::new(Vec::new()));
-    let cancel = CancelToken::default();
-    let mut writer = BufferWriter { bytes: bytes.clone(), limit: 4, cancel: cancel.clone() };
-    writer.write_all(b"PNG").unwrap();
-    assert!(writer.write_all(b"too large").is_err());
-    assert_eq!(*bytes.lock().unwrap(), b"PNG");
-    cancel.cancel();
-    assert!(writer.write_all(b"x").is_err());
-    assert!(writer.flush().is_err());
-    assert_eq!(*bytes.lock().unwrap(), b"PNG");
+fn registered_executor_geometry_admission_excludes_the_cpu_raster_estimate() {
+    // A library-bounded source: about 100 MiB of face appearances on a small mesh at the
+    // largest image. Its CPU raster estimate is above 384 MiB at a registered executor's cap.
+    let count = (100 * 1024 * 1024 / std::mem::size_of::<FaceAppearance>()).min(1_000_000);
+    let mut body = square("appearances", [200; 3], 1.0, Vec3::ZERO);
+    body.faces = vec![FaceAppearance { transmission: None, face: 0, color: [200; 3], opacity: 1.0, surface: None }; count];
+    let source = scene(vec![body]);
+    let mut r = request();
+    r.width = 2048;
+    r.height = 2048;
+    let cpu = admit_raster(admit_source(&source, &r, 1_048_576).unwrap()).unwrap_err();
+    assert_eq!(cpu.code, ErrorCode::LimitExceeded);
+    assert!(cpu.message.contains("384 MiB"), "{}", cpu.message);
+    let geometry = admit_geometry(&source, &r, 1_048_576).unwrap();
+    assert_eq!((geometry.pixel_scratch_bytes, geometry.preparation_bytes), (0, 0));
+    assert_eq!(geometry.estimated_total_bytes, geometry.geometry_bytes);
+    assert_eq!(geometry.face_appearances, count as u64);
+    // The CPU host itself keeps rejecting the source.
+    assert_eq!(admit(&source, &r).unwrap_err().code, ErrorCode::LimitExceeded);
 }

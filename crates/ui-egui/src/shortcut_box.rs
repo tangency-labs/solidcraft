@@ -150,7 +150,7 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
                 .max(score(&q, panel).max(score(&q, home_panel)) / 3);
             let recent = app.sbox.recent.iter().position(|r| r == c.id).map_or(0, |i| 2000u32.saturating_sub(i.min(2000) as u32));
             // Commands that can run now come before those that can't.
-            let usable = if c.info(&app.session).enabled { 150 } else { 0 };
+            let usable = if crate::render_workspace::interactive_command_info(app, c).enabled { 150 } else { 0 };
             (s > 0).then_some((s + usable + if q.is_empty() { recent } else { recent / 20 }, (c.id, label, c.icon, place)))
         })
         .collect();
@@ -415,7 +415,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     let enabled: Vec<_> = rows
                         .iter()
-                        .map(|r| solidcraft_engine::find_command(r.0).is_some_and(|c| c.info(&app.session).enabled))
+                        .map(|r| {
+                            solidcraft_engine::find_command(r.0).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
+                        })
                         .chain(design.iter().map(|_| true))
                         .take(MAX_RESULTS)
                         .collect();
@@ -580,7 +582,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         } else {
             let index = picked.unwrap_or(app.sbox.index);
-            if let Some((id, ..)) = rows.get(index).filter(|r| solidcraft_engine::find_command(r.0).is_some_and(|c| c.info(&app.session).enabled)) {
+            if let Some((id, ..)) = rows
+                .get(index)
+                .filter(|r| solidcraft_engine::find_command(r.0).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled))
+            {
                 app.sbox.used(id);
                 close(app);
                 app.start(id);

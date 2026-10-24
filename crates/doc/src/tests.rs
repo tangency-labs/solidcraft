@@ -261,7 +261,7 @@ fn a_body_reads_the_material_its_mass_is_computed_with() {
     let usable = [("Walnut", 0.65), ("Mote", f64::MIN_POSITIVE), ("Limit", MAX_DENSITY)];
     let unusable = [("Broken", -3.0), ("Weightless", 0.0), ("Beyond", MAX_DENSITY.next_up())];
     for (name, density) in usable.into_iter().chain(unusable) {
-        doc.user_materials.push(UserMaterial { name: name.into(), density, appearance: None });
+        doc.user_materials.push(UserMaterial { name: name.into(), density, appearance: None, physical_card: None });
     }
     // (body, its assignment as stored, the material it reads and weighs, that material's density)
     let cases = [

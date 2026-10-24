@@ -69,7 +69,7 @@ const USAGE_BENCH_ASSISTANT: &str = "  solidcraft-cli bench-assistant --connect 
 /// `snapshot`'s lines in the usage.
 const USAGE_SNAPSHOT: &str = "  solidcraft-cli snapshot <script|design> [--in design.solidcraft|part.step] --out shot.png [--width W] [--height H] [--view NAME | --camera JSON] [--no-grid] [--no-axes]\n      [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27]\n  solidcraft-cli snapshot --in <design.solidcraft|part.step> --out shot.png ...\n      (as with run, --in starts from a design and the script runs on top of it; an option snapshot doesn't take is an error;\n       --view: iso, front, back, top, bottom, left, right, or the name of a view saved in the design with view.save;\n       --camera: {target: [x,y,z], yaw, pitch, distance, fov?} in mm and radians, as the MCP screenshot takes it (docs/mcp.md);\n       --no-grid and --no-axes leave the ground grid (on Z 0) and the origin's axes out of the picture;\n       --body: how one body is drawn, as appearance.assign takes it: opacity 0-1 (below 1 is see-through, so what is inside\n         it shows) and color #rrggbb, either or both, once per body;\n       --tool: draw this body solid in the tool colour and every other body see-through, so a cut's or a join's tool body\n         is visible inside the material it meets; a later --body overrides it;\n       --section: cut the model as inspect.section does, so the inside shows: z=27 (the plane through that world\n         coordinate, keeping the smaller side), add ,flip to keep the other side, or XY, XZ, YZ, or its own JSON)\n";
 /// `render`'s lines in the usage.
-const USAGE_RENDER: &str = "  solidcraft-cli render <script|design> --out image.png [--setup NAME] [--width W] [--height H] [--transparent] [--overwrite] [--timeout SECONDS]\n";
+const USAGE_RENDER: &str = "  solidcraft-cli render <script|design> --out image.png [--setup NAME] [--width W] [--height H] [--transparent] [--overwrite] [--timeout SECONDS]\n      [--progressive] [--samples N] [--max-depth N] [--seed N] [--exposure EV] [--lighting FILE.json] [--environment FILE.json] [--tone-map reinhard|aces_fitted]\n";
 /// `exec`'s lines in the usage.
 const USAGE_EXEC: &str = "  solidcraft-cli exec <command> [json-params]\n";
 /// `commands`'s lines in the usage.
@@ -82,7 +82,7 @@ const USAGE_ORACLE: &str = "  solidcraft-cli oracle <case-dir>... [--json]\n";
 const USAGE_FUZZ: &str =
     "  solidcraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]\n";
 /// `mcp`'s lines in the usage.
-const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.solidcraft|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path]\n                     [--param-check off|warn|strict]\n";
+const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.solidcraft|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path]\n                     [--param-check off|warn|strict] [--render-gpu]\n";
 /// `crashes`'s lines in the usage.
 const USAGE_CRASHES: &str = "  solidcraft-cli crashes [list [--json] | show <id> | replay <id> | dir | clear [<id>]]\n";
 /// `licences`'s lines in the usage.
@@ -629,6 +629,10 @@ fn cmd_exec(args: &[String]) -> Result<(), String> {
 /// a running app's control port. stdout carries only protocol messages. Files the agent's tool
 /// calls reach are confined to `solidcraft_mcp::agent_scope` unless `--allow-any-path` is given.
 fn cmd_mcp(args: &[String]) -> Result<(), String> {
+    let render_gpu = args.iter().any(|arg| arg == "--render-gpu");
+    if render_gpu && flag(args, "--connect").is_some() {
+        return Err("mcp: --render-gpu installs a headless image host; a connected application owns its own device".into());
+    }
     install_renderer();
     let scope = (!args.iter().any(|a| a == "--allow-any-path"))
         .then(|| solidcraft_mcp::agent_scope(flags(args, "--allow-path").into_iter().map(std::path::PathBuf::from)));
@@ -672,9 +676,13 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
             }
             Box::new(remote)
         }
-        (None, Some(path)) => Box::new(solidcraft_mcp::Headless::new(load_checked(path, param_check)?)),
-        // No arguments: the running desktop app, found through the discovery file it wrote
-        // (docs/control-protocol.md); none running (or `--headless`): a session of its own.
+        (None, Some(path)) => {
+            let mut headless = solidcraft_mcp::Headless::new(load_checked(path, param_check)?);
+            if render_gpu {
+                headless.session.register_render_job_host(solidcraft_gpu::path::host().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            }
+            Box::new(headless)
+        }
         (None, None) => {
             if !args.iter().any(|a| a == "--headless")
                 && let Some(port) = discover_app()
@@ -684,6 +692,9 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
             }
             let mut headless = solidcraft_mcp::Headless::default();
             headless.session.param_check = param_check;
+            if render_gpu {
+                headless.session.register_render_job_host(solidcraft_gpu::path::host().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            }
             Box::new(headless)
         }
     };

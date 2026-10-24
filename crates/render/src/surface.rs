@@ -16,12 +16,14 @@ pub struct OpaqueSurface {
     metallic: f64,
     roughness: f64,
     dielectric_ior: f64,
+    clear_coat: Option<crate::clear_coat::ClearCoat>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SurfaceError {
     BaseColor,
     Metallic,
+    CoatWeight,
     Roughness,
     DielectricIor,
     Direction,
@@ -32,6 +34,7 @@ impl std::fmt::Display for SurfaceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::BaseColor => "linear base color channels must be finite and in [0, 1]",
+            Self::CoatWeight => "clear-coat weight must be finite and in [0, 1]",
             Self::Metallic => "metallic fraction must be finite and in [0, 1]",
             Self::Roughness => "perceptual roughness must be finite and in [0.045, 1]",
             Self::DielectricIor => "dielectric IOR must be finite and in [1, 3]",
@@ -58,7 +61,16 @@ impl OpaqueSurface {
         if !dielectric_ior.is_finite() || !(1.0..=3.0).contains(&dielectric_ior) {
             return Err(SurfaceError::DielectricIor);
         }
-        Ok(Self { base_color, metallic, roughness, dielectric_ior })
+        Ok(Self { base_color, metallic, roughness, dielectric_ior, clear_coat: None })
+    }
+
+    /// Runtime optical layer; never serialized into a document appearance.
+    pub fn with_clear_coat(mut self, coat: crate::clear_coat::ClearCoat) -> Self {
+        self.clear_coat = if coat.weight() == 0.0 { None } else { Some(coat) };
+        self
+    }
+    pub fn clear_coat(self) -> Option<crate::clear_coat::ClearCoat> {
+        self.clear_coat
     }
 
     pub fn base_color(self) -> Vec3 {
@@ -77,6 +89,14 @@ impl OpaqueSurface {
     pub fn normal_reflectance(self) -> Vec3 {
         let ratio = (self.dielectric_ior - 1.0) / (self.dielectric_ior + 1.0);
         Vec3::new(ratio * ratio, ratio * ratio, ratio * ratio).lerp(self.base_color, self.metallic)
+    }
+
+    /// Schlick approximation with the exact index-matched dielectric limit.
+    /// A conductor retains its own grazing response, including in a metal mix.
+    pub(crate) fn specular_fresnel(self, cosine: f64) -> Vec3 {
+        let f0 = self.normal_reflectance();
+        let grazing = if self.dielectric_ior == 1.0 { self.metallic } else { 1.0 };
+        f0 + (Vec3::new(grazing, grazing, grazing) - f0) * (1.0 - cosine.clamp(0.0, 1.0)).powi(5)
     }
 
     /// BRDF in inverse steradians. Directions point away from the surface.
@@ -102,19 +122,19 @@ impl OpaqueSurface {
         // G1 / cos(theta) has a finite grazing limit: no epsilon cosine clamp.
         let visibility = |cos: f64| 2.0 / (cos + (a2 + (1.0 - a2) * cos * cos).sqrt());
         let specular = distribution * 0.25 * visibility(nv) * visibility(nl);
-        let f0 = self.normal_reflectance();
-        let fresnel = |cos: f64| f0 + (Vec3::new(1.0, 1.0, 1.0) - f0) * (1.0 - cos).powi(5);
+        let fresnel = |cos: f64| self.specular_fresnel(cos);
         let f = fresnel(vh);
         // Symmetric entry/exit attenuation avoids adding a full Lambert substrate
         // to grazing reflection. Internal reflection / multi-scattering is omitted.
         let fv = fresnel(nv);
         let fl = fresnel(nl);
         let diffuse = self.base_color * ((1.0 - self.metallic) / PI);
-        Ok(Vec3::new(
+        let base = Vec3::new(
             f.x * specular + (1.0 - fv.x) * (1.0 - fl.x) * diffuse.x,
             f.y * specular + (1.0 - fv.y) * (1.0 - fl.y) * diffuse.y,
             f.z * specular + (1.0 - fv.z) * (1.0 - fl.z) * diffuse.z,
-        ))
+        );
+        Ok(self.clear_coat.map_or(base, |coat| coat.layer(base, nv, nl, nh, vh)))
     }
 }
 
@@ -224,6 +244,31 @@ mod tests {
                         assert!(energy.is_finite() && energy.x <= 1.025, "m={metallic}, r={roughness}, ior={ior}, nv={cosine}: {energy:?}");
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn index_matched_dielectric_is_exact_lambert_at_oblique_and_grazing_angles() {
+        let color = Vec3::new(0.75, 0.35, 0.02);
+        for roughness in [MIN_ROUGHNESS, 0.25, 1.0] {
+            let s = OpaqueSurface::new(color, 0.0, roughness, 1.0).unwrap();
+            for cosine in [0.0, 1e-12, 0.02, 0.5, 1.0] {
+                assert_eq!(s.specular_fresnel(cosine), Vec3::ZERO);
+            }
+            for nv in [1e-8_f64, 0.02, 0.5, 1.0] {
+                for nl in [1e-8_f64, 0.2, 0.7, 1.0] {
+                    let v = Vec3::new((1.0 - nv * nv).sqrt(), 0.0, nv);
+                    let l = Vec3::new(0.0, (1.0 - nl * nl).sqrt(), nl);
+                    assert!((s.brdf(Vec3::Z, v, l).unwrap() - color / PI).len() < 1e-14);
+                }
+            }
+        }
+        for metallic in [0.0, 0.25, 0.5, 1.0] {
+            let s = OpaqueSurface::new(color, metallic, 0.5, 1.0).unwrap();
+            for c in [0.0_f64, 0.2, 0.9, 1.0] {
+                let conductor = color + (Vec3::new(1., 1., 1.) - color) * (1.0 - c).powi(5);
+                assert!((s.specular_fresnel(c) - conductor * metallic).len() < 1e-14);
             }
         }
     }

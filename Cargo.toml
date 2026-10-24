@@ -13,6 +13,7 @@ authors = ["SolidCraft contributors"]
 repository = "https://github.com/bherbruck/solidcraft"
 
 [workspace.dependencies]
+robust = "1.2"
 # internal
 solidcraft-geom = { path = "crates/geom" }
 solidcraft-sketch = { path = "crates/sketch" }

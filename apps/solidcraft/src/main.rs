@@ -8,6 +8,7 @@
 //! A `.step`/`.stp` file opens as a new design holding the file's bodies (an Import feature); a
 //! `.3mf`/`.stl`/`.obj`/`.glb`/`.gltf` file as a new design holding mesh bodies.
 //!
+//! `SOLIDCRAFT_SETTINGS_DIR` selects an explicit absolute settings directory without legacy adoption.
 //! `--control <port>` (or `SOLIDCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control
 //! server: `{"id":1,"method":"engine.execute","params":{"command":"solid.box","params":{…}}}`.
 //! Without them the channel still opens, on the default port, unless Preferences turns it off.
@@ -289,6 +290,7 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
         })),
         graphics_path: graphics_path().map(|p| p.to_string_lossy().to_string()),
+        window_system: window_system_now(),
         http_get: Some(std::sync::Arc::new(http_get)),
         http_download: Some(std::sync::Arc::new(http_download)),
         // Already an installed app: only the browser build offers to install.
@@ -458,14 +460,15 @@ fn http_call(url: &str, timeout: std::time::Duration) -> Result<ureq::http::Resp
 }
 
 /// The per-user settings folder: eframe's storage (`app.ron`) and the anti-aliasing preference.
-fn settings_dir() -> Option<std::path::PathBuf> {
-    eframe::storage_dir("SolidCraft")
+fn settings_dir() -> Result<Option<std::path::PathBuf>, String> {
+    let selected = std::env::var_os("SOLIDCRAFT_SETTINGS_DIR");
+    startup::settings_directory(selected.as_deref(), eframe::storage_dir("SolidCraft"))
 }
 
 /// The anti-aliasing preference, kept next to eframe's storage (it is needed before the
 /// window opens).
 fn graphics_path() -> Option<std::path::PathBuf> {
-    settings_dir().map(|d| d.join("graphics.json"))
+    settings_dir().ok().flatten().map(|d| d.join("graphics.json"))
 }
 
 /// Compatibility shim (docs/compatibility.md): on the first launch after the rename, copy the
@@ -475,7 +478,7 @@ fn graphics_path() -> Option<std::path::PathBuf> {
 /// old app id's `~/.var/app` folder; that copy comes first, as it is the newest. The old folders
 /// are never changed.
 fn adopt_legacy_settings() {
-    let (Some(current), Some(legacy)) = (settings_dir(), eframe::storage_dir("SolveCraft")) else { return };
+    let (Some(current), Some(legacy)) = (settings_dir().ok().flatten(), eframe::storage_dir("SolveCraft")) else { return };
     let legacy_eframe = eframe::storage_dir(solidcraft_engine::io::LEGACY_APP_ID);
     let old_flatpak = solidcraft_engine::io::legacy_flatpak_path(&current);
     if let Err(e) = adopt_settings(&current, old_flatpak.as_deref(), &legacy, legacy_eframe.as_deref()) {
@@ -575,7 +578,11 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
-    adopt_legacy_settings();
+    // Validate before legacy adoption, crash markers or any user preference read.
+    let settings = settings_dir().map_err(|error| eframe::Error::AppCreation(error.into()))?;
+    if std::env::var_os("SOLIDCRAFT_SETTINGS_DIR").is_none() {
+        adopt_legacy_settings();
+    }
     let mut safe_mode = startup::env_on(std::env::var(startup::SAFE_MODE_ENV).ok().as_deref());
     let mut control_port: Option<u16> = solidcraft_engine::geom::env::var("CONTROL_PORT").and_then(|p| p.parse().ok());
     let mut files = Vec::new();
@@ -612,7 +619,6 @@ fn main() -> eframe::Result {
     }
     // Settings that don't read are moved aside; launches that never got a window are counted,
     // and after a few in a row this one starts in safe mode (docs/book/src/guide/troubleshooting.md).
-    let settings = settings_dir();
     let mut notes: Vec<String> = Vec::new();
     let mut failed_starts = 0;
     if let Some(dir) = &settings {
@@ -675,12 +681,24 @@ fn main() -> eframe::Result {
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut options = options;
     #[cfg(all(unix, not(target_os = "macos")))]
-    if prefer_x11(
-        std::env::var_os("DISPLAY").is_some(),
-        std::env::var_os("WAYLAND_DISPLAY").is_some(),
-        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
-        solidcraft_engine::geom::env::var("WAYLAND").as_deref(),
-    ) {
+    let x11 = {
+        // SOLIDCRAFT_WAYLAND wins over Preferences › Graphics › Window system (#3083).
+        let environment = solidcraft_engine::geom::env::var("WAYLAND");
+        let preference = window_system_preference();
+        let wayland_override = environment.as_deref().or(window_system_override(preference.as_deref()));
+        let wayland_display = std::env::var_os("WAYLAND_DISPLAY").is_some();
+        let x11 = prefer_x11(
+            std::env::var_os("DISPLAY").is_some(),
+            wayland_display,
+            std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+            wayland_override,
+        );
+        // Without a Wayland socket winit opens on X11 anyway.
+        let _ = WINDOW_SYSTEM.set(if x11 || !wayland_display { "x11" } else { "wayland" });
+        x11
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if x11 {
         options.event_loop_builder = Some(Box::new(|b| {
             use winit::platform::x11::EventLoopBuilderExtX11;
             b.with_x11();
@@ -890,6 +908,36 @@ fn no_window(error: eframe::Error, tried_cpu: bool, settings: Option<&std::path:
     Err(error)
 }
 
+/// Linux: the window system this run opened with (`wayland` or `x11`), for Preferences (#3083).
+#[cfg(all(unix, not(target_os = "macos")))]
+static WINDOW_SYSTEM: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// The window system this run uses, where there is a choice (Linux).
+fn window_system_now() -> Option<&'static str> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    return WINDOW_SYSTEM.get().copied();
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    None
+}
+
+/// Preferences › Graphics › Window system (`graphics.json`'s `window_system`), read before the
+/// window opens.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn window_system_preference() -> Option<String> {
+    graphics().and_then(|v| v.get("window_system").and_then(serde_json::Value::as_str).map(str::to_string))
+}
+
+/// The window system preference as the `SOLIDCRAFT_WAYLAND` value it stands for: `wayland` is
+/// `1`, `x11` is `0`, and `auto` (or anything else) leaves the choice to [`prefer_x11`].
+#[cfg(all(unix, not(target_os = "macos")))]
+fn window_system_override(preference: Option<&str>) -> Option<&'static str> {
+    match preference.map(str::trim) {
+        Some("wayland") => Some("1"),
+        Some("x11") => Some("0"),
+        _ => None,
+    }
+}
+
 /// Whether to run through XWayland rather than native Wayland. winit has no file drag-and-drop
 /// on Wayland (only on X11), so dropping files from the file manager showed a "no" cursor: use
 /// XWayland when it's there. Except on niri, whose XWayland (xwayland-satellite) breaks window
@@ -926,6 +974,19 @@ mod backend_tests {
         assert!(!prefer_x11(true, true, Some("GNOME"), Some("")));
         assert!(prefer_x11(true, true, Some("niri"), Some("0")));
         assert!(!prefer_x11(false, true, Some("niri"), Some("0")));
+    }
+
+    /// Preferences › Graphics › Window system stands for the same values (#3083).
+    #[test]
+    fn the_window_system_preference_maps_to_the_override() {
+        use super::window_system_override as over;
+        assert_eq!(
+            (over(Some("wayland")), over(Some("x11")), over(Some("auto")), over(None), over(Some("junk"))),
+            (Some("1"), Some("0"), None, None, None)
+        );
+        // Wayland chosen on GNOME keeps native Wayland; X11 chosen on niri goes through XWayland.
+        assert!(!prefer_x11(true, true, Some("GNOME"), over(Some("wayland"))));
+        assert!(prefer_x11(true, true, Some("niri"), over(Some("x11"))));
     }
 }
 

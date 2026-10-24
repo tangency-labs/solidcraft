@@ -1,0 +1,3 @@
+# Offline authoring dependencies only; not linked into the Rust application.
+numpy==2.3.5
+Pillow==12.3.0

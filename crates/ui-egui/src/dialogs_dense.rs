@@ -190,11 +190,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         input_rows(d, ui, &app.session);
     }
     match &mut d.kind {
-        Kind::Material { index } => {
-            let names = app.session.doc.material_names();
-            let names: Vec<_> = names.iter().map(String::as_str).collect();
-            choice_row(ui, "Material", "mat", index, &names);
-        }
+        Kind::Material { index, editor } => crate::material_editor::rows(app, ui, index, editor),
         Kind::Appearance(k) => enter |= crate::dialogs_appearance::rows(app, ui, k, &mut d.inputs),
         Kind::Motion(k) => enter |= crate::dialogs_motion::rows(app, ui, k, &mut d.inputs),
         Kind::Part(k) => enter |= crate::dialogs_parts::rows(app, ui, k, &d.inputs),

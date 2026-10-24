@@ -10,6 +10,36 @@ fn fixture() -> Session {
 }
 
 #[test]
+fn copied_recipe_id_labels_are_inert_and_explicit_recipe_requests_stay_strict() {
+    let mut s = fixture();
+    for name in ["starter.metal.gold-warm", "starter.glass.clear-soda-lime"] {
+        for pbr in [serde_json::Value::Null, json!({"metallic":0.0,"roughness":0.73,"dielectric_ior":1.37})] {
+            s.execute("appearance.assign", &json!({"bodies":["Specimen"],"name":name,"color":[31,61,91],"opacity":1.0,"pbr":pbr})).unwrap();
+            let look = &s.doc.appearances.bodies["Specimen"];
+            assert_eq!(look.name, name);
+            assert_eq!(look.color, [31, 61, 91]);
+            assert_eq!(serde_json::to_value(look.pbr).unwrap(), pbr);
+            assert_eq!(product_scene::extract(&s).unwrap().meshes[0].surface.is_some(), !pbr.is_null());
+        }
+    }
+    let before = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len(), s.revision);
+    for params in [
+        json!({"bodies":["Specimen"],"name":"Owned label"}),
+        json!({"bodies":["Specimen"],"name":"Owned label","appearance":"starter.metal.gold-warm","color":[31,61,91]}),
+        json!({"bodies":["Specimen"],"appearance":"starter.glass.clear-soda-lime","color":[31,61,91],"pbr":null}),
+        json!({"bodies":["Specimen"],"name":"x".repeat(129),"color":[31,61,91]}),
+    ] {
+        assert!(s.execute("appearance.assign", &params).is_err());
+        assert!(Arc::ptr_eq(&before, &s.doc));
+        assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+    }
+    s.execute("appearance.assign", &json!({"bodies":["Specimen"],"appearance":"starter.metal.gold-warm"})).unwrap();
+    assert_eq!(s.doc.appearances.bodies["Specimen"].name, "Metal - Warm Reflective Gold");
+    assert_eq!(s.doc.appearances.bodies["Specimen"].pbr.unwrap().metallic(), 1.0);
+}
+
+#[test]
 fn format20_scalar_looks_upgrade_and_format21_setups_keep_their_meaning() {
     let mut s = fixture();
     s.execute("appearance.assign", &json!({"bodies":["Specimen"],"appearance":"Original legacy look","color":"#b47846","opacity":0.4})).unwrap();
@@ -89,7 +119,11 @@ fn invalid_optical_requests_refuse_atomically_and_scalar_export_cannot_lose_them
         "pbr":{"metallic":0,"roughness":0.5,"dielectric_ior":1.5}}),
     )
     .unwrap();
-    assert!(solidcraft_io::catalog::Catalog::from_document(&s.doc, "user.fixture", "Original", Default::default()).is_err());
+    assert!(
+        solidcraft_io::catalog::Catalog::from_document(&s.doc, "user.fixture", "Original", Default::default())
+            .and_then(|c| c.in_format(solidcraft_io::catalog::V1_FORMAT))
+            .is_err()
+    );
     let mut invalid: serde_json::Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     invalid["appearances"]["bodies"]["Specimen"]["opacity"] = json!(0.5);
     assert!(crate::doc::Document::from_json(&invalid.to_string()).is_err());
@@ -115,7 +149,11 @@ fn physical_default_look_and_face_override_keep_independent_optical_meaning() {
     assert!(scene.meshes[0].surface.is_some());
     assert!(scene.meshes[0].faces.iter().any(|f| f.color == [0, 128, 160] && f.surface.is_none()));
     assert_eq!(s.doc.user_materials[0].density, 0.7);
-    assert!(solidcraft_io::catalog::Catalog::from_document(&s.doc, "user.fixture", "Original", Default::default()).is_err());
+    assert!(
+        solidcraft_io::catalog::Catalog::from_document(&s.doc, "user.fixture", "Original", Default::default())
+            .and_then(|c| c.in_format(solidcraft_io::catalog::V1_FORMAT))
+            .is_err()
+    );
 }
 
 #[test]
@@ -143,4 +181,459 @@ fn independent_component_copy_keeps_its_opaque_response_after_source_edits_and_r
     assert_eq!(s.doc.appearances.components[&copied], original);
     let reopened = crate::doc::Document::from_json(&s.doc.to_json()).unwrap();
     assert_eq!(reopened.appearances.components[&copied], original);
+}
+
+#[test]
+fn named_opaque_finishes_reach_the_scene_and_survive_undo_and_reopen_without_changing_mass() {
+    let mut s = fixture();
+    s.execute("material.assign", &json!({"bodies":["Specimen"],"material":"Steel"})).unwrap();
+    let mass = s.execute("component.properties", &json!({})).unwrap();
+    let geometry = product_scene::extract(&s).unwrap().meshes[0].mesh.clone();
+    let library = s.execute("appearance.library", &json!({})).unwrap();
+    let entries = library["appearances"].as_array().unwrap();
+    // Exact pre-finish compatibility fixture. Identify legacy rows by their
+    // names/values, not by missing IDs: independent future packs may coexist.
+    let legacy: [(&str, [u8; 3], f64); 20] = [
+        ("Aluminum - Satin", [204, 208, 214], 1.0),
+        ("Aluminum - Anodized Black", [44, 46, 50], 1.0),
+        ("Aluminum - Anodized Blue", [52, 92, 160], 1.0),
+        ("Steel - Satin", [158, 164, 172], 1.0),
+        ("Stainless Steel - Brushed", [186, 191, 198], 1.0),
+        ("Cast Iron", [104, 104, 110], 1.0),
+        ("Brass - Polished", [208, 172, 88], 1.0),
+        ("Copper", [204, 122, 80], 1.0),
+        ("Titanium", [150, 148, 158], 1.0),
+        ("ABS - White", [236, 236, 230], 1.0),
+        ("ABS - Black", [36, 36, 38], 1.0),
+        ("ABS - Red", [196, 40, 40], 1.0),
+        ("ABS - Blue", [40, 90, 186], 1.0),
+        ("ABS - Yellow", [236, 196, 40], 1.0),
+        ("ABS - Green", [52, 150, 80], 1.0),
+        ("Rubber - Black", [28, 28, 28], 1.0),
+        ("Glass - Clear", [190, 220, 228], 0.25),
+        ("Glass - Smoked", [90, 96, 104], 0.45),
+        ("Wood - Oak", [190, 146, 92], 1.0),
+        ("Paint - Gloss White", [246, 246, 244], 1.0),
+    ];
+    assert_eq!(solidcraft_doc::appearance::LIBRARY, legacy);
+    for (name, color, opacity) in legacy {
+        let matching: Vec<_> = entries.iter().filter(|entry| entry["name"] == name).collect();
+        assert_eq!(matching.len(), 1, "legacy row must occur exactly once: {name}");
+        let row = matching[0];
+        assert_eq!(row["color"], format!("#{:02x}{:02x}{:02x}", color[0], color[1], color[2]));
+        assert_eq!(row["opacity"], opacity);
+        assert!(row.get("pbr").is_none() && row.get("id").is_none(), "legacy scalar meaning changed: {name}");
+    }
+    assert_eq!(
+        solidcraft_doc::appearance::OPAQUE_FINISHES.map(|(name, ..)| name),
+        ["Steel - Satin PBR", "Aluminum - Satin PBR", "Copper - Clean PBR", "ABS - Molded PBR", "PLA - Smooth PBR", "Wood - Oak Uniform PBR Preview"]
+    );
+    for (name, ..) in solidcraft_doc::appearance::OPAQUE_FINISHES {
+        let expected = solidcraft_doc::appearance::library(name).unwrap();
+        let matching: Vec<_> = entries.iter().filter(|entry| entry["name"] == name).collect();
+        assert_eq!(matching.len(), 1, "finish row must occur exactly once: {name}");
+        assert_eq!(matching[0]["color"], expected.hex());
+        assert_eq!(matching[0]["opacity"], 1.0);
+        assert_eq!(matching[0]["pbr"], json!(expected.pbr.unwrap()));
+        assert!(!legacy.iter().any(|(legacy_name, ..)| legacy_name == &name));
+        let before = s.doc.appearances.clone();
+        s.execute("appearance.assign", &json!({"bodies":["Specimen"],"appearance":name.to_lowercase()})).unwrap();
+        assert_eq!(s.doc.appearances.bodies["Specimen"], expected);
+        let scene = product_scene::extract(&s).unwrap();
+        assert_eq!(scene.meshes[0].surface, expected.opaque_surface().unwrap());
+        assert!(Arc::ptr_eq(&scene.meshes[0].mesh, &geometry));
+        assert_eq!(scene.required_features(), vec![crate::render::RenderFeature::Pbr]);
+        assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
+        let saved = s.doc.to_json();
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc.appearances, before);
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert_eq!(s.doc.appearances.bodies["Specimen"], expected);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        assert_eq!(reopened.doc.appearances.bodies["Specimen"], expected);
+        assert_eq!(reopened.execute("component.properties", &json!({})).unwrap(), mass);
+        assert!(
+            solidcraft_io::catalog::Catalog::from_document(&reopened.doc, "user.fixture", "Original", Default::default())
+                .unwrap()
+                .in_format(solidcraft_io::catalog::V1_FORMAT)
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn named_opaque_finish_refuses_transparency_atomically_and_allows_explicit_scalar_override() {
+    let mut s = fixture();
+    s.execute("appearance.assign", &json!({"bodies":["Specimen"],"color":"#123456"})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    let doc = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len(), s.revision);
+    assert!(history.1 > 0);
+    for opacity in [json!(0), json!(0.5), json!(-0.1), json!(2), json!("invalid"), json!(null), json!(true)] {
+        assert!(s.execute("appearance.assign", &json!({"bodies":["Specimen"],"appearance":"Steel - Satin PBR","opacity":opacity})).is_err());
+        assert!(Arc::ptr_eq(&doc, &s.doc));
+        assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+    }
+    s.execute("appearance.assign", &json!({"bodies":["Specimen"],"appearance":"Steel - Satin PBR","pbr":null,"opacity":0.5})).unwrap();
+    let scalar = s.doc.appearances.bodies["Specimen"].clone();
+    assert!(scalar.pbr.is_none());
+    assert_eq!(scalar.opacity, 0.5);
+    assert!(product_scene::extract(&s).unwrap().meshes[0].surface.is_none());
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc.appearances, doc.appearances);
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(s.doc.appearances.bodies["Specimen"], scalar);
+    let reopened = crate::doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.appearances.bodies["Specimen"], scalar);
+}
+
+#[test]
+fn physical_material_presets_refuse_inherited_transparency_before_any_edit() {
+    let mut s = fixture();
+    s.execute("material.create", &json!({"name":"Existing material","density_g_cm3":2,"color":"#123456"})).unwrap();
+    s.execute("material.assign", &json!({"bodies":["Specimen"],"material":"Existing material"})).unwrap();
+    s.execute("material.edit", &json!({"material":"Existing material","density_g_cm3":3})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    let mass = s.execute("component.properties", &json!({})).unwrap();
+    let doc = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len(), s.revision);
+    assert!(history.1 > 0);
+    for command in ["material.create", "material.edit"] {
+        let mut params = if command == "material.create" {
+            json!({"name":"New material","density_g_cm3":4,"appearance":"Steel - Satin PBR"})
+        } else {
+            // A rejected optical edit must not rename the material, rewrite uses or change density.
+            json!({"material":"Existing material","name":"Renamed material","density_g_cm3":4,"appearance":"Steel - Satin PBR"})
+        };
+        for opacity in [json!(0), json!(0.5), json!(-0.1), json!(2), json!("invalid"), json!(null), json!(true)] {
+            params["opacity"] = opacity;
+            assert!(s.execute(command, &params).is_err(), "{command}: {params}");
+            assert!(Arc::ptr_eq(&doc, &s.doc));
+            assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+        }
+    }
+    assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
+}
+
+#[test]
+fn physical_material_finish_defaults_keep_optics_through_edits_undo_and_reopen() {
+    let mut s = fixture();
+    let expected = solidcraft_doc::appearance::library("ABS - Molded PBR").unwrap();
+    s.execute("material.create", &json!({"name":"Original density fixture","density_g_cm3":0.7,"appearance":"ABS - Molded PBR"})).unwrap();
+    assert_eq!(s.doc.user_materials[0].appearance.as_ref(), Some(&expected));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.doc.user_materials.is_empty());
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(s.doc.user_materials[0].appearance.as_ref(), Some(&expected));
+    s.execute("material.assign", &json!({"bodies":["Specimen"],"material":"Original density fixture"})).unwrap();
+    let geometry = product_scene::extract(&s).unwrap().meshes[0].mesh.clone();
+    assert_eq!(product_scene::extract(&s).unwrap().meshes[0].surface, expected.opaque_surface().unwrap());
+
+    s.execute("material.edit", &json!({"material":"Original density fixture","density_g_cm3":0.9})).unwrap();
+    assert_eq!(s.doc.user_materials[0].appearance.as_ref(), Some(&expected));
+    assert_eq!(s.doc.density("Specimen"), 0.9);
+    let reopened = Session::new(crate::doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(reopened.doc.user_materials[0].appearance.as_ref(), Some(&expected));
+    assert_eq!(product_scene::extract(&reopened).unwrap().meshes[0].surface, expected.opaque_surface().unwrap());
+    let mass = s.execute("component.properties", &json!({})).unwrap();
+    s.execute("material.edit", &json!({"material":"Original density fixture","appearance":"Steel - Satin PBR","pbr":null,"opacity":0.4})).unwrap();
+    let scalar = s.doc.user_materials[0].appearance.clone().unwrap();
+    assert!(scalar.pbr.is_none());
+    assert_eq!(scalar.opacity, 0.4);
+    assert_eq!(scalar.color, [158, 164, 172]);
+    let scene = product_scene::extract(&s).unwrap();
+    assert!(scene.meshes[0].surface.is_none());
+    assert!(Arc::ptr_eq(&scene.meshes[0].mesh, &geometry));
+    assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc.user_materials[0].appearance.as_ref(), Some(&expected));
+    assert_eq!(product_scene::extract(&s).unwrap().meshes[0].surface, expected.opaque_surface().unwrap());
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(s.doc.user_materials[0].appearance.as_ref(), Some(&scalar));
+    let mut reopened = Session::new(crate::doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(reopened.doc.user_materials, s.doc.user_materials);
+    assert_eq!(reopened.execute("component.properties", &json!({})).unwrap(), mass);
+    assert!(product_scene::extract(&reopened).unwrap().meshes[0].surface.is_none());
+
+    s.execute(
+        "material.create",
+        &json!({"name":"Explicit scalar fixture","density_g_cm3":1.1,"appearance":"Copper - Clean PBR","pbr":null,"opacity":0.25}),
+    )
+    .unwrap();
+    let created_scalar = s.doc.user_materials[1].appearance.as_ref().unwrap();
+    assert!(created_scalar.pbr.is_none());
+    assert_eq!(created_scalar.opacity, 0.25);
+    assert_eq!(created_scalar.color, [204, 122, 80]);
+}
+
+#[test]
+fn custom_looks_with_preset_names_keep_their_explicit_color_and_response() {
+    let mut s = fixture();
+    let mass = s.execute("component.properties", &json!({})).unwrap();
+    // UI and catalog swatches pass both a name and a color; the name does not opt in to a preset.
+    s.execute("appearance.assign", &json!({"bodies":["Specimen"],"appearance":"Steel - Satin PBR","color":"#123456","opacity":0.4})).unwrap();
+    let scalar = s.doc.appearances.bodies["Specimen"].clone();
+    assert_eq!(scalar.name, "Steel - Satin PBR");
+    assert_eq!(scalar.color, [18, 52, 86]);
+    assert_eq!(scalar.opacity, 0.4);
+    assert!(scalar.pbr.is_none());
+    assert!(product_scene::extract(&s).unwrap().meshes[0].surface.is_none());
+    let response = json!({"metallic":0.25,"roughness":0.8,"dielectric_ior":1.8});
+    s.execute("appearance.assign", &json!({"bodies":["Specimen"],"appearance":"Steel - Satin PBR","color":"#123456","pbr":response})).unwrap();
+    let custom = s.doc.appearances.bodies["Specimen"].clone();
+    assert_eq!(custom.color, scalar.color);
+    assert_eq!(json!(custom.pbr.unwrap()), response);
+    assert_ne!(custom, solidcraft_doc::appearance::library("Steel - Satin PBR").unwrap());
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc.appearances.bodies["Specimen"], scalar);
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(s.doc.appearances.bodies["Specimen"], custom);
+    let reopened = crate::doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.appearances.bodies["Specimen"], custom);
+    assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
+
+    // A physical material's custom default may also have a name matching a built-in appearance.
+    s.execute("material.create", &json!({"name":"Steel - Satin PBR","density_g_cm3":1.2,"color":"#123456","opacity":0.4})).unwrap();
+    assert_eq!(s.doc.user_materials[0].appearance.as_ref(), Some(&scalar));
+}
+
+fn pack_session() -> Session {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":10,"width":20,"height":30,"body_name":"Swatch"})).unwrap();
+    s.execute("material.assign", &json!({"bodies":["Swatch"],"material":"Aluminum"})).unwrap();
+    s
+}
+
+#[test]
+fn pack_listing_keeps_legacy_rows_and_labels_unavailable_recipes_without_mutation() {
+    let mut s = pack_session();
+    let doc = s.doc.clone();
+    let undo = s.undo.len();
+    let reply = s.execute("appearance.library", &json!({})).unwrap();
+    let rows = reply["appearances"].as_array().unwrap();
+    // Compatibility fixture: exact pre-pack scalar library, independent of the
+    // separate six PBR finishes (#1366), which may also have no catalog IDs.
+    let legacy: [(&str, [u8; 3], f64); 20] = [
+        ("Aluminum - Satin", [204, 208, 214], 1.0),
+        ("Aluminum - Anodized Black", [44, 46, 50], 1.0),
+        ("Aluminum - Anodized Blue", [52, 92, 160], 1.0),
+        ("Steel - Satin", [158, 164, 172], 1.0),
+        ("Stainless Steel - Brushed", [186, 191, 198], 1.0),
+        ("Cast Iron", [104, 104, 110], 1.0),
+        ("Brass - Polished", [208, 172, 88], 1.0),
+        ("Copper", [204, 122, 80], 1.0),
+        ("Titanium", [150, 148, 158], 1.0),
+        ("ABS - White", [236, 236, 230], 1.0),
+        ("ABS - Black", [36, 36, 38], 1.0),
+        ("ABS - Red", [196, 40, 40], 1.0),
+        ("ABS - Blue", [40, 90, 186], 1.0),
+        ("ABS - Yellow", [236, 196, 40], 1.0),
+        ("ABS - Green", [52, 150, 80], 1.0),
+        ("Rubber - Black", [28, 28, 28], 1.0),
+        ("Glass - Clear", [190, 220, 228], 0.25),
+        ("Glass - Smoked", [90, 96, 104], 0.45),
+        ("Wood - Oak", [190, 146, 92], 1.0),
+        ("Paint - Gloss White", [246, 246, 244], 1.0),
+    ];
+    assert_eq!(solidcraft_doc::appearance::LIBRARY, legacy);
+    for (name, color, opacity) in legacy {
+        let matching: Vec<_> = rows.iter().filter(|row| row["name"] == name).collect();
+        assert_eq!(matching.len(), 1, "legacy appearance must occur exactly once: {name}");
+        let row = matching[0];
+        assert_eq!(row["color"], format!("#{:02x}{:02x}{:02x}", color[0], color[1], color[2]));
+        assert_eq!(row["opacity"], opacity);
+        assert!(row.get("id").is_none() && row.get("pbr").is_none(), "legacy scalar meaning changed: {name}");
+    }
+    let finishes: [(&str, [u8; 3], f64, f64); 6] = [
+        ("Steel - Satin PBR", [158, 164, 172], 1.0, 0.4),
+        ("Aluminum - Satin PBR", [204, 208, 214], 1.0, 0.3),
+        ("Copper - Clean PBR", [204, 122, 80], 1.0, 0.25),
+        ("ABS - Molded PBR", [222, 222, 216], 0.0, 0.4),
+        ("PLA - Smooth PBR", [110, 160, 222], 0.0, 0.35),
+        ("Wood - Oak Uniform PBR Preview", [190, 146, 92], 0.0, 0.65),
+    ];
+    assert_eq!(solidcraft_doc::appearance::OPAQUE_FINISHES, finishes);
+    for (name, color, metallic, roughness) in finishes {
+        let matching: Vec<_> = rows.iter().filter(|row| row["name"] == name).collect();
+        assert_eq!(matching.len(), 1, "published finish must occur exactly once: {name}");
+        let row = matching[0];
+        assert_eq!(row["color"], format!("#{:02x}{:02x}{:02x}", color[0], color[1], color[2]));
+        assert_eq!(row["opacity"], 1.0);
+        assert_eq!(row["pbr"], json!({"metallic":metallic,"roughness":roughness,"dielectric_ior":1.5}));
+        assert!(row.get("id").is_none());
+    }
+    assert_eq!(rows.len(), 66);
+    assert_eq!(rows.iter().filter(|row| row["available"] != false).count(), 60);
+    assert_eq!(rows.iter().filter(|row| row["available"] != false && row["opacity"] == 1.0).count(), 58);
+    assert_eq!(rows.iter().filter(|row| row["opacity"] != 1.0).count(), 2);
+    assert_eq!(rows.iter().filter(|v| v.get("id").is_some()).count(), 40);
+    assert_eq!(rows.iter().filter(|v| v["available"] == false).count(), 6);
+    for row in rows.iter().filter(|v| v["category"] == "glass") {
+        assert_eq!(row["available"], false);
+        assert_eq!(row["opacity"], 1.0);
+        assert!(row["pbr"].is_null());
+        assert_eq!(row["requirements"], json!(["refraction", "certified_thin_or_closed"]));
+    }
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!(s.undo.len(), undo);
+}
+
+#[test]
+fn opaque_pack_uses_normal_assignment_undo_and_preserves_engineering_properties() {
+    let mut s = pack_session();
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    let density = s.doc.density("Swatch");
+    let physical = s.execute("component.properties", &json!({"component":"root"})).unwrap()["total"].clone();
+    s.execute("appearance.assign", &json!({"bodies":["Swatch"],"appearance":"starter.metal.gold-warm"})).unwrap();
+    let look = s.doc.appearances.bodies.get("Swatch").unwrap();
+    assert_eq!(look.pbr.unwrap().metallic(), 1.0);
+    assert_eq!(look.opacity, 1.0);
+    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.doc.density("Swatch"), density);
+    assert_eq!(s.execute("component.properties", &json!({"component":"root"})).unwrap()["total"], physical);
+    let assigned = s.doc.clone();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(*s.doc, *before);
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(*s.doc, *assigned);
+}
+
+#[test]
+fn unavailable_glass_and_invalid_opaque_override_refuse_atomically() {
+    let mut s = pack_session();
+    let doc = s.doc.clone();
+    let before = (s.revision, s.undo.len(), s.redo.len(), s.is_dirty());
+    for extra in [json!({}), json!({"color":"#ffffff"}), json!({"opacity":0.25,"pbr":null})] {
+        let mut params = json!({"bodies":["Swatch"],"appearance":"starter.glass.clear-soda-lime"});
+        params.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        assert!(s.execute("appearance.assign", &params).unwrap_err().to_string().contains("refraction"));
+        assert!(Arc::ptr_eq(&doc, &s.doc));
+        assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.is_dirty()));
+    }
+    assert!(s.execute("appearance.assign", &json!({"bodies":["Swatch"],"appearance":"starter.wood.oak-honey","opacity":0.4})).is_err());
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.is_dirty()));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn cold_native_reopen_keeps_owned_opaque_values_without_pack_metadata_or_assets() {
+    let mut s = pack_session();
+    s.execute("appearance.assign", &json!({"bodies":["Swatch"],"appearance":"starter.wood.walnut-dark"})).unwrap();
+    let look = s.doc.appearances.bodies.get("Swatch").unwrap().clone();
+    let density = s.doc.density("Swatch");
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let dir = std::env::temp_dir().join(format!("solidcraft-pack-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("opaque.solidcraft");
+    s.execute("file.save", &json!({"path":path.to_str().unwrap()})).unwrap();
+    let mut reopened = Session::default();
+    reopened.execute("doc.open", &json!({"path":path.to_str().unwrap()})).unwrap();
+    assert_eq!(reopened.doc.appearances.bodies.get("Swatch"), Some(&look));
+    assert_eq!(reopened.doc.density("Swatch"), density);
+    let json = reopened.doc.to_json();
+    assert!(!json.contains("starter.wood.walnut-dark") && !json.contains("starter_pack.rs"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn starter_selectors_keep_final_validation_and_custom_names_stay_inert() {
+    let mut s = pack_session();
+    let preset = solidcraft_doc::appearance_pack::find("starter.wood.oak-honey").unwrap();
+    let doc = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len(), s.revision);
+    for selector in [preset.id, preset.name] {
+        for opacity in [json!(0.5), json!(2.0), json!("1"), json!(null)] {
+            assert!(s.execute("appearance.assign", &json!({"bodies":["Swatch"],"appearance":selector,"opacity":opacity})).is_err());
+            assert!(Arc::ptr_eq(&doc, &s.doc));
+            assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+        }
+    }
+    s.execute("appearance.assign", &json!({"bodies":["Swatch"],"appearance":preset.id,"pbr":null,"opacity":0.4})).unwrap();
+    assert!(s.doc.appearances.bodies["Swatch"].pbr.is_none());
+    assert_eq!(s.doc.appearances.bodies["Swatch"].opacity, 0.4);
+    // A copied name is inert; it is not a request to select the registered recipe.
+    s.execute("appearance.assign", &json!({"bodies":["Swatch"],"name":preset.name,"color":"#123456","opacity":0.6})).unwrap();
+    let look = &s.doc.appearances.bodies["Swatch"];
+    assert_eq!((look.name.as_str(), look.color, look.opacity, look.pbr), (preset.name, [18, 52, 86], 0.6, None));
+    s.execute("appearance.assign", &json!({"bodies":["Swatch"],"appearance":preset.name})).unwrap();
+    assert_eq!(s.doc.appearances.bodies["Swatch"], preset.opaque_look().unwrap());
+}
+
+#[test]
+fn starter_visual_defaults_and_overrides_keep_saved_physical_cards_independent() {
+    let mut s = pack_session();
+    let card = json!({"schema_version":1,"designation":"Original illustrative pack fixture","family":"other",
+        "sources":[{"id":"fixture","title":"Original analytic density","kind":"illustrative","license":"MIT OR Apache-2.0"}],
+        "properties":[{"source_id":"fixture","data":{"kind":"density","kg_m3":750.0}}]});
+    s.execute(
+        "material.create",
+        &json!({"name":"Pack substrate","density_g_cm3":0.8,"physical_card":card,
+        "appearance":"starter.plastic.abs-charcoal"}),
+    )
+    .unwrap();
+    s.execute("material.assign", &json!({"bodies":["Swatch"],"material":"Pack substrate"})).unwrap();
+    // Input omission and canonical saved defaults are equivalent. Compare the full
+    // validated representation, not the sparse input object, throughout the edits.
+    let expected_card = serde_json::to_value(serde_json::from_value::<crate::doc::physical_material::ValidatedCard>(card.clone()).unwrap()).unwrap();
+    let physical = s.execute("material.inspect", &json!({"material":"Pack substrate"})).unwrap();
+    assert_eq!(physical["physical_card"], expected_card);
+    let mass = s.execute("component.properties", &json!({})).unwrap();
+    let geometry = product_scene::extract(&s).unwrap().meshes[0].mesh.clone();
+    s.execute("appearance.assign", &json!({"bodies":["Swatch"],"appearance":"starter.metal.gold-warm"})).unwrap();
+    assert_eq!(s.execute("material.inspect", &json!({"material":"Pack substrate"})).unwrap(), physical);
+    assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
+    assert!(Arc::ptr_eq(&geometry, &product_scene::extract(&s).unwrap().meshes[0].mesh));
+    let before = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len(), s.revision);
+    for command in ["material.create", "material.edit"] {
+        let params = json!({"name":"Refused glass","material":"Pack substrate","density_g_cm3":1.0,
+            "appearance":"starter.glass.clear-soda-lime","pbr":null,"opacity":0.25});
+        assert!(s.execute(command, &params).is_err());
+        assert!(Arc::ptr_eq(&before, &s.doc));
+        assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+    }
+    s.execute("material.edit", &json!({"material":"Pack substrate","appearance":"starter.wood.walnut-dark"})).unwrap();
+    assert_eq!(s.execute("material.inspect", &json!({"material":"Pack substrate"})).unwrap()["physical_card"], expected_card);
+    assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
+    let saved = s.doc.to_json();
+    let mut reopened = Session::new(crate::doc::Document::from_json(&saved).unwrap());
+    assert_eq!(reopened.doc.user_materials, s.doc.user_materials);
+    assert_eq!(reopened.execute("material.inspect", &json!({"material":"Pack substrate"})).unwrap()["physical_card"], expected_card);
+    assert_eq!(reopened.execute("component.properties", &json!({})).unwrap(), mass);
+}
+
+#[test]
+fn starter_names_and_ids_share_admission_before_all_overrides() {
+    use crate::doc::appearance_pack::{Recipe, STARTER_PACK};
+    let mut s = pack_session();
+    for preset in &STARTER_PACK {
+        for selector in [preset.id, preset.name] {
+            if matches!(preset.recipe, Recipe::Glass(_)) {
+                for overrides in [
+                    json!({}),
+                    json!({"color":"#aabbcc"}),
+                    json!({"color":"#aabbcc","opacity":0.5,"pbr":null}),
+                    json!({"color":"#aabbcc","pbr":{"metallic":0.0,"roughness":0.5,"dielectric_ior":1.5}}),
+                ] {
+                    let before = s.doc.clone();
+                    let history = (s.undo.len(), s.redo.len(), s.revision);
+                    let mut params = overrides;
+                    params["bodies"] = json!(["Swatch"]);
+                    params["appearance"] = json!(selector);
+                    let error = s.execute("appearance.assign", &params).unwrap_err().to_string();
+                    assert!(error.contains("refraction"), "{selector}: {error}");
+                    assert!(Arc::ptr_eq(&before, &s.doc));
+                    assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+                }
+            } else {
+                s.execute("appearance.assign", &json!({"bodies":["Swatch"],"appearance":selector,"color":[31,61,91]})).unwrap();
+                let look = &s.doc.appearances.bodies["Swatch"];
+                assert_eq!(look.name, preset.name);
+                assert_eq!(look.color, [31, 61, 91]);
+                assert_eq!(look.pbr, preset.opaque_look().unwrap().pbr);
+            }
+        }
+    }
 }

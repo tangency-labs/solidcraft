@@ -135,15 +135,22 @@ impl Appearances {
 #[path = "../../../assets/appearances/library.rs"]
 mod defaults;
 pub use defaults::LIBRARY;
+#[path = "../../../assets/appearances/opaque_finishes.rs"]
+mod finishes;
+pub use finishes::OPAQUE_FINISHES;
 
 /// A library appearance by name (case-insensitive).
 pub fn library(name: &str) -> Option<Look> {
-    LIBRARY.iter().find(|(n, _, _)| n.eq_ignore_ascii_case(name.trim())).map(|(n, c, o)| Look {
-        name: n.to_string(),
-        color: *c,
-        opacity: *o,
-        pbr: None,
-    })
+    LIBRARY
+        .iter()
+        .find(|(n, _, _)| n.eq_ignore_ascii_case(name.trim()))
+        .map(|(n, c, o)| Look { name: n.to_string(), color: *c, opacity: *o, pbr: None })
+        .or_else(|| {
+            let (name, color, metallic, roughness) = OPAQUE_FINISHES.iter().find(|(n, ..)| n.eq_ignore_ascii_case(name.trim()))?;
+            let pbr = crate::pbr_appearance::PbrParameters::new(*metallic, *roughness, 1.5).ok()?;
+            Some(Look { name: (*name).to_string(), color: *color, opacity: 1.0, pbr: Some(pbr) })
+        })
+        .or_else(|| crate::appearance_pack::find(name)?.opaque_look().ok())
 }
 
 /// The look a physical material gives a body that has no appearance of its own.
@@ -326,5 +333,123 @@ mod tests {
         assert!(material_look("Glass").is_some_and(|l| l.opacity < 1.0));
         assert_eq!(Look::custom([1, 2, 3], 7.0).opacity, 1.0);
         assert_eq!(Look::custom([255, 0, 16], 1.0).hex(), "#ff0010");
+    }
+    mod starter_pack {
+        use crate::appearance::Look;
+        use crate::appearance_pack::*;
+        use std::collections::BTreeSet;
+
+        #[test]
+        fn stable_ids_categories_and_original_licences_cover_the_requested_pack() {
+            let mut ids = BTreeSet::new();
+            let mut names = BTreeSet::new();
+            for preset in &STARTER_PACK {
+                assert!(preset.id.starts_with("starter.") && preset.id.len() <= 128);
+                assert!(preset.id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-'));
+                assert!(ids.insert(preset.id));
+                assert!(names.insert(preset.name.to_ascii_lowercase()));
+                assert_eq!(preset.revision, 1);
+                assert_eq!(preset.provenance.license, "MIT OR Apache-2.0");
+                assert!(!preset.provenance.author.is_empty());
+                assert_eq!(preset.provenance.source, "assets/appearances/starter_pack.rs");
+                assert_eq!(find(preset.id), Some(preset));
+                assert_eq!(find(preset.name), Some(preset));
+            }
+            for (category, count) in [
+                (Category::Wood, 8),
+                (Category::Metal, 10),
+                (Category::Plastic, 10),
+                (Category::Glass, 6),
+                (Category::Solar, 2),
+                (Category::Regolith, 4),
+            ] {
+                assert_eq!(STARTER_PACK.iter().filter(|p| p.category == category).count(), count);
+            }
+        }
+
+        #[test]
+        fn opaque_construction_and_owned_look_roundtrip_preserve_current_response() {
+            let mut admitted = 0;
+            for preset in &STARTER_PACK {
+                if let Recipe::Opaque(recipe) = preset.recipe {
+                    let look = preset.opaque_look().unwrap();
+                    assert_eq!(look.opacity, 1.0);
+                    assert_eq!(look.color, recipe.color);
+                    let surface = look.opaque_surface().unwrap().unwrap();
+                    assert_eq!(surface.metallic(), recipe.metallic);
+                    assert_eq!(surface.roughness(), recipe.roughness);
+                    let json = serde_json::to_value(&look).unwrap();
+                    assert_eq!(serde_json::from_value::<Look>(json.clone()).unwrap(), look);
+                    assert!(json.get("provenance").is_none() && json.get("requirements").is_none() && json.get("id").is_none());
+                    assert_eq!(preset.requirements, &[Requirement::OpaquePbr]);
+                    admitted += 1;
+                }
+            }
+            assert_eq!(admitted, 34);
+        }
+
+        #[test]
+        fn glass_transmission_recipes_are_valid_but_never_scalar_or_alpha_looks() {
+            for preset in STARTER_PACK.iter().filter(|p| p.category == Category::Glass) {
+                let Recipe::Glass(recipe) = preset.recipe else { panic!("glass category must carry a glass recipe") };
+                recipe.validate().unwrap();
+                assert!(!preset.is_opaque());
+                assert!(preset.opaque_look().is_err());
+                assert_eq!(preset.requirements, &[Requirement::Refraction, Requirement::CertifiedThinOrClosed]);
+                // Compatibility of illustrative values only: the real optics adapter must
+                // derive and admit these absorption values after geometry certification.
+                assert!(recipe.transmission_linear_rgb.iter().all(|t| (-t.ln() / recipe.reference_path_mm) <= 100.0));
+                for channel in [0.0, -1.0, 1.01, f64::NAN, f64::INFINITY] {
+                    let mut bad = recipe;
+                    bad.transmission_linear_rgb[0] = channel;
+                    assert!(bad.validate().is_err());
+                }
+                let mut bad = recipe;
+                bad.reference_path_mm = 0.0;
+                assert!(bad.validate().is_err());
+                bad = recipe;
+                bad.boundary = GlassBoundary::Thin { thickness_mm: 10001.0 };
+                assert!(bad.validate().is_err());
+            }
+        }
+
+        #[test]
+        fn legacy_library_and_six_existing_finish_names_are_not_overridden_or_duplicated() {
+            assert_eq!(crate::appearance::LIBRARY.len(), 20);
+            for (name, color, opacity) in crate::appearance::LIBRARY {
+                let look = crate::appearance::library(name).unwrap();
+                assert_eq!(look.color, color);
+                assert_eq!(look.opacity, opacity);
+                assert!(look.pbr.is_none());
+                assert!(find(name).is_none());
+            }
+            for name in [
+                "Steel - Satin PBR",
+                "Aluminum - Satin PBR",
+                "Copper - Clean PBR",
+                "ABS - Molded PBR",
+                "PLA - Smooth PBR",
+                "Wood - Oak Uniform PBR Preview",
+            ] {
+                assert!(STARTER_PACK.iter().all(|p| !p.name.eq_ignore_ascii_case(name)), "existing #1366 finish must remain independent");
+            }
+        }
+
+        #[test]
+        fn uniform_previews_and_planned_resource_scale_are_explicit_and_not_bindings() {
+            let mut recipes = 0;
+            for preset in &STARTER_PACK {
+                if let Some(recipe) = preset.future_texture_recipe {
+                    assert!(preset.name.contains("Uniform Preview"));
+                    assert!(preset.preview_note.contains("Uniform opaque preview only"));
+                    assert_eq!(recipe.id, format!("{}.maps-v1", preset.id));
+                    assert!(recipe.repeat_mm.iter().all(|v| v.is_finite() && *v > 0.0 && *v <= 10000.0));
+                    assert_eq!(recipe.grain_axis, if preset.category == Category::Wood { Some(TextureAxis::V) } else { None });
+                    assert_eq!(preset.requirements, &[Requirement::OpaquePbr]);
+                    recipes += 1;
+                }
+            }
+            assert_eq!(recipes, 14);
+        }
     }
 }

@@ -18,27 +18,76 @@ assignment command. A later scalar face override replaces a body's PBR response
 on that face; it does not inherit the optical response implicitly.
 
 Parameters are finite and bounded: metallic [0,1], perceptual roughness [0.045,1],
-relative dielectric IOR [1,3]. Unknown optical fields and nonnumeric/out-of-range
-opacity refuse before changing the design. PBR requires opacity exactly one.
+relative dielectric IOR [1,3]. For PBR, unknown optical fields and
+nonnumeric/out-of-range opacity refuse before changing the design. PBR requires
+opacity exactly one.
 IOR controls the nonmetal fraction's reflection; it does not enable refraction.
-Omitting `pbr` or supplying null in an appearance assignment selects the previous
-scalar response. Assignment replaces a look; it is not a partial parameter patch.
+A library appearance selected by name keeps its complete preset response when
+`pbr` is omitted. An explicit `color`, including a custom look named like a
+library entry, starts with scalar shading unless a `pbr` block is supplied.
+Supplying `pbr: null` explicitly selects scalar shading. Assignment replaces a
+look; it is not a partial parameter patch.
+
+Use `name` with an explicit `color` to copy an inert look label, including labels
+that happen to equal a `starter.*` ID. `name` and `appearance` are mutually
+exclusive. The Appearance editor uses `name` for owned looks and `appearance`
+only for an explicitly selected recipe, so reopening or reusing a copied look
+does not change its optical values. Explicit unavailable glass recipe requests
+still refuse; an inert label never enables refraction.
 
 `material.create/edit` accept the same optional `pbr` block alongside a default
-appearance/color. A density-only edit retains the entire existing look. Visual
+appearance/color. A named PBR default also requires opacity exactly one, even
+when the command omits `pbr`; invalid combinations refuse before creating or
+editing the material. A density-only edit retains the entire existing look. Visual
 response changes do not modify density, geometry, placement or engineering axes.
 No grade-specific optical or mechanical values are inferred from a name or color.
 
-Format **21** saves `pbr` inside existing body/face/component and material-default
-looks. Missing fields retain scalar shading. Format-20 render setups and old looks
+Since format **21**, `pbr` is saved inside existing body/face/component and
+material-default looks. Missing fields retain scalar shading. Format-20 render setups and old looks
 upgrade without reinterpretation; older readers refuse newly saved files instead
 of dropping their optical response. Undo/redo, copying and cold reopening use the
 existing design-owned values, with no external file dependency.
 
-The current scalar catalog v1 cannot represent PBR. Conversion/export refuses a
-PBR look or physical-material default instead of silently dropping its parameters.
-In-design swatches retain and reuse the response. A richer catalog version remains
-a separate integration step.
+The portable catalog v2 preserves PBR looks and physical-material defaults, alongside
+validated engineering cards. Explicit scalar v1 export refuses any loss of those
+records before writing. V1 imports and v2 looks without PBR explicitly select scalar
+shading and clear a prior PBR response. See [local material libraries](book/src/dev/local-libraries.md).
+In-design swatches retain and reuse the response.
+
+## Original opaque finish presets
+
+The existing Appearance library includes six additional opaque finishes. Its
+20 scalar entries keep their names, colors, opacity and shading behavior. The
+new names are distinct, and the Appearance editor uses its existing categories,
+search, swatches and optical fields to select and edit them.
+
+| Appearance | sRGB color | Metallic | Roughness |
+|---|---|---:|---:|
+| Steel - Satin PBR | `#9ea4ac` | 1 | 0.40 |
+| Aluminum - Satin PBR | `#ccd0d6` | 1 | 0.30 |
+| Copper - Clean PBR | `#cc7a50` | 1 | 0.25 |
+| ABS - Molded PBR | `#deded8` | 0 | 0.40 |
+| PLA - Smooth PBR | `#6ea0de` | 0 | 0.35 |
+| Wood - Oak Uniform PBR Preview | `#be925c` | 0 | 0.65 |
+
+Each preset has opacity 1 and an illustrative dielectric IOR of 1.5. The values
+are original visual studies, not measured optical constants or engineering-grade
+material properties. Oak is a uniform preview without grain; PLA has no printed
+layers; satin metals use an isotropic response. A physical material's density and
+engineering axes remain independent of these visual choices.
+
+The source values live in `assets/appearances/opaque_finishes.rs`. Assigning a
+preset saves its values inside the existing look, so a later library update does
+not change a saved assignment. This addition does not change the design format.
+
+`examples/material-finishes.json` creates six original radius-10 mm spheres,
+assigns generic physical materials and applies these finishes through the same
+commands used by the editor:
+
+```sh
+solidcraft-cli run examples/material-finishes.json --save target/material-finishes.solidcraft
+solidcraft-cli render target/material-finishes.solidcraft --out target/material-finishes.png --width 1600 --height 1000
+```
 
 ## Actual consumers and color
 
@@ -82,7 +131,10 @@ Silhouettes are excluded because CPU images use 2x supersampling and that test's
 target uses 1x. This is a scoped parity result, not browser or universal GPU certification.
 
 Command tests check unchanged geometry/mass, atomic refusal, undo/redo, cold reopen,
-physical default/face precedence, retained scalar format-20 looks upgraded to 21 and explicit v1
-catalog refusal. A clicked editor regression checks one transaction and reopening
+physical default/face precedence, retained scalar format-20 looks upgraded to the current
+format and explicit v1 catalog refusal. Preset regressions also cover named PBR
+inheritance, `pbr: null`, custom looks with matching names, material create/edit
+refusal without changing history, density-only edits and all six scene responses.
+A clicked editor regression checks one transaction and reopening
 the same selected body. Native media and exact current-head gate results belong
 in the PR. wasm compilation and actual browser interaction are separate evidence.

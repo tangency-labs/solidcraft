@@ -13,6 +13,10 @@ workspace = true
 name = "solidcraft-web"
 path = "src/main.rs"
 
+[features]
+default = []
+bundled-render-library = ["solidcraft-engine/bundled-render-library"]
+
 [dependencies]
 solidcraft-engine = { workspace = true }
 solidcraft-ui-egui = { workspace = true }

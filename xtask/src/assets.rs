@@ -79,6 +79,7 @@ pub fn run(root: &Path) -> Result<(), String> {
     if !missing.is_empty() {
         return Err(format!("assets missing attribution rows:\n{}", missing.iter().map(|path| format!("  {path}")).collect::<Vec<_>>().join("\n")));
     }
+    crate::render_assets::run(root, &files, &attribution)?;
     println!("assets: {} files, all attributed", files.iter().filter(|path| needs_attribution(path)).count());
     Ok(())
 }

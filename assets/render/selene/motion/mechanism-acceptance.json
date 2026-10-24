@@ -1,0 +1,1888 @@
+{
+  "metadata": {
+    "schema_version": "0.3.0",
+    "language": "en",
+    "status": "source_container_inspected_runtime_pending",
+    "name": "SELENE improved showcase mechanism acceptance",
+    "source_lock": "../source-lock.json",
+    "authorship": "Original acceptance criteria, source-container bindings and analytic planning checks derived from public SolidCraft descriptions and the pinned SychPL native source.",
+    "license": "MIT OR Apache-2.0",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG",
+    "units": {
+      "length": "mm",
+      "angle": "rad",
+      "time": "s"
+    },
+    "evidence_policy": "Documentation, container inspection and native execution remain separate evidence levels. Bindings below describe the unchanged source bytes only. They do not establish evaluated geometry, solved motion or derivative acceptance.",
+    "runtime_scope": "Kinematic mechanism acceptance only. Lunar dynamics, force and torque limits, contact impulses, regolith, grasp/release and capture physics need independent simulation evidence.",
+    "reference_resolution": "reference_ids resolve against ../source-lock.json references.",
+    "automatic_admission_allowed": false,
+    "source_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+    "source_path": "../source/SELENE-showcase.solidcraft",
+    "inspection_date": "2026-10-22",
+    "derivative_policy": "The functional derivative intentionally changes selected mechanisms. Its executable checks and result reports are separate; see ../MECHANISMS.md and ../tools/validate_native.py. Do not overwrite source facts with derivative values."
+  },
+  "items": [
+    {
+      "id": "MCA-001",
+      "name": "Grounded structure and anchored static modules",
+      "status": "source_container_inspected_runtime_pending",
+      "required_for_native_admission": true,
+      "documentation_evidence": {
+        "status": "published_description_not_reproduced",
+        "reference_ids": [
+          "SELENE-REF-001",
+          "SELENE-REF-002"
+        ],
+        "summary": "The documented original v7 had 18 modules that were neither grounded nor joined. The improved example rigidly groups static modules with Structure so the turret and dish have an anchored chain."
+      },
+      "native_evidence": {
+        "status": "inspected_container_only",
+        "source_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+        "bindings": {
+          "grounded_occurrence": {
+            "id": 1930,
+            "name": "Structure:1",
+            "component_id": 1929,
+            "component_name": "Structure",
+            "grounded": true
+          },
+          "rigid_joint_ids": [
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47
+          ],
+          "rigid_attached_occurrence_ids": [
+            2109,
+            2192,
+            2275,
+            2358,
+            2441,
+            2524,
+            2607,
+            2630,
+            2672,
+            2698,
+            2710,
+            2854,
+            3020,
+            3142,
+            3173,
+            3229,
+            3287,
+            3353
+          ],
+          "not_connected_to_ground_by_unsuppressed_joints": [
+            3458
+          ],
+          "unconnected_occurrence": {
+            "id": 3458,
+            "name": "Rock sample:1",
+            "component_id": 3457,
+            "component_name": "Rock sample",
+            "grounded": false
+          }
+        },
+        "limitations": "Undirected persisted-joint reachability is not a solver, degrees-of-freedom or evaluated transform result. The source rock sample is unconnected."
+      },
+      "runtime_evidence": {
+        "status": "not_executed",
+        "software_commit": null,
+        "report": null,
+        "scope": "No native source runtime was executed by this source-binding review. Functional derivative runtime evidence is recorded separately."
+      },
+      "native_review": [
+        "Resolve the improved source's grounded structure occurrence and each static-module attachment from native IDs.",
+        "Inspect rigid joints or equivalent explicit constraints, including the turret pedestal and dish support. Do not assume the original set of 18 maps one-to-one to the improved file.",
+        "Record intentionally free or suppressed occurrences with an explicit purpose."
+      ],
+      "runtime_acceptance": [
+        "Driving each documented movable subsystem must move its intended occurrences and report a meaningful stopped or unconnected reason when a deliberately disconnected test is used.",
+        "Check that the fixed chassis and static modules retain their intended transforms during subsystem motion; do not replace the mechanism with arbitrary parenting."
+      ]
+    },
+    {
+      "id": "MCA-002",
+      "name": "Independent solar-actuator barrels and rods",
+      "status": "source_container_inspected_runtime_pending",
+      "required_for_native_admission": true,
+      "documentation_evidence": {
+        "status": "published_description_not_reproduced",
+        "reference_ids": [
+          "SELENE-REF-001",
+          "SELENE-REF-002"
+        ],
+        "summary": "Four solar actuators are described as separate barrel and rod mechanisms, with moving eyes and pins assigned to the appropriate part."
+      },
+      "native_evidence": {
+        "status": "inspected_container_only",
+        "source_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+        "bindings": {
+          "actuator_occurrences": [
+            {
+              "id": 3398,
+              "name": "Actuator barrel (-1, -62):1",
+              "component_id": 3397,
+              "component_name": "Actuator barrel (-1, -62)",
+              "grounded": false
+            },
+            {
+              "id": 3402,
+              "name": "Actuator rod (-1, -62):1",
+              "component_id": 3401,
+              "component_name": "Actuator rod (-1, -62)",
+              "grounded": false
+            },
+            {
+              "id": 3407,
+              "name": "Actuator barrel (-1, 62):1",
+              "component_id": 3406,
+              "component_name": "Actuator barrel (-1, 62)",
+              "grounded": false
+            },
+            {
+              "id": 3411,
+              "name": "Actuator rod (-1, 62):1",
+              "component_id": 3410,
+              "component_name": "Actuator rod (-1, 62)",
+              "grounded": false
+            },
+            {
+              "id": 3416,
+              "name": "Actuator barrel (1, -62):1",
+              "component_id": 3415,
+              "component_name": "Actuator barrel (1, -62)",
+              "grounded": false
+            },
+            {
+              "id": 3420,
+              "name": "Actuator rod (1, -62):1",
+              "component_id": 3419,
+              "component_name": "Actuator rod (1, -62)",
+              "grounded": false
+            },
+            {
+              "id": 3425,
+              "name": "Actuator barrel (1, 62):1",
+              "component_id": 3424,
+              "component_name": "Actuator barrel (1, 62)",
+              "grounded": false
+            },
+            {
+              "id": 3429,
+              "name": "Actuator rod (1, 62):1",
+              "component_id": 3428,
+              "component_name": "Actuator rod (1, 62)",
+              "grounded": false
+            }
+          ],
+          "joint_triples": [
+            [
+              18,
+              19,
+              20
+            ],
+            [
+              21,
+              22,
+              23
+            ],
+            [
+              24,
+              25,
+              26
+            ],
+            [
+              27,
+              28,
+              29
+            ]
+          ]
+        },
+        "limitations": "Separate barrel and rod occurrence records are confirmed. Evaluated body membership, pin coincidence and movement require native runtime inspection."
+      },
+      "runtime_evidence": {
+        "status": "not_executed",
+        "software_commit": null,
+        "report": null,
+        "scope": "No native source runtime was executed by this source-binding review. Functional derivative runtime evidence is recorded separately."
+      },
+      "native_review": [
+        "Identify all four actuators and their barrel/rod occurrences, body membership and attachment points.",
+        "Verify that rigid bodies belong to the correct moving component and that assembly parentage is resolved.",
+        "Retain any genuinely empty or historical components only if the reviewed source does; do not infer a required total component count."
+      ],
+      "runtime_acceptance": [
+        "During wing motion, each rod must translate relative to its barrel while both end pins remain coincident with their mates.",
+        "Review all actuator bodies for double transformation, detached pins and visual intersections over the chosen motion range."
+      ]
+    },
+    {
+      "id": "MCA-003",
+      "name": "Solar-actuator closed loops and travel stops",
+      "status": "source_container_inspected_runtime_pending",
+      "required_for_native_admission": true,
+      "documentation_evidence": {
+        "status": "published_description_not_reproduced",
+        "reference_ids": [
+          "SELENE-REF-001",
+          "SELENE-REF-002",
+          "SELENE-REF-004"
+        ],
+        "summary": "Each actuator uses a revolute root pin, a stroke slider and a revolute wing pin. Published slider limits are -6 to +0.4 mm. The documented port-wing tilt stops near 32.23 degrees when the stroke reaches its lower limit."
+      },
+      "native_evidence": {
+        "status": "inspected_container_only",
+        "source_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+        "bindings": {
+          "wing_hinges": [
+            {
+              "id": 9,
+              "name": "Port solar tilt articulation",
+              "kind": "revolute",
+              "occurrence_ids": [
+                1930,
+                2882
+              ],
+              "origin_mm": [
+                0.0,
+                -140.0,
+                158.0
+              ],
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                [
+                  -0.2617993877991494,
+                  0.7853981633974483
+                ]
+              ]
+            },
+            {
+              "id": 10,
+              "name": "Starboard solar tilt articulation",
+              "kind": "revolute",
+              "occurrence_ids": [
+                1930,
+                2951
+              ],
+              "origin_mm": [
+                0.0,
+                140.0,
+                158.0
+              ],
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                [
+                  -0.7853981633974483,
+                  0.2617993877991494
+                ]
+              ]
+            }
+          ],
+          "actuator_joints": [
+            {
+              "id": 18,
+              "name": "Actuator root pin (-1, -62)",
+              "kind": "revolute",
+              "occurrence_ids": [
+                1930,
+                3398
+              ],
+              "origin_mm": [
+                -62.0,
+                -91.0,
+                134.0
+              ],
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            },
+            {
+              "id": 19,
+              "name": "Actuator stroke (-1, -62)",
+              "kind": "slider",
+              "occurrence_ids": [
+                3398,
+                3402
+              ],
+              "origin_mm": [
+                -62.0,
+                -91.0,
+                134.0
+              ],
+              "axis": [
+                0.0,
+                -0.9286765862526016,
+                0.3708905473939907
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                [
+                  -6.0,
+                  0.4
+                ]
+              ]
+            },
+            {
+              "id": 20,
+              "name": "Actuator wing pin (-1, -62)",
+              "kind": "revolute",
+              "occurrence_ids": [
+                3402,
+                2882
+              ],
+              "origin_mm": [
+                -62.0,
+                -180.40678269379407,
+                169.70686616300375
+              ],
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            },
+            {
+              "id": 21,
+              "name": "Actuator root pin (-1, 62)",
+              "kind": "revolute",
+              "occurrence_ids": [
+                1930,
+                3407
+              ],
+              "origin_mm": [
+                62.0,
+                -91.0,
+                134.0
+              ],
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            },
+            {
+              "id": 22,
+              "name": "Actuator stroke (-1, 62)",
+              "kind": "slider",
+              "occurrence_ids": [
+                3407,
+                3411
+              ],
+              "origin_mm": [
+                62.0,
+                -91.0,
+                134.0
+              ],
+              "axis": [
+                0.0,
+                -0.9286765862526016,
+                0.3708905473939907
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                [
+                  -6.0,
+                  0.4
+                ]
+              ]
+            },
+            {
+              "id": 23,
+              "name": "Actuator wing pin (-1, 62)",
+              "kind": "revolute",
+              "occurrence_ids": [
+                3411,
+                2882
+              ],
+              "origin_mm": [
+                62.0,
+                -180.40678269379407,
+                169.70686616300375
+              ],
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            },
+            {
+              "id": 24,
+              "name": "Actuator root pin (1, -62)",
+              "kind": "revolute",
+              "occurrence_ids": [
+                1930,
+                3416
+              ],
+              "origin_mm": [
+                -62.0,
+                91.0,
+                134.0
+              ],
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            },
+            {
+              "id": 25,
+              "name": "Actuator stroke (1, -62)",
+              "kind": "slider",
+              "occurrence_ids": [
+                3416,
+                3420
+              ],
+              "origin_mm": [
+                -62.0,
+                91.0,
+                134.0
+              ],
+              "axis": [
+                0.0,
+                0.9286765862526016,
+                0.3708905473939907
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                [
+                  -6.0,
+                  0.4
+                ]
+              ]
+            },
+            {
+              "id": 26,
+              "name": "Actuator wing pin (1, -62)",
+              "kind": "revolute",
+              "occurrence_ids": [
+                3420,
+                2951
+              ],
+              "origin_mm": [
+                -62.0,
+                180.40678269379407,
+                169.70686616300375
+              ],
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            },
+            {
+              "id": 27,
+              "name": "Actuator root pin (1, 62)",
+              "kind": "revolute",
+              "occurrence_ids": [
+                1930,
+                3425
+              ],
+              "origin_mm": [
+                62.0,
+                91.0,
+                134.0
+              ],
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            },
+            {
+              "id": 28,
+              "name": "Actuator stroke (1, 62)",
+              "kind": "slider",
+              "occurrence_ids": [
+                3425,
+                3429
+              ],
+              "origin_mm": [
+                62.0,
+                91.0,
+                134.0
+              ],
+              "axis": [
+                0.0,
+                0.9286765862526016,
+                0.3708905473939907
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                [
+                  -6.0,
+                  0.4
+                ]
+              ]
+            },
+            {
+              "id": 29,
+              "name": "Actuator wing pin (1, 62)",
+              "kind": "revolute",
+              "occurrence_ids": [
+                3429,
+                2951
+              ],
+              "origin_mm": [
+                62.0,
+                180.40678269379407,
+                169.70686616300375
+              ],
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            }
+          ]
+        },
+        "limitations": "Full-precision native pin frames and limits are bound. Loop solvability and stop behavior have not been executed by this source-container review."
+      },
+      "runtime_evidence": {
+        "status": "not_executed",
+        "software_commit": null,
+        "report": null,
+        "scope": "No native source runtime was executed by this source-binding review. Functional derivative runtime evidence is recorded separately."
+      },
+      "native_review": [
+        "Bind each loop's joints, slider axis, sign convention, limits, wing hinge and body-local pin origins.",
+        "Review flip and frame conventions. Confirm the intended assembled pose closes the loop before it is driven.",
+        "Replace rounded demonstration coordinates with source-derived coordinates for native acceptance; record any difference without rewriting the source to match a rounded example."
+      ],
+      "runtime_acceptance": [
+        "Drive from the same approved starting pose in continuous increments; verify pin coincidence and loop closure throughout.",
+        "A request beyond feasible travel must stop with an explicit loop/limit report and retain a closed pose.",
+        "Compare source-derived geometry with an independently evaluated actuator-length relation, using a documented tolerance appropriate to the actual solver and geometry."
+      ],
+      "numeric_expectations": [
+        {
+          "quantity": "slider_lower_limit",
+          "value": -6,
+          "unit": "mm",
+          "kind": "reported_input",
+          "binding_status": "candidate_requires_native_review"
+        },
+        {
+          "quantity": "slider_upper_limit",
+          "value": 0.4,
+          "unit": "mm",
+          "kind": "reported_input",
+          "binding_status": "candidate_requires_native_review"
+        },
+        {
+          "quantity": "reported_port_tilt_stop",
+          "value": 0.5625196179177724,
+          "unit": "rad",
+          "kind": "rounded_reported_demo_result",
+          "binding_status": "not_a_native_acceptance_tolerance"
+        }
+      ],
+      "analytic_candidate": {
+        "id": "SELENE-ANALYTIC-001",
+        "status": "original_calculation_from_rounded_published_inputs",
+        "frame": "+Z up; hinge rotation about +X; the common actuator X coordinate is set to zero because it cancels from this planar length calculation.",
+        "inputs": {
+          "hinge_mm": [
+            0,
+            -140,
+            158
+          ],
+          "root_pin_mm": [
+            0,
+            -91,
+            134
+          ],
+          "wing_pin_at_zero_mm": [
+            0,
+            -180.41,
+            169.71
+          ],
+          "evaluation_angle_rad": 0.3490658503988659,
+          "stroke_lower_limit_mm": -6
+        },
+        "formula": "T(theta) = H + Rx(theta) * (T0 - H); L(theta) = norm(T(theta) - R); stroke(theta) = L(theta) - L(0).",
+        "calculated_expected": {
+          "length_at_zero_mm": 96.27747503959584,
+          "stroke_at_evaluation_angle_mm": -2.8659532890803945,
+          "first_positive_stop_angle_rad": 0.5625425647338391
+        },
+        "interpretation": "The rounded coordinates produce a stop near 32.231315 degrees, close to the approximately 32.23-degree published result. These calculations are planning checks, not measurements of the native model.",
+        "comparison_policy": "Recompute this self-contained analytic example independently. After source admission, derive a separate check from reviewed native axes and points. Do not use this example's rounded numbers as exact source geometry."
+      }
+    },
+    {
+      "id": "MCA-004",
+      "name": "Mirrored solar-wing tilt link",
+      "status": "source_container_inspected_runtime_pending",
+      "required_for_native_admission": true,
+      "documentation_evidence": {
+        "status": "published_description_not_reproduced",
+        "reference_ids": [
+          "SELENE-REF-001"
+        ],
+        "summary": "The documented starboard tilt follows the port tilt with a ratio of -1."
+      },
+      "native_evidence": {
+        "status": "inspected_container_only",
+        "source_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+        "bindings": {
+          "driver_joint_id": 9,
+          "follower_joint_id": 10,
+          "links": [
+            {
+              "a": 9,
+              "b": 10,
+              "ia": 0,
+              "ib": 0,
+              "offset": 0.0,
+              "ratio": -1.0
+            }
+          ]
+        },
+        "limitations": "The serialized -1 ratio and zero offset are confirmed; runtime propagation remains a separate check."
+      },
+      "runtime_evidence": {
+        "status": "not_executed",
+        "software_commit": null,
+        "report": null,
+        "scope": "No native source runtime was executed by this source-binding review. Functional derivative runtime evidence is recorded separately."
+      },
+      "native_review": [
+        "Bind the actual driver/follower tilt joints, their effective angle values, limits and offset.",
+        "Confirm that opposing hinge-axis orientations are consistent with the stored link sign; inspect the source instead of assigning signs from camera appearance."
+      ],
+      "runtime_acceptance": [
+        "For changes within both mechanisms' feasible range, verify delta_starboard = -delta_port after applying the reviewed offset and axis conventions.",
+        "When either actuator loop reaches a limit, preserve all closed-loop constraints and report the stopped result."
+      ],
+      "numeric_expectations": [
+        {
+          "quantity": "angular_motion_link_ratio",
+          "value": -1,
+          "unit": "rad/rad",
+          "kind": "reported_input",
+          "binding_status": "candidate_requires_native_review"
+        }
+      ]
+    },
+    {
+      "id": "MCA-005",
+      "name": "Six-wheel motion-link chain",
+      "status": "source_container_inspected_runtime_pending",
+      "required_for_native_admission": true,
+      "documentation_evidence": {
+        "status": "published_description_not_reproduced",
+        "reference_ids": [
+          "SELENE-REF-001",
+          "SELENE-REF-002"
+        ],
+        "summary": "The six wheels form one motion-link chain, with links stored from the far end in the author's showcase."
+      },
+      "native_evidence": {
+        "status": "inspected_container_only",
+        "source_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+        "bindings": {
+          "wheel_joints": [
+            {
+              "id": 1,
+              "name": "Wheel axis -1:-90",
+              "kind": "revolute",
+              "occurrence_ids": [
+                1930,
+                2162
+              ],
+              "origin_mm": [
+                -90.0,
+                -86.0,
+                40.0
+              ],
+              "axis": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            },
+            {
+              "id": 2,
+              "name": "Wheel axis -1:0",
+              "kind": "revolute",
+              "occurrence_ids": [
+                1930,
+                2245
+              ],
+              "origin_mm": [
+                0.0,
+                -86.0,
+                40.0
+              ],
+              "axis": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            },
+            {
+              "id": 3,
+              "name": "Wheel axis -1:90",
+              "kind": "revolute",
+              "occurrence_ids": [
+                1930,
+                2328
+              ],
+              "origin_mm": [
+                90.0,
+                -86.0,
+                40.0
+              ],
+              "axis": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            },
+            {
+              "id": 4,
+              "name": "Wheel axis 1:-90",
+              "kind": "revolute",
+              "occurrence_ids": [
+                1930,
+                2411
+              ],
+              "origin_mm": [
+                -90.0,
+                86.0,
+                40.0
+              ],
+              "axis": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            },
+            {
+              "id": 5,
+              "name": "Wheel axis 1:0",
+              "kind": "revolute",
+              "occurrence_ids": [
+                1930,
+                2494
+              ],
+              "origin_mm": [
+                0.0,
+                86.0,
+                40.0
+              ],
+              "axis": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            },
+            {
+              "id": 6,
+              "name": "Wheel axis 1:90",
+              "kind": "revolute",
+              "occurrence_ids": [
+                1930,
+                2577
+              ],
+              "origin_mm": [
+                90.0,
+                86.0,
+                40.0
+              ],
+              "axis": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                null
+              ]
+            }
+          ],
+          "links_in_serialized_order": [
+            {
+              "a": 5,
+              "b": 6,
+              "ia": 0,
+              "ib": 0,
+              "offset": 0.0,
+              "ratio": 1.0
+            },
+            {
+              "a": 4,
+              "b": 5,
+              "ia": 0,
+              "ib": 0,
+              "offset": 0.0,
+              "ratio": 1.0
+            },
+            {
+              "a": 3,
+              "b": 4,
+              "ia": 0,
+              "ib": 0,
+              "offset": 0.0,
+              "ratio": 1.0
+            },
+            {
+              "a": 2,
+              "b": 3,
+              "ia": 0,
+              "ib": 0,
+              "offset": 0.0,
+              "ratio": 1.0
+            },
+            {
+              "a": 1,
+              "b": 2,
+              "ia": 0,
+              "ib": 0,
+              "offset": 0.0,
+              "ratio": 1.0
+            }
+          ]
+        },
+        "limitations": "The five links are serialized from follower end toward the driver. Container inspection cannot prove correct topological execution."
+      },
+      "runtime_evidence": {
+        "status": "not_executed",
+        "software_commit": null,
+        "report": null,
+        "scope": "No native source runtime was executed by this source-binding review. Functional derivative runtime evidence is recorded separately."
+      },
+      "native_review": [
+        "Resolve all six wheel-axis joints and the directed link graph, including effective driver, ratios, offsets and native link order.",
+        "Verify that no wheel has two conflicting drivers and that the source has no invalid cycle.",
+        "Record the source order; evaluation must not depend on a convenient serialization order."
+      ],
+      "runtime_acceptance": [
+        "Drive the chain's effective source over the approved range and verify every wheel's expected signed angular increment.",
+        "Evaluate an equivalent reordered link list in an isolated diagnostic if the engine supports it; the motion should match.",
+        "Keep this kinematic link check separate from traction, slip, terrain contact forces and suspension dynamics."
+      ],
+      "numeric_expectations": [
+        {
+          "quantity": "wheel_count",
+          "value": 6,
+          "unit": "count",
+          "kind": "reported_inventory_expectation",
+          "binding_status": "not_sufficient_for_variant_identity"
+        },
+        {
+          "quantity": "documented_equal_wheel_link_ratio",
+          "value": 1,
+          "unit": "rad/rad",
+          "kind": "reported_input",
+          "binding_status": "candidate_requires_native_review"
+        }
+      ]
+    },
+    {
+      "id": "MCA-006",
+      "name": "Rack-and-pinion demonstration track",
+      "status": "source_container_inspected_runtime_pending",
+      "required_for_native_admission": true,
+      "documentation_evidence": {
+        "status": "published_description_not_reproduced",
+        "reference_ids": [
+          "SELENE-REF-002"
+        ],
+        "summary": "The author's improved showcase rolls a regolith demonstration track beneath the wheels using a rack-and-pinion coupling with reported pitch radius 38 mm and prescribed no-slip kinematics."
+      },
+      "native_evidence": {
+        "status": "inspected_container_only",
+        "source_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+        "bindings": {
+          "track_occurrence": {
+            "id": 3434,
+            "name": "Regolith track:1",
+            "component_id": 3433,
+            "component_name": "Regolith track",
+            "grounded": false
+          },
+          "track_joint": {
+            "id": 48,
+            "name": "Track slide",
+            "kind": "slider",
+            "occurrence_ids": [
+              1930,
+              3434
+            ],
+            "origin_mm": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "values": [
+              0.0
+            ],
+            "limits": [
+              null
+            ]
+          },
+          "link": {
+            "a": 1,
+            "b": 48,
+            "coupling": {
+              "radius": 38.0,
+              "reverse": true,
+              "type": "rack_pinion"
+            },
+            "ia": 0,
+            "ib": 0,
+            "offset": 0.0,
+            "ratio": -38.0
+          }
+        },
+        "limitations": "The unchanged source uses a 38 mm rack radius with reverse=true. This prescribed helper is not wheel-ground traction; the functional derivative uses a separately documented 40 mm radius."
+      },
+      "runtime_evidence": {
+        "status": "not_executed",
+        "software_commit": null,
+        "report": null,
+        "scope": "No native source runtime was executed by this source-binding review. Functional derivative runtime evidence is recorded separately."
+      },
+      "native_review": [
+        "Identify the helper-track occurrence, slider, driving revolute joint and rack coupling.",
+        "Review the actual pitch radius, sign, offset and coordinate frame.",
+        "Tag this track as a kinematic demonstration helper. It is not a scanned lunar terrain or a solved rover-ground interaction."
+      ],
+      "runtime_acceptance": [
+        "Verify that the track displacement magnitude equals radius times wheel-angle change in radians, within the reviewed numeric tolerance.",
+        "Confirm the native direction and offset with the actual joint axes and a small positive drive.",
+        "Exclude or explicitly disable this helper in terrain-contact dynamics; prescribed rack motion must not silently become traction physics."
+      ],
+      "numeric_expectations": [
+        {
+          "quantity": "reported_pitch_radius",
+          "value": 38,
+          "unit": "mm",
+          "kind": "reported_input",
+          "binding_status": "candidate_requires_native_review"
+        }
+      ],
+      "analytic_candidate": {
+        "id": "SELENE-ANALYTIC-002",
+        "status": "original_calculation_from_reported_input",
+        "inputs": {
+          "pitch_radius_mm": 38,
+          "angle_change_rad": 6.283185307179586
+        },
+        "formula": "abs(delta_translation_mm) = pitch_radius_mm * abs(delta_angle_rad).",
+        "calculated_expected": {
+          "translation_magnitude_mm": 238.76104167282426
+        },
+        "interpretation": "One full turn in the reported 38 mm coupling implies this displacement magnitude. Direction and offset require native binding. Command values may use degrees; native formula inputs are radians.",
+        "comparison_policy": "This verifies a kinematic relation only; it does not measure rolling resistance, traction or lunar gravity."
+      }
+    },
+    {
+      "id": "MCA-007",
+      "name": "Turret-to-dish gear coupling",
+      "status": "source_container_inspected_runtime_pending",
+      "required_for_native_admission": true,
+      "documentation_evidence": {
+        "status": "published_description_not_reproduced",
+        "reference_ids": [
+          "SELENE-REF-002"
+        ],
+        "summary": "The improved showcase describes a 24:36 gear coupling that turns the dish against the turret."
+      },
+      "native_evidence": {
+        "status": "inspected_container_only",
+        "source_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+        "bindings": {
+          "driver_joint": {
+            "id": 7,
+            "name": "Turret azimuth articulation",
+            "kind": "revolute",
+            "occurrence_ids": [
+              3229,
+              3241
+            ],
+            "origin_mm": [
+              -45.0,
+              0.0,
+              157.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "values": [
+              0.0
+            ],
+            "limits": [
+              [
+                -2.792526803190927,
+                2.792526803190927
+              ]
+            ]
+          },
+          "follower_joint": {
+            "id": 16,
+            "name": "Dish azimuth articulation",
+            "kind": "revolute",
+            "occurrence_ids": [
+              3142,
+              3154
+            ],
+            "origin_mm": [
+              -177.0,
+              0.0,
+              135.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "values": [
+              0.0
+            ],
+            "limits": [
+              [
+                -2.6179938779914944,
+                2.6179938779914944
+              ]
+            ]
+          },
+          "link": {
+            "a": 7,
+            "b": 16,
+            "coupling": {
+              "ra": 24.0,
+              "rb": 36.0,
+              "type": "gear"
+            },
+            "ia": 0,
+            "ib": 0,
+            "offset": 0.0,
+            "ratio": -0.6666666666666666
+          }
+        },
+        "limitations": "The unchanged source couples two separate pointing systems at -24/36. The functional derivative intentionally removes this demonstration coupling for independent pointing."
+      },
+      "runtime_evidence": {
+        "status": "not_executed",
+        "software_commit": null,
+        "report": null,
+        "scope": "No native source runtime was executed by this source-binding review. Functional derivative runtime evidence is recorded separately."
+      },
+      "native_review": [
+        "Bind the two rotational joints and the coupling's declared driver/follower direction, ratio, offset and axis conventions.",
+        "Confirm whether the source expresses tooth counts, radii or a direct motion-link ratio; retain the native representation."
+      ],
+      "runtime_acceptance": [
+        "For the documented driver-to-follower interpretation, check a follower angular-change magnitude of 24/36 times the driver change.",
+        "Verify the rotation sign from the native gear setup; opposite visual rotation alone is not an axis convention.",
+        "Keep any hard stops and other links effective throughout the driven sequence."
+      ],
+      "numeric_expectations": [
+        {
+          "quantity": "reported_driver_to_follower_size_ratio",
+          "value": 0.6666666666666666,
+          "unit": "ratio",
+          "kind": "derived_magnitude_from_reported_24_to_36_pair",
+          "binding_status": "driver_order_and_sign_require_native_review"
+        }
+      ],
+      "analytic_candidate": {
+        "id": "SELENE-ANALYTIC-003",
+        "status": "original_calculation_from_reported_ratio",
+        "inputs": {
+          "driver_count": 24,
+          "follower_count": 36,
+          "driver_angle_change_rad": 1.5707963267948966
+        },
+        "formula": "abs(delta_follower_rad) = (24 / 36) * abs(delta_driver_rad).",
+        "calculated_expected": {
+          "follower_angle_change_magnitude_rad": 1.0471975511965976
+        },
+        "interpretation": "A candidate 90-degree driver increment gives a 60-degree follower magnitude under the stated driver/follower assignment. It is not a substitute for inspecting the native coupling.",
+        "comparison_policy": "Resolve native driver order, axes, sign and offset before treating this as an executable acceptance check."
+      }
+    },
+    {
+      "id": "MCA-008",
+      "name": "Threaded vial-cap motion",
+      "status": "source_container_inspected_runtime_pending",
+      "required_for_native_admission": true,
+      "documentation_evidence": {
+        "status": "published_description_not_reproduced",
+        "reference_ids": [
+          "SELENE-REF-002"
+        ],
+        "summary": "The showcase adds a vial-cap screw motion described as 1.5 mm per turn."
+      },
+      "native_evidence": {
+        "status": "inspected_container_only",
+        "source_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+        "bindings": {
+          "cap_occurrence": {
+            "id": 3461,
+            "name": "Vial cap (-160, -22):1",
+            "component_id": 3460,
+            "component_name": "Vial cap (-160, -22)",
+            "grounded": false
+          },
+          "joint": {
+            "id": 49,
+            "name": "Vial cap thread",
+            "kind": "cylindrical",
+            "occurrence_ids": [
+              3020,
+              3461
+            ],
+            "origin_mm": [
+              53.0,
+              -22.0,
+              179.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "values": [
+              0.0,
+              0.0
+            ],
+            "limits": [
+              null,
+              [
+                0.0,
+                6.0
+              ]
+            ]
+          },
+          "link": {
+            "a": 49,
+            "b": 49,
+            "coupling": {
+              "pitch": 1.5,
+              "type": "screw"
+            },
+            "ia": 0,
+            "ib": 1,
+            "offset": 0.0,
+            "ratio": 0.238732414637843
+          }
+        },
+        "limitations": "The source serializes a 1.5 mm-per-revolution screw and 0..6 mm axial limits. Container inspection does not verify runtime drive, thread contact or sealing."
+      },
+      "runtime_evidence": {
+        "status": "not_executed",
+        "software_commit": null,
+        "report": null,
+        "scope": "No native source runtime was executed by this source-binding review. Functional derivative runtime evidence is recorded separately."
+      },
+      "native_review": [
+        "Identify the actual vial-cap and vial/body occurrences or helper geometry, the screw or coupled joints, axis, pitch, sign, offset and limits.",
+        "Inspect whether the cap is an independent source occurrence. Do not transplant the original v7 cassette's body grouping.",
+        "Record which original or helper parts the demonstration actually uses; an unscrewing cap does not establish an independently releasable vial."
+      ],
+      "runtime_acceptance": [
+        "Verify 1.5 mm axial displacement magnitude per full rotation if native inspection confirms the reported pitch.",
+        "Check the sign, visual contact and feasible range from the reviewed start pose.",
+        "For later release/collection scenes, separately require a hollow vial, contents boundary, closure state, independent release body and mass properties; this demonstration does not supply those facts."
+      ],
+      "numeric_expectations": [
+        {
+          "quantity": "reported_screw_pitch",
+          "value": 1.5,
+          "unit": "mm/turn",
+          "kind": "reported_input",
+          "binding_status": "candidate_requires_native_review"
+        }
+      ],
+      "analytic_candidate": {
+        "id": "SELENE-ANALYTIC-004",
+        "status": "original_calculation_from_reported_input",
+        "inputs": {
+          "pitch_mm_per_turn": 1.5,
+          "angle_change_rad": 6.283185307179586
+        },
+        "formula": "abs(delta_axial_mm) = pitch_mm_per_turn * abs(delta_angle_rad) / (2*pi).",
+        "calculated_expected": {
+          "axial_displacement_magnitude_mm": 1.5
+        },
+        "interpretation": "A prescribed screw-motion relation; it does not establish a sealed closure, thread contact mechanics or a suitable capture device.",
+        "comparison_policy": "Confirm whether the inspected source uses pitch as lead per revolution and verify the native axis and sign."
+      }
+    },
+    {
+      "id": "MCA-009",
+      "name": "Articulated arm reach and drag behavior",
+      "status": "source_container_inspected_runtime_pending",
+      "required_for_native_admission": true,
+      "documentation_evidence": {
+        "status": "published_description_not_reproduced",
+        "reference_ids": [
+          "SELENE-REF-002",
+          "SELENE-REF-003"
+        ],
+        "summary": "The author demonstrates joint.reach moving the gripper toward a pebble in 17 steps, and separate reach/drag demonstrations show an out-of-reach target stopping short. These are published kinematic examples."
+      },
+      "native_evidence": {
+        "status": "inspected_container_only",
+        "source_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+        "bindings": {
+          "arm_joints": [
+            {
+              "id": 11,
+              "name": "Arm azimuth articulation",
+              "kind": "revolute",
+              "occurrence_ids": [
+                1930,
+                2736
+              ],
+              "origin_mm": [
+                177.0,
+                0.0,
+                140.0
+              ],
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                [
+                  -2.792526803190927,
+                  2.792526803190927
+                ]
+              ]
+            },
+            {
+              "id": 12,
+              "name": "Shoulder articulation",
+              "kind": "revolute",
+              "occurrence_ids": [
+                2736,
+                2751
+              ],
+              "origin_mm": [
+                177.0,
+                0.0,
+                165.0
+              ],
+              "axis": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                [
+                  -1.6580627893946132,
+                  1.1344640137963142
+                ]
+              ]
+            },
+            {
+              "id": 13,
+              "name": "Elbow articulation",
+              "kind": "revolute",
+              "occurrence_ids": [
+                2751,
+                2782
+              ],
+              "origin_mm": [
+                242.0,
+                0.0,
+                281.0
+              ],
+              "axis": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                [
+                  -3.141592653589793,
+                  3.141592653589793
+                ]
+              ]
+            },
+            {
+              "id": 14,
+              "name": "Wrist articulation",
+              "kind": "revolute",
+              "occurrence_ids": [
+                2782,
+                2813
+              ],
+              "origin_mm": [
+                350.0,
+                0.0,
+                249.0
+              ],
+              "axis": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                [
+                  -2.792526803190927,
+                  2.792526803190927
+                ]
+              ]
+            },
+            {
+              "id": 15,
+              "name": "Tool tilt articulation",
+              "kind": "revolute",
+              "occurrence_ids": [
+                2813,
+                2844
+              ],
+              "origin_mm": [
+                410.0,
+                0.0,
+                267.0
+              ],
+              "axis": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "values": [
+                0.0
+              ],
+              "limits": [
+                [
+                  -2.792526803190927,
+                  2.792526803190927
+                ]
+              ]
+            }
+          ],
+          "arm_occurrence_ids": [
+            2736,
+            2751,
+            2782,
+            2813,
+            2844
+          ]
+        },
+        "limitations": "The serial arm and joint limits are bound. Reachability, inverse kinematics and collision-free workspace remain unexecuted."
+      },
+      "runtime_evidence": {
+        "status": "not_executed",
+        "software_commit": null,
+        "report": null,
+        "scope": "No native source runtime was executed by this source-binding review. Functional derivative runtime evidence is recorded separately."
+      },
+      "native_review": [
+        "Resolve the improved arm chain, tool point, joints, native angular limits, optional orientation target and grounded base.",
+        "Record the actual target coordinates and poses only after obtaining the source and any accompanying demonstration commands.",
+        "Do not infer actuator speed, torque, backlash, contact handling or reachable launch/catch trajectories from inverse-kinematics success."
+      ],
+      "runtime_acceptance": [
+        "Reproduce agreed reachable targets from an approved initial pose while preserving limits and closed loops; record achieved pose and error.",
+        "Exercise an unreachable target and confirm a bounded result with useful stopped-by-limit or loop information.",
+        "Check collision/contact separately. The cited joint.reach change explicitly does not check contact sets.",
+        "Choose and report an appropriate error tolerance for the reviewed model and engine. Do not promote the author's reported tiny residual to a universal precision guarantee."
+      ],
+      "numeric_expectations": [
+        {
+          "quantity": "reported_demonstration_step_count",
+          "value": 17,
+          "unit": "count",
+          "kind": "reported_demo_metadata",
+          "binding_status": "not_required_native_study_count"
+        },
+        {
+          "quantity": "author_reported_point_residual_bound",
+          "value": 1e-08,
+          "unit": "mm",
+          "kind": "reported_demo_result",
+          "binding_status": "not_independently_reproduced_and_not_an_acceptance_tolerance"
+        }
+      ]
+    },
+    {
+      "id": "MCA-010",
+      "name": "Coordinated SELENE tour and trace separation",
+      "status": "source_container_inspected_runtime_pending",
+      "required_for_native_admission": true,
+      "documentation_evidence": {
+        "status": "published_description_not_reproduced",
+        "reference_ids": [
+          "SELENE-REF-002",
+          "SELENE-REF-004"
+        ],
+        "summary": "One motion study is reported to play track, wings, turret, geared dish, arm and vial cap together. PR 1680 names the study SELENE tour and reports 121 exported tour frames; kept gripper and wing-tip traces appear in demonstrations."
+      },
+      "native_evidence": {
+        "status": "inspected_container_only",
+        "source_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+        "bindings": {
+          "motion_studies": [
+            {
+              "id": 1,
+              "keys": [
+                {
+                  "index": 0,
+                  "joint": 1,
+                  "points": [
+                    [
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      120.0,
+                      12.566370614359172
+                    ]
+                  ]
+                },
+                {
+                  "index": 0,
+                  "joint": 9,
+                  "points": [
+                    [
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      20.0,
+                      0.0
+                    ],
+                    [
+                      50.0,
+                      0.5235987755982988
+                    ],
+                    [
+                      120.0,
+                      0.5235987755982988
+                    ]
+                  ]
+                },
+                {
+                  "index": 0,
+                  "joint": 7,
+                  "points": [
+                    [
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      40.0,
+                      0.0
+                    ],
+                    [
+                      80.0,
+                      1.2217304763960306
+                    ],
+                    [
+                      120.0,
+                      0.0
+                    ]
+                  ]
+                },
+                {
+                  "index": 0,
+                  "joint": 8,
+                  "points": [
+                    [
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      50.0,
+                      0.0
+                    ],
+                    [
+                      80.0,
+                      0.4363323129985824
+                    ],
+                    [
+                      120.0,
+                      0.0
+                    ]
+                  ]
+                },
+                {
+                  "index": 0,
+                  "joint": 17,
+                  "points": [
+                    [
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      30.0,
+                      0.0
+                    ],
+                    [
+                      90.0,
+                      0.6108652381980153
+                    ],
+                    [
+                      120.0,
+                      0.6108652381980153
+                    ]
+                  ]
+                },
+                {
+                  "index": 0,
+                  "joint": 11,
+                  "points": [
+                    [
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      60.0,
+                      0.0
+                    ],
+                    [
+                      100.0,
+                      0.4363323129985824
+                    ],
+                    [
+                      120.0,
+                      0.4363323129985824
+                    ]
+                  ]
+                },
+                {
+                  "index": 0,
+                  "joint": 12,
+                  "points": [
+                    [
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      60.0,
+                      0.0
+                    ],
+                    [
+                      100.0,
+                      -0.6108652381980153
+                    ],
+                    [
+                      120.0,
+                      -0.6108652381980153
+                    ]
+                  ]
+                },
+                {
+                  "index": 0,
+                  "joint": 13,
+                  "points": [
+                    [
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      60.0,
+                      0.0
+                    ],
+                    [
+                      100.0,
+                      0.8726646259971648
+                    ],
+                    [
+                      120.0,
+                      0.8726646259971648
+                    ]
+                  ]
+                },
+                {
+                  "index": 0,
+                  "joint": 49,
+                  "points": [
+                    [
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      70.0,
+                      0.0
+                    ],
+                    [
+                      110.0,
+                      25.132741228718345
+                    ],
+                    [
+                      120.0,
+                      25.132741228718345
+                    ]
+                  ]
+                }
+              ],
+              "name": "SELENE tour",
+              "steps": 120
+            }
+          ]
+        },
+        "limitations": "The source has a 120-step tour with nine keyed joint coordinates. Keys do not establish continuous collision-free paths, physical time or dynamics; native trace generation has not been run."
+      },
+      "runtime_evidence": {
+        "status": "not_executed",
+        "software_commit": null,
+        "report": null,
+        "scope": "No native source runtime was executed by this source-binding review. Functional derivative runtime evidence is recorded separately."
+      },
+      "native_review": [
+        "Locate the native saved study and record its name, ID, step domain, keys, joint references and any loop-dependent motion.",
+        "Identify motion traces and helper markers as display/analysis geometry so they are not mistaken for physical hardware or collision bodies.",
+        "Inspect whether study timing is stored, provided at export or still unspecified. Frame count and export FPS do not define actuator feasibility."
+      ],
+      "runtime_acceptance": [
+        "Replay from the declared initial pose on a copy with all participating link and loop constraints enabled; record any stopped or unmoved subsystem.",
+        "For export, verify sample count, joint states and source immutability independently of the rendering quality profile.",
+        "Use an explicit seconds mapping before estimating velocities or accelerations; rendering settings cannot silently retime an approved motion."
+      ],
+      "numeric_expectations": [
+        {
+          "quantity": "reported_exported_tour_frames",
+          "value": 121,
+          "unit": "frames",
+          "kind": "reported_export_metadata",
+          "binding_status": "not_assumed_native_steps_or_runtime_duration"
+        }
+      ]
+    },
+    {
+      "id": "MCA-011",
+      "name": "Motion analysis and sampled interference evidence",
+      "status": "source_container_inspected_runtime_pending",
+      "required_for_native_admission": false,
+      "documentation_evidence": {
+        "status": "published_description_not_reproduced",
+        "reference_ids": [
+          "SELENE-REF-005"
+        ],
+        "summary": "The published motion-analysis demonstration charts a solar tilt and actuator stroke, then checks the arm against the wings. It describes a clear tour and a separate intentional swing with forearm/distal-arm interference from step 45."
+      },
+      "native_evidence": {
+        "status": "inspected_container_only",
+        "source_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+        "bindings": {
+          "available_motion_study_id": 1
+        },
+        "limitations": "No interference report, evaluated body-pair set, continuous sweep or dynamics result is supplied by this container inspection."
+      },
+      "runtime_evidence": {
+        "status": "not_executed",
+        "software_commit": null,
+        "report": null,
+        "scope": "No native source runtime was executed by this source-binding review. Functional derivative runtime evidence is recorded separately."
+      },
+      "native_review": [
+        "Bind any saved study used by these demonstrations and identify the exact arm and wing occurrence sets.",
+        "Keep the intentional collision case separate from the main tour; do not invent missing study keys or include a collision case by default.",
+        "Record the source's contact sets and whether they stop playback or are bypassed for the reported interference analysis."
+      ],
+      "runtime_acceptance": [
+        "Plot the actual solved follower values, with units and an explicit study duration when per-second quantities are requested.",
+        "For interference checks, record sample spacing, checked pairs, truncation status and any work-budget limit.",
+        "A clear sampled result must not be reported as continuous collision-free proof; tighten sampling or use continuous collision detection where necessary.",
+        "Treat the published step-45 example as descriptive until the exact corresponding study is available."
+      ],
+      "numeric_expectations": [
+        {
+          "quantity": "reported_first_interference_step",
+          "value": 45,
+          "unit": "study_step",
+          "kind": "reported_result_for_separate_demo",
+          "binding_status": "not_a_required_key_or_collision_in_the_primary_tour"
+        }
+      ]
+    },
+    {
+      "id": "MCA-012",
+      "name": "Flexible-hose and sketch visibility treatment",
+      "status": "source_container_inspected_runtime_pending",
+      "required_for_native_admission": false,
+      "documentation_evidence": {
+        "status": "published_description_not_reproduced",
+        "reference_ids": [
+          "SELENE-REF-001"
+        ],
+        "summary": "The mechanism reference notes that rigid hose bodies on one arm link and stationary sweep sketches drift visually during motion; those items were hidden for recording."
+      },
+      "native_evidence": {
+        "status": "inspected_container_only",
+        "source_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677",
+        "bindings": {
+          "hidden_bodies": [
+            "Shoulder hydraulic flexible hose",
+            "Elbow hydraulic flexible hose",
+            "Wrist hydraulic flexible hose"
+          ],
+          "hidden_sketch_ids": [
+            1007,
+            1008,
+            1023,
+            1024,
+            1039,
+            1040
+          ],
+          "hidden_occurrence_ids": []
+        },
+        "limitations": "Stored visibility confirms three rigid hose sweeps and six related sketches are hidden. This does not model flexible deformation or hose forces."
+      },
+      "runtime_evidence": {
+        "status": "not_executed",
+        "software_commit": null,
+        "report": null,
+        "scope": "No native source runtime was executed by this source-binding review. Functional derivative runtime evidence is recorded separately."
+      },
+      "native_review": [
+        "Identify the actual improved source's hose bodies and sketches, their attachment or display ownership, and the saved visibility state.",
+        "Do not hide functional geometry indiscriminately to pass a review; document exactly which visual-only elements are omitted.",
+        "If flexible hardware must remain visible, plan reviewed deformation or link-wise geometry separately."
+      ],
+      "runtime_acceptance": [
+        "Confirm that motion previews and renders disclose any intentionally hidden rigid hose approximations.",
+        "Check that hidden sketch/trace geometry does not alter collision membership or engineering mass silently.",
+        "Do not describe a hidden hose as a physically simulated flexible cable."
+      ]
+    }
+  ]
+}

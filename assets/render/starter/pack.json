@@ -1,0 +1,39 @@
+{
+  "schema": "solidcraft-authored-render-resources/1",
+  "id": "original-render-starter-2026-10",
+  "version": "1.0.0",
+  "created": "2026-10-21",
+  "license": "MIT OR Apache-2.0",
+  "catalog_parent_commit": "10ada1b45a4eb285ce752ac72f9aaa968ff8b5c4",
+  "integration_base_commit": "93a2922c5ee272fb605703ae84c05825b4a74607",
+  "runtime_ready": false,
+  "native_library_format": false,
+  "collections": {
+    "materials": {
+      "manifest": "materials/manifest.json",
+      "count": 48,
+      "export_count": 240,
+      "status": "authored_unbound"
+    },
+    "environments": {
+      "manifest": "environments/manifest.json",
+      "count": 24,
+      "export_count": 24,
+      "status": "authored_unbound",
+      "scope": "illumination_only"
+    },
+    "lighting": {
+      "manifest": "lighting/exports/rigs.json",
+      "count": 24,
+      "status_counts": {
+        "authored_numeric_unbound": 19,
+        "blocked_calibration": 3,
+        "requires_existing_environment_sun": 2
+      },
+      "runtime_ready": false
+    }
+  },
+  "review_outputs": "target/render-starter-review (ignored; not shipped)",
+  "source_policy": "Original procedural fields and analytic recipes; no external asset inputs.",
+  "selene_native_source": "awaiting_native_source (unchanged)"
+}

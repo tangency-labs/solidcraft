@@ -275,7 +275,8 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
     if mods.alt || menu_open {
         return false;
     }
-    if key == Key::Num8 && ctrl && !mods.shift {
+    let result = crate::render_workspace::result_active(app);
+    if key == Key::Num8 && ctrl && !mods.shift && !result {
         crate::viewport::look_at_selection(app);
         return true;
     }
@@ -290,9 +291,14 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
         // The model moves with the arrow, as it does under a pan drag.
         if let Some(rect) = app.viewport.rect {
             let step = rect.height() * 0.1;
-            camera_motion(app, rect, json!({"motion": "pan", "delta": [dx * step, dy * step]}));
+            let params = json!({"motion": "pan", "delta": [dx * step, dy * step]});
+            if result {
+                crate::render_workspace::with_result_camera(app, |app| camera_motion(app, rect, params));
+            } else {
+                camera_motion(app, rect, params);
+            }
         }
-    } else if !repeat {
+    } else if !repeat && !result {
         let degrees = if mods.shift { 90.0 } else { 15.0 };
         app.viewport.key_hold = Some(KeyHold { key, action, shift: mods.shift, since: app.now });
         // Turn from where a step in flight is going, so taps add up and the one animation is
@@ -300,13 +306,17 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
         let from = app.cam_anim.map_or(app.cam, |a| a.to);
         let _ = app.run("view.navigate", json!({"camera": from, "action": action, "degrees": degrees}));
     }
-    true
+    ctrl || !result
 }
 
 /// Each frame an arrow turning the view is held past a tap: turn at a steady rate by the frame's
 /// time, with no animation of its own. Ends when the key is released or the keyboard goes
 /// elsewhere.
 pub(crate) fn step_key_hold(app: &mut SolveApp, ctx: &egui::Context) {
+    if crate::render_workspace::result_active(app) {
+        app.viewport.key_hold = None;
+        return;
+    }
     let Some(hold) = app.viewport.key_hold else { return };
     let (down, dt) = ctx.input(|i| (i.key_down(hold.key), f64::from(i.unstable_dt)));
     if !down || view_keys_blocked(app, ctx) {
@@ -390,7 +400,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // The right button belongs to the marking menu while it is open.
     let secondary_down = secondary_down && app.viewport.context_menu.is_none();
     // The axis view handles its own clicks; the model underneath must not see them.
-    let axes = axis_rect(app, rect);
+    let axes = if caps.orbit { axis_rect(app, rect) } else { Rect::NOTHING };
     // Floating windows and menus own input over the model, including wheel navigation. egui's
     // hit test also counts the model as under the pointer a few points past its own edge and
     // inside a window's or a list's edge (#678), so the pointer must be in the viewport too,

@@ -1,8 +1,6 @@
 //! Incremental product rasterization. Every phase yields between bounded work units.
 
 use std::collections::BTreeMap;
-use std::io::Write;
-use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use solidcraft_geom::Vec3;
@@ -38,26 +36,144 @@ fn limit(message: &str) -> JobError {
 fn invalid(message: &str) -> JobError {
     JobError::new(ErrorCode::InvalidScene, message)
 }
-fn add_bytes(sum: &mut u64, count: usize, size: usize) -> Result<()> {
+fn add_bytes(sum: &mut u64, count: usize, size: usize, maximum: u64) -> Result<()> {
     let bytes = (count as u64).checked_mul(size as u64).ok_or_else(|| limit("geometry size overflow"))?;
     *sum = sum.checked_add(bytes).ok_or_else(|| limit("geometry size overflow"))?;
-    if *sum > MAX_GEOMETRY_BYTES {
-        return Err(limit("retained product geometry exceeds 128 MiB"));
+    if *sum > maximum {
+        return Err(limit(&format!("retained product geometry exceeds its {} MiB profile limit", maximum / (1024 * 1024))));
     }
     Ok(())
 }
 
 /// Conservative admission before allocating pixels or projected-work lists. Source Arcs are
 /// counted even when another owner already holds them. Allocator and codec internals are estimates.
+/// Includes the CPU raster work estimate and its 384 MiB per-job check.
 pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
+    if request.environment.is_some() || request.textures.is_some() {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "captured GPU environments and textures require a registered image executor"));
+    }
+    match request.integrator {
+        super::Integrator::Raster => {
+            if request.raytrace.is_some() {
+                return Err(JobError::new(ErrorCode::InvalidRequest, "raytrace options require integrator: raytrace"));
+            }
+            admit_base(scene, request)
+        }
+        super::Integrator::Raytrace => {
+            if scene.has_transmission() {
+                return Err(JobError::new(ErrorCode::InvalidRequest, "physical transmission requires the progressive GPU executor"));
+            }
+            #[cfg(feature = "raytrace-cpu")]
+            {
+                let defaults = super::RaytraceOptions::default();
+                let options = request.raytrace.as_ref().unwrap_or(&defaults);
+                options.validate()?;
+                crate::raytrace::image::admit(scene, request, options)
+            }
+            #[cfg(not(feature = "raytrace-cpu"))]
+            {
+                Err(JobError::new(ErrorCode::HostUnavailable, "CPU raytracing is not compiled in; enable raytrace-cpu"))
+            }
+        }
+    }
+}
+
+pub(crate) fn admit_base(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
+    admit_raster(admit_source(scene, request, MAX_TRIANGLES)?)
+}
+
+/// Common camera, dimension and source admission for registered executors, without any CPU
+/// raster estimate: the returned admission counts retained source geometry only
+/// (`pixel_scratch_bytes` and `preparation_bytes` are zero). Executors budget their own
+/// preparation and pixel storage, apply their own job limit, and validate triangle contents
+/// before uploading anything to a device.
+pub fn admit_geometry(scene: &ProductScene, request: &ImageRequest, max_triangles: u64) -> Result<Admission> {
+    Ok(admit_source(scene, request, max_triangles)?.admission)
+}
+
+/// A validated source with its geometry accounting, and the builtin raster scratch estimate
+/// for the requested dimensions (used only by the CPU estimate).
+struct Source {
+    admission: Admission,
+    bodies: u64,
+    raster_scratch_bytes: u64,
+}
+
+fn admit_source(scene: &ProductScene, request: &ImageRequest, max_triangles: u64) -> Result<Source> {
+    admit_source_with_budget(scene, request, max_triangles, super::CpuBudget::Compact)
+}
+
+/// Ray tracing has no raster projected-triangle lists. Keep a conservative
+/// pixel/codec allowance, then let the ray tracer charge its actual BVH and film.
+#[cfg(feature = "raytrace-cpu")]
+pub(crate) fn admit_raytrace_source(scene: &ProductScene, request: &ImageRequest, budget: super::CpuBudget) -> Result<Admission> {
+    budget.validate_execution()?;
+    budget.validate_image(request.width, request.height, request.raytrace.as_ref().and_then(|o| o.progressive))?;
+    let source = admit_source_with_budget(scene, request, budget.limits().max_triangles, budget)?;
+    let mut a = source.admission;
+    a.pixel_scratch_bytes = source.raster_scratch_bytes;
+    a.preparation_bytes = 262_144;
+    a.estimated_total_bytes = a
+        .geometry_bytes
+        .checked_add(a.pixel_scratch_bytes)
+        .and_then(|n| n.checked_add(a.preparation_bytes))
+        .ok_or_else(|| limit("CPU source memory overflow"))?;
+    if a.estimated_total_bytes > budget.limits().max_job_bytes {
+        return Err(limit("CPU source exceeds the selected resource profile"));
+    }
+    Ok(a)
+}
+
+fn admit_source_with_budget(scene: &ProductScene, request: &ImageRequest, max_triangles: u64, budget: super::CpuBudget) -> Result<Source> {
+    let limits = budget.limits();
+    admit_source_with_limits(scene, request, max_triangles, limits.max_bodies, limits.max_geometry_bytes, budget.image_limits(false))
+}
+
+/// A registered executor may request a larger finite source envelope without
+/// changing raster/legacy admission. Actual device allocations remain its job.
+pub fn admit_geometry_with_limits(
+    scene: &ProductScene,
+    request: &ImageRequest,
+    max_triangles: u64,
+    max_bodies: usize,
+    max_geometry_bytes: u64,
+    image_limits: crate::RenderLimits,
+) -> Result<Admission> {
+    if max_triangles == 0
+        || max_triangles > super::MAX_CPU_TRIANGLES as u64
+        || max_bodies == 0
+        || max_bodies > super::MAX_CPU_BODIES
+        || max_geometry_bytes == 0
+        || max_geometry_bytes > 4 * 1024 * 1024 * 1024
+        || image_limits.max_dimension > 16_384
+        || image_limits.max_pixels > 67_108_864
+        || image_limits.max_scratch_bytes > super::NATIVE_CPU_POOL_BYTES
+    {
+        return Err(limit("registered source envelope exceeds implementation bounds"));
+    }
+    Ok(admit_source_with_limits(scene, request, max_triangles, max_bodies, max_geometry_bytes, image_limits)?.admission)
+}
+
+fn admit_source_with_limits(
+    scene: &ProductScene,
+    request: &ImageRequest,
+    max_triangles: u64,
+    max_bodies: usize,
+    max_geometry_bytes: u64,
+    image_limits: crate::RenderLimits,
+) -> Result<Source> {
     if !request.camera.is_valid() {
         return Err(JobError::new(ErrorCode::InvalidRequest, "invalid image camera"));
     }
-    if scene.meshes.len() > 16_384 {
+    if scene.meshes.len() > max_bodies {
         return Err(limit("too many product bodies"));
     }
+    let mut backend = crate::builtin_backend();
+    for executor in &mut backend.executors {
+        executor.limits = image_limits;
+    }
     let resolved = crate::resolve_request(
-        &[crate::builtin_backend()],
+        &[backend],
         &RenderRequest {
             backend: None,
             mode: RenderMode::Preview,
@@ -71,62 +187,77 @@ pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> 
     )
     .map_err(|e| JobError::new(ErrorCode::InvalidRequest, e.to_string()))?;
     let (mut triangles, mut faces, mut geometry, mut polylines) = (0u64, 0u64, 0u64, 0u64);
-    add_bytes(&mut geometry, scene.meshes.capacity(), std::mem::size_of::<crate::ProductMesh>())?;
+    add_bytes(&mut geometry, scene.meshes.capacity(), std::mem::size_of::<crate::ProductMesh>(), max_geometry_bytes)?;
     for body in &scene.meshes {
         let m = &body.mesh;
         triangles = triangles.checked_add(m.triangles.len() as u64).ok_or_else(|| limit("triangle count overflow"))?;
         faces = faces.checked_add(body.faces.len() as u64).ok_or_else(|| limit("appearance count overflow"))?;
         polylines = polylines.checked_add(m.edges.len() as u64 + m.edge_faces.len() as u64).ok_or_else(|| limit("edge count overflow"))?;
-        if triangles > MAX_TRIANGLES || faces > MAX_TRIANGLES || polylines > MAX_TRIANGLES {
-            return Err(limit("product image exceeds the 262144 triangle/appearance/polyline admission cap"));
+        if triangles > max_triangles || faces > max_triangles || polylines > max_triangles {
+            return Err(limit("product image exceeds its triangle/appearance/polyline admission cap"));
         }
-        add_bytes(&mut geometry, m.positions.capacity(), std::mem::size_of::<Vec3>())?;
-        add_bytes(&mut geometry, m.normals.capacity(), std::mem::size_of::<Vec3>())?;
-        add_bytes(&mut geometry, m.triangles.capacity(), std::mem::size_of::<[u32; 3]>())?;
-        add_bytes(&mut geometry, m.tri_face.capacity(), std::mem::size_of::<u32>())?;
-        add_bytes(&mut geometry, body.faces.capacity(), std::mem::size_of::<FaceAppearance>())?;
-        add_bytes(&mut geometry, body.name.capacity(), 1)?;
-        add_bytes(&mut geometry, m.edges.capacity(), std::mem::size_of::<Vec<Vec3>>())?;
-        add_bytes(&mut geometry, m.edge_faces.capacity(), std::mem::size_of::<Vec<u32>>())?;
+        add_bytes(&mut geometry, m.positions.capacity(), std::mem::size_of::<Vec3>(), max_geometry_bytes)?;
+        add_bytes(&mut geometry, m.normals.capacity(), std::mem::size_of::<Vec3>(), max_geometry_bytes)?;
+        add_bytes(&mut geometry, m.triangles.capacity(), std::mem::size_of::<[u32; 3]>(), max_geometry_bytes)?;
+        add_bytes(&mut geometry, m.tri_face.capacity(), std::mem::size_of::<u32>(), max_geometry_bytes)?;
+        add_bytes(&mut geometry, body.faces.capacity(), std::mem::size_of::<FaceAppearance>(), max_geometry_bytes)?;
+        add_bytes(&mut geometry, body.name.capacity(), 1, max_geometry_bytes)?;
+        add_bytes(&mut geometry, m.edges.capacity(), std::mem::size_of::<Vec<Vec3>>(), max_geometry_bytes)?;
+        add_bytes(&mut geometry, m.edge_faces.capacity(), std::mem::size_of::<Vec<u32>>(), max_geometry_bytes)?;
         for edge in &m.edges {
-            add_bytes(&mut geometry, edge.capacity(), std::mem::size_of::<Vec3>())?;
+            add_bytes(&mut geometry, edge.capacity(), std::mem::size_of::<Vec3>(), max_geometry_bytes)?;
         }
         for edge in &m.edge_faces {
-            add_bytes(&mut geometry, edge.capacity(), std::mem::size_of::<u32>())?;
+            add_bytes(&mut geometry, edge.capacity(), std::mem::size_of::<u32>(), max_geometry_bytes)?;
         }
         for count in [m.seams.capacity(), m.smooth_edges.capacity(), m.sharp_edges.capacity()] {
-            add_bytes(&mut geometry, count, 1)?;
+            add_bytes(&mut geometry, count, 1, max_geometry_bytes)?;
         }
-        if body.surface.is_some() && body.opacity != 1.0 {
+        if body.surface.is_some() && body.transmission.is_none() && body.opacity != 1.0 {
             return Err(invalid("opaque PBR requires opacity 1"));
         }
         if !body.opacity.is_finite() || !(0.0..=1.0).contains(&body.opacity) {
             return Err(invalid("invalid body opacity"));
         }
     }
+    let encoded_limit = u64::from(request.width) * u64::from(request.height) * 8 + 65_536;
+    Ok(Source {
+        admission: Admission {
+            triangles,
+            face_appearances: faces,
+            geometry_bytes: geometry,
+            pixel_scratch_bytes: 0,
+            preparation_bytes: 0,
+            estimated_total_bytes: geometry,
+            encoded_limit,
+        },
+        bodies: scene.meshes.len() as u64,
+        raster_scratch_bytes: resolved.estimated_scratch_bytes,
+    })
+}
+
+/// The CPU raster scratch/preparation estimate and its 384 MiB per-job check.
+fn admit_raster(source: Source) -> Result<Admission> {
+    let mut a = source.admission;
     // Three bounded 16-byte lists, a conservative map-node allowance, and codec overhead.
-    let preparation = triangles
+    let preparation = a
+        .triangles
         .checked_mul(48)
-        .and_then(|n| faces.checked_mul(160).and_then(|f| n.checked_add(f)))
-        .and_then(|n| n.checked_add(scene.meshes.len() as u64 * 128 + 262_144))
+        .and_then(|n| a.face_appearances.checked_mul(160).and_then(|f| n.checked_add(f)))
+        .and_then(|n| n.checked_add(source.bodies * 128 + 262_144))
         .ok_or_else(|| limit("work list size overflow"))?;
-    let total = geometry
+    let total = a
+        .geometry_bytes
         .checked_add(preparation)
-        .and_then(|n| n.checked_add(resolved.estimated_scratch_bytes))
+        .and_then(|n| n.checked_add(source.raster_scratch_bytes))
         .ok_or_else(|| limit("image memory overflow"))?;
     if total > MAX_JOB_BYTES {
         return Err(limit("product job exceeds its 384 MiB admission estimate"));
     }
-    let encoded_limit = u64::from(request.width) * u64::from(request.height) * 8 + 65_536;
-    Ok(Admission {
-        triangles,
-        face_appearances: faces,
-        geometry_bytes: geometry,
-        pixel_scratch_bytes: resolved.estimated_scratch_bytes,
-        preparation_bytes: preparation,
-        estimated_total_bytes: total,
-        encoded_limit,
-    })
+    a.pixel_scratch_bytes = source.raster_scratch_bytes;
+    a.preparation_bytes = preparation;
+    a.estimated_total_bytes = total;
+    Ok(a)
 }
 
 fn reserve<T>(count: usize) -> Result<Vec<T>> {
@@ -176,30 +307,6 @@ enum Stage {
     Done,
 }
 
-struct BufferWriter {
-    bytes: Arc<Mutex<Vec<u8>>>,
-    limit: usize,
-    cancel: CancelToken,
-}
-
-impl Write for BufferWriter {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        if self.cancel.is_cancelled() {
-            return Err(std::io::Error::other("render cancelled"));
-        }
-        let mut out = self.bytes.lock().map_err(|_| std::io::Error::other("PNG output lock poisoned"))?;
-        if out.len().checked_add(bytes.len()).is_none_or(|n| n > self.limit) {
-            return Err(std::io::Error::other("PNG output exceeds its byte budget"));
-        }
-        out.try_reserve_exact(bytes.len()).map_err(|_| std::io::Error::other("PNG allocation failed"))?;
-        out.extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        if self.cancel.is_cancelled() { Err(std::io::Error::other("render cancelled")) } else { Ok(()) }
-    }
-}
-
 pub enum TaskPoll {
     Pending(Progress),
     Complete(Vec<u8>),
@@ -238,14 +345,15 @@ pub struct ImageTask {
     draw: usize,
     triangle: Option<Triangle>,
     output: Vec<u8>,
-    encoded: Arc<Mutex<Vec<u8>>>,
-    encoder: Option<png::StreamWriter<'static, BufferWriter>>,
-    row: usize,
+    encoder: Option<super::encoding::PngEncoding>,
 }
 
 impl ImageTask {
     pub fn new(scene: ProductScene, request: ImageRequest, cancel: CancelToken) -> Result<Self> {
         cancel.check()?;
+        if request.integrator != super::Integrator::Raster {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "raster task cannot execute a raytrace request"));
+        }
         let admission = admit(&scene, &request)?;
         let (sw, sh) = (request.width as usize * SS, request.height as usize * SS);
         let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(request.camera.target);
@@ -289,9 +397,7 @@ impl ImageTask {
             draw: 0,
             triangle: None,
             output,
-            encoded: Arc::new(Mutex::new(Vec::new())),
             encoder: None,
-            row: 0,
         })
     }
 
@@ -307,7 +413,11 @@ impl ImageTask {
                 done: self.pixel_done,
                 total: self.pixel_tests + (self.sw * self.sh) as u64 + u64::from(self.request.width) * u64::from(self.request.height),
             },
-            Stage::Encode => Progress { phase: Phase::Encoding, done: self.row as u64, total: u64::from(self.request.height) },
+            Stage::Encode => Progress {
+                phase: Phase::Encoding,
+                done: self.encoder.as_ref().map_or(0, |encoder| encoder.row() as u64),
+                total: u64::from(self.request.height),
+            },
             Stage::Done => Progress { phase: Phase::Completed, done: 1, total: 1 },
         }
     }
@@ -380,7 +490,11 @@ impl ImageTask {
             return Err(invalid("non-finite product triangle"));
         }
         let look = self.looks.get(draw.body as usize).and_then(|looks| mesh.tri_face.get(draw.triangle as usize).and_then(|face| looks.get(face)));
-        let (colour, opacity, surface) = look.map_or((body.color, body.opacity, body.surface), |look| (look.color, look.opacity, look.surface));
+        // Transmission is physical optical data, never a request to change CPU preview.
+        // Keep the existing scalar sorted-alpha shading for glass previews.
+        let (colour, opacity, surface) = look.map_or((body.color, body.opacity, body.surface.filter(|_| body.transmission.is_none())), |look| {
+            (look.color, look.opacity, look.surface.filter(|_| look.transmission.is_none()))
+        });
         if surface.is_some() && opacity != 1.0 {
             return Err(invalid("opaque PBR requires opacity 1"));
         }
@@ -562,14 +676,8 @@ impl ImageTask {
         let width = self.request.width as usize;
         let index = self.output.len() / 4;
         if index >= width * self.request.height as usize {
-            let writer = BufferWriter { bytes: self.encoded.clone(), limit: self.admission.encoded_limit as usize, cancel: self.cancel.clone() };
-            let mut encoder = png::Encoder::new(writer, self.request.width, self.request.height);
-            encoder.set_color(png::ColorType::Rgba);
-            encoder.set_depth(png::BitDepth::Eight);
-            encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
-            self.encoder = Some(
-                encoder.write_header().and_then(|w| w.into_stream_writer()).map_err(|e| JobError::new(ErrorCode::EncodingFailed, e.to_string()))?,
-            );
+            self.encoder =
+                Some(super::encoding::PngEncoding::new(self.request.width, self.request.height, self.admission.encoded_limit, self.cancel.clone())?);
             self.stage = Stage::Encode;
             // Pixels and prepared geometry are no longer needed during PNG compression.
             self.pixels = Vec::new();
@@ -600,32 +708,12 @@ impl ImageTask {
     }
 
     fn encode_step(&mut self) -> Result<Option<Vec<u8>>> {
-        if self.row < self.request.height as usize {
-            let length = self.request.width as usize * 4;
-            let start = self.row * length;
-            let row = self.output.get(start..start + length).ok_or_else(|| invalid("missing PNG row"))?;
-            self.encoder
-                .as_mut()
-                .ok_or_else(|| invalid("missing PNG writer"))?
-                .write_all(row)
-                .map_err(|e| JobError::new(ErrorCode::EncodingFailed, e.to_string()))?;
-            self.row += 1;
-            return Ok(None);
+        let result = self.encoder.as_mut().ok_or_else(|| invalid("missing PNG writer"))?.step(&self.output)?;
+        if result.is_some() {
+            self.output = Vec::new();
+            self.stage = Stage::Done;
         }
-        self.encoder
-            .take()
-            .ok_or_else(|| invalid("missing PNG writer"))?
-            .finish()
-            .map_err(|e| JobError::new(ErrorCode::EncodingFailed, e.to_string()))?;
-        self.cancel.check()?;
-        let mut bytes = self.encoded.lock().map_err(|_| JobError::new(ErrorCode::Internal, "PNG output lock poisoned"))?;
-        let png = std::mem::take(&mut *bytes);
-        if !png.starts_with(b"\x89PNG\r\n\x1a\n") {
-            return Err(JobError::new(ErrorCode::EncodingFailed, "invalid PNG output"));
-        }
-        self.output = Vec::new();
-        self.stage = Stage::Done;
-        Ok(Some(png))
+        Ok(result)
     }
 }
 

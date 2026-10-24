@@ -17,6 +17,14 @@ Every platform and package. The links point at the latest release.
 - **Web:** [try it in your browser][web-app], no install.
 
 
+## Code signing
+
+Windows releases will be code signed through the SignPath Foundation: free code signing provided by
+[SignPath.io](https://about.signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/). This is being set up; until it's live, the note
+below applies. macOS releases are being set up to be signed with an Apple Developer ID and
+notarized by Apple.
+
 The downloads aren't signed yet. On Windows, if SmartScreen warns you, choose **More info**, then
 **Run anyway**. On macOS, the first time, right-click SolidCraft in Applications and choose **Open**.
 

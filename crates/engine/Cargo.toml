@@ -9,6 +9,10 @@ license.workspace = true
 workspace = true
 
 [features]
+default = []
+# Optional authored texture/HDR bytes; the command registry and metadata remain available.
+bundled-render-library = []
+raytrace-cpu = ["solidcraft-render/raytrace-cpu"]
 # Turns on the parameter-contract audit recorder (`SOLIDCRAFT_PARAM_AUDIT`, see
 # `src/schema/record.rs`), for checking a new contract against the whole test suite.
 param-audit = []
@@ -44,3 +48,7 @@ web-time = { workspace = true }
 [dev-dependencies]
 # Normal CI exercises profiling assertions without enabling the production feature.
 solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
+
+[[example]]
+name = "render_resource_workflow"
+required-features = ["raytrace-cpu"]

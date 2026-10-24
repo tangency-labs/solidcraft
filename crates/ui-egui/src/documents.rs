@@ -93,6 +93,7 @@ fn take_view(app: &mut SolveApp) -> DocView {
 
 fn put_view(app: &mut SolveApp, v: DocView) {
     app.render_workspace.view = v.render;
+    crate::render_workspace::invalidate_images(app);
     crate::render_workspace::invalidate_scene(app);
     crate::render_workspace::sync_backend(app);
     let u = &mut app.ui;

@@ -1,5 +1,7 @@
 # Product-image jobs (R4a)
 
+Native progressive opaque PNG rendering is described in [Progressive product images](render-path.md). It registers alongside the CPU executor.
+
 R4a adds bounded CPU preview images to the Render workspace. The installed `builtin` /
 `cpu-product` executor supports Preview, Image and PNG. It does not promise refraction,
 HDRI, exposure, final mode or EXR; those requests fail explicitly. The subsequent
@@ -48,6 +50,16 @@ image releases the previous image; old terminal metadata can still report comple
 but it does not promise that its bytes remain exportable. Export requires an explicit
 retained completed job ID; it never silently exports a different/newer job.
 
+Native CPU raytracing can separately enable
+[progressive camera sampling](render-cpu-progressive.md). A status may then include
+`preview: {frame_sequence, samples_per_pixel, frame}`. Its complete-pass PNG is
+available through the in-process `JobHandle::preview()` consumer; the JSON status
+contains metadata only. The preview keeps the same job and capture identity,
+but remains separate from the retained final image and `render.export`.
+Cancellation, failure and final publication clear the provisional slot while
+preserving the previous successful result when no newer final exists. Each
+externally retained preview keeps its own admitted memory reservation.
+
 ## Native and browser execution
 
 Each application installs one CPU host, shared by its documents. Native execution uses
@@ -88,7 +100,8 @@ with an atomic hard link; an existing destination wins even in a race. Filesyste
 without that operation return an error. Explicit overwrite uses the existing atomic
 writer without reading or backing up the previous target. Failed writes preserve the completed
 image and CAD state. Browser export uses the existing virtual file/download service;
-no filesystem paths or base64 payloads are persisted in the design.
+image-export paths or frame payloads are not persisted in the design. Saved HDR
+input resources use their separate [document contract](render-hdr-resources.md).
 
 The Render panel provides Check Render Request, Start Render, phase progress,
 Cancel Render and Export PNG. Replace existing file is an explicit opt-in. A failed or

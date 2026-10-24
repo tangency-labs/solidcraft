@@ -145,6 +145,41 @@ fn physical_material_is_dense_and_keeps_assignment() {
 }
 
 #[test]
+fn physical_material_panel_reviews_saved_si_card_without_changing_the_design() {
+    let mut h = fixture();
+    let card = json!({"schema_version":1,"designation":"Original saved candidate","family":"other",
+        "sources":[{"id":"test","title":"Original illustrative source","kind":"illustrative"}],
+        "properties":[{"source_id":"test","data":{"kind":"density","kg_m3":700.0}},
+            {"source_id":"test","data":{"kind":"elasticity","model":{"symmetry":"isotropic","young_modulus_pa":12e9,"poisson_ratio":0.25}}}]});
+    h.app.run("material.create", json!({"name":"Saved candidate","density_g_cm3":0.8,"physical_card":card})).unwrap();
+    h.app.run("material.assign", json!({"bodies":["Body1"],"material":"Saved candidate"})).unwrap();
+    let mass = h.app.run("component.properties", json!({})).unwrap();
+    let doc = h.app.session.doc.clone();
+    let before = (h.app.session.undo.len(), h.app.session.redo.len());
+    h.app.start("material.assign");
+    let selected = h.app.session.doc.material_names().iter().position(|name| name == "Saved candidate").unwrap();
+    let dialogs::Kind::Material { index, .. } = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("physical-material panel missing") };
+    *index = selected;
+    h.frames(3);
+    // Starting a command also updates view/selection state. Review must not
+    // advance that revision after the dialog has settled.
+    let revision = h.app.session.revision;
+    assert!(h.widget("Density: 0.8 g/cm³").is_some());
+    h.step(&json!({"click":{"handle":"dialog:section:Properties"}})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Original saved candidate").is_some());
+    assert!(h.widget("density: 7e2 kg/m³").is_some());
+    assert!(h.widget("E: 1.2e10 Pa").is_some());
+    assert!(h.widget("Original illustrative source").is_some());
+    assert!(h.app.material_card_review.is_none(), "saved properties share the existing physical-material panel");
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+    assert_eq!(before, (h.app.session.undo.len(), h.app.session.redo.len()));
+    assert_eq!(revision, h.app.session.revision);
+    assert_eq!(h.app.run("component.properties", json!({})).unwrap(), mass);
+}
+
+#[test]
 fn appearance_is_dense_and_preserves_color_opacity_and_targets() {
     form("appearance.assign", &["Objects", "Apply To", "Colour", "Opacity", "Library", "Search"]);
     let mut h = fixture();
@@ -552,4 +587,199 @@ fn parameters_header_drag_retains_offset_and_bounds_the_card() {
             assert!(h.app.params.is_some());
         }
     }
+}
+
+fn physical_editor(h: &mut Harness) -> &mut crate::material_editor::Editor {
+    let dialogs::Kind::Material { editor, .. } = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("physical material panel") };
+    editor
+}
+
+fn physical_type(h: &mut Harness, field: &str, text: &str) {
+    h.step(&json!({"click":{"handle":format!("material:field:{field}")}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":text})).unwrap();
+}
+
+#[test]
+fn physical_material_clicked_save_then_cancel_persists_without_assigning_or_changing_mass() {
+    let mut h = fixture();
+    h.app.run("material.assign", json!({"bodies":["Body1"],"material":"Steel"})).unwrap();
+    let assignments = h.app.session.doc.materials.clone();
+    let mass = h.app.run("component.properties", json!({})).unwrap();
+    let history = h.app.session.undo.len();
+    h.app.start("material.assign");
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"material:new"}})).unwrap();
+    physical_type(&mut h, "name", "Unassigned authored material");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(physical_editor(&mut h).editing(), "Enter belongs to the draft, never body assignment");
+    assert!(dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
+    physical_type(&mut h, "density", "0.8123456789012345");
+    h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
+    assert!(!physical_editor(&mut h).editing());
+    assert_eq!(h.app.session.undo.len(), history + 1);
+    assert_eq!(h.app.session.doc.user_material("Unassigned authored material").unwrap().density, 0.8123456789012345);
+    assert!(h.app.session.doc.user_material("Unassigned authored material").unwrap().physical_card.is_none());
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.materials, assignments);
+    assert_eq!(h.app.run("component.properties", json!({})).unwrap(), mass);
+    let reopened = solidcraft_engine::doc::Document::from_json(&h.app.session.doc.to_json()).unwrap();
+    assert_eq!(reopened.user_materials, h.app.session.doc.user_materials);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(h.app.session.doc.user_material("Unassigned authored material").is_none());
+    h.app.run("edit.redo", json!({})).unwrap();
+    assert!(h.app.session.doc.user_material("Unassigned authored material").is_some());
+    assert_eq!(h.app.session.doc.materials, assignments);
+}
+
+#[test]
+fn physical_material_discard_and_invalid_save_leave_document_and_history_unchanged() {
+    let mut h = fixture();
+    let doc = h.app.session.doc.clone();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    h.app.start("material.assign");
+    h.frames(3);
+    let revision = h.app.session.revision;
+    h.step(&json!({"click":{"handle":"material:new"}})).unwrap();
+    physical_type(&mut h, "name", "Invalid material");
+    physical_type(&mut h, "density", "NaN");
+    h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
+    assert!(physical_editor(&mut h).editing());
+    assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+    assert_eq!(history, (h.app.session.undo.len(), h.app.session.redo.len()));
+    assert_eq!(revision, h.app.session.revision);
+    h.step(&json!({"click":{"handle":"material:discard"}})).unwrap();
+    assert!(!physical_editor(&mut h).editing());
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+    assert_eq!(history, (h.app.session.undo.len(), h.app.session.redo.len()));
+    assert_eq!(revision, h.app.session.revision);
+}
+
+fn complete_physical_card() -> serde_json::Value {
+    let mut data = vec![
+        json!({"kind":"density","kg_m3":750.1234567890123}),
+        json!({"kind":"elasticity","model":{"symmetry":"orthotropic","axes":"wood_lrt",
+            "young_moduli_pa":[12e9,12e9,12e9],"shear_moduli_pa":[5e9,5e9,5e9],"poisson_ratios":[0.2,0.2,0.2]}}),
+        json!({"kind":"tensile_strength","pa":12345678.901234567}),
+        json!({"kind":"compressive_strength","pa":23456789.01234567}),
+        json!({"kind":"yield_strength","pa":34567890.12345678}),
+        json!({"kind":"shear_strength","pa":45678901.23456789}),
+        json!({"kind":"thermal_conductivity","w_m_k":[1.23456789012345,2.34567890123456,3.45678901234567],"axes":"material123"}),
+        json!({"kind":"thermal_expansion","per_k":[-1.234567890123e-6,2.345678901234e-6,3.456789012345e-6],"axes":"wood_lrt"}),
+        json!({"kind":"specific_heat","j_kg_k":1234.5678901234567}),
+    ];
+    let properties: Vec<_> = data
+        .drain(..)
+        .enumerate()
+        .map(|(i, data)| {
+            json!({"source_id":if i%2==0 {"author"} else {"analytic"},
+        "conditions":{"temperature_k":293.15123456789,"moisture_dry_basis_kg_kg":0.1234567890123456,"strain_rate_per_s":0.0012345678901234567,
+            "state":" Original synthetic fixture "},"data":data})
+        })
+        .collect();
+    json!({"schema_version":1,"designation":"Original complete synthetic card","family":"wood",
+        "sources":[
+            {"id":"author","title":"Original illustrative authoring","kind":"illustrative","license":"MIT OR Apache-2.0","reference":"fixture:original"},
+            {"id":"analytic","title":"Original analytic constants","kind":"user_supplied","license":null,"reference":null},
+            {"id":"retained","title":"Unused original source retained exactly","kind":"illustrative","license":"MIT","reference":"fixture:unused"}],
+        "properties":properties})
+}
+
+#[test]
+fn physical_material_editor_preserves_all_sources_conditions_anisotropy_and_pbr_on_rename() {
+    let mut h = fixture();
+    let card = complete_physical_card();
+    h.app
+        .run(
+            "material.create",
+            json!({"name":"Complete substrate","density_g_cm3":0.8123456789012345,"physical_card":card,
+        "color":"#a17643","pbr":{"metallic":0.3,"roughness":0.2712345678901234,"dielectric_ior":1.5512345678901234}}),
+        )
+        .unwrap();
+    h.app.run("material.assign", json!({"bodies":["Body1"],"material":"Complete substrate"})).unwrap();
+    let original = h.app.session.doc.user_material("Complete substrate").unwrap().clone();
+    let mass = h.app.run("component.properties", json!({})).unwrap()["total"].clone();
+    h.app.start("material.assign");
+    let selected = h.app.session.doc.material_names().iter().position(|n| n == "Complete substrate").unwrap();
+    let dialogs::Kind::Material { index, .. } = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("physical material") };
+    *index = selected;
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"material:edit"}})).unwrap();
+    let draft = physical_editor(&mut h).draft.as_ref().unwrap().clone();
+    assert_eq!(draft.card.build().unwrap(), *original.physical_card.as_ref().unwrap().card());
+    assert!(draft.command(&h.app.session.doc).unwrap().is_none(), "unmodified fields must not be rewritten");
+    h.frames(3);
+    physical_type(&mut h, "name", "Renamed complete substrate");
+    // The full form scrolls; command preparation is the same Save operation tested by clicking above.
+    let mut dialog = h.app.dialog.take().unwrap();
+    let dialogs::Kind::Material { index, editor } = &mut dialog.kind else { panic!("physical material") };
+    let history = h.app.session.undo.len();
+    editor.save(&mut h.app, index).unwrap();
+    assert_eq!(h.app.session.undo.len(), history + 1);
+    h.app.dialog = Some(dialog);
+    dialogs::cancel(&mut h.app);
+    let saved = h.app.session.doc.user_material("Renamed complete substrate").unwrap();
+    let mut expected_appearance = original.appearance.clone();
+    expected_appearance.as_mut().unwrap().name = "Renamed complete substrate".into();
+    assert_eq!(saved.appearance, expected_appearance);
+    assert_eq!(saved.physical_card, original.physical_card);
+    assert_eq!(saved.density, original.density);
+    assert_eq!(h.app.run("component.properties", json!({})).unwrap()["total"], mass);
+    let mut editor = crate::material_editor::Editor::default();
+    editor.begin(&h.app.session.doc, Some("Renamed complete substrate"), false);
+    assert!(editor.draft.as_ref().unwrap().command(&h.app.session.doc).unwrap().is_none());
+    let reopened = solidcraft_engine::doc::Document::from_json(&h.app.session.doc.to_json()).unwrap();
+    assert_eq!(reopened.user_materials, h.app.session.doc.user_materials);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.user_material("Complete substrate"), Some(&original));
+    h.app.run("edit.redo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.user_material("Renamed complete substrate").unwrap().physical_card, original.physical_card);
+}
+
+#[test]
+fn physical_material_duplicate_preserves_visual_values_and_keeps_builtin_immutable() {
+    let mut h = fixture();
+    let builtins = h.app.session.execute("material.list", &json!({})).unwrap();
+    let density = h.app.session.doc.material_density("Aluminum").unwrap();
+    let look = h.app.session.doc.material_look("Aluminum").unwrap();
+    let assignments = h.app.session.doc.materials.clone();
+    h.app.start("material.assign");
+    let selected = h.app.session.doc.material_names().iter().position(|n| n == "Aluminum").unwrap();
+    let dialogs::Kind::Material { index, .. } = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("physical material") };
+    *index = selected;
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"material:duplicate"}})).unwrap();
+    physical_type(&mut h, "name", "Duplicated substrate");
+    h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    let saved = h.app.session.doc.user_material("Duplicated substrate").unwrap();
+    assert_eq!(saved.density, density);
+    assert!(saved.physical_card.is_none());
+    let copied = saved.appearance.as_ref().unwrap();
+    assert_eq!((copied.color, copied.opacity, copied.pbr), (look.color, look.opacity, look.pbr));
+    assert_eq!(h.app.session.doc.materials, assignments);
+    let after = h.app.session.execute("material.list", &json!({})).unwrap();
+    assert_eq!(&after["materials"].as_array().unwrap()[..14], builtins["materials"].as_array().unwrap().as_slice());
+}
+
+#[test]
+fn physical_material_draft_rejects_invalid_constants_and_stale_edits_atomically() {
+    let mut h = fixture();
+    h.app.run("material.create", json!({"name":"Shared substrate","density_g_cm3":0.8,"physical_card":complete_physical_card()})).unwrap();
+    let mut editor = crate::material_editor::Editor::default();
+    editor.begin(&h.app.session.doc, Some("Shared substrate"), false);
+    let mut invalid = editor.draft.as_ref().unwrap().clone();
+    invalid.card.properties.iter_mut().find(|p| p.kind == "elasticity").unwrap().values[0] = "-1".into();
+    assert!(invalid.command(&h.app.session.doc).is_err());
+    invalid = editor.draft.as_ref().unwrap().clone();
+    invalid.card.properties.iter_mut().find(|p| p.kind == "density").unwrap().values[0].clear();
+    assert!(invalid.command(&h.app.session.doc).is_err(), "missing values must not become invented zeroes");
+    h.app.run("material.edit", json!({"material":"Shared substrate","density_g_cm3":0.9})).unwrap();
+    let before = h.app.session.doc.clone();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+    assert!(editor.save(&mut h.app, &mut 0).is_err());
+    assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
+    assert_eq!(history, (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
 }

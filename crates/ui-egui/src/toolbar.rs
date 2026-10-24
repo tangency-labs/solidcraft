@@ -1151,7 +1151,17 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let right = r.right();
         // The Sketch exit group follows the last sketch panel, and is always kept room for so it
         // stays reachable at every width; when panels go into the » menu it moves to the far right.
-        let finish_plan = sizes.last().filter(|_| tab == "SKETCH").map(Plan::full);
+        let finish_plan = sizes.last().and_then(|size| {
+            if tab == "SKETCH" {
+                Some(Plan::full(size))
+            } else if tab == "RENDER" {
+                // Personal pins remain uncapped: extra Image actions use the same
+                // trimming/menu policy rather than overflowing a fixed reservation.
+                fit(std::slice::from_ref(size), (right - 4.0 - px).clamp(0.0, 240.0)).pop()
+            } else {
+                None
+            }
+        });
         let finish_width = finish_plan.as_ref().map_or(0.0, |p| p.width().max(80.0));
         let normal_count = sizes.len().saturating_sub(usize::from(finish_plan.is_some()));
         let mut plans = fit(sizes.get(..normal_count).unwrap_or_default(), right - 4.0 - px - finish_width);
@@ -1172,8 +1182,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let collapsed = plan.fit == Fit::Collapsed;
             let trimmed = plan.shown < plan.widths.len();
             let finish = tab == "SKETCH" && *panel == "FINISH SKETCH";
-            let width = if finish { finish_width } else { plan.width() };
-            if finish && finish_right {
+            let pinned = finish || (tab == "RENDER" && *panel == "IMAGE");
+            let width = if pinned { finish_width } else { plan.width() };
+            if pinned && finish_right {
                 px = right - finish_width;
                 painter.line_segment([pos2(px, top), pos2(px, r.bottom() - 1.0)], t.tertiary_border(t.border));
             }
@@ -1235,7 +1246,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         br.max.x -= 14.0;
                     }
                 }
-                let info = selected.info(&app.session);
+                let info = crate::render_workspace::interactive_command_info(app, selected);
                 let resp = ui.interact(br, ui.id().with(("cmd", c.id)), Sense::click_and_drag());
                 crate::scenario::publish_handle(&format!("toolbar:{}", c.id), br.center());
                 // The button itself (`toolbar:<id>` is also a drop-down row's while one is open).
@@ -1327,7 +1338,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         pos2(button_x + (index % columns) as f32 * 27.0, top + 6.0 + (index / columns) as f32 * 23.0),
                         vec2(24.0, 20.0),
                     );
-                    let info = c.info(&app.session);
+                    let info = crate::render_workspace::interactive_command_info(app, c);
                     let resp = ui.interact(cell, ui.id().with(("cmd", c.id)), Sense::click_and_drag());
                     let active = running.as_deref() == Some(c.id);
                     let accent = crate::theme::TabAccent::for_tab(&t, &tab);
@@ -1527,7 +1538,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 selection_filter(app, ui);
                             }
                             for c in cmds {
-                                let info = c.info(&app.session);
+                                let info = crate::render_workspace::interactive_command_info(app, c);
                                 let response = crate::ui_kit::command_menu_button(
                                     ui,
                                     c.id,
@@ -1663,6 +1674,12 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
         let description = match command.id {
             "render.scene" => Some(app.tr("render.preview_help")),
             "render.start" => Some(app.tr("render.image_help")),
+            "render.preset.resolve" | "render.preset.apply" => Some(app.tr("render.ribbon_studios_help")),
+            "render.library.appearance.apply" | "render.library.surface.bind" => Some(app.tr("render.ribbon_materials_help")),
+            "render.library.studio.prepare" | "render.library.studio.apply" => Some(app.tr("render.ribbon_lights_help")),
+            "render.library.environment.apply" | "render.stage.backdrop" => Some(app.tr("render.ribbon_environment_help")),
+            "render.preflight" => Some(app.tr("render.ribbon_check_help")),
+            "render.export" => Some(app.tr("render.output_format_status")),
             _ => None,
         };
         if let Some(description) = description {
@@ -1726,7 +1743,7 @@ fn dropdown_width(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_eng
 /// under the pointer or keyboard focus (like every menu).
 fn dropdown_row(app: &SolveApp, ui: &mut egui::Ui, c: &'static solidcraft_engine::CommandSpec, width: f32, pinned: bool) -> RowAction {
     let t = Tokens::get();
-    let info = c.info(&app.session);
+    let info = crate::render_workspace::interactive_command_info(app, c);
     let (rect, _) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::hover());
     // Every row drags onto the toolbar (to pin it there); enabled rows also start their command.
     let sense = if info.enabled { Sense::click_and_drag() } else { Sense::drag() };
@@ -1825,7 +1842,7 @@ fn dropdown_keys(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engi
         return;
     }
     ui.ctx().data_mut(|d| d.insert_temp(handled, pass));
-    let enabled: Vec<_> = cmds.iter().filter(|c| c.info(&app.session).enabled).collect();
+    let enabled: Vec<_> = cmds.iter().filter(|c| crate::render_workspace::interactive_command_info(app, c).enabled).collect();
     if enabled.is_empty() {
         return;
     }

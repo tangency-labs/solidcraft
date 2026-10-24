@@ -1,12 +1,12 @@
 //! Integrated product preview. Shares the installed device/pipelines, not Design's scene policy.
 
-use crate::ui_kit::{Container, Edge, Surface};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
 use egui::{Color32, Sense};
 use serde_json::json;
 use solidcraft_engine::doc::render_settings::RenderSetup;
+use solidcraft_engine::render::job::{ImageHost, Integrator, LightingPreset, PreviewInfo, RaytraceOptions};
 use solidcraft_engine::render::{
     Availability, Camera, ExecutorDescriptor, ExecutorId, ProductScene, RenderLimits, RenderMode, RenderOperation, RenderProfile, RenderRequest,
     ScratchLayout,
@@ -15,14 +15,54 @@ use solidcraft_engine::render::{
 use crate::gpu::{Frame, GpuScene, SceneSlot, ViewportCallback};
 use crate::{SolveApp, theme::Tokens};
 
-const MAX_GEOMETRY_BYTES: usize = 128 * 1024 * 1024;
+// Vertex payload only, not an OS/GPU peak-memory promise. Native viewport
+// uploads are already chunked by the installed device's buffer limit.
+const MAX_GEOMETRY_BYTES: usize =
+    if cfg!(all(not(target_arch = "wasm32"), target_pointer_width = "64")) { 512 * 1024 * 1024 } else { 128 * 1024 * 1024 };
+
+#[path = "render_workspace_ribbon.rs"]
+mod ribbon;
+
+#[path = "render_workspace_cpu.rs"]
+mod cpu;
+
+#[path = "render_workspace_hdr.rs"]
+mod hdr;
+
+#[path = "render_workspace_effects.rs"]
+mod effects;
+#[path = "render_workspace_inspector.rs"]
+mod inspector;
+
+#[path = "render_workspace_library.rs"]
+mod library;
+
+#[path = "render_workspace_materials.rs"]
+mod materials;
+
+#[path = "render_workspace_setups.rs"]
+mod setups;
+
+#[path = "render_workspace_studio.rs"]
+mod studio;
+#[path = "render_workspace_transport.rs"]
+mod transport;
 
 #[cfg(test)]
 #[path = "render_workspace_tests.rs"]
 mod tests;
 
+type PathFactory = Box<dyn FnOnce() -> Result<ImageHost, String> + Send>;
+
 pub struct State {
+    pending_setup: Option<PathFactory>,
     pub host: Option<ExecutorDescriptor>,
+    pub path_host: PathHost,
+    /// How long the last path tracer setup took, in seconds, per viewport adapter
+    /// ([`adapter_key`]); kept in the preferences to estimate the next one.
+    pub setup_seconds: std::collections::BTreeMap<String, f64>,
+    /// The viewport adapter the current setup runs on.
+    pub setup_key: Option<String>,
     pub image_host: Option<solidcraft_engine::render::job::CpuHost>,
     pub view: ViewState,
     revision: u64,
@@ -31,6 +71,137 @@ pub struct State {
     key: Option<u64>,
     scene_signature: Option<(u64, usize, u64)>,
     scene: Option<ProductScene>,
+    scene_error: Option<String>,
+    preview_upload_bytes: Option<usize>,
+    image: Option<(solidcraft_engine::render::job::JobId, Result<egui::TextureHandle, String>)>,
+    image_info: Option<solidcraft_engine::render::job::FrameInfo>,
+    preview_image: Option<PreviewImage>,
+}
+
+/// Provisional pixels are never an export source and never replace the retained final image.
+struct PreviewImage {
+    info: PreviewInfo,
+    image: Result<egui::TextureHandle, String>,
+}
+
+struct DisplayImage<'a> {
+    info: &'a solidcraft_engine::render::job::FrameInfo,
+    image: &'a Result<egui::TextureHandle, String>,
+    preview: Option<&'a PreviewInfo>,
+}
+
+/// Application-wide setup, retained across document changes. The worker owns a
+/// cloned adapter and initializes the job device; the UI receives the finished host.
+#[derive(Default)]
+pub enum PathHost {
+    #[default]
+    NotStarted,
+    /// The worker's answer, and when it started: shader compilation can take minutes.
+    Preparing(std::sync::mpsc::Receiver<Result<ImageHost, String>>, std::time::Instant),
+    Ready(ImageHost),
+    Failed(String),
+}
+
+impl PathHost {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn start(&mut self, create: impl FnOnce() -> Result<ImageHost, String> + Send + 'static) {
+        if !matches!(self, Self::NotStarted) {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        // Dropping the handle detaches: neither startup nor shutdown joins a driver
+        // that may spend minutes compiling or warming up its pipelines.
+        *self = match std::thread::Builder::new().name("gpu-path-setup".into()).spawn(move || {
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(create)).unwrap_or_else(|_| Err("GPU path tracer setup panicked".into()));
+            let _ = tx.send(result);
+        }) {
+            Ok(_) => Self::Preparing(rx, std::time::Instant::now()),
+            Err(e) => Self::failed(format!("could not start setup worker: {e}")),
+        };
+    }
+
+    fn failed(message: String) -> Self {
+        log::warn!("progressive render unavailable: {message}");
+        Self::Failed(message)
+    }
+
+    /// Take the worker's answer if it has come; returns how long a successful setup took.
+    fn poll(&mut self) -> Option<std::time::Duration> {
+        let Self::Preparing(rx, started) = self else { return None };
+        let took = started.elapsed();
+        *self = match rx.try_recv() {
+            Ok(Ok(host)) => Self::Ready(host),
+            Ok(Err(error)) => Self::failed(error),
+            Err(std::sync::mpsc::TryRecvError::Empty) => return None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Self::failed("setup worker stopped without returning a host".into()),
+        };
+        matches!(self, Self::Ready(_)).then_some(took)
+    }
+}
+
+/// The samples slider's top end: 2^12 = 4096 samples per pixel.
+const MAX_SAMPLES_EXPONENT: u32 = 12;
+
+/// Setup times kept per adapter, at most.
+const MAX_SETUP_TIMES: usize = 16;
+
+/// The key [`State::setup_seconds`] files an adapter's setup time under: a driver update
+/// usually empties the driver's shader cache, so the driver is part of it.
+pub fn adapter_key(info: &egui_wgpu::wgpu::AdapterInfo) -> String {
+    format!("{} | {:?} | {} {}", info.name.trim(), info.backend, info.driver.trim(), info.driver_info.trim())
+}
+
+/// Remember how long the setup on `key` took, for the next start's estimate.
+fn record_setup(state: &mut State, took: std::time::Duration) {
+    let Some(key) = state.setup_key.clone() else { return };
+    if state.setup_seconds.len() >= MAX_SETUP_TIMES && !state.setup_seconds.contains_key(&key) {
+        return;
+    }
+    state.setup_seconds.insert(key, took.as_secs_f64());
+}
+
+/// Setup times from the preferences: finite, non-negative and at most a day each.
+pub fn load_setup_seconds(value: &serde_json::Value) -> std::collections::BTreeMap<String, f64> {
+    value
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(k, v)| Some((k.clone(), v.as_f64().filter(|s| s.is_finite() && (0.0..=86_400.0).contains(s))?)))
+        .take(MAX_SETUP_TIMES)
+        .collect()
+}
+
+/// Minutes and seconds, as `1:05`.
+fn mmss(d: std::time::Duration) -> String {
+    let s = d.as_secs();
+    format!("{}:{:02}", s / 60, s % 60)
+}
+
+/// The path tracer's setup as it goes: a progress bar estimated from the last setup on this
+/// adapter, else a spinner with the time so far. Drivers report no progress of their own.
+fn setup_progress(ui: &mut egui::Ui, app: &SolveApp, started: std::time::Instant) {
+    let elapsed = started.elapsed();
+    let expected = app.render_workspace.setup_key.as_ref().and_then(|k| app.render_workspace.setup_seconds.get(k)).copied();
+    ui.label(app.tr("render.gpu_path_preparing"));
+    match expected.map(|s| std::time::Duration::from_secs_f64(s.max(1.0))) {
+        Some(expected) if elapsed < expected.mul_f64(1.5) => {
+            let fraction = (elapsed.as_secs_f32() / expected.as_secs_f32()).min(0.99);
+            crate::ui_kit::progress(ui, "gpu_path_setup", fraction);
+            ui.label(format!("{} / ~{}", mmss(elapsed), mmss(expected)));
+            // The bar moves with time, so keep drawing while it is shown.
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+        }
+        _ => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(mmss(elapsed));
+            });
+            if expected.is_none() {
+                ui.small(app.tr("render.gpu_path_first_setup"));
+            }
+        }
+    }
 }
 
 /// Small per-document editor state; GPU uploads and host capabilities stay outside tabs.
@@ -39,15 +210,81 @@ pub struct ViewState {
     pub name: String,
     draft: RenderSetup,
     dirty: bool,
+    clean_setup: Option<RenderSetup>,
     job: Option<solidcraft_engine::render::job::JobId>,
     completed: Option<solidcraft_engine::render::job::JobId>,
     transparent: bool,
+    method: ImageMethod,
+    raytrace: RaytraceOptions,
+    samples: u32,
+    max_depth: u32,
+    seed: u32,
+    studio: studio::View,
+    materials: materials::View,
+    library: library::View,
+    inspector: inspector::View,
+
+    cpu: cpu::View,
     overwrite: bool,
+    result: bool,
+    result_camera: Camera,
+    result_scale: ResultScale,
+    result_job: Option<solidcraft_engine::render::job::JobId>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ResultScale {
+    #[default]
+    Fit,
+    Actual,
+    Free,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ImageMethod {
+    #[default]
+    Raster,
+    CpuRaytrace,
+    GpuRaytrace,
+}
+
+impl ImageMethod {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Raster => "render.method_raster",
+            Self::CpuRaytrace => "render.method_cpu",
+            Self::GpuRaytrace => "render.method_gpu",
+        }
+    }
 }
 
 impl Default for ViewState {
     fn default() -> Self {
-        Self { name: "Studio".into(), draft: RenderSetup::default(), dirty: false, job: None, completed: None, transparent: false, overwrite: false }
+        Self {
+            name: "Studio".into(),
+            draft: RenderSetup::default(),
+            dirty: false,
+            clean_setup: None,
+            job: None,
+            completed: None,
+            transparent: false,
+            method: ImageMethod::Raster,
+            raytrace: RaytraceOptions::default(),
+            samples: 64,
+            max_depth: 8,
+            seed: 0,
+            studio: studio::View::default(),
+            materials: materials::View::default(),
+            library: library::View::default(),
+            inspector: inspector::View::default(),
+
+            cpu: cpu::View::default(),
+            overwrite: false,
+            result: false,
+            result_camera: Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() },
+            result_scale: ResultScale::Fit,
+            result_job: None,
+        }
     }
 }
 
@@ -55,6 +292,10 @@ impl Default for State {
     fn default() -> Self {
         Self {
             host: None,
+            path_host: PathHost::default(),
+            pending_setup: None,
+            setup_seconds: Default::default(),
+            setup_key: None,
             image_host: None,
             view: Default::default(),
             revision: u64::MAX,
@@ -63,12 +304,64 @@ impl Default for State {
             key: None,
             scene_signature: None,
             scene: None,
+            scene_error: None,
+            preview_upload_bytes: None,
+            image: None,
+            image_info: None,
+            preview_image: None,
+        }
+    }
+}
+
+impl State {
+    /// Retain the selected viewport adapter, but do not open another device or
+    /// compile shaders until Render is used. A later viewport installation (for
+    /// example safe-mode fallback) replaces only a not-yet-started factory.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn defer_path_host(&mut self, key: String, create: impl FnOnce() -> Result<ImageHost, String> + Send + 'static) {
+        if matches!(self.path_host, PathHost::NotStarted) {
+            self.setup_key = Some(key);
+            self.pending_setup = Some(Box::new(create));
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn start_deferred_path_host(&mut self) {
+        if matches!(self.path_host, PathHost::NotStarted)
+            && let Some(create) = self.pending_setup.take()
+        {
+            self.path_host.start(create);
         }
     }
 }
 
 pub fn active(app: &SolveApp) -> bool {
     app.ui.tab == "RENDER"
+}
+
+pub(crate) fn result_active(app: &SolveApp) -> bool {
+    active(app) && app.render_workspace.view.result
+}
+
+pub(crate) fn fit_result(app: &mut SolveApp) {
+    app.render_workspace.view.result_scale = ResultScale::Fit;
+}
+
+/// Read-only identities for automation and diagnostics. Does not prepare a
+/// request, open a device, evaluate geometry, change the selected result or pump
+/// a job. Clients must use render.status for the exact identity returned here.
+pub(crate) fn inspect_state(app: &SolveApp) -> serde_json::Value {
+    let view = &app.render_workspace.view;
+    let method = match view.method {
+        ImageMethod::Raster => "raster",
+        ImageMethod::CpuRaytrace => "cpu_raytrace",
+        ImageMethod::GpuRaytrace => "gpu_path",
+    };
+    json!({
+        "active": active(app), "setup": view.name, "draft_dirty": view.dirty,
+        "method": method, "job": view.job, "completed": view.completed,
+        "showing_result": view.result, "export_format": if view.studio.export_exr {"exr"} else {"png"},
+    })
 }
 
 pub fn host_executor(max_dimension: u32, depth: bool, samples: u32) -> Result<ExecutorDescriptor, String> {
@@ -99,6 +392,20 @@ pub fn host_executor(max_dimension: u32, depth: bool, samples: u32) -> Result<Ex
 }
 
 pub fn sync_backend(app: &mut SolveApp) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if active(app) {
+        app.render_workspace.start_deferred_path_host();
+    }
+    if let Some(took) = app.render_workspace.path_host.poll() {
+        record_setup(&mut app.render_workspace, took);
+    }
+    if let PathHost::Ready(host) = &app.render_workspace.path_host
+        && let Err(e) = app.session.register_render_job_host(host.clone())
+    {
+        app.render_workspace.path_host = PathHost::failed(e.to_string());
+        app.set_status(e.to_string(), true);
+    }
+
     if app.session.render_job_host().is_none()
         && let Some(host) = &app.render_workspace.image_host
         && let Err(e) = app.session.set_render_job_host(Some(host.clone()))
@@ -116,6 +423,10 @@ pub fn sync_backend(app: &mut SolveApp) {
 /// Cooperative work belongs to the frame loop, never to a status/control request. Keep
 /// scheduling frames even after leaving Render so a browser job can finish in Design.
 pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
+    if matches!(app.render_workspace.path_host, PathHost::Preparing(..)) {
+        // Poll even in Design or an idle window, without continuously redrawing.
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
     if let Some(host) = &app.render_workspace.image_host {
         match host.pump(1024) {
             Ok(true) => ctx.request_repaint(),
@@ -129,18 +440,33 @@ pub fn reset_document(app: &mut SolveApp) {
     app.ui.ribbon_context = None;
     let host = app.render_workspace.host.clone();
     let image_host = app.render_workspace.image_host.clone();
-    app.render_workspace = State { host, image_host, ..Default::default() };
+    let path_host = std::mem::take(&mut app.render_workspace.path_host);
+    let setup_seconds = std::mem::take(&mut app.render_workspace.setup_seconds);
+    let setup_key = app.render_workspace.setup_key.take();
+    let pending_setup = app.render_workspace.pending_setup.take();
+    app.render_workspace = State { host, image_host, path_host, setup_seconds, setup_key, pending_setup, ..Default::default() };
     if active(app) {
         app.ui.tab = "MODEL".into();
     }
     sync_backend(app);
 }
 
+pub(crate) fn invalidate_images(app: &mut SolveApp) {
+    app.render_workspace.image = None;
+    app.render_workspace.image_info = None;
+    app.render_workspace.preview_image = None;
+}
+
 pub fn invalidate_scene(app: &mut SolveApp) {
     app.render_workspace.revision = u64::MAX;
     app.render_workspace.scene_signature = None;
     app.render_workspace.scene = None;
+    app.render_workspace.scene_error = None;
+    app.render_workspace.preview_upload_bytes = None;
     app.render_workspace.key = None;
+    if let Ok(mut slot) = app.render_workspace.slot.lock() {
+        *slot = None;
+    }
 }
 
 pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
@@ -157,6 +483,12 @@ pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
                 app.cam.fit(&scene.bounds);
             }
         }
+        setups::refresh_dirty(app);
+        if app.render_workspace.revision != app.session.revision && !app.render_workspace.view.dirty {
+            setups::load(app);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        app.render_workspace.start_deferred_path_host();
     } else {
         if let Some((camera, perspective)) = app.render_workspace.design_camera.take() {
             app.cam = camera;
@@ -170,194 +502,863 @@ pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
 }
 
 pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if app.render_workspace.revision != app.session.revision && !app.render_workspace.view.dirty {
-        app.render_workspace.view.draft = app.session.doc.render.setups.get(&app.render_workspace.view.name).cloned().unwrap_or_default();
-        app.render_workspace.revision = app.session.revision;
-    }
-    let response = Container::new(ui.ctx(), Surface::Panel)
-        .edge("sc_render_settings", Edge::Right)
-        .exact_size(285.0)
-        .resizable(false)
-        .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(Tokens::get().panel).inner_margin(10))
-        .show(ui, |ui| {
-            crate::ui_kit::scope(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.heading(app.tr("cmd.render_settings_get"));
-                    ui.label(app.tr("render.preview"));
-                    ui.small(app.tr("render.opaque_preview_help"));
-                    ui.separator();
-                    let names: Vec<_> = app.session.doc.render.setups.keys().cloned().collect();
-                    let old_name = app.render_workspace.view.name.clone();
-                    crate::ui_kit::dropdown_menu(ui, "render_setups", &old_name, |ui| {
-                        for name in names {
-                            if crate::ui_kit::list_picker(ui, &name, &name, name == app.render_workspace.view.name).clicked() {
-                                app.render_workspace.view.name = name;
-                                ui.close();
-                            }
-                        }
-                    });
-                    ui.label(app.tr("render.setup_name"));
-                    crate::ui_kit::bounded_cell_editor(ui, ui.id().with("render_setup_name"), &mut app.render_workspace.view.name, "", false, 128);
-                    if app.render_workspace.view.name != old_name {
-                        app.render_workspace.view.draft =
-                            app.session.doc.render.setups.get(&app.render_workspace.view.name).cloned().unwrap_or_default();
-                        app.render_workspace.view.dirty = false;
-                    }
-                    ui.separator();
-                    ui.label(app.tr("render.background"));
-                    if crate::ui_kit::color_field(ui, &mut app.render_workspace.view.draft.background).changed() {
-                        app.render_workspace.view.dirty = true;
-                    }
-                    let mut perspective = app.cam.fov > 0.0;
-                    if crate::ui_kit::checkbox(ui, app.tr("render.perspective"), &mut perspective).changed() {
-                        app.cam.fov = if perspective { std::f64::consts::FRAC_PI_4 } else { 0.0 };
-                        app.render_workspace.view.dirty = true;
-                    }
-                    if crate::ui_kit::button(ui, app.tr("render.fit"), crate::ui_kit::Button::Normal).clicked() {
-                        match solidcraft_engine::product_scene::extract(&app.session) {
-                            Ok(scene) if !scene.bounds.is_empty() => app.cam.fit(&scene.bounds),
-                            Err(e) => app.set_status(e.to_string(), true),
-                            _ => {}
-                        }
-                    }
-                    if crate::ui_kit::button(ui, app.tr("render.restore_camera"), crate::ui_kit::Button::Normal).clicked() {
-                        let name = app.render_workspace.view.name.clone();
-                        if app.run("render.settings.apply", json!({"name":name})).is_ok() {
-                            app.follow_view_request(false);
-                        }
-                    }
-                    if crate::ui_kit::button(ui, app.tr("render.save_setup"), crate::ui_kit::Button::Normal).clicked() {
-                        let name = app.render_workspace.view.name.clone();
-                        let setup = RenderSetup { camera: app.cam, ..app.render_workspace.view.draft.clone() };
-                        if app.run("render.settings.set", json!({"name":name,"set":setup})).is_ok() {
-                            app.render_workspace.view.dirty = false;
-                        }
-                    }
-                    if app.render_workspace.view.dirty {
-                        ui.label(app.tr("render.unsaved"));
-                    }
-                    if crate::ui_kit::button(ui, app.tr("render.reload_settings"), crate::ui_kit::Button::Normal).clicked() {
-                        app.render_workspace.view.dirty = false;
-                        app.render_workspace.revision = u64::MAX;
-                    }
-                    if app.render_workspace.view.draft.backend.as_str() != "builtin" || app.render_workspace.view.draft.mode != RenderMode::Preview {
-                        ui.label(app.tr("render.unavailable_preview"));
-                        if crate::ui_kit::button(ui, app.tr("render.use_preview"), crate::ui_kit::Button::Normal).clicked() {
-                            app.render_workspace.view.draft.backend = solidcraft_engine::render::builtin_backend().id;
-                            app.render_workspace.view.draft.mode = RenderMode::Preview;
-                            app.render_workspace.view.dirty = true;
-                        }
-                    }
-                    ui.separator();
-                    image_controls(app, ui);
-                    ui.separator();
-                    ui.small(app.tr("render.navigation_help"));
-                    if crate::ui_kit::button(ui, app.tr("render.return_design"), crate::ui_kit::Button::Normal).clicked()
-                        && let Err(e) = enter(app, false)
-                    {
-                        app.set_status(e, true);
-                    }
-                });
-            });
-        });
-    let frame = Container::new(ui.ctx(), Surface::Panel).edge_frame(Tokens::get().panel).inner_margin(10);
-    Container::paint_inset(ui.painter(), response.response.rect - frame.outer_margin, frame);
+    inspector::panel(app, ui);
 }
 
-fn image_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
+/// Local Browser-card content, never a new workspace or an alternative model tree.
+pub(crate) fn browser_mode(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
+    if !active(app) {
+        return false;
+    }
+    let labels = [app.tr("render.browser_model").to_string(), app.tr("render.browser_library").to_string()];
+    let mut selected = usize::from(app.render_workspace.view.inspector.library_open);
+    let top = ui.cursor().min;
+    let width = ui.available_width();
+    crate::ui_kit::segmented(ui, &mut selected, &labels.iter().map(String::as_str).collect::<Vec<_>>(), Default::default());
+    for (i, name) in ["render:browser-model", "render:browser-library"].iter().enumerate() {
+        crate::scenario::publish_target(
+            name,
+            egui::Rect::from_min_size(top + egui::vec2(width * i as f32 / 2.0, 0.0), egui::vec2(width / 2.0, crate::ui_kit::row_height())),
+        );
+    }
+    app.render_workspace.view.inspector.library_open = selected == 1;
+    if selected == 1 {
+        crate::ui_kit::scope(ui, |ui| library::browse(app, ui));
+        true
+    } else {
+        false
+    }
+}
+
+fn image_host(app: &SolveApp, method: ImageMethod) -> Result<&ImageHost, String> {
+    if method == ImageMethod::GpuRaytrace {
+        let PathHost::Ready(host) = &app.render_workspace.path_host else {
+            return Err(app.tr("render.gpu_unavailable").to_string());
+        };
+        let descriptor = host.descriptor().map_err(|error| error.to_string())?;
+        if !host.is_available()
+            || !descriptor.profiles.iter().any(|profile| profile.features.contains(&solidcraft_engine::render::RenderFeature::Progressive))
+        {
+            return Err(app.tr("render.gpu_unavailable").to_string());
+        }
+        return Ok(host);
+    }
+    let host = app.session.render_job_host().ok_or_else(|| app.tr("render.image_host_missing").to_string())?;
+    host.validate_integrator(if method == ImageMethod::CpuRaytrace { Integrator::Raytrace } else { Integrator::Raster })
+        .map_err(|error| error.to_string())?;
+    Ok(host)
+}
+
+/// Check and Start use exactly this request, rebuilt at each click. The result camera is
+/// temporarily installed only inside shared navigation; app.cam remains the product camera.
+fn image_params(app: &SolveApp) -> Result<serde_json::Value, String> {
+    let view = &app.render_workspace.view;
+    image_host(app, view.method)?;
+    if app.session.model.is_stale() {
+        return Err(app.tr("render.image_scene_stale").to_string());
+    }
+    image_request(app)
+}
+
+/// Pure request construction is shared with offline setup editing; host checks stay above.
+fn image_request(app: &SolveApp) -> Result<serde_json::Value, String> {
+    cpu::validate_progressive_image(app)?;
+    if !setups::has_runtime_inputs(app) {
+        return Ok(json!({"settings":setups::snapshot(app)?}));
+    }
+    let view = &app.render_workspace.view;
+    // Temporary bindings and unsaved HDR captures use the runtime API. Embedded HDRs
+    // still resolve by their document resource ID when a temporary binding is present.
+    if !view.draft.surfaces.is_empty() {
+        return Err(app.tr("render.saved_maps_runtime_conflict").to_string());
+    }
+    let settings = RenderSetup { camera: app.cam, job: None, ..view.draft.clone() };
+    let mut params = json!({"settings":settings,"transparent_background":view.transparent});
+    match view.method {
+        ImageMethod::Raster => {}
+        ImageMethod::CpuRaytrace => {
+            if view.transparent {
+                return Err(app.tr("render.cpu_opaque_required").to_string());
+            }
+            cpu::params(app, &mut params)?;
+        }
+        ImageMethod::GpuRaytrace => {
+            params["progressive"] = json!(true);
+            params["samples"] = json!(view.samples);
+            params["max_depth"] = json!(view.max_depth);
+            params["seed"] = json!(view.seed);
+            studio::params(app, &mut params)?;
+        }
+    }
+    materials::params(app, &mut params)?;
+    Ok(params)
+}
+
+fn select_image_method(app: &mut SolveApp, method: ImageMethod) {
+    app.render_workspace.view.method = method;
+    // Raster has no exposure control. Selecting it explicitly selects its zero-EV response.
+    if method == ImageMethod::Raster {
+        app.render_workspace.view.draft.exposure_ev = 0.0;
+    }
+    app.render_workspace.view.dirty = true;
+}
+
+fn method_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
+    ui.label(app.tr("render.image_method"));
+    let current = app.render_workspace.view.method;
+    let label = app.tr(current.label()).to_string();
+    let response = crate::ui_kit::dropdown_menu(ui, "render_image_method", &label, |ui| {
+        for (method, handle) in [
+            (ImageMethod::Raster, "render:method-raster"),
+            (ImageMethod::CpuRaytrace, "render:method-cpu"),
+            (ImageMethod::GpuRaytrace, "render:method-gpu"),
+        ] {
+            let capability = image_host(app, method).map(|_| ());
+            let label = app.tr(method.label()).to_string();
+            let response = crate::ui_kit::list_picker(ui, handle, &label, method == current);
+            crate::scenario::publish_handle(handle, response.rect.center());
+            if response.clicked() {
+                select_image_method(app, method);
+                ui.close();
+            }
+            if let Err(reason) = capability {
+                response.on_hover_text(reason);
+            }
+        }
+    });
+    crate::scenario::publish_handle("render:method", response.rect.center());
+    if image_host(app, app.render_workspace.view.method).is_err() {
+        if app.render_workspace.view.inspector.page == inspector::Page::All {
+            ui.small(app.tr("render.setup_offline_help"));
+        } else {
+            crate::ui_kit::text(ui, app.tr("render.setup_offline_help"), crate::ui_kit::Text::Note("render.setup_offline_help"));
+        }
+    }
+    if app.render_workspace.view.method != ImageMethod::Raster {
+        if app.render_workspace.view.inspector.page == inspector::Page::All {
+            ui.small(app.tr("render.preview_image_settings_help"));
+        } else {
+            crate::ui_kit::text(ui, app.tr("render.preview_image_settings_help"), crate::ui_kit::Text::Note("render.preview_image_settings_help"));
+        }
+    }
+}
+
+fn cpu_sampling_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let progressive = cpu::progressive_controls(app, ui);
+    if !progressive {
+        ui.label(app.tr("render.cpu_primary_samples"));
+        let samples = app.render_workspace.view.raytrace.primary_samples;
+        let aa = crate::ui_kit::dropdown_menu(ui, "render_cpu_samples", &format!("{samples}×"), |ui| {
+            for count in [1, 4, 16] {
+                let handle = format!("render:aa-{count}");
+                let response = crate::ui_kit::list_picker(ui, &handle, &format!("{count}×"), count == samples);
+                crate::scenario::publish_handle(&handle, response.rect.center());
+                if response.clicked() {
+                    app.render_workspace.view.raytrace.primary_samples = count;
+                    ui.close();
+                }
+            }
+        });
+        crate::scenario::publish_handle("render:aa", aa.rect.center());
+        ui.small(app.tr("render.cpu_aa_help"));
+    }
+}
+
+fn cpu_lighting_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
+    ui.label(app.tr("render.cpu_lighting"));
+    let presets = [
+        (LightingPreset::Neutral, "render.cpu_neutral"),
+        (LightingPreset::WarmCool, "render.cpu_warm_cool"),
+        (LightingPreset::KeyRim, "render.cpu_key_rim"),
+    ];
+    let selected = app.render_workspace.view.raytrace.preset.unwrap_or(LightingPreset::Neutral);
+    let label = app
+        .tr(match selected {
+            LightingPreset::Neutral => "render.cpu_neutral",
+            LightingPreset::WarmCool => "render.cpu_warm_cool",
+            LightingPreset::KeyRim => "render.cpu_key_rim",
+        })
+        .to_string();
+    crate::ui_kit::dropdown_menu(ui, "render_cpu_lighting", &label, |ui| {
+        for (preset, key) in presets {
+            if crate::ui_kit::list_picker(ui, key, app.tr(key), preset == selected).clicked() {
+                app.render_workspace.view.raytrace.preset = Some(preset);
+                app.render_workspace.view.raytrace.lights = None;
+                ui.close();
+            }
+        }
+    });
+    let shadows = app.tr("render.cpu_shadows").to_string();
+    crate::ui_kit::checkbox(ui, &shadows, &mut app.render_workspace.view.raytrace.shadows);
+}
+
+fn image_method_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
+    method_selector(app, ui);
+    if app.render_workspace.view.method != ImageMethod::CpuRaytrace {
+        return;
+    }
+    cpu_sampling_controls(app, ui);
+    cpu_lighting_controls(app, ui);
+    ui.label(app.tr("render.image_exposure"));
+    let exposure_help = app.tr("render.cpu_exposure_help").to_string();
+    crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.exposure_ev, -32.0..=32.0, 0.1, " EV").on_hover_text(exposure_help);
+    cpu::controls(app, ui);
+}
+
+fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.heading(app.tr("render.image_title"));
-    ui.small(app.tr("render.opaque_image_summary"));
+    let preview = app.tr("render.result_preview").to_string();
+    let result = app.tr("render.result_title").to_string();
+    let mut selected = usize::from(app.render_workspace.view.result);
+    if crate::ui_kit::segmented(ui, &mut selected, &[&preview, &result], crate::ui_kit::Segments { compact: true, ..Default::default() }) {
+        app.render_workspace.view.result = selected == 1;
+        app.cancel_view_animation();
+        app.viewport.key_hold = None;
+        app.viewport.orbit_free = None;
+    }
+    if app.render_workspace.view.result {
+        ui.horizontal(|ui| {
+            if crate::ui_kit::button(ui, app.tr("render.result_fit"), crate::ui_kit::Button::Normal).clicked() {
+                fit_result(app);
+            }
+            if crate::ui_kit::button(ui, "100%", crate::ui_kit::Button::Enabled(!reduced_display(app)))
+                .on_hover_text(app.tr("render.result_actual_help"))
+                .clicked()
+            {
+                app.render_workspace.view.result_scale = ResultScale::Actual;
+            }
+        });
+        ui.small(app.tr("render.result_navigation"));
+    }
+    image_method_controls(app, ui);
+    ui.small(app.tr(match app.render_workspace.view.method {
+        ImageMethod::Raster => "render.opaque_image_summary",
+        ImageMethod::CpuRaytrace => "render.cpu_summary",
+        ImageMethod::GpuRaytrace => "render.progressive_image_summary",
+    }));
+    // The field's hard range never silently clamps a draft when its budget changes.
+    let side = match app.render_workspace.view.method {
+        ImageMethod::CpuRaytrace => 16384,
+        ImageMethod::GpuRaytrace => 8192,
+        ImageMethod::Raster => 4096,
+    };
     ui.horizontal(|ui| {
         ui.label(app.tr("render.image_width"));
-        if crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.width, 1..=4096, 1.0, "").changed() {
+        if crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.width, 1..=side, 1.0, "").changed() {
             app.render_workspace.view.dirty = true;
         }
         ui.label(app.tr("render.image_height"));
-        if crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.height, 1..=4096, 1.0, "").changed() {
+        if crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.height, 1..=side, 1.0, "").changed() {
             app.render_workspace.view.dirty = true;
         }
     });
     let draft = &app.render_workspace.view.draft;
     let size = (u64::from(draft.width), u64::from(draft.height));
-    if let Some((w, h)) = RenderLimits::default().fit(size.0, size.1, None)
+    if let Some((w, h)) = cpu::image_limits(app).fit(size.0, size.1, None)
         && (w, h) != size
     {
-        ui.small(app.tr("render.image_too_large"));
+        let limit = if app.render_workspace.view.method == ImageMethod::CpuRaytrace && app.render_workspace.view.raytrace.progressive.is_some() {
+            "render.cpu_budget_resize"
+        } else {
+            "render.image_too_large"
+        };
+        ui.small(app.tr(limit));
         if crate::ui_kit::button(ui, format!("{} {w} × {h}", app.tr("render.image_use_largest")), crate::ui_kit::Button::Normal).clicked() {
             app.render_workspace.view.draft.width = u32::try_from(w).unwrap_or(1);
             app.render_workspace.view.draft.height = u32::try_from(h).unwrap_or(1);
             app.render_workspace.view.dirty = true;
         }
     }
+    match &app.render_workspace.path_host {
+        PathHost::Preparing(_, started) => setup_progress(ui, app, *started),
+        PathHost::Failed(error) => {
+            ui.add(egui::Label::new(format!("{}: {error}", app.tr("render.gpu_path_failed"))).wrap());
+        }
+        _ => {}
+    }
+    if app.render_workspace.view.method == ImageMethod::GpuRaytrace {
+        ui.label(app.tr("render.image_samples"));
+        // Powers of two from 1 to 4096; requests from elsewhere keep any count.
+        let samples = &mut app.render_workspace.view.samples;
+        let mut exponent = (*samples).max(1).ilog2().min(MAX_SAMPLES_EXPONENT);
+        let slider = crate::ui_kit::Slider { integer: true, format: |e| format!("{}", 1u32 << (e as u32).min(31)), ..Default::default() };
+        if crate::ui_kit::slider(ui, &mut exponent, 0..=MAX_SAMPLES_EXPONENT, slider).changed() {
+            *samples = 1 << exponent.min(MAX_SAMPLES_EXPONENT);
+        }
+        let title = app.tr("render.image_advanced").to_string();
+        crate::ui_kit::section(ui, "render_gpu_advanced", &title, false, |ui| {
+            ui.label(app.tr("render.gpu_depth"));
+            crate::ui_kit::number_field(ui, &mut app.render_workspace.view.max_depth, 1..=16, 1.0, "");
+            ui.label(app.tr("render.gpu_seed"));
+            crate::ui_kit::number_field(ui, &mut app.render_workspace.view.seed, 0..=u32::MAX, 1.0, "");
+            ui.label(app.tr("render.image_exposure"));
+            crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.exposure_ev, -32.0..=32.0, 0.1, " EV");
+            ui.small(app.tr("render.gpu_options_help"));
+            studio::controls(app, ui);
+        });
+    }
+    library::controls(app, ui);
+    materials::controls(app, ui);
     let transparent_label = app.tr("render.image_transparent").to_string();
     crate::ui_kit::checkbox(ui, &transparent_label, &mut app.render_workspace.view.transparent);
-    if crate::ui_kit::button(ui, app.tr("cmd.render_preflight"), crate::ui_kit::Button::Normal).clicked() {
-        let settings = RenderSetup { camera: app.cam, ..app.render_workspace.view.draft.clone() };
-        if app.run("render.preflight", json!({"settings":settings,"transparent_background":app.render_workspace.view.transparent})).is_ok() {
-            app.set_status(app.tr("render.image_supported").to_string(), false);
+}
+
+/// Dense all-controls composition, also useful to standalone/offscreen hosts.
+#[cfg(test)]
+fn image_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
+    image_edit_controls(app, ui);
+    job_controls(app, ui, false);
+    completed_image(app, ui);
+}
+
+fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
+    let params = image_params(app);
+    if !compact {
+        if let Err(error) = &params {
+            ui.add(egui::Label::new(egui::RichText::new(error).color(Tokens::get().warning)).wrap());
         }
+        cpu::checked_status(app, ui, params.as_ref().ok());
     }
     let mut busy = false;
+    let mut state = None;
     if let Some(job) = app.render_workspace.view.job {
         match app.session.execute("render.status", &json!({"job":job})) {
             Ok(status) => {
                 let phase = status["progress"]["phase"].as_str().unwrap_or("unknown");
                 busy = matches!(phase, "queued" | "preparing" | "running" | "encoding" | "cancelling");
-                ui.label(match phase {
-                    "queued" => app.tr("render.image_queued"),
-                    "preparing" => app.tr("render.image_preparing"),
-                    "running" => app.tr("render.image_running"),
-                    "encoding" => app.tr("render.image_encoding"),
-                    "cancelling" => app.tr("render.image_cancelling"),
-                    "cancelled" => app.tr("render.image_cancelled"),
-                    "completed" => app.tr("render.image_completed"),
-                    "failed" => app.tr("render.image_failed"),
-                    _ => app.tr("render.image_unknown"),
-                });
                 if phase == "completed" {
                     app.render_workspace.view.completed = Some(job);
                 }
-                if let Some(message) = status["error"]["message"].as_str() {
-                    ui.label(message);
-                    if status["error"]["code"] == "limit_exceeded" {
-                        ui.small(app.tr("render.image_reduce"));
-                    }
-                }
-                if busy {
-                    let done = status["progress"]["done"].as_u64().unwrap_or(0);
-                    let total = status["progress"]["total"].as_u64().unwrap_or(1).max(1);
-                    crate::ui_kit::progress(ui, "render", (done as f64 / total as f64).clamp(0.0, 1.0) as f32);
-                    ui.ctx().request_repaint();
-                    if crate::ui_kit::button(ui, app.tr("cmd.render_cancel"), crate::ui_kit::Button::Normal).clicked() {
-                        let _ = app.run("render.cancel", json!({"job":job}));
-                    }
-                }
-                if let Some(revision) = status["scene_generation"].as_u64()
-                    && revision != app.session.revision
-                {
-                    ui.small(app.tr("render.image_stale"));
-                }
+                state = Some(status);
             }
-            Err(e) => {
-                ui.label(e.to_string());
+            Err(error) => {
+                if !compact {
+                    ui.add(egui::Label::new(egui::RichText::new(error.to_string()).small()).wrap());
+                }
             }
         }
     }
-    if crate::ui_kit::button(ui, app.tr("render.image_start"), crate::ui_kit::Button::Enabled(!busy)).clicked() {
-        let settings = RenderSetup { camera: app.cam, ..app.render_workspace.view.draft.clone() };
-        if let Ok(reply) = app.run("render.start", json!({"settings":settings,"transparent_background":app.render_workspace.view.transparent})) {
-            app.render_workspace.view.job = serde_json::from_value(reply["job"].clone()).ok();
+    ui.horizontal_wrapped(|ui| {
+        let check = crate::ui_kit::button(
+            ui,
+            app.tr("cmd.render_preflight"),
+            crate::ui_kit::Button::Enabled(ribbon::action_ready(app, "render.preflight").is_ok()),
+        );
+        crate::scenario::publish_target("render:check", check.rect);
+        if check.clicked()
+            && let Err(error) = ribbon::perform_job(app, "render.preflight")
+        {
+            app.set_status(error, true);
+        }
+        let start = crate::ui_kit::button(
+            ui,
+            app.tr("render.image_start"),
+            crate::ui_kit::Button::Enabled(ribbon::action_ready(app, "render.start").is_ok()),
+        );
+        crate::scenario::publish_target("render:start", start.rect);
+        if start.clicked() {
+            if let Err(error) = ribbon::perform_job(app, "render.start") {
+                app.set_status(error, true);
+            }
             ui.ctx().request_repaint();
         }
+    });
+    let message = state.as_ref().map_or_else(
+        || app.tr(if params.is_ok() { "render.studio_ready" } else { "render.studio_needs_review" }).to_string(),
+        |status| {
+            app.tr(match status["progress"]["phase"].as_str().unwrap_or("") {
+                "queued" => "render.image_queued",
+                "preparing" => "render.image_preparing",
+                "running" => "render.image_running",
+                "encoding" => "render.image_encoding",
+                "cancelling" => "render.image_cancelling",
+                "cancelled" => "render.image_cancelled",
+                "completed" => "render.image_completed",
+                "failed" => "render.image_failed",
+                _ => "render.image_unknown",
+            })
+            .to_string()
+        },
+    );
+    let response = ui.add_sized([ui.available_width(), ui.text_style_height(&egui::TextStyle::Body)], egui::Label::new(message).truncate());
+    crate::scenario::publish_target("render:job-summary", response.rect);
+    if let Err(error) = &params {
+        response.on_hover_text(error);
     }
-    let overwrite_label = app.tr("render.image_overwrite").to_string();
-    crate::ui_kit::checkbox(ui, &overwrite_label, &mut app.render_workspace.view.overwrite);
-    if crate::ui_kit::button(ui, app.tr("render.image_export"), crate::ui_kit::Button::Enabled(app.render_workspace.view.completed.is_some()))
-        .clicked()
-        && let Some(job) = app.render_workspace.view.completed
+    if let Some(status) = &state {
+        if !compact {
+            cpu::captured_status(app, ui, status);
+            if let Some(message) = status["error"]["message"].as_str() {
+                ui.add(egui::Label::new(egui::RichText::new(message).small()).wrap());
+            }
+        }
+        if busy {
+            let done = status["progress"]["done"].as_u64().unwrap_or(0);
+            let total = status["progress"]["total"].as_u64().unwrap_or(1).max(1);
+            crate::ui_kit::progress(ui, "render", (done as f64 / total as f64).clamp(0.0, 1.0) as f32);
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        }
+    }
+    ui.horizontal_wrapped(|ui| {
+        let cancel = crate::ui_kit::button(
+            ui,
+            app.tr("cmd.render_cancel"),
+            crate::ui_kit::Button::Enabled(ribbon::action_ready(app, "render.cancel").is_ok()),
+        );
+        crate::scenario::publish_target("render:cancel", cancel.rect);
+        if cancel.clicked()
+            && let Err(error) = ribbon::perform_job(app, "render.cancel")
+        {
+            app.set_status(error, true);
+        }
+        let export = crate::ui_kit::button(
+            ui,
+            app.tr("render.image_export"),
+            crate::ui_kit::Button::Enabled(ribbon::action_ready(app, "render.export").is_ok()),
+        );
+        crate::scenario::publish_target("render:export", export.rect);
+        if export.clicked()
+            && let Err(error) = ribbon::perform_job(app, "render.export")
+        {
+            app.set_status(error, true);
+        }
+    });
+    if !compact {
+        let label = app.tr("render.image_overwrite").to_string();
+        crate::ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.overwrite);
+    }
+}
+
+/// Decode each published sequence once. Provisional textures stay separate from the last
+/// final image, so cancellation or a failed pass cannot change the export target.
+fn completed_image(app: &mut SolveApp, ui: &mut egui::Ui) {
+    cache_render_images(app, ui.ctx());
+    if let Some(display) = displayed_image(app) {
+        if display.preview.is_some() {
+            ui.small(app.tr("render.result_provisional"));
+        }
+        match display.image {
+            Ok(texture) => {
+                if ui
+                    .add(egui::Image::new(texture).max_size(egui::vec2(ui.available_width(), 240.0)).shrink_to_fit().sense(Sense::click()))
+                    .on_hover_text(app.tr("render.result_open"))
+                    .clicked()
+                {
+                    app.render_workspace.view.result = true;
+                    app.cancel_view_animation();
+                    app.viewport.key_hold = None;
+                    app.viewport.orbit_free = None;
+                }
+            }
+            Err(error) => {
+                ui.add(egui::Label::new(error).wrap());
+            }
+        }
+    } else if let Some((_, Err(error))) = &app.render_workspace.image {
+        ui.add(egui::Label::new(error).wrap());
+    }
+}
+
+fn cache_completed_image(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(job) = app.render_workspace.view.completed else {
+        app.render_workspace.image = None;
+        app.render_workspace.image_info = None;
+        return;
+    };
+    if app.render_workspace.image.as_ref().is_none_or(|(old, _)| *old != job) {
+        app.render_workspace.image_info = None;
+        let result = (|| -> Result<egui::TextureHandle, String> {
+            let handle = app.session.render_job_handle(job).map_err(|e| e.to_string())?;
+            let frame = handle.frame().map_err(|e| e.to_string())?.ok_or("render has no completed image")?;
+            let captured = handle.status().map_err(|e| e.to_string())?;
+            let budget = if frame.info.executor.as_str() == "gpu-path" {
+                solidcraft_engine::render::job::GPU_PATH_LIMITS
+            } else {
+                captured_image_limits(&captured.request)
+            };
+            let image = decode_render_image(frame.png(), frame.info.width, frame.info.height, budget, ctx.input(|i| i.max_texture_side))?;
+            app.session.execute("render.result.pin", &json!({"job":job})).map_err(|e| e.to_string())?;
+            app.render_workspace.image_info = Some(frame.info.clone());
+            Ok(ctx.load_texture("sc_render_image", image, egui::TextureOptions::LINEAR))
+        })();
+        // Cache errors too, so a bad frame cannot repeatedly allocate or decode on repaint.
+        app.render_workspace.image = Some((job, result));
+    }
+}
+
+fn displayed_image(app: &SolveApp) -> Option<DisplayImage<'_>> {
+    let state = &app.render_workspace;
+    if let Some(preview) = &state.preview_image
+        && state.view.job == Some(preview.info.frame.job)
     {
-        export_image(app, job, app.render_workspace.view.overwrite);
+        return Some(DisplayImage { info: &preview.info.frame, image: &preview.image, preview: Some(&preview.info) });
     }
+    Some(DisplayImage { info: state.image_info.as_ref()?, image: &state.image.as_ref()?.1, preview: None })
+}
+
+fn cache_preview_frame(app: &mut SolveApp, ctx: &egui::Context, info: &PreviewInfo, png: &[u8]) {
+    if app.render_workspace.view.job != Some(info.frame.job) {
+        return;
+    }
+    if app
+        .render_workspace
+        .preview_image
+        .as_ref()
+        .is_some_and(|old| old.info.frame.job == info.frame.job && old.info.frame_sequence >= info.frame_sequence)
+    {
+        return;
+    }
+    let result = (|| -> Result<egui::TextureHandle, String> {
+        if info.frame_sequence == 0 || !(1..=4096).contains(&info.samples_per_pixel) {
+            return Err("invalid provisional render identity or sample count".into());
+        }
+        let handle = app.session.render_job_handle(info.frame.job).map_err(|e| e.to_string())?;
+        let captured = handle.status().map_err(|e| e.to_string())?;
+        if (info.frame.width, info.frame.height) != (captured.request.width, captured.request.height) {
+            return Err("checkpoint dimensions differ from the captured request".into());
+        }
+        let options = solidcraft_engine::render::job::CpuProgressiveOptions { samples_per_pixel: info.samples_per_pixel, seed: 0 };
+        options.validate_image_with_budget(info.frame.width, info.frame.height, captured.request.cpu_budget()).map_err(|error| error.to_string())?;
+        let image = decode_render_image(
+            png,
+            info.frame.width,
+            info.frame.height,
+            captured_image_limits(&captured.request),
+            ctx.input(|i| i.max_texture_side),
+        )?;
+        Ok(ctx.load_texture("sc_render_preview", image, egui::TextureOptions::LINEAR))
+    })();
+    // Cache errors by identity too: a malformed publication cannot decode on every repaint.
+    app.render_workspace.preview_image = Some(PreviewImage { info: info.clone(), image: result });
+}
+
+fn cache_preview_image(app: &mut SolveApp, ctx: &egui::Context) {
+    if let Some(job) = app.render_workspace.view.job
+        && let Ok(handle) = app.session.render_job_handle(job)
+    {
+        let preview = handle.preview().ok().flatten();
+        // Read the final after the checkpoint: completion may occur after the panel's
+        // earlier status query. Promote the real final before dropping its preview,
+        // rather than briefly falling back to an older job and losing result framing.
+        if handle.frame().ok().flatten().is_some() {
+            app.render_workspace.view.completed = Some(job);
+        } else if let Some(preview) = preview {
+            cache_preview_frame(app, ctx, &preview.info, preview.png());
+            return;
+        }
+    }
+    app.render_workspace.preview_image = None;
+}
+
+fn remember_displayed_job(app: &mut SolveApp, preserve_view: bool) {
+    let Some(job) = displayed_image(app).map(|display| display.info.job) else { return };
+    if app.render_workspace.view.result_job != Some(job) {
+        app.render_workspace.view.result_job = Some(job);
+        if !preserve_view {
+            app.render_workspace.view.result_scale = ResultScale::Fit;
+        }
+    }
+}
+
+fn cache_render_images(app: &mut SolveApp, ctx: &egui::Context) {
+    let preserve_view = app.render_workspace.preview_image.as_ref().is_some_and(|preview| {
+        app.render_workspace.view.result_job == Some(preview.info.frame.job) && app.render_workspace.view.job == Some(preview.info.frame.job)
+    });
+    cache_preview_image(app, ctx);
+    cache_completed_image(app, ctx);
+    // Checkpoint updates and preview→final/cancel transitions preserve shared pan/zoom.
+    remember_displayed_job(app, preserve_view);
+}
+
+fn captured_image_limits(request: &solidcraft_engine::render::job::ImageRequest) -> RenderLimits {
+    if request.integrator == Integrator::Raytrace {
+        request.cpu_budget().image_limits(request.raytrace.as_ref().is_some_and(|o| o.progressive.is_some()))
+    } else {
+        RenderLimits::default()
+    }
+}
+
+/// This is a display cache only: the authoritative PNG/frame and export remain
+/// full resolution. Avoid asking a viewport device for an unsupported texture.
+fn display_dimensions(width: u32, height: u32, max_texture_side: usize) -> Result<(u32, u32), String> {
+    if width == 0 || height == 0 || max_texture_side == 0 {
+        return Err("invalid image display dimensions".into());
+    }
+    let max_side = max_texture_side.min(8192) as u64;
+    let display = RenderLimits { max_dimension: max_side, max_pixels: 16_777_216, max_scratch_bytes: 512 * 1024 * 1024 };
+    let (w, h) = display.fit(u64::from(width), u64::from(height), None).ok_or("image display cannot fit this device")?;
+    Ok((u32::try_from(w).map_err(|_| "display width overflow")?, u32::try_from(h).map_err(|_| "display height overflow")?))
+}
+
+#[cfg(test)]
+fn decode_image(png: &[u8], width: u32, height: u32) -> Result<egui::ColorImage, String> {
+    decode_render_image(png, width, height, RenderLimits::default(), 8192)
+}
+
+fn decode_render_image(png: &[u8], width: u32, height: u32, budget: RenderLimits, max_texture_side: usize) -> Result<egui::ColorImage, String> {
+    let size = (u64::from(width), u64::from(height));
+    if budget.fit(size.0, size.1, None) != Some(size) {
+        return Err("render image exceeds its captured resource profile".into());
+    }
+    let display_size = display_dimensions(width, height, max_texture_side)?;
+    let mut reader = image::ImageReader::with_format(std::io::Cursor::new(png), image::ImageFormat::Png);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(width);
+    limits.max_image_height = Some(height);
+    limits.max_alloc = Some(size.0.checked_mul(size.1).and_then(|n| n.checked_mul(16)).ok_or("image decode budget overflow")?);
+    reader.limits(limits);
+    let image = reader.decode().map_err(|e| e.to_string())?.to_rgba8();
+    if image.dimensions() != (width, height) {
+        return Err("render image dimensions do not match its job".into());
+    }
+    let image = if display_size != (width, height) {
+        image::imageops::resize(&image, display_size.0, display_size.1, image::imageops::FilterType::Triangle)
+    } else {
+        image
+    };
+    Ok(egui::ColorImage::from_rgba_unmultiplied([display_size.0 as usize, display_size.1 as usize], image.as_raw()))
+}
+
+fn reduced_display(app: &SolveApp) -> bool {
+    displayed_image(app).is_some_and(|display| {
+        display.image.as_ref().is_ok_and(|texture| texture.size() != [display.info.width as usize, display.info.height as usize])
+    })
+}
+
+/// The image has its own per-document orthographic camera. Shared navigation can temporarily
+/// drive it without changing the product camera, saved setup, or a pending Design view.
+pub(crate) fn with_result_camera(app: &mut SolveApp, navigate: impl FnOnce(&mut SolveApp)) {
+    let preview = std::mem::replace(&mut app.cam, app.render_workspace.view.result_camera);
+    let before = app.cam;
+    let draft = app.render_workspace.view.draft.clone();
+    let dirty = app.render_workspace.view.dirty;
+    let perspective = std::mem::replace(&mut app.ui.perspective, false);
+    let up = app.ui.up_axis;
+    let animation = app.cam_anim.take();
+    let pending = app.pending_fit.take();
+    let request = app.session.camera.take();
+    let free = app.viewport.orbit_free.take();
+    let spin = std::mem::replace(&mut app.viewport.spin, false);
+    navigate(app);
+    app.render_workspace.view.result_camera = std::mem::replace(&mut app.cam, preview);
+    if app.render_workspace.view.result_camera != before {
+        app.render_workspace.view.result_scale = ResultScale::Free;
+    }
+    app.render_workspace.view.draft = draft;
+    app.render_workspace.view.dirty = dirty;
+    app.ui.perspective = perspective;
+    app.ui.up_axis = up;
+    app.cam_anim = animation;
+    app.pending_fit = pending;
+    app.session.camera = request;
+    app.viewport.orbit_free = free;
+    app.viewport.spin = spin;
+}
+
+fn result_camera(size: [u32; 2], rect: egui::Rect, pixels_per_point: f32, scale: ResultScale) -> Camera {
+    let width = f64::from(size[0].max(1));
+    let height = f64::from(size[1].max(1));
+    let scale = if scale == ResultScale::Actual {
+        1.0 / f64::from(pixels_per_point.max(0.1))
+    } else {
+        (f64::from((rect.width() - 32.0).max(1.0)) / width).min(f64::from((rect.height() - 32.0).max(1.0)) / height)
+    };
+    Camera {
+        yaw: 0.0,
+        pitch: std::f64::consts::FRAC_PI_2,
+        distance: (f64::from(rect.height().max(1.0)) / (0.8 * scale)).clamp(1e-3, 1e7),
+        ..Default::default()
+    }
+}
+
+fn result_rect(camera: Camera, size: [u32; 2], canvas: egui::Rect) -> egui::Rect {
+    let scale = f64::from(canvas.height().max(1.0)) / (2.0 * camera.half_height());
+    let center = canvas.center() + egui::vec2((-camera.target.x * scale) as f32, (camera.target.y * scale) as f32);
+    egui::Rect::from_center_size(center, egui::vec2((f64::from(size[0]) * scale) as f32, (f64::from(size[1]) * scale) as f32))
+}
+
+fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
+    cache_render_images(app, ui.ctx());
+    let t = Tokens::get();
+    ui.painter().rect_filled(ui.max_rect(), 0.0, t.viewport_bottom);
+    let Some((info, preview)) = displayed_image(app).map(|display| (display.info.clone(), display.preview.cloned())) else {
+        let message = match &app.render_workspace.image {
+            Some((_, Err(error))) => error.clone(),
+            _ => app.tr("render.result_empty").to_string(),
+        };
+        ui.centered_and_justified(|ui| {
+            ui.add(egui::Label::new(egui::RichText::new(message).size(t.font_heading).color(t.text)).wrap());
+        });
+        app.viewport.rect = None;
+        return;
+    };
+    egui::Frame::NONE.fill(t.panel).inner_margin(t.space_8).show(ui, |ui| {
+        if let Some(preview) = &preview {
+            ui.colored_label(
+                t.warning,
+                format!(
+                    "{} · {} {} · {} {}",
+                    app.tr("render.result_provisional"),
+                    preview.samples_per_pixel,
+                    app.tr("render.cpu_progressive_spp"),
+                    app.tr("render.result_sequence"),
+                    preview.frame_sequence
+                ),
+            );
+            ui.small(app.tr("render.result_provisional_help"));
+        }
+        if let Some(display) = displayed_image(app)
+            && let Err(error) = display.image
+        {
+            ui.colored_label(t.warning, error);
+        }
+        ui.horizontal_wrapped(|ui| {
+            ui.strong(format!("{} × {} px · PNG · {}", info.width, info.height, info.executor.as_str()));
+            ui.label(format!(
+                "{} {}:{}:{} · {} {}",
+                app.tr("render.result_job"),
+                info.job.session,
+                info.job.serial,
+                info.job.generation,
+                app.tr("render.result_capture"),
+                info.scene_generation
+            ));
+        });
+        if reduced_display(app) {
+            ui.colored_label(t.warning, app.tr("render.result_reduced_display"));
+        }
+        let stale = info.scene_generation != app.session.revision;
+        ui.colored_label(if stale { t.warning } else { t.text_dim }, app.tr(if stale { "render.image_stale" } else { "render.result_current" }));
+        if app.render_workspace.view.job.is_some_and(|job| job != info.job) {
+            ui.small(app.tr("render.result_retained"));
+        }
+    });
+    let rect = ui.available_rect_before_wrap();
+    if rect.width() < 1.0 || rect.height() < 1.0 {
+        return;
+    }
+    let response = ui.allocate_rect(rect, Sense::click_and_drag());
+    app.viewport.rect = Some(rect);
+    crate::viewport::refresh_layout(app, ui.ctx().pixels_per_point());
+    let size = [info.width, info.height];
+    let scale = app.render_workspace.view.result_scale;
+    if scale != ResultScale::Free {
+        app.render_workspace.view.result_camera = result_camera(size, rect, ui.ctx().pixels_per_point(), scale);
+    }
+    with_result_camera(app, |app| {
+        crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
+    });
+    let after = app.render_workspace.view.result_scale;
+    if after != scale && after != ResultScale::Free {
+        app.render_workspace.view.result_camera = result_camera(size, rect, ui.ctx().pixels_per_point(), after);
+    }
+    let camera = app.render_workspace.view.result_camera;
+    let mut image_rect = result_rect(camera, size, rect);
+    if after == ResultScale::Actual {
+        let dpi = ui.ctx().pixels_per_point();
+        let min = egui::pos2((image_rect.min.x * dpi).round() / dpi, (image_rect.min.y * dpi).round() / dpi);
+        image_rect = image_rect.translate(min - image_rect.min);
+    }
+    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    let visible = image_rect.intersect(rect);
+    if visible.is_positive() {
+        // Bound checker work by the visible canvas, even for an extremely magnified image.
+        painter.rect_filled(visible, 0.0, t.panel);
+        let cell = 24.0f32.max(visible.width().max(visible.height()) / 128.0);
+        for row in 0..(visible.height() / cell).ceil() as u32 {
+            for column in 0..(visible.width() / cell).ceil() as u32 {
+                if (row + column) % 2 == 0 {
+                    let square = egui::Rect::from_min_size(visible.min + egui::vec2(column as f32 * cell, row as f32 * cell), egui::vec2(cell, cell));
+                    painter.rect_filled(square.intersect(visible), 0.0, t.control_fill);
+                }
+            }
+        }
+        if let Some(display) = displayed_image(app)
+            && let Ok(texture) = display.image
+        {
+            painter.image(texture.id(), image_rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), Color32::WHITE);
+        }
+        painter.rect_stroke(image_rect, 0.0, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Outside);
+    }
+    let percent = f64::from(rect.height() * ui.ctx().pixels_per_point()) / (2.0 * camera.half_height()) * 100.0;
+    let label = painter.layout_no_wrap(format!("{percent:.1}%"), egui::FontId::proportional(t.font_label), t.text);
+    let badge = egui::Rect::from_min_size(
+        rect.left_bottom() + egui::vec2(t.space_8, -label.size().y - t.space_8 * 2.0),
+        label.size() + egui::vec2(t.space_8 * 2.0, t.space_8),
+    );
+    painter.rect_filled(badge, t.control_radius, t.panel);
+    painter.galley(badge.min + egui::vec2(t.space_8, t.space_8 * 0.5), label, t.text);
+}
+
+impl State {
+    fn prepare_preview(&mut self, signature: (u64, usize, u64), capture: impl FnOnce() -> Result<ProductScene, String>) -> Result<(), String> {
+        if self.scene_signature != Some(signature) {
+            let prepared = capture().and_then(|scene| gpu_scene(&scene).map(|(key, gpu)| (scene, key, gpu)));
+            self.scene_signature = Some(signature);
+            match prepared {
+                Ok((scene, key, gpu)) => {
+                    let bytes = gpu.pbr.len() + gpu.tris.len() + gpu.glass.len();
+                    if self.key != Some(key) {
+                        let uploaded = match self.slot.lock() {
+                            Ok(mut slot) => {
+                                *slot = Some(gpu);
+                                true
+                            }
+                            Err(_) => false,
+                        };
+                        if !uploaded {
+                            let error = "product preview upload slot unavailable".to_string();
+                            self.scene = None;
+                            self.key = None;
+                            self.preview_upload_bytes = None;
+                            self.scene_error = Some(error.clone());
+                            return Err(error);
+                        }
+                        self.key = Some(key);
+                    }
+                    self.scene = Some(scene);
+                    self.scene_error = None;
+                    self.preview_upload_bytes = Some(bytes);
+                }
+                Err(error) => {
+                    self.scene = None;
+                    self.key = None;
+                    self.preview_upload_bytes = None;
+                    if let Ok(mut slot) = self.slot.lock() {
+                        *slot = None;
+                    }
+                    self.scene_error = Some(error);
+                }
+            }
+        }
+        match &self.scene_error {
+            Some(error) => Err(error.clone()),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Use the shared kit's wrapped, themed error surface, not text painted directly
+/// on the user-selected background (which may have the opposite theme contrast).
+fn preview_error(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, error: &str) {
+    let t = Tokens::get();
+    let bounded = rect.shrink(t.space_12);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(bounded), |ui| {
+        ui.set_max_width(bounded.width().min(t.form_card_width * 2.0));
+        crate::ui_kit::Panel::feature_frame(ui.ctx(), crate::shell::LayoutMode::Floating, crate::frame::Side::Left).inner_margin(t.space_8).show(
+            ui,
+            |ui| {
+                crate::ui_kit::text(ui, error, crate::ui_kit::Text::Error("render.preview_failure"));
+                crate::ui_kit::text(ui, app.tr("render.preview_unavailable_help"), crate::ui_kit::Text::Note("render.preview_unavailable_help"));
+                let retry = crate::ui_kit::button(ui, app.tr("render.preview_retry"), crate::ui_kit::Button::Normal);
+                crate::scenario::publish_target("render:preview-retry", retry.rect);
+                if retry.clicked() {
+                    invalidate_scene(app);
+                    ui.ctx().request_repaint();
+                }
+            },
+        );
+    });
 }
 
 /// Keep the selected image and overwrite consent fixed while the upstream picker holds model input.
@@ -373,18 +1374,100 @@ fn export_image(app: &mut SolveApp, job: solidcraft_engine::render::job::JobId, 
     });
 }
 
-/// Convert only product surfaces; geometry budgets are admitted before vertex allocation.
-pub fn gpu_scene(scene: &ProductScene) -> Result<(u64, GpuScene), String> {
-    let bytes = scene
-        .meshes
-        .iter()
-        .try_fold(0usize, |n, m| m.mesh.triangles.len().checked_mul(3 * crate::gpu::PBR_SIZE).and_then(|x| n.checked_add(x)))
-        .ok_or("product geometry size overflow")?;
-    if bytes > MAX_GEOMETRY_BYTES {
-        return Err("product preview exceeds the 128 MiB geometry upload budget".into());
+/// Captures format and completed identity before the asynchronous picker opens.
+fn export_linear_image(app: &mut SolveApp, job: solidcraft_engine::render::job::JobId, overwrite: bool) {
+    let origin = app.session.doc.clone();
+    app.pick_save("render.exr", &["exr"], move |app, path| {
+        let Some(path) = path else {
+            return;
+        };
+        if !Arc::ptr_eq(&origin, &app.session.doc) {
+            app.set_status("The render export document changed while choosing its destination", true);
+            return;
+        }
+        let _ = app.run("render.export", json!({"job":job,"path":path,"overwrite":overwrite,"format":"exr"}));
+    });
+}
+
+/// An exact expanded vertex payload, counted before allocating its buffers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PreviewUploadPlan {
+    pbr: usize,
+    tris: usize,
+    glass: usize,
+    source_triangles: usize,
+}
+impl PreviewUploadPlan {
+    fn bytes(self) -> Result<usize, String> {
+        self.pbr.checked_add(self.tris).and_then(|n| n.checked_add(self.glass)).ok_or_else(|| "product geometry size overflow".into())
     }
+    fn add(&mut self, pbr: bool, glass: bool, triangles: usize, limit: usize) -> Result<(), String> {
+        let stride = if pbr { crate::gpu::PBR_SIZE } else { crate::gpu::TRI_SIZE };
+        let bytes = triangles.checked_mul(3).and_then(|n| n.checked_mul(stride)).ok_or("product geometry size overflow")?;
+        let count = if pbr {
+            &mut self.pbr
+        } else if glass {
+            &mut self.glass
+        } else {
+            &mut self.tris
+        };
+        *count = count.checked_add(bytes).ok_or("product geometry size overflow")?;
+        if self.bytes()? > limit {
+            return Err(format!("product preview exceeds its {} MiB vertex payload envelope; geometry was not simplified", limit / (1024 * 1024)));
+        }
+        Ok(())
+    }
+}
+
+fn preview_upload_plan(scene: &ProductScene, limit: usize) -> Result<PreviewUploadPlan, String> {
+    if scene.meshes.len() > solidcraft_engine::render::job::MAX_CPU_BODIES {
+        return Err("product preview exceeds its captured-body bound".into());
+    }
+    let mut plan = PreviewUploadPlan::default();
+    for body in &scene.meshes {
+        plan.source_triangles = plan.source_triangles.checked_add(body.mesh.triangles.len()).ok_or("product triangle count overflow")?;
+        if plan.source_triangles > solidcraft_engine::render::job::MAX_CPU_TRIANGLES {
+            return Err("product preview exceeds its eight-million-triangle source bound".into());
+        }
+        if body.faces.len() > 262_144 {
+            return Err("product preview exceeds the face-appearance admission cap".into());
+        }
+        if !body.opacity.is_finite()
+            || !(0.0..=1.0).contains(&body.opacity)
+            || body.faces.iter().any(|face| !face.opacity.is_finite() || !(0.0..=1.0).contains(&face.opacity))
+        {
+            return Err("invalid product appearance opacity".into());
+        }
+        let looks: std::collections::BTreeMap<_, _> = body.faces.iter().map(|face| (face.face, face)).collect();
+        if looks.len() != body.faces.len() {
+            return Err("duplicate product face appearance".into());
+        }
+        for index in 0..body.mesh.triangles.len() {
+            let face = body.mesh.tri_face.get(index).and_then(|id| looks.get(id));
+            let (opacity, pbr) = face.map_or((body.opacity, body.surface.is_some() && body.transmission.is_none()), |face| {
+                (face.opacity, face.surface.is_some() && face.transmission.is_none())
+            });
+            if pbr && opacity != 1.0 {
+                return Err("opaque PBR requires opacity 1".into());
+            }
+            if opacity > 0.0 {
+                plan.add(pbr, opacity < 0.999, 1, limit)?;
+            }
+        }
+    }
+    Ok(plan)
+}
+
+/// Convert all captured surfaces, without decimation. The finite, exact payload
+/// plan is admitted first; each output vector is reserved once rather than grown
+/// once per triangle. Device uploads retain their existing chunked buffer path.
+pub fn gpu_scene(scene: &ProductScene) -> Result<(u64, GpuScene), String> {
+    let plan = preview_upload_plan(scene, MAX_GEOMETRY_BYTES)?;
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     let mut gpu = GpuScene::default();
+    for (buffer, bytes) in [(&mut gpu.pbr, plan.pbr), (&mut gpu.tris, plan.tris), (&mut gpu.glass, plan.glass)] {
+        buffer.try_reserve_exact(bytes).map_err(|_| "product preview vertex allocation failed".to_string())?;
+    }
     for body in &scene.meshes {
         if body.faces.len() > 262_144 {
             return Err("product preview exceeds the face-appearance admission cap".into());
@@ -399,17 +1482,21 @@ pub fn gpu_scene(scene: &ProductScene) -> Result<(u64, GpuScene), String> {
         body.name.hash(&mut hash);
         body.color.hash(&mut hash);
         body.opacity.to_bits().hash(&mut hash);
+        body.transmission.is_some().hash(&mut hash);
         hash_surface(body.surface, &mut hash);
         let looks: std::collections::BTreeMap<_, _> = body.faces.iter().map(|l| (l.face, l)).collect();
         for face in &body.faces {
             face.face.hash(&mut hash);
             face.color.hash(&mut hash);
             face.opacity.to_bits().hash(&mut hash);
+            face.transmission.is_some().hash(&mut hash);
             hash_surface(face.surface, &mut hash);
         }
         for (index, triangle) in body.mesh.triangles.iter().enumerate() {
             let face = body.mesh.tri_face.get(index).and_then(|f| looks.get(f));
-            let (color, opacity, surface) = face.map_or((body.color, body.opacity, body.surface), |l| (l.color, l.opacity, l.surface));
+            let (color, opacity, surface) = face.map_or((body.color, body.opacity, body.surface.filter(|_| body.transmission.is_none())), |l| {
+                (l.color, l.opacity, l.surface.filter(|_| l.transmission.is_none()))
+            });
             if surface.is_some() && opacity != 1.0 {
                 return Err("opaque PBR requires opacity 1".into());
             }
@@ -424,14 +1511,6 @@ pub fn gpu_scene(scene: &ProductScene) -> Result<(u64, GpuScene), String> {
             });
             let [Some(a), Some(b), Some(c)] = vertices else { return Err("invalid product triangle".into()) };
             let rgba = [color[0], color[1], color[2], (opacity * 255.0).round() as u8];
-            let (buffer, stride) = if surface.is_some() {
-                (&mut gpu.pbr, crate::gpu::PBR_SIZE)
-            } else if opacity < 0.999 {
-                (&mut gpu.glass, crate::gpu::TRI_SIZE)
-            } else {
-                (&mut gpu.tris, crate::gpu::TRI_SIZE)
-            };
-            buffer.try_reserve(3 * stride).map_err(|_| "product preview vertex allocation failed".to_string())?;
             for (p, n) in [a, b, c] {
                 if let Some(surface) = surface {
                     if n.iter().all(|v| *v == 0.0) {
@@ -445,6 +1524,9 @@ pub fn gpu_scene(scene: &ProductScene) -> Result<(u64, GpuScene), String> {
                 }
             }
         }
+    }
+    if (gpu.pbr.len(), gpu.tris.len(), gpu.glass.len()) != (plan.pbr, plan.tris, plan.glass) {
+        return Err("product preview packing differs from its admitted vertex payload".into());
     }
     Ok((hash.finish(), gpu))
 }
@@ -467,6 +1549,10 @@ pub fn preview_size(executor: Option<&ExecutorDescriptor>, full: (u64, u64)) -> 
 }
 
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if app.render_workspace.view.result {
+        show_result(app, ui);
+        return;
+    }
     let rect = ui.max_rect();
     app.viewport.rect = Some(rect);
     crate::viewport::refresh_layout(app, ui.ctx().pixels_per_point());
@@ -482,7 +1568,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         let ppp = ui.ctx().pixels_per_point();
         let setup = &app.render_workspace.view.draft;
-        if setup.exposure_ev != 0.0 || setup.environment_rotation != 0.0 || setup.environment_intensity != 1.0 {
+        if (app.render_workspace.view.method == ImageMethod::Raster && setup.exposure_ev != 0.0)
+            || setup.environment_rotation != 0.0
+            || setup.environment_intensity != 1.0
+        {
             return Err("fixed studio preview requires exposure 0, environment rotation 0 and intensity 1".into());
         }
         // A 4K or 5K viewport is past the preview's pixel budget: draw it smaller and filter it
@@ -507,18 +1596,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.session.visibility.hidden_bodies.hash(&mut visibility);
         app.session.visibility.hidden_occurrences.hash(&mut visibility);
         let signature = (app.session.revision, Arc::as_ptr(&app.session.world_state()) as usize, visibility.finish());
-        if app.render_workspace.scene_signature != Some(signature) {
-            let scene = solidcraft_engine::product_scene::extract(&app.session).map_err(|e| e.to_string())?;
-            let (key, gpu) = gpu_scene(&scene)?;
-            if app.render_workspace.key != Some(key) {
-                if let Ok(mut slot) = app.render_workspace.slot.lock() {
-                    *slot = Some(gpu);
-                }
-                app.render_workspace.key = Some(key);
-            }
-            app.render_workspace.scene = Some(scene);
-            app.render_workspace.scene_signature = Some(signature);
-        }
+        app.render_workspace
+            .prepare_preview(signature, || solidcraft_engine::product_scene::extract(&app.session).map_err(|error| error.to_string()))?;
         let scene = app.render_workspace.scene.as_ref().ok_or("no product scene")?;
         request.features = scene.required_features();
         solidcraft_engine::render::resolve_request(&[app.session.render_backend()], &request).map_err(|e| e.to_string())?;
@@ -562,13 +1641,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         Ok(())
     })();
     if let Err(error) = result {
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            error,
-            egui::FontId::proportional(crate::theme::Tokens::get().font_heading),
-            Tokens::get().text,
-        );
+        preview_error(app, ui, rect, &error);
     }
     crate::viewport::axis_view(app, ui, rect);
+}
+
+pub(crate) fn interactive_command_info(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> solidcraft_engine::CommandInfo {
+    ribbon::command_info(app, command)
+}
+pub(crate) fn start_interactive(app: &mut SolveApp, id: &str) -> bool {
+    ribbon::start(app, id)
 }

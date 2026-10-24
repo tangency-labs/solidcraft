@@ -1,0 +1,3 @@
+# Preserve canonical source receipts and the runtime icon-discovery snapshot.
+.gitattributes text eol=lf
+/assets/icons/ui/design/requested_icons.txt text eol=lf

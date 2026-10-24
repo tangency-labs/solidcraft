@@ -34,9 +34,11 @@ fn vs_pbr(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) bas
     return o;
 }
 
-fn pbr_fresnel(f0: vec3<f32>, cosine: f32) -> vec3<f32> {
+fn pbr_fresnel(f0: vec3<f32>, cosine: f32, metallic: f32, ior: f32) -> vec3<f32> {
     let t = 1.0 - cosine;
-    return f0 + (vec3<f32>(1.0) - f0) * (t * t * t * t * t);
+    // Match the shared surface: an index-matched dielectric has no interface.
+    let grazing = select(1.0, metallic, ior == 1.0);
+    return f0 + (vec3<f32>(grazing) - f0) * (t * t * t * t * t);
 }
 
 fn pbr_brdf(base: vec3<f32>, parameters: vec3<f32>, n: vec3<f32>, v: vec3<f32>, l: vec3<f32>) -> vec3<f32> {
@@ -54,9 +56,9 @@ fn pbr_brdf(base: vec3<f32>, parameters: vec3<f32>, n: vec3<f32>, v: vec3<f32>, 
     let gl = 2.0 / (nl + sqrt(a2 + (1.0 - a2) * nl * nl));
     let ratio = (parameters.z - 1.0) / (parameters.z + 1.0);
     let f0 = mix(vec3<f32>(ratio * ratio), base, parameters.x);
-    let specular = pbr_fresnel(f0, vh) * (distribution * 0.25 * gv * gl);
+    let specular = pbr_fresnel(f0, vh, parameters.x, parameters.z) * (distribution * 0.25 * gv * gl);
     let diffuse = base * ((1.0 - parameters.x) / 3.141592653589793);
-    return specular + (vec3<f32>(1.0) - pbr_fresnel(f0, nv)) * (vec3<f32>(1.0) - pbr_fresnel(f0, nl)) * diffuse;
+    return specular + (vec3<f32>(1.0) - pbr_fresnel(f0, nv, parameters.x, parameters.z)) * (vec3<f32>(1.0) - pbr_fresnel(f0, nl, parameters.x, parameters.z)) * diffuse;
 }
 
 @fragment

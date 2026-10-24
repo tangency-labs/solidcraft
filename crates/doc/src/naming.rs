@@ -57,25 +57,31 @@ impl NameCell {
     }
     /// Names of a body made by `origin`'s feature, following `lineage` where it is known.
     pub(crate) fn traced(origin: Option<Arc<NamingOrigin>>, lineage: Option<Arc<Lineage>>) -> Self {
-        NameCell { origin, lineage, ..NameCell::default() }
+        NameCell { origin, lineage, names: Arc::new(OnceLock::new()), legacy: Arc::new(OnceLock::new()), copy_of: None, saved_depth: None }
     }
     /// Names already known, taken as they are.
     pub fn known(names: Arc<Vec<String>>) -> Self {
         let legacy = OnceLock::new();
         let _ = legacy.set(names.clone());
-        NameCell { legacy: Arc::new(legacy), ..Self::shared(Arc::new(Names::given(names))) }
+        let mut cell = Self::shared(Arc::new(Names::given(names)));
+        cell.legacy = Arc::new(legacy);
+        cell
     }
     /// The names of `body` (a moved copy of a body keeps its faces' names, and how sure they are).
     ///
     /// Worked out on first request, from the source: moving a body (a transfer into a
     /// component, a placed instance) does not name every face of every moved body up front.
     pub fn same(body: &ModelBody) -> Self {
-        NameCell { copy_of: Some(Arc::new(body.clone())), ..NameCell::default() }
+        let mut cell = Self::traced(None, None);
+        cell.copy_of = Some(Arc::new(body.clone()));
+        cell
     }
     /// Names a saved model kept (worked out when it was saved), at `depth` in the chain of
     /// features that named them.
     pub(crate) fn saved(names: Arc<Names>, depth: Option<usize>) -> Self {
-        NameCell { saved_depth: depth, ..Self::shared(names) }
+        let mut cell = Self::shared(names);
+        cell.saved_depth = depth;
+        cell
     }
     /// How deep the chain of features that named the body is (`None`: not made by a feature).
     pub(crate) fn depth(&self) -> Option<usize> {
@@ -88,18 +94,63 @@ impl NameCell {
     /// The same origin, lineage and depth with nothing worked out yet: for a body given a new
     /// name, whose faces' names may be made from it.
     pub(crate) fn renamed(&self) -> Self {
-        NameCell {
-            origin: self.origin.clone(),
-            lineage: self.lineage.clone(),
-            copy_of: self.copy_of.clone(),
-            saved_depth: self.saved_depth,
-            ..NameCell::default()
-        }
+        let mut cell = Self::traced(self.origin.clone(), self.lineage.clone());
+        cell.copy_of = self.copy_of.clone();
+        cell.saved_depth = self.saved_depth;
+        cell
     }
     fn shared(names: Arc<Names>) -> Self {
         let cell = OnceLock::new();
         let _ = cell.set(names);
-        NameCell { names: Arc::new(cell), ..NameCell::default() }
+        NameCell { origin: None, lineage: None, names: Arc::new(cell), legacy: Arc::new(OnceLock::new()), copy_of: None, saved_depth: None }
+    }
+}
+
+// Origins retain older model states, whose bodies retain older origins. Default
+// Arc destruction therefore recurses through the entire timeline when the last
+// model/tab is closed. The naming-computation depth limit does not bound this
+// destruction path. Reclaim only uniquely owned ancestors, using a heap worklist;
+// shared snapshots and their naming data are never edited or prematurely freed.
+enum NamingAncestor {
+    State(Arc<ModelState>),
+    Copy(Arc<ModelBody>),
+}
+impl NameCell {
+    fn detach_ancestors(&mut self, pending: &mut Vec<NamingAncestor>) {
+        if let Some(origin) = self.origin.take().and_then(Arc::into_inner) {
+            pending.push(NamingAncestor::State(origin.before));
+        }
+        if let Some(source) = self.copy_of.take() {
+            pending.push(NamingAncestor::Copy(source));
+        }
+    }
+}
+impl Drop for NameCell {
+    fn drop(&mut self) {
+        if self.origin.is_none() && self.copy_of.is_none() {
+            return;
+        }
+        let mut pending = Vec::new();
+        self.detach_ancestors(&mut pending);
+        while let Some(ancestor) = pending.pop() {
+            match ancestor {
+                NamingAncestor::State(state) => {
+                    if let Some(mut state) = Arc::into_inner(state) {
+                        for body in &mut state.bodies {
+                            body.names.detach_ancestors(&mut pending);
+                        }
+                    }
+                }
+                NamingAncestor::Copy(body) => {
+                    if let Some(mut body) = Arc::into_inner(body) {
+                        body.names.detach_ancestors(&mut pending);
+                    }
+                }
+            }
+        }
+        // Arc::into_inner, unlike try_unwrap(...).ok(), cannot accidentally
+        // recursively drop the inner value after a racing final-owner release.
+        // Ordinary naming caches/lineage remain governed by their original Arcs.
     }
 }
 
@@ -1083,5 +1134,80 @@ mod tests {
         let inputs = [(&body, FaceIndex::new(&mesh, 3), distinct)];
         assert_eq!(vote(&points, &inputs, 1e-8, None), None);
         assert_eq!(vote(&points[..2], &inputs, 1e-8, None), None, "equal different-source votes must not pick a lexicographic winner");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn release_fixture(count: usize) -> (Arc<ModelState>, Vec<std::sync::Weak<ModelState>>) {
+        let body = ModelBody::new("Original release fixture".into(), solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap(), 1);
+        let feature: Feature = serde_json::from_value(serde_json::json!({
+            "id":1,"name":"Original naming boundary","type":"body_transfer","bodies":[],
+            "from":0,"to":1,"transform":crate::IDENTITY
+        }))
+        .unwrap();
+        let mut state = Arc::new(ModelState::default());
+        let mut weak = vec![Arc::downgrade(&state)];
+        for depth in 0..count {
+            let mut next = body.clone();
+            next.names =
+                NameCell::new(Some(Arc::new(NamingOrigin { feature: feature.clone(), before: state, depth, mats: Vec::new(), sheets: Vec::new() })));
+            let mut next_state = ModelState::default();
+            next_state.bodies.push(next);
+            state = Arc::new(next_state);
+            weak.push(Arc::downgrade(&state));
+        }
+        (state, weak)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn deep_naming_ancestry_releases_without_timeline_sized_call_stack() {
+        let (state, weak) = release_fixture(20_000);
+        let held = state.clone();
+        drop(state);
+        assert!(weak.iter().all(|node| node.upgrade().is_some()), "a live shared model retains its complete ancestry");
+        std::thread::Builder::new().stack_size(256 * 1024).spawn(move || drop(held)).unwrap().join().unwrap();
+        assert!(weak.iter().all(|node| node.upgrade().is_none()), "no ancestor or geometry is leaked after the last owner closes");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn long_placed_copy_chain_reclaims_every_source_on_a_small_stack() {
+        let mut body = ModelBody::new("Original copied fixture".into(), solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap(), 1);
+        let mut weak = Vec::new();
+        for _ in 0..20_000 {
+            let names = NameCell::same(&body);
+            weak.push(Arc::downgrade(names.copy_of.as_ref().unwrap()));
+            body.names = names;
+        }
+        std::thread::Builder::new().stack_size(256 * 1024).spawn(move || drop(body)).unwrap().join().unwrap();
+        assert!(weak.iter().all(|node| node.upgrade().is_none()));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn concurrent_final_naming_owners_do_not_leak_or_mutate_shared_ancestors() {
+        let (state, weak) = release_fixture(8_000);
+        let owner = NameCell::same(&state.bodies[0]);
+        let other = owner.clone();
+        drop(state);
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let gate = barrier.clone();
+        let first = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || {
+                gate.wait();
+                drop(owner);
+            })
+            .unwrap();
+        let second = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || {
+                barrier.wait();
+                drop(other);
+            })
+            .unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        assert!(weak.iter().all(|node| node.upgrade().is_none()));
     }
 }

@@ -1,0 +1,256 @@
+{
+  "metadata": {
+    "schema_version": "0.2.0",
+    "language": "en",
+    "status": "concept_catalog",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG"
+  },
+  "items": [
+    {
+      "id": "F00",
+      "name": "Inventory and reference",
+      "scope": "Inspect the actual branch and record present, partial and missing capabilities.",
+      "depends_on": [],
+      "acceptance": [
+        "A pinned capability matrix and twelve reproducible scenes."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "F01",
+      "name": "Shared scene contract and persistence",
+      "scope": "Separate engineering, appearance, rig, environment, camera and shot.",
+      "depends_on": [
+        "F00"
+      ],
+      "acceptance": [
+        "Atomic validated settings, undo and offline reopen."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "F02",
+      "name": "Physical rendering foundation",
+      "scope": "Implement global transport, areas, HDR environment, ground and geometric precision.",
+      "depends_on": [
+        "F01"
+      ],
+      "acceptance": [
+        "Convergent opaque reference scenes and bounded resource use."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "F03",
+      "name": "Appearance and color",
+      "scope": "Provide layered surfaces, physical texture scale, projections and color management.",
+      "depends_on": [
+        "F02"
+      ],
+      "acceptance": [
+        "Fundamental product finishes with stable reference views."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "F04",
+      "name": "Complete user journey",
+      "scope": "Connect library, inspector, preview and export.",
+      "depends_on": [
+        "F01",
+        "F03"
+      ],
+      "acceptance": [
+        "A novice can produce and reproduce a product image."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "F05",
+      "name": "First verified resource pack",
+      "scope": "Select 40-60 appearances, 20-30 rigs and 20-30 environments that work end to end.",
+      "depends_on": [
+        "F02",
+        "F03",
+        "F04"
+      ],
+      "acceptance": [
+        "Every published resource has supported dependencies and acceptance evidence."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "F06",
+      "name": "Product optics",
+      "scope": "Add transmission, absorption, nested media, anisotropy, coats and subsurface response.",
+      "depends_on": [
+        "F03"
+      ],
+      "acceptance": [
+        "Glass vial, liquid, brushed metal and silicone reference scenes."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "F07",
+      "name": "Lighting and stages",
+      "scope": "Add photometric sources, emitters, skies and three-dimensional staging.",
+      "depends_on": [
+        "F02",
+        "F03"
+      ],
+      "acceptance": [
+        "Rigs have unambiguous ownership and correct parallax."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "F08",
+      "name": "Studio and variants",
+      "scope": "Add decals, cameras, A/B comparison and queues.",
+      "depends_on": [
+        "F04",
+        "F06",
+        "F07"
+      ],
+      "acceptance": [
+        "Repeatable product-family presentations."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "F09",
+      "name": "Production and interchange",
+      "scope": "Add denoising, EXR, passes, portable packs and recovery.",
+      "depends_on": [
+        "F06",
+        "F08"
+      ],
+      "acceptance": [
+        "Production masters with traceable requests."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "F10",
+      "name": "Expanded catalog publication",
+      "scope": "Bind and publish supported families progressively toward the 600/280/280 catalog; retain unsupported specialized records as concepts.",
+      "depends_on": [
+        "F05",
+        "F06",
+        "F07",
+        "F09"
+      ],
+      "acceptance": [
+        "Each published family has validated resources and resolved capability dependencies; specialized completion also requires the relevant F11 capabilities."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "F11",
+      "name": "Specialized rendering",
+      "scope": "Develop caustics, displacement, volume and spectral features as measured pilots.",
+      "depends_on": [
+        "F06",
+        "F09"
+      ],
+      "acceptance": [
+        "Each expensive feature has a demonstrable benefit and explicit limits."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "F12",
+      "name": "Competitive quality and release",
+      "scope": "Measure quality, task success, performance and platform support.",
+      "depends_on": [
+        "F00",
+        "F09"
+      ],
+      "acceptance": [
+        "Comparable scenes and documented time-to-quality results."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S01",
+      "name": "SELENE model binding",
+      "scope": "Acquire and pin the documented improved SELENE-showcase native file; verify its loops, links, grounding and motion studies, then bind reviewed appearance roles.",
+      "depends_on": [
+        "F01",
+        "F03"
+      ],
+      "acceptance": [
+        "Improved source hash, derivative provenance and notices recorded; v7 fallback rejected.",
+        "Native and runtime mechanism acceptance checks completed; exact targets reviewed."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S02",
+      "name": "Lunar still-render demonstration",
+      "scope": "Build procedural terrain and strict physical lunar lighting with calibrated appearances.",
+      "depends_on": [
+        "S01",
+        "F06",
+        "F07",
+        "F09"
+      ],
+      "acceptance": [
+        "Hero and macro shots pass contact, scale, light and image checks."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S03",
+      "name": "Animation and dynamics foundation",
+      "scope": "Extend existing kinematic studies, IK and motion analysis with SI dynamics, rigid-body inertia, bounded actuation, continuous contact, events and analytic benchmarks.",
+      "depends_on": [
+        "F01",
+        "S01"
+      ],
+      "acceptance": [
+        "Validated release and contact behavior independent of rendering."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S04",
+      "name": "Sampling and sample-container states",
+      "scope": "Implement collection, mass transfer, closure and independent vial bodies.",
+      "depends_on": [
+        "S03"
+      ],
+      "acceptance": [
+        "A sealed sample retains mass and has a valid collision representation."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S05",
+      "name": "Throw catch and storage demonstration",
+      "scope": "Plan release, flight, reachable contact capture and cassette retention.",
+      "depends_on": [
+        "S04"
+      ],
+      "acceptance": [
+        "The solver can report failure and never teleports the vial."
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S06",
+      "name": "Final animation production",
+      "scope": "Bake approved motion and render temporally stable frames at quality targets.",
+      "depends_on": [
+        "S02",
+        "S05",
+        "F09"
+      ],
+      "acceptance": [
+        "Every frame traces to the same approved physics and resource manifests."
+      ],
+      "status": "planned"
+    }
+  ]
+}

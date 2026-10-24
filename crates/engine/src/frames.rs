@@ -351,6 +351,15 @@ impl Drop for Nested {
 
 /// `params` with world picks mapped into component frames (`None`: nothing to change).
 pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
+    if id == "library.apply" {
+        // Library targets are the same world selections as appearance.assign,
+        // nested one level down. Convert at the outer boundary exactly once;
+        // run_nested subsequently receives the component-local picks and names.
+        let targets = to_local(s, "appearance.assign", params.get("targets")?)?;
+        let mut out = params.clone();
+        out["targets"] = targets;
+        return Some(out);
+    }
     if id == "timeline.redefine" {
         let cmd = params.get("command")?.as_str()?;
         let key = params.get("feature").and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|id| id.to_string())))?;

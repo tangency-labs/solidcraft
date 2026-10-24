@@ -304,6 +304,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
         "ui.messages" => ok(crate::messages::control(app, p)),
         "ui.inspect" => ok(json!({
+            "render": crate::render_workspace::inspect_state(app),
             "ui": serde_json::to_value(&app.ui).unwrap_or_default(),
             "visibility": app.session.visibility,
             "viewport": app.viewport.rect.map(|r| json!([r.left(), r.top(), r.width(), r.height()])),

@@ -325,7 +325,8 @@ pub fn run(root: &Path) -> Result<(), String> {
                 let source = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
                 let found = violations(&source).map_err(|e| format!("{}: {e}", path.display()))?;
                 if !found.is_empty() {
-                    failures.push(format!("{}: {}", path.strip_prefix(root).unwrap_or(&path).display(), found.join(", ")));
+                    let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+                    failures.push(format!("{relative}: {}", found.join(", ")));
                 }
             }
         }

@@ -2452,7 +2452,7 @@ pub struct DesignLink {
 /// The document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
-    /// Named, renderer-independent setups. Device/job state is never saved here.
+    /// Named image intent and immutable embedded HDR sources. Active jobs and device state are not saved.
     #[serde(default, skip_serializing_if = "crate::render_settings::RenderSettings::is_empty")]
     pub render: std::sync::Arc<crate::render_settings::RenderSettings>,
     #[serde(default = "default_format")]
@@ -3060,6 +3060,7 @@ impl Document {
 
     /// Read a design file's JSON (any format this build knows; older ones are upgraded).
     pub fn from_json(s: &str) -> Result<Document> {
+        crate::render_resources::check_json_budget(s)?;
         let d = crate::format::read(s)?;
         if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
             return Err(DocError::Invalid("document too large".into()));
@@ -3709,7 +3710,13 @@ pub struct UserMaterial {
     pub density: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub appearance: Option<crate::appearance::Look>,
+    /// Candidate engineering data; independent of assigned mass density and optics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical_card: Option<crate::physical_material::ValidatedCard>,
 }
+
+/// Bound design-owned definitions consistently in commands and normal file loading.
+pub const MAX_USER_MATERIALS: usize = 1000;
 
 /// Largest density a material may have (g/cm³); the densest elements are about 22.6.
 pub const MAX_DENSITY: f64 = 1000.0;

@@ -1,0 +1,75 @@
+{
+  "commands": [
+    {
+      "params": {
+        "height": 5,
+        "width": 20,
+        "length": 10,
+        "body_name": "Specimen"
+      },
+      "command": "solid.box"
+    },
+    {
+      "params": {
+        "physical_card": {
+          "family": "other",
+          "sources": [
+            {
+              "kind": "illustrative",
+              "id": "fixture",
+              "license": "MIT OR Apache-2.0",
+              "title": "Original illustrative constants"
+            }
+          ],
+          "properties": [
+            {
+              "source_id": "fixture",
+              "data": {
+                "kind": "density",
+                "kg_m3": 700.0
+              },
+              "conditions": {
+                "state": "synthetic",
+                "temperature_k": 293.15
+              }
+            },
+            {
+              "source_id": "fixture",
+              "data": {
+                "kind": "elasticity",
+                "model": {
+                  "poisson_ratio": 0.25,
+                  "symmetry": "isotropic",
+                  "young_modulus_pa": 12250000000.0
+                }
+              }
+            }
+          ],
+          "schema_version": 1,
+          "designation": "Original synthetic isotropic card - not design data"
+        },
+        "name": "Synthetic candidate",
+        "color": "#b47846",
+        "density_g_cm3": 0.8
+      },
+      "command": "material.create"
+    },
+    {
+      "params": {
+        "bodies": [
+          "Specimen"
+        ],
+        "material": "Synthetic candidate"
+      },
+      "command": "material.assign"
+    },
+    {
+      "params": {},
+      "command": "material.list"
+    },
+    {
+      "params": {},
+      "command": "component.properties"
+    }
+  ]
+}

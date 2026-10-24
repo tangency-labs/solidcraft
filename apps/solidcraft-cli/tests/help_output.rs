@@ -144,3 +144,16 @@ fn fuzz_refuses_an_argument_it_does_not_take() {
         assert!(stderr.contains(arg), "`fuzz {arg}`: {stderr}");
     }
 }
+
+#[test]
+fn render_help_keeps_the_registered_gpu_request_controls() {
+    for args in [vec!["--help"], vec!["render", "--help"]] {
+        let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli")).args(&args).output().unwrap();
+        assert!(output.status.success(), "{args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stderr.is_empty());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for flag in ["--progressive", "--samples", "--max-depth", "--seed", "--exposure", "--lighting", "--environment", "--tone-map"] {
+            assert!(stdout.contains(flag), "{args:?} lost {flag}: {stdout}");
+        }
+    }
+}
