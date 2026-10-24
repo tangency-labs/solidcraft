@@ -1869,6 +1869,8 @@
   "ui.copy": "复制",
   "ui.corner": "角",
   "ui.corners": "角点",
+  "ui.cosmetic_thread_markings": "装饰螺纹标记",
+  "ui.cosmetic_thread_markings_help": "在带螺纹的圆柱面上显示示意标记。仅改变显示，不影响设计或导出。",
   "ui.counterbore": "沉头孔",
   "ui.countersink": "锥形沉孔",
   "ui.create": "创建",

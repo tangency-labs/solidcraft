@@ -212,13 +212,14 @@ pub fn request_scope(app: &SolveApp, params: &Value) -> Result<Option<vfs::PathS
 /// mode, the section the viewport shows: an open Section Analysis dialog's preview, a sketch's
 /// Slice), with the grid and the origin's axes as `guides` says.
 pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides) -> solidcraft_engine::render::Scene {
-    let mut scene = solidcraft_engine::view::scene_with_palette_and_guides(
+    let mut scene = solidcraft_engine::view::scene_with_thread_markings(
         &app.session,
         &app.cam,
         crate::viewport::section_plane(app),
         solidcraft_engine::view::world_curve_parts,
         &crate::viewport::scene_palette(app.ui.dark, app.preferences.color_vision),
         guides,
+        app.preferences.cosmetic_threads,
     );
     scene.plain_cap = !crate::viewport::section_hatch(app);
     scene
@@ -1106,6 +1107,30 @@ mod tests {
         app.dialog = None;
         assert!(render(&mut app, &dir.join("committed.png")) == preview, "the committed section renders differently");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn model_render_cosmetic_threads_preserve_section_hatch_preview() {
+        let mut app = SolveApp::new(Session::default(), Services::default());
+        for cosmetic_threads in [false, true] {
+            app.preferences.cosmetic_threads = cosmetic_threads;
+            for hatch in [false, true] {
+                app.session.section_hatch = hatch;
+                assert_eq!(view_scene(&app, Default::default()).plain_cap, !hatch);
+                app.session.selection = vec![Sel::Plane { name: "XZ".into() }];
+                app.start("inspect.section");
+                let Some(crate::dialogs::Kind::Section { hatch: preview_hatch, .. }) = app.dialog.as_mut().map(|d| &mut d.kind) else {
+                    panic!("no section dialog")
+                };
+                *preview_hatch = !hatch;
+                assert_eq!(
+                    view_scene(&app, Default::default()).plain_cap,
+                    hatch,
+                    "the preview's hatch overrides the session with cosmetic_threads={cosmetic_threads}"
+                );
+                app.dialog = None;
+            }
+        }
     }
 
     /// `ui.render` with extra request parameters.

@@ -11,6 +11,7 @@ pub mod capture;
 pub mod cmd;
 pub mod control_auth;
 pub mod control_pending;
+pub mod cosmetic_threads;
 pub mod crash;
 pub mod frames;
 pub mod fuzz;

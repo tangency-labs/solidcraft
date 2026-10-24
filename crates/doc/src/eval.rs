@@ -314,6 +314,8 @@ pub struct ThreadInfo {
     pub body: String,
     pub designation: String,
     pub major_diameter: f64,
+    /// Radius of the actual cylindrical face when the cosmetic thread is evaluated.
+    pub radius: f64,
     pub pitch: f64,
     pub internal: bool,
     pub axis_point: Vec3,
@@ -466,6 +468,7 @@ fn thread_on_impl(
         body,
         designation: name,
         major_diameter: major,
+        radius: cyl.radius,
         pitch,
         internal: cyl.internal,
         axis_point: cyl.axis_point,
@@ -7470,17 +7473,19 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
                 }
                 out.sketches.push(Arc::new(s2));
             }
-            for t in st
-                .threads
-                .iter()
-                .filter(|t| st.body(&t.body).map(|body| doc.model_body_component(body)).unwrap_or_else(|| comp_of_feature(t.feature)) == comp)
-            {
-                let mut t2 = t.clone();
-                let frame = st.body(&t.body).and_then(|body| doc.model_body_offset(body)).map(|offset| crate::mat_mul(&m, offset)).unwrap_or(m);
-                t2.axis_point = crate::apply_point(&frame, t.axis_point);
-                t2.axis = crate::apply_vector(&frame, *t.axis).unit().unwrap_or(t.axis);
-                out.threads.push(t2);
-            }
+        }
+        // Unlike editable sketch guides, cosmetic surfaces belong to every occurrence.
+        for t in st
+            .threads
+            .iter()
+            .filter(|t| st.body(&t.body).map(|body| doc.model_body_component(body)).unwrap_or_else(|| comp_of_feature(t.feature)) == comp)
+        {
+            let mut t2 = t.clone();
+            t2.body = doc.world_body_name(st, &t.body, comp, &path);
+            let frame = st.body(&t.body).and_then(|body| doc.model_body_offset(body)).map(|offset| crate::mat_mul(&m, offset)).unwrap_or(m);
+            t2.axis_point = crate::apply_point(&frame, t.axis_point);
+            t2.axis = crate::apply_vector(&frame, *t.axis).unit().unwrap_or(t.axis);
+            out.threads.push(t2);
         }
     }
     *placed_before = placed_now;

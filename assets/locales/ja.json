@@ -1869,6 +1869,8 @@
   "ui.copy": "コピー",
   "ui.corner": "コーナー",
   "ui.corners": "コーナー",
+  "ui.cosmetic_thread_markings": "ねじの簡略表示",
+  "ui.cosmetic_thread_markings_help": "ねじ付き円筒面に簡略化したマークを表示します。表示のみを変更し、設計やエクスポートには影響しません。",
   "ui.counterbore": "座ぐり",
   "ui.countersink": "皿穴",
   "ui.create": "作成",

@@ -1869,6 +1869,8 @@
   "ui.copy": "Copy",
   "ui.corner": "Corner",
   "ui.corners": "Corners",
+  "ui.cosmetic_thread_markings": "Cosmetic thread markings",
+  "ui.cosmetic_thread_markings_help": "Show schematic markings on threaded cylindrical walls. Changes only the display, never the design or exports.",
   "ui.counterbore": "Counterbore",
   "ui.countersink": "Countersink",
   "ui.create": "Create",
