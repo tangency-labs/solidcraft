@@ -246,6 +246,19 @@ When the token expires, create a new one the same way and run step 2 again. If a
 published while the secret was missing or expired, submit it afterwards with
 `gh workflow run winget.yml -R bherbruck/solidcraft -f tag=v<version>`.
 
+## Homebrew tap
+
+macOS users install with `brew install --cask tangency-labs/tap/solidcraft` from the tap repository
+[tangency-labs/homebrew-tap](https://github.com/tangency-labs/homebrew-tap) (`Casks/solidcraft.rb`).
+Homebrew's own cask repository only takes signed and notarized apps, so the tap stays until the
+macOS signing work lands.
+
+After publishing a stable release, bump the cask: set `version` and the `sha256` of
+`solidcraft-<version>-macos-universal.dmg` (the line for that file in the release's
+`SHA256SUMS.txt`), run `brew style Casks/solidcraft.rb`, and push to the tap's `main`. The cask's
+`livecheck` follows the latest GitHub release, so `brew livecheck --cask tangency-labs/tap/solidcraft`
+shows when the tap is behind. Skip prereleases and nightlies.
+
 ## Update signing
 
 The app's **Update now** (docs/book/src/guide/updates.md) only installs a package whose SHA-256
