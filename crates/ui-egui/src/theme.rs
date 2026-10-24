@@ -903,7 +903,14 @@ mod tests {
     /// schedules a pass (#5802).
     #[test]
     fn applying_a_theme_asks_for_a_repaint_with_the_new_visuals() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
         let ctx = egui::Context::default();
+        // The integration hook fires on every repaint request, whoever asked for it.
+        let requests = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = std::sync::Arc::clone(&requests);
+        ctx.set_request_repaint_callback(move |_| {
+            counter.fetch_add(1, Ordering::Relaxed);
+        });
         // Let egui's own startup repaints settle: the context must be idle before the
         // theme changes, so the only repaint left is the one the theme asks for.
         let mut settled = false;
@@ -915,6 +922,7 @@ mod tests {
             }
         }
         assert!(settled, "the context must be idle before the theme changes");
+        let before = requests.load(Ordering::Relaxed);
         let previous = super::is_dark();
         super::set_dark(!previous);
         ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -927,8 +935,7 @@ mod tests {
         .textures_delta
         .clear();
         super::set_dark(previous);
-        let causes: Vec<&str> = ctx.repaint_causes().iter().map(|cause| cause.file).collect();
-        assert!(ctx.has_requested_repaint(), "a theme change must ask for a repaint (causes: {causes:?})");
+        assert!(requests.load(Ordering::Relaxed) > before, "a theme change must ask for a repaint");
     }
 
     #[test]
