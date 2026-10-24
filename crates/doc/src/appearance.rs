@@ -201,20 +201,24 @@ impl Document {
     /// The faces of a body with appearances of their own: (B-rep face index, look). A later
     /// assignment to the same face wins.
     pub fn face_colors(&self, b: &crate::ModelBody) -> Vec<(usize, Look)> {
-        // Face colours the body was imported with, under the design's own.
+        // An assigned body appearance replaces imported paint; design face appearances still win.
         let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
-        let mut out: Vec<(usize, Look)> = match b.body.paint() {
-            Some(p) => p.faces.iter().map(|f| (f.face, Look::custom(f.color.map(to8), f.opacity as f64))).collect(),
-            // Carried from an earlier version of the body: by face name (worked out only here:
-            // the viewport asks every body for its face colours on every change).
-            None => match &b.imported {
-                Some(imp) => crate::naming::face_names(b)
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, n)| imp.faces.get(crate::naming::strip_piece(n)).map(|(c, o)| (i, Look::custom(c.map(to8), *o as f64))))
-                    .collect(),
-                None => Vec::new(),
-            },
+        let mut out: Vec<(usize, Look)> = if self.appearances.bodies.contains_key(b.definition_name()) {
+            Vec::new()
+        } else {
+            match b.body.paint() {
+                Some(p) => p.faces.iter().map(|f| (f.face, Look::custom(f.color.map(to8), f.opacity as f64))).collect(),
+                // Carried from an earlier version of the body: by face name (worked out only here:
+                // the viewport asks every body for its face colours on every change).
+                None => match &b.imported {
+                    Some(imp) => crate::naming::face_names(b)
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, n)| imp.faces.get(crate::naming::strip_piece(n)).map(|(c, o)| (i, Look::custom(c.map(to8), *o as f64))))
+                        .collect(),
+                    None => Vec::new(),
+                },
+            }
         };
         for f in self.appearances.faces.iter().filter(|f| f.body == b.definition_name()) {
             let (p, look) = (crate::apply_point(&b.source_transform, f.point), f.look.clone());
@@ -323,6 +327,63 @@ pub(crate) fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn imported_box() -> crate::ModelBody {
+        let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap();
+        let faces = body
+            .faces(0.01)
+            .unwrap()
+            .iter()
+            .map(|face| solidcraft_kernel::FacePaint { face: face.index, color: [1., 0., 0.], opacity: 0.5 })
+            .collect();
+        crate::ModelBody::new("Imported".into(), body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces })), 1)
+    }
+
+    fn check_imported_appearance_precedence(body: &crate::ModelBody) {
+        let mut doc = Document::default();
+        let face_count = body.body.faces(0.01).unwrap().len();
+        let imported = doc.face_colors(body);
+        assert_eq!(imported.len(), face_count);
+        assert!(imported.iter().all(|(_, look)| *look == Look::custom([255, 0, 0], 0.5)));
+
+        let body_look = Look::custom([0, 0, 255], 0.8);
+        doc.appearances.bodies.insert(body.definition_name().into(), body_look.clone());
+        assert_eq!(doc.model_body_look(body), Some(body_look.clone()));
+        assert_eq!(doc.model_body_opacity(body), body_look.opacity);
+        assert!(doc.face_colors(body).is_empty(), "all faces must inherit the assigned body appearance");
+
+        let face_look = Look::custom([0, 255, 0], 1.);
+        let name = crate::naming::face_names(body)[0].clone();
+        doc.appearances.faces.push(FaceLook {
+            body: body.definition_name().into(),
+            point: Vec3::ZERO,
+            look: face_look.clone(),
+            name: Some(name),
+            strict_name: false,
+            certificate: None,
+        });
+        assert_eq!(doc.face_colors(body), vec![(0, face_look.clone())]);
+
+        doc.appearances.bodies.clear();
+        let restored = doc.face_colors(body);
+        assert_eq!(restored.len(), face_count);
+        assert!(restored.iter().all(|(face, look)| *look == if *face == 0 { face_look.clone() } else { Look::custom([255, 0, 0], 0.5) }));
+    }
+
+    #[test]
+    fn body_appearance_overrides_imported_face_paint() {
+        check_imported_appearance_precedence(&imported_box());
+    }
+
+    #[test]
+    fn body_appearance_overrides_carried_imported_face_paint() {
+        let mut body = imported_box();
+        body.imported = ImportedLook::of(&body);
+        body.body = body.body.clone().with_paint(None);
+        body.source_name = Some(body.name.clone());
+        body.name = "Occurrence".into();
+        check_imported_appearance_precedence(&body);
+    }
 
     #[test]
     fn library_and_materials() {
