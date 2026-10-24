@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Render ground plane</title>
+  <path d="M6 30L32 45.01L32 49.01L6 34Z" fill="#b8c3cf"/>
+  <path d="M58 30L32 45.01L32 49.01L58 34Z" fill="#8e9faf"/>
+  <path d="M32 14.99L58 30L32 45.01L6 30Z" fill="#e2e8ef"/>
+  <path d="M32 14.99L58 30L58 34L32 49.01L6 34L6 30Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6 30L32 45.01L58 30" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 45.01L32 49.01" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.19 30A9.81 5.66 0 1 0 41.81 30A9.81 5.66 0 1 0 22.19 30Z" fill="#328bd3"/>
+</svg>

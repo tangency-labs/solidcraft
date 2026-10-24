@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Lighting presets</title>
+  <path d="M16 7L48 7A4 4 0 0 1 52 11L52 53A4 4 0 0 1 48 57L16 57A4 4 0 0 1 12 53L12 11A4 4 0 0 1 16 7Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="26" r="8" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 13L32 16M19 26L22 26M42 26L45 26M32 36L32 39" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="23" cy="48" r="3.2" fill="#8e9faf"/>
+  <circle cx="32" cy="48" r="3.2" fill="#328bd3"/>
+  <circle cx="41" cy="48" r="3.2" fill="#8e9faf"/>
+</svg>

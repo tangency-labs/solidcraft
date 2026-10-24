@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Sun — directional light</title>
+  <circle cx="21.64" cy="21.64" r="12" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M39.64 18.64L50.69 29.69" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M55.64 34.64L47.15 31.81L52.81 26.15Z" fill="#236ead"/>
+  <path d="M33.64 33.64L48.69 48.69" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M53.64 53.64L45.15 50.81L50.81 45.15Z" fill="#236ead"/>
+  <path d="M18.64 39.64L29.69 50.69" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M34.64 55.64L26.15 52.81L31.81 47.15Z" fill="#236ead"/>
+</svg>
