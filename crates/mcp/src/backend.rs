@@ -29,6 +29,13 @@ pub trait Backend {
     fn in_process(&self) -> bool {
         false
     }
+    /// The output options the app's Preferences ask for (its `mcp.options` reply), for a backend
+    /// bridged to the app. `Ok(None)`: nothing to ask (no app, or one from before the setting), so
+    /// the server's own options decide; `Err`: the app could not answer now (not running, busy),
+    /// ask again on a later call.
+    fn app_options(&mut self) -> Result<Option<Value>, String> {
+        Ok(None)
+    }
 }
 
 /// Longest reply line accepted from the app.
@@ -36,6 +43,10 @@ const MAX_REPLY: u64 = 64 << 20;
 
 /// How long a reply may take: kernel operations (booleans, fillets) on big parts can take a while.
 const READ_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// How long the app may take to answer `mcp.options`: the window answers it within a frame, so a
+/// longer wait means the app is busy and the server asks again on a later call.
+const OPTIONS_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How long the app may take to run an `engine.batch`: a little longer than its control server
 /// waits (3600 s), so its "still running" reply arrives first.
@@ -435,6 +446,21 @@ impl Backend for Remote {
     }
     fn has_ui(&self) -> bool {
         true
+    }
+    fn app_options(&mut self) -> Result<Option<Value>, String> {
+        if self.conn.is_none() {
+            self.reconnect().map_err(|e| self.explain(&e))?;
+        }
+        self.set_read_timeout(OPTIONS_TIMEOUT);
+        let r = self.call("mcp.options", json!({}));
+        self.set_read_timeout(READ_TIMEOUT);
+        match r {
+            Ok(v) => Ok(Some(v)),
+            // An app from before the setting (its agent chat refuses methods it doesn't know):
+            // the server's own options decide.
+            Err(e) if e.starts_with("unknown method") || e.contains("is not available in the agent chat") => Ok(None),
+            Err(e) => Err(e),
+        }
     }
     fn describe(&self) -> String {
         if self.conn.is_some() {

@@ -266,6 +266,19 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
 }
 
+/// The AI page's section for agents outside the app, which reach it through the MCP server
+/// whether or not the chat is on: shown below the chat's settings, with the chat off too.
+pub fn mcp_section(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
+    ui_kit::section(ui, "mcp_agents", tr("ui.mcp_agents"), true, |ui| {
+        let r = ui_kit::checkbox(ui, tr("ui.mcp_compact"), &mut app.preferences.mcp_compact);
+        crate::scenario::publish_handle("prefs:mcp_compact", r.rect.center());
+        ui_kit::text(ui, tr("ui.mcp_compact_note"), ui_kit::Text::Note("mcp_compact"));
+    });
+}
+
 /// The agents: found and added, with Test, Default, a permission override and Remove.
 #[cfg(not(target_arch = "wasm32"))]
 fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {

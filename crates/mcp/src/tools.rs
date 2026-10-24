@@ -8,6 +8,7 @@ use solidcraft_engine::io::vfs;
 use solidcraft_engine::timing;
 
 use crate::backend::{Backend, STILL_RUNNING};
+use crate::options::Options;
 
 /// Most commands in one `batch` call.
 const MAX_BATCH: usize = 10_000;
@@ -58,8 +59,15 @@ fn string(desc: &str) -> Value {
     json!({"type": "string", "description": desc})
 }
 
-/// Every tool, with its JSON schema. The same list serves the headless and the bridged backend.
+/// Every tool, with its JSON schema, as the server has them by default. The same list serves the
+/// headless and the bridged backend.
 pub fn tool_definitions() -> Vec<Value> {
+    tool_definitions_with(Options::default())
+}
+
+/// Every tool, with its JSON schema, for these [`Options`] (`compact` changes `inspect_design`'s
+/// arguments).
+pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
     vec![
         tool(
             "list_commands",
@@ -133,25 +141,7 @@ pub fn tool_definitions() -> Vec<Value> {
             ),
             Effect::Files,
         ),
-        tool(
-            "inspect_design",
-            "Inspect the design",
-            "The whole design: user parameters (expression, value, errors), the timeline (features with type, suppressed, \
-             rolled back, error, warning, timing), bodies (volume, area, centre of mass, bounding box, face/edge/vertex \
-             counts), sketches (curves with ids and coordinates, points, constraints, profiles, degrees of freedom, solve \
-             status), assembly joints (what each origin is attached to: occurrence, the feature, face, edge or sketch \
-             curve its face names refer to, whether it resolves and why not; `execute` `joint.inspect {joint}` gives one), \
-             the active sketch, selection and undo depth.",
-            obj(
-                json!({
-                    "measure": {"type": "boolean", "description": "Measure bodies (default true)"},
-                    "sketches": {"type": "boolean", "description": "Full sketch contents (default true; false = summary only)"},
-                    "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
-                }),
-                &[],
-            ),
-            Effect::ReadOnly,
-        ),
+        inspect_design_tool(opts),
         tool(
             "measure",
             "Measure bodies",
@@ -339,6 +329,57 @@ pub fn tool_definitions() -> Vec<Value> {
     ]
 }
 
+/// `inspect_design`'s definition: as it always was, or with compact output its sketch summaries,
+/// `sketches` by name and the `bodies` filter.
+fn inspect_design_tool(opts: Options) -> Value {
+    if !opts.compact {
+        return tool(
+            "inspect_design",
+            "Inspect the design",
+            "The whole design: user parameters (expression, value, errors), the timeline (features with type, suppressed, \
+         rolled back, error, warning, timing), bodies (volume, area, centre of mass, bounding box, face/edge/vertex \
+         counts), sketches (curves with ids and coordinates, points, constraints, profiles, degrees of freedom, solve \
+         status), assembly joints (what each origin is attached to: occurrence, the feature, face, edge or sketch \
+         curve its face names refer to, whether it resolves and why not; `execute` `joint.inspect {joint}` gives one), \
+         the active sketch, selection and undo depth.",
+            obj(
+                json!({
+                    "measure": {"type": "boolean", "description": "Measure bodies (default true)"},
+                    "sketches": {"type": "boolean", "description": "Full sketch contents (default true; false = summary only)"},
+                    "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
+                }),
+                &[],
+            ),
+            Effect::ReadOnly,
+        );
+    }
+    tool(
+        "inspect_design",
+        "Inspect the design",
+        "The whole design: user parameters (expression, value, errors), the timeline (features with type, suppressed, \
+         rolled back, error, warning, timing), bodies (volume, area, centre of mass, bounding box, face/edge/vertex \
+         counts), sketches, the active sketch, selection and undo depth. Sketches are summarised by default (id, name, \
+         plane, counts of points, curves, constraints and profiles, degrees of freedom, solve status); their full contents \
+         (curves with ids and coordinates, points, constraints, profiles) only for the sketches named in `sketches`, or \
+         all with `sketches: true` (large: a 720-point sketch is some 200 KB). Assembly joints: what each origin is \
+         attached to (`execute` `joint.inspect {joint}` gives one). Arguments: measure, sketches, bodies, joints.",
+        obj(
+            json!({
+                "measure": {"type": "boolean", "description": "Measure bodies (default true)"},
+                "sketches": {
+                    "type": ["boolean", "string", "array"],
+                    "items": {"type": ["string", "integer"]},
+                    "description": "Which sketches in full: a list of sketch names or ids, true (all of them), or false / \"summary\" (none: summaries only, the default)",
+                },
+                "bodies": {"type": "array", "items": {"type": "string"}, "description": "Only these bodies, by name (default: all)"},
+                "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
+            }),
+            &[],
+        ),
+        Effect::ReadOnly,
+    )
+}
+
 fn type_matches(t: &str, v: &Value) -> bool {
     match t {
         "string" => v.is_string(),
@@ -352,10 +393,16 @@ fn type_matches(t: &str, v: &Value) -> bool {
     }
 }
 
-/// Validates `args` against the tool's schema (top level): unknown tool, missing required
-/// arguments, unknown arguments, type and enum mismatches.
+/// [`check_arguments_with`] the default options.
+#[cfg(test)]
 pub(crate) fn check_arguments(name: &str, args: &Value) -> Result<(), String> {
-    let defs = tool_definitions();
+    check_arguments_with(name, args, Options::default())
+}
+
+/// Validates `args` against the tool's schema as listed with these [`Options`] (top level):
+/// unknown tool, missing required arguments, unknown arguments, type and enum mismatches.
+pub(crate) fn check_arguments_with(name: &str, args: &Value, opts: Options) -> Result<(), String> {
+    let defs = tool_definitions_with(opts);
     let def = defs.iter().find(|d| d["name"] == name).ok_or_else(|| format!("unknown tool `{name}`"))?;
     let schema = &def["inputSchema"];
     let Some(a) = args.as_object() else { return Err(format!("{name}: arguments must be an object")) };
@@ -392,11 +439,12 @@ pub(crate) fn check_arguments(name: &str, args: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// A tool result: content blocks plus the error flag.
-fn text_result(v: &Value, is_error: bool) -> Value {
+/// A tool result: content blocks plus the error flag. JSON is pretty-printed, or compact with
+/// compact output.
+fn text_result(v: &Value, is_error: bool, opts: Options) -> Value {
     let text = match v {
         Value::String(s) => s.clone(),
-        v => serde_json::to_string_pretty(v).unwrap_or_default(),
+        v => opts.json_text(v),
     };
     let mut r = json!({"content": [{"type": "text", "text": text}]});
     if is_error {
@@ -405,19 +453,25 @@ fn text_result(v: &Value, is_error: bool) -> Value {
     r
 }
 
-/// Run a tool. Failures are tool results with `isError: true` (the model sees the message);
-/// nothing here panics on hostile arguments.
+/// Run a tool, as the server does by default. Failures are tool results with `isError: true`
+/// (the model sees the message); nothing here panics on hostile arguments.
 pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> Value {
+    call_tool_with(b, name, args, Options::default())
+}
+
+/// [`call_tool`] with these [`Options`].
+pub fn call_tool_with(b: &mut dyn Backend, name: &str, args: &Value, opts: Options) -> Value {
     let empty = Map::new();
     let a = args.as_object().unwrap_or(&empty);
     let r = match name {
         "screenshot" => return screenshot(b, a),
-        "batch" => return batch(b, a),
+        "batch" => return batch(b, a, opts),
+        "inspect_design" if opts.compact => inspect_design_compact(b, a),
         _ => dispatch(b, name, a),
     };
     match r {
-        Ok(v) => text_result(&v, false),
-        Err(e) => text_result(&Value::String(e), true),
+        Ok(v) => text_result(&v, false, opts),
+        Err(e) => text_result(&Value::String(e), true, opts),
     }
 }
 
@@ -672,6 +726,100 @@ const TOOL_STEPS: &[&str] = &[
     "undo",
 ];
 
+/// Names for an error message: at most 40 of them.
+fn name_list(names: &[String]) -> String {
+    let mut out = names.iter().take(40).cloned().collect::<Vec<_>>().join(", ");
+    if names.len() > 40 {
+        out.push_str(&format!(", … ({} in all)", names.len()));
+    }
+    if out.is_empty() { "none".into() } else { out }
+}
+
+/// `inspect_design` with compact output: `document.inspect`, with sketch summaries unless
+/// sketches are asked for in full (by name or id, or all), and only the bodies asked for.
+fn inspect_design_compact(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<Value, String> {
+    let measure = a.get("measure").and_then(Value::as_bool).unwrap_or(true);
+    let bodies: Option<Vec<String>> = match a.get("bodies").filter(|v| !v.is_null()) {
+        None => None,
+        Some(v) => Some(
+            v.as_array()
+                .and_then(|l| l.iter().map(|n| n.as_str().map(str::to_string)).collect::<Option<Vec<_>>>())
+                .ok_or("inspect_design: `bodies` must be a list of body names")?,
+        ),
+    };
+    // With `bodies`, only those are measured.
+    let mut d = b.call("document.inspect", json!({"measure": measure && bodies.is_none(), "sketch_counts": true}))?;
+    if let Some(want) = bodies {
+        let all: Vec<Value> = d["bodies"].as_array().cloned().unwrap_or_default();
+        let names: Vec<String> = all.iter().filter_map(|x| x["name"].as_str().map(str::to_string)).collect();
+        if let Some(missing) = want.iter().find(|n| !names.contains(n)) {
+            return Err(format!("inspect_design: no body `{missing}` (bodies: {})", name_list(&names)));
+        }
+        let mut kept: Vec<Value> = all.into_iter().filter(|x| x["name"].as_str().is_some_and(|n| want.iter().any(|w| w == n))).collect();
+        if measure && !want.is_empty() {
+            let m = exec(b, "inspect.measure", json!({"bodies": want}))?;
+            for body in &mut kept {
+                let measured = m["bodies"].as_array().and_then(|l| l.iter().find(|x| x["name"] == body["name"])).cloned();
+                if let (Some(Value::Object(fields)), Some(o)) = (measured, body.as_object_mut()) {
+                    for (k, v) in fields {
+                        o.entry(k).or_insert(v);
+                    }
+                }
+            }
+        }
+        d["bodies"] = Value::Array(kept);
+    }
+    let sketches: Vec<Value> = d["sketches"].as_array().cloned().unwrap_or_default();
+    let full: Vec<Value> = match a.get("sketches") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => Vec::new(),
+        Some(Value::String(t)) if t == "summary" => Vec::new(),
+        Some(Value::Bool(true)) => sketches.iter().map(|x| x["id"].clone()).collect(),
+        Some(Value::String(t)) if t == "full" || t == "all" => sketches.iter().map(|x| x["id"].clone()).collect(),
+        Some(Value::Array(list)) => {
+            let mut ids = Vec::new();
+            for want in list {
+                let found = sketches.iter().find(|x| match want {
+                    Value::String(n) => x["name"].as_str() == Some(n.as_str()) || x["id"].as_u64().is_some_and(|id| n.parse::<u64>() == Ok(id)),
+                    Value::Number(_) => x["id"] == *want,
+                    _ => false,
+                });
+                match found {
+                    Some(x) => ids.push(x["id"].clone()),
+                    None => {
+                        let names: Vec<String> = sketches.iter().filter_map(|x| x["name"].as_str().map(str::to_string)).collect();
+                        return Err(format!("inspect_design: no sketch {want} (sketches: {})", name_list(&names)));
+                    }
+                }
+            }
+            ids
+        }
+        Some(other) => {
+            return Err(format!("inspect_design: `sketches` must be true, false, \"summary\" or a list of sketch names (got {other})"));
+        }
+    };
+    if !full.is_empty() {
+        let out: Vec<Value> = sketches
+            .into_iter()
+            .map(|x| {
+                if full.contains(&x["id"]) {
+                    exec(b, "sketch.inspect", json!({"sketch": x["id"].clone()})).unwrap_or_else(|e| json!({"id": x["id"], "error": e}))
+                } else {
+                    x
+                }
+            })
+            .collect();
+        d["sketches"] = Value::Array(out);
+    }
+    // Joints: what each is attached to (left out when there are none, or the app is older).
+    if a.get("joints").and_then(Value::as_bool).unwrap_or(true)
+        && let Ok(j) = exec(b, "joint.inspect", json!({}))
+        && j["joints"].as_array().is_some_and(|v| !v.is_empty())
+    {
+        d["joints"] = j["joints"].clone();
+    }
+    Ok(d)
+}
+
 /// `set_parameter`'s new value: `value` or `expression` (the parameters.change name), one of
 /// them, or both when they agree (`50` and `"50"` do).
 fn parameter_value(a: &Map<String, Value>) -> Result<Value, String> {
@@ -744,12 +892,12 @@ impl Undo {
 
 /// `batch`: run steps in order, stop at the first failure and (by default) go back to the
 /// design as it was before the batch.
-fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
+fn batch(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -> Value {
     let Some(steps) = a.get("commands").and_then(Value::as_array) else {
-        return text_result(&json!("`commands` must be an array of {command, params}"), true);
+        return text_result(&json!("`commands` must be an array of {command, params}"), true, opts);
     };
     if steps.len() > MAX_BATCH {
-        return text_result(&json!(format!("batch too long ({} steps, at most {MAX_BATCH})", steps.len())), true);
+        return text_result(&json!(format!("batch too long ({} steps, at most {MAX_BATCH})", steps.len())), true, opts);
     }
     let rollback = a.get("rollback").and_then(Value::as_bool).unwrap_or(true);
     let verbose = a.get("verbose").and_then(Value::as_bool).unwrap_or(true);
@@ -783,7 +931,7 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
                     "results": [],
                     "note": "nothing was run",
                 });
-                return text_result(&reply, true);
+                return text_result(&reply, true, opts);
             }
         }
     }
@@ -812,19 +960,19 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
                         failed.insert("error".into(), Value::String(error));
                     }
                 }
-                return batch_reply(&r, steps.len(), rollback, verbose, &narrow);
+                return batch_reply(&r, steps.len(), rollback, verbose, &narrow, opts);
             }
             // Older apps and the headless session, or the app wants the steps one by one.
             Err(e) if e.starts_with("unknown method") || e.starts_with("engine.batch unavailable") => {}
             // Never sent: no app to send it to. Or sent and still running (it was not cancelled):
             // the `pending` tool gets its result.
             Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) => {
-                return text_result(&Value::String(e), true);
+                return text_result(&Value::String(e), true, opts);
             }
             // The app may have run it: sending the steps again would apply them twice.
             Err(e) => {
                 let msg = format!("the app did not answer engine.batch ({e}); it may have run: inspect the design before sending it again");
-                return text_result(&Value::String(msg), true);
+                return text_result(&Value::String(msg), true, opts);
             }
         }
     }
@@ -873,13 +1021,13 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
                     "not_run": (i + 1..steps.len()).collect::<Vec<_>>(),
                     "results": results,
                 });
-                return text_result(&with_timings(reply, timed, rows, clock.ms()), true);
+                return text_result(&with_timings(reply, timed, rows, clock.ms()), true, opts);
             }
         }
     }
     start.finish(b);
     let reply = json!({"ok": true, "completed": results.len(), "results": results});
-    text_result(&with_timings(reply, timed, rows, clock.ms()), false)
+    text_result(&with_timings(reply, timed, rows, clock.ms()), false, opts)
 }
 
 /// `reply` with `timings` and `total_ms` when they were asked for.
@@ -892,7 +1040,7 @@ fn with_timings(mut reply: Value, timed: bool, rows: Vec<Value>, total_ms: f64) 
 }
 
 /// The `batch` reply from the app's `engine.batch` answer, shaped as the per-step path shapes it.
-fn batch_reply(r: &Value, len: usize, rollback: bool, verbose: bool, narrow: &dyn Fn(usize, Value) -> Value) -> Value {
+fn batch_reply(r: &Value, len: usize, rollback: bool, verbose: bool, narrow: &dyn Fn(usize, Value) -> Value, opts: Options) -> Value {
     let results: Vec<Value> = r["results"]
         .as_array()
         .cloned()
@@ -935,7 +1083,7 @@ fn batch_reply(r: &Value, len: usize, rollback: bool, verbose: bool, narrow: &dy
             }
         }
     }
-    text_result(&reply, error)
+    text_result(&reply, error, opts)
 }
 
 /// A command's result without what the design already had (`execute` or `batch` with `verbose: false`): a
@@ -965,7 +1113,7 @@ fn screenshot(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
             {"type": "image", "data": base64(&png), "mimeType": "image/png"},
             {"type": "text", "text": info.to_string()},
         ]}),
-        Err(e) => text_result(&Value::String(e), true),
+        Err(e) => text_result(&Value::String(e), true, Options::default()),
     }
 }
 

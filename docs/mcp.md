@@ -122,6 +122,37 @@ folder of the design open in it, under the same rules, so give absolute paths: a
 resolves against the app's working folder, not the server's. The app's own
 file dialogs are never limited.
 
+### Compact output
+
+Compact output is for agents that pay for every byte. It is off by default, and then every tool
+behaves as described below. Any one of these turns it on:
+
+- **Preferences › AI › Agents through MCP › Compact output** in the app, for every server bridged
+  to it (`--connect`, and the agents its chat starts). The server asks the app (`mcp.options` on
+  the [control channel](control-protocol.md)) when the agent first lists or calls a tool, and
+  keeps the answer for the session, so the tools it listed keep their shape: a change applies to
+  agent sessions started after it. An app that is not running yet is asked again on the next call.
+- `solidcraft-cli mcp --compact`.
+- The environment variable `SOLIDCRAFT_MCP_COMPACT=1` (`true`, `yes` and `on` work too; `0`,
+  `false`, `no`, `off` or empty leave it off; any other value is an error at start-up).
+
+The command line can only turn it on: with the preference on, a server started without
+`--compact` is compact too. With it on:
+
+- `inspect_design` summarises each sketch (`id`, `name`, `plane`, the number of `points`,
+  `curves`, `constraints` and `profiles`, `dof`, `status`, `visible`) instead of returning its
+  contents: a sketch of 720 points is some 4 KB in the summary and over 80 KB in full. `sketches`
+  takes a list of sketch names or ids to return in full (as `execute` `sketch.inspect` gives
+  them), `true` for all of them, or `false` / `"summary"` (the default). `bodies` (a list of
+  names) keeps only those bodies and measures only them. An unknown sketch or body name is an
+  error that lists the names there are.
+- Tool results that are JSON are compact, not pretty-printed.
+
+```sh
+solidcraft-cli mcp --connect 127.0.0.1:7878 --compact
+SOLIDCRAFT_MCP_COMPACT=1 solidcraft-cli mcp --connect 127.0.0.1:7878
+```
+
 ### Tool annotations
 
 Each tool says what it may do, for clients that ask before running tools (or auto-approve on
@@ -206,7 +237,7 @@ The `skill_reference` tool returns these documents from the copies built into So
 | `describe_command` | `id` | One command's parameter docs (`params`) and, for commands with a typed contract (`solid.box`, `solid.extrude` and `engine.describe` so far), the JSON Schemas (2020-12) of its parameters (`input`) and of a successful result (`output`); `null` for the others. The same as `execute` `engine.describe {command}`. |
 | `execute` | `command`, `params?`, `verbose?` (default true) | Run any command with JSON parameters (`list_commands` shows them). Failures leave the design unchanged. A feature command replies with the feature (`feature`, `name`), every body (`bodies`) and the bodies it created, changed and removed (`created_bodies`, `changed_bodies`, `removed_bodies`). `verbose: false` uses the same compact reply as `batch`. |
 | `batch` | `commands: [{command, params}]`, `rollback?` (default true), `verbose?` (default true), `timings?`, `profile?` (default false) | Run steps in order, stop at the first error and undo the completed steps. The reply names the failing step (`failed.index`, `failed.command`, `failed.error`), every result before it, `rolled_back` (true only when the design really went back to where the batch started), `undone`, `applied` (the indices of the steps whose changes are in the design) and `not_run` (the steps never sent). A step may name a tool instead of a command, with that tool's arguments as `params`: `set_parameter` (runs `parameters.change`; `value` or `expression`), `list_commands` (`engine.commands`, filtered by `filter` as the tool filters it), `describe_command` (`engine.describe`), `execute` (`{command, params}`), `measure`, `inspect_design` (`document.inspect`: each sketch as its counts, not its full contents, and no joints), `undo`, `redo`, `export`, `save`, `open`, `new_design` and `crash_reports`. `screenshot`, `body_topology` (use `model.edges` and `model.faces`), `batch`, `pending`, `running` and `skill_reference` can't be steps: such a batch fails before anything is sent. `verbose: false` keeps the reply small in large designs: feature steps leave out the full body list (`created_bodies`, `changed_bodies`, `removed_bodies` stay) and sketch steps the ids they repeat outside `created`. Bridged to an app that has `engine.batch`, the whole batch is one control request (one frame of the app). Older apps, and apps showing the agent cursor, get the steps one by one. `timings: true` adds `timings: [{index, command, ms}]` for every step run, the failing one included, and `total_ms`. `profile: true` also adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`, its time in kernel booleans, in tessellation and the rest. Steps are timed where they run: in the app when bridged. An app without `engine.batch` is timed step by step, without `profile`. |
-| `inspect_design` | `measure?` (default true), `sketches?` (default true), `joints?` (default true) | Design properties (`metadata`: project, author… and other tools' keys; set them with `execute` `document.metadata.set`), parameters, timeline (type, suppressed, rolled back, error, warning, timing), bodies (volume, area, centre of mass, bbox, face/edge/vertex counts, visible; `removed_later: true` while a sketch is being edited on a rolled-back timeline and a later feature deletes the body, which is then not shown), sketches (curves, points, constraints, profiles, DOF, solve status, visible), joints when the design has any (as `joint.inspect` gives them: each origin's occurrence, component and path, the snap as saved, the feature, face, edge or sketch curve (`sketch: {id, name, curve}`) its persistent names refer to, `resolves` and the `error` when it is lost; kind, offset, angle, flip, values, limits, expressions, motion links; `execute` `joint.inspect {joint}` gives one joint), selection, undo depth. Hide helper sketches, bodies or construction planes with `execute` `browser.visibility` (`{items, visible}` or `{folder, visible}`), and joint glyphs with `{joints: [id or name], visible}` or `{folder: "joints", visible}` (a hidden joint still constrains and drives; `joint.list` reports each joint's `visible`). |
+| `inspect_design` | `measure?` (default true), `sketches?` (default true), `joints?` (default true); with [compact output](#compact-output) `sketches?` (names or ids, `true`, or `false` / `"summary"`: the default) and `bodies?` | Design properties (`metadata`: project, author… and other tools' keys; set them with `execute` `document.metadata.set`), parameters, timeline (type, suppressed, rolled back, error, warning, timing), bodies (volume, area, centre of mass, bbox, face/edge/vertex counts, visible; `removed_later: true` while a sketch is being edited on a rolled-back timeline and a later feature deletes the body, which is then not shown), sketches (curves, points, constraints, profiles, DOF, solve status, visible), joints when the design has any (as `joint.inspect` gives them: each origin's occurrence, component and path, the snap as saved, the feature, face, edge or sketch curve (`sketch: {id, name, curve}`) its persistent names refer to, `resolves` and the `error` when it is lost; kind, offset, angle, flip, values, limits, expressions, motion links; `execute` `joint.inspect {joint}` gives one joint), selection, undo depth. Hide helper sketches, bodies or construction planes with `execute` `browser.visibility` (`{items, visible}` or `{folder, visible}`), and joint glyphs with `{joints: [id or name], visible}` or `{folder: "joints", visible}` (a hidden joint still constrains and drives; `joint.list` reports each joint's `visible`). |
 | `measure` | `body?` or `items?` | Volume (mm³), area (mm²), centre of mass, bbox and topology counts per body, with totals. With `items` (one or two selections as `execute` takes them: `face`, `edge`, `vertex`, `sketch_curve`, `profile`), the picked geometry instead: see below. |
 | `body_topology` | `body` | Edges (index, midpoint, length, ends) and faces (index, name, area, centroid, normal, `point`, and for a cylindrical face its `cylinder`: `origin`, `axis`, `radius`). An edge midpoint is the `[x,y,z]` that picks that edge for fillet and chamfer. A face's `point` lies on it and picks it (its centroid may not: that of a face with a hole is in the hole); a face's `name` picks it for the commands that take faces (`face.delete`, `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.split_face`, `solid.replace_face`, and `face` of `sheet.convert`). |
 | `set_parameter` | `name`, `value` or `expression` (number or expression), `unit?`, `comment?` | Create or change a user parameter and recompute. `expression` is another name for `value` (the one `parameters.change` uses): give one of them, or both only when they agree; neither, or two that differ, is an error. Reports `recomputed` (features rebuilt), `restored` (features whose earlier result for the same inputs was reused, e.g. a value set back) and features that now fail. |
