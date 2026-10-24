@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Area light</title>
+  <path d="M9.66 19.8L32 32.7L32 36.14L9.66 23.25Z" fill="#b8c3cf"/>
+  <path d="M54.34 19.8L32 32.7L32 36.14L54.34 23.25Z" fill="#8e9faf"/>
+  <path d="M32 6.91L54.34 19.8L32 32.7L9.66 19.8Z" fill="#b9ddf8"/>
+  <path d="M32 6.91L54.34 19.8L54.34 23.25L32 36.14L9.66 23.25L9.66 19.8Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M9.66 19.8L32 32.7L54.34 19.8" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 32.7L32 36.14" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M17 33.25L17 48.25" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 41.25L32 56.25" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M47 33.25L47 48.25" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

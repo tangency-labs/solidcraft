@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Check render request</title>
+  <path d="M10.02 11.52L46.02 11.52A4 4 0 0 1 50.02 15.52L50.02 43.52A4 4 0 0 1 46.02 47.52L10.02 47.52A4 4 0 0 1 6.02 43.52L6.02 15.52A4 4 0 0 1 10.02 11.52Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.02 42.52L19.02 26.52L29.02 39.52L36.02 32.52L48.02 42.52L48.02 45.52L8.02 45.52Z" fill="#8e9faf"/>
+  <circle cx="40.02" cy="21.52" r="3.2" fill="#328bd3"/>
+  <path d="M34.02 43.52L41.02 50.52L56.02 33.52" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M34.02 43.52L41.02 50.52L56.02 33.52" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Render quality</title>
+  <path d="M14 37.5L16 37.5A4 4 0 0 1 20 41.5L20 49.5A4 4 0 0 1 16 53.5L14 53.5A4 4 0 0 1 10 49.5L10 41.5A4 4 0 0 1 14 37.5Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M31 24.5L33 24.5A4 4 0 0 1 37 28.5L37 49.5A4 4 0 0 1 33 53.5L31 53.5A4 4 0 0 1 27 49.5L27 28.5A4 4 0 0 1 31 24.5Z" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M48 9.5L50 9.5A4 4 0 0 1 54 13.5L54 49.5A4 4 0 0 1 50 53.5L48 53.5A4 4 0 0 1 44 49.5L44 13.5A4 4 0 0 1 48 9.5Z" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M7 54.5L57 54.5" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

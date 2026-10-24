@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Position a light by its highlight</title>
+  <circle cx="27.45" cy="29.45" r="21" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M33.45 8.45Q35.45 19.45 46.45 21.45Q35.45 23.45 33.45 34.45Q31.45 23.45 20.45 21.45Q31.45 19.45 33.45 8.45Z" fill="#236ead"/>
+  <path d="M43.45 33.45L43.45 54.45L49.45 48.45L56.45 48.45Z" fill="#ffffff" stroke="#ffffff" stroke-width="4.75" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M43.45 33.45L43.45 54.45L49.45 48.45L56.45 48.45Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

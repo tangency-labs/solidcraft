@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Export rendered image</title>
+  <path d="M11.09 20.91L44.09 20.91A4 4 0 0 1 48.09 24.91L48.09 50.91A4 4 0 0 1 44.09 54.91L11.09 54.91A4 4 0 0 1 7.09 50.91L7.09 24.91A4 4 0 0 1 11.09 20.91Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M9.09 49.91L20.09 35.91L30.09 46.91L37.09 39.91L46.09 49.91L46.09 52.91L9.09 52.91Z" fill="#8e9faf"/>
+  <circle cx="38.09" cy="30.91" r="3.2" fill="#328bd3"/>
+  <path d="M35.09 30.91L51.43 14.57" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M57.09 8.91L53.91 18.46L47.54 12.09Z" fill="#ffffff" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M35.09 30.91L51.43 14.57" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M57.09 8.91L53.91 18.46L47.54 12.09Z" fill="#236ead"/>
+</svg>

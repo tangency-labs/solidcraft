@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Render output pixel size</title>
+  <path d="M25.5 26L53.5 26A4 4 0 0 1 57.5 30L57.5 51A4 4 0 0 1 53.5 55L25.5 55A4 4 0 0 1 21.5 51L21.5 30A4 4 0 0 1 25.5 26Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.5 13L49.5 13" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M56.5 13L48.5 17L48.5 9Z" fill="#236ead"/>
+  <path d="M21.5 9L21.5 17M57.5 9L57.5 17" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10.5 27L10.5 47" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10.5 54L6.5 46L14.5 46Z" fill="#236ead"/>
+  <path d="M6.5 26L14.5 26M6.5 55L14.5 55" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

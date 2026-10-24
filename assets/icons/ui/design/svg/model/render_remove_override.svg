@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Remove appearance override</title>
+  <path d="M11.52 9.5L43.52 9.5A4 4 0 0 1 47.52 13.5L47.52 50.5A4 4 0 0 1 43.52 54.5L11.52 54.5A4 4 0 0 1 7.52 50.5L7.52 13.5A4 4 0 0 1 11.52 9.5Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="27.52" cy="29.5" r="13" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M36.52 48.5L54.52 48.5" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M36.52 48.5L54.52 48.5" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

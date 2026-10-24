@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Paint — apply a look</title>
+  <path d="M32.5 27L47.5 9Q50.5 6 53.5 9Q56.5 12 53.5 15L36.5 31Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.5 28L27.5 21L41.5 35L34.5 44Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.5 28L34.5 44Q25.5 58 7.5 54Q15.5 48 12.5 40Z" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

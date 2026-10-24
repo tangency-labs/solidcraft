@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Pick up a look</title>
+  <path d="M13.51 41.49L33.51 21.49L40.51 28.49L20.51 48.49L11.51 50.49Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M13.51 42.49L19.51 48.49" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M31.51 12.49L47.51 28.49M35.51 18.49L42.51 11.49Q47.51 6.49 52.51 11.49Q57.51 16.49 52.51 21.49L45.51 28.49Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="8.51" cy="55.49" r="3.3" fill="#328bd3"/>
+</svg>

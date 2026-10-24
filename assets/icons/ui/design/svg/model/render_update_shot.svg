@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Update saved shot</title>
+  <path d="M10.02 16.02L19.02 16.02L23.02 7.02L33.02 7.02L37.02 16.02L47.02 16.02Q52.02 16.02 52.02 21.02L52.02 42.02Q52.02 47.02 47.02 47.02L10.02 47.02Q5.02 47.02 5.02 42.02L5.02 21.02Q5.02 16.02 10.02 16.02Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="27.02" cy="31.02" r="10" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M35.02 44.02A11 11 0 1 0 46.02 33.02" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M35.02 44.02A11 11 0 1 0 46.02 33.02" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M38.02 33.02L47.02 28.02L47.02 38.02Z" fill="#236ead"/>
+</svg>

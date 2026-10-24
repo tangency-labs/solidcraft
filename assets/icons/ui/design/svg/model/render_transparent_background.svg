@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Transparent image background</title>
+  <path d="M14 10L50 10A4 4 0 0 1 54 14L54 50A4 4 0 0 1 50 54L14 54A4 4 0 0 1 10 50L10 14A4 4 0 0 1 14 10Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M11.3 32L32 32L32 11.3L50 11.3Q52.7 11.3 52.7 14L52.7 32L32 32L32 52.7L14 52.7Q11.3 52.7 11.3 50Z" fill="#8e9faf"/>
+  <circle cx="32" cy="32" r="12" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

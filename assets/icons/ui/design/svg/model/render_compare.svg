@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Compare render results</title>
+  <path d="M11 12L53 12A4 4 0 0 1 57 16L57 48A4 4 0 0 1 53 52L11 52A4 4 0 0 1 7 48L7 16A4 4 0 0 1 11 12Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="12" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 20A12 12 0 0 1 32 44Z" fill="#328bd3"/>
+  <path d="M32 8L32 56" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

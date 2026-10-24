@@ -45,3 +45,9 @@ sketch_chamfer_equal = { master = "sketch_chamfer", accent = "sketch" }
 sketch_chamfer_two = { master = "sketch_chamfer_two_distances", accent = "sketch" }
 offset_one_side = { master = "offset", accent = "sketch" }
 bom = "list"
+
+# Render workspace drafts: shared meanings; owner review remains Open.
+render_appearance = "appearance"
+render_environment = "environment_map"
+render_fit_product = "fit"
+render_execute = "render_image"

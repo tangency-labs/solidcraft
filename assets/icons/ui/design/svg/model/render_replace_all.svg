@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Replace a look everywhere</title>
+  <path d="M10.5 9.5L20.5 9.5A4 4 0 0 1 24.5 13.5L24.5 25.5A4 4 0 0 1 20.5 29.5L10.5 29.5A4 4 0 0 1 6.5 25.5L6.5 13.5A4 4 0 0 1 10.5 9.5Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M36.5 28.5L45.5 28.5A4 4 0 0 1 49.5 32.5L49.5 42.5A4 4 0 0 1 45.5 46.5L36.5 46.5A4 4 0 0 1 32.5 42.5L32.5 32.5A4 4 0 0 1 36.5 28.5Z" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M44.5 36.5L53.5 36.5A4 4 0 0 1 57.5 40.5L57.5 50.5A4 4 0 0 1 53.5 54.5L44.5 54.5A4 4 0 0 1 40.5 50.5L40.5 40.5A4 4 0 0 1 44.5 36.5Z" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M30.5 14.5L47.5 14.5Q51.5 14.5 51.5 18.5L51.5 22.5" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M51.5 30.5L46.5 21.5L56.5 21.5Z" fill="#236ead"/>
+</svg>

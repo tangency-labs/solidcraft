@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Exposure</title>
+  <circle cx="32" cy="34.5" r="18" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 16.5A18 18 0 0 1 32 52.5Z" fill="#328bd3"/>
+  <circle cx="32" cy="34.5" r="18" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M48 14.5L58 14.5M53 9.5L53 19.5M6 54.5L16 54.5" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

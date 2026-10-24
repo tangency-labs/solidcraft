@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Image aspect frame</title>
+  <path d="M11 14L53 14A4 4 0 0 1 57 18L57 46A4 4 0 0 1 53 50L11 50A4 4 0 0 1 7 46L7 18A4 4 0 0 1 11 14Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M7 27L7 14L21 14M43 50L57 50L57 37" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18 32L46 32" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12 32L21 27L21 37ZM52 32L43 27L43 37Z" fill="#236ead"/>
+</svg>

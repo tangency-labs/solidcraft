@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Render all shots — queue</title>
+  <path d="M12 8.5L40 8.5A4 4 0 0 1 44 12.5L44 31.5A4 4 0 0 1 40 35.5L12 35.5A4 4 0 0 1 8 31.5L8 12.5A4 4 0 0 1 12 8.5Z" fill="#8e9faf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18 16.5L46 16.5A4 4 0 0 1 50 20.5L50 39.5A4 4 0 0 1 46 43.5L18 43.5A4 4 0 0 1 14 39.5L14 20.5A4 4 0 0 1 18 16.5Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 24.5L52 24.5A4 4 0 0 1 56 28.5L56 51.5A4 4 0 0 1 52 55.5L24 55.5A4 4 0 0 1 20 51.5L20 28.5A4 4 0 0 1 24 24.5Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 31.5L48 40.5L32 49.5Z" fill="#236ead"/>
+</svg>
