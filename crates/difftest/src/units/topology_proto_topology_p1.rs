@@ -319,6 +319,8 @@ pub(super) enum Script {
     },
     /// One object and one API call.
     Transform { obj: TObjIn, op: TOpIn },
+    /// One constructed body retained across every API call and geometry snapshot.
+    TransformSequence { obj: TObjIn, ops: Vec<TOpIn> },
 }
 
 // ---- encoding for the C++ side ------------------------------------------------------------
@@ -458,89 +460,113 @@ pub(super) fn cpp_input(s: &Script) -> Vec<f64> {
                 v.extend_from_slice(o);
             }
         }
+        Script::TransformSequence { obj, ops } => {
+            v.push(kind::TRANSFORM_SEQUENCE as f64);
+            transform_object_block(&mut v, obj);
+            v.push(ops.len() as f64);
+            for op in ops { transform_op_block(&mut v, op); }
+        }
         Script::Transform { obj, op } => {
             v.push(kind::TRANSFORM as f64);
-            match obj {
-                TObjIn::Curve { owned, c } => {
-                    v.extend([tobj::CURVE as f64, b(*owned)]);
-                    curve_block(&mut v, c);
-                }
-                TObjIn::Plane { owned, o, n } => {
-                    v.extend([tobj::PLANE as f64, b(*owned)]);
-                    v.extend_from_slice(o);
-                    v.extend_from_slice(n);
-                }
-                TObjIn::Bsurf { owned, s } => {
-                    v.extend([tobj::BSURF as f64, b(*owned)]);
-                    surface_block(&mut v, s);
-                }
-                TObjIn::Brep => v.push(tobj::BREP as f64),
-                TObjIn::PrimitiveBox { origin, size } | TObjIn::CopiedBox { origin, size } => {
-                    v.push(if matches!(obj, TObjIn::CopiedBox { .. }) { tobj::COPIED_BOX } else { tobj::PRIMITIVE_BOX } as f64);
-                    v.extend_from_slice(origin);
-                    v.extend_from_slice(size);
-                }
-                TObjIn::PrimitiveSphere { origin, radius } | TObjIn::CopiedSphere { origin, radius } => {
-                    v.push(if matches!(obj, TObjIn::CopiedSphere { .. }) { tobj::COPIED_SPHERE } else { tobj::PRIMITIVE_SPHERE } as f64);
-                    v.extend_from_slice(origin);
-                    v.push(*radius);
-                }
-                TObjIn::CallerFace { origin, size } => {
-                    v.push(tobj::CALLER_FACE as f64);
-                    v.extend_from_slice(origin);
-                    v.extend_from_slice(size);
-                }
-                TObjIn::Poly => v.push(tobj::POLY as f64),
-                TObjIn::PolyPts { pts } => {
-                    v.extend([tobj::POLY_PTS as f64, pts.len() as f64]);
-                    for q in pts {
-                        v.extend_from_slice(q);
-                    }
-                }
-                TObjIn::Other => v.push(tobj::OTHER as f64),
-                TObjIn::Null => v.push(tobj::NULL as f64),
-                TObjIn::Composite { owned, cs } => {
-                    v.extend([tobj::COMPOSITE as f64, b(*owned), cs.len() as f64]);
-                    for c in cs {
-                        curve_block(&mut v, c);
-                    }
-                }
-                TObjIn::CrvOnSurf { owned, s, a, b: bb } => {
-                    v.extend([tobj::CRV_ON_SURF as f64, b(*owned)]);
-                    surface_block(&mut v, s);
-                    v.extend([a[0], a[1], bb[0], bb[1]]);
-                }
-            }
-            match op {
-                TOpIn::Transform { o, x, y } => {
-                    v.push(0.0);
-                    for q in [o, x, y] {
-                        v.extend_from_slice(q);
-                    }
-                }
-                TOpIn::Scale { s } => {
-                    v.push(1.0);
-                    v.extend_from_slice(s);
-                }
-                TOpIn::ScaleByPt { r, s } => {
-                    v.push(2.0);
-                    v.extend_from_slice(r);
-                    v.extend_from_slice(s);
-                }
-                TOpIn::Translate { v: t } => {
-                    v.push(3.0);
-                    v.extend_from_slice(t);
-                }
-                TOpIn::Rotate { r, a, deg } => {
-                    v.push(4.0);
-                    v.extend_from_slice(r);
-                    v.extend_from_slice(a);
-                    v.push(*deg);
-                }
-            }
+            transform_object_block(&mut v, obj);
+            transform_op_block(&mut v, op);
         }
     }
     v
+}
+
+fn transform_object_block(v: &mut Vec<f64>, obj: &TObjIn) {
+    match obj {
+        TObjIn::Curve { owned, c } => {
+            v.extend([tobj::CURVE as f64, b(*owned)]);
+            curve_block(v, c);
+        }
+        TObjIn::Plane { owned, o, n } => {
+            v.extend([tobj::PLANE as f64, b(*owned)]);
+            v.extend_from_slice(o);
+            v.extend_from_slice(n);
+        }
+        TObjIn::Bsurf { owned, s } => {
+            v.extend([tobj::BSURF as f64, b(*owned)]);
+            surface_block(v, s);
+        }
+        TObjIn::Brep => v.push(tobj::BREP as f64),
+        TObjIn::PrimitiveBox { origin, size } => {
+            v.push(tobj::PRIMITIVE_BOX as f64);
+            v.extend_from_slice(origin);
+            v.extend_from_slice(size);
+        }
+        TObjIn::PrimitiveSphere { origin, radius } => {
+            v.push(tobj::PRIMITIVE_SPHERE as f64);
+            v.extend_from_slice(origin);
+            v.push(*radius);
+        }
+        TObjIn::CopiedBox { origin, size } => {
+            v.push(tobj::COPIED_BOX as f64);
+            v.extend_from_slice(origin);
+            v.extend_from_slice(size);
+        }
+        TObjIn::CopiedSphere { origin, radius } => {
+            v.push(tobj::COPIED_SPHERE as f64);
+            v.extend_from_slice(origin);
+            v.push(*radius);
+        }
+        TObjIn::CallerFace { origin, size } => {
+            v.push(tobj::CALLER_FACE as f64);
+            v.extend_from_slice(origin);
+            v.extend_from_slice(size);
+        }
+        TObjIn::Poly => v.push(tobj::POLY as f64),
+        TObjIn::PolyPts { pts } => {
+            v.extend([tobj::POLY_PTS as f64, pts.len() as f64]);
+            for q in pts {
+                v.extend_from_slice(q);
+            }
+        }
+        TObjIn::Other => v.push(tobj::OTHER as f64),
+        TObjIn::Null => v.push(tobj::NULL as f64),
+        TObjIn::Composite { owned, cs } => {
+            v.extend([tobj::COMPOSITE as f64, b(*owned), cs.len() as f64]);
+            for c in cs {
+                curve_block(v, c);
+            }
+        }
+        TObjIn::CrvOnSurf { owned, s, a, b: bb } => {
+            v.extend([tobj::CRV_ON_SURF as f64, b(*owned)]);
+            surface_block(v, s);
+            v.extend([a[0], a[1], bb[0], bb[1]]);
+        }
+    }
+}
+
+fn transform_op_block(v: &mut Vec<f64>, op: &TOpIn) {
+    match op {
+        TOpIn::Transform { o, x, y } => {
+            v.push(0.0);
+            for q in [o, x, y] {
+                v.extend_from_slice(q);
+            }
+        }
+        TOpIn::Scale { s } => {
+            v.push(1.0);
+            v.extend_from_slice(s);
+        }
+        TOpIn::ScaleByPt { r, s } => {
+            v.push(2.0);
+            v.extend_from_slice(r);
+            v.extend_from_slice(s);
+        }
+        TOpIn::Translate { v: t } => {
+            v.push(3.0);
+            v.extend_from_slice(t);
+        }
+        TOpIn::Rotate { r, a, deg } => {
+            v.push(4.0);
+            v.extend_from_slice(r);
+            v.extend_from_slice(a);
+            v.push(*deg);
+        }
+    }
 }
 
 pub(super) fn cpp(s: &Script) -> Result<Output, HarnessError> {
@@ -4820,6 +4846,159 @@ const ANCHOR: ObjectRef = ObjectRef {
     key: ObjectKey(1),
 };
 
+fn constructed_transform_body(k: &mut Kernel, obj: &TObjIn) -> Result<Brep, Fail> {
+    Ok(match obj {
+        TObjIn::PrimitiveBox {
+            origin,
+            size: [x, y, z],
+        }
+        | TObjIn::CopiedBox {
+            origin,
+            size: [x, y, z],
+        } => st(solidcore::primitive::api_primitives::create_box(
+            k,
+            v3(*origin),
+            *x,
+            *y,
+            *z,
+        ))?
+        .map_err(|code| harness(format!("box construction status {code}")))?,
+        TObjIn::PrimitiveSphere { origin, radius } | TObjIn::CopiedSphere { origin, radius } => st(
+            solidcore::primitive::api_primitives::create_sphere(k, v3(*origin), *radius),
+        )?
+        .map_err(|code| harness(format!("sphere construction status {code}")))?,
+        TObjIn::CallerFace {
+            origin,
+            size: [width, height],
+        } => {
+            let mut body = st(solidcore::topology::brep::p3::new_brep(
+                k,
+                solidcore::geom::tol::USE_DEFAULT,
+                solidcore::geom::tol::USE_DEFAULT,
+            ))?
+            .map_err(|code| harness(format!("caller body status {code}")))?;
+            let keys = |entity| {
+                let named = solidcore::topology::brep::p3::topology_ref(0, entity);
+                ObjectRef {
+                    type_code: named.type_code,
+                    key: ObjectKey(
+                        named.type_code as u64 * 1_000_000 + (named.key.0 & 0xffff_ffff),
+                    ),
+                }
+            };
+            let mut state = solidcore::topology::brep::p2::ArenaNotifyState::new(&body);
+            let mut env = state.env(None);
+            env.key_of = &keys;
+            let this_face = |face| keys(EntityRef::Face(face));
+            let mut marks = solidcore::topology::topology_traverser::Marks::default();
+            let mut fenv = solidcore::topology::brep::p8::FaceBuildEnv {
+                env: &mut env,
+                marks: &mut marks,
+                this_face: &this_face,
+            };
+            st(solidcore::topology::brep::p8::create_face_from_surface(
+                k,
+                &mut body,
+                Some(Surface::from(Plane::from_normal(
+                    v3(*origin),
+                    Vec3::new(0.0, 0.0, 1.0),
+                ))),
+                &Extent2d::from_bounds(0.0, 0.0, *width, *height),
+                &mut fenv,
+            ))?
+            .map_err(|code| harness(format!("caller face status {code}")))?;
+            body
+        }
+        _ => return Err(harness("sequence requires constructed geometry").into()),
+    })
+}
+
+fn apply_transform_op(
+    k: &mut Kernel,
+    target: Option<TransformObject<'_>>,
+    op: &TOpIn,
+) -> solidcore::Result<()> {
+    match op {
+        TOpIn::Transform { o, x, y } => {
+            let pl = Axis2Placement::new(v3(*o), v3(*x), v3(*y));
+            api::api_transform(k, target, &pl)
+        }
+        TOpIn::Scale { s } => api::api_scale(k, target, v3(*s)),
+        TOpIn::ScaleByPt { r, s } => api::api_scale_by_pt(k, target, v3(*r), v3(*s)),
+        TOpIn::Translate { v } => api::api_translate(k, target, v3(*v)),
+        TOpIn::Rotate { r, a, deg } => api::api_rotate(k, target, v3(*r), v3(*a), *deg),
+    }
+}
+
+fn transform_status(res: solidcore::Result<()>) -> Result<f64, Fail> {
+    Ok(match res {
+        Ok(()) => SM_SUCCESS,
+        Err(e) => match Output::unported(&e) {
+            Some(d) => return Err(Fail::Deferred(Box::new(d))),
+            None => match e {
+                SolidError::InvalidInput { .. } => 1007.0,
+                e => status(&e),
+            },
+        },
+    })
+}
+
+fn append_constructed_transform_record(
+    k: &Kernel,
+    brep: &Brep,
+    o: &mut Vec<f64>,
+) -> Result<(), Fail> {
+    let vertices =
+        solidcore::topology::brep::p1::vertices(brep, None).map_err(|e| harness(e.to_string()))?;
+    let edges =
+        solidcore::topology::brep::p1::edges(brep, None).map_err(|e| harness(e.to_string()))?;
+    let faces =
+        solidcore::topology::brep::p1::faces(brep, None).map_err(|e| harness(e.to_string()))?;
+    o.extend([
+        vertices.len() as f64,
+        edges.len() as f64,
+        faces.len() as f64,
+        brep.this_model_size_estimate(k, false),
+    ]);
+    st(crate::util::primitive::append(k, brep, o))?
+        .map_err(|code| harness(format!("solid geometry status {code}")))?;
+    for face in faces {
+        o.push(f64::from(
+            brep.face(face)
+                .map_err(|e| harness(e.to_string()))?
+                .rectangular_trim,
+        ));
+    }
+    Ok(())
+}
+
+fn run_transform_sequence(obj: &TObjIn, ops: &[TOpIn]) -> Result<Vec<f64>, Fail> {
+    if !(2..=8).contains(&ops.len()) {
+        return Err(harness("transform sequence length").into());
+    }
+    if !matches!(
+        obj,
+        TObjIn::PrimitiveBox { .. } | TObjIn::PrimitiveSphere { .. } | TObjIn::CallerFace { .. }
+    ) {
+        return Err(harness("sequence requires constructed geometry").into());
+    }
+    let mut k = Kernel::default();
+    let mut brep = constructed_transform_body(&mut k, obj)?;
+    let mut out = vec![ops.len() as f64];
+    for op in ops {
+        let status = transform_status(apply_transform_op(
+            &mut k,
+            Some(TransformObject::Brep(&mut brep)),
+            op,
+        ))?;
+        let mut record = Vec::new();
+        append_constructed_transform_record(&k, &brep, &mut record)?;
+        out.extend([status, record.len() as f64]);
+        out.extend(record);
+    }
+    Ok(out)
+}
+
 fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
     let mut k = Kernel::default();
     let mut curve = None;
@@ -4916,34 +5095,9 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
         brep: b,
         env: &mut env,
     });
-    let mut brep = match obj {
-        TObjIn::PrimitiveBox { origin, size: [x, y, z] } | TObjIn::CopiedBox { origin, size: [x, y, z] } => st(solidcore::primitive::api_primitives::create_box(
-            &mut k, v3(*origin), *x, *y, *z,
-        ))?.map_err(|code| harness(format!("box construction status {code}")))?,
-        TObjIn::PrimitiveSphere { origin, radius } | TObjIn::CopiedSphere { origin, radius } => st(solidcore::primitive::api_primitives::create_sphere(
-            &mut k, v3(*origin), *radius,
-        ))?.map_err(|code| harness(format!("sphere construction status {code}")))?,
-        TObjIn::CallerFace { origin, size: [width, height] } => {
-            let mut body = st(solidcore::topology::brep::p3::new_brep(&mut k, solidcore::geom::tol::USE_DEFAULT, solidcore::geom::tol::USE_DEFAULT))?
-                .map_err(|code| harness(format!("caller body status {code}")))?;
-            let keys = |entity| {
-                let named = solidcore::topology::brep::p3::topology_ref(0, entity);
-                ObjectRef { type_code: named.type_code, key: ObjectKey(named.type_code as u64 * 1_000_000 + (named.key.0 & 0xffff_ffff)) }
-            };
-            let mut state = solidcore::topology::brep::p2::ArenaNotifyState::new(&body);
-            let mut env = state.env(None);
-            env.key_of = &keys;
-            let this_face = |face| keys(EntityRef::Face(face));
-            let mut marks = solidcore::topology::topology_traverser::Marks::default();
-            let mut fenv = solidcore::topology::brep::p8::FaceBuildEnv { env: &mut env, marks: &mut marks, this_face: &this_face };
-            st(solidcore::topology::brep::p8::create_face_from_surface(&mut k, &mut body,
-                Some(Surface::from(Plane::from_normal(v3(*origin), Vec3::new(0.0, 0.0, 1.0)))),
-                &Extent2d::from_bounds(0.0, 0.0, *width, *height), &mut fenv))?
-                .map_err(|code| harness(format!("caller face status {code}")))?;
-            body
-        }
-        _ => Brep::new(),
-    };
+    let mut brep = if matches!(obj, TObjIn::PrimitiveBox { .. } | TObjIn::PrimitiveSphere { .. } | TObjIn::CallerFace { .. } | TObjIn::CopiedBox { .. } | TObjIn::CopiedSphere { .. }) {
+        constructed_transform_body(&mut k, obj)?
+    } else { Brep::new() };
     let copied = matches!(obj, TObjIn::CopiedBox { .. } | TObjIn::CopiedSphere { .. });
     let mut source = None;
     let mut source_before = Vec::new();
@@ -4981,34 +5135,10 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
         TObjIn::Other => Some(TransformObject::Other),
         TObjIn::Null => None,
     };
-    let res = match op {
-        TOpIn::Transform { o, x, y } => {
-            let pl = Axis2Placement::new(v3(*o), v3(*x), v3(*y));
-            api::api_transform(&mut k, target, &pl)
-        }
-        TOpIn::Scale { s } => api::api_scale(&mut k, target, v3(*s)),
-        TOpIn::ScaleByPt { r, s } => api::api_scale_by_pt(&mut k, target, v3(*r), v3(*s)),
-        TOpIn::Translate { v } => api::api_translate(&mut k, target, v3(*v)),
-        TOpIn::Rotate { r, a, deg } => api::api_rotate(&mut k, target, v3(*r), v3(*a), *deg),
-    };
-    let s = match res {
-        Ok(()) => SM_SUCCESS,
-        Err(e) => match Output::unported(&e) {
-            Some(d) => return Err(Fail::Deferred(Box::new(d))),
-            None => match e {
-                SolidError::InvalidInput { .. } => 1007.0,
-                e => status(&e),
-            },
-        },
-    };
+    let s = transform_status(apply_transform_op(&mut k, target, op))?;
     let mut o = vec![s];
     if matches!(obj, TObjIn::PrimitiveBox { .. } | TObjIn::PrimitiveSphere { .. } | TObjIn::CallerFace { .. } | TObjIn::CopiedBox { .. } | TObjIn::CopiedSphere { .. }) {
-        let vertices = solidcore::topology::brep::p1::vertices(&brep, None).map_err(|e| harness(e.to_string()))?;
-        let edges = solidcore::topology::brep::p1::edges(&brep, None).map_err(|e| harness(e.to_string()))?;
-        let faces = solidcore::topology::brep::p1::faces(&brep, None).map_err(|e| harness(e.to_string()))?;
-        o.extend([vertices.len() as f64, edges.len() as f64, faces.len() as f64, brep.this_model_size_estimate(&k, false)]);
-        st(crate::util::primitive::append(&k, &brep, &mut o))?.map_err(|code| harness(format!("solid geometry status {code}")))?;
-        for face in faces { o.push(f64::from(brep.face(face).map_err(|e| harness(e.to_string()))?.rectangular_trim)); }
+        append_constructed_transform_record(&k, &brep, &mut o)?;
     }
     if let Some(source) = source {
         o.extend(source_before);
@@ -5050,6 +5180,7 @@ pub(super) fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
             ops,
         } => run_proto(objects, *approx_tol, *capture, *override_tol, ops),
         Script::Transform { obj, op } => run_transform(obj, op),
+        Script::TransformSequence { obj, ops } => run_transform_sequence(obj, ops),
     }
 }
 
