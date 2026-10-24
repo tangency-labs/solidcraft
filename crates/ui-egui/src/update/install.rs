@@ -214,7 +214,29 @@ pub fn run(
     if actual != expected {
         return Err(cleanup(format!("{} doesn't match {SUMS} (got {actual}, expected {expected}); it was deleted", asset.name)));
     }
-    apply(method, &part).map_err(cleanup)
+    let outcome = apply(method, &part).map_err(cleanup)?;
+    Ok(match (method, outcome) {
+        // Zsync-based tools (Gearlever, AppImageUpdate) find the update data by the release's file name.
+        (Method::AppImage(_), Outcome::Restart(placed)) => {
+            let named = release_named(&placed, release.version(), arch);
+            // A failed rename leaves the new AppImage under its old name: it still works.
+            Outcome::Restart(if named != placed && std::fs::rename(&placed, &named).is_ok() { named } else { placed })
+        }
+        (_, outcome) => outcome,
+    })
+}
+
+/// Where an AppImage called `path` goes once it holds `version`: if its name is a release name
+/// (`solidcraft-<version>-linux-<arch>.AppImage`, or the old `solvecraft-` one), the new release's name
+/// in the same folder; any other name (renamed by the user, or without a version) is kept.
+pub fn release_named(path: &Path, version: &str, arch: &str) -> PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let rest = name.strip_prefix("solidcraft-").or_else(|| name.strip_prefix("solvecraft-"));
+    if rest.is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit()) && r.contains("-linux-") && r.ends_with(".appimage")) {
+        path.with_file_name(format!("solidcraft-{}-linux-{arch}.AppImage", version.trim_start_matches('v')))
+    } else {
+        path.to_path_buf()
+    }
 }
 
 /// Put a verified package in place.

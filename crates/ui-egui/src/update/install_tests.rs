@@ -218,3 +218,31 @@ fn windows_installer_is_followed_by_the_new_version() {
     );
     assert!(out.iter().any(|a| a == "-Command"));
 }
+
+#[test]
+fn an_updated_appimage_takes_the_release_file_name() {
+    let new = |p: &str| release_named(Path::new(p), "v0.17.0", "x86_64");
+    assert_eq!(new("/a/solidcraft-0.16.2-linux-x86_64.AppImage"), Path::new("/a/solidcraft-0.17.0-linux-x86_64.AppImage"));
+    assert_eq!(new("/a/solvecraft-0.9.0-linux-x86_64.AppImage"), Path::new("/a/solidcraft-0.17.0-linux-x86_64.AppImage"));
+    assert_eq!(new("/a/SolidCraft.AppImage"), Path::new("/a/SolidCraft.AppImage"), "a name the user chose");
+    assert_eq!(new("/a/solidcraft-linux-x86_64.AppImage"), Path::new("/a/solidcraft-linux-x86_64.AppImage"), "no version in it");
+    assert_eq!(new("/a/solidcraft-0.16.2-linux-x86_64.AppImage.bak"), Path::new("/a/solidcraft-0.16.2-linux-x86_64.AppImage.bak"));
+
+    // End to end: the old versioned file is gone, the new one has the release's name and works.
+    let dir = scratch("appimage-name");
+    let old = dir.join("solidcraft-9.9.8-linux-x86_64.AppImage");
+    std::fs::write(&old, b"old version").unwrap();
+    let name = "solidcraft-linux-x86_64.AppImage";
+    let content = b"new version".to_vec();
+    let r = release_with(&[(name, content.len()), (SUMS, 100)]);
+    let sums = format!("{}  {name}\n", hex(&content));
+    let n = net(vec![(name.into(), content.clone()), (SUMS.into(), sums.into_bytes())]);
+    let kind = InstallKind::AppImage(old.clone());
+    let out = run(&r, &kind, &Method::AppImage(old.clone()), "x86_64", &n, &dir, &Progress::default()).unwrap();
+    let want = dir.join("solidcraft-9.9.9-linux-x86_64.AppImage");
+    assert_eq!(out, Outcome::Restart(want.clone()));
+    assert_eq!(std::fs::read(&want).unwrap(), content);
+    assert!(!old.exists());
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "nothing else is left behind");
+    let _ = std::fs::remove_dir_all(&dir);
+}
