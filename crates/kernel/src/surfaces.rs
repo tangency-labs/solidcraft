@@ -501,11 +501,18 @@ pub(crate) fn picked_chain(body: &Body, at: &[Vec3]) -> Result<(Vec<mt::Edge>, b
     Ok((chain, closed))
 }
 
+/// Copy the faces specified by their 0-based face indices from `body` into a new surface body.
+pub fn copy_face_indices(body: &Body, indices: &[usize]) -> Result<Body> {
+    body.require_brep("copy faces")?;
+    let faces: Vec<&mt::Face> = body.solid.face_iter().collect();
+    let copied = surface_body(indices.iter().filter_map(|i| faces.get(*i).map(|f| (*f).clone())).collect());
+    Ok(rebuilt_body(copied, &[&body.solid], &Rebuild::default()))
+}
+
 /// Faces of a body copied out as a surface body (faces picked by points on them). Its history is
 /// over `[body]`: the faces and their edges are the body's.
 pub fn copy_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
     body.require_brep("copy faces")?;
-    let faces: Vec<&mt::Face> = body.solid.face_iter().collect();
     let mut chosen = Vec::new();
     for p in at {
         // The face whose mesh passes nearest the point.
@@ -514,8 +521,7 @@ pub fn copy_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
             chosen.push(i);
         }
     }
-    let copied = surface_body(chosen.into_iter().filter_map(|i| faces.get(i).map(|f| (*f).clone())).collect());
-    Ok(rebuilt_body(copied, &[&body.solid], &Rebuild::default()))
+    copy_face_indices(body, &chosen)
 }
 
 /// The faces picked by points on them (each once, in the order picked); every face when no
@@ -600,7 +606,7 @@ pub(crate) fn nearest_face(body: &Body, p: Vec3) -> Result<usize> {
     let mut best: Option<(f64, u32)> = None;
     for (t, f) in m.triangles.iter().zip(&m.tri_face) {
         let Some([a, b, c]) = m.tri(t) else { continue };
-        let d = ((a + b + c) / 3.0).dist(p).min(a.dist(p)).min(b.dist(p)).min(c.dist(p));
+        let d = crate::polyhedron::point_tri(p, a, b, c);
         if best.is_none_or(|(x, _)| d < x) {
             best = Some((d, *f));
         }
@@ -832,11 +838,19 @@ const THICKEN_TOLERANCE: f64 = 0.01;
 /// that would fold a face over is refused. Neighbouring faces must meet smoothly (their offsets
 /// agree).
 pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
-    body.require_brep("thicken")?;
     if !(thickness.is_finite() && thickness.abs() > 1e-9) {
         return Err(KernelError::Invalid("thickness must be non-zero".into()));
     }
     let (d0, d1) = if symmetric { (-thickness / 2.0, thickness / 2.0) } else { (0.0, thickness) };
+    thicken_between(body, d0, d1)
+}
+
+/// Thicken between two distances `d0` and `d1` along the face outward normals.
+pub fn thicken_between(body: &Body, d0: f64, d1: f64) -> Result<Body> {
+    body.require_brep("thicken")?;
+    if !d0.is_finite() || !d1.is_finite() || (d1 - d0).abs() < 1e-9 {
+        return Err(KernelError::Invalid("thickness bounds must be finite and distinct".into()));
+    }
     let (lo, hi) = (d0.min(d1), d0.max(d1));
     let size = body.size();
     let tol = size * 1e-7 + 1e-9;

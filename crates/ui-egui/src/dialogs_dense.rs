@@ -704,10 +704,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 ui_kit::segmented(ui, &mut i, &["Emboss", "Deboss"], Default::default());
                 *deboss = i == 1;
             });
-            ui.add(
-                egui::Label::new("Orthogonal line profiles tangent to one supported cylinder wrap automatically. Pick a wall to choose a target.")
-                    .wrap(),
-            );
+            ui.add(egui::Label::new("Emboss or deboss profiles onto concave, convex, or planar faces. Pick a face to choose a target.").wrap());
         }
         Kind::Align { flip } => {
             // Where on the picked face or edge to snap: as picked (a face turns to meet

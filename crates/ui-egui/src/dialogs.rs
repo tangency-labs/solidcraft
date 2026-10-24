@@ -130,11 +130,11 @@ crate::dialog_descriptor::dialog_descriptors! {
             diameter: String = "5 mm".into() => diameter.to_string(),
             wall: String = String::new() => wall.as_deref().map(str::to_string).unwrap_or_default(),
         } => json!({"diameter": diameter});
-        Emboss("solid.emboss", "EMBOSS", [("Profiles", PROFILES, true), ("Target Face (optional)", FACES, false)],
+        Emboss("solid.emboss", "EMBOSS", [("Profiles", PROFILES, true), ("Target Face", FACES, true)],
             FeatureKind::Emboss { depth, deboss, .. }) {
             depth: String = "1 mm".into() => depth.to_string(),
             deboss: bool = false => *deboss,
-        } => json!({"depth": depth, "mode": if *deboss { "deboss" } else { "emboss" }});
+        } => json!({"depth": depth, "mode": if *deboss { "deboss" } else { "emboss" }, "mapping": "wrap"});
         ; custom {
             /// Pick a plane or planar face; the sketch starts on it at once.
             Sketch,
@@ -3661,6 +3661,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Emboss { .. } => {
             need(0, "profiles")?;
+            need(1, "a target face")?;
             let (sketch, idx) = profiles();
             let mut p = json!({"sketch": sketch, "profiles": idx});
             if let Some(Sel::Face { body, point, .. }) = sels(d, 1).first() {

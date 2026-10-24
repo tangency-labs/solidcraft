@@ -942,6 +942,8 @@ pub enum FeatureKind {
         deboss: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         face: Option<EmbossFace>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mapping: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
     },

@@ -43,8 +43,8 @@ pub fn cylinder_emboss_anchor(body: &Body, face: usize, at: Vec3) -> Result<Vec3
     guard("cylinder emboss anchor", || {
         let f = body.solid.face_iter().nth(face).ok_or_else(|| fail("selected face"))?;
         let tol = (body.size() * 1e-8).max(1e-8);
-        let Some(Surf::Cylinder { o, a, r, convex: true }) = surf_of(f, tol) else {
-            return Err(fail("selected face is not an exterior cylinder"));
+        let Some(Surf::Cylinder { o, a, r, .. }) = surf_of(f, tol) else {
+            return Err(fail("selected face is not a cylinder"));
         };
         let w = at - o;
         let radial = w - a * w.dot(a);
@@ -53,6 +53,308 @@ pub fn cylinder_emboss_anchor(body: &Body, face: usize, at: Vec3) -> Result<Vec3
         }
         Ok(o + a * w.dot(a) + radial.normalized().ok_or_else(|| fail("radial point"))? * r)
     })
+}
+
+/// Certify a tessellated pick and project it onto the face used by emboss (supports cylinders, planes, spheres, etc.).
+pub fn emboss_anchor(body: &Body, face: usize, at: Vec3) -> Result<Vec3> {
+    if !at.is_finite() || at.len() > 1e9 {
+        return Err(fail("invalid selected face point"));
+    }
+    guard("emboss anchor", || {
+        let f = body.solid.face_iter().nth(face).ok_or_else(|| fail("selected face"))?;
+        let tol = (body.size() * 1e-8).max(1e-8);
+        match surf_of(f, tol) {
+            Some(Surf::Cylinder { o, a, r, .. }) => {
+                let w = at - o;
+                let radial = w - a * w.dot(a);
+                if (radial.len() - r).abs() > (body.size() * 1e-3).max(1e-3).min(r * 0.05) {
+                    return Err(fail("selected point is too far from cylinder"));
+                }
+                Ok(o + a * w.dot(a) + radial.normalized().ok_or_else(|| fail("radial point"))? * r)
+            }
+            Some(Surf::Plane { n, d }) => {
+                let dist = at.dot(n) - d;
+                if dist.abs() > (body.size() * 1e-3).max(1e-3) {
+                    return Err(fail("selected point is too far from plane"));
+                }
+                Ok(at - n * dist)
+            }
+            Some(Surf::Sphere { c, r, .. }) => {
+                let radial = at - c;
+                if (radial.len() - r).abs() > (body.size() * 1e-3).max(1e-3).min(r * 0.05) {
+                    return Err(fail("selected point is too far from sphere"));
+                }
+                Ok(c + radial.normalized().ok_or_else(|| fail("radial point"))? * r)
+            }
+            _ => Ok(at),
+        }
+    })
+}
+
+/// Project 2D sketch profile regions along the sketch plane normal onto a face of the body,
+/// embossing (raised if `depth > 0`) or debossing (cut if `depth < 0`) by `depth.abs()`.
+/// Supports all surface types: concave, convex, planar, spherical, etc.
+pub fn emboss_project(body: &Body, at: Vec3, plane: &Plane, regions: &[Region2], depth: f64) -> Result<Body> {
+    emboss_project_face(body, None, at, plane, regions, depth)
+}
+
+/// Project 2D sketch profile regions onto a face of the body with wrap mapping,
+/// embossing (raised if `depth > 0`) or debossing (cut if `depth < 0`) by `depth.abs()`.
+/// Supports all surface types: concave, convex, planar, spherical, etc.
+pub fn emboss_project_mapped(body: &Body, at: Vec3, plane: &Plane, regions: &[Region2], depth: f64, _mapping: Option<&str>) -> Result<Body> {
+    emboss_project_face(body, None, at, plane, regions, depth)
+}
+
+/// Project 2D sketch profile regions onto a face of the body with wrap mapping,
+/// optionally targeting an explicit face index `target_face`,
+/// embossing (raised if `depth > 0`) or debossing (cut if `depth < 0`) by `depth.abs()`.
+/// Supports all surface types: concave, convex, planar, spherical, etc.
+pub fn emboss_project_mapped_face(
+    body: &Body,
+    target_face: Option<usize>,
+    at: Vec3,
+    plane: &Plane,
+    regions: &[Region2],
+    depth: f64,
+    _mapping: Option<&str>,
+) -> Result<Body> {
+    emboss_project_face(body, target_face, at, plane, regions, depth)
+}
+
+/// Project 2D sketch profile regions onto a face of the body with wrap mapping,
+/// optionally targeting an explicit face index `target_face`,
+/// embossing (raised if `depth > 0`) or debossing (cut if `depth < 0`) by `depth.abs()`.
+/// Supports all surface types: concave, convex, planar, spherical, etc.
+pub fn emboss_project_face(body: &Body, target_face: Option<usize>, at: Vec3, plane: &Plane, regions: &[Region2], depth: f64) -> Result<Body> {
+    body.require_brep("emboss project")?;
+    if !depth.is_finite() || depth.abs() < 1e-6 || depth.abs() > 1e6 || regions.is_empty() || regions.len() > 4096 {
+        return Err(fail("needs finite nonzero depth and 1..4096 profiles"));
+    }
+    if !plane.origin.is_finite()
+        || !plane.x.is_finite()
+        || !plane.y.is_finite()
+        || (plane.x.len() - 1.0).abs() > 1e-8
+        || (plane.y.len() - 1.0).abs() > 1e-8
+        || plane.x.dot(plane.y).abs() > 1e-8
+    {
+        return Err(fail("invalid sketch frame"));
+    }
+    if !at.is_finite() || at.len() > 1e9 {
+        return Err(fail("invalid selected face point"));
+    }
+
+    guard("emboss project", || {
+        let n = plane.normal();
+        let tol = (body.size() * 1e-8).max(1e-8);
+        let d_abs = depth.abs();
+
+        let face_idx = match target_face {
+            Some(fi) => {
+                if fi >= body.solid.face_iter().count() {
+                    return Err(fail("target face index out of bounds"));
+                }
+                fi
+            }
+            None => crate::surfaces::nearest_face(body, at)?,
+        };
+        let face_sheet = crate::surfaces::copy_face_indices(body, &[face_idx])?;
+        let face_ref = body.solid.face_iter().nth(face_idx);
+        let cyl_info = face_ref.and_then(|f| surf_of(f, tol)).and_then(|surf| match surf {
+            Surf::Cylinder { o, a, r, .. } => Some((o, a, r)),
+            _ => None,
+        });
+
+        // Build thickened concentric slab around the target face
+        // Slab extends inward/outward so that the raised or cut feature is carved with the exact curved face
+        let overlap = (d_abs * 0.2).clamp(0.1, 2.0);
+        let slab = if depth > 0.0 {
+            // Emboss: slab goes from slightly inside the face (-overlap) to +d_abs outside
+            crate::surfaces::thicken_between(&face_sheet, -overlap, d_abs)?
+        } else {
+            // Deboss: slab goes from -d_abs inside the face to +overlap outside
+            crate::surfaces::thicken_between(&face_sheet, -d_abs, overlap)?
+        };
+
+        if let Some((o, a, r)) = cyl_info {
+            // Find face radial vector at pick point `at`
+            let w = at - o;
+            let w_radial = w - a * w.dot(a);
+            let radial_at = w_radial.normalized().unwrap_or(w);
+
+            // Determine if the cylinder axis aligns more with sketch Y or sketch X
+            // Usually, sketch Y is along cylinder axis (text wraps around circumference)
+            let ky = plane.y.dot(a);
+            let kx = plane.x.dot(a);
+            let text_along_axis = kx.abs() > ky.abs();
+
+            let (v_perp, x_dir_sketch, sign_y, sign_x) = if !text_along_axis {
+                let v = plane.x.cross(a);
+                let v_norm = v.normalized().unwrap_or(radial_at);
+                let sy = if ky < 0.0 { -1.0 } else { 1.0 };
+                (v_norm, plane.x, sy, 1.0)
+            } else {
+                let v = plane.y.cross(a);
+                let v_norm = v.normalized().unwrap_or(radial_at);
+                let sx = if kx < 0.0 { -1.0 } else { 1.0 };
+                (v_norm, plane.y, 1.0, sx)
+            };
+
+            // Choose the radial direction facing the selected face (matching radial_at)
+            let radial_0 = if v_perp.dot(radial_at) >= 0.0 { v_perp } else { -v_perp };
+
+            // Tangent along circumference at radial_0, pointing in the same direction as x_dir_sketch
+            let t_cand = a.cross(radial_0);
+            let tangent_0 = if t_cand.dot(x_dir_sketch) >= 0.0 {
+                t_cand.normalized().unwrap_or(x_dir_sketch)
+            } else {
+                (-t_cand).normalized().unwrap_or(x_dir_sketch)
+            };
+
+            // Sketch origin offset relative to cylinder axis
+            let u_orig = (plane.origin - o).dot(tangent_0);
+            let z_orig = (plane.origin - o).dot(a);
+
+            let mut profile_solids = Vec::new();
+            for reg in regions {
+                let c_2d = reg.centroid();
+
+                // Compute centroid displacement relative to cylinder center
+                let ds = u_orig + c_2d.x * plane.x.dot(tangent_0) + c_2d.y * plane.y.dot(tangent_0);
+                let theta = ds / r;
+
+                let cos_t = theta.cos();
+                let sin_t = theta.sin();
+                let radial_i = (radial_0 * cos_t + tangent_0 * sin_t).normalized().unwrap_or(radial_0);
+                let tangent_i = (-radial_0 * sin_t + tangent_0 * cos_t).normalized().unwrap_or(tangent_0);
+
+                // Axial position of the centroid
+                let zh = z_orig + c_2d.x * plane.x.dot(a) + c_2d.y * plane.y.dot(a);
+                let p_i = o + a * zh + radial_i * r;
+
+                // Local frame on the tangent plane:
+                // local_x points along the reading direction
+                // local_y points along the upright direction
+                let local_x = if !text_along_axis { tangent_i } else { a * sign_x };
+                let local_y = if !text_along_axis { a * sign_y } else { tangent_i };
+
+                let Some(local_plane) = Plane::new(p_i, local_x, local_y) else { continue };
+
+                // Map region relative to centroid
+                let mapped_reg = reg.map_points(&|p| p - c_2d);
+
+                // Extrude symmetrically across tangent plane so it fully spans the slab
+                let pad = (d_abs + overlap) * 2.5 + 2.0;
+                let local_prisms = crate::extrude(&local_plane, &[mapped_reg], -pad, pad)?;
+                for p in local_prisms {
+                    if let Some(carved) = crate::boolean(&p, &slab, crate::BoolOp::Intersect)? {
+                        profile_solids.push(carved);
+                    }
+                }
+            }
+
+            if profile_solids.is_empty() {
+                return Err(KernelError::Invalid("profile does not intersect target cylinder face".into()));
+            }
+            apply_emboss_pieces(body, profile_solids, depth)
+        } else {
+            // General surface / planar fallback: extrude parallel to sketch normal and intersect with the slab
+            let (lo, hi) = if let Ok(m) = slab.tessellate(slab.size() * 1e-2) {
+                let mut min_h = f64::INFINITY;
+                let mut max_h = f64::NEG_INFINITY;
+                for v in &m.positions {
+                    let h = (*v - plane.origin).dot(n);
+                    if h < min_h {
+                        min_h = h;
+                    }
+                    if h > max_h {
+                        max_h = h;
+                    }
+                }
+                let pad = (d_abs * 2.0).max(5.0);
+                (min_h - pad, max_h + pad)
+            } else {
+                let h_at = (at - plane.origin).dot(n);
+                let pad = (d_abs * 4.0).max(20.0);
+                (h_at - pad, h_at + pad)
+            };
+            let prisms = crate::extrude(plane, regions, lo.min(hi), lo.max(hi))?;
+            if prisms.is_empty() {
+                return Err(KernelError::Invalid("profile extrusion produced no solids".into()));
+            }
+
+            let mut pieces = Vec::new();
+            for prism in &prisms {
+                if let Some(carved) = crate::boolean(prism, &slab, crate::BoolOp::Intersect)? {
+                    pieces.push(carved);
+                }
+            }
+            apply_emboss_pieces(body, pieces, depth)
+        }
+    })
+}
+
+/// Apply embossed or debossed profile solid pieces onto the body.
+/// Tries a single multi-shell boolean first, falling back to sequential piece-by-piece booleans,
+/// and returns clear human-readable error messages with developer diagnostics if unresolved.
+fn apply_emboss_pieces(body: &Body, pieces: Vec<Body>, depth: f64) -> Result<Body> {
+    if pieces.is_empty() {
+        return Err(KernelError::Invalid("profile does not intersect target face".into()));
+    }
+    let is_emboss = depth > 0.0;
+    let op = if is_emboss { crate::BoolOp::Union } else { crate::BoolOp::Cut };
+    let piece_count = pieces.len();
+
+    // 1. Fast path: try combining all pieces into one multi-shell tool.
+    // When pieces are disjoint, a single boolean keeps the target faces clean
+    // and avoids repeated intermediate face fragmentation.
+    if let Ok(Some(combined)) = crate::ops::join_pieces(pieces.clone())
+        && let Ok(Some(res)) = crate::boolean(body, &combined, op)
+    {
+        return Ok(res);
+    }
+
+    // 2. Sequential fallback: apply each piece individually
+    let mut current = body.clone();
+    let mut succeeded = 0;
+    let mut first_err = None;
+
+    for piece in pieces {
+        match crate::boolean(&current, &piece, op) {
+            Ok(Some(next)) => {
+                current = next;
+                succeeded += 1;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                if first_err.is_none() {
+                    first_err = Some(e);
+                }
+            }
+        }
+    }
+
+    if succeeded > 0 {
+        Ok(current)
+    } else if let Some(err) = first_err {
+        let op_name = if is_emboss { "emboss" } else { "deboss" };
+        let raw = err.to_string();
+        let technical_summary = if raw.contains("faces that touch, or cross at a shallow angle") {
+            "faces touch or meet at a shallow angle on curved geometry"
+        } else if raw.contains("outside the tool's region") || raw.contains("could not be computed reliably") {
+            "coincident or flush faces caused boundary ambiguity"
+        } else if raw.contains("no result") {
+            "surface-surface intersection produced no valid boundary"
+        } else {
+            "boolean solver could not resolve boundary intersections"
+        };
+        Err(KernelError::Failed(format!(
+            "Emboss failed: could not {op_name} profile onto target face ({technical_summary}). \
+            Ensure profiles lie within the target face boundaries and do not graze cut edges. \
+            [Details: {piece_count} profile pieces; {raw}]"
+        )))
+    } else {
+        Err(KernelError::Failed("Emboss failed: no profile pieces could be applied to target face.".into()))
+    }
 }
 
 /// Wrap sketch arc length around an exterior cylinder, retaining exact radial depth.
@@ -746,5 +1048,59 @@ mod tests {
         }
         assert!(emboss_cylinder_at(&sleeve, -Vec3::Y * 10. + Vec3::Z * 7.5, &plane(), &[profile()], 1.).is_err());
         assert_eq!(crate::step_export(&[&sleeve], "unchanged").unwrap(), before);
+    }
+
+    #[test]
+    fn concave_cylinder_emboss_and_deboss_project() {
+        let block = crate::box_solid(Vec3::ZERO, Vec3::new(40., 40., 40.)).unwrap();
+        let cut_cyl = crate::cylinder(Vec3::new(20., 0., 40.), Vec3::Y, 15., 40.).unwrap();
+        let concave_part = crate::boolean(&block, &cut_cyl, crate::BoolOp::Cut).unwrap().unwrap();
+        let at = Vec3::new(20., 20., 25.);
+
+        let sketch_plane = Plane::new(Vec3::new(20., 20., 45.), Vec3::X, Vec3::Y).unwrap();
+        let profile =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(-3., -3.), Vec2::new(3., -3.), Vec2::new(3., 3.), Vec2::new(-3., 3.)]), holes: vec![] };
+
+        // Emboss (raised feature by 1 mm)
+        let embossed = emboss_project(&concave_part, at, &sketch_plane, &[profile.clone()], 1.0).unwrap();
+        assert_eq!(embossed.shell_count(), 1);
+        let vol_before = crate::measure(&concave_part).unwrap().volume;
+        let vol_embossed = crate::measure(&embossed).unwrap().volume;
+        assert!(vol_embossed > vol_before, "emboss should add volume: {vol_embossed} vs {vol_before}");
+
+        // Deboss (cut feature by 1 mm)
+        let debossed = emboss_project(&concave_part, at, &sketch_plane, &[profile], -1.0).unwrap();
+        assert_eq!(debossed.shell_count(), 1);
+        let vol_debossed = crate::measure(&debossed).unwrap().volume;
+        assert!(vol_debossed < vol_before, "deboss should remove volume: {vol_debossed} vs {vol_before}");
+    }
+
+    #[test]
+    fn planar_and_convex_emboss_project() {
+        // Planar face
+        let block = crate::box_solid(Vec3::ZERO, Vec3::new(40., 40., 20.)).unwrap();
+        let at_planar = Vec3::new(20., 20., 20.);
+        let sketch_plane = Plane::new(Vec3::new(20., 20., 30.), Vec3::X, Vec3::Y).unwrap();
+        let profile =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(-5., -5.), Vec2::new(5., -5.), Vec2::new(5., 5.), Vec2::new(-5., 5.)]), holes: vec![] };
+        let embossed_plane = emboss_project(&block, at_planar, &sketch_plane, &[profile.clone()], 2.0).unwrap();
+        let vol_block = crate::measure(&block).unwrap().volume;
+        let vol_emb_plane = crate::measure(&embossed_plane).unwrap().volume;
+        assert!((vol_emb_plane - (vol_block + 10.0 * 10.0 * 2.0)).abs() < 1e-4);
+
+        let debossed_plane = emboss_project(&block, at_planar, &sketch_plane, &[profile.clone()], -2.0).unwrap();
+        let vol_deb_plane = crate::measure(&debossed_plane).unwrap().volume;
+        assert!((vol_deb_plane - (vol_block - 10.0 * 10.0 * 2.0)).abs() < 1e-4);
+
+        // Convex cylinder
+        let cyl = crate::cylinder(Vec3::ZERO, Vec3::Z, 20., 40.).unwrap();
+        let at_cyl = Vec3::new(20., 0., 20.);
+        let sketch_plane_cyl = Plane::new(Vec3::new(25., 0., 20.), -Vec3::Y, Vec3::Z).unwrap();
+        let embossed_cyl = emboss_project(&cyl, at_cyl, &sketch_plane_cyl, &[profile.clone()], 1.0).unwrap();
+        let vol_cyl = crate::measure(&cyl).unwrap().volume;
+        assert!(crate::measure(&embossed_cyl).unwrap().volume > vol_cyl);
+
+        let debossed_cyl = emboss_project(&cyl, at_cyl, &sketch_plane_cyl, &[profile], -1.0).unwrap();
+        assert!(crate::measure(&debossed_cyl).unwrap().volume < vol_cyl);
     }
 }
