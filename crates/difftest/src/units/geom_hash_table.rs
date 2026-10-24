@@ -637,6 +637,10 @@ fn apply(m: &mut Model, upd: &mut Vec<usize>, op: &Op) -> solidcore::Result<()> 
 }
 
 impl UnitDiff for Runner {
+    fn reference_platform(&self) -> Option<crate::platform::ReferencePlatform> {
+        Some(crate::platform::X86_64_HASH_CASTS)
+    }
+
     fn id(&self) -> &'static str {
         "geom.hash_table"
     }

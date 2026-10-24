@@ -635,6 +635,8 @@ pub struct FuzzResult {
     pub notes: Vec<Failure>,
     /// Failure to build or run the cases.
     pub harness_error: Option<String>,
+    /// Reason the native reference is unsupported; no mutations or workers ran.
+    pub skipped_platform: Option<String>,
 }
 
 impl FuzzResult {
@@ -643,15 +645,21 @@ impl FuzzResult {
         self.verdicts.iter().filter(|&&x| x == v).count()
     }
 
-    /// No failure and no harness error.
+    /// At least one verdict, no failure, no harness error and no platform skip.
     pub fn pass(&self) -> bool {
-        self.harness_error.is_none() && self.failures.is_empty() && !self.verdicts.is_empty()
+        self.skipped_platform.is_none()
+            && self.harness_error.is_none()
+            && self.failures.is_empty()
+            && !self.verdicts.is_empty()
     }
 }
 
 /// One-line summary, e.g. `FUZZ-PASS harness.selftest cases=300 rejected=81 malformed=40
 /// ran=179 differs=2 crashes=0 panics=0 timeouts=0` (`ran` includes `differs`).
 pub fn summary_line(r: &FuzzResult) -> String {
+    if let Some(reason) = &r.skipped_platform {
+        return format!("FUZZ-SKIP {} skipped(platform): {reason}", r.unit);
+    }
     let mut s = format!(
         "{} {} cases={} rejected={} malformed={} ran={} differs={} crashes={} panics={} timeouts={}",
         if r.pass() { "FUZZ-PASS" } else { "FUZZ-FAIL" },
@@ -732,8 +740,15 @@ fn clear_old(dir: &Path) {
 pub fn run_fuzz(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &FuzzOptions) -> FuzzResult {
     let mut res = FuzzResult {
         unit: unit.id().to_string(),
+        skipped_platform: unit
+            .reference_platform()
+            .and_then(|p| p.skip_reason(std::env::consts::ARCH))
+            .map(str::to_string),
         ..FuzzResult::default()
     };
+    if res.skipped_platform.is_some() {
+        return res;
+    }
     if let Err(e) = fuzz_unit(unit, ctx, opts, &mut res) {
         res.harness_error = Some(e.0);
     }

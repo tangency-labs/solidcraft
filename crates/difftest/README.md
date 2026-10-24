@@ -54,6 +54,27 @@ PASS|PARTIAL|FAIL <unit> cases=… passed=… failed=… deferred=… max_rel_er
 ```
 
 then the first few failing cases and `reports/difftest/<unit>.json`.
+
+**Native reference restrictions ([#448](https://github.com/tangency-labs/solidcore/issues/448)).**
+`geom.hash_table`, `heal.heal_data_p1`, `heal.heal_data_p2`, `heal.heal_data_p3`
+and `surface.twist_volume` require an x86-64 C++ reference. Their out-of-range
+floating-point-to-integer conversions are undefined upstream; ARM64 saturates
+where the pinned x86-64 reference wraps. Rust deliberately reproduces the latter
+on every target. On other architectures these units print `SKIP ...
+skipped(platform)` (or `FUZZ-SKIP`), before building fixtures or calling C++.
+The twist unit is included because its period reduction has the same dependency,
+even though the current committed cases do not expose it.
+
+Skipped units are counted separately from passes, partials and failures. Their
+JSON reports have `status: "skipped(platform)"`, `pass: false`, a reason in
+`skipped_platform`, and no compared cases. `--status-of` prints `skipped(platform)`;
+ordinary comparison and fuzz runs exit successfully when they contain only passes,
+partials and platform skips. `--baseline` fails if any selected reference is
+unsupported, and skipped reports are invalid baselines: this cannot waive the CI
+coverage ratchet. Plan statuses and tolerances are unchanged. Rust-only
+`--digest-dir` runs remain enabled on every target. On Apple Silicon, an x86-64
+harness and difftest binary under Rosetta can compare these units; this does not
+address independent libc++ reader or libm differences.
 `with_values` / `no_values` split the passing cases into those that compared
 at least one float, integer or topology entry and those that compared nothing
 (both sides returned the same error, or empty outputs). `vacuous` counts the

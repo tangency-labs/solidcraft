@@ -161,10 +161,8 @@ pub struct UnitRun {
     pub stdout: String,
     /// The child's stderr, forwarded as is.
     pub stderr: String,
-    /// The unit counts as failed.
-    pub failed: bool,
-    /// The unit counts as partial.
-    pub partial: bool,
+    /// Comparison outcome, including unsupported native references.
+    pub status: crate::UnitStatus,
     /// The child hit a setup error (exit status 2), e.g. an unwritable report.
     pub setup_error: bool,
 }
@@ -181,14 +179,20 @@ fn exit_detail(status: ExitStatus) -> String {
     format!("exit code {}", status.code().unwrap_or(-1))
 }
 
-/// Parses `difftest: 1 unit(s), P passed, Q partial, F failed[...]` into `(Q, F)`.
-fn parse_summary(line: &str) -> Option<(usize, usize)> {
+/// Parses the aggregate counts `(partial, failed, skipped)` of one child.
+fn parse_summary(line: &str) -> Option<(usize, usize, usize)> {
     let rest = line.strip_prefix("difftest: 1 unit(s), ")?;
     let mut parts = rest.split(", ");
     let _passed = parts.next()?.strip_suffix(" passed")?;
     let partial = parts.next()?.strip_suffix(" partial")?.parse().ok()?;
     let failed = parts.next()?.split(' ').next()?.parse().ok()?;
-    Some((partial, failed))
+    let skipped = parts
+        .find_map(|p| p.strip_suffix(" skipped(platform)"))
+        .map(str::parse)
+        .transpose()
+        .ok()?
+        .unwrap_or(0);
+    Some((partial, failed, skipped))
 }
 
 /// Turns a finished child's output into what the parent prints and counts. A child that
@@ -197,7 +201,7 @@ pub fn interpret(id: &str, status: Option<ExitStatus>, stdout: &str, stderr: &st
     let code = status.and_then(|s| s.code());
     let body = stdout.trim_end_matches('\n');
     let (block, last) = body.rsplit_once('\n').unwrap_or(("", body));
-    if let (Some(c @ 0..=2), Some((partial, failed))) = (code, parse_summary(last)) {
+    if let (Some(c @ 0..=2), Some((partial, failed, skipped))) = (code, parse_summary(last)) {
         let mut out = block.to_string();
         if !out.is_empty() {
             out.push('\n');
@@ -205,8 +209,15 @@ pub fn interpret(id: &str, status: Option<ExitStatus>, stdout: &str, stderr: &st
         return UnitRun {
             stdout: out,
             stderr: stderr.to_string(),
-            failed: failed > 0,
-            partial: partial > 0,
+            status: if failed > 0 {
+                crate::UnitStatus::Fail
+            } else if partial > 0 {
+                crate::UnitStatus::Partial
+            } else if skipped > 0 {
+                crate::UnitStatus::SkippedPlatform
+            } else {
+                crate::UnitStatus::Green
+            },
             setup_error: c == 2,
         };
     }
@@ -226,8 +237,7 @@ pub fn interpret(id: &str, status: Option<ExitStatus>, stdout: &str, stderr: &st
     UnitRun {
         stdout: out,
         stderr: String::new(),
-        failed: true,
-        partial: false,
+        status: crate::UnitStatus::Fail,
         setup_error: false,
     }
 }
@@ -317,6 +327,7 @@ pub fn run_parallel(
     let mut printed = 0usize;
     let mut pool = Pool(Vec::new());
     let (mut failed, mut partial, mut setup_error) = (0usize, 0usize, false);
+    let mut skipped = 0usize;
     let stdout = std::io::stdout();
     while printed < units.len() {
         while pool.0.len() < jobs.max(1) {
@@ -361,8 +372,9 @@ pub fn run_parallel(
             let _ = so.flush();
             drop(so);
             let _ = std::io::stderr().write_all(r.stderr.as_bytes());
-            failed += usize::from(r.failed);
-            partial += usize::from(r.partial && !r.failed);
+            failed += usize::from(r.status == crate::UnitStatus::Fail);
+            partial += usize::from(r.status == crate::UnitStatus::Partial);
+            skipped += usize::from(r.status == crate::UnitStatus::SkippedPlatform);
             setup_error |= r.setup_error;
             printed += 1;
         }
@@ -371,9 +383,8 @@ pub fn run_parallel(
         }
     }
     println!(
-        "difftest: {} unit(s), {} passed, {partial} partial, {failed} failed",
-        units.len(),
-        units.len() - failed - partial
+        "{}",
+        crate::report::run_summary(units.len(), partial, failed, skipped)
     );
     // Timing goes to stderr so stdout stays identical to a serial run.
     let sum: Duration = times.iter().sum();
@@ -468,14 +479,39 @@ mod tests {
     #[test]
     fn summary_lines() {
         assert_eq!(
+            parse_summary(
+                "difftest: 1 unit(s), 0 passed, 0 partial, 0 failed, 1 skipped(platform)"
+            ),
+            Some((0, 0, 1))
+        );
+        assert_eq!(
             parse_summary("difftest: 1 unit(s), 0 passed, 1 partial, 0 failed"),
-            Some((1, 0))
+            Some((1, 0, 0))
         );
         assert_eq!(
             parse_summary("difftest: 1 unit(s), 0 passed, 0 partial, 1 failed, 1 dropped"),
-            Some((0, 1))
+            Some((0, 1, 0))
         );
         assert_eq!(parse_summary("PASS a cases=1"), None);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn skipped_child_is_neither_a_pass_nor_a_failure() {
+        use std::os::unix::process::ExitStatusExt;
+        let summary = crate::report::run_summary(1, 0, 0, 1);
+        let stdout = format!("SKIP u skipped(platform): unsupported reference\n{summary}\n");
+        let r = interpret("u", Some(ExitStatus::from_raw(0)), &stdout, "");
+        assert_eq!(r.status, crate::UnitStatus::SkippedPlatform);
+        assert!(!r.setup_error);
+        assert_eq!(
+            r.stdout,
+            "SKIP u skipped(platform): unsupported reference\n"
+        );
+        assert_eq!(
+            crate::report::run_summary(3, 1, 0, 1),
+            "difftest: 3 unit(s), 1 passed, 1 partial, 0 failed, 1 skipped(platform)"
+        );
     }
 
     #[cfg(unix)]
@@ -490,31 +526,32 @@ mod tests {
             "",
         );
         assert_eq!(r.stdout, "PASS u cases=1\n  report: r/u.json\n");
-        assert!(!r.failed && !r.partial && !r.setup_error);
+        assert_eq!(r.status, crate::UnitStatus::Green);
+        assert!(!r.setup_error);
         let partial = interpret(
             "u",
             Some(ok),
             "PARTIAL u\ndifftest: 1 unit(s), 0 passed, 1 partial, 0 failed\n",
             "",
         );
-        assert!(partial.partial && !partial.failed);
+        assert_eq!(partial.status, crate::UnitStatus::Partial);
         let fail = interpret(
             "u",
             Some(ExitStatus::from_raw(1 << 8)),
             "FAIL u\ndifftest: 1 unit(s), 0 passed, 0 partial, 1 failed\n",
             "",
         );
-        assert!(fail.failed);
+        assert_eq!(fail.status, crate::UnitStatus::Fail);
         // SIGSEGV
         let crash = interpret("u", Some(ExitStatus::from_raw(11)), "", "a\nboom\n");
-        assert!(crash.failed);
+        assert_eq!(crash.status, crate::UnitStatus::Fail);
         assert_eq!(
             crash.stdout,
             "FAIL u (worker process killed by signal 11)\n  stderr: a\n  stderr: boom\n"
         );
         // A clean exit without the summary line is a crash too.
         let cut = interpret("u", Some(ok), "PASS u\n", "");
-        assert!(cut.failed);
+        assert_eq!(cut.status, crate::UnitStatus::Fail);
         assert!(cut
             .stdout
             .starts_with("PASS u\nFAIL u (worker process exit code 0)"));

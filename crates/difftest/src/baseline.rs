@@ -755,6 +755,7 @@ mod tests {
             unit: "a.b".into(),
             cases,
             harness_error: None,
+            skipped_platform: None,
             abs_floors: Vec::new(),
             seeds: 16,
             timing: crate::runner::UnitTiming::default(),

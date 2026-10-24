@@ -19,6 +19,7 @@ pub mod json;
 pub mod known;
 pub mod output;
 pub mod plan;
+pub mod platform;
 pub mod report;
 pub mod rng;
 pub mod runner;

@@ -104,6 +104,10 @@ fn script(rng: &mut Rng) -> Inputs {
 }
 
 impl UnitDiff for Runner {
+    fn reference_platform(&self) -> Option<crate::platform::ReferencePlatform> {
+        Some(crate::platform::X86_64_HASH_CASTS)
+    }
+
     fn id(&self) -> &'static str {
         "heal.heal_data_p3"
     }

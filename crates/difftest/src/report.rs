@@ -87,6 +87,9 @@ pub fn unit_report(r: &UnitResult) -> Value {
     m.insert("unit".into(), json!(r.unit));
     m.insert("pass".into(), json!(r.pass()));
     m.insert("status".into(), json!(r.status().as_str()));
+    if let Some(reason) = &r.skipped_platform {
+        m.insert("skipped_platform".into(), json!(reason));
+    }
     m.insert("rel_tol".into(), num(REL_TOL));
     m.insert("abs_floors".into(), Value::Array(floors));
     m.insert("seeds".into(), json!(r.seeds));
@@ -134,7 +137,7 @@ pub fn write_unit_report(dir: &Path, r: &UnitResult) -> Result<PathBuf, HarnessE
 /// Aggregate counts recorded in a report (including vacuous and known outcomes).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReportCounts {
-    /// `green`, `partial` or `fail`.
+    /// `green`, `partial`, `fail` or `skipped(platform)`.
     pub status: String,
     /// All cases.
     pub total: u64,
@@ -200,14 +203,35 @@ impl ReportCounts {
     }
 }
 
+/// Aggregate CLI summary. Skipped units never contribute to the passed count.
+/// The optional suffix preserves existing output when all references are supported.
+pub fn run_summary(total: usize, partial: usize, failed: usize, skipped: usize) -> String {
+    let mut s = format!(
+        "difftest: {total} unit(s), {} passed, {partial} partial, {failed} failed",
+        total.saturating_sub(partial + failed + skipped)
+    );
+    if skipped > 0 {
+        let _ = write!(s, ", {skipped} skipped(platform)");
+    }
+    s
+}
+
 /// One-line summary, e.g.
 /// `PASS harness.selftest cases=40 passed=40 failed=0 deferred=0 max_rel_err=1.1e-16 with_values=36 no_values=4 vacuous=1`.
-/// The status word is `PASS` (green), `PARTIAL` or `FAIL`; `with_values` / `no_values`
+/// The status word is `PASS` (green), `PARTIAL`, `FAIL` or `SKIP`; a skip prints
+/// only the unit and its platform reason. Otherwise, `with_values` / `no_values`
 /// split the passing cases into those that compared at least one value and those that
 /// compared nothing (the same error on both sides, or empty outputs); `vacuous` counts
 /// the `no_values` cases where both sides succeeded, so only the status agreed; with deferred
 /// cases the line ends with ` blocked_by=<unit>(<cases>),...`.
 pub fn summary_line(r: &UnitResult) -> String {
+    if r.status() == UnitStatus::SkippedPlatform {
+        return format!(
+            "SKIP {} skipped(platform): {}",
+            r.unit,
+            r.skipped_platform.as_deref().unwrap_or_default()
+        );
+    }
     let with_values = r.passed_with_values();
     let mut s = format!(
         "{} {} cases={} passed={} failed={} deferred={} max_rel_err={:e} with_values={with_values} no_values={} vacuous={}",
@@ -215,6 +239,7 @@ pub fn summary_line(r: &UnitResult) -> String {
             UnitStatus::Green => "PASS",
             UnitStatus::Partial => "PARTIAL",
             UnitStatus::Fail => "FAIL",
+            UnitStatus::SkippedPlatform => "SKIP",
         },
         r.unit,
         r.cases.len(),
@@ -262,6 +287,7 @@ mod tests {
             unit: "a.b".into(),
             cases: Vec::new(),
             harness_error: None,
+            skipped_platform: None,
             abs_floors: Vec::new(),
             seeds: 16,
             timing: crate::runner::UnitTiming::default(),

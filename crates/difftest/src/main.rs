@@ -267,9 +267,7 @@ fn main() -> ExitCode {
                 let res = run_unit(unit.as_ref(), &ctx, &opts);
                 // The value-share floor is part of the gate (`--green` enforces it too).
                 match baseline::value_share(&res) {
-                    Some(v)
-                        if res.status() != UnitStatus::Fail && waivers.covering(&v).is_none() =>
-                    {
+                    Some(v) if res.pass() && waivers.covering(&v).is_none() => {
                         eprintln!("difftest: {id}: {}", v.detail);
                         UnitStatus::Fail
                     }
@@ -395,6 +393,7 @@ fn main() -> ExitCode {
 
     let mut failed = 0usize;
     let mut partial = 0usize;
+    let mut skipped = 0usize;
     for id in &wanted {
         let Some(unit) = reg.iter().find(|u| u.id() == id.as_str()) else {
             println!("FAIL {id} (no difftest runner registered for this unit)");
@@ -402,7 +401,7 @@ fn main() -> ExitCode {
             continue;
         };
         let res = run_unit(unit.as_ref(), &ctx, &opts);
-        if args.perturb {
+        if args.perturb && res.status() != UnitStatus::SkippedPlatform {
             let (n, caught) = res.perturb_stats();
             let ok = n > 0 && n == caught;
             let unperturbed = res
@@ -470,18 +469,12 @@ fn main() -> ExitCode {
             .iter()
             .find(|p| p.id == id.as_str())
             .map(|p| p.status.as_str());
-        let mut unit_failed = match res.status() {
-            UnitStatus::Fail => true,
-            UnitStatus::Partial if plan_status == Some("green") => {
-                // Green units cannot contain deferred or known mismatches.
-                println!(
-                    "  FAIL {id}: plan status is green but cases are deferred or known mismatches"
-                );
-                true
-            }
-            UnitStatus::Partial | UnitStatus::Green => false,
-        };
-        if !unit_failed {
+        let gate_error = selection_gate(res.status(), plan_status, args.baseline.is_some());
+        if let Some(reason) = gate_error {
+            println!("  FAIL {id}: {reason}");
+        }
+        let mut unit_failed = res.status() == UnitStatus::Fail || gate_error.is_some();
+        if !unit_failed && res.status() != UnitStatus::SkippedPlatform {
             let mut violations: Vec<Violation> = baseline::value_share(&res).into_iter().collect();
             if let (Some(dir), None) = (&args.baseline, &args.filter) {
                 match baseline::load_baseline(dir, id) {
@@ -499,8 +492,10 @@ fn main() -> ExitCode {
             failed += 1;
         } else if res.status() == UnitStatus::Partial {
             partial += 1;
+        } else if res.status() == UnitStatus::SkippedPlatform {
+            skipped += 1;
         }
-        if !args.no_report {
+        if !args.no_report && !args.perturb {
             match report::write_unit_report(&report_dir, &res) {
                 Ok(p) => println!(
                     "  report: {}",
@@ -519,9 +514,8 @@ fn main() -> ExitCode {
         String::new()
     };
     println!(
-        "difftest: {} unit(s), {} passed, {partial} partial, {failed} failed{dropped_note}",
-        wanted.len(),
-        wanted.len() - failed - partial
+        "{}{dropped_note}",
+        report::run_summary(wanted.len(), partial, failed, skipped)
     );
     if setup_error {
         ExitCode::from(2)
@@ -529,6 +523,24 @@ fn main() -> ExitCode {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+/// Selection constraints are not case-level waivers. An unsupported oracle cannot
+/// satisfy an exact-base run, including when that baseline has no earlier unit report.
+fn selection_gate(
+    status: UnitStatus,
+    plan_status: Option<&str>,
+    has_baseline: bool,
+) -> Option<&'static str> {
+    match status {
+        UnitStatus::Partial if plan_status == Some("green") => {
+            Some("plan status is green but cases are deferred or known mismatches")
+        }
+        UnitStatus::SkippedPlatform if has_baseline => {
+            Some("skipped reference cannot validate an exact-base comparison")
+        }
+        _ => None,
     }
 }
 
@@ -724,6 +736,7 @@ fn fuzz_main(args: &Args, ctx: &CaseContext, root: &Path) -> ExitCode {
     let mut seen = std::collections::BTreeSet::new();
     wanted.retain(|w| seen.insert(w.clone()));
     let mut failed = 0usize;
+    let mut skipped = 0usize;
     for id in &wanted {
         let Some(unit) = reg.iter().find(|u| u.id() == id.as_str()) else {
             println!("FUZZ-FAIL {id} (no difftest runner registered for this unit)");
@@ -732,6 +745,10 @@ fn fuzz_main(args: &Args, ctx: &CaseContext, root: &Path) -> ExitCode {
         };
         let res = fuzz::run_fuzz(unit.as_ref(), ctx, &opts);
         println!("{}", fuzz::summary_line(&res));
+        if res.skipped_platform.is_some() {
+            skipped += 1;
+            continue;
+        }
         for f in res.failures.iter().take(MAX_FUZZ_LINES) {
             let file = f.file.as_deref().map_or_else(String::new, |p| {
                 format!(" -> {}", p.strip_prefix(root).unwrap_or(p).display())
@@ -757,8 +774,13 @@ fn fuzz_main(args: &Args, ctx: &CaseContext, root: &Path) -> ExitCode {
             failed += 1;
         }
     }
+    let skipped_note = if skipped > 0 {
+        format!(", {skipped} skipped(platform)")
+    } else {
+        String::new()
+    };
     println!(
-        "difftest --fuzz: {} unit(s), {failed} failed, {:.1} s",
+        "difftest --fuzz: {} unit(s), {failed} failed, {:.1} s{skipped_note}",
         wanted.len(),
         start.elapsed().as_secs_f64()
     );
@@ -766,5 +788,23 @@ fn fuzz_main(args: &Args, ctx: &CaseContext, root: &Path) -> ExitCode {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn platform_skips_are_not_exact_base_comparisons() {
+        for plan in [None, Some("green"), Some("partial")] {
+            assert!(selection_gate(UnitStatus::SkippedPlatform, plan, false).is_none());
+            assert!(selection_gate(UnitStatus::SkippedPlatform, plan, true).is_some());
+            assert!(selection_gate(UnitStatus::Green, plan, true).is_none());
+        }
+        // A real deferral in a green unit must still fail, on every platform.
+        assert!(selection_gate(UnitStatus::Partial, Some("green"), false).is_some());
+        assert!(selection_gate(UnitStatus::Partial, Some("green"), true).is_some());
+        assert!(selection_gate(UnitStatus::Partial, Some("partial"), true).is_none());
     }
 }
