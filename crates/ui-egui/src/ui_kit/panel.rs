@@ -537,6 +537,8 @@ impl<'a> Window<'a> {
     }
 
     /// Declarative page navigation: the kit owns geometry, selection and page scrolling.
+    /// Preferences uses [`Self::show_pages_with_header`]; this entry is what the page-list tests call.
+    #[cfg(test)]
     pub(crate) fn show_pages<S>(
         self,
         ctx: &egui::Context,
@@ -548,7 +550,7 @@ impl<'a> Window<'a> {
         self.show_pages_inner(ctx, selected, pages, state, None, left)
     }
 
-    /// [`Self::show_pages`] with a strip above the page body (Preferences search).
+    /// Page navigation with a strip above the page body (Preferences search).
     pub(crate) fn show_pages_with_header<S>(
         self,
         ctx: &egui::Context,
