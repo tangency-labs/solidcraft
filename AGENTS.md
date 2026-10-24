@@ -15,14 +15,18 @@ new uses of it anywhere else. Public docs/web/Flatpak deployments use project Pa
 `/solidcraft/`; do not add permanent old-name Pages aliases.
 
 ## Start every session here
-1. Read `plan/STATUS.md` (current milestone, next task), then the task in `plan/execution-plan.md`
-   and the relevant `plan/architecture.md` section.
-2. Kernel and library decisions: `plan/adr/0001-geometry-kernel.md` (what we may depend on, what
-   is rejected for licence reasons).
-3. Follow the autonomous operation protocol (`plan/execution-plan.md` §6). Don't stop to ask
-   unless it lists the decision as the owner's.
+1. What to work on: [ROADMAP.md](ROADMAP.md) (status and milestones), "Where help is wanted most"
+   in CONTRIBUTING.md, and the open issues labelled `help wanted`, `good first issue` and
+   `needs-triage`. Check what is already open first (below).
+2. How the code fits together: [docs/architecture.md](docs/architecture.md) (the layer table) and
+   "How the code is laid out" in CONTRIBUTING.md. Kernel work is paused ("Kernel work is paused"
+   in CONTRIBUTING.md).
+3. What we may depend on: the licence rules under Non-negotiables below, `deny.toml`, and
+   `cargo xtask licences --check`. Only `crates/kernel` may use `truck`.
+4. Work on your own: when the code, the docs and these rules settle a question, act on it. Ask on
+   the issue or the PR only when the answer changes what users see or what the change covers.
 
-`plan/` is gitignored (local only).
+Maintainers may keep local notes in `plan/` (gitignored); nothing in this file depends on them.
 
 ## Never crash
 People trust SolidCraft with their designs; a crash loses their work. **This outranks feature work.**
