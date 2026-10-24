@@ -890,9 +890,13 @@ impl PolyBoundary {
 
     /// Adds the loops' segments between the vertices [`Self::insert_points`] gave. SolidCraft: a
     /// segment that crosses one already added is split where they meet (truck dropped it and
-    /// joined across the face; #1648).
+    /// joined across the face; #1648), once every segment that can be added is in. A face with
+    /// more such segments than [`MAX_SPLIT_SEGMENTS`] (a rim that runs back and forth across
+    /// itself) leaves them all out, as truck did: splitting there crowds the triangulation until
+    /// spade loses its way (#4598).
     fn add_constraints(&self, triangulation: &mut Cdt, poly2tri: &[Option<VertexId>]) {
         let mut counter = 0;
+        let mut blocked = Vec::new();
         self.0
             .iter()
             .map(Vec::len)
@@ -909,9 +913,68 @@ impl PolyBoundary {
                 if triangulation.can_add_constraint(vi, vj) {
                     triangulation.add_constraint(vi, vj);
                 } else {
-                    triangulation.add_constraint_and_split(vi, vj, |p| p);
+                    blocked.push((vi, vj));
                 }
             });
+        if blocked.len() <= MAX_SPLIT_SEGMENTS {
+            for (vi, vj) in blocked {
+                add_split_constraint(triangulation, vi, vj);
+            }
+        }
+    }
+}
+
+/// SolidCraft: most segments of one face split where they cross others (see
+/// [`PolyBoundary::add_constraints`]).
+const MAX_SPLIT_SEGMENTS: usize = 4;
+
+/// SolidCraft: joins `from` and `to` across the constraint edges in the way, split where they
+/// cross. Each crossing becomes a vertex (a constraint edge it lands on is split and stays a
+/// constraint) and the pieces between are added where they can be. spade's own
+/// `add_constraint_and_split` asserts when a split lands so near another vertex or constraint
+/// that the piece up to it is blocked, and the whole body was lost (#4031, #4598); such a piece
+/// is left out here, as truck did before #1653, so the face meshes slightly off instead. A
+/// segment with crowded crossings, or very many (an edge that runs back and forth), or a
+/// crossing it cannot place, is left out whole.
+fn add_split_constraint(triangulation: &mut Cdt, from: VertexId, to: VertexId) {
+    /// Closest two crossings may come along the segment, as a fraction of it.
+    const NEAR: f64 = 1e-6;
+    /// Most crossings one segment is split at.
+    const MAX_CROSSINGS: usize = 16;
+    let (p, q) = (triangulation.vertex(from).position(), triangulation.vertex(to).position());
+    let d = (q.x - p.x, q.y - p.y);
+    // Each crossing with the vertex of the edge it crosses: inserting from there is a step or two,
+    // where a walk from the last insertion can circle in a face crowded with near-coincident
+    // points and give up ("Failed to locate position").
+    let mut cuts: Vec<(f64, SPoint2, VertexId)> = Vec::new();
+    for e in triangulation.get_conflicting_edges_between_vertices(from, to) {
+        let (a, b) = (e.from().position(), e.to().position());
+        let r = (b.x - a.x, b.y - a.y);
+        let denom = d.0 * r.1 - d.1 * r.0;
+        let w = (a.x - p.x, a.y - p.y);
+        let (t, u) = ((w.0 * r.1 - w.1 * r.0) / denom, (w.0 * d.1 - w.1 * d.0) / denom);
+        if !((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)) || cuts.len() == MAX_CROSSINGS {
+            return;
+        }
+        cuts.push((t, SPoint2::new(p.x + d.0 * t, p.y + d.1 * t), e.from().fix()));
+    }
+    cuts.sort_by(|x, y| x.0.total_cmp(&y.0));
+    if cuts.windows(2).any(|w| w[1].0 - w[0].0 < NEAR) {
+        return;
+    }
+    let mut prev = from;
+    for (_, at, hint) in cuts {
+        let Ok(v) = triangulation.insert_with_hint(at, hint) else { continue };
+        if v == prev || v == to {
+            continue;
+        }
+        if triangulation.can_add_constraint(prev, v) {
+            triangulation.add_constraint(prev, v);
+        }
+        prev = v;
+    }
+    if prev != to && triangulation.can_add_constraint(prev, to) {
+        triangulation.add_constraint(prev, to);
     }
 }
 

@@ -2,7 +2,7 @@
 
 use std::f64::consts::FRAC_PI_2;
 
-use solidcraft_geom::{Loop2, Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use truck_modeling::{self as mt, SearchNearestParameter};
 
 use crate::*;
@@ -74,5 +74,37 @@ fn trimmed_ruled_loft_faces_mesh_on_their_surfaces() {
         assert!(*off < 2.0 * tol, "face {fi}: a triangle lies {off:.2} mm off the surface (tolerance {tol:.2})");
         // Covered once: the area of a much finer mesh (the bad face had two and a half times it).
         assert!((area - fine_area).abs() < 0.02 * fine_area, "face {fi}: mesh area {area:.0} mm², finer mesh {fine_area:.0} mm²");
+    }
+}
+
+/// #4031: a join whose new face has a boundary segment crossing another in the triangulation's
+/// parameters (a sketch point far out, inside the command cap) never reaches the triangulator's
+/// assertion: it builds while the boolean's own precision holds, and fails cleanly beyond.
+#[test]
+fn a_crossing_boundary_segment_does_not_trip_the_triangulator() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    // The mesher runs on worker threads: count the assertion by its message.
+    let count = Arc::new(AtomicUsize::new(0));
+    let c2 = count.clone();
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if info.to_string().contains("previous_region") {
+            c2.fetch_add(1, Ordering::SeqCst);
+        }
+    }));
+    let mut volumes = Vec::new();
+    for far in [1e6, 3e6, 9.9e8] {
+        let block = box_solid(Vec3::ZERO, Vec3::new(40.0, 20.0, 10.0)).unwrap();
+        let outer = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(40.0, 0.0), Vec2::new(40.0, far), Vec2::new(0.0, 20.0)]);
+        let sliver = extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0.0, 10.0).unwrap().remove(0);
+        volumes.push(boolean(&block, &sliver, BoolOp::Union).ok().flatten().and_then(|b| measure(&b).ok()).map(|m| m.volume));
+    }
+    std::panic::set_hook(prev);
+    assert_eq!(count.load(Ordering::SeqCst), 0, "the triangulator's assertion fired");
+    // The sliver holds the block: its volume is the union's, (40 * (far + 20) / 2) * 10.
+    for (far, v) in [(1e6, volumes[0]), (3e6, volumes[1])] {
+        let exact = 40.0 * (far + 20.0) / 2.0 * 10.0;
+        assert!(v.is_some_and(|v| (v - exact).abs() < 1e-9 * exact), "far {far}: {v:?}");
     }
 }

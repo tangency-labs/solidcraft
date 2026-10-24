@@ -106,6 +106,12 @@ Changes:
 ## truck-meshalgo 0.4.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
 
 Changes:
+- `tessellation/triangulation.rs`: a boundary segment that crosses constraints already added
+  is split where it crosses by `add_split_constraint` (a vertex at each crossing, the pieces
+  added where they can be), not by spade's `add_constraint_and_split`, which asserts when a
+  split lands so near another vertex or constraint that the piece up to it is blocked. That
+  assertion lost whole bodies and operations (#4031, #4598); a blocked piece is now left out, as
+  truck did before #1653.
 - `tessellation/triangulation.rs`, `closed.rs`: retry nearest trim projections outside a
   spline's knot domain without the preceding point's hint, preferring a bounded fit within
   the caller's chord tolerance, with a bounded damped least-squares fallback where

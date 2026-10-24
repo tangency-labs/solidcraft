@@ -2317,3 +2317,16 @@ fn step_conformance_parts_read_back_their_exact_shape() {
         }
     }
 }
+
+/// #4598: a file whose bore rim runs back and forth across the bore (as main exported a moved
+/// body's edge before) imports whole: the crossings of the rim's own pieces are left out of the
+/// triangulation, not asserted on, so the face meshes a little off the exact rod.
+#[test]
+fn a_rim_that_runs_back_and_forth_imports_whole() {
+    let imp = step_import(include_str!("../../../../tests/step-regressions/rod_doubled_edge.step")).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    // The exact rod is 74 898.5 mm³; the rim's crossings left out shave a little off.
+    assert!(rel(m.volume, 74_898.5) < 2e-3, "volume {}", m.volume);
+    assert_eq!(m.merged.faces, 5);
+}
