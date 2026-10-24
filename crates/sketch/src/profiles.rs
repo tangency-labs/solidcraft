@@ -436,10 +436,16 @@ impl Grid {
     fn cell(&self, p: Vec2) -> (i64, i64) {
         (((p.x - self.lo.x) / self.size).floor() as i64, ((p.y - self.lo.y) / self.size).floor() as i64)
     }
-    /// Cells a box covers; None for boxes spanning too many (they are checked against all).
+    /// Cells a box covers; None for boxes spanning too many (they are checked against all),
+    /// including infinite or huge boxes whose cell span does not fit in an `i64`.
     fn cells(&self, b: &solidcraft_geom::Aabb2) -> Option<Vec<(i64, i64)>> {
+        if !(b.min.is_finite() && b.max.is_finite()) {
+            return None;
+        }
         let (c0, c1) = (self.cell(b.min), self.cell(b.max));
-        if (c1.0 - c0.0 + 1).saturating_mul(c1.1 - c0.1 + 1) > 2048 {
+        let span = |lo: i64, hi: i64| hi.checked_sub(lo)?.checked_add(1);
+        let count = span(c0.0, c1.0)?.checked_mul(span(c0.1, c1.1)?)?;
+        if count > 2048 {
             return None;
         }
         let mut out = Vec::new();
@@ -1337,5 +1343,31 @@ mod whole_boundary_tests {
         // Serialized profiles cannot forge this runtime certificate.
         let copy: Profile = serde_json::from_str(&serde_json::to_string(annulus).unwrap()).unwrap();
         assert!(copy.whole_curve_boundaries().is_none());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcraft_geom::Aabb2;
+
+    /// An infinite or huge box spans more cells than an `i64` holds; it is checked against all
+    /// shapes instead of wrapping the count and filling memory (solidcraft#5020).
+    #[test]
+    fn grid_cells_refuse_infinite_and_huge_boxes() {
+        let small = Aabb2 { min: Vec2::new(0.0, 0.0), max: Vec2::new(10.0, 10.0) };
+        let grid = Grid::new(&[small]);
+        // A box spanning the whole grid touches the 2 x 2 cells at its corners.
+        assert_eq!(grid.cells(&small).map(|c| c.len()), Some(4));
+        let inf = Aabb2 { min: Vec2::new(-f64::INFINITY, -f64::INFINITY), max: Vec2::new(f64::INFINITY, f64::INFINITY) };
+        assert!(grid.cells(&inf).is_none());
+        let nan = Aabb2 { min: Vec2::new(f64::NAN, 0.0), max: Vec2::new(1.0, 1.0) };
+        assert!(grid.cells(&nan).is_none());
+        let huge = Aabb2 { min: Vec2::new(-1e300, -1e300), max: Vec2::new(1e300, 1e300) };
+        assert!(grid.cells(&huge).is_none());
+        // A grid built over an infinite box falls back to unit cells and still answers.
+        let grid = Grid::new(&[small, inf]);
+        assert!(grid.cells(&inf).is_none());
+        assert!(grid.cells(&huge).is_none());
     }
 }

@@ -41,7 +41,27 @@ impl Tf {
         let [a, b, c, d, ..] = self.0;
         a * d - b * c < 0.0
     }
+    fn is_finite(self) -> bool {
+        self.0.iter().all(|x| x.is_finite())
+    }
 }
+
+/// Every number of `g` is finite: a transform such as `scale(1e308)` can push a finite size in
+/// the file past the range of `f64`, and an infinite curve must never reach a sketch.
+fn geom_is_finite(g: &Geom2) -> bool {
+    match g {
+        Geom2::Point(p) => p.is_finite(),
+        Geom2::Line(a, b) => a.is_finite() && b.is_finite(),
+        Geom2::Circle(c, r) => c.is_finite() && r.is_finite(),
+        Geom2::Arc { c, a, b } => c.is_finite() && a.is_finite() && b.is_finite(),
+        Geom2::Ellipse { c, major, minor } => c.is_finite() && major.is_finite() && minor.is_finite(),
+        Geom2::Spline { pts, .. } => pts.iter().all(|p| p.is_finite()),
+        Geom2::Conic { a, apex, b, rho } => a.is_finite() && apex.is_finite() && b.is_finite() && rho.is_finite(),
+        Geom2::Text { at, height, angle, .. } => at.is_finite() && height.is_finite() && angle.is_finite(),
+    }
+}
+
+const OUT_OF_RANGE: &str = "SVG geometry is out of range: a transform or size scales a shape past the largest number SolidCraft can store";
 
 fn numbers(s: &str) -> Vec<f64> {
     // Numbers separated by commas/space, also "1-2" and "1.5.5" forms.
@@ -155,11 +175,19 @@ impl Out {
         if self.g.len() >= MAX_ENTITIES {
             return Err(IoError::Invalid("too many SVG elements".into()));
         }
+        if !geom_is_finite(&g) {
+            return Err(IoError::Invalid(OUT_OF_RANGE.into()));
+        }
         self.g.push(g);
         Ok(())
     }
     fn line(&mut self, t: Tf, a: Vec2, b: Vec2) -> Result<()> {
         let (a, b) = (t.apply(a), t.apply(b));
+        if !(a.is_finite() && b.is_finite()) {
+            // Checked before the length: the distance between infinite ends is NaN, which would
+            // drop the line silently.
+            return Err(IoError::Invalid(OUT_OF_RANGE.into()));
+        }
         if a.dist(b) > 1e-12 { self.push(Geom2::Line(a, b)) } else { Ok(()) }
     }
     fn cubic(&mut self, t: Tf, p: [Vec2; 4]) -> Result<()> {
@@ -442,6 +470,9 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
             root = Some(r);
             tf = r;
         }
+        if !tf.is_finite() {
+            return Err(IoError::Invalid(OUT_OF_RANGE.into()));
+        }
         match name.as_str() {
             "path" => path(&mut out, tf, attr(&a, "d").unwrap_or(""))?,
             "line" => out.line(tf, Vec2::new(num_attr(&a, "x1"), num_attr(&a, "y1")), Vec2::new(num_attr(&a, "x2"), num_attr(&a, "y2")))?,
@@ -556,5 +587,28 @@ mod tests {
         // Plain pixels.
         let g = read_svg(r#"<svg><line x1="0" y1="0" x2="96" y2="0"/></svg>"#).unwrap();
         assert!(matches!(g[0], Geom2::Line(a, b) if (a.dist(b) - 25.4).abs() < 1e-9));
+    }
+
+    /// A transform that scales a shape past the range of `f64` is refused with a clear error
+    /// instead of handing the sketch an infinite curve (solidcraft#5020).
+    #[test]
+    fn geometry_scaled_to_infinity_is_refused() {
+        let doc = |body: &str| format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100mm" height="100mm">{body}</svg>"#);
+        for body in [
+            r#"<g transform="scale(1e308)"><circle r="5"/></g>"#,
+            r#"<g transform="scale(1e308)"><g transform="scale(1e308)"></g></g>"#,
+            r#"<g transform="scale(1e308)"><rect width="5" height="5"/></g>"#,
+            r#"<g transform="scale(1e308)"><path d="M0 0 C 1 1 2 2 5 5"/></g>"#,
+            r#"<g transform="matrix(1e308 0 0 1e308 1e308 1e308)"><line x1="1" y1="1" x2="5" y2="5"/></g>"#,
+            r#"<g transform="scale(1e308)"><text x="0" y="0" font-size="16">A</text></g>"#,
+        ] {
+            match read_svg(&doc(body)) {
+                Err(IoError::Invalid(m)) => assert!(m.contains("out of range"), "{body}: {m}"),
+                other => panic!("{body}: expected an out-of-range error, got {other:?}"),
+            }
+        }
+        // Large but finite drawings still read.
+        let g = read_svg(&doc(r#"<g transform="scale(1e6)"><circle r="5"/></g>"#)).unwrap();
+        assert!(matches!(g[0], Geom2::Circle(_, r) if (r - 5e6).abs() < 1e-3));
     }
 }
