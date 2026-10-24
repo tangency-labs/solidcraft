@@ -399,3 +399,22 @@ fn plane_redefinition_uses_dense_card_and_keeps_command_preview_cancel_and_ok() 
         assert_eq!(h.app.session.doc.to_json(), before);
     }
 }
+
+/// #5103: Redefine Sketch Plane names the plane a sketch is on now, not only "no body-face
+/// attachment": an origin plane, a construction plane, and planes built from them.
+#[test]
+fn redefine_panel_names_the_plane_a_sketch_is_on() {
+    use crate::sketch_attachment_ui::plane_description;
+    let mut h = Harness::new();
+    h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Shelf"})).unwrap();
+    for (plane, expected) in [("XZ", "The XZ plane"), ("Shelf", "Shelf")] {
+        let id = h.app.run("sketch.create", json!({"plane": plane})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let FeatureKind::Sketch { plane: on, .. } = &h.app.session.doc.feature(id).unwrap().kind else { panic!("a sketch") };
+        assert_eq!(plane_description(on), expected, "{plane}");
+    }
+    let xy = Box::new(PlaneRef::Origin { name: "XY".into() });
+    let offset = PlaneRef::Offset { base: xy.clone(), distance: "12 mm".into() };
+    assert_eq!(plane_description(&offset), "The XY plane, offset by 12 mm");
+    assert_eq!(plane_description(&PlaneRef::Flipped { base: xy, about_y: false }), "The XY plane, from its other side");
+}
