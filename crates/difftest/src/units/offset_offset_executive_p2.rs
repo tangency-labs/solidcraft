@@ -2473,13 +2473,13 @@ mod tests {
             ),
             (
                 "member_sheet_extended_dispatch_ignores_skip",
-                "topology.edgeuse_p3",
-                "SmEdgeuse::NormalizedEvaluate",
+                "topology.face_p2",
+                "SmFace handle of a surface's face",
             ),
             (
                 "extended_sheet_direct_independent_flags",
-                "topology.edgeuse_p3",
-                "SmEdgeuse::NormalizedEvaluate",
+                "topology.face_p2",
+                "SmFace handle of a surface's face",
             ),
         ] {
             let case = fixtures.iter().find(|case| case.name == name).unwrap();

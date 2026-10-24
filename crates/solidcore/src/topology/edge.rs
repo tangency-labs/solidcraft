@@ -194,7 +194,7 @@ impl Edge {
     }
 }
 
-// ---- unported callees -------------------------------------------------------------------
+// ---- edge use callees (topology.edgeuse_p3) ----------------------------------------------
 
 /// `SmEdgeuse::NormalizedEvaluate(t, TRUE, ..)`: the UV point at the normalised
 /// parameter `t` (a missing UV trim curve is made).
@@ -1611,7 +1611,7 @@ pub fn is_seam(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<bool> {
 ///
 /// [`SolidError::InvalidInput`] for a face without surface or an edge use without
 /// face (upstream dereferences them); those of the surface queries;
-/// [`SolidError::Unported`] from `SmEdgeuse::NormalizedEvaluate`.
+/// [`SolidError::Unported`] from `SmEdgeuse::NormalizedEvaluate`'s unported callees.
 pub fn is_seam_of_surface(
     k: &Kernel,
     b: &mut Brep,
@@ -1760,8 +1760,8 @@ fn cover_other_coincident_face(
 ///
 /// [`SolidError::InvalidInput`] where upstream dereferences null (an edge use without
 /// face, a face without surface); those of the surface queries;
-/// [`SolidError::Unported`] from `SmEdgeuse::NormalizedEvaluate` and the coverage
-/// test.
+/// [`SolidError::Unported`] from `SmEdgeuse::NormalizedEvaluate`'s unported callees and
+/// the coverage test.
 pub fn is_topological(
     k: &Kernel,
     b: &mut Brep,
