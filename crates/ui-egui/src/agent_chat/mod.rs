@@ -639,10 +639,7 @@ impl AgentChat {
 /// attributes (`import … with { type: "json" }`), which Node parses from 18.20, 20.10 and 21 on.
 fn old_node_version(tail: &[String]) -> Option<String> {
     let v = tail.iter().rev().find_map(|l| l.trim().strip_prefix("Node.js v"))?;
-    let mut parts = v.split('.').map(|p| p.parse::<u32>().ok());
-    let (major, minor) = (parts.next()??, parts.next().flatten().unwrap_or(0));
-    let old = major < 18 || (major == 18 && minor < 20) || major == 19 || (major == 20 && minor < 10);
-    old.then(|| v.to_string())
+    discover::node_too_old(v).then(|| v.to_string())
 }
 
 /// What an event asks of the app.

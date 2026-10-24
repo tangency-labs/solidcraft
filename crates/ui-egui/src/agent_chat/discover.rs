@@ -269,10 +269,58 @@ pub(super) fn command_for(program: &Path) -> Command {
     } else {
         Command::new(program)
     };
-    if let Ok(path) = std::env::join_paths(search_dirs()) {
+    if let Ok(path) = std::env::join_paths(capable_node_first(program, search_dirs())) {
         cmd.env("PATH", path);
     }
     cmd
+}
+
+/// Whether Node.js `version` (`18.19.1` or `v18.19.1`) is too old for the npm agent adapters:
+/// they load JSON with import attributes (`import … with { type: "json" }`), which Node parses
+/// from 18.20, 20.10 and 21 on (#2207). An unreadable version is not called old.
+pub(super) fn node_too_old(version: &str) -> bool {
+    let v = version.trim().trim_start_matches('v');
+    let mut parts = v.split('.').map(|p| p.parse::<u32>().ok());
+    let Some(Some(major)) = parts.next() else { return false };
+    let minor = parts.next().flatten().unwrap_or(0);
+    major < 18 || (major == 18 && minor < 20) || major == 19 || (major == 20 && minor < 10)
+}
+
+/// Whether `program` is a script run by `#!/usr/bin/env node` (as npm installs the adapters).
+fn runs_on_env_node(program: &Path) -> bool {
+    let mut head = [0u8; 256];
+    let n = std::fs::File::open(program).and_then(|mut f| std::io::Read::read(&mut f, &mut head)).unwrap_or(0);
+    let head = String::from_utf8_lossy(head.get(..n).unwrap_or_default());
+    let Some(line) = head.strip_prefix("#!").and_then(|rest| rest.lines().next()) else { return false };
+    let mut words = line.split_whitespace();
+    words.next().is_some_and(|env| env.ends_with("/env")) && words.any(|w| w == "node")
+}
+
+/// The PATH for `program`: `dirs`, except that for an adapter run by `#!/usr/bin/env node`, when
+/// the first `node` on them is too old (an `apt` Node 18.19 in /usr/bin ahead of nvm's 22), the
+/// folder of the first `node` that can run it moves to the front (#2207). The rest keeps its
+/// order. The versions are asked once per run of the app.
+fn capable_node_first(program: &Path, dirs: Vec<PathBuf>) -> Vec<PathBuf> {
+    if !cfg!(unix) || !runs_on_env_node(program) {
+        return dirs;
+    }
+    static CAPABLE: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    let capable = CAPABLE.get_or_init(|| capable_node_dir(&dirs, |node| version(node, Duration::from_secs(3))));
+    match capable {
+        Some(dir) => std::iter::once(dir.clone()).chain(dirs.into_iter().filter(|d| d != dir)).collect(),
+        None => dirs,
+    }
+}
+
+/// The folder of the first `node` on `dirs` that can run the adapters, when the first `node`
+/// there is too old; `None` when the first one is fine, or no other is.
+fn capable_node_dir(dirs: &[PathBuf], version_of: impl Fn(&Path) -> Option<String>) -> Option<PathBuf> {
+    let mut nodes = dirs.iter().filter(|d| d.join("node").is_file()).take(32);
+    let first = nodes.next()?;
+    if !version_of(&first.join("node")).is_some_and(|v| node_too_old(&v)) {
+        return None;
+    }
+    nodes.find(|d| version_of(&d.join("node")).is_some_and(|v| !node_too_old(&v))).cloned()
 }
 
 /// `program --version`'s first line, or `None` after `limit` (the probe is then stopped).
@@ -524,5 +572,37 @@ mod tests {
             .unwrap();
         let _ = std::fs::remove_dir_all(root);
         assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    }
+
+    /// #2207: an `apt` Node 18.19 first on the PATH and nvm's 22 later: the adapter is started
+    /// with nvm's folder first. A capable first Node, or no capable one at all, changes nothing.
+    #[test]
+    fn a_too_old_first_node_gives_way_to_a_capable_one() {
+        let root = std::env::temp_dir().join(format!("sc-agent-node-order-{}", std::process::id()));
+        let dirs: Vec<PathBuf> = ["usr-bin", "other", "nvm-18", "nvm-22"].iter().map(|d| root.join(d)).collect();
+        for d in [&dirs[0], &dirs[2], &dirs[3]] {
+            std::fs::create_dir_all(d).unwrap();
+            std::fs::write(d.join("node"), "").unwrap();
+        }
+        let versions = |table: &'static [(&'static str, &'static str)]| {
+            move |node: &Path| table.iter().find(|(d, _)| node.parent().is_some_and(|p| p.ends_with(d))).map(|(_, v)| v.to_string())
+        };
+        let old_first = versions(&[("usr-bin", "v18.19.1"), ("nvm-18", "v18.12.0"), ("nvm-22", "v22.11.0")]);
+        assert_eq!(capable_node_dir(&dirs, old_first), Some(dirs[3].clone()));
+        let fine_first = versions(&[("usr-bin", "v20.11.1"), ("nvm-18", "v18.12.0"), ("nvm-22", "v22.11.0")]);
+        assert_eq!(capable_node_dir(&dirs, fine_first), None);
+        let none_capable = versions(&[("usr-bin", "v18.19.1"), ("nvm-18", "v18.12.0"), ("nvm-22", "v16.20.2")]);
+        assert_eq!(capable_node_dir(&dirs, none_capable), None);
+        for (v, old) in
+            [("v18.19.1", true), ("19.9.0", true), ("v20.9.0", true), ("v18.20.4", false), ("v20.10.0", false), ("v22.11.0", false), ("junk", false)]
+        {
+            assert_eq!(node_too_old(v), old, "{v}");
+        }
+        let script = root.join("claude-agent-acp");
+        std::fs::write(&script, "#!/usr/bin/env node\nimport x from './x.json' with { type: 'json' };\n").unwrap();
+        assert!(runs_on_env_node(&script));
+        std::fs::write(&script, "#!/bin/sh\necho node\n").unwrap();
+        assert!(!runs_on_env_node(&script));
+        let _ = std::fs::remove_dir_all(root);
     }
 }
