@@ -87,6 +87,8 @@ pub fn tip(app: &SolveApp) -> String {
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     poll(app, &ctx);
+    // The chip the pointer is on lights its target for this frame only.
+    app.agent_chat.hover.clear();
     // Set again below if the chat is drawn this frame.
     app.agent_chat.drop_rect = None;
     // Retain the previous card for shortcut hover routing below; clear it when hidden.
@@ -287,10 +289,10 @@ enum ChipPart<'a> {
 /// hand: egui wraps plain widgets, not framed ones, and one row wider than the chat would widen
 /// the whole panel.
 #[cfg(not(target_arch = "wasm32"))]
-fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool) -> Option<usize> {
-    let mut removed = None;
+fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool, gone: &[bool], handle: &str) -> ChipEvents {
+    let mut events = ChipEvents::default();
     if context.is_empty() {
-        return removed;
+        return events;
     }
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_small);
@@ -335,6 +337,7 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool) -> Optio
                             ui.label(RichText::new(s).color(t.text_dim).size(t.font_small));
                         }
                         ChipPart::Chip(place, item) => {
+                            let is_gone = gone.get(*place).copied().unwrap_or(false);
                             let chip = egui::Frame::NONE
                                 .stroke(Stroke::new(1.0, t.text_dim.gamma_multiply(0.5)))
                                 .corner_radius(8.0)
@@ -342,15 +345,16 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool) -> Optio
                                 .show(ui, |ui| {
                                     ui.spacing_mut().item_spacing.x = 3.0;
                                     ui.horizontal(|ui| {
-                                        let label = ui.add(
-                                            egui::Label::new(RichText::new(shorten(&item.label, CHIP_CHARS)).color(t.text).size(t.font_small))
-                                                .wrap_mode(egui::TextWrapMode::Extend),
-                                        );
+                                        let mut text = RichText::new(shorten(&item.label, CHIP_CHARS)).color(t.text).size(t.font_small);
+                                        if is_gone {
+                                            text = text.color(t.text_dim).strikethrough();
+                                        }
+                                        let label = ui.add(egui::Label::new(text).wrap_mode(egui::TextWrapMode::Extend));
                                         if removable {
                                             let cross = ui_kit::button(ui, "×", ui_kit::Button::Small);
-                                            crate::scenario::publish_handle(&format!("agent_chat:picked_remove:{place}"), cross.rect.center());
+                                            crate::scenario::publish_handle(&format!("{handle}:remove:{place}"), cross.rect.center());
                                             if cross.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                                                removed = Some(*place);
+                                                events.removed = Some(*place);
                                             }
                                         }
                                         label
@@ -358,8 +362,18 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool) -> Optio
                                     .inner
                                 })
                                 .response;
-                            if !item.detail.is_empty() {
-                                chip.on_hover_text(&item.detail);
+                            crate::scenario::publish_handle(&format!("{handle}:chip:{place}"), chip.rect.center());
+                            // Hovering a chip lights its target in the model.
+                            if chip.hovered() {
+                                events.hovered = Some(*place);
+                            }
+                            let tip = match (is_gone, item.detail.is_empty()) {
+                                (true, true) => tr("ui.agent_chat_ctx_gone").to_string(),
+                                (true, false) => format!("{}\n{}", tr("ui.agent_chat_ctx_gone"), item.detail),
+                                (false, _) => item.detail.clone(),
+                            };
+                            if !tip.is_empty() {
+                                chip.on_hover_text(tip);
                             }
                         }
                     }
@@ -370,7 +384,15 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool) -> Optio
     if context.omitted > 0 {
         ui.label(RichText::new(more(context.omitted)).color(t.text_dim).size(t.font_small));
     }
-    removed
+    events
+}
+
+/// What happened to a row of chips this frame: one's × was pressed, the pointer is on one.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct ChipEvents {
+    removed: Option<usize>,
+    hovered: Option<usize>,
 }
 
 /// `s` cut to `max` characters, with an ellipsis.
@@ -823,6 +845,7 @@ fn body(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
+    refresh_gone(app);
     if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
         refresh(app, ui.ctx());
     }
@@ -879,7 +902,12 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // What Pick context chose for this message, each item with an ×.
                 if !app.agent_chat.picked_context.is_empty() {
                     let tray = app.agent_chat.picked_context.clone();
-                    remove_picked_at = context_chips(ui, &tray, true);
+                    let gone = app.agent_chat.gone.tray.clone();
+                    let events = context_chips(ui, &tray, true, &gone, "agent_chat:tray");
+                    remove_picked_at = events.removed;
+                    if let Some(at) = events.hovered {
+                        app.agent_chat.hover = tray.items.get(at).map(|i| i.sels.clone()).unwrap_or_default();
+                    }
                 }
                 // The files for the next message (#1744), as chips of their own.
                 attachment_chips(app, ui);
@@ -1664,6 +1692,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut approval: Option<(u64, Option<bool>)> = None;
     let mut undo: Option<usize> = None;
     let mut open_gallery: Option<Gallery> = None;
+    let mut hover_sels: Option<Vec<solidcraft_engine::Sel>> = None;
     let current_doc = app.session.doc.clone();
     let units = summary::Units { units: &app.session.doc.units, decimals: app.preferences.length_decimals };
     for (n, item) in app.agent_chat.items.iter().enumerate() {
@@ -1684,7 +1713,10 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                         // Taken when the agent starts on the message: nothing to show yet.
                         ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(t.font_small));
                     }
-                    context_chips(ui, context, false);
+                    let flags = app.agent_chat.gone.sent.get(&n).map(Vec::as_slice).unwrap_or_default();
+                    if let Some(at) = context_chips(ui, context, false, flags, &format!("agent_chat:sent:{n}")).hovered {
+                        hover_sels = context.items.get(at).map(|i| i.sels.clone());
+                    }
                     files_line(ui, files.iter().map(String::as_str));
                     if copyable {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| copy_message_button(ui, n, text));
@@ -1892,7 +1924,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                         if p.image {
                             ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(crate::theme::Tokens::get().font_small));
                         }
-                        context_chips(ui, &p.context, false);
+                        let _ = context_chips(ui, &p.context, false, &[], "agent_chat:queued");
                         files_line(ui, p.files.iter().map(|f| f.name.as_str()));
                     }
                 }
@@ -1947,6 +1979,9 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if open_gallery.is_some() {
         app.agent_chat.gallery = open_gallery;
+    }
+    if let Some(sels) = hover_sels {
+        app.agent_chat.hover = sels;
     }
     if let Some((n, o)) = answer {
         answer_permission(app, n, o.as_deref());

@@ -192,6 +192,18 @@ impl std::fmt::Debug for Picture {
     }
 }
 
+/// Which chips point at things that are no longer in the design (shown struck through), worked out
+/// again when the design or the chips change.
+#[derive(Default)]
+pub struct Gone {
+    /// The design (its address) and the chips' version the flags below are for.
+    key: Option<(usize, u64)>,
+    /// Per sent message (its place in the conversation): a flag per chip.
+    pub sent: std::collections::HashMap<usize, Vec<bool>>,
+    /// A flag per chip in the tray.
+    pub tray: Vec<bool>,
+}
+
 /// The viewer: the pictures of one message, and the one shown.
 #[derive(Clone, Debug)]
 pub struct Gallery {
@@ -348,6 +360,12 @@ pub struct AgentChat {
     /// How many things the current selection is by clicks, kept while the selection and the design
     /// stay as they are: (the selection, the design's address, the count).
     selected_count: Option<(Vec<solidcraft_engine::Sel>, usize, usize)>,
+    /// What the chip under the pointer stands for, lit up in the model while the pointer is on it.
+    pub hover: Vec<solidcraft_engine::Sel>,
+    pub gone: Gone,
+    /// Counts up whenever chips are added, removed or the conversation shifts: the flags in
+    /// [`Gone`] are worked out again.
+    chips_version: u64,
     /// What the user picked with Pick context for the next message, and how it reads.
     pub picked: Vec<solidcraft_engine::Sel>,
     pub picked_context: Context,
@@ -577,6 +595,7 @@ impl AgentChat {
     fn push(&mut self, item: Item) {
         if self.items.len() >= MAX_ITEMS {
             self.items.drain(..MAX_ITEMS / 10);
+            self.chips_version += 1;
         }
         self.items.push(item);
     }
@@ -1204,6 +1223,31 @@ const MAX_PENDING: usize = 20;
 /// incomplete.
 const INTERRUPT_NOTE: &str = "[The user interrupted your previous step.]";
 
+/// Work out again which chips point at things that have left the design, when the design or the
+/// chips changed since last time.
+pub fn refresh_gone(app: &mut SolveApp) {
+    let key = (Arc::as_ptr(&app.session.doc) as usize, app.agent_chat.chips_version);
+    if app.agent_chat.gone.key == Some(key) {
+        return;
+    }
+    let mut names = context::NameCache::new();
+    let mut sent = std::collections::HashMap::new();
+    for (n, item) in app.agent_chat.items.iter().enumerate() {
+        if let Item::User { context, .. } = item
+            && !context.items.is_empty()
+        {
+            sent.insert(n, context.items.iter().map(|e| context::is_gone(&app.session, e, &mut names)).collect());
+        }
+    }
+    let tray = app.agent_chat.picked_context.items.iter().map(|e| context::is_gone(&app.session, e, &mut names)).collect();
+    app.agent_chat.gone = Gone { key: Some(key), sent, tray };
+}
+
+/// What the chip under the pointer stands for, to light up in the model.
+pub fn hovered_chip(app: &SolveApp) -> &[solidcraft_engine::Sel] {
+    &app.agent_chat.hover
+}
+
 /// How many things the selection is, counting what was clicked (the two halves of a rim are one).
 pub fn selected_count(app: &mut SolveApp) -> usize {
     let doc = Arc::as_ptr(&app.session.doc) as usize;
@@ -1234,6 +1278,7 @@ pub(crate) fn pick_done(app: &mut SolveApp, d: &crate::dialogs::Dialog) -> Resul
             picked.push(sel.clone());
         }
     }
+    app.agent_chat.chips_version += 1;
     app.agent_chat.picked_context = context::describe(&mut app.session, &picked);
     // The tray lists what was described; more than the limit is only counted.
     picked.truncate(context::MAX_ITEMS);
@@ -1244,6 +1289,7 @@ pub(crate) fn pick_done(app: &mut SolveApp, d: &crate::dialogs::Dialog) -> Resul
 /// Take one picked item (by its place in the tray) out of what the next message carries.
 pub fn remove_picked(app: &mut SolveApp, at: usize) {
     let chat = &mut app.agent_chat;
+    chat.chips_version += 1;
     if at < chat.picked_context.items.len() {
         chat.picked_context.items.remove(at);
         if at < chat.picked.len() {
@@ -1319,6 +1365,7 @@ fn submit(app: &mut SolveApp, ctx: &egui::Context, text: String, image: bool, co
         context: context.clone(),
         files: files.iter().filter(|f| !f.is_picture()).map(|f| f.name.clone()).collect(),
     });
+    app.agent_chat.chips_version += 1;
     // The message's place in the conversation: its picture is kept there when it is taken.
     let at = app.agent_chat.items.len().checked_sub(1);
     // The agent gets the selection as text after the message; the conversation shows chips.
@@ -1399,6 +1446,7 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.gallery = None;
     chat.picked.clear();
     chat.picked_context = Context::default();
+    chat.chips_version += 1;
     chat.pending.clear();
     chat.attachments.clear();
     chat.loading.clear();

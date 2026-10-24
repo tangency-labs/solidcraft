@@ -1,0 +1,20 @@
+{
+  "en": {
+    "ui.agent_chat_ctx_gone": "No longer in the design: it was changed or deleted."
+  },
+  "ja": {
+    "ui.agent_chat_ctx_gone": "デザインにはもうありません(変更または削除されました)。"
+  },
+  "zh": {
+    "ui.agent_chat_ctx_gone": "已不在设计中:它被修改或删除了。"
+  },
+  "ar": {
+    "ui.agent_chat_ctx_gone": "لم يعد في التصميم: تم تغييره أو حذفه."
+  },
+  "he": {
+    "ui.agent_chat_ctx_gone": "כבר לא בעיצוב: הוא שונה או נמחק."
+  },
+  "vi": {
+    "ui.agent_chat_ctx_gone": "Không còn trong thiết kế: nó đã bị thay đổi hoặc xóa."
+  }
+}
