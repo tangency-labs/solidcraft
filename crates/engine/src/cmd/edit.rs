@@ -1143,6 +1143,13 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
             nf.edge_names = solidcraft_doc::hole_reference::reference_edge_names(&s.model.state_before(id), position.0, &edges(a));
         }
     }
+    // New reference edges for a cylinder (#6380): likewise.
+    if let (FeatureKind::Cylinder { references: a, base, .. }, FeatureKind::Cylinder { references: b, .. }) = (&nf.kind, &f.kind) {
+        let edges = |r: &[solidcraft_doc::HoleReference]| r.iter().map(|x| x.edge.0).collect::<Vec<_>>();
+        if edges(a) != edges(b) {
+            nf.edge_names = solidcraft_doc::hole_reference::cylinder_edge_names(&s.model.state_before(id), base, a);
+        }
+    }
     // New bend edges for a conversion: the names of the body's edges there now.
     if let (FeatureKind::SheetConvert { bends: a, body, .. }, FeatureKind::SheetConvert { bends: b, body: was, .. }) = (&nf.kind, &f.kind)
         && (a != b || body != was)

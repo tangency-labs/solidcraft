@@ -55,7 +55,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("cylinder")
         .contract(&CYLINDER_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("radius | diameter, height: expr; base?: [x,y,z] (centre of the bottom: numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); operation?, targets?: [body], name?, body_name?"),
+        .params("radius | diameter, height: expr; base?: [x,y,z] (centre of the bottom: numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); references?: [{edge: [x,y,z] on a straight edge of the face it stands on, distance: expr}] (at most two, as solid.hole's: the base centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric base only); operation?, targets?: [body], name?, body_name?"),
     CommandSpec::new("solid.sphere", "Sphere", crate::checked!("solid.sphere", prim_sphere))
         .at("SOLID", "CREATE")
         .icon("sphere")
@@ -679,6 +679,10 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
         FeatureKind::Hole { position, references, .. } if !references.is_empty() => {
             let edges: Vec<Vec3> = references.iter().map(|r| r.edge.0).collect();
             (Vec::new(), solidcraft_doc::hole_reference::reference_edge_names(&s.model.state(), position.0, &edges))
+        }
+        // A cylinder's reference edges (#6380) are edges of the body it stands on.
+        FeatureKind::Cylinder { base, references, .. } if !references.is_empty() => {
+            (Vec::new(), solidcraft_doc::hole_reference::cylinder_edge_names(&s.model.state(), base, references))
         }
         // A conversion's bend edges are edges of the body it converts.
         FeatureKind::SheetConvert { body, bends, .. } if !bends.is_empty() => {
@@ -1392,7 +1396,19 @@ fn prim_cylinder(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &height, Kind::Length, cmd, "height")?;
     let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
     let axis = axis_dir_param(p, cmd)?;
-    add_feature(s, p, FeatureKind::Cylinder { base, axis: Dir(axis), radius, height, operation: operation(p, cmd)? })
+    // Reference edges (#6380), as a Single hole's: the base centre sits at these distances from
+    // straight edges of the face it stands on, and `base` keeps where those put it.
+    let references = hole_reference_params(s, p, cmd)?;
+    let base = if references.is_empty() {
+        base
+    } else {
+        let at = p
+            .get("base")
+            .and_then(vec3)
+            .ok_or_else(|| bad(cmd, "`references` place a cylinder by its `base` given as numbers, not length expressions"))?;
+        point_expr(referenced_centre(s, cmd, &references, at, -axis)?)
+    };
+    add_feature(s, p, FeatureKind::Cylinder { base, axis: Dir(axis), radius, height, operation: operation(p, cmd)?, references })
 }
 
 fn prim_sphere(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2506,22 +2522,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // Placed by its reference edges: drilled where their distances put it, which `position`
     // then keeps. The edges must be straight edges at the given points, and cross.
-    let position = if references.is_empty() {
-        position
-    } else {
-        let st = s.model.state();
-        let mut distances = Vec::with_capacity(references.len());
-        for r in &references {
-            distances.push(s.doc.eval(&r.distance, Kind::Length).map_err(|e| bad(cmd, format!("`references`: {e}")))?);
-        }
-        let edges: Vec<(Vec3, Option<&str>)> = references.iter().map(|r| (r.edge.0, None)).collect();
-        let frame = solidcraft_doc::hole_reference::reference_frame(&st, position, direction, &edges, true).map_err(|e| bad(cmd, e.to_string()))?;
-        let centre = frame.place(position, &distances).map_err(|e| bad(cmd, e.to_string()))?;
-        if !solidcraft_doc::hole_reference::on_reference_face(&st, &frame, centre) {
-            return Err(bad(cmd, "the reference distances put the hole's centre off its face"));
-        }
-        centre
-    };
+    let position = if references.is_empty() { position } else { referenced_centre(s, cmd, &references, position, direction)? };
     // The diameter: given, or a metric-estimate/Unified-table tap drill, or an ISO 273
     // clearance hole for a bolt size (close, normal or loose fit).
     let diameter = match (expr(p, "diameter"), &thread, str_(p, "clearance")) {
@@ -2604,6 +2605,25 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             references,
         },
     )
+}
+
+/// Where reference edges (#37) put a hole's (or a cylinder's) centre picked at `at` on a flat
+/// face, `dir` into it: at their distances from the edges, which must be straight edges at the
+/// given points, and cross.
+fn referenced_centre(s: &Session, cmd: &str, references: &[solidcraft_doc::HoleReference], at: Vec3, dir: Vec3) -> Result<Vec3> {
+    let st = s.model.state();
+    let mut distances = Vec::with_capacity(references.len());
+    for r in references {
+        distances.push(s.doc.eval(&r.distance, Kind::Length).map_err(|e| bad(cmd, format!("`references`: {e}")))?);
+    }
+    let edges: Vec<(Vec3, Option<&str>)> = references.iter().map(|r| (r.edge.0, None)).collect();
+    let frame = solidcraft_doc::hole_reference::reference_frame(&st, at, dir, &edges, true).map_err(|e| bad(cmd, e.to_string()))?;
+    let centre = frame.place(at, &distances).map_err(|e| bad(cmd, e.to_string()))?;
+    if !solidcraft_doc::hole_reference::on_reference_face(&st, &frame, centre) {
+        let what = if cmd == "solid.cylinder" { "cylinder's base" } else { "hole's centre" };
+        return Err(bad(cmd, format!("the reference distances put the {what} off its face")));
+    }
+    Ok(centre)
 }
 
 /// A hole's reference edges (#37): `references: [{edge: [x, y, z], distance: expr}]`, at most

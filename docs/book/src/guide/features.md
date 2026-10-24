@@ -114,6 +114,13 @@ measured in the face's plane. Moving the hole measures the distances again. The 
 distances when the part changes: it follows its edges, and the distances are parameters like its
 diameter.
 
+A **Cylinder** placed on a planar face takes reference edges the same way. Select the face, then
+start **Cylinder**: it stands where you clicked, and the window has **Reference 1** and
+**Reference 2**. Pick one or two straight edges of that face; each gets a **Distance**, measured
+from where you clicked, which you can also type in the window or in its box on the canvas. The
+cylinder's base centre then follows the edges when the part changes, and the distances are
+parameters like its radius. Edit Feature picks the edges again.
+
 A **Hole** with **Single** placement drills where you pick a planar face. A pick on or near a
 point of a shown sketch that lies on that face, such as a circle's centre, places the hole
 exactly at that point, as **Multiple** placement picks it; **Select Other** (press and hold) also
@@ -271,7 +278,7 @@ still be added through `set`. The fields of the common features:
 | Fillet | `radius`, `edges` (a point on each edge), `body`, `style` |
 | Chamfer | `distance`, `distance2` or `angle`, `flip`, `edges`, `body` |
 | Box | `length`, `width`, `height`, `corner`, `operation` |
-| Cylinder | `radius`, `height`, `base`, `axis`, `operation` |
+| Cylinder | `radius`, `height`, `base`, `axis`, `operation`, `references` (an `edge` point and a `distance` each, as a hole's) |
 | Hole | `diameter`, `depth`, `position`, `direction`, `hole` (simple, drilled, counterbore, countersink), `thread`, `to`, `references` (an `edge` point and a `distance` each) |
 | Shell | `thickness`, `faces`, `direction`, `body`, `tangent_chain` |
 | Draft | `angle`, `faces`, `neutral`, `pull`, `body` |

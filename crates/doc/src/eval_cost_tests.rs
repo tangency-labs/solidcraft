@@ -59,6 +59,7 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
                 radius: "2".into(),
                 height: "10".into(),
                 operation: Operation::NewBody,
+                references: Vec::new(),
             },
             None,
         )

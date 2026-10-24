@@ -5,7 +5,8 @@
 //! there; moving the hole (another pick, or dragging its handle) measures the distances again.
 //! The canvas shows each distance as a dimension from its edge to the hole's centre. OK sends the
 //! edges and distances as `solid.hole`'s `references`, so the hole follows its edges when the
-//! part changes; Edit Feature picks the edges again where they are now.
+//! part changes; Edit Feature picks the edges again where they are now. A Cylinder standing on a
+//! flat face takes the same references for its base centre (#6380).
 
 use egui::{Color32, Pos2, Stroke, vec2};
 use serde_json::{Value, json};
@@ -55,22 +56,57 @@ struct Framed {
     frame: Option<(ReferenceFrame, Vec<usize>)>,
 }
 
-/// The reference edge inputs a Single hole's dialog has after its face input.
+/// The reference edge inputs a Single hole's dialog has after its face input (a Cylinder's: its
+/// only inputs).
 pub(crate) fn inputs() -> [SelInput; 2] {
     REFERENCES.map(|label| SelInput::new(label, EDGES, false))
 }
 
-/// Is `d` a Single hole's dialog?
-fn single(d: &Dialog) -> bool {
-    matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple)
+/// Does `d` take reference edges: a Single hole's dialog, or a Cylinder's standing on a flat
+/// face?
+pub(crate) fn takes(d: &Dialog) -> bool {
+    match &d.kind {
+        Kind::Hole { opts, .. } => !opts.multiple,
+        Kind::Primitive { cmd: "solid.cylinder", at: Some((_, Some(_))), .. } => true,
+        _ => false,
+    }
 }
 
-/// The hole's place: the first face pick (its index in the face input, and the point).
-fn place(d: &Dialog) -> Option<(usize, Vec3)> {
-    d.inputs.first()?.items.iter().enumerate().find_map(|(i, x)| match x {
-        Sel::Face { point, .. } => Some((i, *point)),
+/// The dialog's reference distances and what they were worked out for.
+fn refs(d: &Dialog) -> Option<&Refs> {
+    match &d.kind {
+        Kind::Hole { opts, .. } => Some(opts.refs.as_ref()),
+        Kind::Primitive { refs, .. } => Some(refs.as_ref()),
+        _ => None,
+    }
+}
+
+fn refs_mut(d: &mut Dialog) -> Option<&mut Refs> {
+    match &mut d.kind {
+        Kind::Hole { opts, .. } => Some(opts.refs.as_mut()),
+        Kind::Primitive { refs, .. } => Some(refs.as_mut()),
+        _ => None,
+    }
+}
+
+/// The place: the cylinder's base, else the hole's first face pick.
+fn place(d: &Dialog) -> Option<Vec3> {
+    if let Kind::Primitive { at, .. } = &d.kind {
+        return at.map(|(p, _)| p);
+    }
+    d.inputs.first()?.items.iter().find_map(|x| match x {
+        Sel::Face { point, .. } => Some(*point),
         _ => None,
     })
+}
+
+/// Move the place (see [`place`]) to `p`.
+fn set_place(d: &mut Dialog, p: Vec3) {
+    if let Kind::Primitive { at: Some((point, _)), .. } = &mut d.kind {
+        *point = p;
+    } else if let Some(Sel::Face { point, .. }) = d.inputs.first_mut().and_then(|inp| inp.items.iter_mut().find(|x| matches!(x, Sel::Face { .. }))) {
+        *point = p;
+    }
 }
 
 /// A point on each reference edge picked, by input.
@@ -90,21 +126,24 @@ fn vec3(v: &Value) -> Option<Vec3> {
     (a.len() == 3).then(|| Some(Vec3::new(c(0)?, c(1)?, c(2)?))).flatten()
 }
 
-/// The way the hole drills at `at`: as it was made (editing), else into the face there.
+/// The way the hole drills at `at`: as it was made (editing), else into the face there. A
+/// cylinder's: into the face it stands on, against its axis.
 fn direction(s: &Session, d: &Dialog, at: Vec3) -> Option<Vec3> {
+    if let Kind::Primitive { at: Some((_, normal)), .. } = &d.kind {
+        return normal.map(|n| -n);
+    }
     d.extra.get("direction").and_then(vec3).or_else(|| solidcraft_engine::doc::hole_direction_at(&s.world_state(), at))
 }
 
 /// The face's frame at the place for the picked edges (and which reference inputs they are), found
 /// again only when the design, the place or the edges change.
 fn frame(s: &Session, d: &mut Dialog) -> Option<(ReferenceFrame, Vec<usize>)> {
-    let (_, at) = place(d)?;
+    let at = place(d)?;
     let edges = edges(d);
     if edges.iter().all(Option::is_none) {
         return None;
     }
-    let Kind::Hole { opts, .. } = &d.kind else { return None };
-    if let Some(f) = &opts.refs.frame
+    if let Some(f) = &refs(d)?.frame
         && f.revision == s.revision
         && f.place == at
         && f.edges == edges
@@ -116,8 +155,8 @@ fn frame(s: &Session, d: &mut Dialog) -> Option<(ReferenceFrame, Vec<usize>)> {
         let pts: Vec<(Vec3, Option<&str>)> = picked.iter().map(|(_, p)| (*p, None)).collect();
         reference_frame(&s.world_state(), at, dir, &pts, true).ok().map(|f| (f, picked.iter().map(|(k, _)| *k).collect()))
     });
-    if let Kind::Hole { opts, .. } = &mut d.kind {
-        opts.refs.frame = Some(Framed { revision: s.revision, place: at, edges, frame: found.clone() });
+    if let Some(refs) = refs_mut(d) {
+        refs.frame = Some(Framed { revision: s.revision, place: at, edges, frame: found.clone() });
     }
     found
 }
@@ -126,19 +165,18 @@ fn frame(s: &Session, d: &mut Dialog) -> Option<(ReferenceFrame, Vec<usize>)> {
 /// typed distance moves the place there (when it stays on the face). Run before the dialog's
 /// commands are made.
 pub(crate) fn sync(s: &Session, d: &mut Dialog) {
-    if !single(d) {
+    if !takes(d) {
         return;
     }
     let edges = edges(d);
-    let Some((i, at)) = place(d) else {
-        if let Kind::Hole { opts, .. } = &mut d.kind {
-            opts.refs.seen = None;
+    let Some(at) = place(d) else {
+        if let Some(refs) = refs_mut(d) {
+            refs.seen = None;
         }
         return;
     };
     let framed = frame(s, d);
-    let Kind::Hole { opts, .. } = &mut d.kind else { return };
-    let refs = &mut opts.refs;
+    let Some(refs) = refs_mut(d) else { return };
     let mut to = at;
     if let Some((f, picked)) = &framed {
         let same = refs.seen.as_ref().filter(|sn| sn.place == at && sn.edges == edges);
@@ -170,15 +208,13 @@ pub(crate) fn sync(s: &Session, d: &mut Dialog) {
         }
     }
     refs.seen = Some(Seen { place: to, edges, distance: refs.distance.clone() });
-    if to != at
-        && let Some(Sel::Face { point, .. }) = d.inputs.first_mut().and_then(|inp| inp.items.get_mut(i))
-    {
-        *point = to;
+    if to != at {
+        set_place(d, to);
     }
 }
 
-/// The Single hole's selection rows, each reference edge with its distance on the row below it
-/// once it is picked. Whether Enter was pressed in a distance.
+/// The Single hole's (or the Cylinder's) selection rows, each reference edge with its distance on
+/// the row below it once it is picked. Whether Enter was pressed in a distance.
 pub(crate) fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) -> bool {
     let mut enter = false;
     for i in 0..d.inputs.len() {
@@ -186,8 +222,8 @@ pub(crate) fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) -> bool
         let Some(k) = d.inputs.get(i).filter(|inp| !inp.items.is_empty()).and_then(|inp| REFERENCES.iter().position(|l| *l == inp.label)) else {
             continue;
         };
-        if let Kind::Hole { opts, .. } = &mut d.kind
-            && let (Some(label), Some(value)) = (DISTANCES.get(k), opts.refs.distance.get_mut(k))
+        if let Some(refs) = refs_mut(d)
+            && let (Some(label), Some(value)) = (DISTANCES.get(k), refs.distance.get_mut(k))
         {
             enter |= crate::ui_kit::expr_row(ui, label, value);
         }
@@ -198,24 +234,17 @@ pub(crate) fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) -> bool
 
 /// The `references` OK sends: each picked edge (a point on it) with its distance.
 pub(crate) fn params(d: &Dialog) -> Vec<Value> {
-    let Kind::Hole { opts, .. } = &d.kind else { return Vec::new() };
-    if opts.multiple {
-        return Vec::new();
-    }
-    edges(d)
-        .iter()
-        .zip(&opts.refs.distance)
-        .filter_map(|(e, distance)| e.map(|p| json!({"edge": [p.x, p.y, p.z], "distance": distance.trim()})))
-        .collect()
+    let Some(refs) = refs(d).filter(|_| takes(d)) else { return Vec::new() };
+    edges(d).iter().zip(&refs.distance).filter_map(|(e, distance)| e.map(|p| json!({"edge": [p.x, p.y, p.z], "distance": distance.trim()}))).collect()
 }
 
-/// Editing a hole with reference edges: the edges picked again where they are now, their
-/// distances, and the place where those distances put the hole now.
+/// Editing a hole (or a cylinder) with reference edges: the edges picked again where they are
+/// now, their distances, and the place where those distances put it now.
 pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference], names: &[String]) {
     if references.is_empty() {
         return;
     }
-    let Some((i, at)) = place(d) else { return };
+    let Some(at) = place(d) else { return };
     let st = s.world_state();
     let edges: Vec<(Vec3, Option<&str>)> = references.iter().enumerate().map(|(k, r)| (r.edge.0, names.get(k).map(String::as_str))).collect();
     let found = direction(s, d, at).and_then(|dir| reference_frame(&st, at, dir, &edges, false).ok());
@@ -233,8 +262,8 @@ pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference],
         {
             inp.items = vec![sel];
         }
-        if let Kind::Hole { opts, .. } = &mut d.kind
-            && let Some(slot) = opts.refs.distance.get_mut(k)
+        if let Some(refs) = refs_mut(d)
+            && let Some(slot) = refs.distance.get_mut(k)
         {
             *slot = r.distance.to_string();
         }
@@ -242,19 +271,17 @@ pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference],
     // The hole where its distances put it now (the part may have changed since it was placed).
     let mut to = at;
     if let Some(f) = &found
-        && let Kind::Hole { opts, .. } = &d.kind
+        && let Some(refs) = refs(d)
     {
-        let values: Option<Vec<f64>> = opts.refs.distance.iter().take(f.lines.len()).map(|e| s.doc.eval(e, ValueKind::Length).ok()).collect();
+        let values: Option<Vec<f64>> = refs.distance.iter().take(f.lines.len()).map(|e| s.doc.eval(e, ValueKind::Length).ok()).collect();
         if let Some(c) = values.and_then(|v| f.place(at, &v).ok()).filter(|c| on_reference_face(&st, f, *c)) {
             to = c;
         }
     }
-    if let Some(Sel::Face { point, .. }) = d.inputs.first_mut().and_then(|inp| inp.items.get_mut(i)) {
-        *point = to;
-    }
+    set_place(d, to);
     let edges = self::edges(d);
-    if let Kind::Hole { opts, .. } = &mut d.kind {
-        opts.refs.seen = Some(Seen { place: to, edges, distance: opts.refs.distance.clone() });
+    if let Some(refs) = refs_mut(d) {
+        refs.seen = Some(Seen { place: to, edges, distance: refs.distance.clone() });
     }
 }
 
@@ -273,10 +300,10 @@ fn nearest_edge(s: &Session, at: Vec3, p: Vec3) -> Option<Sel> {
 /// box beside it to type the distance in. Whether a box took the keyboard (a newly picked edge's),
 /// which the dialog's main value then leaves to it.
 pub(crate) fn canvas(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) -> bool {
-    if !single(d) {
+    if !takes(d) {
         return false;
     }
-    let Some((_, at)) = place(d) else { return false };
+    let Some(at) = place(d) else { return false };
     let Some((f, picked)) = frame(&app.session, d) else { return false };
     let mut took = false;
     let t = Tokens::get();
@@ -291,13 +318,13 @@ pub(crate) fn canvas(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter,
             painter.line_segment([e0, e1], Stroke::new(1.2, t.dimension));
         }
         dimension(painter, a, b, t.dimension);
-        let (Some(label), Kind::Hole { opts, .. }) = (DISTANCES.get(*k), &mut d.kind) else { continue };
-        let focus = opts.refs.focus == Some(*k);
+        let (Some(label), Some(refs)) = (DISTANCES.get(*k), refs_mut(d)) else { continue };
+        let focus = refs.focus == Some(*k);
         if focus {
-            opts.refs.focus = None;
+            refs.focus = None;
             took = true;
         }
-        let Some(value) = opts.refs.distance.get_mut(*k) else { continue };
+        let Some(value) = refs.distance.get_mut(*k) else { continue };
         let at = box_beyond(a, b);
         let r = crate::canvas::value_box_in(
             ui,

@@ -436,6 +436,7 @@ fn primitives_and_combine() {
             radius: "2".into(),
             height: "20".into(),
             operation: Operation::NewBody,
+            references: Vec::new(),
         },
         None,
     )

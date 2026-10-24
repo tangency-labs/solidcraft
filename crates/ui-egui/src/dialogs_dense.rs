@@ -184,8 +184,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         ui_kit::text(ui, tr(key), ui_kit::Text::Hint("manage"));
     }
     placement_row(d, ui, &app.session);
-    if matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple) {
-        // Each reference edge with its distance (#37).
+    if crate::hole_refs::takes(d) {
+        // Each reference edge with its distance (#37, #6380).
         enter |= crate::hole_refs::input_rows(d, ui, &app.session);
     } else {
         input_rows(d, ui, &app.session);
@@ -793,7 +793,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             enter |= crate::dialogs_move::rows(ui, k);
             extra_options(ui, "move_options", &mut d.extra, &[("Create Copy", "copy")]);
         }
-        Kind::Primitive { cmd, fields, operation, at } => {
+        Kind::Primitive { cmd, fields, operation, at, .. } => {
             let from_sketch = *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.accept & selection::PROFILES != 0 && !i.items.is_empty());
             for (k, v) in fields.iter_mut() {
                 if from_sketch && (*k == "diameter" || *k == "section_size") {

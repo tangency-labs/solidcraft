@@ -693,6 +693,11 @@ pub enum FeatureKind {
         height: Expr,
         #[serde(default)]
         operation: Operation,
+        /// Up to two straight edges of the face it stands on (#6380), as a Single hole's
+        /// references: the base centre sits at each one's distance from its edge, in the face's
+        /// plane, and follows the edges when the part changes. `base` keeps where it was placed.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        references: Vec<HoleReference>,
     },
     Sphere {
         #[serde(with = "point_expr")]

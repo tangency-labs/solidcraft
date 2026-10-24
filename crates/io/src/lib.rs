@@ -1059,6 +1059,7 @@ mod tests {
                 radius: "6".into(),
                 height: "15".into(),
                 operation: Operation::NewBody,
+                references: Vec::new(),
             },
             None,
         )
