@@ -17,8 +17,8 @@ pub static COMMANDS: &[CommandSpec] = &[
          restored: features whose earlier result for the same inputs was reused (e.g. a value set back)",
     ),
     CommandSpec::new("parameters.list", "List Parameters", list).icon("list").noundo().doc_only().params(
-        "favorites?: bool (only favourites), filter?: all|user|sketch|feature|favorites → parameters (name, expression, unit, value in its unit, \
-         source, feature/input, comment, favorite, uses, used_by, error) and cycles",
+        "favorites?: bool (only favourites), filter?: all|user|sketch|feature|model|linked|favorites → parameters (name, expression, unit, \
+         value in its unit, source, feature/input, design (linked), comment, favorite, uses, used_by, error) and cycles",
     ),
     CommandSpec::new("parameters.add", "Add User Parameter", add).icon("new").params("name, expression, unit?, comment?, favorite?: bool"),
     CommandSpec::new("parameters.rename", "Rename Parameter", rename)
@@ -72,12 +72,12 @@ fn param_name<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
 }
 
 /// Features that fail (name and error).
-fn failing(s: &Session) -> Vec<Value> {
+pub(super) fn failing(s: &Session) -> Vec<Value> {
     s.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| json!({"feature": r.name, "error": e}))).collect()
 }
 
 fn known(s: &Session, name: &str) -> bool {
-    s.doc.param(name).is_some() || s.doc.features.iter().any(|f| f.param_names.iter().any(|n| n == name))
+    s.doc.owner(name).is_some()
 }
 
 fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
@@ -165,8 +165,8 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         .into_iter()
         .filter(|r| match filter.as_str() {
             "favorites" | "favourites" | "favorite" => r.favorite,
-            "user" | "sketch" | "feature" => r.source == filter,
-            "model" => r.source != "user",
+            "user" | "sketch" | "feature" | "linked" => r.source == filter,
+            "model" => r.source == "sketch" || r.source == "feature",
             _ => true,
         })
         .collect();

@@ -836,7 +836,9 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 } else {
                     app.set_status(
                         if let Some(w) = warnings.filter(|w| !w.is_empty()) {
-                            format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
+                            // A design file is opened; a STEP or mesh file (opened or inserted) is imported.
+                            let done = if solidcraft_engine::io::is_design_path(&request.path) { "opened" } else { "imported" };
+                            format!("{done} with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
                         } else {
                             format!("{} done", if request.insert() { "Insert" } else { "Open" })
                         },

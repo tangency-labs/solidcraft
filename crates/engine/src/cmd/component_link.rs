@@ -66,7 +66,7 @@ fn base_dir(path: Option<&str>) -> Option<PathBuf> {
 }
 
 /// A path as given, made absolute when the platform can, with `.` and `..` worked out.
-fn absolute(p: &Path) -> PathBuf {
+pub(super) fn absolute(p: &Path) -> PathBuf {
     let full = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
     let mut out = PathBuf::new();
     for c in full.components() {
@@ -100,7 +100,7 @@ fn relative(base: &Path, target: &Path) -> Option<PathBuf> {
 }
 
 /// How a link stores `file` for a design saved at `design` (`None`: not saved yet).
-fn stored(design: Option<&str>, file: &Path) -> String {
+pub(super) fn stored(design: Option<&str>, file: &Path) -> String {
     let file = absolute(file);
     match base_dir(design).and_then(|d| relative(&d, &file)) {
         // Relative paths are written with `/`, so a design moves between systems with its parts.
@@ -110,7 +110,7 @@ fn stored(design: Option<&str>, file: &Path) -> String {
 }
 
 /// The file a stored link path names, for a design saved at `design`.
-fn resolve(design: Option<&str>, link: &str) -> PathBuf {
+pub(super) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
     let p = Path::new(link);
     match base_dir(design) {
         Some(d) if p.is_relative() => d.join(p),

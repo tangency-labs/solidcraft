@@ -4,6 +4,7 @@
 mod actions;
 mod assistant;
 mod assistant_entry;
+mod attention;
 mod checks;
 mod choice;
 mod color;
@@ -34,6 +35,7 @@ pub(crate) use actions::*;
 pub use actions::{Button, button};
 pub(crate) use assistant::*;
 pub(crate) use assistant_entry::*;
+pub(crate) use attention::*;
 pub(crate) use checks::*;
 pub(crate) use choice::*;
 pub(crate) use color::*;

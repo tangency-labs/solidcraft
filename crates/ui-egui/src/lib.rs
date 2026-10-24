@@ -88,6 +88,7 @@ pub mod issue_report;
 pub mod joint_drag;
 pub mod keymap;
 mod linked_source;
+mod linked_watch;
 #[cfg(test)]
 mod loft_rails_dialog_tests;
 #[cfg(test)]
@@ -401,6 +402,11 @@ pub struct SolveApp {
     pub dialog: Option<dialogs::Dialog>,
     /// The Change Parameters window, when open.
     pub params: Option<params_dialog::ParamsDialog>,
+    /// The watch on the open design's linked designs (desktop only).
+    pub linked_watch: linked_watch::LinkedWatch,
+    /// Commands that need the user's attention (by command id), with why: their buttons and
+    /// rows show the shared mark (`ui_kit::attention_mark`).
+    pub attention: std::collections::BTreeMap<&'static str, String>,
     /// The Design Properties window, when open.
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Bill of Materials window, when open.
@@ -569,6 +575,8 @@ impl SolveApp {
             tool: None,
             dialog: None,
             params: None,
+            linked_watch: Default::default(),
+            attention: Default::default(),
             design_properties: None,
             bom: None,
             material_card_review: None,
@@ -1785,6 +1793,7 @@ impl SolveApp {
         issue_report::CadInput::block(self, ui, report_input);
         sketch_palette::show(self, ui.ctx());
         self.resolve_fit(ui.ctx());
+        linked_watch::step(self, ui.ctx());
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());

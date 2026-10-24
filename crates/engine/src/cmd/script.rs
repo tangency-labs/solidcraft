@@ -227,6 +227,12 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
     // User parameters go in as soon as everything they refer to exists, so each step sees the
     // values the design has (parameters are global; the order only has to let each one evaluate).
     let mut known: BTreeSet<String> = BTreeSet::new();
+    // Linked designs first: the script links the same files (as resolved), so their parameters
+    // have the values the files have when it runs.
+    for design in &doc.linked_designs {
+        out.push(step("parameters.link_design", json!({"path": design.path, "scope": design.scope})));
+        known.extend(design.params.iter().map(|p| p.name.clone()));
+    }
     let mut pending: Vec<&Param> = doc.params.iter().filter(|p| !p.model).collect();
     let flush = |pending: &mut Vec<&Param>, known: &mut BTreeSet<String>, out: &mut Vec<Value>| {
         while let Some(i) = pending.iter().position(|p| expr::references(&p.expr).iter().all(|r| known.contains(r))) {

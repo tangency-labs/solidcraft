@@ -209,6 +209,26 @@ features are computed.
 - **Elsewhere:** folder, group.
 - **For translators:** not a rigid group (a joint) and not a fixed browser *folder*.
 
+### linked parameter
+
+A user parameter of another design file that this design uses by name and can't change.
+
+Its value is read from the other design file and kept in this design, so the design opens and
+evaluates without that file. Updating the parameter links reads the file again; breaking the link
+turns the linked parameters into ordinary user parameters. Compare a linked component (Insert
+Design), which brings in another design's bodies, not its parameters.
+
+- **In SolidCraft:** `parameters.link_design` ("Link Parameters"), `parameters.update_links`
+  ("Update Parameter Links"), `parameters.relink` ("Relink Parameters"), `parameters.break_link`
+  ("Break Parameter Link"), `parameters.links` ("List Parameter Links"); the `design` parameter
+  key naming a linked design; the `linked_designs` design-file key; the `linked` parameter source
+  in `parameters.list`.
+- **Don't use:** shared parameter, global parameter, external parameter, imported parameter (an
+  import copies values once and keeps no link); parameter source ("source" is the kind of
+  parameter in `parameters.list`).
+- **Elsewhere:** linked parameter, master parameters, parameters from a skeleton or master model.
+- **For translators:** not a parameter of a linked component and not a configuration row.
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.

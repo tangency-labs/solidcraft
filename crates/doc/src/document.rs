@@ -11,6 +11,8 @@ use crate::{DocError, Result};
 
 pub const MAX_FEATURES: usize = 10_000;
 pub const MAX_PARAMS: usize = 10_000;
+/// Most designs one design links parameters from.
+pub const MAX_LINKED_DESIGNS: usize = 64;
 /// Largest feature id a replayed feature may keep (`Document::insert_feature`): exact in JSON
 /// numbers, and far from overflowing the next id.
 pub const MAX_FEATURE_ID: u64 = 1 << 52;
@@ -2449,6 +2451,45 @@ pub struct DesignLink {
     pub feature: u64,
 }
 
+/// Which user parameters of a linked design come in (Link Parameters).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParamScope {
+    /// All its user parameters.
+    #[default]
+    All,
+    /// Its favourite user parameters.
+    Favorites,
+}
+
+/// A linked design: another design whose user parameters this design uses by name (Link
+/// Parameters). It keeps where the file is and the values last read from it, so the design opens
+/// and evaluates without the file. Linked parameters are read-only here; Update Parameter Links
+/// reads the file again, and Break Parameter Link turns them into ordinary user parameters.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LinkedDesign {
+    /// The design file. In memory the file as resolved (absolute where the platform allows); in
+    /// a design file relative to that file's folder (`/` separates folders), so a folder of
+    /// designs can move or sync to another computer. Saving and opening convert between the two.
+    pub path: String,
+    #[serde(default)]
+    pub scope: ParamScope,
+    /// The parameters as last read: each value as a number in its own unit (`8.2 mm`).
+    pub params: Vec<LinkedParam>,
+}
+
+/// One parameter of a [`LinkedDesign`], as last read from it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LinkedParam {
+    pub name: String,
+    /// The value in `unit`, with the unit written in (`8.2 mm`, `45 deg`, `3`).
+    pub expr: String,
+    /// `mm`, `deg`… or empty (unit-less), as in the linked design.
+    pub unit: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub comment: String,
+}
+
 /// The document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
@@ -2501,6 +2542,9 @@ pub struct Document {
     /// Components linked to another design file (by component id).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub links: std::collections::BTreeMap<u64, DesignLink>,
+    /// Linked designs: designs whose user parameters this design uses (Link Parameters).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked_designs: Vec<LinkedDesign>,
     /// Configurations (rows of parameter values and suppressions).
     #[serde(default, skip_serializing_if = "crate::config::ConfigTable::is_empty")]
     pub configs: crate::config::ConfigTable,
@@ -2735,6 +2779,7 @@ impl Document {
             configs: Default::default(),
             parts: Default::default(),
             links: Default::default(),
+            linked_designs: Vec::new(),
             body_components: Default::default(),
             body_offsets: Default::default(),
             materials: Default::default(),
@@ -3061,7 +3106,8 @@ impl Document {
     /// Read a design file's JSON (any format this build knows; older ones are upgraded).
     pub fn from_json(s: &str) -> Result<Document> {
         let d = crate::format::read(s)?;
-        if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
+        let linked = d.linked_designs.iter().fold(0usize, |n, s| n.saturating_add(s.params.len()));
+        if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS || linked > MAX_PARAMS || d.linked_designs.len() > MAX_LINKED_DESIGNS {
             return Err(DocError::Invalid("document too large".into()));
         }
         Ok(d)
@@ -3390,6 +3436,11 @@ impl Document {
     /// Add or change a parameter. Fails if the result would not evaluate. A new parameter
     /// without a unit takes the unit of its value (mm, deg or none).
     pub fn set_param(&mut self, name: &str, expr_s: &str, unit: Option<&str>, comment: Option<&str>) -> Result<()> {
+        match self.owner(name) {
+            Some(crate::params::Owner::Input { .. }) => return Err(DocError::Invalid(format!("`{name}` is a feature's parameter"))),
+            Some(crate::params::Owner::Linked { design, .. }) => return Err(crate::params::linked_refusal(name, design)),
+            Some(crate::params::Owner::User(_) | crate::params::Owner::Model(_)) | None => {}
+        }
         if let Some(p) = Self::param_name_problem(name) {
             return Err(DocError::Invalid(p));
         }
@@ -3406,9 +3457,6 @@ impl Document {
         }
         if comment.is_some_and(|c| c.len() > 4096) {
             return Err(DocError::Invalid("comment too long".into()));
-        }
-        if self.features.iter().any(|f| f.param_names.iter().any(|n| n == name)) {
-            return Err(DocError::Invalid(format!("`{name}` is a feature's parameter")));
         }
         let mut next = self.clone();
         let inferred = match unit {

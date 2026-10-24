@@ -1252,8 +1252,17 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
             app.prefs_window.open = true;
         }
     }
-    let params = format!("Parameters ({})", app.session.doc.params.len());
-    if draw_row(ui, ui.id().with("params"), &Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() }).clicked {
+    let params = format!("Parameters ({})", app.session.doc.params.len() + app.session.doc.linked_params_used().len());
+    let row = draw_row(ui, ui.id().with("params"), &Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() });
+    if let (Some(why), Some(rect)) = (app.attention.get("parameters.change"), row.rect) {
+        // The mark sits at the row's end, centred on it, where it can't cover the label.
+        let target = egui::Rect::from_center_size(egui::pos2(rect.right() - 12.0, rect.center().y), egui::vec2(6.0, 6.0));
+        crate::ui_kit::attention_mark(ui.painter(), target, None);
+        let hover = egui::Rect::from_center_size(crate::ui_kit::attention_at(target), egui::vec2(16.0, rect.height()));
+        crate::scenario::publish_handle("attention:browser:params", hover.center());
+        ui.interact(hover, ui.id().with("params_attention"), egui::Sense::hover()).on_hover_text(why);
+    }
+    if row.clicked {
         if app.params.is_some() {
             app.params = None;
         } else {

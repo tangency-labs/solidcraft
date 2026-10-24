@@ -94,7 +94,7 @@ impl SolveApp {
                 let mut params = params;
                 params["path"] = json!(path);
                 let result = app.run(&command, params);
-                if command == "parameters.import"
+                if matches!(command.as_str(), "parameters.import" | "parameters.link_design" | "parameters.relink")
                     && let Some(dialog) = app.params.as_mut()
                 {
                     dialog.error = result.err();
