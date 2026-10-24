@@ -594,8 +594,9 @@ impl Session {
         Arc::make_mut(&mut self.doc)
     }
 
-    /// Prepared placements only: optional save caches must not compute a cold world.
-    pub(crate) fn cached_world_state(&self) -> Option<Arc<solidcraft_doc::ModelState>> {
+    /// Prepared placements only: optional save caches must not compute a cold world. `None`
+    /// when the design has components and nothing has placed them since it last changed.
+    pub fn cached_world_state(&self) -> Option<Arc<solidcraft_doc::ModelState>> {
         let state = self.model.state();
         if self.doc.occurrences.is_empty() {
             return Some(state);

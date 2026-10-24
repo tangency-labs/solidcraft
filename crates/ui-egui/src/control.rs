@@ -121,8 +121,10 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
     if r.is_ok()
         && !matches!(id, "view.layout" | "view.navigate" | "view.ambient_occlusion" | "view.graphics_preset" | "view.history_layout")
         && app.session.active_sketch.is_none()
-        && app.session.world_state().bodies.len() == 1
+        // Cheap test first: placing the world (`world_state`) after every step of a batch in a
+        // design with components placed every component's bodies again once per step.
         && app.session.undo.len() <= 2
+        && app.session.world_state().bodies.len() == 1
     {
         app.fit_view();
     }
@@ -1217,6 +1219,29 @@ mod tests {
             serde_json::Value::Array(a) => a.iter().map(without_timings).collect(),
             v => v.clone(),
         }
+    }
+
+    /// A step of a long design leaves its components unplaced: the first-body fit's check
+    /// (`execute`) looks at the undo history before placing the world, which used to place
+    /// every component's bodies after every step of a batch.
+    #[test]
+    fn a_step_does_not_place_the_world_for_the_first_body_fit() {
+        let mut h = crate::scenario::Harness::new();
+        let v = batch(
+            &mut h,
+            json!({"commands": [
+                {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "body_name": "Cube"}},
+                {"command": "component.from_bodies", "params": {"bodies": ["Cube"]}},
+                {"command": "occurrence.copy", "params": {"component": "Cube", "translate": [0, 40, 0]}},
+            ]}),
+        );
+        assert!(v["result"].get("failed").is_none(), "{v}");
+        assert!(h.app.session.undo.len() > 2, "past the first-body fit");
+        // Straight to `execute`, with no frame: drawing places the world too.
+        let r = super::execute(&mut h.app, "solid.sphere", json!({"radius": 3, "center": [80, 0, 0], "operation": "new"}));
+        assert!(r.is_ok(), "{r:?}");
+        assert!(h.app.session.cached_world_state().is_none(), "the step placed the components again");
+        assert_eq!(h.app.session.world_state().bodies.len(), 3);
     }
 
     /// #743: a batch is one request through the app's queue, answered within a frame, however
