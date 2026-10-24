@@ -59,6 +59,7 @@ pub(crate) mod motion;
 mod parts;
 mod script;
 mod section;
+pub mod settings;
 pub(crate) use measure_sel::measure_items;
 #[cfg(test)]
 mod kernel_heal_tests;
@@ -305,6 +306,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(section::COMMANDS.iter());
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
+    v.extend(settings::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v

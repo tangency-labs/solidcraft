@@ -34,6 +34,7 @@ use serde_json::Value;
 use solidcraft_doc::{Document, Model, ModelState};
 use solidcraft_geom::Vec3;
 
+pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{CommandInfo, CommandSpec, auto_operation, command_specs, extrude_reach, find_command};
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;

@@ -397,6 +397,9 @@ macro_rules! preference_settings {
             fn default() -> Self { Self { $($field: $default,)* } }
         }
 
+        /// Every stored field and the page whose Defaults resets it (`None`: no page).
+        pub(crate) const FIELD_PAGES: &[(&str, Option<usize>)] = &[$((stringify!($field), preference_settings!(@page $($page)?)),)*];
+
         fn reset_preferences(p: &mut Prefs, page: usize) {
             let d = Prefs::default();
             $($(if page == $page { p.$field = d.$field; })?)*
@@ -414,6 +417,8 @@ macro_rules! preference_settings {
             })?)*
         }
     };
+    (@page) => { None };
+    (@page $page:expr) => { Some($page) };
     (@control $app:ident, $ui:ident, $field:ident, check($label:literal $(, $help:literal)?)) => {
         ui_kit::checkbox($ui, crate::i18n::tr_label($label), &mut $app.preferences.$field)
             $(.on_hover_text(crate::i18n::tr_label($help)))?
@@ -727,6 +732,10 @@ struct Snapshot {
     autosave: f64,
     auto_project: bool,
     keys: std::collections::BTreeMap<String, String>,
+    /// What a settings profile also switches: the toolbar, the S box favourites and which profile is active.
+    toolbar: serde_json::Value,
+    favourites: Vec<String>,
+    profile: Option<String>,
 }
 
 impl Snapshot {
@@ -744,6 +753,9 @@ impl Snapshot {
             autosave: app.autosave_minutes,
             auto_project: app.session.auto_project,
             keys: app.keymap.custom.clone(),
+            toolbar: app.toolbar_custom.prefs(),
+            favourites: app.sbox.pinned.clone(),
+            profile: app.settings_profiles.active.clone(),
         }
     }
     fn restore(self, app: &mut SolveApp) {
@@ -768,6 +780,9 @@ impl Snapshot {
         set_autosave(app);
         app.session.auto_project = self.auto_project;
         app.keymap.custom = self.keys;
+        app.toolbar_custom.load(&self.toolbar);
+        app.sbox.pinned = self.favourites;
+        app.settings_profiles.active = self.profile.filter(|name| app.settings_profiles.names().contains(name));
         if (app.preferences.msaa, app.preferences.window_system.clone()) != graphics {
             save_graphics(app);
         }
