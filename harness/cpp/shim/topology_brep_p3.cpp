@@ -673,10 +673,29 @@ void run(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             o.push_back(st(bst2));
             break;
         }
+        std::vector<double> geometry;
+        auto points = [&](const std::vector<SmVertex*>& vertices) {
+            geometry.push_back((double)vertices.size());
+            for (SmVertex* v : vertices)
+                put_vec(geometry, v->GetPoint());
+        };
+        points(g.vertices);
+        points(g2.vertices);
         SmTArray<SmVertex*> nv;
         o.push_back(st(brep->CopyVertices(vs, b2.brep, &nv)));
         o.push_back((double)nv.GetSize());
         put_counts(o, b2.brep);
+        points(g.vertices);
+        points(g2.vertices);
+        Graph post;
+        walk(b2.brep, post, true);
+        geometry.push_back((double)nv.GetSize());
+        for (ULONG i = 0; i < nv.GetSize(); ++i)
+        {
+            geometry.push_back((double)post.find(9, nv[i]));
+            put_vec(geometry, nv[i]->GetPoint());
+        }
+        o.insert(o.end(), geometry.begin(), geometry.end());
         break;
     }
     case P3_DELETE_FACE:

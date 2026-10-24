@@ -25,7 +25,7 @@
 //! | `Construct`     | `mse lsr` (no B-rep block) | `0 0 tol mse lsr editing infinite_void counts` (`SmBrep(mse, lsr)` in a context of its own) |
 //! | `Copy`          | `analytics api` | `status tol editing counts` of the copy (`api`: `SmApiBrepCopy`, else the copy constructor with `analytics`) |
 //! | `Merge`         | `analytics` | `status counts` (`MergeBrep` of the B-rep into a second build of it) |
-//! | `CopyVertices`  | `n v*` | `status new counts` (`CopyVertices` into a second build) |
+//! | `CopyVertices`  | `n v*` | `status new counts`, then four `n xyz*` snapshots (source/destination before, source/existing destination after), then `n (destination_walk_index xyz)*` in returned order (`CopyVertices` into a second build) |
 //! | `DeleteFace`    | `face delete_ev nesting keep_region` (`-1` null) | `status deleted counts tracker` |
 //! | `Wire`          | `which region v1 v2 curve t0 t1 orient end(3)` (`0` `MakeWireEdge`, `1` `MakeWireEdgeVertex`; region `-1` null) | `status counts tracker` |
 //! | `Orient`        | `outward unify n face*` (`n = -1`: no list) | `status maybe_not_closed`, per face `u0 v0 u1 v1 upward_faceuse`, `counts tracker` |
