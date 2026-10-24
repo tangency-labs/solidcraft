@@ -236,3 +236,46 @@ fn an_edge_on_the_cut_face_draws_over_the_cap() {
         }
     }
 }
+
+/// A post standing on a plate, cut through by a section: the post's cut is its own (blue) cap
+/// down to the plate, whichever body came first. The post's bottom, seen through the cut, and the
+/// plate's top are the same plane; the plate's top showed through in patches, and with the post
+/// made first its cap took the plate's colour (the plate's bottom lies behind it).
+#[test]
+fn a_body_standing_on_another_keeps_its_own_cap() {
+    let plate = ("solid.box", json!({"length": 80, "width": 50, "height": 10, "body_name": "Plate"}));
+    let post = ("solid.cylinder", json!({"radius": 12, "height": 40, "base": [20, 25, 10], "body_name": "Post"}));
+    let colours = [
+        ("appearance.assign", json!({"bodies": ["Plate"], "appearance": "ABS - Red"})),
+        ("appearance.assign", json!({"bodies": ["Post"], "appearance": "ABS - Blue"})),
+        ("inspect.section", json!({"plane": {"origin": [0, 25, 0], "normal": [0, -1, 0]}})),
+    ];
+    for post_first in [false, true] {
+        let mut script = if post_first { vec![post.clone(), plate.clone()] } else { vec![plate.clone(), post.clone()] };
+        script.extend(colours.iter().cloned());
+        let s = session(&script);
+        for (mode, c) in capturers() {
+            for fov in [0.0, 0.6] {
+                let mut cam = view::home_camera(&s);
+                cam.fov = fov;
+                // The session's section (`scene_with_guides` takes its own).
+                let scene = view::scene(&s, &cam);
+                let img = c.rgba(&scene, &cam, 400, 400).unwrap();
+                let vp = cam.view_proj(1.0, scene.radius);
+                // The post's cut, 1–4 mm above the plate (a pixel is about 0.4 mm).
+                let mut wrong = Vec::new();
+                for x in (10..=30).map(f64::from) {
+                    for z in [11.0, 12.0, 13.0, 14.0] {
+                        let q = vp.apply(Vec3::new(x, 25.0, z));
+                        let (px, py) = (((q[0] / q[3] + 1.0) * 200.0) as usize, ((1.0 - q[1] / q[3]) * 200.0) as usize);
+                        let p = pixels(&img).nth(py * 400 + px).unwrap();
+                        if i16::from(p[2]) <= i16::from(p[0]) + 25 {
+                            wrong.push(((x, z), p));
+                        }
+                    }
+                }
+                assert!(wrong.is_empty(), "{mode} depth, fov {fov}, post first {post_first}: not the post's cap at {wrong:?}");
+            }
+        }
+    }
+}
