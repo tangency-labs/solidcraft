@@ -4,7 +4,7 @@ use std::f64::consts::PI;
 
 use solidcraft_geom::{Plane, Vec2, Vec3};
 
-use crate::{BoolOp, cylinder, faceted_boolean, sweep_helix_mesh};
+use crate::{BoolOp, boolean, box_solid, cylinder, cylinder_band_at, faceted_boolean, sweep_helix_mesh};
 
 /// A trapezoid groove screwed into a shaft: the result is closed, and the volume removed is
 /// the section's 2π∫r dA per turn over the turns inside the shaft.
@@ -61,4 +61,25 @@ fn a_long_thread_cuts_without_a_deep_tree() {
     let v = cut.tessellate(0.01).unwrap().measure().volume;
     let v0 = PI * r * r * len;
     assert!(v < v0 * 0.95 && v > v0 * 0.6, "{v} of {v0}");
+}
+
+/// A thread fills a hole in, or builds a shaft up, with a ring only on a whole band: a shaft, a
+/// bore through a block and a blind one (whose wall the boolean leaves in two halves) are; a
+/// notch in a block's side and a shaft with a flat on it are not.
+#[test]
+fn a_cylinder_band_is_whole_only_all_round_and_square() {
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let whole = |b: &crate::Body, p: Vec3| cylinder_band_at(b, p).map(|(_, w)| w);
+    let shaft = cylinder(Vec3::ZERO, z, 2.0, 6.0).unwrap();
+    assert_eq!(whole(&shaft, Vec3::new(2.0, 0.0, 3.0)), Some(true));
+    let block = || box_solid(Vec3::new(-5.0, -5.0, 0.0), Vec3::new(5.0, 5.0, 6.0)).unwrap();
+    let cut = |a: &crate::Body, b: &crate::Body| boolean(a, b, BoolOp::Cut).unwrap().unwrap();
+    let through = cut(&block(), &cylinder(Vec3::new(0.0, 0.0, -1.0), z, 2.0, 8.0).unwrap());
+    assert_eq!(whole(&through, Vec3::new(0.0, 2.0, 3.0)), Some(true));
+    let blind = cut(&block(), &cylinder(Vec3::new(0.0, 0.0, 2.0), z, 2.0, 5.0).unwrap());
+    assert_eq!(whole(&blind, Vec3::new(0.0, 2.0, 4.0)), Some(true));
+    let notch = cut(&block(), &cylinder(Vec3::new(5.0, 0.0, -1.0), z, 2.0, 8.0).unwrap());
+    assert_eq!(whole(&notch, Vec3::new(3.0, 0.0, 3.0)), Some(false));
+    let flat = cut(&shaft, &box_solid(Vec3::new(1.5, -3.0, -1.0), Vec3::new(3.0, 3.0, 7.0)).unwrap());
+    assert_eq!(whole(&flat, Vec3::new(-2.0, 0.0, 3.0)), Some(false));
 }
