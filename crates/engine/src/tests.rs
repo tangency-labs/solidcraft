@@ -1385,6 +1385,30 @@ fn extrude_auto_operation() {
     assert!(rel(volume(&mut s), 40.0 * 30.0 * 15.0 - 100.0 * 8.0) < 1e-6);
 }
 
+/// #467: the automatic operation is decided where the extrude starts. A profile on a plate's top
+/// going down cuts; started From Object at the plate's bottom (or 15 mm lower by a start offset)
+/// the same distance goes out of it, and joins.
+#[test]
+fn extrude_auto_operation_counts_from_the_start() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [15, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let down = json!({"profiles": [{"point": [10, 10]}], "distance": -5});
+    assert_eq!(auto_operation(&s, &down), Some("cut"));
+    let mut from = down.clone();
+    from["from"] = json!([20, 15, 0]);
+    assert_eq!(auto_operation(&s, &from), Some("join"));
+    let mut offset = down.clone();
+    offset["start_offset"] = json!("-15 mm");
+    assert_eq!(auto_operation(&s, &offset), Some("join"));
+    // Up from the bottom face into the plate it cuts again.
+    let mut up = from.clone();
+    up["distance"] = json!(5);
+    assert_eq!(auto_operation(&s, &up), Some("cut"));
+}
+
 /// #1666: a loft between two 18-point polylines has twisted (bilinear) side faces. Each was
 /// meshed as two flat triangles, which cross the surface; the mesh volume was 16 800.6 mm³
 /// against the B-rep's 17 884. Divided to the chord tolerance, the mesh matches the B-rep.
