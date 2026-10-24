@@ -721,6 +721,26 @@ fn coil_and_loft_to_a_point() {
     assert!(s.execute("solid.loft", &json!({"sections": [{"sketch": "Base"}, {"sketch": "Top", "point": "nope"}]})).is_err());
 }
 
+/// A square coil joined round a cylinder, its ends flush with the cylinder's end faces (#3088):
+/// both tries as the bodies lie fail on those ends, and the six shifted tries after them did too,
+/// at seconds each on the coil's walls, before the nudged tool was joined; that nudged join then
+/// meshed both bodies at the finest step. The join now takes the nudge after the first two:
+/// counted in the kernel's tries, not timed, so a busy machine cannot fail it.
+#[test]
+fn coil_joined_flush_with_a_cylinders_ends() {
+    use std::f64::consts::{PI, TAU};
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "ID", "expression": 30, "unit": "mm"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 15, "height": 13, "base": [0, 0, 0], "body_name": "Body2"}));
+    let coil = json!({"axis": "Z", "base": [0, 0, 2], "clockwise": true, "diameter": "ID+0.8", "height": 9, "operation": "join",
+        "pitch": 9, "section": "square", "section_position": "inside", "section_size": 4, "targets": ["Body2"]});
+    let r = solidcraft_kernel::with_attempt_budget(6, || s.execute("solid.coil", &coil));
+    assert!(r.is_ok(), "{r:?}");
+    // The cylinder and the turn of the coil's section outside it: 0.4 mm by 4 mm, round r = 15.2.
+    let (v, want) = (volume(&mut s), PI * 15.0 * 15.0 * 13.0 + 0.4 * 4.0 * TAU * 15.2);
+    assert!(rel(v, want) < 1e-3, "{v} {want}");
+}
+
 /// A 3 mm shelled basin (100 x 60 x 30, open top) with a fall lofted from its whole outline
 /// 10 up down to a drain pad (`pad`: corners, 1 up), in either section order. The loft's top
 /// edges lie on the outer walls; the cut used to fail for one order of the sections (an
