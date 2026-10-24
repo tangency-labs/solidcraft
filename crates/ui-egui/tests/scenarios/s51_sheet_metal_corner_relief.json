@@ -3,6 +3,12 @@
   "note": "Sheet Metal Rules: the Corner Relief Shape row sets the rule's corner_relief_shape, and the tray made with the rule follows. The bend on the 120 mm edge is 120 - 2*s0 long (s0 = 3*tan 36 deg) and 8 mm shorter with a relief 8 mm across at both its ends. Torn, its centre line is sin 72 deg - 0.5/sqrt 2 longer: each end runs half that past the corner, toward its flange's closed end."
  },
  {
+  "call": "ui.prefs",
+  "params": {
+   "toolbar_tabs": ["SHEET METAL"]
+  }
+ },
+ {
   "call": "ui.set",
   "params": {
    "tab": "SHEET METAL"

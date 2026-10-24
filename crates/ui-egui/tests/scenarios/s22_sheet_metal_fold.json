@@ -3,6 +3,12 @@
   "note": "Target: sheet metal plate folded along a sketch line (sheet.fold, solidcraft-params; dialog by solidcraft-dialogs). Adjust the dialog steps when it lands."
  },
  {
+  "call": "ui.prefs",
+  "params": {
+   "toolbar_tabs": ["SHEET METAL"]
+  }
+ },
+ {
   "call": "ui.set",
   "params": {
    "tab": "SHEET METAL"

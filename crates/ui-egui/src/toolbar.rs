@@ -903,9 +903,14 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                 + 24.0
         })
         .collect();
+    // A plus after the last tab opens the toolbar's menu, so the optional tabs can be turned on
+    // without knowing about the right-click. The Render workspace has no optional tabs.
+    let add = !crate::render_workspace::active(app);
+    let add_size = TAB_ROW_HEIGHT - 2.0 * RIBBON_TAB_INSET;
     let tabs_width: f32 = widths.iter().sum::<f32>()
         + tabs.len().saturating_sub(1) as f32 * 2.0
-        + tabs.iter().filter(|tab| contextual_tab(app, tab)).count() as f32 * 6.0;
+        + tabs.iter().filter(|tab| contextual_tab(app, tab)).count() as f32 * 6.0
+        + if add { 2.0 + add_size } else { 0.0 };
     let search_width = crate::ui_kit::CommandSearch::closed_width(ui.ctx());
     // The first tab and the search field sit the same distance from the card's top, left and right
     // edges, so their outer corners are concentric with the card's corners.
@@ -987,7 +992,28 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                     if response.clicked() {
                         app.ui.tab = tab.to_string();
                     }
+                    if response.secondary_clicked() {
+                        crate::context_menu::open_for(
+                            app,
+                            response.interact_pointer_pos().unwrap_or(tr.left_bottom()),
+                            crate::context_menu::Target::Toolbar,
+                        );
+                    }
                     x += width + 2.0;
+                }
+                if add {
+                    let pr = Rect::from_min_size(pos2(x, all.top() + inset), vec2(add_size, add_size));
+                    let open = crate::context_menu::open_from(app, pr, &crate::context_menu::Target::Toolbar);
+                    if open && !ui.rect_contains_pointer(pr) {
+                        ui.painter().rect_filled(pr, t.control_radius, t.hover);
+                    }
+                    let response = crate::ui_kit::quiet_icon_button_at(ui, pr, "plus", "Toolbar tabs");
+                    if ui.clip_rect().contains(pr.center()) {
+                        crate::scenario::publish_target("ribbon:add_tab", pr);
+                    }
+                    if response.clicked() {
+                        crate::context_menu::toggle_for(app, pr, pr.left_bottom(), crate::context_menu::Target::Toolbar);
+                    }
                 }
             });
     });

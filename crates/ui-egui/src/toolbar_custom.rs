@@ -3,10 +3,11 @@
 //! pins it to the toolbar, removes it, or pins it to the S box's favourites; buttons are dragged
 //! to reorder them within and between panels; a drop-down row dragged onto the toolbar pins it
 //! there, a button dragged off the toolbar (or back into the drop-down) leaves it; the pin icon
-//! on a hovered drop-down row pins or unpins; the toolbar's own menu (right-click its empty
-//! space) has Customize Toolbar… (a window listing every command of the tab with a check box)
-//! and Reset Toolbar; Reset Toolbar restores the tab. Kept with the
-//! preferences and exported or imported with the keyboard shortcuts.
+//! on a hovered drop-down row pins or unpins; the toolbar's own menu (the plus after the tabs,
+//! or right-click its empty space or a tab) turns the optional tabs on or off, and has Customize Toolbar… (a window
+//! listing every command of the tab with a check box) and Reset Toolbar; Reset Toolbar restores
+//! the tab. The buttons are kept with the preferences and exported or imported with the keyboard
+//! shortcuts; the tabs turned on are the `toolbar_tabs` preference.
 
 use std::collections::BTreeMap;
 
@@ -271,12 +272,22 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
     v
 }
 
-/// The toolbar's own menu (right-click on its empty space).
+/// The toolbar's own menu (right-click on its empty space or a tab): the optional tabs, ticked
+/// when turned on, then the button customisation.
 pub fn toolbar_items(app: &SolveApp) -> Vec<Item> {
-    vec![
-        Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"),
-        Item::action("ui.toolbarReset", "Reset Toolbar", "restore").with(json!({ "tab": app.ui.tab })),
-    ]
+    let mut v = Vec::new();
+    if !crate::render_workspace::active(app) {
+        v.push(Item::heading("Toolbar tabs"));
+        for o in crate::workspace::OPTIONAL_TABS {
+            let on = app.preferences.toolbar_tabs.iter().any(|t| t == o.tab);
+            let item = Item::action("ui.toolbarTab", o.label, o.icon).with(json!({ "tab": o.tab, "shown": !on }));
+            v.push(if on { item.key("current") } else { item });
+        }
+        v.push(Item::sep());
+    }
+    v.push(Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"));
+    v.push(Item::action("ui.toolbarReset", "Reset Toolbar", "restore").with(json!({ "tab": app.ui.tab })));
+    v
 }
 
 /// Run a toolbar item from a menu.
@@ -292,6 +303,7 @@ pub fn run(app: &mut SolveApp, action: &str, p: &Value) {
         "ui.toolbarRemove" => remove(app, &tab, id),
         "ui.toolbarReset" => reset(app, &tab),
         "ui.toolbarCustomize" => app.toolbar_custom.customizing = true,
+        "ui.toolbarTab" => crate::workspace::set_tab_shown(app, &tab, p.get("shown").and_then(Value::as_bool).unwrap_or(true)),
         "ui.shortcutPin" => app.sbox.toggle_pin(id),
         _ => {}
     }

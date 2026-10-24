@@ -3,6 +3,12 @@
   "note": "Two edge flanges in one feature; the second gets an angle of its own in its row of the Flange dialog. Default rule: T 2.5, R 2.5, gap 2.5; height 10. By hand: s0 = (R + T)·tan(θ/2) is 5 at 90° and 2.886751 at 60°, so the base keeps 57.113249 x 35 = 1998.963703 mm². Each bend holds len·θ·(R + T/2): 57.113249·(π/2)·3.75 + 35·(π/3)·3.75 = 473.869483. The 90° panel ends x(w) = ((g/2)·√2 + T − w·cos 60°) / sin 60° from the corner, 2.041241 at w = 5 and −0.845510 at w = 10: 5·(60 − 0.597866) = 297.010671. The 60° panel ends (g/2)·√2 + T = 4.267767 from the corner and is 7.113249 high: 254.172259. Volume: 2.5·3024.016116 = 7560.040 mm³."
  },
  {
+  "call": "ui.prefs",
+  "params": {
+   "toolbar_tabs": ["SHEET METAL"]
+  }
+ },
+ {
   "call": "ui.set",
   "params": {
    "tab": "SHEET METAL"

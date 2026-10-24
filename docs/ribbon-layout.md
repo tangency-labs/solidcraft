@@ -2,7 +2,7 @@
 
 The UI layout in `crates/ui-egui/src/workspace.rs` maps the original engine registry placements into ribbon sections. `docs/features.md` continues to document registry placements; command registrations and ids are unchanged.
 
-Always shown, in order: MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW, SHEET METAL. SKETCH appears during sketch editing. SHEET METAL is reachable in every document, so a sheet-metal part can start from a sketch or a solid; it takes the contextual style and selects itself when the selected body (or the last body of the active component) has evaluated sheet-metal data. Entering a context selects its tab; the other tabs remain available. RENDER belongs to the Render workspace.
+Always shown, in order: MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW. SKETCH appears during sketch editing. SHEET METAL is an optional tab (`workspace::OPTIONAL_TABS`), shown after them. Each person turns optional tabs on: click the **+** after the last tab, or right-click a tab or the toolbar's empty space, and tick it in the menu; or use Settings › Interface › Toolbar tabs. The choice is kept with the preferences (`toolbar_tabs`). A design with a feature of the tab's kind (a sheet-metal feature) shows the tab even when it is off, so opening or making a sheet-metal part brings it. SHEET METAL takes the contextual style and selects itself when the selected body (or the last body of the active component) has evaluated sheet-metal data. Entering a context selects its tab; the other tabs remain available. RENDER belongs to the Render workspace.
 
 **Bold command ids are default promoted buttons.** Every listed command remains in the section menu. Saved user pins can add buttons, as before.
 
@@ -132,7 +132,7 @@ Additional old panels used for shared layouts migrate as follows: SELECT on any 
 
 ## Automation handles
 
-The tab handle form stays `tab:<UPPERCASE NAME>`. Added: `tab:MODEL`, `tab:ASSEMBLE`, `tab:INSERT`, `tab:INSPECT`, `tab:MANAGE`, `tab:VIEW`. SURFACE and RENDER retain their names; SKETCH is available only in context; SHEET METAL is always available. Legacy aliases remain: `tab:SOLID` and `tab:PLASTIC` → MODEL; `tab:MESH` → SURFACE; `tab:UTILITIES` → MANAGE. The Home and document-tab handles are unchanged.
+The tab handle form stays `tab:<UPPERCASE NAME>`. Added: `tab:MODEL`, `tab:ASSEMBLE`, `tab:INSERT`, `tab:INSPECT`, `tab:MANAGE`, `tab:VIEW`. SURFACE and RENDER retain their names; SKETCH is available only in context; SHEET METAL while it is turned on or the design has a sheet-metal feature. The **+** after the last tab is `ribbon:add_tab`; it opens the toolbar menu. In that menu (`ui.menu` with target `{"type": "toolbar"}`), pick a tab's row by its label (`ui.menuPick {"item": "Sheet Metal"}`). The Settings check boxes are `prefs:toolbar_tab:<UPPERCASE NAME>`. Legacy aliases remain: `tab:SOLID` and `tab:PLASTIC` → MODEL; `tab:MESH` → SURFACE; `tab:UTILITIES` → MANAGE. The Home and document-tab handles are unchanged.
 
 Section labels retain `panel:<tab>:<section>` and collapsed sections retain `collapsed:<tab>:<section>`, with destinations from the tables above. In particular, `panel:SOLID:CREATE` becomes `panel:MODEL:CREATE`, selection-filter panels become `panel:VIEW:SELECT`, and `panel:SKETCH:CONSTRAINTS` becomes `panel:SKETCH:CONSTRAIN`. Command button and menu handles keep their command ids.
 

@@ -1,5 +1,11 @@
 [
  {
+  "call": "ui.prefs",
+  "params": {
+   "toolbar_tabs": ["SHEET METAL"]
+  }
+ },
+ {
   "call": "ui.set",
   "params": {
    "tab": "SHEET METAL"

@@ -125,7 +125,7 @@ impl Item {
             swatch: None,
         }
     }
-    fn heading(label: &str) -> Item {
+    pub(crate) fn heading(label: &str) -> Item {
         Item {
             id: format!("#{label}"),
             label: label.into(),
@@ -1210,7 +1210,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let _ = app.run("browser.visibility", json!({"visible": true, "paths": [p["path"]], "isolate": true}));
         }
         "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
-        "ui.toolbarPin" | "ui.toolbarRemove" | "ui.toolbarReset" | "ui.toolbarCustomize" | "ui.shortcutPin" => {
+        "ui.toolbarPin" | "ui.toolbarRemove" | "ui.toolbarReset" | "ui.toolbarCustomize" | "ui.toolbarTab" | "ui.shortcutPin" => {
             crate::toolbar_custom::run(app, &item.id, &p)
         }
         "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" => {
@@ -1538,12 +1538,17 @@ pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
 
 /// A button's menu: a click opens it, and a click on the same button while it is open closes it.
 pub fn toggle_for(app: &mut SolveApp, opener: Rect, at: Pos2, target: Target) {
-    if app.viewport.context_menu.is_some() && app.menu.target == target && app.menu.opener == Some(opener) {
+    if open_from(app, opener, &target) {
         close(app);
     } else {
         open_for(app, at, target);
         app.menu.opener = Some(opener);
     }
+}
+
+/// The button's menu is open, so the button can show it pressed.
+pub fn open_from(app: &SolveApp, opener: Rect, target: &Target) -> bool {
+    app.viewport.context_menu.is_some() && app.menu.target == *target && app.menu.opener == Some(opener)
 }
 
 pub fn close(app: &mut SolveApp) {

@@ -499,6 +499,9 @@ preference_settings! {
     layout: crate::shell::LayoutMode = Default::default(), PAGE_INTERFACE;
     /// Show command names beneath ribbon icons, independently of workspace layout.
     ribbon_labels: bool = true, PAGE_INTERFACE;
+    /// The optional toolbar tabs turned on (`workspace::OPTIONAL_TABS`, such as `SHEET METAL`).
+    /// A design with a feature of a tab's kind shows that tab anyway.
+    toolbar_tabs: Vec<String> = Vec::new(), PAGE_INTERFACE;
     /// Interface scale (1 = 100 %).
     ui_scale: f32 = 1.0, PAGE_INTERFACE, accept(0.5..=2.5);
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
@@ -1512,6 +1515,12 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     }
     if new.disabled_plugins.len() > crate::plugins::MAX_DISABLED || new.disabled_plugins.iter().any(|id| !crate::plugins::valid_id(id)) {
         return Err(format!("`disabled_plugins` must be at most {} ids of lowercase letters, digits and hyphens", crate::plugins::MAX_DISABLED));
+    }
+    let optional: Vec<&str> = crate::workspace::OPTIONAL_TABS.iter().map(|o| o.tab).collect();
+    if new.toolbar_tabs.len() > optional.len()
+        || new.toolbar_tabs.iter().any(|tab| !optional.contains(&tab.as_str()) || new.toolbar_tabs.iter().filter(|t| *t == tab).count() > 1)
+    {
+        return Err(format!("`toolbar_tabs` lists optional tabs, each once: {}", optional.join(", ")));
     }
     if !accepted::ui_scale(&new) || !accepted::look_at_speed(&new) {
         return Err("`ui_scale` must be 0.5…2.5 and `look_at_speed` 0.25…4".into());

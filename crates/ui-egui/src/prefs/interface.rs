@@ -69,6 +69,18 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             ui_kit::layout_preview,
         );
     });
+    // The same choice as the toolbar's own menu (the plus after the tabs, or right-click a tab).
+    ui_kit::settings_section(ui, "toolbar_tabs", app.tr("prefs.toolbar_tabs"), |ui| {
+        for o in crate::workspace::OPTIONAL_TABS {
+            let mut on = app.preferences.toolbar_tabs.iter().any(|t| t == o.tab);
+            let response = ui_kit::checkbox(ui, app.tr_label(o.label), &mut on);
+            crate::scenario::publish_target(&format!("prefs:toolbar_tab:{}", o.tab), response.rect);
+            if response.changed() {
+                crate::workspace::set_tab_shown(app, o.tab, on);
+            }
+        }
+        ui_kit::text(ui, app.tr("prefs.toolbar_tabs_note"), ui_kit::Text::Hint("toolbar_tabs"));
+    });
     ui_kit::settings_section(ui, "scale", app.tr("prefs.scale_text"), |ui| {
         ui_kit::settings_pair(
             ui,

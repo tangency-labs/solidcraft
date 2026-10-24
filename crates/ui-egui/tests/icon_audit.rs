@@ -163,6 +163,8 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         prompt: Box::new(|| {}),
     });
     h.app.preferences.radial_context_menu = true;
+    // Every optional tab is on, so a part without sheet metal still walks its tab.
+    h.app.preferences.toolbar_tabs = workspace::OPTIONAL_TABS.iter().map(|o| o.tab.to_string()).collect();
     assert_eq!(h.call("ui.icon_audit", json!({"reset":true}))["ok"], true);
     h.app.session.run_script(&solidcraft_engine::sample::script()).unwrap();
     h.frames(3);

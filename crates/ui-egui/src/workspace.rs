@@ -444,6 +444,40 @@ pub fn sheet_body(app: &crate::SolveApp) -> Option<String> {
     state.sheets.iter().find(|s| s.body == body).map(|s| s.body.clone())
 }
 
+/// A tab for one kind of work. It is off until the person turns it on (the tab row's menu,
+/// Settings › Interface: `toolbar_tabs`); a design with one of its features shows it anyway, so
+/// opening a sheet-metal part brings its tab.
+pub struct OptionalTab {
+    pub tab: &'static str,
+    /// The tab's name in the menu and Settings, in English (the catalogs translate it as drawn).
+    pub label: &'static str,
+    /// The tab's row in the menu.
+    pub icon: &'static str,
+    /// The features of the tab's kind.
+    pub made_by: fn(&FeatureKind) -> bool,
+}
+
+pub const OPTIONAL_TABS: &[OptionalTab] = &[OptionalTab { tab: "SHEET METAL", label: "Sheet Metal", icon: "sheet", made_by: FeatureKind::is_sheet }];
+
+/// Whether an optional tab shows: turned on, or the design has one of its features.
+pub fn optional_tab_shown(app: &crate::SolveApp, tab: &str) -> bool {
+    app.preferences.toolbar_tabs.iter().any(|t| t == tab) || in_design(app, tab)
+}
+
+/// The design has a feature of this optional tab's kind.
+pub fn in_design(app: &crate::SolveApp, tab: &str) -> bool {
+    OPTIONAL_TABS.iter().any(|o| o.tab == tab && app.session.doc.features.iter().any(|f| (o.made_by)(&f.kind)))
+}
+
+/// Turn an optional tab on or off (kept with the preferences); other names are left alone.
+pub fn set_tab_shown(app: &mut crate::SolveApp, tab: &str, shown: bool) {
+    let Some(o) = OPTIONAL_TABS.iter().find(|o| o.tab == tab) else { return };
+    app.preferences.toolbar_tabs.retain(|t| t != o.tab);
+    if shown {
+        app.preferences.toolbar_tabs.push(o.tab.to_string());
+    }
+}
+
 pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
     if crate::render_workspace::active(app) {
         return vec!["RENDER"];
@@ -452,9 +486,7 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
     if app.session.active_sketch.is_some() {
         tabs.push("SKETCH");
     }
-    // Always reachable, as before the ribbon redesign: a sheet-metal part starts from an
-    // ordinary sketch or solid, so the tab cannot wait for a sheet body.
-    tabs.push("SHEET METAL");
+    tabs.extend(OPTIONAL_TABS.iter().map(|o| o.tab).filter(|tab| optional_tab_shown(app, tab)));
     tabs
 }
 
@@ -675,9 +707,7 @@ mod tests {
     #[test]
     fn contextual_tabs_follow_the_active_body_and_allow_other_tabs() {
         let mut h = crate::scenario::Harness::new();
-        let mut fresh = TABS.to_vec();
-        fresh.push("SHEET METAL");
-        assert_eq!(visible_tabs(&h.app), fresh, "SHEET METAL is reachable before any sheet body exists");
+        assert_eq!(visible_tabs(&h.app), TABS.to_vec(), "SHEET METAL is off in a fresh document until turned on");
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         assert_eq!(h.app.ui.tab, "SKETCH");
         h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
@@ -697,15 +727,86 @@ mod tests {
         h.app.run("solid.box", json!({"body_name":"Solid", "operation":"new", "length":10, "width":10, "height":10})).unwrap();
         h.app.run("select.set", json!({"items":[{"type":"body","name":"Solid"}]})).unwrap();
         sync_context(&mut h.app);
-        assert!(visible_tabs(&h.app).contains(&"SHEET METAL"), "the tab stays reachable off a sheet body");
+        assert!(visible_tabs(&h.app).contains(&"SHEET METAL"), "the tab stays reachable off a sheet body while the design has one");
         assert!(sheet_body(&h.app).is_none());
         h.app.run("select.set", json!({"items":[{"type":"body","name":"Sheet"}]})).unwrap();
         sync_context(&mut h.app);
         assert_eq!(h.app.ui.tab, "SHEET METAL");
     }
 
+    /// Optional tabs are each person's choice: the tab row's menu and Settings › Interface turn
+    /// them on, the choice is kept with the preferences, and a design with one of the tab's
+    /// features shows the tab whatever the choice (#5717).
+    #[test]
+    fn optional_tabs_are_turned_on_by_the_person_or_shown_by_a_design_that_uses_them() {
+        let mut h = crate::scenario::Harness::new();
+        h.frames(2);
+        assert!(!visible_tabs(&h.app).contains(&"SHEET METAL"));
+        assert!(crate::scenario::handle_at("tab:SHEET METAL").is_none(), "no Sheet Metal tab in a fresh document");
+
+        // Right-click a tab: the menu lists the optional tabs, unticked.
+        h.step(&json!({"click":{"handle":"tab:MODEL"},"button":"right"})).unwrap();
+        assert_eq!(h.app.menu.target, crate::context_menu::Target::Toolbar);
+        let row = crate::toolbar_custom::toolbar_items(&h.app).into_iter().find(|i| i.id == "ui.toolbarTab").unwrap();
+        assert_eq!((row.label.as_str(), row.shortcut.as_str()), ("Sheet Metal", ""));
+        h.call("ui.menuPick", json!({"item":"Sheet Metal"}));
+        h.frames(2);
+        assert_eq!(h.app.preferences.toolbar_tabs, ["SHEET METAL"]);
+        assert!(crate::scenario::handle_at("tab:SHEET METAL").is_some(), "the tab is in the row once turned on");
+        let row = crate::toolbar_custom::toolbar_items(&h.app).into_iter().find(|i| i.id == "ui.toolbarTab").unwrap();
+        assert_eq!(row.shortcut, "current", "the menu ticks a tab that is on");
+
+        // Kept with the preferences, and the control channel sets it too.
+        let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        other.load_prefs(&h.app.prefs());
+        assert!(visible_tabs(&other).contains(&"SHEET METAL"));
+        assert!(h.call("ui.prefs", json!({"toolbar_tabs": ["MODEL"]}))["error"].is_string(), "only optional tabs");
+        assert!(h.call("ui.prefs", json!({"toolbar_tabs": ["SHEET METAL", "SHEET METAL"]}))["error"].is_string(), "each once");
+        h.call("ui.prefs", json!({"toolbar_tabs": []}));
+        assert!(!visible_tabs(&h.app).contains(&"SHEET METAL"));
+
+        // The plus after the last tab opens the same menu without a right-click, and closes it again.
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"ribbon:add_tab"}})).unwrap();
+        assert!(h.app.viewport.context_menu.is_some());
+        assert_eq!(h.app.menu.target, crate::context_menu::Target::Toolbar);
+        h.step(&json!({"click":{"handle":"ribbon:add_tab"}})).unwrap();
+        assert!(h.app.viewport.context_menu.is_none(), "a second click on the plus closes its menu");
+        h.step(&json!({"click":{"handle":"ribbon:add_tab"}})).unwrap();
+        h.call("ui.menuPick", json!({"item":"Sheet Metal"}));
+        h.frames(2);
+        assert_eq!(h.app.preferences.toolbar_tabs, ["SHEET METAL"]);
+        let (tab, plus) = (crate::scenario::handle_at("tab:SHEET METAL").unwrap(), crate::scenario::handle_at("ribbon:add_tab").unwrap());
+        assert!(plus.x > tab.x, "the plus stays after the last tab");
+        h.call("ui.prefs", json!({"toolbar_tabs": []}));
+
+        // Settings › Interface has the same choice.
+        h.call("ui.prefs", json!({"open":"Interface"}));
+        crate::prefs::reveal_preference(&mut h, "prefs:toolbar_tab:SHEET METAL");
+        h.step(&json!({"click":{"handle":"prefs:toolbar_tab:SHEET METAL"}})).unwrap();
+        assert_eq!(h.app.preferences.toolbar_tabs, ["SHEET METAL"]);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.toolbar_tabs.is_empty(), "the Interface page's defaults turn it off again");
+        h.call("ui.prefs", json!({"button":"ok"}));
+
+        // Off, but the design has a sheet-metal feature: the tab appears, and goes with it.
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sheet.flange", json!({"name":"Sheet", "body_name":"Sheet"})).unwrap();
+        sync_context(&mut h.app);
+        assert!(in_design(&h.app, "SHEET METAL"));
+        assert_eq!(h.app.ui.tab, "SHEET METAL", "a new sheet-metal feature brings its tab and selects it");
+        assert!(h.app.preferences.toolbar_tabs.is_empty(), "the person's choice is unchanged");
+        h.app.run("edit.undo", json!({})).unwrap();
+        sync_context(&mut h.app);
+        assert!(!visible_tabs(&h.app).contains(&"SHEET METAL"), "undoing the only sheet-metal feature takes the tab away");
+        assert_eq!(h.app.ui.tab, "MODEL");
+    }
+
     /// Parameters and Configurations are on the design tabs they were on before the redesign, and a
-    /// fresh document reaches Sheet Metal (to flange a sketch or convert a solid) by its tab.
+    /// fresh document reaches Sheet Metal (to flange a sketch or convert a solid) by its tab once
+    /// it is turned on.
     #[test]
     fn parameters_and_configurations_are_on_model_and_sheet_metal_and_the_sheet_tab_opens_fresh() {
         let specs = solidcraft_engine::command_specs();
@@ -720,6 +821,8 @@ mod tests {
         }
         let mut h = crate::scenario::Harness::new();
         assert!(sheet_body(&h.app).is_none());
+        set_tab_shown(&mut h.app, "SHEET METAL", true);
+        h.frames(2);
         h.step(&json!({"click":{"handle":"tab:SHEET METAL"}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.ui.tab, "SHEET METAL");
