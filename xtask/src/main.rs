@@ -55,9 +55,10 @@ commands:
                   leave it to the Generated files workflow on main
   lists [--fix]   check that files many changes add to are sorted one item per line (the
                   message catalogs in assets/locales); --fix sorts them
-  test [CARGO ARGS] [-- TEST ARGS]
+  test [--property-tests] [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary at once
-                  (and the doc tests alongside)
+                  (and the doc tests alongside); like pushes to main it skips the boolean_props
+                  property tests, which CI runs only nightly, unless --property-tests
   wasm            cargo check every library crate and the web app for wasm32-unknown-unknown
   web-offline [DIR]
                   write the web build's service worker (sw.js: offline use, updates); run by
@@ -92,7 +93,9 @@ fn main() -> ExitCode {
         Some("lists") => lists::run(&root(), rest.contains(&"--fix")),
         Some("test") => {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
-            test::run(cargo_args, test_args, vec![test::doc_tests(cargo_args, test_args)])
+            let property_tests = cargo_args.contains(&"--property-tests");
+            let cargo_args: Vec<&str> = cargo_args.iter().copied().filter(|a| *a != "--property-tests").collect();
+            test::run(&cargo_args, test_args, property_tests, vec![test::doc_tests(&cargo_args, test_args)])
         }
         Some("ci") => cmd_ci(),
         Some("wasm") => cmd_wasm(),
@@ -382,7 +385,7 @@ fn cmd_ci() -> Result<(), String> {
     c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
     run(c, "cargo clippy -D warnings")?;
     let (wasm, n) = wasm_check()?;
-    test::run(&[], &[], vec![(format!("wasm32-unknown-unknown check ({n} crates)"), wasm), test::doc_tests(&[], &[])])?;
+    test::run(&[], &[], false, vec![(format!("wasm32-unknown-unknown check ({n} crates)"), wasm), test::doc_tests(&[], &[])])?;
     web_offline_test::run(&root(), None, false)?;
     eprintln!("ci: all gates passed");
     Ok(())

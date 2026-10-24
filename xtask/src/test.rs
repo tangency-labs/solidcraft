@@ -1,6 +1,7 @@
 //! `cargo xtask test`: build the workspace's tests once, then run every test binary at the same
 //! time. `cargo test` runs them one after another, so one slow binary held up all the others;
-//! the doc tests and any other `side` jobs run alongside on their own thread.
+//! the doc tests and any other `side` jobs run alongside on their own thread. Like pushes to
+//! `main`, it skips the property tests that CI runs only nightly ([`NIGHTLY_ONLY`]) unless asked.
 
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -8,18 +9,31 @@ use std::time::Instant;
 
 use crate::{cargo, root};
 
+/// Test binaries (package folder, test target) that only the nightly "Property tests" CI job runs:
+/// their inputs are random on every run, so a known kernel bug would fail them at random. Pull
+/// requests and pushes to `main` skip them (`binary(boolean_props)` in .config/nextest.toml and
+/// .github/workflows/ci.yml); `cargo xtask test --property-tests` runs them.
+const NIGHTLY_ONLY: &[(&str, &str)] = &[("kernel", "boolean_props")];
+
 /// A test executable from `cargo test --no-run`.
 struct TestBin {
     label: String,
+    /// The package's folder name (`kernel`) and the test target's name (`boolean_props`).
+    pkg: String,
+    name: String,
     exe: String,
     dir: String,
 }
 
 /// Build the tests with `cargo_args` (e.g. `--locked`), run each binary with `test_args`, and run
 /// the `side` jobs one after another meanwhile. Each prints a line when it ends; a failure prints
-/// its whole output.
-pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>) -> Result<(), String> {
-    let bins = build(cargo_args)?;
+/// its whole output. The [`NIGHTLY_ONLY`] binaries run only with `property_tests`.
+pub fn run(cargo_args: &[&str], test_args: &[&str], property_tests: bool, side: Vec<(String, Command)>) -> Result<(), String> {
+    let (bins, skipped): (Vec<TestBin>, Vec<TestBin>) =
+        build(cargo_args)?.into_iter().partition(|b| property_tests || !nightly_only(&b.pkg, &b.name));
+    for b in &skipped {
+        println!("skip  {:<44}          nightly property tests in CI; --property-tests runs them", b.label);
+    }
     let start = Instant::now();
     let (tx, rx) = mpsc::channel::<(String, Result<String, String>, f64)>();
     let mut failed = Vec::new();
@@ -55,6 +69,11 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
     if failed.is_empty() { Ok(()) } else { Err(format!("failed: {}", failed.join(", "))) }
 }
 
+/// Whether CI runs this test target only in the nightly property tests.
+fn nightly_only(pkg: &str, name: &str) -> bool {
+    NIGHTLY_ONLY.iter().any(|(p, n)| *p == pkg && *n == name)
+}
+
 /// Run to the end: the last `test result:` line on success, all output on failure.
 fn finish(mut c: Command) -> Result<String, String> {
     let out = c.stdin(Stdio::null()).output().map_err(|e| format!("failed to spawn: {e}"))?;
@@ -88,8 +107,9 @@ fn build(cargo_args: &[&str]) -> Result<Vec<TestBin>, String> {
         let dir = manifest.parent().map(|d| d.to_path_buf()).unwrap_or_else(root);
         let pkg = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let kind = m["target"]["kind"][0].as_str().unwrap_or("");
-        let label = format!("{pkg} {kind} {}", m["target"]["name"].as_str().unwrap_or(""));
-        bins.push(TestBin { label, exe: exe.to_string(), dir: dir.to_string_lossy().into_owned() });
+        let name = m["target"]["name"].as_str().unwrap_or("").to_string();
+        let label = format!("{pkg} {kind} {name}");
+        bins.push(TestBin { label, pkg, name, exe: exe.to_string(), dir: dir.to_string_lossy().into_owned() });
     }
     if bins.is_empty() {
         return Err("cargo test --no-run built no test executables".into());
@@ -102,4 +122,31 @@ pub fn doc_tests(cargo_args: &[&str], test_args: &[&str]) -> (String, Command) {
     let mut c = cargo();
     c.args(["test", "--workspace", "--profile", "ci", "--doc"]).args(cargo_args).arg("--").args(test_args);
     ("doc tests".into(), c)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_nightly_binaries_are_skipped() {
+        assert!(nightly_only("kernel", "boolean_props"));
+        assert!(!nightly_only("kernel", "kernel"));
+        assert!(!nightly_only("engine", "boolean_props"));
+        assert!(!nightly_only("engine", "atomic_commands"));
+    }
+
+    /// CI's filters name the same binaries, so `cargo xtask test` keeps checking what a push to
+    /// `main` checks.
+    #[test]
+    fn ci_skips_the_same_binaries() {
+        let read = |p: &str| std::fs::read_to_string(root().join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+        let nextest = read(".config/nextest.toml");
+        let ci = read(".github/workflows/ci.yml");
+        for (pkg, name) in NIGHTLY_ONLY {
+            let filter = format!("package(solidcraft-{pkg}) & binary({name})");
+            assert!(nextest.contains(&filter), ".config/nextest.toml does not skip {filter}");
+            assert!(ci.contains(&format!("not ({filter})")), "ci.yml does not skip {filter} on main");
+        }
+    }
 }
