@@ -33,8 +33,9 @@
 //!   reached when the point lies on a side of the surface's natural domain and an edge
 //!   use end of the loop does too.
 //! - **Ignored statuses.** Upstream ignores the status of `EvaluatePoint` /
-//!   `Evaluate` of the surface and the trim curves and then reads the (uninitialised)
-//!   outputs; the port returns their error instead (no valid input reaches it).
+//!   `Evaluate` of the surface and the trim curves and then reads the outputs they did
+//!   not write (`SM_UNDEF_DOUBLE` defaults, or the previous step's derivatives); the
+//!   port returns their error instead (no valid input reaches it).
 //!   `DropPoint` and `LocalPointSolve` failures are "no answer" (both reset their
 //!   success flag first upstream). [`SolidError::Unported`] from any callee is
 //!   returned.

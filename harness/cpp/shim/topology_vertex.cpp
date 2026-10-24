@@ -20,7 +20,7 @@
 // The B-rep graph is exported in traversal order (each pointer mapped to its first-seen
 // index per kind; -1 is null), reading raw members (protected ones through
 // pointer-to-member access), never the functions under test. Ops whose upstream path
-// would dereference null (or read an uninitialised value) output -2 instead of calling it.
+// would dereference null output -2 instead of calling it.
 #include "sc_shim.h"
 #include "support/topology_fixture.h"
 #include "sc_analytic_export.h"
@@ -1081,18 +1081,18 @@ bool ok_on_pole(SmVertex* v)
     return true;
 }
 
-// AreEdgesTangent: GetStartVertex and the end tangent it reads (a failed evaluation
-// leaves it uninitialised; a null curve is dereferenced).
-bool ok_tangent(SmVertex* v, SmEdge* e)
+// AreEdgesTangent: GetStartVertex and GetEndTangent (a null curve is dereferenced; a
+// failed evaluation leaves the default SmVector3d, SM_UNDEF_DOUBLE, which is defined:
+// WR-256).
+bool ok_tangent(SmEdge* e)
 {
-    if (!ok_start(e) || e->GetCurve() == nullptr)
-        return false;
-    SmVector3d t;
-    return e->GetEndTangent(e->GetStartVertex() == v ? TRUE : FALSE, t) == SM_SUCCESS;
+    return ok_start(e) && e->GetCurve() != nullptr;
 }
 
 // IsTopologicalVertex, following its control flow up to the tangent reads (IsOnPole is
 // evaluated here as upstream does; it only fills caches the real call fills as well).
+// Only a null curve whose tangent is read is refused: a failed GetEndTangent leaves the
+// tangent IsLine wrote or the default SmVector3d (WR-256).
 bool ok_topological(SmVertex* v)
 {
     if (!ok_edges(v))
@@ -1126,22 +1126,15 @@ bool ok_topological(SmVertex* v)
         return true;
     if (c[0] == c[1])
         return true;
-    bool uninit = false;
     for (int i = 0; i < 2; i++)
     {
         if (c[i] == nullptr)
             return false;
         SmVector3d t;
-        SmStatus s = e[i]->GetEndTangent(at_start[i] ? TRUE : FALSE, t);
-        if (s != SM_SUCCESS)
-        {
-            if (at_start[i])
-                return !uninit; // SER returns before the angle is read
-            if (!line[i])
-                uninit = true;
-        }
+        if (at_start[i] && e[i]->GetEndTangent(TRUE, t) != SM_SUCCESS)
+            return true; // SER returns before the other edge's tangent is read
     }
-    return !uninit;
+    return true;
 }
 
 // The cached gap states of every vertex use (vertex/edge, vertex/face).
@@ -1383,7 +1376,7 @@ void run_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         SmEdge* e1 = g.edges[(size_t)rd.idx()];
         SmEdge* e2 = g.edges[(size_t)rd.idx()];
         double tol = rd.num();
-        if (!ok_tangent(v, e1) || !ok_tangent(v, e2))
+        if (!ok_tangent(e1) || !ok_tangent(e2))
         {
             o.push_back(ST_NULL_DEREF);
             break;

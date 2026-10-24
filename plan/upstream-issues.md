@@ -1483,6 +1483,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no (the difftest shim checks the evaluations first and does not call these).
 - **Severity:** crash/UB.
 - **Rust port:** `SolidError::InvalidInput`.
+- **Correction (#521):** only the curveless edge is UB. At `c9c5979` `SmVector3d`'s members default to `SM_UNDEF_DOUBLE` (`source/SMLib/inc/SmVector3d.h:56-58`), so the tangent a failed `GetEndTangent` leaves is defined, and both functions then answer `TRUE`. See WR-256. The port and the shim now follow that; a null curve is still refused.
 
 #### UB-130. `sm_CheckEdgeOnAxis` reads `sSolutions[1]` with one solution
 - **Location:** `source/SMLib/src/SmRotationalSweepGeometry.cpp:224`-`226` (`sm_CheckEdgeOnAxis`, file static), reached by `SmRotationalSweepGeometry::EdgeSweepHigher` and `EdgeSweepSame`.
@@ -2854,6 +2855,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no (no upstream caller uses the defaults).
 - **Severity:** wrong result (latent).
 - **Rust port:** `MergeAddedOptions::default()` is what the declared defaults actually pass, `(TRUE, FALSE, TRUE, TRUE)`; `MERGE_ADDED_FACE_OPTIONS` is `MergeAddedFace`'s explicit `(FALSE, TRUE, TRUE, TRUE)`.
+
+#### WR-256. `SmVertex::AreEdgesTangent` / `IsTopologicalVertex` answer `TRUE` when an end tangent cannot be evaluated
+- **Location:** `source/SMLib/src/SmVertex.cpp:70` `AreEdgesTangent` (its four `SE(GetEndTangent(...))`), `:716` `IsTopologicalVertex` (the `SE(GetEndTangent(FALSE, ...))` branches); `SmEdge::GetEndTangent` (`SmEdge.cpp:476`) writes the tangent only after its `SER` on the curve evaluation.
+- **What happens:** The ignored failure leaves the caller's `SmVector3d` as it was: its default `(SM_UNDEF_DOUBLE, SM_UNDEF_DOUBLE, SM_UNDEF_DOUBLE)`, or in `IsTopologicalVertex` the line vector `IsLine` wrote when that edge's curve is a line. Its squared length (about `4.6e-122`) is within `SM_IS_ZERO_SQUARED`, so `AngleBetween` fails, sets the angle to `0` first, and the status is ignored. `AreEdgesTangent` then returns `TRUE` for any positive tolerance, and `IsTopologicalVertex` passes its angle test, so the vertex counts as removable although nothing is known about the edges' directions there. (At an edge's start `IsTopologicalVertex` returns the failed status itself as `TRUE`, WR-92.) This corrects UB-106, which took the tangent to be uninitialised.
+- **Trigger:** an edge whose curve cannot be evaluated with one derivative at its interval end. B-spline curves and `SmLine`s cannot get there: `SmBSplineCurve::Evaluate` clamps the parameter into the natural interval, and `N_BasisFindSpan` (`NL_BasisBasic.cpp:1429`) steps past end spans shorter than `1e-12` before `sm_BasisDerivs` could reject a knot difference of `SM_EFF_ZERO_SQ`; a NaN parameter evaluates to NaN without an error. An edge whose curve is an `SmCompositeCurve` always reaches it: that class keeps `SmCurve::Evaluate`, which returns `SM_ERR` (`SmCurve.h:390-404`). So can other curve kinds whose `Evaluate` fails (a curve on a surface whose evaluation fails, for example).
+- **How found:** issue #521 (values read after a failed call); traced in the source and probed with the `topology.vertex` difftest (`end_tangents.json`: a 1e-30 end span and zero end tangents, compared, none of which makes `GetEndTangent` fail); the composite-curve edge is the port's unit test `failed_end_tangent_reads_the_default_vector`.
+- **Confirmed:** no (the `topology.vertex` harness builds line and B-spline edges only, and none of its inputs makes `GetEndTangent` fail).
+- **Severity:** wrong result.
+- **Rust port:** Faithful: `topology::vertex` reads `Vec3::UNDEF` for a tangent nothing wrote (it returned `SolidError::InvalidInput` before #521).
 
 ### NLib
 

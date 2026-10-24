@@ -46,11 +46,14 @@
 //!   use without edge, a face use without face, a shell without region: a malformed
 //!   B-rep) the port returns [`SolidError::InvalidInput`]; [`faceuses`] keeps its null
 //!   entries (the edge vertex uses of a wire edge have no face use).
-//! - **Uninitialised tangents.** `AreEdgesTangent` and `IsTopologicalVertex` ignore a
-//!   failed `GetEndTangent` (`SE`) and then read the tangent left uninitialised (an
-//!   `SmVector3d` has no constructor); the port returns [`SolidError::InvalidInput`]
-//!   there. `IsTopologicalVertex` returns the failed status of `GetEndTangent` at an
-//!   edge's start (`SER`) as its `SmBoolean`, which is true; ported as such.
+//! - **Unset tangents.** `AreEdgesTangent` and `IsTopologicalVertex` ignore a failed
+//!   `GetEndTangent` (`SE`) and then read the tangent it did not write. That is the
+//!   `SmVector3d` default, `SM_UNDEF_DOUBLE` in every component ([`Vec3::UNDEF`]), or in
+//!   `IsTopologicalVertex` the line vector `IsLine` wrote for that edge. `AngleBetween`
+//!   then sees a zero-length vector and reports `0`, so both answer true; ported as
+//!   such (WR-256; UB-106 assumed the tangent uninitialised). `IsTopologicalVertex`
+//!   returns the failed status of `GetEndTangent` at an edge's start (`SER`) as its
+//!   `SmBoolean`, which is true; ported as such.
 //! - **Curve identity.** Each edge owns its curve, so `pCurve1 != pCurve2` in
 //!   `IsTopologicalVertex` is false only when neither edge has a curve (upstream two
 //!   edges may share one curve object; the difftest rejects such B-reps).
@@ -777,11 +780,6 @@ fn end_tangent_ignoring_status(
     }
 }
 
-/// The uninitialised tangent upstream reads after an ignored failed `GetEndTangent`.
-fn uninitialised_tangent() -> SolidError {
-    null("tangent left uninitialised by a failed GetEndTangent")
-}
-
 /// `AreEdgesTangent`: whether edges `e1` and `e2`, both ending at the vertex, leave it
 /// in parallel directions (their end tangents, pointing through the vertex, within
 /// `angle_tol_deg` degrees).
@@ -789,8 +787,8 @@ fn uninitialised_tangent() -> SolidError {
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; those of [`edge_start_vertex`];
-/// [`SolidError::InvalidInput`] for an edge without curve and for a tangent whose
-/// evaluation failed (upstream reads it uninitialised).
+/// [`SolidError::InvalidInput`] for an edge without curve. A tangent whose evaluation
+/// fails is the `SmVector3d` default ([`Vec3::UNDEF`]), as upstream.
 pub fn are_edges_tangent(
     k: &Kernel,
     b: &Brep,
@@ -799,18 +797,19 @@ pub fn are_edges_tangent(
     e2: EdgeId,
     angle_tol_deg: f64,
 ) -> Result<bool> {
+    // a failed GetEndTangent leaves the default SmVector3d (SM_UNDEF_DOUBLE)
     let tan1 = if edge_start_vertex(b, e1)? == Some(v) {
-        end_tangent_ignoring_status(k, b, e1, true)?.ok_or_else(uninitialised_tangent)?
+        end_tangent_ignoring_status(k, b, e1, true)?.unwrap_or(Vec3::UNDEF)
     } else {
-        -end_tangent_ignoring_status(k, b, e1, false)?.ok_or_else(uninitialised_tangent)?
+        -end_tangent_ignoring_status(k, b, e1, false)?.unwrap_or(Vec3::UNDEF)
     };
 
     // Note that sTan1 is pointing to the inside of the curve and sTan2 will be pointing
     // to the outside of the curve. That should make them parallel.
     let tan2 = if edge_start_vertex(b, e2)? == Some(v) {
-        -end_tangent_ignoring_status(k, b, e2, true)?.ok_or_else(uninitialised_tangent)?
+        -end_tangent_ignoring_status(k, b, e2, true)?.unwrap_or(Vec3::UNDEF)
     } else {
-        end_tangent_ignoring_status(k, b, e2, false)?.ok_or_else(uninitialised_tangent)?
+        end_tangent_ignoring_status(k, b, e2, false)?.unwrap_or(Vec3::UNDEF)
     };
 
     // AngleBetween sets the angle to 0 on failure (status ignored)
@@ -847,8 +846,9 @@ pub fn is_on_pole(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
 /// # Errors
 ///
 /// Those of [`edges`], [`is_on_pole`], `SmCurve::IsLine` and [`edge_start_vertex`];
-/// [`SolidError::InvalidInput`] for one edge without curve whose tangent is needed and
-/// for a tangent read uninitialised upstream.
+/// [`SolidError::InvalidInput`] for one edge without curve whose tangent is needed. A
+/// tangent neither `IsLine` nor `GetEndTangent` wrote is the `SmVector3d` default
+/// ([`Vec3::UNDEF`]), as upstream.
 pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
     let sedges = edges(b, v, None)?;
 
@@ -931,8 +931,9 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
     let ang_limit_rad = CONTINUITY_ANGLE * (PI / 180.0);
 
     let angle_rad = if curves_differ {
-        let t1 = tan1.ok_or_else(uninitialised_tangent)?;
-        let t2 = tan2.ok_or_else(uninitialised_tangent)?;
+        // a tangent nothing wrote is the default SmVector3d (SM_UNDEF_DOUBLE)
+        let t1 = tan1.unwrap_or(Vec3::UNDEF);
+        let t2 = tan2.unwrap_or(Vec3::UNDEF);
         // AngleBetween sets the angle to 0 on failure (status ignored)
         t1.angle_between(t2).unwrap_or(0.0)
     } else {
@@ -1480,6 +1481,29 @@ mod tests {
             are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.5),
             Err(SolidError::InvalidInput { .. })
         ));
+    }
+
+    /// WR-256: a composite curve cannot be evaluated (`SmCompositeCurve` keeps
+    /// `SmCurve::Evaluate`, which returns `SM_ERR`), so `GetEndTangent` fails at the end
+    /// of edge 0 and the tangent stays the `SmVector3d` default; `AngleBetween` of that
+    /// zero-length vector reports `0`.
+    #[test]
+    fn failed_end_tangent_reads_the_default_vector() {
+        use crate::curve::composite_curve::CompositeCurve;
+        let k = Kernel::default();
+        // edge 0 ends at v1 on [-1, 0], edge 1 (a line) starts there at 0
+        let (mut b, v, e) = chain(true, Vec3::X, Vec3::Y);
+        let e0 = b.edge_mut(e[0]).unwrap();
+        e0.curve = Some(Curve::from(CompositeCurve::new(3)));
+        e0.interval = Extent1d::from_min_max(-1.0, 0.0);
+        assert!(edge_end_tangent(&k, &b, e[0], false).is_err());
+
+        // angle 0: tangent for any positive tolerance, not for 0
+        assert!(are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.5).unwrap());
+        assert!(are_edges_tangent(&k, &b, v[1], e[1], e[0], 0.5).unwrap());
+        assert!(!are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.0).unwrap());
+        // the parameters agree (0 and 0) and the angle test passes
+        assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
     }
 
     #[test]

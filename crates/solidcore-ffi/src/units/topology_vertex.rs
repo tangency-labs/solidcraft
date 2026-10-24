@@ -24,10 +24,10 @@
 //! (`SmBSplineCurve`). Indices refer to the export's traversal order (`-1` selects null
 //! where upstream takes a pointer). Every op's output starts with `0`, or with
 //! `-1 status` when the B-rep could not be built (nothing else follows). `-2` in an
-//! output is "upstream would dereference null or read an uninitialised value" (the shim
-//! did not call it). A list is `count ids...`; "gap states" are the vertex/edge and
-//! vertex/face cache states of every vertex use, in order; a gap is `kind vu length`
-//! (`kind` 0 vertex/edge, 1 vertex/face; `-1` alone for none).
+//! output is "upstream would dereference null" (the shim did not call it). A list is
+//! `count ids...`; "gap states" are the vertex/edge and vertex/face cache states of
+//! every vertex use, in order; a gap is `kind vu length` (`kind` 0 vertex/edge, 1
+//! vertex/face; `-1` alone for none).
 //!
 //! | [`Op`]              | parameters after the block | outputs |
 //! |---------------------|----------------------------|---------|
