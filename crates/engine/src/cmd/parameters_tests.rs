@@ -753,3 +753,35 @@ fn flipped_offset_sketch_plane_follows_its_parameter() {
     run(&mut s, "parameters.change", json!({"name": "d", "expression": "50 mm"}));
     assert!((volume(&mut s) - 400.0 * 50.0).abs() < 1e-6, "{}", volume(&mut s));
 }
+
+/// A plain number on its own takes the design's unit, but one inside an expression keeps the mm
+/// default, so the same `1` stands for different lengths in one command. The feature still
+/// evaluates exactly as before; it now reports the inputs where the two readings differ (#5887).
+#[test]
+fn an_expression_says_when_its_plain_numbers_are_read_as_mm() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "2 in"}));
+    run(&mut s, "document.units", json!({"units": "in"}));
+    // `w + 1` adds a millimetre to two inches: 50.8 + 1, where `1 in` would give 50.8 + 25.4.
+    let r = run(&mut s, "solid.box", json!({"length": "w + 1", "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    let w = r["unit_warnings"].as_array().cloned().unwrap_or_default();
+    assert_eq!(w.len(), 1, "only the expression input is read two ways: {r}");
+    let said = w[0].as_str().unwrap_or_default();
+    assert!(said.contains("51.8") && said.contains("76.2") && said.contains("Length"), "{said}");
+    // One tidy line: no leftover indentation and no trailing zeros in the numbers.
+    assert!(!said.contains("  ") && !said.contains("51.8000"), "{said}");
+    // The geometry is untouched: 51.8 x 254 x 254 mm, as it was before the warning existed.
+    let v = volume(&mut s);
+    assert!(rel(v, 51.8 * 254.0 * 254.0) < 1e-9, "the warning changed the model: {v}");
+    // A plain multiplier reads the same either way, so it is not reported.
+    let r = run(&mut s, "solid.box", json!({"length": "w * 2", "width": 10, "height": 10, "corner": [500, 0, 0]}));
+    assert!(r.get("unit_warnings").is_none(), "a multiplier means the same in any unit: {r}");
+    // A bare number on its own already takes the design's unit, so it is not reported either.
+    let r = run(&mut s, "solid.box", json!({"length": 3, "width": 10, "height": 10, "corner": [1000, 0, 0]}));
+    assert!(r.get("unit_warnings").is_none(), "a bare number takes the design unit: {r}");
+    // In a millimetre design there is nothing to say.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "2 in"}));
+    let r = run(&mut s, "solid.box", json!({"length": "w + 1", "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    assert!(r.get("unit_warnings").is_none(), "a mm design reads plain numbers as mm anyway: {r}");
+}
