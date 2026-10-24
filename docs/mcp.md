@@ -144,6 +144,10 @@ added under the previous name keeps working, see the [compatibility notes](https
 }
 ```
 
+The Windows installer doesn't put `solidcraft-cli.exe` on `PATH` (see below for where it is), so
+on Windows give the full path:
+`claude mcp add solidcraft -- "C:\Program Files\SolidCraft\solidcraft-cli.exe" mcp`.
+
 Claude Desktop (`claude_desktop_config.json`), bridged to a running app:
 
 ```json
