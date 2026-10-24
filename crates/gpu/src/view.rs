@@ -2053,8 +2053,9 @@ fn can_reuse(ss_ready: bool, cached: Option<u64>, key: u64) -> bool {
 }
 
 /// Everything the drawn picture depends on: the scene keys and camera, the viewport's size, the
-/// section, images, analysis, accessibility map and ambient occlusion. The same key draws the
-/// same picture (pipelines and shaders are fixed for the renderer).
+/// section, images, analysis, accessibility map, ambient occlusion and the theme's hover and
+/// selection tints. The same key draws the same picture (pipelines and shaders are fixed for the
+/// renderer).
 fn frame_key(cb: &Frame) -> u64 {
     use std::hash::Hash as _;
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -2072,6 +2073,10 @@ fn frame_key(cb: &Frame) -> u64 {
     cb.cap.map(f32::to_bits).hash(&mut h);
     cb.analysis.map(f32::to_bits).hash(&mut h);
     cb.analysis_colors.map(f32::to_bits).hash(&mut h);
+    // The theme's hover and selection tints: a theme change draws the frame again, so the
+    // picture cached under the previous theme's colours is not shown (#5802).
+    cb.hover_tint.map(f32::to_bits).hash(&mut h);
+    cb.selection_tint.map(f32::to_bits).hash(&mut h);
     cb.outline.hash(&mut h);
     cb.ao_radius.to_bits().hash(&mut h);
     cb.ssaa.to_bits().hash(&mut h);
@@ -2852,6 +2857,10 @@ mod tests {
             ("section cap", key(|f| f.cap[0] = 0.5)),
             ("analysis", key(|f| f.analysis[0] = 1.0)),
             ("analysis colours", key(|f| f.analysis_colors[0] = 1.0)),
+            // The theme's hover and selection tints: a theme change draws the frame again, so
+            // the picture cached under the previous theme's colours is not shown (#5802).
+            ("hover tint", key(|f| f.hover_tint = [0.1, 0.2, 0.3])),
+            ("selection tint", key(|f| f.selection_tint = [0.4, 0.5, 0.6])),
             ("outline", key(|f| f.outline = true)),
             ("ambient occlusion", key(|f| f.ao_radius = 1.0)),
             ("supersampling", key(|f| f.ssaa = 2.0)),

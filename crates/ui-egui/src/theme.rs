@@ -858,6 +858,9 @@ pub fn apply(ctx: &egui::Context) {
         s.spacing.item_spacing = egui::vec2(t.space_6, t.space_4);
         s.spacing.button_padding = egui::vec2(t.space_6, t.space_3);
     });
+    // The new visuals are painted on the next pass: without a repaint request the widgets
+    // keep the previous theme's colours until some other event schedules a pass (#5802).
+    ctx.request_repaint();
 }
 
 #[cfg(test)]
@@ -893,6 +896,29 @@ mod tests {
         }
         assert_eq!(Tokens::outset_radius(0.0, 3.0), 0.0);
         assert_eq!(Tokens::outset_radius(6.0, 3.0), 9.0);
+    }
+
+    /// A theme change repaints: egui paints the new visuals on the next pass, so without a
+    /// repaint request the widgets keep the previous theme's colours until another event
+    /// schedules a pass (#5802).
+    #[test]
+    fn applying_a_theme_asks_for_a_repaint_with_the_new_visuals() {
+        let ctx = egui::Context::default();
+        let previous = super::is_dark();
+        super::set_dark(!previous);
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let dark = super::is_dark();
+            let expected = super::visuals(dark);
+            super::apply(ui.ctx());
+            let theme = if dark { egui::Theme::Dark } else { egui::Theme::Light };
+            assert_eq!(ui.ctx().style_of(theme).visuals, expected, "the new theme's visuals must be in place");
+        })
+        .textures_delta
+        .clear();
+        super::set_dark(previous);
+        // The repaint request is reported by the pass that follows the one that asked for it.
+        ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+        assert!(ctx.repaint_causes().iter().any(|cause| cause.file.ends_with("theme.rs")), "a theme change must ask for a repaint");
     }
 
     #[test]
