@@ -3465,7 +3465,15 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Shell { .. } => {
             need(0, "faces to remove")?;
-            ("solid.shell", json!({"faces": face_points(0)}))
+            let mut p = json!({"faces": face_points(0)});
+            // The picked faces' body: a point alone may name a flush face of another body (#4555).
+            let mut bodies = sels(d, 0).iter().filter_map(|s| if let Sel::Face { body, .. } = s { Some(body) } else { None });
+            if let Some(first) = bodies.next()
+                && bodies.all(|b| b == first)
+            {
+                p["body"] = json!(first);
+            }
+            ("solid.shell", p)
         }
         Kind::Draft { .. } => {
             need(0, "faces")?;
@@ -5339,5 +5347,35 @@ mod awaiting_selection_tests {
         for failure in ["Offset distance must be positive", "the sketch has no curves", "Selection is not on this sketch", "", "sel"] {
             assert!(!awaiting_selection(failure), "{failure}");
         }
+    }
+}
+
+#[cfg(test)]
+mod shell_body_tests {
+    //! The Shell dialog says whose face it removes (#4555).
+
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// Two boxes stacked flush: the upper one's bottom face lies in the lower one's top. Picked
+    /// from below with the lower box hidden, the face is the upper box's, and the dialog says so.
+    #[test]
+    fn a_face_flush_with_another_body_is_shelled_on_its_own_body() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":20,"corner":[0,0,0]})).unwrap();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,20],"operation":"new"})).unwrap();
+        let st = h.app.session.world_state();
+        let (lower, upper) = (st.bodies[0].name.to_string(), st.bodies[1].name.to_string());
+        h.app.run("browser.visibility", json!({"visible":false,"items":[lower]})).unwrap();
+        h.step(&json!({"call":"ui.view","params":{"view":"bottom"}})).unwrap();
+        h.settle();
+        h.step(&json!({"start":"solid.shell"})).unwrap();
+        h.step(&json!({"click":{"world":[10,10,20]}})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().expect("the shell dialog");
+        let commands = dialog_commands(&h.app, d).unwrap();
+        let (cmd, p) = commands.first().unwrap();
+        assert_eq!(cmd, "solid.shell");
+        assert_eq!(p["body"], json!(upper), "{p}");
     }
 }
