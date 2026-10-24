@@ -147,6 +147,29 @@ fn a_sheet_loft_of_lines_follows_its_rail() {
     assert!((m.bbox.max.x - 15.0).abs() < 1e-2 && (m.bbox.min.x + 15.0).abs() < 1e-2, "{:?}", m.bbox);
 }
 
+/// A section that is one straight line lies in every plane through it, so the plane of the
+/// sketch it was drawn in says nothing about the loft. Here the bow's line is drawn on XZ, the
+/// plane the keel rail lies in; the loft still follows both rails, from either end, and stays
+/// between its two sections (#4056).
+#[test]
+fn a_line_section_drawn_in_a_rails_plane_still_takes_the_rail() {
+    let stern = (
+        Plane { origin: Vec3::new(100.0, 0.0, 0.0), x: Vec3::Y, y: Vec3::Z },
+        vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(30.0, 5.0) }, Seg2::Line { a: Vec2::new(30.0, 5.0), b: Vec2::new(40.0, 20.0) }],
+    );
+    // XZ's y runs down world Z: the bow line rises from the keel to the sheer at x = 0.
+    let bow = (Plane::XZ, vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(0.0, -20.0) }]);
+    let keel: Vec<Vec3> = (0..=50).map(|i| Vec3::new(f64::from(i) * 2.0, 0.0, 0.0)).collect();
+    let sheer: Vec<Vec3> = (0..=50).map(|i| Vec3::new(f64::from(i) * 2.0, (f64::from(i) * PI / 100.0).sin() * 40.0, 20.0)).collect();
+    for sections in [[stern.clone(), bow.clone()], [bow.clone(), stern.clone()]] {
+        let b = loft_sheet_with_rails(&sections, &[keel.clone(), sheer.clone()], RailFit::Scale).unwrap();
+        let worst = keel.iter().chain(&sheer).map(|p| off(&b, *p)).fold(0.0, f64::max);
+        assert!(worst < 1e-2, "a rail is {worst} mm off the sheet");
+        let m = measure(&b).unwrap();
+        assert!(m.bbox.min.x > -1e-3 && m.bbox.max.x < 100.0 + 1e-3, "{:?}", m.bbox);
+    }
+}
+
 /// Rails the loft cannot follow are refused, saying why: one that starts off the first section,
 /// one that stops short of the last, three rails, and one up the middle of a sheet loft's lines.
 #[test]
