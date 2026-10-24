@@ -2199,7 +2199,8 @@ fn sew_connected_sections(
             specs.push(lineage::Spec::Cap { section: rs.region(ri), z: *z, up: *up });
         }
     }
-    let sewn = crate::sew::sew_touching_with_sources(&faces, &sources).map(|(body, from)| (body, lineage::Built::Sewn { specs, faces: from }));
+    let sewn = crate::sew::sew_touching_with_sources(&faces, &sources, history.op == BoolOp::Union)
+        .map(|(body, from)| (body, lineage::Built::Sewn { specs, faces: from }));
     // Generated walls joined on their common supports: the piece's history over the operands,
     // carried through the joining.
     Some(if coalesce {

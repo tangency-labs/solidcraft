@@ -227,6 +227,10 @@ pub use whole_face::{WholeFace, cut_takes_only_the_face, cut_tool, face_prism, m
 pub enum KernelError {
     #[error("invalid input: {0}")]
     Invalid(String),
+    /// Exact construction found separate pieces meeting only along a circular edge. Numerical
+    /// retries must not turn that contact into shared material by moving either piece.
+    #[error("invalid input: bodies touch only along an edge (zero-thickness edge contact); keep them as separate bodies or add intentional overlap")]
+    CircularEdgeContact,
     #[error("the operation failed: {0}")]
     Failed(String),
     /// A blend or other size too large for the geometry around it (a smaller size may work);

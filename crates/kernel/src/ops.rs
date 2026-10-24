@@ -1463,6 +1463,9 @@ where
                 }
             }
             Ok(None) => return Ok(None),
+            // Exact sheets found an edge-only contact. Moving either operand to make
+            // it join would change the design rather than recover a numerical failure.
+            Err(KernelError::CircularEdgeContact) if op == BoolOp::Union => return Err(KernelError::CircularEdgeContact),
             // A failed prism attempt keeps trying the other strategies, as it did before.
             Err(_) => {}
         }
@@ -1759,7 +1762,11 @@ where
     // faces of a wider part, its ends flush with them) were left to the B-rep boolean, which
     // the coincident ends defeat, with no room to push them apart (the part goes on past
     // them). In 2D they join exactly: asked before the tool is moved.
-    if let Some(Ok(Some(body))) = prism_result(a, b, op, size, &counts, crate::prism::prism_union_between_caps) {
+    let prism = prism_result(a, b, op, size, &counts, crate::prism::prism_union_between_caps);
+    if matches!(prism, Some(Err(KernelError::CircularEdgeContact))) {
+        return Err(KernelError::CircularEdgeContact);
+    }
+    if let Some(Ok(Some(body))) = prism {
         let (ok, v) = check(&body);
         if ok {
             return Ok(Some(body));

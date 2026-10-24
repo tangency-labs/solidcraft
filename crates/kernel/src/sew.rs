@@ -51,6 +51,20 @@ impl EdgeSpec {
         }
     }
 
+    /// A shared point and oriented tangent for comparing faces at a contact edge.
+    /// Reversing an arc keeps the point and reverses the tangent, including semicircles.
+    fn contact_frame(&self) -> Option<(Vec3, Vec3)> {
+        match self {
+            EdgeSpec::Line { a, b } => Some((*a, (*b - *a).normalized()?)),
+            EdgeSpec::Arc { a, b, mid } => {
+                let centre = circumcentre(*a, *mid, *b)?;
+                let normal = (*mid - *a).cross(*b - *a).normalized()?;
+                Some((*mid, normal.cross(*mid - centre).normalized()?))
+            }
+            EdgeSpec::Chain { .. } => None,
+        }
+    }
+
     /// The way the edge leaves its start (`None` when that cannot be told).
     fn start_dir(&self) -> Option<Vec3> {
         let d = match self {
@@ -282,7 +296,7 @@ impl Cache {
 
 /// Sew the faces into a closed solid.
 pub fn sew(faces: &[FaceSpec]) -> Result<Body> {
-    sew_impl(faces, false, None).map(|(body, _)| body)
+    sew_impl(faces, false, false, None).map(|(body, _)| body)
 }
 
 /// Sew the faces into a closed solid that may touch itself: where four faces meet along a
@@ -290,18 +304,24 @@ pub fn sew(faces: &[FaceSpec]) -> Result<Body> {
 /// their own (see [`touching_sheets`]), and where faces meet at a point in fans joined by no edge
 /// (a hole's corner on its face's outline), each fan gets a vertex of its own.
 pub fn sew_touching(faces: &[FaceSpec]) -> Result<Body> {
-    sew_impl(faces, true, None).map(|(body, _)| body)
+    sew_impl(faces, true, false, None).map(|(body, _)| body)
 }
 
 /// Separate boundary sheets at a shared geometric edge without moving it.
 /// Optional transient sources follow only unchanged produced face identities.
 /// Also reports the face each face of the body was built from (by its place in `faces`; `None`
 /// when that could not be followed).
-pub(crate) fn sew_touching_with_sources(faces: &[FaceSpec], sources: &[Option<crate::FaceSource>]) -> Result<(Body, Option<Vec<usize>>)> {
+/// Union construction opts into circular contacts to distinguish edge-only joins from
+/// numerical failures. Other operations retain their existing boundary-sheet construction.
+pub(crate) fn sew_touching_with_sources(
+    faces: &[FaceSpec],
+    sources: &[Option<crate::FaceSource>],
+    circular_contacts: bool,
+) -> Result<(Body, Option<Vec<usize>>)> {
     if sources.len() != faces.len() {
         return Err(KernelError::Invalid("sew source alignment".into()));
     }
-    sew_impl(faces, true, Some(sources))
+    sew_impl(faces, true, circular_contacts, Some(sources))
 }
 
 type EdgeUse = (usize, usize, usize);
@@ -310,7 +330,7 @@ type EdgeUse = (usize, usize, usize);
 /// their curvature.
 const SAME_WAY: f64 = 1e-6;
 
-/// Where more than two faces meet along a straight edge (bodies touching along a line, or a wall
+/// Where more than two faces meet along a line or circular arc (bodies touching along an edge, or a wall
 /// of no thickness), which faces bound each sheet of it (each sheet gets its own edge), and the
 /// vertex fans that follow from that (see [`corner_fans`]). Only edges on planes, on the walls
 /// of extruded arcs and on ruled walls are looked at.
@@ -322,8 +342,9 @@ const SAME_WAY: f64 = 1e-6;
 /// The material there goes round the hole, and the edges ending at such points get sheets that
 /// bound the empty wedges instead: the hole's wall on either side is one sheet, the outline's
 /// the other.
-fn touching_sheets(faces: &[FaceSpec]) -> Result<(HashMap<EdgeUse, usize>, HashMap<Corner, usize>)> {
+fn touching_sheets(faces: &[FaceSpec], circular_contacts: bool) -> Result<(HashMap<EdgeUse, usize>, HashMap<Corner, usize>)> {
     let mut uses: HashMap<(Key, Key), Vec<(EdgeUse, Vec3, Vec3)>> = HashMap::new();
+    let mut arcs: HashMap<(Key, Key, Key), Vec<(EdgeUse, Vec3, Vec3)>> = HashMap::new();
     for (fi, face) in faces.iter().enumerate() {
         if !matches!(face.surface, SurfSpec::Plane | SurfSpec::Extruded { .. } | SurfSpec::Ruled { .. }) {
             continue;
@@ -334,6 +355,10 @@ fn touching_sheets(faces: &[FaceSpec]) -> Result<(HashMap<EdgeUse, usize>, HashM
                     let (ka, kb) = (key(*a), key(*b));
                     let k = if ka < kb { (ka, kb) } else { (kb, ka) };
                     uses.entry(k).or_default().push(((fi, li, ei), *a, *b));
+                } else if circular_contacts && let EdgeSpec::Arc { a, b, mid } = e {
+                    let (ka, kb, km) = (key(*a), key(*b), key(*mid));
+                    let k = if ka < kb { (ka, kb, km) } else { (kb, ka, km) };
+                    arcs.entry(k).or_default().push(((fi, li, ei), *a, *b));
                 }
             }
         }
@@ -343,6 +368,10 @@ fn touching_sheets(faces: &[FaceSpec]) -> Result<(HashMap<EdgeUse, usize>, HashM
     for (ends, group) in uses.iter().filter(|(_, g)| g.len() > 2) {
         let [material, empty] = edge_sheets(faces, group)?;
         contacts.push((*ends, material, empty, false));
+    }
+    for (ends, group) in arcs.iter().filter(|(_, g)| g.len() > 2) {
+        let [material, empty] = edge_sheets(faces, group)?;
+        contacts.push(((ends.0, ends.1), material, empty, false));
     }
     if contacts.is_empty() {
         return Ok((HashMap::new(), corner_fans(faces, &HashMap::new())));
@@ -402,15 +431,17 @@ fn self_touching(faces: &[FaceSpec], fans: &HashMap<Corner, usize>) -> std::coll
 /// points a short way into each face, as in 2D loop chaining (`prism::tightest_left`).
 fn edge_sheets(faces: &[FaceSpec], group: &[(EdgeUse, Vec3, Vec3)]) -> Result<[[[EdgeUse; 2]; 2]; 2]> {
     let fail = |s: &str| KernelError::Invalid(format!("sew: {s}"));
-    let (Some((_, a0, b0)), 4) = (group.first(), group.len()) else { return Err(fail("unsupported edge contact")) };
-    let t = (if key(*a0) < key(*b0) { *b0 - *a0 } else { *a0 - *b0 }).normalized().ok_or_else(|| fail("a degenerate contact"))?;
+    let (Some((u0, a0, b0)), 4) = (group.first(), group.len()) else { return Err(fail("unsupported edge contact")) };
+    let edge = faces.get(u0.0).and_then(|f| f.loops.get(u0.1)).and_then(|lp| lp.get(u0.2));
+    let (_, along) = edge.and_then(EdgeSpec::contact_frame).ok_or_else(|| fail("a degenerate contact"))?;
+    let t = if key(*a0) < key(*b0) { along } else { -along };
     // Each face: its use, where the use starts, the way into it, its turn, its material side, and
     // the angle of the way into it from the first face's.
     let mut rays = Vec::with_capacity(4);
     let mut reference = None;
-    for (u, a, b) in group {
+    for (u, a, _) in group {
         let face = faces.get(u.0).ok_or_else(|| fail("edge contact"))?;
-        let (into, turn, ccw) = leaving(face, *u, *a, *b, t).ok_or_else(|| fail("unsupported edge contact"))?;
+        let (into, turn, ccw) = leaving(face, *u, t).ok_or_else(|| fail("unsupported edge contact"))?;
         let r: Vec3 = *reference.get_or_insert(into);
         let angle = r.cross(into).dot(t).atan2(r.dot(into)).rem_euclid(std::f64::consts::TAU);
         rays.push((*u, key(*a), turn, ccw, if angle > std::f64::consts::TAU - SAME_WAY { 0.0 } else { angle }));
@@ -450,36 +481,41 @@ fn edge_sheets(faces: &[FaceSpec], group: &[(EdgeUse, Vec3, Vec3)]) -> Result<[[
     Ok([pairs(true)?, pairs(false)?])
 }
 
-/// How a face leaves the straight edge `a`→`b` it bounds (its use `u`), seen along the edge's
+/// How a face leaves the line or circular arc it bounds (its use `u`), seen along the edge's
 /// direction `t`: the way into the face square to the edge, how fast it turns from that way (its
 /// curvature, positive counter-clockwise about `t`; 0 for a plane or a ruled wall), and whether
 /// its material is on its counter-clockwise side. None for other faces, and for an extruded wall
-/// the edge is not a ruling of.
-fn leaving(face: &FaceSpec, u: EdgeUse, a: Vec3, b: Vec3, t: Vec3) -> Option<(Vec3, f64, bool)> {
-    let along = (b - a).normalized()?;
+/// the edge is neither a ruling nor a circular section of.
+fn leaving(face: &FaceSpec, u: EdgeUse, t: Vec3) -> Option<(Vec3, f64, bool)> {
+    let edge = face.loops.get(u.1)?.get(u.2)?;
+    let (at, along) = edge.contact_frame()?;
     // The outward normal along the edge, and the centre of curvature (with its curvature).
     let (outward, centre) = match &face.surface {
         SurfSpec::Plane => (plane_normal(face)?, None),
         SurfSpec::Extruded { a: sa, b: sb, mid, dir } => {
             let k = dir.normalized()?;
-            if along.dot(k).abs() < 1.0 - 1e-9 {
-                return None;
-            }
             let centre = circumcentre(*sa, *mid, *sb)?;
             let radial = |p: Vec3| {
                 let r = p - centre;
                 r - k * r.dot(k)
             };
-            let r = radial(a);
+            let r = radial(at);
             let (p, out) = face.probe?;
             let side = if radial(p).dot(out) < 0.0 { -1.0 } else { 1.0 };
-            (r.normalized()? * side, Some((centre, 1.0 / r.len())))
+            let curvature = match edge {
+                EdgeSpec::Line { .. } if along.dot(k).abs() >= 1.0 - 1e-9 => Some((centre, 1.0 / r.len())),
+                // Across a circular section the wall leaves along its straight extrusion
+                // direction. Its normal section here has no curvature.
+                EdgeSpec::Arc { a, b, mid } if (*mid - *a).cross(*b - *a).normalized()?.dot(k).abs() > 1.0 - 1e-9 => None,
+                _ => return None,
+            };
+            (r.normalized()? * side, curvature)
         }
         // A ruled wall (a cut-out's wall across a bend, ruled between its traces on the bend's
         // two faces), standing on the edge: its normal there is square to the edge and to the way
         // the next edge leaves the edge's end into the wall, as a wall's top or bottom edge leaves
         // its upright one.
-        SurfSpec::Ruled { .. } => {
+        SurfSpec::Ruled { .. } if matches!(edge, EdgeSpec::Line { .. }) => {
             let lp = face.loops.get(u.1)?;
             let v = lp.get((u.2 + 1) % lp.len())?.start_dir()?;
             (along.cross(v - along * v.dot(along)).normalized()?, None)
@@ -491,7 +527,7 @@ fn leaving(face: &FaceSpec, u: EdgeUse, a: Vec3, b: Vec3, t: Vec3) -> Option<(Ve
     let left = t.cross(into);
     let turn = match centre {
         None => 0.0,
-        Some((c, curvature)) if (c - a).dot(left) > 0.0 => curvature,
+        Some((c, curvature)) if (c - at).dot(left) > 0.0 => curvature,
         Some((_, curvature)) => -curvature,
     };
     turn.is_finite().then_some((into, turn, left.dot(outward) < 0.0))
@@ -770,7 +806,12 @@ fn split_vertex_fans(faces: Vec<mt::Face>) -> Result<Vec<mt::Face>> {
         .collect()
 }
 
-fn sew_impl(faces: &[FaceSpec], touching: bool, sources: Option<&[Option<crate::FaceSource>]>) -> Result<(Body, Option<Vec<usize>>)> {
+fn sew_impl(
+    faces: &[FaceSpec],
+    touching: bool,
+    circular_contacts: bool,
+    sources: Option<&[Option<crate::FaceSource>]>,
+) -> Result<(Body, Option<Vec<usize>>)> {
     if faces.len() < 4 || faces.len() > 200_000 {
         return Err(KernelError::Invalid("a solid needs 4…200000 faces".into()));
     }
@@ -799,7 +840,7 @@ fn sew_impl(faces: &[FaceSpec], touching: bool, sources: Option<&[Option<crate::
     guard("sew", || {
         // Separate fans at a point only where contact is expected (as for edge sheets); a plain
         // sew refuses bodies touching at a vertex.
-        let (sheets, fans) = if touching { touching_sheets(faces)? } else { (HashMap::new(), HashMap::new()) };
+        let (sheets, fans) = if touching { touching_sheets(faces, circular_contacts)? } else { (HashMap::new(), HashMap::new()) };
         let fan = |c: Corner| fans.get(&c).copied().unwrap_or(0);
         let mut cache = Cache::default();
         let mut out: Vec<mt::Face> = Vec::with_capacity(faces.len());
@@ -857,6 +898,9 @@ fn sew_impl(faces: &[FaceSpec], touching: bool, sources: Option<&[Option<crate::
             .filter_map(|(i, f)| sources.and_then(|s| s.get(i)).and_then(Option::as_ref).map(|s| (f.id(), (f.orientation(), s))))
             .collect();
         if !sheets.is_empty() && !faces_connected(&out) {
+            if sheets.keys().any(|u| matches!(faces.get(u.0).and_then(|f| f.loops.get(u.1)).and_then(|lp| lp.get(u.2)), Some(EdgeSpec::Arc { .. }))) {
+                return Err(KernelError::CircularEdgeContact);
+            }
             return Err(KernelError::Invalid("sew: bodies touch only along an edge".into()));
         }
         if !sheets.is_empty() {

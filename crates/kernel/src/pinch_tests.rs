@@ -30,6 +30,31 @@ fn assert_solid(r: &Body, volume: f64, rel: f64, shells: usize, what: &str) {
     assert!(r.validity().is_empty(), "{what}: {:?}", r.validity());
 }
 
+/// A coin and the annular rim above it share only a circle (#168). A numerical nudge
+/// must not fuse the pieces after exact construction finds the edge-only contact.
+#[test]
+fn coin_and_rim_touching_along_a_circle_cannot_be_fused() {
+    for plane in [Plane::XY, Plane::from_normal(Vec3::new(17., -11., 5.), Vec3::new(1., 2., 3.)).unwrap()] {
+        let coin = extrude(&plane, &[Region2 { outer: disc(0., 0., 10.), holes: vec![] }], 0., 3.).unwrap().pop().unwrap();
+        for bore in [9.5, 10., 10.5] {
+            let rim =
+                extrude(&plane, &[Region2 { outer: disc(0., 0., 15.), holes: vec![disc(0., 0., bore).reversed()] }], 3., 6.).unwrap().pop().unwrap();
+            for (a, b) in [(&coin, &rim), (&rim, &coin)] {
+                let (result, diagnostics) = capture_boolean_diagnostics(|| boolean(a, b, BoolOp::Union));
+                if bore == 10. {
+                    assert_eq!(result.unwrap_err(), KernelError::CircularEdgeContact);
+                } else {
+                    // A real annular area of contact joins; a real gap keeps separate lumps.
+                    let result = result.unwrap().unwrap();
+                    let volume = (100. + 225. - bore * bore) * 3. * std::f64::consts::PI;
+                    assert_solid(&result, volume, 1e-5, if bore < 10. { 1 } else { 2 }, "coin and rim");
+                }
+                assert!(diagnostics.events.is_empty(), "{diagnostics:?}");
+            }
+        }
+    }
+}
+
 /// The reported case: a disc on a 31 × 29 block, tangent to its back side and overhanging the
 /// other three, joined exactly, whether the tangency is exact or the solver's (1.3e-13 past).
 /// The solver's numbers used to fail every route: a split line traced on the disc's face ended

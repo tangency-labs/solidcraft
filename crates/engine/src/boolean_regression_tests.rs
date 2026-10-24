@@ -73,6 +73,35 @@ fn volume(s: &Session, body: &str) -> f64 {
     s.model.state().body(body).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0)
 }
 
+/// #168: an annular extrusion on a coin's top cap touches it only along the rim.
+/// A refused Join leaves the design unchanged; New Body keeps the two pieces.
+#[test]
+fn annular_extrude_on_a_coin_refuses_edge_only_join() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Coin"})),
+        ("sketch.circle.center", json!({"center": [0, 0], "radius": 10})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch": "Coin", "distance": 3, "body_name": "Coin"})),
+        ("sketch.create", json!({"plane": {"face": [0, 0, 3]}, "name": "Rim"})),
+        ("sketch.circle.center", json!({"center": [0, 0], "radius": 10})),
+        ("sketch.circle.center", json!({"center": [0, 0], "radius": 15})),
+        ("sketch.finish", json!({})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let before = serde_json::to_value(&s.doc).unwrap();
+    let error =
+        s.execute("solid.extrude", &json!({"sketch": "Rim", "distance": 3, "operation": "join", "profiles": [{"point": [12, 0]}]})).unwrap_err();
+    assert!(error.to_string().contains("zero-thickness edge contact"), "{error}");
+    assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!((volume(&s, "Coin") - 300. * std::f64::consts::PI).abs() < 0.1);
+    s.execute("solid.extrude", &json!({"sketch": "Rim", "distance": 3, "operation": "new", "profiles": [{"point": [12, 0]}]})).unwrap();
+    assert_eq!(s.model.state().bodies.len(), 2);
+    assert!(s.model.state().bodies.iter().all(|b| b.body.shell_count() == 1 && b.body.validity().is_empty()));
+}
+
 /// #1985: the STEP export of a small enclosure never finished. The export reads its own file
 /// back, and meshing the screw hole's seam cylinder never ended: the boundary walk took
 /// projected angles millions of turns apart. The file is written, reads back cleanly, and holds
