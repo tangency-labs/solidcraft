@@ -7405,8 +7405,10 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
     // Every body placed elsewhere than its definition, placed on all cores: a large assembly
     // places hundreds of parts, each a B-rep transform.
     let mut jobs = Vec::new();
+    let owners = doc.model_body_components(st);
+    let bodies_of = |comp: u64| st.bodies.iter().zip(&owners).filter(move |(_, owner)| **owner == comp).map(|(b, _)| b);
     for (comp, path, m) in &placements {
-        for b in st.bodies.iter().filter(|b| doc.model_body_component(b) == *comp) {
+        for b in bodies_of(*comp) {
             let bm = body_matrix(b, m);
             if !crate::is_identity(&bm) {
                 jobs.push((b, bm, doc.world_body_name(st, &b.name, *comp, path)));
@@ -7417,7 +7419,7 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
     for (comp, path, m) in placements {
         let primary = path == first_path(comp);
         let ident = crate::is_identity(&m);
-        for b in st.bodies.iter().filter(|b| doc.model_body_component(b) == comp) {
+        for b in bodies_of(comp) {
             let bm = body_matrix(b, &m);
             // Identical geometry also shares its display mesh cell with the definition.
             // A changed placement keeps a distinct mesh, at that placement's coordinates.

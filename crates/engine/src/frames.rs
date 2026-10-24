@@ -92,20 +92,29 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
 
 /// The world placement of bodies (name → frame), with moves not captured yet.
 struct Frames {
-    bodies: Vec<(String, String, Mat)>,
+    /// Worked out on first use: most commands pick no body, and a large assembly's frames cost
+    /// a walk of every body on every command.
+    bodies: std::cell::OnceCell<Vec<(String, String, Mat)>>,
     active: Mat,
     /// The frame of the sketch being edited (its component), else the active component's.
     sketch: Mat,
 }
 
 fn frames(s: &Session) -> Frames {
-    let st = s.model.state();
-    let doc = s.placed_document();
-    // World name, the component's own body name, and its frame.
-    let bodies = doc.body_frames_with_source(&st).into_iter().map(|(world, own, _, _, m)| (world, own, m)).collect();
-    let sketch_comp = s.active_sketch.and_then(|id| doc.feature(id)).map(|f| f.component).unwrap_or(s.active_component);
+    let sketch_comp = s.active_sketch.and_then(|id| s.doc.feature(id)).map(|f| f.component).unwrap_or(s.active_component);
     let active = s.active_component_frame();
-    Frames { bodies, active, sketch: if sketch_comp == s.active_component { active } else { doc.component_transform(sketch_comp) } }
+    let sketch = if sketch_comp == s.active_component { active } else { s.placed_document().component_transform(sketch_comp) };
+    Frames { bodies: std::cell::OnceCell::new(), active, sketch }
+}
+
+impl Frames {
+    /// World name, the component's own body name, and its frame, for every body.
+    fn bodies(&self, s: &Session) -> &[(String, String, Mat)] {
+        self.bodies.get_or_init(|| {
+            let st = s.model.state();
+            s.placed_document().body_frames_with_source(&st).into_iter().map(|(world, own, _, _, m)| (world, own, m)).collect()
+        })
+    }
 }
 
 /// Does world geometry or its instance naming differ from source components?
@@ -132,14 +141,14 @@ fn pt(p: Vec3) -> Value {
 /// The frame of the body a world point lies on (the nearest), or of the named body.
 fn frame_at(s: &Session, f: &Frames, p: Vec3, body: Option<&str>) -> Option<Mat> {
     if let Some(b) = body
-        && let Some((_, _, m)) = f.bodies.iter().find(|(w, _, _)| w == b)
+        && let Some((_, _, m)) = f.bodies(s).iter().find(|(w, _, _)| w == b)
     {
         return Some(*m);
     }
     let world = s.world_state();
     let mut best: Option<(f64, Mat)> = None;
     for wb in &world.bodies {
-        let Some((_, _, m)) = f.bodies.iter().find(|(w, _, _)| *w == wb.name) else { continue };
+        let Some((_, _, m)) = f.bodies(s).iter().find(|(w, _, _)| *w == wb.name) else { continue };
         let mesh = wb.mesh();
         let bb = mesh.bounds();
         let tol = (bb.diagonal() * 1e-3).max(1e-3);
@@ -279,7 +288,7 @@ impl Mapper<'_> {
 
     /// The component's body name for a world (instance) body name.
     fn own_name(&mut self, world: &str) -> Option<String> {
-        let own = self.f.bodies.iter().find(|(w, _, _)| w == world).map(|(_, own, _)| own.clone())?;
+        let own = self.f.bodies(self.s).iter().find(|(w, _, _)| w == world).map(|(_, own, _)| own.clone())?;
         (own != world).then(|| {
             self.changed = true;
             own

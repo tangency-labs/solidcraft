@@ -273,5 +273,8 @@ fn body_owners_match_each_bodys_component() {
         let each: std::collections::HashSet<u64> = st.bodies.iter().map(|b| s.doc.model_body_component(b)).collect();
         assert_eq!(s.doc.body_owners(&st), each);
         assert!(each.len() > 1);
+        // The same answers body by body, in the state's order.
+        let in_order: Vec<u64> = st.bodies.iter().map(|b| s.doc.model_body_component(b)).collect();
+        assert_eq!(s.doc.model_body_components(&st), in_order);
     }
 }

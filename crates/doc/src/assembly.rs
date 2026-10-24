@@ -293,8 +293,9 @@ impl Document {
     /// Body frames with explicit definition names; callers must not infer them from labels.
     pub fn body_frames_with_source(&self, st: &crate::ModelState) -> Vec<(String, String, u64, Vec<u64>, Mat)> {
         let mut out = Vec::new();
+        let owners = self.model_body_components(st);
         for (comp, path, m) in self.placements() {
-            for b in st.bodies.iter().filter(|b| self.model_body_component(b) == comp) {
+            for (b, _) in st.bodies.iter().zip(&owners).filter(|(_, owner)| **owner == comp) {
                 let name = self.world_body_name(st, &b.name, comp, &path);
                 let w = match self.model_body_offset(b) {
                     Some(o) => mat_mul(&m, o),
