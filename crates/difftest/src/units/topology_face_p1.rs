@@ -19,8 +19,8 @@
 //! before its first unported callee. With `props` both sides also pass face properties
 //! with the given seam verdicts and closed flags.
 //!
-//! Deferred: the seam calls behind the C++ crash guard (below) and the cone
-//! `TrimWithDomain` callbacks of `ShrinkGeometry` (`surface.surface_p2`).
+//! Deferred: the cone `TrimWithDomain` callbacks of `ShrinkGeometry`
+//! (`surface.surface_p2`). Rejected: the seam calls the C++ crash trap (below) catches.
 //!
 //! **C++ crash trap.** Upstream `SplitAtSeam`'s U-then-V branch recurses on the wrong
 //! face and crashes (`plan/upstream-issues.md` UB-137). The shim runs every seam call
@@ -28,8 +28,10 @@
 //! face periodic in either (by the face properties' closed flags or by the surface
 //! itself), and every `MoveSeam` with split past its early return (it recomputes the seam
 //! problem before splitting). A child that crashes answers `-4`; where the shim cannot
-//! fork (Windows) it skips the call (`-3`) as before. The C++ side reports both as
-//! deferred to `cpp-crash-guard:UB-137`; the Rust side runs every case.
+//! fork (Windows) it skips the call (`-3`) as before. Both are inputs undefined in C++
+//! (AGENTS.md section 5.6), so the C++ side reports them as `rejected` with a reason
+//! naming UB-137 and the trap: the harness then skips the Rust side and compares
+//! nothing. Seam calls the trap runs to completion compare as usual.
 //!
 //! **Not compared.** Edge curves and UV trim curves are still imported as plain
 //! B-splines (except lines), so conic curve paths (`SwapUV`'s conic mirrors) are not
@@ -351,19 +353,26 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
     };
     let (op, path, input) = input_of(&r)?;
     let out = ffi::eval(op, &path, &input).map_err(|e| harness(format!("c++: {e}")))?;
-    if trapped(&out) {
-        return Ok(Output::deferred(
-            "cpp-crash-guard:UB-137",
-            "SmFace::SplitAtSeam",
-        ));
+    if let Some(reason) = trapped(&out) {
+        return Ok(Output::rejected(reason));
     }
     Ok(Output::new().values("out", out))
 }
 
-/// A seam call the shim's crash trap did not get a record from (UB-137): the child
-/// crashed (`-4`), or the shim could not fork and skipped it (`-3`).
-fn trapped(out: &[f64]) -> bool {
-    matches!(out, [b, x] if *b == 0.0 && (*x == CRASHED || *x == NOT_RUN))
+/// The rejection of a seam call the shim's crash trap did not get a record from: the
+/// input is undefined in C++ (`plan/upstream-issues.md` UB-137, AGENTS.md section 5.6).
+/// The child crashed (`-4`, confirmed at runtime), or the shim could not fork and
+/// skipped the call (`-3`). The harness then runs neither the Rust side nor a compare.
+fn trapped(out: &[f64]) -> Option<&'static str> {
+    match out {
+        [b, x] if *b == 0.0 && *x == CRASHED => {
+            Some("UB-137: SmFace::SplitAtSeam crashed in the shim's fork crash trap")
+        }
+        [b, x] if *b == 0.0 && *x == NOT_RUN => {
+            Some("UB-137: SmFace::SplitAtSeam can crash; no fork for the crash trap, call skipped")
+        }
+        _ => None,
+    }
 }
 
 // ---- Rust side --------------------------------------------------------------------------

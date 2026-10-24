@@ -262,6 +262,14 @@ summaries include a rejected count when nonzero. A run containing only rejected
 fixtures fails the gate: rejection cannot establish parity. Layout errors, native
 exceptions and errors from the operation itself must not be classified this way.
 
+The same mechanism covers inputs that are undefined in C++ (AGENTS.md section 4,
+step 5.6): an FFI guard that refuses an input upstream would crash on, or a shim's
+crash trap that ran the call in a forked child and saw it crash, returns
+`Output::rejected(reason)` with the reason naming the upstream issue (e.g.
+`topology.face_p1`'s UB-137 seam calls). The C++ side never returns
+`Output::deferred`: deferrals are decided by the Rust side only, and a C++-side
+deferral is a harness error.
+
 ## Pass criteria (fixed; never weaken)
 
 * **Topology / integers / error strings**: identical, same counts and order.

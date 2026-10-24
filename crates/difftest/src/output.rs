@@ -21,7 +21,9 @@ use solidcore::SolidError;
 ///   ([`SolidError::Unported`]). The case is then *deferred*: neither pass nor
 ///   fail, and nothing is compared (AGENTS.md section 4a).
 /// * `rejected`: set by the C++ side only when fixture construction failed before
-///   the operation ran. No Rust call or parity comparison is made.
+///   the operation ran, or an FFI guard or crash trap refused an input that is
+///   undefined in C++ (AGENTS.md section 4, step 5.6). No Rust call or parity
+///   comparison is made. (A `deferred` from the C++ side is a harness error.)
 /// * `diagnostics`: named counts the Rust side reports for the record (e.g. arena
 ///   records no walk reaches); written to the report, never compared.
 #[derive(Debug, Clone, Default, PartialEq)]
