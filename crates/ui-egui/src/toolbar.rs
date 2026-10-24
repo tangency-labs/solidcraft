@@ -329,9 +329,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // While a file loads the design waits: no menus or commands from the bar.
         // The File menu: a text button (New, Open, Save, Save As, Export…). Its handle keeps the
         // old `appbar:folder` name too, for scripts written against the folder button.
-        let file = if app.native_file_menu {
-            false
-        } else {
+        let file = {
             let label = app.tr("ui.file").to_string();
             let galley = ui.painter().layout_no_wrap(label.clone(), FontId::proportional(t.font_button), t.app_bar_text);
             let br = Rect::from_min_size(pos2(x - 13.0, r.center().y - 13.0), vec2(galley.size().x + 16.0, 26.0));
@@ -377,7 +375,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         x += step;
         // Narrow windows retain Save; Undo and Redo remain available from their shortcuts and menus.
-        if !compact_actions && !app.native_file_menu {
+        if !compact_actions {
             if click(ui, x, "undo", &undo_tip, shown) {
                 FileAction::Undo.run(app);
             }
@@ -409,7 +407,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let label_width = ui.painter().layout_no_wrap(report_text.to_string(), report_font.clone(), t.app_bar_text).size().x;
         let (report, report_label) = report_rect(r, captions, tabs_start, label_width);
         // Assistant, Settings, Help and Report a bug form the right-hand cluster.
-        if !app.native_file_menu && click(ui, help_x(report), "help", app.tr("ui.help"), true) {
+        if click(ui, help_x(report), "help", app.tr("ui.help"), true) {
             app.help.menu = !app.help.menu;
             let at = help_x(report);
             ui.ctx().data_mut(|d| {
@@ -419,7 +417,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // A newer release: its Update button stays before the right cluster, in the space up to
         // the bar's own file actions on the left.
-        let controls_left = if app.native_file_menu { r.right() - captions - 12.0 } else { report.left() - CLUSTER_BUTTONS };
+        let controls_left = report.left() - CLUSTER_BUTTONS;
         let span = Rect::from_min_max(pos2(x, report.top()), pos2(controls_left - 2.0, report.bottom()));
         let update_labeled = report_label;
         let update = crate::update::button(app, ui, span, update_labeled);
@@ -430,59 +428,47 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let mut tabs_ui = ui.new_child(egui::UiBuilder::new().max_rect(tabs_rect));
         tabs_ui.set_clip_rect(tabs_rect.intersect(ui.clip_rect()));
         crate::documents::tabs(app, &mut tabs_ui, r, tabs_start, tabs_end);
-        if !app.native_file_menu {
-            let response = ui.interact(report, ui.id().with("sc_report_button"), Sense::click());
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), report_text));
-            crate::scenario::publish_target("titlebar:report", report);
-            ui.painter().rect_filled(
-                report,
-                t.radius_sm,
-                if response.hovered() || response.has_focus() { t.app_bar_hover_button } else { t.app_bar },
+        let response = ui.interact(report, ui.id().with("sc_report_button"), Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), report_text));
+        crate::scenario::publish_target("titlebar:report", report);
+        ui.painter().rect_filled(report, t.radius_sm, if response.hovered() || response.has_focus() { t.app_bar_hover_button } else { t.app_bar });
+        ui.painter().rect_stroke(report, t.radius_sm, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
+        let icon = Rect::from_center_size(pos2(report.left() + 14.0, report.center().y), vec2(18.0, 18.0));
+        icons::paint_app_bar(ui.painter(), icon, "bug_report", 1.0);
+        if report_label {
+            ui.painter().text(pos2(report.left() + REPORT_TEXT_X, report.center().y), Align2::LEFT_CENTER, report_text, report_font, t.app_bar_text);
+        }
+        if response.on_hover_text(crate::i18n::tr_label("Report a bug — review a screenshot and open a GitHub draft")).clicked() {
+            crate::help::run(app, &ui.ctx().clone(), "report");
+        }
+        // Settings sits immediately left of Help (also Ctrl+,).
+        let gear = Rect::from_center_size(pos2(report.left() - 52.0, r.center().y), vec2(32.0, 32.0));
+        let gresp = ui.interact(gear, ui.id().with("sc_prefs_button"), Sense::click());
+        if gresp.hovered() || gresp.has_focus() {
+            ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+        }
+        icons::paint_app_bar(ui.painter(), gear.shrink(7.0), "settings", 1.0);
+        crate::scenario::publish_rect("titlebar:preferences", gear);
+        if crate::agent_chat::app_bar_button_shown(app) {
+            assistant_button(app, ui, Rect::from_center_size(pos2(report.left() - 86.0, r.center().y), vec2(32.0, 32.0)));
+        }
+        crate::scenario::publish_handle("titlebar:preferences", gear.center());
+        let prefs_tip = if cfg!(target_os = "macos") {
+            format!("{} (Cmd+,)", app.tr("ui.preferences"))
+        } else {
+            format!("{} (Ctrl+,)", app.tr("ui.preferences"))
+        };
+        if gresp.on_hover_text(prefs_tip).clicked() {
+            crate::prefs::open_at(app, 0);
+        }
+        if r.width() >= 640.0 {
+            ui.painter().text(
+                pos2(r.right() - 12.0 - captions, r.center().y),
+                Align2::RIGHT_CENTER,
+                format!("v{}", crate::update::current_version()),
+                FontId::proportional(t.font_small),
+                t.app_bar_text,
             );
-            ui.painter().rect_stroke(report, t.radius_sm, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
-            let icon = Rect::from_center_size(pos2(report.left() + 14.0, report.center().y), vec2(18.0, 18.0));
-            icons::paint_app_bar(ui.painter(), icon, "bug_report", 1.0);
-            if report_label {
-                ui.painter().text(
-                    pos2(report.left() + REPORT_TEXT_X, report.center().y),
-                    Align2::LEFT_CENTER,
-                    report_text,
-                    report_font,
-                    t.app_bar_text,
-                );
-            }
-            if response.on_hover_text(crate::i18n::tr_label("Report a bug — review a screenshot and open a GitHub draft")).clicked() {
-                crate::help::run(app, &ui.ctx().clone(), "report");
-            }
-            // Settings sits immediately left of Help (also Ctrl+,).
-            let gear = Rect::from_center_size(pos2(report.left() - 52.0, r.center().y), vec2(32.0, 32.0));
-            let gresp = ui.interact(gear, ui.id().with("sc_prefs_button"), Sense::click());
-            if gresp.hovered() || gresp.has_focus() {
-                ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-            }
-            icons::paint_app_bar(ui.painter(), gear.shrink(7.0), "settings", 1.0);
-            crate::scenario::publish_rect("titlebar:preferences", gear);
-            if crate::agent_chat::app_bar_button_shown(app) {
-                assistant_button(app, ui, Rect::from_center_size(pos2(report.left() - 86.0, r.center().y), vec2(32.0, 32.0)));
-            }
-            crate::scenario::publish_handle("titlebar:preferences", gear.center());
-            let prefs_tip = if cfg!(target_os = "macos") {
-                format!("{} (Cmd+,)", app.tr("ui.preferences"))
-            } else {
-                format!("{} (Ctrl+,)", app.tr("ui.preferences"))
-            };
-            if gresp.on_hover_text(prefs_tip).clicked() {
-                crate::prefs::open_at(app, 0);
-            }
-            if r.width() >= 640.0 {
-                ui.painter().text(
-                    pos2(r.right() - 12.0 - captions, r.center().y),
-                    Align2::RIGHT_CENTER,
-                    format!("v{}", crate::update::current_version()),
-                    FontId::proportional(t.font_small),
-                    t.app_bar_text,
-                );
-            }
         }
         if app.custom_titlebar {
             crate::titlebar::caption_buttons(app, ui, r);
@@ -583,10 +569,6 @@ impl FileAction {
 
 fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
     let id = egui::Id::new("sc_file_menu");
-    if app.native_file_menu {
-        ctx.data_mut(|data| data.insert_temp(id, false));
-        return;
-    }
     if !ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
         return;
     }
@@ -2088,23 +2070,46 @@ mod header_report_tests {
     use super::*;
 
     #[test]
-    fn native_file_menu_replaces_window_button_and_preserves_fallback() {
+    fn native_file_menu_preserves_application_bar_controls() {
         let mut h = crate::scenario::Harness::new();
-        h.frames(3);
-        assert!(crate::scenario::handle_at("appbar:file").is_some());
-        h.ctx.data_mut(|data| data.insert_temp(egui::Id::new("sc_file_menu"), true));
-        h.app.native_file_menu = true;
-        h.frames(3);
-        assert!(crate::scenario::handle_at("appbar:file").is_none());
-        assert!(!h.ctx.data(|data| data.get_temp::<bool>(egui::Id::new("sc_file_menu")).unwrap_or(false)));
-        assert!(crate::scenario::handle_at("appbar:save").is_some());
-        assert!(crate::scenario::handle_at("appbar:undo").is_none());
-        assert!(crate::scenario::handle_at("appbar:redo").is_none());
-        h.app.native_file_menu = false;
-        h.frames(3);
-        assert!(crate::scenario::handle_at("appbar:file").is_some());
-        assert!(crate::scenario::handle_at("appbar:undo").is_some());
-        assert!(crate::scenario::handle_at("appbar:redo").is_some());
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        for native in [false, true] {
+            h.app.native_file_menu = native;
+            h.app.integrated_titlebar = native;
+            h.frames(3);
+            for name in [
+                "appbar:file",
+                "appbar:save",
+                "appbar:undo",
+                "appbar:redo",
+                "appbar:help",
+                "titlebar:preferences",
+                "titlebar:assistant",
+                "titlebar:report",
+            ] {
+                assert!(crate::scenario::handle_at(name).is_some(), "native={native}: {name}");
+            }
+            let tabs = crate::scenario::rect_of("tab:design:0").unwrap();
+            let assistant = crate::scenario::rect_of("titlebar:assistant").unwrap();
+            assert!(tabs.right() < assistant.left(), "tabs leave room for the right controls");
+            let depth = h.app.session.undo.len();
+            h.step(&json!({"click":{"handle":"appbar:undo"}})).unwrap();
+            assert_eq!(h.app.session.undo.len(), depth - 1);
+            h.step(&json!({"click":{"handle":"appbar:redo"}})).unwrap();
+            assert_eq!(h.app.session.undo.len(), depth);
+            h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+            assert!(h.widget("Save As JSON…").is_some(), "the in-window File menu still opens");
+            h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+            assert!(!h.ctx.data(|data| data.get_temp::<bool>(egui::Id::new("sc_file_menu")).unwrap_or(false)));
+            h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
+            assert!(h.app.help.menu);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.step(&json!({"click":{"handle":"titlebar:assistant"}})).unwrap();
+            assert!(h.app.agent_chat.open);
+            h.step(&json!({"click":{"handle":"titlebar:assistant"}})).unwrap();
+            assert!(!h.app.agent_chat.open);
+        }
     }
 
     #[test]
