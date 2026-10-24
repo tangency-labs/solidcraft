@@ -8,6 +8,7 @@
 //! the next launch offers to recover it.
 
 use std::fs::{self, File, OpenOptions};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -91,6 +92,28 @@ fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
+/// Recovery metadata is small; a damaged or hostile entry must not exhaust memory.
+const MAX_ENTRY_BYTES: usize = 1 << 20;
+
+/// Read only bounded, regular-file metadata. The second type check and bounded read
+/// also protect against files changed while the recovery folder is being scanned.
+fn read_entry(path: &Path) -> Option<Entry> {
+    let metadata = fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_ENTRY_BYTES as u64 {
+        return None;
+    }
+    let file = File::open(path).ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(MAX_ENTRY_BYTES as u64 + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() > MAX_ENTRY_BYTES {
+        return None;
+    }
+    serde_json::from_slice(&bytes).ok()
+}
+
 /// An entry's design: `<id>.solidcraft`, or `<id>.solvecraft` for an autosave copied from a
 /// pre-rename recovery folder (compatibility shim, docs/compatibility.md).
 fn design_file(dir: &Path, id: &str) -> PathBuf {
@@ -114,8 +137,9 @@ pub fn orphans(dir: &Path) -> Vec<Entry> {
             if p.extension().and_then(|x| x.to_str()) != Some("json") {
                 return None;
             }
-            let entry: Entry = serde_json::from_slice(&fs::read(&p).ok()?).ok()?;
-            if !valid_id(&entry.id) || !design_file(dir, &entry.id).is_file() {
+            let id = p.file_stem().and_then(|s| s.to_str())?;
+            let entry = read_entry(&p)?;
+            if !valid_id(id) || entry.id != id || !design_file(dir, id).is_file() {
                 return None;
             }
             // Held by a running app: not an orphan.
@@ -138,9 +162,8 @@ pub fn load(dir: &Path, id: &str) -> Result<(Document, Entry)> {
     if !valid_id(id) {
         return Err(EngineError::Other(format!("no recovered design `{id}`")));
     }
-    let entry: Entry = fs::read(file(dir, id, "json"))
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
+    let entry = read_entry(&file(dir, id, "json"))
+        .filter(|e| e.id == id)
         .ok_or_else(|| EngineError::Other(format!("no recovered design `{id}`")))?;
     let path = design_file(dir, id);
     let bytes = solidcraft_io::vfs::read(&path.to_string_lossy(), solidcraft_io::MAX_DESIGN_BYTES)
@@ -152,7 +175,7 @@ pub fn load(dir: &Path, id: &str) -> Result<(Document, Entry)> {
 /// be there, so a folder and id that merely name someone's `part.solidcraft` delete nothing.
 pub fn remove(dir: &Path, id: &str) -> Result<()> {
     let is_entry = valid_id(id)
-        && fs::read(file(dir, id, "json")).ok().and_then(|b| serde_json::from_slice::<Entry>(&b).ok()).is_some_and(|e| e.id == id)
+        && read_entry(&file(dir, id, "json")).is_some_and(|e| e.id == id)
         && design_file(dir, id).is_file();
     if !is_entry {
         return Err(EngineError::Other(format!("no recovered design `{id}`")));
@@ -560,4 +583,65 @@ mod tests {
         assert!(load(&d, "../etc").is_err());
         let _ = fs::remove_dir_all(&d);
     }
+
+    /// A corrupted or hostile recovery entry must not consume unbounded memory at startup.
+    /// A metadata file exactly at the limit is still accepted.
+    #[test]
+    fn oversized_recovery_metadata_does_not_hide_valid_entries() {
+        let d = dir("bounded-metadata");
+        fs::create_dir_all(&d).unwrap();
+        let good = Entry { id: "good".into(), path: None, name: "good".into(), saved_at: 1, features: 0 };
+        let mut boundary = Entry { id: "boundary".into(), path: None, name: String::new(), saved_at: 2, features: 0 };
+        let base_len = serde_json::to_vec(&boundary).unwrap().len();
+        boundary.name = "x".repeat((1 << 20) - base_len);
+        let oversized = Entry { id: "oversized".into(), name: "x".repeat(1 << 20), ..good.clone() };
+        for entry in [&good, &boundary, &oversized] {
+            fs::write(file(&d, &entry.id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default())).unwrap();
+            fs::write(file(&d, &entry.id, "json"), serde_json::to_vec(entry).unwrap()).unwrap();
+        }
+        assert_eq!(fs::metadata(file(&d, "boundary", "json")).unwrap().len(), 1 << 20);
+        assert!(fs::metadata(file(&d, "oversized", "json")).unwrap().len() > 1 << 20);
+        let mut ids: Vec<String> = orphans(&d).into_iter().map(|e| e.id).collect();
+        ids.sort();
+        assert_eq!(ids, ["boundary", "good"]);
+        assert_eq!(load(&d, "good").unwrap().1, good);
+        assert_eq!(load(&d, "boundary").unwrap().1, boundary);
+        assert!(load(&d, "oversized").is_err());
+        assert!(remove(&d, "oversized").is_err());
+        assert!(file(&d, "oversized", "json").exists(), "invalid metadata must not delete a design");
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// A mismatched metadata ID must not redirect the recovered design's save path.
+    #[test]
+    fn recovery_metadata_id_must_match_its_filename() {
+        let d = dir("metadata-id");
+        fs::create_dir_all(&d).unwrap();
+        let wrong = Entry { id: "other".into(), path: Some("/unrelated-design.solidcraft".into()), name: "wrong".into(), saved_at: 1, features: 0 };
+        fs::write(file(&d, "actual", "json"), serde_json::to_vec(&wrong).unwrap()).unwrap();
+        for id in ["actual", "other"] {
+            fs::write(file(&d, id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default())).unwrap();
+        }
+        assert!(orphans(&d).is_empty(), "metadata under another ID must not be offered");
+        assert!(load(&d, "actual").is_err(), "a mismatched path must not become the next save target");
+        assert!(remove(&d, "actual").is_err());
+        assert!(file(&d, "actual", solidcraft_io::DESIGN_EXT).exists());
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// A device posing as a JSON file must not block the startup recovery scan.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn recovery_scan_skips_non_regular_metadata_files() {
+        use std::os::unix::fs::symlink;
+
+        let d = dir("device-metadata");
+        fs::create_dir_all(&d).unwrap();
+        symlink("/dev/zero", file(&d, "device", "json")).unwrap();
+        assert!(orphans(&d).is_empty());
+        assert!(load(&d, "device").is_err());
+        assert!(remove(&d, "device").is_err());
+        fs::remove_dir_all(&d).unwrap();
+    }
+
 }
