@@ -281,7 +281,24 @@ and a fresh CI run:
   features`). Don't regenerate or edit them in a pull request.
 - **Design format**: one file per change, never an edit to a shared number (above).
 
-## Sending a change
+## Before you start
+
+- **Check the [integration map](ROADMAP.md#integration-map).** It says which areas are open
+  for pull requests now, which need a conversation first and which are deferred. The CAD core
+  (sketch, solid modelling, assemblies, files) comes first. For a "talk first" area, open an
+  issue (or comment on its RFC) and agree the approach before you write code.
+- **Keep pull requests reviewable.** Aim for under about 1,000 changed lines on one topic.
+  Anything over about 2,000 lines needs an issue where a maintainer has agreed the plan first.
+  Stacked pull requests are fine, as long as each one makes sense and can be reviewed on its own.
+  Generated files, test data and goldens don't count towards the size, but say what they are.
+- **AI-assisted code is welcome.** You must understand every line you send and be able to
+  explain it in review. Large amounts of generated code nobody has reviewed will be closed.
+- **Licences: no GPL, LGPL or AGPL.** That covers code, dependencies and programs SolidCraft
+  needs at run time (for example FreeCAD or OpenCASCADE), as well as code ported or translated
+  from them. The only exception is test tooling you run by hand as a separate program, like the
+  [FreeCAD reference-value scripts](tools/freecad-oracle/README.md). See rule 2 above.
+
+## Sending a pull request
 
 1. Work is tracked in [GitHub issues](https://github.com/tangency-labs/solidcraft/issues), labelled
    by area (`area:kernel`, `area:sketch`, `area:doc`, `area:ui`, `area:infra`). For anything
@@ -316,6 +333,21 @@ without pushes. These automatic cleanup deadlines are separate from the daily pr
 72-hour takeover policy above. A draft PR that references the issue claims it the same way.
 `/unclaim` releases the bot claim early (only you or a maintainer can). Issues a maintainer has
 taken are never freed automatically.
+
+### Review, CI and milestones
+
+- **Quick checks on every push.** Formatting, the repository checks and a quick compile run on
+  every pull request.
+- **Full CI after review.** Once a maintainer has looked at the pull request they add the
+  `approved-for-ci` label, which runs the full suite (build, tests, goldens, Clippy). This is
+  coming with [#2689](https://github.com/tangency-labs/solidcraft/pull/2689); until it lands,
+  ready pull requests run the full suite straight away.
+- **Merges go through the merge queue**, which runs the full suite once more on top of the
+  latest `main` before the change lands.
+- **Milestones set the order.** The [milestones](https://github.com/tangency-labs/solidcraft/milestones)
+  are the current sprint goals, and pull requests for them are reviewed first. When you can,
+  link your pull request to an issue in one of them. Other pull requests are still welcome;
+  they may just wait longer.
 
 Help reviewers see what the words mean. For observable CAD, UI or model behavior, please
 include actual descriptive screenshots or a short recording in the issue or PR. This evidence
@@ -381,8 +413,9 @@ In order of how much they'd help users:
    faces, and fillets that consume neighbouring faces.
 2. **Boolean robustness.** A random-design fuzzer currently gets about half of its designs
    through without a kernel error. Each failing seed is a reproducible bug.
-3. **Drawings, CAM and mesh tools.** These are out of scope for now (see
-   [ROADMAP.md](ROADMAP.md)), but anyone who wants to own one is welcome.
+3. **Drawings, CAM and mesh tools.** These wait until the CAD core is solid. The
+   [integration map](ROADMAP.md#integration-map) says which are "talk first" and which are
+   deferred; please start with an issue rather than code.
 
 ## Updating the generated feature list
 
