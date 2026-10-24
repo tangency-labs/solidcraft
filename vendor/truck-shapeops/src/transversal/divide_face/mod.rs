@@ -43,6 +43,11 @@ where
             let div = curve.parameter_division(curve.range_tuple(), tol).1;
             PolylineCurve(div)
         });
+        // SolidCraft: an edge whose division failed (an intersection curve past its bounded
+        // work comes back empty) gives up the boundary instead of leaving the edge out of it.
+        if poly.len() < 2 {
+            return None;
+        }
         let mut p = *vec.last().unwrap();
         let closure = |q: &P| -> Option<Point2> {
             // SolidCraft: the points of an intersection curve on a lofted or swept surface lie on

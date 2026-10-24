@@ -35,6 +35,9 @@ Changes:
   circle) is divided again, finer, before its area's sign tells a hole from a face piece. The
   sign of a zero area was random: the hole became a face of its own, inside out, and the face it
   was cut in stayed whole.
+- `transversal/divide_face/mod.rs`: an edge whose division comes back with fewer than two points
+  (an intersection curve past its bounded work, see truck-geometry below) gives up the face's
+  boundary instead of leaving the edge out of it.
 - `lib.rs`: `tr!` reports where an operation gives up when `SHAPEOPS_TRACE` is set; compiler
   warnings no longer fail the build.
 - Face and edge history (`transversal/history.rs`, new): `and_with_history` / `or_with_history`
@@ -68,6 +71,11 @@ Changes:
   farther from the leader's point than the curve's tolerance (the projection settled on another
   part of a surface, such as the far side of a small hole) is dropped for the search from
   nothing, as before. `crates/kernel/src/issue_1038_tests.rs` holds it to that search.
+  Bounded work: one division evaluates at most 16 384 pieces across all its branches, and a
+  piece whose midpoint parameter no longer lies strictly inside it (or that reaches truck's
+  depth of 100) ends it; the division then fails (both lists empty) instead of keeping a chord
+  that is off the curve. The depth alone allowed about 2^100 pieces: a twisted sweep's B-spline
+  wall crossing a tube divided for good and hung the cut (#2891).
 - `decorators/revolved_curve.rs`: a point on a revolved surface's seam (angle 0, the same place
   as 2π) takes the end of the period nearer the hinted angle. The angle was decided by the sign of
   a cross product that is rounding noise there, so a boundary followed point by point could come

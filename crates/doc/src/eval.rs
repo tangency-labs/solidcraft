@@ -6172,6 +6172,30 @@ fn chamfer_with(
     })
 }
 
+/// The kernel intersections a twisted sweep's cut or intersection may try (#2891). Its walls are
+/// B-spline surfaces whose intersection with a curved target can fail every try; each failed try
+/// costs a bounded intersection, so the fallbacks may not repeat it without end.
+const TWISTED_SWEEP_BOOLEAN_ATTEMPTS: usize = 12;
+
+/// Whether `f` is a sweep with a twist other than none.
+fn twisted_sweep(vals: &BTreeMap<String, Value>, f: &Feature) -> Result<bool> {
+    let FeatureKind::Sweep { twist: Some(t), .. } = &f.kind else { return Ok(false) };
+    Ok(val(vals, t, Kind::Angle)? != 0.0)
+}
+
+/// `apply` (a twisted sweep's cut or intersection) within [`TWISTED_SWEEP_BOOLEAN_ATTEMPTS`]; a
+/// failure that used them all up is reported as not supported yet.
+fn twisted_sweep_boolean(apply: impl FnOnce() -> Result<()>) -> Result<()> {
+    kernel::with_attempt_budget(TWISTED_SWEEP_BOOLEAN_ATTEMPTS, || {
+        apply().map_err(|e| match (e, kernel::attempts_left()) {
+            (DocError::Kernel(k), Some(0)) => {
+                DocError::Invalid(format!("not supported yet: this twisted sweep cut exceeded the bounded intersection work with its target ({k})"))
+            }
+            (e, _) => e,
+        })
+    })
+}
+
 fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
@@ -6278,6 +6302,9 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 if !handled.is_empty() {
                     return apply_beside_sheet_cut(st, f, tools, *operation, &crate::plain(targets), &handled);
                 }
+            }
+            if matches!(operation, Operation::Cut | Operation::Intersect) && twisted_sweep(vals, f)? {
+                return twisted_sweep_boolean(|| apply_traced(st, f, tools, *operation, &crate::plain(targets)));
             }
             apply_traced(st, f, tools, *operation, &crate::plain(targets))
         }

@@ -161,3 +161,38 @@ fn hostile_sweep_options_are_refused() {
         assert_eq!(s.doc.features.len(), before, "{bad}");
     }
 }
+
+/// A rectangle swept 30° twisted down a 250 mm tube (ID 20, OD 30) as a cut: the intersection
+/// of its B-spline walls with the tube is bounded work, so the command comes back (it ran
+/// forever, #2891) with either a valid smaller tube or the bounded-work error and the design
+/// as it was.
+#[test]
+fn twisted_sweep_cut_through_a_tube_returns() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Tube section"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 15, "id": "outer"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10, "id": "inner"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Tube section", "profiles": "all", "distance": 250, "body_name": "Tube"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "R"}));
+    run(&mut s, "sketch.line", json!({"points": [[8, -3], [17, -3], [17, 3], [8, 3]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Z"}));
+    run(&mut s, "sketch.line", json!({"points": [[12.5, 0], [12.5, -250]], "ids": ["axis"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let tube = measure(&s, "Tube");
+    let before = s.doc.features.len();
+    let cut =
+        json!({"sketch": "R", "path_sketch": "Z", "path": ["axis"], "profiles": [0], "operation": "cut", "targets": ["Tube"], "twist": "30 deg"});
+    match s.execute("solid.sweep", &cut).map_err(|e| e.to_string()) {
+        Ok(_) => {
+            let m = measure(&s, "Tube");
+            assert!(m.volume.is_finite() && m.volume > 0.0 && m.volume < tube.volume, "{} of {}", m.volume, tube.volume);
+        }
+        Err(e) => {
+            assert!(e.contains("not supported yet: this twisted sweep cut exceeded the bounded intersection work"), "{e}");
+            assert_eq!(s.doc.features.len(), before);
+            assert_eq!(measure(&s, "Tube").volume, tube.volume);
+        }
+    }
+}

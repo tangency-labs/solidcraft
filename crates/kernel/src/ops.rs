@@ -898,6 +898,13 @@ pub fn with_attempt_budget<T>(attempts: usize, f: impl FnOnce() -> T) -> T {
     f()
 }
 
+/// The attempts left under the innermost [`with_attempt_budget`] running on this thread (`None`
+/// outside one): `Some(0)` after a failure means the budget ran out, not that the bodies were
+/// refused outright.
+pub fn attempts_left() -> Option<usize> {
+    ATTEMPTS.with(|c| c.get())
+}
+
 /// Takes one of the attempts left under [`with_attempt_budget`]; false when none is left.
 fn take_attempt() -> bool {
     ATTEMPTS.with(|c| match c.get() {
