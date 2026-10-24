@@ -54,98 +54,293 @@ fn differs(want: &Value, got: &Value) -> Option<String> {
     (!out.is_empty()).then(|| out.join("; "))
 }
 
-/// Platform records only override the seeds explicitly verified on that platform.
-fn expected<'a>(file: &'a Value, seed: u64, platform: &str) -> &'a Value {
-    let key = seed.to_string();
-    file.get("platforms")
-        .and_then(|platforms| platforms.get(platform))
-        .and_then(|record| record.get("seeds"))
-        .and_then(|seeds| seeds.get(&key))
-        .unwrap_or(&file["seeds"][key])
+/// Only Windows needs an environment split; other OS policies remain compatible.
+#[derive(Clone, Copy, Debug)]
+struct Target<'a> {
+    os: &'a str,
+    env: &'a str,
 }
 
-#[test]
-fn platform_records_keep_shared_references_for_every_other_seed_and_platform() {
-    let file = json!({"seeds":{"1":{"volume":10},"2":{"volume":20}},"platforms":{"windows":{"seeds":{"1":{"volume":11}}}}});
-    assert_eq!(expected(&file, 1, "windows")["volume"], 11);
-    assert_eq!(expected(&file, 1, "linux")["volume"], 10);
-    assert_eq!(expected(&file, 2, "windows")["volume"], 20);
+impl<'a> Target<'a> {
+    fn current() -> Self {
+        // cfg! describes the compilation target, including when cross-compiling.
+        let env = if cfg!(target_env = "msvc") {
+            "msvc"
+        } else if cfg!(target_env = "gnu") {
+            "gnu"
+        } else {
+            "other"
+        };
+        Self { os: std::env::consts::OS, env }
+    }
+
+    fn platform(self) -> Option<&'a str> {
+        match (self.os, self.env) {
+            ("windows", "msvc") => Some("windows"), // Existing MSVC-verified records.
+            ("windows", "gnu") => Some("windows-gnu"),
+            ("windows", _) => None,
+            (os, _) => Some(os),
+        }
+    }
+
+    fn recording_platform(self, file: &Value) -> Result<Option<&'a str>, String> {
+        let platform = self.platform();
+        if self.os == "windows" {
+            return platform.map(Some).ok_or_else(|| format!("no recording policy for Windows target_env={}; define one before blessing", self.env));
+        }
+        Ok(platform.filter(|p| file["platforms"][*p]["seeds"].is_object()))
+    }
+}
+
+/// An override replaces the entire seed record, never individual fields.
+/// The second return value identifies the selected reference in diagnostics.
+fn expected<'a, 't>(file: &'a Value, seed: u64, target: Target<'t>) -> (&'a Value, &'t str) {
+    let key = seed.to_string();
+    if let Some(platform) = target.platform()
+        && let Some(record) = file.get("platforms").and_then(|p| p.get(platform)).and_then(|p| p.get("seeds")).and_then(|s| s.get(&key))
+    {
+        return (record, platform);
+    }
+    (&file["seeds"][key], "shared")
+}
+
+fn difference(file: &Value, seed: u64, got: &Value, target: Target<'_>) -> Option<String> {
+    let (want, group) = expected(file, seed, target);
+    let change = if want.is_null() { Some("new".to_string()) } else { differs(want, got) };
+    change.map(|d| format!("seed {seed} [target_os={}, target_env={}, reference={group}]: {d}", target.os, target.env))
+}
+
+/// In-memory recording seam: regression tests never write the real reference file.
+fn record(file: &mut Value, seed: u64, got: &Value, reason: &str, target: Target<'_>) -> Result<bool, String> {
+    if reason.trim().is_empty() {
+        return Err("ROBUSTNESS_GOLDENS_BLESS needs the reason for the change".to_string());
+    }
+    let platform = target.recording_platform(file)?;
+    if difference(file, seed, got, target).is_none() {
+        return Ok(false);
+    }
+    if file.get("about").is_none() {
+        file["about"] = json!(
+            "What each robustness seed builds (crates/engine/src/tests/robustness_goldens.rs, docs/robustness.md). Record changes with ROBUSTNESS_GOLDENS_BLESS=\"why\"."
+        );
+    }
+    if let Some(platform) = platform {
+        file["platforms"][platform]["seeds"][seed.to_string()] = got.clone();
+    } else {
+        file["seeds"][seed.to_string()] = got.clone();
+    }
+    let mut notes = file["notes"].as_array().cloned().unwrap_or_default();
+    // Coalesce only the same reason AND destination, including shared vs platform.
+    // Windows destinations encode the environment, so GNU and MSVC cannot coalesce.
+    let destination = platform.map(|p| json!(p));
+    match notes.last_mut() {
+        Some(last) if last["reason"] == json!(reason) && last.get("platform") == destination.as_ref() => {
+            let mut all: Vec<u64> = last["seeds"].as_array().into_iter().flatten().filter_map(Value::as_u64).chain([seed]).collect();
+            all.sort_unstable();
+            all.dedup();
+            last["seeds"] = json!(all);
+        }
+        _ => {
+            let mut note = json!({"reason": reason, "seeds": [seed]});
+            if let Some(platform) = platform {
+                note["platform"] = json!(platform);
+            }
+            notes.push(note);
+        }
+    }
+    file["notes"] = Value::Array(notes);
+    Ok(true)
+}
+
+fn serialize(file: &Value) -> String {
+    // Seeds in order, one per line, so a change is a small diff.
+    let seeds: BTreeMap<u64, Value> =
+        file["seeds"].as_object().into_iter().flatten().filter_map(|(k, v)| Some((k.parse::<u64>().ok()?, v.clone()))).collect();
+    let mut s = format!("{{\n \"about\": {},\n \"seeds\": {{\n", file["about"]);
+    let n = seeds.len();
+    for (i, (k, v)) in seeds.iter().enumerate() {
+        s += &format!("  \"{k}\": {}{}\n", v, if i + 1 < n { "," } else { "" });
+    }
+    let notes: Vec<String> = file["notes"].as_array().into_iter().flatten().map(|n| format!("  {n}")).collect();
+    s += " },\n";
+    if let Some(platforms) = file.get("platforms") {
+        s += &format!(" \"platforms\": {platforms},\n");
+    }
+    s += &format!(" \"notes\": [\n{}\n ]\n}}\n", notes.join(",\n"));
+    s
 }
 
 fn check(seed: u64) {
-    let got: BTreeMap<u64, Value> = BTreeMap::from([(seed, fuzz::golden(seed, MAX_STEPS))]);
+    let got = fuzz::golden(seed, MAX_STEPS);
     let _lock = FILE.lock().unwrap_or_else(|e| e.into_inner());
     let mut file = load();
-    let changed: Vec<(u64, String)> = got
-        .iter()
-        .filter_map(|(seed, g)| {
-            let w = expected(&file, *seed, std::env::consts::OS);
-            if w.is_null() { Some((*seed, "new".to_string())) } else { differs(w, g).map(|d| (*seed, d)) }
-        })
-        .collect();
+    let target = Target::current();
     if let Ok(reason) = std::env::var("ROBUSTNESS_GOLDENS_BLESS") {
-        assert!(!reason.trim().is_empty(), "ROBUSTNESS_GOLDENS_BLESS needs the reason for the change");
-        if changed.is_empty() {
-            return;
+        if record(&mut file, seed, &got, &reason, target).unwrap_or_else(|e| panic!("{e}")) {
+            std::fs::write(path(), serialize(&file)).unwrap_or_else(|e| panic!("{}: {e}", path().display()));
         }
-        if file.get("about").is_none() {
-            file["about"] = json!(
-                "What each robustness seed builds (crates/engine/src/tests/robustness_goldens.rs, docs/robustness.md). Record changes with ROBUSTNESS_GOLDENS_BLESS=\"why\"."
-            );
-        }
-        let platform = std::env::consts::OS;
-        let platform_record = file["platforms"][platform]["seeds"].is_object();
-        for (seed, g) in &got {
-            if platform_record {
-                if changed.iter().any(|(changed, _)| changed == seed) {
-                    file["platforms"][platform]["seeds"][seed.to_string()] = g.clone();
-                }
-            } else {
-                file["seeds"][seed.to_string()] = g.clone();
-            }
-        }
-        let mut notes = file["notes"].as_array().cloned().unwrap_or_default();
-        let seeds: Vec<u64> = changed.iter().map(|(s, _)| *s).collect();
-        // The parts of one record (the tests run side by side) share one note.
-        match notes.last_mut() {
-            Some(last) if last["reason"] == json!(reason) && (!platform_record || last["platform"] == json!(platform)) => {
-                let mut all: Vec<u64> = last["seeds"].as_array().into_iter().flatten().filter_map(Value::as_u64).chain(seeds).collect();
-                all.sort_unstable();
-                all.dedup();
-                last["seeds"] = json!(all);
-            }
-            _ => {
-                let mut note = json!({"reason": reason, "seeds": seeds});
-                if platform_record {
-                    note["platform"] = json!(platform);
-                }
-                notes.push(note);
-            }
-        }
-        file["notes"] = Value::Array(notes);
-        // Seeds in order, one per line, so a change is a small diff.
-        let seeds: BTreeMap<u64, Value> =
-            file["seeds"].as_object().into_iter().flatten().filter_map(|(k, v)| Some((k.parse::<u64>().ok()?, v.clone()))).collect();
-        let mut s = format!("{{\n \"about\": {},\n \"seeds\": {{\n", file["about"]);
-        let n = seeds.len();
-        for (i, (k, v)) in seeds.iter().enumerate() {
-            s += &format!("  \"{k}\": {}{}\n", v, if i + 1 < n { "," } else { "" });
-        }
-        let notes: Vec<String> = file["notes"].as_array().into_iter().flatten().map(|n| format!("  {n}")).collect();
-        s += " },\n";
-        if let Some(platforms) = file.get("platforms") {
-            s += &format!(" \"platforms\": {platforms},\n");
-        }
-        s += &format!(" \"notes\": [\n{}\n ]\n}}\n", notes.join(",\n"));
-        std::fs::write(path(), s).unwrap_or_else(|e| panic!("{}: {e}", path().display()));
         return;
     }
+    let change = difference(&file, seed, &got, target);
     assert!(
-        changed.is_empty(),
-        "{} seed(s) build differently from tests/robustness/goldens.json (if that is intended, record it with ROBUSTNESS_GOLDENS_BLESS=\"why\" and say why in the pull request):\n{}",
-        changed.len(),
-        changed.iter().map(|(s, d)| format!("seed {s}: {d}")).collect::<Vec<_>>().join("\n")
+        change.is_none(),
+        "build differs from tests/robustness/goldens.json (if that is intended, record it with ROBUSTNESS_GOLDENS_BLESS=\"why\" and say why in the pull request):\n{}",
+        change.unwrap_or_default()
     );
+}
+
+const MSVC: Target<'_> = Target { os: "windows", env: "msvc" };
+const GNU: Target<'_> = Target { os: "windows", env: "gnu" };
+const LINUX: Target<'_> = Target { os: "linux", env: "gnu" };
+
+fn policy_fixture() -> Value {
+    json!({
+        "seeds": {"1": {"volume": 10, "faces": 2, "outcome": "ok"}, "2": {"volume": 20}},
+        "platforms": {
+            "windows": {"seeds": {"1": {"volume": 11, "outcome": "failed"}}, "verification": "MSVC"},
+            "macos": {"seeds": {"1": {"volume": 12}}}
+        },
+        "notes": [{"platform": "windows", "reason": "same reason", "seeds": [1]}]
+    })
+}
+
+#[test]
+fn policy_selects_msvc_and_gnu_overrides_with_shared_fallback() {
+    let mut file = policy_fixture();
+    assert_eq!(expected(&file, 1, MSVC), (&file["platforms"]["windows"]["seeds"]["1"], "windows"));
+    assert_eq!(expected(&file, 1, GNU), (&file["seeds"]["1"], "shared"));
+    file["platforms"]["windows-gnu"]["seeds"]["1"] = json!({"volume": 13});
+    assert_eq!(expected(&file, 1, GNU), (&file["platforms"]["windows-gnu"]["seeds"]["1"], "windows-gnu"));
+    for target in [MSVC, GNU] {
+        assert_eq!(expected(&file, 2, target), (&file["seeds"]["2"], "shared"));
+    }
+    // A platform record is whole, including failure outcomes and missing fields.
+    assert!(expected(&file, 1, MSVC).0.get("faces").is_none());
+    assert_eq!(expected(&file, 1, MSVC).0["outcome"], "failed");
+    assert!(differs(expected(&file, 1, MSVC).0, &file["seeds"]["1"]).is_some());
+    assert!(expected(&file, 1, GNU).0.get("faces").is_none());
+    assert!(expected(&file, 99, GNU).0.is_null());
+}
+
+#[test]
+fn policy_preserves_non_windows_and_refuses_unknown_windows_recording() {
+    let mut file = policy_fixture();
+    let macos = Target { os: "macos", env: "" };
+    assert_eq!(expected(&file, 1, LINUX), (&file["seeds"]["1"], "shared"));
+    assert_eq!(expected(&file, 1, macos), (&file["platforms"]["macos"]["seeds"]["1"], "macos"));
+    assert_eq!(LINUX.recording_platform(&file), Ok(None));
+    assert_eq!(macos.recording_platform(&file), Ok(Some("macos")));
+    for env in ["", "other", "new-env"] {
+        let unknown = Target { os: "windows", env };
+        let before = file.clone();
+        assert_eq!(expected(&file, 1, unknown), (&file["seeds"]["1"], "shared"));
+        assert!(record(&mut file, 1, &json!({"volume": 30}), "why", unknown).is_err());
+        assert_eq!(file, before);
+    }
+    assert_eq!(expected(&file, 1, Target { os: "future-os", env: "gnu" }).1, "shared");
+}
+
+#[test]
+fn policy_records_only_changed_gnu_seeds_and_preserves_other_destinations_and_notes() {
+    let mut file = policy_fixture();
+    let before = file.clone();
+    let got = json!({"volume": 30, "outcome": "failed", "error": "known failure"});
+    assert_eq!(record(&mut file, 2, &got, "same reason", GNU), Ok(true));
+    assert_eq!(file["seeds"], before["seeds"]);
+    assert_eq!(file["platforms"]["windows"], before["platforms"]["windows"]);
+    assert_eq!(file["platforms"]["macos"], before["platforms"]["macos"]);
+    assert_eq!(file["notes"][0], before["notes"][0]);
+    assert_eq!(file["notes"][1], json!({"platform": "windows-gnu", "reason": "same reason", "seeds": [2]}));
+    assert_eq!(expected(&file, 2, GNU), (&got, "windows-gnu"));
+    assert!(file["platforms"]["windows-gnu"]["seeds"].get("1").is_none());
+    assert_eq!(record(&mut file, 1, &got, "same reason", GNU), Ok(true));
+    assert_eq!(file["notes"][1]["seeds"], json!([1, 2]));
+    let unchanged = file.clone();
+    assert_eq!(record(&mut file, 1, &got, "same reason", GNU), Ok(false));
+    assert_eq!(file, unchanged);
+    assert_eq!(record(&mut file, 1, &json!({"volume": 31}), "same reason", GNU), Ok(true));
+    assert_eq!(file["notes"][1]["seeds"], json!([1, 2]));
+    assert!(expected(&file, 1, GNU).0.get("error").is_none());
+    assert_eq!(serde_json::from_str::<Value>(&serialize(&file)).ok().as_ref(), Some(&file));
+}
+
+#[test]
+fn policy_isolates_msvc_recording_even_without_a_namespace() {
+    for target in [MSVC, GNU] {
+        let mut file = json!({"seeds": {"1": {"volume": 10}}, "notes": []});
+        let before = file.clone();
+        assert_eq!(record(&mut file, 1, &json!({"volume": 10}), "why", target), Ok(false));
+        assert_eq!(file, before); // No spurious namespace or note for a matching fallback.
+        assert_eq!(record(&mut file, 1, &json!({"volume": 11}), "why", target), Ok(true));
+        assert_eq!(file["seeds"], before["seeds"]);
+        assert_eq!(expected(&file, 1, target).0["volume"], 11);
+        assert_eq!(file["notes"][0]["platform"], json!(target.platform()));
+    }
+}
+
+#[test]
+fn policy_notes_never_coalesce_across_destinations_in_either_direction() {
+    let mut file = policy_fixture();
+    for target in [GNU, MSVC, LINUX, GNU, LINUX, MSVC] {
+        let previous_notes = file["notes"].as_array().cloned().unwrap_or_default();
+        let got = json!({"volume": 100 + previous_notes.len()});
+        assert_eq!(record(&mut file, 1, &got, "same reason", target), Ok(true));
+        let notes = file["notes"].as_array().cloned().unwrap_or_default();
+        assert_eq!(notes.len(), previous_notes.len() + 1);
+        assert_eq!(&notes[..previous_notes.len()], previous_notes);
+    }
+    let before = file["notes"].clone();
+    assert_eq!(record(&mut file, 2, &json!({"volume": 50}), "different reason", MSVC), Ok(true));
+    assert_eq!(file["notes"].as_array().map(Vec::len), before.as_array().map(|n| n.len() + 1));
+    let before = file.clone();
+    assert!(record(&mut file, 1, &json!({"volume": 99}), "  ", GNU).is_err());
+    assert_eq!(file, before);
+}
+
+#[test]
+fn policy_comparator_stays_strict_and_diagnostics_name_the_selected_reference() {
+    let want = json!({"volume": 100.0, "area": 10.0, "faces": 2, "outcome": "ok", "steps": ["box"], "error": null, "rejected": 0, "unsupported": 0});
+    let mut got = want.clone();
+    got["volume"] = json!(100.00005);
+    got["area"] = json!(10.000005);
+    assert_eq!(differs(&want, &got), None);
+    for (field, value) in [
+        ("volume", json!(100.001)),
+        ("area", json!(10.001)),
+        ("faces", json!(3)),
+        ("outcome", json!("failed")),
+        ("steps", json!(["hole"])),
+        ("error", json!("refused")),
+        ("rejected", json!(1)),
+        ("unsupported", json!(1)),
+    ] {
+        let mut got = want.clone();
+        got[field] = value;
+        assert!(differs(&want, &got).is_some(), "{field}");
+    }
+    let file = policy_fixture();
+    let diagnostic = difference(&file, 1, &json!({"volume": 100}), GNU).unwrap_or_default();
+    assert!(diagnostic.contains("target_os=windows, target_env=gnu, reference=shared"), "{diagnostic}");
+    let diagnostic = difference(&file, 1, &json!({"volume": 100}), MSVC).unwrap_or_default();
+    assert!(diagnostic.contains("target_env=msvc, reference=windows"), "{diagnostic}");
+}
+
+#[test]
+fn policy_non_windows_recording_keeps_existing_os_destination_and_shared_notes() {
+    let mut file = policy_fixture();
+    let before = file.clone();
+    let got = json!({"volume": 40});
+    let macos = Target { os: "macos", env: "" };
+    assert_eq!(record(&mut file, 1, &got, "same reason", macos), Ok(true));
+    assert_eq!(file["seeds"], before["seeds"]);
+    assert_eq!(file["platforms"]["windows"], before["platforms"]["windows"]);
+    assert_eq!(expected(&file, 1, macos), (&got, "macos"));
+    let platforms = file["platforms"].clone();
+    assert_eq!(record(&mut file, 1, &got, "same reason", LINUX), Ok(true));
+    assert_eq!(file["platforms"], platforms);
+    assert_eq!(file["notes"][2], json!({"reason": "same reason", "seeds": [1]}));
+    assert_eq!(record(&mut file, 2, &got, "same reason", LINUX), Ok(true));
+    assert_eq!(file["notes"][2]["seeds"], json!([1, 2]));
 }
 
 /// One test per seed, and the list of them.

@@ -48,12 +48,37 @@ kernel, engine, doc, sketch and geom crates) run every seed but the slowest few 
 and the nightly run them all. Each seed is its own test
 (`seed_00` … `seed_95`), so the CI shards and their cores share them out.
 
-Explicit `platforms.<os>.seeds` records override only the listed seeds on that
-operating system; all other seeds keep the shared records and strict tolerances.
+Reference selection uses the compilation target's `target_os` and Windows
+`target_env`, not the build host. Existing `platforms.windows.seeds` records are
+MSVC references; Windows GNU selects `platforms.windows-gnu.seeds`. Only listed
+seeds are overridden, each as a whole record. A missing seed in the selected group
+uses the shared `seeds` record; no other group's record is tried. Non-Windows
+builds retain `platforms.<os>.seeds` selection and shared fallback. An unrecognized
+Windows environment checks shared records and refuses blessing until an explicit
+recording policy is defined. Tolerances and seed coverage are unchanged.
+
 The first four Windows records were independently reproduced on unmodified main
 `1e984c8e`; seed 94 was independently reproduced on unmodified main `c5992386`
 after the extrusion rebase. Both match the extrusion branch. Recording on a platform
 with such entries updates its changed seeds and preserves shared references.
+
+Windows blessing always writes changed seeds to its own group, creating that group
+if absent, even when comparison used shared fallback. It cannot overwrite shared
+or another Windows environment's records. Other operating systems continue to record
+to their existing OS group, or shared records when no OS group exists. Notes coalesce
+only when both the reason and recording destination match, keeping MSVC, GNU and
+shared changes separate; the `platform` note field names that destination.
+
+The Windows records were independently verified with MSVC (see the
+[MSVC report on PR #3361](https://github.com/tangency-labs/solidcraft/pull/3361#issuecomment-6311616529)).
+On Rust 1.99.1, `x86_64-pc-windows-gnu`, all 96 seeds were checked against the
+shared records on main `8c861f9f` with the target selector in the full engine suite:
+every field matches under the existing strict comparator, without blessing or
+changing reference records.
+GNU observations do not invalidate the MSVC records or guarantee identical results on
+other architectures or compiler versions. A matching snapshot with an expected
+failed outcome does not establish geometric validity or resolve known failures
+such as #3583.
 
 To record an intended change, give the reason:
 
