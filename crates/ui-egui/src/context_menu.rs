@@ -1494,9 +1494,33 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) {
 // Opening and showing
 // ---------------------------------------------------------------------------------------------
 
+/// The body a viewport pick belongs to: a face, edge or vertex carries its body's name. The
+/// origin point is a vertex of no body, so an empty name is not a body.
+fn pick_body(sel: &Sel) -> Option<&str> {
+    match sel {
+        Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } if !body.is_empty() => Some(body),
+        _ => None,
+    }
+}
+
+/// Is the pick already part of the selection? Beside the item itself, a face, edge or vertex of a
+/// selected body counts, whether the body is selected on its own or through an occurrence: the
+/// menu is then about the bodies, and the right-click leaves the selection alone (#5849).
+fn in_selection(app: &SolveApp, sel: &Sel) -> bool {
+    if app.session.selection.iter().any(|x| crate::selection::same_item(x, sel)) {
+        return true;
+    }
+    let Some(body) = pick_body(sel) else { return false };
+    app.session.selection.iter().any(|x| match x {
+        Sel::Body { name } => name == body,
+        Sel::Occurrence { path } => app.session.occurrence_bodies(path, true).is_ok_and(|b| b.iter().any(|n| n == body)),
+        _ => false,
+    })
+}
+
 /// Open the viewport menu at a screen position. A right-click on something not selected
 /// selects it first, so the menu is about what is under the cursor; a face or edge already in a
-/// multi-selection keeps the whole selection (#3733).
+/// multi-selection keeps the whole selection (#3733), as does one of a selected body (#5849).
 pub fn open(app: &mut SolveApp, at: Pos2) {
     app.menu.over_geometry = app.viewport.hover.is_some();
     // A right-click leaves a plane unselected, but the menu offers a sketch on it.
@@ -1505,11 +1529,10 @@ pub fn open(app: &mut SolveApp, at: Pos2) {
         _ => None,
     });
     crate::select_other::close(app);
-    let selected = |app: &SolveApp, sel: &Sel| app.session.selection.iter().any(|x| crate::selection::same_item(x, sel));
     if app.session.active_sketch.is_none()
         && let Some(h) = app.viewport.hover.clone()
         && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
-        && !selected(app, &sel)
+        && !in_selection(app, &sel)
         && !matches!(sel, Sel::Plane { .. } | Sel::Axis { .. })
     {
         let _ = app.run("select.set", json!({ "items": [sel] }));
@@ -1517,7 +1540,7 @@ pub fn open(app: &mut SolveApp, at: Pos2) {
         && let Some(h) = app.viewport.hover.clone()
         && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
         && (matches!(sel, Sel::SketchCurve { .. } | Sel::SketchPoint { .. }) || crate::sketch_text::entity_for_selection(app, &sel).is_some())
-        && !selected(app, &sel)
+        && !in_selection(app, &sel)
     {
         let _ = app.run("select.set", json!({ "items": [sel] }));
     }
