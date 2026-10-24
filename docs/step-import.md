@@ -68,4 +68,11 @@ IGES 5.3 files (`.igs`/`.iges`) open, insert and drop the same way: `crates/kern
 
 FreeCAD `.FCStd` and Rhino `.3dm` files open, insert and drop the same way, in the desktop app, the browser app and the CLI. They are read with [cadmpeg](https://github.com/cadmpeg/cadmpeg) (Apache-2.0, `crates/io/src/native_cad.rs`): cadmpeg detects the format from the bytes, decodes it into its neutral model under resource caps, checks that model and writes it as STEP AP214, which the STEP reader then reads. The feature holds that STEP text, so the design reopens without the original file. The file's solids come in; its feature history, sketches and parameters do not. Losses cadmpeg reports become warnings on the feature, and a file without an importable solid is refused with a message. cadmpeg runs inside the panic guard. How much of a file is read follows cadmpeg's support for that format ([format support](https://github.com/cadmpeg/cadmpeg/blob/main/docs/format-support.md)).
 
+FreeCAD sketches have a separate editable import path. **File > Import FreeCAD Sketches…** reads the
+project's Part, Body and Sketch hierarchy and lets the user select individual sketches. Supported sketch
+geometry, dimensions and constraints are converted on a best-effort basis, with skipped items reported as
+warnings. Attachment and support references are intentionally not carried across: imported sketches use
+their local 2D coordinates on the design's XY origin plane and can be reassigned afterward. The import is
+one command and one undo step.
+
 Only codecs for open formats are compiled in: the workspace turns off cadmpeg's default features and enables `fcstd`, `rhino` and `step` (the writer). cadmpeg's codecs for commercial CAD formats are not built, and neither is its `sat` codec, which decodes ShapeManager streams with ACIS as one dialect, so ACIS `.sat`/`.sab` files are not read yet. `crates/io/src/native_cad.rs` is the one place cadmpeg is called; a cadmpeg-based STEP reader could be added there later behind a setting, to compare with the STEP reader above without changing it.

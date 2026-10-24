@@ -22,6 +22,10 @@ mod legacy_dir;
 mod mutate;
 mod native_cad;
 pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_to_step};
+mod freecad_sketch;
+pub use freecad_sketch::{
+    FreeCadNode, FreeCadNodeKind, FreeCadProject, FreeCadSketch, FreeCadSketchInfo, MAX_FREECAD_DOCUMENT_XML, read_freecad_sketches,
+};
 pub mod safe_write;
 mod sketch2d;
 mod svg;

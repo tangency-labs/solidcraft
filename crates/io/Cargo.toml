@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 solidcraft-geom = { workspace = true }
+solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
 thiserror = { workspace = true }

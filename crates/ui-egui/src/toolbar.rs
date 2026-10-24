@@ -516,6 +516,8 @@ pub enum FileAction {
     ExportMesh(&'static str),
     /// Start an existing interactive command.
     Command(&'static str),
+    /// Pick a FreeCAD project, inspect it, then choose editable sketches to import.
+    ImportFreeCadSketches,
     /// Open an entry from the recent-design list.
     OpenRecent(String),
     /// Clear recent designs and their last-opened dates.
@@ -533,8 +535,10 @@ pub enum FileAction {
 impl FileAction {
     /// Whether this action is available in the current document and picker state.
     pub fn enabled(&self, app: &SolveApp) -> bool {
-        let needs_design = matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_))
-            || matches!(self, Self::Export(extension) if *extension != "json");
+        let needs_design = matches!(
+            self,
+            Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_) | Self::ImportFreeCadSketches
+        ) || matches!(self, Self::Export(extension) if *extension != "json");
         let available = match self {
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
@@ -565,6 +569,7 @@ impl FileAction {
             Self::Export(extension) => export(app, extension),
             Self::ExportMesh(format) => crate::dialogs_save_mesh::start_with_format(app, format),
             Self::Command(command) => app.start(command),
+            Self::ImportFreeCadSketches => crate::freecad_import::start(app),
             Self::OpenRecent(path) => crate::home::open_recent(app, path),
             Self::ClearRecent => {
                 app.home.recent.clear();
@@ -638,6 +643,10 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 if item_if(ui, "Insert Mesh…", "", "import", shown) {
                     FileAction::Command("file.insert_mesh").run(app);
+                    close = true;
+                }
+                if item_if(ui, "Import FreeCAD Sketches…", "", "import", shown) {
+                    FileAction::ImportFreeCadSketches.run(app);
                     close = true;
                 }
                 if item_if(ui, &format!("{}…", app.tr_label("Insert Design")), "", "component", shown) {

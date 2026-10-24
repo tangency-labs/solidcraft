@@ -2,6 +2,7 @@
 //! component named after the file (#1426), with the `up` and `names` options (#1312).
 
 use serde_json::{Value, json};
+use std::io::{Cursor, Write};
 
 use super::run;
 use crate::*;
@@ -91,4 +92,67 @@ fn a_broken_freecad_or_rhino_file_is_refused_cleanly() {
         assert_eq!(s.doc, before, "{name}: the design is unchanged");
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+fn sketch_archive() -> Vec<u8> {
+    let xml = r#"<Document SchemaVersion="4">
+      <Properties><Property name="Label"><String value="Sketch Project"/></Property></Properties>
+      <Objects Count="4">
+        <Object type="App::Part" name="Part"/><Object type="PartDesign::Body" name="Body"/>
+        <Object type="Sketcher::SketchObject" name="Profile"/><Object type="Sketcher::SketchObject" name="Loose"/>
+      </Objects>
+      <ObjectData Count="4">
+        <Object name="Part"><Properties><Property name="Group"><LinkList><Link value="Body"/></LinkList></Property><Property name="Label"><String value="Bracket"/></Property></Properties></Object>
+        <Object name="Body"><Properties><Property name="Group"><LinkList><Link value="Profile"/></LinkList></Property><Property name="Label"><String value="Plate"/></Property></Properties></Object>
+        <Object name="Profile"><Properties>
+          <Property name="Constraints"><ConstraintList>
+            <Constrain Type="1" Value="0" First="0" FirstPos="2" Second="1" SecondPos="1" Third="-2000" IsDriving="1" IsActive="1" IsInVirtualSpace="0"/>
+            <Constrain Type="2" Value="0" First="0" FirstPos="0" Second="-2000" SecondPos="0" Third="-2000" IsDriving="1" IsActive="1" IsInVirtualSpace="0"/>
+            <Constrain Type="6" Value="20" First="0" FirstPos="0" Second="-2000" SecondPos="0" Third="-2000" IsDriving="1" IsActive="1" IsInVirtualSpace="0"/>
+          </ConstraintList></Property>
+          <Property name="Geometry"><GeometryList>
+            <Geometry type="Part::GeomLineSegment"><LineSegment StartX="0" StartY="0" EndX="20" EndY="0"/><Construction value="0"/></Geometry>
+            <Geometry type="Part::GeomLineSegment"><LineSegment StartX="20" StartY="0" EndX="20" EndY="10"/><Construction value="0"/></Geometry>
+          </GeometryList></Property>
+          <Property name="Label"><String value="Mounting Profile"/></Property>
+        </Properties></Object>
+        <Object name="Loose"><Properties>
+          <Property name="Geometry"><GeometryList><Geometry type="Part::GeomCircle"><Circle CenterX="5" CenterY="5" Radius="2"/><Construction value="0"/></Geometry></GeometryList></Property>
+          <Property name="Label"><String value="Loose Sketch"/></Property>
+        </Properties></Object>
+      </ObjectData>
+    </Document>"#;
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    zip.start_file("Document.xml", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(xml.as_bytes()).unwrap();
+    zip.finish().unwrap().into_inner()
+}
+
+#[test]
+fn freecad_sketches_can_be_inspected_and_selectively_imported_in_one_undo_step() {
+    let bytes = sketch_archive();
+    let (dir, path) = file("sketches", "source.FCStd", &bytes);
+    let mut s = Session::default();
+    let inspected = run(&mut s, "file.inspect_freecad_sketches", json!({"path": path}));
+    assert_eq!((inspected["project"].clone(), inspected["sketches"].clone()), (json!("Sketch Project"), json!(2)));
+    assert_eq!(inspected["nodes"][0]["label"], "Bracket");
+    assert_eq!(inspected["nodes"][0]["children"][0]["label"], "Plate");
+    assert_eq!(inspected["nodes"][0]["children"][0]["children"][0]["source_name"], "Profile");
+    assert!(s.doc.features.is_empty() && s.undo.is_empty(), "inspection does not change the design");
+
+    let imported = run(&mut s, "file.import_freecad_sketches", json!({"path": path, "sketches": ["Profile"]}));
+    assert_eq!(imported["imported"].as_array().unwrap().len(), 1);
+    assert_eq!(imported["imported"][0]["path"], json!(["Bracket", "Plate", "Mounting Profile"]));
+    assert_eq!(s.doc.features.len(), 1);
+    let feature = &s.doc.features[0];
+    assert_eq!(feature.name, "Mounting Profile");
+    let solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Origin { name }, sketch } = &feature.kind else {
+        panic!("import did not make a sketch")
+    };
+    assert_eq!(name, "XY");
+    assert_eq!((sketch.curves.len(), sketch.constraints.len()), (2, 3));
+    assert_eq!(s.undo.len(), 1, "all selected sketches are one command and one undo step");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.features.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
 }
