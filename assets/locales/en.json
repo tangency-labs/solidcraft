@@ -1564,6 +1564,8 @@
   "prefs.saving": "Autosave and recovery",
   "prefs.scale_note": "Also Ctrl + / Ctrl − in the window. Buttons are 28 px at 100%.",
   "prefs.scale_text": "Scale and text",
+  "prefs.search": "Search settings",
+  "prefs.search_empty": "No matching settings",
   "prefs.select": "Select",
   "prefs.select_one_item": "Select one item",
   "prefs.selecting": "Selecting",

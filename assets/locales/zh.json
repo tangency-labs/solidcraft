@@ -1564,6 +1564,8 @@
   "prefs.saving": "自动保存和恢复",
   "prefs.scale_note": "也可在窗口中使用 Ctrl + / Ctrl −。100% 时按钮高度为 28 像素。",
   "prefs.scale_text": "缩放与文字",
+  "prefs.search": "搜索设置",
+  "prefs.search_empty": "没有匹配的设置",
   "prefs.select": "选择",
   "prefs.select_one_item": "选择一个项目",
   "prefs.selecting": "选择",

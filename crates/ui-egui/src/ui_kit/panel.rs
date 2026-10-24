@@ -841,17 +841,42 @@ impl<'a> Window<'a> {
 
     /// Declarative page navigation: the kit owns geometry, selection and page scrolling.
     pub(crate) fn show_pages<S>(
-        mut self,
+        self,
         ctx: &egui::Context,
         selected: &mut usize,
         pages: &[WindowPage<S>],
         state: &mut S,
         left: impl FnOnce(&mut Ui),
     ) -> (bool, super::Action) {
+        self.show_pages_inner(ctx, selected, pages, state, None, left)
+    }
+
+    /// [`Self::show_pages`] with a strip above the page body (Preferences search).
+    pub(crate) fn show_pages_with_header<S>(
+        self,
+        ctx: &egui::Context,
+        selected: &mut usize,
+        pages: &[WindowPage<S>],
+        state: &mut S,
+        header: fn(&mut Ui, &mut S),
+        left: impl FnOnce(&mut Ui),
+    ) -> (bool, super::Action) {
+        self.show_pages_inner(ctx, selected, pages, state, Some(header), left)
+    }
+
+    fn show_pages_inner<S>(
+        mut self,
+        ctx: &egui::Context,
+        selected: &mut usize,
+        pages: &[WindowPage<S>],
+        state: &mut S,
+        header: Option<fn(&mut Ui, &mut S)>,
+        left: impl FnOnce(&mut Ui),
+    ) -> (bool, super::Action) {
         self.body_padding = false;
         let rows = self.page_rows;
         let padding = self.page_padding;
-        self.show_with_left(ctx, true, |ui| page_list_sized(ui, selected, pages, state, rows, padding), left)
+        self.show_with_left(ctx, true, |ui| page_list_sized(ui, selected, pages, state, rows, padding, header), left)
     }
 
     /// The same bounded card frame, either movable or an input-blocking modal.
@@ -914,10 +939,18 @@ pub(crate) struct WindowPage<S> {
 
 #[cfg(test)]
 pub(super) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<S>], state: &mut S) {
-    page_list_sized(ui, selected, pages, state, 16.0, vec2(Tokens::get().space_16, Tokens::get().space_16));
+    page_list_sized(ui, selected, pages, state, 16.0, vec2(Tokens::get().space_16, Tokens::get().space_16), None);
 }
 
-fn page_list_sized<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<S>], state: &mut S, rows: f32, padding: egui::Vec2) {
+fn page_list_sized<S>(
+    ui: &mut Ui,
+    selected: &mut usize,
+    pages: &[WindowPage<S>],
+    state: &mut S,
+    rows: f32,
+    padding: egui::Vec2,
+    header: Option<fn(&mut Ui, &mut S)>,
+) {
     let t = Tokens::get();
     let height = (dimension(ui.ctx().content_rect().height()) - t.form_header_height - t.form_footer_height - t.space_24 * 3.0)
         .clamp(0.0, t.control_height * rows);
@@ -981,8 +1014,12 @@ fn page_list_sized<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<S>]
             let clip = egui::Rect::from_min_max(content.min, egui::pos2(body.right(), content.bottom()));
             ui.set_clip_rect(ui.clip_rect().intersect(clip));
             ui.spacing_mut().item_spacing.y = t.form_gap_y;
+            if let Some(header) = header {
+                header(ui, state);
+            }
+            let force_scroll = header.is_some() && crate::prefs_search::force_scroll(ui.ctx());
             if let Some(page) = pages.get(*selected) {
-                if page.scroll {
+                if page.scroll || force_scroll {
                     let scroll = super::settings_scroll(ui, ("sc_prefs_page", *selected), |ui| (page.draw)(ui, state));
                     scenario::publish_rect("dialog:page_body", scroll.inner_rect);
                 } else {

@@ -1564,6 +1564,8 @@
   "prefs.saving": "自動保存と復元",
   "prefs.scale_note": "ウィンドウ内では Ctrl + / Ctrl − でも変更できます。100% のボタンは 28 px です。",
   "prefs.scale_text": "拡大率と文字",
+  "prefs.search": "設定を検索",
+  "prefs.search_empty": "一致する設定がありません",
   "prefs.select": "選択",
   "prefs.select_one_item": "項目を 1 つ選択",
   "prefs.selecting": "選択",

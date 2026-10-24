@@ -37,6 +37,9 @@ pub(crate) fn settings_scroll<R>(ui: &mut Ui, id: impl egui::AsIdSalt, add: impl
 }
 
 pub(crate) fn settings_heading(ui: &mut Ui, title: &str, description: &str) {
+    if crate::prefs_search::querying(ui) {
+        return;
+    }
     let t = Tokens::get();
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = t.space_3;
@@ -49,6 +52,10 @@ pub(crate) fn settings_heading(ui: &mut Ui, title: &str, description: &str) {
 
 /// Settings reuse the same disclosure, uppercase typography and rule as the design system.
 pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+    if crate::prefs_search::querying(ui) {
+        crate::prefs_search::begin_section(ui, title);
+        return Some(add(ui));
+    }
     let t = Tokens::get();
     ui.add_space(t.space_8);
     super::section(ui, key, title, true, |ui| {
@@ -252,6 +259,15 @@ pub(crate) enum PreferenceFigure {
 /// Reusable illustrated radio card. Width comes from the figure, and wrapping is owned by
 /// the parent; labels remain accessible even when translations need an ellipsis.
 pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected: bool, enabled: bool, figure: PreferenceFigure) -> Response {
+    if crate::prefs_search::querying(ui) {
+        let show = match note {
+            Some(note) => crate::prefs_search::visible(ui, &[label, note]),
+            None => crate::prefs_search::visible(ui, &[label]),
+        };
+        if !show {
+            return crate::prefs_search::hidden_response(ui);
+        }
+    }
     let t = Tokens::get();
     let theme = matches!(figure, PreferenceFigure::Theme { .. });
     let width = match figure {

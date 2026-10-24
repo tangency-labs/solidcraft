@@ -436,9 +436,11 @@ pub fn reset(app: &mut SolveApp, id: Option<&str>) {
 /// reset; a key another command uses is reported and taken over only on request.
 pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
+    let filtering = crate::prefs_search::querying(ui);
     // Keep a pending chord until it has settled and all keys are released. Modifier-only
     // input never starts the timer, so modifiers can be assembled at the user's own pace.
-    if let Some(id) = app.keymap.capturing.clone() {
+    // A Preferences search is using the keyboard; don't swallow those keys to finish a capture.
+    if !filtering && let Some(id) = app.keymap.capturing.clone() {
         match ctx.input(|i| app.keymap.recorder.update(i)) {
             Recording::Waiting => {
                 if app.keymap.recorder.key.is_some() {
@@ -479,70 +481,83 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let mut action: Option<(String, &str)> = None;
     ui_kit::scope(ui, |ui| {
-        let actions = [
-            ui_kit::SearchAction { label: app.tr_label("Reset All"), icon: None, visible: !app.keymap.read_only, tooltip: None },
-            ui_kit::SearchAction { label: app.tr_label("Import…"), icon: Some("import_tray"), visible: !app.keymap.read_only, tooltip: None },
-            ui_kit::SearchAction {
-                label: app.tr_label("Export…"),
-                icon: Some("export_tray"),
-                visible: true,
-                tooltip: Some(app.tr_label("Keys, S box favourites and the toolbar, as a file")),
-            },
-        ];
-        let (filter, toolbar_action) = ui_kit::search_actions_row(
-            ui,
-            egui::Id::new("sc_keymap_filter"),
-            &mut app.keymap.filter,
-            crate::i18n::tr_label("Filter commands or keys"),
-            &actions,
-        );
-        crate::scenario::publish_target("keymap:filter", filter.rect);
-        crate::scenario::publish_handle("shortcut:filter", filter.rect.center());
-        if filter.clicked() {
-            action = Some((String::new(), "cancel"));
-        }
-        if let Some(index) = toolbar_action {
-            action = Some((
-                String::new(),
-                match index {
-                    0 => "reset_all",
-                    1 => "import",
-                    _ => "export",
+        if !filtering {
+            let actions = [
+                ui_kit::SearchAction { label: app.tr_label("Reset All"), icon: None, visible: !app.keymap.read_only, tooltip: None },
+                ui_kit::SearchAction { label: app.tr_label("Import…"), icon: Some("import_tray"), visible: !app.keymap.read_only, tooltip: None },
+                ui_kit::SearchAction {
+                    label: app.tr_label("Export…"),
+                    icon: Some("export_tray"),
+                    visible: true,
+                    tooltip: Some(app.tr_label("Keys, S box favourites and the toolbar, as a file")),
                 },
-            ));
+            ];
+            let (filter, toolbar_action) = ui_kit::search_actions_row(
+                ui,
+                egui::Id::new("sc_keymap_filter"),
+                &mut app.keymap.filter,
+                crate::i18n::tr_label("Filter commands or keys"),
+                &actions,
+            );
+            crate::scenario::publish_target("keymap:filter", filter.rect);
+            crate::scenario::publish_handle("shortcut:filter", filter.rect.center());
+            if filter.clicked() {
+                action = Some((String::new(), "cancel"));
+            }
+            if let Some(index) = toolbar_action {
+                action = Some((
+                    String::new(),
+                    match index {
+                        0 => "reset_all",
+                        1 => "import",
+                        _ => "export",
+                    },
+                ));
+            }
+            if let Some(m) = &app.keymap.message {
+                ui_kit::text(ui, m, ui_kit::Text::Report("keymap_message", true));
+            }
+            if let Some((id, key, _)) = app.keymap.conflict.clone() {
+                ui.horizontal_wrapped(|ui| {
+                    let replace = ui_kit::button(ui, crate::i18n::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
+                    crate::scenario::publish_target("keymap:replace", replace.rect);
+                    if replace.clicked() {
+                        action = Some((format!("{id}\n{key}"), "replace"));
+                    }
+                    if ui_kit::button(ui, app.tr_label("Cancel"), ui_kit::Button::Normal).clicked() {
+                        action = Some((String::new(), "cancel"));
+                    }
+                });
+            }
+            ui_kit::text(ui, app.tr_label("Select Other: hold the left button still on the model (or right-click › Select Other…) to list everything under the cursor; click again on the same spot to select the next thing there. Double-click the middle button to go Home (Preferences › Navigation)."), ui_kit::Text::Note("navigation"));
         }
-        if let Some(m) = &app.keymap.message {
-            ui_kit::text(ui, m, ui_kit::Text::Report("keymap_message", true));
-        }
-        if let Some((id, key, _)) = app.keymap.conflict.clone() {
-            ui.horizontal_wrapped(|ui| {
-                let replace = ui_kit::button(ui, crate::i18n::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
-                crate::scenario::publish_target("keymap:replace", replace.rect);
-                if replace.clicked() {
-                    action = Some((format!("{id}\n{key}"), "replace"));
-                }
-                if ui_kit::button(ui, app.tr_label("Cancel"), ui_kit::Button::Normal).clicked() {
-                    action = Some((String::new(), "cancel"));
-                }
-            });
-        }
-        ui_kit::text(ui, app.tr_label("Select Other: hold the left button still on the model (or right-click › Select Other…) to list everything under the cursor; click again on the same spot to select the next thing there. Double-click the middle button to go Home (Preferences › Navigation)."), ui_kit::Text::Note("navigation"));
-        if !app.keymap.read_only {
+        if !filtering && !app.keymap.read_only {
             ui_kit::text(ui, app.tr("ui.shortcut_capture_hint"), ui_kit::Text::Note("shortcut_capture_help"));
             if app.keymap.capturing.is_some() {
                 let hint = ctx.input(|input| app.keymap.recorder.hint(input));
                 ui_kit::text(ui, app.tr(hint), ui_kit::Text::Hint("shortcut_capture_state"));
             }
         }
-        let q = app.keymap.filter.to_lowercase();
+        let q = if filtering { app.prefs_window.filter.trim().to_lowercase() } else { app.keymap.filter.to_lowercase() };
         let commands: Vec<_> = command_specs()
             .into_iter()
             .filter_map(|c| {
                 let key = effective_for_spec(app, c).unwrap_or_default();
                 let label = app.tr_label(c.label);
-                (q.is_empty() || [c.label, c.id, key, label].iter().any(|s| s.to_lowercase().contains(&q))).then_some((c, key, label))
+                let hit = if filtering {
+                    crate::prefs_search::matches_text(&q, &[c.label, c.id, key, label])
+                } else {
+                    q.is_empty() || [c.label, c.id, key, label].iter().any(|s| s.to_lowercase().contains(&q))
+                };
+                hit.then_some((c, key, label))
             })
             .collect();
+        if filtering && commands.is_empty() {
+            return;
+        }
+        if filtering {
+            crate::prefs_search::reveal(ui);
+        }
         let t = crate::theme::Tokens::get();
         let key_width = commands
             .iter()
@@ -555,7 +570,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
         } else {
             ui_kit::ContentWidth::button(ui, app.tr_label("Clear")) + ui_kit::ContentWidth::button(ui, app.tr_label("Reset")) + t.space_4
         };
-        ui_kit::settings_scroll(ui, "sc_keymap_scroll", |ui| {
+        let paint = |ui: &mut egui::Ui| {
             let columns = [
                 ui_kit::Column::new("Command", 1.5).flex().min_content_width(t.form_label_width),
                 ui_kit::Column::new(crate::i18n::tr("keymap.command_id"), 1.8).flex().min_content_width(t.form_label_width),
@@ -619,7 +634,12 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                 }
             });
-        });
+        };
+        if filtering {
+            paint(ui);
+        } else {
+            ui_kit::settings_scroll(ui, "sc_keymap_scroll", paint);
+        }
     });
     crate::scenario::publish_count("shortcut_recording", f64::from(app.keymap.capturing.is_some()));
     if action.is_some() {

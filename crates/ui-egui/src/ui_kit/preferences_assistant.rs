@@ -13,16 +13,35 @@ pub(crate) struct SettingsChoice<'a> {
 
 /// Equal option cards keep the choices comparable without repeating long explanations.
 pub(crate) fn settings_choices(ui: &mut Ui, choices: &[SettingsChoice<'_>], selected: &mut usize) -> bool {
+    if crate::prefs_search::querying(ui) && !crate::prefs_search::shows_all(ui) {
+        let keep: Vec<usize> = choices
+            .iter()
+            .enumerate()
+            .filter(|(_, choice)| crate::prefs_search::texts_hit(ui, &[choice.title, choice.summary]))
+            .map(|(index, _)| index)
+            .collect();
+        if keep.is_empty() {
+            return false;
+        }
+        crate::prefs_search::reveal(ui);
+        return choice_row(ui, choices, selected, &keep);
+    }
+    let keep: Vec<usize> = (0..choices.len()).collect();
+    choice_row(ui, choices, selected, &keep)
+}
+
+fn choice_row(ui: &mut Ui, choices: &[SettingsChoice<'_>], selected: &mut usize, keep: &[usize]) -> bool {
     let t = Tokens::get();
-    let count = choices.len().max(1);
+    let count = keep.len().max(1);
     let width = ((dimension(ui.available_width()) - t.space_8 * count.saturating_sub(1) as f32) / count as f32).max(0.0);
     let mut changed = false;
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = t.space_8;
-        for (index, choice) in choices.iter().enumerate() {
-            let response = choice_card(ui, width, choice, *selected == index);
+        for index in keep {
+            let Some(choice) = choices.get(*index) else { continue };
+            let response = choice_card(ui, width, choice, *selected == *index);
             if response.clicked() {
-                *selected = index;
+                *selected = *index;
                 changed = true;
             }
         }
