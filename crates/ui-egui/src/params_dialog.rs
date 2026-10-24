@@ -203,6 +203,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Panel::feature_frame(ctx, app.ui.layout, side),
     )
     .wide()
+    .body_rows(16.0)
     .reset_scroll(d.reset_scroll);
     let panel = if side == crate::frame::Side::Left {
         let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - crate::theme::Tokens::get().space_8).max(0.0));
@@ -1241,10 +1242,56 @@ mod tests {
             h.app.start("parameters.change");
             h.frames(6);
             for id in ["fav", "user", "Box1", "Box2"] {
+                if id.starts_with("Box") {
+                    // The bounded card no longer shows every group at once. Bring each
+                    // model table into view before checking its horizontal layout.
+                    h.app.params.as_mut().unwrap().filter = id.into();
+                    h.frames(6);
+                }
                 let viewport = crate::scenario::rect_of(&format!("dialog:table:{id}:viewport")).unwrap();
                 let content = crate::scenario::count_of(&format!("dialog:table:{id}:content_width")).unwrap();
                 assert!(content <= f64::from(viewport.width().ceil()), "{id} on {screen_width} screen: {content} outside {viewport:?}");
             }
+        }
+    }
+
+    /// #5078: a long list scrolls in a bounded card; moving the card does not stretch it
+    /// down to the bottom of the app. A short viewport still keeps the actions visible.
+    #[test]
+    fn a_long_parameter_list_keeps_its_height_when_moved() {
+        for layout in ["floating", "docked"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.set", json!({"layout": layout}));
+            h.call("ui.resize", json!({"width": 1600, "height": 1400}));
+            for i in 0..60 {
+                h.app.run("parameters.add", json!({"name": format!("p{i:02}"), "expression": "10 mm"})).unwrap();
+            }
+            h.step(&json!({"start": "parameters.change"})).unwrap();
+            h.frames(6);
+            let bounds = || crate::scenario::rect_of("dialog:header").unwrap().union(crate::scenario::rect_of("dialog:footer").unwrap());
+            let before = bounds();
+            let title = crate::scenario::handle_at("dialog:title").unwrap();
+            h.step(&json!({"drag": [{"handle": "dialog:title"}, [title.x - 90.0, title.y + 120.0]]})).unwrap();
+            h.frames(6);
+            let moved = bounds();
+            assert!((moved.top() - before.top() - 120.0).abs() < 2.0, "{layout}: the header moved: {before:?} -> {moved:?}");
+            assert!((moved.height() - before.height()).abs() < 2.0, "{layout}: moving must preserve height: {before:?} -> {moved:?}");
+            assert!(moved.bottom() < 1300.0, "{layout}: a long list must leave room below the card: {moved:?}");
+
+            let viewport = crate::scenario::rect_of("dialog:body:viewport").unwrap();
+            h.call("ui.scroll", json!({"x": viewport.center().x, "y": viewport.center().y, "delta": -100_000}));
+            h.frames(40);
+            let last = crate::scenario::handle_at("param:p59").unwrap();
+            assert!(crate::scenario::rect_of("dialog:body:viewport").unwrap().contains(last), "{layout}: the last parameter remains reachable");
+            assert!((bounds().height() - moved.height()).abs() < 2.0, "{layout}: scrolling must preserve height");
+
+            h.call("ui.resize", json!({"width": 1600, "height": 600}));
+            h.frames(6);
+            let small = bounds();
+            assert!(small.bottom() <= 600.0, "{layout}: the actions must remain on screen: {small:?}");
+            assert!(small.contains(crate::scenario::handle_at("dialog:ok").unwrap()));
+            assert!(crate::scenario::rect_of("dialog:body:viewport").unwrap().height() > 0.0);
         }
     }
 }

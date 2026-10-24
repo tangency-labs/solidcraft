@@ -29,6 +29,8 @@ preferences, manager cards, prompts, context menus and the sketch palette. Impor
   pinned actions, compute status and keyboard routing. `wide()` uses three card
   widths. `feature_frame` and `palette_frame` retain docked/floating surfaces.
   `FeatureOptions::apply_label` adds Apply; `Panel::actions` supplies custom labels.
+  `body_rows` caps a manager's scrolling body independently of its position; short
+  viewports still keep the header and actions visible.
 - `Window` composes the shared Panel frame with a 40 pt icon/title/close header,
   padded content and optional 48 pt footer. `show_with_left` pins a left action beside
   the right-aligned buttons. `show_pages` accepts declarative `WindowPage` entries
