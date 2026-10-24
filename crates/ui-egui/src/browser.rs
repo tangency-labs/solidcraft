@@ -1715,7 +1715,8 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
                 key: b.name.clone(),
                 row_key: format!("b:{}", b.name),
                 label: b.name.clone(),
-                icon: "body",
+                // An open shell is a surface body, not a solid.
+                icon: if b.is_surface() { "surface" } else { "body" },
                 visible: !app.session.visibility.hidden_bodies.contains(&b.name),
                 selected: sel.iter().any(|x| matches!(x, Sel::Body { name } if *name == b.name)),
                 color: None,

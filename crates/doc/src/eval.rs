@@ -65,6 +65,9 @@ pub struct ModelBody {
     /// [`Body::outline_bounds`] of `body` (with the body it was measured on), worked out once
     /// and shared by clones.
     outline: Arc<OnceLock<(Body, solidcraft_geom::Aabb3)>>,
+    /// [`Body::is_surface`] of `body` (with the body it was measured on), worked out once and
+    /// shared by clones.
+    surface: Arc<OnceLock<(Body, bool)>>,
 }
 
 impl ModelBody {
@@ -89,6 +92,16 @@ impl ModelBody {
             bytes: 0,
             source_key: 0,
             outline: Arc::new(OnceLock::new()),
+            surface: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// A surface body: some shell does not close ([`Body::is_surface`]), worked out once.
+    pub fn is_surface(&self) -> bool {
+        match self.surface.get_or_init(|| (self.body.clone(), self.body.is_surface())) {
+            (measured, s) if measured.same(&self.body) => *s,
+            // The body was replaced in this cell's holder since: look again.
+            _ => self.body.is_surface(),
         }
     }
 
