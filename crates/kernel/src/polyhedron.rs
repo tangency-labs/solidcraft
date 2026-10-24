@@ -836,8 +836,19 @@ fn solve3(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {
 }
 
 /// Move the planar faces at the given points along their outward normals by `distance`
-/// (negative: into the body). The body's other faces follow (its topology is kept).
+/// (negative: into the body). The body's other faces follow (its topology is kept); a round
+/// between a moved face and one that stays moves with them, keeping its radius.
 pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
+    offset_faces_with(b, at, distance, true)
+}
+
+/// [`offset_faces`] for a shell's walls: a round between a moved face and one that stays (an
+/// open face) is refused rather than moved off it.
+pub fn offset_walls(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
+    offset_faces_with(b, at, distance, false)
+}
+
+fn offset_faces_with(b: &Body, at: &[Vec3], distance: f64, rounds: bool) -> Result<Body> {
     b.require_brep("offset faces")?;
     if !distance.is_finite() || distance.abs() > 1e6 {
         return Err(KernelError::Invalid("offset distance".into()));
@@ -863,7 +874,9 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         }
     }
     let chosen = crate::offset::with_same_surface(&healed, &chosen);
-    match offset_planar(&healed, |fi, _| if chosen.contains(&fi) { distance } else { 0.0 }) {
+    let shift = |fi: usize, _| if chosen.contains(&fi) { distance } else { 0.0 };
+    let moved = if rounds { crate::offset::offset_body_moving_rounds(&healed, shift) } else { offset_planar(&healed, shift) };
+    match moved {
         Ok(r) => Ok(record::after(r, &healed, &record::counts(&[b]))),
         // A piece of a split face (its neighbour stays): the piece swept along its normal
         // joins on (outward) or cuts in, with walls along the split lines.

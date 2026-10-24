@@ -6381,11 +6381,11 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     let opened =
                         |p: &Vec3| open.iter().any(|q| crate::appearance::face_index_at(&mb, *q) == crate::appearance::face_index_at(&mb, *p));
                     let walls: Vec<Vec3> = samples.iter().filter(|p| !opened(p)).copied().collect();
-                    let outer = Traced::step(kernel::offset_faces(&mb.body, &walls, out)?, &[&input]);
+                    let outer = Traced::step(kernel::offset_walls(&mb.body, &walls, out)?, &[&input]);
                     // The cavity's faces are the shell's inner walls, named after the faces they offset.
                     let inner = mb.before_as(crate::lineage::Operand::Inner(mb.name.clone()));
-                    let cavity = if inn > 0.0 { Traced::step(kernel::offset_faces(&mb.body, &walls, -inn)?, &[&inner]) } else { inner };
-                    let cavity = Traced::step(kernel::offset_faces(&cavity.body, &open, 2.0 * t + 1.0)?, &[&cavity]);
+                    let cavity = if inn > 0.0 { Traced::step(kernel::offset_walls(&mb.body, &walls, -inn)?, &[&inner]) } else { inner };
+                    let cavity = Traced::step(kernel::offset_walls(&cavity.body, &open, 2.0 * t + 1.0)?, &[&cavity]);
                     let cut = kernel::boolean(&outer.body, &cavity.body, BoolOp::Cut)?
                         .ok_or_else(|| DocError::Invalid("the shell removed everything".into()))?;
                     (cut, vec![outer, cavity])

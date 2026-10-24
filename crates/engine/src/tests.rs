@@ -2701,6 +2701,35 @@ fn press_pull_on_curved_faces() {
     assert!(rel(v1 - v0, PI * (25.0 - 16.0) * 20.0) < 1e-3, "{v0} {v1}");
 }
 
+/// #3468: offsetting a face next to a fillet moves the fillet with it (same radius), instead
+/// of refusing a corner whose faces no longer meet.
+#[test]
+fn offset_face_next_to_a_fillet_moves_the_fillet() {
+    // A boss with a 2 mm round at its base, grown by 1: the wall's ring, and the round's
+    // cross-section (4 − π) carried 1 mm further out (Pappus).
+    for d in [1.0, -1.0] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10}));
+        run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 10, "base": [30, 20, 10], "operation": "join"}));
+        run(&mut s, "solid.fillet", json!({"edges": [[40, 20, 10]], "radius": 2}));
+        let v0 = volume(&mut s);
+        run(&mut s, "solid.offset_face", json!({"faces": [[40, 20, 16]], "distance": d}));
+        let r = 10.0 + d;
+        let want = PI * (r * r - 100.0) * 10.0 + 2.0 * PI * (4.0 - PI) * d;
+        assert!(rel(volume(&mut s) - v0, want) < 1e-3, "d {d}: {} vs {want}", volume(&mut s) - v0);
+    }
+    // A box's wall beside a rounded vertical edge, and its top beside a rounded top edge: the
+    // round slides with the face, the face's neighbours grow by its move.
+    for (edge, face, grow) in [([40, 0, 10], [40, 15, 10], 2.0 * 30.0 * 20.0), ([20, 0, 20], [20, 15, 20], 2.0 * 40.0 * 30.0)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+        run(&mut s, "solid.fillet", json!({"edges": [edge], "radius": 3}));
+        let v0 = volume(&mut s);
+        run(&mut s, "solid.offset_face", json!({"faces": [face], "distance": 2}));
+        assert!(rel(volume(&mut s) - v0, grow) < 1e-6, "{edge:?}: {} vs {grow}", volume(&mut s) - v0);
+    }
+}
+
 /// A cut in one component leaves other components' bodies alone unless they are named as
 /// participants; auto join/cut looks at the active component only.
 #[test]
