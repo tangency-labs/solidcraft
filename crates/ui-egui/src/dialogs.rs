@@ -3341,8 +3341,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             let mut out = Vec::new();
             let (sketch, idx) = profiles();
-            if !sketch.is_null() {
-                out.push(("solid.extrude".to_string(), with(json!({"sketch": sketch, "profiles": idx}))));
+            let profile = (!sketch.is_null()).then(|| ("solid.extrude".to_string(), with(json!({"sketch": sketch, "profiles": idx}))));
+            // A new extrude runs its picked faces before its profiles: the profiles' extrude can
+            // cover a picked face, which is then gone when its own extrude looks for it (#3926).
+            // An edit rebuilds the profiles' extrude, so that one stays first.
+            let faces_first = d.editing.is_none();
+            if !faces_first {
+                out.extend(profile.clone());
             }
             // Coplanar faces of one body share one sketch and Boolean. Mixed selections
             // retain their original order and explicit face-body scope.
@@ -3372,12 +3377,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 && points.len() > 1
             {
                 out.push(("solid.extrude".to_string(), with(json!({"faces": points, "face_body": body}))));
+                if faces_first {
+                    out.extend(profile);
+                }
                 return Ok(out);
             }
             for pick in sels(d, 0) {
                 if let Sel::Face { body, point, .. } = pick {
                     out.push(("solid.extrude".to_string(), with(json!({"face": pt(*point), "face_body": body}))));
                 }
+            }
+            if faces_first {
+                out.extend(profile);
             }
             return Ok(out);
         }
@@ -5339,5 +5350,48 @@ mod awaiting_selection_tests {
         for failure in ["Offset distance must be positive", "the sketch has no curves", "Selection is not on this sketch", "", "sel"] {
             assert!(!awaiting_selection(failure), "{failure}");
         }
+    }
+}
+
+#[cfg(test)]
+mod extrude_mixed_pick_tests {
+    //! An extrude of a profile and a body face picked together (#3926).
+
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// A 20 x 20 x 10 box and a sketch rectangle at its top covering half of it. With the profile
+    /// and the top face under it picked, OK extrudes the face (the whole top) and the profile.
+    #[test]
+    fn a_face_under_a_picked_profile_is_still_extruded() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+        h.app.run("sketch.create", json!({"plane":{"origin":[0,0,10],"x_dir":[1,0,0],"y_dir":[0,1,0]}})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,20]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        // The new sketch's profile is taken at once.
+        h.step(&json!({"start":"solid.extrude"})).unwrap();
+        h.frames(2);
+        let st = h.app.session.world_state();
+        let box_body = &st.bodies[0];
+        let top = (0..64)
+            .find(|i| box_body.body.planar_face(*i).is_some_and(|p| p.normal().z > 0.99 && (p.origin.z - 10.0).abs() < 1e-9))
+            .expect("the box's top face");
+        let face = Sel::Face { body: box_body.name.clone(), index: top, point: Vec3::new(5.0, 10.0, 10.0) };
+        let Some(d) = h.app.dialog.as_mut() else { panic!("the extrude dialog") };
+        assert_eq!(d.inputs[0].items.len(), 1, "the profile is picked");
+        d.inputs[0].items.push(face);
+        if let Kind::Extrude { distance, operation, auto_op, .. } = &mut d.kind {
+            *distance = "10 mm".into();
+            *operation = 1;
+            *auto_op = false;
+        }
+        h.frames(2);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.dialog.is_none(), "OK: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        let st = h.app.session.world_state();
+        let volume: f64 = st.bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum();
+        assert!((volume - 8000.0).abs() < 1e-6, "the box grown to 20 mm: {volume}");
     }
 }
