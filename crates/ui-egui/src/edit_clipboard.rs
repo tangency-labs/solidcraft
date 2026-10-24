@@ -4,7 +4,8 @@
 //! In a sketch they copy the selected sketch geometry (`sketch.copy`) and paste it at the cursor
 //! (`sketch.paste` with `at`); Cut copies the sketch geometry and deletes it (`sketch.cut`), or offset from the original when the cursor is not over the
 //! viewport. Outside a sketch they copy the selected timeline features and paste them at the
-//! history marker (`timeline.copy` / `timeline.paste`).
+//! history marker (`timeline.copy` / `timeline.paste`). Cut remembers the selected features
+//! (`timeline.cut`), and Paste uses them until a copy replaces the cut.
 //!
 //! The window system turns Ctrl+C / Ctrl+V into clipboard events, not key presses, and only sends
 //! the paste event while the system clipboard holds text. So a copy also puts a short line of
@@ -45,7 +46,7 @@ pub fn can_paste(app: &SolveApp) -> bool {
     if app.session.active_sketch.is_some() {
         app.session.sketch_clipboard.is_some()
     } else {
-        app.linked_design_clipboard.is_some() || !app.session.clipboard.is_empty()
+        app.linked_design_clipboard.is_some() || !app.session.clipboard.is_empty() || !app.session.timeline_cut.is_empty()
     }
 }
 
@@ -94,11 +95,11 @@ pub fn copy(app: &mut SolveApp) -> bool {
     true
 }
 
-/// Cut the selected sketch geometry: copy it, then delete it (one undo step).
+/// Cut: in a sketch, the selected sketch geometry (copied, then deleted: one undo step); otherwise
+/// the selected timeline features (`timeline.cut`), which Paste then uses.
 pub fn cut(app: &mut SolveApp) -> bool {
     if app.session.active_sketch.is_none() {
-        app.set_status("Cut works on sketch geometry: edit a sketch and select some", true);
-        return false;
+        return cut_features(app);
     }
     let entities = sketch_selection(app);
     if entities.is_empty() {
@@ -110,6 +111,22 @@ pub fn cut(app: &mut SolveApp) -> bool {
     let n = out.get("curves").and_then(Value::as_u64).unwrap_or(0) + out.get("points").and_then(Value::as_u64).unwrap_or(0);
     app.set_status(format!("Cut {n} sketch entities"), false);
     leave_text(format!("SolidCraft sketch geometry: {n} entities"));
+    true
+}
+
+/// Cut the selected timeline features. The document does not change; the features wait for Paste.
+fn cut_features(app: &mut SolveApp) -> bool {
+    let features = crate::timeline::selected_feature_ids(app);
+    if features.is_empty() {
+        app.set_status("Select sketch geometry or timeline features to cut", true);
+        return false;
+    }
+    let Ok(out) = app.run("timeline.cut", json!({ "features": features })) else { return false };
+    app.linked_design_clipboard = None;
+    let names: Vec<&str> = out.get("cut").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    app.set_status(format!("Cut {}", names.join(", ")), false);
+    // Like a copy, the cut leaves text on the system clipboard, so the window system sends Paste.
+    leave_text(format!("SolidCraft features: {}", names.join(", ")));
     true
 }
 
@@ -155,6 +172,10 @@ pub fn paste(app: &mut SolveApp, at: Option<Pos2>) -> bool {
         }
         app.set_status("Pasted linked component: use Move/Copy to position it", false);
         return true;
+    }
+    if !app.session.timeline_cut.is_empty() {
+        // Paste moves the cut features into the active component. The copy clipboard is not touched.
+        return app.run("timeline.paste", json!({})).is_ok();
     }
     if app.session.clipboard.is_empty() {
         app.set_status("Nothing to paste: copy timeline features first", true);

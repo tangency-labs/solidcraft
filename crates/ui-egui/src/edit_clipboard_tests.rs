@@ -147,6 +147,30 @@ fn ctrl_c_ctrl_v_outside_a_sketch_copies_and_pastes_timeline_features() {
 }
 
 #[test]
+fn ctrl_x_outside_a_sketch_cuts_the_selected_features_and_ctrl_v_moves_them_into_the_active_component() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let (id, name) = (h.app.session.doc.features[0].id, h.app.session.doc.features[0].name.clone());
+    let part = h.app.run("component.create", json!({"name": "Part"})).unwrap();
+    let (component, occurrence) = (part["component"].as_u64().unwrap(), part["occurrence"].as_u64().unwrap());
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    h.frames(3);
+    // The feature and a component are selected: the cut takes the feature only.
+    h.app.run("select.set", json!({"items": [{"type": "feature", "id": id}, {"type": "occurrence", "path": [occurrence]}]})).unwrap();
+    h.frames(2);
+    let before = h.app.session.doc.to_json();
+    h.step(&json!({"key": "X", "cmd": true})).unwrap();
+    assert_eq!(h.app.status.as_ref().map(|s| (s.0.clone(), s.2)), Some((format!("Cut {name}"), false)));
+    assert_eq!(h.app.session.doc.to_json(), before, "the cut does not change the document");
+    h.app.run("component.activate", json!({"component": component})).unwrap();
+    h.step(&json!({"key": "V", "cmd": true})).unwrap();
+    let features = &h.app.session.doc.features;
+    assert_eq!(features.len(), 1, "{:?}", h.app.status);
+    assert_eq!((features[0].id, features[0].name.as_str(), features[0].component), (id, name.as_str(), component), "moved, not copied");
+    assert!(h.app.session.timeline_cut.is_empty());
+}
+
+#[test]
 fn ctrl_x_cuts_the_sketch_selection_and_ctrl_v_brings_it_back() {
     let (mut h, rect) = rectangle();
     let before = curves(&h);

@@ -13,13 +13,18 @@ use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("timeline.copy", "Copy Features", copy).icon("copy").noundo().params("features: [ids or names] (in timeline order on paste)"),
+    CommandSpec::new("timeline.cut", "Cut Features", cut)
+        .icon("cut")
+        .noundo()
+        .params("features: [ids or names] (in timeline order): remembered for Cut & Paste; the document is not changed"),
     CommandSpec::new("timeline.paste", "Paste Features", paste)
         .icon("paste")
-        .params("translate?: [x,y,z] (moves the copies' geometry); the copies go at the marker"),
+        .params("translate?: [x,y,z] (moves the copies' geometry); the copies go at the marker. After `timeline.cut` it moves the cut features into the active component instead (no `translate`): ids, names and timeline positions stay, one undo step"),
 ];
 
-fn copy(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "timeline.copy";
+/// The features `features` names, in timeline order: sketches come before the features that use them.
+/// Copy and cut share it, so they refuse the same lists with the same messages.
+fn chosen<'a>(s: &'a Session, p: &Value, cmd: &str) -> Result<Vec<&'a solidcraft_doc::Feature>> {
     let mut keys = string_list(p, "features");
     if let Some(Value::Array(a)) = p.get("features") {
         keys.extend(a.iter().filter_map(Value::as_u64).map(|n| n.to_string()));
@@ -31,11 +36,26 @@ fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     for k in &keys {
         ids.push(s.doc.find_feature(k).map(|f| f.id).ok_or_else(|| bad(cmd, format!("no feature `{k}`")))?);
     }
-    // Keep timeline order so sketches come before the features that use them.
-    let copied: Vec<solidcraft_doc::Feature> = s.doc.features.iter().filter(|f| ids.contains(&f.id)).cloned().collect();
+    Ok(s.doc.features.iter().filter(|f| ids.contains(&f.id)).collect())
+}
+
+fn copy(s: &mut Session, p: &Value) -> Result<Value> {
+    let copied: Vec<solidcraft_doc::Feature> = chosen(s, p, "timeline.copy")?.into_iter().cloned().collect();
     let names: Vec<String> = copied.iter().map(|f| f.name.clone()).collect();
     s.clipboard = copied;
+    // A copy replaces a cut: paste pastes this copy from now on.
+    s.timeline_cut.clear();
     Ok(json!({"copied": names}))
+}
+
+/// Remembers the features for Cut & Paste (`Session::timeline_cut`). Components are not cut, and the
+/// document does not change.
+fn cut(s: &mut Session, p: &Value) -> Result<Value> {
+    let picked = chosen(s, p, "timeline.cut")?;
+    let ids: Vec<u64> = picked.iter().map(|f| f.id).collect();
+    let names: Vec<String> = picked.iter().map(|f| f.name.clone()).collect();
+    s.timeline_cut = ids;
+    Ok(json!({"cut": names}))
 }
 
 /// Origin planes become explicit planes so a translation can move them.
@@ -51,8 +71,35 @@ fn explicit_planes(p: &mut PlaneRef) {
     }
 }
 
+/// What a copying paste carries from one feature to the next: the ids, names and bodies of the
+/// copies made so far, which later copies' references are remapped to.
+struct Copying {
+    cmd: &'static str,
+    comp: u64,
+    author_path: Vec<u64>,
+    translate: Option<solidcraft_geom::Vec3>,
+    sketches: BTreeMap<u64, u64>,
+    bodies: BTreeMap<String, String>,
+    names: BTreeMap<String, String>,
+    used: std::collections::BTreeSet<String>,
+    notices: Vec<String>,
+}
+
+/// The shared tail of a paste: evaluate the timeline and report the errors of the features
+/// `ids` (the copies, or the features that moved).
+fn evaluated_errors(s: &mut Session, ids: impl IntoIterator<Item = u64>) -> Vec<Value> {
+    s.refresh();
+    ids.into_iter().filter_map(|id| s.model.result(id).and_then(|r| r.error.clone()).map(|e| json!({"feature": id, "error": e}))).collect()
+}
+
 fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.paste";
+    if !s.timeline_cut.is_empty() {
+        if p.get("translate").is_some() {
+            return Err(bad(cmd, "`translate` cannot be used after a cut: the features stay where they are in the world"));
+        }
+        return move_cut(s);
+    }
     if s.clipboard.is_empty() {
         return Err(bad(cmd, "nothing copied (timeline.copy first)"));
     }
@@ -62,125 +109,257 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let feats = s.clipboard.clone();
     let comp = s.active_component;
-    let mut sketches: BTreeMap<u64, u64> = BTreeMap::new();
-    let mut bodies: BTreeMap<String, String> = BTreeMap::new();
-    let mut used: std::collections::BTreeSet<String> = s.model.state().bodies.iter().map(|body| body.name.clone()).collect();
-    let mut notices = Vec::new();
     let author_path = s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(comp));
     solidcraft_doc::EmbossFace::component_frame(&s.placed_document(), comp, &author_path)?;
-    let mut names: BTreeMap<String, String> = BTreeMap::new();
+    let mut copying = Copying {
+        cmd,
+        comp,
+        author_path,
+        translate,
+        sketches: BTreeMap::new(),
+        bodies: BTreeMap::new(),
+        names: BTreeMap::new(),
+        used: s.model.state().bodies.iter().map(|body| body.name.clone()).collect(),
+        notices: Vec::new(),
+    };
     let mut made = Vec::new();
     for f in feats {
-        let mut kind = f.kind.clone();
-        kind.remap_refs(&sketches, &names);
-        // A body made by an earlier copy is the one this copy acts on (#613).
-        kind.remap_bodies(&bodies);
-        if let FeatureKind::Sketch { plane, .. } = &mut kind
-            && let Some(anchor) = super::sketch::face::anchor_mut(plane)
-        {
-            let internal = bodies.contains_key(&anchor.target.body);
-            if !internal && translate.is_some_and(|translate| translate.len() > 1e-12) {
-                return Err(bad(cmd, "translated paste retains an external exact face attachment; explicitly convert it to a fixed plane first"));
+        made.push(copy_feature(s, &mut copying, &f)?);
+    }
+    let errors = evaluated_errors(s, made.iter().filter_map(|m| m["id"].as_u64()));
+    Ok(json!({"pasted": made, "errors": errors, "notices": copying.notices}))
+}
+
+/// Adds the copy of feature `f` at the marker: a new id, `(copy)` body names, its own dimension
+/// parameters, references pointing at the copies made before it, and the translation.
+fn copy_feature(s: &mut Session, c: &mut Copying, f: &solidcraft_doc::Feature) -> Result<Value> {
+    let (cmd, comp) = (c.cmd, c.comp);
+    let (translate, author_path) = (c.translate, c.author_path.clone());
+    let Copying { sketches, bodies, names, used, notices, .. } = c;
+    let mut kind = f.kind.clone();
+    kind.remap_refs(sketches, names);
+    // A body made by an earlier copy is the one this copy acts on (#613).
+    kind.remap_bodies(bodies);
+    if let FeatureKind::Sketch { plane, .. } = &mut kind
+        && let Some(anchor) = super::sketch::face::anchor_mut(plane)
+    {
+        let internal = bodies.contains_key(&anchor.target.body);
+        if !internal && translate.is_some_and(|translate| translate.len() > 1e-12) {
+            return Err(bad(cmd, "translated paste retains an external exact face attachment; explicitly convert it to a fixed plane first"));
+        }
+        if !internal {
+            notices.push(format!("pasted sketch retains external exact face attachment to {}", anchor.target.body));
+        }
+        anchor.remap_target(sketches, bodies)?;
+        if internal {
+            anchor.component = comp;
+            anchor.path = author_path.clone();
+        }
+        anchor.author_path = author_path.clone();
+        let target = anchor.target.clone();
+        if let FeatureKind::Sketch { sketch, .. } = &mut kind {
+            for link in &mut sketch.links {
+                if link.auto_face {
+                    if let solidcraft_sketch::LinkSource::Face { body, .. } = &mut link.source
+                        && let Some(mapped) = bodies.get(body)
+                    {
+                        *body = mapped.clone();
+                    }
+                    link.face_name = Some(target.name.clone());
+                }
             }
-            if !internal {
-                notices.push(format!("pasted sketch retains external exact face attachment to {}", anchor.target.body));
+        }
+    }
+    let built: Vec<String> = s
+        .model
+        .result(f.id)
+        .map(|result| result.state.bodies.iter().filter(|body| body.feature == f.id).map(|body| body.name.clone()).collect())
+        .unwrap_or_default();
+    let outputs = if f.body_names.is_empty() { built.clone() } else { f.body_names.clone() };
+    // A later feature names a body as the model shows it, and that is not always the name stored
+    // on the feature: solids that share a label are stored as `X`, `X`, `X` and shown as `X`,
+    // `X (2)`, `X (3)`, and a second import of a file shows `Aa (2)` for the stored `Aa`. The
+    // copies are found by the shown names; the stored ones only name the copies.
+    let shown = if built.len() == outputs.len() { built } else { outputs.clone() };
+    let copied_names: Vec<_> = outputs
+        .iter()
+        .zip(&shown)
+        .map(|(original, shown)| {
+            let base = format!("{original} (copy)");
+            let mut name = base.clone();
+            let mut suffix = 2usize;
+            while !used.insert(name.clone()) {
+                name = format!("{base} {suffix}");
+                suffix += 1;
             }
-            anchor.remap_target(&sketches, &bodies)?;
-            if internal {
-                anchor.component = comp;
-                anchor.path = author_path.clone();
+            bodies.insert(shown.clone(), name.clone());
+            name
+        })
+        .collect();
+    let doc = s.doc_mut();
+    if let FeatureKind::Sketch { sketch, .. } = &mut kind {
+        // Each dimension of the copy gets its own parameter, with the same expression.
+        for c in &mut sketch.constraints {
+            if let Some(pn) = c.param.clone() {
+                let (e, u) = doc.param(&pn).map(|x| (x.expr.clone(), x.unit.clone())).unwrap_or_else(|| (pn.clone(), "mm".into()));
+                c.param = Some(doc.new_model_param(&e, &u));
             }
-            anchor.author_path = author_path.clone();
-            let target = anchor.target.clone();
-            if let FeatureKind::Sketch { sketch, .. } = &mut kind {
-                for link in &mut sketch.links {
-                    if link.auto_face {
-                        if let solidcraft_sketch::LinkSource::Face { body, .. } = &mut link.source
-                            && let Some(mapped) = bodies.get(body)
-                        {
-                            *body = mapped.clone();
-                        }
-                        link.face_name = Some(target.name.clone());
+        }
+    }
+    if let Some(t) = translate {
+        if let FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } = &mut kind {
+            explicit_planes(plane);
+        }
+        let mut m = solidcraft_doc::IDENTITY;
+        m[3][0] = t.x;
+        m[3][1] = t.y;
+        m[3][2] = t.z;
+        kind.transform_geometry(&m);
+    }
+    // A cylinder Emboss finds its face only by the persistent name recorded when it was made
+    // (#1035): the copy keeps that name, pointed at the pasted features and bodies.
+    let face_names: Vec<String> = if matches!(kind, FeatureKind::Emboss { face: Some(_), .. }) {
+        f.face_names.iter().map(|n| solidcraft_doc::remap_topology(n, sketches, bodies)).collect()
+    } else {
+        Vec::new()
+    };
+    let id = doc.add_feature(kind, None)?;
+    if let Some(nf) = doc.feature_mut(id) {
+        nf.component = comp;
+        nf.body_names = copied_names;
+        nf.face_names = face_names;
+    }
+    let new_name = doc.feature(id).map(|x| x.name.clone()).unwrap_or_default();
+    sketches.insert(f.id, id);
+    names.insert(f.name.clone(), new_name.clone());
+    Ok(json!({"id": id, "name": new_name, "from": f.name}))
+}
+
+/// Moves the features of the last `timeline.cut` into the active component. It is an
+/// organisational change: ids, names and timeline positions stay, nothing is copied, and the
+/// geometry stays where it is in the world (a moved feature's picks, planes and directions are
+/// re-expressed in the new component's frame). Bodies follow the feature that made them. The move
+/// is made on a scratch copy and the whole timeline is evaluated; the result is adopted only when
+/// no feature, moved or left behind, gained an error. Otherwise nothing changes.
+fn move_cut(s: &mut Session) -> Result<Value> {
+    use solidcraft_doc::{Feature, is_identity, mat_inverse, mat_mul};
+    use std::collections::BTreeSet;
+    let cmd = "timeline.paste";
+    if s.timeline_cut.is_empty() {
+        return Err(bad(cmd, "nothing cut (timeline.cut first)"));
+    }
+    if !s.pending_moves.is_empty() {
+        return Err(bad(cmd, "finish the component move in progress first"));
+    }
+    let missing: Vec<String> = s.timeline_cut.iter().filter(|id| s.doc.feature(**id).is_none()).map(u64::to_string).collect();
+    if !missing.is_empty() {
+        return Err(bad(cmd, format!("the cut features {} no longer exist; cut again", missing.join(", "))));
+    }
+    let dest = s.active_component;
+    let moving: BTreeSet<u64> = s.timeline_cut.iter().copied().filter(|id| s.doc.feature(*id).is_some_and(|f| f.component != dest)).collect();
+    if moving.is_empty() {
+        return Err(bad(cmd, "the cut features are already in the active component"));
+    }
+    let moved: Vec<Feature> = s.doc.features.iter().filter(|f| moving.contains(&f.id)).cloned().collect();
+    // One placement each: a component placed twice has no single frame to keep the geometry in.
+    let placements = |c: u64| s.doc.occurrences.iter().filter(|o| o.component == c).count();
+    let sources: BTreeSet<u64> = moved.iter().map(|f| f.component).collect();
+    if sources.iter().chain([&dest]).any(|c| *c != 0 && placements(*c) > 1) {
+        return Err(bad(cmd, "a component involved is placed more than once; moving between repeated components is not supported"));
+    }
+    if moved.iter().any(|f| matches!(f.kind, FeatureKind::BodyTransfer { .. })) {
+        return Err(bad(cmd, "a recorded body transfer cannot be moved"));
+    }
+    // The bodies each feature made (by name), and so the bodies that move with the features.
+    let mut made: BTreeMap<String, u64> = BTreeMap::new();
+    for f in &s.doc.features {
+        if let Some(r) = s.model.result(f.id) {
+            for b in r.state.bodies.iter().filter(|b| b.feature == f.id) {
+                made.entry(b.name.clone()).or_insert(f.id);
+            }
+        }
+    }
+    let moved_bodies: BTreeSet<String> = made.iter().filter(|(_, f)| moving.contains(f)).map(|(b, _)| b.clone()).collect();
+    if moved_bodies.iter().any(|b| s.doc.body_components.contains_key(b) || s.doc.body_offsets.contains_key(b)) {
+        return Err(bad(cmd, "a body that was moved between components by a body transfer cannot be moved"));
+    }
+    // A join or boolean whose inputs would end up in two components.
+    for f in &s.doc.features {
+        let mut inputs: BTreeSet<String> = f.kind.body_refs().into_iter().collect();
+        inputs.extend(f.participants.iter().cloned());
+        let (inside, outside) =
+            (inputs.iter().filter(|b| moved_bodies.contains(*b)).count(), inputs.iter().filter(|b| !moved_bodies.contains(*b)).count());
+        if inside > 0 && outside > 0 && inputs.len() > 1 {
+            return Err(bad(cmd, format!("{} works on bodies that would be split between components", f.name)));
+        }
+    }
+    let to_dest = mat_inverse(&s.doc.component_transform(dest)).ok_or_else(|| bad(cmd, "the active component's frame is not invertible"))?;
+    let dest_path = s.doc.first_path(dest);
+    let before_errors: BTreeMap<u64, bool> = s.doc.features.iter().map(|f| (f.id, s.model.result(f.id).is_some_and(|r| r.error.is_some()))).collect();
+
+    let mut scratch = s.scratch();
+    let doc = scratch.doc_mut();
+    for old in &moved {
+        let delta = mat_mul(&to_dest, &s.doc.component_transform(old.component));
+        let Some(f) = doc.feature_mut(old.id) else { continue };
+        f.component = dest;
+        if !is_identity(&delta) {
+            if let FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } = &mut f.kind {
+                explicit_planes(plane);
+            }
+            f.kind.transform_geometry(&delta);
+        }
+    }
+    // Attached sketches and embossed faces carry the placement of the body they sit on and of
+    // the component they were authored in: those that moved are rewritten, nothing else changes.
+    for f in &mut doc.features {
+        let authored_here = moving.contains(&f.id);
+        let rewrite = |body: &str, path: &mut Vec<u64>, author_path: &mut Vec<u64>| {
+            if moved_bodies.contains(body) {
+                *path = dest_path.clone();
+            }
+            if authored_here {
+                *author_path = dest_path.clone();
+            }
+        };
+        match &mut f.kind {
+            FeatureKind::Sketch { plane, .. } => {
+                if let Some(anchor) = super::sketch::face::anchor_mut(plane) {
+                    let moved_body = moved_bodies.contains(&anchor.target.body);
+                    rewrite(&anchor.target.body, &mut anchor.path, &mut anchor.author_path);
+                    if moved_body {
+                        anchor.component = dest;
                     }
                 }
             }
-        }
-        let built: Vec<String> = s
-            .model
-            .result(f.id)
-            .map(|result| result.state.bodies.iter().filter(|body| body.feature == f.id).map(|body| body.name.clone()).collect())
-            .unwrap_or_default();
-        let outputs = if f.body_names.is_empty() { built.clone() } else { f.body_names.clone() };
-        // A later feature names a body as the model shows it, and that is not always the name stored
-        // on the feature: solids that share a label are stored as `X`, `X`, `X` and shown as `X`,
-        // `X (2)`, `X (3)`, and a second import of a file shows `Aa (2)` for the stored `Aa`. The
-        // copies are found by the shown names; the stored ones only name the copies.
-        let shown = if built.len() == outputs.len() { built } else { outputs.clone() };
-        let copied_names: Vec<_> = outputs
-            .iter()
-            .zip(&shown)
-            .map(|(original, shown)| {
-                let base = format!("{original} (copy)");
-                let mut name = base.clone();
-                let mut suffix = 2usize;
-                while !used.insert(name.clone()) {
-                    name = format!("{base} {suffix}");
-                    suffix += 1;
-                }
-                bodies.insert(shown.clone(), name.clone());
-                name
-            })
-            .collect();
-        let doc = s.doc_mut();
-        if let FeatureKind::Sketch { sketch, .. } = &mut kind {
-            // Each dimension of the copy gets its own parameter, with the same expression.
-            for c in &mut sketch.constraints {
-                if let Some(pn) = c.param.clone() {
-                    let (e, u) = doc.param(&pn).map(|x| (x.expr.clone(), x.unit.clone())).unwrap_or_else(|| (pn.clone(), "mm".into()));
-                    c.param = Some(doc.new_model_param(&e, &u));
-                }
+            FeatureKind::Emboss { face: Some(face), .. } => {
+                let body = face.body.as_ref().to_string();
+                rewrite(&body, &mut face.path, &mut face.author_path);
             }
+            _ => {}
         }
-        if let Some(t) = translate {
-            if let FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } = &mut kind {
-                explicit_planes(plane);
-            }
-            let mut m = solidcraft_doc::IDENTITY;
-            m[3][0] = t.x;
-            m[3][1] = t.y;
-            m[3][2] = t.z;
-            kind.transform_geometry(&m);
-        }
-        // A cylinder Emboss finds its face only by the persistent name recorded when it was made
-        // (#1035): the copy keeps that name, pointed at the pasted features and bodies.
-        let face_names: Vec<String> = if matches!(kind, FeatureKind::Emboss { face: Some(_), .. }) {
-            f.face_names.iter().map(|n| solidcraft_doc::remap_topology(n, &sketches, &bodies)).collect()
-        } else {
-            Vec::new()
-        };
-        let id = doc.add_feature(kind, None)?;
-        if let Some(nf) = doc.feature_mut(id) {
-            nf.component = comp;
-            nf.body_names = copied_names;
-            nf.face_names = face_names;
-        }
-        let new_name = doc.feature(id).map(|x| x.name.clone()).unwrap_or_default();
-        sketches.insert(f.id, id);
-        names.insert(f.name.clone(), new_name.clone());
-        made.push(json!({"id": id, "name": new_name, "from": f.name}));
     }
-    s.refresh();
-    let errors: Vec<Value> = made
+    scratch.refresh();
+    // Any feature that gains an error, moved or left behind, stops the move.
+    let broken = scratch
+        .doc
+        .features
         .iter()
-        .filter_map(|m| m["id"].as_u64())
-        .filter_map(|id| s.model.result(id).and_then(|r| r.error.clone()).map(|e| json!({"feature": id, "error": e})))
-        .collect();
-    Ok(json!({"pasted": made, "errors": errors, "notices":notices}))
+        .filter(|f| !before_errors.get(&f.id).copied().unwrap_or(false))
+        .find_map(|f| scratch.model.result(f.id).and_then(|r| r.error.clone()).map(|e| (f.name.clone(), e)));
+    if let Some((name, error)) = broken {
+        return Err(bad(cmd, format!("moving would break {name}: {error}")));
+    }
+    s.accept_computed(scratch);
+    s.timeline_cut.clear();
+    let names: Vec<&str> = moved.iter().map(|f| f.name.as_str()).collect();
+    Ok(json!({"moved": names, "component": dest, "bodies": moved_bodies}))
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
+    use solidcraft_doc::FeatureKind;
 
     use crate::Session;
 
@@ -222,6 +401,144 @@ mod tests {
         assert!(s.execute("timeline.paste", &json!({"translate": "x"})).is_err());
         let mut t = Session::default();
         assert!(t.execute("timeline.paste", &json!({})).is_err());
+    }
+
+    /// A 10 × 10 × 5 block (sketch `S`, extrude `Extrude1`, body `Block`) in the root with a sketch
+    /// `Top` attached to its top face, and a component `Part` placed 100 mm along X. The root is active.
+    fn block_and_part() -> (Session, u64) {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "S", "distance": 5, "body_name": "Block"}));
+        run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 5]}, "name": "Top"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [4, 4]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let part = run(&mut s, "component.create", json!({"name": "Part"}))["component"].as_u64().unwrap_or(0);
+        let first = s.doc.occurrence_of(part).map(|o| o.id).unwrap_or(0);
+        run(&mut s, "occurrence.move", json!({"occurrence": first, "translate": [100, 0, 0], "capture": true}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        (s, part)
+    }
+
+    #[test]
+    fn paste_after_cut_moves_features_in_place_and_keeps_the_world_and_the_attachment() {
+        let (mut s, part) = block_and_part();
+        let ids: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+        let (names, steps) = (s.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>(), s.undo.len());
+        let (volume_before, corner) = (volume(&mut s), corners(&mut s));
+        run(&mut s, "timeline.cut", json!({"features": ["S", "Extrude1"]}));
+        run(&mut s, "component.activate", json!({"component": part}));
+        let copied = s.clipboard.clone();
+        let r = run(&mut s, "timeline.paste", json!({}));
+        assert_eq!(r["moved"], json!(["S", "Extrude1"]), "{r}");
+        // Nothing was added or renamed, the copy clipboard is untouched, and it is one undo step.
+        assert_eq!(s.doc.features.iter().map(|f| f.id).collect::<Vec<_>>(), ids);
+        assert_eq!(s.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>(), names);
+        assert_eq!(s.clipboard, copied);
+        assert!(s.timeline_cut.is_empty());
+        assert_eq!(s.undo.len(), steps + 1, "the move is one undo step");
+        for name in ["S", "Extrude1"] {
+            assert_eq!(s.doc.find_feature(name).map(|f| f.component), Some(part));
+        }
+        assert_eq!(s.doc.find_feature("Top").map(|f| f.component), Some(0));
+        assert!((volume(&mut s) - volume_before).abs() < 1e-6);
+        assert_eq!(corners(&mut s), corner, "the block is where it was in the world");
+        // The sketch left behind follows the body into its new component and still evaluates.
+        let top = s.doc.find_feature("Top").map(|f| f.id).unwrap_or(0);
+        assert!(s.model.result(top).is_some_and(|r| r.error.is_none()), "{:?}", s.model.result(top).map(|r| r.error.clone()));
+        let anchor = match s.doc.find_feature("Top").map(|f| f.kind.clone()) {
+            Some(FeatureKind::Sketch { mut plane, .. }) => super::super::sketch::face::anchor_mut(&mut plane).cloned(),
+            _ => None,
+        };
+        assert_eq!(anchor.map(|a| (a.component, a.path)), Some((part, s.doc.first_path(part))));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.find_feature("Extrude1").map(|f| f.component), Some(0));
+    }
+
+    /// A cut with no targets cuts "the bodies of its component". Moved without its body, or with
+    /// the body moved from under it, it would break, so the move is refused and nothing changes.
+    #[test]
+    fn paste_after_cut_refuses_a_move_that_would_break_a_feature() {
+        for moves in [["S2", "Cut1"], ["S1", "Extrude1"]] {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S1"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 20]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "S1", "distance": 10, "body_name": "Block"}));
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S2"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [10, 10]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "S2", "distance": 4, "operation": "cut", "name": "Cut1"}));
+            let part = run(&mut s, "component.create", json!({"name": "Part", "activate": false}))["component"].as_u64().unwrap_or(0);
+            run(&mut s, "timeline.cut", json!({"features": moves}));
+            run(&mut s, "component.activate", json!({"component": part}));
+            let before = s.doc.to_json();
+            let e = s.execute("timeline.paste", &json!({})).err().map(|e| e.to_string()).unwrap_or_default();
+            assert!(e.contains("moving would"), "{moves:?}: {e}");
+            assert_eq!(s.doc.to_json(), before, "{moves:?}");
+        }
+    }
+
+    #[test]
+    fn paste_after_cut_refusals_change_nothing() {
+        let (mut s, part) = block_and_part();
+        let refused = |s: &mut Session, why: &str| {
+            let before = s.doc.to_json();
+            let e = s.execute("timeline.paste", &json!({})).err().map(|e| e.to_string()).unwrap_or_default();
+            assert!(e.contains(why), "{e}");
+            assert_eq!(s.doc.to_json(), before);
+        };
+        refused(&mut s, "nothing copied");
+        run(&mut s, "timeline.cut", json!({"features": ["S", "Extrude1"]}));
+        refused(&mut s, "already in the active component");
+        // A feature deleted since the cut.
+        run(&mut s, "component.activate", json!({"component": part}));
+        run(&mut s, "timeline.cut", json!({"features": ["Top"]}));
+        run(&mut s, "timeline.delete", json!({"features": ["Top"]}));
+        refused(&mut s, "no longer exist");
+        // A component placed twice.
+        run(&mut s, "timeline.cut", json!({"features": ["S", "Extrude1"]}));
+        run(&mut s, "occurrence.copy", json!({"component": part}));
+        refused(&mut s, "placed more than once");
+    }
+
+    #[test]
+    fn paste_after_cut_refuses_a_boolean_whose_inputs_would_be_split() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A", "name": "BoxA"}));
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 10, "width": 10, "height": 10, "corner": [10, 0, 0], "operation": "new_body", "body_name": "B", "name": "BoxB"}),
+        );
+        run(&mut s, "solid.combine", json!({"target": "A", "tools": ["B"], "operation": "join", "name": "Joined"}));
+        run(&mut s, "component.create", json!({"name": "Part"}));
+        let before = s.doc.to_json();
+        run(&mut s, "timeline.cut", json!({"features": ["BoxA"]}));
+        let e = s.execute("timeline.paste", &json!({})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("split between components"), "{e}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+
+    /// `timeline.copy` and `timeline.cut` both refuse an empty list, an unknown feature and too many features.
+    #[test]
+    fn copy_and_cut_refuse_invalid_feature_lists() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        let too_many: Vec<String> = (0..1001).map(|i| format!("F{i}")).collect();
+        let cases = [
+            (json!([]), "`features` must list 1…1000 features"),
+            (json!(["NoSuchFeature"]), "no feature `NoSuchFeature`"),
+            (json!(too_many), "`features` must list 1…1000 features"),
+        ];
+        for (features, message) in cases {
+            let p = json!({"features": features});
+            for command in ["timeline.copy", "timeline.cut"] {
+                let error = s.execute(command, &p).err().map(|e| e.to_string()).unwrap_or_default();
+                assert!(error.ends_with(message), "{command} {p}: {error}");
+            }
+        }
     }
 
     #[test]
