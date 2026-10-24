@@ -1986,6 +1986,42 @@ fn folder_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, comp: u64, path: Option
     let _ = t;
 }
 
+/// The body's name edited in its row (started by a double-click): Enter or leaving the box keeps
+/// the name, Escape cancels.
+fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, e: &Entry, depth: usize) {
+    let editing = app.menu.rename.as_ref().is_some_and(|r| r.inline && matches!(&r.what, crate::context_menu::RenameWhat::Body(b) if *b == e.key));
+    if !editing {
+        return;
+    }
+    let Some(mut rename) = app.menu.rename.take() else { return };
+    // Where the label starts: the fold arrow, eye and icon come first.
+    let left = row.left() + 2.0 + depth as f32 * INDENT + 14.0 + 18.0 + 21.0;
+    let edit_rect = Rect::from_min_max(pos2(left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
+    ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
+    let id = ui.id().with(("browser_rename", &e.row_key));
+    let response = crate::ui_kit::inline_name(ui, edit_rect, id, &mut rename.text);
+    crate::scenario::publish_handle(&format!("rename:{}", e.key), edit_rect.center());
+    let was_focused = rename.focused;
+    if !rename.focused {
+        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
+            let end = rename.text.chars().count();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(end))));
+            state.store(ui.ctx(), id);
+        }
+        response.request_focus();
+        rename.focused = true;
+    }
+    let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+    let commit = ui.input(|i| i.key_pressed(egui::Key::Enter)) || (was_focused && response.lost_focus());
+    if escape {
+        // Dropping the state cancels the edit.
+    } else if commit {
+        crate::context_menu::commit_rename(app, &rename);
+    } else {
+        app.menu.rename = Some(rename);
+    }
+}
+
 /// One item row of a folder.
 #[allow(clippy::too_many_arguments)]
 fn entry_row(
@@ -2055,6 +2091,22 @@ fn entry_row(
         } else {
             click_select(app, ui, e.row_key.clone(), e.sel.clone());
         }
+        // A double-click renames the row (sketch rows open for editing instead), like F2. A body
+        // is edited in its own row.
+        if r.double {
+            crate::context_menu::rename_selection(app, r.rect.map(|x| x.left_bottom()).unwrap_or_default());
+            if folder == "bodies"
+                && let Some(rename) = app.menu.rename.as_mut()
+                && matches!(&rename.what, crate::context_menu::RenameWhat::Body(b) if *b == e.key)
+            {
+                rename.inline = true;
+            }
+        }
+    }
+    if folder == "bodies"
+        && let Some(rect) = r.rect
+    {
+        inline_rename(app, ui, rect, e, depth);
     }
     if r.hovered && !e.bodies.is_empty() {
         acts.hover_bodies = e.bodies.clone();

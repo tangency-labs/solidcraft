@@ -245,6 +245,8 @@ pub struct Rename {
     pub text: String,
     pub at: Pos2,
     pub(crate) focused: bool,
+    /// Edited in the browser row itself (a double-click on a body), not in the floating box.
+    pub(crate) inline: bool,
 }
 
 /// Radial slots, clockwise from the top.
@@ -1470,7 +1472,7 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::View(v) => v.clone(),
         RenameWhat::Joint(j) => doc.assembly.joints.iter().find(|x| x.id == *j).map(|x| x.name.clone()).unwrap_or_default(),
     };
-    app.menu.rename = Some(Rename { what, text, at, focused: false });
+    app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false });
 }
 
 pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) {
@@ -1926,6 +1928,9 @@ fn show_rename(app: &mut SolveApp, ctx: &egui::Context) {
     // Feature-history folders own their editor inside the row. Keep the shared rename state so
     // automation and keyboard handling still use the same path, but do not draw the floating box.
     if app.preferences.timeline_left && matches!(app.menu.rename.as_ref().map(|rename| &rename.what), Some(RenameWhat::TimelineGroup(_))) {
+        return;
+    }
+    if app.menu.rename.as_ref().is_some_and(|r| r.inline) {
         return;
     }
     let Some(mut r) = app.menu.rename.take() else { return };
