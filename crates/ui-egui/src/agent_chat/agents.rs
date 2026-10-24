@@ -218,6 +218,7 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "Ollama", base_url: "http://localhost:11434/v1" },
     ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
     ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
+    ApiPreset { name: "Mammouth AI", base_url: "https://api.mammouth.ai/v1" },
 ];
 
 /// Anthropic-compatible endpoints people use. The base URL is the one their documentation calls
@@ -266,6 +267,7 @@ mod tests {
     #[test]
     fn keys_go_only_over_https_or_to_this_computer() {
         assert!(key_safe_for("https://api.openai.com/v1"));
+        assert!(key_safe_for("https://api.mammouth.ai/v1"));
         assert!(key_safe_for("http://localhost:11434/v1"));
         assert!(key_safe_for("http://127.0.0.1:1234/v1"));
         assert!(key_safe_for("http://[::1]:8080/v1"));
@@ -307,6 +309,7 @@ mod tests {
         assert_eq!(Kind::Api.id(), "api");
         assert_eq!(Kind::Anthropic.id(), "anthropic");
         assert!(presets(Protocol::OpenAi).iter().all(|p| !p.name.is_empty() && p.base_url.starts_with("http")));
+        assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mammouth AI" && key_safe_for(p.base_url)));
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
     }
 }
