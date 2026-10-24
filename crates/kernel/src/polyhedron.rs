@@ -482,6 +482,8 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     if opened.is_empty() {
         return Err(KernelError::Invalid("select at least one face to remove".into()));
     }
+    // A hole wall split into halves (#4010): opening one half must open the whole sheet.
+    let opened = crate::offset::with_same_surface(&healed, &opened);
     // A successful Boolean is not evidence that a tangential rim has wall thickness.
     // Refuse only when the entire planar opening loses its rim. A single collapsed
     // round can still end in a valid sharp edge (the tutorial plate, for example).
@@ -634,12 +636,30 @@ fn rim_without_thickness(b: &Body, opened: &[usize], thickness: f64, whole_rim: 
 
 fn shell_opened(b: &Body, healed: &Body, open: &[Vec3], opened: &[usize], thickness: f64, margin: f64) -> Result<Body> {
     let size = healed.size();
+    let tol = (size * 1e-7).max(1e-9) * 100.0;
+    let faces: Vec<mt::Face> = healed.solid.face_iter().cloned().collect();
+    // Cylindrical open faces (#4010): leave them unmoved so the cavity keeps the bore radius,
+    // while every other face moves in. Pushing a hole wall out collapses or misses rim corners.
+    let cyl_open = opened.iter().any(|&fi| {
+        matches!(faces.get(fi).and_then(|f| crate::offset::surf_of(f, tol)), Some(crate::offset::Surf::Cylinder { .. }))
+    });
+    if cyl_open {
+        return shell_by_opening(healed, opened, thickness, margin);
+    }
     // Open faces pushed out past the body: the simple way, unless a face tangent to an open
     // one (a fillet along its edge) can't follow; then every face moves in (tangencies keep)
     // and the opening is the open face's copy swept out through the body.
     let cavity = match offset_planar(healed, |fi, _| if opened.contains(&fi) { margin } else { -thickness }) {
         Ok(c) => c,
-        Err(e) => return shell_by_opening(healed, opened, thickness, margin).map_err(|_| e),
+        // Pushing the open face out can miss a corner when that face meets a thin round
+        // (seed 38): the all-inward fallback names the wall-thickness limit instead.
+        Err(e) => {
+            return match shell_by_opening(healed, opened, thickness, margin) {
+                Ok(body) => Ok(body),
+                Err(e2) if shell_fallback_names_limit(&e2) => Err(e2),
+                Err(_) => Err(e),
+            };
+        }
     };
     let cavity = match opening_overreach(healed, &cavity, opened, thickness, margin) {
         Ok(Some(trimmed)) => trimmed,
@@ -771,7 +791,25 @@ fn opening_overreach(healed: &Body, cavity: &Body, opened: &[usize], thickness: 
 /// joined with each open face's moved copy swept out through the body. No history: the
 /// opening's walls, swept from the cavity's edges, come from nothing of `b`.
 fn shell_by_opening(b: &Body, opened: &[usize], thickness: f64, reach: f64) -> Result<Body> {
-    let closed = offset_planar(b, |_, _| -thickness)?;
+    let size = b.size();
+    let tol = (size * 1e-7).max(1e-9) * 100.0;
+    let src_faces: Vec<mt::Face> = b.solid.face_iter().cloned().collect();
+    let cyl_open = opened.iter().any(|&fi| {
+        matches!(src_faces.get(fi).and_then(|f| crate::offset::surf_of(f, tol)), Some(crate::offset::Surf::Cylinder { .. }))
+    });
+    // Through-hole wall (#4010): keep the open cylinder where it is (shift 0) and move every
+    // other face in. The cavity then has the same bore as the solid, so cutting it out leaves
+    // no tube wall — matching an inset box less the hole.
+    let closed = if cyl_open {
+        offset_planar(b, |fi, _| if opened.contains(&fi) { 0.0 } else { -thickness })?
+    } else {
+        offset_planar(b, |_, _| -thickness)?
+    };
+    if cyl_open {
+        let r = crate::ops::boolean(b, &closed, crate::BoolOp::Cut)?.ok_or_else(|| KernelError::Failed("the shell removed everything".into()))?;
+        return Ok(r.without_history());
+    }
+    // Planar opens: all-inward cavity, then a prism through each open face.
     let faces: Vec<mt::Face> = closed.solid.face_iter().cloned().collect();
     let mut cavity = closed.clone();
     for fi in opened {
@@ -794,6 +832,13 @@ fn shell_by_opening(b: &Body, opened: &[usize], thickness: f64, reach: f64) -> R
 
 fn unsupported_shell(m: &str) -> KernelError {
     KernelError::Failed(format!("not supported yet: {m}"))
+}
+
+/// Whether a shell fallback's error is the real limit (thin wall / unsupported) rather than a
+/// secondary boolean failure that would hide the first offset's corner message.
+fn shell_fallback_names_limit(e: &KernelError) -> bool {
+    let s = e.to_string();
+    s.contains("faces would cross") || s.contains("not supported yet") || s.contains("rim would have no thickness")
 }
 
 pub(crate) fn point_tri(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
@@ -900,5 +945,90 @@ mod rim_preflight_tests {
         let combined = crate::boolean(&rounded, &distant, crate::BoolOp::Union).unwrap().unwrap();
         let faces: Vec<_> = (0..combined.solid.face_iter().count()).collect();
         assert!(rim_without_thickness(&combined, &faces, 2.0, true).is_none());
+    }
+
+    /// Robustness seed 6 (#1494): a cylinder joined on a box's side leaves a saddle on the
+    /// cylinder seam; the shell used to refuse that corner.
+    #[test]
+    fn shell_of_a_box_with_a_side_cylinder_opens_at_the_bottom() {
+        let b = crate::box_solid(Vec3::ZERO, Vec3::new(47.5, 45.0, 30.0)).unwrap();
+        let c = crate::cylinder(Vec3::new(47.5, 0.0, 10.0), Vec3::X, 7.5, 30.0).unwrap();
+        let u = crate::boolean(&b, &c, crate::BoolOp::Union).unwrap().unwrap();
+        let before = crate::measure(&u).unwrap().volume;
+        let s = shell(&u, &[Vec3::new(23.75, 22.5, 0.0)], 1.0).expect("shell");
+        assert!(s.validity().is_empty(), "{:?}", s.validity());
+        assert_eq!(s.shell_count(), 1);
+        let vol = crate::measure(&s).unwrap().volume;
+        assert!(vol.is_finite() && vol > 0.0 && vol < before, "before {before}, shell {vol}");
+    }
+
+    /// #4010: a plate with a through hole, shelled by opening the hole wall.
+    #[test]
+    fn shell_plate_opening_the_hole_wall() {
+        use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+        let outer = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(40.0, 0.0), Vec2::new(40.0, 30.0), Vec2::new(0.0, 30.0)]);
+        let hole = Loop2::circle(Vec2::new(20.0, 15.0), 5.0);
+        let plate = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![hole] }], 0.0, 12.5).unwrap().remove(0);
+        let before = crate::measure(&plate).unwrap().volume;
+        let s = shell(&plate, &[Vec3::new(25.0, 15.0, 6.25)], 2.5).expect("shell");
+        assert!(s.validity().is_empty(), "{:?}", s.validity());
+        assert_eq!(s.shell_count(), 1);
+        let vol = crate::measure(&s).unwrap().volume;
+        let want = 8044.80;
+        assert!(vol.is_finite() && vol > 0.0 && vol < before, "before {before}, shell {vol}");
+        assert!((vol - want).abs() < 1.0, "shell volume {vol}, want ~{want}");
+    }
+
+    /// Robustness seed 78 (#142): a half-revolve cut by a box. A shell thicker than the rim at
+    /// the cut used to look like a missed corner; it is refused as a wall cross.
+    #[test]
+    fn shell_half_revolve_cut_by_box_names_wall_cross() {
+        use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+        let rect = Loop2::polygon(&[Vec2::new(7.5, 0.0), Vec2::new(25.0, 0.0), Vec2::new(25.0, 5.0), Vec2::new(7.5, 5.0)]);
+        let rev = crate::revolve(&Plane::XZ, &[Region2 { outer: rect, holes: vec![] }], Vec2::ZERO, Vec2::Y, std::f64::consts::PI)
+            .unwrap()
+            .remove(0);
+        let cut = crate::box_solid(Vec3::new(-25.0, 0.0, -2.5), Vec3::new(-7.5, 22.5, 20.0)).unwrap();
+        let u = crate::boolean(&rev, &cut, crate::BoolOp::Cut).unwrap().unwrap();
+        let err = shell(&u, &[Vec3::new(16.25, 0.0, -2.5)], 2.0).expect_err("thick shell");
+        let msg = err.to_string();
+        assert!(msg.contains("faces would cross"), "{msg}");
+        assert!(!msg.contains("don't meet the same way"), "{msg}");
+    }
+
+    /// Robustness seed 38 (#142): a cylindrical notch on a box edge shells at half a millimetre;
+    /// at 2 mm (thicker than the notch) it is refused as a wall cross, not a missed corner.
+    #[test]
+    fn shell_box_with_edge_notch() {
+        let b = crate::box_solid(Vec3::ZERO, Vec3::new(47.5, 60.0, 27.5)).unwrap();
+        let c = crate::cylinder(Vec3::new(47.5, 0.0, 25.0), Vec3::new(0.0, 0.0, -1.0), 1.25, 22.5).unwrap();
+        let u = crate::boolean(&b, &c, crate::BoolOp::Cut).unwrap().unwrap();
+        let open = [Vec3::new(47.5, 30.509393063583815, 13.75)];
+        let thin = shell(&u, &open, 0.5).expect("thin shell");
+        assert!(thin.validity().is_empty(), "{:?}", thin.validity());
+        let err = shell(&u, &open, 2.0).expect_err("thick shell");
+        let msg = err.to_string();
+        assert!(msg.contains("faces would cross"), "{msg}");
+        assert!(!msg.contains("don't meet the same way"), "{msg}");
+    }
+
+    /// Robustness seed 69 (#142): a 90° revolve with a joined box, shelled twice. Cylinder
+    /// halves on the cavity wall used to leave a seam corner the second shell refused.
+    #[test]
+    fn shell_revolved_section_with_joined_box_twice() {
+        use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+        let rect = Loop2::polygon(&[Vec2::new(2.5, 0.0), Vec2::new(22.5, 0.0), Vec2::new(22.5, 30.0), Vec2::new(2.5, 30.0)]);
+        let rev = crate::revolve(&Plane::XZ, &[Region2 { outer: rect, holes: vec![] }], Vec2::ZERO, Vec2::Y, std::f64::consts::FRAC_PI_2)
+            .unwrap()
+            .remove(0);
+        let boxb = crate::box_solid(Vec3::new(22.5, 17.5, -7.5), Vec3::new(45.0, 25.0, -2.5)).unwrap();
+        let u = crate::boolean(&rev, &boxb, crate::BoolOp::Union).unwrap().unwrap();
+        let s1 = shell(&u, &[Vec3::new(33.75, 17.5, -5.0)], 1.5).expect("first shell");
+        assert!(s1.validity().is_empty(), "{:?}", s1.validity());
+        let s2 = shell(&s1, &[Vec3::new(1.5, 12.327229847555518, -15.0)], 1.5).expect("second shell");
+        assert!(s2.validity().is_empty(), "{:?}", s2.validity());
+        assert_eq!(s2.shell_count(), 1);
+        let vol = crate::measure(&s2).unwrap().volume;
+        assert!(vol.is_finite() && vol > 0.0);
     }
 }
