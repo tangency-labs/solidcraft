@@ -1284,6 +1284,17 @@ impl Dialog {
         if !inp.multi && !inp.items.is_empty() && self.active + 1 < self.inputs.len() {
             self.advance();
         }
+        // Move by points or about an axis: once a body is in, go on to the empty From, Point or
+        // Axis (#6170), so the next click picks it instead of another body. Free Move's Pivot is
+        // optional and stays unvisited.
+        if let Kind::Move { mode: crate::dialogs_move::ROTATE | crate::dialogs_move::POINT_TO_POINT | crate::dialogs_move::POINT_TO_POSITION, .. } =
+            self.kind
+            && self.active == 0
+            && self.inputs.first().is_some_and(|i| !i.items.is_empty())
+            && self.inputs.get(1).is_some_and(|i| i.items.is_empty())
+        {
+            self.active = 1;
+        }
         self.error = None;
         self.sync_thread(s);
     }
