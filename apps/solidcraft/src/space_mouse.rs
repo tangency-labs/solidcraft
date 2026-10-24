@@ -241,6 +241,7 @@ struct Reading {
     device: Option<Source>,
     /// A source that is connected but has not yet shown a device behind it (spacenavd's socket answers
     /// with no mouse plugged in; its protocol has no enumeration, so the first record is the evidence).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     awaiting: Option<Source>,
     axes: Axes,
     /// When each of X, Y, Z, Rx, Ry and Rz last arrived. Each ages on its own: a device may send
@@ -287,6 +288,7 @@ impl Reading {
     }
 
     /// A record arrived from the source being waited on: there is a device.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     fn heard(&mut self) {
         if self.device.is_none() {
             self.device = self.awaiting.take();
