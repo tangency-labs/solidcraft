@@ -903,6 +903,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes. ASan on macOS arm64 (harness built with `-fsanitize=address,undefined`) reports `heap-use-after-free` READ at `SmBSplineCurveNLib.cpp:3138`, freed by `N_FreeReal1dArray` <- `N_FreeCrv` <- `N_CrvInsertKnot`, for curve_p6 gen0161 / gen0953 and n_lib gen0695 / gen1279. Latent on x86-64 Linux (benign under glibc malloc). GitHub issue #449.
 - **Severity:** crash/UB (use after free; wrong result on non-glibc allocators).
 - **Rust port:** Reads the live knot vector after each insertion (`crates/solidcore/src/nurbs/b_spline_curve_n_lib.rs`, `curr.knots()` in the insertion loop), which equals the glibc result.
+- **Difftest follow-up (#449, PR #793):** On macOS arm64 only, the ten generated deform cases listed above use the existing `skipped(platform)` outcome, never a pass. The reason cites the upstream use-after-free at `SmBSplineCurveNLib.cpp:3127-3149` and that Rust matches the Linux reference. Linux still runs all ten comparisons; neither the Rust kernel nor the C++ reference is changed.
 
 ### Surfaces and volumes
 

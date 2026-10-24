@@ -217,7 +217,8 @@ impl CaseResult {
 /// Status of a unit run (AGENTS.md section 4a).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnitStatus {
-    /// At least one parity pass, no failures or deferrals (fixture rejections excluded).
+    /// No failures, deferrals or known mismatches (platform skips excluded).
+    /// An entirely platform-skipped run retains this canonical verdict but has no parity passes.
     Green,
     /// No failing case and at least one deferred case or known mismatch.
     Partial,
@@ -314,10 +315,11 @@ impl UnitResult {
             || self.cases.len() == self.rejected()
         {
             UnitStatus::Fail
-        } else if self.deferred() > 0 || self.skipped_platform() > 0 || self.known_mismatches() > 0
-        {
+        } else if self.deferred() > 0 || self.known_mismatches() > 0 {
             UnitStatus::Partial
         } else {
+            // Platform skips are recorded separately, never as passes. Like the
+            // CI baseline verdict, they do not change the canonical unit status.
             UnitStatus::Green
         }
     }
@@ -823,6 +825,26 @@ mod tests {
         assert_eq!(r.status(), UnitStatus::Fail);
         r.cases.truncate(1);
         assert_eq!(r.status(), UnitStatus::Green);
+        let mut skipped = case(None, true);
+        skipped.skipped_platform = Some("platform-specific C++ reference behaviour".into());
+        assert_eq!(skipped.outcome(), CaseOutcome::SkippedPlatform);
+        assert!(!skipped.pass());
+        r.cases.push(skipped.clone());
+        assert_eq!(r.status(), UnitStatus::Green);
+        assert_eq!((r.passed(), r.failed(), r.skipped_platform()), (1, 0, 1));
+        // An entirely platform-skipped unit (e.g. database_io on libc++) keeps
+        // its canonical verdict without claiming any passing comparisons.
+        r.cases = vec![skipped];
+        assert_eq!(r.status(), UnitStatus::Green);
+        assert_eq!((r.passed(), r.failed(), r.skipped_platform()), (0, 0, 1));
+        let report = crate::report::unit_report(&r);
+        assert_eq!(report["cases"][0]["outcome"], "skipped(platform)");
+        assert_eq!(report["cases"][0]["pass"], false);
+        r.cases.push(case(d(), true));
+        assert_eq!(r.status(), UnitStatus::Partial);
+        r.cases.push(case(None, false));
+        assert_eq!(r.status(), UnitStatus::Fail);
+        r.cases = vec![case(None, true)];
         let mut h = case(d(), true);
         h.harness_error = Some("cpp: bad".into());
         assert_eq!(h.outcome(), CaseOutcome::Fail);

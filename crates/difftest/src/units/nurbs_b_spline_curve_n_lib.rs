@@ -1531,6 +1531,23 @@ impl UnitDiff for Runner {
         "nurbs.b_spline_curve_n_lib"
     }
 
+    fn skipped_platform(&self, case: &Case) -> Option<String> {
+        if cfg!(all(target_os = "macos", target_arch = "aarch64"))
+            && matches!(
+                case.name.as_str(),
+                "gen0695" | "gen0720" | "gen0880" | "gen0932" | "gen1279" | "gen1374" | "gen1482"
+            )
+            && case.inputs.get("op").and_then(Value::as_str) == Some("deform")
+        {
+            Some(
+                "upstream use-after-free in SmBSplineCurveNLib.cpp:3127-3149 (issue #449); Rust matches the Linux reference"
+                    .into(),
+            )
+        } else {
+            None
+        }
+    }
+
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         serde_json::to_value(gen_valid(rng)?).ok()
     }
@@ -1555,4 +1572,3 @@ impl UnitDiff for Runner {
         rust(&i)
     }
 }
-

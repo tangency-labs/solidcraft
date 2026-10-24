@@ -1494,6 +1494,20 @@ impl UnitDiff for Runner {
         "curve.curve_p6"
     }
 
+    fn skipped_platform(&self, case: &Case) -> Option<String> {
+        if cfg!(all(target_os = "macos", target_arch = "aarch64"))
+            && matches!(case.name.as_str(), "gen0161" | "gen0953" | "gen2879")
+            && case.inputs.get("op").and_then(Value::as_str) == Some("deform")
+        {
+            Some(
+                "upstream use-after-free in SmBSplineCurveNLib.cpp:3127-3149 (issue #449); Rust matches the Linux reference"
+                    .into(),
+            )
+        } else {
+            None
+        }
+    }
+
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         let k = &Kernel::default();
         for _ in 0..64 {
