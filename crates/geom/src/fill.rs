@@ -458,6 +458,12 @@ fn loop_gap(uv: &[[f64; 2]]) -> [f64; 2] {
 }
 
 /// Whether `p` is inside the closed loop `uv` (ray casting).
+///
+/// The ray goes from `p` towards +x, at the height of `p`: an edge crosses it when exactly
+/// one of its ends is strictly above that height (so an end exactly on the ray counts as
+/// below it, and a corner of the loop is crossed once), and the crossing counts only when it
+/// lies strictly to the right of `p`. A point on the loop's edge is answered by that rule
+/// like any other point: there is no separate "on the boundary" case.
 pub(crate) fn inside_loop(p: [f64; 2], uv: &[[f64; 2]]) -> bool {
     let m = uv.len();
     let mut inside = false;
@@ -538,7 +544,8 @@ fn check_projectable(points: &[Vec3], uv: &[[f64; 2]]) -> SplineResult<()> {
     Ok(())
 }
 
-/// Whether the closed segments `ab` and `cd` share a point.
+/// Whether the closed segments `ab` and `cd` share a point: crossing, touching at an
+/// endpoint and lying on each other (collinear and overlapping) all count as meeting.
 pub(crate) fn segments_meet(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
     let orient = |p: [f64; 2], q: [f64; 2], r: [f64; 2]| (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
     let within =
@@ -1086,5 +1093,90 @@ mod tests {
         }
         assert!(fill_loop(6, &mut lifted(&hex, &dome), 2e-5, MAX_CROWN).is_ok());
         assert!(fill_loop(6, &mut lifted(&hex, &dome), 2e-5, MIN_CROWN).is_ok());
+    }
+
+    #[test]
+    fn inside_loop_finds_the_inside_of_a_loop_and_resolves_its_boundary_by_the_ray_casting_rule() {
+        let square = vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+        // The middle of the square is inside it; a point beyond each of its four sides is not.
+        assert!(inside_loop([5.0, 5.0], &square), "the middle of the square is inside");
+        for p in [[-1.0, 5.0], [15.0, 5.0], [5.0, -1.0], [5.0, 15.0]] {
+            assert!(!inside_loop(p, &square), "{p:?} is outside the square");
+        }
+        // The rule: the ray goes from the point towards +x, at the point's height. An edge
+        // crosses it when exactly one of its ends is strictly above that height (the half-open
+        // rule, so an end exactly on the ray counts as below it and a corner is crossed once),
+        // and a crossing counts only when it lies strictly to the right of the point.
+        //
+        // A point on the bottom edge: the edge it lies on has no end strictly above the ray,
+        // so it is not crossed; the ray meets the right edge once, to the right of the point,
+        // and the left edge once, to its left. One crossing to the right: inside.
+        assert!(inside_loop([5.0, 0.0], &square), "a point on the bottom edge is inside");
+        // A point on the top edge: the ray is at the top of the square, where no edge has an
+        // end strictly above it, so it crosses none of them: outside.
+        assert!(!inside_loop([5.0, 10.0], &square), "a point on the top edge is outside");
+        // A point on the right edge: the ray meets that edge exactly at the point, and such a
+        // crossing is not counted (the comparison is strict); the left edge's crossing is to
+        // the left of the point. No crossing to the right: outside.
+        assert!(!inside_loop([10.0, 5.0], &square), "a point on the right edge is outside");
+        // A point on the left edge: the ray meets that edge exactly at the point (not
+        // counted) and the right edge once, to the right of the point: inside.
+        assert!(inside_loop([0.0, 5.0], &square), "a point on the left edge is inside");
+        // The corners: the bottom left one is inside (the ray leaves it and meets the right
+        // edge once, to the right of the point), the bottom right one is outside (the ray
+        // meets the right edge exactly at the corner, which is not counted) and the two top
+        // ones are outside (the ray is at the top of the square, where no edge crosses it).
+        assert!(inside_loop([0.0, 0.0], &square), "the bottom left corner is inside");
+        for p in [[10.0, 0.0], [10.0, 10.0], [0.0, 10.0]] {
+            assert!(!inside_loop(p, &square), "the corner {p:?} is outside");
+        }
+        // Which way the loop runs does not matter: the same points get the same answers.
+        let mut back = square.clone();
+        back.reverse();
+        for p in [[5.0, 5.0], [5.0, 0.0], [5.0, 10.0], [10.0, 5.0], [0.0, 5.0], [0.0, 0.0], [10.0, 0.0], [0.0, 10.0]] {
+            assert_eq!(inside_loop(p, &square), inside_loop(p, &back), "{p:?}");
+        }
+    }
+
+    #[test]
+    fn inside_loop_finds_the_notch_of_a_concave_loop_outside() {
+        // An L: a wide bottom arm and a tall left arm, with the corner between them notched out.
+        let l = vec![[0.0, 0.0], [30.0, 0.0], [30.0, 10.0], [10.0, 10.0], [10.0, 30.0], [0.0, 30.0]];
+        // In the body of the L: the corner where the two arms meet, and each arm's far end.
+        for p in [[5.0, 5.0], [20.0, 5.0], [5.0, 20.0]] {
+            assert!(inside_loop(p, &l), "{p:?} is in the body of the L");
+        }
+        // In the notch: outside.
+        for p in [[20.0, 20.0], [15.0, 15.0], [25.0, 15.0]] {
+            assert!(!inside_loop(p, &l), "{p:?} is in the notch of the L");
+        }
+        // The inner corner of the notch is outside as well: at its height the ray runs along
+        // the notch's bottom edge, which is not crossed (both its ends are at that height),
+        // and meets the arm's side exactly at the corner, which is not counted.
+        assert!(!inside_loop([10.0, 10.0], &l), "the inner corner of the notch is outside");
+        // The same loop the other way round gives the same answers.
+        let mut back = l.clone();
+        back.reverse();
+        for p in [[5.0, 5.0], [20.0, 20.0], [10.0, 10.0]] {
+            assert_eq!(inside_loop(p, &l), inside_loop(p, &back), "{p:?}");
+        }
+    }
+
+    #[test]
+    fn segments_meet_finds_crossings_touchings_and_overlaps() {
+        // Two segments that cross.
+        assert!(segments_meet([0.0, 0.0], [10.0, 10.0], [0.0, 10.0], [10.0, 0.0]), "the diagonals of a square cross");
+        // Two segments that are apart.
+        assert!(!segments_meet([0.0, 0.0], [4.0, 0.0], [0.0, 4.0], [1.0, 4.0]), "parallel segments apart do not meet");
+        // Two segments that share only an endpoint: the two sides of an elbow.
+        assert!(segments_meet([0.0, 0.0], [10.0, 0.0], [10.0, 0.0], [10.0, 10.0]), "the sides of an elbow meet at the elbow");
+        // An endpoint in the middle of the other segment.
+        assert!(segments_meet([0.0, 0.0], [10.0, 0.0], [5.0, 0.0], [5.0, 5.0]), "a T's stem meets its bar");
+        // Collinear segments that overlap.
+        assert!(segments_meet([0.0, 0.0], [10.0, 0.0], [5.0, 0.0], [15.0, 0.0]), "collinear segments that overlap meet");
+        // Collinear segments that only touch at an endpoint.
+        assert!(segments_meet([0.0, 0.0], [10.0, 0.0], [10.0, 0.0], [20.0, 0.0]), "collinear segments that touch at an endpoint meet");
+        // Collinear segments that do not overlap.
+        assert!(!segments_meet([0.0, 0.0], [10.0, 0.0], [11.0, 0.0], [20.0, 0.0]), "collinear segments that do not overlap do not meet");
     }
 }
