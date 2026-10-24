@@ -119,8 +119,12 @@ multiplier. Bare saved feature length cells and rule thresholds gain the previou
 unit; explicit units and nonliteral source expressions retain their text. A matching active
 row rederives its driven values when units change. User parameters retain their own units.
 
-Rules recompute on configured edits, **Apply**, and **Preview Row**. Ordinary parameter
-edits can leave the configuration unmatched and do not continuously enforce restrictions.
+Rules recompute on configured edits, **Apply**, and **Preview Row**. An ordinary parameter edit
+runs only the rules that switch a feature's suppression and whose condition reads a parameter whose
+value changed (or a feature such a rule just switched), in their order, so a switch parameter alone
+turns its features on and off; `parameters.change` lists them as `switched`. It does not drive
+parameters or enforce restrictions: those, and a matching configuration, wait for an edit of the
+configuration or an activation.
 Cross-unit drives store effective numeric lengths; their saved source expressions reevaluate
 on the next Apply or Preview rather than following later ordinary parameter edits live.
 Saved source cells are preserved: disabling a drive restores the row's original choice.

@@ -14,7 +14,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\" (new parameters default to their value's unit), comment?, \
              favorite?: bool, new_name?: rename (references follow); or delete: name; or changes: {name: expression, …} (existing \
          parameters, checked together and rebuilt once, all or nothing) → changed?: {name: value} (with changes), recomputed: features rebuilt, \
-         restored: features whose earlier result for the same inputs was reused (e.g. a value set back)",
+         restored: features whose earlier result for the same inputs was reused (e.g. a value set back), switched?: [{feature, name, suppressed}] \
+         (the configuration rules that switch a feature's suppression and read a parameter whose value changed run in their order, as on \
+         activation; driven parameters and restrictions wait for a configuration edit or activation)",
     ),
     CommandSpec::new("parameters.list", "List Parameters", list).icon("list").noundo().doc_only().params(
         "favorites?: bool (only favourites), filter?: all|user|sketch|feature|favorites → parameters (name, expression, unit, value in its unit, \
@@ -107,6 +109,7 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`expression` must be a number or text"));
     };
     let (unit, comment) = (str_(p, "unit"), str_(p, "comment"));
+    let before = s.doc.param_values().0;
     match &e {
         Some(e) => s.doc_mut().change_param(&name, e, unit, comment)?,
         None => {
@@ -121,8 +124,12 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(f) = bool_(p, "favorite") {
         s.doc_mut().set_favorite(&name, f)?;
     }
+    let switched = switch_by_rules(s, &before);
     s.settle_value_edit(&solved)?;
     let (vals, _) = s.doc.param_values();
+    if !switched.is_empty() {
+        out["switched"] = json!(switched);
+    }
     out["name"] = json!(name);
     out["expression"] = json!(e);
     out["value"] = json!(vals.get(&name).map(|v| v.v));
@@ -146,11 +153,34 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
         let e = expr_arg(&json!({"e": e}), "e").ok_or_else(|| bad(cmd, format!("`changes.{name}` must be a number or text")))?;
         list.push((name.trim().to_string(), e));
     }
+    let before = s.doc.param_values().0;
     s.doc_mut().change_params_atomic(&list)?;
+    let switched = switch_by_rules(s, &before);
     s.settle_value_edit(solved)?;
     let (vals, _) = s.doc.param_values();
     let values: serde_json::Map<String, Value> = list.iter().map(|(n, _)| (n.clone(), json!(vals.get(n).map(|v| v.v)))).collect();
-    Ok(json!({"changed": values, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored, "errors": failing(s)}))
+    let mut out = json!({"changed": values, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored, "errors": failing(s)});
+    if !switched.is_empty() {
+        out["switched"] = json!(switched);
+    }
+    Ok(out)
+}
+
+/// The configuration rules that switch a feature's suppression and read a parameter this edit
+/// changed (`Document::apply_suppression_rules`), applied before the design is rebuilt, so that
+/// one rebuild has them: `[{feature, name, suppressed}]` for each feature they switched.
+fn switch_by_rules(s: &mut Session, before: &std::collections::BTreeMap<String, expr::Value>) -> Vec<Value> {
+    if s.doc.configs.rules.is_empty() {
+        return Vec::new();
+    }
+    let switched = s.doc_mut().apply_suppression_rules(before);
+    switched
+        .into_iter()
+        .map(|(id, suppressed)| {
+            let name = s.doc.features.iter().find(|f| f.id == id).map(|f| f.name.clone());
+            json!({"feature": id, "name": name, "suppressed": suppressed})
+        })
+        .collect()
 }
 
 fn list(s: &mut Session, p: &Value) -> Result<Value> {

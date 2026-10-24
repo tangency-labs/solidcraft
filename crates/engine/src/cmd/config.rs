@@ -440,6 +440,43 @@ mod tests {
     }
 
     #[test]
+    fn a_switch_parameter_alone_switches_the_features_its_rules_suppress() {
+        // A 10 mm cube with a 4 mm hole cut through it; `Enable` and the hole's suppression are
+        // configured, with one rule each way. A plain parameter edit runs them: no activation.
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "Enable", "expression": "1", "unit": ""}));
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "10 mm"}));
+        run(&mut s, "solid.box", json!({"length": "W", "width": 10, "height": 10, "body_name": "A"}));
+        run(&mut s, "solid.hole", json!({"position": [5, 5, 10], "diameter": 4, "name": "Hole"}));
+        let hole = s.doc.features.last().map_or(0, |f| f.id);
+        run(&mut s, "config.configure", json!({"params": ["Enable"], "features": ["Hole"]}));
+        let rule = |id: &str, when: &str, off: bool| {
+            json!({"rule": {"id": id, "name": id, "enabled": true,
+                "condition": {"type": "parameter", "parameter": "Enable", "operator": "eq", "expression": when},
+                "effect": {"type": "drive_suppression", "feature": hole, "value": off}}})
+        };
+        run(&mut s, "config.rule", rule("off", "0", true));
+        run(&mut s, "config.rule", rule("on", "1", false));
+        let full = 1000.0;
+        let drilled = full - std::f64::consts::PI * 4.0 * 10.0;
+        assert!((volume(&mut s) - drilled).abs() < 0.5, "{}", volume(&mut s));
+        let r = run(&mut s, "parameters.change", json!({"name": "Enable", "expression": "0"}));
+        assert_eq!(r["switched"], json!([{"feature": hole, "name": "Hole", "suppressed": true}]), "{r}");
+        assert!((volume(&mut s) - full).abs() < 1e-6, "the hole is off: {}", volume(&mut s));
+        // Back on, through the `changes` form; one undo takes the edit and its switch back.
+        let r = run(&mut s, "parameters.change", json!({"changes": {"Enable": "1"}}));
+        assert_eq!(r["switched"][0]["suppressed"], json!(false), "{r}");
+        assert!((volume(&mut s) - drilled).abs() < 0.5);
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.doc.features.iter().any(|f| f.id == hole && f.suppressed), "undo restores the switch with the value");
+        run(&mut s, "edit.redo", json!({}));
+        // The hole switched off by hand stays off through an edit its rules do not read.
+        run(&mut s, "timeline.suppress", json!({"feature": hole, "suppressed": true}));
+        let r = run(&mut s, "parameters.change", json!({"name": "W", "expression": "12 mm"}));
+        assert!(r.get("switched").is_none() && s.doc.features.iter().any(|f| f.id == hole && f.suppressed), "{r}");
+    }
+
+    #[test]
     fn configuration_activation_tolerates_identical_existing_errors_but_rejects_reenabled_failure() {
         let mut s = Session::default();
         run(&mut s, "parameters.change", json!({"name":"radius","expression":"10 mm"}));
