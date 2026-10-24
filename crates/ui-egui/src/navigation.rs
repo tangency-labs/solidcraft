@@ -375,7 +375,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     let picking = caps.pick;
     let (hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, primary_released, delta) = ui.input(|i| {
         (
-            i.pointer.hover_pos(),
+            // A finger that lifts closes the touch with `PointerGone` in the same frame, so a tap's
+            // click has no hover: it happened where the finger was.
+            i.pointer.hover_pos().or_else(|| i.pointer.any_released().then(|| i.pointer.interact_pos()).flatten()),
             i.smooth_scroll_delta.y,
             i.modifiers,
             i.pointer.middle_down(),
@@ -395,7 +397,10 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // hit test also counts the model as under the pointer a few points past its own edge and
     // inside a window's or a list's edge (#678), so the pointer must be in the viewport too,
     // with no window or menu above it.
-    let inside = ui.is_enabled() && resp.contains_pointer() && ui.rect_contains_pointer(rect) && hover.is_some_and(|p| !axes.contains(p));
+    // A lifted finger is no longer over anything; the view had it when it took the click.
+    let lifted = ui.input(|i| i.pointer.hover_pos().is_none());
+    let over = if lifted { resp.clicked() || resp.drag_stopped() } else { resp.contains_pointer() && ui.rect_contains_pointer(rect) };
+    let inside = ui.is_enabled() && over && hover.is_some_and(|p| rect.contains(p) && !axes.contains(p));
     app.viewport.mouse = hover.filter(|_| inside);
     // Sketch snap suppression is set once in `viewport::show` from preferences.
     middle_double_click(app, ui, inside);
@@ -409,6 +414,46 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     } else if !ui.input(|i| i.is_scrolling()) {
         app.viewport.wheel_zoom_raw_until_idle = false;
     }
+    // ---- touch (#android): one finger orbits, two fingers pan, a pinch zooms.
+    // A touch screen has no mouse buttons, so a finger drag would otherwise be the preset's
+    // left-button drag (box select) and nothing would ever orbit.
+    let touches: Vec<(egui::TouchId, egui::TouchPhase, Pos2)> = ui.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::Touch { id, phase, pos, .. } => Some((*id, *phase, *pos)),
+                _ => None,
+            })
+            .collect()
+    });
+    for (id, phase, pos) in touches {
+        match phase {
+            egui::TouchPhase::Start | egui::TouchPhase::Move => match app.viewport.touch.iter_mut().find(|(t, _)| *t == id) {
+                Some(slot) => slot.1 = pos,
+                None => app.viewport.touch.push((id, pos)),
+            },
+            egui::TouchPhase::End | egui::TouchPhase::Cancel => app.viewport.touch.retain(|(t, _)| *t != id),
+        }
+    }
+    let two_fingers = app.viewport.touch.len() >= 2;
+    // Pinch: egui's own multi-touch state, which tracks the fingers' spread per frame.
+    if let Some(m) = ui.input(|i| i.multi_touch()) {
+        let z = f64::from(m.zoom_delta);
+        if (z - 1.0).abs() > 1e-3 {
+            app.cancel_view_animation();
+            let anchor = crate::prefs::pivot_under(app, &projection(app, rect), m.center_pos);
+            app.cam.zoom_at(1.0 / z, Some(anchor));
+            log::debug!("touch: {} fingers, zoom {z:.3}", m.num_touches);
+        }
+    }
+    // Body-free wheel/drag navigation is meaningless under two fingers: the fingers own the view.
+    let touch_nav = if two_fingers {
+        Some(NavMode::Pan)
+    } else if app.viewport.touch.len() == 1 && app.tool.is_none() && app.dialog.is_none() && inside {
+        Some(NavMode::Orbit)
+    } else {
+        None
+    };
     let options = ui.ctx().options(|o| o.input_options);
     let page_height = ui.ctx().viewport_rect().height();
     let raw = ui.input(|i| immediate_wheel(i, options, page_height, &mut app.viewport.trackpad_gesture));
@@ -495,7 +540,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         };
         let openscad_orbit =
             app.preferences.nav == crate::prefs::OPENSCAD_NAV && app.tool.is_none() && app.dialog.is_none() && !mods.shift && empty_space(app);
-        let preset = if app.preferences.nav != crate::prefs::OPENSCAD_NAV || openscad_orbit {
+        let preset = if touch_nav.is_some() {
+            touch_nav
+        } else if app.preferences.nav != crate::prefs::OPENSCAD_NAV || openscad_orbit {
             crate::prefs::nav_mode(app, crate::prefs::NavButton::Left, mods)
         } else {
             None

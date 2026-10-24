@@ -11,3 +11,8 @@ __pycache__/
 
 # cargo-mutants output (docs/mutation-testing.md)
 mutants.out*/
+
+# Android port: signing material never leaves this machine
+/keys/
+*.jks
+*.keystore

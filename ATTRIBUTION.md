@@ -487,6 +487,11 @@ Editable drawing code, native projects and shipped exports are collected under `
 
 | docs/book/src/og.png | SolidCraft contributors | copy of assets/branding/web/source/og.png staged by cargo xtask book (gitignored) | MIT OR Apache-2.0 |
 | docs/sponsors/blacksmith-ci-powered.png | Blacksmith (blacksmith.sh) | "CI powered by Blacksmith" sponsor banner supplied by Blacksmith for the sponsorship credit; used only to credit the sponsor, not part of the application | © Blacksmith, used with permission |
+| apps/solidcraft-android/res/mipmap-mdpi/ic_launcher.png | SolidCraft contributors | original SolidCraft application mark, 48 px export used as the Android launcher icon | MIT OR Apache-2.0 |
+| apps/solidcraft-android/res/mipmap-hdpi/ic_launcher.png | SolidCraft contributors | original SolidCraft application mark, 64 px export used as the Android launcher icon | MIT OR Apache-2.0 |
+| apps/solidcraft-android/res/mipmap-xhdpi/ic_launcher.png | SolidCraft contributors | original SolidCraft application mark, 128 px export used as the Android launcher icon | MIT OR Apache-2.0 |
+| apps/solidcraft-android/res/mipmap-xxhdpi/ic_launcher.png | SolidCraft contributors | original SolidCraft application mark, 256 px export used as the Android launcher icon | MIT OR Apache-2.0 |
+| apps/solidcraft-android/res/mipmap-xxxhdpi/ic_launcher.png | SolidCraft contributors | original SolidCraft application mark, 512 px export used as the Android launcher icon | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 

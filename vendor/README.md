@@ -301,3 +301,27 @@ SolidCraft changes:
   submits nothing (`DeviceLost::probe`), so a device the driver lost is found by that
   submission rather than by the first queue write, which panicked inside wgpu-core
   (`PendingWrites::activate`, #4172).
+
+## winit 0.30.13 / android-activity 0.6.1 (Android input and lifecycle)
+
+These two are no longer vendored: the Android input backend needs two changes that belong upstream,
+so they live as `[patch.crates-io]` git dependencies until a release carries them.
+
+- `Hawaii-005/winit`, branch `android-stylus-hover-and-palm` (no upstream PR yet: the 0.30 line has
+  no maintenance branch, and the 0.31 rewrite moved the backend into `winit-android`, so the port
+  there is still to be written): a stylus
+  hovering above the glass (`HoverMove`/`HoverEnter`) is reported as `WindowEvent::CursorMoved`, so
+  the viewport can show what a tap would pick before it lands; and finger input is ignored while the
+  stylus is down, because the palm resting next to a drawing pen otherwise arrives as a second finger
+  and every stroke reads as a pinch. A hover also clears that flag, so a lost `Up` cannot leave touch
+  dead.
+- `rust-mobile/android-activity#255` (`Hawaii-005/android-activity`, branch
+  `nonblocking-callbacks-and-ime-host`): `set_nonblocking_callbacks(true)` makes the JVM-thread
+  lifecycle callbacks hand their state over and return instead of waiting for `poll_events` — a
+  blocking SAF pick parks the Rust main thread, and the wait was long enough for Android to ANR the
+  app. `show_soft_input`/`hide_soft_input` also call the activity's own `imeShow`/`imeHide` when it
+  provides them, since a bare `NativeActivity` has no editable view and `showSoftInput` on the decor
+  view never delivers text.
+
+When either release ships these, the `[patch.crates-io]` entry goes away and the dependency goes
+back to crates.io.
