@@ -57,6 +57,16 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                             }
                         });
                     });
+                    ui_kit::row(ui, app.tr("prefs.bodies_folders"), |ui| {
+                        let modes = BodiesFolders::ALL;
+                        let labels: Vec<_> = modes.iter().map(|m| app.tr(m.label_id())).collect();
+                        let mut selected = modes.iter().position(|m| *m == app.preferences.browser_bodies_folders).unwrap_or(0);
+                        if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { proportional: true, compact: true, ..Default::default() })
+                            && let Some(mode) = modes.get(selected)
+                        {
+                            app.preferences.browser_bodies_folders = *mode;
+                        }
+                    });
                     ui_kit::text(ui, app.tr("prefs.layout_note"), ui_kit::Text::Hint("layout"));
                     ui_kit::LayoutPreview {
                         compact: app.ui.layout == crate::shell::LayoutMode::Docked,
