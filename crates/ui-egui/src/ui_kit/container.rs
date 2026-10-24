@@ -259,7 +259,7 @@ impl Container {
                 offset: [0, t.space_14 as i8],
                 blur: (t.space_24 + t.space_12) as u8,
                 spread: 0,
-                color: t.app_bar.gamma_multiply(0.18),
+                color: t.shade.gamma_multiply(0.18),
             })
     }
 
