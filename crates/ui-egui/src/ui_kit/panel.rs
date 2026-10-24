@@ -850,10 +850,11 @@ impl<'a> Window<'a> {
         state: &mut S,
         left: impl FnOnce(&mut Ui),
     ) -> (bool, super::Action) {
-        self.show_pages_inner(ctx, selected, pages, state, None, left)
+        self.show_pages_inner(ctx, selected, pages, state, None, None, left)
     }
 
     /// Page navigation with a strip above the page body (Preferences search).
+    /// `on_select` runs when a page tab is clicked, before that page is drawn.
     pub(crate) fn show_pages_with_header<S>(
         self,
         ctx: &egui::Context,
@@ -861,9 +862,10 @@ impl<'a> Window<'a> {
         pages: &[WindowPage<S>],
         state: &mut S,
         header: fn(&mut Ui, &mut S),
+        on_select: fn(&mut S),
         left: impl FnOnce(&mut Ui),
     ) -> (bool, super::Action) {
-        self.show_pages_inner(ctx, selected, pages, state, Some(header), left)
+        self.show_pages_inner(ctx, selected, pages, state, Some(header), Some(on_select), left)
     }
 
     fn show_pages_inner<S>(
@@ -873,12 +875,13 @@ impl<'a> Window<'a> {
         pages: &[WindowPage<S>],
         state: &mut S,
         header: Option<fn(&mut Ui, &mut S)>,
+        on_select: Option<fn(&mut S)>,
         left: impl FnOnce(&mut Ui),
     ) -> (bool, super::Action) {
         self.body_padding = false;
         let rows = self.page_rows;
         let padding = self.page_padding;
-        self.show_with_left(ctx, true, |ui| page_list_sized(ui, selected, pages, state, rows, padding, header), left)
+        self.show_with_left(ctx, true, |ui| page_list_sized(ui, selected, pages, state, rows, padding, header, on_select), left)
     }
 
     /// The same bounded card frame, either movable or an input-blocking modal.
@@ -941,7 +944,7 @@ pub(crate) struct WindowPage<S> {
 
 #[cfg(test)]
 pub(super) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<S>], state: &mut S) {
-    page_list_sized(ui, selected, pages, state, 16.0, vec2(Tokens::get().space_16, Tokens::get().space_16), None);
+    page_list_sized(ui, selected, pages, state, 16.0, vec2(Tokens::get().space_16, Tokens::get().space_16), None, None);
 }
 
 fn page_list_sized<S>(
@@ -952,6 +955,7 @@ fn page_list_sized<S>(
     rows: f32,
     padding: egui::Vec2,
     header: Option<fn(&mut Ui, &mut S)>,
+    on_select: Option<fn(&mut S)>,
 ) {
     let t = Tokens::get();
     let height = (dimension(ui.ctx().content_rect().height()) - t.form_header_height - t.form_footer_height - t.space_24 * 3.0)
@@ -979,6 +983,9 @@ fn page_list_sized<S>(
                     ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height + t.space_4), egui::Sense::click());
                 if response.clicked() {
                     *selected = index;
+                    if let Some(on_select) = on_select {
+                        on_select(state);
+                    }
                 }
                 let on = *selected == index;
                 if on || response.hovered() || response.has_focus() {

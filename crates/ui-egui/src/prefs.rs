@@ -289,6 +289,11 @@ fn search_header(ui: &mut egui::Ui, app: &mut SolveApp) {
     ui.add_space(Tokens::get().space_8);
 }
 
+/// A page tab leaves search and shows that page on its own.
+fn clear_search(app: &mut SolveApp) {
+    app.prefs_window.filter.clear();
+}
+
 fn window_page<const INDEX: usize>(ui: &mut egui::Ui, app: &mut SolveApp) {
     if let Some(rect) = crate::scenario::rect_of("prefs:page:Sketch") {
         crate::scenario::publish_target("prefs:page:Selection", rect);
@@ -1622,7 +1627,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .actions("OK", "Cancel", Some("Apply"));
     let window = if capturing { window.keep_open_on_escape() } else { window };
     let mut selected = app.prefs_window.section;
-    let (closed, action) = window.show_pages_with_header(ctx, &mut selected, &WINDOW_PAGES, app, search_header, |ui| {
+    let (closed, action) = window.show_pages_with_header(ctx, &mut selected, &WINDOW_PAGES, app, search_header, clear_search, |ui| {
         if ui_kit::button(ui, crate::i18n::tr("ui.restore_defaults"), ui_kit::Button::Normal)
             .on_hover_text(crate::i18n::tr("ui.reset_the_settings_on_this_page"))
             .clicked()
