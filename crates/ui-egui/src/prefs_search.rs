@@ -117,19 +117,71 @@ pub(crate) fn query(ui: &Ui) -> String {
 }
 
 /// A child that does not move the parent until [`commit_search_child`] says this group matched.
-pub(crate) fn detached_child(ui: &mut Ui, salt: impl std::hash::Hash + std::fmt::Debug) -> Ui {
-    ui.new_child(UiBuilder::new().id_salt(salt).max_rect(ui.available_rect_before_wrap()).layout(egui::Layout::top_down(egui::Align::Min)))
+/// An invisible child only counts hits, so a miss cannot paint over the setting that matched.
+pub(crate) fn detached_child(ui: &mut Ui, salt: impl std::hash::Hash + std::fmt::Debug, invisible: bool) -> Ui {
+    let mut builder = UiBuilder::new().id_salt(salt).max_rect(ui.available_rect_before_wrap()).layout(egui::Layout::top_down(egui::Align::Min));
+    if invisible {
+        builder = builder.invisible();
+    }
+    ui.new_child(builder)
 }
 
 /// Keep the child's layout only when it found something. An empty page or section leaves no gap.
 pub(crate) fn commit_search_child(ui: &mut Ui, child: &Ui, before: u32) {
-    if hits(ui) <= before {
-        return;
+    if hits(ui) > before {
+        place_search_child(ui, child);
     }
+}
+
+/// The group is already known to match. Keep whatever it drew.
+pub(crate) fn place_search_child(ui: &mut Ui, child: &Ui) {
     let rect = child.min_rect();
     if rect.height().is_finite() && rect.height() > 0.0 && rect.width().is_finite() {
         ui.advance_cursor_after_rect(rect);
     }
+}
+
+pub(crate) struct SearchLayoutMark {
+    page_shown: bool,
+    section_shown: String,
+    hits: u32,
+    heading_open: bool,
+    child_matched: bool,
+}
+
+pub(crate) fn search_layout_mark(ui: &Ui) -> SearchLayoutMark {
+    with(ui, |state| SearchLayoutMark {
+        page_shown: state.page_shown,
+        section_shown: state.section_shown.clone(),
+        hits: state.hits,
+        heading_open: state.heading_open,
+        child_matched: state.child_matched,
+    })
+    .unwrap_or(SearchLayoutMark { page_shown: false, section_shown: String::new(), hits: 0, heading_open: false, child_matched: false })
+}
+
+pub(crate) fn restore_search_layout(ui: &Ui, mark: SearchLayoutMark) {
+    with(ui, |state| {
+        state.page_shown = mark.page_shown;
+        state.section_shown = mark.section_shown;
+        state.hits = mark.hits;
+        state.heading_open = mark.heading_open;
+        state.child_matched = mark.child_matched;
+    });
+}
+
+/// Forget the headings counted while every page was probed, and count the visible pass again.
+/// Dropdown values learned on the probe stay, so the next pass can show them.
+pub(crate) fn rewind_search_layout(ui: &Ui) {
+    with(ui, |state| {
+        state.page_shown = false;
+        state.section_shown.clear();
+        state.section_matches = false;
+        state.block_matches = false;
+        state.heading_open = false;
+        state.hits = 0;
+        state.child_matched = false;
+    });
 }
 
 pub(crate) fn shows_all(ui: &Ui) -> bool {
@@ -460,6 +512,7 @@ mod tests {
         let hit = h.widget("Reverse zoom direction").expect("zoom row");
         let gap = hit[1] - f64::from(search.y);
         assert!(gap < 520.0, "search results leave a {gap:.0}px gap under the field");
+        assert!(h.widget("Translation X").is_none(), "unmatched pages do not stack on the result");
         h.app.prefs_window.filter = "extrude".into();
         h.frames(3);
         assert!(crate::scenario::rect_of("prefs:search:shortcuts").is_some(), "shortcut matches collapse to one row");
