@@ -261,7 +261,8 @@ fn take_cache(
     index: usize,
     handle: Option<PieceHandle>,
 ) -> Option<CurveCache<PieceHandle>> {
-    let (built_for, cache) = caches.get_mut(index)?.take()?;
+    let slot = 2 * index + handle.map_or(0, |h| usize::from(h.1));
+    let (built_for, cache) = caches.get_mut(slot)?.take()?;
     (Some(built_for) == handle).then_some(cache)
 }
 
@@ -272,8 +273,11 @@ fn put_cache(
     handle: Option<PieceHandle>,
     cache: Option<CurveCache<PieceHandle>>,
 ) {
-    if let (Some(slot), Some(h), Some(c)) = (caches.get_mut(index), handle, cache) {
-        *slot = Some((h, c));
+    if let (Some(h), Some(c)) = (handle, cache) {
+        let slot = 2 * index + usize::from(h.1);
+        if let Some(s) = caches.get_mut(slot) {
+            *s = Some((h, c));
+        }
     }
 }
 
@@ -1141,8 +1145,10 @@ impl CompositeCurve {
         // every offset's curve cache with the handle it was built for (performance
         // only: upstream keeps the cache on the curve until the curve changes; see
         // `Curve::global_curve_intersect_cached`)
+        // Two slots per offset: one for the analytic handle and one for the
+        // non-analytic handle (upstream keeps both on the curve).
         let mut caches: Vec<Option<(PieceHandle, CurveCache<PieceHandle>)>> =
-            (0..num_offs).map(|_| None).collect();
+            (0..2 * num_offs).map(|_| None).collect();
 
         // Intersect every offset curve with every offset curve, including itself.
         for ii in 0..num_offs {
