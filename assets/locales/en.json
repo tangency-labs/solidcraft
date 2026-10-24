@@ -1183,6 +1183,8 @@
   "joint.from_bodies_hint": "Each picked body moves into a new component of its own and stays where it is.",
   "joint.one_body": "Both picks are on {body}. Pick the second one on another part.",
   "joint.one_component": "These parts are bodies of one component: {bodies}. A joint moves one component against another, so each part needs a component of its own.",
+  "joint.rigid_group_one_component": "These {count} bodies are all in one component (or in the design itself): use {command} first.",
+  "joint.rigid_group_select_components": "Select two or more components.",
   "keymap.command_id": "Command ID",
   "keymap.empty": "No matching commands",
   "keymap.use_anyway": "Use {key} here anyway",

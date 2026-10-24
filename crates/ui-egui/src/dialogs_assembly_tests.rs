@@ -342,6 +342,45 @@ fn picks_on_one_component_say_why_and_offer_components() {
     assert!(text_at(&out, &why).is_none(), "nothing left to say");
 }
 
+#[test]
+fn rigid_group_bodies_in_one_component_explain_how_to_separate_them() {
+    for component in [None, Some("Part")] {
+        let mut s = Session::default();
+        if let Some(name) = component {
+            s.execute("component.create", &json!({"name": name})).unwrap();
+        }
+        for x in [0, 30, 60, 90, 120] {
+            s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        }
+        let mut app = SolveApp::new(s, Services::default());
+        app.session.selection = (1..=5).map(|i| Sel::Body { name: format!("Body{i}") }).collect();
+        app.start("joint.rigid_group");
+        let d = app.dialog.take().unwrap();
+        assert_eq!(
+            apply_commands(&app, &d).unwrap_err(),
+            "These 5 bodies are all in one component (or in the design itself): use Create Components from Bodies first."
+        );
+        app.run("component.from_bodies", json!({"bodies": ["Body1", "Body2", "Body3", "Body4", "Body5"]})).unwrap();
+        assert_eq!(apply_commands(&app, &d).unwrap()[0].1["occurrences"].as_array().unwrap().len(), 5);
+    }
+}
+
+#[test]
+fn rigid_group_preserves_two_instances_of_one_component() {
+    let mut s = Session::default();
+    let first = s.execute("component.create", &json!({"name": "Part"})).unwrap()["occurrence"].as_u64().unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let second = s.execute("occurrence.copy", &json!({"occurrence": first, "translate": [30, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    s.selection = [first, second].into_iter().map(|id| Sel::Body { name: s.occurrence_bodies(&[id], false).unwrap()[0].clone() }).collect();
+    let mut app = SolveApp::new(s, Services::default());
+    app.start("joint.rigid_group");
+    let d = app.dialog.take().unwrap();
+    let commands = apply_commands(&app, &d).unwrap();
+    assert_eq!(commands, vec![("joint.rigid_group".into(), json!({"occurrences": [first, second]}))]);
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    assert_eq!(app.session.doc.assembly.joints.len(), 1);
+}
+
 /// Two top faces mate face to face: B ends up upside down on A, not inside it;
 /// Flip turns it back over (into A).
 #[test]

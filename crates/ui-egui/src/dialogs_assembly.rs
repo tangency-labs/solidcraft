@@ -864,13 +864,17 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
 
 /// The occurrences of picked bodies (deduplicated, in pick order).
 fn occurrences(s: &Session, items: &[Sel]) -> Vec<u64> {
+    let frames = s.doc.body_frames(&s.model.state());
     let mut out = Vec::new();
     for x in items {
         if let Sel::Body { name } = x
-            && let Some(o) = occurrence_of_body(s, name)
-            && !out.contains(&o)
+            // World names distinguish instances; the definition's first occurrence does not.
+            && let Some((_, _, path, _)) = frames.iter().find(|(world, ..)| world == name)
         {
-            out.push(o);
+            let o = path.last().copied().unwrap_or(0);
+            if !out.contains(&o) {
+                out.push(o);
+            }
         }
     }
     out
@@ -946,9 +950,16 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             cmd("joint.origin", p)
         }
         Asm::RigidGroup => {
-            let occs = occurrences(s, sel_items(inputs, 0));
+            let items = sel_items(inputs, 0);
+            let occs = occurrences(s, items);
             if occs.len() < 2 {
-                return Err("select two or more components".into());
+                if occs.len() == 1 && items.len() > 1 && items.iter().all(|x| matches!(x, Sel::Body { .. })) {
+                    return Err(crate::i18n::format(
+                        "joint.rigid_group_one_component",
+                        &[("count", &items.len().to_string()), ("command", crate::i18n::tr("cmd.component_from_bodies"))],
+                    ));
+                }
+                return Err(crate::i18n::tr("joint.rigid_group_select_components").into());
             }
             cmd("joint.rigid_group", json!({ "occurrences": occs }))
         }
