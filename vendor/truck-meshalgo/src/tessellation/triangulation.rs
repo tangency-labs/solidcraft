@@ -890,7 +890,7 @@ impl PolyBoundary {
 
     /// Adds the loops' segments between the vertices [`Self::insert_points`] gave. SolidCraft: a
     /// segment that crosses one already added is split where they meet (truck dropped it and
-    /// joined across the face; #1648).
+    /// joined across the face; #1648), in bounded steps ([`add_split_constraint`], #6294).
     fn add_constraints(&self, triangulation: &mut Cdt, poly2tri: &[Option<VertexId>]) {
         let mut counter = 0;
         self.0
@@ -909,9 +909,79 @@ impl PolyBoundary {
                 if triangulation.can_add_constraint(vi, vj) {
                     triangulation.add_constraint(vi, vj);
                 } else {
-                    triangulation.add_constraint_and_split(vi, vj, |p| p);
+                    add_split_constraint(triangulation, vi, vj);
                 }
             });
+    }
+}
+
+/// SolidCraft: most steps [`add_split_constraint`] takes along one segment.
+const MAX_SPLIT_STEPS: usize = 256;
+
+/// SolidCraft: adds the segment `from`-`to` across the constraints already in its way, a step
+/// at a time: to where it crosses the first of them (a new vertex there), or, when that point
+/// can't be used, to the end of that constraint nearer the segment. Each step must get further
+/// along the segment, and there are at most [`MAX_SPLIT_STEPS`]; the rest of a segment that
+/// can't go on is left out (the face's mesh may then join across it). spade's own
+/// `add_constraint_and_split` never returned on a segment running back over another at a shallow
+/// angle, and grew memory all the while (#6294).
+fn add_split_constraint(triangulation: &mut Cdt, from: VertexId, to: VertexId) {
+    let at = |t: &Cdt, v: VertexId| {
+        let p = t.vertex(v).position();
+        [p.x, p.y]
+    };
+    let (a, b) = (at(triangulation, from), at(triangulation, to));
+    let d = [b[0] - a[0], b[1] - a[1]];
+    let len2 = d[0] * d[0] + d[1] * d[1];
+    if !(len2 > 0.0 && len2.is_finite()) {
+        return;
+    }
+    // How far along the segment a point is: 0 at `from`, 1 at `to`.
+    let along = |p: [f64; 2]| ((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / len2;
+    let off = |p: [f64; 2]| ((p[0] - a[0]) * d[1] - (p[1] - a[1]) * d[0]).abs();
+    let (mut now, mut t) = (from, 0.0);
+    for _ in 0..MAX_SPLIT_STEPS {
+        if now == to {
+            return;
+        }
+        if triangulation.can_add_constraint(now, to) {
+            triangulation.add_constraint(now, to);
+            return;
+        }
+        let Some(edge) = triangulation.get_conflicting_edges_between_vertices(now, to).next() else {
+            return;
+        };
+        let ends = [edge.from().fix(), edge.to().fix()];
+        let [p, q] = ends.map(|v| at(triangulation, v));
+        let ahead = |s: f64| s > t && s <= 1.0;
+        // Where the segment crosses the constraint, when the two aren't (nearly) parallel.
+        let e = [q[0] - p[0], q[1] - p[1]];
+        let den = d[0] * e[1] - d[1] * e[0];
+        let crossing = (den.abs() > f64::EPSILON * (len2 * (e[0] * e[0] + e[1] * e[1])).sqrt())
+            .then(|| {
+                let s = ((p[0] - a[0]) * e[1] - (p[1] - a[1]) * e[0]) / den;
+                [a[0] + s * d[0], a[1] + s * d[1]]
+            })
+            .filter(|x| x[0].is_finite() && x[1].is_finite() && ahead(along(*x)) && along(*x) < 1.0);
+        let mut next = None;
+        if let Some(x) = crossing {
+            if let Ok(v) = triangulation.insert(SPoint2::new(x[0], x[1])) {
+                if v != now && ahead(along(at(triangulation, v))) && triangulation.can_add_constraint(now, v) {
+                    next = Some(v);
+                }
+            }
+        }
+        if next.is_none() {
+            next = ends
+                .into_iter()
+                .filter(|&v| v != now && ahead(along(at(triangulation, v))))
+                .min_by(|&u, &v| off(at(triangulation, u)).total_cmp(&off(at(triangulation, v))))
+                .filter(|&v| triangulation.can_add_constraint(now, v));
+        }
+        let Some(v) = next else { return };
+        triangulation.add_constraint(now, v);
+        t = along(at(triangulation, v));
+        now = v;
     }
 }
 
@@ -1733,6 +1803,27 @@ pub mod include_test_hooks {
     fn hook_passes() {
         let n = include_answers_as_before(0..120);
         assert!(matches!(n, Ok(n) if n > 100_000), "{n:?}");
+    }
+}
+
+/// SolidCraft: [`PolyBoundary::add_constraints`] on loops given in the triangulation's own
+/// coordinates, for kernel tests (#6294).
+///
+/// Not part of the API. Built only for tests, or with the `test-hooks` feature.
+#[cfg(any(test, feature = "test-hooks"))]
+#[doc(hidden)]
+pub mod constraint_test_hooks {
+    use super::*;
+
+    /// Inserts `points`, then adds each loop's segments as a face's boundary is added. Returns
+    /// the vertices and the constraint edges the triangulation ends with.
+    pub fn add_loops(points: &[[f64; 2]], loops: &[Vec<usize>]) -> (usize, usize) {
+        let mut triangulation = Cdt::new();
+        let ids: Vec<Option<VertexId>> = points.iter().map(|p| triangulation.insert(SPoint2::new(p[0], p[1])).ok()).collect();
+        let boundary = PolyBoundary(loops.iter().map(|l| l.iter().filter_map(|&i| points.get(i)).map(|p| Point2::new(p[0], p[1])).collect()).collect(), Vec::new(), Vec::new());
+        let poly2tri: Vec<Option<VertexId>> = loops.iter().flatten().map(|&i| ids.get(i).flatten()).collect();
+        boundary.add_constraints(&mut triangulation, &poly2tri);
+        (triangulation.num_vertices(), triangulation.num_constraints())
     }
 }
 

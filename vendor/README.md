@@ -200,7 +200,10 @@ Changes:
   segment and joined its start to the first later node it could reach, which on a joined tube
   left a trimming curve's 130 nodes behind one constraint across the face: slivers from it
   sagged millimetres off the surface, and a face pinched to a point (#1648) got no triangles.
-  All meshes; faces whose segments all go in mesh as before.
+  All meshes; faces whose segments all go in mesh as before. The split is our own
+  (`add_split_constraint`), in steps that must each get further along the segment, at most 256:
+  spade's `add_constraint_and_split` never returned on a segment running back over another at a
+  shallow angle, and grew memory all the while (#6294).
 - `tessellation/mod.rs`: `Deflection::rulings` is now `Deflection::display`: a mesh to display
   or export (the kernel's `tessellate` and display meshes), which gets the ruling grid lines,
   and the speed-scaled triangulation above. The meshes a Boolean operation intersects
