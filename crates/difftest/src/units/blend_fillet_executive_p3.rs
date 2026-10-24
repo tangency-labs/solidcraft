@@ -107,6 +107,11 @@ fn orient_brep(
 }
 
 impl ExecutiveAccess<Handle> for Access {
+    fn solver_base(&self, _: Handle) -> SolidResult<&solidcore::blend::fillet_solver::p1::FilletSolver> { missing() }
+    fn solver_base_mut(&mut self, _: Handle) -> SolidResult<&mut solidcore::blend::fillet_solver::p1::FilletSolver> { missing() }
+    fn solver_has_surface(&self, _: Handle, _: usize) -> SolidResult<bool> { missing() }
+    fn edge_g1_knots(&mut self, _: &Kernel, _: Handle) -> SolidResult<Vec<f64>> { missing() }
+    fn edgeuse_vertex(&self, _: Handle) -> SolidResult<Option<Handle>> { missing() }
     // (the fixture's handles name no corners)
     fn corner_solvers(&self, _: Handle, _: &FilletExecutive<Handle>) -> SolidResult<Vec<Handle>> {
         missing()
@@ -773,6 +778,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
         law_sequence_edges: vec![],
         pseudo_brep: None,
         surface_generators: vec![],
+        filleted_vertices: Vec::new(),
         vertex_corner_map: BTreeMap::new(),
         edgeuse_solver_map: BTreeMap::new(),
         self_intersection_handler: None,

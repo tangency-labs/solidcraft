@@ -177,10 +177,21 @@ impl Default for ExecutionOptions {
     }
 }
 
+/// The native vertex map's pending solver edge uses or completed corner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VertexEntry<O> {
+    /// Edge uses collected by `LoadFilletSolver`, in native insertion order.
+    SolverEdgeuses(Vec<O>),
+    /// The corner that replaced the pending list.
+    Corner(O),
+}
+
 /// Executive member state consumed by p3, co-ported from p1. This is not the
 /// constructor: p1 must supply its constructor/setup defaults and intersector.
 #[derive(Debug, Clone)]
 pub struct FilletExecutive<O> {
+    /// `m_vFilletedVertices`, in first-insertion order (a null vertex is retained).
+    pub filleted_vertices: Vec<Option<O>>,
     /// `m_pTargetBrep`.
     pub target: Option<O>,
     /// `m_pFilletBrep`.
@@ -214,9 +225,9 @@ pub struct FilletExecutive<O> {
     /// `m_vFSGs`: the fillet surface generators the executive owns (added by
     /// `blend.fillet_executive_p1`).
     pub surface_generators: Vec<O>,
-    /// `m_vVertexCornerMap`: the fillet corner of each filleted vertex (added by
-    /// `blend.fillet_executive_p1`).
-    pub vertex_corner_map: BTreeMap<O, O>,
+    /// `m_vVertexCornerMap`: one pending-list or completed-corner slot per vertex.
+    /// A null vertex is retained as `None`, matching native loader ordering.
+    pub vertex_corner_map: BTreeMap<Option<O>, VertexEntry<O>>,
     /// `m_vEdgeuseSolverMap`: the fillet solver of each filleted edge use (added by
     /// `blend.fillet_executive_p1`; `blend::fillet_corner::p3::FilletExecutiveData`
     /// holds the same map over typed ids).
@@ -301,6 +312,19 @@ impl StitchAttempt {
 /// retain a second executive or intersector; writes must be visible to the next phase.
 /// No claimed solver/corner implementation or record is reproduced here.
 pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
+    /// The actual retained solver base, borrowed from its concrete solver object.
+    fn solver_base(&self, solver: O) -> Result<&crate::blend::fillet_solver::p1::FilletSolver>;
+    /// The same actual solver for a native member write.
+    fn solver_base_mut(
+        &mut self,
+        solver: O,
+    ) -> Result<&mut crate::blend::fillet_solver::p1::FilletSolver>;
+    /// `GetSurface(rail)`, including the actual geometry-for-surfaces fallback.
+    fn solver_has_surface(&self, solver: O, rail: usize) -> Result<bool>;
+    /// G1 knots from the edge's actual knots and existing-or-created curve cache.
+    fn edge_g1_knots(&mut self, k: &Kernel, edge: O) -> Result<Vec<f64>>;
+    /// `edgeuse->GetVertexuse()->GetVertex()`; a null vertex remains null.
+    fn edgeuse_vertex(&self, edgeuse: O) -> Result<Option<O>>;
     /// `GetName`, `GetCornerType`, `GetFilletedVertex` for error reporting only.
     fn corner_error_info(&self, corner: O, executive: &FilletExecutive<O>)
         -> Result<CornerView<O>>;

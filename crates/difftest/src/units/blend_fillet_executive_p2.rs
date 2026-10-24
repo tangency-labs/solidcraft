@@ -15,9 +15,8 @@
 //! law whose interpolation failed (no such input is known) would have a null curve
 //! upstream and an error here: also an error on both sides.
 //!
-//! Whatever reaches `AddFilletSurfaceGenerator`, `LoadFilletSolver`, `NoteError` or
-//! `CreateFilletCorners` defers to `blend.fillet_executive_p1`, so `SmTemporaryRadiusChange`
-//! (which needs a loaded solver) is not compared yet.
+//! Constant-radius solvers are retained and loaded into actual registered executives.
+//! Remaining corner/sequence operations still report their missing implementation.
 
 use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
@@ -259,10 +258,13 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
 enum Handle {
     Brep(usize),
     Edge(EdgeId),
+    Vertex(solidcore::topology::VertexId),
     Edgeuse(EdgeuseId),
     Generator(usize),
     Solver(usize),
     Law(usize),
+    Geom(solidcore::blend::fillet_geom::p1::FilletGeomId),
+    Pseudo,
 }
 impl ClassObject for Handle {
     fn class_kind(&self) -> ClassObjectKind {
@@ -282,6 +284,7 @@ struct Access {
     generators: Vec<FilletSurfaceGenerator>,
     solvers: Vec<ConstantRadiusAssistedFs>,
     laws: Vec<FilletLaw>,
+    edge_caches: BTreeMap<EdgeId, solidcore::curve::curve_cache::CurveCache<Handle>>,
 }
 fn missing_error() -> SolidError {
     SolidError::InvalidInput {
@@ -293,15 +296,29 @@ fn missing<T>() -> SolidResult<T> {
     Err(missing_error())
 }
 impl Access {
+    fn solver_surface(
+        &self,
+        solver: Handle,
+        rail: usize,
+    ) -> SolidResult<Option<&solidcore::blend::fillet_custom_solver::OffsetSurface>> {
+        let solver = self.solver_base(solver)?;
+        if let Some(geom) = solver.fg_for_surfaces {
+            self.pseudo.geom(geom)?.offset_surface(rail, Some(solver))
+        } else {
+            Ok(solver.surface(rail)?.map(|slot| &slot.surface))
+        }
+    }
     fn brep(&self, h: Handle) -> SolidResult<&Brep> {
         match h {
             Handle::Brep(i) => self.breps.get(i).ok_or_else(missing_error),
+            Handle::Pseudo => Ok(self.pseudo.brep()),
             _ => missing(),
         }
     }
     fn brep_mut(&mut self, h: Handle) -> SolidResult<&mut Brep> {
         match h {
             Handle::Brep(i) => self.breps.get_mut(i).ok_or_else(missing_error),
+            Handle::Pseudo => Ok(self.pseudo.brep_mut()),
             _ => missing(),
         }
     }
@@ -351,6 +368,79 @@ fn orient_brep(
 }
 
 impl ExecutiveAccess<Handle> for Access {
+    fn solver_base(
+        &self,
+        solver: Handle,
+    ) -> SolidResult<&solidcore::blend::fillet_solver::p1::FilletSolver> {
+        let Handle::Solver(index) = solver else {
+            return missing();
+        };
+        self.solvers
+            .get(index)
+            .map(|solver| &solver.solver)
+            .ok_or_else(missing_error)
+    }
+    fn solver_base_mut(
+        &mut self,
+        solver: Handle,
+    ) -> SolidResult<&mut solidcore::blend::fillet_solver::p1::FilletSolver> {
+        let Handle::Solver(index) = solver else {
+            return missing();
+        };
+        self.solvers
+            .get_mut(index)
+            .map(|solver| &mut solver.solver)
+            .ok_or_else(missing_error)
+    }
+    fn solver_has_surface(&self, solver: Handle, rail: usize) -> SolidResult<bool> {
+        Ok(self.solver_surface(solver, rail)?.is_some())
+    }
+    fn edge_g1_knots(&mut self, k: &Kernel, edge: Handle) -> SolidResult<Vec<f64>> {
+        const OP: &str = "SmFilletExecutive::LoadFilletSolver";
+        let Handle::Edge(id) = edge else {
+            return missing();
+        };
+        let curve = self
+            .breps
+            .first()
+            .ok_or_else(missing_error)?
+            .edge(id)?
+            .curve
+            .as_ref()
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let knots = curve.knots(k, None)?.0;
+        if let std::collections::btree_map::Entry::Vacant(entry) = self.edge_caches.entry(id) {
+            // The cache manager returns null on construction failure; LoadFilletSolver
+            // applies NER to that pointer after GetKnots has succeeded.
+            let cache = solidcore::curve::curve::p5::make_curve_cache(k, curve, Some(edge))
+                .map_err(|error| {
+                    if error.is_unported() {
+                        error
+                    } else {
+                        SolidError::null_pointer(OP)
+                    }
+                })?;
+            entry.insert(cache);
+        }
+        let cache = self.edge_caches.get(&id).ok_or_else(missing_error)?;
+        cache
+            .continuities()
+            .iter()
+            .enumerate()
+            .filter(|(_, continuity)| {
+                **continuity == solidcore::geom::geom_utility::p2::ContinuityType::G1
+            })
+            .map(|(index, _)| knots.get(index).copied().ok_or_else(missing_error))
+            .collect()
+    }
+    fn edgeuse_vertex(&self, edgeuse: Handle) -> SolidResult<Option<Handle>> {
+        let Handle::Edgeuse(id) = edgeuse else {
+            return missing();
+        };
+        let b = self.brep(Handle::Brep(0))?;
+        let vertexuse = b.edgeuse(id)?.vertexuse.ok_or_else(missing_error)?;
+        Ok(b.vertexuse(vertexuse)?.vertex.map(Handle::Vertex))
+    }
     // (the fixture's handles name no corners)
     fn corner_solvers(&self, _: Handle, _: &FilletExecutive<Handle>) -> SolidResult<Vec<Handle>> {
         missing()
@@ -595,11 +685,11 @@ impl ExecutiveAccess<Handle> for Access {
     fn corner_approx_tolerance(&self, _: Handle) -> SolidResult<f64> {
         missing()
     }
-    fn solver_geoms(&self, _: Handle) -> SolidResult<Vec<Handle>> {
-        missing()
+    fn solver_geoms(&self, solver: Handle) -> SolidResult<Vec<Handle>> {
+        Ok(self.solver_base(solver)?.fillet_geoms().into_iter().map(Handle::Geom).collect())
     }
-    fn solver_geom(&self, _: Handle, _: usize) -> SolidResult<Option<Handle>> {
-        missing()
+    fn solver_geom(&self, solver: Handle, index: usize) -> SolidResult<Option<Handle>> {
+        Ok(self.solver_base(solver)?.fillet_geoms.get(index).copied().map(Handle::Geom))
     }
     fn solver_edge(&self, _: Handle) -> SolidResult<Handle> {
         missing()
@@ -680,8 +770,9 @@ impl ExecutiveAccess<Handle> for Access {
     fn new_executive_objects(&mut self, _: &mut Kernel) -> SolidResult<ExecutiveObjects<Handle>> {
         missing()
     }
-    fn edgeuse_edge(&self, _: Handle) -> SolidResult<Option<Handle>> {
-        missing()
+    fn edgeuse_edge(&self, edgeuse: Handle) -> SolidResult<Option<Handle>> {
+        let Handle::Edgeuse(id) = edgeuse else { return missing(); };
+        Ok(self.brep(Handle::Brep(0))?.edgeuse(id)?.edge.map(Handle::Edge))
     }
     fn fillet_edge_original_face(&self, _: Handle) -> SolidResult<Option<Handle>> {
         missing()
@@ -706,19 +797,21 @@ impl ExecutiveAccess<Handle> for Access {
     }
     fn variable_radius_solver(
         &self,
-        _: Handle,
+        solver: Handle,
     ) -> SolidResult<Option<&solidcore::blend::fillet_standard_solver::p1::VariableRadiusFs>> {
-        missing()
+        self.solver_base(solver)?;
+        Ok(None) // Every retained solver here is a real ConstantRadiusAssistedFs.
     }
     fn variable_radius_solver_mut(
         &mut self,
-        _: Handle,
+        solver: Handle,
     ) -> SolidResult<Option<&mut solidcore::blend::fillet_standard_solver::p1::VariableRadiusFs>>
     {
-        missing()
+        self.solver_base(solver)?;
+        Ok(None)
     }
-    fn solver_edgeuse(&self, _: Handle, _: usize) -> SolidResult<Option<Handle>> {
-        missing()
+    fn solver_edgeuse(&self, solver: Handle, rail: usize) -> SolidResult<Option<Handle>> {
+        self.solver_base(solver)?.edgeuse(rail).map(|edgeuse| edgeuse.map(Handle::Edgeuse))
     }
     fn solver_corner(&self, _: Handle, _: usize) -> SolidResult<Option<Handle>> {
         missing()
@@ -996,6 +1089,7 @@ fn box_access(bx: &BoxIn) -> Result<Result<Access, Output>, HarnessError> {
         generators: Vec::new(),
         solvers: Vec::new(),
         laws: Vec::new(),
+        edge_caches: BTreeMap::new(),
     }))
 }
 
@@ -1028,6 +1122,7 @@ fn executive(target: Option<Handle>) -> FilletExecutive<Handle> {
         law_sequence_edges: vec![],
         pseudo_brep: None,
         surface_generators: vec![],
+        filleted_vertices: Vec::new(),
         vertex_corner_map: BTreeMap::new(),
         edgeuse_solver_map: BTreeMap::new(),
         self_intersection_handler: None,
@@ -1122,7 +1217,8 @@ fn set_params(
         thumbweight,
     };
     let mut k = Kernel::default();
-    let mut ex = executive(None);
+    let mut executive = executive(None);
+    let ex = &mut executive;
     let status = match ex.set_fillet_parameters(&mut k, &mut access, &params) {
         Ok(()) => 0.0,
         Err(e) if e.is_unported() => return Ok(error_output(&e)),
@@ -1176,14 +1272,15 @@ fn exec(sub: usize, n: usize, bx: &BoxIn) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     let mut k = Kernel::default();
-    let mut ex = executive(Some(Handle::Brep(0)));
+    let mut executive = executive(Some(Handle::Brep(0)));
+    let ex = &mut executive;
     if n > 0 {
-        if let Err(e) = load_solvers(&mut k, &mut access, &mut ex, n) {
+        if let Err(e) = load_solvers(&mut k, &mut access, ex, n) {
             return Ok(error_output(&e));
         }
     }
     if sub > 0 && n > 1 {
-        if let Err(e) = access.create_corners(&mut k, &mut ex, None) {
+        if let Err(e) = access.create_corners(&mut k, ex, None) {
             return Ok(error_output(&e));
         }
     }
@@ -1241,14 +1338,51 @@ fn temp_radius(variable: bool, start: f64, end: f64, bx: &BoxIn) -> Result<Outpu
         thumbweight: 1.0,
     };
     let mut k = Kernel::default();
-    let mut ex = executive(Some(Handle::Brep(0)));
-    match ex.set_fillet_parameters(&mut k, &mut access, &params) {
-        Err(e) => Ok(error_output(&e)),
-        // Reached once executive p1 lands: the side edge use and the change are not
-        // modelled yet, so this is a harness error rather than a pass.
-        Ok(()) => Err(harness(
-            "temp_radius past SetFilletParameters is not modelled",
-        )),
+    let mut executive = executive(Some(Handle::Brep(0)));
+    let ex = &mut executive;
+    if let Err(e) = ex.set_fillet_parameters(&mut k, &mut access, &params) {
+        Ok(error_output(&e))
+    } else {
+        let solver = ex
+            .solvers
+            .first()
+            .copied()
+            .ok_or_else(|| harness("no retained solver"))?;
+        let b = access
+            .brep(Handle::Brep(0))
+            .map_err(|e| harness(e.to_string()))?;
+        let first =
+            edge::start_vertex(b, EdgeId::from_index(0)).map_err(|e| harness(e.to_string()))?;
+        let mut side = None;
+        for (id, _) in b.edges().iter().skip(1) {
+            let start = edge::start_vertex(b, id).map_err(|e| harness(e.to_string()))?;
+            let end = edge::other_vertex(b, id, start).map_err(|e| harness(e.to_string()))?;
+            if start == first || end == first {
+                side = Some(Handle::Edge(id));
+                break;
+            }
+        }
+        let side = match side {
+            Some(side) => access
+                .blend_edgeuse(&mut k, side)
+                .map_err(|e| harness(e.to_string()))?,
+            None => None,
+        };
+        let Some(side) = side else {
+            return Ok(error_output(&SolidError::sm_err(
+                "harness::fillet_executive_p2::temporary_radius_change",
+            )));
+        };
+        match solidcore::blend::fillet_executive::p2::with_temporary_radius_change(
+            &mut access,
+            solver,
+            0,
+            side,
+            |_| Ok(()),
+        ) {
+            Ok(()) => Ok(values_output(vec![0.0])),
+            Err(e) => Ok(error_output(&e)),
+        }
     }
 }
 
@@ -1370,3 +1504,7 @@ impl UnitDiff for Runner {
         })
     }
 }
+
+#[path = "blend_fillet_executive_p2/loader.rs"]
+mod loader;
+pub(crate) use loader::{loader_cpp, loader_rust, LoaderScript};

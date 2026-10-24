@@ -68,6 +68,39 @@ fn absent<T>() -> Result<T> {
     Err(invalid("test handle has no geometry"))
 }
 impl ExecutiveAccess<Handle> for Access {
+    fn solver_base(&self, _: Handle) -> Result<&crate::blend::fillet_solver::p1::FilletSolver> {
+        Err(SolidError::invalid_input(
+            "test::executive_access",
+            "no retained solver",
+        ))
+    }
+    fn solver_base_mut(
+        &mut self,
+        _: Handle,
+    ) -> Result<&mut crate::blend::fillet_solver::p1::FilletSolver> {
+        Err(SolidError::invalid_input(
+            "test::executive_access",
+            "no retained solver",
+        ))
+    }
+    fn solver_has_surface(&self, _: Handle, _: usize) -> Result<bool> {
+        Err(SolidError::invalid_input(
+            "test::executive_access",
+            "no retained solver",
+        ))
+    }
+    fn edge_g1_knots(&mut self, _: &Kernel, _: Handle) -> Result<Vec<f64>> {
+        Err(SolidError::invalid_input(
+            "test::executive_access",
+            "no retained solver",
+        ))
+    }
+    fn edgeuse_vertex(&self, _: Handle) -> Result<Option<Handle>> {
+        Err(SolidError::invalid_input(
+            "test::executive_access",
+            "no retained solver",
+        ))
+    }
     fn reinitialize_corner_edges(
         &mut self,
         _: &mut Kernel,
@@ -704,6 +737,7 @@ fn state() -> FilletExecutive<Handle> {
         law_sequence_edges: vec![],
         pseudo_brep: None,
         surface_generators: vec![],
+        filleted_vertices: Vec::new(),
         vertex_corner_map: BTreeMap::new(),
         edgeuse_solver_map: BTreeMap::new(),
         self_intersection_handler: None,

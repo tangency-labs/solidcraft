@@ -33,9 +33,16 @@
 #include <SmBrep.h>
 #include <SmContext.h>
 #include <SmEdge.h>
+#include <SmEdgeuse.h>
+#include <SmVertexuse.h>
+#include <SmPlane.h>
+#include <SmCircle.h>
+#include <SmOffsetSurface.h>
+#include <cfloat>
 #include <SmExtent1d.h>
 #include <SmFilletExecutive.h>
 #include <SmFilletSolver.h>
+#include <SmFilletGeom.h>
 #include <SmFilletStandardSolver.h>
 #include <SmNurbsCrv.h>
 #include <SmTArray.h>
@@ -53,6 +60,7 @@ enum : int32_t
     OP_SET_PARAMS = 2,
     OP_EXEC = 3,
     OP_TEMP_RADIUS = 4,
+    OP_LOAD_SOLVER = 5,
 };
 
 const double ST_NULL_DEREF = -2.0;
@@ -461,6 +469,182 @@ void op_temp_radius(Rd& rd, std::vector<double>& o)
     delete law;
     delete box;
 }
+struct LoaderSolver : SmConstantRadiusFS
+{
+    using SmConstantRadiusFS::SmConstantRadiusFS;
+    const SmTArray<double>& g1_knots() const { return m_vG1Knots; }
+    void attach_wire(SmEdgeuse* a,SmEdgeuse* b) { m_pEdgeuses[0]=a;m_pEdgeuses[1]=b; }
+};
+
+// Native loader fixtures retain real constant-radius solvers and real box topology.
+// Only the fixture owns the solvers: repeated loads retain the same solver more than once.
+struct LoaderExecutive : Executive
+{
+    using Executive::Executive;
+    SmStatus load(SmFilletSolver* solver) { return LoadFilletSolver(solver); }
+    bool has_vertices() const { return m_vFilletedVertices.GetSize()!=0; }
+    void clear_first_pending()
+    {
+        if (m_vFilletedVertices.GetSize() == 0) return;
+        SmVertex* vertex = m_vFilletedVertices[0];
+        delete (SmTArray<SmEdgeuse*>*)m_vVertexCornerMap.At(vertex);
+        m_vVertexCornerMap.Insert(vertex, NULL);
+    }
+    ~LoaderExecutive()
+    {
+        m_vFilletSolvers.ReSet(); // fixture owns each actual solver exactly once
+        for (ULONG i=0;i<m_vFilletedVertices.GetSize();i++)
+            delete (SmTArray<SmEdgeuse*>*)m_vVertexCornerMap.At(m_vFilletedVertices[i]);
+    }
+    void put_loader(std::vector<double>& out, const std::vector<LoaderSolver*>& solvers,
+                    const SmTArray<SmEdge*>& edges)
+    {
+        auto solver_label = [&](SmFilletSolver* target) {
+            for (size_t i=0;i<solvers.size();i++) if (solvers[i]==target) return (double)i+1;
+            return 0.0;
+        };
+        auto edgeuse_label = [&](SmEdgeuse* target) {
+            for (ULONG i=0;i<edges.GetSize();i++) {
+                SmTArray<SmEdgeuse*> uses; edges[i]->GetEdgeuses(uses);
+                for (ULONG j=0;j<uses.GetSize();j++) if (uses[j]==target) return 1.0+4.0*i+j;
+            }
+            return 0.0;
+        };
+        out.push_back((double)m_vFilletSolvers.GetSize());
+        for (ULONG i=0;i<m_vFilletSolvers.GetSize();i++) out.push_back(solver_label(m_vFilletSolvers[i]));
+        out.push_back((double)m_vFilletedVertices.GetSize());
+        for (ULONG i=0;i<m_vFilletedVertices.GetSize();i++) {
+            SmVertex* vertex=m_vFilletedVertices[i];
+            out.push_back(vertex ? 1.0 : 0.0);
+            if (vertex) { SmPoint3d p=vertex->GetPoint(); out.push_back(p.x);out.push_back(p.y);out.push_back(p.z); }
+            SmTArray<SmEdgeuse*>* pending=(SmTArray<SmEdgeuse*>*)m_vVertexCornerMap.At(vertex);
+            out.push_back(pending ? 1.0 : 0.0);
+            if (pending) {
+                out.push_back((double)pending->GetSize());
+                for (ULONG j=0;j<pending->GetSize();j++) out.push_back(edgeuse_label((*pending)[j]));
+            }
+        }
+        for (ULONG i=0;i<edges.GetSize();i++) {
+            SmTArray<SmEdgeuse*> uses; edges[i]->GetEdgeuses(uses);
+            for (ULONG j=0;j<uses.GetSize();j++) out.push_back(solver_label(GetFilletSolverOfEdgeuse(uses[j])));
+        }
+        out.push_back(GetPseudoBrep()!=NULL ? 1.0 : 0.0);
+    }
+};
+
+void op_loader(Rd& rd, std::vector<double>& out)
+{
+    double scale=rd.num(); bool g1=rd.flag();
+    SmBrep* box=NULL;
+    if (SmApiCreateBox(SmVector3d(0,0,0),scale,2*scale,3*scale,box)!=SM_SUCCESS || !box) {
+        out.push_back((double)SM_ERR); return;
+    }
+    if (short_box(box,out)) { delete box; return; }
+    SmTArray<SmEdge*> edges; box->GetEdges(edges);
+    // Keep the actual edge geometry unchanged while introducing unequal speeds at
+    // its interior knot: the curve is G1, but its parameter derivative is not C1.
+    if (g1) for (ULONG i=0;i<edges.GetSize();i++) {
+        SmEdge* edge=edges[i]; const SmExtent1d domain=edge->GetInterval();
+        SmPoint3d a,b; edge->GetCurve()->EvaluatePoint(domain.GetMin(),a);
+        edge->GetCurve()->EvaluatePoint(domain.GetMax(),b);
+        SmPoint3d middle=a+(b-a)*0.25;
+        gw_CURVE* curve=sm_AllocateNurbCurve(2,1,4);
+        SmPoint3d points[3]={a,middle,b};
+        for (int j=0;j<3;j++) { curve->pol->Pw[j].x=points[j].x;curve->pol->Pw[j].y=points[j].y;curve->pol->Pw[j].z=points[j].z;curve->pol->Pw[j].w=-DBL_MAX; }
+        double t0=domain.GetMin(),t1=domain.GetMax();
+        double knots[5]={t0,t0,(t0+t1)*0.5,t1,t1};
+        for(int j=0;j<5;j++) curve->knt->U[j]=knots[j];
+        edge->Replace3DCurve(new (*box->GetContext()) SmBSplineCurve(curve,3,FALSE));
+    }
+    int64_t count=rd.idx();
+    std::vector<LoaderSolver*> solvers;
+    std::vector<SmSurface*> detached_surfaces;
+    SmPlane plane0(SmPoint3d(0,0,0),SmVector3d(0,0,1),box->GetContext());
+    SmPlane plane1(SmPoint3d(0,0,0),SmVector3d(0,1,0),box->GetContext());
+    SmEdge* closed_edge=NULL;
+    for(int64_t i=0;i<count;i++) {
+        int64_t edge=rd.idx(),mask=rd.idx(); bool radial=rd.flag(),geometry_surfaces=rd.flag();
+        LoaderSolver* solver;
+        if(edge<12) {
+            SmEdgeuse* eu=edges[(ULONG)edge]->GetBlendEdgeuse();
+            if(radial && eu) eu=eu->GetRadial();
+            solver=new (*box->GetContext()) LoaderSolver(*box->GetContext(),1e-6,0.1,0.01,0.125*scale,eu);
+        } else {
+            solver=new (*box->GetContext()) LoaderSolver(*box->GetContext(),1e-6,0.1,0.01,0.125*scale,0.125*scale,plane0,plane1,TRUE,TRUE);
+            if(edge==13) {
+                if(!closed_edge) {
+                    SmCircle* circle=new (*box->GetContext()) SmCircle(SmPoint3d(5*scale,0,0),SmVector3d(1,0,0),SmVector3d(0,1,0),SmExtent1d(0,360),0.5*scale,3);
+                    if(box->CreateWireEdgeFromCurve(circle,circle->GetNaturalInterval(),closed_edge)!=SM_SUCCESS || !closed_edge) { rd.ok=false;delete solver;break; }
+                    box->GetEdges(edges);
+                }
+                SmTArray<SmEdgeuse*> uses;closed_edge->GetEdgeuses(uses);
+                if(uses.GetSize()!=2) {rd.ok=false;delete solver;break;}
+                solver->attach_wire(uses[0],uses[1]);
+            }
+        }
+        for(ULONG rail=0;rail<2;rail++) if(!(mask&(1<<rail))) {
+            detached_surfaces.push_back(solver->GetSurface(rail));
+            solver->SetSurface(rail,NULL);
+        }
+        if(geometry_surfaces) { SmTArray<SmFilletGeom*> geoms;solver->GetFilletGeoms(geoms);solver->SetFilletGeomForSurfaces(geoms[0]); }
+        solvers.push_back(solver);
+    }
+    if(!rd.ok) {
+        for(auto* solver:solvers) delete solver;
+        for(auto* surface:detached_surfaces) delete surface;
+        delete box;return;
+    }
+    {
+        LoaderExecutive executive(*box->GetContext(),box);
+        out.push_back(0.0);
+        // Compare actual edge domains and geometry before loader mutations.
+        out.push_back((double)edges.GetSize());
+        for(ULONG i=0;i<edges.GetSize();i++) {
+            SmExtent1d domain=edges[i]->GetInterval();
+            out.push_back(domain.GetMin());out.push_back(domain.GetMax());
+            for(double fraction : {0.0,0.5,1.0}) {
+                double t=domain.GetMin()+(domain.GetMax()-domain.GetMin())*fraction;
+                SmPoint3d point;
+                out.push_back(st(edges[i]->GetCurve()->EvaluatePoint(t,point)));
+                out.push_back(point.x);out.push_back(point.y);out.push_back(point.z);
+            }
+        }
+        // Every new comparison includes actual offset geometry, not just statuses.
+        for(auto* solver:solvers) for(ULONG rail=0;rail<2;rail++) {
+            SmSurface* surface=solver->GetSurface(rail); out.push_back(surface ? 1.0 : 0.0);
+            if(surface) {
+                SmPoint2d uv=surface->GetNaturalUVDomain().Evaluate(0.5,0.5); SmPoint3d p;
+                out.push_back(st(surface->EvaluatePoint(uv,p)));out.push_back(p.x);out.push_back(p.y);out.push_back(p.z);
+            }
+        }
+        int64_t loads=rd.idx();
+        std::vector<int64_t> which;
+        for(int64_t i=0;i<loads;i++) { if(rd.idx()!=0) rd.ok=false; which.push_back(rd.idx()); }
+        int64_t clear_after=rd.idx();
+        for(int64_t i=0;i<loads;i++) {
+            LoaderExecutive* current=&executive;
+            LoaderSolver* target=solvers[(size_t)which[(size_t)i]];
+            // With no rails and an existing vertex list the native loop reads
+            // uninitialized pVerts. Guard that actual state before calling it.
+            if(target->GetSurface(0) && target->GetSurface(1) && !target->GetEdgeuse(0) && !target->GetEdgeuse(1) && current->has_vertices()) { rd.ok=false;break; }
+            out.push_back(st(current->load(target)));
+            if(clear_after==i+1) current->clear_first_pending();
+            current->put_loader(out,solvers,edges);
+            for(auto* solver:solvers) {
+                SmFilletExecutive* owner=solver->GetFilletExecutive();
+                out.push_back(owner ? 1.0 : 0.0);
+                SmFilletBrep* pseudo=owner ? owner->GetPseudoBrep() : NULL;
+                out.push_back(owner && pseudo==current->GetPseudoBrep() ? 1.0 : 0.0);
+                out.push_back((double)solver->g1_knots().GetSize());
+                for(ULONG j=0;j<solver->g1_knots().GetSize();j++) out.push_back(solver->g1_knots()[j]);
+            }
+        }
+    }
+    for(auto* solver:solvers) delete solver;
+    for(auto* surface:detached_surfaces) delete surface;
+    delete box;
+}
+
 } // namespace
 
 SC_EXPORT int32_t sc_blend_fillet_executive_p2_eval(int32_t op, const double* in, int64_t n_in,
@@ -484,6 +668,9 @@ SC_EXPORT int32_t sc_blend_fillet_executive_p2_eval(int32_t op, const double* in
         break;
     case OP_EXEC:
         op_exec(rd, o);
+        break;
+    case OP_LOAD_SOLVER:
+        op_loader(rd,o);
         break;
     case OP_TEMP_RADIUS:
         op_temp_radius(rd, o);

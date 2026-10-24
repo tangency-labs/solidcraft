@@ -72,6 +72,9 @@ struct Inputs {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 enum CaseIn {
+    Loader {
+        loader: super::blend_fillet_executive_p2::LoaderScript,
+    },
     Law(Inputs),
     Object(ObjectIn),
 }
@@ -99,7 +102,7 @@ fn cpp_input(i: &Inputs) -> Vec<f64> {
     o
 }
 
-fn to_output(flat: &[f64]) -> Output {
+pub(crate) fn to_output(flat: &[f64]) -> Output {
     let (status, rest) = flat
         .split_first()
         .map_or((f64::NAN, &[][..]), |(s, r)| (*s, r));
@@ -240,6 +243,7 @@ impl UnitDiff for Runner {
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let flat = match case.parse()? {
+            CaseIn::Loader { loader } => super::blend_fillet_executive_p2::loader_cpp(&loader),
             CaseIn::Law(i) => ffi::law_eval(&cpp_input(&i)),
             CaseIn::Object(i) => ffi::object_eval(i.parts().0, &object_cpp_input(&i)),
         }
@@ -249,6 +253,7 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         match case.parse()? {
+            CaseIn::Loader { loader } => super::blend_fillet_executive_p2::loader_rust(&loader),
             CaseIn::Law(i) => rust(&i),
             CaseIn::Object(i) => object_rust(&i),
         }
@@ -821,12 +826,12 @@ fn exec_step(
         Step::AddTopoEdge { h } => x.topo_edges.push(opt(*h)),
         Step::RemoveTopoEdge { h } => x.remove_from_topo_edges(opt(*h)),
         Step::MapCorner { v, c } => {
-            x.vertex_corner_map.insert(H(*v), H(*c));
+            x.vertex_corner_map.insert(Some(H(*v)), solidcore::blend::fillet_executive::p3::VertexEntry::Corner(H(*c)));
         }
         Step::MapSolver { eu, s } => {
             x.edgeuse_solver_map.insert(H(*eu), H(*s));
         }
-        Step::CornerOf { v } => q.push(out_handle(x.fillet_corner_of_vertex(H(*v)))),
+        Step::CornerOf { v } => q.push(out_handle(x.fillet_corner_of_vertex(H(*v)).map_err(|e| HarnessError::new(e.to_string()))?)),
         Step::SolverOf { eu } => q.push(out_handle(x.fillet_solver_of_edgeuse(H(*eu)))),
         Step::NoteFilletError {
             code,

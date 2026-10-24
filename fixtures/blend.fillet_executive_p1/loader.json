@@ -1,0 +1,885 @@
+{
+  "cases": [
+    {
+      "name": "loader_one_edge",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_repeated_solver",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_same_edge_different_solvers",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_same_edge_radial_edgeuses",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": true
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_incident_edges",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 1,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 2,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_registration_order",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 3,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 7,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              2
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_distinct_incident_solvers",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 1,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 1,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              2
+            ],
+            [
+              0,
+              3
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_surface0_missing",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 2,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_surface1_missing",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 1,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_both_surfaces_missing",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 0,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_surface_rejection_after_load",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 1,
+              "mask": 2,
+              "radial": false
+            },
+            {
+              "edge": 1,
+              "mask": 2,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_no_edgeuses_empty",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 12,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_no_edgeuses_then_edge",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 12,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_no_edgeuses_before_edge",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 12,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_defined_missing_pending_prefix",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ]
+          ],
+          "drop_pending_after": 0
+        }
+      }
+    },
+    {
+      "name": "loader_g1_curve",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": true,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_g1_repeated",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": true,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_g1_incident_edges",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": true,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 1,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 3,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_g1_distinct_radial_solvers",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "g1": true,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": true
+            },
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_scale_0.001",
+      "inputs": {
+        "loader": {
+          "scale": 0.001,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 1,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_g1_scale_0.001",
+      "inputs": {
+        "loader": {
+          "scale": 0.001,
+          "g1": true,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 1,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_scale_1000.0",
+      "inputs": {
+        "loader": {
+          "scale": 1000.0,
+          "g1": false,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 1,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_g1_scale_1000.0",
+      "inputs": {
+        "loader": {
+          "scale": 1000.0,
+          "g1": true,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 1,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_closed_edge",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "solvers": [
+            {
+              "edge": 13,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_closed_repeated",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "solvers": [
+            {
+              "edge": 13,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_closed_two_solvers",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "solvers": [
+            {
+              "edge": 13,
+              "mask": 3,
+              "radial": false
+            },
+            {
+              "edge": 13,
+              "mask": 3,
+              "radial": false
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_geometry_surfaces_mask3",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 3,
+              "geometry_surfaces": true
+            },
+            {
+              "edge": 0,
+              "mask": 3,
+              "geometry_surfaces": true
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "loader_geometry_surfaces_mask0",
+      "inputs": {
+        "loader": {
+          "scale": 1.0,
+          "solvers": [
+            {
+              "edge": 0,
+              "mask": 0,
+              "geometry_surfaces": true
+            },
+            {
+              "edge": 0,
+              "mask": 0,
+              "geometry_surfaces": true
+            }
+          ],
+          "loads": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    }
+  ]
+}

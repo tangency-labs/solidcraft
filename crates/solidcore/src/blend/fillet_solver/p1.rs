@@ -75,7 +75,9 @@
 //!   `SetSurface` with a geometry set for the surfaces (`m_pFGForSurfaces`) do not take
 //!   the pseudo B-rep and stay stubs (`plan/findings.md`, "`blend.fillet_solver_p1`:
 //!   the geometry for the surfaces"). `SmFilletExecutive` and the fillet corners belong
-//!   to unported units ([`FilletExecutiveRef`]); calls into unported units return
+//!   to executive/corner units. [`FilletExecutiveRef`] records only whether the
+//!   native back pointer is set. Callers pass the operation's executive explicitly.
+//!   Calls into unported operations return
 //!   [`SolidError::Unported`] naming the owning unit at the call site (`unported_on`,
 //!   tagged `UNPORTED`). `SplitFilletGeomAtSideEdge`, `SplitFilletGeom`, `TrimRails`,
 //!   `sm_SplitRail`, `sm_ComputeSupportEdge` and `sm_TestManifoldTangentRollover` are
@@ -365,7 +367,8 @@ impl FilletSurfaceGenerator {
     }
 }
 
-/// An `SmFilletExecutive*` (unit `blend.fillet_executive_p1`, not modelled).
+/// Whether the solver's native executive back pointer is set.
+/// The operation passes its one executive explicitly as context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FilletExecutiveRef;
 
