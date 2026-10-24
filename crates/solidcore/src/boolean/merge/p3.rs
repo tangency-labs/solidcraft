@@ -1104,16 +1104,27 @@ mod tests {
                 operation,
                 Some(&mut state.env(None)),
             );
-            assert!(
-                matches!(
-                    result,
-                    Err(SolidError::Unported {
-                        upstream: "SmTopologyIntersector::IntersectInsertRelate",
-                        unit: "boolean.topology_intersector_p2",
-                    })
-                ),
-                "{operation:?}: {result:?}"
+            // IntersectInsertRelate runs (the edge-less fixture faces relate nothing);
+            // copying an unrelated B face then needs its face use, which a bare face
+            // record lacks, so Union, ExclusiveOr and Merge stop there
+            let copies = matches!(
+                operation,
+                BooleanOperation::Union | BooleanOperation::ExclusiveOr | BooleanOperation::Merge
             );
+            if copies {
+                assert!(
+                    matches!(
+                        result,
+                        Err(SolidError::InvalidInput {
+                            operation: "topology::face::p2",
+                            ..
+                        })
+                    ),
+                    "{operation:?}: {result:?}"
+                );
+            } else {
+                assert!(result.is_ok(), "{operation:?}: {result:?}");
+            }
             assert!(kernel.context.doing_boolean());
         }
         let mut kernel = Kernel::default();

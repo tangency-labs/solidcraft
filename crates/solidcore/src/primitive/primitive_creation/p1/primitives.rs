@@ -1329,13 +1329,18 @@ mod tests {
                 &mut notifications,
             )
             .unwrap_err();
-        assert!(matches!(
-            error,
-            SolidError::Unported {
-                unit: "boolean.topology_intersector_p2",
-                ..
-            }
-        ));
+        // past IntersectInsertRelate: copying B's unrelated face needs its face use,
+        // which the bare fixture face record lacks
+        assert!(
+            matches!(
+                error,
+                SolidError::InvalidInput {
+                    operation: "topology::face::p2",
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
         let covered_a = a
             .face(fa)
             .unwrap()
@@ -1390,14 +1395,17 @@ mod tests {
                     &mut notifications,
                 )
                 .unwrap_err();
-            if invalid {
-                assert!(
-                    matches!(error, SolidError::InvalidInput { .. }),
-                    "{angle}: {error}"
-                );
+            // a coplanar pair goes on through IntersectInsertRelate and stops copying
+            // B's bare face record (no face use); the others fail the coplanar check
+            let expected = if invalid {
+                "primitive::primitive_creation::p1::boolean_2d"
             } else {
-                assert!(error.is_unported(), "{angle}: {error}");
-            }
+                "topology::face::p2"
+            };
+            assert!(
+                matches!(error, SolidError::InvalidInput { operation, .. } if operation == expected),
+                "{angle}: {error}"
+            );
             assert!(!a.editing_enabled());
             assert!(b.editing_enabled());
             assert!(!k.context.doing_boolean());

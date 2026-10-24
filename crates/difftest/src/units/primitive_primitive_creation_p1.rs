@@ -97,10 +97,16 @@ fn maps_record(maps: &EntityMaps, out: &mut Vec<f64>) {
         }
     }
 }
-fn boolean_face(brep: &mut Brep, k: &Kernel, data: &[f64]) -> solidcore::Result<()> {
+/// `CreateFaceFromSurface(surface, domain, face)` on the native fixture's canonical
+/// plane (its STEP UV domain adjusted first) or unit sphere, as the shim builds it.
+fn boolean_face(
+    brep: &mut Brep,
+    k: &mut Kernel,
+    data: &[f64],
+    notifications: &mut solidcore::topology::edge::NotifyEnv<'_>,
+) -> solidcore::Result<()> {
     use solidcore::geom::extent2d::Extent2d;
     use solidcore::surface::{plane::p1::Plane, sphere::Sphere, surface::Surface};
-    use solidcore::topology::{Face, ShellId};
     let angle = value(data, 1).to_radians();
     let frame = Axis2Placement::new(
         Vec3::new(0.0, 0.0, value(data, 2)),
@@ -121,10 +127,20 @@ fn boolean_face(brep: &mut Brep, k: &Kernel, data: &[f64]) -> solidcore::Result<
         // IsPlanar uses the revolution base; Surface has no sphere variant yet.
         Surface::from(Sphere::create_canonical(k, &frame, 1.0)?.base().clone())
     };
-    let mut face = Face::new(ShellId::from_index(0));
-    face.surface = Some(surface);
-    face.uv_domain = domain;
-    brep.add_face_record(face)?;
+    let mut marks = solidcore::topology::topology_traverser::Marks::default();
+    let this_face = |f| topology_key(EntityRef::Face(f));
+    let mut fenv = solidcore::topology::brep::p8::FaceBuildEnv {
+        env: notifications,
+        marks: &mut marks,
+        this_face: &this_face,
+    };
+    solidcore::topology::brep::p8::create_face_from_surface(
+        k,
+        brep,
+        Some(surface),
+        &domain,
+        &mut fenv,
+    )?;
     Ok(())
 }
 
@@ -461,15 +477,25 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
         }
 
         6 => {
-            let mut a = Brep::new();
-            let mut b = Brep::new();
+            // SmBrep(SM_USE_DEFAULT, SM_USE_DEFAULT, context), with its infinite region
+            let mut a = solidcore::topology::brep::p3::new_brep(
+                &mut k,
+                solidcore::geom::tol::USE_DEFAULT,
+                solidcore::geom::tol::USE_DEFAULT,
+            )?;
+            let mut b = solidcore::topology::brep::p3::new_brep(
+                &mut k,
+                solidcore::geom::tol::USE_DEFAULT,
+                solidcore::geom::tol::USE_DEFAULT,
+            )?;
             let split = 7 + 7 * value(v, 4) as usize;
             for face in v.get(7..split).unwrap_or_default().as_chunks::<7>().0 {
-                boolean_face(&mut a, &k, face)?;
+                boolean_face(&mut a, &mut k, face, &mut notifications)?;
             }
             for face in v.get(split..).unwrap_or_default().as_chunks::<7>().0 {
-                boolean_face(&mut b, &k, face)?;
+                boolean_face(&mut b, &mut k, face, &mut notifications)?;
             }
+            let had_faces = !solidcore::topology::brep::p1::faces(&a, None)?.is_empty();
             a.set_tolerance(value(v, 6));
             b.set_tolerance(value(v, 6));
             a.set_editing_enabled(value(v, 2) != 0.0);
@@ -500,12 +526,32 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 Err(solidcore::SolidError::Upstream { code, .. }) => code,
                 Err(_) => solidcore::error::SM_ERR,
             };
+            // On success Boolean2D returns A (here moved into the output slot) and
+            // deletes B; on error or empty input both survive.
+            let consumed = status == 0
+                && had_faces
+                && solidcore::topology::brep::p1::faces(&a, None)?.is_empty();
             record.extend([
                 f64::from(status),
                 f64::from(a.editing_enabled()),
-                f64::from(b.editing_enabled()),
+                if consumed {
+                    -1.0
+                } else {
+                    f64::from(b.editing_enabled())
+                },
                 f64::from(output.is_some()),
             ]);
+            if consumed {
+                let result = output
+                    .as_ref()
+                    .ok_or_else(|| solidcore::SolidError::null_pointer("difftest::primitive_p1"))?;
+                record.extend([
+                    solidcore::topology::brep::p1::faces(result, None)?.len() as f64,
+                    solidcore::topology::brep::p1::edges(result, None)?.len() as f64,
+                    solidcore::topology::brep::p1::vertices(result, None)?.len() as f64,
+                ]);
+                crate::util::primitive::append(&k, result, &mut record)?;
+            }
         }
 
         _ => unreachable!(),
@@ -522,6 +568,14 @@ fn output(input: &Inputs, data: Vec<f64>) -> Result<Output, HarnessError> {
         Ok(Output::new()
             .ints("maps", head.iter().map(|v| *v as i64).collect::<Vec<_>>())
             .values("geometry", data.get(prefix..).unwrap_or_default().to_vec()))
+    } else if op == 6 && data.len() > 4 {
+        // A successful Boolean2D: the statuses, the result's counts, then its geometry.
+        let head = data
+            .get(..7)
+            .ok_or_else(|| HarnessError::new("missing Boolean2D result record"))?;
+        Ok(Output::new()
+            .ints("maps", head.iter().map(|v| *v as i64).collect::<Vec<_>>())
+            .values("geometry", data.get(7..).unwrap_or_default().to_vec()))
     } else if op == 0 || op == 5 || op == 6 {
         Ok(Output::new().ints(
             "maps",

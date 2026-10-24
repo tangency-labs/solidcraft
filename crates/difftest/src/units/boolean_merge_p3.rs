@@ -8,27 +8,29 @@
 //! context-only native `SmMerge` with the same explicit members and at most one
 //! operand: it compares the NER status, the restored manifold flag, the lamina mode
 //! the engine's intersector received and the null result (error-path coverage only).
+//! Family 4 constructs the merge (`MergeAccess(context, a, b, 0.0, 0.0, options)`, as
+//! the shim) and runs `PiecewiseMerge` with that engine's intersector as `m_vTI`:
+//! `IntersectInsertRelate`, the mate clearing, subset, controls, SSI registration and
+//! wire processing all act on the one engine that `ManifoldBoolean` then uses.
 use std::collections::BTreeSet;
 
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 use port::{BooleanDriver, PiecewiseAccess};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use solidcore::boolean::merge::p1::{MergeState, VertexCopy};
-use solidcore::boolean::merge::p2::{MergeOperand, TopologyCopy};
-use solidcore::boolean::merge::p4::{KernelManifoldIntersector, ManifoldState};
-use solidcore::boolean::merge::p5::process_wires_and_shell_vertices;
+use solidcore::boolean::merge::p1::MergeState;
+use solidcore::boolean::merge::p2::MergeOperand;
+use solidcore::boolean::merge::p4::{
+    BooleanKernels, KernelManifoldIntersector, ManifoldIntersector, ManifoldState,
+};
 use solidcore::boolean::merge::{p1::MergeOptions, p3 as port};
-use solidcore::boolean::topology_intersector::p1::{Relations, TopologyIntersector};
+use solidcore::boolean::topology_intersector::p1::TopologyIntersector;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{ids, Attribute, AttributeStore, Behavior, ObjectKey};
 use solidcore::geom::context::MarkLock;
-use solidcore::geom::solution_array::{ObjectKind, SolutionObject};
-use solidcore::intersect::point_class::{ClassObject, ClassObjectKind};
 use solidcore::kernel::Kernel;
-use solidcore::topology::topology::Topology;
-use solidcore::topology::topology_traverser::Marks;
-use solidcore::topology::{brep::p1 as bp, Brep};
+use solidcore::topology::brep_cache::{arena_identity, CacheObject};
+use solidcore::topology::{brep::p1 as bp, Brep, FaceId};
 use solidcore::SolidError;
 use solidcore_ffi::units::boolean_merge_p3 as ffi;
 
@@ -90,7 +92,7 @@ fn encode(i: &Inputs) -> Vec<f64> {
     data.extend(i.tree.iter().map(|&v| v as f64));
     data
 }
-/// The deferral tag of `ManifoldBoolean` calls with no Rust-side engine (family 4).
+/// The deferral tag of merge calls with no constructed Rust-side engine.
 const HARNESS_ENGINE_STATE: &str = "harness:merge-engine-state";
 /// Family 6: `NonManifoldBoolean` on an adopted engine (see the module docs).
 const ENGINE_PROBE: u8 = 6;
@@ -355,33 +357,10 @@ fn list_result(result: &port::BooleanListsResult, values: &mut Vec<f64>) -> soli
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum PoolRef {
-    Brep(usize),
-    Surface(usize, usize),
-}
-impl ClassObject for PoolRef {
-    fn class_kind(&self) -> ClassObjectKind {
-        match self {
-            Self::Surface(..) => ClassObjectKind::Surface,
-            Self::Brep(..) => ClassObjectKind::Other,
-        }
-    }
-}
-impl SolutionObject for PoolRef {
-    fn kind(&self) -> ObjectKind {
-        match self {
-            Self::Surface(..) => ObjectKind::Surface,
-            Self::Brep(..) => ObjectKind::Other,
-        }
-    }
-}
-
 struct Pool {
     breps: Vec<Brep>,
     original_count: usize,
     retired: BTreeSet<usize>,
-    intersector: TopologyIntersector<PoolRef>,
     attributes: AttributeStore,
     primary: Option<usize>,
     other: Option<usize>,
@@ -421,9 +400,7 @@ impl Pool {
                     .as_mut()
                 {
                     if surface.owner().is_some() {
-                        surface.set_owner(Some(solidcore::topology::brep_cache::arena_identity(
-                            solidcore::topology::brep_cache::CacheObject::Face(face),
-                        )));
+                        surface.set_owner(Some(arena_identity(CacheObject::Face(face))));
                     }
                 }
                 // a new owner key drops the cached face tolerance: record it again
@@ -436,12 +413,6 @@ impl Pool {
             breps,
             original_count: i.a.len() + i.b.len(),
             retired: BTreeSet::new(),
-            intersector: TopologyIntersector::new(
-                Some(PoolRef::Brep(0)),
-                Some(PoolRef::Brep(i.a.len())),
-                0.0,
-                0.0,
-            ),
             attributes: AttributeStore::new(),
             primary: Some(0),
             other: Some(i.a.len()),
@@ -501,6 +472,66 @@ impl Pool {
                 })?,
         ))
     }
+    /// The constructed merge (`boolean.merge_p2`), whose intersector is `m_vTI`.
+    fn engine_mut(&mut self) -> solidcore::Result<&mut port::MergeEngine> {
+        self.engine.as_mut().ok_or_else(|| {
+            SolidError::unported(
+                "SmMerge::PiecewiseMerge (pool engine state)",
+                HARNESS_ENGINE_STATE,
+            )
+        })
+    }
+    /// Run `action` on the merge and the current operands, moved out of their slots
+    /// and back (the engine and both B-reps return on every exit).
+    fn with_engine_pair<T>(
+        &mut self,
+        action: impl FnOnce(&mut port::MergeEngine, &mut Brep, &mut Brep) -> solidcore::Result<T>,
+    ) -> solidcore::Result<T> {
+        let (Some(p), Some(o)) = (self.primary, self.other) else {
+            return Err(SolidError::invalid_input(
+                "harness::merge_p3",
+                "the merge needs both operands",
+            ));
+        };
+        if p == o {
+            return Err(SolidError::invalid_input(
+                "harness::merge_p3",
+                "a merge of one B-rep with itself",
+            ));
+        }
+        self.engine_mut()?;
+        let mut a = self.take_brep(p)?;
+        let mut b = match self.take_brep(o) {
+            Ok(b) => b,
+            Err(error) => {
+                self.restore_brep(Some(p), Some(a));
+                return Err(error);
+            }
+        };
+        let result = match self.engine.as_mut() {
+            Some(engine) => action(engine, &mut a, &mut b),
+            None => Err(SolidError::null_pointer("harness::merge_p3")),
+        };
+        self.restore_brep(Some(p), Some(a));
+        self.restore_brep(Some(o), Some(b));
+        result
+    }
+    /// The face of a `GetSurfaces` handle: the `index`-th face owning its surface.
+    fn surface_face(&self, (id, index): (usize, usize)) -> solidcore::Result<FaceId> {
+        let brep = self.brep(id)?;
+        let mut owners = Vec::new();
+        for face in bp::faces(brep, None)? {
+            let owned = brep.face(face)?.surface.as_ref().is_some_and(|surface| {
+                surface.owner() == Some(arena_identity(CacheObject::Face(face)))
+            });
+            if owned {
+                owners.push(face);
+            }
+        }
+        owners.get(index).copied().ok_or_else(|| {
+            SolidError::invalid_input("harness::merge_p3", "bad surface handle")
+        })
+    }
     fn record(&self, id: usize, values: &mut Vec<f64>) -> solidcore::Result<()> {
         let brep = self.brep(id)?;
         let identity = if id < self.original_count {
@@ -541,10 +572,6 @@ impl BooleanDriver for Pool {
             angle_tol,
             options,
         )?;
-        self.intersector
-            .set_this_approx_tol_3d(merge.intersector.this_approx_tol_3d());
-        self.intersector
-            .set_this_ang_tol_rad(merge.intersector.this_ang_tol_rad());
         self.manifold = merge.manifold_boolean.unwrap_or(self.manifold);
         self.engine = Some(port::MergeEngine::from_merge(&merge)?);
         Ok(())
@@ -562,8 +589,8 @@ impl BooleanDriver for Pool {
         // ManifoldBoolean (boolean.merge_p4) on the engine `construct` built, run by
         // port::DependencyMerge on the pool's B-reps, moved in and back.
         let Some(engine) = self.engine.take() else {
-            // Family 4 runs PiecewiseMerge on the native SmMerge(c, a, b, ...) the shim
-            // built, but no Rust engine holds the pool's piecewise intersector state.
+            // Every family constructs the merge before it runs: no engine means no
+            // SmMerge object was built on the Rust side.
             return Err(SolidError::unported(
                 "SmMerge::ManifoldBoolean (pool engine state)",
                 HARNESS_ENGINE_STATE,
@@ -611,8 +638,6 @@ impl PiecewiseAccess for Pool {
     fn set_operands(&mut self, a: Option<usize>, b: Option<usize>) {
         self.primary = a;
         self.other = b;
-        self.intersector.set_primary_brep(a.map(PoolRef::Brep));
-        self.intersector.set_other_brep(b.map(PoolRef::Brep));
     }
     fn surfaces(&self, id: usize) -> solidcore::Result<Vec<Self::Surface>> {
         let brep = self.brep(id)?;
@@ -622,22 +647,36 @@ impl PiecewiseAccess for Pool {
             .map(|(s, _)| (id, s))
             .collect())
     }
-    fn intersect_insert_relate(&mut self, _k: &mut Kernel) -> solidcore::Result<()> {
-        // UNPORTED(boolean.topology_intersector_p2): SmTopologyIntersector::IntersectInsertRelate
-        Err(SolidError::unported(
-            "SmTopologyIntersector::IntersectInsertRelate",
-            "boolean.topology_intersector_p2",
-        ))
+    fn intersect_insert_relate(&mut self, k: &mut Kernel) -> solidcore::Result<()> {
+        // m_vTI.IntersectInsertRelate() on the constructed merge's intersector
+        self.with_engine_pair(|engine, a, b| {
+            engine.intersector.intersect_insert_relate(
+                &mut BooleanKernels {
+                    primary: k,
+                    other: None,
+                },
+                a,
+                b,
+                &mut engine.attributes,
+            )
+        })
     }
     fn clear_relationships(&mut self) -> solidcore::Result<()> {
-        self.intersector.clear_relationships()
+        self.engine_mut()?.intersector.clear_relationships()
     }
     fn set_subset(&mut self, surfaces: &[Self::Surface]) {
-        let handles: Vec<_> = surfaces
+        // SetSubset by surface identity (the canonical B-rep cache's convention). The
+        // handles come from GetSurfaces of live B-reps, so each resolves.
+        let identities: Vec<_> = surfaces
             .iter()
-            .map(|&(b, s)| PoolRef::Surface(b, s))
+            .filter_map(|&surface| {
+                let face = self.surface_face(surface).ok()?;
+                KernelManifoldIntersector::surface_identity(self.brep(surface.0).ok()?, face).ok()
+            })
             .collect();
-        self.intersector.set_subset(&handles);
+        if let Some(engine) = self.engine.as_mut() {
+            engine.intersector.set_surface_subset(&identities);
+        }
     }
     fn surface_map(
         &mut self,
@@ -701,108 +740,42 @@ impl PiecewiseAccess for Pool {
     }
     fn set_controls(&mut self, manifold: bool, wires: bool, lamina: u64) {
         self.manifold = manifold;
-        self.intersector.intersect_wire_edges = wires;
-        self.intersector.intersect_lamina_edges = lamina;
+        if let Some(engine) = self.engine.as_mut() {
+            engine.intersector.set_intersect_wire_edges(wires);
+            engine.intersector.set_intersect_lamina_edges(lamina);
+        }
     }
     fn process_wires(&mut self, k: &mut Kernel, lock: &MarkLock) -> solidcore::Result<()> {
-        // ProcessWiresAndShellVertices(SM_BO_MERGE, keep, mark1, mark2) (merge_p5) with
-        // merge_p2's copy environment. The pool's intersector names only B-reps and
-        // surfaces, so its topology mates are empty, and the pool marks no topology:
-        // empty Relations and Marks are its actual state, not a second mate map.
-        let (Some(p), Some(o)) = (self.primary, self.other) else {
-            return Err(SolidError::invalid_input(
-                "harness::merge_p3",
-                "wire processing without both operands",
-            ));
-        };
-        self.brep(p)?;
-        self.brep(o)?;
-        if p == o {
-            return Err(SolidError::invalid_input(
-                "harness::merge_p3",
-                "wire processing of one B-rep with itself",
-            ));
-        }
-        let (low, high) = (p.min(o), p.max(o));
-        let (head, tail) = self.breps.split_at_mut(high);
-        let (lower, upper) = (
-            head.get_mut(low)
-                .ok_or(SolidError::null_pointer("harness::merge_p3"))?,
-            tail.first_mut()
-                .ok_or(SolidError::null_pointer("harness::merge_p3"))?,
-        );
-        let (primary, other) = if p < o {
-            (lower, upper)
-        } else {
-            (upper, lower)
-        };
-        let mut records = std::collections::BTreeMap::new();
-        for (base, brep) in [(0u64, &*primary), (1_000_000, &*other)] {
-            for v in brep.vertices().ids() {
-                records.insert(ObjectKey(base + u64::from(v.index())), Topology::new());
-            }
-            for e in brep.edges().ids() {
-                records.insert(
-                    ObjectKey(2_000_000 + base + u64::from(e.index())),
-                    Topology::new(),
-                );
-            }
-        }
-        let object = |key: u64, type_code: i64| solidcore::geom::object::ObjectRef {
-            key: ObjectKey(key),
-            type_code,
-        };
-        let mut copy = TopologyCopy {
-            vertices: VertexCopy {
-                records: &mut records,
-                attributes: &mut self.attributes,
-                source_key: &|v| object(1_000_000 + u64::from(v.index()), 16021),
-                destination_key: &|e| match e {
-                    solidcore::EntityRef::Vertex(v) => object(u64::from(v.index()), 16021),
-                    solidcore::EntityRef::Vertexuse(v) => {
-                        object(6_000_000 + u64::from(v.index()), 16006)
-                    }
-                    _ => object(9_000_000, 16001),
+        // ProcessWiresAndShellVertices(SM_BO_MERGE, keep, mark1, mark2) (merge_p5) on the
+        // merge's own mates, state and attributes.
+        self.with_engine_pair(|engine, a, b| {
+            let mut keep = Vec::new(); // local and discarded, as upstream
+            engine.intersector.process_wires(
+                &mut BooleanKernels {
+                    primary: k,
+                    other: None,
                 },
-            },
-            edge_source_key: &|e| object(3_000_000 + u64::from(e.index()), 16016),
-            edge_destination_key: &|e| object(2_000_000 + u64::from(e.index()), 16016),
-            face_source_key: &|f| object(5_000_000 + u64::from(f.index()), 16002),
-            face_destination_key: &|f| object(4_000_000 + u64::from(f.index()), 16002),
-        };
-        let mut keep = Vec::new(); // local and discarded, as upstream
-        process_wires_and_shell_vertices(
-            k,
-            primary,
-            other,
-            &mut Marks::default(),
-            &mut Marks::default(),
-            &mut Relations::default(),
-            &mut copy,
-            None,
-            BooleanOperation::Merge,
-            lock.mark_type1(),
-            lock.mark_type2(),
-            &mut keep,
-        )
+                a,
+                b,
+                &mut engine.state,
+                &mut engine.attributes,
+                BooleanOperation::Merge,
+                lock.mark_type1(),
+                lock.mark_type2(),
+                &mut keep,
+            )
+        })
     }
     fn release_marks(&mut self, k: &mut Kernel, lock: &mut MarkLock) -> solidcore::Result<()> {
         lock.release(std::slice::from_mut(&mut k.context))
     }
     fn register_empty_ssi(&mut self, a: Self::Surface, b: Self::Surface) -> solidcore::Result<()> {
-        register_ssi(&mut self.intersector, a, b, &[], &[], &[], &[], &[])
+        let (a, b) = (self.surface_face(a)?, self.surface_face(b)?);
+        self.engine_mut()?.intersector.register_empty_ssi(a, b);
+        Ok(())
     }
     fn clear_existing_ssi(&mut self) -> solidcore::Result<()> {
-        // The fixture adapter only registers empty curve arrays. No curve handles
-        // can be created here until RegisterExistingSSI is wired above.
-        let deleted = self.intersector.clear_existing_ssi();
-        if !deleted.is_empty() {
-            // UNPORTED(boolean.topology_intersector_p2): SmTopologyIntersector::RegisterExistingSSI (curve storage)
-            return Err(SolidError::unported(
-                "SmTopologyIntersector::RegisterExistingSSI (curve storage)",
-                "boolean.topology_intersector_p2",
-            ));
-        }
+        self.engine_mut()?.intersector.clear_existing_ssi();
         Ok(())
     }
     fn notify_pre_edit(&mut self, k: &mut Kernel, a: usize) -> solidcore::Result<()> {
@@ -879,24 +852,6 @@ fn set_tolerance(
         Err(e) if e.is_unported() => Err(e),
         _ => Ok(()),
     }
-}
-
-#[allow(clippy::too_many_arguments)] // all five native SSI arrays remain explicit
-fn register_ssi(
-    _intersector: &mut TopologyIntersector<PoolRef>,
-    _a: (usize, usize),
-    _b: (usize, usize),
-    _curves_3d: &[PoolRef],
-    _uv1: &[PoolRef],
-    _uv2: &[PoolRef],
-    _orientations: &[solidcore::surface::surface::p2::TsectCurveType],
-    _deviations: &[f64],
-) -> solidcore::Result<()> {
-    // UNPORTED(boolean.topology_intersector_p2): SmTopologyIntersector::RegisterExistingSSI
-    Err(SolidError::unported(
-        "SmTopologyIntersector::RegisterExistingSSI",
-        "boolean.topology_intersector_p2",
-    ))
 }
 
 /// `SmBrep::Notify(op, caller, data1, data2)` (`topology::brep::p2::notify`). The fixture
@@ -998,21 +953,24 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 })
                 .and_then(|result| single_result(&pool, result, manifold, lamina, &mut values))
         }
-        4 => port::piecewise_merge(
-            &mut k,
-            &mut pool,
-            None,
-            i.options.unwrap_or(0) & 1 != 0,
-            i.options.unwrap_or(0) & 2 != 0,
-        )
-        .and_then(|result| {
-            single_result(
-                &pool,
-                result,
-                pool.manifold,
-                pool.intersector.intersect_lamina_edges,
-                &mut values,
-            )
+        // MergeAccess merge(context, a, b, 0.0, 0.0, options), then PiecewiseMerge
+        4 => pool
+            .construct(&mut k, &mut Some(0), &mut Some(1), 0.0, 0.0, opts.as_ref())
+            .and_then(|()| {
+                port::piecewise_merge(
+                    &mut k,
+                    &mut pool,
+                    None,
+                    i.options.unwrap_or(0) & 1 != 0,
+                    i.options.unwrap_or(0) & 2 != 0,
+                )
+            })
+            .and_then(|result| {
+            let lamina = pool
+                .engine
+                .as_ref()
+                .map_or(0, |engine| engine.intersector.intersect_lamina_edges());
+            single_result(&pool, result, pool.manifold, lamina, &mut values)
         }),
         _ => return Err(harness("fixture-only family")),
     };
@@ -1254,13 +1212,19 @@ mod tests {
 
     #[test]
     fn piecewise_adapter_uses_canonical_subset_attributes_controls_and_marks() {
+        fn engine(pool: &Pool) -> &KernelManifoldIntersector {
+            &pool.engine.as_ref().unwrap().intersector
+        }
         let mut pool = Pool::load(&inputs()).unwrap();
+        let mut k = Kernel::default();
+        pool.construct(&mut k, &mut Some(0), &mut Some(1), 0.0, 0.0, None)
+            .unwrap();
         assert_eq!(pool.surfaces(0).unwrap().len(), 6);
         assert!(pool.surfaces(1).unwrap().is_empty());
         pool.set_subset(&[(0, 0), (0, 0)]);
-        assert_eq!(pool.intersector.subset().unwrap().len(), 1);
+        assert_eq!(engine(&pool).surface_subset().unwrap().len(), 1);
         pool.set_subset(&[]);
-        assert!(pool.intersector.subset().is_none());
+        assert!(engine(&pool).surface_subset().is_none());
         pool.surface_map((0, 0), false).unwrap();
         assert_eq!(pool.surface_map_users((0, 0)).unwrap(), Some(vec![(0, 0)]));
         let key = pool.surface_key((0, 0)).unwrap();
@@ -1269,11 +1233,10 @@ mod tests {
         pool.surface_map((0, 0), false).unwrap();
         assert_eq!(pool.attributes.attributes(key).len(), 2);
         pool.set_controls(false, false, 3);
-        assert!(!pool.manifold_flag() && !pool.intersector.intersect_wire_edges);
-        assert_eq!(pool.intersector.intersect_lamina_edges, 3);
+        assert!(!pool.manifold_flag() && !engine(&pool).intersect_wire_edges());
+        assert_eq!(engine(&pool).intersect_lamina_edges(), 3);
         pool.clear_relationships().unwrap();
         pool.clear_existing_ssi().unwrap();
-        let mut k = Kernel::default();
         let mut lock = MarkLock::new(
             std::slice::from_mut(&mut k.context),
             0,
@@ -1293,6 +1256,16 @@ mod tests {
     fn piecewise_dependency_errors_name_the_next_missing_owner() {
         let mut pool = Pool::load(&inputs()).unwrap();
         let mut k = Kernel::default();
+        // without SmMerge's constructor the pool holds no m_vTI
+        assert!(matches!(
+            pool.clear_relationships(),
+            Err(SolidError::Unported {
+                unit: HARNESS_ENGINE_STATE,
+                ..
+            })
+        ));
+        pool.construct(&mut k, &mut Some(0), &mut Some(1), 0.0, 0.0, None)
+            .unwrap();
         // the face B-rep is built (SmBrep constructor, topology.brep_p3;
         // CreateFaceFromSurface, topology.brep_p8)
         let r = pool.new_face_brep(&mut k, 0);
@@ -1300,13 +1273,9 @@ mod tests {
         // SmBrep::Notify is topology.brep_p2's (#149): PRE_EDIT of the fixture B-rep runs
         let r = pool.notify_pre_edit(&mut k, 0);
         assert!(r.is_ok(), "notify_pre_edit: {r:?}");
-        assert!(matches!(
-            pool.register_empty_ssi((0, 0), (0, 1)),
-            Err(SolidError::Unported {
-                unit: "boolean.topology_intersector_p2",
-                ..
-            })
-        ));
+        // RegisterExistingSSI of empty arrays on the merge's own intersector
+        let r = pool.register_empty_ssi((0, 0), (0, 1));
+        assert!(r.is_ok(), "register_empty_ssi: {r:?}");
         // SmMerge's constructor and copy environment are boolean.merge_p2's (#229) and
         // SmBrep::Point3DClassify is query.brep's: ProcessWiresAndShellVertices runs to
         // completion on the fixture

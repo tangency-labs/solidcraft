@@ -329,8 +329,9 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
         Ok(())
     }
 
-    /// Clear the two canonical mate maps between piecewise stages.
-    pub(crate) fn clear_relationships(&mut self) -> Result<()> {
+    /// Clear the two canonical mate maps between piecewise stages
+    /// (`m_pBToO->RemoveAll(); m_pOToB->RemoveAll()`).
+    pub fn clear_relationships(&mut self) -> Result<()> {
         self.merge.intersector.with_intersector(
             &mut self.intersector,
             arena_pair::encode,
@@ -340,12 +341,12 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
     }
 
     /// `m_vTI.m_bIntersectWireEdges`.
-    pub(crate) fn set_intersect_wire_edges(&mut self, enabled: bool) {
+    pub fn set_intersect_wire_edges(&mut self, enabled: bool) {
         self.intersector.intersect_wire_edges = enabled;
     }
 
     /// The empty-array `RegisterExistingSSI` call used by `PiecewiseMerge`.
-    pub(crate) fn register_empty_ssi(&mut self, primary: FaceId, other: FaceId) {
+    pub fn register_empty_ssi(&mut self, primary: FaceId, other: FaceId) {
         self.intersector.register_empty_ssi(
             Some(arena_pair::surface_handle(false, primary)),
             Some(arena_pair::surface_handle(true, other)),
@@ -353,7 +354,7 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
     }
 
     /// Clear the piecewise stage's registered surface pairs.
-    pub(crate) fn clear_existing_ssi(&mut self) {
+    pub fn clear_existing_ssi(&mut self) {
         let _ = self.intersector.clear_existing_ssi();
     }
 
@@ -536,6 +537,18 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
     #[must_use]
     pub fn intersect_lamina_edges(&self) -> u64 {
         self.intersector.intersect_lamina_edges
+    }
+
+    /// `m_vTI.m_bIntersectWireEdges`.
+    #[must_use]
+    pub fn intersect_wire_edges(&self) -> bool {
+        self.intersector.intersect_wire_edges
+    }
+
+    /// The partial-merge surface subset ([`Self::set_surface_subset`]), if any.
+    #[must_use]
+    pub fn surface_subset(&self) -> Option<&BTreeSet<ObjectRef>> {
+        self.subset.as_ref()
     }
 
     /// Run the orchestration with the options held in the canonical `MergeState`.
