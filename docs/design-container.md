@@ -147,7 +147,7 @@ SHA-256 of their encoding), and a placed copy of a repeated part (an instance fr
 a STEP assembly) records the part and its matrix, so it shows that part's display
 again instead of being meshed on its own.
 
-`cache/model.json` records `solidcraft-model-cache/3`, the producer revision
+`cache/model.json` records `solidcraft-model-cache/4`, the producer revision
 `solidcraft-truck-adapter/3`, the application version, the build (source commit,
 CPU architecture and OS), the SHA-256 of the exact `document.json` (whose blob
 references pin every STEP, mesh and image payload) and of `cache/bodies.bin`, the
@@ -168,7 +168,9 @@ A model whose cache would push the container past them keeps fewer states
 other states, the slowest feature's first (the evaluations opening would otherwise
 repeat for longest), each while what it adds still fits: the bodies no state kept
 so far holds (a body is stored once however many states hold it) and the records
-of the state, those bodies, their names and sketches. When the rest of the
+of the state, those bodies, their names and sketches. Sheet bodies, like sketches, are
+written once and named by place in the states (most features leave the sheets as they were); a
+thinned cache keeps all of them. When the rest of the
 manifest (the bodies' table, the slices) then leaves too little room, the choice
 is made again within that much less, and the final state alone is always tried.
 A feature whose state is left out records none. The cache is left out (and the

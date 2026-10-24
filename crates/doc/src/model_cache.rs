@@ -22,7 +22,7 @@ pub struct SavedModel {
 
 /// Records refer to these at most.
 const MAX_ITEMS: usize = 1_000_000;
-/// Bodies and sketches all the states hold together, at most (a state is a list of clones).
+/// Bodies, sketches and sheet bodies all the states hold together, at most (a state is a list of clones).
 const MAX_HELD: usize = 50_000_000;
 
 fn hex(v: u64) -> String {
@@ -107,6 +107,10 @@ struct Writer {
     names_index: HashMap<usize, usize>,
     sketches: Vec<Json>,
     sketch_index: HashMap<usize, usize>,
+    /// Sheet bodies by their record: most features leave the sheets as they were, so the states
+    /// share them (writing them with every state made a sheet-metal design's model too large to keep).
+    sheets: Vec<Json>,
+    sheet_index: HashMap<String, usize>,
     states: Vec<Json>,
     state_index: HashMap<usize, usize>,
 }
@@ -173,6 +177,17 @@ impl Writer {
         Some(self.sketches.len() - 1)
     }
 
+    fn sheet(&mut self, sheet: &crate::sheet::SheetBody) -> Option<usize> {
+        let record = serde_json::to_value(sheet).ok()?;
+        let key = record.to_string();
+        if let Some(i) = self.sheet_index.get(&key) {
+            return Some(*i);
+        }
+        self.sheets.push(record);
+        self.sheet_index.insert(key, self.sheets.len() - 1);
+        Some(self.sheets.len() - 1)
+    }
+
     fn state(&mut self, st: &Arc<ModelState>) -> Option<usize> {
         let id = Arc::as_ptr(st) as usize;
         if let Some(i) = self.state_index.get(&id) {
@@ -180,10 +195,11 @@ impl Writer {
         }
         let bodies = st.bodies.iter().map(|b| self.model_body(b)).collect::<Option<Vec<_>>>()?;
         let sketches = st.sketches.iter().map(|s| self.sketch(s)).collect::<Option<Vec<_>>>()?;
+        let sheets = st.sheets.iter().map(|s| self.sheet(s)).collect::<Option<Vec<_>>>()?;
         let r = json!({
             "bodies": runs(&bodies), "sketches": runs(&sketches), "body_counter": st.body_counter,
             "reserved_body_names": st.reserved_body_names.iter().collect::<Vec<_>>(),
-            "sheets": serde_json::to_value(&st.sheets).ok()?, "construct": serde_json::to_value(&st.construct).ok()?,
+            "sheets": sheets, "construct": serde_json::to_value(&st.construct).ok()?,
             "threads": serde_json::to_value(&st.threads).ok()?,
             "sketch_keys": st.sketch_keys.iter().map(|(f, k)| json!([f, hex(*k)])).collect::<Vec<_>>(),
             "blend_edges": serde_json::to_value(&st.blend_edges).ok()?, "fitted": serde_json::to_value(&st.fitted).ok()?,
@@ -219,6 +235,7 @@ impl Model {
             }
             let records = json!({
                 "features": features, "states": w.states, "model_bodies": w.model_bodies, "names": w.names, "sketches": w.sketches,
+                "sheets": w.sheets,
             });
             Ok(SavedModel { records, bodies: w.bodies })
         })
@@ -295,6 +312,10 @@ impl SavedModel {
             }
             model_bodies.push(b);
         }
+        let mut sheets = Vec::new();
+        for s in list("sheets")? {
+            sheets.push(serde_json::from_value::<crate::sheet::SheetBody>(s.clone()).map_err(|_| bad("saved model: sheet"))?);
+        }
         let mut states = Vec::new();
         let mut held = 0usize;
         for s in list("states")? {
@@ -327,7 +348,13 @@ impl SavedModel {
                     .and_then(Json::as_array)
                     .map(|a| a.iter().filter_map(|n| n.as_str().map(str::to_string)).collect())
                     .unwrap_or_default(),
-                sheets: serde_json::from_value(field("sheets")?).map_err(invalid)?,
+                sheets: s
+                    .get("sheets")
+                    .and_then(Json::as_array)
+                    .ok_or_else(|| bad("saved model: state"))?
+                    .iter()
+                    .map(|i| index(Some(i), sheets.len()).and_then(|i| sheets.get(i).cloned().ok_or_else(|| bad("saved model: sheet"))))
+                    .collect::<Result<Vec<_>>>()?,
                 construct: serde_json::from_value(field("construct")?).map_err(invalid)?,
                 threads: serde_json::from_value(field("threads")?).map_err(invalid)?,
                 sketch_keys,
@@ -335,7 +362,7 @@ impl SavedModel {
                 fitted: serde_json::from_value(field("fitted")?).map_err(invalid)?,
                 tapered: serde_json::from_value(field("tapered")?).map_err(invalid)?,
             };
-            held = held.saturating_add(st.bodies.len()).saturating_add(st.sketches.len());
+            held = held.saturating_add(st.bodies.len()).saturating_add(st.sketches.len()).saturating_add(st.sheets.len());
             if held > MAX_HELD {
                 return Err(bad("saved model: states"));
             }
@@ -412,7 +439,9 @@ impl SavedModel {
         let mut kept_bodies = vec![false; model_bodies.len()];
         let (mut names_used, mut sketches_used) = (vec![false; names.len()], vec![false; sketches.len()]);
         let mut stored = std::collections::HashSet::new();
-        let mut used = 0usize;
+        // The sheet bodies, each written once and named by place in the states: all kept.
+        let sheets = list("sheets").cloned().unwrap_or_default();
+        let mut used = bytes(sheets.as_slice()).iter().fold(0usize, |t, b| t.saturating_add(*b));
         for s in std::iter::once(last).chain(order) {
             let (mut adds, mut new_names, mut new_sketches) = (HashMap::new(), std::collections::HashSet::new(), std::collections::HashSet::new());
             let mut records = *state_bytes.get(s)?;
@@ -504,7 +533,7 @@ impl SavedModel {
         }
         let records = json!({
             "features": out_features, "states": out_states, "model_bodies": out_bodies, "names": kept_of(names.as_slice(), &names_used),
-            "sketches": kept_of(sketches.as_slice(), &sketches_used),
+            "sketches": kept_of(sketches.as_slice(), &sketches_used), "sheets": sheets,
         });
         let kept: Vec<usize> = (0..self.bodies.len()).filter(|i| kernel_used.get(*i) == Some(&true)).collect();
         let bodies = kept.iter().filter_map(|i| self.bodies.get(*i).cloned()).collect();

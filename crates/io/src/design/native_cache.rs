@@ -5,7 +5,7 @@
 use super::*;
 use solidcraft_doc::{ModelState, SavedModel};
 
-const FORMAT: &str = "solidcraft-model-cache/3";
+const FORMAT: &str = "solidcraft-model-cache/4";
 const PRODUCER: &str = "solidcraft-truck-adapter/3";
 const MANIFEST: &str = "cache/model.json";
 const PAYLOAD: &str = "cache/bodies.bin";

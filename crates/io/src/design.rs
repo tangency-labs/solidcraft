@@ -811,7 +811,7 @@ mod tests {
         solidcraft_doc::SavedModel {
             records: json!({
                 "features": [{"id": 1, "fingerprint": "0000000000000000", "ms": 0.0, "skipped": false, "state": 0}],
-                "states": [state], "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [],
+                "states": [state], "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [],
             }),
             bodies,
         }
@@ -910,7 +910,7 @@ mod tests {
             .map(|(i, ms)| json!({"id": i + 1, "fingerprint": "0000000000000000", "ms": ms, "skipped": false, "state": i}))
             .collect();
         solidcraft_doc::SavedModel {
-            records: json!({"features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": []}),
+            records: json!({"features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": []}),
             bodies,
         }
     }

@@ -899,6 +899,49 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 
+    /// A sheet-metal design keeps each sheet body once in its saved model, not again with every
+    /// later feature's state: a design of many features after its sheet metal wrote the sheets
+    /// over and over, and past the cache's size limit kept only some of its states.
+    #[test]
+    fn a_saved_model_keeps_each_sheet_body_once() {
+        let design = |boxes: usize| {
+            let mut s = Session::new(Document::new("Sheet"));
+            let run = |s: &mut Session, id: &str, p: Value| s.execute(id, &p).unwrap();
+            run(
+                &mut s,
+                "sheet.manage_rules",
+                json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","gap":"0.5 mm","active":true}),
+            );
+            run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,150]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+            run(&mut s, "sheet.flange", json!({"edges":[[100,0,2],[200,75,2],[100,150,2],[0,75,2]],"height":"20 mm","angle":"90 deg"}));
+            // A panel's holes: each one is a cut-out the sheet keeps.
+            for i in 0..16 {
+                run(&mut s, "solid.hole", json!({"position":[25 + 10 * i,40,2],"diameter":5}));
+            }
+            for i in 0..boxes {
+                run(&mut s, "solid.box", json!({"length":5,"width":5,"height":5,"corner":[300 + 10 * i,0,0],"operation":"new"}));
+            }
+            s
+        };
+        let size = |s: &Session| serde_json::to_vec(&saved_geometry(s, &s.doc).unwrap().records).unwrap().len();
+        let (few, many) = (design(2), design(12));
+        let sheet = serde_json::to_vec(&many.model.state().sheets).unwrap().len();
+        let per_feature = (size(&many) - size(&few)) / 10;
+        assert!(per_feature * 2 < sheet, "each later feature adds {per_feature} bytes, the sheet is {sheet}");
+        // Taken from the file as saved: the sheet is the one evaluated.
+        let flat = many.model.state().sheets.clone();
+        let path = std::env::temp_dir().join(format!("solidcraft-sheet-cache-{}.solidcraft", std::process::id()));
+        std::fs::write(&path, many.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap()).unwrap();
+        let mut reopened = Session::default();
+        reopened.execute("doc.open", &json!({"path":path})).unwrap();
+        assert!(reopened.model.results.iter().zip(&many.model.results).all(|(a, b)| a.ms == b.ms), "taken from the file, not evaluated");
+        assert_eq!(serde_json::to_value(&reopened.model.state().sheets).unwrap(), serde_json::to_value(&flat).unwrap());
+        std::fs::remove_file(path).unwrap();
+    }
+
     #[test]
     #[ignore = "manual native cache save benchmark; generate issue303-step.json first"]
     fn benchmark_native_cache_save() {
