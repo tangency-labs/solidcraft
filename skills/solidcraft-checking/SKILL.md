@@ -7,7 +7,7 @@ description: Use alongside solidcraft-modeling and solidcraft-editing whenever y
 
 `solidcraft-modeling` and `solidcraft-editing` cover the commands, plane axes, ids, edge picks and the MCP workflow: load the one that fits first. This skill adds checks for errors SolidCraft does not report, and the work around a design kept in a repo.
 
-`$SKILL` below is the folder this file is in (`~/.claude/skills/solidcraft-checking` for a user install). Written against SolidCraft 0.8.0. `scripts/tests/test_facts.py` checks every trap and convention below, and the facts behind the corrections in `solidcraft-modeling`. After a SolidCraft upgrade, run the tests and fix the text where they fail:
+`$SKILL` below is the folder this file is in (`~/.claude/skills/solidcraft-checking` for a user install). Checked against SolidCraft 0.21.0. `scripts/tests/test_facts.py` checks every trap and convention below, and the facts behind the corrections in `solidcraft-modeling`. After a SolidCraft upgrade, run the tests and fix the text where they fail:
 `PYTHONDONTWRITEBYTECODE=1 uv run --no-project --with pytest --with build123d pytest -p no:cacheprovider $SKILL/scripts/tests`
 
 ## Scripts
@@ -37,8 +37,7 @@ In `$SKILL/scripts/`:
 5. **Measurement accuracy.** The `solidcraft-modeling` reference gives how far measured volumes stray from computed ones. Centre of mass and bounding box come out up to about 5e-5 of the part size off. Set test tolerances as the template says.
 6. **Expressions.** They have `+ - * / ^ %`, `sin cos tan asin acos atan atan2 sqrt abs min max floor ceil round mod trunc exp ln log log10 pow sign hypot` (`log` is base 10), `pi` and units; no `if` and no comparisons. Build steps from `floor`, `mod`, `min`, `max` and `sign`, which gives 1 at 0. `asin acos atan atan2` return angles, so a unitless parameter cannot hold them.
 7. **Snapping.** A point created exactly on an existing point or the origin becomes coincident with it (`connect` defaults to true).
-8. **Rectangle symmetry.** Opposite sides of a rectangle run in opposite directions, so `sketch.constraint.symmetry` on two sides conflicts with the rectangle; make two corner points symmetric instead.
-9. **Repeated body names.** A repeated `body_name` is renamed (`Body1`) without an error, so `targets` reach only the first body.
+8. **Repeated body names.** A repeated `body_name` is renamed (`Body1`) without an error, so `targets` reach only the first body.
 
 ## Conventions
 

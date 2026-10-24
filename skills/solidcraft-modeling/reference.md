@@ -22,7 +22,7 @@ These are the shapes of the commands a part build needs, so an agent rarely has 
   - Draw a feature at height z at sketch y = **-z**.
   - A cut with a positive distance goes into the wall.
 - **Top face:** sketch on `{"plane":"XY","offset":"h"}`.
-- **Hole direction:** `solid.hole {sketch}` drills from the sketch plane along -normal. A hole sketch at z=0 under a part drills into empty space and still reports success, so put the sketch on the top face.
+- **Hole direction:** `solid.hole {sketch}` drills into the part from the face nearest the sketch. A hole sketch at z=0, or below the part, drills up into the bottom face. Put the sketch on the face the hole starts from.
 
 ## Ids
 
@@ -32,7 +32,7 @@ These are the shapes of the commands a part build needs, so an agent rarely has 
 - **Rectangles:** `sketch.rectangle.*` also returns `sides {bottom,right,top,left}` and `corners {bottom_left,...}`.
   - `rectangle.center` adds 2 construction diagonals, so each corner joins 3 lines. Its centre point is `p5`.
   - `sketch.fillet {point}` therefore fails on its corners. Use `{a:"l1", b:"l4", radius}` or the 3D `solid.fillet`.
-- **Slots:** `sketch.slot.overall` and `sketch.slot.center_to_center` create curves `l1, a1, l2, a2` and points `p1`-`p4`, `a1.center`, `a2.center`.
+- **Slots:** `sketch.slot.overall` and `sketch.slot.center_to_center` create 2 lines, 2 arcs and 4 points, plus `a1.center` and `a2.center`. The ids count on from what the sketch already has: in an empty sketch `l1, a1, l2, a2` and `p1`-`p4`, after a `rectangle.two_point` `l5, a1, l6, a2` and `p5`-`p8`.
   - The `length` role of `slot.overall` is the overall length. The arc centres are at ±(length/2 - width/2).
   - After `length` and `width`, 3 dof remain. To remove them, dimension `origin` to `a1.center` horizontally and vertically, and `origin` to `a2.center` vertically. For a slot along Y the solver refuses that last dimension as over-constraining; dimension `a2.center` horizontally instead.
   - `sketch.slot.center_point` creates no centre point. Dimension an arc centre instead.
@@ -73,12 +73,12 @@ Distances are unsigned. Draw the geometry on the correct side first, and the dim
 
 | Command | Minimal params | Traps |
 |---|---|---|
-| `solid.extrude` | `distance` | `profiles` defaults to **every region**, so two concentric circles give a solid disc. Pick regions with `[{"point":[x,y]}]` or `[index]`. Other options: `operation` (new/join/cut/intersect/auto), `direction` (positive/negative/symmetric), `through_all: true`, `start_offset`. A cut that misses reports success. |
+| `solid.extrude` | `distance` | `profiles` defaults to **every region**, with a region inside another as a hole in it: two concentric circles give a ring. Pick regions with `[{"point":[x,y]}]` or `[index]`. Other options: `operation` (new/join/cut/intersect/auto), `direction` (positive/negative/symmetric), `through_all: true`, `start_offset`. A cut that misses reports success. |
 | `solid.box` | `length`, `width`, `height` | `center:[x,y,z]` or `corner`. The quickest way to block out a part. `body_name` names the body it makes. With `operation:"cut"`, `targets:["Top"]` cuts only the bodies listed, so the cutter can pass through other bodies. |
 | `solid.cylinder` | `radius` or `diameter`, `height` | `base` is the centre of the bottom (default origin), `axis` defaults to `Z`. Expressions work in `base`. Always pass `operation`. `body_name` and `targets` work as for `solid.box`. |
 | `sketch.slot.overall` / `sketch.slot.center_to_center` | `p0`, `p1` (overall ends / arc centres), `width` | Ids and dof are in the "Ids" section above. |
-| `solid.fillet` / `solid.chamfer` | `edges:[[x,y,z]]`, `radius` / `distance` | The pick snaps to the **nearest** edge, with no distance limit and no error, so check that the face count changed. One pick takes the whole tangent chain: a rounded rim needs 1 point, not 8. |
-| `solid.shell` | `faces:[[x,y,z]]`, `thickness` | A point on each face to remove, or its name from `body_topology`. Fillet first, except an edge of a removed face (see Order in `SKILL.md`). |
+| `solid.fillet` / `solid.chamfer` | `edges:[[x,y,z]]`, `radius` / `distance` | The pick snaps to the **nearest** edge. A pick farther than 5% of the body's size from every edge is refused, so check that the face count changed. One pick takes the whole tangent chain: a rounded rim needs 1 point, not 8. |
+| `solid.shell` | `faces:[[x,y,z]]`, `thickness` | A point on each face to remove, or its name from `body_topology`. Fillet first, except an edge of a removed face or a fillet between curved faces (see Order in `SKILL.md`). Bodies with lofted or swept faces are refused (`offset: only bodies with planes, cylinders, cones, spheres and tori`): hollow a loft with a smaller loft and `operation: cut`. |
 | `solid.hole` | `position:[x,y,z]` on a face (numbers or length expressions such as `["40", "width/2", "t"]`, which the hole then follows) + `diameter`, or `sketch` (+ `points`) | `clearance:"M3"`. `depth` defaults to through all. `type` is one of simple/drilled/counterbore/countersink. A `countersink` needs `cs_diameter` and `cs_angle`; a `counterbore` needs `cb_diameter` and `cb_depth`. `position` is a fixed point; to tie it to the part, add `references: [{edge:[x,y,z], distance}]` (up to two straight edges of the face): the centre then sits at those distances from the edges and follows them. |
 | `solid.pattern.rectangular` | `features`, `dir1`, `count1`, `spacing1` (+ `dir2`, `count2`, `spacing2`) | Spacing takes expressions and follows parameters. |
 | `solid.pattern.circular` | `features`, `axis` (`"Z"` or `{origin, dir}`), `count` | `angle` defaults to 360 deg. A full pattern keeps the COM on the axis, so check its radius with a top-view screenshot. |
@@ -138,10 +138,10 @@ After `set_parameter L=120` the volume is 35335.2 mm³, and the holes stay in th
 | `list_commands {}` | **Over 100 KB.** Never call it unfiltered; filter on a distinctive word such as `"hole"` or `"slot"`. |
 | `body_topology` | 25-45 KB |
 | `inspect_design {}` | 12 KB, and it grows with the sketches |
-| `inspect_design {"measure":false,"sketches":false}` | 4 KB: parameters, timeline errors, bodies |
+| `inspect_design {"measure":false,"sketches":false}` | 4 KB for one part: parameters, timeline errors, bodies. About 65 B more per body (14 KB at 210 bodies) |
 | `sketch.inspect` | 5 KB per small sketch |
 | `parameters.list {"filter":"feature"}` | 3 KB |
-| `measure {}` | 1 KB: volume, bbox, COM, face/edge/vertex counts |
+| `measure {}` | about 0.9 KB per body: volume, bbox, COM, face/edge/vertex counts. On a large design, `execute inspect.measure {"bodies":[...]}` measures only the listed bodies |
 | `sketch.solve` | under 100 B: dof, status, profile count |
 | `screenshot {"source":"model","width":480,"height":320}` | one small image. Without `source`, a bridged server returns the whole app window and ignores the size. |
 

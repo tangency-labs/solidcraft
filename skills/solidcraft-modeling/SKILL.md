@@ -37,15 +37,17 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
 
   A plain number never follows a parameter.
 - **Repeats:** `solid.pattern.rectangular` takes expression spacing; `solid.mirror` takes `XY`/`XZ`/`YZ`, a construction plane or `{origin, normal}` (origin coordinates may be length expressions such as `["half", 0, 0]`). A mirror or pattern feature cannot be mirrored or patterned again.
-- **Edge and face picks** snap to the nearest edge or face. There is no distance limit and no error, so compute the exact midpoint from your geometry (the vertical corner edge of a centred box is `[w/2, d/2, h/2]`).
+- **Edge and face picks** snap to the nearest edge or face. An edge pick farther than 5% of the body's size from every edge is refused (`the nearest edge is 15.000 mm away`). On a large body that limit is wide (about 48 mm on a 949 mm board), so compute the exact midpoint from your geometry (the vertical corner edge of a centred box is `[w/2, d/2, h/2]`).
   - Picks must be plain numbers.
   - A pick is resolved once and then follows its edge when parameters change.
   - A face can be given by name instead of a point (`faces:["F1:+z"]`, the `face` of `sheet.convert`). `body_topology` lists each face's `name`, a `point` that lies on it (the centroid of a face with a hole is in the hole) and, for a cylinder, `{origin, axis, radius}`.
-- **Profiles:** extrude takes every region by default. For a ring or a boss with a hole, pass `profiles`.
-- **Order:** fillet the outside edges before you shell, so the shell follows the fillets. An edge of the face the shell removes, such as the rim of an open box, is the exception: round it after the shell, because the shell can fail on it.
+- **Profiles:** extrude takes every region by default, and a region inside another is a hole in it: two concentric circles give a ring. A third circle inside the ring gives a separate disc body. Pass `profiles` to choose regions.
+- **Order:** fillet the outside edges before you shell, so the shell follows the fillets. There are two exceptions:
+  - An edge of the face the shell removes, such as the rim of an open box: round it after the shell, because the shell can fail on it.
+  - A fillet between two curved faces, such as a sphere joined to a cylinder: the shell then fails with `offset: only bodies with planes, cylinders, cones, spheres and tori`. Shell first. The inside corner then stays sharp, so the wall there is thinner than `thickness`.
 
 ## Verify
-- **Each stage:** run `measure {}` (about 1 KB) and compare the volume, bbox and face count with your numbers. A cut or hole that leaves the volume unchanged has missed, even though it reported success.
+- **Each stage:** run `measure {}` (about 0.9 KB per body) and compare the volume, bbox and face count with your numbers. A cut or hole that leaves the volume unchanged has missed, even though it reported success.
 - **Timeline health:** `inspect_design {"measure":false,"sketches":false}` shows each feature's `error` and `warning`.
 - **Parameter test:** run `set_parameter`. Expect `errors: []`, then `measure` again; the COM and bbox should move by the amounts you computed.
 - **Positions:** `measure` does not say where a feature sits.
