@@ -1719,6 +1719,208 @@ fn tool_annotations_tell_the_whole_truth() {
     assert!(tools.iter().all(|t| t["annotations"]["readOnlyHint"].is_boolean()), "every tool is annotated");
 }
 
+/// A fake desktop app with design tabs (`name`, unsaved?) that records the control methods it
+/// is asked, for the tools that manage the app.
+struct FakeApp {
+    calls: Vec<(String, Value)>,
+    tabs: Vec<(&'static str, bool)>,
+    closing: Option<usize>,
+}
+
+impl FakeApp {
+    fn new(tabs: &[(&'static str, bool)]) -> Self {
+        FakeApp { calls: Vec::new(), tabs: tabs.to_vec(), closing: None }
+    }
+
+    /// Run a tool: `(reply, is_error)`, the reply parsed when it is JSON.
+    fn tool(&mut self, name: &str, args: Value) -> (Value, bool) {
+        crate::tools::check_arguments(name, &args).unwrap_or_else(|e| panic!("{e}"));
+        let r = crate::tools::call_tool(self, name, &args);
+        let text = r["content"][0]["text"].as_str().unwrap_or_default();
+        (serde_json::from_str(text).unwrap_or_else(|_| json!(text)), r["isError"] == json!(true))
+    }
+
+    /// The methods sent after the read every tool starts with.
+    fn changes(&self) -> Vec<(String, Value)> {
+        self.calls.iter().filter(|(m, p)| !(m == "ui.documents" && p == &json!({}))).cloned().collect()
+    }
+}
+
+impl crate::backend::Backend for FakeApp {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.calls.push((method.to_string(), params.clone()));
+        match method {
+            "ui.documents" => {
+                let docs: Vec<Value> = self.tabs.iter().map(|(n, d)| json!({"name": n, "dirty": d})).collect();
+                Ok(json!({"documents": docs, "active": 0, "closing": self.closing, "quitting": false}))
+            }
+            "app.quit" => Ok(json!({"quitting": true, "asking": false})),
+            "ui.prefs" => Ok(json!({"theme": "dark", "dialog": null})),
+            "ui.agent_cursor" => Ok(json!({"show": false, "speed": 1.0, "follow_camera": false})),
+            other => Err(format!("unknown method `{other}`")),
+        }
+    }
+    fn has_ui(&self) -> bool {
+        true
+    }
+    fn describe(&self) -> String {
+        "fake app".into()
+    }
+}
+
+const APP_TOOLS: [&str; 4] = ["documents", "quit_app", "preferences", "agent_cursor"];
+
+/// The app's tabs, quitting, preferences and agent cursor are tools, with honest annotations:
+/// closing a tab and quitting may discard unsaved changes, the other two change only the app.
+#[test]
+fn app_tools_are_listed_and_annotated() {
+    let mut s = server();
+    let tools = call(&mut s, 1, "tools/list", json!({}));
+    let tools = tools["result"]["tools"].as_array().unwrap();
+    let hints = |name: &str| {
+        let t = tools.iter().find(|t| t["name"] == name).unwrap_or_else(|| panic!("no tool {name}"));
+        assert_eq!(t["inputSchema"]["additionalProperties"], false, "{t}");
+        let a = &t["annotations"];
+        (a["readOnlyHint"].as_bool().unwrap(), a["destructiveHint"].as_bool().unwrap(), a["openWorldHint"].as_bool().unwrap())
+    };
+    assert_eq!(hints("documents"), (false, true, false));
+    assert_eq!(hints("quit_app"), (false, true, false));
+    assert_eq!(hints("preferences"), (false, false, false));
+    assert_eq!(hints("agent_cursor"), (false, false, false));
+}
+
+/// A headless server has no app: each app tool says it needs one and how to bridge to it.
+/// Arguments of the wrong shape are protocol errors (-32602) before anything runs.
+#[test]
+fn app_tools_need_the_app_and_check_their_arguments() {
+    let mut s = server();
+    for name in APP_TOOLS {
+        let r = raw_tool(&mut s, name, json!({}));
+        assert_eq!(r["result"]["isError"], true, "{name}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("needs the desktop app") && text.contains("--connect"), "{text}");
+    }
+    for (name, args) in [
+        ("documents", json!({"action": "quit"})),
+        ("documents", json!({"index": "1"})),
+        ("documents", json!({"answer": "save"})),
+        ("documents", json!({"force": 1})),
+        ("quit_app", json!({"force": "yes"})),
+        ("quit_app", json!({"now": true})),
+        ("preferences", json!({"set": "theme=dark"})),
+        ("preferences", json!({"theme": "dark"})),
+        ("agent_cursor", json!({"show": "yes"})),
+        ("agent_cursor", json!({"speed": true})),
+    ] {
+        let r = raw_tool(&mut s, name, args.clone());
+        assert_eq!(r["error"]["code"], -32602, "{name} {args}: {r}");
+    }
+}
+
+/// `documents` lists, switches, opens and closes tabs through `ui.documents`. A tab with unsaved
+/// changes closes only with `force` (no "save changes?" prompt opens), and a bad index or an
+/// `answer` with no prompt open sends nothing.
+#[test]
+fn documents_manages_tabs_without_prompting() {
+    let mut app = FakeApp::new(&[("Bracket", true), ("Scratch", false)]);
+    let (list, err) = app.tool("documents", json!({}));
+    assert!(!err, "{list}");
+    assert_eq!(list["documents"][0], json!({"name": "Bracket", "dirty": true}));
+    app.tool("documents", json!({"action": "switch", "index": 1}));
+    app.tool("documents", json!({"action": "new"}));
+    app.tool("documents", json!({"action": "close", "index": 1}));
+    assert_eq!(
+        app.changes(),
+        [
+            ("ui.documents".to_string(), json!({"action": "switch", "index": 1})),
+            ("ui.documents".to_string(), json!({"action": "new"})),
+            ("ui.documents".to_string(), json!({"action": "close", "index": 1, "force": false})),
+        ]
+    );
+
+    let mut app = FakeApp::new(&[("Bracket", true), ("Scratch", false)]);
+    // The active tab (0) has unsaved changes: refused, naming it.
+    let (e, err) = app.tool("documents", json!({"action": "close"}));
+    assert!(err && e.as_str().unwrap().contains("Bracket") && e.as_str().unwrap().contains("force"), "{e}");
+    for args in [
+        json!({"action": "switch"}),
+        json!({"action": "switch", "index": 2}),
+        json!({"action": "close", "index": -1}),
+        json!({"answer": "dont_save"}),
+        json!({"action": "new", "answer": "cancel"}),
+    ] {
+        let (e, err) = app.tool("documents", args.clone());
+        assert!(err, "{args}: {e}");
+    }
+    assert!(app.changes().is_empty(), "{:?}", app.changes());
+    app.tool("documents", json!({"action": "close", "force": true}));
+    assert_eq!(app.changes(), [("ui.documents".to_string(), json!({"action": "close", "index": 0, "force": true}))]);
+
+    // A prompt the user opened is answered.
+    let mut app = FakeApp::new(&[("Bracket", true)]);
+    app.closing = Some(0);
+    let (_, err) = app.tool("documents", json!({"answer": "cancel"}));
+    assert!(!err);
+    assert_eq!(app.changes(), [("ui.documents".to_string(), json!({"answer": "cancel"}))]);
+}
+
+/// `quit_app` quits a clean app, refuses to drop unsaved designs (naming them) and drops them only
+/// with `force`, saying which.
+#[test]
+fn quit_app_refuses_unsaved_changes_unless_forced() {
+    let mut app = FakeApp::new(&[("Bracket", false)]);
+    let (r, err) = app.tool("quit_app", json!({}));
+    assert!(!err && r["quitting"] == true, "{r}");
+    assert_eq!(app.changes(), [("app.quit".to_string(), json!({"force": false}))]);
+
+    let mut app = FakeApp::new(&[("Bracket", true), ("Scratch", false), ("Lid", true)]);
+    let (e, err) = app.tool("quit_app", json!({}));
+    assert!(err && e.as_str().unwrap().contains("Bracket, Lid"), "{e}");
+    assert!(app.changes().is_empty());
+    let (r, err) = app.tool("quit_app", json!({"force": true}));
+    assert!(!err, "{r}");
+    assert_eq!(r["discarded"], json!(["Bracket", "Lid"]));
+    assert_eq!(app.changes(), [("app.quit".to_string(), json!({"force": true}))]);
+
+    // The app tools are not batch steps: such a batch fails before anything is sent.
+    for name in APP_TOOLS {
+        let (b, body, is_error) = recorded_batch(Ok(json!({})), json!({"commands": [{"command": "solid.box"}, {"command": name}]}));
+        assert!(is_error && b.calls.is_empty(), "{name}: {body}");
+        assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains(name) && e.contains("on its own")), "{body}");
+    }
+}
+
+/// `preferences` reads (no `set`) or sets through `ui.prefs`, never with the dialog's keys;
+/// `agent_cursor` forwards its settings to `ui.agent_cursor` and checks `speed`.
+#[test]
+fn preferences_and_agent_cursor_reach_their_control_methods() {
+    let mut app = FakeApp::new(&[("Bracket", false)]);
+    let (r, err) = app.tool("preferences", json!({}));
+    assert!(!err && r["theme"] == "dark", "{r}");
+    app.tool("preferences", json!({"set": {"theme": "light", "nav": "blender"}}));
+    for set in [json!({"open": "AI"}), json!({"theme": "light", "button": "ok"})] {
+        let (e, err) = app.tool("preferences", json!({"set": set}));
+        assert!(err && e.as_str().unwrap().contains("dialog"), "{e}");
+    }
+    app.tool("agent_cursor", json!({}));
+    app.tool("agent_cursor", json!({"show": true, "speed": "instant", "follow_camera": true}));
+    app.tool("agent_cursor", json!({"speed": 2.5}));
+    for speed in [json!(0), json!(6), json!("fast")] {
+        let (e, err) = app.tool("agent_cursor", json!({"speed": speed}));
+        assert!(err && e.as_str().unwrap().contains("1 to 5"), "{e}");
+    }
+    assert_eq!(
+        app.changes(),
+        [
+            ("ui.prefs".to_string(), json!({})),
+            ("ui.prefs".to_string(), json!({"theme": "light", "nav": "blender"})),
+            ("ui.agent_cursor".to_string(), json!({})),
+            ("ui.agent_cursor".to_string(), json!({"show": true, "speed": "instant", "follow_camera": true})),
+            ("ui.agent_cursor".to_string(), json!({"speed": 2.5})),
+        ]
+    );
+}
+
 /// `measure` with `items` (#1392): a sketch circle's diameter and radius, and two circles'
 /// centre-to-centre with the closest and farthest distances.
 #[test]

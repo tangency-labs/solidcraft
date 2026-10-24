@@ -220,6 +220,16 @@ The `skill_reference` tool returns these documents from the copies built into So
 | `new_design` | `name?` | Start an empty design. |
 | `open` | `path` | Open a `.solidcraft` design, a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature), or a 3MF/STL file as mesh bodies. |
 | `save` | `path?` | Save the design (to its current file without `path`). |
+| `documents` | `action?` (list, switch, close, new), `index?`, `force?`, `answer?` (dont_save, cancel) | The app's design tabs (`ui.documents`): each tab's `name` and `dirty` (unsaved changes), the `active` one, an open "save changes?" prompt (`closing`) and a quit in progress (`quitting`). `switch` needs `index`; `close` closes tab `index` (default the active one). A tab with unsaved changes closes only with `force: true`, which discards them; otherwise the call is refused, naming it. `answer` answers a prompt already open. |
+| `quit_app` | `force?` | Quit the app cleanly (`app.quit`; a killed app offers crash recovery at its next launch). Refused while a design has unsaved changes, naming them; `force: true` quits anyway and lists what it discarded (`discarded`). |
+| `preferences` | `set?` | The app's preferences (`ui.prefs`): all of them, or after setting those in `set` (e.g. `{"theme": "light"}`). An unknown preference is an error; the dialog's keys (`open`, `button`) are refused. |
+| `agent_cursor` | `show?`, `speed?` (1 to 5, or `"instant"`), `follow_camera?` | The agent cursor's settings (`ui.agent_cursor`), after changing those given. |
+
+The last four manage the desktop app, so a headless server answers them with an error saying
+to bridge to the app (`--connect`). They never open a dialog or a "save changes?" prompt: what
+would ask is refused instead, unless `force` says to discard. `documents` and `quit_app` are
+destructive (they may discard unsaved changes); `preferences` and `agent_cursor` change only
+the app, so they are neither read-only nor destructive. None of them can be a `batch` step.
 
 `measure` with `items` reports each item under `items` (`length_mm`, `area_mm2` or `position`).
 A circle, arc, hole or other cylindrical face also gives `diameter`, `radius`, `center` and

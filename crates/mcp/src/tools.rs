@@ -36,12 +36,14 @@ enum Effect {
     Replaces,
     /// May read, write, overwrite or delete files on disk (any command, a file path).
     Files,
+    /// Changes the app around the design (preferences, the agent cursor), not the design.
+    App,
 }
 
 fn tool(name: &str, title: &str, desc: &str, schema: Value, effect: Effect) -> Value {
     let (read_only, destructive, open_world) = match effect {
         Effect::ReadOnly => (true, false, false),
-        Effect::Edits => (false, false, false),
+        Effect::Edits | Effect::App => (false, false, false),
         Effect::Replaces => (false, true, false),
         Effect::Files => (false, true, true),
     };
@@ -336,6 +338,10 @@ pub fn tool_definitions() -> Vec<Value> {
             ),
             Effect::ReadOnly,
         ),
+        documents_tool(),
+        quit_app_tool(),
+        preferences_tool(),
+        agent_cursor_tool(),
     ]
 }
 
@@ -557,6 +563,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "running" => b.call("control.running", json!({})),
         "undo" => exec(b, "edit.undo", json!({})),
         "redo" => exec(b, "edit.redo", json!({})),
+        "documents" | "quit_app" | "preferences" | "agent_cursor" => app_tool(b, name, a),
         "new_design" => exec(b, "file.new", pick(a, &["name"])),
         "open" => exec(b, "doc.open", pick(a, &["path", "up", "names"])),
         "save" => exec(b, "file.save", pick(a, &["path", "format"])),
@@ -640,6 +647,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<String>), String> {
         },
         "body_topology" => Err("`body_topology` is a tool, not a command: in a batch use model.edges {body} and model.faces {body}".into()),
         "screenshot" => Err("`screenshot` is a tool, not a command: call it after the batch".into()),
+        "documents" | "quit_app" | "preferences" | "agent_cursor" => Err(format!("`{command}` manages the app, not the design: call it on its own")),
         "batch" => Err("batches don't nest: put the steps in this batch".into()),
         "pending" => Err("`pending` is a tool, not a command: call it on its own".into()),
         "running" => Err("`running` is a tool, not a command: call it on its own".into()),
@@ -651,10 +659,12 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<String>), String> {
 
 /// The tool names a `batch` step may not be (or is mapped from): `execute` must not wrap them.
 const TOOL_STEPS: &[&str] = &[
+    "agent_cursor",
     "batch",
     "body_topology",
     "crash_reports",
     "describe_command",
+    "documents",
     "execute",
     "export",
     "inspect_design",
@@ -663,6 +673,8 @@ const TOOL_STEPS: &[&str] = &[
     "new_design",
     "open",
     "pending",
+    "preferences",
+    "quit_app",
     "redo",
     "running",
     "save",
@@ -685,6 +697,180 @@ fn parameter_value(a: &Map<String, Value>) -> Result<Value, String> {
         (Some(_), Some(_)) => Err("set_parameter: `value` and `expression` disagree; give one of them".into()),
         (None, None) => Err("set_parameter: give the new value as `value` (or `expression`): a number (mm) or an expression".into()),
     }
+}
+
+/// The tools that manage the desktop app around the design (docs/control-protocol.md): its tabs,
+/// quitting, preferences and the agent cursor. A headless server has none of these.
+fn documents_tool() -> Value {
+    tool(
+        "documents",
+        "Design tabs",
+        "The designs open in the app's tabs: name, unsaved changes (`dirty`), the active tab, and a \"save changes?\" prompt \
+         that is open (`closing`: its tab) or a quit in progress (`quitting`). `action`: list (default), switch to tab \
+         `index`, new (an empty design in a new tab) or close tab `index` (default: the active one). Closing a tab with \
+         unsaved changes is refused unless `force: true` discards them; nothing ever asks. `answer` answers a prompt \
+         already open (dont_save closes without saving, cancel keeps the tab). Needs the desktop app.",
+        obj(
+            json!({
+                "action": {"type": "string", "enum": ["list", "switch", "close", "new"], "description": "What to do (default list)"},
+                "index": {"type": "integer", "description": "The tab, from 0 (switch: required; close: default the active tab)"},
+                "force": {"type": "boolean", "description": "close: discard the tab's unsaved changes (default false: refused when it has any)"},
+                "answer": {"type": "string", "enum": ["dont_save", "cancel"], "description": "Answer the open \"save changes?\" prompt"},
+            }),
+            &[],
+        ),
+        Effect::Replaces,
+    )
+}
+
+fn quit_app_tool() -> Value {
+    tool(
+        "quit_app",
+        "Quit the app",
+        "Quit the SolidCraft app cleanly (killing it makes the next launch offer crash recovery). Refused while a design \
+         has unsaved changes, naming them: save them first, or pass `force: true` to quit and discard them. Nothing ever \
+         asks. The MCP server stays; its next call says the app is not running until it is started again. Needs the \
+         desktop app.",
+        obj(json!({"force": {"type": "boolean", "description": "Quit even with unsaved changes, discarding them (default false)"}}), &[]),
+        Effect::Replaces,
+    )
+}
+
+fn preferences_tool() -> Value {
+    tool(
+        "preferences",
+        "Preferences",
+        "The app's preferences (kept between runs), as the control channel's ui.prefs has them: e.g. theme, nav, \
+         default_units, up_axis, language, ui_scale and the AI page's settings. Without `set`: read them all. `set`: the \
+         preferences to change, e.g. {\"theme\": \"light\"}; the reply has them all after the change. An unknown \
+         preference is an error. Never opens the Preferences dialog. Needs the desktop app.",
+        obj(json!({"set": {"type": "object", "description": "Preferences to change, by name (default: change nothing)"}}), &[]),
+        Effect::App,
+    )
+}
+
+fn agent_cursor_tool() -> Value {
+    tool(
+        "agent_cursor",
+        "Agent cursor",
+        "The agent cursor: a second pointer that shows the user what the agent does. While it is shown, each `execute` \
+         first glides to the command's toolbar button and to each pick, then runs. Arguments change those settings; the \
+         reply has them all (call without arguments to read them). Needs the desktop app.",
+        obj(
+            json!({
+                "show": {"type": "boolean", "description": "Show the cursor"},
+                "speed": {"type": ["number", "string"], "description": "1 to 5 (times the normal speed), or \"instant\" (no animation)"},
+                "follow_camera": {"type": "boolean", "description": "Move the camera as a user would: to face a new sketch, and back when it is finished"},
+            }),
+            &[],
+        ),
+        Effect::App,
+    )
+}
+
+/// `documents`, `quit_app`, `preferences` and `agent_cursor`: the app's own control methods. They
+/// never leave a "save changes?" prompt or a dialog open: what would ask is refused instead,
+/// unless the agent said to discard (`force`).
+fn app_tool(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<Value, String> {
+    if !b.has_ui() {
+        return Err(format!(
+            "`{name}` needs the desktop app: this server runs a headless session, without tabs, preferences or an agent \
+             cursor. Bridge to a running app instead: `solidcraft-cli mcp --connect 127.0.0.1:PORT`, with the app started \
+             as `solidcraft --control PORT`"
+        ));
+    }
+    match name {
+        "documents" => documents(b, a),
+        "quit_app" => quit_app(b, a),
+        "preferences" => {
+            let set = a.get("set").and_then(Value::as_object).cloned().unwrap_or_default();
+            // These two act on the Preferences dialog, which a programmatic call never opens.
+            if let Some(k) = ["open", "button"].iter().find(|k| set.contains_key(**k)) {
+                return Err(format!("preferences: `{k}` works the Preferences dialog, which agents don't open; set the preferences themselves"));
+            }
+            b.call("ui.prefs", Value::Object(set))
+        }
+        "agent_cursor" => {
+            if let Some(s) = a.get("speed").filter(|v| !v.is_null()) {
+                let ok = s.as_f64().is_some_and(|x| (1.0..=5.0).contains(&x)) || s.as_str() == Some("instant");
+                if !ok {
+                    return Err(format!("agent_cursor: `speed` must be a number from 1 to 5, or \"instant\" (got {s})"));
+                }
+            }
+            b.call("ui.agent_cursor", pick(a, &["show", "speed", "follow_camera"]))
+        }
+        other => Err(format!("unknown tool `{other}`")),
+    }
+}
+
+/// The app's tabs as `ui.documents` lists them: `(name, dirty)` each.
+fn tabs(list: &Value) -> Vec<(String, bool)> {
+    let tabs = list["documents"].as_array().map(Vec::as_slice).unwrap_or_default();
+    tabs.iter().map(|d| (d["name"].as_str().unwrap_or("Untitled").to_string(), d["dirty"].as_bool().unwrap_or(false))).collect()
+}
+
+fn documents(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<Value, String> {
+    let list = b.call("ui.documents", json!({}))?;
+    let tabs = tabs(&list);
+    let tab = |i: Option<u64>| -> Result<usize, String> {
+        let i = i.ok_or("documents: give the tab's `index`")?;
+        usize::try_from(i)
+            .ok()
+            .filter(|i| *i < tabs.len())
+            .ok_or_else(|| format!("documents: no tab {i}; the tabs are 0 to {}", tabs.len().saturating_sub(1)))
+    };
+    let index = a.get("index").and_then(Value::as_u64);
+    if a.get("index").is_some_and(|v| !v.is_null()) && index.is_none() {
+        return Err("documents: `index` must be 0 or more".into());
+    }
+    let answer = str_arg(a, "answer");
+    let action = str_arg(a, "action").unwrap_or("list");
+    if answer.is_some() && action != "list" {
+        return Err("documents: give `answer` on its own, without an `action`".into());
+    }
+    match action {
+        "new" => b.call("ui.documents", json!({"action": "new"})),
+        "switch" => b.call("ui.documents", json!({"action": "switch", "index": tab(index)?})),
+        "close" => {
+            let i = tab(index.or_else(|| list["active"].as_u64()))?;
+            let force = a.get("force").and_then(Value::as_bool).unwrap_or(false);
+            if let Some((name, true)) = tabs.get(i)
+                && !force
+            {
+                return Err(format!(
+                    "documents: tab {i} ({name}) has unsaved changes. Save it first (`save`, after switching to it), or close \
+                     it with `force: true` to discard them"
+                ));
+            }
+            b.call("ui.documents", json!({"action": "close", "index": i, "force": force}))
+        }
+        _ => match answer {
+            Some(answer) => {
+                if list["closing"].is_null() {
+                    return Err("documents: no \"save changes?\" prompt is open".into());
+                }
+                b.call("ui.documents", json!({"answer": answer}))
+            }
+            None => Ok(list),
+        },
+    }
+}
+
+fn quit_app(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<Value, String> {
+    let force = a.get("force").and_then(Value::as_bool).unwrap_or(false);
+    let unsaved: Vec<String> = tabs(&b.call("ui.documents", json!({}))?).into_iter().filter(|(_, dirty)| *dirty).map(|(name, _)| name).collect();
+    if !unsaved.is_empty() && !force {
+        return Err(format!(
+            "not quitting: unsaved changes in {}. Save them first (`save`; `documents` switches tabs), or pass `force: true` \
+             to quit and discard them",
+            unsaved.join(", ")
+        ));
+    }
+    let mut r = b.call("app.quit", json!({"force": force}))?;
+    if force && let Some(o) = r.as_object_mut() {
+        o.insert("discarded".into(), json!(unsaved));
+    }
+    Ok(r)
 }
 
 fn undo_depth(b: &mut dyn Backend) -> Option<u64> {
