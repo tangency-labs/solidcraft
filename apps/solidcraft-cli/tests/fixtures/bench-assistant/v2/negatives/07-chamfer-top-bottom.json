@@ -1,0 +1,41 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "commands": [
+    {
+      "command": "solid.box",
+      "params": {
+        "length": 60,
+        "width": 40,
+        "height": 20
+      }
+    },
+    {
+      "command": "solid.chamfer",
+      "params": {
+        "edges": [
+          [
+            30,
+            0,
+            0
+          ],
+          [
+            60,
+            20,
+            0
+          ],
+          [
+            30,
+            40,
+            0
+          ],
+          [
+            0,
+            20,
+            0
+          ]
+        ],
+        "distance": 3
+      }
+    }
+  ]
+}

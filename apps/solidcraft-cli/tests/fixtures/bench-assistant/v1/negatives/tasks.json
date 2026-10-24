@@ -1,0 +1,211 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "format": 1,
+  "tasks": [
+    {
+      "id": "01-cube-wrong",
+      "prompt": "Make a 20 mm cube.",
+      "check": {
+        "bodies": 1,
+        "volume": 8000,
+        "bbox_size": [
+          20,
+          20,
+          20
+        ]
+      },
+      "reference": "negatives/01-cube-wrong.json",
+      "setup_steps": 0
+    },
+    {
+      "id": "02-cylinder-wrong",
+      "prompt": "Make a cylinder 30 mm in diameter and 50 mm tall.",
+      "check": {
+        "bodies": 1,
+        "volume": 35342.92,
+        "bbox_size": [
+          30,
+          30,
+          50
+        ]
+      },
+      "reference": "negatives/02-cylinder-wrong.json",
+      "setup_steps": 0
+    },
+    {
+      "id": "03-block-wrong",
+      "prompt": "Create a block 60 mm long, 40 mm wide and 10 mm thick.",
+      "check": {
+        "bodies": 1,
+        "volume": 24000,
+        "bbox_size": [
+          10,
+          40,
+          60
+        ]
+      },
+      "reference": "negatives/03-block-wrong.json",
+      "setup_steps": 0
+    },
+    {
+      "id": "04-sketch-extrude-wrong",
+      "prompt": "Sketch a 50 by 30 mm rectangle on the XY plane and extrude it 15 mm.",
+      "check": {
+        "bodies": 1,
+        "volume": 22500,
+        "bbox_size": [
+          15,
+          30,
+          50
+        ],
+        "feature_kinds": [
+          "Extrude"
+        ]
+      },
+      "reference": "negatives/04-sketch-extrude-wrong.json",
+      "setup_steps": 0
+    },
+    {
+      "id": "05-plate-hole-wrong",
+      "prompt": "Make a plate 80 x 60 x 10 mm with a 20 mm diameter hole straight through the middle.",
+      "check": {
+        "bodies": 1,
+        "volume": 44858.41,
+        "bbox_size": [
+          10,
+          60,
+          80
+        ]
+      },
+      "reference": "negatives/05-plate-hole-wrong.json",
+      "setup_steps": 0
+    },
+    {
+      "id": "06-fillet-box-wrong",
+      "prompt": "Round all the edges of the box with a 3 mm radius.",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 40,
+            "height": 40
+          }
+        }
+      ],
+      "check": {
+        "bodies": 1,
+        "volume": 63108.53,
+        "tol": 0.003,
+        "feature_kinds": [
+          "Fillet"
+        ]
+      },
+      "reference": "negatives/06-fillet-box-wrong.json",
+      "setup_steps": 1
+    },
+    {
+      "id": "07-move-body-wrong",
+      "prompt": "Move the box 50 mm along the X axis.",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 20,
+            "width": 20,
+            "height": 20
+          }
+        }
+      ],
+      "check": {
+        "bodies": 1,
+        "volume": 8000,
+        "bbox_min": [
+          50,
+          0,
+          0
+        ]
+      },
+      "reference": "negatives/07-move-body-wrong.json",
+      "setup_steps": 1
+    },
+    {
+      "id": "08-rename-body-wrong",
+      "prompt": "Rename the body to Bracket.",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 30,
+            "width": 20,
+            "height": 10
+          }
+        }
+      ],
+      "check": {
+        "bodies": 1,
+        "volume": 6000,
+        "body_name": "Bracket"
+      },
+      "reference": "negatives/08-rename-body-wrong.json",
+      "setup_steps": 1
+    },
+    {
+      "id": "09-volume-question-wrong",
+      "prompt": "What is the volume of the part?",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 30,
+            "width": 20,
+            "height": 10
+          }
+        }
+      ],
+      "check": {
+        "bodies": 1,
+        "volume": 6000,
+        "unchanged": true,
+        "reply_number": "6[ ,. ]?000(?![0-9])|6(\\.0+)? ?cm"
+      },
+      "reference": "negatives/09-volume-question-wrong.json",
+      "setup_steps": 1,
+      "reference_reply": "The volume is 42 mm³."
+    },
+    {
+      "id": "10-two-holes-wrong",
+      "prompt": "Make a 100 x 50 x 5 mm plate and drill two 10 mm holes through it, each 15 mm in from the short ends and centred across the width.",
+      "check": {
+        "bodies": 1,
+        "volume": 24214.6,
+        "bbox_size": [
+          5,
+          50,
+          100
+        ]
+      },
+      "reference": "negatives/10-two-holes-wrong.json",
+      "setup_steps": 0
+    },
+    {
+      "id": "11-any-change-wrong",
+      "prompt": "can you use the software to make a change to the current shape, any change at all",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 30,
+            "width": 20,
+            "height": 10
+          }
+        }
+      ],
+      "check": {
+        "changed": true
+      },
+      "reference": "negatives/11-any-change-wrong.json",
+      "setup_steps": 1
+    }
+  ]
+}

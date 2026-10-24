@@ -1,0 +1,20 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "commands": [
+    {
+      "command": "solid.box",
+      "params": {
+        "length": 30,
+        "width": 20,
+        "height": 10
+      }
+    },
+    {
+      "command": "body.rename",
+      "params": {
+        "body": "Body1",
+        "name": "Bracket"
+      }
+    }
+  ]
+}

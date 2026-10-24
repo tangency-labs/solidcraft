@@ -1,0 +1,80 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "commands": [
+    {
+      "command": "parameters.add",
+      "params": {
+        "name": "length",
+        "expression": "100 mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "name": "width",
+        "expression": "60 mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "name": "thickness",
+        "expression": "8 mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "name": "hole_d",
+        "expression": "10 mm"
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "length": "length",
+        "width": "width",
+        "height": "thickness",
+        "body_name": "Plate"
+      }
+    },
+    {
+      "command": "solid.hole",
+      "params": {
+        "position": [
+          "15 mm",
+          "width / 2",
+          "thickness"
+        ],
+        "diameter": "hole_d"
+      }
+    },
+    {
+      "command": "solid.hole",
+      "params": {
+        "position": [
+          "length - 15 mm",
+          "width / 2",
+          "thickness"
+        ],
+        "diameter": "hole_d"
+      }
+    },
+    {
+      "command": "timeline.edit",
+      "params": {
+        "feature": "Box1",
+        "set": {
+          "length": "120"
+        }
+      }
+    },
+    {
+      "command": "parameters.change",
+      "params": {
+        "name": "hole_d",
+        "expression": "12 mm"
+      }
+    }
+  ]
+}

@@ -39,6 +39,8 @@ pub struct AcpBackend {
     permissions: HashMap<u64, Value>,
     next_key: u64,
     exited: bool,
+    model_option: Option<String>,
+    selected_model: Option<String>,
 }
 
 impl AcpBackend {
@@ -60,6 +62,8 @@ impl AcpBackend {
             permissions: HashMap::new(),
             next_key: 0,
             exited: false,
+            model_option: None,
+            selected_model: None,
         };
         b.request(Pending::Initialize, "initialize", acp::initialize_params(env!("CARGO_PKG_VERSION")));
         Ok(b)
@@ -91,6 +95,7 @@ impl AcpBackend {
                     (Pending::SessionNew, Ok(v)) => match v.get("sessionId").and_then(Value::as_str) {
                         Some(s) => {
                             self.session = Some(s.to_string());
+                            self.model_option = acp::model_config(&v).and_then(|c| c["id"].as_str()).map(str::to_string);
                             if let Some((current, available)) = acp::modes(&v) {
                                 out.push(Event::Modes { current, available });
                             }
@@ -108,7 +113,15 @@ impl AcpBackend {
                     }
                     // Signed in: try the session again.
                     (Pending::Authenticate, Ok(_)) => self.new_session(),
-                    (Pending::SetMode | Pending::SetModel, Ok(_)) => {}
+                    (Pending::SetModel, Ok(v)) => {
+                        if let Some((current, available)) = acp::models(&v) {
+                            self.selected_model = None;
+                            out.push(Event::Models { current, available });
+                        } else if let Some(current) = self.selected_model.take() {
+                            out.push(Event::Models { current, available: Vec::new() });
+                        }
+                    }
+                    (Pending::SetMode, Ok(_)) => {}
                     (what, Err((code, message))) => {
                         let auth = code == acp::AUTH_REQUIRED || message.to_ascii_lowercase().contains("auth");
                         if auth {
@@ -213,8 +226,17 @@ impl ChatBackend for AcpBackend {
 
     fn set_model(&mut self, model: &str) {
         if let Some(s) = self.session.clone() {
-            self.request(Pending::SetModel, "session/set_model", acp::set_model_params(&s, model));
+            self.selected_model = Some(model.to_string());
+            if let Some(option) = self.model_option.clone() {
+                self.request(Pending::SetModel, "session/set_config_option", json!({"sessionId": s, "configId": option, "value": model}));
+            } else {
+                self.request(Pending::SetModel, "session/set_model", acp::set_model_params(&s, model));
+            }
         }
+    }
+
+    fn model_pending(&self) -> bool {
+        self.pending.values().any(|p| *p == Pending::SetModel)
     }
 
     fn pid(&self) -> Option<u32> {

@@ -1,0 +1,85 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "commands": [
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XZ",
+        "name": "L profile"
+      }
+    },
+    {
+      "command": "sketch.line",
+      "params": {
+        "points": [
+          [
+            0,
+            0
+          ],
+          [
+            50,
+            0
+          ],
+          [
+            50,
+            8
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            8,
+            40
+          ],
+          [
+            0,
+            40
+          ]
+        ],
+        "closed": true,
+        "infer": true,
+        "ids": [
+          "l1",
+          "l2",
+          "l3",
+          "l4",
+          "l5",
+          "l6"
+        ]
+      }
+    },
+    {
+      "command": "sketch.dimension",
+      "params": {
+        "entities": [
+          "l1"
+        ],
+        "value": 50
+      }
+    },
+    {
+      "command": "sketch.dimension",
+      "params": {
+        "entities": [
+          "l6"
+        ],
+        "value": 40
+      }
+    },
+    {
+      "command": "sketch.inspect",
+      "params": {}
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.extrude",
+      "params": {
+        "distance": 30
+      }
+    }
+  ]
+}

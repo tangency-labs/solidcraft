@@ -1,0 +1,81 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "commands": [
+    {
+      "command": "solid.box",
+      "params": {
+        "length": 40,
+        "width": 40,
+        "height": 20
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "diameter": 10,
+        "height": 60,
+        "base": [
+          60,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "command": "solid.sphere",
+      "params": {
+        "radius": 10,
+        "center": [
+          100,
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "command": "body.rename",
+      "params": {
+        "body": "Body1",
+        "name": "Housing"
+      }
+    },
+    {
+      "command": "body.rename",
+      "params": {
+        "body": "Body2",
+        "name": "Shaft"
+      }
+    },
+    {
+      "command": "body.rename",
+      "params": {
+        "body": "Body3",
+        "name": "Knob"
+      }
+    },
+    {
+      "command": "component.create",
+      "params": {
+        "name": "Handle",
+        "activate": false
+      }
+    },
+    {
+      "command": "component.move_bodies",
+      "params": {
+        "bodies": [
+          "Shaft",
+          "Knob"
+        ],
+        "component": "Handle"
+      }
+    },
+    {
+      "command": "component.list",
+      "params": {
+        "compact": true,
+        "bodies": true
+      }
+    }
+  ]
+}

@@ -14,6 +14,7 @@ Editable drawing code, native projects and shipped exports are collected under `
 
 | File | Author | Source | Licence |
 |---|---|---|---|
+| apps/solidcraft-cli/tests/fixtures/bench-assistant/{v1,v2}/ | Pilot contributors | [Public benchmark format-1 tasks, references, negatives, and starting designs](https://github.com/dutchman-cad/pilot/tree/6299ccf351de7c6e70b4960492157b81bdfb6def/bench/sets); copied without changes; check semantics independently implemented in Rust | Apache-2.0 |
 | assets/render/catalog/capabilities.json | SolidCraft contributors | Byte-identical runtime export of docs/render-materials/capabilities.json; generated and checked by tools/render-library/generate.py | MIT OR Apache-2.0 |
 | assets/render/catalog/environments.json | SolidCraft contributors | Byte-identical runtime export of docs/render-materials/environments.json; generated and checked by tools/render-library/generate.py | MIT OR Apache-2.0 |
 | assets/render/catalog/lighting.json | SolidCraft contributors | Byte-identical runtime export of docs/render-materials/lighting.json; generated and checked by tools/render-library/generate.py | MIT OR Apache-2.0 |

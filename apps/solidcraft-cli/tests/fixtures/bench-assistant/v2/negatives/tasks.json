@@ -1,0 +1,289 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "format": 1,
+  "tasks": [
+    {
+      "id": "07-chamfer-top-bottom",
+      "title": "chamfer only the top edges",
+      "prompt": "Chamfer the four top edges of the block by 3 mm. Leave the vertical edges and the bottom edges sharp.",
+      "reference": "negatives/07-chamfer-top-bottom.json",
+      "setup_steps": 1,
+      "check": {
+        "bodies": 1,
+        "volume": 47136.0,
+        "tol": 0.003,
+        "bbox_size": [
+          60,
+          40,
+          20
+        ],
+        "feature_kinds": [
+          "Chamfer"
+        ],
+        "faces": 10,
+        "com": [
+          30,
+          20,
+          9.835
+        ],
+        "com_tol": 0.03
+      }
+    },
+    {
+      "id": "04-edit-parameters-box-only",
+      "title": "edit parameters in an existing timeline",
+      "prompt": "This plate is driven by parameters. Make it 120 mm long and change both holes to 12 mm diameter. The holes have to stay 15 mm in from each end. Edit the existing design, don't rebuild it.",
+      "reference": "negatives/04-edit-parameters-box-only.json",
+      "setup_steps": 7,
+      "check": {
+        "bodies": 1,
+        "volume": 55790.74,
+        "tol": 0.003,
+        "bbox_size": [
+          120,
+          60,
+          8
+        ],
+        "params": {
+          "length": 120,
+          "hole_d": 12
+        },
+        "timeline_max": 3,
+        "round": [
+          {
+            "d": 12,
+            "count": 2,
+            "centers": [
+              [
+                15,
+                30
+              ],
+              [
+                105,
+                30
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "05-hole-grid-offcentre",
+      "title": "4 x 3 grid of holes",
+      "prompt": "Make a 120 x 80 x 10 mm plate centred on the origin, sitting on the XY plane, and drill a grid of 8 mm through holes in it: 4 columns along the length and 3 rows across, 25 mm apart both ways, with the grid centred on the plate.",
+      "reference": "negatives/05-hole-grid-offcentre.json",
+      "setup_steps": 0,
+      "check": {
+        "bodies": 1,
+        "volume": 89969.14,
+        "tol": 0.002,
+        "bbox_size": [
+          120,
+          80,
+          10
+        ],
+        "round": [
+          {
+            "d": 8,
+            "count": 12,
+            "centers": [
+              [
+                -37.5,
+                -25
+              ],
+              [
+                -12.5,
+                -25
+              ],
+              [
+                12.5,
+                -25
+              ],
+              [
+                37.5,
+                -25
+              ],
+              [
+                -37.5,
+                0
+              ],
+              [
+                -12.5,
+                0
+              ],
+              [
+                12.5,
+                0
+              ],
+              [
+                37.5,
+                0
+              ],
+              [
+                -37.5,
+                25
+              ],
+              [
+                -12.5,
+                25
+              ],
+              [
+                12.5,
+                25
+              ],
+              [
+                37.5,
+                25
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "09-revolute-joint-flipped",
+      "title": "revolute joint, driven to 45 degrees",
+      "prompt": "The base and the arm are separate components, and the arm's hole sits over the pin on the base. Connect them with a revolute joint so the arm pivots on the pin, then swing the arm round 45 degrees. The base must not move, and the arm should stay sitting flat on top of the base.",
+      "reference": "negatives/09-revolute-joint-flipped.json",
+      "setup_steps": 8,
+      "check": {
+        "bodies": 2,
+        "volume": 42909.44,
+        "tol": 0.003,
+        "joints": [
+          {
+            "type": "revolute",
+            "value_abs": 45
+          }
+        ],
+        "occurrences": {
+          "Base:1": {
+            "identity": true
+          },
+          "Arm:1": {
+            "rot_z_abs": 45,
+            "upright": true,
+            "fixed_point": [
+              0,
+              0,
+              10
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "10-rename-organize-one-body",
+      "title": "rename three bodies, two into a new component",
+      "prompt": "Rename the box to Housing, the cylinder to Shaft and the ball to Knob. Then put Shaft and Knob together in a new component called Handle. Housing stays where it is.",
+      "reference": "negatives/10-rename-organize-one-body.json",
+      "setup_steps": 3,
+      "check": {
+        "bodies": 3,
+        "volume": 40900.1,
+        "tol": 0.003,
+        "body_names": [
+          "Housing",
+          "Shaft",
+          "Knob"
+        ],
+        "components": {
+          "Handle": [
+            "Shaft",
+            "Knob"
+          ]
+        }
+      }
+    },
+    {
+      "id": "11-constrained-sketch-underdefined",
+      "title": "fully constrained L sketch, extruded",
+      "prompt": "Sketch an L-shaped profile on the XZ plane with the outside corner at the origin: 50 mm along the bottom, 40 mm tall, and both legs 8 mm thick. Dimension and constrain it so it is fully defined, then extrude it 30 mm.",
+      "reference": "negatives/11-constrained-sketch-underdefined.json",
+      "setup_steps": 0,
+      "check": {
+        "bodies": 1,
+        "volume": 19680.0,
+        "tol": 0.005,
+        "bbox_size": [
+          50,
+          30,
+          40
+        ],
+        "feature_kinds": [
+          "Extrude"
+        ],
+        "sketch_defined": {
+          "min_dimensions": 4
+        }
+      }
+    },
+    {
+      "id": "01-bolt-circle-bracket-wrong-pcd",
+      "title": "bracket: bore, 6 holes on a bolt circle, filleted corners",
+      "prompt": "Make a square mounting plate 80 x 80 x 8 mm, centred on the origin and lying on the XY plane. Put a 30 mm bore through the middle and six 8 mm bolt holes evenly spaced on a 56 mm bolt circle around it, then round the four vertical corner edges with a 10 mm radius.",
+      "reference": "negatives/01-bolt-circle-bracket-wrong-pcd.json",
+      "setup_steps": 0,
+      "check": {
+        "bodies": 1,
+        "volume": 42446.06,
+        "tol": 0.003,
+        "bbox_size": [
+          80,
+          80,
+          8
+        ],
+        "feature_kinds": [
+          "Fillet"
+        ],
+        "round": [
+          {
+            "d": 30,
+            "count": 1,
+            "centers": [
+              [
+                0,
+                0
+              ]
+            ]
+          },
+          {
+            "d": 8,
+            "count": 6,
+            "pcd": 56
+          },
+          {
+            "d": 20,
+            "count": 4
+          }
+        ]
+      }
+    },
+    {
+      "id": "08-thread-top",
+      "title": "modelled M10 thread on part of a rod",
+      "prompt": "Make a 10 mm diameter rod, 40 mm long, standing on the XY plane at the origin, and cut a real modelled (not cosmetic) M10 thread along the bottom 25 mm of it.",
+      "reference": "negatives/08-thread-top.json",
+      "setup_steps": 0,
+      "check": {
+        "bodies": 1,
+        "volume": 2800.99,
+        "tol": 0.005,
+        "bbox_size": [
+          10,
+          10,
+          40
+        ],
+        "feature_kinds": [
+          "Thread"
+        ],
+        "com": [
+          0,
+          0,
+          20.904
+        ],
+        "com_tol": 0.2
+      }
+    }
+  ]
+}

@@ -128,25 +128,34 @@ pub struct ModelInfo {
     pub description: String,
 }
 
-/// The agent's models in a `session/new` or `session/load` reply (`models`: `currentModelId` and
-/// `availableModels: [{modelId, name, description?}]`): the current one and each model. `None`
-/// when the agent reports none.
+/// The advertised select option that controls the session model.
+pub fn model_config(session: &Value) -> Option<&Value> {
+    session.get("configOptions")?.as_array()?.iter().find(|c| (c["category"] == "model" || c["id"] == "model") && c["type"] == "select")
+}
+
+/// The current model and available models, from legacy models or config options.
 pub fn models(session: &Value) -> Option<(String, Vec<ModelInfo>)> {
-    let m = session.get("models")?;
-    let current = m.get("currentModelId").and_then(Value::as_str).unwrap_or("").to_string();
-    let available: Vec<ModelInfo> = m
-        .get("availableModels")?
-        .as_array()?
-        .iter()
+    let (current, list, legacy) = if let Some(m) = model_config(session) {
+        (m.get("currentValue"), m.get("options"), false)
+    } else {
+        let m = session.get("models")?;
+        (m.get("currentModelId"), m.get("availableModels"), true)
+    };
+    let current = current.and_then(Value::as_str).unwrap_or("").to_string();
+    let available = list
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|x| x.get("options").and_then(Value::as_array).map_or_else(|| std::slice::from_ref(x), Vec::as_slice))
         .take(200)
         .filter_map(|x| {
-            let id = x.get("modelId").or_else(|| x.get("id"))?.as_str()?.to_string();
+            let id = if legacy { x.get("modelId").or_else(|| x.get("id")) } else { x.get("value") }?.as_str()?.to_string();
             let name = x.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).unwrap_or(&id).to_string();
             let description = x.get("description").and_then(Value::as_str).unwrap_or("").to_string();
             Some(ModelInfo { id, name, description })
         })
         .collect();
-    (!available.is_empty()).then_some((current, available))
+    Some((current, available))
 }
 
 /// `session/set_model` parameters.
@@ -579,9 +588,10 @@ mod tests {
         assert_eq!(current, "sonnet");
         let names: Vec<_> = list.iter().map(|m| (m.id.as_str(), m.name.as_str(), m.description.as_str())).collect();
         assert_eq!(names, [("opus", "Opus", "Most capable"), ("sonnet", "Sonnet", ""), ("haiku", "haiku", "")]);
-        // An agent without models, or with an empty list, reports none.
+        // Preserve a reported current model even when the available list is empty.
         assert!(models(&json!({"sessionId": "s"})).is_none());
-        assert!(models(&json!({"models": {"currentModelId": "x", "availableModels": []}})).is_none());
+        assert_eq!(models(&json!({"models": {"currentModelId": "x", "availableModels": []}})).unwrap().0, "x");
+        assert_eq!(models(&json!({"models": {"currentModelId": "haiku"}})).unwrap().0, "haiku");
         let changed = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"current_model_update","currentModelId":"haiku"}}}"#;
         assert_eq!(parse(changed), Some(Incoming::ModelChanged("haiku".into())));
         assert_eq!(set_model_params("s", "opus"), json!({"sessionId": "s", "modelId": "opus"}));

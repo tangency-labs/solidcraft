@@ -1,0 +1,52 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "commands": [
+    {
+      "command": "solid.box",
+      "params": {
+        "length": 120,
+        "width": 80,
+        "height": 10,
+        "corner": [
+          -60,
+          -40,
+          0
+        ],
+        "body_name": "Plate"
+      }
+    },
+    {
+      "command": "solid.hole",
+      "params": {
+        "position": [
+          -37.5,
+          -25,
+          10
+        ],
+        "diameter": 8
+      }
+    },
+    {
+      "command": "solid.pattern.rectangular",
+      "params": {
+        "features": [
+          "Hole1"
+        ],
+        "dir1": [
+          1,
+          0,
+          0
+        ],
+        "count1": 4,
+        "spacing1": 25,
+        "dir2": [
+          0,
+          1,
+          0
+        ],
+        "count2": 3,
+        "spacing2": 25
+      }
+    }
+  ]
+}

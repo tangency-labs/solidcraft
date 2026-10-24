@@ -2019,3 +2019,100 @@ fn add_agent_opens_its_dialog_from_home() {
     assert!(h.app.agent_chat.settings.add.is_some(), "Add agent opened its dialog");
     assert!(handle_at("ai_add:add").is_some(), "the dialog is drawn over Home");
 }
+
+/// Both model advertisements select through their matching ACP method, after session/new.
+#[cfg(unix)]
+#[test]
+fn acp_session_models_and_config_options() {
+    for config in [false, true] {
+        let dir = std::env::temp_dir().join(format!("sc-bench-acp-{}-{config}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let workspace = dir.join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let log = dir.join("requests");
+        let metadata = if config {
+            json!({"configOptions": [{"id": "model-choice", "category": "model", "type": "select", "currentValue": "fast", "options": [{"value": "fast", "name": "Fast"}, {"value": "smart", "name": "Smart"}]}]})
+        } else {
+            json!({"models": {"currentModelId": "fast", "availableModels": [{"modelId": "fast", "name": "Fast"}, {"modelId": "smart", "name": "Smart"}]}})
+        };
+        let mut session = metadata;
+        session["sessionId"] = json!("s1");
+        let mut selected_session = session.clone();
+        if config {
+            selected_session["configOptions"][0]["currentValue"] = json!("smart");
+        }
+        let script = r#"
+log="$1"
+session="$2"
+selected="$3"
+pwd > "$log.cwd"
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$log"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+    *'"method":"session/new"'*) printf '{"jsonrpc":"2.0","id":%s,"result":%s}\n' "$id" "$session" ;;
+    *'"method":"session/set_config_option"'*) printf '{"jsonrpc":"2.0","id":%s,"result":%s}\n' "$id" "$selected" ;;
+    *'"method":"session/set_'*) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+  esac
+done
+"#;
+        let argv: Vec<String> = vec![
+            "sh".into(),
+            "-c".into(),
+            script.into(),
+            "fake".into(),
+            log.to_string_lossy().into_owned(),
+            session.to_string(),
+            selected_session.to_string(),
+        ];
+        let command = argv.iter().map(|s| format!("\"{}\"", s.replace('"', "\\\""))).collect::<Vec<_>>().join(" ");
+        assert_eq!(acp::split_command(&command), argv);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let ctx = crate::fonts::test_context();
+        control(
+            &mut app,
+            &ctx,
+            &json!({"features": true,
+            "add_agent": {"id": "fake", "name": "Fake", "kind": "acp", "command": command},
+            "agent": "fake", "cwd": workspace, "connect": true, "new_chat": true}),
+        )
+        .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while app.agent_chat.state() == State::Starting {
+            poll(&mut app, &ctx);
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(status(&app)["model"], "fast");
+        assert_eq!(status(&app)["cwd"], workspace.to_str().unwrap());
+        assert_eq!(app.agent_chat.models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["fast", "smart"]);
+        let selected = control(&mut app, &ctx, &json!({"model": "smart"})).unwrap();
+        assert_eq!(selected["modelPending"], true);
+        while status(&app)["modelPending"] == true {
+            poll(&mut app, &ctx);
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(status(&app)["model"], "smart");
+        let logged: Vec<Value> = std::fs::read_to_string(&log).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let new = logged.iter().find(|v| v["method"] == "session/new").unwrap();
+        assert_eq!(new["params"]["cwd"], workspace.to_str().unwrap());
+        let process_cwd = std::fs::read_to_string(log.with_extension("cwd")).unwrap();
+        assert_eq!(std::path::Path::new(process_cwd.trim()).canonicalize().unwrap(), workspace.canonicalize().unwrap());
+        let set = logged.last().unwrap();
+        assert_eq!(set["method"], if config { "session/set_config_option" } else { "session/set_model" });
+        assert_eq!(
+            set["params"],
+            if config {
+                json!({"sessionId": "s1", "configId": "model-choice", "value": "smart"})
+            } else {
+                json!({"sessionId": "s1", "modelId": "smart"})
+            }
+        );
+        control(&mut app, &ctx, &json!({"stop": true})).unwrap();
+        assert!(app.agent_chat.cwd.is_none());
+        assert!(status(&app)["cwd"].is_null());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

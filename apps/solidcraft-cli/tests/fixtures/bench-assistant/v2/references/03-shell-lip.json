@@ -1,0 +1,39 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "commands": [
+    {
+      "command": "solid.box",
+      "params": {
+        "length": 80,
+        "width": 50,
+        "height": 30,
+        "body_name": "Enclosure"
+      }
+    },
+    {
+      "command": "solid.shell",
+      "params": {
+        "faces": [
+          [
+            40,
+            25,
+            30
+          ]
+        ],
+        "thickness": 2
+      }
+    },
+    {
+      "command": "plastic.lip",
+      "params": {
+        "face": [
+          1,
+          25,
+          30
+        ],
+        "width": 1,
+        "height": 2
+      }
+    }
+  ]
+}

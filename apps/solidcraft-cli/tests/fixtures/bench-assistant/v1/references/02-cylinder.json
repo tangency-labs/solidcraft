@@ -1,0 +1,12 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "commands": [
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "diameter": 30,
+        "height": 50
+      }
+    }
+  ]
+}

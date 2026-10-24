@@ -1,0 +1,54 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "format": 1,
+  "expectations": [
+    {
+      "id": "01-bolt-circle-bracket",
+      "pass": false
+    },
+    {
+      "id": "02-revolved-groove",
+      "pass": false
+    },
+    {
+      "id": "03-shell-lip",
+      "pass": false
+    },
+    {
+      "id": "04-edit-parameters",
+      "pass": false
+    },
+    {
+      "id": "05-hole-grid",
+      "pass": false
+    },
+    {
+      "id": "06-mirror",
+      "pass": false
+    },
+    {
+      "id": "07-chamfer-top",
+      "pass": false
+    },
+    {
+      "id": "08-thread",
+      "pass": false
+    },
+    {
+      "id": "09-revolute-joint",
+      "pass": false
+    },
+    {
+      "id": "10-rename-organize",
+      "pass": false
+    },
+    {
+      "id": "11-constrained-sketch",
+      "pass": false
+    },
+    {
+      "id": "12-measure-holes",
+      "pass": false
+    }
+  ]
+}

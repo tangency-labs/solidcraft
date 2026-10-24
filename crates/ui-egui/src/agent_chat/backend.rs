@@ -90,6 +90,10 @@ pub trait ChatBackend {
     fn authenticate(&mut self, method: &str);
     /// Use one of the models it reported in [`Event::Models`].
     fn set_model(&mut self, _model: &str) {}
+    /// A model selection is waiting for the agent acknowledgement.
+    fn model_pending(&self) -> bool {
+        false
+    }
     /// Switch to one of the modes it reported in [`Event::Modes`].
     fn set_mode(&mut self, _mode: &str) {}
     /// Its process, for status and tests.

@@ -1,0 +1,50 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "format": 1,
+  "expectations": [
+    {
+      "id": "01-cube",
+      "pass": false
+    },
+    {
+      "id": "02-cylinder",
+      "pass": false
+    },
+    {
+      "id": "03-block",
+      "pass": false
+    },
+    {
+      "id": "04-sketch-extrude",
+      "pass": false
+    },
+    {
+      "id": "05-plate-hole",
+      "pass": false
+    },
+    {
+      "id": "06-fillet-box",
+      "pass": false
+    },
+    {
+      "id": "07-move-body",
+      "pass": false
+    },
+    {
+      "id": "08-rename-body",
+      "pass": false
+    },
+    {
+      "id": "09-volume-question",
+      "pass": false
+    },
+    {
+      "id": "10-two-holes",
+      "pass": false
+    },
+    {
+      "id": "11-any-change",
+      "pass": false
+    }
+  ]
+}

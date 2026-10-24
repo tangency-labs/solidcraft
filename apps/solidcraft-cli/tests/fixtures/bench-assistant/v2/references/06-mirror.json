@@ -1,0 +1,55 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "commands": [
+    {
+      "command": "solid.box",
+      "params": {
+        "length": 100,
+        "width": 40,
+        "height": 10,
+        "corner": [
+          -50,
+          -20,
+          0
+        ],
+        "body_name": "Plate"
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "diameter": 16,
+        "height": 15,
+        "base": [
+          30,
+          0,
+          10
+        ],
+        "operation": "join",
+        "name": "Boss"
+      }
+    },
+    {
+      "command": "solid.hole",
+      "params": {
+        "position": [
+          30,
+          0,
+          25
+        ],
+        "diameter": 6,
+        "name": "Boss hole"
+      }
+    },
+    {
+      "command": "solid.mirror",
+      "params": {
+        "features": [
+          "Boss",
+          "Boss hole"
+        ],
+        "plane": "YZ"
+      }
+    }
+  ]
+}

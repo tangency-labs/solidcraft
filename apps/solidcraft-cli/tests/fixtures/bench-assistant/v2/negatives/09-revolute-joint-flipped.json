@@ -1,0 +1,122 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "commands": [
+    {
+      "command": "component.create",
+      "params": {
+        "name": "Base"
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "length": 60,
+        "width": 60,
+        "height": 10,
+        "corner": [
+          -30,
+          -30,
+          0
+        ],
+        "body_name": "Base"
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "diameter": 10,
+        "height": 12,
+        "base": [
+          0,
+          0,
+          10
+        ],
+        "operation": "join",
+        "name": "Pin"
+      }
+    },
+    {
+      "command": "component.activate",
+      "params": {
+        "component": "root"
+      }
+    },
+    {
+      "command": "component.create",
+      "params": {
+        "name": "Arm"
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "length": 80,
+        "width": 16,
+        "height": 5,
+        "corner": [
+          -8,
+          -8,
+          10
+        ],
+        "body_name": "Arm"
+      }
+    },
+    {
+      "command": "solid.hole",
+      "params": {
+        "position": [
+          0,
+          0,
+          15
+        ],
+        "diameter": 10.5
+      }
+    },
+    {
+      "command": "component.activate",
+      "params": {
+        "component": "root"
+      }
+    },
+    {
+      "command": "joint.create",
+      "params": {
+        "type": "revolute",
+        "a": {
+          "occurrence": "Base:1",
+          "circle": [
+            5,
+            0,
+            11
+          ]
+        },
+        "b": {
+          "occurrence": "Arm:1",
+          "circle": [
+            5.25,
+            0,
+            11
+          ]
+        },
+        "flip": false
+      }
+    },
+    {
+      "command": "joint.drive",
+      "params": {
+        "joint": "Joint1",
+        "value": 45
+      }
+    },
+    {
+      "command": "component.list",
+      "params": {
+        "compact": true
+      }
+    },
+    {
+      "command": "joint.list",
+      "params": {}
+    }
+  ]
+}

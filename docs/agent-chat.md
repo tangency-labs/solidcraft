@@ -351,9 +351,41 @@ solidcraft-cli bench-assistant --connect 127.0.0.1:9271 \
   --json results.json --markdown results.md
 ```
 
+For an Anthropic-compatible endpoint, set the key in your environment before running:
+
+```sh
+solidcraft-cli bench-assistant --connect 127.0.0.1:9271 \
+  --kind anthropic --base-url https://api.anthropic.com --model claude-haiku-5-5 \
+  --key-env ANTHROPIC_API_KEY --json anthropic.json --markdown anthropic.md
+```
+
+`--kind` defaults to `openai`. `--key-env VAR` reads the API key from that environment variable
+and stores it in the app's system keychain. Keys cannot be supplied as command-line values and
+are redacted from errors, console output, and reports. A missing, empty, or invalid key fails
+before connecting. Keyed endpoints require HTTPS, except for loopback addresses.
+
+To use the installed Claude Code ACP adapter with its own sign-in:
+
+```sh
+solidcraft-cli bench-assistant --connect 127.0.0.1:9271 \
+  --agent claude --json claude-code.json --markdown claude-code.md
+```
+
+Use an installed agent id from the Assistant's `ui.agent_chat` status (`agents`). `--agent`
+cannot be combined with `--base-url`, `--model`, `--kind`, or `--key-env`. The selected agent
+uses its own sign-in. Add `--agent-model ID` to select one of the models the agent advertises;
+an unknown model fails before any task runs and lists the available model ids. Without this
+option, the agent uses its configured model. Each session starts in a fresh empty temporary
+directory, which is removed after the task, so relative shell commands do not inspect the
+caller's working directory. Console, Markdown, and JSON reports identify the API kind and model,
+or the installed agent and adapter version (unknown if unavailable). Agent JSON and Markdown
+also record the model reported by the session. Coding agents
+bring their own prompt alongside SolidCraft's tools, so their results are not directly
+comparable with API runs.
+
 Each task replaces the open design with a new one, so save your work first. The command adds the
-endpoint as an API agent named "bench", starts a new chat with All permissions for every task,
-sends the prompt once, and waits for the turn to end. It runs only the setup the test prescribes
+endpoint as an API agent named "bench" (or selects the installed agent), starts a new chat with
+All permissions for every task, sends the prompt once, and waits for the turn to end. It runs only the setup the test prescribes
 (the box some tasks start from) and does none of the modelling itself. When it finishes it stops
 the agent and puts your permission setting back.
 

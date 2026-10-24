@@ -1,0 +1,26 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "commands": [
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "diameter": 10,
+        "height": 40,
+        "body_name": "Rod"
+      }
+    },
+    {
+      "command": "solid.thread",
+      "params": {
+        "face": [
+          5,
+          0,
+          5
+        ],
+        "designation": "M10",
+        "length": 25,
+        "modeled": true
+      }
+    }
+  ]
+}

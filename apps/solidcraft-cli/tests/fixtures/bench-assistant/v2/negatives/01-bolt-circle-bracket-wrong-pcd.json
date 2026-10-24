@@ -1,0 +1,79 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "commands": [
+    {
+      "command": "solid.box",
+      "params": {
+        "length": 80,
+        "width": 80,
+        "height": 8,
+        "corner": [
+          -40,
+          -40,
+          0
+        ],
+        "body_name": "Bracket"
+      }
+    },
+    {
+      "command": "solid.fillet",
+      "params": {
+        "edges": [
+          [
+            40,
+            40,
+            4
+          ],
+          [
+            -40,
+            40,
+            4
+          ],
+          [
+            -40,
+            -40,
+            4
+          ],
+          [
+            40,
+            -40,
+            4
+          ]
+        ],
+        "radius": 10
+      }
+    },
+    {
+      "command": "solid.hole",
+      "params": {
+        "position": [
+          0,
+          0,
+          8
+        ],
+        "diameter": 30
+      }
+    },
+    {
+      "command": "solid.hole",
+      "params": {
+        "position": [
+          30,
+          0,
+          8
+        ],
+        "diameter": 8
+      }
+    },
+    {
+      "command": "solid.pattern.circular",
+      "params": {
+        "features": [
+          "Hole2"
+        ],
+        "axis": "Z",
+        "count": 6
+      }
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "SPDX-License-Identifier": "Apache-2.0",
+  "commands": [
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XZ",
+        "name": "Pin profile"
+      }
+    },
+    {
+      "command": "sketch.line",
+      "params": {
+        "points": [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            -48
+          ],
+          [
+            8.5,
+            -48
+          ],
+          [
+            8.5,
+            -50
+          ],
+          [
+            10,
+            -50
+          ],
+          [
+            10,
+            -60
+          ],
+          [
+            0,
+            -60
+          ]
+        ],
+        "closed": true
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.revolve",
+      "params": {
+        "axis": "Z",
+        "body_name": "Pin"
+      }
+    }
+  ]
+}
