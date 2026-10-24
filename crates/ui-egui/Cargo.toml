@@ -22,6 +22,7 @@ solidcraft-views = { workspace = true }
 solidcore-record = { workspace = true }
 solidcore-ops = { workspace = true }
 solidcore-tess = { workspace = true }
+zeroize = { version = "1", features = ["alloc"] }
 solidcraft-cloud = { workspace = true }
 solidcraft-engine = { workspace = true }
 solidcraft-control = { workspace = true }

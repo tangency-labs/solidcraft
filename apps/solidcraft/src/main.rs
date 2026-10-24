@@ -1334,6 +1334,9 @@ impl Drop for DriverClient {
 }
 
 fn main() -> eframe::Result {
+    if let Some(code) = cloud::askpass() {
+        std::process::exit(code);
+    }
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");

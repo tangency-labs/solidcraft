@@ -30,6 +30,8 @@ pub mod canvas;
 mod card_resize;
 pub mod cli_link;
 mod cloud;
+mod cloud_browser;
+mod cloud_settings;
 mod cloud_setup;
 #[cfg(test)]
 mod colour_tokens_tests;
@@ -2482,8 +2484,21 @@ impl SolveApp {
             }
             return;
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if id == "cloud.configure" {
+            cloud_settings::git::open(self);
+            return;
+        }
+        if id == "cloud.settings" {
+            prefs::open_at(self, prefs::PAGE_CLOUD);
+            return;
+        }
         if id == "cloud.connect" {
             cloud_setup::open(self);
+            return;
+        }
+        if matches!(id, "cloud.list" | "cloud.save") {
+            cloud_browser::start(self, id);
             return;
         }
         if id == "ui.palette" {
@@ -4646,6 +4661,9 @@ impl SolveApp {
         semantic_content::begin(self, ui.ctx());
         self.cad_ui(ui, &mut report_input);
         cloud_setup::show(self, ui.ctx());
+        #[cfg(not(target_arch = "wasm32"))]
+        cloud_settings::git::show(self, ui.ctx());
+        cloud_browser::show(self, ui.ctx());
         semantic_content::finalize(self, ui.ctx());
         #[cfg(not(target_arch = "wasm32"))]
         if !self.view_windows.is_child() {
