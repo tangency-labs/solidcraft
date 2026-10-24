@@ -85,3 +85,13 @@ why = "region nesting differs once #613's shell ray face preparation and #639's 
 unit = "topology.brep_p6"
 case = "cube_with_outer_vertex"
 why = "region nesting differs once #613's shell ray face preparation and #639's forwarded face hooks both reach it; deferred on each alone (plan/findings.md: Region nesting once shell ray face preparation meets the forwarded face hooks)"
+
+[[mismatch]]
+unit = "topology.face_p1"
+case = "cone.smb_1_f5_op9"
+why = "MoveSeam with split: the runner's null classification handles cannot name topology, so the port's post-move HasSeamProblem fails (BrepSeamObjects InvalidInput, ignored as 'no problem') where upstream finds one and splits; reachable once the UB-137 fork trap runs the call (plan/findings.md: topology.face_p1 fork trap merged with main)"
+
+[[mismatch]]
+unit = "topology.face_p1"
+case = "torus.smb_1_f5_op9"
+why = "MoveSeam with split: the runner's null classification handles cannot name topology, so the port's post-move HasSeamProblem fails (BrepSeamObjects InvalidInput, ignored as 'no problem') where upstream finds one and splits; reachable once the UB-137 fork trap runs the call (plan/findings.md: topology.face_p1 fork trap merged with main)"
