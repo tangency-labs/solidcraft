@@ -17,16 +17,21 @@
 //! does (`SetProps_Stage2`, `ReSet(SM_PROPSTAGE_3)`, the loop props) and exports the
 //! values `ClassifyLoops` reads (stage, closed flags, poles, the loops' seam crossing
 //! and winding counts, the seam classifications' end point classes and vertices, the
-//! seam done-touch lists); both sides then run `ClassifyLoops` on those same props (the
+//! seam done-touch lists, and for the loop bisector and `GetLoopCrossings` the zone
+//! tolerance, no-vertex poles, pole points and missing seam direction); both sides then run `ClassifyLoops` on those same props (the
 //! Rust side imports them; the seam classifications' non-vertex point classifications
 //! carry no object, which `ClassifyLoops` never reads). The target loops are exported
 //! too. With `props` `0` the props are fresh and `ClassifyLoops` computes them itself
 //! (`SetProps_Stage2`; the Rust side runs the port of unit `heal.face_props`).
 //!
-//! **Deferred.** A target loop that crosses no seam the face props classified needs
-//! `sms_FindAndClassifyLoopBisector` (`query.face_p3`) and `GetLoopCrossings`
-//! (`intersect.curve_class_p4`); fresh props of a closed surface need
-//! `SmFace::HasSeamProblem` (`topology.face_p4`).
+//! **Deferred.** Fresh props of a closed surface need `SmFace::HasSeamProblem`
+//! (`topology.face_p4`), which reaches its unported callees.
+//!
+//! **Inexact geometry.** The importer approximates the edge curves of most built faces
+//! (unit `topology.face_p2`'s `Exact`); the cases are still compared, since the loop
+//! classification is integer-valued. Two scale-`1e-3` cylinder cases where the
+//! approximation moves the bisector across a loop are known mismatches
+//! (`crates/difftest/known_mismatches.toml`).
 //!
 //! **Rejected** (both sides report `rejected`): the inputs the FFI wrapper documents,
 //! where `ClassifyLoops` would read outside its arrays.
@@ -50,6 +55,8 @@ use solidcore::intersect::point_class::{ClassObject, ClassObjectKind};
 use solidcore::intersect::curve_class::p1::{CrvDirOnFaceType, CurveClassification, TouchData};
 use solidcore::intersect::point_class::PointClassType;
 use solidcore::kernel::Kernel;
+use solidcore::math::Point3;
+use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::query::face::p4 as qf4;
 use solidcore::topology::{EdgeId, EdgeuseId, FaceId, LoopId, VertexId};
@@ -624,6 +631,14 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let crv_class_v = classification(&k, &mut rd)?;
     let done_u = touches(&mut rd)?;
     let done_v = touches(&mut rd)?;
+    let zone_tol = rd.num()?;
+    let no_vertex_poles = rd.int()?;
+    let bad_missing_seam = rd.int()?;
+    let n_pp = rd.count()?;
+    let mut pole_points = Vec::new();
+    for _ in 0..n_pp {
+        pole_points.push(Point3::new(rd.num()?, rd.num()?, rd.num()?));
+    }
     let n_loops = rd.count()?;
     let mut loops = rd
         .ints(n_loops)?
@@ -644,6 +659,14 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         props.crv_class_v = crv_class_v;
         props.done_touch_list_u = done_u;
         props.done_touch_list_v = done_v;
+        props.zone_tol_3d = zone_tol;
+        props.no_vertex_poles =
+            u64::try_from(no_vertex_poles).map_err(|_| harness("bad no-vertex poles"))?;
+        props.bad_missing_seam_dir = u64::try_from(bad_missing_seam)
+            .ok()
+            .and_then(SurfParamType::from_code)
+            .ok_or_else(|| harness("bad SmSurfParamType"))?;
+        props.pole_points = pole_points;
     }
 
     let mut out = initial_out();

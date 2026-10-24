@@ -37,7 +37,8 @@
 //! | `Classify` | `rejected [status loops classifiable not_yet n_io (loop type orient degen area containment)* start stop n_no_area idx* tree scratch_size]` |
 //!
 //! `props` is `stage face_index closed_u closed_v poles not_yet n_lp (cross_u wind_u
-//! cross_v wind_v)* class_u class_v done_u done_v`; a classification is `0` (none) or `1
+//! cross_v wind_v)* class_u class_v done_u done_v zone_tol no_vertex_poles
+//! bad_missing_seam n_pp (x y z)*` (`n_pp` pole points); a classification is `0` (none) or `1
 //! n (start_class start_vertex end_class end_vertex)*` (the vertex's export index for a
 //! vertex classification, else `-1`); a touch list `n (loop dir loop_index)*` (`loop`: the
 //! loop's export index, `-1` none, `-2` not a loop); `loops` `n idx*`; `tree` `n (pole

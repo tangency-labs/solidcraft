@@ -1083,6 +1083,17 @@ void put_props(std::vector<double>& o, Graph& g, const SmFaceProps& p)
     put_classification(o, g, p.m_pCrvClassV);
     put_touches(o, g, p.m_sDoneTouchListU);
     put_touches(o, g, p.m_sDoneTouchListV);
+    // what the loop bisector and GetLoopCrossings read
+    o.push_back((double)p.m_sZoneTol3d);
+    o.push_back((double)p.m_lNoVertexPoles);
+    o.push_back((double)p.m_eBadMissingSeam);
+    o.push_back((double)p.m_sPolePoints.GetSize());
+    for (ULONG i = 0; i < p.m_sPolePoints.GetSize(); i++)
+    {
+        o.push_back(p.m_sPolePoints[i].x);
+        o.push_back(p.m_sPolePoints[i].y);
+        o.push_back(p.m_sPolePoints[i].z);
+    }
 }
 
 void put_loops(std::vector<double>& o, Graph& g, const SmTArray<SmLoop*>& l)
