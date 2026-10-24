@@ -95,6 +95,19 @@ struct App {
     come_forward: come_forward::ComeForward,
     /// The graphics device: lost, it can't draw again (`App::watch_device`, #4172).
     gpu: Option<LostWatch>,
+    /// The window's backend, and whether it is the software renderer.
+    renderer: Option<(eframe::wgpu::Backend, bool)>,
+    /// A GPU that hangs after the window is up (`App::watch_for_a_hang`).
+    hang: startup::HangWatch,
+    /// Whether the GPU still finishes its work (`App::gpu_progressing`), on `progress_clock`.
+    progress: std::sync::Arc<std::sync::Mutex<startup::GpuProgress>>,
+    progress_clock: std::time::Instant,
+    /// The GPU hung: the next launch starts once this one has closed, on this backend
+    /// (`startup::after_hang`), saved then.
+    restart: Option<&'static str>,
+    /// The designs whose unsaved changes closing couldn't keep for recovery
+    /// (`recovery_ui::close`), for the notice of a restart this app forces (`Drop for App`).
+    unkept: Vec<String>,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     space_mouse: space_mouse::SpaceMouse,
     #[cfg(target_os = "macos")]
@@ -221,6 +234,7 @@ impl eframe::App for App {
             }
         }
         self.watch_device();
+        self.watch_for_a_hang(ctx, _frame);
         // The design on screen is the one whose commands a crash report replays.
         self.solve.session.crash_journal = solidcraft_engine::crash::enabled();
         // The OS closing the window (Alt+F4, Cmd+Q, the window manager): ask about unsaved
@@ -302,7 +316,11 @@ impl eframe::App for App {
         if !solidcraft_engine::capture::close(std::time::Duration::from_secs(5)) {
             log::warn!("a picture was still being drawn as the app closed");
         }
-        solidcraft_ui_egui::recovery_ui::close(&mut self.solve);
+        self.unkept = solidcraft_ui_egui::recovery_ui::close(&mut self.solve);
+        for design in &self.unkept {
+            log::error!("recovery: unsaved changes not kept: {design}");
+            solidcraft_engine::note!("SolidCraft: unsaved changes not kept for recovery: {design}");
+        }
         // A GPU path tracer setup still running did not stop the app (#9236).
         solidcraft_ui_egui::render_workspace::close(&mut self.solve);
         solidcraft_ui_egui::open_elsewhere::close(&mut self.solve);
@@ -325,15 +343,18 @@ impl Drop for App {
         if let Some(gpu) = &self.gpu
             && let Some(lost_at) = gpu.lost_at
         {
-            device_lost::restart(gpu.restart_on_software, lost_at, &gpu.reason);
+            device_lost::restart(gpu.restart_on_software, lost_at, &gpu.reason, &self.unkept);
             // The window's GPU surface is still to be dropped, and on a lost device that may
             // never return (#9044).
             device_lost::end();
+        } else if let (Some((backend, _)), Some(next)) = (self.renderer, self.restart) {
+            restart_after_hang(backend, next, &self.unkept);
         }
         // An update asked to restart into the new version or to run its installer.
         if let Some((program, args)) = solidcraft_ui_egui::update::take_launch(&mut self.solve) {
             let mut command = std::process::Command::new(&program);
-            command.args(&args);
+            // This launch's notices aren't the new version's.
+            command.args(&args).env_remove(startup::HUNG_ENV).env_remove(startup::UNKEPT_ENV);
             #[cfg(windows)]
             {
                 use std::os::windows::process::CommandExt;
@@ -374,6 +395,139 @@ impl App {
         gpu.reason = reason;
         self.solve.quit_requested = true;
     }
+
+    /// The GPU hung (frames wait out their acquire, or the surface refuses its configuration, while
+    /// the user is there, #3321): close, keeping unsaved changes for recovery as a forced quit
+    /// does (the window, white, can't ask about them), and start again on another renderer once
+    /// closed ([`restart_after_hang`]). Windows only: elsewhere a hidden window's frames can wait
+    /// as long (Wayland, macOS).
+    fn watch_for_a_hang(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+        if !cfg!(target_os = "windows") {
+            return;
+        }
+        let progressing = self.gpu_progressing(frame);
+        let (now, input) = ctx.input(|i| {
+            let input = i.events.iter().any(|e| {
+                matches!(
+                    e,
+                    egui::Event::PointerMoved(_) | egui::Event::PointerButton { .. } | egui::Event::Key { .. } | egui::Event::MouseWheel { .. }
+                )
+            });
+            (i.time, input)
+        });
+        let stalled = eframe::egui_wgpu::stalled_frames();
+        let refused = eframe::egui_wgpu::refused_for().map(|d| d.as_secs_f64());
+        if !self.hang.hung(now, input, stalled, refused, progressing) {
+            return;
+        }
+        let why = match refused {
+            Some(s) if s > 0.0 => format!("the surface refused its configuration for {s:.0} s"),
+            _ => format!("{stalled} frames in a row waited out their acquire"),
+        };
+        let Some(backend) = self.renderer.and_then(|(backend, cpu)| startup::after_hang(backend, cpu)) else {
+            log::error!("graphics: {why}, on the software renderer");
+            return;
+        };
+        log::error!("graphics: {why}; the GPU hung, restarting on {backend}");
+        solidcraft_engine::note!("SolidCraft graphics: the GPU stopped responding; restarting on {backend}");
+        remember_backend(backend);
+        self.restart = Some(backend);
+        self.solve.quit_requested = true;
+    }
+}
+
+impl App {
+    /// Whether the GPU finished work it was busy with lately ([`startup::GpuProgress`]). Asks for
+    /// the completion of the work submitted so far when no ask is outstanding, and polls without
+    /// waiting: the answer comes now if that work is done, else at a later poll or submit.
+    fn gpu_progressing(&mut self, frame: &eframe::Frame) -> bool {
+        let now = self.progress_clock.elapsed().as_secs_f64();
+        let ask = self.progress.lock().is_ok_and(|mut p| p.ask(now));
+        if ask && let Some(rs) = frame.wgpu_render_state() {
+            let progress = std::sync::Arc::clone(&self.progress);
+            let clock = self.progress_clock;
+            rs.queue.on_submitted_work_done(move || {
+                if let Ok(mut p) = progress.lock() {
+                    p.answered(clock.elapsed().as_secs_f64());
+                }
+            });
+            let _ = rs.device.poll(eframe::wgpu::PollType::Poll);
+        }
+        self.progress.lock().is_ok_and(|p| p.progressing(now))
+    }
+}
+
+/// Start SolidCraft again after the GPU hung on `hung`, with the same arguments, on `next`
+/// ([`hang_restart_command`]), naming the designs whose unsaved changes weren't kept (`unkept`).
+fn restart_after_hang(hung: eframe::wgpu::Backend, next: &str, unkept: &[String]) {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let mut command = hang_restart_command(exe, std::env::args_os().skip(1), hung, next, unkept);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Not tied to this process: its own process group, no console.
+        command.creation_flags(0x0000_0200 | 0x0000_0008);
+    }
+    if let Err(e) = command.spawn() {
+        log::error!("graphics: starting again after the GPU hung: {e}");
+    }
+}
+
+/// The command that starts `exe` again with `args` after the GPU hung on `hung`, on `next`: the
+/// backend [`remember_backend`] saved, and for this start also passed as a start-up retry's
+/// backend (the software renderer as such), so a save that failed (a read-only settings folder,
+/// a full disk) doesn't start the backend that hung again, and the next hang moves on from
+/// `next` (#3321 review). `WGPU_BACKEND`, an inherited retry's backend and an earlier loss's
+/// stamp are not passed on: they would win over `next` or tell the wrong story.
+fn hang_restart_command(
+    exe: std::path::PathBuf,
+    args: impl IntoIterator<Item = std::ffi::OsString>,
+    hung: eframe::wgpu::Backend,
+    next: &str,
+    unkept: &[String],
+) -> std::process::Command {
+    let mut command = std::process::Command::new(exe);
+    command
+        .args(args)
+        .env(startup::HUNG_ENV, format!("{hung:?}"))
+        .env_remove(startup::WGPU_BACKEND_ENV)
+        .env_remove(startup::FALLBACK_NOTE_ENV)
+        .env_remove(device_lost::LOST_ENV);
+    if next == startup::SOFTWARE_BACKEND {
+        command.env(startup::RENDERER_ENV, "cpu").env_remove(startup::RETRY_BACKEND_ENV);
+    } else {
+        command.env(startup::RETRY_BACKEND_ENV, next);
+    }
+    match startup::unkept(unkept) {
+        Some(designs) => command.env(startup::UNKEPT_ENV, designs),
+        None => command.env_remove(startup::UNKEPT_ENV),
+    };
+    command
+}
+
+/// Keep `backend` as `graphics.json`'s `backend` (its other settings stay). Written to a new file
+/// that then replaces the old one: this runs as the GPU hangs, when the machine may reset next,
+/// and a half-written file would lose the anti-aliasing setting too.
+fn remember_backend(backend: &str) {
+    let Some(path) = graphics_path() else { return };
+    let mut graphics = graphics().filter(serde_json::Value::is_object).unwrap_or_else(|| serde_json::json!({}));
+    graphics["backend"] = serde_json::json!(backend);
+    if let Err(e) = write_replacing(&path, graphics.to_string().as_bytes()) {
+        log::error!("graphics: keeping the {backend} backend in {}: {e}", path.display());
+    }
+}
+
+/// Write `bytes` to `path` all at once: to a file next to it, flushed to disk, then renamed over it.
+fn write_replacing(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".new");
+    let new = path.with_file_name(name);
+    let mut file = std::fs::File::create(&new)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
+    std::fs::rename(&new, path)
 }
 
 /// Where the next file dialog opens (#7756): the folder of the file last chosen in one, or of the
@@ -824,7 +978,8 @@ fn restore_graphics_preferences(app: &mut SolveApp, saved: Option<&serde_json::V
         .to_string();
 }
 
-/// The graphics backend preference (`graphics.json`'s `backend`: `auto`, `dx12`, `vulkan`, `gl`).
+/// The graphics backend preference (`graphics.json`'s `backend`: `auto`, `dx12`, `vulkan`, `gl`,
+/// or `cpu`, the software renderer).
 fn backend_preference() -> Option<String> {
     graphics().and_then(|v| v.get("backend").and_then(serde_json::Value::as_str).map(str::to_string))
 }
@@ -839,6 +994,15 @@ fn scene_samples(backend: eframe::wgpu::Backend, samples: u32, supported: &[u32]
     } else {
         supported.iter().copied().filter(|&n| n <= solidcraft_ui_egui::prefs::Prefs::default().msaa).max().unwrap_or(1)
     }
+}
+
+/// The scene's sample count on the software renderer (a CPU adapter: safe mode, the `cpu` backend,
+/// or WARP or llvmpipe where there is no GPU), which draws every sample on the CPU: 1x unless an
+/// anti-aliasing level was chosen in Graphics (`chosen`, a saved `msaa`), which applies there
+/// too (#3321). Safe mode ignores saved settings, so it always draws 1x. Preferences keeps
+/// showing the level asked for, as with OpenGL's 1x (`effective_msaa_samples`).
+fn software_samples(samples: u32, software: bool, chosen: bool) -> u32 {
+    if software && !chosen { 1 } else { samples }
 }
 
 /// Keep the default until the installed renderer's startup check proves a fallback is needed.
@@ -1009,15 +1173,28 @@ fn main() -> eframe::Result {
         safe_mode = true;
         notes.push(format!("The last {failed_starts} launches stopped before the window opened, so this one is in safe mode."));
     }
-    let cpu_renderer = safe_mode || startup::cpu_renderer_env(std::env::var(startup::RENDERER_ENV).ok().as_deref());
+    // The software renderer: safe mode, SOLIDCRAFT_RENDERER, or kept after the GPU hung on every
+    // API (`startup::after_hang`).
+    let cpu_renderer = safe_mode
+        || startup::cpu_renderer_env(std::env::var(startup::RENDERER_ENV).ok().as_deref())
+        || startup::cpu_renderer_env(backend_preference().as_deref());
     // The launch before this one closed because its graphics device was lost (`App::watch_device`).
     let after_loss = device_lost::recent(std::env::var(device_lost::LOST_ENV).ok().as_deref(), device_lost::now_secs());
+    // The launch before closed itself and couldn't keep every unsaved change (`App::on_exit`).
+    let unkept = std::env::var(startup::UNKEPT_ENV).ok();
+    if let Some(designs) = unkept.as_deref().filter(|u| !u.trim().is_empty()) {
+        log::warn!("recovery: the last launch couldn't keep unsaved changes of {designs}");
+    }
     if after_loss {
         let reason = std::env::var(device_lost::REASON_ENV).ok();
         if let Some(reason) = device_lost::reason(reason.as_deref()) {
             log::warn!("graphics: the last launch lost its device ({reason})");
         }
-        notes.push(device_lost::note(cpu_renderer, reason.as_deref()));
+        notes.push(device_lost::note(cpu_renderer, reason.as_deref(), unkept.as_deref()));
+    }
+    // The launch before this one closed because its GPU hung (`App::watch_for_a_hang`).
+    if let Some(hung) = std::env::var(startup::HUNG_ENV).ok().filter(|v| !v.trim().is_empty()) {
+        notes.push(startup::hang_note(&hung, safe_mode, backend_preference().as_deref(), unkept.as_deref()));
     }
     if safe_mode {
         notes.push("Safe mode: default settings (yours are kept for the next normal start), no recovery offer, software rendering.".into());
@@ -1164,6 +1341,7 @@ fn main() -> eframe::Result {
                 lost_at: None,
                 reason: String::new(),
             });
+            let mut renderer = None;
             if let Some(rs) = &cc.wgpu_render_state {
                 app.services.graphics_adapters = rs
                     .available_adapters
@@ -1185,9 +1363,11 @@ fn main() -> eframe::Result {
                 let supported = scene_sample_choices(depth_bits, STENCIL_BITS, |depth| {
                     eframe::egui_wgpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth)
                 });
-                let scene_samples = scene_samples(info.backend, u32::from(samples), &supported);
+                let software = cpu_renderer || info.device_type == eframe::wgpu::DeviceType::Cpu;
+                let scene_samples = software_samples(scene_samples(info.backend, u32::from(samples), &supported), software, saved_samples.is_some());
                 solidcraft_engine::note!("SolidCraft graphics: {:?}, MSAA {scene_samples}x (requested {}x)", rs.adapter.get_info().backend, samples);
                 solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
+                renderer = Some((rs.adapter.get_info().backend, cpu_renderer));
                 let scene_samples = app.set_wgpu_split(rs, depth_bits, STENCIL_BITS, scene_samples);
                 app.msaa_supported = supported;
                 app.preferences.msaa = u32::from(samples);
@@ -1310,6 +1490,12 @@ fn main() -> eframe::Result {
                 take_focus_unwanted: control_port.is_some(),
                 come_forward: come_forward::ComeForward::default(),
                 gpu,
+                renderer,
+                hang: startup::HangWatch::default(),
+                progress: Default::default(),
+                progress_clock: std::time::Instant::now(),
+                restart: None,
+                unkept: Vec::new(),
                 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
                 space_mouse,
                 #[cfg(target_os = "macos")]
@@ -1337,8 +1523,8 @@ fn startup_step(step: &'static str, detail: &str) {
 }
 
 /// The renderer settings: with `cpu`, the software adapter (WARP, lavapipe, llvmpipe). The
-/// backends come from `startup::choose_backends` (on Windows D3D12 first, and only the backend
-/// in use is started); `preference` is `graphics.json`'s `backend`.
+/// backends come from `startup::choose_backends` (on Windows D3D12 first, Vulkan on AMD
+/// integrated GPUs, and only the backend in use is started); `preference` is `graphics.json`'s `backend`.
 fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuConfiguration {
     let mut options = eframe::egui_wgpu::WgpuConfiguration::default();
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
@@ -1346,7 +1532,7 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
         // A retry applies only to this launch. WGPU_BACKEND always has priority.
         let retry = std::env::var(startup::RETRY_BACKEND_ENV).ok();
         let preference = if cpu { preference } else { retry.as_deref().or(preference) };
-        if let Some(backends) = startup::choose_backends(cfg!(target_os = "windows"), env_set, cpu, preference, startup::has_hardware_adapter) {
+        if let Some(backends) = startup::choose_backends(cfg!(target_os = "windows"), env_set, cpu, preference, startup::hardware_adapters) {
             solidcraft_engine::note!("SolidCraft graphics: starting {backends:?}");
             setup.instance_descriptor.backends = backends;
         }
@@ -1388,7 +1574,7 @@ fn no_window(error: eframe::Error, tried_cpu: bool, failed: eframe::wgpu::Backen
         log::warn!("{note}");
         solidcraft_engine::note!("SolidCraft: {note}");
         let mut command = std::process::Command::new(exe);
-        command.args(std::env::args_os().skip(1)).env(startup::FALLBACK_NOTE_ENV, note);
+        command.args(std::env::args_os().skip(1)).env(startup::FALLBACK_NOTE_ENV, note).env_remove(startup::HUNG_ENV);
         if next == "cpu" {
             command.env(startup::RENDERER_ENV, "cpu").env_remove(startup::RETRY_BACKEND_ENV);
         } else {
@@ -1981,6 +2167,21 @@ mod msaa_tests {
         }
     }
 
+    /// The software renderer draws 1x by default, as it draws every sample on the CPU; a level
+    /// chosen in Graphics still applies there, and a GPU keeps the default 4x (#3321).
+    #[test]
+    fn the_software_renderer_draws_one_sample_unless_a_level_was_chosen() {
+        use eframe::wgpu::Backend;
+        let default = u32::from(super::scene_msaa_request(None));
+        for backend in [Backend::Dx12, Backend::Vulkan] {
+            assert_eq!(super::software_samples(super::scene_samples(backend, default, &[1, 4]), true, false), 1);
+            assert_eq!(super::software_samples(super::scene_samples(backend, default, &[1, 4]), false, false), 4, "a GPU");
+        }
+        assert_eq!(super::software_samples(4, true, true), 4, "chosen in Graphics");
+        assert_eq!(super::software_samples(8, false, true), 8);
+        assert_eq!(super::software_samples(1, true, true), 1);
+    }
+
     #[test]
     fn the_scene_follows_the_backend_policy_too() {
         use eframe::wgpu::Backend;
@@ -1988,5 +2189,30 @@ mod msaa_tests {
         assert_eq!(super::scene_samples(Backend::Gl, 4, &[]), 1);
         assert_eq!(super::scene_samples(Backend::Vulkan, 4, &[1, 4]), 4);
         assert_eq!(super::scene_samples(Backend::Dx12, 8, &[1, 2, 4]), 4);
+    }
+
+    /// The restart after a hang starts on the next backend even when saving it failed: it is
+    /// passed for that start too (the software renderer as such), and nothing that would win
+    /// over it is inherited (#3321 review).
+    #[test]
+    fn the_restart_after_a_hang_starts_the_next_backend_even_unsaved() {
+        use eframe::wgpu::Backend;
+        let env = |command: &std::process::Command, name: &str| {
+            command.get_envs().find(|(k, _)| *k == name).map(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+        };
+        let exe = std::path::PathBuf::from("solidcraft");
+        let command = super::hang_restart_command(exe.clone(), ["--control".into(), "7979".into()], Backend::Dx12, "vulkan", &[]);
+        assert_eq!(env(&command, crate::startup::RETRY_BACKEND_ENV), Some(Some("vulkan".into())));
+        assert_eq!(env(&command, crate::startup::HUNG_ENV), Some(Some("Dx12".into())));
+        assert_eq!(env(&command, crate::startup::WGPU_BACKEND_ENV), Some(None));
+        assert_eq!(env(&command, crate::device_lost::LOST_ENV), Some(None));
+        assert_eq!(env(&command, crate::startup::RENDERER_ENV), None);
+        assert_eq!(env(&command, crate::startup::UNKEPT_ENV), Some(None));
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["--control", "7979"]);
+        let unkept = ["Bracket: autosave is off".to_string()];
+        let command = super::hang_restart_command(exe, Vec::new(), Backend::Gl, crate::startup::SOFTWARE_BACKEND, &unkept);
+        assert_eq!(env(&command, crate::startup::RENDERER_ENV), Some(Some("cpu".into())));
+        assert_eq!(env(&command, crate::startup::RETRY_BACKEND_ENV), Some(None));
+        assert_eq!(env(&command, crate::startup::UNKEPT_ENV), Some(Some(unkept[0].clone())));
     }
 }
