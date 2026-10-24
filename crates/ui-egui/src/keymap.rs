@@ -303,13 +303,22 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
             }
             return;
         }
-        app.start(app.preferences.sketch_variants.resolve(id));
+        app.start(variant_for_key(app, id));
     } else if let Some(id) = sketch_tool_for(app, key) {
+        let then = variant_for_key(app, id);
         app.start("sketch.create");
         if let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, crate::dialogs::Kind::Sketch)) {
-            d.then_start = Some(app.preferences.sketch_variants.resolve(id));
+            d.then_start = Some(then);
         }
     }
+}
+
+/// What a family's key starts: the variant used last (#4308), unless that variant has a key of
+/// its own; then the family's key starts the command it is bound to, and the other key the
+/// variant.
+fn variant_for_key(app: &SolveApp, id: &'static str) -> &'static str {
+    let chosen = app.preferences.sketch_variants.resolve(id);
+    if chosen != id && effective(app, chosen).is_some() { id } else { chosen }
 }
 
 /// Outside a sketch: the SKETCH-tab command bound to `key` that a new sketch would start. Not
