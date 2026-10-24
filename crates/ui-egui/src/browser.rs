@@ -1643,6 +1643,16 @@ fn dialog_takes_body(app: &SolveApp) -> bool {
     app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::BODIES != 0)
 }
 
+/// A plain click on a sketch (a Browser row or a History item) while Extrude, Revolve or Emboss
+/// is open gives the dialog every profile of that sketch (#6106). False when it is not one: the
+/// click then selects as usual.
+pub(crate) fn pick_sketch_into_dialog(app: &mut SolveApp, id: u64) -> bool {
+    let Some(mut d) = app.dialog.take() else { return false };
+    let taken = d.pick_sketch(&app.session, id);
+    app.dialog = Some(d);
+    taken
+}
+
 /// Browser picks go only into compatible active dialog inputs. Outside a dialog, planes and
 /// axes become the selection; body rows use the ordinary Ctrl/Shift-aware selection path.
 fn pick_from_browser(app: &mut SolveApp, x: Sel) {
@@ -2049,6 +2059,12 @@ fn entry_row(
             if let Some(s) = e.sel.clone() {
                 pick_from_browser(app, s);
             }
+        } else if folder == "sketches"
+            && !ui.input(|i| i.modifiers.any())
+            && let Some(Sel::Feature { id }) = e.sel
+            && pick_sketch_into_dialog(app, id)
+        {
+            // Extrude, Revolve or Emboss took all the sketch's profiles (#6106).
         } else {
             click_select(app, ui, e.row_key.clone(), e.sel.clone());
         }

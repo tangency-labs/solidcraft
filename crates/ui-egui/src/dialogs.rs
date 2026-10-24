@@ -1230,6 +1230,35 @@ impl Dialog {
         true
     }
 
+    /// A sketch clicked in the Browser or the History while Extrude, Revolve or Emboss is open
+    /// (#6106): Profiles takes every profile of the sketch, as when the sketch is selected before
+    /// the command starts. The island inside another profile's hole is left out, or it would fill
+    /// the hole. False when the click is not one of those (the caller selects it as usual).
+    pub fn pick_sketch(&mut self, s: &Session, id: u64) -> bool {
+        if self.active != 0
+            || !matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. })
+            || !self.inputs.first().is_some_and(|i| i.accept & PROFILES != 0)
+            || !s.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
+        {
+            return false;
+        }
+        let profiles: Vec<Sel> = s
+            .world_state()
+            .sketch(id)
+            .map(|ss| outermost_profiles(&ss.profiles).map(|index| Sel::Profile { sketch: id, index }).collect())
+            .unwrap_or_default();
+        let Some(input) = self.inputs.first_mut() else { return false };
+        if profiles.is_empty() {
+            return false;
+        }
+        input.items = profiles;
+        self.profile_selection_changed = true;
+        self.focus = true;
+        self.error = None;
+        self.sync_thread(s);
+        true
+    }
+
     /// A pick in the viewport (already accepted by the active input).
     pub fn pick(&mut self, s: &Session, sel: Sel) {
         if self.take_extrude_target(s, &sel) {
@@ -1372,6 +1401,19 @@ fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
         }
     }
     picked
+}
+
+/// The profiles of a sketch that aren't the island inside another profile's hole: a circle in a
+/// rectangle gives the rectangle-with-hole and the disc, and taking both would fill the hole.
+/// Loops are compared as sets of curve ids, so where a loop starts or which way it runs doesn't matter.
+fn outermost_profiles(profiles: &[solidcraft_engine::sketch::Profile]) -> impl Iterator<Item = usize> + '_ {
+    let key = |ids: &[String]| {
+        let mut v = ids.to_vec();
+        v.sort();
+        v
+    };
+    let holes: Vec<Vec<String>> = profiles.iter().flat_map(|p| p.hole_curves.iter().map(|h| key(h))).collect();
+    (0..profiles.len()).filter(move |&i| profiles.get(i).is_some_and(|p| !holes.contains(&key(&p.outer_curves))))
 }
 
 /// Profiles of the sketch a feature would use, when there is just one: the active sketch's, else

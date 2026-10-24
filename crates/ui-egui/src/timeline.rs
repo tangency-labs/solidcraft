@@ -483,6 +483,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                             d.pick(&app.session, solidcraft_engine::Sel::Feature { id: *id });
                             app.dialog = Some(d);
                         }
+                    } else if !ui.input(|i| i.modifiers.any()) && crate::browser::pick_sketch_into_dialog(app, *id) {
+                        // Extrude, Revolve or Emboss took every profile of the sketch (#6106).
                     } else {
                         let modifiers = ui.input(|i| i.modifiers);
                         if modifiers.shift {
