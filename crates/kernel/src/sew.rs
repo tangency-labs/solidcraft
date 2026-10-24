@@ -1365,12 +1365,12 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
     // Each edge's label and NURBS form (`form::edge`): a circle about a revolved face's axis on
     // that face's frame, so its form lies on the face's quarter grid; an edge the caller gave a
     // pcurve for keeps the parameter that pcurve is on.
-    let mut frames_of: Vec<Vec<&b::Frame>> = vec![Vec::new(); edges.len()];
+    let mut frames_of: Vec<Vec<b::Frame>> = vec![Vec::new(); edges.len()];
     for f in &faces {
         let Some(frame) = b::form::frame_of(&f.surface) else { continue };
         for u in f.loops.iter().flatten() {
             if let Some(slot) = frames_of.get_mut(u.edge as usize) {
-                slot.push(frame);
+                slot.push(frame.clone());
             }
         }
     }
@@ -1383,7 +1383,7 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
             continue;
         }
         let (label, interval, form) =
-            b::form::edge(&e.curve, e.interval, frames.iter().copied(), tol).ok_or_else(|| fail("an arc of more than one turn".into()))?;
+            b::form::edge(&e.curve, e.interval, frames.iter(), tol).ok_or_else(|| fail("an arc of more than one turn".into()))?;
         labels.push((label, interval));
         forms.push(form);
     }
@@ -1405,18 +1405,26 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
                 })
                 .collect()
         };
-        let folded_label = folded_on(None);
+        // A cylinder, cone, sphere or torus on its NURBS form, over the extent of its boundary on
+        // its label.
         let form = match f.surface {
             b::Surface::Cylinder { .. } | b::Surface::Cone { .. } | b::Surface::Sphere { .. } | b::Surface::Torus { .. } => {
-                let label = pcurve::pcurves(&f.surface, &uses_of(&edges, &forms, ls, false, &folded_label, tol)?, tol).map_err(failed)?;
-                let extent = domain_of(&f.surface, &label).ok_or_else(|| fail(format!("face {fi} has no area in its parameters")))?;
-                Some(b::form::surface(&f.surface, extent).ok_or_else(|| fail(format!("face {fi}: more than one turn")))?.0)
+                let boundary: Vec<Vec<(&b::Curve, [f64; 2], bool)>> = ls
+                    .iter()
+                    .map(|l| l.iter().filter_map(|&(e, forward, _)| labels.get(e as usize).map(|(c, i)| (c, *i, forward))).collect())
+                    .collect();
+                let extent = b::form::extent(&f.surface, &boundary).ok_or_else(|| fail(format!("face {fi}: its boundary is not on its surface")))?;
+                Some(b::form::surface(&f.surface, extent).ok_or_else(|| fail(format!("face {fi}: more than one turn")))?)
             }
             _ => None,
         };
+        let (form, form_box) = match form {
+            Some((s, d)) => (Some(s), Some(d)),
+            None => (None, None),
+        };
         let on = form.as_ref().unwrap_or(&f.surface);
         let folded_form = if form.is_some() { folded_on(form.as_ref()) } else { Vec::new() };
-        let pc = pcurve::pcurves(on, &uses_of(&edges, &forms, ls, true, &folded_form, tol)?, tol).map_err(failed)?;
+        let pc = pcurve::pcurves_within(on, &uses_of(&edges, &forms, ls, &folded_form, tol)?, tol, form_box).map_err(failed)?;
         domains.push(domain_of(on, &pc).ok_or_else(|| fail(format!("face {fi} has no area in its parameters")))?);
         pcs.push(pc);
         face_forms.push(form);
@@ -1568,14 +1576,13 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
 /// A face's parameter box: around its pcurves' control points (a B-spline lies in their hull),
 /// held inside the surface's natural domain (one turn where periodic). None when it has no
 /// width in either direction.
-/// A face's edge uses for `pcurve::pcurves`: on each edge's NURBS form where it has one and
-/// `formed`, else on its curve as given; `folded` gives the pcurves of edges folded across the
-/// face (see [`folded_pcurve`]).
+/// A face's edge uses for `pcurve::pcurves`: on each edge's NURBS form where it has one, else on
+/// its curve as given; `folded` gives the pcurves of edges folded across the face (see
+/// [`folded_pcurve`]).
 fn uses_of<'a>(
     edges: &'a [PartEdge],
     forms: &'a [Option<(b::Curve, [f64; 2])>],
     ls: &[Vec<(u32, bool, Option<&'a Curve2>)>],
-    formed: bool,
     folded: &'a [(u32, Curve2)],
     tol: f64,
 ) -> Result<Vec<Vec<pcurve::EdgeUse<'a>>>> {
@@ -1585,7 +1592,7 @@ fn uses_of<'a>(
                 .map(|&(e, forward, given)| {
                     let edge = edges.get(e as usize).ok_or_else(|| KernelError::Invalid("sew: edge reference".into()))?;
                     let (curve, interval) = match forms.get(e as usize).and_then(Option::as_ref) {
-                        Some((c, i)) if formed => (c, *i),
+                        Some((c, i)) => (c, *i),
                         _ => (&edge.curve, edge.interval),
                     };
                     let given = given.or_else(|| folded.iter().find(|(f, _)| *f == e).map(|(_, c)| c));

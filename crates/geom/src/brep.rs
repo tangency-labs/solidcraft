@@ -89,10 +89,11 @@ pub struct Face {
     /// What the face is: its surface as the producer names it (a cylinder, a NURBS…).
     pub surface: Surface,
     /// The NURBS form the face is parameterised on, when it differs from `surface`'s own
-    /// parameters: a cylinder, cone, sphere or torus as SMLib holds it (every SMLib analytic
-    /// surface is a B-spline surface, its trims in that NURBS's parameters). When given, `domain`
-    /// and every pcurve are in this surface's (u, v), and `surface` only says what it is; it is a
-    /// `Spline` or `RationalSpline` and `surface` is a cylinder, cone, sphere or torus
+    /// parameters: a cylinder, cone, sphere, torus or placed revolution as SMLib holds it (every
+    /// SMLib analytic surface is a B-spline surface, its trims in that NURBS's parameters). When
+    /// given, `domain` and every pcurve are in this surface's (u, v), and `surface` only says what
+    /// it is; it is a `Spline` or `RationalSpline` and `surface` is a cylinder, cone, sphere, torus
+    /// or placed revolution
     /// (docs/native-brep.md, "Surfaces").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nurbs: Option<Surface>,
@@ -589,6 +590,8 @@ impl Brep {
                     "NURBS form on a curve that is not a line, circle or ellipse",
                 )?;
             }
+            // A circle or ellipse is a label: its geometry is its NURBS form.
+            require(e.nurbs.is_some() || !matches!(e.curve, Curve::Circle { .. } | Curve::Ellipse { .. }), "a circle or ellipse without its NURBS form")?;
             interval(&e.interval, curve_natural(e.parameters()))?;
             require(e.vertices.iter().all(|&v| (v as usize) < self.vertices.len()), "edge vertices")?;
             tolerance(e.tolerance)?;
@@ -600,10 +603,26 @@ impl Brep {
                 surface(n, 0, &mut budget)?;
                 require(matches!(n, Surface::Spline { .. } | Surface::RationalSpline { .. }), "NURBS form is not a NURBS")?;
                 require(
-                    matches!(f.surface, Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. }),
-                    "NURBS form on a surface that is not a cylinder, cone, sphere or torus",
+                    matches!(
+                        f.surface,
+                        Surface::Cylinder { .. }
+                            | Surface::Cone { .. }
+                            | Surface::Sphere { .. }
+                            | Surface::Torus { .. }
+                            | Surface::PlacedRevolution { .. }
+                    ),
+                    "NURBS form on a surface that is not a cylinder, cone, sphere, torus or revolution",
                 )?;
             }
+            // A cylinder, cone, sphere, torus or revolution is a label: its geometry is its form.
+            require(
+                f.nurbs.is_some()
+                    || !matches!(
+                        f.surface,
+                        Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. } | Surface::PlacedRevolution { .. }
+                    ),
+                "a cylinder, cone, sphere, torus or revolution without its NURBS form",
+            )?;
             let [u, v] = surface_natural(f.parameters());
             interval(&f.domain[0], u)?;
             interval(&f.domain[1], v)?;

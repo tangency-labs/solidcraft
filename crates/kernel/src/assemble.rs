@@ -12,7 +12,9 @@
 
 use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::pcurve::{EdgeUse, pcurves_within};
-use solidcraft_geom::brep::{Brep, Curve, Curve2, Edge, Face, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell, Surface, VERSION, Vertex};
+use solidcraft_geom::brep::{
+    Brep, Curve, Curve2, Edge, Face, Frame, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell, Surface, VERSION, Vertex, form,
+};
 
 use crate::body::Body;
 use crate::history::{EdgeOrigin, FaceProv};
@@ -60,13 +62,6 @@ pub(crate) struct AFace {
     pub shell: usize,
     /// The source record's face whose surface and parameter box this face keeps.
     pub domain: Option<[[f64; 2]; 2]>,
-}
-
-impl AFace {
-    /// The surface the face's (u, v) are on, as `Face::parameters`.
-    pub fn parameters(&self) -> &Surface {
-        self.nurbs.as_ref().unwrap_or(&self.surface)
-    }
 }
 
 /// A body taken apart: vertices, edges and faces that [`Assembly::finish`] builds into a record.
@@ -215,10 +210,11 @@ impl Assembly {
         let mut by_shell: Vec<Vec<u32>> = vec![Vec::new(); self.shells];
         let mut faces: Vec<Face> = Vec::with_capacity(kept.len());
         let mut sides: Vec<bool> = Vec::with_capacity(kept.len());
+        let formed = self.formed()?;
         for (k, &i) in kept.iter().enumerate() {
             let f = self.faces.get(i).and_then(Option::as_ref).ok_or_else(|| invalid("face reference"))?;
             by_shell.get_mut(f.shell).ok_or_else(|| invalid("shell reference"))?.push(index(k)?);
-            faces.push(self.stored(i, f)?);
+            faces.push(self.stored(i, f, &formed)?);
             sides.push(f.natural_out);
         }
         let shells = by_shell
@@ -237,10 +233,10 @@ impl Assembly {
                 regions.push(Region { shells: region.shells.iter().copied().filter(|s| used(*s)).collect(), void: region.void });
             }
         }
-        let edges = self.edges.iter().map(|a| Edge {
-            nurbs: a.nurbs.clone(),
-            curve: a.curve.clone(),
-            interval: a.interval,
+        let edges = self.edges.iter().zip(&formed.edges).map(|(a, f)| Edge {
+            nurbs: f.nurbs.clone(),
+            curve: f.label.clone(),
+            interval: f.interval,
             vertices: a.vertices,
             tolerance: a.tolerance,
             uses: Vec::new(),
@@ -258,9 +254,64 @@ impl Assembly {
         Ok(Finished { record: part.brep, faces: face_map, edges: part.edges.iter().map(|e| *e as usize).collect() })
     }
 
+    /// Which faces and edges go on a NURBS form, and theirs. A cylinder, cone, sphere, torus or
+    /// revolution face without one takes one where none of its uses brings its own pcurve (those
+    /// are on its label's parameters); an edge without one takes one (a circle about such a
+    /// face's axis labelled on its frame, `form::edge`) where none of its uses brings a pcurve
+    /// and every face it bounds is a plane, a spline or on a form.
+    fn formed(&self) -> Result<Formed> {
+        let takes: Vec<bool> = self
+            .faces
+            .iter()
+            .map(|f| {
+                f.as_ref()
+                    .is_some_and(|f| f.nurbs.is_none() && form::frame_of(&f.surface).is_some() && f.loops.iter().flatten().all(|u| u.given.is_none()))
+            })
+            .collect();
+        let n = self.edges.len();
+        let (mut frames, mut open, mut given): (Vec<Vec<Frame>>, Vec<bool>, Vec<bool>) = (vec![Vec::new(); n], vec![true; n], vec![false; n]);
+        for (f, takes) in self.faces.iter().zip(&takes) {
+            let Some(f) = f else { continue };
+            let on_form = f.nurbs.is_some()
+                || *takes
+                || matches!(
+                    f.surface,
+                    Surface::Plane { .. } | Surface::PlaneThrough { .. } | Surface::Spline { .. } | Surface::RationalSpline { .. }
+                );
+            let frame = if *takes { form::frame_of(&f.surface) } else { None };
+            for u in f.loops.iter().flatten() {
+                let e = u.edge as usize;
+                if u.given.is_some() {
+                    if let Some(g) = given.get_mut(e) {
+                        *g = true;
+                    }
+                }
+                if !on_form && let Some(o) = open.get_mut(e) {
+                    *o = false;
+                }
+                if let (Some(fr), Some(slot)) = (&frame, frames.get_mut(e)) {
+                    slot.push(fr.clone());
+                }
+            }
+        }
+        let mut edges = Vec::with_capacity(n);
+        for (i, a) in self.edges.iter().enumerate() {
+            let free = a.nurbs.is_none() && !given.get(i).copied().unwrap_or(true) && open.get(i).copied().unwrap_or(false);
+            let fr = frames.get(i).map(Vec::as_slice).unwrap_or(&[]);
+            edges.push(match (free, form::edge(&a.curve, a.interval, fr, self.tolerance)) {
+                (true, Some((label, iv, Some((nurbs, interval))))) => {
+                    FormedEdge { label: label.clone(), label_interval: iv, nurbs: Some(nurbs), interval }
+                }
+                _ => FormedEdge { label: a.curve.clone(), label_interval: a.interval, nurbs: a.nurbs.clone(), interval: a.interval },
+            });
+        }
+        Ok(Formed { faces: takes, edges })
+    }
+
     /// Face `i` as the record stores it: its loops relative to its surface's natural normal, each
-    /// use with its pcurve (the record's own where the use kept one), and its parameter box.
-    fn stored(&self, i: usize, f: &AFace) -> Result<Face> {
+    /// use with its pcurve (the record's own where the use kept one), on its NURBS form (its own,
+    /// or the one [`Assembly::formed`] gives it, over its boundary's extent), and its parameter box.
+    fn stored(&self, i: usize, f: &AFace, formed: &Formed) -> Result<Face> {
         let loops: Vec<Vec<AUse>> = f
             .loops
             .iter()
@@ -278,10 +329,11 @@ impl Assembly {
                 l.iter()
                     .map(|u| {
                         let e = self.edges.get(u.edge as usize).ok_or_else(|| invalid("edge reference"))?;
+                        let fe = formed.edges.get(u.edge as usize).ok_or_else(|| invalid("edge reference"))?;
                         Ok(EdgeUse {
                             edge: u.edge,
-                            curve: e.nurbs.as_ref().unwrap_or(&e.curve),
-                            interval: e.interval,
+                            curve: fe.nurbs.as_ref().unwrap_or(&fe.label),
+                            interval: fe.interval,
                             forward: u.forward,
                             tolerance: e.tolerance,
                             given: u.given.as_ref(),
@@ -290,8 +342,21 @@ impl Assembly {
                     .collect::<Result<Vec<_>>>()
             })
             .collect::<Result<_>>()?;
-        let pcurves = pcurves_within(f.parameters(), &uses, self.tolerance, f.domain).map_err(|e| invalid(format!("face {i}: {e}")))?;
-        let domain = domain_of(f.parameters(), &pcurves, f.domain).ok_or_else(|| invalid(format!("face {i}: no parameter box")))?;
+        // A face taking a form: its form over its boundary's extent on its label.
+        let (nurbs, kept) = if formed.faces.get(i).copied().unwrap_or(false) {
+            let boundary: Vec<Vec<(&Curve, [f64; 2], bool)>> = loops
+                .iter()
+                .map(|l| l.iter().filter_map(|u| formed.edges.get(u.edge as usize).map(|e| (&e.label, e.label_interval, u.forward))).collect())
+                .collect();
+            let extent = form::extent(&f.surface, &boundary).ok_or_else(|| invalid(format!("face {i}: its boundary is not on its surface")))?;
+            let (n, d) = form::surface(&f.surface, extent).ok_or_else(|| invalid(format!("face {i}: more than one turn")))?;
+            (Some(n), Some(d))
+        } else {
+            (f.nurbs.clone(), f.domain)
+        };
+        let on = nurbs.as_ref().unwrap_or(&f.surface);
+        let pcurves = pcurves_within(on, &uses, self.tolerance, kept).map_err(|e| invalid(format!("face {i}: {e}")))?;
+        let domain = domain_of(on, &pcurves, kept).ok_or_else(|| invalid(format!("face {i}: no parameter box")))?;
         let stored = loops
             .iter()
             .zip(&pcurves)
@@ -299,8 +364,22 @@ impl Assembly {
                 edges: l.iter().zip(pc).map(|(u, pcurve)| OrientedEdge { edge: u.edge, forward: u.forward, pcurve: pcurve.clone() }).collect(),
             })
             .collect();
-        Ok(Face { nurbs: f.nurbs.clone(), surface: f.surface.clone(), domain, loops: stored })
+        Ok(Face { nurbs, surface: f.surface.clone(), domain, loops: stored })
     }
+}
+
+/// What [`Assembly::formed`] decides: which faces take a NURBS form, and each edge's label (a
+/// circle relabelled on a face's frame), its interval there, and its form with its interval.
+struct Formed {
+    faces: Vec<bool>,
+    edges: Vec<FormedEdge>,
+}
+
+struct FormedEdge {
+    label: Curve,
+    label_interval: [f64; 2],
+    nurbs: Option<Curve>,
+    interval: [f64; 2],
 }
 
 /// Reverse a loop: the same edges, the other way round.

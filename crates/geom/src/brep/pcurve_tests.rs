@@ -128,10 +128,10 @@ fn rulings_are_v_lines() {
     }
 }
 
-/// Curves with no closed form are fitted cubic B-splines within the tolerance: a tilted circle
-/// on a sphere, a plane's ellipse on a cylinder, a circle off the axis on a plane.
+/// Curves with no closed form on their face are refused, never fitted: a tilted circle on a
+/// sphere, a plane's ellipse on a cylinder, a circle off the axis on a plane.
 #[test]
-fn other_curves_are_fitted_within_tolerance() {
+fn curves_without_a_closed_form_are_refused() {
     let (s, c) = 0.5f64.sin_cos();
     let sphere = Surface::Sphere { frame: about_z([0.; 3], false), radius: 6. };
     let great = Curve::Circle { frame: frame([0.; 3], [1., 0., 0.], [0., c, s]), radius: 6. };
@@ -143,22 +143,10 @@ fn other_curves_are_fitted_within_tolerance() {
     let plane = Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] };
     let circle = Curve::Circle { frame: about_z([3., 1., 0.], false), radius: 2. };
     for (surface, curve, interval) in [(&sphere, &great, [0., TAU]), (&cylinder, &ellipse, [0.2, 6.]), (&plane, &circle, [0., 3.])] {
-        for tol in [1e-3, 1e-6] {
-            let pc = &pcurves(surface, &one(curve, interval), tol).unwrap()[0][0];
-            let Curve2::Spline { knots, .. } = pc else { panic!("a B-spline") };
-            assert_eq!(knots.len() - pc_count(pc) - 1, 3, "cubic");
-            let e = lift_error(surface, curve, interval, pc);
-            assert!(e <= tol, "{curve:?} at {tol}: {e}");
-        }
+        let r = pcurves(surface, &one(curve, interval), 1e-6);
+        assert!(matches!(&r, Err(Error::Failed(m)) if m.contains("not supported yet: no exact pcurve")), "{curve:?}: {r:?}");
     }
 }
-fn pc_count(pc: &Curve2) -> usize {
-    match pc {
-        Curve2::Spline { points, .. } => points.len(),
-        Curve2::RationalSpline { homogeneous, .. } => homogeneous.len(),
-    }
-}
-
 /// The ends of each use in loop order and the loop's signed area in (u, v).
 fn walk(l: &[EdgeUse<'_>], pcs: &[Curve2]) -> (Vec<([f64; 2], [f64; 2])>, f64) {
     let mut ring = Vec::new();
@@ -288,27 +276,30 @@ fn a_seam_from_pole_to_pole_encloses_the_whole_sphere() {
                     knots: vec![0., 0., 0., 0.5, 0.5, 1., 1., 1.],
                     homogeneous: vec![h(o - z + side, 1.), h(o - z + r, w), h(o + r, 1.), h(o + z + r, w), h(o + z - side, 1.)],
                 };
-                for (seam, iv) in [(&circle, [-FRAC_PI_2, FRAC_PI_2]), (&nurbs, [0., 1.])] {
+                // The circle on the sphere as it is; the NURBS meridian, on a parameter of its own,
+                // on the sphere's NURBS form (one turn is four quarters there, the latitude two).
+                let (form, _) = crate::brep::form::surface(&sphere, [[0., TAU], [-FRAC_PI_2, FRAC_PI_2]]).unwrap();
+                for (seam, iv, on, period, height) in [(&circle, [-FRAC_PI_2, FRAC_PI_2], &sphere, TAU, PI), (&nurbs, [0., 1.], &form, 4., 2.)] {
                     for order in [[true, false], [false, true]] {
                         let l: Vec<EdgeUse> = order
                             .iter()
                             .map(|&forward| EdgeUse { edge: 0, curve: seam, interval: iv, forward, tolerance: 0.0, given: None })
                             .collect();
-                        let pcs = &pcurves(&sphere, std::slice::from_ref(&l), tol).unwrap()[0];
+                        let pcs = &pcurves(on, std::slice::from_ref(&l), tol).unwrap()[0];
                         let what = format!("{sf:?} {turn} {off} {seam:?} {order:?}");
                         for pc in pcs {
-                            assert!(lift_error(&sphere, seam, iv, pc) <= tol, "{what}");
+                            assert!(lift_error(on, seam, iv, pc) <= tol, "{what}");
                         }
                         let mid = 0.5 * (iv[0] + iv[1]);
                         let (a, b) = (pcs[0].eval(mid).unwrap(), pcs[1].eval(mid).unwrap());
-                        assert!(((a[0] - b[0]).abs() - TAU).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-12, "a period apart: {a:?} {b:?} {what}");
+                        assert!(((a[0] - b[0]).abs() - period).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-12, "a period apart: {a:?} {b:?} {what}");
                         let (ends, area) = walk(&l, pcs);
                         for k in 0..2 {
                             assert!((ends[k].1[1] - ends[(k + 1) % 2].0[1]).abs() < 1e-6, "closed in v: {ends:?} {what}");
                         }
                         // The box less the corners `walk` cuts (it joins each use's 16th
                         // sample to the next use's start): about 15/16 of it.
-                        assert!((area / (TAU * PI * 15. / 16.) - 1.).abs() < 1e-2, "counter-clockwise around the box: {area} {what}");
+                        assert!((area / (period * height * 15. / 16.) - 1.).abs() < 1e-2, "counter-clockwise around the box: {area} {what}");
                     }
                 }
             }
@@ -346,28 +337,6 @@ fn a_torus_bounded_by_its_seams_spans_both_periods() {
     }
 }
 
-/// A surface of revolution about +z as a rational spline closed in u, as SMLib writes a fillet
-/// ring round a hole's rim and STEP a NURBS cylinder: u the nine-point rational quadratic
-/// circle on [0, 1] (first and last rows the same), v the profile's `[radius, height, weight]`
-/// points on `v_knots`.
-pub(crate) fn closed_ring(profile: &[[f64; 3]], v_knots: &[f64]) -> Surface {
-    let w = std::f64::consts::FRAC_1_SQRT_2;
-    let around = [[1., 0., 1.], [1., 1., w], [0., 1., 1.], [-1., 1., w], [-1., 0., 1.], [-1., -1., w], [0., -1., 1.], [1., -1., w], [1., 0., 1.]];
-    let homogeneous = around
-        .iter()
-        .map(|&[cx, cy, wu]| {
-            profile
-                .iter()
-                .map(|&[r, z, wv]| {
-                    let wt = wu * wv;
-                    [r * cx * wt, r * cy * wt, z * wt, wt]
-                })
-                .collect()
-        })
-        .collect();
-    Surface::RationalSpline { u_knots: vec![0., 0., 0., 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1., 1., 1.], v_knots: v_knots.to_vec(), homogeneous }
-}
-
 /// The pcurves of a loop on a spline closed in u (period 1): each lifts within `tol`, the
 /// seam's two uses (`seam`: their positions) lie one period apart, the loop closes (in v alone
 /// where it meets a pole) and turns counter-clockwise once around the whole (u, v) box, all in
@@ -380,7 +349,9 @@ fn closes_around_the_box(surface: &Surface, l: &[EdgeUse<'_>], seam: [usize; 2],
     let iv = l[seam[0]].interval;
     let mid = 0.5 * (iv[0] + iv[1]);
     let (a, b) = (pcs[seam[0]].eval(mid).unwrap(), pcs[seam[1]].eval(mid).unwrap());
-    assert!(((a[0] - b[0]).abs() - 1.).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9, "{what}: seam uses a period apart: {a:?} {b:?}");
+    let dom = SurfaceEval::new(surface).unwrap().domain();
+    let period = dom.period[0].unwrap();
+    assert!(((a[0] - b[0]).abs() - period).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9, "{what}: seam uses a period apart: {a:?} {b:?}");
     let (ends, area) = walk(l, pcs);
     let n = l.len();
     for k in 0..n {
@@ -390,6 +361,8 @@ fn closes_around_the_box(surface: &Surface, l: &[EdgeUse<'_>], seam: [usize; 2],
     }
     // At a pole `walk` cuts the corner (it joins each use's 16th sample to the next use's
     // start, across the pole's line): a sliver of the box less.
+    let [u, v] = dom.range.map(|r| r.unwrap());
+    let area = area / ((u.1 - u.0) * (v.1 - v.0));
     let least = if pole.is_some() { 0.9 } else { 1. - 1e-6 };
     assert!(area >= least && area < 1. + 1e-6, "{what}: counter-clockwise around the box: {area}");
     for pc in pcs {
@@ -397,7 +370,7 @@ fn closes_around_the_box(surface: &Surface, l: &[EdgeUse<'_>], seam: [usize; 2],
         for k in 0..=32 {
             let t = knots[0] + (knots[knots.len() - 1] - knots[0]) * k as f64 / 32.;
             let q = pc.eval(t).unwrap();
-            assert!((-1e-9..=1. + 1e-9).contains(&q[0]), "{what}: base period: {q:?}");
+            assert!((u.0 - 1e-9..=u.1 + 1e-9).contains(&q[0]), "{what}: base period: {q:?}");
         }
     }
 }
@@ -408,43 +381,45 @@ fn closes_around_the_box(surface: &Surface, l: &[EdgeUse<'_>], seam: [usize; 2],
 /// into its pole. Each seam's uses come out a period apart, never both on u = 0.
 #[test]
 fn a_seam_on_a_spline_closed_in_u_gets_pcurves_a_period_apart() {
-    let w = std::f64::consts::FRAC_1_SQRT_2;
     let full = [0., TAU];
     let (big, small) = (5., 1.);
-    // The torus band: the tube's quarter from its outer equator (v = 0) to its top (v = 1).
-    let band = closed_ring(&[[big + small, 0., 1.], [big + small, small, w], [big, small, 1.]], &[0., 0., 0., 1., 1., 1.]);
-    let outer = Curve::Circle { frame: about_z([0.; 3], false), radius: big + small };
-    let top = Curve::Circle { frame: about_z([0., 0., small], false), radius: big };
-    let quarter = Curve::Circle { frame: frame([big, 0., 0.], [1., 0., 0.], [0., 0., 1.]), radius: small };
+    // Each surface and circle on its NURBS form (`form`), as SolidCraft's builders give them.
+    let on = |c: &Curve, iv: [f64; 2]| crate::brep::form::curve(c, iv).unwrap();
+    // The torus band: the tube's quarter from its outer equator to its top.
+    let torus = Surface::Torus { frame: about_z([0.; 3], false), major_radius: big, minor_radius: small };
+    let (band, _) = crate::brep::form::surface(&torus, [full, [0., FRAC_PI_2]]).unwrap();
+    let outer = on(&Curve::Circle { frame: about_z([0.; 3], false), radius: big + small }, full);
+    let top = on(&Curve::Circle { frame: about_z([0., 0., small], false), radius: big }, full);
+    let quarter = on(&Curve::Circle { frame: frame([big, 0., 0.], [1., 0., 0.], [0., 0., 1.]), radius: small }, [0., FRAC_PI_2]);
     let l = vec![
-        EdgeUse { edge: 0, curve: &outer, interval: full, forward: true, tolerance: 0.0, given: None },
-        EdgeUse { edge: 1, curve: &quarter, interval: [0., FRAC_PI_2], forward: true, tolerance: 0.0, given: None },
-        EdgeUse { edge: 2, curve: &top, interval: full, forward: false, tolerance: 0.0, given: None },
-        EdgeUse { edge: 1, curve: &quarter, interval: [0., FRAC_PI_2], forward: false, tolerance: 0.0, given: None },
+        EdgeUse { edge: 0, curve: &outer.0, interval: outer.1, forward: true, tolerance: 0.0, given: None },
+        EdgeUse { edge: 1, curve: &quarter.0, interval: quarter.1, forward: true, tolerance: 0.0, given: None },
+        EdgeUse { edge: 2, curve: &top.0, interval: top.1, forward: false, tolerance: 0.0, given: None },
+        EdgeUse { edge: 1, curve: &quarter.0, interval: quarter.1, forward: false, tolerance: 0.0, given: None },
     ];
     for tol in [1e-4, 1e-7] {
         closes_around_the_box(&band, &l, [1, 3], None, tol, &format!("torus band, tol {tol}"));
     }
-    // The cylinder: radius 3 from z = 0 (v = 0) to z = 4 (v = 1), its seam a line.
-    let cylinder = closed_ring(&[[3., 0., 1.], [3., 4., 1.]], &[0., 0., 1., 1.]);
-    let (low, high) =
-        (Curve::Circle { frame: about_z([0.; 3], false), radius: 3. }, Curve::Circle { frame: about_z([0., 0., 4.], false), radius: 3. });
+    // The cylinder: radius 3 from z = 0 to z = 4, its seam a line.
+    let (cylinder, _) = crate::brep::form::surface(&Surface::Cylinder { frame: about_z([0.; 3], false), radius: 3. }, [full, [0., 4.]]).unwrap();
+    let low = on(&Curve::Circle { frame: about_z([0.; 3], false), radius: 3. }, full);
+    let high = on(&Curve::Circle { frame: about_z([0., 0., 4.], false), radius: 3. }, full);
     let line = Curve::Line { start: [3., 0., 0.], end: [3., 0., 4.] };
     let l = vec![
-        EdgeUse { edge: 0, curve: &low, interval: full, forward: true, tolerance: 0.0, given: None },
+        EdgeUse { edge: 0, curve: &low.0, interval: low.1, forward: true, tolerance: 0.0, given: None },
         EdgeUse { edge: 1, curve: &line, interval: [0., 1.], forward: true, tolerance: 0.0, given: None },
-        EdgeUse { edge: 2, curve: &high, interval: full, forward: false, tolerance: 0.0, given: None },
+        EdgeUse { edge: 2, curve: &high.0, interval: high.1, forward: false, tolerance: 0.0, given: None },
         EdgeUse { edge: 1, curve: &line, interval: [0., 1.], forward: false, tolerance: 0.0, given: None },
     ];
     closes_around_the_box(&cylinder, &l, [1, 3], None, 1e-7, "cylinder");
-    // The dome: radius 6 from its equator (v = 0) to its pole (v = 1), the seam a meridian.
-    let dome = closed_ring(&[[6., 0., 1.], [6., 6., w], [0., 6., 1.]], &[0., 0., 0., 1., 1., 1.]);
-    let equator = Curve::Circle { frame: about_z([0.; 3], false), radius: 6. };
-    let meridian = Curve::Circle { frame: frame([0.; 3], [1., 0., 0.], [0., 0., 1.]), radius: 6. };
+    // The dome: radius 6 from its equator to its pole, the seam a meridian.
+    let (dome, _) = crate::brep::form::surface(&Surface::Sphere { frame: about_z([0.; 3], false), radius: 6. }, [full, [0., FRAC_PI_2]]).unwrap();
+    let equator = on(&Curve::Circle { frame: about_z([0.; 3], false), radius: 6. }, full);
+    let meridian = on(&Curve::Circle { frame: frame([0.; 3], [1., 0., 0.], [0., 0., 1.]), radius: 6. }, [0., FRAC_PI_2]);
     let l = vec![
-        EdgeUse { edge: 0, curve: &equator, interval: full, forward: true, tolerance: 0.0, given: None },
-        EdgeUse { edge: 1, curve: &meridian, interval: [0., FRAC_PI_2], forward: true, tolerance: 0.0, given: None },
-        EdgeUse { edge: 1, curve: &meridian, interval: [0., FRAC_PI_2], forward: false, tolerance: 0.0, given: None },
+        EdgeUse { edge: 0, curve: &equator.0, interval: equator.1, forward: true, tolerance: 0.0, given: None },
+        EdgeUse { edge: 1, curve: &meridian.0, interval: meridian.1, forward: true, tolerance: 0.0, given: None },
+        EdgeUse { edge: 1, curve: &meridian.0, interval: meridian.1, forward: false, tolerance: 0.0, given: None },
     ];
     closes_around_the_box(&dome, &l, [1, 2], Some(2), 1e-7, "dome");
     // A spline whose ends merely come near each other stays open: no period, so the seam's
@@ -454,11 +429,11 @@ fn a_seam_on_a_spline_closed_in_u_gets_pcurves_a_period_apart() {
     open[8][0][1] += 1e-3;
     let open = Surface::RationalSpline { u_knots: u_knots.clone(), v_knots: v_knots.clone(), homogeneous: open };
     assert_eq!(SurfaceEval::new(&open).unwrap().domain().period, [None, None]);
-    assert_eq!(SurfaceEval::new(&cylinder).unwrap().domain().period, [Some(1.), None]);
+    assert_eq!(SurfaceEval::new(&cylinder).unwrap().domain().period, [Some(4.), None]);
 }
 
 /// An intersection record evaluates to the point of both surfaces in the leader's normal
-/// plane, and its pcurves on either surface fit.
+/// plane; it has no exact pcurve on either.
 #[test]
 fn intersection_curves_lie_on_both_surfaces() {
     // The cylinder x² + y² = 25 cut by the plane z = 20 + x tan 0.4: an ellipse.
@@ -482,9 +457,10 @@ fn intersection_curves_lie_on_both_surfaces() {
         let p = eval.point(12. * i as f64 / 48.).unwrap();
         assert!((p.x.hypot(p.y) - 5.).abs() < 1e-11 && (p.z - 20. - p.x * k).abs() < 1e-11, "{i}: {p:?}");
     }
+    // It has no closed-form pcurve on either surface (an intersection record is a construction,
+    // not a NURBS): refused, never fitted.
     for surface in [&cylinder, &plane] {
-        let pc = &pcurves(surface, &one(&curve, [0., 12.]), 1e-6).unwrap()[0][0];
-        assert!(lift_error(surface, &curve, [0., 12.], pc) <= 1e-6);
+        assert!(matches!(pcurves(surface, &one(&curve, [0., 12.]), 1e-6), Err(Error::Failed(m)) if m.contains("no exact pcurve")));
     }
 }
 
@@ -555,13 +531,11 @@ fn an_edge_along_the_rim_of_a_band_winding_close_to_itself_stays_on_its_turn() {
     }
 }
 
-/// A curve that is smooth through a knot of full multiplicity (one smooth curve with the knot
-/// inserted three times, as SMLib's intersection curves come) gets a pcurve with one tangent
-/// there. Two pieces fitted apart meet at an angle in (u, v) (a tenth of a degree here, over the
-/// degree SMLib's check allows on a real thread), sharp where u runs hundreds of times as fast as
-/// v.
+/// A curve weaving across a thread flank, smooth through a knot of full multiplicity (one smooth
+/// curve with the knot inserted three times, as SMLib's intersection curves come), has no
+/// closed-form pcurve on the flank: it is refused, never fitted (SMLib gives its own trims).
 #[test]
-fn a_smooth_curve_through_a_full_knot_gets_a_pcurve_with_a_tangent_there() {
+fn a_curve_weaving_across_a_thread_flank_is_refused() {
     let (surface, _) = thread_flank();
     let s = SurfaceEval::new(&surface).unwrap();
     // Along the flank as it winds, a third of a turn (u = t), weaving a little across it.
@@ -576,13 +550,8 @@ fn a_smooth_curve_through_a_full_knot_gets_a_pcurve_with_a_tangent_there() {
         (knots, ctrl) = crate::bspline::insert_knot(3, &knots, &ctrl, k).unwrap();
     }
     let weave = Curve::Spline { knots, points: ctrl.iter().map(|h| h.project().unwrap()).map(|p| [p.x, p.y, p.z]).collect() };
-    let pc = &pcurves(&surface, &one(&weave, [a, b]), 1e-3).unwrap()[0][0];
-    assert!(lift_error(&surface, &weave, [a, b], pc) <= 1e-3);
-    let h = 1e-7;
-    let (l, m, r) = (pc.eval(k - h).unwrap(), pc.eval(k).unwrap(), pc.eval(k + h).unwrap());
-    let (dl, dr) = ([m[0] - l[0], m[1] - l[1]], [r[0] - m[0], r[1] - m[1]]);
-    let cos = (dl[0] * dr[0] + dl[1] * dr[1]) / (dl[0].hypot(dl[1]) * dr[0].hypot(dr[1]));
-    assert!(cos > 1. - 1e-6, "the pcurve turns by {} degrees at the knot", cos.min(1.).acos().to_degrees());
+    // A curve weaving across the flank has no closed-form pcurve there: refused, never fitted.
+    assert!(matches!(pcurves(&surface, &one(&weave, [a, b]), 1e-3), Err(Error::Failed(m)) if m.contains("no exact pcurve")));
 }
 
 /// Hostile records give errors, never a panic.
@@ -607,11 +576,12 @@ fn hostile_records_give_errors() {
     // Too many uses, refused before any work.
     let many = vec![vec![EdgeUse { edge: 0, curve: &line, interval: [0., 1.], forward: true, tolerance: 0.0, given: None }; MAX_USES + 1]];
     assert!(matches!(pcurves(&plane, &many, 1e-6), Err(Error::TooLarge(_))));
-    // A polyline of many points on a curved surface: too many spans for one pcurve.
+    // A polyline of many points across a curved surface: it has no exact pcurve there, and is
+    // refused as such (nothing is fitted).
     let cylinder = Surface::Cylinder { frame: about_z([0.; 3], false), radius: 1. };
     let n = 5000;
     let zigzag = Curve::Polyline { points: (0..n).map(|i| [(i as f64 * 0.01).cos(), (i as f64 * 0.01).sin(), (i % 2) as f64]).collect() };
-    assert!(matches!(pcurves(&cylinder, &one(&zigzag, [0., (n - 1) as f64]), 1e-6), Err(Error::TooLarge(_))));
+    assert!(matches!(pcurves(&cylinder, &one(&zigzag, [0., (n - 1) as f64]), 1e-6), Err(Error::Failed(m)) if m.contains("no exact pcurve")));
     // A degree the evaluators do not take.
     let high = Curve::Spline { knots: [vec![0.; 10], vec![1.; 10]].concat(), points: (0..10).map(|i| [i as f64, 0., 0.]).collect() };
     assert!(matches!(pcurves(&cylinder, &one(&high, [0., 1.]), 1e-6), Err(Error::Failed(_))));

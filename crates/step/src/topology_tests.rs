@@ -373,14 +373,20 @@ fn a_cylinder_has_a_seam_used_twice_by_its_side() {
     assert_eq!(seam.uses[0].face, seam.uses[1].face);
     for e in &s.brep.edges {
         if matches!(e.curve, BCurve::Circle { .. }) {
-            assert!((e.interval[1] - e.interval[0] - TAU).abs() < 1e-12);
+            // On its NURBS form: a whole turn in angle, its interval in the form's parameter.
+            let [a0, a1] = e.curve_interval().unwrap();
+            assert!(e.nurbs.is_some() && (a1 - a0 - TAU).abs() < 1e-12);
             assert_eq!(e.vertices[0], e.vertices[1]);
         }
     }
     faces_away(&s.brep, 0, |p| [1.0, 2.0, p[2].clamp(1.0, 9.0)]);
-    // The side face spans one turn of the cylinder and its height.
+    // The side face spans one turn of the cylinder (four quarters of its NURBS form) and its height.
     let f = s.brep.faces.iter().find(|f| matches!(f.surface, BSurface::Cylinder { .. })).unwrap();
-    assert!((f.domain[0][1] - f.domain[0][0] - TAU).abs() < 1e-9 && f.domain[1][0] < 1e-6 && f.domain[1][1] > 10.0 - 1e-6, "{:?}", f.domain);
+    assert!(
+        f.nurbs.is_some() && (f.domain[0][1] - f.domain[0][0] - 4.0).abs() < 1e-9 && f.domain[1][0] < 1e-6 && f.domain[1][1] > 10.0 - 1e-6,
+        "{:?}",
+        f.domain
+    );
 }
 
 #[test]
@@ -402,7 +408,8 @@ fn a_ball_bounded_by_its_seam_alone() {
         let s = one_solid(&w.file(&[solid]));
         assert_eq!(counts(&s.brep), [2, 1, 1, 1, 2]);
         let e = &s.brep.edges[0];
-        assert!((e.interval[1] - e.interval[0] - PI).abs() < 1e-12, "{:?}", e.interval);
+        let [a0, a1] = e.curve_interval().unwrap();
+        assert!((a1 - a0 - PI).abs() < 1e-12, "{:?}", e.interval);
         faces_away(&s.brep, 0, |_| [0.0; 3]);
     }
 }

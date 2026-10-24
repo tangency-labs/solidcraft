@@ -61,6 +61,18 @@ fn quarters([a0, a1]: [f64; 2]) -> Option<(f64, usize)> {
     (n <= 5).then_some((q0, n))
 }
 
+/// A face's quarters along an angle direction and its domain there: a whole turn is exactly
+/// four quarters from the one it starts in (the form closes on itself, so it is periodic and the
+/// face's seam uses lie a period apart), anything less the quarters it needs.
+fn face_quarters(a: [f64; 2]) -> Option<((f64, usize), [f64; 2])> {
+    if a[1] - a[0] >= TAU * (1.0 - 1e-9) {
+        let q0 = quarter_of(a[0]);
+        return Some(((q0, 4), [q0, q0 + 4.0]));
+    }
+    let grid = quarters(a)?;
+    Some((grid, params(a, grid)))
+}
+
 /// The form parameters of an angle interval on the quarters `quarters` chose for it (its ends kept
 /// on them: an end within rounding past a quarter's end stays in that quarter).
 fn params([a0, a1]: [f64; 2], (q0, n): (f64, usize)) -> [f64; 2] {
@@ -128,9 +140,8 @@ fn conic(frame: &Frame, [rx, ry]: [f64; 2], t: [f64; 2]) -> Option<(Curve, [f64;
 /// parameters: angles, and the height along the axis of a cylinder or cone) and the domain in the
 /// form's parameters; `None` for another kind, or a domain of more than one turn.
 pub fn surface(s: &Surface, [u, v]: [[f64; 2]; 2]) -> Option<(Surface, [[f64; 2]; 2])> {
-    let grid = quarters(u)?;
+    let (grid, fu) = face_quarters(u)?;
     let (u_knots, ring) = arcs(grid.0, grid.1);
-    let fu = params(u, grid);
     // The ring of arcs times a profile `(control, weight)` mapped to (radial, axial) about the
     // frame: a rational tensor product, its weights the products.
     let net = |f: &Frame, profile: &[([f64; 2], f64)], at: &dyn Fn([f64; 2]) -> (f64, f64)| -> Option<Vec<Vec<[f64; 4]>>> {
@@ -168,10 +179,45 @@ pub fn surface(s: &Surface, [u, v]: [[f64; 2]; 2]) -> Option<(Surface, [[f64; 2]
             Some((Surface::RationalSpline { u_knots, v_knots, homogeneous }, [fu, params(v, vgrid)]))
         }
         Surface::Torus { frame, major_radius, minor_radius } => {
-            let vgrid = quarters(v)?;
+            let (vgrid, fv) = face_quarters(v)?;
             let (v_knots, tube) = arcs(vgrid.0, vgrid.1);
             let homogeneous = net(frame, &tube, &|[c, s]| (major_radius + minor_radius * c, minor_radius * s))?;
-            Some((Surface::RationalSpline { u_knots, v_knots, homogeneous }, [fu, params(v, vgrid)]))
+            Some((Surface::RationalSpline { u_knots, v_knots, homogeneous }, [fu, fv]))
+        }
+        Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => {
+            // The profile's control points turned about the axis on the quarter grid from angle
+            // zero (the profile): (a + ib)(c + is) for each point's radial (a, b) in the frame and
+            // each arc control point (c, s), weights multiplied; then the matrix.
+            let (angles, along) = if *forward { (v, u) } else { (u, v) };
+            let (ring_grid, fa) = face_quarters(angles)?;
+            let (a_knots, arcs_r) = arcs(ring_grid.0, ring_grid.1);
+            let (p_knots, h) = profile_nurbs(profile, Some(along))?;
+            let fp = match profile.as_ref() {
+                Curve::Circle { .. } | Curve::Ellipse { .. } => curve(profile, along)?.1,
+                _ => along,
+            };
+            let (o, x, y, k) = revolution_frame(&h, *origin, *axis)?;
+            let net: Vec<Vec<[f64; 4]>> = arcs_r
+                .iter()
+                .map(|([c, s], wu)| {
+                    h.iter()
+                        .map(|hp| {
+                            let d = Vec3::new(hp[0] / hp[3], hp[1] / hp[3], hp[2] / hp[3]) - o;
+                            let (a, b, z) = (d.dot(x), d.dot(y), d.dot(k));
+                            let q = o + k * z + x * (a * c - b * s) + y * (a * s + b * c);
+                            hom(affine(matrix, q), wu * hp[3])
+                        })
+                        .collect()
+                })
+                .collect();
+            if *forward {
+                // u the profile, v the angle: the net turned over.
+                let n = net.first()?.len();
+                let t: Vec<Vec<[f64; 4]>> = (0..n).map(|j| net.iter().filter_map(|r| r.get(j).copied()).collect()).collect();
+                Some((Surface::RationalSpline { u_knots: p_knots, v_knots: a_knots, homogeneous: t }, [fp, fa]))
+            } else {
+                Some((Surface::RationalSpline { u_knots: a_knots, v_knots: p_knots, homogeneous: net }, [fa, fp]))
+            }
         }
         _ => None,
     }
@@ -196,12 +242,58 @@ pub fn on_frame(c: &Curve, [t0, t1]: [f64; 2], frame: &Frame, tol: f64) -> Optio
     Some((Curve::Circle { frame: relabel, radius: *radius }, [t0 + shift, t1 + shift]))
 }
 
-/// The frame of a cylinder, cone, sphere or torus (`None` for another surface).
-pub fn frame_of(s: &Surface) -> Option<&Frame> {
+/// The frame of a cylinder, cone, sphere or torus, or of a placed revolution (its axis, angle
+/// zero at its profile: [`revolution_frame`]); `None` for another surface.
+pub fn frame_of(s: &Surface) -> Option<Frame> {
     match s {
-        Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } | Surface::Sphere { frame, .. } | Surface::Torus { frame, .. } => Some(frame),
+        Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } | Surface::Sphere { frame, .. } | Surface::Torus { frame, .. } => {
+            Some(frame.clone())
+        }
+        Surface::PlacedRevolution { profile, origin, axis, matrix, .. } => {
+            let (_, h) = profile_nurbs(profile, None)?;
+            let (o, x, y, _) = revolution_frame(&h, *origin, *axis)?;
+            let m = |p: Vec3| affine(matrix, p);
+            let (mo, mx, my) = (m(o), m(o + x) - m(o), m(o + y) - m(o));
+            Some(Frame { origin: [mo.x, mo.y, mo.z], x_axis: [mx.x, mx.y, mx.z], y_axis: [my.x, my.y, my.z] })
+        }
         _ => None,
     }
+}
+
+/// `matrix` (column-major, `matrix[column][row]`) applied to `p`.
+fn affine(matrix: &[[f64; 4]; 4], p: Vec3) -> Vec3 {
+    let row = |r: usize| matrix[0][r] * p.x + matrix[1][r] * p.y + matrix[2][r] * p.z + matrix[3][r];
+    Vec3::new(row(0), row(1), row(2))
+}
+
+/// A revolution's profile as a NURBS: its knots and homogeneous control points (a B-spline or
+/// NURBS as it is, a line or conic as its form over `range`; `None` without a range).
+fn profile_nurbs(profile: &Curve, range: Option<[f64; 2]>) -> Option<(Vec<f64>, Vec<[f64; 4]>)> {
+    let formed;
+    let c = match profile {
+        Curve::Spline { .. } | Curve::RationalSpline { .. } => profile,
+        other => {
+            formed = curve(other, range?)?.0;
+            &formed
+        }
+    };
+    match c {
+        Curve::Spline { knots, points } => Some((knots.clone(), points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect())),
+        Curve::RationalSpline { knots, homogeneous } => Some((knots.clone(), homogeneous.clone())),
+        _ => None,
+    }
+}
+
+/// A revolution's frame: the origin and unit axis, x the radial direction of the profile's
+/// first control point off the axis (angle zero), y = axis × x.
+fn revolution_frame(h: &[[f64; 4]], origin: [f64; 3], axis: [f64; 3]) -> Option<(Vec3, Vec3, Vec3, Vec3)> {
+    let (o, k) = (v3(origin), v3(axis).normalized()?);
+    let x = h.iter().find_map(|h| {
+        let d = Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]) - o;
+        let r = d - k * d.dot(k);
+        if r.len() > 1e-12 * (1.0 + d.len()) { r.normalized() } else { None }
+    })?;
+    Some((o, x, k.cross(x), k))
 }
 
 /// An edge's label and NURBS form: a circle about the axis of one of `frames` (the cylinder,
@@ -220,4 +312,53 @@ pub fn edge<'a>(
         _ => None,
     };
     Some((label, iv, form))
+}
+
+/// Points per edge along a loop taken for a face's extent.
+const EXTENT_POINTS: usize = 32;
+
+/// The parameter box of a face on `label` over its boundary: each loop's points (`loops`, in
+/// order along each loop) projected onto the label, a periodic parameter unwrapped from one point
+/// to the next. What the face's NURBS form ([`surface`]) is built over; no pcurve is involved.
+pub fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Option<[[f64; 2]; 2]> {
+    let eval = super::eval::SurfaceEval::new(label).ok()?;
+    let period = eval.domain().period;
+    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for l in loops {
+        let mut prev: Option<[f64; 2]> = None;
+        for (c, [t0, t1], forward) in l {
+            let curve = super::eval::CurveEval::new(c).ok()?;
+            for k in 0..=EXTENT_POINTS {
+                let f = k as f64 / EXTENT_POINTS as f64;
+                let t = if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f };
+                let mut q = eval.project(curve.point(t)?, prev, f64::INFINITY)?;
+                if let Some(p) = prev {
+                    for d in 0..2 {
+                        if let Some(Some(per)) = period.get(d) {
+                            q[d] += ((p[d] - q[d]) / per).round() * per;
+                        }
+                    }
+                }
+                // At a pole the collapsed parameter is anything: it bounds nothing.
+                let pole = eval.pole(q);
+                for d in 0..2 {
+                    if !pole.get(d).copied().unwrap_or(false) {
+                        lo[d] = lo[d].min(q[d]);
+                        hi[d] = hi[d].max(q[d]);
+                    }
+                }
+                if !pole.iter().any(|p| *p) {
+                    prev = Some(q);
+                }
+            }
+        }
+    }
+    // At most one turn round a periodic direction; a boundary that never goes round it (a face
+    // bounded by its seam alone) covers the whole turn from there.
+    for d in 0..2 {
+        if let Some(Some(per)) = period.get(d) {
+            hi[d] = if hi[d] - lo[d] <= 1e-9 * per { lo[d] + per } else { hi[d].min(lo[d] + per) };
+        }
+    }
+    (lo[0] < hi[0] && lo[1] < hi[1]).then_some([[lo[0], hi[0]], [lo[1], hi[1]]])
 }

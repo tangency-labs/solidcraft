@@ -212,7 +212,7 @@ impl On {
     }
 
     fn pcurve(&self, record: &Curve, curve: &CurveEval, range: [f64; 2], tol: f64) -> Result<Curve2> {
-        if let Some(pc) = self.exact(record, curve, range)?
+        if let Some(pc) = self.exact(record, curve, range, tol)?
             && self.lifts(&pc, curve, range, 0.5 * tol)
         {
             return Ok(pc);
@@ -221,7 +221,7 @@ impl On {
     }
 
     /// The closed-form pcurve where there is one (unchecked).
-    fn exact(&self, record: &Curve, curve: &CurveEval, [t0, t1]: [f64; 2]) -> Result<Option<Curve2>> {
+    fn exact(&self, record: &Curve, curve: &CurveEval, [t0, t1]: [f64; 2], tol: f64) -> Result<Option<Curve2>> {
         let segment = |a: [f64; 2], b: [f64; 2]| Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![a, b] };
         let at = |t: f64| curve.point(t).ok_or_else(|| Error::Failed(format!("the curve has no point at {t}")));
         Ok(match (&self.surface, record) {
@@ -283,7 +283,7 @@ impl On {
                 let c = super::eval::Axes::new(frame);
                 let turn = c.z.dot(axes.z);
                 if (turn.abs() - 1.0).abs() > 1e-9 {
-                    return Ok(None);
+                    return Ok(self.meridian(axes, &c, *radius, curve, [t0, t1]));
                 }
                 let sign = turn.signum();
                 let u0 = c.x.dot(axes.y).atan2(c.x.dot(axes.x));
@@ -305,28 +305,69 @@ impl On {
                 let u = b.atan2(a);
                 Some(segment([u, height(t0)?], [u, height(t1)?]))
             }
-            (SurfaceEval::Eval(..), _) => self.along(curve, [t0, t1]),
+            (SurfaceEval::Eval(..), _) => self.along(curve, [t0, t1], tol),
             _ => None,
         })
+    }
+
+    /// A meridian of a sphere or a tube circle of a torus (a circle in a plane through the axis,
+    /// centred on the sphere's centre or on the torus's ring): u fixed at the arc's azimuth, v its
+    /// angle from the outward radial toward the axis, `α + s·t` (`s` ±1 as the circle runs).
+    /// `None` for any other circle.
+    fn meridian(&self, axes: &super::eval::Axes, c: &super::eval::Axes, radius: f64, curve: &CurveEval, [t0, t1]: [f64; 2]) -> Option<Curve2> {
+        let ring = match &self.surface {
+            SurfaceEval::Sphere { radius: r, .. } => (0.0, *r),
+            SurfaceEval::Torus { major, minor, .. } => (*major, *minor),
+            _ => return None,
+        };
+        let size = 1.0 + ring.0 + ring.1;
+        if c.z.dot(axes.z).abs() > 1e-9 || (radius - ring.1).abs() > 1e-9 * size {
+            return None;
+        }
+        let tm = 0.5 * (t0 + t1);
+        let m = curve.point(tm)?;
+        let [mx, my, _] = axes.local(m);
+        let u0 = my.atan2(mx);
+        let radial = (axes.x * mx + axes.y * my).normalized()?;
+        // The circle's centre: the sphere's, or the torus's ring at that azimuth.
+        let centre = axes.o + radial * ring.0;
+        if c.o.dist(centre) > 1e-9 * size {
+            return None;
+        }
+        let s = c.z.dot(radial.cross(axes.z)).signum();
+        let d = m - centre;
+        let vm = d.dot(axes.z).atan2(d.dot(radial));
+        let alpha = vm - s * tm;
+        Some(Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![[u0, alpha + s * t0], [u0, alpha + s * t1]] })
     }
 
     /// On a spline face (a NURBS form, or another spline), the edge's pcurve where it runs along
     /// the face's parameters at its own parameter's pace: a straight line in (u, v), between the
     /// ends' parameters, or with u (or v) the edge's parameter itself (a rim of a revolved form on
     /// the same quarter grid, whose two ends are one point on the seam). A candidate is taken only
-    /// where it lifts onto the edge to within rounding, so it is the exact pcurve; none is fitted.
-    fn along(&self, curve: &CurveEval, [t0, t1]: [f64; 2]) -> Option<Curve2> {
+    /// where it lifts onto the edge within the record's tolerance, as the closed forms on analytic
+    /// surfaces must: the closed form the geometry has, never a fit.
+    fn along(&self, curve: &CurveEval, [t0, t1]: [f64; 2], tol: f64) -> Option<Curve2> {
         let (p0, p1, pm) = (curve.point(t0)?, curve.point(t1)?, curve.point(0.5 * (t0 + t1))?);
         let size = [p0, p1, pm].iter().flat_map(|p| [p.x.abs(), p.y.abs(), p.z.abs()]).fold(1.0, f64::max);
-        let exact = EXACT * size;
+        // Within the record's tolerance, as the closed forms on analytic surfaces are, and never
+        // looser than rounding.
+        let exact = (0.5 * tol).max(EXACT * size);
         let line = |a: [f64; 2], b: [f64; 2]| Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![a, b] };
         let mut candidates = Vec::with_capacity(3);
-        if let (Some(a), Some(b)) = (self.project(p0, None, exact), self.project(p1, None, exact)) {
+        let ends = (self.project_in(p0, exact), self.project_in(p1, exact));
+        if let (Some(a), Some(b)) = ends {
             candidates.push(line(a, b));
+        }
+        // One parameter fixed where the edge's middle is (an end on a seam or at an apex may
+        // project anywhere along it), the other from the ends.
+        if let (Some(a), Some(b), Some(m)) = (ends.0, ends.1, self.project_in(pm, exact)) {
+            candidates.push(line([m[0], a[1]], [m[0], b[1]]));
+            candidates.push(line([a[0], m[1]], [b[0], m[1]]));
         }
         // u or v the edge's own parameter, either way along and offset (forms on one frame's
         // quarter grid, or on the same grid turned over), the other fixed.
-        if let Some([u, v]) = self.project(pm, None, exact) {
+        if let Some([u, v]) = self.project_in(pm, exact) {
             let tm = 0.5 * (t0 + t1);
             for sign in [1.0, -1.0] {
                 let (cu, cv) = (u - sign * tm, v - sign * tm);
@@ -349,6 +390,17 @@ impl On {
             let lifted = pc.eval(t).and_then(|q| self.surface.point(q));
             matches!((lifted, curve.point(t)), (Some(a), Some(b)) if a.dist(b) <= target)
         })
+    }
+
+    /// The parameters of `p` within `accept` inside the face's parameter box when it has one: a
+    /// spline extended past its knots, or a profile turned past where the face lies, has other
+    /// preimages outside it. The global search first, then from the box's centre.
+    fn project_in(&self, p: Vec3, accept: f64) -> Option<[f64; 2]> {
+        let Some(b) = self.face else { return self.project(p, None, accept) };
+        let pad = |d: usize| 1e-9 * (1.0 + (b[d][1] - b[d][0]).abs());
+        let inside = |q: [f64; 2]| (0..2).all(|d| q[d] >= b[d][0] - pad(d) && q[d] <= b[d][1] + pad(d));
+        let centre = [0.5 * (b[0][0] + b[0][1]), 0.5 * (b[1][0] + b[1][1])];
+        [None, Some(centre)].into_iter().filter_map(|near| self.project(p, near, accept)).find(|q| inside(*q))
     }
 
     /// The parameters of `p` within `accept`, from `near` (and unwrapped to it) when given.
