@@ -103,7 +103,7 @@ impl Recorder {
     fn preview(&self) -> Option<String> {
         match self.key {
             Some(key) => Some(format!("{}…", display(&key_name(key, self.modifiers)))),
-            None if !self.modifiers.is_none() => Some(format!("{}…", display(&modifier_prefix(self.modifiers)))),
+            None if !self.modifiers.is_none() => Some(format!("{}…", display(&modifier_prefix(self.modifiers, None)))),
             None => None,
         }
     }
@@ -180,33 +180,103 @@ impl Keymap {
     pub fn load(&mut self, v: &Value) {
         self.custom =
             v.as_object().map(|o| o.iter().take(2000).filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect()).unwrap_or_default();
+        // A shortcut that named a modifier key twice ("Shift+ShiftLeft", from before the shift
+        // keys were named after themselves) is the modifier itself (#4582).
+        for key in self.custom.values_mut() {
+            if let Some(named) = named_modifier_key(key) {
+                *key = named;
+            }
+        }
     }
 }
 
 /// A key press as a shortcut name: `E`, `Shift+E`, `Ctrl+Alt+K`, `F5`, `Delete`.
+///
+/// A modifier key is the shortcut itself, and its two sides are the same shortcut (the app's
+/// modifiers collapse them), so a bound Shift key is named `Shift`, not `Shift+ShiftLeft`
+/// (#4582).
 pub fn key_name(key: egui::Key, mods: egui::Modifiers) -> String {
-    let mut s = modifier_prefix(mods);
-    s.push_str(key.name());
+    let modifier = Modifier::of(key);
+    let mut s = modifier_prefix(mods, modifier);
+    s.push_str(modifier.map_or_else(|| key.name(), |m| m.name()));
     s
 }
 
-fn modifier_prefix(mods: egui::Modifiers) -> String {
+/// The modifiers in a shortcut name, before the key. `modifier` is the modifier the pressed key
+/// is, when it is one: a modifier key is the shortcut itself, so it is not named twice (#4582).
+fn modifier_prefix(mods: egui::Modifiers, modifier: Option<Modifier>) -> String {
     let mut s = String::new();
-    if mods.command || mods.ctrl {
+    if (mods.command || mods.ctrl) && modifier != Some(Modifier::Ctrl) {
         s.push_str("Ctrl+");
     }
     // Keep the historical Ctrl/Cmd alias for existing bindings, but don't discard a
     // physical Control pressed together with macOS Command.
-    if mods.mac_cmd && mods.ctrl {
+    if mods.mac_cmd && mods.ctrl && modifier != Some(Modifier::Ctrl) {
         s.push_str("Cmd+");
     }
-    if mods.alt {
+    if mods.alt && modifier != Some(Modifier::Alt) {
         s.push_str("Alt+");
     }
-    if mods.shift {
+    if mods.shift && modifier != Some(Modifier::Shift) {
         s.push_str("Shift+");
     }
     s
+}
+
+/// The modifier a key is, when it is one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Modifier {
+    Ctrl,
+    Alt,
+    Shift,
+}
+
+impl Modifier {
+    /// The modifier a key is: the left and right keys are the same one.
+    fn of(key: egui::Key) -> Option<Self> {
+        match key {
+            egui::Key::ShiftLeft | egui::Key::ShiftRight => Some(Modifier::Shift),
+            egui::Key::ControlLeft | egui::Key::ControlRight => Some(Modifier::Ctrl),
+            egui::Key::AltLeft | egui::Key::AltRight => Some(Modifier::Alt),
+            // The Super key is the app's Ctrl (the Command key on macOS).
+            egui::Key::SuperLeft | egui::Key::SuperRight => Some(Modifier::Ctrl),
+            _ => None,
+        }
+    }
+
+    /// The modifier a key is called in a shortcut name.
+    fn of_name(name: &str) -> Option<Self> {
+        match name {
+            "ShiftLeft" | "ShiftRight" => Some(Modifier::Shift),
+            "ControlLeft" | "ControlRight" | "SuperLeft" | "SuperRight" => Some(Modifier::Ctrl),
+            "AltLeft" | "AltRight" => Some(Modifier::Alt),
+            _ => None,
+        }
+    }
+
+    /// The modifier's name in a shortcut.
+    fn name(self) -> &'static str {
+        match self {
+            Modifier::Ctrl => "Ctrl",
+            Modifier::Alt => "Alt",
+            Modifier::Shift => "Shift",
+        }
+    }
+}
+
+/// A shortcut name that ends in a modifier key, with that key named after its modifier:
+/// `Shift+ShiftLeft` is `Shift` and `Ctrl+ShiftLeft` is `Ctrl+Shift` (#4582).
+fn named_modifier_key(key: &str) -> Option<String> {
+    let mut parts: Vec<&str> = key.split('+').collect();
+    let last = parts.pop()?;
+    let modifier = Modifier::of_name(last)?;
+    let name = modifier.name();
+    // The modifier named twice ("Shift+Shift") is the modifier alone.
+    if parts.last() == Some(&name) {
+        parts.pop();
+    }
+    parts.push(name);
+    Some(parts.join("+"))
 }
 
 /// The key a command runs from now.
@@ -960,6 +1030,33 @@ mod tests {
         // And the other way round.
         bind(&mut a, "sketch.point", "Shift+W", false).unwrap();
         assert!(bind(&mut a, everywhere.id, "Shift+W", false).is_err(), "{}", everywhere.id);
+    }
+
+    /// #4582: the Keyboard Shortcuts page named a bound Shift key "Shift+ShiftLeft": the modifier
+    /// twice, and the left and right keys as two different shortcuts. A modifier key is the
+    /// shortcut itself, and both sides are the same one.
+    #[test]
+    fn a_bound_modifier_key_is_named_after_itself() {
+        let shift = egui::Modifiers { shift: true, ..Default::default() };
+        assert_eq!(key_name(egui::Key::ShiftLeft, shift), "Shift");
+        assert_eq!(key_name(egui::Key::ShiftRight, shift), "Shift", "both shift keys are the same shortcut");
+        assert_eq!(key_name(egui::Key::ControlLeft, egui::Modifiers { ctrl: true, ..Default::default() }), "Ctrl");
+        assert_eq!(key_name(egui::Key::AltLeft, egui::Modifiers { alt: true, ..Default::default() }), "Alt");
+        // The other keys are named as before.
+        assert_eq!(key_name(egui::Key::K, egui::Modifiers { ctrl: true, shift: true, ..Default::default() }), "Ctrl+Shift+K");
+        assert_eq!(key_name(egui::Key::E, shift), "Shift+E");
+        // A shortcut bound before the change keeps working.
+        let mut a = app();
+        a.keymap.load(&json!({"solid.extrude": "Shift+ShiftLeft"}));
+        assert_eq!(effective(&a, "solid.extrude").as_deref(), Some("Shift"));
+        // The bound key runs its command.
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.frames(2);
+        bind(&mut h.app, "sketch.line", "Shift", true).unwrap();
+        press(&mut h.app, "Shift");
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd.to_string()).as_deref(), Some("sketch.line"), "the bound Shift key starts its command");
     }
 
     /// #3045: Shift+R starts the last tool again (here a sketch's Line after Escape put it
