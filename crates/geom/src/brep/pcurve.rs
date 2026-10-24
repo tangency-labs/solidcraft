@@ -84,6 +84,36 @@ pub fn pcurves_within(
     tolerance: f64,
     domain: Option<[[f64; 2]; 2]>,
 ) -> Result<Vec<Vec<Curve2>>> {
+    check_size(loops, tolerance)?;
+    let on = On::new(surface_record)?.within(domain);
+    let each = each_pcurve(surface_record, &on, loops, tolerance)?;
+    let mut out = Vec::with_capacity(loops.len());
+    for (l, pcs) in loops.iter().zip(each) {
+        let mut fitted = Vec::with_capacity(l.len());
+        for (u, pc) in l.iter().zip(pcs) {
+            fitted.push((pc?, u.forward));
+        }
+        on.close(&mut fitted, tolerance)?;
+        out.push(fitted.into_iter().map(|(c, _)| c).collect());
+    }
+    Ok(out)
+}
+
+/// For each loop of a face on `surface`, each use's pcurve where it has a closed form (or is
+/// given), else `None`: the uses whose pcurves the face's kernel makes ([`Trims`]). Not closed
+/// into loops; [`pcurves_within`] does that once every use has its pcurve.
+pub fn exact_pcurves(
+    surface_record: &Surface,
+    loops: &[Vec<EdgeUse<'_>>],
+    tolerance: f64,
+    domain: Option<[[f64; 2]; 2]>,
+) -> Result<Vec<Vec<Option<Curve2>>>> {
+    check_size(loops, tolerance)?;
+    let on = On::new(surface_record)?.within(domain);
+    Ok(each_pcurve(surface_record, &on, loops, tolerance)?.into_iter().map(|l| l.into_iter().map(|pc| pc.ok()).collect()).collect())
+}
+
+fn check_size(loops: &[Vec<EdgeUse<'_>>], tolerance: f64) -> Result<()> {
     if !(tolerance.is_finite() && tolerance > 0.0 && tolerance <= 1e3) {
         return Err(Error::Invalid(format!("pcurve tolerance {tolerance}")));
     }
@@ -91,47 +121,94 @@ pub fn pcurves_within(
     if uses > MAX_USES {
         return Err(Error::TooLarge(format!("a face with {uses} edge uses")));
     }
+    Ok(())
+}
+
+/// Each use's pcurve: the given one, or its closed form; a use with neither is its `Failed`
+/// error, any other error fails the face.
+fn each_pcurve(surface_record: &Surface, on: &On, loops: &[Vec<EdgeUse<'_>>], tolerance: f64) -> Result<Vec<Vec<Result<Curve2>>>> {
     let mut budget = Budget(0);
     surface(surface_record, 0, &mut budget).map_err(|e| Error::Invalid(e.to_string()))?;
-    let on = On::new(surface_record)?.within(domain);
-    // A seam edge used twice is fitted once.
-    let mut done: Vec<(u32, Curve2)> = Vec::new();
+    // A seam edge used twice is worked out once.
+    let mut done: Vec<(u32, Result<Curve2>)> = Vec::new();
     let mut out = Vec::with_capacity(loops.len());
     for (w, l) in loops.iter().enumerate() {
-        let mut fitted = Vec::with_capacity(l.len());
+        let mut pcs = Vec::with_capacity(l.len());
         for (i, u) in l.iter().enumerate() {
             if let Some(given) = u.given {
-                fitted.push((own_pcurve(given, u.interval, &mut budget).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?, u.forward));
+                pcs.push(Ok(own_pcurve(given, u.interval, &mut budget).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?));
                 continue;
             }
-            let pc = match done.iter().find(|(e, _)| *e == u.edge) {
-                Some((_, pc)) => pc.clone(),
-                None => {
-                    curve(u.curve, 0, &mut budget).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?;
-                    interval(&u.interval, curve_natural(u.curve)).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?;
-                    let c = CurveEval::new(u.curve)?;
-                    // An edge record that holds a looser tolerance than the face's (another
-                    // kernel's approximated edge) is fitted to its own, up to the same cap.
-                    let own = if u.tolerance.is_finite() && u.tolerance <= 1e3 { tolerance.max(u.tolerance) } else { tolerance };
-                    let pc = on.pcurve(u.curve, &c, u.interval, own).map_err(|e| {
-                        let at = |t: f64| c.point(t).map(|p| [p.x, p.y, p.z]);
-                        let message = format!("pcurve of loop {w} use {i} ({:?} to {:?}): {e}", at(u.interval[0]), at(u.interval[1]));
-                        match e {
-                            Error::Invalid(_) => Error::Invalid(message),
-                            Error::Failed(_) => Error::Failed(message),
-                            Error::TooLarge(_) => Error::TooLarge(message),
-                        }
-                    })?;
-                    done.push((u.edge, pc.clone()));
-                    pc
+            if let Some((_, pc)) = done.iter().find(|(e, _)| *e == u.edge) {
+                pcs.push(pc.clone());
+                continue;
+            }
+            curve(u.curve, 0, &mut budget).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?;
+            interval(&u.interval, curve_natural(u.curve)).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?;
+            let c = CurveEval::new(u.curve)?;
+            // An edge record that holds a looser tolerance than the face's (another kernel's
+            // approximated edge) is checked against its own, up to the same cap.
+            let own = if u.tolerance.is_finite() && u.tolerance <= 1e3 { tolerance.max(u.tolerance) } else { tolerance };
+            let pc = on.pcurve(u.curve, &c, u.interval, own).map_err(|e| {
+                let at = |t: f64| c.point(t).map(|p| [p.x, p.y, p.z]);
+                let message = format!("pcurve of loop {w} use {i} ({:?} to {:?}): {e}", at(u.interval[0]), at(u.interval[1]));
+                match e {
+                    Error::Invalid(_) => Error::Invalid(message),
+                    Error::Failed(_) => Error::Failed(message),
+                    Error::TooLarge(_) => Error::TooLarge(message),
                 }
-            };
-            fitted.push((pc, u.forward));
+            });
+            if let Err(e @ (Error::Invalid(_) | Error::TooLarge(_))) = pc {
+                return Err(e);
+            }
+            done.push((u.edge, pc.clone()));
+            pcs.push(pc);
         }
-        on.close(&mut fitted, tolerance)?;
-        out.push(fitted.into_iter().map(|(c, _)| c).collect());
+        out.push(pcs);
     }
     Ok(out)
+}
+
+/// One edge of a face handed to a kernel for its pcurves ([`TrimFace`]).
+#[derive(Clone, Debug)]
+pub struct TrimEdge<'a> {
+    /// What the edge is, and the NURBS form it is parameterised on when it has one (as
+    /// [`super::Edge`]).
+    pub curve: &'a Curve,
+    pub nurbs: Option<&'a Curve>,
+    pub interval: [f64; 2],
+    /// Into [`TrimFace::vertices`].
+    pub vertices: [u32; 2],
+    pub tolerance: f64,
+}
+
+/// One edge use of a [`TrimFace`]'s loop: its edge (into [`TrimFace::edges`]), whether the loop
+/// runs along it, and its exact pcurve where it has one.
+#[derive(Clone, Debug)]
+pub struct TrimUse {
+    pub edge: u32,
+    pub forward: bool,
+    pub pcurve: Option<Curve2>,
+}
+
+/// A face whose pcurves are partly unknown, as a kernel takes it to make them: its surface as
+/// [`super::Face`] holds it (what it is, the NURBS form it is parameterised on, the parameter
+/// box), its edges and their vertices, and its loops (relative to the surface's natural normal).
+#[derive(Clone, Debug)]
+pub struct TrimFace<'a> {
+    pub surface: &'a Surface,
+    pub nurbs: Option<&'a Surface>,
+    pub domain: [[f64; 2]; 2],
+    pub edges: Vec<TrimEdge<'a>>,
+    pub vertices: Vec<[f64; 3]>,
+    pub loops: Vec<Vec<TrimUse>>,
+    pub tolerance: f64,
+}
+
+/// A kernel that makes the pcurves of a face's uses that have no closed form, keeping the given
+/// ones: for each loop, every use's pcurve on its edge's interval in its curve's direction.
+pub trait Trims {
+    fn trims(&self, face: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String>;
 }
 
 /// A producer's own pcurve, checked as a record: a valid 2D B-spline on the use's interval
@@ -164,6 +241,30 @@ fn cut(c: Curve2, [t0, t1]: [f64; 2]) -> Result<Curve2> {
     })
 }
 
+/// A degree-1 patch of four control points on a parallelogram (a plane as a file's B-spline
+/// writes it) as that plane: the patch is affine in (u, v), so it is the plane at every
+/// parameter, and its pcurves have the plane's closed forms.
+fn flat_patch(s: &Surface) -> Option<Surface> {
+    let Surface::Spline { u_knots, v_knots, points } = s else { return None };
+    let (&[a, a1, b, b1], &[c, c1, d, d1]) = (u_knots.as_slice(), v_knots.as_slice()) else { return None };
+    let [row0, row1] = points.as_slice() else { return None };
+    let (&[p00, p01], &[p10, p11]) = (row0.as_slice(), row1.as_slice()) else { return None };
+    let [p00, p01, p10, p11] = [p00, p01, p10, p11].map(Vec3::from);
+    if a != a1 || b != b1 || c != c1 || d != d1 || !(a < b && c < d) {
+        return None;
+    }
+    let size = [p00, p01, p10, p11].iter().flat_map(|p| [p.x.abs(), p.y.abs(), p.z.abs()]).fold(1.0, f64::max);
+    if (p00 + p11 - p10 - p01).len() > EXACT * size {
+        return None;
+    }
+    let (du, dv) = ((p10 - p00) * (1.0 / (b - a)), (p01 - p00) * (1.0 / (d - c)));
+    if !(du.cross(dv).len() > EXACT * size * size) {
+        return None;
+    }
+    let origin = p00 - du * a - dv * c;
+    Some(Surface::Plane { origin: [origin.x, origin.y, origin.z], u_axis: [du.x, du.y, du.z], v_axis: [dv.x, dv.y, dv.z] })
+}
+
 /// What a curve record is, for a message.
 fn curve_kind(c: &Curve) -> &'static str {
     match c {
@@ -189,7 +290,8 @@ struct On {
 
 impl On {
     fn new(s: &Surface) -> Result<Self> {
-        let surface = SurfaceEval::new(s)?;
+        let flat = flat_patch(s);
+        let surface = SurfaceEval::new(flat.as_ref().unwrap_or(s))?;
         let dom = surface.domain();
         Ok(On { surface, starts: uv::Starts::default(), dom, face: None })
     }
@@ -365,14 +467,23 @@ impl On {
             candidates.push(line([m[0], a[1]], [m[0], b[1]]));
             candidates.push(line([a[0], m[1]], [b[0], m[1]]));
         }
-        // u or v the edge's own parameter, either way along and offset (forms on one frame's
-        // quarter grid, or on the same grid turned over), the other fixed.
-        if let Some([u, v]) = self.project_in(pm, exact) {
+        // u or v moving at a steady pace in the edge's own parameter, the other fixed (or both
+        // moving): a rim on the face's quarter grid, its knots scaled or turned over (a closed
+        // rim's two ends are one point on the seam, so its pace is read inside it, from a quarter
+        // to three quarters along, unwrapped from the middle).
+        if let Some(m) = self.project_in(pm, exact) {
             let tm = 0.5 * (t0 + t1);
-            for sign in [1.0, -1.0] {
-                let (cu, cv) = (u - sign * tm, v - sign * tm);
-                candidates.push(line([cu + sign * t0, v], [cu + sign * t1, v]));
-                candidates.push(line([u, cv + sign * t0], [u, cv + sign * t1]));
+            let (ta, tb) = (t0 + 0.25 * (t1 - t0), t0 + 0.75 * (t1 - t0));
+            let near = |t: f64| curve.point(t).and_then(|p| self.project(p, Some(m), exact));
+            if let (Some(a), Some(b)) = (near(ta), near(tb)) {
+                let pace = [(b[0] - a[0]) / (tb - ta), (b[1] - a[1]) / (tb - ta)];
+                let at = |t: f64, moving: [bool; 2]| {
+                    let d = t - tm;
+                    [m[0] + if moving[0] { pace[0] * d } else { 0.0 }, m[1] + if moving[1] { pace[1] * d } else { 0.0 }]
+                };
+                for moving in [[true, false], [false, true], [true, true]] {
+                    candidates.push(line(at(t0, moving), at(t1, moving)));
+                }
             }
         }
         candidates.into_iter().find(|pc| self.lifts(pc, curve, [t0, t1], exact))

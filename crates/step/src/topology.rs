@@ -27,8 +27,9 @@
 //! distance (with margin) as its tolerance; a face whose edges lie off its surface gets its
 //! pcurves fitted at a looser tolerance, which its edges then carry.
 //!
-//! Pcurves are computed from the 3D edges and our surfaces ([`pcurve::pcurves`]); the file's
-//! own PCURVE entities are not used.
+//! Pcurves are the closed forms the 3D edges have on our surfaces ([`pcurve::exact_pcurves`]); a
+//! use with none gets its pcurve from the kernel ([`read_solids_with`], SMLib's own trims). The
+//! file's own PCURVE entities are not used.
 //!
 //! Input is hostile: every reference is checked, nesting and counts are capped, and the work of
 //! a whole file is bounded (shared shells count each time a solid uses them).
@@ -38,7 +39,7 @@ use std::f64::consts::TAU;
 
 use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
-use solidcraft_geom::brep::pcurve::{self, EdgeUse};
+use solidcraft_geom::brep::pcurve::{self, EdgeUse, TrimEdge, TrimFace, TrimUse, Trims};
 use solidcraft_geom::brep::{
     self, Brep, Curve as BCurve, Curve2, Edge, EdgeUseRef, Face, Frame, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell,
     Surface as BSurface, Vertex,
@@ -227,8 +228,18 @@ impl Index {
 }
 
 /// Read every solid of the file. A solid that cannot be read is listed in
-/// [`Solids::failures`] with its reason; the others are still read.
+/// [`Solids::failures`] with its reason; the others are still read. A face's use with no
+/// closed-form pcurve refuses its solid: [`read_solids_with`] has a kernel make those.
 pub fn read_solids(ex: &Exchange) -> Solids {
+    read_solids_in(ex, None)
+}
+
+/// [`read_solids`], with `trims` making the pcurves of uses that have no closed form.
+pub fn read_solids_with(ex: &Exchange, trims: &dyn Trims) -> Solids {
+    read_solids_in(ex, Some(trims))
+}
+
+fn read_solids_in(ex: &Exchange, trims: Option<&dyn Trims>) -> Solids {
     let mut items: Vec<u64> = ex.entities.iter().filter(|(_, e)| SOLID_ITEMS.contains(&e.name())).map(|(id, _)| *id).collect();
     items.sort_unstable();
     let index = Index::new(ex);
@@ -247,7 +258,7 @@ pub fn read_solids(ex: &Exchange) -> Solids {
             (Reader::new(ex, c.units), c)
         });
         let context = *context;
-        match read_with(ex, reader, item, context, &mut budget) {
+        match read_with(ex, reader, item, context, &mut budget, trims) {
             Ok(mut s) => {
                 s.product = index.product.get(&item).cloned();
                 if s.name.is_empty()
@@ -267,7 +278,14 @@ pub fn read_solids(ex: &Exchange) -> Solids {
 pub fn read_solid(ex: &Exchange, item: u64, context: units::Context) -> R<Solid> {
     let mut reader = Reader::new(ex, context.units);
     let mut budget = MAX_FILE_FACES;
-    read_with(ex, &mut reader, item, context, &mut budget)
+    read_with(ex, &mut reader, item, context, &mut budget, None)
+}
+
+/// [`read_solid`], with `trims` making the pcurves of uses that have no closed form.
+pub fn read_solid_with(ex: &Exchange, item: u64, context: units::Context, trims: &dyn Trims) -> R<Solid> {
+    let mut reader = Reader::new(ex, context.units);
+    let mut budget = MAX_FILE_FACES;
+    read_with(ex, &mut reader, item, context, &mut budget, Some(trims))
 }
 
 /// The base tolerance of a context.
@@ -275,11 +293,18 @@ pub fn tolerance(context: &units::Context) -> f64 {
     context.uncertainty.unwrap_or(DEFAULT_TOLERANCE).clamp(MIN_TOLERANCE, MAX_FIT_TOLERANCE)
 }
 
-fn read_with<'a>(ex: &'a Exchange, reader: &mut Reader<'a>, item: u64, context: units::Context, budget: &mut usize) -> R<Solid> {
+fn read_with<'a>(
+    ex: &'a Exchange,
+    reader: &mut Reader<'a>,
+    item: u64,
+    context: units::Context,
+    budget: &mut usize,
+    trims: Option<&dyn Trims>,
+) -> R<Solid> {
     let e = entity(ex, item)?;
     let p = e.params();
     let name = p.first().and_then(Param::as_str).unwrap_or("").to_string();
-    let mut b = Builder::new(ex, reader, tolerance(&context), budget);
+    let mut b = Builder::new(ex, reader, tolerance(&context), budget, trims);
     let (shells, kind) = match e.name() {
         "MANIFOLD_SOLID_BREP" => (vec![b.shell(rid(p.get(1), "outer shell")?)?], Kind::Solid),
         "BREP_WITH_VOIDS" => {
@@ -347,6 +372,8 @@ struct Builder<'b, 'a> {
     reader: &'b mut Reader<'a>,
     tol: f64,
     budget: &'b mut usize,
+    /// Makes the pcurves of uses that have no closed form; without it such a face is refused.
+    trims: Option<&'b dyn Trims>,
     vertex_ids: HashMap<u64, u32>,
     vertices: Vec<Vertex>,
     /// STEP edge → schema edge, and whether the schema edge runs with the STEP edge.
@@ -358,12 +385,13 @@ struct Builder<'b, 'a> {
 }
 
 impl<'b, 'a> Builder<'b, 'a> {
-    fn new(ex: &'a Exchange, reader: &'b mut Reader<'a>, tol: f64, budget: &'b mut usize) -> Self {
+    fn new(ex: &'a Exchange, reader: &'b mut Reader<'a>, tol: f64, budget: &'b mut usize, trims: Option<&'b dyn Trims>) -> Self {
         Builder {
             ex,
             reader,
             tol,
             budget,
+            trims,
             vertex_ids: HashMap::new(),
             vertices: Vec::new(),
             edge_ids: HashMap::new(),
@@ -965,23 +993,6 @@ impl<'b, 'a> Builder<'b, 'a> {
         // Which loop index in `face.loops` each edge loop is.
         let positions: Vec<usize> = face.loops.iter().enumerate().filter(|(_, l)| matches!(l, LoopB::Edges(_))).map(|(i, _)| i).collect();
         let tol = self.tol;
-        // The face's pcurves on `on`, each edge on its NURBS form.
-        let pcurves_on = |on: &BSurface, domain: Option<[[f64; 2]; 2]>| -> R<Vec<Vec<Curve2>>> {
-            let mut uses = Vec::with_capacity(edge_loops.len());
-            for l in &edge_loops {
-                let mut u = Vec::with_capacity(l.len());
-                for &(e, forward) in l {
-                    let edge = self.edges.get(e as usize).ok_or("edge reference")?;
-                    let (curve, interval) = match &edge.form {
-                        Some((c, i)) => (c, *i),
-                        _ => (&edge.curve, edge.interval),
-                    };
-                    u.push(EdgeUse { edge: e, curve, interval, forward, tolerance: 0.0, given: None });
-                }
-                uses.push(u);
-            }
-            pcurve::pcurves_within(on, &uses, tol, domain).map_err(|e| e.to_string())
-        };
         // A cylinder, cone, sphere, torus or revolution on its NURBS form, over the extent of its
         // boundary on its label; then every pcurve on the forms.
         let form = match brep::form::frame_of(&label) {
@@ -1004,8 +1015,21 @@ impl<'b, 'a> Builder<'b, 'a> {
             Some((f, d)) => (Some(f), Some(d)),
             None => (None, None),
         };
-        let surface = form.clone().unwrap_or(label);
-        let pcs = pcurves_on(&surface, box_on_form)?;
+        let surface = form.clone().unwrap_or_else(|| label.clone());
+        // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
+        let exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, tol, box_on_form).map_err(|e| e.to_string())?;
+        // Without a kernel, a use with neither is refused below with why.
+        let made = match self.trims {
+            Some(trims) if exact.iter().flatten().any(Option::is_none) => {
+                let domain = match box_on_form {
+                    Some(d) => d,
+                    None => natural_box(&surface).ok_or_else(|| unsupported("a face on an unbounded surface without closed-form pcurves"))?,
+                };
+                Some(trims.trims(&self.trim_face(&label, form.as_ref(), domain, &edge_loops, exact)?)?)
+            }
+            _ => None,
+        };
+        let pcs = pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, tol, box_on_form).map_err(|e| e.to_string())?;
         // Signed areas of the loops that close in (u, v).
         let periods = natural_periods(&surface);
         // Each use starts near where the one before it ends, along a bounded direction that
@@ -1068,6 +1092,87 @@ impl<'b, 'a> Builder<'b, 'a> {
         let pcs: Vec<Vec<Curve2>> = if flip { pcs.into_iter().map(|l| l.into_iter().rev().collect()).collect() } else { pcs };
         let domain = face_domain(&surface, &pcs)?;
         Ok((pcs, domain, flip, form))
+    }
+}
+
+impl Builder<'_, '_> {
+    /// The face as a kernel takes it to make its missing pcurves: its edges and vertices
+    /// numbered within it, each use with its closed-form pcurve where `exact` has one.
+    fn trim_face<'s>(
+        &'s self,
+        surface: &'s BSurface,
+        nurbs: Option<&'s BSurface>,
+        domain: [[f64; 2]; 2],
+        edge_loops: &[Vec<(u32, bool)>],
+        exact: Vec<Vec<Option<Curve2>>>,
+    ) -> R<TrimFace<'s>> {
+        let (mut edge_at, mut vertex_at) = (HashMap::new(), HashMap::new());
+        let (mut edges, mut vertices) = (Vec::new(), Vec::new());
+        let mut loops = Vec::with_capacity(edge_loops.len());
+        for (l, pcs) in edge_loops.iter().zip(exact) {
+            let mut uses = Vec::with_capacity(l.len());
+            for (&(e, forward), pcurve) in l.iter().zip(pcs) {
+                let local = match edge_at.get(&e) {
+                    Some(i) => *i,
+                    None => {
+                        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                        let mut ends = [0u32; 2];
+                        for (end, v) in ends.iter_mut().zip(edge.vertices) {
+                            *end = match vertex_at.get(&v) {
+                                Some(i) => *i,
+                                None => {
+                                    let i = index(vertices.len())?;
+                                    vertices.push(self.point(v)?);
+                                    vertex_at.insert(v, i);
+                                    i
+                                }
+                            };
+                        }
+                        let (curve, nurbs, interval) = match &edge.form {
+                            Some((n, i)) => (&edge.curve, Some(n), *i),
+                            None => (&edge.curve, None, edge.interval),
+                        };
+                        let i = index(edges.len())?;
+                        edges.push(TrimEdge { curve, nurbs, interval, vertices: ends, tolerance: edge.tolerance });
+                        edge_at.insert(e, i);
+                        i
+                    }
+                };
+                uses.push(TrimUse { edge: local, forward, pcurve });
+            }
+            loops.push(uses);
+        }
+        Ok(TrimFace { surface, nurbs, domain, edges, vertices, loops, tolerance: self.tol })
+    }
+}
+
+/// A face's uses on their edges' NURBS forms, with `given` pcurves where a kernel made them.
+fn uses_of<'e>(edges: &'e [EdgeB], edge_loops: &[Vec<(u32, bool)>], given: Option<&'e Vec<Vec<Curve2>>>) -> R<Vec<Vec<EdgeUse<'e>>>> {
+    let mut uses = Vec::with_capacity(edge_loops.len());
+    for (li, l) in edge_loops.iter().enumerate() {
+        let mut u = Vec::with_capacity(l.len());
+        for (p, &(e, forward)) in l.iter().enumerate() {
+            let edge = edges.get(e as usize).ok_or("edge reference")?;
+            let (curve, interval) = match &edge.form {
+                Some((c, i)) => (c, *i),
+                _ => (&edge.curve, edge.interval),
+            };
+            let given = match given {
+                Some(g) => Some(g.get(li).and_then(|l| l.get(p)).ok_or("a pcurve the kernel did not make")?),
+                None => None,
+            };
+            u.push(EdgeUse { edge: e, curve, interval, forward, tolerance: 0.0, given });
+        }
+        uses.push(u);
+    }
+    Ok(uses)
+}
+
+/// A spline surface's parameter box: its knot ranges.
+fn natural_box(s: &BSurface) -> Option<[[f64; 2]; 2]> {
+    match s.natural() {
+        [Natural::Range(a, b), Natural::Range(c, d)] if [a, b, c, d].iter().all(|x| x.is_finite()) => Some([[a, b], [c, d]]),
+        _ => None,
     }
 }
 

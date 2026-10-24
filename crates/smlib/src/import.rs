@@ -12,7 +12,7 @@
 //! - Every end value (edge intervals, face domains) is already in the flat arrays' units, radians
 //!   for angles; the C side converts them to SMLib's own pointwise.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use solidcraft_geom::brep as b;
 
@@ -85,7 +85,7 @@ fn z_axis(f: &b::Frame) -> [f64; 3] {
 pub fn arrays(brep: &b::Brep, trusted: bool) -> R<Arrays> {
     brep.validate().map_err(|e| Unsupported::Invalid(e.0))?;
     let brep = analytic::analytic(brep)?;
-    laid_out(brep.as_ref(), trusted, true)
+    laid_out(brep.as_ref(), trusted, true, &HashSet::new())
 }
 
 /// [`arrays`] with every surface as the record holds it: a round face truck holds as a rational
@@ -94,12 +94,19 @@ pub fn arrays(brep: &b::Brep, trusted: bool) -> R<Arrays> {
 /// surfaces. A revolution is still refused (SMLib has no such surface).
 pub fn arrays_keeping_splines(brep: &b::Brep, trusted: bool) -> R<Arrays> {
     brep.validate().map_err(|e| Unsupported::Invalid(e.0))?;
-    laid_out(brep, trusted, false)
+    laid_out(brep, trusted, false, &HashSet::new())
+}
+
+/// The flat arrays of a record whose uses in `bare` (face, loop, position) go without their
+/// UV trims, for SMLib to make (their pcurves in the record are not read): what
+/// [`crate::pcurves`] hands SMLib. Not validated, as its bare uses have no pcurves.
+pub(crate) fn arrays_with_bare_uses(brep: &b::Brep, bare: &HashSet<(u32, u32, u32)>) -> R<Arrays> {
+    laid_out(brep, true, true, bare)
 }
 
 /// The flat arrays; `analytic`: a plane on any axes goes as SMLib's plane (else, off unit
-/// orthogonal axes, as the bilinear patch it is).
-fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool) -> R<Arrays> {
+/// orthogonal axes, as the bilinear patch it is). The uses in `bare` go without UV trims.
+fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool, bare: &HashSet<(u32, u32, u32)>) -> R<Arrays> {
     let mut a = Arrays::default();
 
     // Regions and shells. Each region gets its own copy of each shell it lists.
@@ -174,7 +181,7 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool) -> R<Arrays> {
     let any_spline_face =
         brep.faces.iter().any(|f| f.nurbs.is_some() || matches!(f.surface, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. }));
     let any_form = brep.faces.iter().any(|f| f.nurbs.is_some());
-    for f in &brep.faces {
+    for (fi, f) in brep.faces.iter().enumerate() {
         a.i(flat::FACE_LOOP_COUNT).push(int(f.loops.len())?);
         a.i(flat::FACE_TRIM_TYPE).push(0);
         // A face with a NURBS form: what it is (its analytic entry), then the NURBS it is
@@ -190,7 +197,7 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool) -> R<Arrays> {
         if any_form {
             a.i(flat::FACE_NURBS_FORM).push(i64::from(f.nurbs.is_some()));
         }
-        for l in &f.loops {
+        for (li, l) in f.loops.iter().enumerate() {
             match l {
                 b::Loop::Vertex { vertex } => {
                     a.i(flat::LOOP_EDGEUSE_COUNT).push(0);
@@ -199,11 +206,11 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool) -> R<Arrays> {
                 b::Loop::Edges { edges } => {
                     a.i(flat::LOOP_EDGEUSE_COUNT).push(int(edges.len())?);
                     a.i(flat::LOOP_VERTEX).push(-1);
-                    for u in edges {
+                    for (p, u) in edges.iter().enumerate() {
                         a.i(flat::EDGEUSE_EDGE).push(i64::from(u.edge));
                         a.i(flat::EDGEUSE_ORIENTATION).push(i64::from(u.forward));
                         if any_spline_face {
-                            if spline {
+                            if spline && !bare.contains(&(idx(fi)?, idx(li)?, idx(p)?)) {
                                 let shift = intervals.get(u.edge as usize).map_or(0.0, |i| i.1);
                                 trim(&mut a, &u.pcurve, u.forward, shift)?;
                             } else {
