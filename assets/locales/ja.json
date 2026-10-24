@@ -933,6 +933,7 @@
   "cmd.sketch_move": "スケッチ要素を移動/コピー",
   "cmd.sketch_move3d": "3D 点を移動",
   "cmd.sketch_move_point": "スケッチ点をドラッグ",
+  "cmd.sketch_move_points": "スケッチ点を移動",
   "cmd.sketch_offset_break": "オフセット関連付けを解除",
   "cmd.sketch_options": "スケッチ パレット オプション",
   "cmd.sketch_paste": "スケッチ要素を貼り付け",

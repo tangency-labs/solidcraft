@@ -933,6 +933,7 @@
   "cmd.sketch_move": "移动/复制草图图元",
   "cmd.sketch_move3d": "移动三维点",
   "cmd.sketch_move_point": "拖动草图点",
+  "cmd.sketch_move_points": "移动草图点",
   "cmd.sketch_offset_break": "断开偏移关联",
   "cmd.sketch_options": "草图选项板选项",
   "cmd.sketch_paste": "粘贴草图图元",

@@ -933,6 +933,7 @@
   "cmd.sketch_move": "Move/Copy Sketch Entities",
   "cmd.sketch_move3d": "Move 3D Point",
   "cmd.sketch_move_point": "Drag Sketch Point",
+  "cmd.sketch_move_points": "Move Sketch Points",
   "cmd.sketch_offset_break": "Break Offset Association",
   "cmd.sketch_options": "Sketch Palette Options",
   "cmd.sketch_paste": "Paste Sketch Entities",
