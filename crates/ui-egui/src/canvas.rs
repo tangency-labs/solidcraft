@@ -542,6 +542,29 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     if radius_spline_handles(app, ui, painter, proj, d) {
         dir = None;
     }
+    // Two-sided sketch offset: Distance 2 is its own dimension, the other way from Distance.
+    // One Side and Symmetric keep the single Distance box.
+    if let Kind::SketchModify(crate::sketch_modify_ui::Mod::Offset { distance2, mode, .. }) = &mut d.kind
+        && crate::sketch_modify_ui::offset_two_sides(*mode)
+        && let Some(n) = dir
+        && let Some(l2) = app.session.doc.eval(distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
+    {
+        let before = distance2.clone();
+        if let Some(ts) =
+            drag_arrow(ui, painter, proj, base, bs, -n, l2.abs(), false, egui::Id::new("sc_manipulator_offset2"), half_height, distance2)
+        {
+            // Its own area and field, so it does not share Distance's focus or text.
+            value_box_in(
+                ui,
+                (egui::Id::new("sc_canvas_area2"), egui::Id::new("sc_canvas_value2")),
+                "Distance 2",
+                distance2,
+                (ts + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
+                *distance2 != before,
+                false,
+            );
+        }
+    }
     let Some((label, kind, value)) = d.primary() else { return };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() { Some(0.0) } else { app.session.doc.eval(value, kind).ok().filter(|v| v.is_finite()) }

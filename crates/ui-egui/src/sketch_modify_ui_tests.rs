@@ -468,6 +468,27 @@ fn rect(h: &mut crate::scenario::Harness, count: &str, spacing: &str, count2: &s
 }
 
 #[test]
+fn two_sided_offset_shows_a_dimension_for_each_distance() {
+    let (mut h, id) = open("sketch.offset");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::SketchCurve { id }];
+    }
+    h.frames(2);
+    assert!(crate::scenario::handle_at("arrow").is_some(), "Distance has its dimension");
+    assert!(crate::scenario::handle_at("arrow2").is_none(), "one side draws a single dimension");
+    if let Kind::SketchModify(Mod::Offset { distance, distance2, mode, .. }) = &mut h.app.dialog.as_mut().unwrap().kind {
+        *mode = 1;
+        *distance = "9 mm".into();
+        *distance2 = "2 mm".into();
+    }
+    h.frames(2);
+    let first = crate::scenario::handle_at("arrow").expect("Distance stays on the sketch");
+    let second = crate::scenario::handle_at("arrow2").expect("Distance 2 gets its own dimension");
+    assert!(first.distance(second) > 20.0, "the two dimensions sit on opposite sides: {first:?} {second:?}");
+}
+
+#[test]
 fn rectangular_pattern_window_opens_instead_of_a_click_tool() {
     let (h, _) = open("sketch.pattern.rectangular");
     assert!(h.app.tool.is_none(), "the click tool still takes the command");

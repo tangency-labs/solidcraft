@@ -78,6 +78,11 @@ pub(crate) fn offset_symmetric(mode: usize) -> bool {
     mode == SYMMETRIC
 }
 
+/// Whether an offset mode index is Two Sides (Distance and an independent Distance 2).
+pub(crate) fn offset_two_sides(mode: usize) -> bool {
+    mode == TWO_SIDES
+}
+
 /// A sketch modify tool window's values.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Mod {
