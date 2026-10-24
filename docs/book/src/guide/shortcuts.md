@@ -41,6 +41,10 @@ if that happens; recording is cancelled if the app loses focus.
 | Ctrl+Z | Undo | Ctrl+Y | Redo |
 | Ctrl+N | New Design | Ctrl+O | Open |
 | Ctrl+S | Save | Delete | Delete the selection |
+| Ctrl+1 | Front View | Ctrl+2 | Back View |
+| Ctrl+3 | Left View | Ctrl+4 | Right View |
+| Ctrl+5 | Top View | Ctrl+6 | Bottom View |
+| Ctrl+7 | Isometric View | | |
 
 Keys handled by the window itself:
 

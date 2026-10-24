@@ -24,7 +24,66 @@ CommandSpec::new("view.normal_to", "Normal to Selection", normal_to)
         .icon("camera")
         .noundo()
         .enabled(|s| normal_target(s).map(|_| ()).ok_or_else(|| "select a planar face or plane".into()))
-        .params("camera?: Camera (default: current session camera or home view) → camera; Look At the first selected planar face or plane, centered on the picked point; repeat while aligned to flip the side; preserves scale and projection")];
+        .params("camera?: Camera (default: current session camera or home view) → camera; Look At the first selected planar face or plane, centered on the picked point; repeat while aligned to flip the side; preserves scale and projection"),
+CommandSpec::new("view.front", "Front View", front).icon("camera").noundo().key("Ctrl+1").params(STANDARD_PARAMS),
+CommandSpec::new("view.back", "Back View", back).icon("camera").noundo().key("Ctrl+2").params(STANDARD_PARAMS),
+CommandSpec::new("view.left", "Left View", left).icon("camera").noundo().key("Ctrl+3").params(STANDARD_PARAMS),
+CommandSpec::new("view.right", "Right View", right).icon("camera").noundo().key("Ctrl+4").params(STANDARD_PARAMS),
+CommandSpec::new("view.top", "Top View", top).icon("camera").noundo().key("Ctrl+5").params(STANDARD_PARAMS),
+CommandSpec::new("view.bottom", "Bottom View", bottom).icon("camera").noundo().key("Ctrl+6").params(STANDARD_PARAMS),
+CommandSpec::new("view.isometric", "Isometric View", isometric).icon("camera").noundo().key("Ctrl+7").params(STANDARD_PARAMS)];
+
+const STANDARD_PARAMS: &str = "camera?: Camera (default: current session camera or home view) → camera; turns to that standard view as the view cube does, keeping target, distance and projection";
+
+/// The standard view a `view.front` … `view.isometric` command turns to.
+pub fn standard_view(id: &str) -> Option<StandardView> {
+    Some(match id {
+        "view.front" => StandardView::Front,
+        "view.back" => StandardView::Back,
+        "view.left" => StandardView::Left,
+        "view.right" => StandardView::Right,
+        "view.top" => StandardView::Top,
+        "view.bottom" => StandardView::Bottom,
+        "view.isometric" => StandardView::Iso,
+        _ => return None,
+    })
+}
+
+fn front(s: &mut Session, p: &Value) -> Result<Value> {
+    turn_to(s, p, "view.front")
+}
+fn back(s: &mut Session, p: &Value) -> Result<Value> {
+    turn_to(s, p, "view.back")
+}
+fn left(s: &mut Session, p: &Value) -> Result<Value> {
+    turn_to(s, p, "view.left")
+}
+fn right(s: &mut Session, p: &Value) -> Result<Value> {
+    turn_to(s, p, "view.right")
+}
+fn top(s: &mut Session, p: &Value) -> Result<Value> {
+    turn_to(s, p, "view.top")
+}
+fn bottom(s: &mut Session, p: &Value) -> Result<Value> {
+    turn_to(s, p, "view.bottom")
+}
+fn isometric(s: &mut Session, p: &Value) -> Result<Value> {
+    turn_to(s, p, "view.isometric")
+}
+
+fn turn_to(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
+    let view = standard_view(cmd).ok_or_else(|| bad(cmd, "not a standard view"))?;
+    let mut cam: Camera = match p.get("camera") {
+        Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "invalid camera"))?,
+        None => s.camera.unwrap_or_else(|| crate::view::home_camera(s)),
+    };
+    if !cam.is_valid() || !cam.fov.is_finite() || !(0.0..std::f64::consts::PI).contains(&cam.fov) {
+        return Err(bad(cmd, "invalid camera"));
+    }
+    cam.set_view(view);
+    s.camera = Some(cam);
+    Ok(json!({"camera": cam}))
+}
 
 fn normal_target(s: &Session) -> Option<(solidcraft_geom::Vec3, solidcraft_geom::Vec3)> {
     let state = s.world_state();
@@ -274,6 +333,32 @@ mod tests {
         }
         assert_eq!(s.doc.to_json(), document);
         assert_eq!(s.undo.len(), undo);
+    }
+
+    #[test]
+    fn standard_view_commands_turn_the_camera_and_keep_the_rest() {
+        let cam = Camera { yaw: 0.3, pitch: 0.4, fov: 0.6, distance: 123.0, ..Default::default() };
+        let mut s = Session { camera: Some(cam), ..Default::default() };
+        for (id, key, view) in [
+            ("view.front", "Ctrl+1", StandardView::Front),
+            ("view.back", "Ctrl+2", StandardView::Back),
+            ("view.left", "Ctrl+3", StandardView::Left),
+            ("view.right", "Ctrl+4", StandardView::Right),
+            ("view.top", "Ctrl+5", StandardView::Top),
+            ("view.bottom", "Ctrl+6", StandardView::Bottom),
+            ("view.isometric", "Ctrl+7", StandardView::Iso),
+        ] {
+            assert_eq!(crate::find_command(id).and_then(|c| c.shortcut), Some(key), "{id}");
+            let result = s.execute(id, &json!({"camera": cam})).unwrap();
+            let to: Camera = serde_json::from_value(result["camera"].clone()).unwrap();
+            let mut want = cam;
+            want.set_view(view);
+            assert!(to.back().dist(want.back()) < 1e-9, "{id}");
+            assert_eq!((to.target, to.distance, to.fov), (cam.target, cam.distance, cam.fov), "{id}");
+            assert_eq!(s.camera, Some(to));
+        }
+        assert!(s.undo.is_empty());
+        assert!(s.execute("view.top", &json!({"camera": Camera { distance: -1.0, ..Default::default() }})).is_err());
     }
 
     #[test]

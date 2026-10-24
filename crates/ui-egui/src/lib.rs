@@ -937,6 +937,16 @@ impl SolveApp {
         if self.file_load.busy() || self.file_picker.is_some() {
             return;
         }
+        // Front … Isometric (Ctrl+1…7 by default) turn the view as the view cube's faces do. The
+        // flat pattern is a 2D page: it has no other side to turn to.
+        if solidcraft_engine::standard_view(id).is_some() {
+            if !dialogs_sheet::flat_active(self) {
+                // `view.isometric` → "isometric", which `StandardView::parse` reads as Iso.
+                self.animate_view(id.trim_start_matches("view."));
+                self.home.open = false;
+            }
+            return;
+        }
         if id == "view.normal_to" {
             if self.run(id, json!({"camera": self.cam})).is_ok() {
                 self.follow_view_request(true);
