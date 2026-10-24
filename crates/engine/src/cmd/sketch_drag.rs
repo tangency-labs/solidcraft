@@ -271,7 +271,7 @@ pub(super) fn drag_entity(
         let valid = |before: &Sketch, after: &Sketch| {
             let mut geometry = Geometry::default();
             geometry.take(before);
-            !geometry.sweep_wrapped(after)
+            !geometry.sweep_wrapped(after) && solidcraft_sketch::fillets_kept(before, after)
         };
         let followed = match (e, line_grab) {
             (Ent::Point(q), _) => solidcraft_sketch::move_point_towards(sk, q, to, max_step, frame.as_mut(), valid),

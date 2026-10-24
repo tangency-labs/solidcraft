@@ -1052,3 +1052,101 @@ fn profiles_crossing_next_to_an_overshooting_end_keeps_the_corner_beside_it() {
     assert_eq!(areas.len(), 1, "{areas:?}");
     assert!(areas.iter().all(|a| (a - (2.0 - x)).abs() < 1e-4), "{areas:?}");
 }
+
+/// A fillet as `sketch.fillet` makes it: `l1` from (10, 10) to (35, 10), the arc round
+/// (35, 15) from (35, 10) to (40, 15), `l2` from (40, 15) to (40, 30); horizontal, vertical,
+/// radius 5, tangent at both ends. Returns (l1, arc, l2, l1's far point, l2's far point).
+fn filleted_corner() -> (Sketch, usize, usize, usize, usize, usize) {
+    let mut sk = Sketch::new();
+    let l1 = sk.add_line(v(10.0, 10.0), v(35.0, 10.0), None, None, None).unwrap();
+    let CurveKind::Line { a: far1, b: ta } = sk.curves[l1].kind else { panic!() };
+    let arc = sk.add_arc(v(35.0, 15.0), v(35.0, 10.0), v(40.0, 15.0), [None, Some(ta), None], None).unwrap();
+    let CurveKind::Arc { b: tb, .. } = sk.curves[arc].kind else { panic!() };
+    let l2 = sk.add_line(v(40.0, 15.0), v(40.0, 30.0), Some(tb), None, None).unwrap();
+    let CurveKind::Line { b: far2, .. } = sk.curves[l2].kind else { panic!() };
+    use ConstraintKind::*;
+    sk.add_constraint(Horizontal { l: l1 }, None).unwrap();
+    sk.add_constraint(Vertical { l: l2 }, None).unwrap();
+    sk.add_constraint(Radius { c: arc, value: 5.0 }, None).unwrap();
+    sk.add_constraint(Tangent { a: l1, b: arc }, None).unwrap();
+    sk.add_constraint(Tangent { a: l2, b: arc }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    (sk, l1, arc, l2, far1, far2)
+}
+
+/// The arc's counter-clockwise sweep from its stored `a` to `b`, degrees.
+fn sweep_deg(sk: &Sketch, arc: usize) -> f64 {
+    let CurveKind::Arc { c, a, b } = sk.curves[arc].kind else { panic!() };
+    let (c, a, b) = (sk.points[c].pos, sk.points[a].pos, sk.points[b].pos);
+    ((b - c).angle() - (a - c).angle()).rem_euclid(2.0 * PI).to_degrees()
+}
+
+/// Each line leaves the arc at its touch point along the arc's travel (a smooth path, not a
+/// line cutting back through the arc).
+fn lines_leave_the_arc(sk: &Sketch, arc: usize, lines: [usize; 2]) -> bool {
+    let CurveKind::Arc { c, a, b } = sk.curves[arc].kind else { panic!() };
+    lines.iter().all(|&l| {
+        let CurveKind::Line { a: la, b: lb } = sk.curves[l].kind else { panic!() };
+        let (p, far) = if la == a || la == b { (la, lb) } else { (lb, la) };
+        let outward = if p == b { 1.0 } else { -1.0 };
+        (sk.points[p].pos - sk.points[c].pos).perp().dot(sk.points[far].pos - sk.points[p].pos) * outward > 1e-6
+    })
+}
+
+#[test]
+fn a_fillet_follows_its_corner_when_the_corner_mirrors() {
+    // Pin the vertical line's far end to a point below the horizontal line: the corner mirrors.
+    // The fillet is the quarter arc on the other side, not a line through its arc or a
+    // three-quarter arc.
+    let (mut sk, l1, arc, l2, _, far2) = filleted_corner();
+    let q = sk.add_point(v(40.0, -20.0), None).unwrap();
+    sk.points[q].fixed = true;
+    sk.add_constraint(ConstraintKind::Coincident { p: far2, q }, None).unwrap();
+    let rep = solve(&mut sk);
+    assert!(rep.ok(), "{rep:?}");
+    assert!((sweep_deg(&sk, arc) - 90.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
+    assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
+    assert!(sk.center(arc).unwrap().dist(v(35.0, 5.0)) < 1e-6, "{:?}", sk.center(arc));
+    let (_, q1) = line_pts(&sk, l1);
+    let (p2, _) = line_pts(&sk, l2);
+    assert!(q1.dist(v(35.0, 10.0)) < 1e-6 && p2.dist(v(40.0, 5.0)) < 1e-6, "{q1:?} {p2:?}");
+    // Dragged back up (a move against the positions before it), it mirrors again.
+    sk.constraints.retain(|c| !matches!(c.kind, ConstraintKind::Coincident { .. }));
+    let reference: Vec<Vec2> = sk.points.iter().map(|p| p.pos).collect();
+    sk.points[far2].pos = v(40.0, 30.0);
+    let rep = solve_with(&mut sk, &Hold { points: vec![far2], radii: Vec::new() }, Some(&reference), Analysis::Full, None);
+    assert!(rep.ok(), "{rep:?}");
+    assert!((sweep_deg(&sk, arc) - 90.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
+    assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
+    assert!(sk.center(arc).unwrap().dist(v(35.0, 15.0)) < 1e-6, "{:?}", sk.center(arc));
+}
+
+#[test]
+fn a_fillet_folded_through_flat_is_refused_like_a_fold() {
+    // Without the horizontal and vertical, the second line turns about the corner: the arc
+    // shrinks towards flat (the lines collinear) and the lines keep leaving it. Past flat the
+    // only arc left is the loop the other way round; that step is refused as a fold and the
+    // sketch stays where it was.
+    let (mut sk, l1, arc, l2, _, far2) = filleted_corner();
+    sk.constraints.retain(|c| !matches!(c.kind, ConstraintKind::Horizontal { .. } | ConstraintKind::Vertical { .. }));
+    let hold = Hold { points: vec![far2], radii: Vec::new() };
+    let mut refused = None;
+    for step in 1..=16 {
+        let t = step as f64 / 16.0 * PI;
+        let reference: Vec<Vec2> = sk.points.iter().map(|p| p.pos).collect();
+        // From straight up, round through the right towards straight down, 15 mm from the corner.
+        sk.points[far2].pos = v(40.0, 10.0) + Vec2::from_angle(FRAC_PI_2 - t) * 15.0;
+        let rep = solve_with(&mut sk, &hold, Some(&reference), Analysis::Full, None);
+        if !rep.ok() {
+            assert!(!rep.folded.is_empty(), "step {step}: {rep:?}");
+            let stays = sk.points.iter().enumerate().filter(|(i, _)| *i != far2).all(|(i, p)| p.pos == reference[i]);
+            assert!(stays, "step {step}: the sketch stays");
+            refused = Some(step);
+            break;
+        }
+        let sweep = sweep_deg(&sk, arc);
+        assert!(sweep < 90.0 + 1e-6, "step {step}: sweep {sweep}");
+        assert!(lines_leave_the_arc(&sk, arc, [l1, l2]), "step {step}: sweep {sweep}");
+    }
+    assert!(refused.is_some_and(|s| (7..=9).contains(&s)), "refused at {refused:?}");
+}

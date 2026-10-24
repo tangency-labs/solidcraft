@@ -1532,7 +1532,7 @@ fn solve_from(
     old_values: Option<&[Option<f64>]>,
     budget: &mut Budget,
 ) -> SolveReport {
-    solve_inner(sk, hold, reference, analysis, old_values, budget)
+    solve_sensed(sk, hold, reference, analysis, old_values, budget)
 }
 
 /// In this crate's tests every solve is repeated without the constructive seed: the seed only
@@ -1552,11 +1552,11 @@ fn solve_from(
 ) -> SolveReport {
     use crate::construct::switch;
     if !(switch::seed_on() && switch::differential_on()) {
-        return solve_inner(sk, hold, reference, analysis, old_values, budget);
+        return solve_sensed(sk, hold, reference, analysis, old_values, budget);
     }
     let mut plain = sk.clone();
-    let without = switch::without_seed(|| solve_inner(&mut plain, hold, reference, analysis, old_values, &mut Budget::full()));
-    let with = solve_inner(sk, hold, reference, analysis, old_values, budget);
+    let without = switch::without_seed(|| solve_sensed(&mut plain, hold, reference, analysis, old_values, &mut Budget::full()));
+    let with = solve_sensed(sk, hold, reference, analysis, old_values, budget);
     assert_same_outcome(&with, &without);
     with
 }
@@ -1930,6 +1930,252 @@ fn continue_values(
         }
     }
     (spent, t >= SUBSTEPS)
+}
+
+/// A line tangent to an arc at the arc's end `p` continues the arc's travel there, as a
+/// fillet's line leaves its arc: `Some(1.0)`; turned back onto the arc, `Some(-1.0)`; `None`
+/// when too short to tell. The travel runs counter-clockwise from the arc's `a` to its `b`.
+fn tangent_sense(sk: &Sketch, pos: &dyn Fn(usize) -> Vec2, arc: usize, line: usize, p: usize) -> Option<f64> {
+    let CurveKind::Arc { c, a, b } = sk.curves.get(arc)?.kind else { return None };
+    let CurveKind::Line { a: la, b: lb } = sk.curves.get(line)?.kind else { return None };
+    let far = if la == p {
+        lb
+    } else if lb == p {
+        la
+    } else {
+        return None;
+    };
+    let outward = if p == b {
+        1.0
+    } else if p == a {
+        -1.0
+    } else {
+        return None;
+    };
+    let along = (pos(p) - pos(c)).perp();
+    let leaving = pos(far) - pos(p);
+    let d = along.dot(leaving) * outward;
+    (d.abs() > 1e-9 * along.len() * leaving.len()).then(|| d.signum())
+}
+
+/// An arc with lines tangent at its ends, as a solve started or left it: its sweep (counter-
+/// clockwise from `a` to `b`) and each line's sense.
+struct ArcSense {
+    arc: usize,
+    sweep: f64,
+    /// (line, touch point, tangent constraint index, sense)
+    lines: Vec<(usize, usize, usize, Option<f64>)>,
+}
+
+/// The arcs a solve may turn over (no arc sweep dimension of their own, not fixed, not
+/// linked) with the lines tangent at their ends, read at `pos`.
+fn arc_senses(sk: &Sketch, pos: &dyn Fn(usize) -> Vec2) -> Vec<ArcSense> {
+    let swept: std::collections::BTreeSet<usize> = sk
+        .constraints
+        .iter()
+        .filter(|c| !c.driven)
+        .filter_map(|c| match c.kind {
+            ConstraintKind::ArcSweep { c, .. } => Some(c),
+            _ => None,
+        })
+        .collect();
+    let arc =
+        |i: usize| sk.curves.get(i).is_some_and(|c| matches!(c.kind, CurveKind::Arc { .. }) && !c.fixed && c.link.is_none() && !swept.contains(&i));
+    let line = |i: usize| sk.curves.get(i).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. }));
+    let on_curve = points_on_curves(sk);
+    let mut out: Vec<ArcSense> = Vec::new();
+    for (ci, c) in sk.constraints.iter().enumerate().filter(|(_, c)| !c.driven) {
+        let ConstraintKind::Tangent { a, b } = c.kind else { continue };
+        let Some(p) = touch_point(sk, &c.kind, &on_curve) else { continue };
+        let (arc, line) = if arc(a) && line(b) {
+            (a, b)
+        } else if arc(b) && line(a) {
+            (b, a)
+        } else {
+            continue;
+        };
+        let sense = tangent_sense(sk, pos, arc, line, p);
+        let entry = match out.iter().position(|e| e.arc == arc) {
+            Some(k) => k,
+            None => {
+                let CurveKind::Arc { c, a, b } = sk.curves[arc].kind else { continue };
+                let sweep = ((pos(b) - pos(c)).angle() - (pos(a) - pos(c)).angle()).rem_euclid(std::f64::consts::TAU);
+                out.push(ArcSense { arc, sweep, lines: Vec::new() });
+                out.len() - 1
+            }
+        };
+        if let Some(e) = out.get_mut(entry) {
+            e.lines.push((line, p, ci, sense));
+        }
+    }
+    out
+}
+
+/// What a solve did to a filleted arc, against how it started.
+enum Turn {
+    /// Still the same arc between its lines.
+    Kept,
+    /// It ran round the other way with its lines following: the corner it rounds mirrored. Its
+    /// ends swapped, it is that corner's short arc again.
+    Swap,
+    /// One of its two lines cut back through it: the corner mirrored, the arc did not. The
+    /// arc reflected across the line that stayed (`across`) with that line's touch point
+    /// (`p`) is the start to solve again from.
+    Mirror { p: usize, across: usize },
+    /// It looped the other way round, or a line folded back onto it: no arc of a corner.
+    Over(Vec<usize>),
+}
+
+fn turn(before: &ArcSense, after: &ArcSense) -> Turn {
+    let jump = (after.sweep - before.sweep).abs() > std::f64::consts::PI;
+    // A line whose sense was clear and no longer is collapsed onto the arc: turned too.
+    let lines: Vec<(&(usize, usize, usize, Option<f64>), bool)> = before
+        .lines
+        .iter()
+        .filter_map(|l @ (line, p, _, was)| {
+            let was = (*was)?;
+            let is = after.lines.iter().find(|(m, q, ..)| (m, q) == (line, p)).map(|(.., is)| *is)?;
+            Some((l, is != Some(was)))
+        })
+        .collect();
+    let (all, any) = (lines.iter().all(|(_, f)| *f), lines.iter().any(|(_, f)| *f));
+    match (jump, any, all) {
+        (false, false, _) => Turn::Kept,
+        (true, _, true) => Turn::Swap,
+        (false, true, false) if lines.len() == 2 => {
+            let Some(turned) = lines.iter().find(|(_, f)| *f).map(|(l, _)| l) else { return Turn::Kept };
+            let Some(stayed) = lines.iter().find(|(_, f)| !*f).map(|(l, _)| l) else { return Turn::Kept };
+            Turn::Mirror { p: turned.1, across: stayed.0 }
+        }
+        _ => Turn::Over(lines.iter().map(|(l, _)| l.2).collect()),
+    }
+}
+
+/// The arc's ends swapped: the same circle run the other way round from the same points, so the
+/// stored counter-clockwise arc is the one on the other side of its chord. `reversed` keeps the
+/// as-drawn start and end.
+fn swap_arc_ends(sk: &mut Sketch, arc: usize) {
+    if let Some(curve) = sk.curves.get_mut(arc)
+        && let CurveKind::Arc { a, b, .. } = &mut curve.kind
+    {
+        std::mem::swap(a, b);
+        curve.reversed = !curve.reversed;
+    }
+}
+
+/// The arc's centre and the touch point `p` reflected across line `across`, and its ends
+/// swapped: the corner's fillet on the mirrored side.
+fn mirror_arc(sk: &mut Sketch, arc: usize, p: usize, across: usize) {
+    let Some(CurveKind::Arc { c, .. }) = sk.curves.get(arc).map(|c| c.kind.clone()) else { return };
+    let Some(CurveKind::Line { a: la, b: lb }) = sk.curves.get(across).map(|c| c.kind.clone()) else { return };
+    let (Some(pa), Some(pb)) = (sk.point(la), sk.point(lb)) else { return };
+    let Some(d) = (pb - pa).normalized() else { return };
+    let reflect = |q: Vec2| pa + d * (q - pa).dot(d) * 2.0 - (q - pa);
+    for i in [c, p] {
+        if let Some(q) = sk.point(i)
+            && let Some(point) = sk.points.get_mut(i)
+            && !point.fixed
+        {
+            point.pos = reflect(q);
+        }
+    }
+    swap_arc_ends(sk, arc);
+}
+
+/// Every fillet of `before` is still an arc of its corner in `after` (the same sketch moved: its
+/// lines keep their sense at the arc and the arc its side of its chord): what a feasible move
+/// of the cursor may keep. See [`solve_sensed`].
+pub fn fillets_kept(before: &Sketch, after: &Sketch) -> bool {
+    let was = arc_senses(before, &|i| before.points.get(i).map(|p| p.pos).unwrap_or_default());
+    let now = arc_senses(after, &|i| after.points.get(i).map(|p| p.pos).unwrap_or_default());
+    was.iter().all(|b| now.iter().find(|a| a.arc == b.arc).is_none_or(|a| matches!(turn(b, a), Turn::Kept)))
+}
+
+/// The turns of every filleted arc from `before` to where `sk` is now, applying the swaps.
+fn settle(sk: &mut Sketch, before: &[ArcSense]) -> Vec<(usize, Turn)> {
+    let after = arc_senses(sk, &|i| sk.points.get(i).map(|p| p.pos).unwrap_or_default());
+    let turns: Vec<(usize, Turn)> = before
+        .iter()
+        .filter_map(|b| after.iter().find(|a| a.arc == b.arc).map(|a| (b.arc, turn(b, a))))
+        .filter(|(_, t)| !matches!(t, Turn::Kept))
+        .collect();
+    for (arc, t) in &turns {
+        if matches!(t, Turn::Swap) {
+            swap_arc_ends(sk, *arc);
+        }
+    }
+    turns
+}
+
+/// [`solve_inner`], keeping each fillet an arc of its corner: a line tangent at an arc's end
+/// keeps its sense there (it leaves the arc, as it did), and the arc stays on its side of its
+/// chord. Positions are compared with `reference` (an interactive move's start) or the
+/// stored ones. A corner that mirrored gets its arc on the mirrored side (its ends swapped, or
+/// the arc reflected across the line that stayed and solved again). A solve that would loop
+/// the arc round the other way, or fold a line back onto it, is refused as a fold is: the
+/// geometry stays and the tangent constraints are reported as `folded`.
+fn solve_sensed(
+    sk: &mut Sketch,
+    hold: &Hold,
+    reference: Option<&[Vec2]>,
+    analysis: Analysis,
+    old_values: Option<&[Option<f64>]>,
+    budget: &mut Budget,
+) -> SolveReport {
+    let stored: Vec<Vec2> = sk.points.iter().map(|p| p.pos).collect();
+    let pos = |i: usize| reference.and_then(|r| r.get(i)).or_else(|| stored.get(i)).copied().unwrap_or_default();
+    let before = arc_senses(sk, &pos);
+    if before.is_empty() {
+        return solve_inner(sk, hold, reference, analysis, old_values, budget);
+    }
+    let start = sk.clone();
+    let mut report = solve_inner(sk, hold, reference, analysis, old_values, budget);
+    if !report.ok() {
+        return report;
+    }
+    let mut turns = settle(sk, &before);
+    let mirrors: Vec<(usize, usize, usize)> =
+        turns.iter().filter_map(|(arc, t)| if let Turn::Mirror { p, across } = t { Some((*arc, *p, *across)) } else { None }).collect();
+    if !mirrors.is_empty() {
+        let solved = sk.clone();
+        for (arc, p, across) in &mirrors {
+            mirror_arc(sk, *arc, *p, *across);
+        }
+        let again = solve_inner(sk, hold, reference, analysis, old_values, budget);
+        let again_turns = if again.ok() { settle(sk, &before) } else { Vec::new() };
+        if again.ok() && again_turns.is_empty() {
+            return again;
+        }
+        *sk = solved;
+    }
+    let over: Vec<usize> = turns
+        .iter_mut()
+        .flat_map(|(_, t)| match t {
+            Turn::Over(cs) => std::mem::take(cs),
+            Turn::Mirror { .. } => Vec::new(),
+            _ => Vec::new(),
+        })
+        .collect();
+    let mirrored_still: Vec<usize> = turns
+        .iter()
+        .filter(|(_, t)| matches!(t, Turn::Mirror { .. }))
+        .flat_map(|(arc, _)| before.iter().find(|b| b.arc == *arc).map(|b| b.lines.iter().map(|l| l.2).collect::<Vec<_>>()).unwrap_or_default())
+        .collect();
+    let folded: Vec<String> = over.into_iter().chain(mirrored_still).filter_map(|ci| sk.constraints.get(ci).map(|c| c.id.clone())).collect();
+    if folded.is_empty() {
+        return report;
+    }
+    *sk = start;
+    report.status = SolveStatus::Failed;
+    for id in folded {
+        if !report.failing.contains(&id) {
+            report.failing.push(id.clone());
+        }
+        if !report.folded.contains(&id) {
+            report.folded.push(id);
+        }
+    }
+    report
 }
 
 fn solve_inner(

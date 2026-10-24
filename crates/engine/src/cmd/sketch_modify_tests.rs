@@ -1972,3 +1972,50 @@ fn fillet_radius_accepts_a_leading_equals_sign() {
     let plain = run(&mut s, "sketch.fillet", json!({"point": "c.end", "radius": "= 2 mm"}));
     assert!(plain["curves"].is_array());
 }
+
+/// The arc's counter-clockwise sweep from its stored start to its end, degrees, from `sketch.inspect`.
+fn arc_sweep_deg(si: &Value, id: &str) -> f64 {
+    let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == id).unwrap();
+    let at = |k: &str| Vec2::new(c[k][0].as_f64().unwrap(), c[k][1].as_f64().unwrap());
+    let (centre, a, b) = (at("center_at"), at("start_at"), at("end_at"));
+    ((b - centre).angle() - (a - centre).angle()).rem_euclid(std::f64::consts::TAU).to_degrees()
+}
+
+#[test]
+fn a_fillet_stays_a_quarter_arc_when_its_corner_is_pinned_or_dragged_to_the_other_side() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[10, 10], [40, 10], [40, 30]]}));
+    let f = run(&mut s, "sketch.fillet", json!({"point": "l1.end", "radius": 5}));
+    let arc = ids(&f["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "l1"}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "l2"}));
+    let curve = |si: &Value, id: &str| si["curves"].as_array().unwrap().iter().find(|c| c["id"] == id).unwrap().clone();
+    // Pin the vertical line's far end below the horizontal line: the corner mirrors, and the
+    // fillet is the quarter arc inside the mirrored corner (its lines leave it, none cuts
+    // through it).
+    run(&mut s, "sketch.point", json!({"point": [40, -20], "id": "q"}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "q"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "l2.end", "b": "q"}));
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert!((arc_sweep_deg(&si, &arc) - 90.0).abs() < 1e-6, "{}", arc_sweep_deg(&si, &arc));
+    assert_eq!(curve(&si, &arc)["center_at"], json!([35.0, 5.0]), "{}", curve(&si, &arc));
+    assert_eq!(curve(&si, "l2")["start_at"], json!([40.0, 5.0]), "{}", curve(&si, "l2"));
+    // Dragging the horizontal line's far end through the corner would push the line through its
+    // fillet: the drag stops at the arc.
+    let d = run(&mut s, "sketch.drag", json!({"entity": "l1.start", "from": [10, 10], "to": [70, 10]}));
+    assert!(d["reached"].as_f64().unwrap() < 0.5, "{d}");
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    let l1 = curve(&si, "l1");
+    assert!(l1["start_at"][0].as_f64().unwrap() <= 35.0 + 1e-6, "{l1}");
+    assert!((arc_sweep_deg(&si, &arc) - 90.0).abs() < 1e-6, "{}", arc_sweep_deg(&si, &arc));
+    assert_eq!(curve(&si, &arc)["center_at"], json!([35.0, 5.0]), "{}", curve(&si, &arc));
+    // Pinned on the far side instead, the corner mirrors again and the fillet follows.
+    run(&mut s, "sketch.point", json!({"point": [70, 10], "id": "r"}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "r"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "l1.start", "b": "r"}));
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert!((arc_sweep_deg(&si, &arc) - 90.0).abs() < 1e-6, "{}", arc_sweep_deg(&si, &arc));
+    assert_eq!(curve(&si, &arc)["center_at"], json!([45.0, 5.0]), "{}", curve(&si, &arc));
+    assert_eq!(curve(&si, "l1")["end_at"], json!([45.0, 10.0]), "{}", curve(&si, "l1"));
+    assert_eq!(curve(&si, "l2")["start_at"], json!([40.0, 5.0]), "{}", curve(&si, "l2"));
+}
