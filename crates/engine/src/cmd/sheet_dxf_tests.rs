@@ -554,3 +554,23 @@ fn the_file_of_a_body_is_named_after_it_and_no_two_share_a_name() {
     // Two bodies that would share a file (in any case) get a number.
     assert_eq!(names("p.dxf", &["Lid", "lid", "LID", "Lid_2"]), ["p-Lid.dxf", "p-lid_2.dxf", "p-LID_3.dxf", "p-Lid_2_2.dxf"]);
 }
+
+/// #4314: a cutter that cuts every line gets a file without the bend lines, or with everything
+/// on layer 0. The default keeps the role layers and the dashed bend lines.
+#[test]
+fn bend_lines_can_be_left_out_and_everything_put_on_layer_0() {
+    let mut s = tray_with(&marks());
+    let layer = |e: &Entity| e.1.iter().find(|(c, _)| *c == 8).map(|(_, v)| v.clone()).unwrap_or_default();
+    let default = entities(&export(&mut s, json!({})));
+    let bends = |es: &[Entity]| es.iter().filter(|e| matches!(layer(e).as_str(), "BEND_UP" | "BEND_DOWN")).count();
+    assert_eq!(bends(&default), 4, "the tray's four bends");
+    let without = entities(&export(&mut s, json!({"bend_lines": false})));
+    assert_eq!(bends(&without), 0);
+    assert_eq!(without.len(), default.len() - 4, "only the bend lines go");
+    let single = entities(&export(&mut s, json!({"layers": "single"})));
+    assert_eq!(single.len(), default.len());
+    assert!(single.iter().all(|e| layer(e) == "0"), "{:?}", single.iter().map(layer).collect::<Vec<_>>());
+    for bad in [json!({"bend_lines": "no"}), json!({"layers": "one"})] {
+        assert!(s.execute("sheet.export_dxf", &bad).is_err(), "{bad}");
+    }
+}

@@ -73,6 +73,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "body?, path?, curves?: exact|arcs (default exact: an ellipse as ELLIPSE, splines, text outlines and other Béziers as SPLINE; arcs: tangent arcs and lines within 0.001 mm, for machines that read only those), \
              text?: cut|etch (default cut: letters that text cut through the sheet are cut contours on layer TEXT; etch: single contours on layer ETCH and the sheet keeps its material there; text machined to a depth is always on ETCH), \
              bend_notes?: bool (default false: a note beside each bend line on layer BEND_NOTES, `B1 UP 90%%d R1`), note_height?: mm (default 3), \
+             bend_lines?: bool (default true; false leaves BEND_UP and BEND_DOWN out, for a cutter that would cut them), \
+             layers?: roles|single (default roles, the layers below; single: every entity on layer 0), \
              per_body?: bool (a file for every sheet body, `<path>-<body>.dxf`, or their DXF texts without a path → files: [{body, path | dxf, bends}]; not with `body`) \
              → DXF (AutoCAD 2000, mm): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES, \
              POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth) and PERFORATION; inner contours come before the outline",
@@ -590,6 +592,10 @@ pub struct DxfOptions {
     pub text: DxfText,
     /// The height (mm) of the note beside each bend line, when it is to have one.
     pub bend_notes: Option<f64>,
+    /// Leave the bend lines out (BEND_UP, BEND_DOWN), for a cutter that would cut them (#4314).
+    pub no_bend_lines: bool,
+    /// Everything on layer 0 instead of a layer for each role (#4314).
+    pub one_layer: bool,
 }
 
 /// The layer of a role: its AutoCAD colour index (1 red, 2 yellow, 3 green, 4 cyan, 5 blue,
@@ -732,13 +738,22 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
         entities.extend(solidcraft_io::loop_shapes(h).into_iter().map(|shape| DxfEntity { layer: layer.clone(), shape }));
     }
     for b in sh.bends() {
-        entities.push(DxfEntity { layer: if b.up { "BEND_UP" } else { "BEND_DOWN" }.into(), shape: DxfShape::Line(b.start, b.end) });
+        if !o.no_bend_lines {
+            entities.push(DxfEntity { layer: if b.up { "BEND_UP" } else { "BEND_DOWN" }.into(), shape: DxfShape::Line(b.start, b.end) });
+        }
         if let Some(height) = o.bend_notes {
             entities.push(DxfEntity { layer: "BEND_NOTES".into(), shape: bend_note(&b, height) });
         }
     }
     for (c, r) in perforation {
         entities.push(DxfEntity { layer: "PERFORATION".into(), shape: DxfShape::Circle { c, r } });
+    }
+    // One layer: every entity on layer 0, which every drawing has.
+    if o.one_layer {
+        for e in &mut entities {
+            e.layer = "0".into();
+        }
+        return Ok(solidcraft_io::write_dxf_drawing(&[], &entities));
     }
     // The four layers of every flat pattern, and those the rest is on.
     let mut names: std::collections::BTreeSet<String> = ["OUTLINE", "CUT", "BEND_UP", "BEND_DOWN"].map(String::from).into();
@@ -773,7 +788,20 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
         Some(Value::Bool(true)) => Some(height),
         Some(_) => return Err(bad(cmd, "`bend_notes` must be true or false")),
     };
-    Ok(DxfOptions { curves, text, bend_notes })
+    let no_bend_lines = match p.get("bend_lines").filter(|v| !v.is_null()) {
+        None | Some(Value::Bool(true)) => false,
+        Some(Value::Bool(false)) => true,
+        Some(_) => return Err(bad(cmd, "`bend_lines` must be true or false")),
+    };
+    let one_layer = match p.get("layers").filter(|v| !v.is_null()) {
+        None => false,
+        Some(v) => match v.as_str().map(str::to_ascii_lowercase).as_deref() {
+            Some("roles") => false,
+            Some("single") => true,
+            _ => return Err(bad(cmd, "`layers` must be roles or single")),
+        },
+    };
+    Ok(DxfOptions { curves, text, bend_notes, no_bend_lines, one_layer })
 }
 
 /// The files of an export of every sheet body: `path` with `-<body>` before its extension

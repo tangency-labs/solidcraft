@@ -264,6 +264,10 @@ parallel to it and readable from below or from the right. A bend that cut-outs s
 for each piece. Notes are off by default, because a program that cuts or marks every layer would
 mark them.
 
+For a program that cuts every line it is given, `"bend_lines": false` leaves the bend lines out
+(`BEND_UP` and `BEND_DOWN` are then empty), and `"layers": "single"` writes every entity on layer
+`0` instead of a layer for each role.
+
 A design with several sheet bodies exports one file for each with `"per_body": true`: the files
 are `<path>-<body>.dxf` (characters a file name cannot hold become `_`; two bodies that would
 share a name get `_2`, `_3`…), and the reply lists them in `files`. Without a `path` it lists
