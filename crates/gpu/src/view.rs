@@ -2397,6 +2397,7 @@ impl Renderer {
                     if lo < hi {
                         pass.set_vertex_buffer(0, buffer.slice(..));
                         pass.draw(lo - base..hi - base, 0..1);
+                        tally.triangles(hi - lo, 1);
                     }
                     base = end;
                 }
@@ -2407,7 +2408,7 @@ impl Renderer {
         let tinted_instanced =
             |pass: &mut wgpu::RenderPass<'static>, smooth: &wgpu::RenderPipeline, flat: &wgpu::RenderPipeline, list: &[InstancedDraw]| {
                 for d in list.iter().filter(|d| d.look == InstanceLook::Opaque) {
-                    d.draw(pass, smooth, flat);
+                    d.draw(pass, smooth, flat, tally);
                 }
             };
         let sectioned = cb.clip[..3].iter().map(|c| c * c).sum::<f32>() > 0.25;
