@@ -87,7 +87,7 @@ impl Layout {
     }
 }
 
-pub(crate) fn fit_bounds(mut cam: Camera, bounds: &Aabb3, layout: &Layout, perspective: bool) -> Option<Camera> {
+pub(crate) fn fit_bounds(mut cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64) -> Option<Camera> {
     if bounds.is_empty()
         || !bounds.min.is_finite()
         || !bounds.max.is_finite()
@@ -99,7 +99,7 @@ pub(crate) fn fit_bounds(mut cam: Camera, bounds: &Aabb3, layout: &Layout, persp
         return None;
     }
     let original_fov = cam.fov;
-    cam.fov = if perspective { 0.6 } else { 0.0 };
+    cam.fov = fov;
     let (r, u, b) = cam.basis();
     let centre = bounds.center();
     let mut hx: f64 = 0.0;
@@ -120,8 +120,9 @@ pub(crate) fn fit_bounds(mut cam: Camera, bounds: &Aabb3, layout: &Layout, persp
     let h = f64::from(layout.viewport.height());
     let hh = (hx * h / f64::from(layout.drawable.width())).max(hy * h / f64::from(layout.drawable.height())).max(0.5);
     let offset = layout.drawable.center() - layout.viewport.center();
-    let tangent = if perspective { (0.3_f64).tan() } else { 0.4 };
-    cam.distance = hh / tangent + if perspective { depth } else { 0.0 };
+    // The view's half height per millimetre of distance, at the angle it is drawn with.
+    let tangent = Camera { distance: 1.0, ..cam }.half_height();
+    cam.distance = hh / tangent + if fov > 0.0 { depth } else { 0.0 };
     // Offset the target so the model projects into the free rectangle in the original viewport.
     // Perspective needs a bounded correction because corners have different depths.
     for _ in 0..16 {

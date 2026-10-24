@@ -1370,6 +1370,7 @@
   "prefs.orbit_snap": "Hold Shift during orbit to snap to an axis.",
   "prefs.orientation": "Orientation",
   "prefs.overall_speed": "Overall speed",
+  "prefs.perspective_fov": "Field of view",
   "prefs.preview_choices": "Preview of your choices",
   "prefs.quality_default": "default",
   "prefs.quality_fastest": "fastest",

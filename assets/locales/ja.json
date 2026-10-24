@@ -1370,6 +1370,7 @@
   "prefs.orbit_snap": "回転中にShiftを押すと軸にスナップします。",
   "prefs.orientation": "方向",
   "prefs.overall_speed": "全体の速度",
+  "prefs.perspective_fov": "画角",
   "prefs.preview_choices": "選択した設定のプレビュー",
   "prefs.quality_default": "既定",
   "prefs.quality_fastest": "最速",

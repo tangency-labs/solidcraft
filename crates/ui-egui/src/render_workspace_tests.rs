@@ -577,6 +577,7 @@ fn clicked_render_workspace_saves_one_setup_and_restores_design_view() {
     for language in ["en", "de", "ko", "ru"] {
         let mut h = Harness::new();
         h.app.preferences.language = language.into();
+        h.app.preferences.perspective_fov = 50f64.to_radians();
         h.app.run("solid.box", json!({"length":10,"width":20,"height":5})).unwrap();
         h.app.session.mark_saved();
         h.frames(3);
@@ -594,6 +595,7 @@ fn clicked_render_workspace_saves_one_setup_and_restores_design_view() {
         assert!(h.widget(&heading).is_some(), "{language}");
         h.step(&json!({"click":{"handle":"render:page:camera"}})).unwrap();
         h.step(&json!({"widget":perspective})).unwrap();
+        assert_eq!(h.app.cam.fov, 50f64.to_radians(), "{language}: Perspective takes the Field of view preference's angle (#5364)");
         assert!(!h.app.session.is_dirty(), "preview edits are staged");
         h.step(&json!({"widget":save})).unwrap();
         assert_eq!(h.app.session.undo.len(), undo + 1);
@@ -2780,4 +2782,29 @@ fn missing_linear_master_is_never_reconstructed_from_a_finished_png() {
     assert!(h.app.session.execute("render.export", &json!({"job":id,"path":temp,"format":"exr"})).is_err());
     assert!(!temp.exists());
     assert_eq!(h.app.session.render_job_handle(id).unwrap().frame().unwrap().unwrap().png(), bytes);
+}
+
+/// The Field of view preference (#5364) rescales the design view only: navigating the result image
+/// turns Perspective view off and on around it without a rescale, and an angle changed while Render
+/// is open leaves Render's camera alone and reaches the design view when it's back.
+#[test]
+fn the_field_of_view_rescales_only_the_design_view() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":20,"height":5})).unwrap();
+    h.call("ui.set", json!({"perspective": true}));
+    h.frames(3);
+    let design = h.app.cam;
+    let size = |cam: Camera, fov: f64| Camera { fov, ..cam }.half_height();
+    enter(&mut h.app, true).unwrap();
+    h.frames(2);
+    with_result_camera(&mut h.app, |app| app.cam.distance *= 1.0);
+    h.frames(2);
+    let render = h.app.cam;
+    h.call("ui.prefs", json!({"perspective_fov": 1.2}));
+    h.frames(2);
+    assert_eq!(h.app.cam, render, "Render's camera is its own");
+    enter(&mut h.app, false).unwrap();
+    h.frames(2);
+    assert!(h.app.ui.perspective);
+    assert!((size(h.app.cam, 1.2) / size(design, 0.6) - 1.0).abs() < 1e-9, "the design view keeps its size: {:?}", h.app.cam);
 }

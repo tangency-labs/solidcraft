@@ -45,7 +45,7 @@ use std::sync::mpsc::Sender;
 
 use serde_json::{Value, json};
 use solidcraft_engine::io::vfs;
-use solidcraft_engine::render::StandardView;
+use solidcraft_engine::render::{Camera, StandardView};
 use solidcraft_engine::timing;
 
 use crate::SolveApp;
@@ -886,7 +886,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
 
 /// `ui.camera`: the viewport's orbit camera (`target`, `yaw`, `pitch`, `roll` in radians,
 /// `distance` in mm, `fov`, `up`), or a new one. A field left out keeps its value, so a reply
-/// passed back sets the same view again. `fit`: frame the listed occurrences (ids or names;
+/// passed back sets the same view again. `fov` is the angle the window draws with (see [`drawn`]). `fit`: frame the listed occurrences (ids or names;
 /// `root`: the bodies outside every component), or everything (`true`), keeping the direction;
 /// `false` frames nothing.
 /// Nothing changes when a field is refused.
@@ -900,10 +900,10 @@ fn camera(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     if let Some(k) = o.keys().find(|k| !FIELDS.contains(&k.as_str())) {
         return Err(format!("unknown camera field `{k}` (it takes {})", FIELDS.join(", ")));
     }
-    let mut cam = app.cam;
+    let mut cam = drawn(app);
     let sets = o.keys().any(|k| k != "fit");
     if sets {
-        let mut v = serde_json::to_value(app.cam).map_err(|e| e.to_string())?;
+        let mut v = serde_json::to_value(cam).map_err(|e| e.to_string())?;
         for (k, x) in o.iter().filter(|(k, _)| *k != "fit") {
             v[k] = x.clone();
         }
@@ -915,10 +915,11 @@ fn camera(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
         // Straight up or down keeps a heading, as the standard views do.
         let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
         cam.pitch = cam.pitch.clamp(-lim, lim);
-        // Perspective and the up axis are settings the camera follows, not its own.
-        if cam.fov != app.cam.fov {
-            return Err("`fov` follows the perspective setting (ui.set {perspective})".into());
+        // Perspective, its angle and the up axis are settings the camera follows, not its own.
+        if cam.fov != drawn(app).fov {
+            return Err("`fov` follows Perspective view (ui.set {perspective}) and its angle (ui.prefs {perspective_fov})".into());
         }
+        cam.fov = app.cam.fov;
         if cam.up != app.cam.up {
             return Err("`up` follows the up axis preference (ui.prefs {up_axis})".into());
         }
@@ -941,7 +942,7 @@ fn camera(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     };
     // A read leaves a view change that is animating alone.
     if !sets && fit.is_none() {
-        return serde_json::to_value(app.cam).map_err(|e| e.to_string());
+        return serde_json::to_value(drawn(app)).map_err(|e| e.to_string());
     }
     app.cancel_view_animation();
     app.viewport.orbit_free = None;
@@ -951,7 +952,17 @@ fn camera(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
         Some(Some(b)) => app.fit_bounds(b),
         None => {}
     }
-    serde_json::to_value(app.cam).map_err(|e| e.to_string())
+    serde_json::to_value(drawn(app)).map_err(|e| e.to_string())
+}
+
+/// The camera as the window draws it: with the view's angle ([`SolveApp::view_fov`]), or in Render
+/// with the Render camera's own.
+fn drawn(app: &SolveApp) -> Camera {
+    let mut cam = app.cam;
+    if !crate::render_workspace::active(app) {
+        cam.fov = app.view_fov();
+    }
+    cam
 }
 
 /// An occurrence by id or name (or a component's name: its first occurrence); 0 is the root.
@@ -1535,6 +1546,25 @@ mod tests {
         let before = empty.app.cam;
         let r = empty.call("ui.camera", json!({"yaw": 1, "fit": true}));
         assert!(r["ok"] == false && empty.app.cam == before, "{r}");
+    }
+
+    /// With Perspective view on, `ui.camera` reports the angle the window draws with (#5364) and
+    /// its reply replays; another angle is refused, naming the preference. A sketch draws parallel.
+    #[test]
+    fn ui_camera_reports_the_drawn_angle_and_its_reply_replays() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"perspective": true}));
+        h.call("ui.prefs", json!({"perspective_fov": 1.0}));
+        let read = h.call("ui.camera", Value::Null);
+        assert_eq!(read["result"]["fov"], json!(1.0), "{read}");
+        let stored = h.app.cam.fov;
+        let again = h.call("ui.camera", read["result"].clone());
+        assert_eq!(again["result"], read["result"], "the reply replays");
+        assert_eq!(h.app.cam.fov, stored, "the camera's own angle is left as it was");
+        let refused = h.call("ui.camera", json!({"fov": 0.6}));
+        assert!(refused["ok"] == false && refused["error"].as_str().unwrap().contains("ui.prefs {perspective_fov}"), "{refused}");
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        assert_eq!(h.call("ui.camera", Value::Null)["result"]["fov"], json!(0.0), "a sketch draws parallel");
     }
 
     /// `ui.start` params set what a dialog opens on: Drive Joints on a joint (by name or id) at

@@ -1370,6 +1370,7 @@
   "prefs.orbit_snap": "旋转时按住Shift可捕捉到坐标轴。",
   "prefs.orientation": "方向",
   "prefs.overall_speed": "整体速度",
+  "prefs.perspective_fov": "视场角",
   "prefs.preview_choices": "所选设置预览",
   "prefs.quality_default": "默认",
   "prefs.quality_fastest": "最快",

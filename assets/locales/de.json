@@ -1141,6 +1141,7 @@
   "pick one or two vertices, edges or faces": "Wählen Sie ein oder zwei Ecken, Kanten oder Flächen",
   "prefs.cpu": "CPU (Software)",
   "prefs.minutes_suffix": " min",
+  "prefs.perspective_fov": "Sichtfeld",
   "properties.title": "Eigenschaften: {name}",
   "recovery.days_ago": "vor {count} Tagen",
   "recovery.detail": "{file} · {features} Merkmale · automatisch gespeichert {when}",
