@@ -259,6 +259,11 @@ pub struct SheetRule {
     /// Gap between flanges that meet at a corner.
     #[serde(default = "rule_gap")]
     pub gap: String,
+    /// How the bend angles of its parts read in the DXF bend notes: `bend` (how far the sheet
+    /// turns from flat) or `included` (the angle left between the bend's two sides, as a press
+    /// brake is set). A choice, not an expression; saved only when it isn't `bend`.
+    #[serde(default = "rule_angle_display", skip_serializing_if = "is_bend_display")]
+    pub angle_display: String,
 }
 
 impl SheetRule {
@@ -311,6 +316,14 @@ fn rule_corner_relief_shape() -> String {
 fn rule_hem_gap() -> String {
     "0.01 mm".into()
 }
+fn rule_angle_display() -> String {
+    AngleDisplay::Bend.name().into()
+}
+/// A rule that reads bend angles as bend angles leaves the setting out of the design, which
+/// then saves as it did before the setting existed.
+fn is_bend_display(s: &str) -> bool {
+    AngleDisplay::parse(s) == Some(AngleDisplay::Bend)
+}
 
 impl SheetRule {
     /// Default: Steel (mm), 2.5 mm, K 0.44, bend radius = Thickness.
@@ -326,6 +339,7 @@ impl SheetRule {
             corner_relief_shape: rule_corner_relief_shape(),
             hem_gap: rule_hem_gap(),
             gap: rule_gap(),
+            angle_display: rule_angle_display(),
         }
     }
 }
@@ -384,6 +398,48 @@ impl ReliefShape {
     }
 }
 
+/// How a rule's bend angles read in the DXF bend notes (a rule's `angle_display`). The bend
+/// table gives both angles, and a flange's `angle` is always the bend angle.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AngleDisplay {
+    /// How far the sheet turns from flat: a flange at 58° reads 58°.
+    #[default]
+    Bend,
+    /// The angle left between the bend's two sides, 180° less the bend angle: a 58° bend reads
+    /// 122°, a 90° bend 90°.
+    Included,
+}
+
+impl AngleDisplay {
+    pub fn parse(s: &str) -> Option<AngleDisplay> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "bend" => Some(AngleDisplay::Bend),
+            "included" => Some(AngleDisplay::Included),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            AngleDisplay::Bend => "bend",
+            AngleDisplay::Included => "included",
+        }
+    }
+
+    pub fn is_bend(&self) -> bool {
+        *self == AngleDisplay::Bend
+    }
+
+    /// A bend of `bend_deg` degrees as this display reads it.
+    pub fn of(self, bend_deg: f64) -> f64 {
+        match self {
+            AngleDisplay::Bend => bend_deg,
+            AngleDisplay::Included => 180.0 - bend_deg,
+        }
+    }
+}
+
 /// The corner relief an edge flange feature asks for in place of the rule's. A value left out
 /// follows the rule.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -405,6 +461,7 @@ pub struct RuleValues {
     pub corner_relief_shape: ReliefShape,
     pub hem_gap: f64,
     pub gap: f64,
+    pub angle_display: AngleDisplay,
 }
 
 impl Document {
@@ -440,6 +497,8 @@ impl Document {
             })?,
             hem_gap: with_t(&r.hem_gap, Kind::Length)?,
             gap: with_t(&r.gap, Kind::Length)?,
+            angle_display: AngleDisplay::parse(&r.angle_display)
+                .ok_or_else(|| DocError::Invalid(format!("unknown bend angle display `{}` (bend or included)", r.angle_display)))?,
         };
         if !(0.0..=1.0).contains(&v.k_factor) || v.bend_radius < 0.0 {
             return Err(DocError::Invalid("the K-factor must be 0…1 and the bend radius positive".into()));
@@ -541,6 +600,9 @@ pub struct SheetBody {
     /// The rule's bend relief (`relief_width`, `relief_depth`), cut into the base where a
     /// flange's bend ends beside more of the base.
     pub bend_relief: (f64, f64),
+    /// How the DXF bend notes read its bend angles (the rule's `angle_display`).
+    #[serde(default, skip_serializing_if = "AngleDisplay::is_bend")]
+    pub angle_display: AngleDisplay,
     /// The base sketch's lines (id, ends in flat coordinates), naming the base panel's edges.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub base_curves: Vec<(String, Vec2, Vec2)>,
@@ -683,6 +745,13 @@ pub struct BendInfo {
     /// Centre line in flat coordinates.
     pub start: Vec2,
     pub end: Vec2,
+}
+
+impl BendInfo {
+    /// The angle left between the bend's two sides (degrees): 180° less `angle_deg`.
+    pub fn included_angle_deg(&self) -> f64 {
+        AngleDisplay::Included.of(self.angle_deg)
+    }
 }
 
 fn rot_about(o: Vec3, k: Vec3, a: f64) -> Mat {
@@ -4515,6 +4584,7 @@ pub fn base_flange(body: &str, rule: &str, rv: &RuleValues, plane: Plane, region
         relief: rv.corner_relief_shape,
         relief_size: rv.corner_relief,
         bend_relief: (rv.relief_width, rv.relief_depth),
+        angle_display: rv.angle_display,
         base_curves: Vec::new(),
         altered_by: None,
     }
@@ -4574,6 +4644,7 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
         relief: rv.corner_relief_shape,
         relief_size: rv.corner_relief,
         bend_relief: (rv.relief_width, rv.relief_depth),
+        angle_display: rv.angle_display,
         base_curves: Vec::new(),
         altered_by: None,
     };
@@ -4699,6 +4770,7 @@ mod tests {
             corner_relief_shape: ReliefShape::Notch,
             hem_gap: 0.01,
             gap: 2.5,
+            angle_display: AngleDisplay::Bend,
         }
     }
 
@@ -5251,6 +5323,7 @@ mod tests {
             corner_relief_shape: ReliefShape::Notch,
             hem_gap: 0.01,
             gap: 2.0,
+            angle_display: AngleDisplay::Bend,
         };
         let r = rect(Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 80.0), Vec2::new(0.0, 80.0));
         let mut s = base_flange("Body1", "AL2", &rule, Plane::XY, r);
@@ -5346,6 +5419,7 @@ mod tests {
             corner_relief_shape: ReliefShape::Notch,
             hem_gap: 0.01,
             gap: 0.5,
+            angle_display: AngleDisplay::Bend,
         }
     }
 
@@ -5591,6 +5665,49 @@ mod tests {
             let err = doc.rule_values(&vals, &SheetRule { corner_relief_shape: text.into(), ..old.clone() }).unwrap_err().to_string();
             assert!(err.contains(&format!("unknown corner relief shape `{text}` (notch, round, rectangular or tear)")), "{err}");
         }
+    }
+
+    #[test]
+    fn the_rule_names_how_its_bend_angles_read() {
+        // A rule saved before the setting existed reads bend angles, and saves as it did.
+        let old: SheetRule = serde_json::from_str(r#"{"name":"Old","thickness":"2 mm","k_factor":"0.5","bend_radius":"1 mm"}"#).unwrap();
+        assert_eq!(old.angle_display, "bend");
+        assert_eq!(SheetRule::steel().angle_display, "bend");
+        assert!(serde_json::to_value(&old).unwrap().get("angle_display").is_none());
+        let (doc, vals) = (Document::default(), std::collections::BTreeMap::new());
+        assert_eq!(doc.rule_values(&vals, &old).unwrap().angle_display, AngleDisplay::Bend);
+        for (text, display) in [("included", AngleDisplay::Included), (" Included ", AngleDisplay::Included), ("BEND", AngleDisplay::Bend)] {
+            let rule = SheetRule { angle_display: text.into(), ..old.clone() };
+            assert_eq!(doc.rule_values(&vals, &rule).unwrap().angle_display, display);
+            assert_eq!(AngleDisplay::parse(display.name()), Some(display));
+        }
+        // An included rule is saved with the setting and read back the same.
+        let included = SheetRule { angle_display: "included".into(), ..old.clone() };
+        let saved = serde_json::to_value(&included).unwrap();
+        assert_eq!(saved["angle_display"], "included");
+        assert_eq!(serde_json::from_value::<SheetRule>(saved).unwrap(), included);
+        // No other word is a display.
+        for text in ["deflection", "inside", ""] {
+            let err = doc.rule_values(&vals, &SheetRule { angle_display: text.into(), ..old.clone() }).unwrap_err().to_string();
+            assert!(err.contains(&format!("unknown bend angle display `{text}` (bend or included)")), "{err}");
+        }
+    }
+
+    /// The included angle is what a bend leaves between its sides: 180° less the bend angle, so a
+    /// 90° bend reads the same both ways. A body keeps its rule's display.
+    #[test]
+    fn the_included_angle_is_180_less_the_bend_angle() {
+        for (deg, included) in [(58.0, 122.0), (90.0, 90.0), (120.0, 60.0)] {
+            let bends = flanged(f64::to_radians(deg)).bends();
+            assert_eq!(bends.len(), 1);
+            assert!((bends[0].angle_deg - deg).abs() < 1e-9 && (bends[0].included_angle_deg() - included).abs() < 1e-9, "{bends:?}");
+            assert!((AngleDisplay::Bend.of(bends[0].angle_deg) - deg).abs() < 1e-9);
+            assert!((AngleDisplay::Included.of(bends[0].angle_deg) - included).abs() < 1e-9);
+        }
+        let r = rect(Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 80.0), Vec2::new(0.0, 80.0));
+        assert_eq!(base_flange("Body1", "Steel", &steel(), Plane::XY, r.clone()).angle_display, AngleDisplay::Bend);
+        let shop = RuleValues { angle_display: AngleDisplay::Included, ..steel() };
+        assert_eq!(base_flange("Body1", "Shop", &shop, Plane::XY, r).angle_display, AngleDisplay::Included);
     }
 
     #[test]

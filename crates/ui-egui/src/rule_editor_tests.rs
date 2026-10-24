@@ -13,6 +13,7 @@ const SHEET_ROWS: &[&str] = &[
     "Corner Relief",
     "Hem Gap",
     "Flange Gap",
+    "Angle Display",
     "Active rule",
 ];
 const PLASTIC_ROWS: &[&str] = &[
@@ -65,7 +66,7 @@ fn sheet_rule_editor_contract() {
     let (mut kind, _) = crate::dialogs_sheet::start(&app, "sheet.manage_rules").unwrap();
     frame(&mut app, &ctx, &mut kind, SHEET_ROWS);
     let mut expected = json!({"name":"Steel (mm)","active":true,"corner_relief_shape":"notch","thickness":"2.5 mm","k_factor":"0.44",
-        "bend_radius":"Thickness","relief_width":"Thickness","relief_depth":"Thickness * 0.5","corner_relief":"Thickness * 4.0","hem_gap":"0.01 mm","gap":"Thickness"});
+        "bend_radius":"Thickness","relief_width":"Thickness","relief_depth":"Thickness * 0.5","corner_relief":"Thickness * 4.0","hem_gap":"0.01 mm","gap":"Thickness","angle_display":"bend"});
     assert_eq!(commands(&app, &kind), vec![("sheet.manage_rules".into(), expected.clone())]);
     let Kind::Sheet(Sm::Rules { pick, values, relief, .. }) = &mut kind else { panic!() };
     *pick = 1;

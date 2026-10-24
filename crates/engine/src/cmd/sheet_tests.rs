@@ -1296,7 +1296,12 @@ fn the_bend_table_and_the_dxf_follow_what_flat_cuts_leave_of_a_bend() {
     let csv = run(&mut s, "sheet.export_bend_table", json!({}));
     let text = csv["text"].as_str().unwrap_or_default();
     assert_eq!((text.lines().count(), csv["bends"].as_u64()), (2, Some(1)), "{text}");
-    assert!(text.lines().nth(1).is_some_and(|l| l.contains(",1,90.000000000,up,1.000000000,3.141592654,100.000000000,100.000000000,")), "{text}");
+    assert!(
+        text.lines()
+            .nth(1)
+            .is_some_and(|l| l.contains(",1,90.000000000,up,1.000000000,3.141592654,100.000000000,100.000000000,") && l.ends_with(",90.000000000")),
+        "{text}"
+    );
     // A slot across what is left splits the bend: a row and a line for each piece, both bend 1.
     run(&mut s, "sheet.unfold", json!({}));
     rectangle_tool(&mut s, "Slot", [140.0, -20.0], [160.0, 10.0]);
@@ -1598,6 +1603,8 @@ fn bend_table_exports_shop_dimensions_and_tracks_parameter_changes() {
     let csv = run(&mut s, "sheet.export_bend_table", json!({}));
     let text = csv["text"].as_str().unwrap();
     assert!(text.starts_with("body,rule,thickness_mm,k_factor,bend,angle_deg,direction,"));
+    // The included angle comes last, so a reader that takes the columns by position is unaffected.
+    assert!(text.lines().next().is_some_and(|h| h.ends_with(",end_y_mm,included_angle_deg")), "{text}");
     assert!(text.contains("\"Shop, \"\"steel\"\"\""), "{text}");
     assert_eq!(text.lines().count(), 2);
     assert_eq!(csv["bends"], 1);
@@ -1615,6 +1622,103 @@ fn bend_table_exports_shop_dimensions_and_tracks_parameter_changes() {
     assert!(s.execute("sheet.export_bend_table", &json!({"body": "Missing"})).is_err());
     let mut empty = Session::default();
     assert!(empty.execute("sheet.export_bend_table", &json!({})).is_err());
+}
+
+/// A 100 x 60 base of the 2 mm rule `Shop` (R 1, K 0.5, its `angle_display` as given; none leaves
+/// it out) with a 20 mm edge flange at `deg` on its y = 0 edge.
+fn shop_bend(deg: f64, display: Option<&str>) -> Session {
+    let mut s = Session::default();
+    let mut rule = json!({"name": "Shop", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "active": true});
+    if let Some(d) = display {
+        rule["angle_display"] = json!(d);
+    }
+    run(&mut s, "sheet.manage_rules", rule);
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": format!("{deg} deg")}));
+    s
+}
+
+/// The DXF bend notes of the last sheet body.
+fn bend_notes(s: &mut Session) -> Vec<String> {
+    let dxf = run(s, "sheet.export_dxf", json!({"bend_notes": true}))["dxf"].as_str().unwrap_or_default().to_string();
+    dxf.lines().map(str::trim).filter(|l| l.starts_with('B') && l.contains("%%d")).map(str::to_string).collect()
+}
+
+#[test]
+fn the_bend_table_gives_the_included_angle_beside_the_bend_angle() {
+    // 180° less the bend angle whatever the rule shows: a 58° bend leaves 122°, a 90° one 90°.
+    for (deg, included) in [(58.0, 122.0), (90.0, 90.0)] {
+        for display in [None, Some("bend"), Some("included")] {
+            let mut s = shop_bend(deg, display);
+            let csv = run(&mut s, "sheet.export_bend_table", json!({}));
+            let text = csv["text"].as_str().unwrap_or_default();
+            let mut lines = text.lines();
+            let header: Vec<&str> = lines.next().unwrap_or_default().split(',').collect();
+            let row: Vec<&str> = lines.next().unwrap_or_default().split(',').collect();
+            let column = |name: &str| header.iter().position(|h| *h == name);
+            assert_eq!((column("angle_deg"), column("included_angle_deg")), (Some(5), Some(14)), "{text}");
+            let (angle, inside) = (format!("{deg:.9}"), format!("{included:.9}"));
+            assert_eq!((row.get(5).copied(), row.get(14).copied()), (Some(angle.as_str()), Some(inside.as_str())), "{display:?}: {text}");
+            for format in ["json", "flat"] {
+                let table = if format == "json" {
+                    let text = run(&mut s, "sheet.export_bend_table", json!({"format": "json"}))["text"].as_str().unwrap_or_default().to_string();
+                    serde_json::from_str(&text).unwrap_or_default()
+                } else {
+                    flat(&mut s)
+                };
+                let b = &table["bends"][0];
+                let near = |k: &str, want: f64| (b[k].as_f64().unwrap_or(f64::NAN) - want).abs() < 1e-9;
+                assert!(near("angle_deg", deg) && near("included_angle_deg", included), "{format} {display:?}: {b}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_angle_display_is_a_rule_setting_checked_saved_and_undone() {
+    let mut s = shop_bend(58.0, None);
+    let display = |s: &mut Session| {
+        let r = run(s, "sheet.rules", json!({}));
+        (r["rules"][0]["rule"]["angle_display"].clone(), r["rules"][0]["values"]["angle_display"].clone())
+    };
+    assert_eq!(display(&mut s), (json!("bend"), json!("bend")));
+    assert_eq!(bend_notes(&mut s), ["B1 UP 58%%d R1"]);
+    // A design whose rules read bend angles saves as it did before the setting.
+    let before = s.doc.to_json();
+    assert!(!before.contains("angle_display"), "{before}");
+    // Only the two words are displays; a refused one changes nothing and makes no rule.
+    for wrong in [json!("deflection"), json!("press brake"), json!(""), json!(122), json!(true)] {
+        for name in ["Shop", "Other"] {
+            let e = s.execute("sheet.manage_rules", &json!({"name": name, "angle_display": wrong})).map(|_| ()).unwrap_err().to_string();
+            assert!(e.contains("`angle_display` must be bend or included"), "{e}");
+            assert_eq!(s.doc.to_json(), before, "{name}: {wrong}");
+        }
+    }
+    let undo = s.undo.len();
+    let r = run(&mut s, "sheet.manage_rules", json!({"name": "Shop", "angle_display": " Included "}));
+    assert_eq!((&r["rule"]["angle_display"], &r["values"]["angle_display"]), (&json!("included"), &json!("included")));
+    assert_eq!(bend_notes(&mut s), ["B1 UP 122%%d R1"]);
+    // Other settings leave it alone, and so does null.
+    run(&mut s, "sheet.manage_rules", json!({"name": "Shop", "hem_gap": "0.02 mm", "angle_display": null}));
+    assert_eq!(display(&mut s), (json!("included"), json!("included")));
+    // Saved with the design and read back; a design saved without it reads bend angles.
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    assert_eq!(saved["sheet"]["rules"][0]["angle_display"], "included");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    assert_eq!(display(&mut reopened).0, "included");
+    assert_eq!(bend_notes(&mut reopened), ["B1 UP 122%%d R1"]);
+    if let Some(rule) = saved["sheet"]["rules"][0].as_object_mut() {
+        rule.remove("angle_display");
+    }
+    let mut older = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    assert_eq!(display(&mut older), (json!("bend"), json!("bend")));
+    assert_eq!(bend_notes(&mut older), ["B1 UP 58%%d R1"]);
+    // Undone like the rule's other changes.
+    assert_eq!(s.undo.len(), undo + 2);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(display(&mut s).0, "bend");
+    assert_eq!(bend_notes(&mut s), ["B1 UP 58%%d R1"]);
 }
 
 #[test]

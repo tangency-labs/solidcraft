@@ -37,6 +37,10 @@ const RULE_FIELDS: [(&str, &str); 8] = [
 /// The corner relief shapes the manager offers (the rule's `corner_relief_shape`) and their labels.
 const RELIEF_SHAPES: [&str; 4] = ["notch", "round", "rectangular", "tear"];
 const RELIEF_SHAPE_LABELS: [&str; 4] = ["Notch", "Round", "Rectangular", "Tear"];
+/// How the manager's rule reads bend angles in the DXF bend notes (the rule's `angle_display`)
+/// and their labels.
+const ANGLE_DISPLAYS: [&str; 2] = ["bend", "included"];
+const ANGLE_DISPLAY_LABELS: [&str; 2] = ["Bend", "Included"];
 /// The corner relief shapes an edge flange offers: the rule's (index 0, nothing of its own), then
 /// the shapes of `RELIEF_SHAPES` in order.
 const FLANGE_RELIEF_LABELS: [&str; 5] = ["Rule", "Notch", "Round", "Rectangular", "Tear"];
@@ -90,6 +94,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 values: Vec<String>,
                 /// The corner relief shape (index into `RELIEF_SHAPES`).
                 relief: usize,
+                /// How bend angles read (index into `ANGLE_DISPLAYS`).
+                angles: usize,
                 active: bool,
                 loaded: Option<usize>,
             },
@@ -165,7 +171,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             let active = app.session.doc.sheet.active.clone();
             let rules = rule_list(app);
             let pick = active.and_then(|a| rules.iter().position(|r| r.name == a)).unwrap_or(0);
-            (Sm::Rules { pick, name: String::new(), values: Vec::new(), relief: 0, active: true, loaded: None }, vec![])
+            (Sm::Rules { pick, name: String::new(), values: Vec::new(), relief: 0, angles: 0, active: true, loaded: None }, vec![])
         }
         "sheet.flat_pattern" => (Sm::FlatPattern { data: None, key: None, status: None }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         _ => Sm::simple_start(id)?,
@@ -286,7 +292,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
         }
         Sm::Unfold { .. } => {}
         Sm::Convert { rule } => rule_combo(app, ui, "sm_conv_rule", rule),
-        Sm::Rules { pick, name, values, relief, active, loaded } => {
+        Sm::Rules { pick, name, values, relief, angles, active, loaded } => {
             let rules = rule_list(app);
             crate::rule_editor::rule_editor! {
                 ui, "sm_rules", rules, pick, name, active, loaded;
@@ -305,6 +311,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                         base.gap.clone(),
                     ];
                     *relief = RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(base.corner_relief_shape.trim())).unwrap_or(0);
+                    *angles = ANGLE_DISPLAYS.iter().position(|d| d.eq_ignore_ascii_case(base.angle_display.trim())).unwrap_or(0);
                     *active = app.session.doc.sheet_rule(None).name == base.name || *pick >= rules.len();
                 },
                 fields: {
@@ -315,6 +322,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                         }
                         enter |= expr_row(ui, label, v);
                     }
+                    choice_row(ui, "Angle Display", "sm_angle_display", angles, &ANGLE_DISPLAY_LABELS);
                 }
             }
             if *pick < rules.len()
@@ -569,11 +577,12 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             }
             ("sheet.convert", p)
         }
-        Sm::Rules { pick, name, values, relief, active, .. } => {
+        Sm::Rules { pick, name, values, relief, angles, active, .. } => {
             let rules = rule_list(app);
             let fields = RULE_FIELDS.iter().map(|(key, _)| *key).zip(values);
             let mut p = crate::rule_editor::params(rules.get(*pick).map(|r| r.name.as_str()), name, *active, fields)?;
             p["corner_relief_shape"] = json!(RELIEF_SHAPES.get(*relief).copied().unwrap_or("notch"));
+            p["angle_display"] = json!(ANGLE_DISPLAYS.get(*angles).copied().unwrap_or("bend"));
             ("sheet.manage_rules", p)
         }
         Sm::FlatPattern { .. } => return Ok(Vec::new()),

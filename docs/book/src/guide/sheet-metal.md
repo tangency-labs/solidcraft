@@ -210,8 +210,10 @@ computing a point on a face with holes or a curved outline: `model.faces` gives 
 
 For a shop drawing or spreadsheet, `sheet.export_bend_table` returns CSV by default; choose
 `format: "json"` for structured data. It includes the sheet rule, thickness, bend angles,
-radii, allowances and flat centre-line coordinates. Lengths use millimetres and angles use
-degrees. A bend is listed where its centre line has material: one that a cut-out has shortened
+radii, allowances and flat centre-line coordinates. Each bend has its bend angle (`angle_deg`)
+and its included angle (`included_angle_deg`, below; the CSV's last column, so the columns before
+it keep their places). Lengths use millimetres and
+angles use degrees. A bend is listed where its centre line has material: one that a cut-out has shortened
 gives the length and ends it has left, and one that cut-outs split gives a row for every piece,
 all with the bend's number (the flat pattern and the DXF draw the same pieces as bend lines).
 Supply `path` to save it, or omit `path` to receive the content through the command
@@ -263,6 +265,23 @@ high (`"note_height"` changes that), centred half a height beside the middle of 
 parallel to it and readable from below or from the right. A bend that cut-outs split has a note
 for each piece. Notes are off by default, because a program that cuts or marks every layer would
 mark them.
+
+A bend's angle is how far the sheet turns from flat. Many press brakes are set by the
+**included angle** instead: the angle left between the bend's two sides, 180° less the bend
+angle. A 90° bend is 90° either way, but a 58° bend is set as 122°. The rule's `angle_display`
+(Angle Display in Sheet Metal Rules) says which one the DXF's bend notes give: `bend` (Bend,
+the default) or `included` (Included). Under an `included` rule the note of a 58°
+bend reads `B1 UP 122° R1`. The bend table gives both angles whatever the rule says, in columns
+of their own (`angle_deg` and `included_angle_deg`), so neither is taken for the other. The
+setting does not change the flange angle yet: `angle` in `sheet.flange` and in the Flange dialog
+is always the bend angle, so a 122° included angle is a flange at `180 deg - 122 deg`. A design
+keeps the setting in its rule, so templates made from it read their bends the same way.
+
+```json
+{"command":"sheet.manage_rules","params":{"name":"Sheet 2 mm","angle_display":"included"}}
+{"command":"sheet.flange","params":{"edges":[[50,0,2]],"height":20,"angle":"180 deg - 122 deg"}}
+{"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf","bend_notes":true}}
+```
 
 A design with several sheet bodies exports one file for each with `"per_body": true`: the files
 are `<path>-<body>.dxf` (characters a file name cannot hold become `_`; two bodies that would
