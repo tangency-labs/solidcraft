@@ -5,8 +5,6 @@ Every platform and package. The links point at the latest release.
 - **Windows:** download and run the [installer][windows-msi].
   Also for [ARM64][windows-arm64-msi] and [32-bit][windows-x86-msi] PCs, or as a
   [portable zip][windows-portable] that runs without installing.
-  With [WinGet](https://learn.microsoft.com/windows/package-manager/winget/):
-  `winget install bherbruck.SolidCraft`.
 - **macOS:** open the [disk image][macos-dmg] and drag SolidCraft into Applications
   (Apple silicon and Intel).
 - **Linux:** download the [AppImage][linux-appimage], allow it to run as a program and open it.

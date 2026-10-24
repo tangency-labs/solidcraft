@@ -52,7 +52,7 @@
 
 ## Download
 
-- **Windows:** the [installer][windows-msi], or `winget install bherbruck.SolidCraft`.
+- **Windows:** the [installer][windows-msi].
 - **macOS:** the [disk image][macos-dmg] (Apple silicon and Intel).
 - **Linux:** the [AppImage][linux-appimage], or `sudo snap install solidcraft` ([Snap Store][snap-store]).
 - **Web:** [try it in your browser][web-app], no install.
