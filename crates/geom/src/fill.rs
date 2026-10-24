@@ -1087,4 +1087,99 @@ mod tests {
         assert!(fill_loop(6, &mut lifted(&hex, &dome), 2e-5, MAX_CROWN).is_ok());
         assert!(fill_loop(6, &mut lifted(&hex, &dome), 2e-5, MIN_CROWN).is_ok());
     }
+
+    /// A 10 × 10 square in the plane, counter-clockwise, and the same square the other way
+    /// round: a point is inside or outside the loop, whichever way the loop is written.
+    fn square() -> ([[f64; 2]; 4], [[f64; 2]; 4]) {
+        let ccw = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+        (ccw, [ccw[3], ccw[2], ccw[1], ccw[0]])
+    }
+
+    #[test]
+    fn inside_loop_tells_inside_from_outside() {
+        let (ccw, cw) = square();
+        for (p, want) in [
+            ([5.0, 5.0], true),
+            ([1.0, 9.0], true),
+            ([0.5, 0.5], true),
+            ([9.9, 9.9], true),
+            ([15.0, 5.0], false),
+            ([-0.5, 5.0], false),
+            ([5.0, 12.0], false),
+            ([5.0, -1.0], false),
+        ] {
+            assert_eq!(inside_loop(p, &ccw), want, "the point {p:?} in the square");
+            assert_eq!(inside_loop(p, &cw), want, "the point {p:?} in the square the other way round");
+        }
+    }
+
+    /// The ray-casting rule of [`inside_loop`], which the boundary points follow: the ray goes
+    /// from the point towards `+x` and counts the boundary crossings strictly to the right of
+    /// the point. An edge is a crossing only when the point's height lies in the edge's
+    /// half-open range `[min y, max y)` (the lower end of the edge counts, the upper end does
+    /// not), and the edge the point itself lies on never counts, because a crossing has to be
+    /// strictly to the right of the point.
+    ///
+    /// So a point on the bottom edge or on the left edge of the square has one crossing to its
+    /// right (the opposite edge) and counts as inside; a point on the top edge or on the right
+    /// edge has none and counts as outside; and of the four corners only the bottom-left one,
+    /// whose height is at the lower end of the two edges it lies on, counts as inside.
+    #[test]
+    fn inside_loop_resolves_the_boundary_by_the_ray_casting_rule() {
+        let (ccw, cw) = square();
+        for (p, want) in [
+            ([5.0, 0.0], true),
+            ([0.0, 5.0], true),
+            ([5.0, 10.0], false),
+            ([10.0, 5.0], false),
+            ([0.0, 0.0], true),
+            ([10.0, 0.0], false),
+            ([10.0, 10.0], false),
+            ([0.0, 10.0], false),
+        ] {
+            assert_eq!(inside_loop(p, &ccw), want, "the point {p:?} on the boundary of the square");
+            assert_eq!(inside_loop(p, &cw), want, "the point {p:?} on the boundary, the other way round");
+        }
+    }
+
+    #[test]
+    fn inside_loop_finds_the_notch_of_a_non_convex_loop() {
+        // An L: a 10 × 10 square with its 6 × 6 top-right corner cut away. The body is the two
+        // legs, the notch is what was cut away.
+        let l = [[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [4.0, 4.0], [4.0, 10.0], [0.0, 10.0]];
+        let back = [l[5], l[4], l[3], l[2], l[1], l[0]];
+        for p in [[2.0, 2.0], [1.0, 1.0], [2.0, 8.0], [8.0, 2.0]] {
+            assert!(inside_loop(p, &l), "the point {p:?} is in the body of the L");
+            assert!(inside_loop(p, &back), "the point {p:?} is in the body of the L the other way round");
+        }
+        for p in [[7.0, 7.0], [8.0, 8.0], [6.0, 9.0]] {
+            assert!(!inside_loop(p, &l), "the point {p:?} is in the notch of the L");
+            assert!(!inside_loop(p, &back), "the point {p:?} is in the notch of the L the other way round");
+        }
+    }
+
+    #[test]
+    fn segments_meet_finds_crossings_and_shared_endpoints() {
+        // Crossing in the middle.
+        assert!(segments_meet([0.0, 0.0], [10.0, 10.0], [0.0, 10.0], [10.0, 0.0]));
+        // Apart: parallel segments, and segments that would cross beyond their ends.
+        assert!(!segments_meet([0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 2.0]));
+        assert!(!segments_meet([0.0, 0.0], [10.0, 0.0], [5.0, 1.0], [15.0, 1.0]));
+        // One endpoint in common: a corner, and the end of one on the middle of the other.
+        assert!(segments_meet([0.0, 0.0], [10.0, 0.0], [10.0, 0.0], [10.0, 10.0]));
+        assert!(segments_meet([0.0, 0.0], [10.0, 0.0], [5.0, 0.0], [5.0, 5.0]));
+        // A segment of no length is a point: it meets the segment it lies on, and nothing else.
+        assert!(segments_meet([5.0, 0.0], [5.0, 0.0], [0.0, 0.0], [10.0, 0.0]));
+        assert!(!segments_meet([5.0, 5.0], [5.0, 5.0], [0.0, 0.0], [10.0, 0.0]));
+    }
+
+    #[test]
+    fn segments_meet_tells_collinear_overlap_from_collinear_gap() {
+        // Collinear and overlapping, at either end.
+        assert!(segments_meet([0.0, 0.0], [10.0, 0.0], [5.0, 0.0], [15.0, 0.0]));
+        assert!(segments_meet([0.0, 0.0], [10.0, 0.0], [-5.0, 0.0], [5.0, 0.0]));
+        // Collinear and apart.
+        assert!(!segments_meet([0.0, 0.0], [10.0, 0.0], [12.0, 0.0], [20.0, 0.0]));
+        assert!(!segments_meet([0.0, 0.0], [10.0, 0.0], [-20.0, 0.0], [-12.0, 0.0]));
+    }
 }
