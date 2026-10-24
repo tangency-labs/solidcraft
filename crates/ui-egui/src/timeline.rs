@@ -456,7 +456,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     icon,
                     name,
                     kind: ty,
-                    selected: sel || (floating && marker > 0 && i == marker - 1),
+                    selected: sel,
                     hovered: resp.hovered() || from_view == Some(*id),
                     dim: rolled,
                     suppressed: *suppressed,
@@ -466,6 +466,9 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     accent: if drag == Some(Drag::Feature(*id)) { crate::theme::TabAccent::for_tab(&t, "SKETCH") } else { accent },
                 }
                 .paint(&p, br, crate::ui_kit::HistoryStyle::Bottom);
+                if floating && marker > 0 && i == marker - 1 {
+                    p.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, accent.color);
+                }
                 let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
                 if let Some(r) = res {
                     tip += &format!("\n{:.1} ms", r.ms);
@@ -1051,31 +1054,49 @@ mod tests {
         h.app.ui.tab = "SURFACE".into();
         let t = crate::theme::Tokens::get();
         let accent = crate::theme::TabAccent::for_tab(&t, "SURFACE");
-        let ctx = crate::fonts::test_context();
-        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::timeline(&mut h.app, ui));
-        out.textures_delta.clear();
-        let texts: Vec<_> = out
-            .shapes
-            .iter()
-            .filter_map(|s| match &s.shape {
-                egui::Shape::Text(text) => Some(text.galley.text()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(texts, ["History"]);
-        let chips: Vec<_> = out
-            .shapes
-            .iter()
-            .filter_map(|s| match &s.shape {
-                egui::Shape::Rect(r) if r.rect.size() == egui::vec2(28.0, 28.0) => Some(r),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(chips.len(), 2);
-        assert_eq!(chips.last().unwrap().fill, accent.soft);
-        assert_eq!(chips.last().unwrap().stroke.color, accent.color);
-        let marker = crate::scenario::rect_of("history:marker").unwrap();
-        assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c)
-            if marker.contains(c.center) && c.fill == t.timeline && c.stroke == egui::Stroke::new(t.space_2, accent.color))));
+        for marker_position in [None, Some(1), Some(0)] {
+            h.app.session.doc_mut().marker = marker_position;
+            let marker_index = marker_position.unwrap_or(2);
+            for selected in [None, Some(0), Some(1)] {
+                h.app.session.selection =
+                    selected.map(|i| solidcraft_engine::Sel::Feature { id: h.app.session.doc.features[i].id }).into_iter().collect();
+                let ctx = crate::fonts::test_context();
+                let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::timeline(&mut h.app, ui));
+                out.textures_delta.clear();
+                let texts: Vec<_> = out
+                    .shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Text(text) => Some(text.galley.text()),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(texts, ["History"]);
+                let chips: Vec<_> = out
+                    .shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Rect(r) if r.rect.size() == egui::vec2(28.0, 28.0) => Some(r),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(chips.len(), 2);
+                for (i, chip) in chips.iter().enumerate() {
+                    let opacity = if i >= marker_index { 0.42 } else { 1.0 };
+                    let (fill, edge) = if selected == Some(i) { (accent.soft, accent.color) } else { (t.timeline_item, t.border) };
+                    assert_eq!(chip.fill, fill.gamma_multiply(opacity), "marker={marker_position:?}, selected={selected:?}, chip={i}");
+                    assert_eq!(chip.stroke.color, edge.gamma_multiply(opacity));
+                    let dot_center = egui::pos2(chip.rect.center().x, chip.rect.bottom() + t.space_3);
+                    let has_dot = out.shapes.iter().any(|s| {
+                        matches!(&s.shape, egui::Shape::Circle(c)
+                        if c.center == dot_center && c.radius == t.space_2 && c.fill == accent.color && c.stroke == egui::Stroke::NONE)
+                    });
+                    assert_eq!(has_dot, marker_index > 0 && i == marker_index - 1);
+                }
+                let marker = crate::scenario::rect_of("history:marker").unwrap();
+                assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c)
+                    if marker.contains(c.center) && c.fill == t.timeline && c.stroke == egui::Stroke::new(t.space_2, accent.color))));
+            }
+        }
     }
 }
