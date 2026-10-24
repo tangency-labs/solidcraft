@@ -554,6 +554,9 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         // Empty space, or a plane, which leads with a sketch on it.
         if let Some(plane) = &app.menu.plane {
             v.push(cmd(app, "sketch.create", "Create Sketch").with(json!({ "plane": plane })));
+            if let Some(f) = app.session.doc.find_feature(plane).filter(|f| app.session.doc.plane_extents.contains_key(&f.id)) {
+                v.push(reset_plane_size(app, f.id, plane));
+            }
             v.push(Item::sep());
         }
         v.push(act("ui.nav", "Pan", "pan").with(json!({ "mode": "pan" })));
@@ -664,6 +667,7 @@ fn plane_items(app: &SolveApp, id: u64) -> Vec<Item> {
         cmd(app, "sketch.create", "Create Sketch").with(json!({ "plane": f.name })),
         Item::sep(),
         act("ui.editFeature", "Edit Feature", "plane").with(json!({ "feature": id })),
+        reset_plane_size(app, id, &f.name),
         Item::sep(),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
         act("ui.rename", "Rename", "rename").with(json!({ "feature": id })),
@@ -672,6 +676,11 @@ fn plane_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::sep(),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })),
     ]
+}
+
+/// Back to a size that follows the zoom, for a construction plane dragged to a size of its own.
+fn reset_plane_size(app: &SolveApp, id: u64, name: &str) -> Item {
+    cmd(app, "view.plane_size", "Reset Size").with(json!({ "plane": name, "extent": null })).on(app.session.doc.plane_extents.contains_key(&id))
 }
 
 /// An origin plane's row in the browser: sketch on it, show or hide.
