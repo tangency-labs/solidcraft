@@ -325,6 +325,16 @@ Changes with no useful observable behavior do not need screenshot or video evide
 small example without private designs or sensitive details; attach the media or link to an
 accessible recording rather than committing generated review artifacts.
 
+To show a picture without committing it, attach the media to the PR (it goes to the PR's own
+attachment storage and renders inline in the comment). A gist is the better home for a log or
+another text file, and you link it; a gist does not render a picture inline. The review artifacts
+stay out of the diff that way, and nothing has to be pushed to a branch of its own.
+
+Attaching works in the browser for anyone who can comment: drag the file into a comment on the
+pull request. A command-line agent without a browser session usually cannot attach a file (the
+upload needs write access to this repository). Say so in the pull request, and the person running
+the agent or a maintainer can attach it.
+
 Keep an eye on your PR's status, but don't push to it only to catch up with `main` (no merge of
 `main`, no Update branch button, no rebase for that alone): every push restarts the whole CI
 run for everyone waiting behind it, and `main`'s own run catches what lands in between. When you
