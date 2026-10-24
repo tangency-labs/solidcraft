@@ -421,6 +421,11 @@ pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<
     }
 }
 
+/// The longest face name a joint origin takes. A face that cuts split and merged keeps the names
+/// of the faces around it (`<name>#[<name>,…]`): several hundred characters on a part a text or
+/// a pattern of holes was cut through.
+const MAX_FACE_NAME: usize = 16_384;
+
 /// The component an occurrence places (0 for the root, or an unknown occurrence).
 fn component_of(s: &Session, occurrence: u64) -> u64 {
     if occurrence == 0 { 0 } else { s.doc.occurrences.iter().find(|o| o.id == occurrence).map_or(0, |o| o.component) }
@@ -430,8 +435,8 @@ fn component_of(s: &Session, occurrence: u64) -> u64 {
 /// a round end of it), on `body?`, of `occurrence?` (default: the first occurrence of the
 /// face's component).
 fn origin_by_name(s: &Session, v: &Value, what: &str, name: &str, cmd: &str) -> Result<JointOrigin> {
-    if name.is_empty() || name.len() > 512 {
-        return Err(bad(cmd, "a face name is 1…512 characters"));
+    if name.is_empty() || name.len() > MAX_FACE_NAME {
+        return Err(bad(cmd, format!("a face name is 1…{MAX_FACE_NAME} characters")));
     }
     let st = s.model.state();
     let (component, pick) = joints::named_face_spot(&s.doc, &st, str_(v, "body"), name).map_err(|why| {
@@ -464,8 +469,10 @@ fn origin_by_name(s: &Session, v: &Value, what: &str, name: &str, cmd: &str) -> 
 fn settle(s: &Session, mut o: JointOrigin, v: &Value, cmd: &str) -> Result<JointOrigin> {
     let st = s.model.state();
     if let Some(want) = v.get("end") {
-        let want =
-            want.as_str().filter(|n| !n.is_empty() && n.len() <= 512).ok_or_else(|| bad(cmd, "`end` is the name of a face a round end lies on"))?;
+        let want = want
+            .as_str()
+            .filter(|n| !n.is_empty() && n.len() <= MAX_FACE_NAME)
+            .ok_or_else(|| bad(cmd, "`end` is the name of a face a round end lies on"))?;
         let Snap::CircleCenter { end, .. } = &mut o.snap else { return Err(bad(cmd, "`end` is for a round origin (`circle`)")) };
         *end = Some(want.to_string());
         let names = joints::end_faces(&s.doc, &st, &o.snap);
@@ -492,9 +499,9 @@ fn x_param(s: &Session, v: &Value, component: u64, inv: &solidcraft_doc::Mat, cm
     let wrong = || bad(cmd, "`x` is a direction [x, y, z], a face's name, or {face: [x, y, z]}");
     match v.get("x") {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::String(name)) if !name.is_empty() && name.len() <= 512 => named(name),
+        Some(Value::String(name)) if !name.is_empty() && name.len() <= MAX_FACE_NAME => named(name),
         Some(o @ Value::Object(_)) => match o.get("face") {
-            Some(Value::String(name)) if !name.is_empty() && name.len() <= 512 => named(name),
+            Some(Value::String(name)) if !name.is_empty() && name.len() <= MAX_FACE_NAME => named(name),
             Some(p) => {
                 let pick = vec3(p).map(|p| solidcraft_doc::apply_point(inv, p)).ok_or_else(wrong)?;
                 let face = joints::face_name_at(&s.doc, &st, component, pick, false).ok_or_else(|| bad(cmd, "`x`: no named face there"))?;

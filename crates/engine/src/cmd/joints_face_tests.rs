@@ -188,6 +188,44 @@ fn origins_take_faces_by_name_and_an_end_and_turn_by_name() {
     }
 }
 
+/// A face split by a cut whose edge runs in many segments is named after the faces around its
+/// piece (`<face>#[<face>,…]`): several hundred characters. Such a name, as `model.faces` gives
+/// it, is taken for a face centre and as a round end (it was refused over 512 characters).
+#[test]
+fn origins_take_a_long_piece_name() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Tray"}));
+    run(&mut s, "solid.box", json!({"length": 300, "width": 100, "height": 1, "corner": [0, 0, 0]}));
+    // A slot across the tray whose left edge zigzags in 60 segments: the top left of it names them all.
+    let mut zig: Vec<[f64; 2]> = (0..=60).map(|i| [140.0 + f64::from(i % 2) * 4.0, -10.0 + 2.0 * f64::from(i)]).collect();
+    zig.extend([[170.0, 110.0], [170.0, -10.0]]);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Zig"}));
+    run(&mut s, "sketch.line", json!({"points": zig, "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Zig", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    run(&mut s, "solid.hole", json!({"position": [50, 50, 1], "diameter": 6}));
+    let tray = occ(&s, "Tray");
+    run(&mut s, "occurrence.ground", json!({"occurrence": tray, "grounded": true}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Bracket"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 2, "corner": [100, 200, 0]}));
+    run(&mut s, "solid.hole", json!({"position": [110, 210, 2], "diameter": 6}));
+    let top = face_name(&mut s, "Tray", Vec3::new(20.0, 20.0, 1.0));
+    assert!(top.len() > 512, "{}: {top}", top.len());
+    let wall = face_name(&mut s, "Tray", Vec3::new(53.0, 50.0, 0.5));
+    let foot = face_name(&mut s, "Bracket", Vec3::new(113.0, 210.0, 1.0));
+    let under = face_name(&mut s, "Bracket", Vec3::new(105.0, 205.0, 0.0));
+    run(&mut s, "joint.origin", json!({"name": "Top", "face": top}));
+    run(&mut s, "joint.origin", json!({"name": "Hole", "circle": wall, "end": top, "x": [1, 0, 0]}));
+    let r = run(&mut s, "joint.create", json!({"type": "rigid", "a": "Hole", "b": {"circle": foot, "end": under, "x": [1, 0, 0]}}));
+    assert_eq!(r["errors"].as_array().map(Vec::len), Some(0), "{r}");
+    let hole = place(&s, "Bracket", Vec3::new(110.0, 210.0, 0.0));
+    assert!(near(hole, Vec3::new(50.0, 50.0, 1.0)), "{hole:?}");
+    // Names stay bounded.
+    let huge = format!("F1:+z#[{}]", "F2:side:l1,".repeat(2_000));
+    assert!(s.execute("joint.origin", &json!({"name": "Huge", "face": huge})).is_err());
+}
+
 #[test]
 fn a_face_centre_by_name_follows_its_face() {
     let mut s = tray();
