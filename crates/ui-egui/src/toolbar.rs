@@ -1788,7 +1788,7 @@ fn dropdown_row(app: &SolveApp, ui: &mut egui::Ui, c: &'static solidcraft_engine
     }
     // A disabled row says why; a documented command also shows its help (#2758).
     let reason = info.disabled_reason.as_deref().filter(|_| !info.enabled);
-    let resp = match crate::command_help::row_tip(c.id, &label, c.shortcut, reason) {
+    let resp = match crate::command_help::row_tip(c.id, &label, Some(shortcut.as_str()).filter(|k| !k.is_empty()), reason) {
         Some(tip) => crate::command_help::tooltip(resp, c.id, tip),
         None => resp,
     };
@@ -2808,6 +2808,21 @@ mod dropdown_toggle_tests {
         h.step(&json!({"click": {"handle": "panel:MODEL:CREATE"}})).unwrap();
         h.frames(2);
         assert!(rect_of("toolbar_dropdown").is_none(), "the second click closes it");
+    }
+
+    /// A drop-down row's help tooltip names the key the command runs from now, not its default.
+    #[test]
+    fn a_drop_down_row_tooltip_names_a_rebound_key() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.frames(3);
+        crate::keymap::bind(&mut h.app, "solid.shell", "Shift+J", false).unwrap();
+        h.step(&json!({"click": {"handle": "panel:MODEL:MODIFY"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"move": {"handle": "dropdown:solid.shell"}})).unwrap();
+        h.frames(40);
+        let shell = h.app.tr_label("Shell").to_string();
+        assert!(h.widget(&format!("{shell}  (Shift+J)")).is_some(), "the tooltip shows the new key");
     }
 }
 
