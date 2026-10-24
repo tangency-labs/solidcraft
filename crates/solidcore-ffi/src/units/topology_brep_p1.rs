@@ -24,7 +24,7 @@
 //! | `ObjMap`       | `n_set (oty oi cty ci copy rev)*n_set n_get (ty idx)*n_get` | per get: `type idx copy_map_idx reverse_map_idx` as one list |
 //! | `AddAttrs`     | `ty idx n_attrs id*n_attrs n_idx index*n_idx`    | `status`, the object's attribute ids (`n id*n`) |
 //! | `ReflectEu`    | `edge`                                           | `status`, the edge use list (`n idx*n`) |
-//! | `ReflectShell` | `face`                                           | `status`, then `shell1 shell2` and per shell its face use count (`n c*n`, -1 for a wire shell) |
+//! | `ReflectShell` | `face`                                           | `status`, then `shell1 shell2`, face use counts (`n c*n`, -1 for a wire shell), and per shell the ordered members (`n idx*n`) followed by each member's next/previous ids |
 //! | `RmLoopVu`     | `vu`                                             | `status vertex_list_size [remaining(n idx*n)]` |
 //! | `MarkLoops`    | `loop level`                                     | `status loops(n idx*n)` |
 //! | `SwapFaceUv`   | `face mark premark`                              | `0 marked u0 v0 u1 v1 [B-rep]` (an unmarked face is swapped: the `put_healed` B-rep follows) |

@@ -87,6 +87,10 @@
 //!   `Notify`, `ReverseParameterization`, `EditParameterization`) do not abort the port
 //!   either: only [`SolidError::Unported`] propagates from them; a failed point
 //!   evaluation leaves undefined coordinates (upstream leaves the `SmPoint3d` unset).
+//!   Exception (#520): seam redistribution requires four edge uses, existing seam
+//!   trims, successful neighbor trim creation and successful endpoint evaluations
+//!   before classifying or swapping trims. Reflection helpers validate list members
+//!   before editing and propagate list-edit errors.
 //! - `sm_MakeVertexSplitUVTrimCurve` clones the face surface for the lift of the split
 //!   point (upstream borrows it); `sm_FindSectorOfFace` returns the region as `Option`
 //!   (upstream hands back the shell's region pointer unchecked).
@@ -986,11 +990,18 @@ impl PendingTopologyDelete {
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for an odd
-/// edge use count (upstream reads past the array).
+/// edge use count (upstream reads past the array) or inconsistent list membership.
 pub fn reverse_reflection_edgeuses(b: &mut Brep, e: EdgeId) -> Result<()> {
     let uses = b.edge(e)?.edgeuses.clone();
     if uses.len() % 2 != 0 {
         return Err(null("sm_ReverseReflectionEdgeuses: odd edge use count"));
+    }
+    for &eu in &uses {
+        if b.edgeuse(eu)?.edge != Some(e) {
+            return Err(null(
+                "sm_ReverseReflectionEdgeuses: inconsistent edge use owner",
+            ));
+        }
     }
     let mut relinked = Vec::with_capacity(uses.len());
     for pair in uses.chunks_exact(2) {
@@ -1007,9 +1018,8 @@ pub fn reverse_reflection_edgeuses(b: &mut Brep, e: EdgeId) -> Result<()> {
 /// exchanges the shells they belong to.
 ///
 /// Upstream removes each face use from its shell's list and appends it to the other's
-/// (`Remove` / `PostInsert`): the membership is each face use's `shell`, swapped here.
-/// The order of a shell's face use list is `SmShell`'s (unit `topology.shell`) and is
-/// not modelled yet. `Face::shell` and `Shell::faces` have no upstream counterpart
+/// (`Remove` / `PostInsert`): both ordered member lists and sibling links follow the
+/// new owners. `Face::shell` and `Shell::faces` have no upstream counterpart
 /// (`SmFace` holds no shell; the arena builders fill them, the import leaves
 /// `Shell::faces` empty): they follow the first face use, so the face moves to the
 /// other shell's list.
@@ -1018,7 +1028,8 @@ pub fn reverse_reflection_edgeuses(b: &mut Brep, e: EdgeId) -> Result<()> {
 ///
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] where
 /// upstream dereferences null (a face without two face uses, a face use without
-/// shell).
+/// shell) or inconsistent shell membership. Invalid lists are rejected before
+/// changing either owner.
 pub fn swap_reflection_shells(b: &mut Brep, f: FaceId) -> Result<()> {
     let (first, second) = face2::faceuses(b, f)?;
     let first = first.ok_or_else(|| null("sm_SwapReflectionShells: face without face use"))?;
@@ -1028,8 +1039,22 @@ pub fn swap_reflection_shells(b: &mut Brep, f: FaceId) -> Result<()> {
     let bb = eu1::faceuse_shell(b, second)?
         .ok_or_else(|| null("sm_SwapReflectionShells: mate without shell"))?;
     if a != bb {
-        b.faceuse_mut(first)?.shell = Some(bb);
-        b.faceuse_mut(second)?.shell = Some(a);
+        // Check both lists before the first edit, including references that the
+        // sibling-link refresh will visit. Otherwise a later failed edit could
+        // leave the first face use in the wrong shell (#520).
+        for (shell, member) in [(a, first), (bb, second)] {
+            let members = b.shell(shell)?.get_faceuses()?;
+            if !members.contains(&member) {
+                return Err(null("sm_SwapReflectionShells: face use missing from shell"));
+            }
+            for id in members {
+                if b.faceuse(id)?.shell != Some(shell) {
+                    return Err(null("sm_SwapReflectionShells: inconsistent face use owner"));
+                }
+            }
+        }
+        crate::topology::shell::move_faceuse(b, first, bb)?;
+        crate::topology::shell::move_faceuse(b, second, a)?;
         // the face record follows its first face use: move it to the end of the other
         // shell's face list (PostInsert appends)
         b.shell_mut(a)?.faces.retain(|&x| x != f);
@@ -1889,9 +1914,9 @@ pub fn update_vertex_edge_intervals(
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] where upstream reads past the edge use list (fewer
-/// than four edge uses) or dereferences null; those of the UV trim curve creation,
-/// the singularity test and the trim curve swap.
+/// [`SolidError::InvalidInput`] for a seam without exactly four edge uses or missing
+/// trim curves; those of UV trim creation, endpoint evaluations, the singularity
+/// test and the trim curve swap. No trims are swapped after a failed prerequisite.
 pub fn redistribute_seam_uv_trim_curves(
     k: &Kernel,
     b: &mut Brep,
@@ -1905,8 +1930,14 @@ pub fn redistribute_seam_uv_trim_curves(
     if uv_trim_curve.is_none() || seam_edge == SurfParamType::Neither {
         return Ok(false);
     }
-    let eus = b.edge(new_edge)?.edgeuses.clone(); // SM_ASSERT(4 edge uses)
-                                                  // sEdgeuse[0] = Starts At StartVertex OneFace, sEdgeuse[3] = Starts At EndVertex OtherFace
+    let eus = b.edge(new_edge)?.edgeuses.clone();
+    // SM_ASSERT upstream; this algorithm handles exactly two mated pairs (#520).
+    if eus.len() != 4 {
+        return Err(null(
+            "sm_RedistributeSeamUVTrimCurves: expected 4 edge uses",
+        ));
+    }
+    // sEdgeuse[0] = Starts At StartVertex OneFace, sEdgeuse[3] = Starts At EndVertex OtherFace
     let this_eu = *eus
         .first()
         .ok_or_else(|| null("sm_RedistributeSeamUVTrimCurves: no edge uses"))?;
@@ -1917,25 +1948,33 @@ pub fn redistribute_seam_uv_trim_curves(
         .ok_or_else(|| null("sm_RedistributeSeamUVTrimCurves: edge use without CW"))?;
     let prev_other = eu1::cw_edgeuse(b, other_eu)?
         .ok_or_else(|| null("sm_RedistributeSeamUVTrimCurves: edge use without CW"))?;
+    for eu in [this_eu, other_eu] {
+        if eu1::uv_trim_curve(b, eu)?.0.is_none() {
+            return Err(null(
+                "sm_RedistributeSeamUVTrimCurves: edge use without UV trim curve",
+            ));
+        }
+    }
 
-    // GWC: Check if we need to make sure the PrevEdgeuses have UVTrimCurves for this to work?
-    // (the statuses and curves are only SM_ASSERTed upstream)
-    let _this_status = get_or_create_uv_trim_curve(k, b, prev_this, false, false, true)?;
-    let _other_status = get_or_create_uv_trim_curve(k, b, prev_other, false, false, true)?;
+    // Both the outer Result and the retained projection status must succeed.
+    // Upstream checks these statuses and curves only with SM_ASSERT (#520).
+    for eu in [prev_this, prev_other] {
+        eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
+        if eu1::uv_trim_curve(b, eu)?.0.is_none() {
+            return Err(null(
+                "sm_RedistributeSeamUVTrimCurves: neighbor without UV trim curve",
+            ));
+        }
+    }
 
-    // Find the UV point for the two new starting Vertexuses (statuses not checked
-    // upstream: a failed evaluation leaves the point unset; undefined here; the first
-    // derivatives are requested but unused upstream)
+    // A failed evaluation must not feed unset points into seam-side classification.
+    // First derivatives are requested but unused, as upstream.
     // NewE Start UV values from UVTrimCurves
-    let this_point_uv =
-        ignored(normalized_evaluate(k, b, this_eu, 0.0, true, true))?.unwrap_or(Point3::UNDEF);
-    let other_point_uv =
-        ignored(normalized_evaluate(k, b, other_eu, 0.0, true, true))?.unwrap_or(Point3::UNDEF);
+    let this_point_uv = normalized_evaluate(k, b, this_eu, 0.0, true, true)?;
+    let other_point_uv = normalized_evaluate(k, b, other_eu, 0.0, true, true)?;
     // Prev Start UV values from PrevUVtrimCurves
-    let prev_this_point_uv =
-        ignored(normalized_evaluate(k, b, prev_this, 1.0, true, true))?.unwrap_or(Point3::UNDEF);
-    let prev_other_point_uv =
-        ignored(normalized_evaluate(k, b, prev_other, 1.0, true, true))?.unwrap_or(Point3::UNDEF);
+    let prev_this_point_uv = normalized_evaluate(k, b, prev_this, 1.0, true, true)?;
+    let prev_other_point_uv = normalized_evaluate(k, b, prev_other, 1.0, true, true)?;
 
     // make sure sThisPointUV == sPrevThisPointUV, sOtherPointUV == sPrevOtherPointUV are
     // the same to tol by switching the UVTrimCurves if needed. Expect all 4 PointUVs to
@@ -3149,6 +3188,232 @@ mod tests {
     use super::*;
     use crate::geom::a_object;
     use crate::topology::Region;
+
+    fn seam_fixture() -> (Brep, EdgeId, [EdgeuseId; 4], [EdgeuseId; 2]) {
+        use crate::curve::line::Line;
+        use crate::surface::plane::Plane;
+        use crate::topology::{Edgeuse, EdgeuseOwner, Faceuse, Loopuse};
+
+        let trim = |x| {
+            Curve::from(Line::from_points(
+                Point3::new(x, 0.0, 0.0),
+                Point3::new(x, 1.0, 0.0),
+                2,
+            ))
+        };
+        let mut b = Brep::new();
+        let shell = b.add_shell().unwrap();
+        let face = b.add_face(shell).unwrap();
+        b.face_mut(face).unwrap().surface = Some(Surface::from(Plane::from_normal(
+            Point3::ZERO,
+            Point3::new(0.0, 0.0, 1.0),
+        )));
+        let fu = b
+            .add_faceuse_record(Faceuse {
+                face: Some(face),
+                shell: Some(shell),
+                ..Faceuse::default()
+            })
+            .unwrap();
+        let lu = b
+            .add_loopuse_record(Loopuse {
+                faceuse: Some(fu),
+                ..Loopuse::default()
+            })
+            .unwrap();
+        let v = b.add_vertex(Point3::ZERO).unwrap();
+        let edge = b.add_edge(v, v).unwrap();
+        let uses = std::array::from_fn(|i| {
+            b.add_edgeuse_record(Edgeuse {
+                edge: Some(edge),
+                owner: EdgeuseOwner::Loopuse(Some(lu)),
+                orientation: if i % 2 == 0 {
+                    OrientType::Same
+                } else {
+                    OrientType::Opposite
+                },
+                uv_trim_curve: (i % 2 == 0).then(|| trim((i / 2) as f64)),
+                ..Edgeuse::default()
+            })
+            .unwrap()
+        });
+        b.edge_mut(edge).unwrap().edgeuses = uses.to_vec();
+        let previous = std::array::from_fn(|i| {
+            b.add_edgeuse_record(Edgeuse {
+                orientation: OrientType::Same,
+                uv_trim_curve: Some(trim((1 - i) as f64)),
+                ..Edgeuse::default()
+            })
+            .unwrap()
+        });
+        b.edgeuse_mut(uses[0]).unwrap().cw = Some(previous[0]);
+        b.edgeuse_mut(uses[3]).unwrap().cw = Some(previous[1]);
+        (b, edge, uses, previous)
+    }
+
+    fn redistribute_fixture(b: &mut Brep, edge: EdgeId) -> Result<bool> {
+        let trim = Curve::from(crate::curve::line::Line::from_points(
+            Point3::ZERO,
+            Point3::new(1.0, 0.0, 0.0),
+            2,
+        ));
+        redistribute_seam_uv_trim_curves(
+            &Kernel::default(),
+            b,
+            edge,
+            Some(&trim),
+            SurfParamType::U,
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        )
+    }
+
+    fn seam_sides(b: &Brep, uses: [EdgeuseId; 4]) -> [f64; 2] {
+        [uses[0], uses[3]].map(|eu| {
+            eu1::uv_trim_curve(b, eu)
+                .unwrap()
+                .0
+                .unwrap()
+                .evaluate_point(&Kernel::default(), 0.0)
+                .unwrap()
+                .x
+        })
+    }
+
+    #[test]
+    fn seam_redistribution_preserves_trims_after_failed_projection() {
+        use crate::surface::surface::p2::DropCurveFail;
+
+        for failed_previous in 0..2 {
+            let (mut b, edge, uses, previous) = seam_fixture();
+            b.edgeuse_mut(previous[failed_previous])
+                .unwrap()
+                .drop_curve_fail = Some(Box::new(DropCurveFail {
+                fail_status: SM_ERR_INVALID_INPUT,
+                ..DropCurveFail::default()
+            }));
+            assert!(matches!(
+                redistribute_fixture(&mut b, edge),
+                Err(SolidError::Upstream {
+                    code: SM_ERR_INVALID_INPUT,
+                    ..
+                })
+            ));
+            assert_eq!(seam_sides(&b, uses), [0.0, 1.0]);
+        }
+    }
+
+    #[test]
+    fn seam_redistribution_requires_four_uses_and_usable_trims() {
+        let (b, edge, uses, previous) = seam_fixture();
+        for count in [0, 2, 6] {
+            let mut bad = b.clone();
+            bad.edge_mut(edge).unwrap().edgeuses = uses.into_iter().cycle().take(count).collect();
+            assert!(redistribute_fixture(&mut bad, edge).is_err());
+        }
+        for eu in [uses[0], uses[2], previous[0], previous[1]] {
+            let mut bad = b.clone();
+            bad.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::default()));
+            assert!(redistribute_fixture(&mut bad, edge).is_err());
+        }
+        for eu in [uses[0], uses[2]] {
+            let mut bad = b.clone();
+            bad.edgeuse_mut(eu).unwrap().uv_trim_curve = None;
+            let before = format!("{bad:?}");
+            assert!(redistribute_fixture(&mut bad, edge).is_err());
+            assert_eq!(format!("{bad:?}"), before);
+        }
+        let mut good = b;
+        assert!(redistribute_fixture(&mut good, edge).unwrap());
+        assert_eq!(seam_sides(&good, uses), [1.0, 0.0]);
+        assert!(!redistribute_fixture(&mut good, edge).unwrap());
+    }
+
+    fn reflection_fixture() -> (Brep, FaceId, [crate::topology::FaceuseId; 2], [ShellId; 2]) {
+        use crate::topology::shell::{ShellMembers, ShellType};
+        use crate::topology::Faceuse;
+
+        let mut b = Brep::new();
+        let shells = [b.add_shell().unwrap(), b.add_shell().unwrap()];
+        let face = b.add_face(shells[0]).unwrap();
+        let uses = std::array::from_fn(|i| {
+            b.add_faceuse_record(Faceuse {
+                face: Some(face),
+                shell: Some(shells[i]),
+                ..Faceuse::default()
+            })
+            .unwrap()
+        });
+        for i in 0..2 {
+            b.faceuse_mut(uses[i]).unwrap().mate = Some(uses[1 - i]);
+            let shell = b.shell_mut(shells[i]).unwrap();
+            shell.shell_type = ShellType::Faceuse;
+            shell.members = ShellMembers::Faceuses(vec![uses[i]]);
+        }
+        b.face_mut(face).unwrap().faceuse = Some(uses[0]);
+        (b, face, uses, shells)
+    }
+
+    #[test]
+    fn reflection_updates_shell_members_and_links() {
+        use crate::topology::shell::faceuse_sibling_links;
+
+        let (mut b, face, uses, shells) = reflection_fixture();
+        swap_reflection_shells(&mut b, face).unwrap();
+        for i in 0..2 {
+            assert_eq!(
+                b.shell(shells[i]).unwrap().get_faceuses().unwrap(),
+                vec![uses[1 - i]]
+            );
+            assert_eq!(b.faceuse(uses[i]).unwrap().shell, Some(shells[1 - i]));
+            assert_eq!(
+                faceuse_sibling_links(&b, uses[i]).unwrap(),
+                (Some(uses[i]), Some(uses[i]))
+            );
+        }
+        swap_reflection_shells(&mut b, face).unwrap();
+        for i in 0..2 {
+            assert_eq!(
+                b.shell(shells[i]).unwrap().get_faceuses().unwrap(),
+                vec![uses[i]]
+            );
+        }
+    }
+
+    #[test]
+    fn reflection_rejects_bad_lists_before_mutation() {
+        use crate::topology::shell::ShellMembers;
+
+        for bad_member in 0..2 {
+            let (mut b, face, uses, shells) = reflection_fixture();
+            b.shell_mut(shells[bad_member]).unwrap().members = ShellMembers::Empty;
+            let before = format!("{b:?}");
+            assert!(swap_reflection_shells(&mut b, face).is_err());
+            assert_eq!(format!("{b:?}"), before);
+            assert_eq!(b.faceuse(uses[0]).unwrap().shell, Some(shells[0]));
+        }
+    }
+
+    #[test]
+    fn reflection_edgeuses_require_live_members_of_the_edge() {
+        let (b, edge, uses, _) = seam_fixture();
+        let mut good = b.clone();
+        reverse_reflection_edgeuses(&mut good, edge).unwrap();
+        assert_eq!(
+            good.edge(edge).unwrap().edgeuses,
+            [uses[1], uses[0], uses[3], uses[2]]
+        );
+        for bad_member in 0..4 {
+            let mut bad = b.clone();
+            bad.edgeuse_mut(uses[bad_member]).unwrap().edge = None;
+            assert!(reverse_reflection_edgeuses(&mut bad, edge).is_err());
+            assert_eq!(bad.edge(edge).unwrap().edgeuses, uses);
+        }
+        let mut bad = b;
+        bad.edge_mut(edge).unwrap().edgeuses.pop();
+        let before = bad.edge(edge).unwrap().edgeuses.clone();
+        assert!(reverse_reflection_edgeuses(&mut bad, edge).is_err());
+        assert_eq!(bad.edge(edge).unwrap().edgeuses, before);
+    }
 
     #[test]
     fn type_queries() {

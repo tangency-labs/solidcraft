@@ -1696,6 +1696,17 @@ fn run_rust_op(
                         })
                         .collect();
                     o.extend(list_of(&counts));
+                    for (_, shell) in b.shells().iter() {
+                        let members = shell.get_faceuses()?;
+                        o.extend(ids(&members));
+                        for member in members {
+                            let (next, previous) =
+                                solidcore::topology::shell::faceuse_sibling_links(b, member)?;
+                            o.extend([next, previous].map(|id| {
+                                id.map_or(-1.0, |id| f64::from(id.index()))
+                            }));
+                        }
+                    }
                 }
                 Err(e) => o.push(status_of(&e)),
             }

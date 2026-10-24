@@ -1603,6 +1603,18 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         for (SmShell* s2 : g.shells)
             v.push_back(s2->*ShPeek::type() == SmFaceuse_TYPE ? (int64_t)list_of(s2->GetList()).size() : -1);
         put_list(o, v);
+        // Owner pointers alone cannot detect stale shell membership after reflection.
+        for (SmShell* s2 : g.shells)
+        {
+            SmTArray<SmFaceuse*> members;
+            s2->GetFaceuses(members);
+            put_found(o, g, 2, members);
+            for (ULONG i = 0; i < members.GetSize(); ++i)
+            {
+                o.push_back((double)g.find(2, members[i]->GetNext()));
+                o.push_back((double)g.find(2, members[i]->GetLast()));
+            }
+        }
         break;
     }
     case OP_RM_LOOP_VU:
