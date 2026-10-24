@@ -58,7 +58,8 @@
 //!   deletes the current surface and stores the saved pointer). Evaluations of the
 //!   solver's own offsets keep a base extension they make, as upstream's `const`
 //!   evaluators do; `SmFindClippedRadiusEFO` evaluates copies (its iso curve and
-//!   `LocalCurveIntersect`), which drop such an extension.
+//!   `LocalCurveIntersect`), whose extension the solver's offsets then take
+//!   ([`FilletSolver::keep_extension_of_copy`]).
 //! - **Fillet geometries, executive, corners.** As in `blend.fillet_geom_p1`, the
 //!   solver's `SmFilletGeom`s live in the executive's pseudo B-rep ([`FilletBrep`],
 //!   `m_pExecutive->m_pPseudoBrep`) with its fillet vertices and edges; the solver
@@ -114,7 +115,7 @@ use crate::blend::fillet_geom::p1::{
 use crate::blend::fillet_standard_solver::p1::{
     BlendCurveCrossSectionFsg, CircularCrossSectionFsg, LinearCrossSectionFsg,
 };
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
 use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
@@ -759,6 +760,43 @@ impl FilletSolver {
             .get_mut(rail)
             .map(Option::as_mut)
             .ok_or_else(|| invalid("rail index out of range"))
+    }
+
+    /// After an evaluation of `copy`, a copy of rail `rail`'s offset surface made for
+    /// it (wrapped in a [`Surface`] or an iso curve), the rail's offset surface takes the
+    /// copy's current base extension (`m_pExtendedSurface`): upstream evaluates the
+    /// solver's own `SmOffsetSurface`, whose `const` evaluators store the extension they
+    /// make. The copy starts from the rail's extension and nothing else evaluates the
+    /// rail in between, so this leaves the rail as upstream's one object. A `copy` that
+    /// is not an offset surface (or an iso curve of one) has nothing to hand back.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FilletSolver::surface_mut`]; [`SolidError::InvalidInput`] for a missing
+    /// offset surface.
+    pub(crate) fn keep_extension_of_copy(&mut self, rail: usize, copy: &Surface) -> Result<()> {
+        if let SurfaceKind::OffsetSurface(c) = copy.kind() {
+            self.surface_mut(rail)?
+                .ok_or_else(|| invalid("no offset surface"))?
+                .surface
+                .surface
+                .take_extension_of(c);
+        }
+        Ok(())
+    }
+
+    /// [`FilletSolver::keep_extension_of_copy`] for the surface of an iso curve built
+    /// over a copy of rail `rail`'s offset surface (`SmIsoCurve(*GetSurface(rail), ...)`
+    /// holds a pointer to the solver's surface upstream).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FilletSolver::keep_extension_of_copy`].
+    pub(crate) fn keep_extension_of_iso_copy(&mut self, rail: usize, iso: &Curve) -> Result<()> {
+        match iso.kind() {
+            CurveKind::Iso(c) => self.keep_extension_of_copy(rail, c.surface()),
+            _ => Ok(()),
+        }
     }
 
     /// `SetSurface(lRailIndex, pNewOffsetSurface)`.
@@ -2321,9 +2359,10 @@ impl<'a> FindClippedRadiusEfo<'a> {
     /// iso curve of the offset surface (`SmIsoCurve(*m_pSurface, m_eSurfParam,
     /// m_dIsoParam, TRUE, FALSE)`, unclamped): the other surface's UV point and the
     /// curve parameter, `None` when no good point was found. Both surfaces are
-    /// evaluated through copies, so a base extension the evaluations make is not kept
-    /// (upstream's `const` evaluators store it in the solver's offsets).
-    fn intersect_iso(&self, k: &Kernel) -> Result<Option<(Point2, f64)>> {
+    /// evaluated through copies; the solver's offsets then take the base extension the
+    /// evaluations made ([`FilletSolver::keep_extension_of_copy`]), as upstream's
+    /// `const` evaluators store it in the solver's own offsets.
+    fn intersect_iso(&mut self, k: &Kernel) -> Result<Option<(Point2, f64)>> {
         let (i, o) = (self.surf_index, 1 - self.surf_index);
         let surface = Surface::from(
             self.solver
@@ -2352,8 +2391,11 @@ impl<'a> FindClippedRadiusEfo<'a> {
             self.approx_tol_3d,
             self.other_uv,
             self.guess_t,
-        )?;
-        Ok(found.map(|c| (c.uv, c.t)))
+        );
+        // (also on a failure: upstream's evaluations stored their extensions already)
+        self.solver.keep_extension_of_iso_copy(i, &curve)?;
+        self.solver.keep_extension_of_copy(o, &other)?;
+        Ok(found?.map(|c| (c.uv, c.t)))
     }
 
     fn base_points(&self, k: &Kernel, uv: Point2, other_uv: Point2) -> Result<f64> {

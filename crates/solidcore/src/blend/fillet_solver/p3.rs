@@ -24,12 +24,18 @@
 //!   constant-distance solver's distance through [`FilletSolverOps::constant_distance`]
 //!   (both added to the trait for this unit). The variable-radius branch casts to
 //!   `SmVariableRadiusFS` (unit `blend.fillet_standard_solver_p1`) and is a stub.
-//! - **Offset surface copies.** As in `blend.fillet_solver_p1`, offset evaluations
-//!   (`EvaluateNormal`, the iso curve and its `LocalCurveIntersect`) run on copies of
-//!   the solver's offset surfaces; `LoadInitialValues` receives a copy of the first one
-//!   (upstream passes `*GetSurface(0)` as a `const` reference). Upstream's `SmIsoCurve`
-//!   holds a pointer to the solver's surface, so after `SetSurfacesToZeroOffset` it
-//!   evaluates at zero offset: the copy is rebuilt from the zeroed surface there.
+//! - **Offset surface copies.** As in `blend.fillet_solver_p1`, the iso curve and its
+//!   `LocalCurveIntersect` run on copies of the solver's offset surfaces;
+//!   `LoadInitialValues` receives a copy of the first one (upstream passes
+//!   `*GetSurface(0)` as a `const` reference). Upstream evaluates the solver's own
+//!   `SmOffsetSurface`s, whose `const` evaluators store the base extension they make
+//!   (`m_pExtendedSurface`), so after each use the solver's offsets take the copies'
+//!   extensions back ([`FilletSolver::keep_extension_of_copy`]; a copy starts from the
+//!   solver's extension and nothing else evaluates the solver's surface meanwhile, so
+//!   the history matches upstream's one object). `EvaluateNormal` runs on the solver's
+//!   own surface. Upstream's `SmIsoCurve` holds a pointer to the solver's surface, so
+//!   after `SetSurfacesToZeroOffset` it evaluates at zero offset: the copy is rebuilt
+//!   from the zeroed surface there.
 //! - **Out-params.** `StepSolve`'s three flags are a [`StepSolveOutcome`] the caller
 //!   passes in, written where upstream writes them, so on an error they keep what was
 //!   set before it (upstream's `SmFilletIntersector` reads `bClipped` / `bBoundaryHit`
@@ -468,7 +474,13 @@ impl FilletSolver {
                     ops.solver().this_approx_tol_3d(),
                     get2(&uv, oi),
                     guess,
-                )?;
+                );
+                // upstream evaluates the solver's own offsets: they keep the extensions
+                // (also on a failure)
+                ops.solver_mut()
+                    .keep_extension_of_iso_copy(si, &iso_curve)?;
+                ops.solver_mut().keep_extension_of_copy(oi, &other)?;
+                let found = found?;
                 out.found_good_point = found.is_some();
 
                 // when an intersection point was found
@@ -495,11 +507,14 @@ impl FilletSolver {
 
                         // the iso curve points at the (now zero-offset) surface
                         let iso_curve = iso_curve_of(ops.solver(), si, surf_param, iso_param)?;
-                        let plane_orig = iso_curve.evaluate_point(k, t_found)?;
+                        let plane_orig = iso_curve.evaluate_point(k, t_found);
+                        ops.solver_mut()
+                            .keep_extension_of_iso_copy(si, &iso_curve)?;
+                        let plane_orig = plane_orig?;
 
                         // get railcurve point surface normals
-                        let normal1 = offset_normal(k, ops.solver(), 0, uv[0])?;
-                        let normal2 = offset_normal(k, ops.solver(), 1, uv[1])?;
+                        let normal1 = offset_normal(k, ops.solver_mut(), 0, uv[0])?;
+                        let normal2 = offset_normal(k, ops.solver_mut(), 1, uv[1])?;
                         let plane_normal = normal1.cross(normal2).unitize()?;
 
                         // find two railcurve points on plane at radius distance from
@@ -594,8 +609,16 @@ impl FilletSolver {
             &mut intervals,
             &mut periodicities,
             &mut guess_t,
-        )?;
-        if let Some(iv) = initial {
+        );
+        // upstream passes the solver's own surface: it keeps the extensions the
+        // evaluations made (also on a failure)
+        ops.solver_mut()
+            .surface_mut(0)?
+            .ok_or_else(|| invalid("no first offset surface"))?
+            .surface
+            .surface
+            .take_extension_of(&surface1.surface);
+        if let Some(iv) = initial? {
             surf2_index = iv.surface2_index;
         }
 
@@ -675,14 +698,14 @@ fn iso_curve_of(
     )?))
 }
 
-/// `GetSurface(rail)->EvaluateNormal(uv, TRUE, TRUE, ..)` on a copy.
-fn offset_normal(k: &Kernel, solver: &FilletSolver, rail: usize, uv: Point2) -> Result<Vec3> {
-    let mut s = solver
-        .surface(rail)?
+/// `GetSurface(rail)->EvaluateNormal(uv, TRUE, TRUE, ..)` on the solver's own offset
+/// surface, which keeps an extension the evaluation makes (as upstream's).
+fn offset_normal(k: &Kernel, solver: &mut FilletSolver, rail: usize, uv: Point2) -> Result<Vec3> {
+    solver
+        .surface_mut(rail)?
         .ok_or_else(|| invalid("no offset surface"))?
         .surface
-        .clone();
-    s.surface
+        .surface
         .evaluate_normal_extending(k, uv, Side::Left, Side::Left)
 }
 

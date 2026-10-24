@@ -2614,6 +2614,25 @@ mod tests {
         .expect("solve");
         assert!(found2);
         assert_eq!(t2.srf_pos(SrfIndex::First), c);
+        // and so does the solver's own virtual (StepSolve, sm_FindFilletTsectPnt), not
+        // the base SmFilletSolver::PointOnPlaneSolve
+        let mut fs3 = corner(&k, 0.25);
+        let mut t3 = TsectPnt::new();
+        let ops: &mut dyn FilletSolverOps = &mut fs3;
+        let found3 = ops
+            .point_on_plane_solve(
+                &k,
+                p(0.4, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                &d,
+                &d,
+                Point2::new(0.45, 0.3),
+                Point2::new(0.35, 0.2),
+                &mut t3,
+            )
+            .expect("solve");
+        assert!(found3);
+        assert_eq!(t3.srf_pos(SrfIndex::First), c);
     }
 
     #[test]

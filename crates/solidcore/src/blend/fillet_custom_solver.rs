@@ -17,8 +17,8 @@
 //! | [`SecantConstantRadiusFs::load_initial_values`]   | `SmSecantConstantRadiusFS::LoadInitialValues`     |
 //! | [`SecantConstantRadiusFs::load_jacobian`]         | `SmSecantConstantRadiusFS::LoadJacobian`          |
 //! | [`ConstantRadiusAssistedFs`] (CO-PORTED)          | `SmConstantRadiusFS` / `SmConstantRadiusAssistedFS` over the `SmFilletSolver` base ([`FilletSolver`]) |
-//! | `impl FilletSolverOps for ConstantRadiusAssistedFs` | the same inherited overrides plus `SmConstantRadiusFS::LoadJacobian` (`blend.fillet_standard_solver_p1`'s methods), `SmConstantRadiusAssistedFS::IsKindOf` and `SmConstantRadiusFS::LoadInitialValues` (`_p2`'s) (the class `blend.fillet_intersector` runs `ComputeSurfaceValues` on) |
-//! | `impl FilletSolverOps` for both solvers            | their `LoadJacobian` / `LoadInitialValues` overrides; the inherited `SmConstantRadiusFS` / `SmConstantRadiusAssistedFS` overrides `GetJacobianSize`, `SetupOffsetValues`, `OffsetRadiiCanChange`, `GetType` call `blend.fillet_standard_solver_p1`'s, `IsKindOf` `_p2`'s |
+//! | `impl FilletSolverOps for ConstantRadiusAssistedFs` | the same inherited overrides plus `SmConstantRadiusFS::LoadJacobian` (`blend.fillet_standard_solver_p1`'s methods), `SmConstantRadiusAssistedFS::IsKindOf`, `SmConstantRadiusFS::LoadInitialValues` and `SmConstantRadiusAssistedFS::PointOnPlaneSolve` (`_p2`'s) (the class `blend.fillet_intersector` runs `ComputeSurfaceValues` on) |
+//! | `impl FilletSolverOps` for both solvers            | their `LoadJacobian` / `LoadInitialValues` overrides; the inherited `SmConstantRadiusFS` / `SmConstantRadiusAssistedFS` overrides `GetJacobianSize`, `SetupOffsetValues`, `OffsetRadiiCanChange`, `GetType` call `blend.fillet_standard_solver_p1`'s, `IsKindOf` and `PointOnPlaneSolve` `_p2`'s |
 //! | [`OffsetSurface`], [`SurfaceId`]                  | an `SmOffsetSurface*` rail surface (unit `surface.offset_surface`) and the identity of its base pointer |
 //! | [`JacobianLoad`], [`InitialValues`]               | the in/out arguments of `LoadJacobian`, `LoadInitialValues` |
 //!
@@ -1740,6 +1740,34 @@ macro_rules! fillet_solver_ops {
                     guess_t,
                 )
             }
+
+            /// `SmConstantRadiusAssistedFS::PointOnPlaneSolve` (inherited, unit
+            /// `blend.fillet_standard_solver_p2`): the override `StepSolve` and the
+            /// other callers of the virtual dispatch to.
+            fn point_on_plane_solve(
+                &mut self,
+                k: &Kernel,
+                plane_origin: Point3,
+                plane_normal: Vec3,
+                uv_domain1: &Extent2d,
+                uv_domain2: &Extent2d,
+                uv1: Point2,
+                uv2: Point2,
+                point: &mut TsectPnt,
+            ) -> Result<bool> {
+                crate::blend::fillet_standard_solver::p2::point_on_plane_solve(
+                    self,
+                    k,
+                    None,
+                    plane_origin,
+                    plane_normal,
+                    uv_domain1,
+                    uv_domain2,
+                    uv1,
+                    uv2,
+                    point,
+                )
+            }
         }
     };
 }
@@ -2085,6 +2113,35 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
             intervals,
             periodicities,
             guess_t,
+        )
+    }
+
+    /// `SmConstantRadiusAssistedFS::PointOnPlaneSolve` (unit
+    /// `blend.fillet_standard_solver_p2`): the override `StepSolve` and the other
+    /// callers of the virtual dispatch to (the base `SmFilletSolver` version solves
+    /// a different system).
+    fn point_on_plane_solve(
+        &mut self,
+        k: &Kernel,
+        plane_origin: Point3,
+        plane_normal: Vec3,
+        uv_domain1: &Extent2d,
+        uv_domain2: &Extent2d,
+        uv1: Point2,
+        uv2: Point2,
+        point: &mut TsectPnt,
+    ) -> Result<bool> {
+        crate::blend::fillet_standard_solver::p2::point_on_plane_solve(
+            self,
+            k,
+            None,
+            plane_origin,
+            plane_normal,
+            uv_domain1,
+            uv_domain2,
+            uv1,
+            uv2,
+            point,
         )
     }
 }
