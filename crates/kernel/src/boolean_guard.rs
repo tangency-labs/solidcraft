@@ -32,7 +32,7 @@ pub(crate) fn point_triangle_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
 
 /// The triangles of a mesh in a uniform grid of cells, each listing the triangles within `reach`
 /// of it, to answer "is this point within `reach` of the surface?".
-struct Near<'a> {
+pub(crate) struct Near<'a> {
     mesh: &'a Mesh,
     min: Vec3,
     cell: f64,
@@ -42,7 +42,7 @@ struct Near<'a> {
 }
 
 impl<'a> Near<'a> {
-    fn new(mesh: &'a Mesh, reach: f64) -> Option<Self> {
+    pub(crate) fn new(mesh: &'a Mesh, reach: f64) -> Option<Self> {
         let bounds = mesh.bounds();
         if bounds.is_empty() {
             return None;
@@ -81,7 +81,7 @@ impl<'a> Near<'a> {
         [f(d.x, dims[0]), f(d.y, dims[1]), f(d.z, dims[2])]
     }
 
-    fn close(&self, p: Vec3) -> bool {
+    pub(crate) fn close(&self, p: Vec3) -> bool {
         let d = p - self.min;
         let s = [d.x, d.y, d.z];
         if s.iter().zip(self.dims).any(|(v, n)| *v < 0.0 || *v > self.cell * n as f64) {

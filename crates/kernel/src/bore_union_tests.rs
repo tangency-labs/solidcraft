@@ -55,7 +55,7 @@ fn thin_connected_web_between_bore_stations_survives_union() {
     let accept = |body: &Body| {
         let mr = body.tessellate_with(tol, true).unwrap();
         let v = mr.measure().volume;
-        let mismatch = super::mismatch(&ma, &mb, &mr, BoolOp::Union);
+        let mismatch = super::mismatch(&ma, &mb, &mr, BoolOp::Union, 0.0);
         eprintln!("fallback candidate V={v}, expected={expected}, web={}, mismatch={mismatch:?}", mr.contains(probe));
         v > 0. && v >= va.max(vb) - slack && v <= va + vb + slack && mismatch.is_none_or(|f| f < 0.004)
     };
