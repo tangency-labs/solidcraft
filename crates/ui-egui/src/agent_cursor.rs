@@ -1,6 +1,7 @@
 //! The agent cursor (#35): a second, clearly marked pointer that acts out what an agent does
 //! over the control channel or MCP. Before an `engine.execute` runs, the pointer glides to the
 //! command's toolbar button (or its panel when the button sits in a drop-down) and clicks it,
+//! with the command's name beside the pointer so a closed group still identifies the tool,
 //! then glides to each pick in the parameters (faces, edges and points projected to the screen,
 //! sketch points, the plane of a new sketch), and only then does the command run. The reply
 //! waits for the animation, so an agent's timing stays honest. With "follow camera" on, a new
@@ -21,9 +22,7 @@
 use std::collections::VecDeque;
 use std::sync::mpsc::Sender;
 
-#[cfg(test)]
-use egui::vec2;
-use egui::{Pos2, Stroke, pos2};
+use egui::{Pos2, Stroke, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcraft_engine::geom::{Vec2, Vec3};
@@ -133,7 +132,8 @@ pub struct Job {
     method: String,
     params: Value,
     reply: Sender<ControlResponse>,
-    stops: VecDeque<Pos2>,
+    /// Screen position and registry label, kept together even when several commands share a panel.
+    stops: VecDeque<(Pos2, &'static str)>,
     /// Seconds per glide and per click for this request (within [`TIME_BUDGET`] in all).
     glide: f64,
     click: f64,
@@ -253,13 +253,17 @@ pub fn stops(app: &SolveApp, command: &str, params: &Value) -> Vec<Pos2> {
 /// Where the pointer goes for an `engine.batch`: the toolbar buttons of its distinct commands, in
 /// the order they first come, at most [`MAX_BATCH_STOPS`] of them.
 pub fn batch_stops(steps: &[Value]) -> Vec<Pos2> {
+    batch_targets(steps).into_iter().map(|(at, _)| at).collect()
+}
+
+fn batch_targets(steps: &[Value]) -> Vec<(Pos2, &'static str)> {
     let mut seen: Vec<&str> = Vec::new();
     for c in steps.iter().filter_map(crate::control::batch_step_command) {
         if !seen.contains(&c) {
             seen.push(c);
         }
     }
-    let buttons: Vec<Pos2> = seen.into_iter().filter_map(button).collect();
+    let buttons: Vec<_> = seen.into_iter().filter_map(|c| Some((button(c)?, solidcraft_engine::find_command(c)?.label))).collect();
     summarise(&buttons, MAX_BATCH_STOPS)
 }
 
@@ -330,22 +334,23 @@ pub fn intercept(app: &mut SolveApp, method: &str, params: &Value, reply: &Sende
     if !s.show || params.get("animate").and_then(Value::as_bool) == Some(false) {
         return false;
     }
-    let stops: VecDeque<Pos2> = match method {
+    let stops: VecDeque<_> = match method {
         "engine.execute" | "command" => {
             let Some(cmd) = params.get("command").or(params.get("id")).and_then(Value::as_str) else { return false };
             let inner = params.get("params").cloned().unwrap_or(json!({}));
-            stops(app, cmd, &inner).into()
+            let label = solidcraft_engine::find_command(cmd).map_or("", |c| c.label);
+            stops(app, cmd, &inner).into_iter().map(|at| (at, label)).collect()
         }
         // A batch is acted out as one request; one the app refuses is answered at once.
         "engine.batch" => match params.get("commands").and_then(Value::as_array) {
-            Some(steps) if crate::control::batch_refusal(steps).is_none() => batch_stops(steps).into(),
+            Some(steps) if crate::control::batch_refusal(steps).is_none() => batch_targets(steps).into(),
             _ => return false,
         },
         _ => return false,
     };
     if s.speed == Speed::Instant {
         // No animation: the command runs now; the pointer jumps to where it acted.
-        if let Some(last) = stops.back() {
+        if let Some((last, _)) = stops.back() {
             app.agent.pos = Some(*last);
             app.agent.ripples.push((*last, app.now));
         }
@@ -395,7 +400,7 @@ pub fn step(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(job) = app.agent.job.as_mut() else { return };
     let (glide, click) = (job.glide, job.click);
     ctx.request_repaint();
-    let Some(&to) = job.stops.front() else {
+    let Some(&(to, _)) = job.stops.front() else {
         if job.ahead.as_ref().is_none_or(crate::control_job::Ahead::finished) {
             finish(app, ctx);
         }
@@ -468,6 +473,22 @@ pub fn paint(app: &SolveApp, ctx: &egui::Context) {
         painter.circle_stroke(*at, 6.0 + 22.0 * k, Stroke::new(3.0 * (1.0 - k) + 0.5, agent().gamma_multiply(1.0 - k)));
     }
     crate::icons::pointer::paint(&painter, p);
+    if let Some((_, label)) = app.agent.job.as_ref().and_then(|job| job.stops.front()).filter(|(_, label)| !label.is_empty()) {
+        use crate::ui_kit::{Container, Surface};
+        let t = crate::theme::Tokens::get();
+        Container::new(ctx, Surface::Popup)
+            .area(egui::Id::new("sc_agent_command"))
+            .order(egui::Order::Debug)
+            .fixed_pos(p + vec2(15.0, 42.0))
+            .constrain(true)
+            .interactable(false)
+            .fade_in(false)
+            .show(ctx, |ui| {
+                Container::popup_frame(ui.style()).fill(t.overlay).show(ui, |ui| {
+                    ui.label(egui::RichText::new(crate::i18n::tr_label(label)).size(t.font_label).color(t.text));
+                });
+            });
+    }
 }
 
 #[cfg(test)]
@@ -577,6 +598,55 @@ mod tests {
         let (r, frames) = h.call_queued("engine.batch", json!({"commands": [{"command": "doc.open", "params": {"path": "x.solidcraft"}}]}));
         assert!(r["error"].as_str().is_some_and(|e| e.starts_with("engine.batch unavailable")), "{r}");
         assert!(frames <= 3, "{frames}");
+    }
+
+    #[test]
+    fn a_command_in_a_closed_group_is_named_while_the_pointer_acts_it_out() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.agent_cursor", json!({"show": true, "speed": 1}));
+        assert!(crate::scenario::handle_at("toolbar:solid.box").is_none());
+        assert!(button("solid.box").is_some(), "the closed group is the pointer's target");
+        let (tx, rx) = std::sync::mpsc::channel();
+        assert!(intercept(&mut h.app, "engine.execute", &json!({"command":"solid.box", "params":{"length":10,"width":10,"height":10}}), &tx));
+        h.frames(3);
+        assert!(h.widget("Box").is_some(), "the command must be identified before it executes");
+        assert!(rx.try_recv().is_err());
+        assert!(h.app.dialog.is_none(), "programmatic commands do not open interactive tools");
+        h.frames(120);
+        assert_eq!(rx.try_recv().unwrap()["ok"], true);
+        assert_eq!(h.app.session.world_state().bodies.len(), 1);
+        assert!(!h.app.agent.busy());
+        assert!(h.widget("Box").is_none(), "the command label ends with the animation");
+    }
+
+    #[test]
+    fn a_batch_names_each_command_even_when_they_share_a_closed_group() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.agent_cursor", json!({"show": true, "speed": 1}));
+        assert_eq!(button("solid.box"), button("solid.sphere"));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let params = json!({"commands":[
+            {"command":"solid.box","params":{"length":10,"width":10,"height":10}},
+            {"command":"solid.sphere","params":{"center":[30,0,0],"radius":3}}
+        ]});
+        assert!(intercept(&mut h.app, "engine.batch", &params, &tx));
+        let mut seen = Vec::new();
+        for _ in 0..120 {
+            h.frame();
+            for label in ["Box", "Sphere"] {
+                if h.widget(label).is_some() && seen.last() != Some(&label) {
+                    seen.push(label);
+                }
+            }
+            if !h.app.agent.busy() {
+                break;
+            }
+        }
+        assert_eq!(seen, ["Box", "Sphere"]);
+        let reply = rx.try_recv().unwrap();
+        assert_eq!(reply["result"]["completed"], 2, "{reply}");
+        assert!(h.app.dialog.is_none());
+        assert!(h.widget("Box").is_none() && h.widget("Sphere").is_none());
     }
 
     #[test]
