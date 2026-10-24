@@ -726,28 +726,43 @@ mod tests {
 
     /// The generator reaches successful and failing extensions of every continuity
     /// and both normal-derivative outcomes.
+    ///
+    /// Deep-but-bounded extension recursion (`ST_curxcdr` fails only past 50 levels,
+    /// nested in `ST_surxsdr`'s 10) must fit the thread stack: generated cases reach
+    /// the recursion limits, and a debug build's frames are much larger than
+    /// upstream's, so the loop runs on a dedicated thread with a raised stack (same
+    /// pattern as the reader fuzz `run_guarded`); the release difftest profile needs
+    /// the default stack.
     #[test]
     fn generated_cases_cover_outcomes() {
-        let mut stats = [0usize; 6];
-        for seed in 0..1500u64 {
-            let mut rng = Rng::new(seed);
-            let i = gen_case(&mut rng);
-            let flat = rust_flat(&i).unwrap();
-            let ok = flat.first() == Some(&0.0);
-            match (&i, ok) {
-                (Inputs::Extend { cont, .. }, true) => {
-                    stats[match cont {
-                        2 => 0,
-                        3 => 1,
-                        4 => 2,
-                        _ => 3,
-                    }] += 1;
+        const STACK: usize = 64 * 1024 * 1024;
+        let h = std::thread::Builder::new()
+            .stack_size(STACK)
+            .spawn(|| {
+                let mut stats = [0usize; 6];
+                for seed in 0..1500u64 {
+                    let mut rng = Rng::new(seed);
+                    let i = gen_case(&mut rng);
+                    let flat = rust_flat(&i).unwrap();
+                    let ok = flat.first() == Some(&0.0);
+                    match (&i, ok) {
+                        (Inputs::Extend { cont, .. }, true) => {
+                            stats[match cont {
+                                2 => 0,
+                                3 => 1,
+                                4 => 2,
+                                _ => 3,
+                            }] += 1;
+                        }
+                        (Inputs::Extend { .. }, false) => stats[4] += 1,
+                        (Inputs::NormalDeriv { .. }, true) => stats[5] += 1,
+                        (Inputs::NormalDeriv { .. }, false) => {}
+                    }
                 }
-                (Inputs::Extend { .. }, false) => stats[4] += 1,
-                (Inputs::NormalDeriv { .. }, true) => stats[5] += 1,
-                (Inputs::NormalDeriv { .. }, false) => {}
-            }
-        }
+                stats
+            })
+            .expect("spawn");
+        let stats = h.join().unwrap();
         eprintln!("{stats:?}");
         assert!(stats.iter().all(|&k| k >= 10), "{stats:?}");
     }
