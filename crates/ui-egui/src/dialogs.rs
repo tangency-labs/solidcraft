@@ -530,16 +530,37 @@ fn run_evaluated(app: &mut SolveApp, d: &Dialog, evaluated: Option<&solidcraft_e
 /// applies at once, as it always did.
 pub const APPLY_AT_ONCE: std::time::Duration = std::time::Duration::from_millis(150);
 
+/// Leave OK's evaluation to run on to its end (Cancel while computing): the dialog drops it, and
+/// OK pressed again on the same commands takes it up ([`begin_applying`]).
+fn abandon(app: &mut SolveApp) {
+    app.abandoned.retain_mut(|job| !job.finished());
+    if let Some(mut job) = app.applying.take()
+        && !job.finished()
+        && app.abandoned.len() < MAX_ABANDONED
+    {
+        app.abandoned.push(job);
+    }
+}
+
+/// Jobs a Cancel left computing that OK can still take up; the oldest goes past this.
+const MAX_ABANDONED: usize = 8;
+
 /// Start OK's evaluation off the window thread, for a feature dialog. `Now` when OK should
 /// just run: not a feature, not asked for ([`SolveApp::apply_off_thread`]), no threads (the
-/// web), or done within the wait.
+/// web), or done within the wait. The same commands still computing since a Cancel are taken up
+/// rather than computed a second time beside them: a long boolean would run twice.
 #[cfg(not(target_arch = "wasm32"))]
-fn begin_applying(app: &SolveApp, d: &Dialog) -> Begun {
+fn begin_applying(app: &mut SolveApp, d: &Dialog) -> Begun {
     let Some(wait) = app.apply_off_thread else { return Begun::Now(None) };
     if !d.previews() {
         return Begun::Now(None);
     }
     let Ok(cmds) = apply_commands(app, d) else { return Begun::Now(None) };
+    app.abandoned.retain_mut(|job| !job.finished());
+    if let Some(i) = app.abandoned.iter().position(|job| job.cmds == cmds) {
+        let job = app.abandoned.remove(i);
+        return Begun::Later(Applying { seen: false, ..job });
+    }
     let ahead = app.session.ahead();
     let (tx, rx) = std::sync::mpsc::channel();
     let computed = cmds.clone();
@@ -566,7 +587,7 @@ fn begin_applying(app: &SolveApp, d: &Dialog) -> Begun {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn begin_applying(_app: &SolveApp, _d: &Dialog) -> Begun {
+fn begin_applying(_app: &mut SolveApp, _d: &Dialog) -> Begun {
     Begun::Now(None)
 }
 
@@ -2726,7 +2747,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Cancel while computing: the result goes (its worker runs on to its end).
     if cancel && !applied {
-        app.applying = None;
+        abandon(app);
     }
     if !keep || cancel {
         crate::dialogs_motion::closed(app, &mut d, applied);
@@ -2756,7 +2777,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
 pub fn cancel(app: &mut SolveApp) {
-    app.applying = None;
+    abandon(app);
     if let Some(mut d) = app.dialog.take() {
         crate::dialogs_motion::closed(app, &mut d, false);
         if let Kind::Text(k) = &mut d.kind {

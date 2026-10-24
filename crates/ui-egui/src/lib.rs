@@ -430,6 +430,9 @@ pub struct SolveApp {
     pub preview: preview::PreviewState,
     /// OK pressed on a feature that takes a while: its evaluation runs off the window thread.
     pub applying: Option<dialogs::Applying>,
+    /// OK's evaluations a Cancel left computing (a worker cannot be stopped): OK pressed again
+    /// on the same commands takes its job up instead of starting the work a second time.
+    pub(crate) abandoned: Vec<dialogs::Applying>,
     /// A command recomputing the history (the marker moved, undo) computing off the window
     /// thread, and those asked for meanwhile ([`deferred`]).
     pub deferred: Option<deferred::Deferred>,
@@ -580,6 +583,7 @@ impl SolveApp {
             slicer_menu: dialogs_save_mesh::SlicerMenu::default(),
             preview: preview::PreviewState::default(),
             applying: None,
+            abandoned: Vec::new(),
             deferred: None,
             deferred_queue: Vec::new(),
             delete_check: None,

@@ -139,3 +139,45 @@ fn inputs_changed_while_ok_computes_are_computed_off_the_thread_too() {
     assert_eq!(h.app.session.doc.features.len(), features + 1);
     h.step(&json!({"expect": {"bodies": 1, "volume": 13000}})).unwrap();
 }
+
+/// #3962: OK pressed again after a Cancel left its evaluation computing takes that job up: the
+/// evaluation runs once. The worker is held until it is let go once; a second worker started
+/// beside the first would wait for a second release that never comes, and nothing would apply.
+#[test]
+fn ok_again_after_cancel_takes_up_the_evaluation_still_computing() {
+    let mut h = square_on_a_block();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    let (finish, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let features = h.app.session.doc.features.len();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.applying.is_some(), "computing");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(h.app.applying.is_none() && h.app.dialog.is_none());
+    assert_eq!(h.app.abandoned.len(), 1, "left computing");
+    h.app.start("solid.extrude");
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.applying.is_some() && h.app.abandoned.is_empty(), "the same evaluation taken up");
+    finish.send(()).unwrap();
+    until_applied(&mut h);
+    assert!(h.app.applying.is_none(), "applied once its one evaluation is in");
+    assert_eq!(h.app.session.doc.features.len(), features + 1);
+}
+
+/// #3962: quitting does not wait for an evaluation a Cancel left computing.
+#[test]
+fn quitting_does_not_wait_for_an_evaluation_left_computing() {
+    let mut h = square_on_a_block();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    // Held for the whole test: the evaluation never finishes.
+    let (_finish, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert_eq!(h.app.abandoned.len(), 1);
+    h.app.session.mark_saved();
+    crate::documents::request_quit(&mut h.app);
+    h.frames(2);
+    assert!(h.app.quit_requested, "the window closes with the evaluation still running");
+}
