@@ -590,6 +590,8 @@ impl Brep {
                     "NURBS form on a curve that is not a line, circle or ellipse",
                 )?;
             }
+            // A circle or ellipse is a label: its geometry is its NURBS form.
+            require(e.nurbs.is_some() || !matches!(e.curve, Curve::Circle { .. } | Curve::Ellipse { .. }), "a circle or ellipse without its NURBS form")?;
             interval(&e.interval, curve_natural(e.parameters()))?;
             require(e.vertices.iter().all(|&v| (v as usize) < self.vertices.len()), "edge vertices")?;
             tolerance(e.tolerance)?;
@@ -612,6 +614,15 @@ impl Brep {
                     "NURBS form on a surface that is not a cylinder, cone, sphere, torus or revolution",
                 )?;
             }
+            // A cylinder, cone, sphere, torus or revolution is a label: its geometry is its form.
+            require(
+                f.nurbs.is_some()
+                    || !matches!(
+                        f.surface,
+                        Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. } | Surface::PlacedRevolution { .. }
+                    ),
+                "a cylinder, cone, sphere, torus or revolution without its NURBS form",
+            )?;
             let [u, v] = surface_natural(f.parameters());
             interval(&f.domain[0], u)?;
             interval(&f.domain[1], v)?;

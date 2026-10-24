@@ -25,6 +25,26 @@ fn list_uses(b: &mut Brep) {
     }
 }
 
+/// Every analytic face and conic edge on its NURBS form, as producers make them: a face's form
+/// over its stated domain, a circle about a face's axis labelled on its frame (`form::edge`).
+fn on_forms(b: &mut Brep) {
+    let frames: Vec<Frame> = b.faces.iter().filter(|f| f.nurbs.is_none()).filter_map(|f| form::frame_of(&f.surface)).collect();
+    for f in &mut b.faces {
+        if f.nurbs.is_none()
+            && let Some((n, d)) = form::surface(&f.surface, f.domain)
+        {
+            (f.nurbs, f.domain) = (Some(n), d);
+        }
+    }
+    for e in &mut b.edges {
+        if e.nurbs.is_none()
+            && let Some((label, _, Some((n, iv)))) = form::edge(&e.curve, e.interval, &frames, b.tolerance)
+        {
+            (e.curve, e.nurbs, e.interval) = (label, Some(n), iv);
+        }
+    }
+}
+
 /// Every oriented edge's pcurve from its face's surface and its edge (`pcurve::pcurves`).
 fn fit_pcurves(b: &mut Brep) {
     for f in &mut b.faces {
@@ -166,6 +186,7 @@ fn tube() -> Brep {
         vertices: vec![Vertex { point: [3., 2., 3.], tolerance: 1e-7 }, Vertex { point: [3., 2., 8.], tolerance: 1e-7 }],
     };
     list_uses(&mut b);
+    on_forms(&mut b);
     fit_pcurves(&mut b);
     b
 }
@@ -190,6 +211,7 @@ fn one_face(surface: Surface, domain: [[f64; 2]; 2], edges: Vec<(Curve, [f64; 2]
         vertices: vertices.iter().map(|&point| Vertex { point, tolerance: 1e-7 }).collect(),
     };
     list_uses(&mut b);
+    on_forms(&mut b);
     fit_pcurves(&mut b);
     b
 }
@@ -200,12 +222,11 @@ fn closed_band() -> Brep {
     let (big, small) = (5., 1.);
     let torus =
         Surface::Torus { frame: Frame { origin: [0., 0., 0.], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }, major_radius: big, minor_radius: small };
-    let (form, domain) = form::surface(&torus, [[0., TAU], [0., FRAC_PI_2]]).unwrap();
     let about = |z: f64| Frame { origin: [0., 0., z], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
     let quarter = Curve::Circle { frame: Frame { origin: [big, 0., 0.], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] }, radius: small };
-    let mut b = one_face(
+    one_face(
         torus,
-        domain,
+        [[0., TAU], [0., FRAC_PI_2]],
         vec![
             (Curve::Circle { frame: about(0.), radius: big + small }, [0., TAU], [0, 0]),
             (quarter, [0., FRAC_PI_2], [0, 1]),
@@ -213,15 +234,7 @@ fn closed_band() -> Brep {
         ],
         &[[big + small, 0., 0.], [big, 0., small]],
         &[(0, true), (1, true), (2, false), (1, false)],
-    );
-    b.faces[0].nurbs = Some(form);
-    for e in &mut b.edges {
-        if let Some((nurbs, interval)) = form::curve(&e.curve, e.interval) {
-            (e.nurbs, e.interval) = (Some(nurbs), interval);
-        }
-    }
-    fit_pcurves(&mut b);
-    b
+    )
 }
 /// A whole sphere bounded by one meridian from pole to pole, used twice: a closed shell.
 fn ball() -> Brep {
@@ -368,9 +381,9 @@ fn one_defect_fixtures_are_refused() {
             }
             b
         }),
-        ("edge interval past one turn", "parameter interval exceeds one turn", {
+        ("edge interval past its form", "parameter interval outside the natural domain", {
             let mut b = tube();
-            b.edges[0].interval = [0., TAU + 0.1];
+            b.edges[0].interval = [0., 4.1];
             b
         }),
         ("edge interval outside a spline", "parameter interval outside the natural domain", {
@@ -386,13 +399,13 @@ fn one_defect_fixtures_are_refused() {
         }),
         ("face domain outside the sphere", "parameter interval outside the natural domain", {
             let mut b = sheet();
-            b.faces[0].surface = Surface::Sphere { frame: a_frame(), radius: 2. };
-            b.faces[0].domain = [[0., TAU], [-FRAC_PI_2 - 0.1, FRAC_PI_2]];
+            formed(&mut b, Surface::Sphere { frame: a_frame(), radius: 2. }, [[0., TAU], [-FRAC_PI_2, FRAC_PI_2]]);
+            b.faces[0].domain[1][0] -= 0.1;
             b
         }),
-        ("face domain past one turn", "parameter interval exceeds one turn", {
+        ("face domain past its form", "parameter interval outside the natural domain", {
             let mut b = tube();
-            b.faces[0].domain[0] = [0., TAU + 0.1];
+            b.faces[0].domain[0] = [0., 4.1];
             b
         }),
         ("face domain outside a spline surface", "parameter interval outside the natural domain", {
@@ -489,8 +502,8 @@ fn one_defect_fixtures_are_refused() {
         }),
         ("cone domain past its apex", "parameter interval outside the natural domain", {
             let mut b = sheet();
-            b.faces[0].surface = Surface::Cone { frame: a_frame(), radius_at_origin: 1., half_angle: 0.25 * std::f64::consts::PI };
-            b.faces[0].domain = [[0., 1.], [-2., 1.]];
+            formed(&mut b, Surface::Cone { frame: a_frame(), radius_at_origin: 1., half_angle: 0.25 * std::f64::consts::PI }, [[0., 1.], [-1., 1.]]);
+            b.faces[0].domain[1][0] = -2.;
             b
         }),
     ];
@@ -500,6 +513,12 @@ fn one_defect_fixtures_are_refused() {
     }
 }
 
+/// Face 0 relabelled `surface` on its NURBS form over `domain` (its loops left as they were).
+fn formed(b: &mut Brep, surface: Surface, domain: [[f64; 2]; 2]) {
+    let (nurbs, domain) = form::surface(&surface, domain).expect("a form");
+    let f = &mut b.faces[0];
+    (f.surface, f.nurbs, f.domain) = (surface, Some(nurbs), domain);
+}
 fn pcurve_of(b: &mut Brep, face: usize, position: usize) -> &mut Curve2 {
     let Loop::Edges { edges } = &mut b.faces[face].loops[0] else { panic!("an edge loop") };
     &mut edges[position].pcurve
@@ -545,8 +564,9 @@ fn geometric_defects_are_refused_by_record() {
             Record::Use { face: 0, r#loop: 0, position: 1 },
             Box::new(|p: &Problem| matches!(p, Problem::Period { .. })),
             {
+                // One turn of the tube's NURBS form is four quarters.
                 let mut b = tube();
-                shift(pcurve_of(&mut b, 0, 1), [TAU, 0.]);
+                shift(pcurve_of(&mut b, 0, 1), [4., 0.]);
                 b
             },
         ),
@@ -576,7 +596,8 @@ fn geometric_defects_are_refused_by_record() {
                 let mut b = ball();
                 let mid = |b: &mut Brep, k: usize| pcurve_of(b, 0, k).eval(0.).unwrap()[0];
                 let by = mid(&mut b, 0) - mid(&mut b, 1);
-                assert!((by.abs() - TAU).abs() < 1e-9, "a period apart: {by}");
+                // On the sphere's NURBS form one turn is four quarters.
+                assert!((by.abs() - 4.).abs() < 1e-9, "a period apart: {by}");
                 shift(pcurve_of(&mut b, 0, 1), [by, 0.]);
                 b
             },
@@ -636,7 +657,9 @@ fn hostile_records_never_panic_the_geometry_check() {
     b.faces[0].loops[1] = Loop::Vertex { vertex: u32::MAX };
     cases.push(b);
     let mut b = tube();
-    b.faces[0].surface = Surface::Cylinder { frame: a_frame(), radius: f64::NAN };
+    if let Some(Surface::RationalSpline { homogeneous, .. }) = &mut b.faces[0].nurbs {
+        homogeneous[0][0][0] = f64::NAN;
+    }
     cases.push(b);
     let mut b = tube();
     b.edges[0].tolerance = f64::NAN;
