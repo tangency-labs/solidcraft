@@ -15,6 +15,16 @@ fn mesh_collision_same_as_before() {
     }
 }
 
+/// Meshes whose triangles all miss the other mesh's box are skipped without a sweep: the sweep
+/// would have found no pairs in them.
+#[test]
+fn mesh_collision_skips_only_meshes_without_pairs() {
+    match collision::apart_meshes_have_no_pairs(0..400) {
+        Ok(n) => assert!(n > 0, "no random meshes were apart"),
+        Err(e) => panic!("{e}"),
+    }
+}
+
 /// NaN coordinates in a mesh: the collision search goes on without a panic.
 #[test]
 fn mesh_collision_nan_triangles_do_not_panic() {

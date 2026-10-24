@@ -183,6 +183,27 @@ fn disjoint_boxes(bdb0: &BoundingBox<Point3>, bdb1: &BoundingBox<Point3>) -> boo
         || bdb1.max()[2] < bdb0.min()[2]
 }
 
+/// SolidCraft: whether some triangle of each mesh meets the box of the other mesh. When not, no two
+/// triangles' boxes overlap and [`candidate_pairs`] finds none; the sweep it saves dominated
+/// booleans whose finely divided faces mostly lie apart (every face of one solid is met with
+/// every face of the other).
+fn reaches(
+    tris0: &[([Point3; 3], BoundingBox<Point3>)],
+    tris1: &[([Point3; 3], BoundingBox<Point3>)],
+) -> bool {
+    let whole = |tris: &[([Point3; 3], BoundingBox<Point3>)]| {
+        tris.iter().fold(BoundingBox::new(), |mut b, (_, t)| {
+            b += t;
+            b
+        })
+    };
+    let (box0, box1) = (whole(tris0), whole(tris1));
+    let meets = |tris: &[([Point3; 3], BoundingBox<Point3>)], other: &BoundingBox<Point3>| {
+        !other.is_empty() && tris.iter().any(|(_, t)| !disjoint_boxes(t, other))
+    };
+    meets(tris0, &box1) && meets(tris1, &box0)
+}
+
 /// Pairs of triangles (one from each mesh) whose bounding boxes overlap, in the order the
 /// sweep along `unit` meets them.
 ///
@@ -242,6 +263,10 @@ fn collision(poly0: &PolygonMesh, poly1: &PolygonMesh) -> Vec<(Point3, Point3)> 
         false => hash::take_one_unit(poly0.positions()[0]),
     };
     let (tris0, tris1) = (boxed_triangles(poly0), boxed_triangles(poly1));
+    // SolidCraft: no sweep for meshes that cannot meet.
+    if !reaches(&tris0, &tris1) {
+        return Vec::new();
+    }
     let pairs = candidate_pairs(&tris0, &tris1, unit);
     let test = |&(i, j): &(usize, usize)| collide_triangles(tris0[i].0, tris1[j].0);
     #[cfg(not(target_arch = "wasm32"))]
@@ -410,10 +435,36 @@ pub mod test_hooks {
         Ok(compared)
     }
 
+    /// Meshes the early exit of `collision` (`reaches`) calls apart have no candidate pairs, on
+    /// random triangle sets moved apart by up to twice their size. Returns how many were apart.
+    pub fn apart_meshes_have_no_pairs(seeds: std::ops::Range<u64>) -> Result<usize, String> {
+        let mut apart = 0;
+        for seed in seeds {
+            let mut r = Lcg(seed * 7919 + 3);
+            let n0 = 1 + (r.unit() * 30.0) as usize;
+            let n1 = 1 + (r.unit() * 30.0) as usize;
+            let shift = Vector3::new(r.unit() * 8.0, r.unit() * 8.0, r.unit() * 8.0);
+            let t0: Vec<[Point3; 3]> = (0..n0).map(|_| r.tri()).collect();
+            let t1: Vec<[Point3; 3]> = (0..n1).map(|_| r.tri().map(|p| p + shift)).collect();
+            let b0: Vec<_> = t0.iter().map(|t| (*t, t.iter().collect())).collect();
+            let b1: Vec<_> = t1.iter().map(|t| (*t, t.iter().collect())).collect();
+            if reaches(&b0, &b1) {
+                continue;
+            }
+            apart += 1;
+            let pairs = candidate_pairs(&b0, &b1, hash::take_one_unit(t0[0][0]));
+            if !pairs.is_empty() {
+                return Err(format!("seed {seed}: called apart, but {} pairs overlap", pairs.len()));
+            }
+        }
+        Ok(apart)
+    }
+
     #[cfg(test)]
     #[test]
     fn hooks_pass() {
         assert_eq!(nan_triangles_do_not_panic(), Ok(()));
+        assert!(matches!(apart_meshes_have_no_pairs(0..400), Ok(n) if n > 0));
         let n = same_collisions_in_the_same_order(0..200);
         assert!(matches!(n, Ok(n) if n > 0), "{n:?}");
     }

@@ -1166,19 +1166,32 @@ fn imprinted(body: Body, mut h: Option<History>, n: Vec3, d: f64, tool: &Body, t
     // One split per surface: the halves of a round side lie on one cylinder, and splitting
     // along it again re-traces the line already there, leaving a sliver (or not) depending
     // on how the second trace falls.
+    // Faces with no surface of their own (the spans of a wall swept along a spline) split
+    // together, after the others: one trace of each face for all of them, where one per span
+    // took minutes for a spline of seventy points (#4542).
+    let (free, own): (Vec<usize>, Vec<usize>) = beside.into_iter().partition(|t| crate::face_surface(tool, *t).is_none());
+    let mut tools: Vec<crate::SplitTool> = Vec::new();
     let mut used: Vec<Option<crate::FaceSurface>> = Vec::new();
-    for t in beside {
+    for t in own {
         let surface = crate::face_surface(tool, t);
         if used.iter().any(|u| same_surface(u, &surface, tol)) {
             continue;
         }
         used.push(surface);
+        tools.push(crate::SplitTool::Face { body: tool, face: t });
+    }
+    match free.as_slice() {
+        [] => {}
+        [t] => tools.push(crate::SplitTool::Face { body: tool, face: *t }),
+        _ => tools.push(crate::SplitTool::Faces { body: tool, faces: free }),
+    }
+    for t in &tools {
         let faces = near(&body, faces_in(&body, n, d, tol));
         if faces.is_empty() {
             break;
         }
         // Faces the tool's face does not cross stay as they are; none crossed is an error.
-        let Ok((split, _)) = crate::splitface::split_any(&body, &faces, &crate::SplitTool::Face { body: tool, face: t }) else { continue };
+        let Ok((split, _)) = crate::splitface::split_any(&body, &faces, t) else { continue };
         h = crate::boolean_record::through(&split, 0, h.as_ref());
         body = split;
     }
