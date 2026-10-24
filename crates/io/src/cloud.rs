@@ -7,11 +7,17 @@ use solidcraft_cloud::{Error, Manifest, Result, Snapshot, digest};
 use solidcraft_doc::Document;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod auth;
+#[cfg(not(target_arch = "wasm32"))]
+pub use auth::NativeAccess;
+#[cfg(not(target_arch = "wasm32"))]
 mod catalog;
 #[cfg(not(target_arch = "wasm32"))]
 mod git;
 #[cfg(not(target_arch = "wasm32"))]
 mod process;
+#[cfg(not(target_arch = "wasm32"))]
+mod provision;
 #[cfg(not(target_arch = "wasm32"))]
 pub use git::{GitRepository, Published};
 

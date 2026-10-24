@@ -11,6 +11,7 @@ mod outbox;
 mod project;
 mod publication;
 mod settings;
+pub mod setup;
 mod snapshot;
 pub use configuration::{Configuration, MAX_SETTINGS_BYTES};
 pub use outbox::{PendingSave, StagedSave};

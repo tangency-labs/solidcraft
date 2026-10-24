@@ -182,6 +182,24 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
                 status.phase = Phase::Ready;
             });
         }
+        Operation::Setup(connection) => {
+            if connection.provider != "github" {
+                return Err(storage("unsupported setup provider"));
+            }
+            let token = LocalSettings::open()
+                .await?
+                .credential(&connection.credential)
+                .await?
+                .ok_or_else(|| storage("paste a repository token to connect"))?;
+            let client = crate::cloud_client::client_for_job(Some(&token), Some(job.clone())).map_err(|_| storage("GitHub client unavailable"))?;
+            let mut connection = solidcraft_cloud::github::prepare(client, connection).await?;
+            connection.checkout.clear();
+            check_cancelled(job)?;
+            return job.update(|status| {
+                status.result = Some(serde_json::json!(connection));
+                status.phase = Phase::Ready;
+            });
+        }
         Operation::Configure(settings) => {
             LocalSettings::open().await?.configure(settings.clone()).await?;
             return job.update(|status| {
@@ -255,10 +273,27 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
 }
 
 impl Host for BrowserHost {
+    fn store_credential(&self, id: String, token: String) -> Result<Job> {
+        solidcraft_cloud::setup::check_token(&token)?;
+        let job = Job::new(String::new())?;
+        let worker = job.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = async {
+                LocalSettings::open().await?.store_credential(id, Some(token)).await?;
+                worker.update(|status| status.phase = Phase::Ready)
+            }
+            .await;
+            if let Err(error) = result {
+                let _ = worker.fail(error);
+            }
+        });
+        Ok(job)
+    }
     fn submit(&self, operation: Operation, _: String) -> Result<Job> {
         let connection = match &operation {
             Operation::LoadSettings | Operation::Configure(_) => None,
-            Operation::Test(connection)
+            Operation::Setup(connection)
+            | Operation::Test(connection)
             | Operation::List(connection)
             | Operation::Synchronize(connection)
             | Operation::Open { connection, .. }
