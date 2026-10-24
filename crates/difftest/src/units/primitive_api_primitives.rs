@@ -12,7 +12,7 @@
 //!
 //! Surface overloads compare their parameterizations. Successful B-reps additionally
 //! compare reachable vertices, sampled curves/surfaces, tolerances and UV trim counts.
-//! A pyramid plane fit that reaches UB-119 remains deferred by the existing guard.
+//! A pyramid whose plane fit reaches UB-119 is rejected (see [`ub_119`]).
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
@@ -180,6 +180,12 @@ impl Inputs {
 // ---- C++ -------------------------------------------------------------------------------
 
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
+    if i.op == OpName::Pyramid && ub_119(i)? {
+        return Ok(Output::rejected(
+            "UB-119: SmTrimmingTools::FindOuterLoops reads past its arrays for a zero-area \
+             loop of the pyramid's plane fit; not run",
+        ));
+    }
     let args: Vec<f64> = i.args.iter().map(|f| f.0).collect();
     let xy: Vec<Arc> = i.xy.iter().map(|a| a.ffi()).collect();
     let xz: Vec<Arc> = i.xz.iter().map(|a| a.ffi()).collect();
@@ -188,6 +194,23 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(rec) => Ok(Output::new().values("rec", rec)),
         Err(e) => Err(HarnessError::new(e.to_string())),
     }
+}
+
+/// A pyramid face whose plane fit hits `FindOuterLoops`' zero-area loop (a base far
+/// from the origin relative to its size): upstream reads past its arrays there
+/// (`plan/upstream-issues.md` UB-119), so the input is undefined in C++ (AGENTS.md
+/// section 4, step 5.6) and [`cpp`] rejects it. Decided from the inputs and the Rust
+/// side only: the port's `find_outer_loops` returns `InvalidInput` ("index out of
+/// range") exactly where upstream's count translation reads past `sOutLoops`.
+fn ub_119(i: &Inputs) -> Result<bool, HarnessError> {
+    let r = api::create_pyramid(&mut Kernel::default(), i.point(0)?, i.arg(3)?, i.arg(4)?);
+    Ok(matches!(
+        r,
+        Err(SolidError::InvalidInput {
+            operation: "topology::trimming_tools",
+            reason: "index out of range",
+        })
+    ))
 }
 
 /// The ffi's guard accepts the case.
@@ -378,19 +401,11 @@ fn brep_record(r: solidcore::Result<Brep>, rays: bool) -> Output {
     )
 }
 
-/// [`brep_out`] for the pyramid: a face whose plane fit hits `FindOuterLoops`' zero-area
-/// loop (a base far from the origin relative to its size), which the port refuses
-/// (`InvalidInput` from `topology::trimming_tools`) and upstream reads past its arrays
-/// for (`plan/upstream-issues.md` UB-119), is not comparable: deferred as
-/// `cpp-guard:ub-119`.
+/// [`brep_out`] for the pyramid, with its rays. (A face whose plane fit hits
+/// `FindOuterLoops`' zero-area loop, UB-119, is rejected by [`cpp`] before either side
+/// runs; the port's `InvalidInput` there would report `1007`.)
 fn pyramid_out(r: solidcore::Result<Brep>) -> Output {
-    match r {
-        Err(SolidError::InvalidInput {
-            operation: "topology::trimming_tools",
-            ..
-        }) => Output::deferred("cpp-guard:ub-119", "SmTrimmingTools::FindOuterLoops"),
-        r => brep_record(r, true),
-    }
+    brep_record(r, true)
 }
 
 fn arcs(xs: &[ArcIn]) -> Result<Vec<SmCurve>, HarnessError> {

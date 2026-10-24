@@ -137,7 +137,7 @@ void p7_make_face_with_curves(Rd& rd, std::vector<double>& o)
     // null UV curve array (SmBrep.cpp:16600) and crashes; with 3D curves given it gets
     // that far. Its own input checks (SmBrep.cpp:15722-15741: no loops, a degenerate
     // surface) return first and run. Still over-wide for inputs upstream rejects later,
-    // before MakeFace; the Rust side defers those cases (it reaches MakeShellVertex).
+    // before MakeFace. The runner rejects the same inputs (UB-165) before calling here.
     bool input_error = loops.GetSize() == 0 || srf->IsDegenerateCurve() || srf->IsDegeneratePoint();
     if (cos == 2 && !hasuv && has3d && !input_error)
     {

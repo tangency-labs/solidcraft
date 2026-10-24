@@ -45,11 +45,12 @@
 //! use with edge, curve, vertex, mate, neighbours and a face with surface; `VertexOffset`
 //! walks no loops and needs only a curve on each edge and, for a single edge, a face
 //! with surface and a B-spline curve). `-6` ends
-//! the script at an op the Rust side defers at without comparing anything: a non-local
-//! `FaceuseOffset` of a face whose concrete kind is not exported, or of an exactly
+//! the script at an op nothing is compared at: a non-local `FaceuseOffset` of a face
+//! whose concrete kind is not exported (the Rust side defers), or of an exactly
 //! `SmSurfOfRevolution` surface when self-intersection is enabled (HANG-26: its offset
-//! self-intersection takes 20 s to minutes, or never returns at large distances), and an `EdgeuseOffset` with
-//! `|offset distance| > 1e6` (HANG-27).
+//! self-intersection takes 20 s to minutes, or never returns at large distances), and an
+//! `EdgeuseOffset` with `|offset distance| > 1e6` (HANG-27). The difftest runner rejects
+//! the hang cases from the Rust script before calling here; the `-6` stop is a safety net.
 //!
 //! The `n_local` pairs name store surfaces only (kind 7): `SmLocalOperationGeometryCreation`
 //! owns its listed surfaces (with `make_analytics` it reparameterises and deletes each one

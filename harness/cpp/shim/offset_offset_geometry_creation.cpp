@@ -18,7 +18,7 @@
 // edge's curve, set an edge use's UV trim curve, mark an edge use) and the unit's
 // functions. Each op emits its code, a status (0 success, the SmStatus code, -2 when
 // the shim refused the op because upstream would dereference null, or -6 when the script
-// stops at an op the Rust side defers at, see ST_NOT_RUN) and its outputs; the
+// stops at an op nothing is compared at, see ST_NOT_RUN) and its outputs; the
 // objects the unit makes are emitted as geometry (`put_curve` of the fixture header,
 // surfaces as their type, UV domain, a 3x3 point sample and, for a plain B-spline surface
 // or a surface of revolution, their NURB), the B-rep edits as edge / edge-use state blocks.
@@ -160,11 +160,12 @@ struct Two
 const double ST_OK = 0.0;
 // The database version of the exported concrete surface records (OG_EXPORT).
 const ULONG SURFACE_DB_VERSION = 33;
-// The op the Rust side defers at without running anything comparable, so the script
-// stops here (the runner mirrors each predicate): a non-local FaceuseOffset whose
-// concrete kind is not exported, or an SmSurfOfRevolution with self-intersection
-// enabled (20 s to minutes, HANG-26), and an EdgeuseOffset with
-// |offset distance| above MAX_EDGEUSE_OFFSET_DISTANCE (HANG-27).
+// An op nothing comparable runs at, so the script stops here (the runner mirrors each
+// predicate): a non-local FaceuseOffset whose concrete kind is not exported (the Rust
+// side defers), or an SmSurfOfRevolution with self-intersection enabled (20 s to
+// minutes, HANG-26), and an EdgeuseOffset with |offset distance| above
+// MAX_EDGEUSE_OFFSET_DISTANCE (HANG-27). The runner rejects the hang cases from the
+// Rust script before calling the shim; this stop is a safety net.
 const double ST_NOT_RUN = -6.0;
 // HANG-27: SmCrvOnSurf::ApproximateCurve of an EdgeuseOffset rail grows with the
 // offset distance (Mouse.smb: 1 s at 1e4, 10 s at 1e6, 28 s at 1e8, no return within
@@ -895,7 +896,7 @@ void run_script(Rd& rd, Two& t, std::vector<double>& o)
             }
             if (fabs(dist) > MAX_EDGEUSE_OFFSET_DISTANCE)
             {
-                o.push_back(ST_NOT_RUN); // HANG-27: the Rust defers here
+                o.push_back(ST_NOT_RUN); // HANG-27: the runner rejects such a script
                 return;
             }
             if (exec.GetExtendConvexEdges())

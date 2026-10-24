@@ -21,9 +21,12 @@
 //! C++ side reports `-3` and the Rust side defers to `cpp-guard:unvalidated-topology`.
 //! **Revisit when `topology.brep_p10` lands** (e.g. run the C++ read out of process): a
 //! guard-free sweep crashed in 13 of 15 files, while most such streams are safe. The other
-//! shim guards answer `-2` (upstream would dereference null); both sides would only echo
-//! that constant, so the Rust side defers them: `cpp-guard:ub-165`
-//! (`MakeFaceWithCurves` with a curve on surface and no UV curves), `cpp-guard:null-curve`
+//! shim guards answer `-2` (upstream would dereference null). A `MakeFaceWithCurves` with
+//! a curve on surface, 3D curves and no UV curves that gets past its own input checks
+//! crashes upstream (`plan/upstream-issues.md` UB-165): `run_cpp` rejects it from the
+//! inputs and the Rust side's checks before calling the shim (whose `-2` guard stays as a
+//! safety net), so neither side runs. The other two `-2` guards would only echo that
+//! constant on both sides, so the Rust side defers them: `cpp-guard:null-curve`
 //! (`GlueEdgesGeneral` with `SM_OT_SAME`, equal intervals and one edge without curve),
 //! `cpp-guard:null-surface`
 //! (`MergeSelfIntersectionCurves` on a face without surface).
@@ -564,9 +567,44 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(x) => x,
         Err(o) => return Ok(o),
     };
+    if ub_165(&r)? {
+        return Ok(Output::rejected(
+            "UB-165: SmBrep::MakeFaceWithCurves dereferences the null UV curve array \
+             (curve on surface, no UV curves); not run",
+        ));
+    }
     let (op, path, input) = encode(&r)?;
     let out = ffi::eval(op, &path, &input).map_err(|e| harness(format!("c++: {e}")))?;
     Ok(Output::new().values("out", out))
+}
+
+/// A `MakeFaceWithCurves` that crashes upstream (`plan/upstream-issues.md` UB-165,
+/// AGENTS.md section 4, step 5.6): `pbOptCrvOnSurf` TRUE with 3D curves and no UV
+/// curves, past its own input checks (no loops, a degenerate surface:
+/// `SmBrep.cpp:15722-15741`, which return first). The same predicate as the shim's `-2`
+/// guard, decided from the inputs and the Rust side's degeneracy tests, never from C++
+/// output. Where a degeneracy test is unported the Rust side cannot tell: the case is
+/// not rejected, the shim's guard keeps it from upstream and the Rust side defers.
+fn ub_165(i: &Inputs) -> Result<bool, HarnessError> {
+    let Inputs::MakeFaceWithCurves {
+        surface,
+        crv_on_surf,
+        loops,
+        has3d,
+        has_uv,
+        ..
+    } = i
+    else {
+        return Ok(false);
+    };
+    if *crv_on_surf != 2 || *has_uv || !*has3d {
+        return Ok(false);
+    }
+    match mfwc_input_error(&Kernel::default(), surface, loops) {
+        Ok(input_error) => Ok(!input_error),
+        Err(Fail::Deferred(_)) => Ok(false),
+        Err(Fail::Harness(h)) => Err(h),
+    }
 }
 
 // ---- Rust side --------------------------------------------------------------------------
@@ -864,15 +902,8 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
             curves,
             points,
         } => {
-            // the shim's guard: upstream dereferences the null UV curve array once MakeFace
-            // succeeds (the port returns InvalidInput there); its own input checks (no
-            // loops, a degenerate surface) return first
-            if *crv_on_surf == 2 && !*has_uv && *has3d && !mfwc_input_error(k, surface, loops)? {
-                return Err(cpp_null_deref(
-                    "cpp-guard:ub-165",
-                    "SmBrep::MakeFaceWithCurves",
-                ));
-            }
+            // (a curve on surface without UV curves past the input checks crashes upstream:
+            // run_cpp rejects it (ub_165); the port returns InvalidInput there)
             // (the shim passes the new B-rep's GetInfiniteRegion() unless null)
             let (mut b, infinite) = native_brep()?;
             let region = (!*region_null).then_some(infinite);

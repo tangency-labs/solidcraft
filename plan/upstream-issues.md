@@ -2300,7 +2300,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **How found:** `difftest --unit offset.offset_geometry_creation --fuzz 2000` (PR #156) reported timeouts; gdb backtraces after 12, 24 and 40 s; replays with the distance substituted.
 - **Confirmed:** yes (reference build; gdb backtraces, timed replays). Not proven infinite: the recursion is bounded, but no run at the distances above returned within the limits given.
 - **Severity:** hang in practice; memory exhaustion at some distances.
-- **Rust port:** `CreateOffsetSurface` on such a face is deferred (`harness:analytic-geometry-export`: the export brings the surface in as its B-spline part), so the difftest shim does not run that `FaceuseOffset` (status `-6`, the script stops) and nothing comparable is lost. HANG-20 (`blend.fillet_geom_p1`) is a different regime of the same solver (coordinates near the double range's overflow).
+- **Rust port:** the difftest runner rejects a script whose Rust run reaches a non-local `FaceuseOffset` of an exact `SmSurfOfRevolution` face with self-intersection enabled (`Output::rejected` naming HANG-26, decided before either side runs); the shim keeps its own stop there (status `-6`, the script stops) as a safety net. HANG-20 (`blend.fillet_geom_p1`) is a different regime of the same solver (coordinates near the double range's overflow).
 
 #### HANG-27. `SmCrvOnSurf::ApproximateCurve` of an offset-surface rail grows with the offset distance and stops returning
 - **Location:** `SmOffsetGeometryCreation::EdgeuseOffset` (the offset-surface rail when no offset edge use is given) -> `SmCrvOnSurf::ApproximateCurve` -> `SmCrvOnSurf::GetOrCreateBSApproxPointer` -> `SmCurve::ApproximateCurve` -> `SmCurve::LocalPointSolve` -> `SmLocalSolve1d::SolveIt` -> `SmFindPCExtremaEFO::Evaluate` (gdb after 40 s).
@@ -2309,7 +2309,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **How found:** `difftest --fuzz 2000` of PR #156; gdb backtrace; replays with the distance substituted.
 - **Confirmed:** yes (reference build). Not proven infinite.
 - **Severity:** hang in practice.
-- **Rust port:** the port builds the rail's `SmOffsetSurface` and defers at the curve on it (`UNPORTED(curve.crv_on_surf)`: the ported `CrvOnSurf` holds a B-spline surface only). The difftest shim and runner treat an `EdgeuseOffset` with `|distance| > 1e6` as a hang guard (status `-6`, the script stops; the Rust defers under `upstream:HANG-27`). The bound is chosen for the fuzz time budget (20 s per side), not the termination boundary (about 1e250); the generator's distances (0.001 to 100) are far below it.
+- **Rust port:** the port builds the rail's `SmOffsetSurface` and defers at the curve on it (`UNPORTED(curve.crv_on_surf)`: the ported `CrvOnSurf` holds a B-spline surface only). The difftest shim and runner treat an `EdgeuseOffset` with `|distance| > 1e6` as a hang guard (the runner rejects a script whose Rust run reaches it, naming HANG-27; the shim keeps its own stop there, status `-6`, as a safety net). The bound is chosen for the fuzz time budget (20 s per side), not the termination boundary (about 1e250); the generator's distances (0.001 to 100) are far below it.
 
 #### HANG-21. The surface cache of an offset of a small trimmed surface does not finish
 - **Location:** `source/SMLib/src/SmOffsetSurface.cpp:337` (`SmSurface::CalculateBoundingBox` on the offset), `smsurf_GetSurfaceCache` and the `SmSurfaceCache` tree build.
