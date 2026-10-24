@@ -32,6 +32,18 @@
 //!   `GetHeight` failures are returned too. A STEP inversion of the cone that fails in
 //!   the generator solve returns the error (upstream keeps the location it had already
 //!   classified); its other failures leave `SM_LT_EXTERIOR`, as upstream.
+//! - **Seam lines of the ellipse trim (opt-in,
+//!   [`UpstreamFixes::ellipse_trim_seam_lines_span_cone_height`](crate::kernel::UpstreamFixes::ellipse_trim_seam_lines_span_cone_height),
+//!   WR-490).** `sm_GetEllipseTrimIntervals` takes the end circles at the cone's own
+//!   height and classifies through the cone's STEP inversion, which ignores the domain,
+//!   but evaluates the two seam lines on the given domain's v range. A face trimmed along
+//!   its axis then loses the seam crossing that lies in its trimmed-off part; with no
+//!   crossing left the ellipse is returned as outside, and two equal cylinders with
+//!   crossing axes lose half their intersection (a union drops a body, status OK). With
+//!   the field set, the seam lines span the cone's whole height too and only their sweep
+//!   comes from the domain, as the SolidCraft fork does; the face's own trims are applied
+//!   by its caller. By default the seam lines use the domain, as the pinned C++ does. See
+//!   `plan/upstream-issues/WR-490--ellipse-trim-seam-lines-on-trimmed-domain.md`.
 //! - **Offset factory.** The apex-truncation branch dereferences the result of
 //!   `CreateCanonical` without checking its status (a `NULL` cone crashes, a
 //!   non-finite height recurses without bound); here that construction's error is
@@ -996,12 +1008,18 @@ pub fn ellipse_trim_intervals(
     }
 
     // get cone corners [StartLine start, StartLine end, EndLine start EndLine end]
-    // (statuses ignored)
+    // (statuses ignored). Opt-in (WR-490): the seam lines span the cone's whole height,
+    // as the end circles and the classification do; only their sweep comes from
+    // `uv_domain`. By default their v range comes from `uv_domain` too, as upstream.
+    let seam_domain = if k.fixes.ellipse_trim_seam_lines_span_cone_height {
+        let cone_v = cone.rev.anal_uv_domain.v_interval();
+        let sweep = anal_uv_domain.u_interval();
+        Extent2d::from_bounds(sweep.min(), cone_v.min(), sweep.max(), cone_v.max())
+    } else {
+        anal_uv_domain
+    };
     let corner = |u: f64, v: f64| -> Result<Point3> {
-        Ok(
-            ignored(cone.evaluate_step_point(anal_uv_domain.evaluate(u, v)))?
-                .unwrap_or(Vec3::UNDEF),
-        )
+        Ok(ignored(cone.evaluate_step_point(seam_domain.evaluate(u, v)))?.unwrap_or(Vec3::UNDEF))
     };
     let corners = [
         corner(0.0, 0.0)?,
@@ -1324,5 +1342,76 @@ mod tests {
         // the circle lies in no seam-line plane crossing: the result is whatever the
         // classification gives, but it must not fail
         assert!(ivls.is_ok());
+    }
+
+    /// WR-490: total length (deg) of the trim intervals of an ellipse on a cylinder r 10,
+    /// h 100 trimmed to v >= 30, with `ellipse_trim_seam_lines_span_cone_height` set to
+    /// `fix`, and of the same ellipse on the natural domain.
+    fn ellipse_on_a_trimmed_cylinder(fix: bool) -> (f64, f64) {
+        // A face already joined to another body: the ellipse of a plane through the axis
+        // point (0, 0, 50) that meets the seam (x = 10, y = 0) only at its lowest point,
+        // z = 20, in the trimmed-off part. Upstream takes the seam lines from the trimmed
+        // domain: no crossing at all, and the ellipse comes back as outside the cylinder.
+        let mut k = kernel();
+        k.fixes.ellipse_trim_seam_lines_span_cone_height = fix;
+        let cyl = canonical(&k, 10.0, 10.0, 100.0, false, false);
+        let d = cyl.rev().base().natural_uv_domain();
+        let (lo, hi) = (d.min(), d.max());
+        let trim = Extent2d::from_bounds(lo.x, lo.y + 0.3 * (hi.y - lo.y), hi.x, hi.y);
+        let step_min = cyl.convert_uv_from_nurbs_to_step(&k, trim.min()).unwrap();
+        assert!(step_min.y > 20.0 + 1e-6 && step_min.y < 50.0);
+        let x = Vec3::new(1.0, 0.0, -3.0) * (1.0 / 10.0_f64.sqrt());
+        let rx = 1000.0_f64.sqrt();
+        let lowest = Vec3::new(0.0, 0.0, 50.0) + rx * x;
+        assert!((lowest - Vec3::new(10.0, 0.0, 20.0)).length() < 1e-12);
+        let ivls = ellipse_trim_intervals(
+            &k,
+            Vec3::new(0.0, 0.0, 50.0),
+            x,
+            Vec3::new(0.0, 1.0, 0.0),
+            rx,
+            10.0,
+            0.0,
+            360.0,
+            &cyl,
+            &trim,
+            1e-6,
+        )
+        .unwrap();
+        let natural = ellipse_trim_intervals(
+            &k,
+            Vec3::new(0.0, 0.0, 50.0),
+            x,
+            Vec3::new(0.0, 1.0, 0.0),
+            rx,
+            10.0,
+            0.0,
+            360.0,
+            &cyl,
+            &d,
+            1e-6,
+        )
+        .unwrap();
+        let total = |v: &[Extent1d]| v.iter().map(Extent1d::length).sum::<f64>();
+        (total(&ivls), total(&natural))
+    }
+
+    #[test]
+    fn seam_crossing_below_a_trimmed_domain_keeps_the_ellipse() {
+        // WR-490, opt-in: the ellipse lies on the whole cylinder (z 20..80 of 0..100), so
+        // the full ellipse, as with the natural domain; the face's trims are the caller's
+        // (CurveOnClassify)
+        let (trimmed, natural) = ellipse_on_a_trimmed_cylinder(true);
+        assert!((natural - 360.0).abs() < 1e-9);
+        assert!((trimmed - 360.0).abs() < 1e-9, "{trimmed}");
+    }
+
+    #[test]
+    fn seam_crossing_below_a_trimmed_domain_drops_the_ellipse_by_default() {
+        // WR-490, default: no seam crossing on the trimmed domain, so the ellipse is
+        // returned as outside, as the pinned C++ does
+        let (trimmed, natural) = ellipse_on_a_trimmed_cylinder(false);
+        assert!((natural - 360.0).abs() < 1e-9);
+        assert!(trimmed.abs() < 1e-9, "{trimmed}");
     }
 }
