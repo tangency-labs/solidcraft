@@ -503,6 +503,7 @@ pub struct SolveApp {
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
     pub agent_chat: agent_chat::AgentChat,
     pending_shots: Vec<(u64, Option<String>, std::sync::mpsc::Sender<Value>, f64)>,
+    shot_chat_turns: std::collections::HashMap<u64, std::sync::Arc<std::sync::atomic::AtomicBool>>,
     queued_shots: Vec<(u64, f64, u32)>,
     shot_token: u64,
     styled: bool,
@@ -617,6 +618,7 @@ impl SolveApp {
             control_answering: Vec::new(),
             agent: Default::default(),
             pending_shots: Vec::new(),
+            shot_chat_turns: Default::default(),
             queued_shots: Vec::new(),
             shot_token: 0,
             styled: false,
@@ -857,6 +859,7 @@ impl SolveApp {
     /// What follows a command's run, whether it ran here or on a worker (a save): its echo,
     /// the status line when it failed, what opening and saving update, and the toolbar tab.
     pub(crate) fn finish_command(&mut self, id: &str, r: &Result<Value, String>) {
+        let id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
         match r {
             Ok(v) => {
                 // Programmatic callers (the control channel, scripts) run outside a render
@@ -875,6 +878,7 @@ impl SolveApp {
                     prefs::apply_new_design(self);
                 }
                 if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                    documents::reset_chat(self);
                     render_workspace::reset_document(self);
                     dim_view::cancel();
                     self.menu.props = None;
@@ -1866,6 +1870,9 @@ impl SolveApp {
             // Held requests go first, in order, once nothing makes them wait.
             let held = if waits || shot_waits { None } else { self.control_held.pop_front() };
             let Some(req) = held.or_else(|| rx.as_ref().and_then(|rx| rx.try_recv().ok())) else { break };
+            if req.refuse_cancelled_chat() {
+                continue;
+            }
             if shot_waits {
                 if self.control_held.len() < MAX_HELD {
                     self.control_held.push_back(req);
@@ -1892,8 +1899,7 @@ impl SolveApp {
                 ctx.request_repaint();
                 continue;
             };
-            let reply = req.reply.clone();
-            if agent_cursor::intercept(self, &req.method, &req.params, &reply) {
+            if agent_cursor::intercept(self, &req) {
                 ctx.request_repaint();
                 continue;
             }
@@ -1909,6 +1915,9 @@ impl SolveApp {
 
     /// Run a control request here, now, and reply (or queue the screenshot it asks for).
     pub(crate) fn run_control(&mut self, ctx: &egui::Context, req: ControlRequest) {
+        if req.refuse_cancelled_chat() {
+            return;
+        }
         let reply = req.reply.clone();
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {
@@ -1922,6 +1931,9 @@ impl SolveApp {
             control::Outcome::Screenshot { path } => {
                 self.shot_token += 1;
                 let token = self.shot_token;
+                if let Some(turn) = req.chat_turn {
+                    self.shot_chat_turns.insert(token, turn);
+                }
                 self.queued_shots.push((token, now_ms() + 150.0, 0));
                 self.pending_shots.push((token, path, reply, now_ms() + 8000.0));
             }
@@ -1946,6 +1958,19 @@ impl SolveApp {
     }
 
     fn collect_screenshots(&mut self, ctx: &egui::Context) {
+        // A screenshot requested in one tab must never return or save a frame of another.
+        let chat_turns = &mut self.shot_chat_turns;
+        let queued_shots = &mut self.queued_shots;
+        self.pending_shots.retain(|(token, _, reply, _)| {
+            if control::chat_turn_cancelled(chat_turns.get(token).map(std::sync::Arc::as_ref)) {
+                chat_turns.remove(token);
+                queued_shots.retain(|(queued, ..)| queued != token);
+                let _ = reply.send(control::cancelled_chat_response());
+                false
+            } else {
+                true
+            }
+        });
         if self.pending_shots.is_empty() && !issue_report::pending(self) {
             return;
         }
@@ -1966,17 +1991,19 @@ impl SolveApp {
             issue_report::receive(self, token, image.clone());
             if let Some(i) = self.pending_shots.iter().position(|(t, ..)| *t == token) {
                 let (_, path, reply, _) = self.pending_shots.remove(i);
+                self.shot_chat_turns.remove(&token);
                 let _ = reply.send(control::save_screenshot(&image, path.as_deref()));
             }
         }
         let now = now_ms();
         // Hidden while waiting: no frame is coming.
         let hidden = window_hidden(ctx);
-        self.pending_shots.retain(|(_, _, reply, deadline)| {
+        self.pending_shots.retain(|(token, _, reply, deadline)| {
             if now < *deadline && !hidden {
                 return true;
             }
             let _ = reply.send(json!({"ok": false, "error": "no frame was presented (window hidden?); use ui.render"}));
+            self.shot_chat_turns.remove(token);
             false
         });
     }

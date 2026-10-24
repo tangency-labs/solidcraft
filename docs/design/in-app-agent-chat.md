@@ -169,6 +169,35 @@ design from before the turn), relabelled "Agent chat: <message>". If the history
 the meantime the start is found by the design it holds; if it's gone, nothing is merged. The
 conversation shows the merged step with an Undo button while it's still the latest thing done.
 
+### Document ownership
+
+Each open design tab owns an `AgentChat`, including its transcript, backend session, agent
+selection, sign-in retry, draft, attachments, pending messages and approval state. `DocSlot`
+parks that state alongside its `Session`; switching restores both together. Panel visibility,
+placement, agent discovery, endpoint model cache, settings dialogs and the desktop endpoint
+starter remain window state. A new tab gets a fresh conversation. Closing a tab drops its
+backend; closing the last tab or replacing its design (including programmatic New, Open and
+Recover commands or scripts) clears its conversation.
+Conversation state is in memory only and does not change the design file format.
+
+Leaving a tab cancels its running turn, declines outstanding approvals, and merges completed
+changes into that design's undo history before swapping sessions. Its backend conversation
+remains available when the tab is selected again. Pending messages stay with that tab and wait
+for Send. Hidden backends are not polled and their tool endpoints never feed the active tab's
+gate. Prompts waiting for startup or sign-in also move to the explicit Send queue on leaving.
+Late events are received only when their owning tab is selected again; requests without a
+running turn are refused, and late permission questions from a stopped turn are cancelled.
+Turning off AI or quitting stops hidden backends as well.
+
+Every admitted tool request also carries a shared turn validity flag. Ending the turn or
+leaving the tab invalidates it. The app checks it before dispatch, after deferred computation,
+before an animated command applies, and before returning or saving a window screenshot. A
+cancelled computation or export releases its UI waiting slot without waiting for its worker;
+already started file writes are not rolled back. Requests already past the gate cannot apply
+commands to or return inspection or screenshot data from the next tab, even if tab indices
+change through closing. Ordinary external control requests retain their existing active-design
+behavior.
+
 ### The agent's own tools
 
 ACP lets the client offer a file system and a terminal; the chat offers neither, and starts the
@@ -214,7 +243,7 @@ returns the whole state, for tests and screenshots.
 
 | Area | Work |
 |---|---|
-| Conversation | Diffs, history per design, resume (`session/load`) |
+| Conversation | Diffs, persisted conversation history, resume (`session/load`) |
 | Session controls | Model and mode pickers from `configOptions` / `modes`, slash commands |
 | Auth | An embedded terminal or "open a terminal here" for terminal logins on each OS; logout |
 | Discovery | Read the ACP registry; keychain-aware login check on macOS |

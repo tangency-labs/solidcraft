@@ -108,6 +108,12 @@ clears the files waiting on the chips too.
 
 ## Typing while the agent works
 
+Each design tab has its own conversation, agent session, draft, attachments and queued messages.
+A new tab starts with an empty chat. Switching away stops the current turn and keeps its
+completed changes in that design's undo history. Returning restores the conversation; queued
+messages wait for **Send**. Closing a design closes its conversation. Conversations are kept
+only while the tabs remain open.
+
 The input stays enabled during a turn. **Enter** queues the message: it shows in the conversation
 as a **Queued** bubble that you can **Edit** or remove (×) until it is sent. Several queued
 messages go as one prompt, in order, when the turn ends normally.

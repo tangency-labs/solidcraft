@@ -452,7 +452,9 @@ impl ChatBackend for Script {
     fn set_model(&mut self, model: &str) {
         self.calls.lock().unwrap().push(format!("set_model: {model}"));
     }
-    fn answer_permission(&mut self, _: u64, _: Option<&str>) {}
+    fn answer_permission(&mut self, key: u64, option: Option<&str>) {
+        self.calls.lock().unwrap().push(format!("permission: {key} {option:?}"));
+    }
     fn authenticate(&mut self, _: &str) {}
     fn shutdown(&mut self, _: bool) {}
 }
@@ -468,6 +470,262 @@ fn app_with_script() -> (SolveApp, Script, egui::Context) {
 
 fn ended(script: &Script, reason: &str) {
     script.report(Event::TurnEnded { reason: reason.into() });
+}
+
+#[test]
+fn document_tabs_keep_their_conversations_and_backend_context() {
+    let (mut app, first, ctx) = app_with_script();
+    app.agent_chat.open = true;
+    app.agent_chat.control_starter = Some(Box::new(|_| Some(12345)));
+    app.agent_chat.tools_port = Some(12345);
+    app.agent_chat.settings.add = Some(settings::AddState::default());
+    app.agent_chat.agent_id = Some("first-agent".into());
+    app.agent_chat.input = "first draft".into();
+    app.agent_chat.attach_view = true;
+    app.agent_chat.add_file(attach::Attachment::imported("sample.step".into()));
+    send(&mut app, &ctx, "first request".into());
+    send(&mut app, &ctx, "first follow-up".into());
+
+    crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+    assert!(app.agent_chat.items.is_empty() && app.agent_chat.input.is_empty());
+    assert!(app.agent_chat.pending.is_empty() && app.agent_chat.attachments.is_empty());
+    assert!(app.agent_chat.backend.is_none() && app.agent_chat.agent_id.is_none());
+    assert!(app.agent_chat.tools_port.is_none() && app.agent_chat.tools_rx.is_none());
+    assert!(!app.agent_chat.attach_view);
+    assert!(app.agent_chat.open && app.agent_chat.control_starter.is_some());
+    assert!(app.agent_chat.settings.add.is_some(), "settings belong to the window");
+    assert!(first.calls().iter().any(|c| c == "cancel"));
+
+    let second = Script::default();
+    app.agent_chat.backend = Some(Box::new(second.clone()));
+    app.agent_chat.state = Some(State::Ready);
+    app.agent_chat.input = "second draft".into();
+    send(&mut app, &ctx, "second request".into());
+    ended(&second, "");
+    poll(&mut app, &ctx);
+    ended(&first, "cancelled");
+    crate::documents::switch(&mut app, 0);
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.input, "first draft");
+    assert_eq!(app.agent_chat.agent_id.as_deref(), Some("first-agent"));
+    assert_eq!(app.agent_chat.tools_port, Some(12345), "the endpoint belongs to its conversation");
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::User { files, .. } if files.iter().any(|name| name == "sample.step"))));
+    assert_eq!(texts(&app), ["first follow-up"]);
+    assert!(app.agent_chat.stopped, "returning must not send the stopped queue");
+    assert_eq!(first.prompts().len(), 1);
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "first request")));
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "second request")));
+    assert!(app.agent_chat.attach_view);
+
+    // Closing an earlier tab shifts indices, but the surviving backend and draft stay together.
+    crate::documents::close(&mut app, 0, true);
+    assert_eq!(app.docs.active, 0);
+    assert_eq!(app.agent_chat.input, "second draft");
+    assert!(!app.agent_chat.stopped, "leaving an idle conversation does not stop a turn");
+    send(&mut app, &ctx, "second continuation".into());
+    assert_eq!(second.prompts().len(), 2, "the same backend retains this tab's context");
+    crate::documents::close(&mut app, 0, true);
+    assert!(app.agent_chat.items.is_empty() && app.agent_chat.backend.is_none());
+    assert!(app.agent_chat.open && app.agent_chat.control_starter.is_some());
+}
+
+#[test]
+fn leaving_during_startup_or_sign_in_keeps_the_unsent_message_for_send() {
+    for state in [State::Starting, State::NeedsAuth] {
+        let (mut app, script, ctx) = app_with_script();
+        app.agent_chat.state = Some(state);
+        app.agent_chat.add_file(attach::Attachment::imported("sample.step".into()));
+        send(&mut app, &ctx, "waiting request".into());
+        assert!(script.prompts().is_empty());
+        assert!(app.agent_chat.queued.is_some());
+        crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+        // Both events may have been buffered while the original tab was hidden.
+        script.report(Event::AuthRequired { methods: Vec::new() });
+        script.report(Event::Ready { agent: "scripted".into(), images: false });
+        crate::documents::switch(&mut app, 0);
+        poll(&mut app, &ctx);
+        assert!(script.prompts().is_empty(), "returning must not send a startup or sign-in retry");
+        assert!(app.agent_chat.queued.is_none());
+        assert_eq!(texts(&app), ["waiting request"]);
+        assert_eq!(app.agent_chat.pending[0].files[0].name, "sample.step");
+        send_now(&mut app, &ctx);
+        assert_eq!(script.prompts().len(), 1, "an explicit Send resumes the message");
+        assert_eq!(app.agent_chat.items.iter().filter(|i| matches!(i, Item::User { text, .. } if text == "waiting request")).count(), 1);
+    }
+}
+
+#[test]
+fn a_late_sign_in_retry_or_permission_cannot_restart_a_departed_turn() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "first request".into());
+    crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+    script.report(Event::Permission {
+        key: 7,
+        title: "mcp__solidcraft__batch".into(),
+        options: vec![PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() }],
+    });
+    ended(&script, "auth");
+    script.report(Event::AuthRequired { methods: Vec::new() });
+    script.report(Event::Ready { agent: "scripted".into(), images: false });
+    crate::documents::switch(&mut app, 0);
+    poll(&mut app, &ctx);
+    assert!(script.calls().iter().any(|c| c == "permission: 7 None"), "late permission is cancelled even for our own tools");
+    assert_eq!(app.agent_chat.waiting(), 0);
+    assert_eq!(script.prompts().len(), 1, "a cancelled turn must not retry after sign-in");
+    assert!(app.agent_chat.turn.is_none() && app.agent_chat.queued.is_none());
+}
+
+#[test]
+fn programmatic_replacement_clears_the_conversation_and_invalidates_its_requests() {
+    for command in ["file.new", "FILE.NEW"] {
+        let (mut app, script, ctx) = app_with_script();
+        let (tx, rx) = channel();
+        app.agent_chat.tools_rx = Some(rx);
+        send(&mut app, &ctx, "first request".into());
+        let queued = ask(&tx, "engine.execute", boxed(0.0));
+        pump_tools(&mut app);
+        app.run(command, json!({})).unwrap();
+        app.drain_control(&ctx);
+        assert_eq!(queued.try_recv().unwrap()["ok"], false);
+        assert!(app.agent_chat.items.is_empty() && app.agent_chat.backend.is_none());
+        assert!(app.session.doc.features.is_empty() && app.session.undo.is_empty());
+        assert!(script.calls().iter().any(|c| c == "cancel"));
+    }
+}
+
+#[test]
+fn a_script_resets_chat_only_after_a_replacement_succeeds() {
+    for (steps, replaced) in [
+        (json!([{"command": "missing.command"}, {"command": "file.new"}]), false),
+        (json!([{"command": "file.new"}]), true),
+        (json!([{"id": "FILE.NEW"}]), true),
+        (json!([{"command": "file.new"}, {"command": "missing.command"}]), true),
+    ] {
+        for params in [steps.clone(), json!({"commands": steps})] {
+            let (mut app, _script, ctx) = app_with_script();
+            send(&mut app, &ctx, "first request".into());
+            let (req, reply) = ControlRequest::new("engine.script", params);
+            app.run_control(&ctx, req);
+            assert!(reply.try_recv().is_ok());
+            assert_eq!(app.agent_chat.backend.is_none(), replaced);
+            assert_eq!(app.agent_chat.items.is_empty(), replaced);
+            assert_eq!(app.agent_chat.turn.is_none(), replaced);
+        }
+    }
+}
+
+#[test]
+fn leaving_a_tab_refuses_computation_and_export_replies() {
+    // The export deliberately omits its path: even a worker's error must be replaced by
+    // cancellation after leaving, without writing a file or echoing into another document.
+    for params in [boxed(0.0), json!({"command": "file.export", "params": {}})] {
+        let (mut app, tx) = app_in_a_turn();
+        let ctx = crate::fonts::test_context();
+        app.apply_off_thread = Some(std::time::Duration::ZERO);
+        app.preferences.agent_off_thread = true;
+        app.preferences.ai_permissions = agents::Mode::All;
+        let reply = ask(&tx, "engine.execute", params);
+        pump_tools(&mut app);
+        app.drain_control(&ctx);
+        assert!(app.control_job.is_some() || !app.control_answering.is_empty(), "the worker result waits for a later frame");
+        crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+        let incoming = app.session.doc.clone();
+        let log = app.session.log.clone();
+        app.poll_control_jobs(&ctx);
+        let response = reply.try_recv().expect("cancellation must not wait for the worker");
+        assert_eq!(response["ok"], false);
+        assert!(response["error"].as_str().is_some_and(|e| e.contains("document tab was left")));
+        assert!(app.control_job.is_none() && app.control_answering.is_empty());
+        assert!(Arc::ptr_eq(&app.session.doc, &incoming));
+        assert_eq!(app.session.log, log);
+        assert!(app.session.undo.is_empty());
+        crate::documents::switch(&mut app, 0);
+        assert!(app.session.doc.features.is_empty() && app.session.undo.is_empty());
+    }
+}
+
+#[test]
+fn leaving_a_tab_refuses_admitted_commands_animations_and_screenshots() {
+    for animate in [false, true] {
+        let (mut app, tx) = app_in_a_turn();
+        let ctx = crate::fonts::test_context();
+        app.ui.agent_cursor.show = animate;
+        crate::scenario::publish_handle("toolbar:solid.box", egui::pos2(100.0, 100.0));
+        app.ui.agent_cursor.speed = crate::agent_cursor::Speed::Times(1.0);
+        let change = ask(&tx, "engine.execute", boxed(0.0));
+        let shot = ask(&tx, "ui.screenshot", json!({}));
+        pump_tools(&mut app);
+        // Capture a request already waiting for a frame, as well as a queued command.
+        let screenshot = app.control_held.pop_back().unwrap();
+        app.run_control(&ctx, screenshot);
+        assert_eq!(app.pending_shots.len(), 1);
+        if animate {
+            app.drain_control(&ctx);
+            assert!(app.agent.busy(), "the command is waiting on cursor animation");
+        }
+        crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+        let other = app.session.doc.clone();
+        app.drain_control(&ctx);
+        crate::agent_cursor::step(&mut app, &ctx);
+        app.collect_screenshots(&ctx);
+        for reply in [change, shot] {
+            let response = reply.try_recv().expect("cancelled requests answer without running");
+            assert_eq!(response["ok"], false);
+            assert!(response["error"].as_str().is_some_and(|e| e.contains("document tab was left")));
+        }
+        assert!(Arc::ptr_eq(&app.session.doc, &other));
+        assert!(app.session.undo.is_empty() && app.pending_shots.is_empty());
+        assert!(app.queued_shots.is_empty(), "a cancelled screenshot must not capture the incoming tab");
+        crate::documents::switch(&mut app, 0);
+        assert!(app.session.doc.features.is_empty() && app.session.undo.is_empty());
+        // Adopting into a blank tab replaces the document and clears its old conversation.
+        app.agent_chat.input = "discarded draft".into();
+        crate::documents::adopt(&mut app, solidcraft_engine::Session::default());
+        assert!(app.agent_chat.input.is_empty() && app.agent_chat.items.is_empty());
+    }
+}
+
+#[test]
+fn late_events_approvals_and_undo_stay_with_the_originating_document() {
+    let (mut app, first, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    send(&mut app, &ctx, "make two blocks".into());
+    for x in [0.0, 20.0] {
+        let reply = ask(&tx, "engine.execute", boxed(x));
+        frame(&mut app);
+        assert_eq!(reply.try_recv().unwrap()["ok"], true);
+    }
+    assert_eq!(app.session.undo.len(), 2);
+    app.preferences.ai_permissions = agents::Mode::Ask;
+    let held = ask(&tx, "engine.execute", boxed(40.0));
+    pump_tools(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 1);
+    crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+    assert_eq!(held.try_recv().unwrap()["ok"], false);
+    assert_eq!(app.agent_chat.waiting(), 0);
+    first.report(Event::Text { thought: false, text: "Stopped in the first design".into() });
+    ended(&first, "cancelled");
+    let late = ask(&tx, "engine.execute", boxed(60.0));
+    frame(&mut app);
+    assert!(app.agent_chat.items.is_empty());
+    assert!(app.session.doc.features.is_empty() && app.session.undo.is_empty());
+    assert!(matches!(late.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+
+    crate::documents::switch(&mut app, 0);
+    frame(&mut app);
+    assert_eq!(late.try_recv().unwrap()["ok"], false);
+    assert_eq!(app.session.doc.features.len(), 2);
+    assert_eq!(app.session.undo.len(), 1, "the outgoing turn merged only its own undo");
+    let changes = app.agent_chat.items.iter().position(|i| matches!(i, Item::Changes { steps: 2, .. })).unwrap();
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Agent { text, .. } if text == "Stopped in the first design")));
+    undo_changes(&mut app, changes);
+    assert!(app.session.doc.features.is_empty());
+    crate::documents::switch(&mut app, 1);
+    app.preferences.ai_features = false;
+    poll(&mut app, &ctx);
+    crate::documents::switch(&mut app, 0);
+    assert!(app.agent_chat.backend.is_none(), "disabling AI stops hidden conversations too");
 }
 
 fn texts(app: &SolveApp) -> Vec<String> {

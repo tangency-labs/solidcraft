@@ -133,6 +133,7 @@ pub struct Job {
     method: String,
     params: Value,
     reply: Sender<ControlResponse>,
+    chat_turn: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     stops: VecDeque<Pos2>,
     /// Seconds per glide and per click for this request (within [`TIME_BUDGET`] in all).
     glide: f64,
@@ -325,7 +326,8 @@ fn walk<'a>(v: &'a Value, key: Option<&'a str>, f: &mut dyn FnMut(Option<&'a str
 
 /// Take over a control request when the pointer should act it out first: returns the request
 /// back when it should simply run.
-pub fn intercept(app: &mut SolveApp, method: &str, params: &Value, reply: &Sender<ControlResponse>) -> bool {
+pub fn intercept(app: &mut SolveApp, req: &crate::control::ControlRequest) -> bool {
+    let (method, params, reply) = (req.method.as_str(), &req.params, &req.reply);
     let s = app.ui.agent_cursor;
     if !s.show || params.get("animate").and_then(Value::as_bool) == Some(false) {
         return false;
@@ -362,6 +364,7 @@ pub fn intercept(app: &mut SolveApp, method: &str, params: &Value, reply: &Sende
         method: method.to_string(),
         params: params.clone(),
         reply: reply.clone(),
+        chat_turn: req.chat_turn.clone(),
         stops,
         glide,
         click,
@@ -393,6 +396,12 @@ pub fn step(app: &mut SolveApp, ctx: &egui::Context) {
         ctx.request_repaint();
     }
     let Some(job) = app.agent.job.as_mut() else { return };
+    if crate::control::chat_turn_cancelled(job.chat_turn.as_deref()) {
+        if let Some(job) = app.agent.job.take() {
+            let _ = job.reply.send(crate::control::cancelled_chat_response());
+        }
+        return;
+    }
     let (glide, click) = (job.glide, job.click);
     ctx.request_repaint();
     let Some(&to) = job.stops.front() else {
@@ -426,6 +435,10 @@ pub fn step(app: &mut SolveApp, ctx: &egui::Context) {
 /// Run the held request now (as a call without animation) and send its reply.
 fn finish(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(job) = app.agent.job.take() else { return };
+    if crate::control::chat_turn_cancelled(job.chat_turn.as_deref()) {
+        let _ = job.reply.send(crate::control::cancelled_chat_response());
+        return;
+    }
     let mut params = job.params;
     params["animate"] = json!(false);
     let cmd = params.get("command").or(params.get("id")).and_then(Value::as_str).unwrap_or_default().to_string();

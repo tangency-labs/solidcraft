@@ -244,6 +244,8 @@ pub enum Item {
 
 /// The message being answered: what undo and the limits need.
 struct Turn {
+    /// Deferred requests stop being valid when this turn ends or its tab is left.
+    active: Arc<std::sync::atomic::AtomicBool>,
     /// The design and the undo depth before it.
     start_doc: Arc<solidcraft_engine::doc::Document>,
     start_undo: usize,
@@ -410,6 +412,33 @@ impl Drop for AgentChat {
 }
 
 impl AgentChat {
+    /// Exchange document state, keeping window services and preferences UI in the window.
+    pub(crate) fn swap_document(&mut self, other: &mut Self) {
+        std::mem::swap(self, other);
+        std::mem::swap(&mut self.open, &mut other.open);
+        std::mem::swap(&mut self.settings, &mut other.settings);
+        std::mem::swap(&mut self.control_starter, &mut other.control_starter);
+        std::mem::swap(&mut self.models_cache, &mut other.models_cache);
+        std::mem::swap(&mut self.window_placed, &mut other.window_placed);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            std::mem::swap(&mut self.detection, &mut other.detection);
+            std::mem::swap(&mut self.detecting, &mut other.detecting);
+        }
+        // Hit regions must be measured again for the incoming conversation.
+        self.panel_rect = None;
+        self.dock_space = None;
+        self.drop_rect = None;
+    }
+
+    pub(crate) fn disconnect_document(&mut self, session: &mut solidcraft_engine::Session, wait: bool) {
+        finish_turn(self, session);
+        self.stop_backend(wait);
+        if self.state.is_some() {
+            self.state = Some(State::Off);
+        }
+    }
+
     /// Put a file on the next message with an id of its own; its name back.
     fn add_file(&mut self, file: attach::Attachment) -> String {
         let id = self.next_file_id();
@@ -604,7 +633,7 @@ impl AgentChat {
                 self.state = Some(State::NeedsAuth);
                 self.picking = Some(false);
                 // What was asked goes again once the login is done.
-                if self.queued.is_none() {
+                if !self.stopped && self.queued.is_none() {
                     self.queued = self.last.take();
                 }
             }
@@ -840,18 +869,36 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Stop the agent (and everything it started); the conversation stays.
 pub fn disconnect(app: &mut SolveApp) {
-    end_turn(app);
-    let chat = &mut app.agent_chat;
-    chat.stop_backend(false);
-    if chat.state.is_some() {
-        chat.state = Some(State::Off);
-    }
+    app.agent_chat.disconnect_document(&mut app.session, false);
 }
 
 /// The app is quitting: end the agent and its helpers before the window goes.
 pub fn shutdown(app: &mut SolveApp) {
+    app.agent_chat.disconnect_document(&mut app.session, true);
+    crate::documents::disconnect_background_chats(app, true);
+}
+
+/// A tab switch stops this turn before its session leaves the app. Keep the backend's own
+/// conversation, drafts and queue, but do not send that queue automatically on returning.
+pub(crate) fn leave_document(app: &mut SolveApp) {
+    if app.agent_chat.state() == State::Busy {
+        cancel(app);
+    }
     end_turn(app);
-    app.agent_chat.stop_backend(true);
+    let chat = &mut app.agent_chat;
+    chat.steering = false;
+    chat.last = None;
+    // A prompt waiting for startup or sign-in has not reached the backend yet. Keep it
+    // with the explicit queue so a late Ready event cannot send it on returning to the tab.
+    if let Some((text, image, at, files)) = chat.queued.take() {
+        if let Some(at) = at.filter(|&at| matches!(chat.items.get(at), Some(Item::User { .. }))) {
+            chat.items.remove(at);
+        }
+        chat.pending.insert(0, Pending { text, image, files });
+    }
+    if !chat.pending.is_empty() {
+        chat.stopped = true;
+    }
 }
 
 /// Most messages waiting in the queue.
@@ -1133,8 +1180,15 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
     // The undo step is named after the message, or its first file when it has no words.
     let first_line = text.lines().find(|l| !l.trim().is_empty()).or_else(|| files.first().map(|f| f.name.as_str())).unwrap_or("");
     let label: String = first_line.chars().take(48).collect();
-    app.agent_chat.turn =
-        Some(Turn { start_doc: app.session.doc.clone(), start_undo: app.session.undo.len(), changes: 0, requests: 0, limit_told: false, label });
+    app.agent_chat.turn = Some(Turn {
+        active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        start_doc: app.session.doc.clone(),
+        start_undo: app.session.undo.len(),
+        changes: 0,
+        requests: 0,
+        limit_told: false,
+        label,
+    });
     app.agent_chat.last = Some((text, image, at, files));
     app.agent_chat.state = Some(State::Busy);
     app.agent_chat.stopped = false;
@@ -1349,11 +1403,16 @@ fn approve_with(app: &mut SolveApp, id: u64, allow: bool, why: &str) {
 /// The message is answered: its changes become one undo step, and what still waits is declined.
 fn end_turn(app: &mut SolveApp) {
     decline_all(app, "the message ended");
-    let Some(turn) = app.agent_chat.turn.take() else { return };
-    let steps = merge_undo(&mut app.session.undo, &turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
+    finish_turn(&mut app.agent_chat, &mut app.session);
+}
+
+fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
+    let Some(turn) = chat.turn.take() else { return };
+    turn.active.store(false, std::sync::atomic::Ordering::Relaxed);
+    let steps = merge_undo(&mut session.undo, &turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
     if steps > 0 {
-        let doc = app.session.doc.clone();
-        app.agent_chat.push(Item::Changes { steps, doc, undone: false });
+        let doc = session.doc.clone();
+        chat.push(Item::Changes { steps, doc, undone: false });
     }
 }
 
@@ -1404,6 +1463,7 @@ fn pump_tools(app: &mut SolveApp) {
             refuse(req, "the agent chat has no message in progress".into());
             continue;
         };
+        req.chat_turn = Some(Arc::clone(&turn.active));
         turn.requests += 1;
         if turn.requests > gate::MAX_REQUESTS_PER_TURN {
             refuse(req, format!("too many requests in one message (at most {})", gate::MAX_REQUESTS_PER_TURN));
@@ -1518,6 +1578,7 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // AI features turned off: nothing keeps running, nothing is looked for.
     if !shown(app) {
+        crate::documents::disconnect_background_chats(app, false);
         if app.agent_chat.backend.is_some() || app.agent_chat.open {
             disconnect(app);
             app.agent_chat.open = false;
@@ -1532,6 +1593,11 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
             Some(Outcome::TurnEnd) => {
                 end_turn(app);
                 after_turn(app, ctx);
+            }
+            Some(Outcome::Permission { key, .. }) if app.agent_chat.turn.is_none() => {
+                if let Some(b) = app.agent_chat.backend.as_mut() {
+                    b.answer_permission(key, None);
+                }
             }
             Some(Outcome::Permission { key, title, options }) => on_permission(app, key, title, options),
             None => {}

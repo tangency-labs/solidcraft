@@ -58,13 +58,33 @@ pub struct ControlRequest {
     pub reply: Sender<ControlResponse>,
     /// Set once the window starts on it; until then it waits its turn (`control.running`, #3654).
     pub started: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Chat requests already admitted by the gate may outlive a tab switch. This turn's
+    /// validity follows them through queues, computation and cursor animation.
+    pub(crate) chat_turn: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl ControlRequest {
     pub fn new(method: impl Into<String>, params: Value) -> (Self, std::sync::mpsc::Receiver<ControlResponse>) {
         let (tx, rx) = std::sync::mpsc::channel();
-        (Self { method: method.into(), params, reply: tx, started: Default::default() }, rx)
+        (Self { method: method.into(), params, reply: tx, started: Default::default(), chat_turn: None }, rx)
     }
+
+    pub(crate) fn refuse_cancelled_chat(&self) -> bool {
+        if chat_turn_cancelled(self.chat_turn.as_deref()) {
+            let _ = self.reply.send(cancelled_chat_response());
+            true
+        } else {
+            false
+        }
+    }
+}
+
+pub(crate) fn chat_turn_cancelled(turn: Option<&std::sync::atomic::AtomicBool>) -> bool {
+    turn.is_some_and(|active| !active.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+pub(crate) fn cancelled_chat_response() -> Value {
+    json!({"ok": false, "error": "not run: the agent chat turn ended or its document tab was left"})
 }
 
 pub enum Outcome {
@@ -314,7 +334,20 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             ok(json!(app.ui.agent_cursor))
         }
         "engine.script" => {
-            let r = app.session.run_script(p).map(|v| json!(v)).map_err(|e| e.to_string());
+            let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
+            let mut replaced = false;
+            let r = app
+                .session
+                .run_script_each(p, &mut |i, _| {
+                    let id = steps.and_then(|steps| steps.get(i)).and_then(command).and_then(solidcraft_engine::find_command).map(|spec| spec.id);
+                    replaced |= matches!(id, Some("file.new" | "doc.open" | "doc.recover"));
+                })
+                .map(|v| json!(v))
+                .map_err(|e| e.to_string());
+            // A successful replacement still happened if a later script step failed.
+            if replaced {
+                crate::documents::reset_chat(app);
+            }
             app.follow_view_request(false);
             wrap(r)
         }

@@ -373,6 +373,9 @@ impl SolveApp {
     /// An export's or a reading's reply, from its copy, with the echo an export leaves when it
     /// runs here.
     fn answered(&mut self, job: ControlJob, reply: Option<Value>) {
+        if job.req.refuse_cancelled_chat() {
+            return;
+        }
         let reply = reply.unwrap_or_else(|| json!({"ok": false, "error": format!("`{}` ended without a reply", job.label)}));
         let export = executed(&job.req.params).and_then(|(command, _)| spec_id(command)).is_some_and(|id| ANSWERED_ON_A_COPY.contains(&id));
         if reply["ok"] == true && export {
@@ -387,6 +390,10 @@ impl SolveApp {
         if !self.control_answering.is_empty() {
             let mut i = 0;
             while i < self.control_answering.len() {
+                if self.control_answering.get(i).is_some_and(|job| job.req.refuse_cancelled_chat()) {
+                    self.control_answering.remove(i);
+                    continue;
+                }
                 match self.control_answering.get(i).and_then(ControlJob::poll) {
                     Some(reply) => {
                         let job = self.control_answering.remove(i);
@@ -398,6 +405,10 @@ impl SolveApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
         let Some(job) = &self.control_job else { return };
+        if job.req.refuse_cancelled_chat() {
+            self.control_job = None;
+            return;
+        }
         if job.poll().is_none() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
             return;
