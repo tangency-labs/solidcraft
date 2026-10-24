@@ -157,6 +157,10 @@ matext4cgmath = { path = "vendor/matext4cgmath" }
 # Keep OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
 egui-wgpu = { path = "vendor/egui-wgpu" }
 
+# Save the settings file (app.ron) whole: a temporary file renamed over it, so two windows
+# saving at once can't leave a damaged file.
+eframe = { path = "vendor/eframe" }
+
 # Mutation testing (cargo-mutants, docs/mutation-testing.md): the ci profile with incremental
 # builds, since every mutant rebuilds the crates above the one it changes.
 [profile.mutants]

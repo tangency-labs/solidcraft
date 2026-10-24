@@ -214,6 +214,56 @@ mod tests {
         d
     }
 
+    /// Two windows saving the settings file at once: a reader only ever finds a whole save, never a
+    /// shorter save with the tail of a longer one (a file that did not read, moved aside with all
+    /// its settings), and no temporary file stays behind.
+    #[test]
+    fn settings_saved_from_two_windows_at_once_always_read() {
+        let keys = ["solidcraft.prefs"];
+        let d = scratch("concurrent");
+        let path = d.join("app.ron");
+        let save = |egui: usize| {
+            let kv: std::collections::HashMap<String, String> =
+                [("solidcraft.prefs".to_string(), r#"{"grid":true}"#.to_string()), ("egui".to_string(), "x".repeat(egui))].into();
+            move |path: &Path| eframe::save_settings_file(path, &kv)
+        };
+        save(10)(&path);
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let (reads, bad) = std::thread::scope(|s| {
+            let writers = [200_000, 10].map(|egui| {
+                let (path, save) = (&path, save(egui));
+                s.spawn(move || {
+                    for _ in 0..100 {
+                        save(path);
+                    }
+                })
+            });
+            let reader = s.spawn(|| {
+                let (mut reads, mut bad) = (0, None);
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) && bad.is_none() {
+                    // A read can fail while a rename replaces the file; only what reads counts.
+                    if let Ok(text) = std::fs::read_to_string(&path) {
+                        reads += 1;
+                        if !app_ron_reads(&text, &keys) {
+                            bad = Some(format!("{} bytes ending {:?}", text.len(), text.get(text.len().saturating_sub(40)..)));
+                        }
+                    }
+                }
+                (reads, bad)
+            });
+            for w in writers {
+                w.join().unwrap();
+            }
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            reader.join().unwrap()
+        });
+        assert_eq!(bad, None, "a reader found a damaged save");
+        assert!(reads > 0, "the reader read the file");
+        assert!(app_ron_reads(&std::fs::read_to_string(&path).unwrap(), &keys));
+        let left: Vec<_> = std::fs::read_dir(&d).unwrap().flatten().map(|e| e.file_name()).filter(|n| *n != "app.ron").collect();
+        assert!(left.is_empty(), "temporary files left: {left:?}");
+    }
+
     #[test]
     fn switches_read_from_the_environment() {
         assert!(env_on(Some("1")) && env_on(Some("yes")) && !env_on(Some("0")) && !env_on(Some(" ")) && !env_on(None) && !env_on(Some("false")));

@@ -562,3 +562,12 @@ A frame whose meshes the GPU refuses to stage (device lost or out of memory) is
 skipped with a warning instead of panicking (#1469).
 Paint callbacks are prepared only after a drawable is acquired, so a skipped
 surface frame cannot strand cached meshes without their GPU initialization.
+
+## Vendored settings-file fix
+
+`vendor/eframe` is eframe 0.36.2 from https://github.com/emilk/egui
+(MIT OR Apache-2.0; both original licence texts are included). Rust sources are
+retained; egui's logo (`data/icon.png`) and the README are not copied, and the
+default window icon is empty (SolidCraft always sets its own). SolidCraft's patch
+saves the settings file (`app.ron`) to a temporary file beside it and renames
+that over it, so two windows saving at once can't leave a damaged file (#4164).
