@@ -698,6 +698,8 @@ pub struct PrefsWindow {
     applied_up: Option<String>,
     /// The search text of the interface font list.
     font_filter: String,
+    /// Search text on the Plugins page.
+    pub(crate) plugin_query: String,
 }
 
 /// Open the dialog at a page.
