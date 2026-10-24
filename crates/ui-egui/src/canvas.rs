@@ -465,6 +465,15 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     {
         drag_arrow(ui, painter, proj, base, bs, -(n * sign), l2, true, egui::Id::new("sc_manipulator2"), half_height, distance2);
     }
+    // Sketch offset Two Sides: Distance 2 gets its own arrow, the other way from Distance
+    // (#4285). One Side and Symmetric keep the single arrow; the second distance is the
+    // other side, so the arrow is not signed (a negative length would swap the sides).
+    if let (Kind::SketchModify(crate::sketch_modify_ui::Mod::Offset { mode, distance2, .. }), Some(n)) = (&mut d.kind, dir)
+        && crate::sketch_modify_ui::offset_two_sides(*mode)
+        && let Some(l2) = app.session.doc.eval(distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
+    {
+        drag_arrow(ui, painter, proj, base, bs, -n, l2, false, egui::Id::new("sc_manipulator2"), half_height, distance2);
+    }
     // A chamfer of two distances: Distance 2 gets its own arrow along the other face.
     let faces = chamfer_face_dirs(app, d, base);
     if let (Kind::Fillet { distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)

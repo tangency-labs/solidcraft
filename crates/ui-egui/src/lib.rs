@@ -105,6 +105,8 @@ pub(crate) mod mesh_lod;
 pub mod messages;
 pub mod occurrence_drag;
 #[cfg(test)]
+mod offset_arrow_tests;
+#[cfg(test)]
 mod pattern_arrow_tests;
 #[cfg(test)]
 mod prompt_cards_tests;

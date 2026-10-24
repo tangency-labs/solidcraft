@@ -69,9 +69,14 @@ const MAX_COPIES: f64 = 500.0;
 pub(crate) const OFFSET_MODES: [&str; 3] = ["One Side", "Two Sides", "Symmetric"];
 const OFFSET_MODE_ICONS: [&str; 3] = ["offset_one_side", "offset_two_sides", "offset_symmetric"];
 /// Index of Two Sides in [`OFFSET_MODES`] (the mode with a second distance).
-const TWO_SIDES: usize = 1;
+pub(crate) const TWO_SIDES: usize = 1;
 /// Index of Symmetric in [`OFFSET_MODES`].
 const SYMMETRIC: usize = 2;
+
+/// Whether an offset mode index is Two Sides (an independent distance the other way).
+pub(crate) fn offset_two_sides(mode: usize) -> bool {
+    mode == TWO_SIDES
+}
 
 /// Whether an offset mode index is Symmetric (which hides Flip and offsets both ways).
 pub(crate) fn offset_symmetric(mode: usize) -> bool {
