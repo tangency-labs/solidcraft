@@ -893,6 +893,32 @@ fn contextual_tab(app: &SolveApp, tab: &str) -> bool {
     tab == "SKETCH" || (tab == "SHEET METAL" && crate::workspace::sheet_body(app).is_some())
 }
 
+/// How one ribbon tab is painted: its fill, its label colour and an outline
+/// (`Color32::TRANSPARENT` for none).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RibbonTabStyle {
+    fill: Color32,
+    ink: Color32,
+    outline: Color32,
+}
+
+/// A contextual tab (Sketch while editing, Sheet Metal for a sheet body) is the loudest tab
+/// when it is selected: the solid accent pill. Unselected, it looks like any unselected tab
+/// with its accent as an outline, so it still marks the context without outshining the
+/// selected tab. Ordinary tabs use the soft accent when selected and the hover colour when
+/// hovered.
+fn ribbon_tab_style(t: &Tokens, tab: &str, contextual: bool, active: bool, hovered: bool) -> RibbonTabStyle {
+    let accent = crate::theme::TabAccent::for_tab(t, tab);
+    let idle = if hovered { t.hover } else { Color32::TRANSPARENT };
+    let (fill, ink, outline) = match (contextual, active) {
+        (true, true) => (accent.color, accent.on_fill(t), Color32::TRANSPARENT),
+        (true, false) => (idle, t.text, accent.color),
+        (false, true) => (accent.soft, accent.ink, Color32::TRANSPARENT),
+        (false, false) => (idle, t.text, Color32::TRANSPARENT),
+    };
+    RibbonTabStyle { fill, ink, outline }
+}
+
 fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
     let t = Tokens::get();
     let tabs = crate::workspace::visible_tabs(app);
@@ -946,31 +972,9 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                     }
                     let response = ui.interact(tr, ui.id().with(("tab", tab)), Sense::click());
                     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, ribbon_label(app, tab)));
-                    let accent = crate::theme::TabAccent::for_tab(&t, tab);
-                    let fill = if contextual {
-                        accent.color
-                    } else if active {
-                        accent.soft
-                    } else if response.hovered() {
-                        t.hover
-                    } else {
-                        Color32::TRANSPARENT
-                    };
-                    ui.painter().rect_filled(tr, corner, fill);
-                    ribbon_text(
-                        ui,
-                        tr.center(),
-                        &ribbon_label(app, tab),
-                        t.font_button,
-                        if contextual {
-                            accent.on_fill(&t)
-                        } else if active {
-                            accent.ink
-                        } else {
-                            t.text
-                        },
-                        active || contextual,
-                    );
+                    let style = ribbon_tab_style(&t, tab, contextual, active, response.hovered());
+                    ui.painter().rect(tr, corner, style.fill, Stroke::new(1.0, style.outline), egui::StrokeKind::Inside);
+                    ribbon_text(ui, tr.center(), &ribbon_label(app, tab), t.font_button, style.ink, active || contextual);
                     if ui.clip_rect().contains(tr.center()) {
                         crate::scenario::publish_target(&format!("tab:{tab}"), tr);
                         crate::scenario::publish_rect(&format!("toolbar_tab:{tab}"), tr);
@@ -2872,6 +2876,54 @@ mod app_bar_tests {
 #[cfg(test)]
 mod ribbon_label_tests {
     use super::*;
+
+    fn tab_test_themes() -> Vec<Tokens> {
+        let mut themes = Vec::new();
+        for dark in [false, true] {
+            for vision in crate::theme::ColorVision::ALL {
+                themes.push(Tokens::themed(dark, vision));
+            }
+        }
+        themes.extend(crate::theme_files::builtin().iter().map(crate::theme_files::resolve));
+        themes
+    }
+
+    #[test]
+    fn a_selected_contextual_tab_stands_out_and_an_unselected_one_is_outlined() {
+        for t in tab_test_themes() {
+            for tab in ["SKETCH", "SHEET METAL"] {
+                let accent = crate::theme::TabAccent::for_tab(&t, tab);
+                for hovered in [false, true] {
+                    let active = ribbon_tab_style(&t, tab, true, true, hovered);
+                    let inactive = ribbon_tab_style(&t, tab, true, false, hovered);
+                    assert_eq!(active, RibbonTabStyle { fill: accent.color, ink: accent.on_fill(&t), outline: Color32::TRANSPARENT });
+                    assert_eq!(inactive, RibbonTabStyle { outline: accent.color, ..ribbon_tab_style(&t, tab, false, false, hovered) });
+                    assert!(crate::theme::contrast_ratio(active.ink, active.fill) >= 4.5, "{tab}: selected text must remain readable");
+                    // The selected contextual tab is the solid pill; the unselected one never is.
+                    assert!(
+                        crate::theme::contrast_ratio(active.fill, t.toolbar)
+                            > crate::theme::contrast_ratio(if hovered { t.hover } else { t.toolbar }, t.toolbar),
+                        "{tab}: the selected tab must be the more prominent one"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ordinary_tabs_keep_their_selected_hovered_and_idle_colors() {
+        for t in tab_test_themes() {
+            for tab in ["MODEL", "SURFACE", "SHEET METAL"] {
+                let accent = crate::theme::TabAccent::for_tab(&t, tab);
+                for hovered in [false, true] {
+                    let none = Color32::TRANSPARENT;
+                    assert_eq!(ribbon_tab_style(&t, tab, false, true, hovered), RibbonTabStyle { fill: accent.soft, ink: accent.ink, outline: none });
+                    let idle = if hovered { t.hover } else { none };
+                    assert_eq!(ribbon_tab_style(&t, tab, false, false, hovered), RibbonTabStyle { fill: idle, ink: t.text, outline: none });
+                }
+            }
+        }
+    }
 
     #[test]
     fn ribbon_weight_is_painted_once_at_a_pixel_aligned_origin() {
