@@ -713,6 +713,7 @@
   "cmd.sketch_spline_fit_point": "擬合點雲形線",
   "cmd.sketch_spun_profile": "旋轉輪廓",
   "cmd.sketch_toggle_driven": "切換從動尺寸",
+  "cmd.sketch_transform": "變換",
   "cmd.sketch_trim_path": "沿路徑修剪",
   "cmd.solid_align": "對齊",
   "cmd.solid_boundary_fill": "邊界填充",

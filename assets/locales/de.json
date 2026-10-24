@@ -825,6 +825,7 @@
   "cmd.sketch_spline_fit_point": "Spline mit Fitpunkten",
   "cmd.sketch_spun_profile": "Gedrehtes Profil",
   "cmd.sketch_toggle_driven": "Abhängiges Maß umschalten",
+  "cmd.sketch_transform": "Transformieren",
   "cmd.sketch_trim_path": "Entlang Pfad trimmen",
   "cmd.solid_align": "Ausrichten",
   "cmd.solid_boundary_fill": "Begrenzungsfüllung",

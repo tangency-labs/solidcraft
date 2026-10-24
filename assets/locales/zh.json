@@ -912,6 +912,7 @@
   "cmd.sketch_spline_fit_point": "拟合点样条曲线",
   "cmd.sketch_spun_profile": "旋转轮廓",
   "cmd.sketch_toggle_driven": "切换被驱动尺寸",
+  "cmd.sketch_transform": "变换",
   "cmd.sketch_trim_path": "沿路径修剪",
   "cmd.solid_align": "对齐",
   "cmd.solid_boundary_fill": "边界填充",

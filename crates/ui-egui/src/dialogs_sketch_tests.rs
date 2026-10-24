@@ -281,3 +281,50 @@ fn rectangular_pattern_quantity_arrows_keep_both_directions_within_the_copy_limi
     h.step(&json!({"click":{"handle":"dialog:Quantity down"}})).unwrap();
     assert_eq!(counts(&h), ("249".into(), "2".into()));
 }
+
+/// Transform scales, turns and moves what is picked as one, by handles on its box or by the
+/// window's numbers, and OK applies it in a single step.
+#[test]
+fn transform_handles_and_fields_scale_move_and_turn_the_picks() {
+    let mut h = fixture();
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    h.settle();
+    let ids: Vec<String> = {
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        sk.curves.iter().map(|c| c.id.clone()).collect()
+    };
+    let mut d = Dialog::for_command(&h.app, "sketch.transform").unwrap();
+    d.inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    h.app.dialog = Some(d);
+    h.frames(4);
+    let state = |h: &Harness| match h.app.dialog.as_ref().map(|d| d.kind.clone()) {
+        Some(Kind::SketchModify(Mod::Transform { x, y, factor, angle, frame })) => (x, y, factor, angle, frame),
+        other => panic!("no transform window: {other:?}"),
+    };
+    // The box is the rectangle's: 30 x 20 around (25, 20).
+    assert_eq!(state(&h).4, Some(([25.0, 20.0], [30.0, 20.0])));
+    // The corner at (40, 30) dragged to (55, 40): one and a half times the size about the corner at (10, 10).
+    h.step(&json!({"drag": [{"handle": "transform:handle:3"}, {"world": [55, 40, 0]}]})).unwrap();
+    h.frames(3);
+    let (x, y, factor, _, _) = state(&h);
+    assert!((factor.parse::<f64>().unwrap() - 1.5).abs() < 0.05, "scaled: {factor}");
+    assert!(x.starts_with("7.5") && y.starts_with("5"), "the middle moved to (32.5, 25): {x}, {y}");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+    for p in (0..sk.curves.len()).flat_map(|i| sk.polyline(i)) {
+        lo = (lo.0.min(p.x), lo.1.min(p.y));
+        hi = (hi.0.max(p.x), hi.1.max(p.y));
+    }
+    assert!((lo.0 - 10.0).abs() < 0.5 && (lo.1 - 10.0).abs() < 0.5, "the fixed corner stayed: {lo:?}");
+    assert!((hi.0 - 55.0).abs() < 1.5 && (hi.1 - 40.0).abs() < 1.5, "the far corner went to (55, 40): {hi:?}");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let top = (0..sk.curves.len()).flat_map(|i| sk.polyline(i)).fold(f64::MIN, |m, p| m.max(p.x));
+    assert!((top - 40.0).abs() < 1e-6, "one undo puts it back: {top}");
+}

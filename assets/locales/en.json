@@ -912,6 +912,7 @@
   "cmd.sketch_spline_fit_point": "Fit Point Spline",
   "cmd.sketch_spun_profile": "Spun Profile",
   "cmd.sketch_toggle_driven": "Toggle Driven Dimension",
+  "cmd.sketch_transform": "Transform",
   "cmd.sketch_trim_path": "Trim Along Path",
   "cmd.solid_align": "Align",
   "cmd.solid_boundary_fill": "Boundary Fill",

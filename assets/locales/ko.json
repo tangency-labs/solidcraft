@@ -715,6 +715,7 @@
   "cmd.sketch_spline_fit_point": "맞춤점 스플라인",
   "cmd.sketch_spun_profile": "회전 프로파일",
   "cmd.sketch_toggle_driven": "종속 치수 전환",
+  "cmd.sketch_transform": "변환",
   "cmd.sketch_trim_path": "경로를 따라 트림",
   "cmd.solid_align": "정렬",
   "cmd.solid_boundary_fill": "경계 채우기",

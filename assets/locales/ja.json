@@ -912,6 +912,7 @@
   "cmd.sketch_spline_fit_point": "通過点スプライン",
   "cmd.sketch_spun_profile": "回転プロファイル",
   "cmd.sketch_toggle_driven": "従動寸法の切り替え",
+  "cmd.sketch_transform": "変形",
   "cmd.sketch_trim_path": "パスに沿ってトリム",
   "cmd.solid_align": "整列",
   "cmd.solid_boundary_fill": "境界フィル",
