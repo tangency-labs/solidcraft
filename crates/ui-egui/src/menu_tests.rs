@@ -920,6 +920,54 @@ fn right_click_on_a_plane_offers_a_sketch_on_it() {
     assert_eq!(sketch, Some(25.0), "the sketch is on the construction plane");
 }
 
+/// A right-click on empty space leads with Create Sketch too (#3032), in the same place as on a
+/// plane: the toolbar's, which asks for the plane or face. Either way the menu offers it once.
+#[test]
+fn empty_space_leads_with_create_sketch() {
+    let mut app = sample_app();
+    let items = context_menu::items(&app, &Target::Viewport);
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).filter(|l| !l.is_empty()).collect();
+    assert_eq!(labels[..2], ["Create Sketch", "Pan"], "{labels:?}");
+    assert_eq!(items.first().map(|i| i.label.as_str()), Some("Create Sketch"), "first, as on a plane");
+    assert!(items.get(1).is_some_and(|i| i.id == "-"), "then a separator, as on a plane");
+    assert_eq!(labels.iter().filter(|l| **l == "Create Sketch").count(), 1, "{labels:?}");
+    let sketch = find(&items, "Create Sketch");
+    assert!(sketch.enabled && sketch.params.is_none(), "{sketch:?}");
+    // A plane under the cursor: still one Create Sketch, first, on that plane.
+    app.menu.plane = Some("XY".into());
+    let on_plane = context_menu::items(&app, &Target::Viewport);
+    let sketches: Vec<&Item> = on_plane.iter().filter(|i| i.label == "Create Sketch").collect();
+    assert_eq!(sketches.len(), 1);
+    assert_eq!(sketches[0].params, Some(json!({"plane": "XY"})));
+    assert_eq!(on_plane.first().map(|i| i.label.as_str()), Some("Create Sketch"));
+    // Picking the empty-space one starts the toolbar's Create Sketch, waiting for a plane.
+    app.menu.plane = None;
+    context_menu::run_item(&mut app, &sketch, pos2(0.0, 0.0));
+    assert!(matches!(app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Sketch)), "Create Sketch started");
+}
+
+/// Create Sketch from a right-click on empty space sketches on the next plane clicked (#3032).
+#[test]
+fn create_sketch_from_empty_space_sketches_on_the_plane_clicked_next() {
+    use solidcraft_engine::geom::Vec3;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.settle();
+    let view = h.call("ui.inspect", json!({}))["result"]["viewport"].clone();
+    let corner = [view[0].as_f64().unwrap() + 40.0, view[3].as_f64().unwrap() - 40.0];
+    h.call("ui.menu", json!({"x": corner[0], "y": corner[1]}));
+    let menu = h.call("ui.menu", json!({}))["result"].clone();
+    let first = menu["items"].as_array().unwrap().iter().find_map(|i| i["label"].as_str().filter(|l| !l.is_empty()));
+    assert_eq!(first, Some("Create Sketch"), "{menu}");
+    assert_eq!(h.call("ui.menuPick", json!({"item": "Create Sketch"}))["ok"], true);
+    assert!(h.app.session.active_sketch.is_none(), "it waits for a plane or face");
+    let p = h.at(&json!({"plane": "XY"})).unwrap();
+    h.call("ui.click", json!({"x": p[0], "y": p[1]}));
+    h.frames(3);
+    let normal = h.app.session.active_sketch.and_then(|s| h.app.session.world_state().sketch(s).map(|s| s.plane.normal()));
+    assert!(normal.is_some_and(|n| n.dot(Vec3::Z).abs() > 0.999), "sketching on XY: {normal:?}");
+}
+
 /// Menus opened near the window's bottom right corner, in the viewport or the browser, open up
 /// or to the left where they would not fit, ending at the cursor and staying in the window, at
 /// any UI scale (#1354).

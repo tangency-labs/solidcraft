@@ -551,11 +551,14 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.revolve", "Revolve"));
     } else {
-        // Empty space, or a plane, which leads with a sketch on it.
-        if let Some(plane) = &app.menu.plane {
-            v.push(cmd(app, "sketch.create", "Create Sketch").with(json!({ "plane": plane })));
-            v.push(Item::sep());
-        }
+        // Empty space, or a plane: both lead with Create Sketch (#3032). On a plane it sketches
+        // there; on empty space it is the toolbar's, which asks for the plane or face.
+        let sketch = cmd(app, "sketch.create", "Create Sketch");
+        v.push(match &app.menu.plane {
+            Some(plane) => sketch.with(json!({ "plane": plane })),
+            None => sketch,
+        });
+        v.push(Item::sep());
         v.push(act("ui.nav", "Pan", "pan").with(json!({ "mode": "pan" })));
         v.push(act("ui.nav", "Zoom", "zoom").with(json!({ "mode": "zoom" })));
         v.push(act("ui.nav", "Orbit", "orbit").with(json!({ "mode": "orbit" })));
