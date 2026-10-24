@@ -38,11 +38,18 @@ where
         .or_else(|| surface.search_nearest_parameter(pt, None, 100))?
         .into();
     let vec = wire.edge_iter().try_fold(vec![p], |mut vec, edge| {
-        let poly = polys.entry(edge.id()).or_insert_with(|| {
+        // SolidCraft: an intersection curve with a point that projects onto neither surface
+        // gives this division up (`take_projection_failure`), as its panic did (#5562).
+        if !polys.contains_key(&edge.id()) {
             let curve = edge.curve();
+            let _ = truck_geometry::prelude::take_projection_failure();
             let div = curve.parameter_division(curve.range_tuple(), tol).1;
-            PolylineCurve(div)
-        });
+            if truck_geometry::prelude::take_projection_failure() {
+                return None;
+            }
+            polys.insert(edge.id(), PolylineCurve(div));
+        }
+        let poly = polys.get(&edge.id())?;
         let mut p = *vec.last().unwrap();
         let closure = |q: &P| -> Option<Point2> {
             // SolidCraft: the points of an intersection curve on a lofted or swept surface lie on

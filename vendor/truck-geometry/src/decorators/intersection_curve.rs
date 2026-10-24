@@ -182,13 +182,28 @@ where
 // SolidCraft: a point of the curve with its parameters on both surfaces.
 type Triple = (Point3, Point2, Point2);
 
+thread_local! {
+    // SolidCraft: a point of an intersection curve projected onto neither surface since the last
+    // `take_projection_failure` (the leader's point stood in for it).
+    static PROJECTION_FAILED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// SolidCraft: whether `parameter_division` of an intersection curve met a point that projects
+/// onto neither surface on this thread since the last call, which clears it. Such a division
+/// holds the leader's points there and stops dividing: a Boolean gives up on the curve, as it
+/// did when the failure panicked, instead of carrying approximate points on (#5562).
+#[doc(hidden)]
+pub fn take_projection_failure() -> bool { PROJECTION_FAILED.with(|f| f.replace(false)) }
+
 impl<C, S> IntersectionCurve<C, S>
 where
     C: ParametricCurve3D,
     S: ParametricSurface3D + SearchNearestParameter<D2, Point = Point3>,
 {
     // SolidCraft: `search_triple` started from `hint`'s parameters, falling back to the search
-    // from nothing (and, where that fails too, to `subs` as before). A hinted result is taken
+    // from nothing. Where that fails too, the leader's point stands in and the failure is
+    // recorded (`take_projection_failure`): `subs` unwrapped that same failed search and
+    // panicked, failing a revolve cut through a box's corner (#5562). A hinted result is taken
     // only within the curve's tolerance of the leader's point, where the leader lies: started
     // from a neighbour (or from a periodic surface's seam), the projection can settle on another
     // part of a surface, such as the far side of a small hole, which the search from nothing
@@ -210,7 +225,10 @@ where
         });
         match hinted.or_else(|| self.search_triple(t)) {
             Some(triple) => triple,
-            None => (self.subs(t), Point2::origin(), Point2::origin()),
+            None => {
+                PROJECTION_FAILED.with(|f| f.set(true));
+                (lead, Point2::origin(), Point2::origin())
+            }
         }
     }
 }
@@ -233,7 +251,9 @@ where
     let t = range.0 * (1.0 - p) + range.1 * p;
     let mid = p0 + (p1 - p0) * p;
     let dist2 = curve.hinted_triple(t, Some(ends.0)).0.distance2(mid);
-    if dist2 < tol * tol || trials == 0 {
+    // SolidCraft: a point that projects nowhere ends the division (see `take_projection_failure`).
+    let failed = PROJECTION_FAILED.with(std::cell::Cell::get);
+    if dist2 < tol * tol || trials == 0 || failed {
         (vec![range.0, range.1], vec![p0, p1])
     } else {
         let mid_param = (range.0 + range.1) / 2.0;

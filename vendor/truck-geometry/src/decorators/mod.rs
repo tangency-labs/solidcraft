@@ -146,4 +146,4 @@ mod intersection_curve;
 mod processor;
 mod revolved_curve;
 mod trimmied_curve;
-pub use intersection_curve::double_projection;
+pub use intersection_curve::{double_projection, take_projection_failure};

@@ -73,6 +73,50 @@ fn volume(s: &Session, body: &str) -> f64 {
     s.model.state().body(body).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0)
 }
 
+/// #5562: a quarter disc in a box's side face, at its corner, revolved 360° about the box's
+/// edge through the corner and cut: a hemisphere centred on the corner, its pole on that edge.
+/// Dividing one of the cut's intersection edges met a point that projects onto neither surface,
+/// and the fallback unwrapped that same failed projection: a kernel panic, recorded as a crash.
+/// Nothing panics now; the box loses the eighth of the ball inside it, or the cut is refused
+/// and the box is left whole.
+#[test]
+fn revolve_cut_round_a_box_corner_does_not_panic() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let mut s = Session::default();
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XY"})),
+        ("sketch.rectangle.two_point", json!({"p0": [-5.4, 7.0], "p1": [15.0, -5.0]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"direction": "positive", "distance": "10 mm", "operation": "new", "profiles": [0], "sketch": 1})),
+        ("sketch.create", json!({"plane": {"body": "Body1", "face": [12.721266146083186, -5.0, 7.034827173055135], "index": 1, "path": []}})),
+        ("sketch.circle.center", json!({"center": "p3", "radius": 4.664761515876241})),
+        ("sketch.options", json!({"slice": true})),
+        ("sketch.finish", json!({})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let before = volume(&s, "Body1");
+    let me = std::thread::current().id();
+    let count = Arc::new(AtomicUsize::new(0));
+    let c2 = count.clone();
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |_| {
+        if std::thread::current().id() == me {
+            c2.fetch_add(1, Ordering::SeqCst);
+        }
+    }));
+    let result = s.execute("solid.revolve", &json!({"angle": "360 deg", "axis": "l4", "operation": "cut", "profiles": [2], "sketch": 3}));
+    std::panic::set_hook(prev);
+    assert_eq!(count.load(Ordering::SeqCst), 0, "kernel panics during the cut");
+    let removed = before - volume(&s, "Body1");
+    let eighth = std::f64::consts::PI * 4.664761515876241_f64.powi(3) / 6.0;
+    match result {
+        Ok(_) => assert!((removed - eighth).abs() < 0.02 * eighth, "removed {removed}, an eighth of the ball is {eighth}"),
+        Err(e) => assert!(removed.abs() < 1e-9, "{e}, yet the box lost {removed}"),
+    }
+}
+
 /// #1985: the STEP export of a small enclosure never finished. The export reads its own file
 /// back, and meshing the screw hole's seam cylinder never ended: the boundary walk took
 /// projected angles millions of turns apart. The file is written, reads back cleanly, and holds
