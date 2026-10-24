@@ -1,0 +1,58 @@
+{
+  "en": {
+    "Add an outer tool": "Add an outer tool",
+    "Commands…": "Commands…",
+    "Compact (icons only)": "Compact (icons only)",
+    "Hold before the radial menu opens": "Hold before the radial menu opens",
+    "Hold the right button still, then move: the radial menu opens, and letting go over a command runs it. Moving sooner moves the view; letting go without moving opens the usual menu.": "Hold the right button still, then move: the radial menu opens, and letting go over a command runs it. Moving sooner moves the view; letting go without moving opens the usual menu.",
+    "Inner ring": "Inner ring",
+    "Inner ring, clockwise from the top": "Inner ring, clockwise from the top",
+    "Outer ring": "Outer ring",
+    "Outer ring, clockwise from the top": "Outer ring, clockwise from the top",
+    "Radial menu": "Radial menu",
+    "Radial menu and mouse gestures": "Radial menu and mouse gestures",
+    "Remove": "Remove"
+  },
+  "de": {
+    "Add an outer tool": "Äußeres Werkzeug hinzufügen",
+    "Commands…": "Befehle…",
+    "Compact (icons only)": "Kompakt (nur Symbole)",
+    "Hold before the radial menu opens": "Halten, bevor sich das Radialmenü öffnet",
+    "Hold the right button still, then move: the radial menu opens, and letting go over a command runs it. Moving sooner moves the view; letting go without moving opens the usual menu.": "Rechte Maustaste still halten, dann bewegen: Das Radialmenü öffnet sich, und Loslassen über einem Befehl führt ihn aus. Früheres Bewegen bewegt die Ansicht; Loslassen ohne Bewegung öffnet das gewohnte Menü.",
+    "Inner ring": "Innerer Ring",
+    "Inner ring, clockwise from the top": "Innerer Ring, im Uhrzeigersinn von oben",
+    "Outer ring": "Äußerer Ring",
+    "Outer ring, clockwise from the top": "Äußerer Ring, im Uhrzeigersinn von oben",
+    "Radial menu": "Radialmenü",
+    "Radial menu and mouse gestures": "Radialmenü und Mausgesten",
+    "Remove": "Entfernen"
+  },
+  "ja": {
+    "Add an outer tool": "外側のツールを追加",
+    "Commands…": "コマンド…",
+    "Compact (icons only)": "コンパクト（アイコンのみ）",
+    "Hold before the radial menu opens": "ラジアルメニューが開くまでの長押し時間",
+    "Hold the right button still, then move: the radial menu opens, and letting go over a command runs it. Moving sooner moves the view; letting go without moving opens the usual menu.": "右ボタンを動かさずに押し続けてから動かすと、ラジアルメニューが開きます。コマンドの上でボタンを離すと実行されます。それより早く動かすとビューが動き、動かさずに離すといつものメニューが開きます。",
+    "Inner ring": "内側のリング",
+    "Inner ring, clockwise from the top": "内側のリング（上から時計回り）",
+    "Outer ring": "外側のリング",
+    "Outer ring, clockwise from the top": "外側のリング（上から時計回り）",
+    "Radial menu": "ラジアルメニュー",
+    "Radial menu and mouse gestures": "ラジアルメニューとマウスジェスチャー",
+    "Remove": "削除"
+  },
+  "zh": {
+    "Add an outer tool": "添加外圈工具",
+    "Commands…": "命令…",
+    "Compact (icons only)": "紧凑（仅图标）",
+    "Hold before the radial menu opens": "按住多久后打开径向菜单",
+    "Hold the right button still, then move: the radial menu opens, and letting go over a command runs it. Moving sooner moves the view; letting go without moving opens the usual menu.": "按住右键不动，然后移动：径向菜单打开，在某个命令上松开即执行。更早移动会移动视图；不移动就松开会打开普通菜单。",
+    "Inner ring": "内圈",
+    "Inner ring, clockwise from the top": "内圈，从顶部顺时针",
+    "Outer ring": "外圈",
+    "Outer ring, clockwise from the top": "外圈，从顶部顺时针",
+    "Radial menu": "径向菜单",
+    "Radial menu and mouse gestures": "径向菜单和鼠标手势",
+    "Remove": "移除"
+  }
+}
