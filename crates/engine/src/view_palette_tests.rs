@@ -6,6 +6,75 @@ use serde_json::json;
 use solidcraft_geom::Vec2;
 use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource};
 
+/// #4214: the grid's fade is at full strength in the middle of the view, and gone before the
+/// grid's own edge and before the picture's far plane cuts the ground, so that neither of them
+/// shows as a cut.
+#[test]
+fn the_grid_fades_out_before_its_edge_and_before_the_far_plane() {
+    let fade = GridFade::new(40.0, 1.0, 120.0, 90.0);
+    assert!(fade.start < fade.end, "the fade has a width");
+    assert!(fade.end <= 90.0, "the grid is gone before the far plane cuts the ground at 90");
+    assert!(fade.end <= 120.0, "the grid is gone before its own edge at 120");
+    assert_eq!(fade.alpha(0.0), 1.0, "the middle of the grid is at full strength");
+    assert_eq!(fade.alpha(fade.start), 1.0, "the grid is at full strength up to {}", fade.start);
+    assert_eq!(fade.alpha(fade.end), 0.0, "the grid is gone at {}", fade.end);
+    assert_eq!(fade.alpha(fade.end * 2.0), 0.0, "the grid does not come back");
+    assert_eq!(fade.alpha(f64::NAN), 0.0, "a distance that is not a number fades the grid away");
+    // The fade falls evenly.
+    let mid = (fade.start + fade.end) * 0.5;
+    assert!((fade.alpha(mid) - 0.5).abs() < 0.01, "the fade falls evenly: {} at {mid}", fade.alpha(mid));
+}
+
+/// #4214: the headless grid fades out with the distance from the middle of the view, as the
+/// viewport's does: the lines near the middle are at full strength, the ones further out are
+/// dimmer, and the grid is gone before the distance where it used to stop.
+#[test]
+fn the_headless_grid_fades_out_with_the_distance() {
+    let s = Session::default();
+    let mut cam = home_camera(&s);
+    // A top view: the ground is the XY plane and the grid is centred on the target.
+    cam.pitch = std::f64::consts::FRAC_PI_2;
+    cam.target = Vec3::ZERO;
+    let scene = scene(&s, &cam);
+    assert!(!scene.grid.is_empty(), "the grid is drawn");
+    // How far each piece of the grid is from the middle of the view, and the alpha it is drawn
+    // with.
+    let mut pieces: Vec<(f64, f32)> = scene
+        .grid
+        .iter()
+        .map(|l| {
+            let mid = l.points[0] + (l.points[1] - l.points[0]) * 0.5;
+            ((mid.x * mid.x + mid.y * mid.y).sqrt(), l.alpha)
+        })
+        .collect();
+    pieces.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    // The grid in the middle of the view is at full strength.
+    let strongest = pieces.iter().filter(|(d, _)| *d < 1.0).map(|(_, a)| *a).fold(0.0f32, f32::max);
+    assert_eq!(strongest, 1.0, "the middle of the grid is at full strength");
+    // The further from the middle, the dimmer: the outer half of the grid is fainter than the
+    // inner half.
+    let (near, far) = pieces.split_at(pieces.len() / 2);
+    let mean = |v: &[(f64, f32)]| v.iter().map(|(_, a)| f64::from(*a)).sum::<f64>() / v.len().max(1) as f64;
+    assert!(mean(near) > mean(far) + 0.1, "the grid fades: {} near the middle, {} far from it", mean(near), mean(far));
+    // The grid is gone before the distance where it used to stop, so its edge never shows.
+    let (_, major) = grid_step(cam.half_height());
+    let cut = (cam.half_height() * 3.0 / major).ceil() * major;
+    let farthest = pieces.last().map(|(d, _)| *d).unwrap_or(0.0);
+    assert!(farthest < cut, "the grid fades out at {farthest}, short of the cut at {cut}");
+}
+
+/// #4214: the grid's half size, the one the picture and the window share: the grid reaches as far
+/// on its plane as the view is wide, and further as the plane is seen at a slant.
+#[test]
+fn the_grid_reaches_further_as_its_plane_is_seen_at_a_slant() {
+    let major = grid_step(40.0).1;
+    let flat = grid_ext(40.0, major, 1.0);
+    assert_eq!(flat, (40.0 * 3.0 / major).ceil() * major, "seen face on, the grid reaches as far as the view is wide");
+    assert!(grid_ext(40.0, major, 0.5) > flat, "seen at a slant, the grid reaches further on its plane");
+    // A plane seen edge-on keeps a usable size.
+    assert!(grid_ext(40.0, major, 0.0).is_finite());
+}
+
 /// No colour here is one of [`colors`] or an appearance below, and each field has its own.
 const MARK: Palette = Palette {
     background: (Rgb(1, 2, 3), Rgb(4, 5, 6)),
