@@ -50,10 +50,21 @@ and the nightly run them all. Each seed is its own test
 
 Explicit `platforms.<os>.seeds` records override only the listed seeds on that
 operating system; all other seeds keep the shared records and strict tolerances.
-The first four Windows records were independently reproduced on unmodified main
-`1e984c8e`; seed 94 was independently reproduced on unmodified main `c5992386`
-after the extrusion rebase. Both match the extrusion branch. Recording on a platform
-with such entries updates its changed seeds and preserves shared references.
+The Windows records for seeds 1, 23 and 34 were independently reproduced on unmodified
+main `1e984c8e`; seed 94 was independently reproduced on unmodified main `c5992386`
+after the extrusion rebase. Both match the extrusion branch. Seed 13's was recorded on
+unmodified main `65e6d9da`; seed 23's was re-recorded after #1653. Seed 36's, recorded
+on main `79a843c9`, holds a failure: on Windows (and macOS) its last step leaves a body that fails the
+validity check, where Linux builds it ok (#3583). The record only makes a further change
+show; it does not accept the failure. Recording on a platform with such entries updates its
+changed seeds and preserves shared references. A platform record replaces the shared
+one whole, so a change that moves a seed with a platform record needs that seed checked
+on that platform too: seed 67's Windows record went stale this way after #2064 and
+#2247 and was removed once Windows built the shared record again.
+The Windows records were made with the MSVC target (`x86_64-pc-windows-msvc`) and all
+six were checked again on main `e9490093`. A build for the GNU target (`x86_64-pc-windows-gnu`)
+has been reported to build the shared records for seeds 1, 23, 34 and 94 instead, but it
+is still given the Windows records, which select by operating system only (#4104).
 
 To record an intended change, give the reason:
 
