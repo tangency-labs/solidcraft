@@ -594,7 +594,7 @@ impl ConstantRadiusAssistedFs {
     }
 
     /// `GetSurface(i)->SetOffsetDistance(m_dFilletRadii[i]*m_dOrientations[i])`.
-    fn set_offset_by_radius(&mut self, rail: usize) -> Result<()> {
+    pub(crate) fn set_offset_by_radius(&mut self, rail: usize) -> Result<()> {
         let o = self
             .solver
             .orientations
@@ -640,107 +640,135 @@ impl ConstantRadiusAssistedFs {
         f: &mut [f64],
         jacobian: Option<&mut Matrix>,
     ) -> Result<bool> {
-        const OP: &str = OP_CR_JAC;
-        // init output
-        let mut found = false;
-        let [surface1, surface2] = surfaces;
-
-        // Always need to set the offset surface offset distances prior to solving
-        self.set_offset_by_radius(0)?;
-        self.set_offset_by_radius(1)?;
-
-        let base0 = self.surface(0)?.base_id;
-        let base1 = self.surface(1)?.base_id;
-
-        // get lSurf1Off index into crX array for lSurf1 parameters
-        let mut surf1_off = *num_parameters;
-        *num_parameters = add(*num_parameters, 2, OP)?;
-        if rail_index == 0 && surface1 == Some(base0) {
-            surf1_off = surf_offsets[0];
-            *num_parameters = sub(*num_parameters, 2, OP)?;
-        } else if rail_index == 1 && surface2 == Some(base0) {
-            surf1_off = surf_offsets[1];
-            *num_parameters = sub(*num_parameters, 2, OP)?;
-        }
-
-        // get offsetSurface1 F Point values for given crX values
-        let uv = uv_at(x, surf1_off, OP)?;
-        let (p_f, du_f, dv_f) = offset_evaluate_1st(k, self.surface_mut(0)?, uv)?;
-
-        // get lSurf2Off index into crX array for lSurf2 parameters
-        let mut surf2_off = *num_parameters;
-        *num_parameters = add(*num_parameters, 2, OP)?;
-        if rail_index == 1 && surface1 == Some(base1) {
-            surf2_off = surf_offsets[0];
-            *num_parameters = sub(*num_parameters, 2, OP)?;
-        }
-        if rail_index == 0 && surface2 == Some(base1) {
-            surf2_off = surf_offsets[1];
-            *num_parameters = sub(*num_parameters, 2, OP)?;
-        }
-
-        // set rlSurfffset as needed
-        if rail_index == 0 && surface1.is_none() {
-            surf_offsets[0] = surf1_off;
-        }
-        if rail_index == 0 && surface2.is_none() {
-            surf_offsets[1] = surf2_off;
-        }
-        if rail_index == 1 && surface1.is_none() {
-            surf_offsets[1] = surf1_off;
-        }
-        if rail_index == 1 && surface2.is_none() {
-            surf_offsets[0] = surf2_off;
-        }
-
-        // get offsetSurface2 G Point values for given crX values
-        let uv2 = uv_at(x, surf2_off, OP)?;
-        let (p_g, du_g, dv_g) = offset_evaluate_1st(k, self.surface_mut(1)?, uv2)?;
-
-        // check surface tangent magnitudes
-        // failure: zero length tangents
-        if du_f.length_squared() < EFF_ZERO_SQ
-            || dv_f.length_squared() < EFF_ZERO_SQ
-            || du_g.length_squared() < EFF_ZERO_SQ
-            || dv_g.length_squared() < EFF_ZERO_SQ
-        {
-            return Err(SolidError::sm_err(OP));
-        }
-
-        // set sDiff1 = distance between offset points
-        let diff1 = p_f - p_g;
-
-        if let Some(j) = jacobian {
-            let s1 = add(surf1_off, 1, OP)?;
-            let s2 = add(surf2_off, 1, OP)?;
-            let mut i = *num_equations;
-            for (a, b, c, d) in [
-                (du_f.x, dv_f.x, du_g.x, dv_g.x),
-                (du_f.y, dv_f.y, du_g.y, dv_g.y),
-                (du_f.z, dv_f.z, du_g.z, dv_g.z),
-            ] {
-                set_j(j, i, surf1_off, a, OP)?;
-                set_j(j, i, s1, b, OP)?;
-                set_j(j, i, surf2_off, -c, OP)?;
-                set_j(j, i, s2, -d, OP)?;
-                i = add(i, 1, OP)?; // Move to next equation
-            }
-        }
-
-        // Compute function values
-        for v in [diff1.x, diff1.y, diff1.z] {
-            set_f(f, *num_equations, v, OP)?;
-            *num_equations = add(*num_equations, 1, OP)?;
-        }
-
-        // See if we have converged
-        let scaled_tol = self.solver.conversion_tol * (1.0 + p_f.max_dimension());
-        if diff1.x.abs() < scaled_tol && diff1.y.abs() < scaled_tol && diff1.z.abs() < scaled_tol {
-            found = true;
-        }
-
-        Ok(found)
+        constant_radius_load_jacobian(
+            self,
+            k,
+            num_equations,
+            num_parameters,
+            rail_index,
+            surfaces,
+            surf_offsets,
+            x,
+            f,
+            jacobian,
+        )
     }
+}
+
+/// Constant-radius Jacobian evaluated against the context's actual offset objects.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn constant_radius_load_jacobian<S: super::p2::ConstantRadiusOps + ?Sized>(
+    solver: &mut S,
+    k: &Kernel,
+    num_equations: &mut usize,
+    num_parameters: &mut usize,
+    rail_index: usize,
+    surfaces: JacobianSurfaces,
+    surf_offsets: &mut [usize; 2],
+    x: &[f64],
+    f: &mut [f64],
+    jacobian: Option<&mut Matrix>,
+) -> Result<bool> {
+    const OP: &str = OP_CR_JAC;
+    // init output
+    let mut found = false;
+    let [surface1, surface2] = surfaces;
+
+    // Always need to set the offset surface offset distances prior to solving
+    solver.set_offset_by_radius(0)?;
+    solver.set_offset_by_radius(1)?;
+
+    let base0 = solver.offset_surface(0)?.base_id;
+    let base1 = solver.offset_surface(1)?.base_id;
+
+    // get lSurf1Off index into crX array for lSurf1 parameters
+    let mut surf1_off = *num_parameters;
+    *num_parameters = add(*num_parameters, 2, OP)?;
+    if rail_index == 0 && surface1 == Some(base0) {
+        surf1_off = surf_offsets[0];
+        *num_parameters = sub(*num_parameters, 2, OP)?;
+    } else if rail_index == 1 && surface2 == Some(base0) {
+        surf1_off = surf_offsets[1];
+        *num_parameters = sub(*num_parameters, 2, OP)?;
+    }
+
+    // get offsetSurface1 F Point values for given crX values
+    let uv = uv_at(x, surf1_off, OP)?;
+    let (p_f, du_f, dv_f) = offset_evaluate_1st(k, solver.offset_surface_mut(0)?, uv)?;
+
+    // get lSurf2Off index into crX array for lSurf2 parameters
+    let mut surf2_off = *num_parameters;
+    *num_parameters = add(*num_parameters, 2, OP)?;
+    if rail_index == 1 && surface1 == Some(base1) {
+        surf2_off = surf_offsets[0];
+        *num_parameters = sub(*num_parameters, 2, OP)?;
+    }
+    if rail_index == 0 && surface2 == Some(base1) {
+        surf2_off = surf_offsets[1];
+        *num_parameters = sub(*num_parameters, 2, OP)?;
+    }
+
+    // set rlSurfffset as needed
+    if rail_index == 0 && surface1.is_none() {
+        surf_offsets[0] = surf1_off;
+    }
+    if rail_index == 0 && surface2.is_none() {
+        surf_offsets[1] = surf2_off;
+    }
+    if rail_index == 1 && surface1.is_none() {
+        surf_offsets[1] = surf1_off;
+    }
+    if rail_index == 1 && surface2.is_none() {
+        surf_offsets[0] = surf2_off;
+    }
+
+    // get offsetSurface2 G Point values for given crX values
+    let uv2 = uv_at(x, surf2_off, OP)?;
+    let (p_g, du_g, dv_g) = offset_evaluate_1st(k, solver.offset_surface_mut(1)?, uv2)?;
+
+    // check surface tangent magnitudes
+    // failure: zero length tangents
+    if du_f.length_squared() < EFF_ZERO_SQ
+        || dv_f.length_squared() < EFF_ZERO_SQ
+        || du_g.length_squared() < EFF_ZERO_SQ
+        || dv_g.length_squared() < EFF_ZERO_SQ
+    {
+        return Err(SolidError::sm_err(OP));
+    }
+
+    // set sDiff1 = distance between offset points
+    let diff1 = p_f - p_g;
+
+    if let Some(j) = jacobian {
+        let s1 = add(surf1_off, 1, OP)?;
+        let s2 = add(surf2_off, 1, OP)?;
+        let mut i = *num_equations;
+        for (a, b, c, d) in [
+            (du_f.x, dv_f.x, du_g.x, dv_g.x),
+            (du_f.y, dv_f.y, du_g.y, dv_g.y),
+            (du_f.z, dv_f.z, du_g.z, dv_g.z),
+        ] {
+            set_j(j, i, surf1_off, a, OP)?;
+            set_j(j, i, s1, b, OP)?;
+            set_j(j, i, surf2_off, -c, OP)?;
+            set_j(j, i, s2, -d, OP)?;
+            i = add(i, 1, OP)?; // Move to next equation
+        }
+    }
+
+    // Compute function values
+    for v in [diff1.x, diff1.y, diff1.z] {
+        set_f(f, *num_equations, v, OP)?;
+        *num_equations = add(*num_equations, 1, OP)?;
+    }
+
+    // See if we have converged
+    let scaled_tol = solver.constant_radius().solver.conversion_tol * (1.0 + p_f.max_dimension());
+    if diff1.x.abs() < scaled_tol && diff1.y.abs() < scaled_tol && diff1.z.abs() < scaled_tol {
+        found = true;
+    }
+
+    Ok(found)
 }
 
 // ---- SmSurfaceSurfaceFS -------------------------------------------------------------------

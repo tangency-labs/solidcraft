@@ -10,7 +10,7 @@
 //! | [`surface_surface_fillet`], [`SurfaceFilletOptions`] | `SmFilletExecutive::SurfaceSurfaceFillet` |
 //! | [`FilletExecutive::do_surface_filleting`] | `SmFilletExecutive::DoSurfaceFilleting` |
 //! | [`FilletExecutive::set_fillet_brep_edge_map`] | `SmFilletExecutive::SetFilletBrepEdgeMap` |
-//! | [`FilletExecutive::process_smooth_edge_sequences`] | `SmFilletExecutive::ProcessSmoothEdgeSequences` |
+//! | [`FilletExecutive::process_smooth_edge_sequences`], [`FilletExecutive::process_smooth_edge_sequences_with`] | `SmFilletExecutive::ProcessSmoothEdgeSequences` |
 //! | [`FilletExecutive::collect_tangent_edge_sequence`] | `SmFilletExecutive::CollectTangentEdgeSequence` |
 //! | [`TemporaryRadiusChange::new`], [`TemporaryRadiusChange::revert`], [`with_temporary_radius_change`] | `SmTemporaryRadiusChange` (constructor, destructor) |
 //! | [`TemporaryRadiusChange::set_up`] | `SmTemporaryRadiusChange::SetUp` |
@@ -924,6 +924,23 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     where
         A: ExecutiveAccess<O> + ?Sized,
     {
+        self.process_smooth_edge_sequences_with(k, |executive, solvers, sequence| {
+            executive.collect_tangent_edge_sequence(access, solvers, sequence)
+        })
+    }
+
+    /// Run `ProcessSmoothEdgeSequences` with the caller's live tangent collector.
+    ///
+    /// Zero or one retained solver needs no collection. Larger lists use the
+    /// collector in native order, followed by `CreateSmoothEdgeSequence`.
+    ///
+    /// # Errors
+    /// The collector's errors or missing `CreateSmoothEdgeSequence` implementation.
+    pub fn process_smooth_edge_sequences_with(
+        &mut self,
+        k: &mut Kernel,
+        mut collect: impl FnMut(&Self, &mut Vec<Option<O>>, &mut Vec<O>) -> Result<()>,
+    ) -> Result<()> {
         let _ = k;
         // Copy the FilletSolver pointers into a separate array.
         let mut solvers: Vec<Option<O>> = self.solvers.iter().copied().map(Some).collect();
@@ -931,7 +948,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
 
         // Each pass removes at least one solver from the list.
         while solvers.len() > 1 {
-            self.collect_tangent_edge_sequence(access, &mut solvers, &mut sequence)?;
+            collect(self, &mut solvers, &mut sequence)?;
             create_smooth_edge_sequence(self, &sequence)?;
         }
         Ok(())

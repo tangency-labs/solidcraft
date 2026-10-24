@@ -1124,6 +1124,12 @@ impl Brep {
         Ok(id)
     }
 
+    /// Allocates a vertex retained by another topology object, outside the B-rep's
+    /// owning vertex list.
+    pub(crate) fn add_unlinked_vertex_record(&mut self, vertex: Vertex) -> Result<VertexId> {
+        self.vertices.insert(vertex)
+    }
+
     /// Appends a face use record as is (no validation).
     pub fn add_faceuse_record(&mut self, faceuse: Faceuse) -> Result<FaceuseId> {
         self.faceuses.insert(faceuse)

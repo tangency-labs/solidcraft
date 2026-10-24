@@ -887,7 +887,7 @@ impl FilletCorner {
         let fillet_srf = env
             .pseudo
             .geom(orig_fg)?
-            .fillet_surface()
+            .fillet_surface()?
             .ok_or_else(|| invalid(OP, "fillet geometry without fillet surface"))?;
 
         let srf_domain = fillet_srf.natural_uv_domain();
@@ -1363,7 +1363,7 @@ impl FilletCorner {
                         .ok_or_else(|| invalid(OP, "fillet edge use without fillet geometry"))?;
                     let fs = solver_ref(env, fillet_geom, OP)?;
                     (
-                        env.pseudo.geom(fillet_geom)?.fillet_surface().cloned(),
+                        env.pseudo.geom(fillet_geom)?.fillet_surface()?.cloned(),
                         fs.this_approx_tol_3d(),
                         fs.this_ang_tol_rad(),
                     )
@@ -1584,13 +1584,12 @@ impl FilletCorner {
 
             // Drop pE's end points to center line to compute radius, axis & origin of
             // cross section
-            let center_line = Curve::from(
-                env.pseudo
-                    .geom(fg)?
-                    .center_line_curve()
-                    .cloned()
-                    .ok_or_else(null)?,
-            );
+            let center_line = env
+                .pseudo
+                .geom(fg)?
+                .center_line_geometry()
+                .cloned()
+                .ok_or_else(null)?;
             let center_line_ivl = center_line.natural_interval();
             let v = vertex_of(e)?;
             let start_pnt = env.pseudo.vertex_point(v)?;
@@ -1656,7 +1655,7 @@ impl FilletCorner {
         let opposite_fillet = env
             .pseudo
             .geom(opposite_fg)?
-            .fillet_surface()
+            .fillet_surface()?
             .cloned()
             .ok_or_else(null)?;
         let opposite_fs = solver_of_geom(env, opposite_fg, OP)?;
@@ -2019,7 +2018,7 @@ impl FilletCorner {
         // set output
         env.pseudo
             .geom(new_fg)?
-            .fillet_surface()
+            .fillet_surface()?
             .cloned()
             .ok_or_else(|| invalid(OP, "new fillet geometry without fillet surface"))
     }

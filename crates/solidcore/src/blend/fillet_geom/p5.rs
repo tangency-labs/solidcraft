@@ -71,7 +71,7 @@
 //!   `DropPoint` counts as no drop point.
 //! - **Surface/surface intersection.** `sm_SrfSrfIntersection` (`blend.fillet_geom_p2`)
 //!   runs through `blend.fillet_geom_p4`'s adapter: the fillet vertices go in as their
-//!   points and the curves come back as their `SmBSplineCurve` part, as in p4.
+//!   points and the curves retain their actual B-spline-derived objects through p4.
 //! - **Curve cache.** Upstream keeps one curve cache on the rail across the up to nine
 //!   `DropPoint` calls and the `GlobalPointSolve` of `TrimRailCurves`
 //!   (SmFilletGeom.cpp:10580-10645); [`Curve::drop_point`] and the solve here each build
@@ -376,6 +376,36 @@ fn executive_pseudo_brep(solver: &FilletSolver) -> Result<()> {
     )
 }
 
+/// Actual solver records and extended surfaces used by a corner edge calculation.
+pub trait FilletEdgeContext {
+    /// Resolve the retained solver for this geometry's actual ID.
+    ///
+    /// # Errors
+    /// Missing or foreign solver identities.
+    fn solver(&self, id: FilletSolverId) -> Result<&FilletSolver>;
+
+    /// Resolve the executive's actual extended surface for the original face.
+    ///
+    /// # Errors
+    /// Missing executive context or actual surface-resolution errors.
+    fn extended_surface(&self, corner: &FilletCorner, face: FaceId) -> Result<Option<&Surface>>;
+}
+
+struct IndexedEdgeContext<'s, 'c> {
+    solvers: &'s [FilletSolver],
+    corners: CornerLookup<'c>,
+}
+
+impl FilletEdgeContext for IndexedEdgeContext<'_, '_> {
+    fn solver(&self, id: FilletSolverId) -> Result<&FilletSolver> {
+        solver_of(self.solvers, id, OP_SIDE)
+    }
+
+    fn extended_surface(&self, corner: &FilletCorner, face: FaceId) -> Result<Option<&Surface>> {
+        self.corners.extended_surface(corner, face)
+    }
+}
+
 // ---- the routines -----------------------------------------------------------------
 
 impl FilletBrep {
@@ -494,8 +524,8 @@ impl FilletBrep {
 
             // check state - filletSurface must have been computed by now
             let (Some(surface1), Some(surface2)) = (
-                self.geom(g1)?.fillet_surface().cloned(),
-                self.geom(g2)?.fillet_surface().cloned(),
+                self.geom(g1)?.fillet_surface()?.cloned(),
+                self.geom(g2)?.fillet_surface()?.cloned(),
             ) else {
                 return Ok(()); // Fillet surfaces have not yet been computed
             };
@@ -553,10 +583,10 @@ impl FilletBrep {
             // save outputs: Curve, Edgeuses->UVCurves, Status = processed
             let (curve, uv1, uv2) = curves;
             let ivl = curve.natural_interval();
-            set_edge_curve(self.brep_mut(), curr_edge, Some(Curve::from(curve)))?;
+            set_edge_curve(self.brep_mut(), curr_edge, Some(curve))?;
             edge::set_interval(self.brep_mut(), curr_edge, &ivl)?;
-            self.set_uv(prim, uv1.map(Curve::from))?;
-            self.set_uv(mate, uv2.map(Curve::from))?;
+            self.set_uv(prim, uv1)?;
+            self.set_uv(mate, uv2)?;
             self.fillet_edge_mut(curr_edge)?
                 .set_status(FilStatus::Processed);
         }
@@ -624,6 +654,29 @@ impl FilletBrep {
         solvers: &[FilletSolver],
         target: &Brep,
     ) -> Result<()> {
+        self.calc_cross_section_with_lookup(
+            k,
+            e,
+            corner,
+            corners,
+            &|id| solver_of(solvers, id, OP_CROSS),
+            target,
+        )
+    }
+
+    /// Calculate a cross-section using borrowed records from the actual solver store.
+    ///
+    /// # Errors
+    /// As [`Self::calc_cross_section`], including the caller's solver lookup errors.
+    pub fn calc_cross_section_with_lookup<'solver>(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        corner: Option<FilletCornerId>,
+        corners: CornerLookup<'_>,
+        resolve: &impl Fn(FilletSolverId) -> Result<&'solver FilletSolver>,
+        target: &Brep,
+    ) -> Result<()> {
         let (start_fv, end_fv) = self.edge_ends(e, OP_CROSS)?;
         let (prim, mate) = self.p5_prim_mate(e, OP_CROSS)?;
         let g1 = self.eu_geom(prim)?;
@@ -637,25 +690,25 @@ impl FilletBrep {
             let sid1 = self.geom(g1)?.fillet_solver();
             surface1 = self
                 .geom(g1)?
-                .fillet_surface()
+                .fillet_surface()?
                 .cloned()
                 .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
 
             if let Some(g2) = g2.filter(|&g2| g2 != g1) {
-                let fs2 = self.geom_solver(g2, solvers, OP_CROSS)?;
+                let fs2 = resolve(
+                    self.geom(g2)?
+                        .fillet_solver()
+                        .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?,
+                )?;
                 fs2_tol = Some(fs2.approx_tol_3d);
                 surface2 = Some(
                     self.geom(g2)?
-                        .fillet_surface()
+                        .fillet_surface()?
                         .cloned()
                         .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?,
                 );
             }
-            let fs1 = solver_of(
-                solvers,
-                sid1.ok_or_else(|| SolidError::null_pointer(OP_CROSS))?,
-                OP_CROSS,
-            )?;
+            let fs1 = resolve(sid1.ok_or_else(|| SolidError::null_pointer(OP_CROSS))?)?;
             tol = fs1.approx_tol_3d;
 
             // Examine the connectivity between two adjacent fillet geoms.
@@ -675,7 +728,11 @@ impl FilletBrep {
                             if g2 == g1 {
                                 return Err(SolidError::null_pointer(OP_CROSS));
                             }
-                            let fs2 = self.geom_solver(g2, solvers, OP_CROSS)?;
+                            let fs2 = resolve(
+                                self.geom(g2)?
+                                    .fillet_solver()
+                                    .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?,
+                            )?;
                             at_start_of_geom2 = fs2.vertex(target, 0)? == filleted_vertex;
                             check_connectivity = true;
                         }
@@ -834,6 +891,29 @@ impl FilletBrep {
         solvers: &[FilletSolver],
         target: &Brep,
     ) -> Result<()> {
+        self.calc_fillet_int_side_face_with_context(
+            k,
+            e,
+            corner,
+            corners,
+            &IndexedEdgeContext { solvers, corners },
+            target,
+        )
+    }
+
+    /// Calculate a side-face end rib using actual borrowed solver/surface context.
+    ///
+    /// # Errors
+    /// As [`Self::calc_fillet_int_side_face`], including actual context failures.
+    pub fn calc_fillet_int_side_face_with_context(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        corner: Option<FilletCornerId>,
+        corners: CornerLookup<'_>,
+        context: &impl FilletEdgeContext,
+        target: &Brep,
+    ) -> Result<()> {
         // get filletEdge->vertices
         let (start_fv, end_fv) = self.edge_ends(e, OP_SIDE)?;
 
@@ -853,7 +933,11 @@ impl FilletBrep {
         let g1 = self
             .eu_geom(prim)?
             .ok_or_else(|| SolidError::null_pointer(OP_SIDE))?;
-        let fs1 = self.geom_solver(g1, solvers, OP_SIDE)?;
+        let fs1 = context.solver(
+            self.geom(g1)?
+                .fillet_solver()
+                .ok_or_else(|| SolidError::null_pointer(OP_SIDE))?,
+        )?;
         let has_curve = edge::curve(self.brep(), e)?.is_some_and(is_b_spline);
 
         // get tolerance
@@ -864,7 +948,7 @@ impl FilletBrep {
         if !has_curve {
             let fillet_surface1 = self
                 .geom(g1)?
-                .fillet_surface()
+                .fillet_surface()?
                 .cloned()
                 .ok_or_else(|| SolidError::null_pointer(OP_SIDE))?;
             // upstream calls `pCorner->IsExtendedSurfacePatch()` on the missing corner
@@ -881,7 +965,7 @@ impl FilletBrep {
                     .fillet_edge(e)?
                     .original_face()
                     .ok_or_else(|| SolidError::null_pointer(OP_SIDE))?;
-                match corners.extended_surface(the_corner, face)? {
+                match context.extended_surface(the_corner, face)? {
                     Some(s) => Some(s.clone()),
                     None => target.face(face)?.surface.clone(),
                 }
@@ -949,9 +1033,9 @@ impl FilletBrep {
         // when a new 3DCurve was constructed by surf/surf intersection
         if let Some(c) = new_curves {
             // save 3DCurve and UVTrimCurves, and set the owner
-            set_edge_curve(self.brep_mut(), e, c.curve_3d.map(Curve::from))?;
-            self.set_uv(prim, c.uv_curve1.map(Curve::from))?;
-            self.set_uv(mate, c.uv_curve2.map(Curve::from))?;
+            set_edge_curve(self.brep_mut(), e, c.curve_3d)?;
+            self.set_uv(prim, c.uv_curve1)?;
+            self.set_uv(mate, c.uv_curve2)?;
         }
 
         // connect the sideFilletEdge to the FilletSurfaceFace
@@ -1039,7 +1123,7 @@ impl FilletBrep {
             .curve_3d
             .ok_or_else(|| SolidError::null_pointer(OP_EXT_EDGE))?;
         // both UV curves are deleted
-        set_edge_curve(self.brep_mut(), e, Some(Curve::from(curve)))?;
+        set_edge_curve(self.brep_mut(), e, Some(curve))?;
         Ok(())
     }
 
@@ -1353,7 +1437,7 @@ impl FilletBrep {
         // Create a line between the two UV points and lift the curve.
         let fillet_surface = self
             .geom(g)?
-            .fillet_surface()
+            .fillet_surface()?
             .cloned()
             .ok_or_else(|| SolidError::null_pointer(OP_END))?;
         let mut eus = Vec::with_capacity(2);
@@ -1578,7 +1662,7 @@ impl FilletBrep {
         // check state
         let fillet_surface = self
             .geom(g)?
-            .fillet_surface()
+            .fillet_surface()?
             .cloned()
             .ok_or_else(|| SolidError::null_pointer(OP_TRIM))?;
 
@@ -1874,7 +1958,7 @@ impl FilletBrep {
         let angle_tol = solver.ang_tol_rad;
         let fillet_surface = self
             .geom(g)?
-            .fillet_surface()
+            .fillet_surface()?
             .cloned()
             .ok_or_else(|| SolidError::null_pointer(OP_CLIFF))?;
         let fil_srf_domain = fillet_surface.natural_uv_domain();
@@ -1957,7 +2041,7 @@ impl FilletBrep {
                         self.eu_geom(mate)?
                     };
                     let side_surface = if let Some(sg) = side_fg.filter(|&s| s != g) {
-                        self.geom(sg)?.fillet_surface().cloned()
+                        self.geom(sg)?.fillet_surface()?.cloned()
                     } else {
                         let face = self
                             .fillet_edge(rail)?
@@ -1986,9 +2070,9 @@ impl FilletBrep {
                         .curve_3d
                         .ok_or_else(|| SolidError::null_pointer(OP_CLIFF))?;
                     let ivl = curve.natural_interval();
-                    set_edge_curve(self.brep_mut(), rail, Some(Curve::from(curve)))?;
+                    set_edge_curve(self.brep_mut(), rail, Some(curve))?;
                     edge::set_interval(self.brep_mut(), rail, &ivl)?;
-                    self.set_uv(prim, curves.uv_curve1.map(Curve::from))?;
+                    self.set_uv(prim, curves.uv_curve1)?;
                     self.set_uv(mate, None)?;
                 } else if rail_type == FilletEdgeType::Rail {
                     if start_v == end_v {

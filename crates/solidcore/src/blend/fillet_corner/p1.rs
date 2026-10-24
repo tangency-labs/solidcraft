@@ -125,6 +125,8 @@
 //!
 //! No loops depend on input size beyond the given arrays; there is no recursion.
 
+use std::collections::BTreeMap;
+
 use crate::blend::fillet_corner::p2::is_b_spline_kind;
 use crate::blend::fillet_corner::p3::{
     CornerEnv, FilletCorner, FilletCornerKind, FilletExecutiveData,
@@ -851,6 +853,18 @@ impl FilletCorner {
         &self,
         exec: &FilletExecutiveData,
     ) -> Result<Vec<Option<FilletSolverId>>> {
+        self.fillet_solvers_with_lookup(|edgeuse| Ok(exec.fillet_solver_of_edgeuse(edgeuse)))
+    }
+
+    /// Resolve the actual corner solvers through a borrowed executive lookup.
+    /// The native repeated-first-edgeuse lookup is retained.
+    ///
+    /// # Errors
+    /// Missing corner edge uses or actual solver lookup failures.
+    pub fn fillet_solvers_with_lookup(
+        &self,
+        mut solver_of: impl FnMut(EdgeuseId) -> Result<Option<FilletSolverId>>,
+    ) -> Result<Vec<Option<FilletSolverId>>> {
         let eus = self
             .solver_eus
             .as_deref()
@@ -860,7 +874,7 @@ impl FilletCorner {
             let first = eus
                 .first()
                 .ok_or_else(|| SolidError::invalid_input(OP_SOLVERS, "empty solver edge uses"))?;
-            solvers.push(exec.fillet_solver_of_edgeuse(*first));
+            solvers.push(solver_of(*first)?);
         }
         Ok(solvers)
     }
@@ -886,7 +900,21 @@ impl FilletCorner {
         original_face: FaceId,
         ext_surface: Surface,
     ) {
-        if let Some(old_surface) = exec.extended_surfaces_map.get(&original_face) {
+        Self::add_extended_original_surface_with_map(
+            &mut exec.extended_surfaces_map,
+            original_face,
+            ext_surface,
+        );
+    }
+
+    /// Register an actual extended surface in the executive's owned face map.
+    /// The same native domain-containment rule is used by both executive adapters.
+    pub fn add_extended_original_surface_with_map(
+        map: &mut BTreeMap<FaceId, Surface>,
+        original_face: FaceId,
+        ext_surface: Surface,
+    ) {
+        if let Some(old_surface) = map.get(&original_face) {
             let new_domain = ext_surface.natural_uv_domain();
             let old_domain = old_surface.natural_uv_domain();
             if new_domain.is_contained_by(&old_domain, EFF_ZERO) {
@@ -895,8 +923,7 @@ impl FilletCorner {
             }
             // else: the old surface is deleted (replaced below)
         }
-        exec.extended_surfaces_map
-            .insert(original_face, ext_surface);
+        map.insert(original_face, ext_surface);
     }
 
     /// `ReInitializeCornerEdges`: `SetCurve(NULL, TRUE)` on every corner fillet edge
@@ -1243,41 +1270,64 @@ impl FilletCorner {
         env: &mut CornerEnv<'_>,
         solvers: &mut [FilletSolver],
     ) -> Result<()> {
-        let num_verts = self.vertices.len();
+        let mut context = (env, solvers);
+        self.calc_corner_vert_geom_with(
+            &mut context,
+            |(env, _), fv| Ok(env.pseudo.fillet_vertex(fv)?.is_processed()),
+            |(env, _), fv| {
+                env.pseudo.calc_corner_vert_geom(
+                    env.k,
+                    fv,
+                    CornerLookup::of_corner(env.corner, self, env.exec),
+                    env.target,
+                    env.solvers,
+                )
+            },
+            |(env, solvers), corner, processed| {
+                corner.adjust_vertex_law_intervals(env, solvers, processed)
+            },
+        )
+    }
+
+    /// Calculate corner vertices in native order using the caller's live objects.
+    ///
+    /// The processed flag is sampled immediately before each calculation. Ordinary
+    /// calculation errors become `SM_ERR`; genuine missing dependencies propagate.
+    /// Law adjustment runs afterward only for a corner calculated as constant radius.
+    /// The explicit context lets both phases borrow one authoritative object store.
+    ///
+    /// # Errors
+    /// Processed-state lookup and law-adjustment errors, `SM_ERR` for a failed
+    /// calculation, or its genuine [`SolidError::Unported`] dependency.
+    pub fn calc_corner_vert_geom_with<C>(
+        &self,
+        context: &mut C,
+        mut is_processed: impl FnMut(&C, VertexId) -> Result<bool>,
+        mut calculate: impl FnMut(&mut C, VertexId) -> Result<()>,
+        adjust_law_intervals: impl FnOnce(&mut C, &Self, &[bool]) -> Result<()>,
+    ) -> Result<()> {
         let mut already_processed = Vec::new();
-
-        // CalcCornerVertGeom() for every FilletVertex.
         for &fv in &self.vertices {
-            // Save this info for later.  [B570]
-            already_processed.push(env.pseudo.fillet_vertex(fv)?.is_processed());
-
-            // switch on FilletVertex->m_eType to call appropriate vertex calculator
-            let status = env.pseudo.calc_corner_vert_geom(
-                env.k,
-                fv,
-                CornerLookup::of_corner(env.corner, self, env.exec),
-                env.target,
-                env.solvers,
-            );
-
-            // for errors
-            match status {
+            already_processed.push(is_processed(context, fv)?);
+            match calculate(context, fv) {
                 Ok(()) => {}
                 Err(e @ SolidError::Unported { .. }) => return Err(e),
                 Err(_) => return Err(SolidError::sm_err(OP_VERT_GEOM)),
             }
         }
-
-        // Now we need to adjust the FilletSolvers' LawIntervals, which map
-        // the variable-radius functions to the Edge intervals.  [B551 B570]
-        // Need to find them all and use the shortest interval.  [B663]
-
-        // We do this only if the original was calculated as a constant-radius blend.
-        let adjust_law_intervals = self.is_calc_as_const_rad();
-        if !adjust_law_intervals {
+        if !self.is_calc_as_const_rad() {
             return Ok(());
         }
+        adjust_law_intervals(context, self, &already_processed)
+    }
 
+    fn adjust_vertex_law_intervals(
+        &self,
+        env: &mut CornerEnv<'_>,
+        solvers: &mut [FilletSolver],
+        already_processed: &[bool],
+    ) -> Result<()> {
+        let num_verts = self.vertices.len();
         // Get the corner vertex, for determining Start or End.
         let corner_vertex = self.filleted_vertex();
 
@@ -1394,6 +1444,34 @@ impl FilletCorner {
     /// failed edge the merge cannot absorb; `SM_ERR_NULL_POINTER` for a processed edge
     /// without curve; those of the squeeze.
     pub fn calc_corner_edge_geom(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+        self.calc_corner_edge_geom_with(
+            env,
+            |env, corner, edge| {
+                env.pseudo.calc_corner_edge_geom(
+                    env.k,
+                    edge,
+                    CornerLookup::of_corner(env.corner, corner, env.exec),
+                    env.solvers,
+                    env.target,
+                )
+            },
+            |env| env.exec.do_global_merge,
+            |env| &mut *env.pseudo,
+        )
+    }
+
+    /// Calculate corner edges through live operations, preserving native slot,
+    /// squeeze, deletion and status-update order.
+    ///
+    /// # Errors
+    /// Actual calculator failures or the existing squeeze/deletion dependencies.
+    pub fn calc_corner_edge_geom_with<C>(
+        &mut self,
+        context: &mut C,
+        mut calculate: impl FnMut(&mut C, &Self, EdgeId) -> Result<()>,
+        global_merge: impl Fn(&C) -> bool,
+        mut pseudo: impl for<'p> FnMut(&'p mut C) -> &'p mut FilletBrep,
+    ) -> Result<()> {
         // for every filletEdge (not a rail) ordered around this corner
         let mut slots: Vec<Option<EdgeId>> = self.edges.iter().copied().map(Some).collect();
         for ii in 0..slots.len() {
@@ -1404,13 +1482,7 @@ impl FilletCorner {
 
             // Branch on SmFilletEdge->m_eType to pass call to
             // the appropriate edgeBuilding function
-            let calc = env.pseudo.calc_corner_edge_geom(
-                env.k,
-                curr_edge,
-                CornerLookup::of_corner(env.corner, self, env.exec),
-                env.solvers,
-                env.target,
-            );
+            let calc = calculate(context, self, curr_edge);
             if let Err(e @ SolidError::Unported { .. }) = calc {
                 return Err(e);
             }
@@ -1419,22 +1491,22 @@ impl FilletCorner {
 
                 // Error out if m_bDoGlobalMerge is FALSE or the type of edge is not
                 // qualify for global merge afterwards.
-                if !env.exec.do_global_merge
-                    || env.pseudo.fillet_edge(curr_edge)?.edge_type
+                if !global_merge(context)
+                    || pseudo(context).fillet_edge(curr_edge)?.edge_type
                         != FilletEdgeType::FilletXSideFace
                 {
                     return Err(SolidError::sm_err(OP_EDGE_GEOM));
                 }
-                pseudo_brep_delete_edge(env.pseudo, curr_edge)?;
+                pseudo_brep_delete_edge(pseudo(context), curr_edge)?;
                 if let Some(slot) = slots.get_mut(ii) {
                     *slot = None;
                 }
             } else {
                 // pCurrEdge->CalcCornerEdgeGeom() succeeded
-                if env.pseudo.fillet_edge(curr_edge)?.status == FilStatus::ToBeSqueezed {
+                if pseudo(context).fillet_edge(curr_edge)?.status == FilStatus::ToBeSqueezed {
                     // squeeze and delete it
                     self.edges = slots.iter().copied().flatten().collect();
-                    self.squeeze_edge(env.pseudo, curr_edge)?;
+                    self.squeeze_edge(pseudo(context), curr_edge)?;
                     for slot in &mut slots {
                         if slot.is_some_and(|e| !self.edges.contains(&e)) {
                             *slot = None;
@@ -1444,19 +1516,18 @@ impl FilletCorner {
                 }
 
                 // set currEdge->Interval = currEdge->Curve->NaturalInterval
-                let ivl = env
-                    .pseudo
+                let ivl = pseudo(context)
                     .brep()
                     .edge(curr_edge)?
                     .curve
                     .as_ref()
                     .map(Curve::natural_interval)
                     .ok_or_else(|| SolidError::null_pointer(OP_EDGE_GEOM))?;
-                edge::set_interval(env.pseudo.brep_mut(), curr_edge, &ivl)?;
+                edge::set_interval(pseudo(context).brep_mut(), curr_edge, &ivl)?;
 
                 // increment status to SM_FIL_PROCESSED for all but
                 // SM_FE_CUBIC_RAIL_RAIL_INTERPOLATE cases
-                let fe = env.pseudo.fillet_edge_mut(curr_edge)?;
+                let fe = pseudo(context).fillet_edge_mut(curr_edge)?;
                 if fe.status != FilStatus::CubicRailRailInterpolate {
                     fe.set_status(FilStatus::Processed);
                 }
@@ -1468,6 +1539,36 @@ impl FilletCorner {
 
         // all done
         Ok(())
+    }
+
+    /// Whether every corner vertex is processed and within the corner tolerance.
+    /// This is the read-only prefix of `CheckAndFixDegeneracy`, before topology edits.
+    ///
+    /// # Errors
+    /// Actual pseudo-vertex record or point lookup failures.
+    pub fn vertices_are_degenerate(
+        &self,
+        pseudo: &FilletBrep,
+        corner_point: Point3,
+    ) -> Result<bool> {
+        // for every corner filletVertex
+        for &fv in &self.vertices {
+            // low work - corners with unprocessed vertices are not degenerate
+            if !pseudo.fillet_vertex(fv)?.is_processed() {
+                return Ok(false);
+            }
+
+            // get corner filletVertex point
+            let pnt = pseudo.vertex_point(fv)?;
+
+            // when filletVertex point is more than tolerance from origVertex point
+            if pnt.distance(corner_point) > self.approx_tol_3d {
+                // the corner is not degenerat
+                return Ok(false);
+            }
+        } // end iter all corner filletVertices
+
+        Ok(true)
     }
 
     /// `CheckAndFixDegeneracy`: a corner whose processed fillet vertices all lie within
@@ -1496,22 +1597,9 @@ impl FilletCorner {
         let corner_vertex = self.vertex.ok_or_else(null)?;
         let corner_pnt = env.target.vertex(corner_vertex)?.point;
 
-        // for every corner filletVertex
-        for &fv in &self.vertices {
-            // low work - corners with unprocessed vertices are not degenerate
-            if !env.pseudo.fillet_vertex(fv)?.is_processed() {
-                return Ok(false);
-            }
-
-            // get corner filletVertex point
-            let pnt = env.pseudo.vertex_point(fv)?;
-
-            // when filletVertex point is more than tolerance from origVertex point
-            if pnt.distance(corner_pnt) > self.approx_tol_3d {
-                // the corner is not degenerat
-                return Ok(false);
-            }
-        } // end iter all corner filletVertices
+        if !self.vertices_are_degenerate(env.pseudo, corner_pnt)? {
+            return Ok(false);
+        }
 
         // arrive here when all corner filletVertices are within tolerance
         // of origVertex point
@@ -1917,7 +2005,7 @@ impl FilletCorner {
         let surface0 = env
             .pseudo
             .geom(fg0)?
-            .fillet_surface()
+            .fillet_surface()?
             .cloned()
             .ok_or_else(null)?;
         let prim_eu1 = prim_of(env.pseudo, edge1)?;
@@ -1929,7 +2017,7 @@ impl FilletCorner {
         let surface1 = env
             .pseudo
             .geom(fg1)?
-            .fillet_surface()
+            .fillet_surface()?
             .cloned()
             .ok_or_else(null)?;
 
@@ -2138,7 +2226,7 @@ impl FilletCorner {
 
         env.pseudo
             .geom(new_fg)?
-            .fillet_surface()
+            .fillet_surface()?
             .cloned()
             .ok_or_else(deref)
     }
@@ -2476,6 +2564,122 @@ fn make_face(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edge_failure_retains_completed_prefix_and_reads_live_merge_flag() {
+        use crate::blend::fillet_geom::p1::FilletCornerId;
+        use crate::geom::extent1d::Extent1d;
+        let mut pseudo = FilletBrep::new();
+        let start = pseudo.brep_mut().add_vertex(Point3::ZERO).unwrap();
+        let end = pseudo
+            .brep_mut()
+            .add_vertex(Point3::new(1.0, 0.0, 0.0))
+            .unwrap();
+        let mut edges = Vec::new();
+        for _ in 0..3 {
+            let edge = pseudo
+                .new_fillet_edge(start, end, Some(FilletCornerId(0)))
+                .unwrap();
+            pseudo
+                .fillet_edge_mut(edge)
+                .unwrap()
+                .set_fillet_edge_type(FilletEdgeType::FilletXSideFace);
+            let record = pseudo.brep_mut().edge_mut(edge).unwrap();
+            record.curve = Some(Curve::from(
+                BSplineCurve::create_line_segment(3, Point3::ZERO, Point3::new(1.0, 0.0, 0.0))
+                    .unwrap(),
+            ));
+            record.interval = Extent1d::from_min_max(5.0, 6.0);
+            edges.push(edge);
+        }
+        let mut corner = FilletCorner::new(FilletCornerKind::NByOne, None, None, None, 1e-3, 0.1);
+        corner.edges.clone_from(&edges);
+        let mut context = (pseudo, Vec::new(), true);
+        let result = corner.calc_corner_edge_geom_with(
+            &mut context,
+            |(_, visited, global_merge), _, edge| {
+                visited.push(edge);
+                if edge == edges[1] {
+                    *global_merge = false;
+                    return Err(SolidError::sm_err("defined edge failure"));
+                }
+                Ok(())
+            },
+            |(_, _, global_merge)| *global_merge,
+            |(pseudo, _, _)| pseudo,
+        );
+        assert!(matches!(
+            result,
+            Err(SolidError::Upstream { code: SM_ERR, .. })
+        ));
+        assert_eq!(context.1, edges[..2]);
+        assert_eq!(
+            context.0.fillet_edge(edges[0]).unwrap().status(),
+            FilStatus::Processed
+        );
+        assert_ne!(
+            context.0.fillet_edge(edges[1]).unwrap().status(),
+            FilStatus::Processed
+        );
+        assert_ne!(
+            context.0.fillet_edge(edges[2]).unwrap().status(),
+            FilStatus::Processed
+        );
+        assert_eq!(
+            context.0.brep().edge(edges[0]).unwrap().interval,
+            Extent1d::from_min_max(0.0, 1.0)
+        );
+        assert_eq!(
+            context.0.brep().edge(edges[1]).unwrap().interval,
+            Extent1d::from_min_max(5.0, 6.0)
+        );
+        assert_eq!(corner.edges, edges);
+    }
+
+    #[test]
+    fn vertex_geometry_failure_retains_completed_prefix_and_stops_law_adjustment() {
+        use crate::blend::fillet_geom::p1::FilletVertex;
+
+        let k = Kernel::default();
+        let mut pseudo = FilletBrep::new();
+        let first = pseudo.brep_mut().add_vertex(Point3::ZERO).unwrap();
+        let second = pseudo.brep_mut().add_vertex(Point3::ZERO).unwrap();
+        let third = pseudo.brep_mut().add_vertex(Point3::ZERO).unwrap();
+        for vertex in [first, second, third] {
+            pseudo.insert_fillet_vertex(vertex, FilletVertex::new(&k, None));
+        }
+        let mut corner = FilletCorner::new(FilletCornerKind::NByOne, None, None, None, 1e-3, 0.1);
+        corner.vertices = vec![first, second, third];
+        corner.set_calc_as_const_rad(true);
+        let mut context = (pseudo, Vec::new(), false);
+        let result = corner.calc_corner_vert_geom_with(
+            &mut context,
+            |(pseudo, _, _), vertex| Ok(pseudo.fillet_vertex(vertex)?.is_processed()),
+            |(pseudo, visited, _), vertex| {
+                visited.push(vertex);
+                if vertex == second {
+                    return Err(SolidError::null_pointer("defined calculator failure"));
+                }
+                pseudo
+                    .fillet_vertex_mut(vertex)?
+                    .set_status(FilStatus::Processed);
+                Ok(())
+            },
+            |(_, _, adjusted), _, _| {
+                *adjusted = true;
+                Ok(())
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(SolidError::Upstream { code: SM_ERR, .. })
+        ));
+        assert_eq!(context.1, [first, second]);
+        assert!(context.0.fillet_vertex(first).unwrap().is_processed());
+        assert!(!context.0.fillet_vertex(second).unwrap().is_processed());
+        assert!(!context.0.fillet_vertex(third).unwrap().is_processed());
+        assert!(!context.2);
+    }
 
     /// `SqueezeEdge` moves one rail vertex use at a time: a closed rail at the vertex to
     /// delete keeps its other end there when the loop stops with `SM_ERR` at a non-rail

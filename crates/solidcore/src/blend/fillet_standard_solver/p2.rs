@@ -337,6 +337,27 @@ pub trait ConstantRadiusOps {
     /// The `SmConstantRadiusFS` data, mutable.
     fn constant_radius_mut(&mut self) -> &mut ConstantRadiusFs;
 
+    /// The selected offset object for this context.
+    fn offset_surface(&self, rail: usize) -> Result<&OffsetSurface> {
+        self.constant_radius().surface(rail)
+    }
+
+    /// The same selected offset object for an in-place write.
+    fn offset_surface_mut(&mut self, rail: usize) -> Result<&mut OffsetSurface> {
+        self.constant_radius_mut().surface_mut(rail)
+    }
+
+    /// Reset the selected offset using the actual radius and orientation.
+    fn set_offset_by_radius(&mut self, rail: usize) -> Result<()> {
+        self.constant_radius_mut().set_offset_by_radius(rail)
+    }
+
+    /// Resolve the selected geometry's tangent-rollover guess at its native branch.
+    /// Context-free callers have no selected geometry.
+    fn check_tangent_rollover_guess_context(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// `SetupOffsetExtension(pSurf, rDomain)` of the solver's class.
     ///
     /// # Errors
@@ -438,9 +459,8 @@ pub fn constant_radius_load_initial_values<S: ConstantRadiusOps + ?Sized>(
 
     // SmTemporaryChangeValue on the other base's out-of-bounds flag (surface1 is a
     // separate copy: when it has the same base, its copy changes too)
-    let fs = solver.constant_radius_mut();
-    let base2_id = fs.surface(other_rail)?.base_id;
-    let saved2 = enable_base_out_of_bounds(fs.surface_mut(other_rail)?);
+    let base2_id = solver.offset_surface(other_rail)?.base_id;
+    let saved2 = enable_base_out_of_bounds(solver.offset_surface_mut(other_rail)?);
     let saved1 = if surface1.base_id == base2_id {
         enable_base_out_of_bounds(surface1)
     } else {
@@ -458,10 +478,7 @@ pub fn constant_radius_load_initial_values<S: ConstantRadiusOps + ?Sized>(
         guess_t,
     );
     restore_base_out_of_bounds(surface1, saved1);
-    restore_base_out_of_bounds(
-        solver.constant_radius_mut().surface_mut(other_rail)?,
-        saved2,
-    );
+    restore_base_out_of_bounds(solver.offset_surface_mut(other_rail)?, saved2);
     r
 }
 
@@ -480,7 +497,7 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
 ) -> Result<Option<InitialValues>> {
     const OP: &str = OP_CR_INIT;
     let fs = solver.constant_radius();
-    let surface2 = fs.surface(other_rail)?;
+    let surface2 = solver.offset_surface(other_rail)?;
     let mut other_eu = fs.solver.edgeuses.get(other_rail).copied().flatten();
     let base2 = surface2.base_surface();
     let base2_id = surface2.base_id;
@@ -492,7 +509,7 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
     );
     let pnt = offset_evaluate_point(k, surface1, uv)?;
 
-    // (GetFilletGeomForSurfaces() is NULL: no tangent-rollover guess)
+    solver.check_tangent_rollover_guess_context()?;
     let mut srf2_guess_uv = Point3::UNDEF;
     let mut found_uv = false;
 

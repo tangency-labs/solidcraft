@@ -40,14 +40,10 @@
 //!   (`query.brep`). `FindAndSetInfiniteRegion` is `topology.brep_p5`'s.
 //!   `DeleteFace` and `SqueezeEdge` are `topology.brep_p3`'s, notifying through the
 //!   kernel context's callbacks; `GlueVertices`, `GlueEdgesGeneral` and
-//!   `MakeVertexSplitEdge` (through [`test_and_split_edge`]) defer only where their own
+//!   `MakeVertexSplitEdge` (through [`super::p1::test_and_split_edge`]) defer only where their own
 //!   units still do.
 
-use super::p1::{
-    brep_notify_pre_edit, glue_edges_general, glue_vertices, set_point, sort_by_param,
-    squeeze_edge_to, test_and_split_edge, AdvancedStitch, DefaultStitchCallback, SplitReason,
-    Stitch,
-};
+use super::p1::{sort_by_param, AdvancedStitch, DefaultStitchCallback, SplitReason, Stitch};
 use crate::curve::curve::Curve;
 use crate::error::{ignore_status, ignored, EntityRef, SM_ERR};
 use crate::geom::extent3d::Extent3d;
@@ -265,7 +261,7 @@ impl Stitch<'_> {
     ) -> Result<()> {
         let tol_3d = self.stitch_tol_3d();
         // (status not checked)
-        ignore_status(brep_notify_pre_edit(b))?;
+        ignore_status(self.edit_brep_pre_edit(k, b))?;
 
         // when asked find and remove sliver laminar faces
         if self.remove_laminar_slivers {
@@ -274,7 +270,7 @@ impl Stitch<'_> {
                 // when face is a lamina sliver
                 if face_is_lamina(b, f)? && face_is_degenerate(k, b, f, true, Some(zone_tol))? {
                     // delete Face and its boundary edges and vertices from the Brep
-                    ignore_status(delete_face(k, b, f, true, true, None, None))?;
+                    ignore_status(self.edit_delete_face(k, b, f, true, true, None, None))?;
                 }
             }
         }
@@ -322,7 +318,7 @@ impl Stitch<'_> {
                     let surv_v = surv_v.ok_or_else(|| deref("edge without vertex"))?;
                     // remove and delete edge from topology graph by squeezing
                     // [vertex-edge-vertex] into [vertex]
-                    squeeze_edge_to(k, b, Some(e), surv_v)?;
+                    self.edit_squeeze_edge(k, b, Some(e), surv_v)?;
 
                     if candidate_vertices.is_some() {
                         add_unique(&mut cand_vertices, surv_v); // This becomes a candidate.
@@ -402,7 +398,8 @@ impl Stitch<'_> {
                         // split edges when vertex is within tolerance
                         let this_tol =
                             smos_max(tol_3d, vertex::tolerance(b, v)? + edge::tolerance(b, e)?);
-                        let split = test_and_split_edge(k, b, e, vertex::point(b, v)?, this_tol)?;
+                        let split =
+                            self.edit_test_and_split_edge(k, b, e, vertex::point(b, v)?, this_tol)?;
 
                         // when split created a new vertex
                         if let Some(new_v) = split.new_vertex {
@@ -577,15 +574,15 @@ impl Stitch<'_> {
                     // squeeze or glue vertices together (make pV the retained vertex)
                     if choice.keep_first {
                         if do_squeeze {
-                            squeeze_edge_to(k, b, squeeze_edge, v)?;
+                            self.edit_squeeze_edge(k, b, squeeze_edge, v)?;
                         } else if do_glue {
-                            glue_vertices(k, b, v, cv, Some(&wire_edges))?;
+                            self.edit_glue_vertices(k, b, v, cv, Some(&wire_edges))?;
                         }
                     } else {
                         if do_squeeze {
-                            squeeze_edge_to(k, b, squeeze_edge, cv)?;
+                            self.edit_squeeze_edge(k, b, squeeze_edge, cv)?;
                         } else if do_glue {
-                            glue_vertices(k, b, cv, v, Some(&wire_edges))?;
+                            self.edit_glue_vertices(k, b, cv, v, Some(&wire_edges))?;
                         }
                         v = cv;
                     }
@@ -621,9 +618,9 @@ impl Stitch<'_> {
 
         // if edges were stitched - notify all modified Brep faces of impending change
         if out.stitched_edges > 0 {
-            ignore_status(brep_notify_pre_edit(b))?;
+            ignore_status(self.edit_brep_pre_edit(k, b))?;
             for f in bp1::faces(b, None)? {
-                ignore_status(face_notify(
+                ignore_status(self.edit_face_notify(
                     b,
                     f,
                     NotifyOperation::PreEdit,
@@ -866,7 +863,7 @@ impl Stitch<'_> {
                     for f in edge::faces(b, delete, None)? {
                         add_unique(modified_faces, f);
                     }
-                    match glue_edges_general(
+                    match self.edit_glue_edges(
                         k,
                         b,
                         keep,
@@ -1075,16 +1072,16 @@ impl Stitch<'_> {
                 // squeeze or glue vertices together (make pV the retained vertex)
                 if choice.keep_first {
                     if do_squeeze {
-                        squeeze_edge_to(k, b, squeeze_edge, v)?;
+                        self.edit_squeeze_edge(k, b, squeeze_edge, v)?;
                     } else if do_glue {
-                        glue_vertices(k, b, v, cv, None)?;
+                        self.edit_glue_vertices(k, b, v, cv, None)?;
                     }
                     out.deleted.push(cv);
                 } else {
                     if do_squeeze {
-                        squeeze_edge_to(k, b, squeeze_edge, cv)?;
+                        self.edit_squeeze_edge(k, b, squeeze_edge, cv)?;
                     } else if do_glue {
-                        glue_vertices(k, b, cv, v, None)?;
+                        self.edit_glue_vertices(k, b, cv, v, None)?;
                     }
                     out.deleted.push(v);
                     v = cv;
@@ -1113,7 +1110,7 @@ impl Stitch<'_> {
     ///
     /// # Errors
     ///
-    /// Those of [`test_and_split_edge`] unless [`Stitch::ignore_problems`];
+    /// Those of [`super::p1::test_and_split_edge`] unless [`Stitch::ignore_problems`];
     /// [`SolidError::InvalidInput`] past the per-vertex split bound.
     pub fn split_edges_with_vertices(
         &mut self,
@@ -1174,7 +1171,7 @@ impl Stitch<'_> {
 
                 let this_tol = smos_max(tol_3d, vertex::tolerance(b, v)? + edge::tolerance(b, e)?);
 
-                let split = match test_and_split_edge(k, b, e, pv_point, this_tol) {
+                let split = match self.edit_test_and_split_edge(k, b, e, pv_point, this_tol) {
                     Ok(s) => s,
                     Err(err) if err.is_unported() => return Err(err),
                     Err(_) if self.ignore_problems => continue,
@@ -1201,10 +1198,10 @@ impl Stitch<'_> {
                     // First set the position of the surviving vertex to the midpoint
                     // of the two, to keep tolerances from growing excessively.
                     let mid = (vertex::point(b, v)? + vertex::point(b, new_v)?) * 0.5;
-                    set_point(k, b, v, mid)?;
+                    self.edit_set_point(k, b, v, mid)?;
 
                     // (status not checked)
-                    ignore_status(glue_vertices(k, b, v, new_v, None))?;
+                    ignore_status(self.edit_glue_vertices(k, b, v, new_v, None))?;
                     out.processed.push(v);
                     set_none(verts, ii)?;
 
@@ -1458,7 +1455,7 @@ pub fn stitch_into_shell(
 /// context's callbacks ([`crate::topology::brep::p3::with_kernel_callbacks`], as
 /// `super::p1::squeeze_edge_to`). `deleted_edges_vertices` is reset first, as upstream,
 /// and gets the deleted edges and vertices when the deletion succeeds.
-fn delete_face(
+pub(super) fn delete_face(
     k: &mut Kernel,
     b: &mut Brep,
     f: FaceId,
@@ -1538,7 +1535,7 @@ fn face_is_degenerate(
 /// `SmFace::Notify(eNotifyOperation, pData1, pData2, pData3)` (unit
 /// `topology.face_p3`) with `pData2 = SM_NO_GET_BREP(pF)` (null), the only form used
 /// here.
-fn face_notify(
+pub(super) fn face_notify(
     b: &mut Brep,
     f: FaceId,
     operation: NotifyOperation,

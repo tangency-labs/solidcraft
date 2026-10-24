@@ -1541,7 +1541,7 @@ impl RustModel {
             let mut geom = FilletGeom::new(&k, None, gtype).map_err(h)?;
             geom.status = FilStatus::from_code(g.status).ok_or_else(|| harness("bad status"))?;
             if let Some(c) = &g.center {
-                geom.center_line_curve = Some(curve_of(c)?);
+                geom.center_line_curve = Some(Curve::from(curve_of(c)?));
             }
             if let Some(s) = &g.surface {
                 geom.set_fillet_surface(Some(surface_of(s)?));
@@ -1896,7 +1896,7 @@ impl RustModel {
                 o.push(self.edge_index(Some(e)));
             }
             dump_bcurve(o, g.center_line_curve());
-            dump_surface(o, g.fillet_surface())?;
+            dump_surface(o, g.fillet_surface().map_err(h)?)?;
             o.push(g.ref_eus.len() as f64);
             for &eu in &g.ref_eus {
                 self.put_eu(o, Some(eu));

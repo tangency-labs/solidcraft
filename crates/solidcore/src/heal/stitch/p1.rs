@@ -46,10 +46,12 @@
 //!   [`SolidError::InvalidInput`] there. Its rescan of a vertex after gluing a closer
 //!   one is bounded by `4 * (n1 + n2) + 16` passes (each glue empties a slot, so
 //!   upstream needs at most `n1 + 2 * n2`).
-//! - `SmVertex::SetPoint`'s and `SmBrep::MakeVertexSplitEdge`'s notifications run on
+//! - Legacy `SmVertex::SetPoint` and `SmBrep::MakeVertexSplitEdge` notifications run on
 //!   record sets local to the call (no attributes are attached by the stitch). The
 //!   split's refusal (`SM_ERR` with the nearby endpoint) is reported as `SM_ERR`, the
-//!   only distinction its caller makes.
+//!   only distinction its caller makes. Contextual stitching instead borrows the
+//!   caller's actual notification state; an unregistered split curve is refused
+//!   at the real identity callback, retaining preceding mutations.
 //! - Uninitialised reads upstream: `DoSimpleFaceStitch` ignores `CurveMaxDistanceBetween`'s
 //!   status (`SE`) and reads the unset `dDistToCurve` after a failure (the port reads 0).
 //! - `UnifyNormals` ignores `NormalizedEvaluate`'s status and goes on with `sPnt` / `sDir`
@@ -81,7 +83,7 @@ use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::context::{with_mark_lock, Context, ALL_MARKS};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
-use crate::geom::object::ObjectRef;
+use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::tol::{self, TopologyToUpdate};
 use crate::geom::tree::{NodeGeomType, Tree};
 use crate::kernel::Kernel;
@@ -97,7 +99,9 @@ use crate::topology::face::p1 as fp1;
 use crate::topology::face::p2 as fp2;
 use crate::topology::topology::Topology;
 use crate::topology::topology_traverser::{Entity, Marks};
-use crate::topology::{edge, vertex, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
+use crate::topology::{
+    edge, vertex, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId, VertexId,
+};
 use crate::{Result, SolidError};
 
 const OP: &str = "heal::stitch::p1";
@@ -569,6 +573,22 @@ pub fn test_and_split_edge(
     point: Point3,
     tol: f64,
 ) -> Result<EdgeSplitTest> {
+    test_and_split_edge_with(k, b, e, point, tol, make_vertex_split_edge)
+}
+
+fn test_and_split_edge_with(
+    k: &mut Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    point: Point3,
+    tol: f64,
+    mut split: impl FnMut(
+        &mut Kernel,
+        &mut Brep,
+        EdgeId,
+        f64,
+    ) -> Result<(Option<EdgeId>, Option<EdgeId>, Option<VertexId>)>,
+) -> Result<EdgeSplitTest> {
     // Init outputs
     let mut out = EdgeSplitTest {
         reason: SplitReason::NoReason,
@@ -607,7 +627,7 @@ pub fn test_and_split_edge(
     }
 
     // Must have a point which can split the Edge.
-    let (e1, e2, new_v) = match make_vertex_split_edge(k, b, e, dropped.parameter) {
+    let (e1, e2, new_v) = match split(k, b, e, dropped.parameter) {
         Ok(r) => r,
         Err(err) if err.is_unported() => return Err(err),
         Err(_) => {
@@ -621,6 +641,231 @@ pub fn test_and_split_edge(
     Ok(out)
 }
 
+/// Actual notification services borrowed by a contextual stitch operation.
+/// Implementations retain the caller's topology records, attributes and identities.
+#[allow(clippy::too_many_arguments)]
+pub(crate) trait StitchEditContext {
+    fn set_point(&mut self, k: &mut Kernel, b: &mut Brep, v: VertexId, point: Point3)
+        -> Result<()>;
+    fn glue_vertices(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        keep: VertexId,
+        delete: VertexId,
+        wire: Option<&[EdgeId]>,
+    ) -> Result<()>;
+    fn remove_faces(&mut self, k: &mut Kernel, b: &mut Brep, faces: &[FaceId]) -> Result<()>;
+    fn glue_edges(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        keep: EdgeId,
+        orientation: OrientType,
+        dist: f64,
+        nest: bool,
+        delete: EdgeId,
+        inside: Option<&[FaceuseId]>,
+    ) -> Result<()>;
+    fn squeeze_edge(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        e: Option<EdgeId>,
+        keep: VertexId,
+    ) -> Result<()>;
+    fn split_edge(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        e: EdgeId,
+        t: f64,
+    ) -> Result<(Option<EdgeId>, Option<EdgeId>, Option<VertexId>)>;
+    fn brep_pre_edit(&mut self, k: &mut Kernel, b: &mut Brep) -> Result<()>;
+    fn delete_face(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        f: FaceId,
+        delete_ev: bool,
+        nest: bool,
+        out: Option<&mut Vec<EntityRef>>,
+        region: Option<RegionId>,
+    ) -> Result<()>;
+    fn face_notify(
+        &mut self,
+        b: &mut Brep,
+        f: FaceId,
+        operation: NotifyOperation,
+        data1: Option<EntityRef>,
+        data3: Option<EntityRef>,
+    ) -> Result<()>;
+}
+
+/// A stitch edit service borrowing the real notification environment.
+/// New split-curve identities must be registered by the owner or refused explicitly.
+pub(crate) struct BorrowedStitchEdits<'a, 'e> {
+    pub env: &'a mut edge::NotifyEnv<'e>,
+    pub curve_ref: &'a dyn Fn(EdgeId, i64) -> Result<ObjectRef>,
+}
+
+impl StitchEditContext for BorrowedStitchEdits<'_, '_> {
+    fn set_point(
+        &mut self,
+        _k: &mut Kernel,
+        b: &mut Brep,
+        v: VertexId,
+        point: Point3,
+    ) -> Result<()> {
+        let this = (self.env.key_of)(EntityRef::Vertex(v));
+        let key_of = self.env.key_of;
+        vertex::set_point(
+            b,
+            v,
+            point,
+            self.env.records,
+            self.env.attributes,
+            self.env.context.as_deref_mut(),
+            this,
+            &|vu| key_of(EntityRef::Vertexuse(vu)),
+        )
+    }
+    fn glue_vertices(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        keep: VertexId,
+        delete: VertexId,
+        wire: Option<&[EdgeId]>,
+    ) -> Result<()> {
+        crate::topology::brep::p5::glue_with_notifications(
+            k,
+            b,
+            Some(keep),
+            Some(delete),
+            wire,
+            Some(self.env),
+        )
+    }
+    fn remove_faces(&mut self, k: &mut Kernel, b: &mut Brep, faces: &[FaceId]) -> Result<()> {
+        crate::topology::brep::p5::remove_faces_notified(k, b, b.editing_enabled(), faces, self.env)
+    }
+    fn glue_edges(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        keep: EdgeId,
+        orientation: OrientType,
+        dist: f64,
+        nest: bool,
+        delete: EdgeId,
+        inside: Option<&[FaceuseId]>,
+    ) -> Result<()> {
+        crate::topology::brep::p7::glue_edges_general(
+            k,
+            b,
+            Some(keep),
+            orientation,
+            dist,
+            nest,
+            Some(delete),
+            inside,
+            self.env,
+        )
+    }
+    fn squeeze_edge(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        e: Option<EdgeId>,
+        keep: VertexId,
+    ) -> Result<()> {
+        let e = e.ok_or_else(|| SolidError::null_pointer("heal::stitch::p1::squeeze_edge_to"))?;
+        crate::topology::brep::p3::squeeze_edge(k, b, self.env, e, keep)
+    }
+    fn split_edge(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        e: EdgeId,
+        t: f64,
+    ) -> Result<(Option<EdgeId>, Option<EdgeId>, Option<VertexId>)> {
+        let out = crate::topology::brep::p9::make_vertex_split_edge_with_identity(
+            k,
+            b,
+            e,
+            t,
+            &mut edge::NotifyState::from_env(self.env),
+            self.curve_ref,
+        )?;
+        if !out.split {
+            return Err(SolidError::sm_err(OP));
+        }
+        let [e1, e2] = out.edges.ok_or_else(|| ner("split without edges"))?;
+        Ok((Some(e1), Some(e2), out.vertex))
+    }
+    fn brep_pre_edit(&mut self, _k: &mut Kernel, b: &mut Brep) -> Result<()> {
+        use crate::topology::brep::p2;
+        let this = Some(p2::NotifyArg::Object(p2::brep_ref(b)));
+        p2::notify(
+            b,
+            self.env,
+            None,
+            NotifyOperation::PreEdit,
+            [this, None, None],
+        )
+    }
+    fn delete_face(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        f: FaceId,
+        delete_ev: bool,
+        nest: bool,
+        out: Option<&mut Vec<EntityRef>>,
+        region: Option<RegionId>,
+    ) -> Result<()> {
+        let mut out = out;
+        if let Some(out) = out.as_deref_mut() {
+            out.clear();
+        }
+        let deleted = crate::topology::brep::p3::delete_face(
+            k,
+            b,
+            self.env,
+            &mut Marks::default(),
+            f,
+            crate::topology::brep::p3::DeleteFaceOptions {
+                delete_edges_vertices: delete_ev,
+                do_region_nesting: nest,
+                region_to_keep: region,
+            },
+        )?;
+        if let Some(out) = out {
+            *out = deleted;
+        }
+        Ok(())
+    }
+    fn face_notify(
+        &mut self,
+        b: &mut Brep,
+        f: FaceId,
+        operation: NotifyOperation,
+        data1: Option<EntityRef>,
+        data3: Option<EntityRef>,
+    ) -> Result<()> {
+        let key_of = self.env.key_of;
+        crate::topology::face::p3::notify(
+            b,
+            f,
+            self.env,
+            None,
+            operation,
+            [data1.map(key_of), None, data3.map(key_of)],
+        )
+    }
+}
+
 // ---- SmStitch --------------------------------------------------------------------------
 
 /// Stitches topological elements together (`SmStitch`).
@@ -628,6 +873,7 @@ pub fn test_and_split_edge(
 pub struct Stitch<'c> {
     /// Picks the kept and the deleted object of a glued pair (`m_rStitchCallback`).
     callback: &'c mut dyn StitchCallback,
+    pub(crate) edits: Option<&'c mut dyn StitchEditContext>,
     /// Geometry-owner identities for the final region-nesting query.
     pub(crate) query_identity: Option<crate::query::brep::BrepIdentity<'c>>,
     /// Max 3d distance between coincident edges and vertices (`m_dStitchTol3d`).
@@ -710,6 +956,148 @@ pub struct EdgesOfVertices {
 }
 
 impl<'c> Stitch<'c> {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn edit_set_point(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        v: VertexId,
+        point: Point3,
+    ) -> Result<()> {
+        if let Some(edits) = self.edits.as_deref_mut() {
+            edits.set_point(k, b, v, point)
+        } else {
+            set_point(k, b, v, point)
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn edit_glue_vertices(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        keep: VertexId,
+        delete: VertexId,
+        wire: Option<&[EdgeId]>,
+    ) -> Result<()> {
+        if let Some(edits) = self.edits.as_deref_mut() {
+            edits.glue_vertices(k, b, keep, delete, wire)
+        } else {
+            glue_vertices(k, b, keep, delete, wire)
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn edit_remove_faces(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        faces: &[FaceId],
+    ) -> Result<()> {
+        if let Some(edits) = self.edits.as_deref_mut() {
+            edits.remove_faces(k, b, faces)
+        } else {
+            remove_faces(k, b, faces)
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn edit_glue_edges(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        keep: EdgeId,
+        orientation: OrientType,
+        dist: f64,
+        nest: bool,
+        delete: EdgeId,
+        inside: Option<&[FaceuseId]>,
+    ) -> Result<()> {
+        if let Some(edits) = self.edits.as_deref_mut() {
+            edits.glue_edges(k, b, keep, orientation, dist, nest, delete, inside)
+        } else {
+            glue_edges_general(k, b, keep, orientation, dist, nest, delete, inside)
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn edit_squeeze_edge(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        e: Option<EdgeId>,
+        keep: VertexId,
+    ) -> Result<()> {
+        if let Some(edits) = self.edits.as_deref_mut() {
+            edits.squeeze_edge(k, b, e, keep)
+        } else {
+            squeeze_edge_to(k, b, e, keep)
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn edit_split_edge(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        e: EdgeId,
+        t: f64,
+    ) -> Result<(Option<EdgeId>, Option<EdgeId>, Option<VertexId>)> {
+        if let Some(edits) = self.edits.as_deref_mut() {
+            edits.split_edge(k, b, e, t)
+        } else {
+            make_vertex_split_edge(k, b, e, t)
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn edit_brep_pre_edit(&mut self, k: &mut Kernel, b: &mut Brep) -> Result<()> {
+        if let Some(edits) = self.edits.as_deref_mut() {
+            edits.brep_pre_edit(k, b)
+        } else {
+            let _ = k;
+            brep_notify_pre_edit(b)
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn edit_delete_face(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        f: FaceId,
+        delete_ev: bool,
+        nest: bool,
+        out: Option<&mut Vec<EntityRef>>,
+        region: Option<RegionId>,
+    ) -> Result<()> {
+        if let Some(edits) = self.edits.as_deref_mut() {
+            edits.delete_face(k, b, f, delete_ev, nest, out, region)
+        } else {
+            super::p2::delete_face(k, b, f, delete_ev, nest, out, region)
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn edit_face_notify(
+        &mut self,
+        b: &mut Brep,
+        f: FaceId,
+        operation: NotifyOperation,
+        data1: Option<EntityRef>,
+        data3: Option<EntityRef>,
+    ) -> Result<()> {
+        if let Some(edits) = self.edits.as_deref_mut() {
+            edits.face_notify(b, f, operation, data1, data3)
+        } else {
+            super::p2::face_notify(b, f, operation, data1, data3)
+        }
+    }
+    pub(crate) fn edit_test_and_split_edge(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        e: EdgeId,
+        point: Point3,
+        tol: f64,
+    ) -> Result<EdgeSplitTest> {
+        test_and_split_edge_with(k, b, e, point, tol, |k, b, e, t| {
+            self.edit_split_edge(k, b, e, t)
+        })
+    }
+
     /// `SmStitch(rStitchCallback, dStitchTol3d, bDoRegionNesting, bValidateResult)`
     /// (upstream defaults `TRUE`, `TRUE`); the other options take their defaults.
     pub fn new(
@@ -721,6 +1109,7 @@ impl<'c> Stitch<'c> {
         Self {
             callback,
             query_identity: None,
+            edits: None,
             tol_3d: stitch_tol_3d,
             do_region_nesting,
             validate_result,
@@ -954,7 +1343,7 @@ impl<'c> Stitch<'c> {
 
         // the vertex and edge pairs have been found and they are in tolerance so delete
         // FacesToDelete (increments unlocked mark value; status ignored)
-        ignore_status(remove_faces(k, b, faces_to_delete))?;
+        ignore_status(self.edit_remove_faces(k, b, faces_to_delete))?;
 
         // now follow the procedure that is used in DoStitching for stitching vertex
         // and edge pairs
@@ -963,7 +1352,6 @@ impl<'c> Stitch<'c> {
         let making_manifold_solid = self.making_manifold_solid;
         let fast_edge_compare = self.fast_edge_compare;
         let stitch_tol_3d = self.tol_3d;
-        let callback = self.callback();
         with_mark_lock(k, ALL_MARKS, |k, mark| -> Result<SimpleFaceStitch> {
             let mut marks = Marks::default();
             for (&kv, &dv) in k_vertices.iter().zip(&d_vertices) {
@@ -979,7 +1367,7 @@ impl<'c> Stitch<'c> {
             b.set_editing_enabled(true);
             let r = (|| -> Result<SimpleFaceStitch> {
                 // status ignored
-                ignore_status(brep_notify_pre_edit(b))?;
+                ignore_status(self.edit_brep_pre_edit(k, b))?;
 
                 // glue the coincident vertices
                 let wire_edges = bp1::wire_edges(b, None)?;
@@ -991,7 +1379,7 @@ impl<'c> Stitch<'c> {
                         continue;
                     }
                     let dist_to_v = vertex::point(b, v0)?.distance(vertex::point(b, v1)?);
-                    let c = callback.select_topology_to_keep(
+                    let c = self.callback.select_topology_to_keep(
                         k,
                         b,
                         EntityRef::Vertex(v0),
@@ -1036,9 +1424,9 @@ impl<'c> Stitch<'c> {
                     }
                     let (keep, other) = if c.keep_first { (v0, v1) } else { (v1, v0) };
                     if do_squeeze {
-                        squeeze_edge_to(k, b, squeeze_edge, keep)?;
+                        self.edit_squeeze_edge(k, b, squeeze_edge, keep)?;
                     } else if do_glue {
-                        glue_vertices(k, b, keep, other, Some(&wire_edges))?;
+                        self.edit_glue_vertices(k, b, keep, other, Some(&wire_edges))?;
                     }
                 }
 
@@ -1111,7 +1499,7 @@ impl<'c> Stitch<'c> {
                         out.max_edge_gap = dist_to_curve;
                     }
 
-                    let c = callback.select_topology_to_keep(
+                    let c = self.callback.select_topology_to_keep(
                         k,
                         b,
                         EntityRef::Edge(e0),
@@ -1127,7 +1515,7 @@ impl<'c> Stitch<'c> {
                             modified_faces.push(f);
                         }
                     }
-                    glue_edges_general(
+                    self.edit_glue_edges(
                         k,
                         b,
                         keep,
@@ -1602,14 +1990,14 @@ impl<'c> Stitch<'c> {
             let tol2 = vertex::tolerance(b, vtx2_to_glue)?;
             if min_dist > (tol2 + tol2) / 4.0 {
                 let mid = (vertex::point(b, vtx1)? + point2) * 0.5;
-                set_point(k, b, vtx1, mid)?;
+                self.edit_set_point(k, b, vtx1, mid)?;
                 check_gaps = true;
             }
 
             let old_tol = vertex::tolerance(b, vtx2_to_glue)?;
             let s_lii = at1(&sorted1, lii_to_glue)?;
             let s_ljj = at1(&sorted2, ljj_to_glue)?;
-            match glue_vertices(k, b, vtx1, vtx2_to_glue, None) {
+            match self.edit_glue_vertices(k, b, vtx1, vtx2_to_glue, None) {
                 Ok(()) => {}
                 Err(e) if e.is_unported() => return Err(e),
                 Err(e) => {
@@ -1826,7 +2214,7 @@ impl<'c> Stitch<'c> {
 
                     // glue pE/pTestE edge pair - keep pE
                     let old_tol = edge::tolerance(b, test_e)?;
-                    match glue_edges_general(
+                    match self.edit_glue_edges(
                         k,
                         b,
                         e,
@@ -2034,7 +2422,7 @@ pub(crate) fn glue_edges_general(
     dist: f64,
     do_region_nesting: bool,
     delete: EdgeId,
-    inside_faceuses: Option<&[crate::topology::FaceuseId]>,
+    inside_faceuses: Option<&[FaceuseId]>,
 ) -> Result<()> {
     let mut state = crate::topology::brep::p2::ArenaNotifyState::new(b);
     Context::with_notification_context(k, |k, context| {
@@ -2135,7 +2523,7 @@ pub(crate) fn brep_notify_pre_edit(b: &mut Brep) -> Result<()> {
         b,
         &mut state.env(),
         None,
-        crate::geom::object::NotifyOperation::PreEdit,
+        NotifyOperation::PreEdit,
         [this, None, None],
     )
 }
@@ -2400,6 +2788,79 @@ mod tests {
         assert!(!s.ignore_problems && !s.fast_edge_compare && !s.squeeze_small_edges);
         assert!(!s.remove_laminar_slivers);
         assert!((s.stitch_tol_3d() - 0.01).abs() < 1e-15);
+    }
+
+    #[test]
+    fn contextual_notifications_use_actual_attribute_users_and_callback() {
+        use crate::geom::attribute::{ids, Attribute, Behavior};
+        use crate::topology::brep::p3::{notify_serial, topology_ref};
+        let (mut k, events) = recording_kernel();
+        let mut b = Brep::new();
+        let shell = b.add_shell().unwrap();
+        let face = b.add_face(shell).unwrap();
+        let copied_face = b.add_face(shell).unwrap();
+        let vertex = b.add_vertex(Point3::ZERO).unwrap();
+        let serial = notify_serial(&mut k.context, &mut b).unwrap();
+        let key_of = |entity| topology_ref(serial, entity);
+        let face_key = key_of(EntityRef::Face(face)).key;
+        let vertex_key = key_of(EntityRef::Vertex(vertex)).key;
+        let copied_face_key = key_of(EntityRef::Face(copied_face)).key;
+        let mut attributes = AttributeStore::new();
+        let marker = attributes
+            .insert(Attribute::new(
+                ids::ALL_FILLET_EDGES,
+                Behavior::StandaloneReference,
+            ))
+            .unwrap();
+        attributes.add_attribute(face_key, marker).unwrap();
+        attributes.add_attribute(vertex_key, marker).unwrap();
+        let mut records = BTreeMap::new();
+        records.insert(face_key, Topology::new());
+        records.insert(copied_face_key, Topology::new());
+        records.insert(vertex_key, Topology::new());
+        let reject_curve = |_, _| {
+            Err(SolidError::Unported {
+                upstream: "unregistered split curve",
+                unit: "topology.brep_p9",
+            })
+        };
+        Context::with_notification_context(&mut k, |k, context| {
+            let mut env = edge::NotifyEnv {
+                records: &mut records,
+                attributes: &mut attributes,
+                context: Some(context),
+                key_of: &key_of,
+            };
+            let mut edits = BorrowedStitchEdits {
+                env: &mut env,
+                curve_ref: &reject_curve,
+            };
+            let mut callback = DefaultStitchCallback::new();
+            let mut stitch = Stitch::new(&mut callback, 0.01, true, true);
+            stitch.edits = Some(&mut edits);
+            stitch.edit_set_point(k, &mut b, vertex, Point3::X).unwrap();
+            stitch
+                .edit_face_notify(
+                    &mut b,
+                    face,
+                    NotifyOperation::Copy,
+                    Some(EntityRef::Face(copied_face)),
+                    None,
+                )
+                .unwrap();
+        })
+        .unwrap();
+        assert_eq!(b.vertex(vertex).unwrap().point, Point3::X);
+        assert_eq!(
+            attributes.users(marker).unwrap(),
+            vec![face_key, vertex_key, copied_face_key]
+        );
+        assert_eq!(attributes.attributes(copied_face_key), vec![marker]);
+        assert!(events
+            .lock()
+            .unwrap()
+            .contains(&NotifyOperation::ChangeGeometry));
+        assert!(events.lock().unwrap().contains(&NotifyOperation::Copy));
     }
 
     /// A notify callback that records the operations it sees.

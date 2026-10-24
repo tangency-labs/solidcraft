@@ -780,68 +780,118 @@ fn make_face_attempt_with_state(
     this_face: &dyn Fn(FaceId) -> ObjectRef,
     env: &mut ed::NotifyState<'_>,
 ) -> Result<MakeFaceAttempt> {
-    let Some(mut surface) = surface else {
+    let Some(surface) = surface else {
         return Err(SolidError::null_pointer(OP));
     };
-    // GetInfiniteRegion() (an inline field read; NULL when unset)
-    let region = region.or(b.infinite_region());
-
-    // get preexisting surface owner
-    let old_owner = surface.owner();
-    // MakeFaceTopology claims a new mark: a fresh mark record serves (see p10)
-    let attempt = p6::make_face_topology_attempt_with_state(
+    let mut transfer = p6::FaceSurfaceTransfer::new(surface);
+    let mut attempt = MakeFaceAttempt {
+        status: Ok(()),
+        region: None,
+        shell: None,
+        face: None,
+    };
+    make_face_transfer_attempt_with_state(
         k,
         b,
-        &mut Marks::default(),
-        env,
-        Some(surface.clone()),
+        region,
+        loops,
+        edgeuses,
+        loop_vertices,
+        &mut transfer,
+        uv_domain,
         orientation,
-        &p6::FaceTopologyOptions {
-            region,
-            edge_loops: loops,
-            edgeuses,
-            loop_vertices,
-            verify_radial_sectors: opts.verify_radial_sectors,
-            calculate_trims: opts.calculate_trims,
-            uv_curves: opts.uv_curves,
-            surface_key: None,
-        },
+        opts,
+        this_face,
+        env,
+        true,
+        &mut attempt,
     )?;
-    // restore the preexisting surface owner, whether the build fails or succeeds
-    surface.set_owner(old_owner);
-    if let Err(err) = attempt.status {
-        return Ok(MakeFaceAttempt {
-            status: Err(err),
-            region: attempt.region,
-            shell: attempt.shell,
-            face: attempt.face,
-        });
+    Ok(attempt)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn make_face_transfer_attempt_with_state(
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    loops: &[usize],
+    edgeuses: &[EdgeuseId],
+    loop_vertices: &[VertexId],
+    transfer: &mut p6::FaceSurfaceTransfer,
+    uv_domain: &Extent2d,
+    orientation: OrientType,
+    opts: &MakeFaceOptions<'_>,
+    this_face: &dyn Fn(FaceId) -> ObjectRef,
+    env: &mut ed::NotifyState<'_>,
+    legacy: bool,
+    out: &mut MakeFaceAttempt,
+) -> Result<()> {
+    *out = MakeFaceAttempt {
+        status: Ok(()),
+        region: None,
+        shell: None,
+        face: None,
+    };
+    transfer.owned_surface()?;
+    let region = region.or(b.infinite_region());
+    let old_owner = transfer.owned_surface()?.owner();
+    let options = p6::FaceTopologyOptions {
+        region,
+        edge_loops: loops,
+        edgeuses,
+        loop_vertices,
+        verify_radial_sectors: opts.verify_radial_sectors,
+        calculate_trims: opts.calculate_trims,
+        uv_curves: opts.uv_curves,
+        surface_key: None,
+    };
+    let attempt = if legacy {
+        let mut copy = p6::FaceSurfaceTransfer::new(transfer.owned_surface()?.clone());
+        p6::make_face_topology_transfer_attempt_with_state(
+            k,
+            b,
+            &mut Marks::default(),
+            env,
+            &mut copy,
+            orientation,
+            &options,
+        )
+    } else {
+        p6::make_face_topology_transfer_attempt_with_state(
+            k,
+            b,
+            &mut Marks::default(),
+            env,
+            transfer,
+            orientation,
+            &options,
+        )
+    };
+    // Native restores the pre-existing owner before checking topology status.
+    transfer.surface_mut(b)?.set_owner(old_owner);
+    out.region = attempt.region;
+    out.shell = attempt.shell;
+    out.face = attempt.face;
+    if let Err(error) = attempt.status {
+        if matches!(error, SolidError::Upstream { .. }) {
+            out.status = Err(error);
+            return Ok(());
+        }
+        return Err(error);
     }
-    let new_region = attempt.region;
-    let new_shell = attempt.shell;
     let new_face = attempt.face.ok_or_else(|| null("MakeFace made no face"))?;
-
     b.face_mut(new_face)?.uv_domain = *uv_domain;
-
-    // default face tolerance to Brep tolerance
     let tol = b.tolerance();
-    // SetTolerance(GetTolerance()) = (tol, TRUE, TRUE): grow only, cascade
     face_set_tolerance(b, new_face, tol, true, true)?;
-
-    // make the face->surface connections
     let owner = this_face(new_face);
-    surface.set_owner(Some(owner));
-    b.face_mut(new_face)?.surface = Some(surface);
+    if legacy {
+        transfer.install(b, new_face)?;
+    }
+    transfer.surface_mut(b)?.set_owner(Some(owner));
     b.geometry_owner_keys
         .insert(EntityRef::Face(new_face), owner);
     b.sync_face_surface_tolerance(new_face)?;
-
-    Ok(MakeFaceAttempt {
-        status: Ok(()),
-        region: new_region,
-        shell: new_shell,
-        face: Some(new_face),
-    })
+    Ok(())
 }
 
 /// `MakeFace`: makes a face on `surface` (over `uv_domain`) in `region` (the infinite
@@ -1114,6 +1164,74 @@ fn make_face_with_curves_impl(
     curve_owners: &mut Vec<Option<EdgeId>>,
     state: &mut ed::NotifyState<'_>,
 ) -> Result<NewFace> {
+    let mut transfer = p6::FaceSurfaceTransfer::new(surface);
+    let mut out = NewFace::default();
+    make_face_with_curves_transfer_impl(
+        k,
+        b,
+        region,
+        input,
+        &mut transfer,
+        uv_domain,
+        orientation,
+        crv_on_surf,
+        this_face,
+        curve_owners,
+        state,
+        &mut out,
+        true,
+    )?;
+    Ok(out)
+}
+
+/// Constructs with the original surface, retaining its location and partial outputs on error.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn make_face_with_curves_transfer(
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    input: FaceCurvesInput,
+    transfer: &mut p6::FaceSurfaceTransfer,
+    uv_domain: &Extent2d,
+    orientation: OrientType,
+    crv_on_surf: Option<bool>,
+    this_face: &dyn Fn(FaceId) -> ObjectRef,
+    env: &mut ed::NotifyEnv<'_>,
+    out: &mut NewFace,
+) -> Result<()> {
+    make_face_with_curves_transfer_impl(
+        k,
+        b,
+        region,
+        input,
+        transfer,
+        uv_domain,
+        orientation,
+        crv_on_surf,
+        this_face,
+        &mut Vec::new(),
+        &mut ed::NotifyState::from_env(env),
+        out,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn make_face_with_curves_transfer_impl(
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    input: FaceCurvesInput,
+    transfer: &mut p6::FaceSurfaceTransfer,
+    uv_domain: &Extent2d,
+    orientation: OrientType,
+    crv_on_surf: Option<bool>,
+    this_face: &dyn Fn(FaceId) -> ObjectRef,
+    curve_owners: &mut Vec<Option<EdgeId>>,
+    state: &mut ed::NotifyState<'_>,
+    out: &mut NewFace,
+    legacy: bool,
+) -> Result<()> {
     curve_owners.clear();
     let FaceCurvesInput {
         loops,
@@ -1122,7 +1240,8 @@ fn make_face_with_curves_impl(
         orientations,
         loop_points,
     } = input;
-    let mut out = NewFace::default();
+    *out = NewFace::default();
+    let surface = transfer.owned_surface()?;
 
     // check input
     if curves_3d.is_none() && uv_curves.is_none() {
@@ -1265,7 +1384,7 @@ fn make_face_with_curves_impl(
                         InValueType::Unconstrained,
                         None,
                         InValueType::Unconstrained,
-                        Some((&surface, None)),
+                        Some((surface, None)),
                     ))?
                     .flatten();
                     if let Some(d) = deformed {
@@ -1465,25 +1584,35 @@ fn make_face_with_curves_impl(
         }
     }
 
-    let made = make_face_with_state(
+    let mut made = MakeFaceAttempt {
+        status: Ok(()),
+        region: None,
+        shell: None,
+        face: None,
+    };
+    let result = make_face_transfer_attempt_with_state(
         k,
         b,
         region,
         &sorted_loops,
         &face_edgeuses,
         &loop_vertices,
-        Some(surface),
+        transfer,
         uv_domain,
         orientation,
         &MakeFaceOptions::default(),
         this_face,
         state,
-    )?;
+        legacy,
+        &mut made,
+    );
     out.region = made.region;
     if made.shell.is_some() && out.shell.is_some() {
         out.shell = made.shell;
     }
     out.face = made.face;
+    result?;
+    made.status?;
 
     // with curves on surface: make the UV trim curves from the given UV curves
     if crv_on_surf {
@@ -1507,7 +1636,7 @@ fn make_face_with_curves_impl(
             Ok(()) | Err(_) => {}
         }
     }
-    Ok(out)
+    Ok(())
 }
 
 // ---- GlueEdgesGeneral -----------------------------------------------------------------------
@@ -2771,6 +2900,122 @@ mod tests {
             b.face(face).unwrap().surface.as_ref().unwrap().owner(),
             Some(face_ref(face))
         );
+    }
+
+    #[test]
+    fn transfer_installs_original_surface_identity_in_actual_face() {
+        let mut k = Kernel::default();
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let mut surface = plane();
+        let key = k
+            .context
+            .geometry_key(surface.notify_identity_slot())
+            .unwrap();
+        let mut transfer = p6::FaceSurfaceTransfer::new(surface);
+        let mut out = NewFace::default();
+        let mut records = std::collections::BTreeMap::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = ed::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key_of,
+        };
+        make_face_with_curves_transfer(
+            &mut k,
+            &mut b,
+            None,
+            FaceCurvesInput {
+                loops: vec![1],
+                curves_3d: Some(vec![None]),
+                orientations: vec![OrientType::Same],
+                ..Default::default()
+            },
+            &mut transfer,
+            &dom(),
+            OrientType::Same,
+            None,
+            &face_ref,
+            &mut env,
+            &mut out,
+        )
+        .unwrap();
+        let face = out.face.unwrap();
+        assert_eq!(transfer.installed_face(), Some(face));
+        assert!(
+            matches!(transfer.into_location().unwrap(), p6::FaceSurfaceLocation::Installed(id) if id==face)
+        );
+        let installed = b.face(face).unwrap().surface.as_ref().unwrap();
+        // Clone resets the issued identity: this proves transfer of the original,
+        // rather than merely equal geometry or a copied owner field.
+        assert_eq!(installed.notify_key(), Some(key));
+        assert_eq!(installed.owner(), Some(face_ref(face)));
+    }
+
+    #[test]
+    fn failed_transfer_retains_original_surface_and_partial_wire_topology() {
+        let mut k = Kernel::default();
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let mut surface = plane();
+        let key = k
+            .context
+            .geometry_key(surface.notify_identity_slot())
+            .unwrap();
+        let mut transfer = p6::FaceSurfaceTransfer::new(surface);
+        let mut out = NewFace::default();
+        let mut records = std::collections::BTreeMap::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = ed::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key_of,
+        };
+        let error = make_face_with_curves_transfer(
+            &mut k,
+            &mut b,
+            None,
+            FaceCurvesInput {
+                loops: vec![1],
+                curves_3d: Some(vec![Some(Curve::from(
+                    crate::curve::line::Line::from_points(Point3::ZERO, Point3::X, 3),
+                ))]),
+                orientations: vec![OrientType::Same],
+                ..Default::default()
+            },
+            &mut transfer,
+            &dom(),
+            OrientType::Same,
+            None,
+            &face_ref,
+            &mut env,
+            &mut out,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            SolidError::InvalidInput {
+                reason: "loop does not close",
+                ..
+            }
+        ));
+        assert_eq!(out.face, None);
+        assert_eq!(transfer.installed_face(), None);
+        match transfer.into_location().unwrap() {
+            p6::FaceSurfaceLocation::Owned(surface) => {
+                assert_eq!(surface.notify_key(), Some(key));
+                assert_eq!(surface.owner(), None);
+            }
+            p6::FaceSurfaceLocation::Installed(_) => {
+                panic!("surface installed before failed loop construction")
+            }
+        }
+        assert_eq!(b.vertices().len(), 1);
+        assert_eq!(b.shells().len(), 1);
+        assert_eq!(b.vertexuses().len(), 1);
+        assert!(b.faces().is_empty());
+        let (vertex, _) = b.vertices().iter().next().unwrap();
+        assert!(records.contains_key(&key_of(EntityRef::Vertex(vertex)).key));
     }
 
     #[test]

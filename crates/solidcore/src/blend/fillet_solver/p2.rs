@@ -341,22 +341,23 @@ fn store_parts(
         }
     }
     if let Some(center_line) = center_line {
-        // m_pCenterLineCurve is an SmBSplineCurve*: the part of the SmLine / SmCurve
-        pseudo.geom_mut(g)?.center_line_curve = Some(bspline_part(&center_line)?);
+        // The native base pointer retains the actual derived curve object.
+        bspline_part(&center_line)?;
+        pseudo.geom_mut(g)?.center_line_curve = Some(center_line);
     }
     Ok(())
 }
 
 /// The `SmBSplineCurve` part of a curve (`SM_CAST_PTR(SmBSplineCurve, ..)`: the analytic
 /// curves derive from it upstream).
-fn bspline_part(curve: &Curve) -> Result<BSplineCurve> {
+fn bspline_part(curve: &Curve) -> Result<&BSplineCurve> {
     use crate::curve::curve::CurveKind;
     match curve.kind() {
-        CurveKind::BSpline(c) => Ok(c.clone()),
-        CurveKind::Line(c) => Ok(c.base.clone()),
-        CurveKind::Ellipse(c) => Ok(c.base().clone()),
-        CurveKind::Hyperbola(c) => Ok(c.base().clone()),
-        CurveKind::Parabola(c) => Ok(c.base().clone()),
+        CurveKind::BSpline(c) => Ok(c),
+        CurveKind::Line(c) => Ok(c.base()),
+        CurveKind::Ellipse(c) => Ok(c.base()),
+        CurveKind::Hyperbola(c) => Ok(c.base()),
+        CurveKind::Parabola(c) => Ok(c.base()),
         _ => Err(SolidError::null_pointer(OP)),
     }
 }
@@ -1209,7 +1210,7 @@ impl FilletSolver {
         tsect: &mut TsectPnt,
     ) -> Result<Option<f64>> {
         // check state - need both offset surfaces
-        if !has_surface(ops.solver(), 0)? || !has_surface(ops.solver(), 1)? {
+        if ops.solver_surface(0)?.is_none() || ops.solver_surface(1)?.is_none() {
             return Err(sm_err());
         }
         let rail_srf = srf_of_rail(rail_index)?;
@@ -1234,9 +1235,8 @@ impl FilletSolver {
         set_interval(&mut intervals, 0, uv_trim.natural_interval());
 
         let base = ops
-            .solver()
-            .surface(rail_index)?
-            .map(|slot| slot.surface.base_surface().clone())
+            .solver_surface(rail_index)?
+            .map(|surface| surface.base_surface().clone())
             .ok_or_else(|| invalid("no offset surface"))?;
         let mut domain = base.natural_uv_domain();
         // virtual SetupOffsetExtension: dispatched on the solver's kind
@@ -1259,7 +1259,10 @@ impl FilletSolver {
         let surf1_index = 1; // UV values of Surface1
 
         // given current inputs - place a good guess for upcoming solve in sGuessT
-        let mut surface1 = take_surface(ops.solver(), rail_index)?;
+        let mut surface1 = ops
+            .solver_surface(rail_index)?
+            .cloned()
+            .ok_or_else(|| invalid("no offset surface"))?;
         let loaded = ops.load_initial_values(
             k,
             Some(b),
@@ -1271,7 +1274,9 @@ impl FilletSolver {
             &mut periodicities,
             &mut guess_t,
         );
-        put_surface(ops.solver_mut(), rail_index, surface1)?;
+        if let Some(selected) = ops.solver_surface_mut(rail_index)? {
+            *selected = surface1;
+        }
         let loaded = loaded?;
 
         let side_tol = edge::tolerance(
@@ -1878,7 +1883,7 @@ impl FilletSolver {
         let mut fil_edges: Vec<EdgeId> = Vec::new();
         for g in self.fillet_geoms() {
             let this_geom = pseudo.geom(g)?;
-            if this_geom.fillet_surface().is_some() && !fil_surfs.contains(&g) {
+            if this_geom.fillet_surface()?.is_some() && !fil_surfs.contains(&g) {
                 fil_surfs.push(g);
             }
             if this_geom.center_line_curve().is_some() && !fil_curvs.contains(&g) {

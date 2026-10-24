@@ -417,7 +417,7 @@ fn run(i: &Inputs) -> Result<Output, HarnessError> {
                     object,
                 );
             }
-            record.set_curve_class(Some(cc));
+            record.set_indexed_curve_class(Some(&cc)).map_err(harness)?;
         }
         fb.insert_fillet_edge(edge, record);
         geom.set_rail(index, Some(edge));

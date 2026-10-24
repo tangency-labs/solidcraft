@@ -149,3 +149,443 @@ fn real_box_nx1_topology_uses_live_pseudo_objects() {
     assert_eq!(rib.fillet_edge_type(), FilletEdgeType::FilletXSideFace);
     session.target().face(rib.original_face().unwrap()).unwrap();
 }
+
+#[test]
+fn real_box_corner_vertex_stage_retains_native_geometry_and_rail_start() {
+    let mut k = Kernel::default();
+    let mut target = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
+    let edge = target.edges().ids().next().unwrap();
+    let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[edge], 0.5, 1, 1, 1.0)
+        .unwrap();
+    session.create_corners(&k, None).unwrap();
+    session.process_smooth_edge_sequences(&mut k).unwrap();
+    session.create_corner_vertices(&mut k).unwrap();
+    let mut points = Vec::new();
+    for &object in &session.executive().corners {
+        let FilletObject::Corner(id) = object else {
+            panic!("actual corner required");
+        };
+        let corner = session.corner(id).unwrap();
+        assert!(!corner.is_calc_as_const_rad());
+        for &vertex in &corner.vertices {
+            assert!(session
+                .pseudo_brep()
+                .fillet_vertex(vertex)
+                .unwrap()
+                .is_processed());
+            points.push(session.pseudo_brep().vertex_point(vertex).unwrap());
+        }
+    }
+    // Direct native box-edge component trace, in actual corner/FV order.
+    assert_eq!(
+        points,
+        [
+            Point3::new(9.5, 0.0, 30.0),
+            Point3::new(10.0, 0.0, 29.5),
+            Point3::new(10.0, 20.0, 29.5),
+            Point3::new(9.5, 20.0, 30.0),
+        ]
+    );
+    let rail = session.pseudo_brep().edge_list()[0];
+    assert_eq!(
+        session
+            .pseudo_brep()
+            .fillet_edge(rail)
+            .unwrap()
+            .fillet_edge_type(),
+        solidcore::blend::fillet_geom::p1::FilletEdgeType::Rail
+    );
+    let first_use = session.pseudo_brep().brep().edge(rail).unwrap().edgeuses[0];
+    let FilletObject::Corner(first_corner) = session.executive().corners[0] else {
+        panic!("actual first corner required");
+    };
+    let first_vertex = session.corner(first_corner).unwrap().vertices[0];
+    let vertexuse = session
+        .pseudo_brep()
+        .brep()
+        .edgeuse(first_use)
+        .unwrap()
+        .vertexuse
+        .unwrap();
+    assert_eq!(
+        session
+            .pseudo_brep()
+            .brep()
+            .vertexuse(vertexuse)
+            .unwrap()
+            .vertex,
+        Some(first_vertex)
+    );
+}
+
+#[test]
+fn real_box_post_vertex_adjustment_preserves_retained_corner_topology() {
+    let mut k = Kernel::default();
+    let mut target = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
+    let edge = target.edges().ids().next().unwrap();
+    let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[edge], 0.5, 1, 1, 1.0)
+        .unwrap();
+    session.create_corners(&k, None).unwrap();
+    session.create_corner_vertices(&mut k).unwrap();
+    let corners = session.executive().corners.clone();
+    let edges = session.pseudo_brep().edge_list().to_vec();
+    let mut points = Vec::new();
+    for &object in &corners {
+        let FilletObject::Corner(id) = object else {
+            panic!("actual corner required");
+        };
+        for &vertex in &session.corner(id).unwrap().vertices {
+            points.push((vertex, session.pseudo_brep().vertex_point(vertex).unwrap()));
+        }
+    }
+    session.adjust_corner_topology(&mut k).unwrap();
+    assert_eq!(session.executive().corners, corners);
+    assert_eq!(session.pseudo_brep().edge_list(), edges);
+    for (vertex, point) in points {
+        assert_eq!(session.pseudo_brep().vertex_point(vertex).unwrap(), point);
+        assert!(session
+            .pseudo_brep()
+            .fillet_vertex(vertex)
+            .unwrap()
+            .is_processed());
+    }
+}
+
+#[test]
+fn actual_box_solver_builds_surface_and_rails_in_retained_geometry() {
+    let mut k = Kernel::default();
+    let mut target = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
+    let edge = target.edges().ids().next().unwrap();
+    let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[edge], 0.5, 1, 1, 1.0)
+        .unwrap();
+    session.create_corners(&k, None).unwrap();
+    session.process_smooth_edge_sequences(&mut k).unwrap();
+    session.create_corner_vertices(&mut k).unwrap();
+    session.adjust_corner_topology(&mut k).unwrap();
+    let FilletObject::Solver(id) = session.executive().solvers[0] else {
+        panic!("actual solver");
+    };
+    let actual_base = std::ptr::from_ref(session.solver(id).unwrap().base());
+    let geometries = session.solver(id).unwrap().base().fillet_geoms.clone();
+    assert!(geometries.iter().all(|&geometry| session
+        .pseudo_brep()
+        .geom(geometry)
+        .unwrap()
+        .fillet_surface
+        .is_none()));
+    session.calc_solver_geometry(&k, id).unwrap();
+    let solver = session.solver(id).unwrap().base();
+    assert_eq!(std::ptr::from_ref(solver), actual_base);
+    assert_eq!(solver.fillet_geoms, geometries);
+    assert!(solver.extend_before && solver.extend_after);
+    for geometry in geometries {
+        let geometry = session.pseudo_brep().geom(geometry).unwrap();
+        assert_eq!(geometry.solver, Some(id));
+        assert!(geometry.fillet_surface.is_some());
+        let center = geometry.center_line_geometry().unwrap();
+        let solidcore::curve::curve::CurveKind::Line(line) = center.kind() else {
+            panic!("actual native analytic centerline must remain a line");
+        };
+        assert!(std::ptr::eq(
+            geometry.center_line_curve().unwrap(),
+            line.base()
+        ));
+        for rail in geometry.rails {
+            let rail = rail.unwrap();
+            assert!(edge::curve(session.pseudo_brep().brep(), rail)
+                .unwrap()
+                .is_some());
+        }
+    }
+}
+
+#[test]
+fn actual_box_all_solver_stage_builds_retained_fillet_surface() {
+    let mut k = Kernel::default();
+    let mut target = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
+    let edge = target.edges().ids().next().unwrap();
+    let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[edge], 0.5, 1, 1, 1.0)
+        .unwrap();
+    session.create_corners(&k, None).unwrap();
+    session.process_smooth_edge_sequences(&mut k).unwrap();
+    session.create_corner_vertices(&mut k).unwrap();
+    session.adjust_corner_topology(&mut k).unwrap();
+    session.calculate_solver_geometry(&mut k).unwrap();
+    assert!(!session.executive().solvers.is_empty());
+    for &object in &session.executive().solvers {
+        let FilletObject::Solver(id) = object else {
+            panic!("actual solver");
+        };
+        let solver = session.solver(id).unwrap().base();
+        assert!(!solver.fillet_geoms.is_empty());
+        for &geometry in &solver.fillet_geoms {
+            let geometry = session.pseudo_brep().geom(geometry).unwrap();
+            assert_eq!(geometry.solver, Some(id));
+            assert!(geometry.fillet_surface.is_some());
+        }
+    }
+}
+
+#[test]
+fn smooth_prelude_requires_live_tangent_context_for_multiple_solvers() {
+    let mut k = Kernel::default();
+    let mut target = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
+    let edges: Vec<_> = target.edges().ids().take(2).collect();
+    let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+    session.process_smooth_edge_sequences(&mut k).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &edges, 0.5, 1, 1, 1.0)
+        .unwrap();
+    assert_eq!(session.executive().solvers.len(), 2);
+    let solvers = session.executive().solvers.clone();
+    let error = session.process_smooth_edge_sequences(&mut k).unwrap_err();
+    assert!(error.is_unported());
+    assert_eq!(session.executive().solvers, solvers);
+}
+
+#[test]
+fn actual_target_extension_map_retains_native_containing_surface() {
+    let mut k = Kernel::default();
+    let mut target = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
+    let face = target.faces().ids().next().unwrap();
+    let surface = target.face(face).unwrap().surface.as_ref().unwrap().clone();
+    let domain = surface.natural_uv_domain();
+    let duplicate = surface.clone();
+    let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+    assert!(session.extended_surface(face).is_none());
+    session
+        .add_extended_original_surface(face, surface)
+        .unwrap();
+    let retained = std::ptr::from_ref(session.extended_surface(face).unwrap());
+    session
+        .add_extended_original_surface(face, duplicate)
+        .unwrap();
+    let actual = session.extended_surface(face).unwrap();
+    assert_eq!(std::ptr::from_ref(actual), retained);
+    assert_eq!(actual.natural_uv_domain(), domain);
+}
+
+#[test]
+fn actual_box_corner_edges_are_processed_in_retained_corner_order() {
+    let mut k = Kernel::default();
+    let mut target = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
+    let edge = target.edges().ids().next().unwrap();
+    let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[edge], 0.5, 1, 1, 1.0)
+        .unwrap();
+    session.create_corners(&k, None).unwrap();
+    session.process_smooth_edge_sequences(&mut k).unwrap();
+    session.create_corner_vertices(&mut k).unwrap();
+    session.adjust_corner_topology(&mut k).unwrap();
+    session.calculate_solver_geometry(&mut k).unwrap();
+    session.calculate_corner_edges(&mut k).unwrap();
+    assert!(!session.executive().corners.is_empty());
+    for &object in &session.executive().corners {
+        let FilletObject::Corner(id) = object else {
+            panic!("actual corner");
+        };
+        let corner = session.corner(id).unwrap();
+        assert!(!corner.edges.is_empty());
+        for &edge_id in &corner.edges {
+            let edge_record = session.pseudo_brep().brep().edge(edge_id).unwrap();
+            let curve = edge_record.curve.as_ref().unwrap();
+            assert_eq!(curve.type_code(), solidcore::curve::curve::p2::CIRCLE_TYPE);
+            assert_eq!(edge_record.interval, curve.natural_interval());
+            let fillet_edge = session.pseudo_brep().fillet_edge(edge_id).unwrap();
+            assert_eq!(
+                fillet_edge.status,
+                solidcore::blend::fillet_geom::p1::FilStatus::Processed
+            );
+            assert_eq!(fillet_edge.fillet_corner(), Some(id));
+        }
+    }
+}
+
+#[test]
+fn actual_box_rail_trim_preserves_live_rails_and_classification_option() {
+    let mut k = Kernel::default();
+    let mut target = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
+    let edge = target.edges().ids().next().unwrap();
+    let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[edge], 0.5, 1, 1, 1.0)
+        .unwrap();
+    session.create_corners(&k, None).unwrap();
+    session.process_smooth_edge_sequences(&mut k).unwrap();
+    session.create_corner_vertices(&mut k).unwrap();
+    session.adjust_corner_topology(&mut k).unwrap();
+    session.calculate_solver_geometry(&mut k).unwrap();
+    session.calculate_corner_edges(&mut k).unwrap();
+    assert!(session.executive().options.classification);
+    let rails: Vec<_> = session
+        .pseudo_brep()
+        .geoms()
+        .iter()
+        .flat_map(|geometry| geometry.rails.into_iter().flatten())
+        .collect();
+    assert!(!rails.is_empty());
+    session.trim_solver_rails(&mut k).unwrap();
+    assert!(session.executive().options.classification);
+    for rail in rails {
+        let edge = session.pseudo_brep().brep().edge(rail).unwrap();
+        let curve = edge.curve.as_ref().unwrap();
+        let interval = curve.natural_interval();
+        assert!(interval.min() <= interval.max());
+        assert!(matches!(
+            curve.kind(),
+            solidcore::curve::curve::CurveKind::Line(_)
+        ));
+    }
+}
+
+#[test]
+fn actual_box_rollover_keeps_scoped_attached_rail_classifications() {
+    use solidcore::blend::fillet_classification::FilletClassObject;
+    let mut k = Kernel::default();
+    let mut target = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
+    let edge = target.edges().ids().next().unwrap();
+    let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[edge], 0.5, 1, 1, 1.0)
+        .unwrap();
+    session.create_corners(&k, None).unwrap();
+    session.process_smooth_edge_sequences(&mut k).unwrap();
+    session.create_corner_vertices(&mut k).unwrap();
+    session.adjust_corner_topology(&mut k).unwrap();
+    session.calculate_solver_geometry(&mut k).unwrap();
+    session.calculate_corner_edges(&mut k).unwrap();
+    session.trim_solver_rails(&mut k).unwrap();
+    assert!(session.executive().options.classification);
+    let adjusted = session.classify_solver_rails_with_adjusted(&mut k).unwrap();
+    assert!(adjusted.is_empty());
+    let rails: Vec<_> = session
+        .pseudo_brep()
+        .geoms()
+        .iter()
+        .flat_map(|geom| geom.rails.into_iter().flatten())
+        .collect();
+    assert!(!rails.is_empty());
+    for rail in rails {
+        let record = session.pseudo_brep().fillet_edge(rail).unwrap();
+        let cc = record.curve_class().unwrap();
+        assert_eq!(
+            cc.curve(),
+            Some(FilletClassObject::Curve(FilletBody::Pseudo, rail))
+        );
+        assert_eq!(
+            cc.face(),
+            record
+                .original_face()
+                .map(|face| FilletClassObject::Topology(FilletBody::Target, EntityRef::Face(face)))
+        );
+    }
+}
+
+#[test]
+fn actual_box_face_stage_constructs_a_distinct_intermediate_body() {
+    let mut k = Kernel::default();
+    let mut target = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
+    let edge = target.edges().ids().next().unwrap();
+    let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+    assert!(session.intermediate_brep().is_none());
+    session
+        .prepare_constant_radius_edges(&mut k, &[edge], 0.5, 1, 1, 1.0)
+        .unwrap();
+    session.create_corners(&k, None).unwrap();
+    session.process_smooth_edge_sequences(&mut k).unwrap();
+    session.create_corner_vertices(&mut k).unwrap();
+    session.adjust_corner_topology(&mut k).unwrap();
+    session.calculate_solver_geometry(&mut k).unwrap();
+    session.calculate_corner_edges(&mut k).unwrap();
+    session.trim_solver_rails(&mut k).unwrap();
+    session.classify_solver_rails(&mut k).unwrap();
+    session.build_fillet_faces(&mut k).unwrap();
+    let body = session.intermediate_brep().unwrap();
+    assert!(body.editing_enabled());
+    assert_eq!(
+        body.key(),
+        solidcore::topology::brep::p3::topology_ref(
+            body.notify_serial().unwrap(),
+            EntityRef::Brep(solidcore::topology::BrepId::from_index(0)),
+        )
+        .key
+    );
+    assert_ne!(body.key(), solidcore::geom::attribute::ObjectKey(0));
+    assert!(!body.faces().is_empty());
+    assert_ne!(body.notify_serial(), session.target().notify_serial());
+    assert_eq!(
+        session.executive().fillet,
+        Some(FilletObject::IntermediateBrep)
+    );
+    for (index, geometry) in session.pseudo_brep().geoms().iter().enumerate() {
+        let id = solidcore::blend::fillet_geom::p1::FilletGeomId(u32::try_from(index).unwrap());
+        let source = session.fillet_surface(id).unwrap().unwrap();
+        let face = body
+            .faces()
+            .ids()
+            .find(|&face| {
+                body.face(face)
+                    .unwrap()
+                    .surface
+                    .as_ref()
+                    .is_some_and(|managed| core::ptr::eq(source, managed))
+            })
+            .expect("native source surface must be the actual managed face surface");
+        assert_eq!(
+            source.owner(),
+            Some(
+                session
+                    .intermediate_identity(EntityRef::Face(face))
+                    .unwrap()
+            )
+        );
+        assert!(geometry.fillet_surface().unwrap_err().is_unported());
+    }
+    let edge_keys: Vec<_> = solidcore::topology::brep::p1::edges(body, None)
+        .unwrap()
+        .into_iter()
+        .map(|edge| {
+            session
+                .intermediate_identity(EntityRef::Edge(edge))
+                .unwrap()
+                .key
+        })
+        .collect();
+    let Some(FilletObject::Attribute(marker)) = session.executive().edge_attribute else {
+        panic!("actual executive edge marker must be retained");
+    };
+    assert!(session.attributes().users(marker).unwrap().is_empty());
+    let outcome = session.stitch_fillet_faces(&mut k).unwrap();
+    assert!(outcome.status.is_none());
+    // Independent native box-edge baseline: no glues, four lamina edges.
+    assert_eq!((outcome.stitched, outcome.lamina), (0, 4));
+    assert_eq!((outcome.max_vertex_gap, outcome.max_edge_gap), (0.0, 0.0));
+    assert_eq!(session.attributes().users(marker).unwrap(), edge_keys);
+    let geom = solidcore::blend::fillet_geom::p1::FilletGeomId(0);
+    let before = session
+        .fillet_surface(geom)
+        .unwrap()
+        .unwrap()
+        .natural_uv_domain();
+    assert_eq!((before.min().x, before.max().x), (0.0, 1.0));
+    let context = k.context.doing_boolean();
+    session.shrink_fillet_faces(&mut k).unwrap();
+    assert_eq!(k.context.doing_boolean(), context);
+    let after = session
+        .fillet_surface(geom)
+        .unwrap()
+        .unwrap()
+        .natural_uv_domain();
+    // Independent native direct-component baseline; default trim options.
+    assert_eq!((after.min().x, after.max().x), (0.25, 0.75));
+    assert_eq!((after.min().y, after.max().y), (0.0, 1.0));
+}

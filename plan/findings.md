@@ -19060,3 +19060,718 @@ Corner types: the shims' stand-in corners (`blend_fillet_geom_p3.cpp`'s `ShimCor
 new `P2Corner` of `blend_fillet_geom_p2_static.inc`) are `SM_FCR_UNKNOWN`, which no
 `FilletCornerKind` has; the runners use `OneByOne` records. On the compared paths the type
 is only tested against `SM_FCR_N_x_N_CONCAVE`, which neither is. No disagreement.
+## intersect.topology_solver_p2: sm_GetFaceSilhouettes trims through the face (2026-10-24)
+
+- `face_silhouettes` (`sm_GetFaceSilhouettes`) now calls the ported
+  `topology::face::p2::create_curves_by_trimming` on the face that
+  `TopologyObjects::face_entity` resolves, then `AddCurvesToCache` /
+  `HasCachedCurves` on the per-call surface cache as upstream. The static runner's
+  adapter now holds real `CreateFaceFromSurface` faces (each in its own B-rep, as the
+  shim does) and resolves `face_entity` for them. The 8 `SmFace::CreateCurvesByTrimming`
+  cases (operation 14) and the 4 `SmFace::PointClassify` cases now pass; the planes seen
+  along their normal have no silhouette, so the projected cases compare status and an
+  empty solution list.
+- **Vertex/face maximize over a face-owned plane (same class as the GetNaturalUVDomain
+  entry above).** With `face_entity` answered, `face_included_without_shape_limit_5_4_0`
+  and `_5_4_1` (static-shell-vertices.json #124/#125: entry 5 `SmTLSVertexFace`,
+  operation 4 `SM_SO_MAXIMIZE`, request 0, tol 1e-5, vertex (-0.7, 0, 0), plane z=0
+  over [0,1]^2, included) reach `GlobalPointSolve` in the non-projected branch.
+  C++: success, 0 solutions. Rust: success, 1 solution, value 1.972308292331602 at
+  uv (1, 1). A free (not face-owned) `SmPlane` in C++ returns the same single solution
+  as Rust, so the difference is the face's `SmTrimSrfCache`: the adapter's planes are
+  standalone copies, and handing it the face-owned surfaces instead makes Rust stop at
+  `SmFace handle of a surface's face` (no trimmed-face binding for the adapter's
+  handles). The runner defers exactly these inputs (entry 5, maximize, included) under
+  that symbol until a face-aware `SurfaceSolveContext` exists for the static adapter.
+## Issue #506: SurfaceCache per-evaluation cost in surface_point_solve_p2 (fix/point-solve-perf, 2026-10-24)
+
+Reproduction note: the original `fuzz00474` reproduction file (`fuzz-out/n2000/`, not
+committed) is not available; the deterministic mutation numbering has drifted since the
+sweep (the unit's base-case list changed), so the regenerated `fuzz00474` runs in 0.02 s
+on both sides. The regime is instead reproduced with constructed near-degenerate cases
+(3 x 5 rational B-spline spanning `1e-4`, `wrap = true`, `solver = 10`, smallest v-knot
+span `2.5e-5`), run through `FUZZ_CORPUS_DIR` (both sides agree, as required):
+
+| op | C++ | Rust |
+|---|---|---|
+| rough | 51.0 s | 35.5 s |
+| push | ~40 s | ~40 s |
+| norms | ~43 s | ~43 s |
+| adjust | ~39 s | ~38 s |
+| solve | ~68 s | ~67 s |
+
+The port's sample profile (macOS `sample`, the Rust phase of `rough`, 10 s) puts the
+Rust time in `surface::surface_cache::{p1::compute_bezier_approximation_memo,
+p3::net_constants, p3::patch_boxes}` -> `evaluate_point`/`derivs`/`eval()` ->
+`nurbs::nurbs_srf::compute_surf_constants` over the subdivision tree, i.e. the same
+structure the 2026-10-21 entry ("Fuzz 'Rust-only' hangs") measured: identical call
+counts on both sides, the gap is per-evaluation cost, not more work. On this
+constructed case the C++ is actually slower (51 s to 35 s); the exact original input
+made C++ 11 s / Rust 21 s, so the levers below are checked against bit-identical
+output rather than against wall-clock parity on every input.
+
+The first candidate - the memo being ineffective, which is what the profile suggested
+- is excluded. `compute_bezier_approximation_memo`'s `PoleMemo` is per cache, not per node:
+`SurfaceCache::pole_memo` is built once and passed by reference through every
+`SubdivideNode`/`SubdivideNodeSplit` corner call (`split_node`, `p3.rs`, both `d1` and
+`d2` children share it), and `PoleMemo::poles` recomputes `GetSingularities` only while
+the memo is still `Empty`. It hits on every repeated corner evaluation of the
+subdivision tree. Upstream is worse, not better: `sm_ComputeBezierApproximation`
+(`SmSurfaceCache.cpp:707/754/800/846`) calls `SmSurface::IsSingularity(uv, eSingDir)`
+without pole points, so every corner whose direction is still `SM_SP_NEITHER`
+recomputes `GetSingularities(&poles)` inside `IsSingularity`
+(`SmSurface.cpp:23239-23242`). The port is deliberately faster here (a documented
+performance-only deviation that returns identical values), which is why the
+constructed cases put the C++ side behind: 51.0/35.5 s (`rough`), 22.7/11.2 ms
+(`scratch_flat2`), 42.2/26.3 s (`scratch_s1e5`). Levers checked, per the plan:
+
+| lever | observed evidence | expected speedup | bit-identity risk | verdict |
+|---|---|---|---|---|
+| `PoleMemo` effectiveness | computes `GetSingularities` once per cache and hits on every corner of every node; upstream recomputes it per corner (`SM_SP_NEITHER` path); all constructed cases C++ >= Rust | already realised | none (existing, values identical by construction) | no change needed |
+| duplicate evaluation dedup in `compute_surf_constants` (chord phase and angle phase both evaluate at `at(0)` of each row) | only reached with a non-B-spline `surface_to_test`; in the reproduced regime `net_constants` reads nets / Bezier patches (`compute_net_constants`, no evaluations) | <= 5% where applicable, 0 here | low (same values, cached recomputation) | not applicable to this workload |
+| allocation churn in `evaluate_point`/`derivs`/`eval` | micro-benchmark on the constructed 3 x 5 rational surface (20000 iterations): `evaluate(uv, 1, 1)` = 0.54 us per call, `evaluate_point` = 0.072 us; the NLib-level paths already keep the basis arrays on the stack (`basis_eval_into`, `derivative_matrix::<SMALL_NP>`), so per-eval cost is dominated by the derivative algorithm itself, which both sides run identically | <= 10-20% best case, speculative | restructure of NLib internals (`N_SrfDerivs` equivalents) | not implemented: no evidence, only risk |
+| patch-invariant recomputation per evaluation (`net_constants` / `compute_surf_constants`) | `test_against_tolerances` calls `net_constants` at most twice per node (chord heights only when the pseudo-box fails, angles only when not already subdividing), as upstream | 0 | none | no recomputation asymmetry found |
+| bounds-check / `Result` threading overhead (`rd`/`sx`/`ux`/`get`/`at_u` helpers) | pervasive in the NLib leaves, but every reproduced configuration has the C++ side slower; removing the checks is `unsafe`/unchecked indexing, denied by the workspace lints | unknown | forbidden by repo rules (no `unsafe`, no unchecked `[i]`) | not implementable |
+
+No lever shows a measurable, bit-identical improvement on any reproducible
+configuration; the practice between the port's cache and upstream's is the opposite of
+the profiled hypothesis (the port's memo is strictly cheaper). The remaining unexplained
+gap is the unreproducible `fuzz00474` 11 s / 21 s direction, which none of the five
+regeneration attempts (scale `1e-5`, knot span `1e-7`, tight `1e-13`, `1e-6` scale,
+amplified non-polar nets, all with `FUZZ_CORPUS_DIR` agreement - `scratch_s1e5` 42.2/26.3
+s, `scratch_vknot` 42.3/26.3 s, `scratch_t13` 25.9 s Rust-only) reproduces; #506 stays
+open upstream with this evidence.
+## boolean.merge_p4 / boolean.merge_p1: post-process re-owns the joined curve (2026-10-24)
+
+Found when SmVertexDefinition::Imprint started merging in the arena pair
+(ProtoBrep::merge_point_class_into_brep): the far-translation fixtures (wire at
+(1e8,-1e8,1e8), isolated vertex at its middle, operations 1, 3, 4) split the wire, then
+BooleanPostProcess joins the two edges again (DeleteTopologicalVertex). The C++ result
+curve is back at 1e8; the Rust one stayed at the origin-shifted position (dbls[6..20]:
+cpp 1e8.., rust -0.5..0.5). Cause: boolean_post_process calls
+delete_topological_vertex without the caller's notification identities, so the joined
+curve of the surviving edge is owned under a kernel-issued key; the inverse
+SmTemporaryBrepTransform (topology::brep::p5::transform with the adapter's keys) walks
+curve owners by identity and skipped it. Fix in boolean.merge_p1: the surviving edge's
+curve gets back the owner identity it had before the call (upstream the owner is the
+same SmEdge*). All three now pass. A cleaner fix is for the manifold adapter to pass its
+notification environment to boolean_post_process
+(delete_topological_vertex_with_notifications); that needs boolean/merge/p4/kernel_adapter.rs.
+## offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference
+
+Unit `offset.offset_executive_p2`, cases `gen0000` and `gen0003` (static `ShellBrep`
+of an `SmApiCreateBox` box, `extend_convex_edges`, negative distance, no shell faces;
+`gen0003`: box at (122.38, -217.37, ...) with distance -5). Both sides build the same
+inset shell (Rust: 6 outward planes, inset by |distance|, one void and one solid
+region, manifold) and pass it to `SmMerge::ManifoldBoolean(SM_BO_DIFFERENCE)` with
+the original as primary operand, whose result is the original itself on both sides.
+C++ returns the hollow box: regions/shells/faces/loops/edges/edgeuses/vertices
+3/4/12/12/24/96/16. Rust returns the original unchanged: 2/2/6/6/12/48/8. The
+operands do not intersect (the inner box lies strictly inside), so the suspected
+cause is the Rust Difference's handling of a fully contained, non-intersecting
+other operand in the merge editing stages (`boolean.merge_p4` /
+`boolean.merge_p2` classification): the contained shell's faces are dropped instead
+of being kept reversed as a void. Listed in `known_mismatches.toml`; the offset
+port itself is not involved after the shell is built.
+
+
+### Real-solid fillet checkpoint: corner vertices are outside the pseudo owning list (2026-10-24)
+
+`blend.fillet_executive_p3`, fixture `real_solids.json`, case
+`real-box-first_topology-actual-session`: a 10×20×30 box, edge 0, radius 0.5.
+Actual shared setup and corner creation matched. The first direct Nx1 topology
+operation initially exposed seven integer mismatches: native `GetVertices`
+returned only the pseudo shell placeholder (1), while Rust also linked the two
+corner-owned fillet vertices (3). Their owning-list labels likewise differed.
+
+The producer now allocates those vertices into the arena without linking them
+into the B-rep's owning list. All original checks remain, with additional actual
+FV→corner, edge→corner and edgeuse→fillet-geometry backlinks. Four paired setup/
+corner/topology fixtures pass exactly; the full API fixture remains deferred.
+The direct topology checkpoint stops before vertex geometry and omits smoothing
+on both sides; it does not claim the full executive prelude or a finished fillet.
+### 2026-10-24 — Nx1 corner topology co-port for the live fillet session
+
+The real box-edge session creates two `NByOne` corners, then reaches the missing
+`MakeCornerTopology` producer. Neither `SmFilletNx1Corner::MakeCornerTopology` nor
+`sm_FindSurfaceExtensionDistAtCorner` is assigned in `harness/callgraph/units.json`.
+This follow-up co-ports the ordinary Nx1 producer and its three static side-edge /
+convexity helpers into `blend::fillet_corner::topology`, tracked with corner p3.
+It borrows the actual target, pseudo-B-rep, loaded solver and corner identity.
+The first real-box topology test retains two classified corner vertices and one
+end rib bound to the actual target end face; native paired-prefix proof is separate.
+
+Mixed-convexity extension remains unported at the actual missing
+`sm_FindSurfaceExtensionDistAtCorner` call, after the native two-vertex / rail prefix.
+Its `blend.fillet_corner_p1` tracking label is an explicit proposed home for that
+unassigned helper, not a claim of prior callgraph ownership. Keep this continuation
+visible and both corner units partial. No fake radius, solver table or extended
+surface is supplied. The native pseudo owning-vertex list differs from corner-owned
+fillet vertices; compare the two traversals separately.
+
+## Fillet session: retained solver reaches geometry-owned offset-surface boundary
+
+The actual constant-radius box-edge setup (`10 x 20 x 30`, first owning edge,
+radius `0.5`, circular/G1) now reaches `CalcCornerVertGeom` through the production
+session, after ordered parameter setup, corner creation and first ordinary Nx1
+topology. The retained concrete solver runs through the live rail provider; it
+returns `Unported("SmFilletGeom::GetOffsetSurface", "blend.fillet_geom_p1")` when
+native-order `m_pFGForSurfaces` selects the real geometry. `FilletSolver::surface`
+and `surface_mut` do not yet resolve that geometry-owned slot.
+
+The normal native full-API box fixture succeeds; a separate direct vertex-stage
+comparison is being added. This is a missing live-object context boundary, not
+successful end-to-end execution. Resolution must preserve actual geometry-owned
+offset surfaces, solver fallback and write-through semantics (`SmFilletSolver.cpp`
+130–162; `SmFilletGeom.cpp` 9672–9680). Clearing the selected geometry, copying a
+solver base, or swapping unrelated surface state would conceal the missing path.
+
+### Real fillet first-corner vertex calculation reaches offset-surface context (2026-10-24)
+
+The additive `real-box-first-vertex-geometry-actual-session` case runs shared
+parameter setup, actual corner creation, direct first Nx1 topology, then that
+corner's actual vertex calculation on both sides. It does not claim the complete
+executive prelude. Native returns success and processes both fillet vertices at
+(9.5, 0, 30) and (10, 0, 29.5), with zero tolerance and original parameters 9.5
+and 29.5. Rust reaches genuine `SmFilletGeom::GetOffsetSurface` in
+`blend.fillet_geom_p1`; the case remains deferred, with no fabricated result.
+
+The snapshot reads initialized fillet-vertex status/processed fields and samples
+geometry only after processing. It never reads the uninitialized native corner
+status or unevaluated pseudo-edge geometry. Full p3: 297 cases, 249 value passes,
+48 deferred, zero failures. All five earlier real-solid cases retain their full
+CPP and Rust output records byte-for-byte; no earlier record fields were removed.
+
+## Retained constant-radius geometry offsets (2026-10-24)
+
+The real box session reached `SmFilletGeom::GetOffsetSurface` while native calculated
+both first-corner vertices. The context-free solver getter could not resolve the
+selected fillet geometry. A borrowed constant-radius rail context now reads and
+mutates that actual geometry's offsets, including nested initial-value extension
+state and Jacobian offset resets. The concrete solver and its separate offsets
+remain retained; selected geometry is restored after success or failure. No surface
+swap, selected-FG clearing, cloned solver table or invented offset identity is used.
+The six real-box checkpoints now give five exact value passes, zero failures and
+one later full-API deferral (`blend.fillet_executive_p1`); maximum relative error is
+zero. This proves direct first-corner vertex geometry, not a full fillet result.
+
+The ordinary geometry is `SM_FG_DEFAULT`. The contextual tangent-rollover guess in
+`SmConstantRadiusFS::LoadInitialValues` (`SmFilletStandardSolver.cpp:493–537`) still
+needs actual pseudo-B-rep vertex-use context; that genuine branch remains explicitly
+Unported in the borrowed provider. Other concrete solver kinds keep their existing
+missing-context behavior. Existing context-free APIs and fixture coverage remain.
+
+## Nx1 rail endpoint orientation default (2026-10-24)
+
+The actual combined two-corner component caught six topology differences that
+vertex positions alone did not expose: the new Nx1 producer passed `Same` to
+MakeRailEdgeuse, while native omits the argument and defaults to `Unknown`
+(SmFilletGeom.h:604; SmFilletCorner.cpp:6092). Both endpoint uses were inserted at
+the front of the rail list, replacing the observed first endpoint. The producer
+now passes Unknown so the existing helper derives orientation from the actual
+original corner vertex. No shared edge-insertion algorithm or harness field changed.
+The same seven retained native/Rust fixtures now give six exact passes, zero
+failures and one later full-API deferral; all four vertex records and full topology
+agree, maximum relative error zero. The first failing comparison is retained as
+evidence that endpoint orientation/list order checks detect this regression.
+
+### Real two-corner fillet stage catches forced rail orientation (2026-10-24)
+
+`real-box-corner-vertices-component-actual-session` runs the shared production
+corner loop and its native counterpart, with smoothing omitted on both sides.
+All four actual vertex geometries and flags matched, but six directed rail
+integers differed: the Nx1 producer passed `Same` where the native omitted
+argument defaults to `Unknown` (SmFilletCorner.cpp6092; SmFilletGeom.h604).
+This forced both ends to insert at the front of each rail. Using the existing
+orientation inference fixes the identical fixture with every field retained.
+Seven real-box cases now give six exact value passes and one full-API deferral.
+The earlier direct vertex checkpoint now passes through the actual borrowed
+offset-surface provider. No finished fillet or mass parity is claimed.
+
+Full p3 after this component: 298 cases, 251 value passes, 47 deferred, zero
+failures, max_rel_err=0. The remaining deferrals belong to executive p1.
+
+### Retained corner-stage capability boundary
+
+The shared Session corner-vertex component currently dispatches ordinary `NByOne`
+corner topology/geometry. Other valid concrete corner contexts and unsupported
+concrete rail-solver contexts return `Unported(blend.fillet_executive_p1)` at the
+live virtual-dispatch seam; they are not converted into an ordinary native fillet
+failure. The explicitly named direct Nx1 helpers still validate their own type.
+This slice makes no cylinder, multi-edge, variable-radius or complete API claim.
+
+### Real-box untrimmed fillet centerline loses its native Line subtype (2026-10-24)
+
+An additive actual-session checkpoint retains the original 10×20×30 box, edge0 and radius0.5 through real preparation, corner creation, smooth prelude, shared corner vertices, all adjustment and direct first solver CalcFilletGeom. All six statuses and all sampled geometry agree (max relative error2.775557561562892e-16), but native centerline GetType is SmLine14010 while Rust reports BSpline14033. The only mismatch is ints.generated_geometry_state[15]; surface and both rail runtime types already agree. Native SmFilletSolver.cpp633–637 retains the derived line pointer; Rust solver/p2.rs345 slices it via bspline_part into FilletGeom's BSplineCurve slot. Preserve the actual curve representation; do not normalize the type comparison. Full executive_p3 baseline:300 cases,252 passes,47 existing deferrals,1 failure. The post-adjustment case passes; all14 previous CPP/Rust real-box records are byte-identical. Public SmApiFilletEdges remains genuinely deferred.
+
+Resolution of the real-box centerline subtype finding: retain the canonical actual Curve (including Line) in FilletGeom, use its virtual copy/evaluation/reversal operations, and preserve the legacy borrowed B-spline-base accessor for base-only callers. The new observer reads the actual curve. Same fixtures and enforced runtime types now give 300 executive_p3 cases,253 passes,47 existing deferrals,0 failures,max_rel_err=0; perturb253/253 caught. Seven affected native units total4032 cases,3864 passes,136 existing deferrals,32 defined rejections,0 failures. All3732 existing affected-unit Rust-only per-case digests and all14 previous real-box CPP/Rust output records are unchanged. Full SmApiFilletEdges still genuinely defers; this proves retained untrimmed geometry, not a completed fillet.
+
+### Actual fillet corner boundary curves lose Circle subtype in the SSI adapter (2026-10-24)
+
+The original box/edge/radius case now runs shared all-solver geometry followed by each corner's tangent adjustment, repeated vertex geometry and boundary-edge calculation. All seven stage statuses and sampled points agree exactly, but both native end ribs are Circle14021 and Rust stores plain BSpline14033. New corner_edge_geometry_state indices6 and18 expose the mismatch. Native retains actual derived curves from sm_SrfSrfIntersection. Rust geom/p2's SrfSrfCurves already retains Curve, but the distinct geom/p4 adapter279–324 holds Option<BSplineCurve> and clones only each returned object's base before p5 stores it. Preserve the actual returned curves through this adapter; do not remove type checks or change SSI arithmetic. Red executive_p3 baseline:301 cases,253 passes,47 existing deferrals,1 failure; all18 prior real-box CPP/Rust records are byte-identical. Full public filleting remains genuinely unported.
+
+Resolution of the boundary-Circle finding: the private geom/p4 SSI carrier retains the actual Curve objects accepted by the same native B-spline cast filter; p4 virtual endpoint/reversal/store operations and p5 ownership transfer retain derived objects. The existing public base-only UvCurves API keeps its explicit compatibility projection. With the same fixture and unchanged observer, executive_p3 now has 301 cases,254 passes,47 existing deferrals,0 failures,max_rel_err=0; perturb254/254 caught. Six affected native suites:2615 cases,2431 passes,78 existing deferrals,106 defined rejections,0 failures. All2314 previous affected-unit Rust digests and all18 earlier CPP/Rust box records are unchanged. Full SmApiFilletEdges remains genuinely deferred; the next real component is rail trimming.
+### Fillet rollover classification: retained body-qualified identities
+
+The production Session's pseudo rail curves and target boundary topology can have
+equal local arena IDs. The legacy solver-p5 fixture encodes pseudo curves using
+offset edge IDs; that fixture convention is not a production identity resolver.
+Rail classifications now retain explicit body and geometry-role handles, with a
+separate Legacy namespace for indexed entrypoints. Legacy adapters preserve their
+existing algorithms and outputs without applying that offset convention to Session.
+
+The actual classification loan splits pseudo topology from its attached mutable
+classification, preserving partial writes on ordinary and Unported errors without
+geometry snapshots or owner rebinding. Scoped target-edge projections reject
+pseudo and geometry handles. The canonical getter exposes scoped handles; indexed
+input conversion is explicit and fallible. These changes do not complete missing
+recovery notifications, custom producer-owner resolution, or the public fillet API.
+
+
+### Paired retained fillet rail classification (2026-10-24)
+
+The unchanged real box/edge/radius now runs enabled TestRollOver after shared TrimRails, then repairs the actual ordered adjusted-corner list. Native and Session both attach classifications to the real pseudo rail curves: each has one interval [0.25,0.75], boundary Target edges and a mid Target face (faces3/1). Rail0 endpoints classify on target edges8/5 at t29.5; rail1 on edges9/1 at t9.5. Actual adjusted-corner lists are empty. Target vertex/edge tolerances remain1e-5; classification remains enabled. DoingBoolean and CC DoingFillets both remain false in this direct component, matching its actual caller context; this does not claim the outer DoFilleting context scope.
+
+The new checkpoint compares 432 exact fields and 282 values, max_rel_err=0, with no preclassification evaluation or lazy geometry lookup. Existing real-box CPP/Rust output records (22) and affected-unit Rust digests (1340, Rust-only retention) remain byte-identical. Five affected native suites total1643 cases,1583 value passes,47 existing deferrals,13 defined rejections,0 failures. Executive_p3:303 cases,256 passes,47 deferrals; perturb256/256 caught. Actual body/role identities replace no target/pseudo IDs with numeric offsets.
+
+This ordinary fixture proves attached CC routing and expected Target Edge/Face identities, not general unexpected non-topology point identity or nonempty rollover repair. The observer preserves an explicit unknown marker for unsupported object roles. Recovery owner notifications and the full SmApiFilletEdges entrypoint remain genuinely Unported; no completed fillet or resultant mass parity is claimed.
+
+
+### Paired intermediate fillet face construction (2026-10-24)
+
+The unchanged box now continues through actual intermediate SmBrep allocation with target tolerance/editing, every corner CalcCornerGeom, then each solver's tolerance propagation and actual MakeFaceBrep. Both native corner predicates return normally; no corner-patch callback is fabricated. The separate intermediate body has4 vertices,4 edges,1 face,1 shell,1 region and8 directed edgeuses, tolerance4.0000000000000003e-5. Actual boundary objects are Line14010/Circle14021/Line14010/Circle14021; the face surface is Cylinder15012. No type normalization is used.
+
+The new checkpoint compares564 exact fields and389 values, max_rel_err0, including ordered edge/loop topology, each edgeuse's startvertex/mate/radial/cw/ccw/face, fixed primary/mate faceuse orientations and shell/region labels, actual geometry domains/statuses/samples, and topology tolerances. All observations follow the actual construction operations; no attributes or stitching stage is skipped into the claim. Existing24 CPP/Rust real-box outputs and1805 affected-unit Rust-only case digests remain byte-identical. Four affected native suites total2109 cases,1878 value passes,132 existing deferrals,99 defined rejections,0 failures. Executive_p3:304 cases,257 value passes,47 existing deferrals; perturb257/257 caught.
+
+The original full SmApiFilletEdges case still genuinely defers. This proves a real retained intermediate fillet face, not a completed target solid or mass properties. Actual attribute attachment, stitching and later target integration remain separate pipeline stages.
+
+
+### Fillet source surface loses its consumed managed-face identity (2026-10-24)
+
+A passive addition to the unchanged intermediate-face fixture exposes four genuine identity mismatches while every previous564 exact fields and389 values remain unchanged. Native source FG surface is the very surface consumed into intermediateface0 and owned by that Face(type16002); Rust retains an independent FG surface with owner=None, while its managed face owns a clone. New source_surface_binding indices3/4/5/6 are native1/16002/0/0 versus Rust0/0/-1/-2. No sampled geometry or runtime type is normalized or removed.
+
+Native MakeFaceBrep passes m_pFilletSurface directly/consumed at SmFilletGeom.cpp9616/9639; its destructor9038–9054 does not delete that surface. DoFilleting.cpp2995 then resolves the first FG surface's owner as Face and calls ShrinkGeometry. A stale clone or guessed owner cannot replace this actual managed-surface mutation relationship. The owning kernel worker is implementing a producer-proven Owned→ManagedFace route; this red observer makes the gap visible. All26 previous CPP/Rust real-box records remain byte-identical after removing only the added source_surface_binding key for retention comparison. The new section is never removed from actual difftest comparison.
+### Fillet intermediate stitching: live attributes and notifications
+
+The intermediate body's ordered edges receive the executive's retained E attribute
+before the existing StitchFaces algorithm runs. Its mutating helper calls now accept
+the same borrowed notification records, attribute store and kernel callback context;
+legacy entrypoints retain their existing adapters. The shared executive stage returns
+counts and gaps only after success, preserving BAD_MERGE mutation on ordinary error.
+
+The normal box-edge kernel probe retains the same four marker users and reports zero
+stitched edges, four lamina edges and zero gaps. Paired native proof is pending. This
+is not general stitch-mutation or complete fillet parity: a newly copied split curve
+still requires its actual identity provider, and nested notification-context leases
+remain a limitation for mutation paths that request fresh kernel geometry keys.
+Separately, the face-stage native alias observer exposes a real FG-surface versus
+managed-face ownership mismatch; the stitching adapter does not repair or hide it.
+
+### Fillet surface installation: actual managed binding and indexed compatibility
+
+Native MakeFaceBrep installs its original fillet surface into the generated face.
+The real Session now transfers that surface through the shared p6/p7 construction
+algorithm, retaining either the original owned value or its installed face on every
+return. Partial face allocation alone does not imply installation. Native owner
+restoration and topology-versus-late-error boundaries remain distinct.
+
+The canonical FG slot is Owned or ManagedFace(actual body identity, FaceId).
+Session::fillet_surface resolves the actual object; an owned-only getter reports
+missing body context after transfer rather than silently returning None. The real
+box test observes the same surface object and actual canonical face owner before
+attribute attachment and stitching.
+
+The indexed slice API retains its existing copied-surface construction backend,
+including its prior cliff trimming route. It does not claim shared surface binding.
+The retained-solver Session successor always uses original-surface transfer; its
+cliff transfer through the trimming tool remains a genuine missing capability at
+the actual final call. No fixture, tolerance, runtime type or ownership observation
+is normalized to hide that boundary.
+### Fillet consumed-surface binding fixed; actual attribute/stitch paired evidence
+
+The unchanged same-box face/stitch checkpoints now resolve the original surface through its actual managed Face. Native and Rust source_surface_binding both equal [1,1,1,1,16002,0,0]; all four prior owner/alias mismatches are fixed without removing any fields. All26 older CPP/Rust box outputs remain identical outside that intentionally corrected binding section. Mode11 retains571 exact fields/389 values; Mode12 retains623 exact fields/391 values, all native values exact. E is the actual executive attribute with four ordered intermediate-edge users. Actual Stitch returns0 stitched,4 lamina and0 gaps. Whole executive_p3:305 cases,258 value passes,47 existing deferrals,0 failures; full API remains honestly deferred.
+
+An affected-suite run caught five legacy cliff cases newly deferred by the initial transfer backend. The explicit indexed compatibility path now preserves their existing behavior: geom_p4 all400 cases pass, with no case/status/tolerance waiver. The actual retained Session path always transfers the original surface and still reports its unavailable cliff transfer honestly. This is ordinary same-box component evidence, not full filleting, target integration, shrink, mass or broad notification parity.
+
+### Direct first-fillet-face shrink: native paired domain and geometry proof
+
+After actual E attachment and Stitch, the unchanged ordinary box runs the shared first-FG-per-solver owner-face shrink component. Native and Rust canonical surface AND stored Face UV domains change from [0,0,1,1] to [0.25,0,0.75,1]. Raw edge intervals, actual Line/Circle types, source-to-face alias and all later samples remain compared. New checkpoint682 exact fields/439 values matches exactly; whole executive_p3 306 cases/259 value passes/47 existing deferrals/0 failures. All28 older CPP/Rust box outputs remain identical; perturb catches14/14 implemented box cases.
+
+This is the direct component with unchanged false Boolean/fillet flags. Native actual surface PreEdit removes an existing local TrimSrfCache; nested generator, Surface and Face notifications, owner-clear/restore and temporary object lifecycle are independently observed but NOT claimed as Rust parity. The current numeric checkpoint does not erase these gaps or claim complete CreateFilletBrep/DoFilleting/public API parity.
+## boolean.api_brep: tiny-box Booleans reach the UB-175 teardown once edge definitions imprint into faces
+
+Unit `boolean.api_brep`, cases `gen0059` (`with_options`, operation 3, boxes of
+size about 0.005 at (-0.0066, -0.0183, -0.0027) and (-0.0025, -0.0203, -0.0025)) and
+`gen0066` (`merge_breps`, operation 2, boxes of size about 0.008 and 0.004). Until
+`SmEdgeDefinition::Imprint` could run `SmBrep::MakeEdgeInFace` on the owning B-rep
+these cases were deferred there. Both now run to the end of
+`SmTopologyIntersector::IntersectInsertRelate`, where the port's UB-175 check
+(`plan/upstream-issues.md`: `~SmProtoTopologyManager` reads a freed proto edge) finds
+a proto vertex that still lists a freed proto edge: the proto vertex capture distance
+is at least 0.01 (`SmTopologyIntersector.cpp:1159`), larger than the boxes, so the
+intersection points collapse into shared proto vertices and some proto edges start
+and end on the same one. The port returns `SM_ERR_INVALID_INPUT` there
+(`gen0059` status 1007; in `gen0066` `merge_breps` reports it as `SM_ERR` 1001);
+the C++ reads the freed memory and goes on (status 0, 8 and 7 result records). The
+C++ build cannot be instrumented here, so no input-based rule separates these from
+tiny boxes that do not reach the condition from the inputs alone, so the
+`boolean.api_brep` runner rejects a case on the Rust side when the port reports exactly
+this UB-175 error (the way `primitive.api_primitives` rejects UB-119): the C++ is not
+run, because the input is undefined there. For that the merge's `BooleanTrees` now
+passes an `InvalidInput` from `ManifoldBoolean` through instead of turning it into
+`SM_ERR`.
+
+## boolean.merge_p3: vertex list order after merges that imprint edges into faces
+
+Unit `boolean.merge_p3`, cases `upstream_merge_breps_operation_3` (`merge_breps`,
+operation 3, boxes (0,0,0)+10 and (8,6,3)+(4,8,6)), `upstream_piecewise_boxes_2_keep_other`
+and `upstream_piecewise_boxes_3_keep_other` (`PiecewiseMerge` with
+`bCreateNewBrepsForFaces`, boxes (0,0,0)+10 and (5,0,0)+10). Deferred at
+`SmBrep::MakeEdgeInFace` before; now both sides finish with the same counts
+(18/36/22 and 10/20/12 faces/edges/vertices) and the same vertex positions, in a
+different vertex list order. C++ lists the vertices that belong only to the part of
+one operand on the far side of the other (the corners (8,6,3) and (8,6,9) inside the
+first box; the x = 0 corners of the first box in the piecewise cases) after all the
+others, as if that part's vertices were moved out of the B-rep and back in; the port
+keeps them in their original places (`values.record[18..]` and `[8..]`). The binormal
+classification of `UpdateFaces` is not involved (the merge case never evaluates one;
+in the piecewise cases every evaluation succeeds). Suspected cause: a step after the
+imprint in the merge editing stages that moves a region's or shell's topology between
+B-reps upstream and keeps it in place in the port. Follow-up: trace which step moves the
+far-side part's topology out of the B-rep and back in upstream. Listed in
+`known_mismatches.toml`.
+
+## offset.offset_executive_p2: gen0166 leaves extra shells and loops after a failed shell
+
+Unit `offset.offset_executive_p2`, case `gen0166` (`static_shell` of a 20x30x40 box at
+(-8.005, -18.639, -17.799), face 2 selected twice, distance -0.5, tolerance 1e-6).
+Deferred at `SmBrep::MakeEdgeInFace` before; now both sides return status 1000 with
+12 faces, 24 edges and 16 vertices, but the C++ result has 3 regions / 3 shells /
+13 loops and the port 3 / 7 / 16, and the selected faces after the call are (0, 2) in
+C++ and (4, none) in the port. No edge use binormal is evaluated in this case.
+Suspected to be the same Rust merge region/shell handling as `gen0000` / `gen0003`
+above (the inset shell's Difference); not traced further. Listed in
+`known_mismatches.toml`.
+
+## General — macOS-arm64 divergence cluster, wave-2 follow-up (2026-10-24)
+
+Diagnosis-only follow-up to #799, based on authoritative main `2ca17d8e9`
+(after #793). The frozen sweep evidence is
+`promote-zero-deferred-evidence.txt` and
+`promote-zero-deferred-sweep-retry.log` under
+`~/.local/share/opencode/`; the latter's SHA256 was rechecked as
+`94cf2cc986a539fd97471c71e3b7a0e8f1d8f5e0f6348b13f8928e7e4d8d5923`.
+Those historical outcomes are not substituted for fresh post-#793 runs below.
+
+Environment: macOS 27.0.1 arm64, Rust 1.98.1, `CARGO_BUILD_JOBS=2`,
+`RUSTC_WRAPPER` unset (sccache unavailable), and the existing shared reference
+at `SOLIDCORE_CPP_DIR=/Users/altvnk/Projects/Personal/solidcore/bin/cpp`.
+No reference rebuild, kernel/harness change, tolerance change or plan-status
+promotion/demotion is part of this diagnosis. Commands use `nice -n 10`.
+
+Reproduction command (one unit per process, default seeds, no case filter):
+
+```sh
+export CARGO_BUILD_JOBS=2
+unset RUSTC_WRAPPER
+export SOLIDCORE_CPP_DIR=/Users/altvnk/Projects/Personal/solidcore/bin/cpp
+nice -n 10 rustup run 1.98.1 cargo run --profile difftest -p difftest --features cpp -- --unit <unit.id>
+```
+
+The lane's ignored `bin/macos-divergence/<unit.id>.log` and
+`reports/difftest/<unit.id>.json` retain the fresh output and case inputs;
+neither generated artifact is committed. A harness failure or worker signal
+is not converted to an operation status, a rejection, a deferred case or a pass.
+
+The overlapping, separately owned PR #773 proposes unit-level non-x86-64
+oracle restrictions for `geom.hash_table`, `heal.heal_data_p1`/`p2`/`p3` and
+`surface.twist_volume` (#448); it is not incorporated or modified here.
+That architecture-dependent conversion cluster is distinct from the
+allocator-dependent deform use-after-free (#449, UB-251), whose ten macOS
+cases already have case-level `skipped(platform)` wiring in #793.
+
+## blend.fillet_solver_p5 — Linux-only native worker is unavailable on macOS (2026-10-24)
+
+The platform mechanism is explicit, not a numerical comparison failure:
+`harness/cpp/shim/sc_rollover_worker.h:52-96` implements `isolated` only
+under `__linux__ && SC_ROLLOVER_WORKER_PATH`; the other branch immediately
+returns `SC_ERR_EXCEPTION`. No worker is spawned on macOS. Both the native
+evaluation and Rust's native fixture import can therefore fail with
+`cpp_exception`; the runner correctly treats these harness failures as failures,
+not matching operation-error passes. Repeating them or reducing `--jobs` cannot
+enable the missing branch. This is distinct from the out-of-range conversion
+skips proposed in #773 and the deform skips landed in #793 (#449, UB-251).
+
+What would settle it: implement and separately validate a macOS fresh-process
+containment path, or define an explicit unsupported-platform policy without
+turning exceptions into passing comparisons. Neither change belongs to this
+findings-only lane. No `upstream-issues.md` entry: the observed limitation is
+in this repository's harness, not evidence of a new upstream kernel defect.
+
+Fresh full run: 100 cases, 0 passed, 100 failed, 0 deferred, 0
+`skipped(platform)`, 0 rejected, 0 known mismatches; `max_rel_err=0` because
+no value comparison was reached. Samples
+`review_huge_tiny_pair_100_100`, `review_huge_tiny_pair_100_101` and
+`review_huge_tiny_pair_100_102` all report
+`cpp: cpp_exception; rust: cpp_exception`. They use rails spanning
+`[-1e300, 1e300]` and `[0, 1e-300]`, with the second interval's classification
+100, 101 and 102 respectively. Their extreme scales are not evidence of a
+numerical failure: the platform guard returns before executing the fixture.
+
+## geom.hash_table — ARM64 conversion-dependent voxel results (2026-10-24)
+
+Fresh full run: 619 cases, 184 passed, 435 failed, 0 deferred, 0
+`skipped(platform)`, 0 rejected, 0 known mismatches;
+`max_rel_err=1.9983959312403277`. Two full runs reproduce the counts.
+Samples (C++ first, Rust second):
+
+- `heal_fitcrv_incremental`: planar input points (`z=0`), tolerance `0.01`;
+  `values.floats.len=236/364`, `ints.ints.len=3935/4161`.
+- `map_points_outside`: box `[0,0,0,1,1,1]`, voxel counts `[2,3,4]`, first
+  mapped point `[-0.5,0.2,0.2]`; `values.floats[0]=0/0.5`.
+- `gen0000` (seed `5793377638189413714`): zero-width y extent,
+  `values.floats[19]=5.078904121819958/12.31764670862244`.
+
+Class: architecture-dependent behavior, not small floating-point residue.
+These are the negative/out-of-range and zero-extent voxel mapping conditions
+already documented in UB-35 (`SmHashTable.h:1957-1959`). Rust deliberately
+emulates the x86-64 reference; ARM64's saturating native conversion differs.
+What would settle it: retain these exact inputs in an x86-64 reference replay
+and verify the oracle restriction proposed by the separately owned #773.
+Do not change the deterministic Rust conversion to match this host.
+No new `upstream-issues.md` entry: UB-35 already records the defect.
+
+## heal.heal_data_p1 / p2 / p3 — architecture-associated cache records (2026-10-24)
+
+Fresh full runs, with all outcome categories kept separate:
+
+- `heal.heal_data_p1`: 495 cases, 432 passed, 24 failed, 11 deferred, 0
+  `skipped(platform)`, 0 rejected, 28 known mismatches; `max_rel_err=1`.
+  `sphere_low_op` (radius `0.001`, stage-2 face snapshot) has
+  `values.out.len=2951/2961`; `sphere_big` (radius `1000`, swapped) and
+  `closed_sphere_swap0` (radius `1`, unswapped) have `3031/3041`.
+  These sequences include coincident-vertex caching and face-props snapshots.
+  Existing known mismatches are not counted in the 24 failures.
+- `heal.heal_data_p2`: 738 cases, 478 passed, 260 failed, 0 deferred, 0
+  `skipped(platform)`, 0 rejected, 0 known mismatches; `max_rel_err=1`.
+  `tiny_box` (sizes `[1e-4,1e-4,1e-4]`) has
+  `values.out[3378]=0/12`; `flat_box` (`[1e4,1e-4,1]`) has `0/4` there;
+  `duplicate_targets` (unit box, repeated edge/face/vertex targets) has
+  `values.out.len=3032/3057`.
+- `heal.heal_data_p3`: 478 cases, 450 passed, 28 failed, 0 deferred, 0
+  `skipped(platform)`, 0 rejected, 0 known mismatches; `max_rel_err=1`.
+  `review_valid_no_prior_targets` and
+  `review_valid_remove_all_prior_vertices` (box `[1,2,3]`, cache props then
+  update targets with operation 6) have `values.out.len=2833/2848` and
+  `3369/3384`; `gen0001` (`sphere.smb`, cache/fix coincident vertices,
+  voxels `[12,12,12]`) has `2856/2876`.
+
+Class: architecture-associated histogram/voxel/cache-layout divergence, not a
+tiny-value tolerance failure. UB-194 (`SmTArray.h:2395-2397`, used by
+`SmHealData::Cache_EdgeProps`) explains short-edge histogram bucket changes;
+UB-35 explains coincident-vertex voxel membership and resulting record sizes.
+These mechanisms and older ARM64 reproductions are already documented under
+General and the healer findings. The present samples alone do not prove the
+first causal cache operation for every one of the 24/260/28 failures.
+What would settle that remaining attribution: compare these exact records with
+the same-revision x86-64 oracle and trace the first cache divergence per sample;
+coordinate unsupported-oracle policy with #773 rather than introducing another
+skip approach. No new upstream issue: UB-35 and UB-194 already cover these
+conversion defects. No healer status or known-mismatch waiver was changed.
+
+## geom.local_solve1d — reproducible near-threshold residual (2026-10-24)
+
+Fresh full run: 3316 cases, 3315 passed, 1 failed, 0 deferred, 0
+`skipped(platform)`, 0 rejected, 0 known mismatches;
+`max_rel_err=1.588890061224939e-9`. There is only one failing case to sample:
+`gen1231`, seed `1894831246230431480`, `solve_it`, algorithm 3,
+function kind 2 with partial derivatives, guess `0.4249261703541882`, interval
+`[-1.600249728224778,0.7935376232354012]`, acceptable accuracy
+`1.9498269151442054e-12`. At `values.state_f[3]` and `[10]`, C++ returns
+`3.493706235424554e-8`, Rust `3.493706240975669e-8`
+(absolute difference about `5.55e-17`). A second full run and a standalone
+`--filter gen1231 --no-report` reproduce the same values.
+
+Class: floating-point residual, just outside the unchanged `1e-9` relative
+gate. A platform/libm or operation-rounding cause is plausible, not established
+by the error magnitude. This is not evidence for an architecture-conversion
+skip or a looser tolerance. What would settle it: compare the same case's
+evaluation/iteration values on Linux x86-64 and macOS, locating the first
+rounding difference. No new upstream issue without such attribution.
+
+## topology.brep_data — SIGSEGV is in the C++ reader (2026-10-24)
+
+Three fresh full unit runs terminate with signal 11 (Python subprocess return
+code `-11`). No run finishes a unit report; passed/failed/deferred/skip/rejected
+totals are therefore unavailable, not zero and not copied from a stale report.
+This reproduces without parallel unit scheduling. Isolated
+`--unit topology.brep_data --filter gen0110 --no-report` also terminates with
+SIGSEGV (shell status 139).
+
+LLDB on that isolated case shows `EXC_BAD_ACCESS`, address `0x58`, in
+`SmShellData::ReadFromDB + 500`, with the stack:
+`SmShellData::ReadFromDB` <- `SmBrepData::ReadFromDB` <-
+`SmBrepData::ReadFromFile` <- `sc_topology_brep_data_run` <-
+`solidcore_ffi::units::topology_brep_data::run` <-
+`difftest::units::topology_brep_data::cpp` <- `Runner::run_cpp`.
+Thus the crashing engine is upstream C++, not the Rust kernel. A Rust-only
+`--filter gen0110 --digest-dir bin/macos-divergence/rust-only --digest-debug`
+run completes (`cases=1`, `needs_cpp=0`, exit 0); that is attribution evidence,
+not a passing C++ differential comparison.
+
+A debugger breakpoint at the C shim preserved the full run's last input:
+2777-byte ASCII `Version 33` stream, beginning with the color component
+`4.595e-321`; SHA256
+`95f52f5fe9381b17a1ae67ad33ba2938747c2fc470dcc2c4495890b4b79dd3bb`.
+The isolated `gen0110` shim input has the identical length and SHA256.
+This matches the already documented UB-6 platform trigger (libc++ extraction
+of a subnormal double sets stream failure, later readers use unset locals),
+including the previously identified crashing case `gen0110`; UB-75 records
+the related unchecked reader counts. The current `skipped_platform` hook
+covers mode `db` only, not this `ReadFromFile` path. Class: reproducible
+platform/environment-dependent upstream reader crash, not worker instability.
+
+Reproduce the backtrace without rebuilding the shared reference:
+
+```sh
+nice -n 10 lldb -b -o run -k 'thread backtrace -c 18' -k 'process kill' -- \
+  bin/difftest/difftest --unit topology.brep_data --filter gen0110 --no-report
+```
+
+What would settle a fix: exercise the file-mode/subnormal path against the
+existing libc++ oracle guard policy and verify the reader's extraction/status
+handling in a separately owned implementation change. No Rust crash chase was
+performed. No new `upstream-issues.md` entry: UB-6 already records this exact
+case and C++ crash location; duplicating it would add no new defect.
+
+## query.face_p4 — exact loop-classification disagreement (2026-10-24)
+
+Fresh full run: 500 cases, 492 passed, 1 failed, 5 deferred, 0
+`skipped(platform)`, 0 rejected, 2 known mismatches; `max_rel_err=0`.
+The sole failing case is `gen0360`, seed `4634847627957580463`: a swapped
+scale-1 cylinder (`a=1.3301972357953764`, `c=1.74191392660755`), one
+vertical UV line at `u=0.3916538774595547` and one rectangular UV loop,
+face 33, imported stage-3 props (`props=1`). C++/Rust differ in
+`ints.classify_loop_ios[8]=1/2`, `[10]=1/0`, `[11]=1/5`, and
+`ints.looptree.len=17/9`. A standalone
+`--filter gen0360 --no-report` reproduces all four integer mismatches.
+There are not two or three new failing cases to sample; `gen0157` and
+`gen0300` remain separate pre-existing known mismatches.
+
+Class: reproducible geometry/classification divergence, provisionally
+platform-sensitive, with the first causal operation still unlocated. It is
+not a small compared floating-point residue (`max_rel_err=0` does not make
+different integer classifications equal), nor does isolation suggest a
+scheduling-dependent worker failure. The runner documents approximate imported
+3D curves as a classification hazard; whether that or a native platform-specific
+branch explains this scale-1 cylinder remains unproven. What would settle it:
+replay this exact input on x86-64 and compare the imported curves, bisector and
+first containment decision. Neither #773's conversion-only restrictions nor
+#793's deform-only skips establish an exemption for this case. No new upstream
+issue without evidence that the native result itself is defective.
+
+## topology.brep_p10 — expected mismatch unexpectedly agrees on this lane (2026-10-24)
+
+Fresh full run: 1404 cases, 1380 passed, 1 failed, 4 deferred, 0
+`skipped(platform)`, 7 rejected, 12 known mismatches;
+`max_rel_err=6.978000677784215e-7`. Crucially, the sole failure is not that
+relative error. It is `read_Solids_fillet_ts`, input
+`Solids/fillet_ts.smb`, with harness error
+`listed in crates/difftest/known_mismatches.toml but the case is now pass: remove the entry`.
+Its actual comparison has 1683 floating values and 9486 exact items compared,
+zero mismatches and `max_rel_err=0`. The current known-mismatch annotation
+expects different UV-trim/gap mutations (historical value lengths 1659/1683).
+This lane instead agrees and correctly fails the stale-expectation guard.
+Three isolated `--filter read_Solids_fillet_ts --no-report` runs reproduce
+that error with `max_rel_err=0`; a second full run reproduces all outcome
+counts above. This is not evidence of scheduling/worker instability.
+
+There is only one newly failing case. For contrast, the existing
+`known_mismatch` case `gen0115` contributes the unit's maximum error:
+`values.dbls[654]`, C++ `9.7170165910819e-4`, Rust
+`9.717009810547064e-4`; `read_Boolean_extrudeHoles1` remains a known
+length disagreement (`values.dbls.len=909/921`). They are not additional
+unwaived failures or evidence that the sole failure is floating-point residue.
+
+Class: platform/environment-sensitive expected-mismatch inversion, not a
+newly observed numeric regression. What would settle the policy: compare the
+same fixture on authoritative Linux x86-64, determine why the expected UV-trim
+mutation difference disappears here, and only then revise the expectation in
+a separately owned harness change. This lane does not remove the waiver,
+promote the case or infer an upstream defect from unexpected agreement.
+
+## Platform-skipped controls — post-#793 outcomes re-derived (2026-10-24)
+
+Fresh full runs, not the pre-#793 sweep's failure counts:
+
+- `surface.srf_in_volume`: 2112 cases, 2037 passed, 0 failed, 0 deferred,
+  75 `skipped(platform)`, 0 rejected, 0 known mismatches, `max_rel_err=0`,
+  exit 0. The existing non-libstdc++ hook skips `ReadDb` operations only.
+- `topology.database_io`: 2066 cases, 0 passed, 0 failed, 0 deferred,
+  2066 `skipped(platform)`, 0 rejected, 0 known mismatches,
+  `max_rel_err=0`. All cases are skipped for libc++ extraction differences.
+  Although #793's aggregate verdict prints `PASS`, the command exits 1:
+  `GATE-FAIL (value-share) 0 of 0 passing cases compare a value (minimum 75% and at least one)`.
+  This is an independent coverage gate, not 2066 passes and not a crash.
+- `curve.curve_p6`: 3138 cases, 3135 passed, 0 failed, 0 deferred,
+  3 `skipped(platform)`, 0 rejected, 0 known mismatches, `max_rel_err=0`,
+  exit 0. Exact skip names: `gen0161`, `gen0953`, `gen2879`.
+- `nurbs.b_spline_curve_n_lib`: 2326 cases, 2319 passed, 0 failed,
+  0 deferred, 7 `skipped(platform)`, 0 rejected, 0 known mismatches,
+  `max_rel_err=0`, exit 0. Exact skip names: `gen0695`, `gen0720`,
+  `gen0880`, `gen0932`, `gen1279`, `gen1374`, `gen1482`.
+
+The latter ten JSON case records all have `pass=false`,
+`outcome="skipped(platform)"`, `values_compared=0` and `exact_compared=0`.
+They are the landed #793 controls for #449 / UB-251's allocator-dependent
+`DeformToEndPointTargets` use-after-free, not ten newly passing deform checks.
+The skipped reader controls cover the already documented libc++/libstdc++
+environment differences. What would settle broader support: validate a safe
+same-platform oracle and an explicit coverage policy; no loosening of the
+zero-value gate or blanket conversion of skips to passes is proposed here.
+No new upstream entry: these mechanisms already have upstream issue records.
+
+## General — macOS divergence follow-up verification and remaining gates (2026-10-24)
+
+Fetched authoritative `upstream/main` again and merged it into
+`plan/macos-divergence-findings` before final verification; the merge was
+already up to date at `2ca17d8e9963483d46ab53e7e52743a6dfc4345c`.
+Thus all unit runs above and the post-merge checks use the same kernel,
+harness, fixtures and known-mismatch configuration. Only this findings file
+is changed against upstream; `plan/upstream-issues.md` and unit statuses are
+unchanged. Existing upstream defect entries are cited instead of duplicated.
+
+The assigned standard suite was run twice, including after that final merge,
+with Rust 1.98.1 and the environment recorded above. Every command exited 0:
+
+```sh
+nice -n 10 rustup run 1.98.1 cargo fmt --all --check
+nice -n 10 rustup run 1.98.1 cargo clippy --workspace --all-targets -- -D warnings
+nice -n 10 rustup run 1.98.1 cargo test -p solidcore
+nice -n 10 rustup run 1.98.1 cargo check -p solidcore --target wasm32-unknown-unknown
+```
+
+Kernel tests: 2109 unit tests passed; integration groups passed 3, 1, 4 and 2
+tests respectively (one integration test ignored); doctests had no failures.
+Final logs are `bin/macos-divergence/final-{fmt,clippy,test,wasm}.log`.
+The native difftest link also emits Apple's nonfatal `__eh_frame section too
+large` unwind-table warning; the binary builds and executes, and that warning
+does not explain any of the attributed failures.
+
+Unresolved product findings: eight selected units have case/harness failures
+(`geom.hash_table`, three healer parts, `blend.fillet_solver_p5`,
+`geom.local_solve1d`, `query.face_p4`, `topology.brep_p10`),
+`topology.database_io` fails the independent zero-value coverage gate, and
+`topology.brep_data` crashes in C++. The three passing commands are
+`surface.srf_in_volume`, `curve.curve_p6` and
+`nurbs.b_spline_curve_n_lib`, with their skips explicitly separate from
+passes above. A full local `--green` sweep was not added to the assigned
+validation; no local all-green or platform-fix claim is made. These diagnosed
+pre-existing defects are the content of the completed findings report, not
+prerequisites to merge this documentation-only PR. Canonical CI run
+[40125789957](https://github.com/tangency-labs/solidcore/actions/runs/40125789957)
+passed all eight checks on exact report head
+`33bb6841920092836a382e01265886f5c43cd361`. Readiness of the documentation
+correction is gated by its own exact-head canonical CI, independently of the
+unresolved product findings. No tolerance, waiver, input, plan status or
+existing PR (#773) was changed to obtain green.

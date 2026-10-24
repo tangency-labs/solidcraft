@@ -484,6 +484,57 @@ impl FilletBrep {
         }
     }
 
+    /// Dispatch an actual corner edge using retained solver/surface context.
+    /// Concrete operations not yet connected to this context remain explicit.
+    ///
+    /// # Errors
+    /// Actual corner/context resolution or selected calculator failures.
+    pub fn calc_corner_edge_geom_with_context(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        corners: CornerLookup<'_>,
+        context: &impl super::p5::FilletEdgeContext,
+        target: &mut Brep,
+    ) -> Result<()> {
+        let edge = self.fillet_edge(e)?;
+        let corner = edge
+            .fillet_corner()
+            .ok_or_else(|| SolidError::null_pointer(OP_CORNER_EDGE))?;
+        match edge.fillet_edge_type() {
+            FilletEdgeType::CrossSection => self.calc_cross_section_with_lookup(
+                k,
+                e,
+                Some(corner),
+                corners,
+                &|id| context.solver(id),
+                target,
+            ),
+            FilletEdgeType::FilletXSideFace => self.calc_fillet_int_side_face_with_context(
+                k,
+                e,
+                Some(corner),
+                corners,
+                context,
+                target,
+            ),
+            FilletEdgeType::OnEdge => self.calc_edge_on_edge(k, e, target),
+            FilletEdgeType::FilletXFillet
+            | FilletEdgeType::RailRailInterpolation
+            | FilletEdgeType::OnExtendEdge
+            | FilletEdgeType::FilletEnd
+            | FilletEdgeType::SetbackRail
+            | FilletEdgeType::RailExtension => {
+                // UNPORTED(blend.fillet_executive_p3): actual concrete corner-edge operation contexts.
+                Err(SolidError::unported(
+                    "SmFilletEdge::CalcCornerEdgeGeom (live concrete operations)",
+                    "blend.fillet_executive_p3",
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// `SmFilletEdge::CalcFilletIntFillet(crContext, pCorner)`: the edge where two
     /// fillet surfaces meet. Adds the edge's uses to their geometries' side edge uses;
     /// with both end vertices processed, trims the edge's 3D curve and both UV trim
@@ -555,8 +606,8 @@ impl FilletBrep {
         let g2 = self.geom(fillet_geom2)?;
         let fil_solver1 = solver_of(solvers, g1.fillet_solver().ok_or_else(nul)?, OP_FIF)?;
         let fil_solver2 = solver_of(solvers, g2.fillet_solver().ok_or_else(nul)?, OP_FIF)?;
-        let fillet_surface1 = g1.fillet_surface().ok_or_else(nul)?;
-        let fillet_surface2 = g2.fillet_surface().ok_or_else(nul)?;
+        let fillet_surface1 = g1.fillet_surface()?.ok_or_else(nul)?;
+        let fillet_surface2 = g2.fillet_surface()?.ok_or_else(nul)?;
 
         // pick appoxTol and angTol as tightest filletSolver tolerances
         let approx_tol = smos_min(fil_solver1.approx_tol_3d, fil_solver2.approx_tol_3d);

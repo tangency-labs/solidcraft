@@ -17,6 +17,7 @@
 //! See `p5/recovery.rs` for the bounded segment-walk deviation. No recursion.
 
 use super::p1::FilletSolver;
+use crate::blend::fillet_classification::{FilletClassObject, LegacyClassificationObjects};
 use crate::blend::fillet_geom::p1::{
     FilletBrep, FilletCornerId, FilletCornerType, FilletGeomId, FilletGeomType,
 };
@@ -53,6 +54,67 @@ pub trait RolloverObjects: CurveOnClassifyObjects<EntityRef> {
     fn corner_type(&self, corner: FilletCornerId) -> Result<FilletCornerType>;
 }
 
+/// Actual identity and classification services, borrowed only during each classification.
+pub trait RailClassificationContext {
+    /// Actual retained rail curve identity.
+    fn rail_curve(&self, rail: EdgeId) -> FilletClassObject;
+    /// Actual retained mate UV identity, when present.
+    fn rail_mate_uv_curve(&self, pseudo: &Brep, mate: EdgeuseId) -> Option<FilletClassObject>;
+    /// Classify the attached record using the two actual topology domains.
+    ///
+    /// # Errors
+    /// Classifier errors, retaining all partial record writes.
+    fn classify(
+        &mut self,
+        k: &Kernel,
+        target: &mut Brep,
+        pseudo: &Brep,
+        face: crate::topology::FaceId,
+        class: &mut CurveClassification<FilletClassObject>,
+    ) -> Result<()>;
+    /// Actual corner kind.
+    ///
+    /// # Errors
+    /// An unresolved corner.
+    fn corner_type(&self, corner: FilletCornerId) -> Result<FilletCornerType>;
+}
+
+struct LegacyRolloverContext<'a, T>(&'a T);
+impl<T: RolloverObjects> RailClassificationContext for LegacyRolloverContext<'_, T> {
+    fn rail_curve(&self, rail: EdgeId) -> FilletClassObject {
+        FilletClassObject::Legacy(self.0.rail_curve(rail))
+    }
+    fn rail_mate_uv_curve(&self, _: &Brep, mate: EdgeuseId) -> Option<FilletClassObject> {
+        self.0
+            .rail_mate_uv_curve(mate)
+            .map(FilletClassObject::Legacy)
+    }
+    fn classify(
+        &mut self,
+        k: &Kernel,
+        target: &mut Brep,
+        _: &Brep,
+        face: crate::topology::FaceId,
+        class: &mut CurveClassification<FilletClassObject>,
+    ) -> Result<()> {
+        curve_on_classify(
+            k,
+            target,
+            face,
+            &LegacyClassificationObjects(self.0),
+            true,
+            class,
+            true,
+            false,
+            true,
+        )?;
+        Ok(())
+    }
+    fn corner_type(&self, corner: FilletCornerId) -> Result<FilletCornerType> {
+        self.0.corner_type(corner)
+    }
+}
+
 pub use super::p1::RailOwnership as RolloverOwnership;
 
 impl FilletSolver {
@@ -71,6 +133,29 @@ impl FilletSolver {
         target: &mut Brep,
         fillets: &mut FilletBrep,
         objects: &impl RolloverObjects,
+        adjusted_corners: &mut Vec<FilletCornerId>,
+        ownership: &mut impl RolloverOwnership,
+    ) -> Result<()> {
+        self.test_roll_over_with_context(
+            k,
+            target,
+            fillets,
+            &mut LegacyRolloverContext(objects),
+            adjusted_corners,
+            ownership,
+        )
+    }
+
+    /// Classify actual retained rails through a scoped, short-lived geometry provider.
+    ///
+    /// # Errors
+    /// As [`Self::test_roll_over`], preserving attached partial classifications.
+    pub fn test_roll_over_with_context(
+        &mut self,
+        k: &Kernel,
+        target: &mut Brep,
+        fillets: &mut FilletBrep,
+        context: &mut impl RailClassificationContext,
         adjusted_corners: &mut Vec<FilletCornerId>,
         ownership: &mut impl RolloverOwnership,
     ) -> Result<()> {
@@ -94,9 +179,9 @@ impl FilletSolver {
                 cc.reset(
                     k,
                     &ResetOptions {
-                        curve: Some(objects.rail_curve(rail)),
+                        curve: Some(context.rail_curve(rail)),
                         interval: Some(interval),
-                        uv_curve: objects.rail_mate_uv_curve(mate),
+                        uv_curve: context.rail_mate_uv_curve(fillets.brep(), mate),
                         zone_tol_3d: self.approx_tol_3d,
                         ..ResetOptions::default()
                     },
@@ -107,12 +192,9 @@ impl FilletSolver {
                 })?;
                 // Install the classification before calling the fallible operation:
                 // upstream leaves that object attached even when classification fails.
-                let cc = fillets
-                    .fillet_edge_mut(rail)?
-                    .curve_class
-                    .as_mut()
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
-                curve_on_classify(k, target, face, objects, true, cc, true, false, true)?;
+                fillets.with_rail_classification(rail, |pseudo, cc| {
+                    context.classify(k, target, pseudo, face, cc)
+                })?;
                 finish_classification(
                     self,
                     k,
@@ -129,7 +211,7 @@ impl FilletSolver {
                 target,
                 fillets,
                 id,
-                &|corner| objects.corner_type(corner),
+                &|corner| context.corner_type(corner),
                 adjusted_corners,
                 ownership,
             )?;
@@ -208,7 +290,7 @@ trait ClassificationOps {
             .curve_class
             .take()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let result = super::p3::refine_rail_curve_classification(
+        let result = super::p3::refine_rail_curve_classification_scoped(
             solver,
             k,
             target,
@@ -334,7 +416,7 @@ mod tests {
                 .unwrap()
                 .mid
                 .set_class_object(PointClassType::Edge, Some(EntityRef::Edge(edge)));
-            record.set_curve_class(Some(cc));
+            record.set_indexed_curve_class(Some(&cc)).unwrap();
             fb.insert_fillet_edge(edge, record);
             geom.set_rail(i, Some(edge));
         }

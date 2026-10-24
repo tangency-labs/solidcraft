@@ -5,6 +5,7 @@
 //! `SmFilletRemoval`, `SmCurveFilletExecutive` in `source/SMLib`, and
 //! `SM_API/SmApiFillets`.
 
+pub mod fillet_classification;
 pub mod fillet_corner;
 pub mod fillet_custom_solver;
 pub mod fillet_executive;

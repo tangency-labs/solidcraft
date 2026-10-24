@@ -27,7 +27,8 @@
 //!   an id not in the table is [`SolidError::InvalidInput`], a geometry without a
 //!   solver where upstream dereferences it `SM_ERR_NULL_POINTER`). The rollover
 //!   caller can supply its single live solver with its actual id through
-//!   `calc_rail_int_edgeuse_with_solver`; an unresolved adjacent id is an error.
+//!   `calc_rail_int_edgeuse_with_solver`; the `_with_solver_ops` entry retains
+//!   derived virtual operations. An unresolved adjacent id is an error.
 //!   The target B-rep
 //!   (the classifications, original faces and the solvers' edge uses) is `target`. The
 //!   constructors `SmFilletVertex(SmFilletCorner*)` and `SmFilletEdge(SmFilletBrep*,
@@ -247,6 +248,7 @@ fn solver_at<'s>(
 enum RailSolvers<'a> {
     Indexed(&'a mut [FilletSolver]),
     Single(FilletSolverId, &'a mut FilletSolver),
+    Live(FilletSolverId, &'a mut dyn FilletSolverOps),
 }
 
 impl RailSolvers<'_> {
@@ -256,7 +258,8 @@ impl RailSolvers<'_> {
                 solver_at(solvers, solver_index(solvers, id, OP_RAIL_EU)?, OP_RAIL_EU)
             }
             Self::Single(key, solver) if *key == id => Ok(solver),
-            Self::Single(..) => Err(SolidError::invalid_input(
+            Self::Live(key, solver) if *key == id => Ok(solver.solver()),
+            Self::Single(..) | Self::Live(..) => Err(SolidError::invalid_input(
                 OP_RAIL_EU,
                 "unresolved adjacent fillet solver",
             )),
@@ -264,18 +267,24 @@ impl RailSolvers<'_> {
     }
 
     fn solver_mut(&mut self, id: FilletSolverId) -> Result<&mut FilletSolver> {
+        Ok(self.solver_ops_mut(id)?.solver_mut())
+    }
+
+    fn solver_ops_mut(&mut self, id: FilletSolverId) -> Result<&mut (dyn FilletSolverOps + '_)> {
         match self {
             Self::Indexed(solvers) => {
                 let index = solver_index(solvers, id, OP_RAIL_EU)?;
-                solvers.get_mut(index).ok_or_else(|| {
+                let solver = solvers.get_mut(index).ok_or_else(|| {
                     SolidError::invalid_input(
                         OP_RAIL_EU,
                         "fillet solver id not in the solver table",
                     )
-                })
+                })?;
+                Ok(solver)
             }
-            Self::Single(key, solver) if *key == id => Ok(solver),
-            Self::Single(..) => Err(SolidError::invalid_input(
+            Self::Single(key, solver) if *key == id => Ok(&mut **solver),
+            Self::Live(key, solver) if *key == id => Ok(&mut **solver),
+            Self::Single(..) | Self::Live(..) => Err(SolidError::invalid_input(
                 OP_RAIL_EU,
                 "unresolved adjacent fillet solver",
             )),
@@ -502,7 +511,7 @@ fn point_on_plane_solve(
 /// as upstream's `SetFilletGeomForSurfaces(this)`.
 #[allow(clippy::too_many_arguments)]
 fn rail_edgeuse_intersect(
-    fb: &FilletBrep,
+    fb: &mut FilletBrep,
     k: &Kernel,
     g: FilletGeomId,
     solvers: &mut RailSolvers<'_>,
@@ -513,8 +522,8 @@ fn rail_edgeuse_intersect(
     tsect: &mut TsectPnt,
 ) -> Result<Option<f64>> {
     let si = RailSolvers::geom_solver(fb, g)?;
-    let fs = solvers.solver_mut(si)?;
-    fb.rail_edgeuse_intersect(k, g, fs, target, rail_index, side_eu, guess, tsect)
+    let fs = solvers.solver_ops_mut(si)?;
+    fb.rail_edgeuse_intersect_with_geometry(k, g, fs, target, rail_index, side_eu, guess, tsect)
 }
 
 /// `SmTemporaryRadiusChange(pFS, lRailIndex, pSideEU)` (unit
@@ -1184,6 +1193,31 @@ impl FilletBrep {
             opt_fg,
             corners,
             &mut RailSolvers::Single(solver_id, solver),
+            target,
+        )
+    }
+
+    /// Calculate a rail/side-edge vertex using the retained concrete solver's
+    /// virtual operations and actual identity.
+    ///
+    /// # Errors
+    /// As [`Self::calc_rail_int_edgeuse_with_solver`].
+    pub fn calc_rail_int_edgeuse_with_solver_ops(
+        &mut self,
+        k: &Kernel,
+        v: VertexId,
+        opt_fg: Option<FilletGeomId>,
+        corners: CornerLookup<'_>,
+        solver_id: FilletSolverId,
+        solver: &mut dyn FilletSolverOps,
+        target: &mut Brep,
+    ) -> Result<()> {
+        self.calc_rail_int_edgeuse_with_solvers(
+            k,
+            v,
+            opt_fg,
+            corners,
+            &mut RailSolvers::Live(solver_id, solver),
             target,
         )
     }
@@ -2323,6 +2357,36 @@ mod tests {
     use crate::nurbs::b_spline_curve::BSplineCurve;
 
     #[test]
+    fn live_solver_lookup_retains_virtuals_and_actual_identity() {
+        struct Derived(FilletSolver);
+        impl FilletSolverOps for Derived {
+            fn solver(&self) -> &FilletSolver {
+                &self.0
+            }
+            fn solver_mut(&mut self) -> &mut FilletSolver {
+                &mut self.0
+            }
+            fn jacobian_size(&self) -> Result<usize> {
+                Ok(7)
+            }
+        }
+        let id = FilletSolverId(37);
+        let mut derived = Derived(FilletSolver::new(1e-5, 1e-3, 0.01));
+        let mut table = RailSolvers::Live(id, &mut derived);
+        assert_eq!(
+            table.solver_ops_mut(id).unwrap().jacobian_size().unwrap(),
+            7
+        );
+        table.solver_mut(id).unwrap().set_extension_factor(4.5);
+        assert_eq!(table.solver(id).unwrap().extension_factor(), 4.5);
+        assert!(matches!(
+            table.solver_ops_mut(FilletSolverId(0)),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert_eq!(derived.0.extension_factor(), 4.5);
+    }
+
+    #[test]
     fn single_solver_lookup_preserves_nonzero_identity_and_live_mutations() {
         let id = FilletSolverId(37);
         let mut solver = FilletSolver::new(1e-5, 1e-3, 0.01);
@@ -2416,7 +2480,8 @@ mod tests {
                 Point3::new(0.0, 0.0, 0.0),
                 Point3::new(1.0, 0.0, 0.0),
             )
-            .unwrap(),
+            .unwrap()
+            .into(),
         );
         fb.destroy_geom(g).unwrap();
         assert!(fb.geom(g).unwrap().center_line_curve.is_none());

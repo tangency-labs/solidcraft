@@ -67,7 +67,7 @@ fn rail(k: &Kernel, fb: &mut FilletBrep, ends: &[f64], unknown: bool) -> EdgeId 
             );
         }
     }
-    rec.set_curve_class(Some(cc));
+    rec.set_indexed_curve_class(Some(&cc)).unwrap();
     fb.insert_fillet_edge(e, rec);
     e
 }
@@ -359,7 +359,7 @@ impl RecoveryOps for Script {
     ) -> Result<()> {
         assert!(!analytic);
         assert!(direction.is_some());
-        assert!(c.fillets.geom(g)?.fillet_surface().is_none());
+        assert!(c.fillets.geom(g)?.fillet_surface()?.is_none());
         self.call("recalc")?;
         c.fillets.geom_mut(g)?.set_fillet_surface(Some(plane()));
         Ok(())
@@ -490,7 +490,7 @@ fn failure_before_trim_keeps_partial_surface_removal_corner_and_changed_offsets(
     assert_eq!(script.calls.last().unwrap(), "recalc");
     assert!(!script.calls.iter().any(|s| s == "trim"));
     assert_eq!(adjusted, [FilletCornerId(41)]);
-    assert!(f.fb.geom(id).unwrap().fillet_surface().is_none());
+    assert!(f.fb.geom(id).unwrap().fillet_surface().unwrap().is_none());
     assert_eq!(f.solver.orientations[0], -1.0);
     assert_ne!(f.solver.surfaces[0].as_ref().unwrap().key, 20);
 }

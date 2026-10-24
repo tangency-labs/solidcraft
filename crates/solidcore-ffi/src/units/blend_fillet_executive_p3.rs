@@ -96,6 +96,112 @@ pub fn upstream_fixture(example: usize) -> Result<Vec<f64>, FfiError> {
     })
 }
 
+extern "C" {
+    fn sc_blend_fillet_executive_p3_real_solid(
+        input: *const f64,
+        n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+}
+
+/// Validate the real-box fixture wire: XYZ dimensions, radius, cross-section,
+/// continuity, thumbweight, selected-edge count, then owning-list edge indices.
+/// Bounds describe the fixture's finite box and enum encoding, not a claim that
+/// the public fillet API rejects other finite parameter values.
+pub fn validate_real_solid(input: &[f64]) -> Result<(), FfiError> {
+    let mut r = Cursor::new(input);
+    for value in r.slice(3)? {
+        if *value <= 1e-12 {
+            return Err(FfiError::InvalidArgument(
+                "non-positive box dimension".into(),
+            ));
+        }
+    }
+    r.slice(1)?;
+    // Native ULONG is unsigned long (64-bit on this Linux reference). Reject
+    // the rounded 2^64 endpoint before a floating-point-to-integer conversion.
+    for _ in 0..2 {
+        let code = r.num()?;
+        if !code.is_finite() || code < 0.0 || code.fract() != 0.0 || code >= 18446744073709551616.0
+        {
+            return Err(FfiError::InvalidArgument("invalid native ULONG".into()));
+        }
+    }
+    r.slice(1)?;
+    let remaining = input.len().saturating_sub(8);
+    let count = r.index(remaining)?;
+    if count == 0 || count != remaining {
+        return Err(FfiError::InvalidArgument(
+            "invalid edge selection length".into(),
+        ));
+    }
+    for _ in 0..count {
+        r.index(11)?;
+    }
+    r.done()
+}
+
+/// Execute the real mutating public fillet API on a newly constructed box.
+/// The record contains pre-call selected-edge samples, actual API status,
+/// freshly traversed result geometry and actual precise-mass status/values.
+pub fn real_solid(input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate_real_solid(input)?;
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_real_solid(
+            input.as_ptr(),
+            input.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
+extern "C" {
+    fn sc_blend_fillet_executive_p3_real_prefix(
+        input: *const f64,
+        n: i64,
+        checkpoint: i32,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+}
+
+/// Execute actual setup/corner checkpoints (1–5), or the real smooth prelude
+/// followed by shared corner vertices and adjustment (6). Mode 7 adds the first
+/// direct solver geometry operation and samples its actual surface and curves.
+/// Mode 8 runs all solvers, then tangent adjustment, repeated vertex calculation
+/// and boundary curves in each corner’s native order.
+/// Mode 9 adds actual rail trimming and directed UV-curve observations before
+/// classification, which remains enabled.
+/// Mode 10 executes enabled rail classification and actual adjusted-corner repairs,
+/// recording the attached classifications and returned corner identities.
+/// Mode 11 allocates the actual intermediate body, runs all corner geometry then
+/// all solver face construction, and records its directed topology and geometry.
+/// These are retained component checkpoints, not completed public fillets.
+/// Uninitialized corner status and uncomputed geometry are never read.
+pub fn real_prefix(input: &[f64], checkpoint: u32) -> Result<Vec<f64>, FfiError> {
+    validate_real_solid(input)?;
+    if !(1..=13).contains(&checkpoint) {
+        return Err(FfiError::InvalidArgument(
+            "unknown fillet checkpoint".into(),
+        ));
+    }
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_real_prefix(
+            input.as_ptr(),
+            input.len() as i64,
+            checkpoint as i32,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::validate;
@@ -168,5 +274,36 @@ mod tests {
         for example in [7, 8, usize::MAX] {
             assert!(super::validate_upstream_fixture(example).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod real_solid_tests {
+    use super::validate_real_solid;
+    fn record() -> Vec<f64> {
+        vec![10.0, 20.0, 30.0, 0.5, 1.0, 1.0, 1.0, 1.0, 0.0]
+    }
+    #[test]
+    fn native_cross_section_defaults_and_g3_are_not_guarded_out() {
+        let mut value = record();
+        value[4] = 99.0;
+        value[5] = 3.0;
+        assert!(validate_real_solid(&value).is_ok());
+        value[4] = 18446744073709549568.0;
+        assert!(validate_real_solid(&value).is_ok());
+        value[4] = 18446744073709551616.0;
+        assert!(validate_real_solid(&value).is_err());
+    }
+    #[test]
+    fn complete_edge_selection_is_validated_before_native_execution() {
+        let mut value = record();
+        value[7] = 2.0;
+        assert!(validate_real_solid(&value).is_err());
+        value.push(11.0);
+        assert!(validate_real_solid(&value).is_ok());
+        value[8] = 12.0;
+        assert!(validate_real_solid(&value).is_err());
+        value[8] = 0.5;
+        assert!(validate_real_solid(&value).is_err());
     }
 }

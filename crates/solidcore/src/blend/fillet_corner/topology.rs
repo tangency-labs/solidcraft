@@ -163,7 +163,7 @@ fn new_corner_vertex(
     pseudo: &mut FilletBrep,
     corner: FilletCornerId,
 ) -> Result<VertexId> {
-    let vertex = pseudo.brep_mut().add_vertex_record(Vertex {
+    let vertex = pseudo.brep_mut().add_unlinked_vertex_record(Vertex {
         point: Point3::ZERO,
         tolerance: 0.0,
         ..Vertex::default()
@@ -249,8 +249,12 @@ impl FilletCorner {
                 geometry,
                 solver_rail,
                 Some(fv),
-                crate::nurbs::b_spline_surface_n_lib::p2::OrientType::Same,
+                crate::nurbs::b_spline_surface_n_lib::p2::OrientType::Unknown,
                 None,
+                crate::blend::fillet_geom::p1::CornerLookup {
+                    this: Some((Some(corner), self)),
+                    ..Default::default()
+                },
                 solver,
                 target,
             )?;

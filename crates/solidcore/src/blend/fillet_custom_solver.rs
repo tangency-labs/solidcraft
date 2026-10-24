@@ -2020,6 +2020,21 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         &mut self.solver
     }
 
+    fn rail_edgeuse_intersect_on_geometry(
+        &mut self,
+        k: &Kernel,
+        geometry: &mut crate::blend::fillet_geom::p1::FilletGeom,
+        target: &mut Brep,
+        rail_index: usize,
+        edgeuse: EdgeuseId,
+        guess: f64,
+        tsect: &mut TsectPnt,
+    ) -> Result<Option<f64>> {
+        crate::blend::fillet_solver::surfaces::rail_edgeuse_intersect(
+            self, k, geometry, target, rail_index, edgeuse, guess, tsect,
+        )
+    }
+
     /// `SmConstantRadiusFS::GetJacobianSize`.
     fn jacobian_size(&self) -> Result<usize> {
         Ok(ConstantRadiusAssistedFs::jacobian_size(self))

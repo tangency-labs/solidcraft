@@ -200,6 +200,77 @@ pub struct FaceTopologyAttempt {
     pub region: Option<RegionId>,
 }
 
+/// The single canonical location of a face-construction input surface.
+#[derive(Debug)]
+pub(crate) enum FaceSurfaceLocation {
+    Owned(Box<Surface>),
+    Installed(FaceId),
+}
+
+/// Retains the actual input surface or its actual installed face on every return.
+/// Unlike the legacy value API, the caller can recover ownership after failure.
+#[derive(Debug)]
+pub(crate) struct FaceSurfaceTransfer {
+    owned: Option<Surface>,
+    installed_face: Option<FaceId>,
+}
+
+impl FaceSurfaceTransfer {
+    pub(crate) const fn new(surface: Surface) -> Self {
+        Self {
+            owned: Some(surface),
+            installed_face: None,
+        }
+    }
+
+    pub(crate) const fn installed_face(&self) -> Option<FaceId> {
+        self.installed_face
+    }
+
+    pub(crate) fn into_location(self) -> Result<FaceSurfaceLocation> {
+        match (self.owned, self.installed_face) {
+            (Some(surface), None) => Ok(FaceSurfaceLocation::Owned(Box::new(surface))),
+            (None, Some(face)) => Ok(FaceSurfaceLocation::Installed(face)),
+            _ => Err(SolidError::invalid_input(
+                OP,
+                "invalid surface transfer state",
+            )),
+        }
+    }
+
+    pub(super) fn owned_surface(&self) -> Result<&Surface> {
+        self.owned
+            .as_ref()
+            .ok_or_else(|| SolidError::null_pointer(OP))
+    }
+
+    pub(super) fn surface_mut<'a>(&'a mut self, brep: &'a mut Brep) -> Result<&'a mut Surface> {
+        if let Some(face) = self.installed_face {
+            brep.face_mut(face)?
+                .surface
+                .as_mut()
+                .ok_or_else(|| SolidError::null_pointer(OP))
+        } else {
+            self.owned
+                .as_mut()
+                .ok_or_else(|| SolidError::null_pointer(OP))
+        }
+    }
+
+    pub(super) fn install(&mut self, brep: &mut Brep, face: FaceId) -> Result<()> {
+        // Validate the destination before taking ownership: no fallible step may
+        // leave the source without a recorded canonical location.
+        let destination = brep.face_mut(face)?;
+        let surface = self
+            .owned
+            .take()
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        destination.surface = Some(surface);
+        self.installed_face = Some(face);
+        Ok(())
+    }
+}
+
 /// Input loops, isolated vertices, and the upstream face-construction flags.
 #[derive(Debug, Clone, Default)]
 pub struct FaceTopologyOptions<'a> {
@@ -430,6 +501,36 @@ pub(crate) fn make_face_topology_attempt_with_state(
     orientation: OrientType,
     options: &FaceTopologyOptions<'_>,
 ) -> Result<FaceTopologyAttempt> {
+    let mut transfer = FaceSurfaceTransfer {
+        owned: surface,
+        installed_face: None,
+    };
+    let attempt = make_face_topology_transfer_attempt_with_state(
+        k,
+        brep,
+        marks,
+        env,
+        &mut transfer,
+        orientation,
+        options,
+    );
+    if let Err(error) = &attempt.status {
+        if !matches!(error, SolidError::Upstream { .. }) {
+            return Err(error.clone());
+        }
+    }
+    Ok(attempt)
+}
+
+pub(crate) fn make_face_topology_transfer_attempt_with_state(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    marks: &mut Marks,
+    env: &mut NotifyState<'_>,
+    transfer: &mut FaceSurfaceTransfer,
+    orientation: OrientType,
+    options: &FaceTopologyOptions<'_>,
+) -> FaceTopologyAttempt {
     let mut attempt = FaceTopologyAttempt {
         status: Ok(()),
         face: None,
@@ -441,19 +542,13 @@ pub(crate) fn make_face_topology_attempt_with_state(
         brep,
         marks,
         env,
-        surface,
+        transfer,
         orientation,
         options,
         &mut attempt,
     );
-    match status {
-        Ok(()) => Ok(attempt),
-        Err(error @ SolidError::Upstream { .. }) => {
-            attempt.status = Err(error);
-            Ok(attempt)
-        }
-        Err(error) => Err(error),
-    }
+    attempt.status = status;
+    attempt
 }
 
 /// The new loop uses, one per input loop then one per loop vertex.
@@ -468,7 +563,7 @@ fn build_face(
     brep: &mut Brep,
     marks: &mut Marks,
     env: &mut NotifyState<'_>,
-    surface: Option<Surface>,
+    transfer: &mut FaceSurfaceTransfer,
     orientation: OrientType,
     options: &FaceTopologyOptions<'_>,
     out: &mut FaceTopologyAttempt,
@@ -479,7 +574,7 @@ fn build_face(
     // Check input
     let region = required(region)?;
     brep.region(region)?;
-    let surface = required(surface)?;
+    transfer.owned_surface()?;
 
     // Get shell to contain new faceuses
     // If no Edgeuses given, create a new one.
@@ -556,8 +651,8 @@ fn build_face(
     // connect face to surface just temporarily to help with some radial sectoring
     // that will follow (the face is not on the face list yet).
     let face_ref = (env.key_of)(EntityRef::Face(face));
-    let domain = surface.natural_uv_domain();
-    brep.face_mut(face)?.surface = Some(surface);
+    let domain = transfer.owned_surface()?.natural_uv_domain();
+    transfer.install(brep, face)?;
     set_surface_owner(
         k,
         brep,

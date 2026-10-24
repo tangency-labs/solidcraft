@@ -1597,6 +1597,19 @@ pub(crate) fn stitch_faces_with_identity(
     allow_spine_edges: bool,
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
 ) -> Result<StitchOutcome> {
+    stitch_faces_with_context(k, b, xsect_tol_3d, faces, allow_spine_edges, identity, None)
+}
+
+/// Stitch with the actual caller's notification state; no call-local edit stores.
+pub(crate) fn stitch_faces_with_context<'a>(
+    k: &mut Kernel,
+    b: &mut Brep,
+    xsect_tol_3d: f64,
+    faces: Option<&[Option<FaceId>]>,
+    allow_spine_edges: bool,
+    identity: Option<crate::query::brep::BrepIdentity<'a>>,
+    mut edits: Option<&'a mut dyn crate::heal::stitch::p1::StitchEditContext>,
+) -> Result<StitchOutcome> {
     // lock brep bounding box, until goes out of scope
     let mut lockit = LockBrepBox::new(k, b)?;
     let b = lockit.brep();
@@ -1606,6 +1619,9 @@ pub(crate) fn stitch_faces_with_identity(
     // construct Stitch manager using default coincident keep/delete logic
     let mut stitch = Stitch::new(&mut callback, xsect_tol_3d, true, true);
     stitch.query_identity = identity;
+    stitch.edits = edits
+        .as_mut()
+        .map(|edits| &mut **edits as &mut dyn crate::heal::stitch::p1::StitchEditContext);
     stitch.fast_edge_compare = true;
     stitch.ignore_problems = true;
     stitch.squeeze_small_edges = true;
