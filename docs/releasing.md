@@ -109,6 +109,31 @@ new commits were added. An existing tag or published release is never overwritte
 version after publication. Do not push the version tag yourself: publishing the draft creates
 it at the draft's target commit.
 
+## macOS disk image
+
+`packaging/macos/package.sh` builds the `.dmg` with [dmgbuild](https://github.com/dmgbuild/dmgbuild)
+(MIT; hash-pinned in `packaging/macos/dmg-requirements.txt`, installed into a throwaway venv under
+`target/`). It writes the Finder layout, the background and the icon positions straight into the
+image, so the build needs no Finder session or AppleScript, which are unreliable on CI runners.
+
+The look lives in `assets/platforms/macos/dmg/`: `layout.json` (window size, icon size and
+positions, shared by both files below), `settings.py` (the dmgbuild settings) and `background.tiff`
+(a blueprint sheet, 540×360 pt, with a 1x and a 2x representation so Retina screens get the sharp one). Change the art with
+`make_background.py` (needs Pillow; its docstring has the commands), view the result by mounting the
+image, and commit the TIFF with the script. Rules the design follows:
+
+- The title bar adds to the window rectangle (`title_bar` in `layout.json`, 32 pt on macOS 27); the
+  content area must equal the background's size. Older macOS versions have a thinner title bar and
+  were not checked.
+- Finder draws the icon names itself, black in Light and white in Dark appearance, and art cannot
+  change that. Each name therefore sits on a mid-tone plate that both colours read on. Keep the
+  plates under the icons if you move them.
+- `README.txt` stays on the disk but is hidden (`SetFile -a V`), so the window stays calm.
+
+`package.sh` mounts the finished image and checks the layout files, the volume icon, the bundle and
+its signature. `hdiutil` prints deprecation warnings on macOS 27 (dmgbuild still uses it); if a
+later macOS removes it, dmgbuild needs a release that uses `diskutil image`.
+
 ## Notes for the next release
 
 Items to carry into the next release's notes (step 3 below), then remove from here:

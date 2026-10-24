@@ -25,6 +25,7 @@ assets/
   fonts/{liberation-sans,biz-udp-gothic}/ # unmodified fonts and OFL licences
   locales/{en,de,ja,ko}.json          # shared offline catalogs
   platforms/{macos,linux,windows}/    # bundle, freedesktop and WiX templates
+  platforms/macos/dmg/                # disk image window: layout, dmgbuild settings, background art
   archive/icons/macos-v1/
     source/icon.vectorcraft          # earlier editable work, retained
                                      # redundant historical exports are retired

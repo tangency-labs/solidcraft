@@ -2,7 +2,8 @@
 # Build and package SolidCraft for macOS:
 #
 #   $DIST/solidcraft-<version>-macos-<arch>.dmg        SolidCraft.app (with solidcraft-cli inside) on a
-#                                                      drag-to-Applications DMG
+#                                                      drag-to-Applications DMG with a drawn window
+#                                                      (assets/platforms/macos/dmg)
 #   $DIST/solidcraft-cli-<version>-macos-<arch>.zip    the headless CLI (and its solvecraft-cli
 #                                                      compatibility alias) with the licence files
 #
@@ -82,23 +83,26 @@ test -x "$APP/Contents/MacOS/solidcraft-cli" || { echo "solidcraft-cli is missin
 
 # ---- DMG ---------------------------------------------------------------------------------------
 echo "==> building $DMG"
-STAGE="$WORK/dmg"
-mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/SolidCraft.app"
-ln -s /Applications "$STAGE/Applications"
-cp "$ROOT/assets/platforms/macos/README.txt" "$STAGE/README.txt"
-rm -f "$DMG" "$WORK/raw.dmg"
-# makehybrid + convert builds the image without attaching a device, unlike `create -srcfolder`,
-# which is flaky on CI runners ("Resource busy").
-hdiutil makehybrid -hfs -hfs-volume-name "SolidCraft" -hfs-openfolder "$STAGE" -o "$WORK/raw.dmg" "$STAGE"
-hdiutil convert "$WORK/raw.dmg" -format UDZO -imagekey zlib-level=9 -o "$DMG"
-rm -f "$WORK/raw.dmg"
+DMG_ART="$ROOT/assets/platforms/macos/dmg"
+# dmgbuild (hash-pinned, packaging/macos/dmg-requirements.txt) writes the window layout, the
+# background and the icon positions into the image without a Finder session.
+VENV="$WORK/dmg-venv"
+python3 -m venv "$VENV"
+"$VENV/bin/pip" install --quiet --disable-pip-version-check --require-hashes -r "$ROOT/packaging/macos/dmg-requirements.txt"
+rm -f "$DMG"
+"$VENV/bin/dmgbuild" -s "$DMG_ART/settings.py" \
+  -D "here=$DMG_ART" -D "app=$APP" -D "readme=$ROOT/assets/platforms/macos/README.txt" \
+  -D "icns=$ROOT/assets/icons/app/macos/exports/icon.icns" \
+  SolidCraft "$DMG"
 
 # Check the image as a user gets it: mount it and look inside.
 MNT="$(mktemp -d)"
 hdiutil attach -readonly -nobrowse -mountpoint "$MNT" "$DMG"
 ls -la "$MNT" "$MNT/SolidCraft.app/Contents" "$MNT/SolidCraft.app/Contents/MacOS" "$MNT/SolidCraft.app/Contents/Resources"
 test -L "$MNT/Applications" && test "$(readlink "$MNT/Applications")" = /Applications
+# The window's look: Finder layout, background art and the volume icon.
+test -s "$MNT/.DS_Store" && test -s "$MNT/.VolumeIcon.icns"
+test -s "$MNT/.background.tiff"
 plutil -lint "$MNT/SolidCraft.app/Contents/Info.plist"
 # Check the names Finder/LaunchServices actually use, and the bundle identity.
 for key in CFBundleName CFBundleDisplayName CFBundleExecutable CFBundleIconFile CFBundleIconName; do
