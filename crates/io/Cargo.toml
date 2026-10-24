@@ -1,6 +1,6 @@
 [package]
 name = "solidcraft-io"
-description = "SolidCraft file formats: designs (JSON), STL, OBJ, STEP, IGES, 3MF and glTF, and FreeCAD/Rhino import"
+description = "SolidCraft file formats: designs (JSON), STL, OBJ, STEP, IGES, 3MF and glTF, and FreeCAD/Rhino/SolidWorks import"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -22,7 +22,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 chardetng = { workspace = true }
 encoding_rs = { workspace = true }
-# FreeCAD and Rhino import (pure Rust, so the browser build has it too).
+# FreeCAD/Rhino are available on every host.
 cadmpeg-core = { workspace = true }
 cadmpeg-ir = { workspace = true }
 cadmpeg-registry = { workspace = true }
@@ -31,3 +31,13 @@ cadmpeg-registry = { workspace = true }
 # the tree through tempfile.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+
+# SolidWorks requires the native saved-body readers and sibling part references.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+flate2 = { workspace = true }
+crc32fast = { workspace = true }
+parasolid-core = { version = "=0.3.5", path = "../../vendor/parasolid-core" }
+cadmpeg-registry = { workspace = true, features = ["sldprt"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+cadmpeg-ir = { workspace = true, features = ["examples"] }

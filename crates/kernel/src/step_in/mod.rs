@@ -28,7 +28,7 @@ use p21::{Entity, Exchange, Param};
 /// Deepest assembly nesting followed.
 const MAX_ASSEMBLY_DEPTH: usize = 32;
 /// Most body instances in one import.
-const MAX_BODIES: usize = 10_000;
+const MAX_BODIES: usize = 20_000;
 /// Most product occurrences and mapped representations visited (a shared sub-assembly used
 /// twice at every level would otherwise grow exponentially).
 const MAX_VISITS: usize = 100_000;
@@ -629,18 +629,23 @@ impl Reader {
 
     /// Representations of a product (its own shape representations and those linked to them).
     fn rep_closure(&self, roots: &[u64]) -> Vec<u64> {
-        let mut seen: Vec<u64> = Vec::new();
+        // A saved part can have a separate context for thousands of solids.
+        // Do not truncate its closure: unvisited representations would otherwise
+        // be mistaken for loose geometry and placed at the origin. The parsed
+        // entity/reference budgets bound this graph; each vertex is visited once.
+        let mut visited = HashSet::new();
+        let mut ordered = Vec::new();
         let mut stack: Vec<u64> = roots.to_vec();
         while let Some(r) = stack.pop() {
-            if seen.contains(&r) || seen.len() > 1024 {
+            if !visited.insert(r) {
                 continue;
             }
-            seen.push(r);
+            ordered.push(r);
             if let Some(l) = self.rep_links.get(&r) {
                 stack.extend(l.iter().copied());
             }
         }
-        seen
+        ordered
     }
 
     /// Representations a MAPPED_ITEM walks (empty for any other item).
@@ -805,7 +810,7 @@ impl Reader {
                         for f in &failed {
                             self.warn(format!("{label}: {f}"));
                         }
-                        if !part.closed {
+                        if !part.closed && e.name() != "SHELL_BASED_SURFACE_MODEL" {
                             self.warn(format!("{label}: imported as an open body (the shell is not closed)"));
                         }
                     }

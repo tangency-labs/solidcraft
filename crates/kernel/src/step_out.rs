@@ -1621,7 +1621,107 @@ thread_local! {
     static MERGES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// Assemble already validated bare STEP parts without rewriting their geometry.
+/// Their original representation contexts, uncertainty, voids and styles remain intact.
+/// Each nonempty product needs its matching source; sources containing products or
+/// placements are refused. This is for saved imports, not edited kernel bodies.
+pub fn step_export_products_with_sources(products: &[ExportProduct], root: usize, header: &StepHeader, sources: &[Option<&str>]) -> Result<String> {
+    if sources.len() != products.len()
+        || sources.iter().flatten().try_fold(0usize, |sum, s| sum.checked_add(s.len()).filter(|n| *n <= 512 << 20)).is_none()
+    {
+        return Err(KernelError::Invalid("STEP source assembly budget or product count".into()));
+    }
+    products_text_sources(products, root, header, false, Some(sources))
+}
+
+fn copy_source_part(o: &mut Out, text: &str, expected: usize) -> Result<Vec<u64>> {
+    let ex = p21::parse(text).map_err(|e| KernelError::Invalid(format!("STEP source assembly: {e}")))?;
+    if ex.entities.values().any(|e| {
+        e.records.iter().any(|r| {
+            matches!(
+                r.name.as_str(),
+                "PRODUCT"
+                    | "PRODUCT_DEFINITION"
+                    | "NEXT_ASSEMBLY_USAGE_OCCURRENCE"
+                    | "MAPPED_ITEM"
+                    | "CONTEXT_DEPENDENT_SHAPE_REPRESENTATION"
+                    | "SHAPE_REPRESENTATION_RELATIONSHIP"
+                    | "REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION"
+            )
+        })
+    }) {
+        return Err(KernelError::Invalid("STEP source assembly requires bare parts without placements".into()));
+    }
+    if o.lines.len().checked_add(ex.entities.len()).is_none_or(|n| n > 4_000_000) {
+        return Err(KernelError::Invalid("STEP source assembly entity budget".into()));
+    }
+    let mut ids: Vec<_> = ex.entities.keys().copied().collect();
+    ids.sort_unstable();
+    let map: HashMap<_, _> = ids.iter().enumerate().map(|(i, id)| (*id, (o.lines.len() + i + 1) as u64)).collect();
+    let breps: std::collections::HashSet<_> = ex
+        .entities
+        .iter()
+        .filter(|(_, e)| matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "SHELL_BASED_SURFACE_MODEL"))
+        .map(|(id, _)| *id)
+        .collect();
+    // Surface models may be open; a declared solid must still be closed and complete.
+    // Import is shared with the assembly validator, so this reuses its parsed B-reps.
+    let imported = crate::step_import_shared(text)?;
+    if imported.bodies.len() != expected {
+        return Err(KernelError::Invalid("STEP source body inventory is incomplete".into()));
+    }
+    for b in &imported.bodies {
+        let e = ex.get(b.source_item).ok_or_else(|| KernelError::Invalid("STEP source body missing".into()))?;
+        if !breps.contains(&b.source_item) || (!b.closed && e.name() != "SHELL_BASED_SURFACE_MODEL") {
+            return Err(KernelError::Invalid("STEP source declared solid is not closed".into()));
+        }
+    }
+    if !imported.warnings.is_empty() {
+        return Err(KernelError::Invalid("STEP source part is incomplete".into()));
+    }
+    let mut attached = std::collections::HashSet::new();
+    let mut reps = Vec::new();
+    for id in &ids {
+        let e = ex.get(*id).ok_or_else(|| KernelError::Invalid("STEP source entity missing".into()))?;
+        if matches!(e.name(), "SHAPE_REPRESENTATION" | "ADVANCED_BREP_SHAPE_REPRESENTATION" | "MANIFOLD_SURFACE_SHAPE_REPRESENTATION") {
+            let items = e.params().get(1).and_then(Param::as_list).ok_or_else(|| KernelError::Invalid("STEP source representation items".into()))?;
+            let solids: Vec<_> = items.iter().filter_map(Param::as_ref_id).filter(|id| breps.contains(id)).collect();
+            if !solids.is_empty() {
+                attached.extend(solids);
+                reps.push(*map.get(id).ok_or_else(|| KernelError::Invalid("STEP source representation mapping".into()))?);
+            }
+        }
+        let mut line = String::new();
+        if e.is_complex() {
+            line.push('(');
+        }
+        for r in &e.records {
+            line.push_str(&r.name);
+            line.push('(');
+            params(&r.params, &map, &mut line).map_err(KernelError::Invalid)?;
+            line.push(')');
+        }
+        if e.is_complex() {
+            line.push(')');
+        }
+        o.add(line);
+    }
+    if breps.len() != expected || attached != breps || reps.is_empty() {
+        return Err(KernelError::Invalid("STEP source body inventory does not match validated parts".into()));
+    }
+    Ok(reps)
+}
+
 fn products_text(products: &[ExportProduct], root: usize, header: &StepHeader, merge: bool) -> Result<String> {
+    products_text_sources(products, root, header, merge, None)
+}
+fn products_text_sources(
+    products: &[ExportProduct],
+    root: usize,
+    header: &StepHeader,
+    merge: bool,
+    sources: Option<&[Option<&str>]>,
+) -> Result<String> {
     if products.is_empty() || root >= products.len() {
         return Err(KernelError::Invalid("nothing to export".into()));
     }
@@ -1722,7 +1822,18 @@ fn products_text(products: &[ExportProduct], root: usize, header: &StepHeader, m
         if let Some(slot) = shape_rep.get_mut(pi) {
             *slot = srep;
         }
-        if !p.bodies.is_empty() {
+        if let Some(sources) = sources {
+            match sources.get(pi).copied().flatten() {
+                Some(source) => {
+                    let reps = copy_source_part(&mut o, source, p.bodies.len())?;
+                    for rep in reps {
+                        o.add(format!("SHAPE_REPRESENTATION_RELATIONSHIP('','',#{srep},#{rep})"));
+                    }
+                }
+                None if !p.bodies.is_empty() => return Err(KernelError::Invalid("STEP source part is missing".into())),
+                None => {}
+            }
+        } else if !p.bodies.is_empty() {
             let mut solids = Vec::new();
             for b in &p.bodies {
                 for lump in export_lumps(b.body) {

@@ -68,4 +68,61 @@ IGES 5.3 files (`.igs`/`.iges`) open, insert and drop the same way: `crates/kern
 
 FreeCAD `.FCStd` and Rhino `.3dm` files open, insert and drop the same way, in the desktop app, the browser app and the CLI. They are read with [cadmpeg](https://github.com/cadmpeg/cadmpeg) (Apache-2.0, `crates/io/src/native_cad.rs`): cadmpeg detects the format from the bytes, decodes it into its neutral model under resource caps, checks that model and writes it as STEP AP214, which the STEP reader then reads. The feature holds that STEP text, so the design reopens without the original file. The file's solids come in; its feature history, sketches and parameters do not. Losses cadmpeg reports become warnings on the feature, and a file without an importable solid is refused with a message. cadmpeg runs inside the panic guard. How much of a file is read follows cadmpeg's support for that format ([format support](https://github.com/cadmpeg/cadmpeg/blob/main/docs/format-support.md)).
 
-Only codecs for open formats are compiled in: the workspace turns off cadmpeg's default features and enables `fcstd`, `rhino` and `step` (the writer). cadmpeg's codecs for commercial CAD formats are not built, and neither is its `sat` codec, which decodes ShapeManager streams with ACIS as one dialect, so ACIS `.sat`/`.sab` files are not read yet. `crates/io/src/native_cad.rs` is the one place cadmpeg is called; a cadmpeg-based STEP reader could be added there later behind a setting, to compare with the STEP reader above without changing it.
+The workspace disables cadmpeg defaults and enables `fcstd`, `rhino` and the `step` writer on every host. Native builds additionally enable `sldprt` for the restricted, validated scope below. Other commercial codecs and the ShapeManager/ACIS `sat` codec stay disabled. SolidWorks import is available in the desktop app and CLI.
+
+### Experimental SolidWorks part import
+
+Desktop and CLI builds accept `.sldprt` through the same Open, Insert, drag-and-drop,
+and script commands. The first supported scope is an analytic solid made of planes
+and cylinders with embedded display geometry. Design-history editing,
+unsupported surfaces and ambiguous boundaries are refused.
+
+The Apache-2.0 cadmpeg reader supplies the B-rep. For a single active, unsuppressed
+`Multi_CAD_Imported` feature, a matching single `LocalBodies` cache can supply the
+geometry when the active partition is empty. Input limits and CRC checks apply
+before the cache is used. Original bytes are never changed. Display points must
+uniquely establish circular edge direction; longer arcs are retained when that is
+what the evidence shows. Exterior boundaries are classified before STEP export.
+Every face must be covered, the SolidCraft result must be closed with positive
+volume, and its bounds must agree with the original display geometry. Its volume must also
+agree with the faceted reference within 0.5%. A design
+stores the resulting STEP, so reopening needs no original SLDPRT or commercial CAD
+installation. Base RGB face colors are retained through AP214 and saved designs.
+For the compact cached-part path, named `SDL/TYSA_COLOUR` attributes resolve explicit owner
+face and RGB asset ids; conflicting assignments or missing RGB assets are refused.
+Feature history and advanced appearances are not transferred.
+
+### Experimental SolidWorks assembly import
+
+Desktop and CLI builds also accept `.sldasm` with its referenced `.sldprt` files
+in the same directory. Unpack an assembly ZIP first, then open the SLDASM. The
+saved component tree supplies configuration identities and rigid placements;
+repeated parts share geometry. Original absolute reference paths are ignored.
+The imported design retains the resulting STEP assembly text and needs no source files
+when reopened.
+
+This path uses the schema-framed, pure Rust `parasolid-core` reader for the exact
+`SCH_3501251_35102_13006` saved-solid profile. It reads analytic and NURBS surfaces,
+source edge senses, tolerant surface-parameter boundaries, and material regions
+with internal voids. Intersections without a supported exact conic form are
+restated as cubic splines at a fraction of the source modelling resolution.
+Metres become millimetres once; rotations and curve parameters keep their units.
+Explicit body and face RGB assignments follow their source owner identities.
+Assembly packaging preserves each validated part representation, including its
+modelling uncertainty, internal voids and presentation styles, in an AP242 product tree.
+
+A selected part partition must match the assembly's configuration number. An
+empty saved partition may use a CRC-checked `LocalBodies` cache only for the exact,
+unchanged imported feature. Source sheets are retained as shell-based surface models,
+with their trimmed faces, placements and body/face RGB styles. They are not given
+artificial thickness or converted to solids. The two sides of a source sheet do
+not duplicate its faces. Closed surface-parameter boundaries without vertices are
+supported when the source trim closes within tolerance. Loose sheet joins retain
+the source tolerance (bounded to 1 mm); curve fitting remains capped at 0.00001 mm.
+Wire-only bodies are reported and excluded. Every declared solid must still have
+closed manifold shells;
+missing parts, conflicting configurations, unsupported schemas or geometry, and
+unresolved hidden or flexible occurrences are errors. A source regeneration flag
+is reported when its saved static solid is used. Mates, feature history, journals,
+textures and advanced appearances are not transferred. This is a validated saved
+geometry subset, not general support for every SolidWorks version or assembly.

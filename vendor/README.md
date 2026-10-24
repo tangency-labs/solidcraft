@@ -301,3 +301,13 @@ SolidCraft changes:
   submits nothing (`DeviceLost::probe`), so a device the driver lost is found by that
   submission rather than by the first queue write, which panicked inside wgpu-core
   (`PendingWrites::activate`, #4172).
+
+
+## parasolid-core 0.3.5
+
+The schema-framed X_B reader in `parasolid-core/` is the published 0.3.5 crate
+from https://github.com/monozukuri-ai/parasolid-kit, licensed MIT AND Apache-2.0.
+Both original license texts are included. It has no runtime dependencies.
+`SOLIDCRAFT-PATCH.md` records the additional exact SolidWorks schema profile,
+its canonical definition hash, and the admission tests. No private CAD fixtures
+are distributed. SolidCraft's source B-rep to AP214 conversion is local code.

@@ -624,6 +624,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "cadmpeg-codec-sldprt"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb9188fcb8dae57194b0213da0b960f0b889ca993ad8fdcab98acfedeb1bf243"
+dependencies = [
+ "cadmpeg-container",
+ "cadmpeg-core",
+ "cadmpeg-ir",
+ "cadmpeg-parasolid",
+ "crc32fast",
+ "flate2",
+ "rmp",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+]
+
+[[package]]
 name = "cadmpeg-codec-step"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -683,6 +702,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cadmpeg-parasolid"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4ce6b70bbb33c4a2c2626488c482314fd3e367a8b42d783c4257e2cef234e2c"
+dependencies = [
+ "cadmpeg-core",
+]
+
+[[package]]
 name = "cadmpeg-registry"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -690,6 +718,7 @@ checksum = "b2be23469a9bca0b684f1811118fffb581ebd32ded08e6cc8b0716a41f8c1377"
 dependencies = [
  "cadmpeg-codec-freecad",
  "cadmpeg-codec-rhino",
+ "cadmpeg-codec-sldprt",
  "cadmpeg-codec-step",
  "cadmpeg-container",
  "cadmpeg-core",
@@ -3079,6 +3108,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "parasolid-core"
+version = "0.3.5"
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3628,6 +3661,15 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rmp"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ba8be72d372b2c9b35542551678538b562e7cf86c3315773cae48dfbfe7790c"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -4333,9 +4375,12 @@ dependencies = [
  "cadmpeg-ir",
  "cadmpeg-registry",
  "chardetng",
+ "crc32fast",
  "encoding_rs",
+ "flate2",
  "gltf",
  "log",
+ "parasolid-core",
  "quick-xml",
  "rustix 1.1.5",
  "serde",

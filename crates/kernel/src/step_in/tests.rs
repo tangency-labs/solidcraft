@@ -2249,7 +2249,7 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
             assert!(text.contains(&old));
             let text = text.replacen(&old, &surface, 1);
             let imported = step_import(&text).unwrap();
-            assert_eq!(imported.warnings, ["solid 'Strip': imported as an open body (the shell is not closed)"]);
+            assert!(imported.warnings.is_empty(), "{:?}", imported.warnings);
             assert_eq!(imported.bodies.len(), 1);
             let body = &imported.bodies[0].body;
             assert_eq!(imported.bodies[0].file_faces, 1);
@@ -2316,4 +2316,113 @@ fn step_conformance_parts_read_back_their_exact_shape() {
             assert!(got.dist(want) <= size * 1e-3, "{name}: box corner {got:?} vs {want:?}");
         }
     }
+}
+#[test]
+fn source_part_assembly_keeps_uncertainty_and_repeated_rigid_placements() {
+    use crate::{ExportBody, ExportProduct, StepHeader};
+    let tube = RingEdgeTube::small();
+    let source = tube.step();
+    let imported = step_import_shared(&source).unwrap();
+    assert_eq!(imported.bodies.len(), 1);
+    let mut moved = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    moved[3][0] = 30.;
+    let identity = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    let products = vec![
+        ExportProduct { name: "Assembly".into(), bodies: vec![], children: vec![(1, identity, "First".into()), (1, moved, "Second".into())] },
+        ExportProduct {
+            name: "Tube".into(),
+            bodies: vec![ExportBody { name: "Tube".into(), body: &imported.bodies[0].body, color: None }],
+            children: vec![],
+        },
+    ];
+    let packed = crate::step_export_products_with_sources(&products, 0, &StepHeader::default(), &[None, Some(&source)]).unwrap();
+    let result = step_import_shared(&packed).unwrap();
+    assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+    assert_eq!(result.tree[0].children.len(), 2);
+    assert_eq!(result.bodies.len(), 2);
+    for b in &result.bodies {
+        assert!(b.closed);
+        assert_eq!(b.file_faces, 3);
+        assert_eq!(b.body.boundary_tol, imported.bodies[0].body.boundary_tol);
+    }
+    assert!((result.bodies[1].body.outline_bounds().min.x - result.bodies[0].body.outline_bounds().min.x - 30.).abs() < 1e-8);
+    assert!(
+        crate::step_export_products_with_sources(&products, 0, &StepHeader::default(), &[None, Some(&packed)])
+            .unwrap_err()
+            .to_string()
+            .contains("bare parts")
+    );
+}
+#[test]
+fn linked_part_representations_beyond_1024_keep_their_product_placement() {
+    use crate::{ExportBody, ExportProduct, StepHeader};
+    let source = RingEdgeTube::small().step();
+    let imported = step_import_shared(&source).unwrap();
+    let moved = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [30., 0., 0., 1.]];
+    let products = vec![
+        ExportProduct { name: "Assembly".into(), bodies: vec![], children: vec![(1, moved, "Placed".into())] },
+        ExportProduct {
+            name: "Tube".into(),
+            bodies: vec![ExportBody { name: "Tube".into(), body: &imported.bodies[0].body, color: None }],
+            children: vec![],
+        },
+    ];
+    let packed = crate::step_export_products_with_sources(&products, 0, &StepHeader::default(), &[None, Some(&source)]).unwrap();
+    let ex = p21::parse(&packed).unwrap();
+    let (&link, relationship) = ex.entities.iter().find(|(_, e)| e.name() == "SHAPE_REPRESENTATION_RELATIONSHIP").unwrap();
+    let parent = relationship.params()[2].as_ref_id().unwrap();
+    let target = relationship.params()[3].as_ref_id().unwrap();
+    let ctx = ex.get(parent).unwrap().params()[2].as_ref_id().unwrap();
+    let first = ex.entities.keys().max().unwrap() + 1;
+    let mut entities = String::new();
+    for i in 0..1100u64 {
+        let rep = first + 2 * i;
+        let next = if i == 1099 { target } else { rep + 2 };
+        entities.push_str(&format!(
+            "#{rep}=SHAPE_REPRESENTATION('',(),#{ctx});\n#{}=SHAPE_REPRESENTATION_RELATIONSHIP('','',#{rep},#{next});\n",
+            rep + 1
+        ));
+    }
+    let old = format!("#{link}=SHAPE_REPRESENTATION_RELATIONSHIP('','',#{parent},#{target});");
+    let changed = packed.replace(&old, &format!("#{link}=SHAPE_REPRESENTATION_RELATIONSHIP('','',#{parent},#{first});"));
+    assert_ne!(changed, packed);
+    let text = changed.replace("ENDSEC;\nEND-ISO-10303-21;", &format!("{entities}ENDSEC;\nEND-ISO-10303-21;"));
+    assert_ne!(text, changed);
+    let result = step_import_shared(&text).unwrap();
+    assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+    assert_eq!(result.tree.len(), 1, "the part must not become loose geometry at the origin");
+    assert_eq!(result.tree[0].children.len(), 1);
+    assert_eq!(result.tree[0].children[0].bodies.len(), 1);
+    assert_eq!(result.bodies.len(), 1);
+    assert!(result.bodies[0].closed);
+    assert!((result.bodies[0].body.outline_bounds().min.x - imported.bodies[0].body.outline_bounds().min.x - 30.).abs() < 1e-8);
+}
+
+#[test]
+fn source_part_assembly_keeps_open_surfaces_and_rejects_unclosed_declared_solids() {
+    use crate::{ExportBody, ExportProduct, StepHeader};
+    let source = gapped_sheet(3., 0., None);
+    let imported = step_import_shared(&source).unwrap();
+    assert!(!imported.bodies[0].closed);
+    let moved = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [12., -34., 56., 1.]];
+    let products = vec![
+        ExportProduct { name: "Assembly".into(), bodies: vec![], children: vec![(1, moved, "Sheet".into())] },
+        ExportProduct {
+            name: "Sheet".into(),
+            bodies: vec![ExportBody { name: "Sheet".into(), body: &imported.bodies[0].body, color: None }],
+            children: vec![],
+        },
+    ];
+    let packed = crate::step_export_products_with_sources(&products, 0, &StepHeader::default(), &[None, Some(&source)]).unwrap();
+    let result = step_import_shared(&packed).unwrap();
+    assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+    assert_eq!(result.bodies.len(), 1);
+    assert!(!result.bodies[0].closed);
+    assert_eq!(result.bodies[0].file_faces, 1);
+    let b = result.bodies[0].body.outline_bounds();
+    assert!((b.min - Vec3::new(12., -34., 56.)).len() < 1e-8);
+    assert!((b.max - Vec3::new(15., -31., 56.)).len() < 1e-8);
+    let broken = source.replace("SHELL_BASED_SURFACE_MODEL('Sheet',(#110))", "MANIFOLD_SOLID_BREP('Broken',#110)");
+    let err = crate::step_export_products_with_sources(&products, 0, &StepHeader::default(), &[None, Some(&broken)]).unwrap_err();
+    assert!(err.to_string().contains("not closed"), "{err}");
 }

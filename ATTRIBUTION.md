@@ -526,15 +526,21 @@ in THIRD-PARTY-LICENSES.txt; no images or artwork from that project are copied.
 The glTF test files are built by the tests themselves (crates/io/src/gltf_in_tests.rs,
 crates/engine/src/tests/gltf_import.rs); no third-party models are committed.
 
-## FreeCAD and Rhino import library
+## Native CAD import library
 
-FreeCAD `.FCStd` and Rhino `.3dm` files are read with [cadmpeg](https://github.com/cadmpeg/cadmpeg)
+FreeCAD `.FCStd`, Rhino `.3dm` and supported SolidWorks `.sldprt` files are read with [cadmpeg](https://github.com/cadmpeg/cadmpeg)
 0.6.3 (Apache-2.0), linked as the crates `cadmpeg-core`, `cadmpeg-ir`, `cadmpeg-registry`,
-`cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-rhino` and `cadmpeg-codec-step`
-in native and browser builds (`crates/io/src/native_cad.rs`). Only those open-format codecs are built: no
-default features, so cadmpeg's codecs for commercial CAD formats and its ShapeManager/ACIS
-codec are not compiled in. Its licence text is in THIRD-PARTY-LICENSES.txt; no code from it is
-copied into SolidCraft.
+`cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-rhino`, `cadmpeg-codec-sldprt`,
+`cadmpeg-parasolid` and `cadmpeg-codec-step` in native builds (`crates/io/src/native_cad.rs`). FreeCAD and Rhino codecs also build for the browser.
+Default features are disabled; other commercial codecs and ShapeManager/ACIS stay disabled.
+Its licence text is in THIRD-PARTY-LICENSES.txt. The bounded cached-color reader in
+`crates/io/src/native_cad/sldprt/colors.rs` adapts its Apache-2.0 metadata record layouts
+(`brep/entity.rs` and `brep/attrib.rs`); face assignment and conflict validation are local.
+
+The local body envelope follows the cadmpeg project's published
+[SLDPRT specification](https://github.com/cadmpeg/cadmpeg/blob/v0.6.1/docs/formats/sldprt.md)
+(CC BY 4.0). SolidCraft's bounded cache selection and display-backed analytic boundary
+validation are original code. User-supplied validation models are not distributed.
 
 ## Recovered contributions
 
@@ -546,6 +552,7 @@ copied into SolidCraft.
 
 | Directory | Source | Licence | Changes |
 |---|---|---|---|
+| vendor/parasolid-core | parasolid-core 0.3.5, https://github.com/monozukuri-ai/parasolid-kit | MIT AND Apache-2.0 | exact SCH_3501251_35102_13006 profile and admission tests (vendor/parasolid-core/SOLIDCRAFT-PATCH.md) |
 | vendor/truck-meshalgo | truck-meshalgo 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | meshing: bounded parameter searches, collapsed-boundary projection, subdivision and provisional fixed-grid previews (vendor/README.md) |
 | vendor/truck-stepio | truck-stepio 0.3.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | STEP writer: intersection-curve surfaces written at unique ids (vendor/README.md) |
 | vendor/truck-shapeops | truck-shapeops 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | robust meshing and nearest-parameter fallback in booleans; degenerate intersection-curve rejection; face and edge history of booleans; trace macro; corner choice at vertices several intersection curves end on; reuse of an operand's meshes (vendor/README.md) |

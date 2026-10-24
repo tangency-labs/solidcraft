@@ -67,10 +67,12 @@ encoding_rs = "0.8"
 # read by crates/io itself, so no image decoding or file access comes with it.
 gltf = { version = "1.4", default-features = false, features = ["names"] }
 
-# FreeCAD and Rhino import (Apache-2.0, pure Rust; native and browser builds).
-# Pinned: its IR and codec APIs change between minor versions. Open formats only: no default
-# features, so cadmpeg's codecs for commercial formats (f3d, sldprt, inventor, catia, creo, nx)
-# and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through.
+# Native CAD bridge (Apache-2.0). FreeCAD/Rhino work in native and browser builds.
+# SolidWorks is enabled only by the native IO dependency; other proprietary codecs
+# and ShapeManager/ACIS stay disabled.
+# Pin the shared IR/codec APIs. STEP is the neutral representation kept in designs.
+flate2 = "1"
+crc32fast = "1"
 cadmpeg-core = "=0.6.3"
 cadmpeg-ir = "=0.6.3"
 cadmpeg-registry = { version = "=0.6.3", default-features = false, features = ["fcstd", "rhino", "step"] }

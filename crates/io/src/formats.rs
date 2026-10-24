@@ -45,8 +45,7 @@ pub struct ImportSpec {
     /// Options offered at import time; each `param` is a parameter of `doc.open` and of the
     /// matching `file.insert_*` command.
     pub options: &'static [OptionSpec],
-    /// Read through cadmpeg (FreeCAD `.FCStd`, Rhino `.3dm`). Every current host builds it;
-    /// `native = false` leaves these rows out for a host that cannot.
+    /// Importer currently available only on native targets (see `crate::native_cad`).
     pub native_only: bool,
 }
 
@@ -204,13 +203,29 @@ pub static FORMATS: &[FormatSpec] = &[
         label: "FreeCAD",
         extensions: &["fcstd"],
         role: Role::Artifact,
-        import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: true }),
+        import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: false }),
         export: None,
     },
     FormatSpec {
         id: "3dm",
         label: "Rhino",
         extensions: &["3dm"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: false }),
+        export: None,
+    },
+    FormatSpec {
+        id: "sldprt",
+        label: "SolidWorks part",
+        extensions: &["sldprt"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: true }),
+        export: None,
+    },
+    FormatSpec {
+        id: "sldasm",
+        label: "SolidWorks assembly",
+        extensions: &["sldasm"],
         role: Role::Artifact,
         import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: true }),
         export: None,
@@ -324,7 +339,7 @@ pub fn import_for_path(path: &str) -> Option<&'static FormatSpec> {
     FORMATS.iter().find(|f| f.import.is_some() && f.extensions.contains(&ext.as_str()))
 }
 
-/// The importing rows, without the cadmpeg ones when `native` is false.
+/// The importing rows, omitting native-only CAD formats when `native` is false.
 pub fn importable(native: bool) -> impl Iterator<Item = &'static FormatSpec> {
     FORMATS.iter().filter(move |f| f.import.as_ref().is_some_and(|i| native || !i.native_only))
 }
@@ -371,7 +386,7 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
         let Some(import) = f.import.as_ref() else { continue };
         match import.target {
             ImportTarget::Design => add("SolidCraft design (container or JSON)", f.extensions),
-            ImportTarget::Brep if import.native_only => add("FreeCAD and Rhino", f.extensions),
+            ImportTarget::Brep if import.native_only => add("SolidWorks", f.extensions),
             ImportTarget::Brep => add(f.label, f.extensions),
             ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
             ImportTarget::Sketch => add("Sketch drawings (DXF, SVG)", f.extensions),
@@ -410,7 +425,7 @@ mod tests {
         for e in with_target(ImportTarget::Brep) {
             assert!(crate::is_step_path(&format!("part.{e}")), "is_step_path misses .{e}");
         }
-        for e in ["step", "stp", "igs", "iges", "fcstd", "3dm"] {
+        for e in ["step", "stp", "igs", "iges", "fcstd", "3dm", "sldprt", "sldasm"] {
             assert!(with_target(ImportTarget::Brep).contains(&e), "registry misses B-rep .{e}");
         }
         for e in with_target(ImportTarget::Mesh) {
@@ -446,6 +461,8 @@ mod tests {
         assert_eq!(for_path("a.SolidCraft").map(|f| f.id), Some("design"));
         assert_eq!(for_path("a.json").map(|f| f.id), Some("design"));
         assert_eq!(for_path("a.STEP").map(|f| f.id), Some("step"));
+        assert_eq!(import_for_path("a.SLDPRT").map(|f| f.id), Some("sldprt"));
+        assert_eq!(import_for_path("a.SLDASM").map(|f| f.id), Some("sldasm"));
         assert_eq!(for_path("a.3mf").map(|f| f.id), Some("3mf"));
         assert_eq!(for_path("a.dxf").map(|f| f.id), Some("dxf-sketch"));
         assert_eq!(import_for_path("a.glb").map(|f| f.id), Some("gltf"));
@@ -453,15 +470,17 @@ mod tests {
         assert!(for_path("nodot").is_none());
     }
 
-    /// cadmpeg is pure Rust now, so the browser build offers its rows too; `native = false`
-    /// stays for a host that cannot build it.
     #[test]
-    fn a_host_without_cadmpeg_leaves_its_rows_out() {
-        assert!(importable(true).any(|f| f.id == "fcstd"));
-        assert!(open_extensions(true).contains(&"fcstd"));
-        assert!(open_extensions(true).contains(&"3dm"));
-        assert!(importable(false).all(|f| f.id != "fcstd" && f.id != "3dm"));
-        assert!(!open_extensions(false).contains(&"fcstd"));
+    fn browser_keeps_open_formats_and_excludes_native_solidworks() {
+        for ext in ["fcstd", "3dm"] {
+            assert!(open_extensions(false).contains(&ext));
+            assert!(open_extensions(true).contains(&ext));
+        }
+        for ext in ["sldprt", "sldasm"] {
+            assert!(!open_extensions(false).contains(&ext));
+            assert!(open_extensions(true).contains(&ext));
+        }
+        assert!(importable(false).all(|f| f.import.as_ref().is_some_and(|i| !i.native_only)));
         assert!(open_extensions(false).contains(&"igs"));
     }
 
@@ -473,9 +492,13 @@ mod tests {
         assert_eq!(find("SolidCraft design (container or JSON)"), vec![crate::DESIGN_EXT, crate::LEGACY_DESIGN_EXT, "json"]);
         assert_eq!(find("STEP"), vec!["step", "stp"]);
         assert_eq!(find("IGES"), vec!["igs", "iges"]);
-        assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);
+        assert_eq!(find("FreeCAD"), vec!["fcstd"]);
+        assert_eq!(find("Rhino"), vec!["3dm"]);
+        assert_eq!(find("SolidWorks"), vec!["sldprt", "sldasm"]);
         assert_eq!(find("Mesh (3MF, STL, OBJ, glTF)"), vec!["stl", "3mf", "obj", "glb", "gltf"]);
         assert_eq!(find("Sketch drawings (DXF, SVG)"), vec!["dxf", "svg"]);
-        assert!(import_filters(false).iter().all(|(l, _)| *l != "FreeCAD and Rhino"));
+        assert!(import_filters(false).iter().all(|(l, _)| *l != "SolidWorks"));
+        assert!(import_filters(false).iter().any(|(l, _)| *l == "FreeCAD"));
+        assert!(import_filters(false).iter().any(|(l, _)| *l == "Rhino"));
     }
 }
