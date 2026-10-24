@@ -1,6 +1,7 @@
 //! Real keyboard input must stay inside the dimensions of the shape being drawn.
 
 use serde_json::json;
+use solidcraft_engine::sketch::CurveIdx;
 
 use super::{BOX, in_view};
 use crate::scenario::Harness;
@@ -147,7 +148,7 @@ fn clicking_a_parameter_suggestion_fills_the_length_box() {
     let state = h.app.session.world_state();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sk.curves.len(), 1);
-    let length = sk.shape(0).map(|s| match s {
+    let length = sk.shape(CurveIdx(0)).map(|s| match s {
         solidcraft_engine::sketch::Shape::Line { a, b } => a.dist(b),
         _ => 0.0,
     });
@@ -165,8 +166,8 @@ fn two_point_circle_takes_a_typed_diameter() {
     let state = h.app.session.world_state();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
-    assert!(sk.radius(0).is_some_and(|r| (r - 15.0).abs() < 1e-6), "{:?}", sk.radius(0));
-    let c = sk.center(0).unwrap();
+    assert!(sk.radius(CurveIdx(0)).is_some_and(|r| (r - 15.0).abs() < 1e-6), "{:?}", sk.radius(CurveIdx(0)));
+    let c = sk.center(CurveIdx(0)).unwrap();
     // From the first point (the origin) toward the cursor at (20, 10).
     let dir = solidcraft_engine::geom::Vec2::new(20.0, 10.0).normalized().unwrap();
     assert!((c - dir * 15.0).len() < 1e-6, "{c:?}");
@@ -322,13 +323,15 @@ fn a_line_end_on_a_circle_within_the_axis_snap_lands_on_the_quadrant_the_preview
         let sk = &st.sketch(sid).unwrap().sketch;
         let (line, a, b) = sk
             .curves
-            .iter()
-            .enumerate()
+            .iter_enumerated()
             .find_map(|(i, c)| if let CurveKind::Line { a, b } = c.kind { Some((i, a, b)) } else { None })
             .unwrap_or_else(|| panic!("{deg}: no line, {:?}", h.app.status));
         assert!(sk.point(a).unwrap().dist(Vec2::ZERO) < 1e-9, "{deg}");
         assert!(sk.point(b).unwrap().dist(end) < 1e-9, "{deg}: placed at {:?}", sk.point(b));
-        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c: 0 } if p == b)), "{deg}: end not on the circle");
+        assert!(
+            sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c: CurveIdx(0) } if p == b)),
+            "{deg}: end not on the circle"
+        );
         let axis = |k: &ConstraintKind| {
             if horizontal {
                 matches!(k, ConstraintKind::Horizontal { l } if *l == line)

@@ -420,7 +420,7 @@ mod tests {
         run(&mut s, "sketch.create", json!({"plane": "XY"}));
         run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
         let sk = s.active_sketch.unwrap();
-        let id = s.model.state().sketch(sk).unwrap().sketch.curves[0].id.clone();
+        let id = s.model.state().sketch(sk).unwrap().sketch.curves.first().unwrap().id.clone();
         run(&mut s, "selection.delete", json!({"items": [{"type": "sketch_curve", "id": id}]}));
         assert!(s.model.state().sketch(sk).unwrap().sketch.curves.is_empty());
     }

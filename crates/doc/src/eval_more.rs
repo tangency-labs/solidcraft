@@ -519,8 +519,7 @@ pub(super) fn sheet_eval(
                 sh.base_curves = ss
                     .sketch
                     .curves
-                    .iter()
-                    .enumerate()
+                    .iter_enumerated()
                     .filter(|(_, c)| !c.construction)
                     .flat_map(|(ci, c)| {
                         ss.sketch.segs(ci).into_iter().filter_map(move |sg| match sg {

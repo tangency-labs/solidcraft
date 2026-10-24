@@ -22,7 +22,7 @@ fn fan(rnd: &mut Lcg, k: usize, lo: f64, hi: f64, on: bool) -> (usize, usize) {
     let (mut failed, mut mirrored, mut kept) = (0, 0, 0);
     while kept < 500 {
         let mut sk = Sketch::new();
-        let ids: Vec<usize> = (0..k)
+        let ids: Vec<PointIdx> = (0..k)
             .map(|i| {
                 let t = i as f64 / k as f64 * std::f64::consts::TAU;
                 let r = 30.0 + rnd.next() * 10.0;
@@ -154,11 +154,11 @@ fn triangle_edits_keep_the_apex_side_far_from_the_origin() {
 /// Two triangles joined by three links: no point beyond the first triangle has two loci on
 /// placed points, so the seed must leave them to LM (projecting each onto its one locus would
 /// freeze a point that still has a degree of freedom).
-fn linkage() -> (Sketch, Vec<usize>) {
+fn linkage() -> (Sketch, Vec<PointIdx>) {
     const TRUE: [(f64, f64); 6] = [(0.0, 0.0), (40.0, 0.0), (18.0, 30.0), (8.0, 55.0), (52.0, 48.0), (30.0, 80.0)];
     const PAIRS: [(usize, usize); 9] = [(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3), (0, 3), (1, 4), (2, 5)];
     let mut sk = Sketch::new();
-    let ids: Vec<usize> = TRUE
+    let ids: Vec<PointIdx> = TRUE
         .iter()
         .enumerate()
         .map(|(i, p)| {
@@ -236,11 +236,11 @@ fn edited_linkage_the_seeded_start_alone_cannot_solve() {
 fn triconnected_linkage_still_solves_exactly() {
     let (mut sk, ids) = linkage();
     let s = seed_of(&sk);
-    assert_eq!(s.placed_by[ids[0]], Some(Placement::Given));
-    assert!(matches!(s.placed_by[ids[1]], Some(Placement::TwoLoci { transversal: true, .. })));
-    assert!(matches!(s.placed_by[ids[2]], Some(Placement::TwoLoci { transversal: true, .. })));
+    assert_eq!(s.placed_by[ids[0].0], Some(Placement::Given));
+    assert!(matches!(s.placed_by[ids[1].0], Some(Placement::TwoLoci { transversal: true, .. })));
+    assert!(matches!(s.placed_by[ids[2].0], Some(Placement::TwoLoci { transversal: true, .. })));
     for &p in &ids[3..] {
-        assert_eq!(s.placed_by[p], None, "point {p} has one locus only");
+        assert_eq!(s.placed_by[p.0], None, "point {p} has one locus only");
     }
     let rep = solve(&mut sk);
     assert!(rep.ok(), "{rep:?}");
@@ -262,7 +262,7 @@ fn triconnected_linkage_still_solves_exactly() {
 fn grid(n: usize) -> Sketch {
     let mut sk = Sketch::new();
     let mut rnd = Lcg(12345);
-    let mut id = vec![vec![0; n]; n];
+    let mut id = vec![vec![PointIdx::ORIGIN; n]; n];
     for (r, row) in id.iter_mut().enumerate() {
         for (c, slot) in row.iter_mut().enumerate() {
             let j = if r == 0 && c == 0 { v(0.0, 0.0) } else { v(rnd.next() * 2.0 - 1.0, rnd.next() * 2.0 - 1.0) };
@@ -322,14 +322,14 @@ fn constructed_grid_leaves_nothing_to_lm() {
 #[test]
 fn lm_iterates_on_what_the_construction_leaves() {
     let mut sk = grid(8);
-    let corner = sk.points.len() - 1;
+    let corner = PointIdx(sk.points.len() - 1);
     let q = sk.add_point(sk.points[corner].pos + v(7.0, 0.0), None).unwrap();
     sk.add_constraint(ConstraintKind::Distance { p: corner, q, value: 5.0 }, None).unwrap();
     crate::solver::lm_vars::take();
     let rep = seeded(true, || solve(&mut sk.clone()));
     assert_eq!(crate::solver::lm_vars::take(), 2, "only the hanging point");
     assert!(rep.ok() && rep.dof == 1, "{rep:?}");
-    assert!(!rep.point_determined[q] && rep.point_determined[corner]);
+    assert!(!rep.point_determined[q.0] && rep.point_determined[corner.0]);
     // The outcome is the one of the unseeded solve, which iterates on every point.
     solve(&mut sk);
 }
@@ -340,7 +340,7 @@ fn lm_iterates_on_what_the_construction_leaves() {
 #[test]
 fn a_failed_pinned_solve_is_retried_once() {
     let mut sk = grid(4);
-    let corner = sk.points.len() - 1;
+    let corner = PointIdx(sk.points.len() - 1);
     let q = sk.add_point(sk.points[corner].pos + v(7.0, 0.0), None).unwrap();
     sk.add_constraint(ConstraintKind::Distance { p: corner, q, value: 5.0 }, None).unwrap();
     sk.add_constraint(ConstraintKind::Distance { p: corner, q, value: 9.0 }, None).unwrap();
@@ -351,7 +351,7 @@ fn a_failed_pinned_solve_is_retried_once() {
 }
 
 /// Move point `q` to `to` holding it, as a drag does; `reference` from before the move.
-fn drag(sk: &mut Sketch, q: usize, to: Vec2, with_reference: bool) -> bool {
+fn drag(sk: &mut Sketch, q: PointIdx, to: Vec2, with_reference: bool) -> bool {
     let before: Vec<Vec2> = sk.points.iter().map(|p| p.pos).collect();
     let mut t = sk.clone();
     t.points[q].pos = to;
@@ -450,7 +450,7 @@ fn one_jump_drag_keeps_an_equal_linked_elbow() {
 }
 
 /// A fillet in a corner: L1 horizontal from a fixed end, arc tangent to L1 and L2, radius 5.
-fn fillet() -> (Sketch, usize, usize, usize) {
+fn fillet() -> (Sketch, PointIdx, PointIdx, PointIdx) {
     let mut sk = Sketch::new();
     let l1 = sk.add_line(v(40.0, 0.0), v(5.0, 0.0), None, None, None).unwrap();
     let (s1, e1) = sk.curves[l1].kind.ends().unwrap();
@@ -496,17 +496,17 @@ fn hostile_input_neither_panics_nor_changes_the_report() {
         let mut sk = Sketch::new();
         let a = sk.add_point(v(10.0, 0.0), None).unwrap();
         let b = sk.add_point(v(5.0, 8.0), None).unwrap();
-        let l = sk.add_line_pts(0, a, None).unwrap();
+        let l = sk.add_line_pts(PointIdx::ORIGIN, a, None).unwrap();
         sk.add_constraint(ConstraintKind::Horizontal { l }, None).unwrap();
-        sk.add_constraint(ConstraintKind::Distance { p: 0, q: a, value: 10.0 }, None).unwrap();
-        sk.add_constraint(ConstraintKind::Distance { p: 0, q: b, value: 9.0 }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Distance { p: PointIdx::ORIGIN, q: a, value: 10.0 }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Distance { p: PointIdx::ORIGIN, q: b, value: 9.0 }, None).unwrap();
         sk.add_constraint(ConstraintKind::Distance { p: a, q: b, value: 9.0 }, None).unwrap();
         (sk, a, b, l)
     };
     let push = |sk: &mut Sketch, kind: ConstraintKind| {
         sk.constraints.push(Constraint { id: format!("h{}", sk.constraints.len()), kind, param: None, driven: false, text: None })
     };
-    let cases: Vec<Box<dyn Fn(&mut Sketch, usize, usize, usize)>> = vec![
+    let cases: Vec<Box<dyn Fn(&mut Sketch, PointIdx, PointIdx, CurveIdx)>> = vec![
         Box::new(|sk, _, _, _| sk.constraints[1].kind.set_value(f64::NAN)),
         Box::new(|sk, _, _, _| sk.constraints[2].kind.set_value(f64::INFINITY)),
         Box::new(|sk, _, _, _| sk.constraints[3].kind.set_value(1e300)),
@@ -515,9 +515,9 @@ fn hostile_input_neither_panics_nor_changes_the_report() {
         Box::new(|sk, _, b, _| sk.points[b].pos = v(f64::NAN, 1.0)),
         Box::new(|sk, a, _, _| sk.points[a].pos = v(f64::INFINITY, 0.0)),
         Box::new(|sk, _, b, _| sk.points[b].pos = v(1e300, -1e300)),
-        Box::new(move |sk, _, b, _| push(sk, ConstraintKind::Distance { p: b, q: 999, value: 3.0 })),
-        Box::new(move |sk, a, _, _| push(sk, ConstraintKind::DistanceX { p: a, q: usize::MAX, value: 3.0 })),
-        Box::new(move |sk, _, _, _| push(sk, ConstraintKind::Horizontal { l: 77 })),
+        Box::new(move |sk, _, b, _| push(sk, ConstraintKind::Distance { p: b, q: PointIdx(999), value: 3.0 })),
+        Box::new(move |sk, a, _, _| push(sk, ConstraintKind::DistanceX { p: a, q: PointIdx(usize::MAX), value: 3.0 })),
+        Box::new(move |sk, _, _, _| push(sk, ConstraintKind::Horizontal { l: CurveIdx(77) })),
         Box::new(move |sk, _, b, _| push(sk, ConstraintKind::Coincident { p: b, q: b })),
         Box::new(move |sk, _, _, l| push(sk, ConstraintKind::Length { l, value: f64::NAN })),
         Box::new(move |sk, a, b, _| push(sk, ConstraintKind::DistanceY { p: a, q: b, value: f64::NEG_INFINITY })),
@@ -532,7 +532,7 @@ fn hostile_input_neither_panics_nor_changes_the_report() {
         assert!(s.pos.iter().flatten().all(|p| p.is_finite()), "case {i}: {s:?}");
         let n = sk.points.len();
         for reference in [None, Some(vec![Vec2::ZERO; 1]), Some(vec![v(f64::NAN, f64::INFINITY); n]), Some(vec![Vec2::ZERO; n + 3])] {
-            let hold = Hold { points: vec![usize::MAX], radii: vec![usize::MAX] };
+            let hold = Hold { points: vec![PointIdx(usize::MAX)], radii: vec![CurveIdx(usize::MAX)] };
             let mut t = sk.clone();
             match &reference {
                 Some(r) => solve_with(&mut t, &hold, Some(r), Analysis::Full, None),
@@ -559,8 +559,8 @@ fn points_out_of_dependency_order_are_seeded() {
     sk.add_constraint(ConstraintKind::Distance { p: a, q: d, value: 28.0 }, None).unwrap();
     sk.add_constraint(ConstraintKind::Distance { p: c, q: d, value: 30.0 }, None).unwrap();
     let s = seed_of(&sk);
-    assert!(matches!(s.placed_by[c], Some(Placement::TwoLoci { transversal: true, .. })), "{s:?}");
-    assert_eq!(s.placed_by[d], Some(Placement::TwoLoci { a, b: c, transversal: true }), "{s:?}");
+    assert!(matches!(s.placed_by[c.0], Some(Placement::TwoLoci { transversal: true, .. })), "{s:?}");
+    assert_eq!(s.placed_by[d.0], Some(Placement::TwoLoci { a: a.0, b: c.0, transversal: true }), "{s:?}");
 }
 
 /// Tangency and concentricity are judged on the loci's own size, not on how far from the
@@ -580,8 +580,8 @@ fn far_from_the_origin_a_flat_triangle_still_has_two_branches() {
     sk.add_constraint(ConstraintKind::Distance { p: a, q: c, value: r }, None).unwrap();
     sk.add_constraint(ConstraintKind::Distance { p: b, q: c, value: r }, None).unwrap();
     let s = seed_of(&sk);
-    assert_eq!(s.placed_by[c], Some(Placement::TwoLoci { a, b, transversal: true }));
-    assert!(s.pos[c].unwrap().dist(o + v(20.0, 0.05)) < 1e-6, "{:?}", s.pos[c]);
+    assert_eq!(s.placed_by[c.0], Some(Placement::TwoLoci { a: a.0, b: b.0, transversal: true }));
+    assert!(s.pos[c.0].unwrap().dist(o + v(20.0, 0.05)) < 1e-6, "{:?}", s.pos[c.0]);
 
     // Circles about centres 1 mm apart, 1e6 mm from the origin, are not concentric.
     let o = v(1e6, 1e6);
@@ -595,8 +595,8 @@ fn far_from_the_origin_a_flat_triangle_still_has_two_branches() {
     sk.add_constraint(ConstraintKind::Distance { p: a, q: c, value: 10.0 }, None).unwrap();
     sk.add_constraint(ConstraintKind::Distance { p: b, q: c, value: 10.0 }, None).unwrap();
     let s = seed_of(&sk);
-    assert_eq!(s.placed_by[c], Some(Placement::TwoLoci { a, b, transversal: true }));
-    assert!(s.pos[c].unwrap().dist(o + v(0.5, -(100.0f64 - 0.25).sqrt())) < 1e-6, "{:?}", s.pos[c]);
+    assert_eq!(s.placed_by[c.0], Some(Placement::TwoLoci { a: a.0, b: b.0, transversal: true }));
+    assert!(s.pos[c.0].unwrap().dist(o + v(0.5, -(100.0f64 - 0.25).sqrt())) < 1e-6, "{:?}", s.pos[c.0]);
 }
 
 /// Loci that only touch leave the point where it was: the solve is exactly the unseeded one.
@@ -612,7 +612,7 @@ fn touching_loci_are_left_to_lm() {
     sk.add_constraint(ConstraintKind::Distance { p: a, q: c, value: 15.0 }, None).unwrap();
     sk.add_constraint(ConstraintKind::Distance { p: b, q: c, value: 25.0 }, None).unwrap();
     let s = seed_of(&sk);
-    assert_eq!(s.placed_by[c], Some(Placement::TwoLoci { a, b, transversal: false }));
+    assert_eq!(s.placed_by[c.0], Some(Placement::TwoLoci { a: a.0, b: b.0, transversal: false }));
     let (mut on, mut off) = (sk.clone(), sk.clone());
     let with = seeded(true, || solve(&mut on));
     let without = seeded(false, || solve(&mut off));
@@ -625,10 +625,10 @@ fn touching_loci_are_left_to_lm() {
 /// decomposition (none has two placed neighbours), and S by propagation again (level with P,
 /// under Q: relations the decomposition does not combine). Returns the sketch and
 /// [O1, F, O2, P, Q, R, S].
-fn bracket_chain() -> (Sketch, [usize; 7]) {
+fn bracket_chain() -> (Sketch, [PointIdx; 7]) {
     let truth = [v(0.0, 0.0), v(60.0, 40.0), v(60.0, 0.0), v(10.0, 30.0), v(45.0, 35.0), v(25.0, 55.0), v(45.0, 30.0)];
     let mut sk = Sketch::new();
-    let mut ids = [0; 7];
+    let mut ids = [PointIdx::ORIGIN; 7];
     for (i, t) in truth.iter().enumerate() {
         // The free points start a few mm off, as after an edit.
         let off = if i < 2 { v(0.0, 0.0) } else { v(1.5 * (i as f64 - 4.0), 1.0 - 0.5 * i as f64) };
@@ -640,7 +640,7 @@ fn bracket_chain() -> (Sketch, [usize; 7]) {
     }
     sk.add_constraint(ConstraintKind::HorizontalPoints { p: o1, q: o2 }, None).unwrap();
     sk.add_constraint(ConstraintKind::VerticalPoints { p: f, q: o2 }, None).unwrap();
-    let at = |x: usize| truth[ids.iter().position(|i| *i == x).unwrap()];
+    let at = |x: PointIdx| truth[ids.iter().position(|i| *i == x).unwrap()];
     sk.add_constraint(ConstraintKind::HorizontalPoints { p, q: s }, None).unwrap();
     sk.add_constraint(ConstraintKind::VerticalPoints { p: q, q: s }, None).unwrap();
     for (a, b) in [(p, q), (q, r), (p, r), (o1, p), (o1, r), (o2, q)] {
@@ -654,13 +654,13 @@ fn propagation_and_decomposition_interleave() {
     let (mut sk, [o1, f, o2, p, q, r, s]) = bracket_chain();
     let out = seed_of(&sk);
     for x in [o1, f] {
-        assert_eq!(out.placed_by[x], Some(Placement::Given));
+        assert_eq!(out.placed_by[x.0], Some(Placement::Given));
     }
-    assert!(matches!(out.placed_by[o2], Some(Placement::TwoLoci { transversal: true, .. })), "{out:?}");
+    assert!(matches!(out.placed_by[o2.0], Some(Placement::TwoLoci { transversal: true, .. })), "{out:?}");
     for x in [p, q, r] {
-        assert_eq!(out.placed_by[x], Some(Placement::Cluster), "point {x}: {out:?}");
+        assert_eq!(out.placed_by[x.0], Some(Placement::Cluster), "point {x}: {out:?}");
     }
-    assert_eq!(out.placed_by[s], Some(Placement::TwoLoci { a: p, b: q, transversal: true }), "{out:?}");
+    assert_eq!(out.placed_by[s.0], Some(Placement::TwoLoci { a: p.0, b: q.0, transversal: true }), "{out:?}");
     let rep = solve(&mut sk);
     assert!(rep.ok() && rep.dof == 0, "{rep:?}");
     assert_eq!(rep.iterations, 0, "every point constructed exactly");
@@ -688,7 +688,7 @@ fn touching_cluster_merges_are_left_to_lm() {
     };
     let (sk, q, r) = build(32.0);
     let out = seed_of(&sk);
-    assert_eq!((out.placed_by[q], out.placed_by[r]), (None, None), "{out:?}");
+    assert_eq!((out.placed_by[q.0], out.placed_by[r.0]), (None, None), "{out:?}");
     let (mut on, mut off) = (sk.clone(), sk.clone());
     let with = seeded(true, || solve(&mut on));
     let without = seeded(false, || solve(&mut off));
@@ -697,7 +697,7 @@ fn touching_cluster_merges_are_left_to_lm() {
     // Shorter: the triangle turns onto it at a crossing and is placed.
     let (sk, q, r) = build(31.0);
     let out = seed_of(&sk);
-    assert_eq!((out.placed_by[q], out.placed_by[r]), (Some(Placement::Cluster), Some(Placement::Cluster)), "{out:?}");
+    assert_eq!((out.placed_by[q.0], out.placed_by[r.0]), (Some(Placement::Cluster), Some(Placement::Cluster)), "{out:?}");
 }
 
 /// The seed does not depend on the order of the constraints.
@@ -727,7 +727,7 @@ fn short_reference_covers_its_points_and_long_one_is_ignored() {
         sk.add_constraint(ConstraintKind::Distance { p: p2, q: p3, value: 20.0 }, None).unwrap();
         (sk, p1, p2, p3)
     };
-    let side = |sk: &Sketch, p1: usize, p2: usize, p3: usize| orientation(sk.points[p1].pos, sk.points[p3].pos, sk.points[p2].pos);
+    let side = |sk: &Sketch, p1: PointIdx, p2: PointIdx, p3: PointIdx| orientation(sk.points[p1].pos, sk.points[p3].pos, sk.points[p2].pos);
     let hand_moved = |extra: usize| {
         let (mut sk, p1, p2, p3) = arm();
         let before: Vec<Vec2> = sk.points.iter().map(|p| p.pos).collect();
@@ -749,7 +749,7 @@ fn short_reference_covers_its_points_and_long_one_is_ignored() {
 /// [`bracket_chain`] with a second bracket on S (placed by propagation after the first
 /// decomposition) and Q: P' Q' R' rigid, |S P'|, |S R'|, |Q Q'|. Returns the sketch and
 /// [P', Q', R'].
-fn two_stage_bracket() -> (Sketch, [usize; 3]) {
+fn two_stage_bracket() -> (Sketch, [PointIdx; 3]) {
     let (mut sk, [.., q, _, s]) = bracket_chain();
     let truth = [v(70.0, 20.0), v(85.0, 40.0), v(65.0, 50.0)];
     let ids = truth.map(|t| sk.add_point(t + v(1.0, -1.5), None).unwrap());
@@ -775,7 +775,7 @@ fn the_decomposition_graph_is_reused_across_rounds() {
     let out = seed_of(&sk);
     assert_eq!(crate::decompose::builds() - builds, 1, "one graph for both rounds");
     for x in ids {
-        assert_eq!(out.placed_by[x], Some(Placement::Cluster), "point {x}: {out:?}");
+        assert_eq!(out.placed_by[x.0], Some(Placement::Cluster), "point {x}: {out:?}");
     }
     let rep = solve(&mut sk);
     assert!(rep.ok() && rep.dof == 0 && rep.iterations == 0, "{rep:?}");
@@ -858,7 +858,7 @@ fn conflicting_readings_of_one_pair_do_not_depend_on_order() {
     assert_eq!(seed_of(&sk), forward);
     // Neither end is seeded by a cluster, nor floated with one (P with the triangle O1 P R).
     for x in [p, q] {
-        assert!(!matches!(forward.placed_by[x], Some(Placement::Cluster | Placement::Float)), "point {x}: {forward:?}");
+        assert!(!matches!(forward.placed_by[x.0], Some(Placement::Cluster | Placement::Float)), "point {x}: {forward:?}");
     }
 }
 
@@ -877,7 +877,7 @@ fn inconsistent_offsets_are_not_placed() {
     sk.add_constraint(ConstraintKind::Distance { p: a, q: c, value: 60.0 }, None).unwrap();
     sk.add_constraint(ConstraintKind::Distance { p: b, q: c, value: 50.0 }, None).unwrap();
     let out = seed_of(&sk);
-    assert_eq!((out.placed_by[b], out.placed_by[c]), (None, None), "{out:?}");
+    assert_eq!((out.placed_by[b.0], out.placed_by[c.0]), (None, None), "{out:?}");
 }
 
 /// A given point is a constant for the solve: never placed, even when out of range.
@@ -889,7 +889,7 @@ fn given_points_are_never_placed() {
     for p in [a, b] {
         sk.add_constraint(ConstraintKind::Fix { p }, None).unwrap();
     }
-    let g = sk.points.len();
+    let g = PointIdx(sk.points.len());
     sk.points.push(SPoint { id: "far".into(), pos: v(2e9, 0.0), fixed: true, link: None, exprs: None });
     let d = sk.add_point(v(20.0, 30.0), None).unwrap();
     let push = |sk: &mut Sketch, kind: ConstraintKind| {
@@ -901,10 +901,10 @@ fn given_points_are_never_placed() {
     push(&mut sk, ConstraintKind::Distance { p: g, q: d, value: 30.0 });
     push(&mut sk, ConstraintKind::Distance { p: a, q: d, value: 36.0 });
     let mask = given(&sk);
-    assert!(mask[g]);
+    assert!(mask[g.0]);
     let out = seed(&sk, &mask, None, true, &points_on_curves(&sk), &mut Budget::full());
-    assert_eq!((out.pos[g], out.placed_by[g]), (None, None), "{out:?}");
-    assert_eq!(out.placed_by[d], None, "nothing is built on it: {out:?}");
+    assert_eq!((out.pos[g.0], out.placed_by[g.0]), (None, None), "{out:?}");
+    assert_eq!(out.placed_by[d.0], None, "nothing is built on it: {out:?}");
 }
 
 /// A component the seed did not move is solved once, also when it fails: the plain-start
@@ -941,14 +941,14 @@ fn an_unseeded_failing_component_is_not_solved_twice() {
 // Floating clusters: rigid clusters that are free or pinned at a single placed point.
 
 /// Distances between pairs of points, each its current length times `scale`.
-fn dimension(sk: &mut Sketch, pairs: &[(usize, usize, f64)]) {
+fn dimension(sk: &mut Sketch, pairs: &[(PointIdx, PointIdx, f64)]) {
     for &(p, q, scale) in pairs {
         let value = sk.points[p].pos.dist(sk.points[q].pos) * scale;
         sk.add_constraint(ConstraintKind::Distance { p, q, value }, None).unwrap();
     }
 }
 
-fn points(sk: &mut Sketch, at: &[Vec2]) -> Vec<usize> {
+fn points(sk: &mut Sketch, at: &[Vec2]) -> Vec<PointIdx> {
     at.iter().map(|p| sk.add_point(*p, None).unwrap()).collect()
 }
 
@@ -969,7 +969,7 @@ fn a_floated_pose_anchors_nothing() {
     dimension(&mut sk, &[(a[1], b[1], 1.0), (a[2], b[2], 1.0)]);
     let out = seed_of(&sk);
     for x in [a[1], a[2], b[1], b[2]] {
-        assert_eq!(out.placed_by[x], Some(Placement::Float), "point {x}: {out:?}");
+        assert_eq!(out.placed_by[x.0], Some(Placement::Float), "point {x}: {out:?}");
     }
     let rep = solve(&mut sk);
     assert!(rep.ok() && rep.dof == 0, "{rep:?}");
@@ -993,9 +993,9 @@ fn floats_are_pinned_only_at_accepted_points() {
     let t = points(&mut sk, &[v(5.0, 40.0), v(0.0, 33.0)]);
     dimension(&mut sk, &[(p, t[0], 1.0), (t[0], t[1], 1.2), (t[1], p, 1.0)]);
     let out = seed_of(&sk);
-    assert_eq!(out.placed_by[p], None, "{out:?}");
+    assert_eq!(out.placed_by[p.0], None, "{out:?}");
     for x in t {
-        assert_eq!(out.placed_by[x], None, "point {x}: {out:?}");
+        assert_eq!(out.placed_by[x.0], None, "point {x}: {out:?}");
     }
 }
 
@@ -1010,7 +1010,7 @@ fn a_tie_that_misses_floats_its_cluster() {
     sk.add_constraint(ConstraintKind::PointLineDistance { p: c, l, value: 10.0 }, None).unwrap();
     let out = seed_of(&sk);
     for x in [a, b, c] {
-        assert_eq!(out.placed_by[x], Some(Placement::Float), "point {x}: {out:?}");
+        assert_eq!(out.placed_by[x.0], Some(Placement::Float), "point {x}: {out:?}");
     }
     let rep = solve(&mut sk);
     assert!(rep.ok() && rep.dof == 3 && rep.iterations == 0, "{rep:?}");
@@ -1068,7 +1068,7 @@ fn solved_floating_parts_are_not_floated() {
     let out = seed_of(&sk);
     let work = crate::decompose::last_work();
     for x in &ids[2..] {
-        assert_eq!(out.placed_by[*x], Some(Placement::Cluster), "point {x}");
+        assert_eq!(out.placed_by[x.0], Some(Placement::Cluster), "point {x}");
     }
     assert!(out.placed_by[1..floating].iter().all(Option::is_none));
     assert!(work < 1_000_000, "{work}");
@@ -1082,8 +1082,8 @@ fn an_arc_follows_its_constructed_centre() {
     let mut sk = Sketch::new();
     let arc = sk.add_arc(v(1.0, 1.0), v(1.0, 7.0), v(1.0, -5.0), [None, None, None], None).unwrap();
     let CurveKind::Arc { c, a, b } = sk.curves[arc].kind else { panic!() };
-    sk.add_constraint(ConstraintKind::Coincident { p: c, q: 0 }, None).unwrap();
-    assert!(solve_holding(&mut sk, &Hold { points: vec![0], radii: vec![] }).ok());
+    sk.add_constraint(ConstraintKind::Coincident { p: c, q: PointIdx::ORIGIN }, None).unwrap();
+    assert!(solve_holding(&mut sk, &Hold { points: vec![PointIdx::ORIGIN], radii: vec![] }).ok());
     for (p, want) in [(c, v(0.0, 0.0)), (a, v(0.0, 6.0)), (b, v(0.0, -6.0))] {
         assert!(sk.points[p].pos.dist(want) < 1e-9, "{:?} vs {want:?}", sk.points[p].pos);
     }

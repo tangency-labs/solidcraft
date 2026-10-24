@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, Sketch};
+use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, PointIdx, Sketch};
 
 use crate::{Sel, Session};
 
@@ -61,9 +61,9 @@ fn copy_paste_keeps_internal_constraints_and_dimensions_and_drops_outside_ones()
     // The horizontal/vertical, coincident-corner and parallel constraints and the three dimensions
     // came along; the coincidence with the origin did not.
     let new_cons: Vec<_> = sk.constraints.iter().filter(|c| !before.constraints.iter().any(|b| b.id == c.id)).collect();
-    let internal = before.constraints.iter().filter(|c| !c.kind.refers_to_point(0)).count();
+    let internal = before.constraints.iter().filter(|c| !c.kind.refers_to_point(PointIdx::ORIGIN)).count();
     assert_eq!(new_cons.len(), internal, "{new_cons:#?}");
-    assert!(!new_cons.iter().any(|c| c.kind.refers_to_point(0)));
+    assert!(!new_cons.iter().any(|c| c.kind.refers_to_point(PointIdx::ORIGIN)));
     let dims: Vec<_> = new_cons.iter().filter(|c| c.kind.is_dimension()).collect();
     assert_eq!(dims.len(), 3);
     // Each pasted dimension has its own parameter.
@@ -185,7 +185,7 @@ fn paste_into_another_sketch_lands_on_its_plane() {
     let p = pos(sk, &pasted[0]);
     assert!(p[0].dist(Vec2::new(0.0, 0.0)) < 1e-6 && p[1].dist(Vec2::new(20.0, 0.0)) < 1e-6, "{p:?}");
     assert_eq!(sk.constraints.iter().filter(|c| c.kind.is_dimension()).count(), 3);
-    assert!(!sk.constraints.iter().any(|c| c.kind.refers_to_point(0)));
+    assert!(!sk.constraints.iter().any(|c| c.kind.refers_to_point(PointIdx::ORIGIN)));
     let st = s.world_state();
     let ss = st.sketch(b).unwrap();
     let w = ss.plane.to_world(Vec2::new(20.0, 10.0));

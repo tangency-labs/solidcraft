@@ -17,15 +17,15 @@ use crate::*;
 #[derive(Clone, Copy, Debug)]
 enum Check {
     /// `p` stays on its side of the line through `a` and `b`.
-    Side { p: usize, a: usize, b: usize },
+    Side { p: PointIdx, a: PointIdx, b: PointIdx },
     /// The line from `a` to `b` points within a quarter turn of `d` (where the edit turns it).
-    Toward { a: usize, b: usize, d: Vec2 },
+    Toward { a: PointIdx, b: PointIdx, d: Vec2 },
     /// `p` stays ahead of or behind `a` along the line from `a` to `b`.
-    Along { p: usize, a: usize, b: usize },
+    Along { p: PointIdx, a: PointIdx, b: PointIdx },
     /// The counter-clockwise sweep of the arc `curve` stays in `lo..hi` (radians).
-    Sweep { curve: usize, lo: f64, hi: f64 },
+    Sweep { curve: CurveIdx, lo: f64, hi: f64 },
     /// `p` ends at `at`.
-    At { p: usize, at: Vec2 },
+    At { p: PointIdx, at: Vec2 },
 }
 
 /// A family member: the solved sketch, the dimension edits (constraint index, new value) and
@@ -36,7 +36,7 @@ struct Case {
     checks: Vec<Check>,
 }
 
-fn sweep(sk: &Sketch, curve: usize) -> f64 {
+fn sweep(sk: &Sketch, curve: CurveIdx) -> f64 {
     let CurveKind::Arc { c, a, b } = sk.curves[curve].kind else { return f64::NAN };
     let (c, a, b) = (sk.points[c].pos, sk.points[a].pos, sk.points[b].pos);
     ((b - c).angle() - (a - c).angle()).rem_euclid(std::f64::consts::TAU)
@@ -44,7 +44,7 @@ fn sweep(sk: &Sketch, curve: usize) -> f64 {
 
 /// Does `sk` keep every check (sides as in `before`)?
 fn holds(sk: &Sketch, checks: &[Check], before: &Sketch) -> bool {
-    let p = |i: usize| sk.points[i].pos;
+    let p = |i: PointIdx| sk.points[i].pos;
     checks.iter().all(|c| match *c {
         Check::Side { p: x, a, b } => {
             let side = |s: &Sketch| (s.points[b].pos - s.points[a].pos).cross(s.points[x].pos - s.points[a].pos).signum();
@@ -99,7 +99,7 @@ fn filleted_rectangle(rnd: &mut Lcg, lo: f64, hi: f64) -> Option<Case> {
     let right = sk.add_line(at(w, r[0]), at(w, h - r[1]), None, None, None).unwrap();
     let top = sk.add_line(at(w - r[1], h), at(r[2], h), None, None, None).unwrap();
     let left = sk.add_line(at(0.0, h - r[2]), at(0.0, r[3]), None, None, None).unwrap();
-    let ends = |sk: &Sketch, l: usize| sk.curves[l].kind.ends().unwrap();
+    let ends = |sk: &Sketch, l: CurveIdx| sk.curves[l].kind.ends().unwrap();
     let ((b0, b1), (r0, r1), (t0, t1), (l0, l1)) = (ends(&sk, bottom), ends(&sk, right), ends(&sk, top), ends(&sk, left));
     let corners = [
         (at(w - r[0], r[0]), b1, r0, bottom, right),
@@ -164,7 +164,7 @@ fn slot(rnd: &mut Lcg, lo: f64, hi: f64, overall: bool) -> Option<Case> {
     let (tb, ta) = sk.curves[top].kind.ends().unwrap();
     let arc_b = sk.add_arc(cb, cb - n * r, cb + n * r, [None, Some(bb), Some(tb)], None).unwrap();
     let arc_a = sk.add_arc(ca, ca + n * r, ca - n * r, [None, Some(ta), Some(ba)], None).unwrap();
-    let centre = |sk: &Sketch, a: usize| match sk.curves[a].kind {
+    let centre = |sk: &Sketch, a: CurveIdx| match sk.curves[a].kind {
         CurveKind::Arc { c, .. } => c,
         _ => panic!(),
     };
@@ -562,9 +562,9 @@ fn every_point_of_every_family_is_constructed() {
         for case in sample(&mut rnd, family, 0.5, 2.0, 10) {
             let sk = edited(&case);
             let s = seed_of(&sk);
-            let used: Vec<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
+            let used: Vec<PointIdx> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
             for p in used {
-                assert!(s.placed_by[p].is_some_and(Placement::anchors), "{name}: point {p} ({}) not placed: {s:?}", sk.points[p].id);
+                assert!(s.placed_by[p.0].is_some_and(Placement::anchors), "{name}: point {p} ({}) not placed: {s:?}", sk.points[p].id);
             }
         }
     }
@@ -595,7 +595,7 @@ fn decomposition_grows_clusters_through_lines_and_tangency() {
     for tangent in [false, true] {
         let truth = [v(0.0, 0.0), v(60.0, 0.0), v(10.0, 30.0), v(45.0, 35.0), v(25.0, 55.0)];
         let mut sk = Sketch::new();
-        let ids: Vec<usize> = truth
+        let ids: Vec<PointIdx> = truth
             .iter()
             .enumerate()
             .map(|(i, t)| sk.add_point(*t + if i < 2 { v(0.0, 0.0) } else { v(0.7 * i as f64, -0.4 * i as f64) }, None).unwrap())
@@ -636,7 +636,7 @@ fn decomposition_grows_clusters_through_lines_and_tangency() {
         };
         let out = seed_of(&sk);
         for x in [p, q, r, m] {
-            assert_eq!(out.placed_by[x], Some(Placement::Cluster), "tangent {tangent}, point {x}: {out:?}");
+            assert_eq!(out.placed_by[x.0], Some(Placement::Cluster), "tangent {tangent}, point {x}: {out:?}");
         }
         let rep = solve(&mut sk);
         assert!(rep.ok() && rep.dof == 0 && rep.iterations == 0, "tangent {tangent}: {rep:?}");
@@ -655,7 +655,7 @@ fn a_dimensioned_radius_is_seeded() {
     let sk = edited(&case);
     let s = seed_of(&sk);
     let ConstraintKind::Diameter { c, value } = sk.constraints[1].kind else { panic!() };
-    assert_eq!(s.radius[c], Some(value / 2.0));
+    assert_eq!(s.radius[c.0], Some(value / 2.0));
 }
 
 /// Hostile curve references and values in the constraints the new loci read neither panic
@@ -667,27 +667,27 @@ fn hostile_lines_and_rounds_neither_panic_nor_change_the_report() {
         sk.constraints.push(Constraint { id: format!("h{}", sk.constraints.len()), kind, param: None, driven: false, text: None })
     };
     let cases: Vec<Box<dyn Fn(&mut Sketch)>> = vec![
-        Box::new(|sk| raw(sk, ConstraintKind::Midpoint { p: 1, l: 999 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Midpoint { p: usize::MAX, l: 0 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Symmetric { p: 1, q: 2, l: usize::MAX })),
-        Box::new(|sk| raw(sk, ConstraintKind::Tangent { a: 0, b: 0 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Tangent { a: 2, b: 77 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Radius { c: 2, value: f64::NAN })),
-        Box::new(|sk| raw(sk, ConstraintKind::Radius { c: 2, value: -3.0 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Diameter { c: 0, value: 1e300 })),
-        Box::new(|sk| raw(sk, ConstraintKind::PointOnCurve { p: 1, c: 2 })),
-        Box::new(|sk| raw(sk, ConstraintKind::PointOnCurve { p: 1, c: usize::MAX })),
-        Box::new(|sk| raw(sk, ConstraintKind::PointLineDistance { p: 1, l: 1, value: f64::INFINITY })),
-        Box::new(|sk| raw(sk, ConstraintKind::LineAngle { l: 0, value: f64::NAN })),
-        Box::new(|sk| raw(sk, ConstraintKind::Angle { a: 0, b: 1, value: 1e300, flip: true })),
-        Box::new(|sk| raw(sk, ConstraintKind::Parallel { a: 0, b: 0 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Perpendicular { a: 0, b: 2 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Equal { a: 0, b: 2 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Concentric { a: 2, b: 2 })),
-        Box::new(|sk| raw(sk, ConstraintKind::SlotOverallLength { a: 2, b: 2, value: 5.0 })),
-        Box::new(|sk| raw(sk, ConstraintKind::LinearDiameter { p: 3, l: 0, value: -1.0 })),
-        Box::new(|sk| sk.points[2].pos = v(f64::NAN, 0.0)),
-        Box::new(|sk| sk.points[3].pos = v(1e300, -1e300)),
+        Box::new(|sk| raw(sk, ConstraintKind::Midpoint { p: PointIdx(1), l: CurveIdx(999) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Midpoint { p: PointIdx(usize::MAX), l: CurveIdx(0) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Symmetric { p: PointIdx(1), q: PointIdx(2), l: CurveIdx(usize::MAX) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Tangent { a: CurveIdx(0), b: CurveIdx(0) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Tangent { a: CurveIdx(2), b: CurveIdx(77) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Radius { c: CurveIdx(2), value: f64::NAN })),
+        Box::new(|sk| raw(sk, ConstraintKind::Radius { c: CurveIdx(2), value: -3.0 })),
+        Box::new(|sk| raw(sk, ConstraintKind::Diameter { c: CurveIdx(0), value: 1e300 })),
+        Box::new(|sk| raw(sk, ConstraintKind::PointOnCurve { p: PointIdx(1), c: CurveIdx(2) })),
+        Box::new(|sk| raw(sk, ConstraintKind::PointOnCurve { p: PointIdx(1), c: CurveIdx(usize::MAX) })),
+        Box::new(|sk| raw(sk, ConstraintKind::PointLineDistance { p: PointIdx(1), l: CurveIdx(1), value: f64::INFINITY })),
+        Box::new(|sk| raw(sk, ConstraintKind::LineAngle { l: CurveIdx(0), value: f64::NAN })),
+        Box::new(|sk| raw(sk, ConstraintKind::Angle { a: CurveIdx(0), b: CurveIdx(1), value: 1e300, flip: true })),
+        Box::new(|sk| raw(sk, ConstraintKind::Parallel { a: CurveIdx(0), b: CurveIdx(0) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Perpendicular { a: CurveIdx(0), b: CurveIdx(2) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Equal { a: CurveIdx(0), b: CurveIdx(2) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Concentric { a: CurveIdx(2), b: CurveIdx(2) })),
+        Box::new(|sk| raw(sk, ConstraintKind::SlotOverallLength { a: CurveIdx(2), b: CurveIdx(2), value: 5.0 })),
+        Box::new(|sk| raw(sk, ConstraintKind::LinearDiameter { p: PointIdx(3), l: CurveIdx(0), value: -1.0 })),
+        Box::new(|sk| sk.points[PointIdx(2)].pos = v(f64::NAN, 0.0)),
+        Box::new(|sk| sk.points[PointIdx(3)].pos = v(1e300, -1e300)),
     ];
     for (i, case) in cases.iter().enumerate() {
         let mut c = base();
@@ -708,9 +708,9 @@ fn hostile_lines_and_rounds_neither_panic_nor_change_the_report() {
 fn an_axis_aligned_line_angle_turned_half_a_turn_is_built_along_it() {
     let case = chain(&mut Lcg(31), 1.0, 1.0, 0.0, std::f64::consts::PI).unwrap();
     let sk = edited(&case);
-    let (i0, i1) = sk.curves[0].kind.ends().unwrap();
+    let (i0, i1) = sk.curves[CurveIdx(0)].kind.ends().unwrap();
     let s = seed_of(&sk);
-    let (p0, e1) = (sk.points[i0].pos, s.pos[i1].unwrap_or_else(|| panic!("L1's end unplaced: {s:?}")));
+    let (p0, e1) = (sk.points[i0].pos, s.pos[i1.0].unwrap_or_else(|| panic!("L1's end unplaced: {s:?}")));
     assert!((e1 - p0).dot(Vec2::X) < 0.0, "L1 built along the reference's axis, not its angle: {p0:?} → {e1:?}");
     assert_eq!(run(&case, true), (false, false));
 }
@@ -739,9 +739,9 @@ fn contradictory_levels_still_read_each_line_on_its_own() {
         push(&mut sk, ConstraintKind::Length { l: l2, value: 30.0 });
         push(&mut sk, if perpendicular { ConstraintKind::Perpendicular { a: l1, b: l2 } } else { ConstraintKind::Parallel { a: l1, b: l2 } });
         let s = seed_of(&sk);
-        assert!(s.pos[b].is_some_and(|p| p.dist(v(40.0, 0.0)) < 1e-9), "perpendicular {perpendicular}: {s:?}");
+        assert!(s.pos[b.0].is_some_and(|p| p.dist(v(40.0, 0.0)) < 1e-9), "perpendicular {perpendicular}: {s:?}");
         let want = if perpendicular { v(30.0, 30.0) } else { v(0.0, 60.0) };
-        assert!(s.pos[d].is_some_and(|p| p.dist(want) < 1e-9), "perpendicular {perpendicular}: {s:?}");
+        assert!(s.pos[d.0].is_some_and(|p| p.dist(want) < 1e-9), "perpendicular {perpendicular}: {s:?}");
     }
 }
 
@@ -752,7 +752,7 @@ fn a_dimensioned_radius_is_seeded_with_nothing_given() {
     let circle = sk.add_circle(v(10.0, 5.0), 10.0, None, None).unwrap();
     push(&mut sk, ConstraintKind::Diameter { c: circle, value: 30.0 });
     let s = seed(&sk, &vec![false; sk.points.len()], None, true, &[], &mut Budget::full());
-    assert_eq!(s.radius[circle], Some(15.0));
+    assert_eq!(s.radius[circle.0], Some(15.0));
 }
 
 /// A line's end constrained onto a circle is the tangency's touch point only through the
@@ -774,10 +774,10 @@ fn the_touch_point_comes_from_the_point_on_curve_index() {
     push(&mut sk, ConstraintKind::PointOnCurve { p: b, c: circle });
     let on_curve = crate::solver::points_on_curves(&sk);
     let with = seed(&sk, &given(&sk), None, true, &on_curve, &mut Budget::full());
-    assert!(with.placed_by[c].is_some_and(Placement::anchors), "{with:?}");
-    assert!(with.pos[c].unwrap().dist(v(40.0, 12.0) + d.perp() * 8.0) < 1e-9, "{with:?}");
+    assert!(with.placed_by[c.0].is_some_and(Placement::anchors), "{with:?}");
+    assert!(with.pos[c.0].unwrap().dist(v(40.0, 12.0) + d.perp() * 8.0) < 1e-9, "{with:?}");
     let without = seed(&sk, &given(&sk), None, true, &[], &mut Budget::full());
-    assert!(!without.placed_by[c].is_some_and(Placement::anchors), "{without:?}");
+    assert!(!without.placed_by[c.0].is_some_and(Placement::anchors), "{without:?}");
 }
 
 /// Many pair clusters each grown by one shared point: a fixed point on every line from another
@@ -795,7 +795,7 @@ fn long_growth_chains_are_not_starved() {
         push(&mut sk, ConstraintKind::Fix { p: x });
     }
     push(&mut sk, ConstraintKind::Distance { p, q: z, value: 12.0 });
-    let qs: Vec<usize> = (0..40)
+    let qs: Vec<PointIdx> = (0..40)
         .map(|j| {
             let d = 20.0 + 3.0 * j as f64;
             let q = sk.add_point(o + u * d + v(0.5, -0.4), None).unwrap();
@@ -807,7 +807,7 @@ fn long_growth_chains_are_not_starved() {
         .collect();
     let s = seed_of(&sk);
     for (j, q) in qs.iter().enumerate() {
-        assert_eq!(s.placed_by[*q], Some(Placement::Cluster), "point {j}: {s:?}");
-        assert!(s.pos[*q].is_some_and(|at| at.dist(o + u * (20.0 + 3.0 * j as f64)) < 1e-9), "point {j}: {s:?}");
+        assert_eq!(s.placed_by[q.0], Some(Placement::Cluster), "point {j}: {s:?}");
+        assert!(s.pos[q.0].is_some_and(|at| at.dist(o + u * (20.0 + 3.0 * j as f64)) < 1e-9), "point {j}: {s:?}");
     }
 }

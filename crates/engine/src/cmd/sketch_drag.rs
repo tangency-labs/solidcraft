@@ -15,7 +15,7 @@
 use std::f64::consts::{PI, TAU};
 
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{Analysis, Budget, ConstraintKind, CurveKind, Hold, Sketch, conic_rho_from_point};
+use solidcraft_sketch::{Analysis, Budget, ConstraintKind, CurveIdx, CurveKind, Hold, PointIdx, Sketch, conic_rho_from_point};
 
 use super::{Ent, Left, counted_solve};
 
@@ -42,16 +42,16 @@ const SWEEP_EPS: f64 = 1e-6;
 /// What a drag moves, from where it is (`t = 0`) to where the cursor puts it (`t = 1`).
 enum Path {
     /// Points slide by `d` (a dragged point by its way to the cursor).
-    Slide { pts: Vec<(usize, Vec2)>, d: Vec2 },
+    Slide { pts: Vec<(PointIdx, Vec2)>, d: Vec2 },
     /// A circle's radius or an ellipse's minor radius follows the cursor.
-    Radius { c: usize, from: f64, to: f64 },
+    Radius { c: CurveIdx, from: f64, to: f64 },
     /// An arc's ends move along their rays from the centre `o` to the cursor's radius.
-    ArcRadius { o: Vec2, ends: Vec<(usize, Vec2)>, from: f64, to: f64 },
+    ArcRadius { o: Vec2, ends: Vec<(PointIdx, Vec2)>, from: f64, to: f64 },
     /// A conic's `rho` follows the cursor, read off its position between the chord's midpoint
     /// and the apex (see [`solidcraft_sketch::conic_rho_from_point`]). `a`, `b` and `apex` stay
     /// put; only the curve's fullness changes, the way an ellipse's outline changes its minor
     /// radius rather than sliding the ellipse.
-    ConicRho { c: usize, from: f64, to: f64 },
+    ConicRho { c: CurveIdx, from: f64, to: f64 },
 }
 
 impl Path {
@@ -63,7 +63,7 @@ impl Path {
     }
 
     /// The points the drag moves.
-    fn points(&self) -> impl Iterator<Item = usize> + '_ {
+    fn points(&self) -> impl Iterator<Item = PointIdx> + '_ {
         let pts = match self {
             Path::Slide { pts, .. } | Path::ArcRadius { ends: pts, .. } => pts.as_slice(),
             Path::Radius { .. } | Path::ConicRho { .. } => &[],
@@ -73,7 +73,7 @@ impl Path {
 
     /// Put the dragged geometry where it is at `t` along the drag.
     fn apply(&self, sk: &mut Sketch, t: f64) {
-        let mut set = |q: usize, at: Vec2| {
+        let mut set = |q: PointIdx, at: Vec2| {
             if let Some(pt) = sk.points.get_mut(q) {
                 pt.pos = at;
             }
@@ -144,8 +144,9 @@ pub(super) fn drag_entity(
         ss.report.ok()
             && ss.sketch == *sk
             && match e {
-                Ent::Point(q) => ss.report.point_determined.get(q),
-                Ent::Curve(c) => ss.report.curve_determined.get(c),
+                Ent::Point(q) => ss.report.point_determined.get(q.0),
+
+                Ent::Curve(c) => ss.report.curve_determined.get(c.0),
             }
             .copied()
             .unwrap_or(false)
@@ -382,7 +383,7 @@ pub(super) struct Dragged {
     /// The part of the way from where it was grabbed to the cursor the geometry followed (0..1).
     pub reached: f64,
     /// The points the drag moves (not the fixed ones it holds), where they were before it.
-    pub moving: Vec<(usize, Vec2)>,
+    pub moving: Vec<(PointIdx, Vec2)>,
     pub line_grab: Option<LineGrab>,
     /// Cursor work stopped at its budget after making progress; another frame can continue.
     pub retry: bool,
@@ -401,9 +402,9 @@ impl Dragged {
 /// The grabbed position in a line's frame, retained through rotation and constraint correction.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct LineGrab {
-    curve: usize,
-    a: usize,
-    b: usize,
+    curve: CurveIdx,
+    a: PointIdx,
+    b: PointIdx,
     local: Vec2,
 }
 
@@ -457,8 +458,8 @@ impl Geometry {
     /// turn, or ran from clear of them onto one? An arc already that close may still move.
     /// Measured on the arc's ends as they were before the step (a solve may swap them).
     fn sweep_wrapped(&self, sk: &Sketch) -> bool {
-        let was = |q: usize| self.pos.get(q).copied();
-        let now = |q: usize| sk.point(q);
+        let was = |q: PointIdx| self.pos.get(q.0).copied();
+        let now = |q: PointIdx| sk.point(q);
         let clear = |s: f64| (SWEEP_EPS..=TAU - SWEEP_EPS).contains(&s);
         self.curves.iter().any(|(kind, _)| {
             let CurveKind::Arc { c, a, b } = *kind else { return false };
@@ -541,7 +542,7 @@ fn plan(sk: &Sketch, e: Ent, from: Vec2, to: Vec2) -> Option<(Path, Hold)> {
             }
             let kind = sk.curves.get(c).map(|x| x.kind.clone())?;
             let locked = sk.locked_points();
-            let free = |q: &usize| !locked.get(*q).copied().unwrap_or(true);
+            let free = |q: &PointIdx| !locked.get(q.0).copied().unwrap_or(true);
             // A cursor on the centre leaves the radius as it is.
             let radius_to = |o: Vec2, r: f64| Some(o.dist(to)).filter(|x| *x > 1e-9).unwrap_or(r);
             match kind {
@@ -614,8 +615,8 @@ fn plan_group(sk: &Sketch, e: Ent, with: &[Ent], d: Vec2) -> Option<(Path, Hold)
     hold.radii.sort_unstable();
     hold.radii.dedup();
     let locked = sk.locked_points();
-    let pts: Vec<(usize, Vec2)> =
-        hold.points.iter().filter(|q| !locked.get(**q).copied().unwrap_or(true)).filter_map(|&q| Some((q, sk.point(q)?))).collect();
+    let pts: Vec<(PointIdx, Vec2)> =
+        hold.points.iter().filter(|q| !locked.get(q.0).copied().unwrap_or(true)).filter_map(|&q| Some((q, sk.point(q)?))).collect();
     if pts.is_empty() {
         return None;
     }
@@ -644,9 +645,9 @@ struct Group<'a> {
 
 impl Group<'_> {
     /// Does an entity with these points and curves belong to the group?
-    fn has(&self, points: &[usize], curves: &[usize]) -> bool {
-        let any = |flags: &[bool], ids: &[usize]| ids.iter().any(|i| flags.get(*i).copied().unwrap_or(false));
-        any(self.points, points) || any(self.radii, curves)
+    fn has(&self, points: &[PointIdx], curves: &[CurveIdx]) -> bool {
+        let flag = |flags: &[bool], i: usize| flags.get(i).copied().unwrap_or(false);
+        points.iter().any(|p| flag(self.points, p.0)) || curves.iter().any(|c| flag(self.radii, c.0))
     }
 }
 
@@ -662,14 +663,14 @@ impl Group<'_> {
 fn smallest_size(sk: &Sketch, hold: &Hold, group: Option<Group>) -> f64 {
     // Point lists are built only to test a size smaller than the smallest so far against the
     // group; without a group nothing is built.
-    let in_group = |points: &dyn Fn() -> Vec<usize>, curves: &[usize]| group.is_none_or(|g| g.has(&points(), curves));
+    let in_group = |points: &dyn Fn() -> Vec<PointIdx>, curves: &[CurveIdx]| group.is_none_or(|g| g.has(&points(), curves));
     // A radius is the circle's own variable, or (an arc's) the distance between its points.
-    let radius_in_group = |c: usize| match sk.curves.get(c).map(|x| &x.kind) {
+    let radius_in_group = |c: CurveIdx| match sk.curves.get(c).map(|x| &x.kind) {
         Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. }) => in_group(&Vec::new, &[c]),
         Some(k) => in_group(&|| k.point_ids(), &[]),
         None => false,
     };
-    let line_length = |l: usize| super::line_pts(sk, l).map(|(a, b)| a.dist(b));
+    let line_length = |l: CurveIdx| super::line_pts(sk, l).map(|(a, b)| a.dist(b));
     let points = |k: &ConstraintKind| sk.constraint_points(k);
     let mut min = f64::INFINITY;
     let mut take = |size: f64, counts: &dyn Fn() -> bool| {
@@ -698,7 +699,7 @@ fn smallest_size(sk: &Sketch, hold: &Hold, group: Option<Group>) -> f64 {
             }
         }
     }
-    for c in 0..sk.curves.len() {
+    for c in sk.curves.indices() {
         if let Some(r) = sk.radius(c) {
             take(r, &|| radius_in_group(c));
         }

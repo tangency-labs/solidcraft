@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Plane, Vec2, Vec3};
 use solidcraft_kernel::Continuity;
-use solidcraft_sketch::Sketch;
+use solidcraft_sketch::{Hold, Sketch};
 
 use crate::construct::{AxisDef, GeoRef, PointDef};
 use crate::expr::{self, Expr, Kind};
@@ -3686,7 +3686,7 @@ impl Document {
             // Source dimensions may have moved curves during the solve.
             sk.refresh_offsets()?;
             report = if report.ok() {
-                solidcraft_sketch::solve_with(sk, &solidcraft_sketch::Hold::default(), None, analysis, None)
+                solidcraft_sketch::solve_with(sk, &Hold::default(), None, analysis, None)
             } else {
                 solidcraft_sketch::solve_after_edit_with_analysis(sk, stored, was(sk).as_deref(), analysis)
             };

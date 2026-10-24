@@ -2,20 +2,20 @@
 
 use solidcraft_geom::Vec2;
 
-use crate::{ConstraintKind, EndTouch, Sketch, find_profiles, loose_ends};
+use crate::{ConstraintKind, CurveIdx, EndTouch, PointIdx, Sketch, find_profiles, loose_ends};
 
 fn v(x: f64, y: f64) -> Vec2 {
     Vec2::new(x, y)
 }
 
 /// A closed polyline whose corners are each one shared point.
-fn shared_square(sk: &mut Sketch) -> Vec<usize> {
-    let pts: Vec<usize> = [v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
+fn shared_square(sk: &mut Sketch) -> Vec<CurveIdx> {
+    let pts: Vec<PointIdx> = [v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
     (0..4).map(|i| sk.add_line_pts(pts[i], pts[(i + 1) % 4], None).unwrap()).collect()
 }
 
 /// A square drawn as four separate lines: every corner is two points at one place.
-fn loose_square(sk: &mut Sketch) -> Vec<usize> {
+fn loose_square(sk: &mut Sketch) -> Vec<CurveIdx> {
     let c = [v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)];
     (0..4).map(|i| sk.add_line(c[i], c[(i + 1) % 4], None, None, None).unwrap()).collect()
 }
@@ -116,7 +116,7 @@ fn three_ends_meeting_by_position_are_one_place_tied_at_once() {
     assert_eq!(r.untied.len(), 2, "{r:?}");
     let anchor = match r.untied[0].touches {
         EndTouch::Point(q) => q,
-        EndTouch::Curve(_) => usize::MAX,
+        EndTouch::Curve(_) => PointIdx(usize::MAX),
     };
     assert!(r.untied.iter().all(|u| u.touches == EndTouch::Point(anchor) && u.point != anchor), "{r:?}");
     for u in &r.untied {

@@ -281,7 +281,7 @@ fn line_direction(sk: &Sketch, id: Option<&str>) -> Option<Vec2> {
 
 /// Keep sampled vector directions compatible with older designs, while picked lines are
 /// solver references. The default second direction follows the first line's perpendicular.
-fn linear_displacement(sk: &Sketch, kind: &SketchPatternKind, [i, j]: [usize; 2], fallback: Vec2) -> (Vec2, [Option<(usize, Vec2)>; 2]) {
+fn linear_displacement(sk: &Sketch, kind: &SketchPatternKind, [i, j]: [usize; 2], fallback: Vec2) -> (Vec2, [Option<(CurveIdx, Vec2)>; 2]) {
     let SketchPatternKind::Rectangular { dir, dir2, direction, direction2, spacing, spacing2, alignment, alignment2, reversed, reversed2, .. } = kind
     else {
         return (fallback, [None; 2]);

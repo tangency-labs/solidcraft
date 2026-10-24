@@ -1111,6 +1111,7 @@ fn normalise(d: &mut Document) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcraft_sketch::PointIdx;
 
     /// A pending change that records that its step ran, in `trace`.
     fn traced(name: &'static str) -> Part {
@@ -1662,10 +1663,10 @@ mod tests {
         document.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
         assert_eq!(read(&document.to_json()).unwrap(), document);
         let mut value: Value = serde_json::from_str(&document.to_json()).unwrap();
-        value["features"][0]["sketch"]["points"][closing]["pos"] = serde_json::json!([1, 0]);
+        value["features"][0]["sketch"]["points"][closing.0]["pos"] = serde_json::json!([1, 0]);
         assert!(read(&value.to_string()).unwrap_err().to_string().contains("periodic"));
-        value["features"][0]["sketch"]["points"][closing]["pos"] = value["features"][0]["sketch"]["points"][first]["pos"].clone();
-        value["features"][0]["sketch"]["points"][neighbor]["pos"] = value["features"][0]["sketch"]["points"][first]["pos"].clone();
+        value["features"][0]["sketch"]["points"][closing.0]["pos"] = value["features"][0]["sketch"]["points"][first.0]["pos"].clone();
+        value["features"][0]["sketch"]["points"][neighbor.0]["pos"] = value["features"][0]["sketch"]["points"][first.0]["pos"].clone();
         assert!(read(&value.to_string()).unwrap_err().to_string().contains("periodic"));
     }
 
@@ -1804,7 +1805,7 @@ mod tests {
         let dim = d.new_model_param("reach", "mm");
         let mut sketch = Sketch::new();
         let end = sketch.add_point(Vec2::new(25.0, 0.0), Some("tip")).unwrap();
-        let line = sketch.add_line_pts(0, end, Some("edge")).unwrap();
+        let line = sketch.add_line_pts(PointIdx::ORIGIN, end, Some("edge")).unwrap();
         sketch.add_constraint(ConstraintKind::Horizontal { l: line }, None).unwrap();
         sketch.add_constraint(ConstraintKind::Length { l: line, value: 25.0 }, Some(dim)).unwrap();
         d.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, Some("Dimensioned")).unwrap();
@@ -1835,7 +1836,7 @@ mod tests {
         let overall = d.new_model_param("10 mm", "mm");
         let mut sketch = Sketch::new();
         let end = sketch.add_point(Vec2::new(2.0, 2.0), None).unwrap();
-        let line = sketch.add_line_pts(0, end, None).unwrap();
+        let line = sketch.add_line_pts(PointIdx::ORIGIN, end, None).unwrap();
         let a = sketch.add_arc(Vec2::ZERO, Vec2::new(0.0, 2.0), Vec2::new(0.0, -2.0), [None; 3], None).unwrap();
         let b = sketch.add_arc(Vec2::new(6.0, 0.0), Vec2::new(6.0, -2.0), Vec2::new(6.0, 2.0), [None; 3], None).unwrap();
         sketch.add_constraint(ConstraintKind::LineAngle { l: line, value: std::f64::consts::FRAC_PI_4 }, Some(heading)).unwrap();
@@ -1997,7 +1998,7 @@ mod tests {
 
         // A sketch right at the point cap, chained by coincident constraints.
         let mut sketch = Sketch::new();
-        let mut previous = 0;
+        let mut previous = PointIdx::ORIGIN;
         while sketch.points.len() < MAX_POINTS {
             let i = sketch.add_point(solidcraft_geom::Vec2::new(0.001 * sketch.points.len() as f64, 0.0), None).unwrap();
             sketch.add_constraint(solidcraft_sketch::ConstraintKind::Coincident { p: previous, q: i }, None).unwrap();

@@ -82,7 +82,7 @@ fn box_part(s: &mut Session) {
     let r = run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
     let l = ids(&r["curves"]);
     let sk = s.doc.sketch(s.active_sketch.unwrap()).unwrap();
-    let start = match sk.curves[0].kind {
+    let start = match sk.curves.first().unwrap().kind {
         solidcraft_sketch::CurveKind::Line { a, .. } => sk.points[a].id.clone(),
         _ => panic!(),
     };

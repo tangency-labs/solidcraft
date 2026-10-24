@@ -10,7 +10,7 @@
 
 use solidcraft_geom::Vec2;
 
-use crate::model::{ConstraintKind, CurveKind, Sketch};
+use crate::model::{ConstraintKind, CurveIdx, CurveKind, Sketch};
 use crate::union_find::{find, union};
 
 /// What a dimension measures, in a form that can be drawn.
@@ -39,7 +39,7 @@ pub struct DimLayout {
     pub text: Vec2,
 }
 
-fn line_ends(sk: &Sketch, l: usize) -> Option<(Vec2, Vec2)> {
+fn line_ends(sk: &Sketch, l: CurveIdx) -> Option<(Vec2, Vec2)> {
     match sk.curves.get(l)?.kind {
         CurveKind::Line { a, b } => Some((sk.point(a)?, sk.point(b)?)),
         _ => None,
@@ -162,13 +162,13 @@ pub fn chain_centres(sk: &Sketch) -> Vec<Vec2> {
     for c in &sk.curves {
         let ids = c.kind.point_ids();
         for w in ids.windows(2) {
-            union(&mut parent, w[0], w[1]);
+            union(&mut parent, w[0].0, w[1].0);
         }
     }
     let mut sum = vec![(Vec2::ZERO, 0usize); n];
     let roots: Vec<usize> = (0..n).map(|i| find(&mut parent, i)).collect();
-    for (i, r) in roots.iter().enumerate() {
-        if let (Some(s), Some(p)) = (sum.get_mut(*r), sk.points.get(i)) {
+    for (p, r) in sk.points.iter().zip(&roots) {
+        if let Some(s) = sum.get_mut(*r) {
             s.0 += p.pos;
             s.1 += 1;
         }
@@ -224,7 +224,7 @@ pub fn dim_reach(sk: &Sketch, k: &ConstraintKind) -> [Option<(Vec2, Vec2)>; 2] {
     let Some((a, b)) = line_ends(sk, l) else { return [None, None] };
     let d = b - a;
     // A line ending at `p` that runs parallel to `l`.
-    let parallel = sk.curves.iter().enumerate().find_map(|(i, c)| match c.kind {
+    let parallel = sk.curves.iter_enumerated().find_map(|(i, c)| match c.kind {
         CurveKind::Line { a: pa, b: pb } if i != l && (pa == p || pb == p) => {
             let (u, v) = line_ends(sk, i)?;
             let e = v - u;
@@ -398,6 +398,7 @@ pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::PointIdx;
 
     fn close(a: Vec2, b: Vec2) -> bool {
         a.dist(b) < 1e-9
@@ -450,7 +451,7 @@ mod tests {
         // #3393: a quarter arc from 0° to 90°; a radius dimension dragged to 135° gets the arc
         // continued from its 90° end round to the arrow, and a little past it.
         let mut sk = Sketch::new();
-        let c = sk.add_arc(Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(0.0, 10.0), [None, None, None], None).unwrap_or(0);
+        let c = sk.add_arc(Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(0.0, 10.0), [None, None, None], None).unwrap_or(CurveIdx(0));
         let f =
             dim_frame(&sk, &ConstraintKind::Radius { c, value: 10.0 }).unwrap_or(DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::ZERO, dir: Vec2::X });
         let DimFrame::Radial { arc: Some((start, sweep)), .. } = f else { panic!("an arc's frame keeps its span: {f:?}") };
@@ -482,8 +483,8 @@ mod tests {
     #[test]
     fn angle_frame_uses_the_rays_toward_the_lines() {
         let mut sk = Sketch::new();
-        let a = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), None, None, None).unwrap_or(0);
-        let b = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(0.0, 10.0), Some(1), None, None).unwrap_or(0);
+        let a = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), None, None, None).unwrap_or(CurveIdx(0));
+        let b = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(0.0, 10.0), Some(PointIdx(1)), None, None).unwrap_or(CurveIdx(0));
         let k = ConstraintKind::Angle { a, b, value: std::f64::consts::FRAC_PI_2, flip: false };
         let Some(DimFrame::Angular { vertex, d0, sweep }) = dim_frame(&sk, &k) else { panic!("no frame") };
         assert!(close(vertex, Vec2::ZERO) && close(d0, Vec2::X));
@@ -499,8 +500,8 @@ mod tests {
         // across their middles needs no extension lines, one placed above them reaches their
         // top ends, not the low end.
         let mut sk = Sketch::new();
-        let l = sk.add_line(Vec2::new(0.0, -100.0), Vec2::new(0.0, 100.0), None, None, None).unwrap_or(0);
-        let m = sk.add_line(Vec2::new(30.0, -80.0), Vec2::new(30.0, 90.0), None, None, None).unwrap_or(0);
+        let l = sk.add_line(Vec2::new(0.0, -100.0), Vec2::new(0.0, 100.0), None, None, None).unwrap_or(CurveIdx(0));
+        let m = sk.add_line(Vec2::new(30.0, -80.0), Vec2::new(30.0, 90.0), None, None, None).unwrap_or(CurveIdx(0));
         let p = sk.curves[m].kind.point_ids()[0];
         let k = ConstraintKind::PointLineDistance { p, l, value: 30.0 };
         let f = dim_frame(&sk, &k).unwrap_or(DimFrame::Radial { center: Vec2::ZERO, radius: 1.0, diameter: false, arc: None });
@@ -519,8 +520,8 @@ mod tests {
         assert!(lay.lines.iter().any(|line| (line[0].y + 79.7).abs() < 1e-9));
         // A point that is not the end of a parallel line keeps its own extension line.
         let mut sk = Sketch::new();
-        let l = sk.add_line(Vec2::new(0.0, -100.0), Vec2::new(0.0, 100.0), None, None, None).unwrap_or(0);
-        let q = sk.add_point(Vec2::new(30.0, -80.0), None).unwrap_or(0);
+        let l = sk.add_line(Vec2::new(0.0, -100.0), Vec2::new(0.0, 100.0), None, None, None).unwrap_or(CurveIdx(0));
+        let q = sk.add_point(Vec2::new(30.0, -80.0), None).unwrap_or(PointIdx::ORIGIN);
         assert!(dim_reach(&sk, &ConstraintKind::PointLineDistance { p: q, l, value: 30.0 })[1].is_none());
     }
 }

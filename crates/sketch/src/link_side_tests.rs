@@ -34,7 +34,7 @@ fn a_point_dimensioned_from_a_linked_line_keeps_its_side_when_the_line_moves_pas
     let link = sk.add_link(LinkKind::Project, source(), &rail(50.0)).unwrap();
     let l = sk.link_curves(&link)[0];
     let p = sk.add_point(Vec2::new(40.0, 45.0), None).unwrap();
-    sk.add_constraint(ConstraintKind::DistanceX { p: 0, q: p, value: 40.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::DistanceX { p: PointIdx::ORIGIN, q: p, value: 40.0 }, None).unwrap();
     sk.add_constraint(ConstraintKind::PointLineDistance { p, l, value: 5.0 }, None).unwrap();
     assert!(solve(&mut sk).ok());
     // Past the point (20, 6, 44), away from it (400) and not as far as it (48).
@@ -56,10 +56,10 @@ fn a_dimension_along_an_axis_keeps_its_side_of_a_linked_point_that_moves_past() 
         let q = sk.link_points(&link)[0];
         let p = sk.add_point(if upright { Vec2::new(40.0, 45.0) } else { Vec2::new(45.0, 40.0) }, None).unwrap();
         if upright {
-            sk.add_constraint(ConstraintKind::DistanceX { p: 0, q: p, value: 40.0 }, None).unwrap();
+            sk.add_constraint(ConstraintKind::DistanceX { p: PointIdx::ORIGIN, q: p, value: 40.0 }, None).unwrap();
             sk.add_constraint(ConstraintKind::DistanceY { p: q, q: p, value: 5.0 }, None).unwrap();
         } else {
-            sk.add_constraint(ConstraintKind::DistanceY { p: 0, q: p, value: 40.0 }, None).unwrap();
+            sk.add_constraint(ConstraintKind::DistanceY { p: PointIdx::ORIGIN, q: p, value: 40.0 }, None).unwrap();
             sk.add_constraint(ConstraintKind::DistanceX { p: q, q: p, value: 5.0 }, None).unwrap();
         }
         assert!(solve(&mut sk).ok());
@@ -115,8 +115,8 @@ fn stored_positions_are_matched_by_point_id() {
     assert_eq!(sk.positions_in(&stored), None, "the new points have no stored place and `p` has not moved");
     sk.points[now].pos = Vec2::new(60.0, 45.0);
     let was = sk.positions_in(&stored).unwrap();
-    assert_eq!(was[now], Vec2::new(40.0, 45.0));
+    assert_eq!(was[now.0], Vec2::new(40.0, 45.0));
     for i in sk.link_points(&link) {
-        assert_eq!(was[i], sk.points[i].pos);
+        assert_eq!(was[i.0], sk.points[i].pos);
     }
 }

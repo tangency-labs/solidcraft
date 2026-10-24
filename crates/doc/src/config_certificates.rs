@@ -402,7 +402,7 @@ impl<'a> ExactSketchCurves<'a> {
         if sketch.sketch.curves.len() > 2000 {
             return Self { segments };
         }
-        for (index, curve) in sketch.sketch.curves.iter().enumerate() {
+        for (index, curve) in sketch.sketch.curves.iter_enumerated() {
             if curve.construction
                 || !matches!(
                     curve.kind,
@@ -965,7 +965,7 @@ mod tests {
             .iter()
             .map(|generated| {
                 let mut found = None;
-                for (index, curve) in sketch.sketch.curves.iter().enumerate() {
+                for (index, curve) in sketch.sketch.curves.iter_enumerated() {
                     if sketch.sketch.segs(index).iter().any(|original| exact_segment_contains(original, generated)) {
                         if found.is_some() {
                             return None;

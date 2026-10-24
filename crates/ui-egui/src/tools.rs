@@ -8,6 +8,7 @@ use solidcraft_engine::geom::Vec2;
 use crate::SolveApp;
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::viewport::{Hit, Proj, pick, sketch_point_at};
+use solidcraft_engine::sketch::CurveIdx;
 
 const DRAW_SCOPES: &[Scope] = &[Scope::SketchDraw, Scope::SketchDrag];
 
@@ -679,7 +680,7 @@ pub(crate) fn paint_preview_curve(
         curve.construction |= mode != 0 && !curve.centerline;
     }
     let mut budget = solidcraft_engine::render::SamplingBudget::new(4096, 65_536);
-    for index in 0..sketch.curves.len() {
+    for index in sketch.curves.indices() {
         paint_curve(&sketch, index, plane, painter, proj, stroke, &mut budget);
     }
     crate::scenario::publish_count("tool_preview_curves", sketch.curves.len() as f64);
@@ -703,7 +704,7 @@ pub(crate) fn paint_sketch_path(points: &[solidcraft_engine::geom::Vec3], mode: 
 
 pub(crate) fn paint_curve(
     sketch: &solidcraft_engine::sketch::Sketch,
-    index: usize,
+    index: CurveIdx,
     plane: &solidcraft_engine::geom::Plane,
     painter: &egui::Painter,
     proj: &Proj,

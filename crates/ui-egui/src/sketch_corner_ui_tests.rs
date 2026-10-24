@@ -1,5 +1,5 @@
 use super::*;
-use solidcraft_engine::sketch::CurveKind;
+use solidcraft_engine::sketch::{CurveIdx, CurveKind, PointIdx};
 
 #[test]
 fn three_point_arc_follows_its_snapped_through_point_after_dimension_change() {
@@ -19,7 +19,7 @@ fn three_point_arc_follows_its_snapped_through_point_after_dimension_change() {
     let state = h.app.session.model.state();
     let ss = state.sketch(sid).unwrap();
     let sk = &ss.sketch;
-    let arc = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Arc { .. })).unwrap();
+    let arc = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Arc { .. })).map(CurveIdx).unwrap();
     let through = sk.point(sk.resolve_point("height.end").unwrap()).unwrap();
     assert!(ss.report.ok());
     assert!(through.dist(Vec2::new(0.0, 15.0)) < 1e-6, "{through:?}");
@@ -43,7 +43,7 @@ fn clicked_periodic_fit_closes_at_start_and_right_click_keeps_natural() {
     h.step(&json!({"click":{"world":[2,2,0]}})).unwrap();
     let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
     assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
-    assert!(matches!(sk.curves[0].kind, CurveKind::Spline { periodic: true, .. }));
+    assert!(matches!(sk.curves[CurveIdx(0)].kind, CurveKind::Spline { periodic: true, .. }));
     sk.validate_periodic_splines().unwrap();
     assert_eq!(solidcraft_engine::sketch::find_profiles(&sk).len(), 1);
     assert!(h.app.tool.as_ref().unwrap().pts.is_empty());
@@ -53,7 +53,7 @@ fn clicked_periodic_fit_closes_at_start_and_right_click_keeps_natural() {
     h.step(&json!({"click":{"world":[20,6,0]},"button":"right"})).unwrap();
     let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
     assert_eq!(sk.curves.len(), 2);
-    assert!(matches!(sk.curves[1].kind, CurveKind::Spline { periodic: false, .. }));
+    assert!(matches!(sk.curves[CurveIdx(1)].kind, CurveKind::Spline { periodic: false, .. }));
 }
 
 /// Curve ids in the open dialog's first selection input.
@@ -232,8 +232,8 @@ fn corner_window_takes_the_corner_then_applies_the_typed_size() {
         assert_eq!(h.app.session.undo.len(), before.1 + 1, "{command} must be one undo entry");
         let st = h.app.session.world_state();
         let ss = st.sketch(sid).unwrap();
-        assert_eq!(ss.sketch.point(0), Some(Vec2::ZERO));
-        assert!(ss.sketch.points[0].fixed);
+        assert_eq!(ss.sketch.point(PointIdx::ORIGIN), Some(Vec2::ZERO));
+        assert!(ss.sketch.points[PointIdx::ORIGIN].fixed);
         assert_eq!(ss.sketch.curves.len(), 5, "{command} must actually modify the geometry; status: {:?}", h.app.status);
         if command == "sketch.fillet" {
             assert!(ss.sketch.curves.iter().any(|c| matches!(c.kind, CurveKind::Arc { .. })));
@@ -536,7 +536,7 @@ fn ordinary_drawing_keeps_origin_snap_and_real_origin_corners_work() {
     assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
     let st = h.app.session.world_state();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
-    assert_eq!(ss.sketch.point(0), Some(Vec2::ZERO));
+    assert_eq!(ss.sketch.point(PointIdx::ORIGIN), Some(Vec2::ZERO));
     assert!(ss.sketch.curves.iter().any(|c| matches!(c.kind, CurveKind::Arc { .. })));
     assert_eq!(ss.profiles.len(), 1);
 }
@@ -672,7 +672,7 @@ fn two_tangent_circle_clicked_on_two_sides_fits_the_corner_and_moves_nothing() {
         h.step(&json!({"click":{"world":[-550,0,0]}})).unwrap();
         h.step(&json!({"click":{"world":[-800,250,0]}})).unwrap();
         let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
-        let circle = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Circle { .. }));
+        let circle = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Circle { .. })).map(CurveIdx);
         let circle = circle.unwrap_or_else(|| panic!("fixed {fixed}: no circle: {:?}", h.app.status));
         assert!(sk.center(circle).unwrap().dist(Vec2::new(-750.0, 50.0)) < 1e-6, "fixed {fixed}: {:?}", sk.center(circle));
         let after = points(&h);
@@ -696,10 +696,10 @@ fn centre_circle_clicked_through_a_line_end_stays_on_it() {
         h.step(&json!({"click":{"world":at}})).unwrap();
     }
     let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
-    let circle = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Circle { .. })).unwrap();
+    let circle = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Circle { .. })).map(CurveIdx).unwrap();
     let end = sk.resolve_point("l1.end").unwrap();
     assert!(
-        sk.constraints.iter().any(|k| matches!(k.kind, solidcraft_engine::sketch::ConstraintKind::Midpoint { l: 0, .. })),
+        sk.constraints.iter().any(|k| matches!(k.kind, solidcraft_engine::sketch::ConstraintKind::Midpoint { l: CurveIdx(0), .. })),
         "{:?}",
         sk.constraints
     );

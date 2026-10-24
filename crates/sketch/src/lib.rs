@@ -52,8 +52,8 @@ pub use fonts::{DEFAULT_FONT_FAMILY, FontData, families_in, find_style_in, font_
 pub use freeform_offset::{FreeformOffset, OFFSET_TOLERANCE};
 pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES, SKETCH_AXIS_HALF, TextExprs, sketch_axis_geom};
 pub use model::{
-    Constraint, ConstraintKind, Curve, CurveKind, MAX_CONSTRAINTS, MAX_COORD, MAX_CURVES, MAX_POINTS, PointExprs, SPoint, Sketch, SketchError,
-    SketchView,
+    Constraint, ConstraintKind, Curve, CurveIdx, CurveKind, MAX_CONSTRAINTS, MAX_COORD, MAX_CURVES, MAX_POINTS, PointExprs, PointIdx, SPoint, Sketch,
+    SketchError, SketchView,
 };
 pub use offset::OffsetChain;
 pub use offset_topology::{OffsetCreated, OffsetRole, OffsetRoleFlags, OffsetRoleKind, OffsetTopology};

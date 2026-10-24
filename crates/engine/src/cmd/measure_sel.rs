@@ -10,6 +10,7 @@ use solidcraft_geom::{Mesh, UnitVec3, Vec3};
 use super::measure_shape::{Shape, Slot, add_round, centre};
 use crate::params::bad;
 use crate::{Result, Sel, Session};
+use solidcraft_sketch::PointIdx;
 
 /// Geometry of a picked item, as points or triangles.
 enum Geo {
@@ -156,7 +157,7 @@ fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
     use solidcraft_sketch::CurveKind;
     let sk = &ss.sketch;
     let c = sk.curves.get(sk.curve_index(id)?)?;
-    let at = |i: usize| sk.points.get(i).map(|p| ss.plane.to_world(p.pos));
+    let at = |i: PointIdx| sk.point(i).map(|p| ss.plane.to_world(p));
     let normal = ss.plane.normal().unit()?;
     let (shape, pts) = match c.kind {
         CurveKind::Circle { c, r } => {

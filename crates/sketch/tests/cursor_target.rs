@@ -1,15 +1,15 @@
 //! Analytic cursor oracle plus feasibility checks on every accepted continuation step.
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{ConstraintKind, Sketch, move_line_towards, move_point_towards, solve};
+use solidcraft_sketch::{ConstraintKind, PointIdx, Sketch, move_line_towards, move_point_towards, solve};
 
-fn linkage() -> (Sketch, usize, usize) {
+fn linkage() -> (Sketch, PointIdx, PointIdx) {
     let mut sk = Sketch::new();
     let a = sk.add_point(Vec2::new(-10.0, 0.0), None).unwrap();
     let x = -10.0 + (1600.0 - 400.0 + 52.0 * 52.0) / 104.0;
     let c = sk.add_point(Vec2::new(x, -(1600.0_f64 - (x + 10.0).powi(2)).sqrt()), None).unwrap();
     let b = sk.add_point(Vec2::new(42.0, 0.0), None).unwrap();
     sk.points[b].fixed = true;
-    for (p, q, value) in [(0, a, 10.0), (a, c, 40.0), (c, b, 20.0)] {
+    for (p, q, value) in [(PointIdx::ORIGIN, a, 10.0), (a, c, 40.0), (c, b, 20.0)] {
         sk.add_constraint(ConstraintKind::Distance { p, q, value }, None).unwrap();
     }
     assert!(solve(&mut sk).ok());
@@ -21,7 +21,7 @@ fn a_material_point_on_a_link_follows_without_relaxing_its_length() {
     for along in [0.2, 0.5, 0.8] {
         for target in [Vec2::new(-10.0, 16.0), Vec2::new(20.0, 0.0), Vec2::new(1000.0, -1000.0)] {
             let (mut sk, a, c) = linkage();
-            let line = sk.add_line_pts(0, a, None).unwrap();
+            let line = sk.add_line_pts(PointIdx::ORIGIN, a, None).unwrap();
             let target = target * along;
             assert!(move_line_towards(&mut sk, line, Vec2::new(along, 0.0), target, 1.25, None, |before, after| {
                 assert!((after.points[a].pos.len() - 10.0).abs() < 1e-9);
@@ -65,14 +65,14 @@ fn circle_oracle_all_directions_and_large_targets() {
 fn fixed_axis_and_rejected_candidates_keep_design_constraints() {
     let mut sk = Sketch::new();
     let a = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
-    let l = sk.add_line_pts(0, a, None).unwrap();
+    let l = sk.add_line_pts(PointIdx::ORIGIN, a, None).unwrap();
     sk.add_constraint(ConstraintKind::Horizontal { l }, None).unwrap();
     assert!(move_point_towards(&mut sk, a, Vec2::new(20.0, 10.0), 2.0, None, |_, _| true));
     assert!(sk.points[a].pos.dist(Vec2::new(20.0, 0.0)) < 1e-5, "{:?}", sk.points[a].pos);
     let before = sk.clone();
     assert!(move_point_towards(&mut sk, a, Vec2::new(-20.0, 10.0), 2.0, None, |_, _| false));
     assert_eq!(sk, before);
-    assert!(!move_point_towards(&mut sk, usize::MAX, Vec2::ZERO, 1.0, None, |_, _| true));
+    assert!(!move_point_towards(&mut sk, PointIdx(usize::MAX), Vec2::ZERO, 1.0, None, |_, _| true));
     assert!(!move_point_towards(&mut sk, a, Vec2::new(f64::NAN, 0.0), 1.0, None, |_, _| true));
     assert_eq!(sk, before);
     sk.points[a].pos.x = f64::NAN;
@@ -110,7 +110,7 @@ fn a_cursor_at_the_pivot_does_not_choose_a_pose_from_roundoff() {
 #[test]
 fn cursor_motion_refreshes_driven_dimensions_without_a_followup_solve() {
     let (mut sk, a, _) = linkage();
-    sk.add_constraint(ConstraintKind::DistanceX { p: 0, q: a, value: 10.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::DistanceX { p: PointIdx::ORIGIN, q: a, value: 10.0 }, None).unwrap();
     sk.constraints.last_mut().unwrap().driven = true;
     assert!(move_point_towards(&mut sk, a, Vec2::new(-10.0, 8.0), 1.25, None, |_, _| true));
     let value = sk.constraints.last().unwrap().kind.value().unwrap();
@@ -183,7 +183,7 @@ fn a_cursor_budget_stop_keeps_the_best_corrected_pose_and_reference_dimensions()
     let mut stopped_after_progress = false;
     for work in [128, 256, 512, 1024, 2048, 4096, 8192, 16384] {
         let (mut sk, a, c) = linkage();
-        sk.add_constraint(ConstraintKind::DistanceX { p: 0, q: a, value: 10.0 }, None).unwrap();
+        sk.add_constraint(ConstraintKind::DistanceX { p: PointIdx::ORIGIN, q: a, value: 10.0 }, None).unwrap();
         sk.constraints.last_mut().unwrap().driven = true;
         let before = sk.clone();
         let mut budget = solidcraft_sketch::Budget::new(work);

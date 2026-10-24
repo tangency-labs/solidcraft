@@ -11,7 +11,7 @@
 
 use solidcraft_geom::{Aabb2, Seg2, Vec2};
 
-use crate::model::{ConstraintKind, CurveKind, Sketch};
+use crate::model::{ConstraintKind, CurveIdx, CurveKind, PointIdx, Sketch};
 use crate::union_find::{find, union};
 
 /// How close an end has to be to another curve to touch it: the distance at which profile
@@ -24,26 +24,26 @@ const MAX_ENDS: usize = 100_000;
 /// What an untied end touches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EndTouch {
-    /// Another curve's end (a point index).
-    Point(usize),
+    /// Another curve's end.
+    Point(PointIdx),
     /// Another curve, between its ends (a curve index).
-    Curve(usize),
+    Curve(CurveIdx),
 }
 
 /// An end that touches another curve without being tied to it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UntiedEnd {
-    /// The end's point index.
-    pub point: usize,
+    /// The end's point.
+    pub point: PointIdx,
     /// The curve it is an end of.
-    pub curve: usize,
+    pub curve: CurveIdx,
     pub touches: EndTouch,
 }
 
-/// The open and untied ends of a sketch's drawn profile curves (point indices).
+/// The open and untied ends of a sketch's drawn profile curves.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EndReport {
-    pub open: Vec<usize>,
+    pub open: Vec<PointIdx>,
     pub untied: Vec<UntiedEnd>,
 }
 
@@ -54,7 +54,7 @@ impl EndReport {
 }
 
 /// Curves profiles are made of (the ones `find_profiles` reads).
-fn profile_curve(sk: &Sketch, ci: usize) -> bool {
+fn profile_curve(sk: &Sketch, ci: CurveIdx) -> bool {
     sk.curves.get(ci).is_some_and(|c| !(c.construction || c.centerline || c.infinite))
 }
 
@@ -78,21 +78,21 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
     let mut group: Vec<usize> = (0..n).collect();
     for c in &sk.constraints {
         if let ConstraintKind::Coincident { p, q } = c.kind {
-            union(&mut group, p, q);
+            union(&mut group, p.0, q.0);
         }
     }
     // Per place: how many profile curve ends meet there, and whether a point there is held
     // on a profile curve.
     let mut ends_at = vec![0usize; n];
     let mut held = vec![false; n];
-    let mut ends: Vec<(usize, usize)> = Vec::new();
-    for (ci, c) in sk.curves.iter().enumerate() {
+    let mut ends: Vec<(PointIdx, CurveIdx)> = Vec::new();
+    for (ci, c) in sk.curves.iter_enumerated() {
         if !profile_curve(sk, ci) {
             continue;
         }
         let Some((a, b)) = c.kind.ends() else { continue };
         for p in [a, b] {
-            let g = find(&mut group, p);
+            let g = find(&mut group, p.0);
             if let Some(k) = ends_at.get_mut(g) {
                 *k += 1;
             }
@@ -112,7 +112,7 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
             _ => None,
         };
         if let Some(p) = on {
-            let g = find(&mut group, p);
+            let g = find(&mut group, p.0);
             if let Some(h) = held.get_mut(g) {
                 *h = true;
             }
@@ -122,9 +122,9 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
         return EndReport::default();
     }
     // Ends tied to nothing: the ones to look at by position.
-    let mut free: Vec<(usize, usize, Vec2)> = Vec::new();
+    let mut free: Vec<(PointIdx, CurveIdx, Vec2)> = Vec::new();
     for &(p, ci) in &ends {
-        let g = find(&mut group, p);
+        let g = find(&mut group, p.0);
         if ends_at.get(g).copied().unwrap_or(0) >= 2 || held.get(g).copied().unwrap_or(false) {
             continue;
         }
@@ -138,7 +138,7 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
     free.sort_by(|a, b| a.2.x.total_cmp(&b.2.x));
     // What each free end touches: another curve's end first, else another curve's span.
     let mut touch: Vec<Option<EndTouch>> = vec![None; free.len()];
-    for (ci, c) in sk.curves.iter().enumerate() {
+    for (ci, c) in sk.curves.iter_enumerated() {
         if !profile_curve(sk, ci) {
             continue;
         }
@@ -170,7 +170,7 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
     }
     // Free ends that touch each other are one place, however many meet there: each is tied to
     // the place's first end, which is tied to what it touches outside the place (if anything).
-    let index: std::collections::HashMap<usize, usize> = free.iter().enumerate().map(|(k, f)| (f.0, k)).collect();
+    let index: std::collections::HashMap<PointIdx, usize> = free.iter().enumerate().map(|(k, f)| (f.0, k)).collect();
     let mut place: Vec<usize> = (0..free.len()).collect();
     for (k, t) in touch.iter().enumerate() {
         if let Some(EndTouch::Point(q)) = t
@@ -179,7 +179,8 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
             union(&mut place, k, j);
         }
     }
-    let mut first: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    let mut first: std::collections::HashMap<usize, PointIdx> = std::collections::HashMap::new();
+
     for (k, f) in free.iter().enumerate() {
         let root = find(&mut place, k);
         let e = first.entry(root).or_insert(f.0);

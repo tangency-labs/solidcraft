@@ -576,7 +576,7 @@ fn a_face_place_snaps_to_the_points_of_shown_geometry_only() {
     for hide in [false, true] {
         sk.view.hide_projected = hide;
         let takes = crate::dialogs::SnapPoints::of(&sk);
-        for (i, p) in sk.points.iter().enumerate() {
+        for (i, p) in sk.points.iter_enumerated() {
             let want = solidcraft_engine::view::sketch_point_visible(&sk, i) && !(hide && p.link.is_some());
             assert_eq!(takes.takes(p), want, "point {} (link {:?}), Show Projected off: {hide}", p.id, p.link);
         }

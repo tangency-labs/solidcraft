@@ -44,7 +44,7 @@ use solidcraft_geom::Vec2;
 
 use crate::decompose::{Budget, Decomposition, enqueue};
 use crate::loci::{MAX_LOCI, Reading, Rel, View, place, radii, read};
-use crate::model::{Sketch, in_range};
+use crate::model::{CurveIdx, PointIdx, Sketch, in_range};
 
 /// Rounds of decomposition then propagation per seed. Each round after the first must follow a
 /// propagation that placed something, so on real sketches the loop ends after a few; this
@@ -100,10 +100,17 @@ impl Placement {
 /// moves only held points. `on_curve` holds the sketch's point-on-curve pairs
 /// ([`crate::solver::points_on_curves`]); the decomposition works within what is left of
 /// `budget`, and charges it.
-pub(crate) fn seed(sk: &Sketch, given: &[bool], reference: Option<&[Vec2]>, edits: bool, on_curve: &[(usize, usize)], budget: &mut Budget) -> Seed {
+pub(crate) fn seed(
+    sk: &Sketch,
+    given: &[bool],
+    reference: Option<&[Vec2]>,
+    edits: bool,
+    on_curve: &[(PointIdx, CurveIdx)],
+    budget: &mut Budget,
+) -> Seed {
     let n = sk.points.len();
     let reference = reference.filter(|r| r.len() <= n);
-    let before = |i: usize| match reference.and_then(|r| r.get(i)) {
+    let before = |i: PointIdx| match reference.and_then(|r| r.get(i.0)) {
         Some(p) => Some(*p),
         None => sk.points.get(i).map(|p| p.pos),
     };

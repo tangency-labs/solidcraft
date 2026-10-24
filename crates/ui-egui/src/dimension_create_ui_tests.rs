@@ -1,6 +1,7 @@
 //! Dimension creation is an editable draft, accepted by the real focused value field.
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcraft_engine::sketch::CurveIdx;
 
 fn line(end: [f64; 2]) -> Harness {
     crate::dim_view::cancel();
@@ -622,11 +623,12 @@ fn type_first_line_circle_arc_distance_and_angle_commit_one_undo_step_each() {
         assert_eq!(h.app.session.doc.to_json(), original, "nothing changes until Enter");
         // The text follows the pointer while typing: Enter places it there.
         // (For the angle, inside the wedge both before and after it changes.)
-        let cursor = if check(&solidcraft_engine::sketch::ConstraintKind::Angle { a: 0, b: 1, value: 60f64.to_radians(), flip: false }) {
-            [10.4, 6.0]
-        } else {
-            [centre[0] + 3.0, centre[1] + 9.0]
-        };
+        let cursor =
+            if check(&solidcraft_engine::sketch::ConstraintKind::Angle { a: CurveIdx(0), b: CurveIdx(1), value: 60f64.to_radians(), flip: false }) {
+                [10.4, 6.0]
+            } else {
+                [centre[0] + 3.0, centre[1] + 9.0]
+            };
         h.step(&json!({"move":{"world":[cursor[0],cursor[1],0]}})).unwrap();
         keys(&mut h, typed);
         h.step(&json!({"key":"Enter"})).unwrap();
@@ -830,7 +832,7 @@ fn midpoint_then_edge_creates_a_distance_in_one_undo_step() {
         let (_, c, sk) = crate::dim_view::draft_preview().unwrap();
         let ConstraintKind::PointLineDistance { p, l, .. } = c.kind else { panic!("MID to edge must be a distance: {:?}", c.kind) };
         assert_eq!(sk.curves[l].id, "l2");
-        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { p: q, l: 0 } if q == p)));
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { p: q, l: CurveIdx(0) } if q == p)));
         assert_eq!(h.app.session.doc.to_json(), baseline, "preview creates no persistent helper");
         if !accept {
             h.step(&json!({"key":"Escape"})).unwrap();
@@ -1006,8 +1008,7 @@ fn midpoint_dimension_orientation_follows_the_pointer_before_placement() {
                 let bottom = ss
                     .sketch
                     .curves
-                    .iter()
-                    .enumerate()
+                    .iter_enumerated()
                     .find_map(|(i, c)| {
                         c.link.as_ref()?;
                         let solidcraft_engine::sketch::Shape::Line { a, b } = ss.sketch.shape(i)? else {
@@ -1027,8 +1028,7 @@ fn midpoint_dimension_orientation_follows_the_pointer_before_placement() {
                 let mid_ref = |point: [f64; 2]| {
                     ss.sketch
                         .curves
-                        .iter()
-                        .enumerate()
+                        .iter_enumerated()
                         .find_map(|(i, c)| {
                             let solidcraft_engine::sketch::Shape::Line { a, b } = ss.sketch.shape(i)? else {
                                 return None;

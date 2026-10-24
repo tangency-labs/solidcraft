@@ -4,6 +4,7 @@ use crate::sketch_modify_ui::{Mod, candidate};
 use crate::viewport::Hit;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
+use solidcraft_engine::sketch::PointIdx;
 
 fn step(h: &mut Harness, value: Value) {
     h.step(&value).unwrap();
@@ -184,7 +185,7 @@ fn sketch_modify_inputs_refuse_other_sketches_without_changing_hole_points() {
 fn sketch_preselected_points_toggle_once_and_empty_shift_box_keeps_reference() {
     let mut h = fixture();
     let state = h.app.session.world_state();
-    let point = state.sketch(1).unwrap().sketch.points[1].id.clone();
+    let point = state.sketch(1).unwrap().sketch.points[PointIdx(1)].id.clone();
     h.app.session.selection = vec![Sel::SketchPoint { id: point.clone() }];
     h.app.start("sketch.mirror");
     let d = h.app.dialog.as_mut().unwrap();

@@ -1,6 +1,6 @@
 use solidcraft_geom::{Vec2, Vec3};
 use solidcraft_kernel::measure;
-use solidcraft_sketch::{ConstraintKind, Sketch};
+use solidcraft_sketch::{ConstraintKind, CurveIdx, PointIdx, Sketch};
 
 use crate::*;
 
@@ -14,10 +14,10 @@ fn plate_doc() -> (Document, u64) {
     doc.set_param("width", "40 mm", Some("mm"), None).unwrap();
     let mut sk = Sketch::new();
     let pts = [Vec2::new(0.0, 0.0), Vec2::new(38.0, 0.5), Vec2::new(39.0, 31.0), Vec2::new(0.5, 29.0)];
-    let ids: Vec<usize> = pts.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
-    let l: Vec<usize> = (0..4).map(|i| sk.add_line_pts(ids[i], ids[(i + 1) % 4], None).unwrap()).collect();
+    let ids: Vec<PointIdx> = pts.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
+    let l: Vec<CurveIdx> = (0..4).map(|i| sk.add_line_pts(ids[i], ids[(i + 1) % 4], None).unwrap()).collect();
     use ConstraintKind::*;
-    sk.add_constraint(Coincident { p: ids[0], q: 0 }, None).unwrap();
+    sk.add_constraint(Coincident { p: ids[0], q: PointIdx::ORIGIN }, None).unwrap();
     sk.add_constraint(Horizontal { l: l[0] }, None).unwrap();
     sk.add_constraint(Horizontal { l: l[2] }, None).unwrap();
     sk.add_constraint(Vertical { l: l[1] }, None).unwrap();

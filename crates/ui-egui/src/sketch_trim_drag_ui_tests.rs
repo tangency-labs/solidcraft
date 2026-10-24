@@ -56,7 +56,7 @@ fn dragging_across_pieces_trims_them_all_in_one_undo_step() {
     assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
     // The vertical line keeps its ends; the lower line its left half.
     let sk = sketch(&h);
-    let rest: Vec<Shape> = (0..sk.curves.len()).filter_map(|ci| sk.shape(ci)).collect();
+    let rest: Vec<Shape> = sk.curves.indices().filter_map(|ci| sk.shape(ci)).collect();
     assert_eq!(rest.len(), 4, "{rest:?}");
     assert!(rest.iter().all(|s| s.dist(Vec2::new(10.0, 5.0)) > 1e-3 && s.dist(Vec2::new(15.0, 0.0)) > 1e-3), "{rest:?}");
     let lower = sk.shape(sk.curve_index(&v).unwrap()).unwrap();
@@ -86,7 +86,7 @@ fn a_click_still_trims_one_piece_and_an_empty_drag_nothing() {
     assert_eq!(h.app.session.undo.len(), undo + 1);
     let sk = sketch(&h);
     assert_eq!(sk.curves.len(), 4);
-    assert!((0..sk.curves.len()).all(|ci| sk.shape(ci).is_some_and(|s| s.dist(Vec2::new(10.0, 5.0)) > 1e-3)));
+    assert!(sk.curves.indices().all(|ci| sk.shape(ci).is_some_and(|s| s.dist(Vec2::new(10.0, 5.0)) > 1e-3)));
     assert!(sk.curve_index(&v).is_some());
 }
 
@@ -105,7 +105,7 @@ fn a_click_that_moves_along_a_piece_still_trims_it() {
     assert_eq!(h.app.session.undo.len(), undo + 1, "one trim");
     let sk = sketch(&h);
     assert_eq!(sk.curves.len(), 4);
-    assert!((0..sk.curves.len()).all(|ci| sk.shape(ci).is_some_and(|s| s.dist(Vec2::new(10.0, 5.0)) > 1e-3)));
+    assert!(sk.curves.indices().all(|ci| sk.shape(ci).is_some_and(|s| s.dist(Vec2::new(10.0, 5.0)) > 1e-3)));
 }
 
 fn run(h: &mut Harness, id: &str, p: Value) -> Value {

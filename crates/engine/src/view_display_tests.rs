@@ -1,9 +1,9 @@
 use super::*;
 use serde_json::json;
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource};
+use solidcraft_sketch::{CurveIdx, LinkGeom, LinkKind, LinkSource};
 
-fn line(sk: &mut Sketch, y: f64) -> usize {
+fn line(sk: &mut Sketch, y: f64) -> CurveIdx {
     sk.add_line(Vec2::new(0., y), Vec2::new(2., y), None, None, None).unwrap()
 }
 
@@ -38,14 +38,14 @@ fn sampler_keeps_style_precedence_hidden_references_text_and_disjoint_parts() {
         )
         .unwrap();
     let mut determined_flags = vec![false; sk.curves.len()];
-    determined_flags[determined] = true;
+    determined_flags[determined.0] = true;
     let saved = serde_json::to_value(&sk).unwrap();
     let mut called = Vec::new();
     let lines = sketch_lines_with_sampler(&sk, &Plane::XY, true, &determined_flags, |_, i, _| {
         called.push(i);
-        vec![vec![Vec3::new(i as f64, 0., 0.), Vec3::new(i as f64, 1., 0.)], vec![Vec3::new(i as f64, 3., 0.), Vec3::new(i as f64, 4., 0.)]]
+        vec![vec![Vec3::new(i.0 as f64, 0., 0.), Vec3::new(i.0 as f64, 1., 0.)], vec![Vec3::new(i.0 as f64, 3., 0.), Vec3::new(i.0 as f64, 4., 0.)]]
     });
-    assert_eq!(called, (0..sk.curves.len()).collect::<Vec<_>>());
+    assert_eq!(called, sk.curves.indices().collect::<Vec<_>>());
     for (i, expected) in [
         colors::SKETCH,
         colors::SKETCH_LOCKED,
@@ -63,7 +63,7 @@ fn sampler_keeps_style_precedence_hidden_references_text_and_disjoint_parts() {
             assert_eq!(part.1, expected);
             assert_eq!(part.0.len(), 2);
         }
-        assert_eq!(lines[2 * i].2, [fixed, centerline, construction].contains(&i));
+        assert_eq!(lines[2 * i].2, [fixed, centerline, construction].contains(&CurveIdx(i)));
     }
     assert_eq!(serde_json::to_value(&sk).unwrap(), saved);
     sk.view.hide_projected = true;
@@ -72,7 +72,7 @@ fn sampler_keeps_style_precedence_hidden_references_text_and_disjoint_parts() {
         called.push(i);
         vec![vec![Vec3::ZERO, Vec3::X]]
     });
-    assert_eq!(called, vec![ordinary, fixed, centerline, construction, determined, 7]);
+    assert_eq!(called, vec![ordinary, fixed, centerline, construction, determined, CurveIdx(7)]);
     assert_eq!(finished[0].1, colors::SKETCH_DONE);
     assert_eq!(finished[4].1, colors::SKETCH_DONE);
     assert_eq!(finished[5].1, colors::SKETCH_DONE);
@@ -96,7 +96,7 @@ fn hiding_construction_geometry_keeps_ordinary_curves_centerlines_and_projected_
     let trace = sk.link_curves(&axis)[0];
     sk.curves[trace].construction = true;
     let determined = vec![false; sk.curves.len()];
-    let drawn = |sk: &Sketch| -> Vec<usize> {
+    let drawn = |sk: &Sketch| -> Vec<CurveIdx> {
         let mut seen = Vec::new();
         sketch_lines_with_sampler(sk, &Plane::XY, true, &determined, |_, i, _| {
             seen.push(i);
@@ -117,7 +117,7 @@ fn hiding_construction_geometry_keeps_ordinary_curves_centerlines_and_projected_
     sk.view.hide_construction = false;
     assert_eq!(drawn(&sk), vec![ordinary, construction, centerline]);
     // A curve index that does not exist is not visible, and nothing panics asking.
-    assert!(!sketch_curve_visible(&sk, sk.curves.len()));
+    assert!(!sketch_curve_visible(&sk, CurveIdx(sk.curves.len())));
 }
 
 #[test]

@@ -4,7 +4,7 @@
 //! projected references, points, dimensions and constraints are viewport overlays and are left
 //! out. The active sketch is drawn on top, as the viewport draws it.
 use solidcraft_geom::{Plane, Vec3};
-use solidcraft_sketch::Sketch;
+use solidcraft_sketch::{CurveIdx, Sketch};
 
 use super::progress::Stage;
 use crate::Session;
@@ -20,12 +20,12 @@ pub(super) struct Part {
     pub on_top: bool,
 }
 
-fn profile_curve(sk: &Sketch, i: usize) -> bool {
+fn profile_curve(sk: &Sketch, i: CurveIdx) -> bool {
     sketch_curve_visible(sk, i) && sk.curves.get(i).is_some_and(|c| !c.construction && !c.centerline && (c.link.is_none() || sk.is_text_curve(i)))
 }
 
 fn has_profile(sk: &Sketch) -> bool {
-    (0..sk.curves.len()).any(|i| profile_curve(sk, i)) || sk.wires.iter().any(|w| w.fit.len() > 1 && w.pts.len() > 1)
+    sk.curves.indices().any(|i| profile_curve(sk, i)) || sk.wires.iter().any(|w| w.fit.len() > 1 && w.pts.len() > 1)
 }
 
 /// Does the current view have anything `file.export_view_dxf` draws: a visible body or a shown
@@ -36,7 +36,7 @@ pub fn exportable(s: &Session) -> bool {
 }
 
 /// A curve's boundary segments joined end to end, so a circle (two half arcs) is one run.
-fn curve_parts(sk: &Sketch, i: usize, plane: &Plane, tolerance: f64) -> Vec<Vec<Vec3>> {
+fn curve_parts(sk: &Sketch, i: CurveIdx, plane: &Plane, tolerance: f64) -> Vec<Vec<Vec3>> {
     let mut parts: Vec<Vec<Vec3>> = Vec::new();
     for seg in sk.segs(i) {
         let points: Vec<Vec3> = seg.polyline(tolerance).iter().map(|p| plane.to_world(*p)).collect();
@@ -74,7 +74,7 @@ pub(super) fn parts(s: &Session, tolerance: f64) -> Result<Vec<Part>, &'static s
         progress.check()?;
         let on_top = s.active_sketch == Some(ss.feature);
         let sk = &ss.sketch;
-        for i in (0..sk.curves.len()).filter(|i| profile_curve(sk, *i)) {
+        for i in sk.curves.indices().filter(|i| profile_curve(sk, *i)) {
             for points in curve_parts(sk, i, &ss.plane, tolerance) {
                 add(points, on_top, &mut result)?;
             }

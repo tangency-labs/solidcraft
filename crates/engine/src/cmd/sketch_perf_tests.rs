@@ -6,6 +6,7 @@ use std::time::Instant;
 use serde_json::json;
 
 use crate::Session;
+use solidcraft_sketch::{CurveIdx, PointIdx};
 
 fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
@@ -24,11 +25,11 @@ fn big(n: usize) -> Session {
     let side = (n as f64).sqrt().ceil() as usize;
     for k in 0..n {
         let (x, y) = ((k % side) as f64 * 30.0, (k / side) as f64 * 30.0);
-        let p: Vec<usize> = [(0.0, 0.0), (20.0, 0.3), (20.2, 15.0), (-0.1, 15.1)]
+        let p: Vec<PointIdx> = [(0.0, 0.0), (20.0, 0.3), (20.2, 15.0), (-0.1, 15.1)]
             .iter()
             .map(|(dx, dy)| sk.add_point(Vec2::new(x + dx, y + dy), None).unwrap())
             .collect();
-        let l: Vec<usize> = (0..4).map(|i| sk.add_line_pts(p[i], p[(i + 1) % 4], None).unwrap()).collect();
+        let l: Vec<CurveIdx> = (0..4).map(|i| sk.add_line_pts(p[i], p[(i + 1) % 4], None).unwrap()).collect();
         sk.add_constraint(Horizontal { l: l[0] }, None).unwrap();
         sk.add_constraint(Horizontal { l: l[2] }, None).unwrap();
         sk.add_constraint(Vertical { l: l[1] }, None).unwrap();

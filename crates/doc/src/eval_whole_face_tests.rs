@@ -6,7 +6,7 @@ use std::cell::Cell;
 use serde_json::json;
 use solidcraft_geom::{Plane, Vec2, Vec3};
 use solidcraft_kernel as kernel;
-use solidcraft_sketch::{CurveKind, Sketch};
+use solidcraft_sketch::{CurveKind, PointIdx, Sketch};
 
 use crate::*;
 
@@ -23,7 +23,7 @@ pub(super) fn slab_taken() {
 fn spline_sketch(z: f64) -> FeatureKind {
     let mut sk = Sketch::new();
     let fit = [(8.0, 0.0), (4.0, 6.0), (-3.0, 7.0), (-7.0, 1.0), (-4.0, -6.0), (3.0, -5.0)];
-    let mut pts: Vec<usize> = fit.iter().map(|&(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+    let mut pts: Vec<PointIdx> = fit.iter().map(|&(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
     pts.push(pts[0]);
     sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true }, None).unwrap();
     let plane = Plane { origin: Vec3::new(0.0, 0.0, z), ..Plane::XY };

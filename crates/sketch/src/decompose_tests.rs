@@ -6,8 +6,8 @@
 //! solver alone mirrors a rigid sub-triangle on each family, and what the decomposition does.
 use super::*;
 use crate::construct::switch;
-use crate::model::{Constraint, ConstraintKind, CurveKind, Sketch};
-use crate::solver::{SolveReport, solve};
+use crate::model::{Constraint, ConstraintKind, CurveIdx, CurveKind, PointIdx, Sketch};
+use crate::solver::{Hold, SolveReport, solve};
 
 use crate::tests::Lcg;
 
@@ -23,7 +23,7 @@ fn current(sk: &Sketch) -> Vec<Vec2> {
 fn decompose_from(sk: &Sketch, known: &[Option<Vec2>], reference: &[Vec2]) -> Placed {
     let reading = crate::loci::read(
         sk,
-        &|i| reference.get(i).or(sk.points.get(i).map(|p| &p.pos)).copied(),
+        &|i| reference.get(i.0).or(sk.points.get(i).map(|p| &p.pos)).copied(),
         &crate::solver::points_on_curves(sk),
         &crate::loci::radii(sk),
     );
@@ -49,9 +49,9 @@ fn push_point(sk: &mut Sketch, pos: Vec2) {
 }
 
 /// Every point of `ids` placed at its `want` position.
-fn assert_placed(d: &Placed, ids: &[usize], want: &[Vec2]) {
+fn assert_placed(d: &Placed, ids: &[PointIdx], want: &[Vec2]) {
     for (id, w) in ids.iter().zip(want) {
-        let at = d.pos[*id].unwrap_or_else(|| panic!("point {id} unplaced"));
+        let at = d.pos[id.0].unwrap_or_else(|| panic!("point {id} unplaced"));
         assert!(at.dist(*w) < 1e-9, "point {id}: {at:?} vs {w:?}");
     }
 }
@@ -183,15 +183,15 @@ fn bracket(rng: &mut Lcg, datum: Datum, scale: f64) -> Option<Case> {
     }
 
     let mut sk = Sketch::new();
-    let mut ids = [0usize; 5];
+    let mut ids = [PointIdx::ORIGIN; 5];
     for (i, pos) in l0.iter().enumerate() {
         ids[i] = match (i, datum) {
-            (0, Datum::Horizontal) => 0,
-            (1, Datum::Hinge) => usize::MAX,
+            (0, Datum::Horizontal) => PointIdx::ORIGIN,
+            (1, Datum::Hinge) => PointIdx(usize::MAX),
             _ => sk.add_point(*pos, None).ok()?,
         };
     }
-    let fix = |sk: &mut Sketch, p: usize| sk.add_constraint(ConstraintKind::Fix { p }, None).map(|_| ());
+    let fix = |sk: &mut Sketch, p: PointIdx| sk.add_constraint(ConstraintKind::Fix { p }, None).map(|_| ());
     match datum {
         Datum::Fixed => {
             fix(&mut sk, ids[0]).ok()?;
@@ -218,11 +218,11 @@ fn bracket(rng: &mut Lcg, datum: Datum, scale: f64) -> Option<Case> {
     }
     let mut target = current(&sk);
     for (i, id) in ids.iter().enumerate() {
-        if let Some(t) = target.get_mut(*id) {
+        if let Some(t) = target.get_mut(id.0) {
             *t = l1[i];
         }
     }
-    let at = |i: usize| ids[i];
+    let at = |i: usize| ids[i].0;
     let checks = checks
         .into_iter()
         .map(|c| match c {
@@ -262,7 +262,7 @@ fn fan(rng: &mut Lcg, k: usize, lo: f64, hi: f64, anchored: bool) -> Option<Case
     }
     // The sketch is built only for feasible draws (most are rejected).
     let mut sk = Sketch::new();
-    let ids: Vec<usize> = pts.iter().map(|p| sk.add_point(*p, None)).collect::<Result<_, _>>().ok()?;
+    let ids: Vec<PointIdx> = pts.iter().map(|p| sk.add_point(*p, None)).collect::<Result<_, _>>().ok()?;
     if anchored {
         for &p in &ids[..2] {
             sk.add_constraint(ConstraintKind::Fix { p }, None).ok()?;
@@ -277,7 +277,7 @@ fn fan(rng: &mut Lcg, k: usize, lo: f64, hi: f64, anchored: bool) -> Option<Case
     for i in 2..k - 1 {
         sk.add_constraint(ConstraintKind::Distance { p: ids[0], q: ids[i], value: dist[&(0, i)] }, None).ok()?;
     }
-    let checks = (1..k - 1).map(|i| Check::Turn(ids[0], ids[i], ids[i + 1])).collect();
+    let checks = (1..k - 1).map(|i| Check::Turn(ids[0].0, ids[i].0, ids[i + 1].0)).collect();
     Some(Case { sk, target: None, checks, size: 40.0 })
 }
 
@@ -287,7 +287,7 @@ fn linkage(rng: &mut Lcg) -> Option<Case> {
     const TRUE: [(f64, f64); 6] = [(0.0, 0.0), (40.0, 0.0), (18.0, 30.0), (8.0, 55.0), (52.0, 48.0), (30.0, 80.0)];
     const PAIRS: [(usize, usize); 9] = [(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3), (0, 3), (1, 4), (2, 5)];
     let mut sk = Sketch::new();
-    let ids: Vec<usize> = TRUE.iter().map(|p| sk.add_point(Vec2::new(p.0, p.1), None)).collect::<Result<_, _>>().ok()?;
+    let ids: Vec<PointIdx> = TRUE.iter().map(|p| sk.add_point(Vec2::new(p.0, p.1), None)).collect::<Result<_, _>>().ok()?;
     sk.add_constraint(ConstraintKind::Fix { p: ids[0] }, None).ok()?;
     let l = sk.add_line_pts(ids[0], ids[1], None).ok()?;
     sk.add_constraint(ConstraintKind::Horizontal { l }, None).ok()?;
@@ -295,7 +295,7 @@ fn linkage(rng: &mut Lcg) -> Option<Case> {
         let d = sk.points[ids[a]].pos.dist(sk.points[ids[b]].pos) * rng.range(0.8, 1.25);
         sk.add_constraint(ConstraintKind::Distance { p: ids[a], q: ids[b], value: d }, None).ok()?;
     }
-    let checks = vec![Check::Turn(ids[0], ids[1], ids[2]), Check::Turn(ids[3], ids[4], ids[5])];
+    let checks = vec![Check::Turn(ids[0].0, ids[1].0, ids[2].0), Check::Turn(ids[3].0, ids[4].0, ids[5].0)];
     Some(Case { sk, target: None, checks, size: 40.0 })
 }
 
@@ -313,7 +313,7 @@ fn sample(rng: &mut Lcg, make: &mut dyn FnMut(&mut Lcg) -> Option<Case>) -> Case
 /// points: circle, horizontal or vertical line), as the propagation seed does it.
 fn propagation_places_all(sk: &Sketch) -> bool {
     let mut placed = sk.locked_points();
-    let ends = |l: usize| match sk.curves.get(l).map(|c| &c.kind) {
+    let ends = |l: CurveIdx| match sk.curves.get(l).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => Some((*a, *b)),
         _ => None,
     };
@@ -342,8 +342,8 @@ fn propagation_places_all(sk: &Sketch) -> bool {
                 _ => continue,
             };
             for (free, base) in [(p, q), (q, p)] {
-                if placed[base] && !placed[free] {
-                    let l = &mut loci[free];
+                if placed[base.0] && !placed[free.0] {
+                    let l = &mut loci[free.0];
                     match kind {
                         0 => l.0 += 1,
                         1 => l.1 = true,
@@ -380,7 +380,7 @@ fn canonical_bracket_is_placed_exactly() {
     // one of the eight; it must still be exact.
     for shift in [Vec2::ZERO, Vec2::new(6.0, -6.0)] {
         let mut sk = Sketch::new();
-        let ids: Vec<usize> = truth.iter().enumerate().map(|(i, p)| sk.add_point(if i < 2 { *p } else { *p + shift }, None).unwrap()).collect();
+        let ids: Vec<PointIdx> = truth.iter().enumerate().map(|(i, p)| sk.add_point(if i < 2 { *p } else { *p + shift }, None).unwrap()).collect();
         for &p in &ids[..2] {
             sk.add_constraint(ConstraintKind::Fix { p }, None).unwrap();
         }
@@ -389,7 +389,7 @@ fn canonical_bracket_is_placed_exactly() {
         }
         assert!(!propagation_places_all(&sk), "the canonical case has no propagation order");
         let d = decompose_from(&sk, &known(&sk), &current(&sk));
-        let placed: Vec<Vec2> = ids.iter().map(|id| d.pos[*id].unwrap()).collect();
+        let placed: Vec<Vec2> = ids.iter().map(|id| d.pos[id.0].unwrap()).collect();
         let start: Vec<Vec2> = ids.iter().map(|id| sk.points[*id].pos).collect();
         assert_eq!(signature(&checks, &placed), signature(&checks, &start), "every triangle keeps its orientation");
         if shift == Vec2::ZERO {
@@ -397,7 +397,7 @@ fn canonical_bracket_is_placed_exactly() {
         }
         // Placed by the cluster solve: every point not known on entry (P Q R).
         let given = known(&sk);
-        assert!(ids.iter().all(|id| d.pos[*id].is_some()) && ids[2..].iter().all(|id| given[*id].is_none()));
+        assert!(ids.iter().all(|id| d.pos[id.0].is_some()) && ids[2..].iter().all(|id| given[id.0].is_none()));
         let mut s = seeded(&sk, &d);
         let rep = solve(&mut s);
         assert!(rep.ok() && rep.dof == 0, "{rep:?}");
@@ -411,7 +411,7 @@ fn canonical_bracket_is_placed_exactly() {
 fn the_ground_has_no_nodes_to_grow() {
     let truth = [Vec2::new(0.0, 0.0), Vec2::new(60.0, 0.0), Vec2::new(10.0, 30.0), Vec2::new(45.0, 35.0), Vec2::new(25.0, 55.0)];
     let mut sk = Sketch::new();
-    let ids: Vec<usize> = truth.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
+    let ids: Vec<PointIdx> = truth.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
     for &p in &ids[..2] {
         sk.add_constraint(ConstraintKind::Fix { p }, None).unwrap();
     }
@@ -423,7 +423,7 @@ fn the_ground_has_no_nodes_to_grow() {
     let mut g = Graph::build(&reading, &|i| given.get(i).copied().flatten(), MAX_WORK).unwrap();
     g.reduce();
     let ground = g.cluster(g.ground.unwrap()).unwrap();
-    assert!(ids.iter().all(|id| ground.pts.contains_key(id)), "the bracket reached the ground");
+    assert!(ids.iter().all(|id| ground.pts.contains_key(&id.0)), "the bracket reached the ground");
     assert!(ground.fresh.is_empty(), "{:?}", ground.fresh);
 }
 
@@ -477,7 +477,7 @@ fn bracket_family_is_solved_exactly_by_solve() {
                 assert_eq!(signature(&case.checks, &current(&case.sk)), before, "{datum:?} scale {scale}: mirrored");
                 let target = case.target.as_ref().unwrap();
                 for (i, t) in target.iter().enumerate() {
-                    let p = case.sk.points[i].pos;
+                    let p = case.sk.points[PointIdx(i)].pos;
                     assert!(p.dist(*t) < 1e-8 * case.size.max(1.0), "{datum:?} scale {scale}: point {i} {p:?} vs {t:?}");
                 }
             }
@@ -563,17 +563,17 @@ fn a_cluster_pinned_at_one_point_turns_about_it() {
         let u = Vec2::from_angle(turn);
         let n = u.perp() * rng.sign();
         let pts = [pin, pin + u * 3.9, pin + u * 1.95 + n * (4.0f64 - 1.95 * 1.95).sqrt()];
-        let ids: Vec<usize> = pts.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
+        let ids: Vec<PointIdx> = pts.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
         for (p, q, value) in [(0, 1, 3.9), (1, 2, 2.0), (2, 0, 2.0)] {
             sk.add_constraint(ConstraintKind::Distance { p: ids[p], q: ids[q], value }, None).unwrap();
         }
-        let checks = [Check::Turn(ids[0], ids[1], ids[2])];
+        let checks = [Check::Turn(ids[0].0, ids[1].0, ids[2].0)];
         let reference = current(&sk);
         let before = signature(&checks, &reference);
         let jump = rng.range(0.0, std::f64::consts::TAU);
         let to = pin + Vec2::from_angle(jump) * rng.range(5.0, 40.0);
         sk.points[ids[0]].pos = to;
-        let hold = crate::solver::Hold { points: vec![ids[0]], radii: vec![] };
+        let hold = Hold { points: vec![ids[0]], radii: vec![] };
         let mut lm = sk.clone();
         let lm_rep = switch::without_seed(|| crate::solve_with(&mut lm, &hold, Some(&reference), crate::Analysis::Full, None));
         lm_mirrored += usize::from(lm_rep.ok() && signature(&checks, &current(&lm)) != before);
@@ -583,7 +583,7 @@ fn a_cluster_pinned_at_one_point_turns_about_it() {
         assert_eq!(sk.points[ids[0]].pos, to);
         // Moved with the pin, not turned: the reference pose is kept about it.
         for i in 1..3 {
-            let (was, now) = (reference[ids[i]] - reference[ids[0]], sk.points[ids[i]].pos - to);
+            let (was, now) = (reference[ids[i].0] - reference[ids[0].0], sk.points[ids[i]].pos - to);
             assert!(was.dist(now) < 1e-9, "point {i} turned: {was:?} -> {now:?}");
         }
     }
@@ -632,11 +632,11 @@ fn branch_follows_the_reference_not_the_current_geometry() {
     sk.add_constraint(ConstraintKind::Distance { p: a, q: c, value: 25.0 }, None).unwrap();
     sk.add_constraint(ConstraintKind::Distance { p: b, q: c, value: 25.0 }, None).unwrap();
     let mut reference = current(&sk);
-    reference[c] = Vec2::new(20.0, -15.0);
+    reference[c.0] = Vec2::new(20.0, -15.0);
     let d = decompose_from(&sk, &known(&sk), &reference);
-    assert!(d.pos[c].unwrap().dist(Vec2::new(20.0, -15.0)) < 1e-12);
+    assert!(d.pos[c.0].unwrap().dist(Vec2::new(20.0, -15.0)) < 1e-12);
     let d = decompose_from(&sk, &known(&sk), &current(&sk));
-    assert!(d.pos[c].unwrap().dist(Vec2::new(20.0, 15.0)) < 1e-12);
+    assert!(d.pos[c.0].unwrap().dist(Vec2::new(20.0, 15.0)) < 1e-12);
 }
 
 #[test]
@@ -658,7 +658,7 @@ fn rigid_cluster_with_a_horizontal_edge_is_oriented() {
     sk.add_constraint(ConstraintKind::Horizontal { l }, None).unwrap();
     assert!(!propagation_places_all(&sk));
     let d = decompose_from(&sk, &known(&sk), &current(&sk));
-    assert!(d.pos[q].unwrap().dist(truth[1]) < 1e-12 && d.pos[r].unwrap().dist(truth[2]) < 1e-12, "{d:?}");
+    assert!(d.pos[q.0].unwrap().dist(truth[1]) < 1e-12 && d.pos[r.0].unwrap().dist(truth[2]) < 1e-12, "{d:?}");
     let mut s = seeded(&sk, &d);
     let rep = solve(&mut s);
     assert!(rep.ok() && rep.iterations == 0, "{rep:?}");
@@ -723,7 +723,7 @@ fn a_drag_frame_decomposes_within_its_budget() {
     let (frame, full) = (work(FRAME_WORK), work(MAX_WORK));
     assert!(frame > FRAME_WORK / 2 && frame <= FRAME_WORK + FRAME_WORK / 100, "frame work {frame}");
     assert!(full > 10 * FRAME_WORK, "full work {full}");
-    let hold = crate::Hold::default();
+    let hold = Hold::default();
     assert!(
         switch::without_differential(|| crate::solve_with(&mut sk.clone(), &hold, None, crate::Analysis::StatusOnly, Some(&mut Budget::frame())))
             .ok()
@@ -772,8 +772,8 @@ fn work_is_bounded_on_a_star_of_oriented_pairs() {
     for i in 0..n {
         let pos = Vec2::new((i % 200) as f64 + 1.0, (i / 200) as f64 + 1.0);
         push_point(&mut sk, pos);
-        sk.constraints.push(raw(ConstraintKind::DistanceX { p: 0, q: i + 1, value: pos.x }));
-        sk.constraints.push(raw(ConstraintKind::DistanceY { p: 0, q: i + 1, value: pos.y }));
+        sk.constraints.push(raw(ConstraintKind::DistanceX { p: PointIdx::ORIGIN, q: PointIdx(i + 1), value: pos.x }));
+        sk.constraints.push(raw(ConstraintKind::DistanceY { p: PointIdx::ORIGIN, q: PointIdx(i + 1), value: pos.y }));
     }
     let given = known(&sk);
     let reading = crate::loci::read(&sk, &|i| sk.points.get(i).map(|p| p.pos), &crate::solver::points_on_curves(&sk), &crate::loci::radii(&sk));
@@ -782,7 +782,7 @@ fn work_is_bounded_on_a_star_of_oriented_pairs() {
     assert!(g.work < MAX_WORK / 10, "work {}", g.work);
     let ground = g.cluster(g.ground.unwrap()).unwrap();
     assert_eq!(ground.pts.len(), n + 1);
-    assert!(ground.pts.iter().all(|(i, p)| p.dist(sk.points[*i].pos) < 1e-12));
+    assert!(ground.pts.iter().all(|(i, p)| p.dist(sk.points[PointIdx(*i)].pos) < 1e-12));
 }
 
 #[test]
@@ -792,7 +792,7 @@ fn orient_tries_every_bond() {
     let truth = [Vec2::new(0.0, 0.0), Vec2::new(12.0, 0.0), Vec2::new(6.0, 8.0), Vec2::new(6.0, 8.0), Vec2::new(20.0, 8.0)];
     let turned = |v: Vec2| Vec2::new(v.x * 0.98 - v.y * 0.17, v.x * 0.17 + v.y * 0.98);
     let mut sk = Sketch::new();
-    let ids: Vec<usize> = truth
+    let ids: Vec<PointIdx> = truth
         .iter()
         .enumerate()
         .map(|(i, t)| sk.add_point(turned(*t) + if i == 3 { Vec2::new(0.2, -0.1) } else { Vec2::ZERO }, None).unwrap())
@@ -821,8 +821,8 @@ fn signs_come_from_the_constrained_point_not_its_coincident_group() {
     sk.add_constraint(ConstraintKind::DistanceX { p: q, q: r, value: 5.0 }, None).unwrap();
     sk.add_constraint(ConstraintKind::HorizontalPoints { p: q, q: r }, None).unwrap();
     let d = decompose_from(&sk, &known(&sk), &current(&sk));
-    assert_eq!(d.pos[q], Some(Vec2::ZERO));
-    assert_eq!(d.pos[r], Some(Vec2::new(-5.0, 0.0)));
+    assert_eq!(d.pos[q.0], Some(Vec2::ZERO));
+    assert_eq!(d.pos[r.0], Some(Vec2::new(-5.0, 0.0)));
 }
 
 #[test]
@@ -881,8 +881,8 @@ fn zero_distance_joins_points() {
     sk.add_constraint(ConstraintKind::Distance { p: a, q: c, value: 25.0 }, None).unwrap();
     sk.add_constraint(ConstraintKind::Distance { p: b, q: c2, value: 25.0 }, None).unwrap();
     let d = decompose_from(&sk, &known(&sk), &current(&sk));
-    assert_eq!(d.pos[c], d.pos[c2]);
-    assert!(d.pos[c].is_some_and(|v| v.dist(Vec2::new(20.0, 15.0)) < 1e-12), "{d:?}");
+    assert_eq!(d.pos[c.0], d.pos[c2.0]);
+    assert!(d.pos[c.0].is_some_and(|v| v.dist(Vec2::new(20.0, 15.0)) < 1e-12), "{d:?}");
 }
 
 #[test]
@@ -899,12 +899,12 @@ fn coincident_points_and_unreachable_triangles() {
     sk.add_constraint(ConstraintKind::Distance { p: a, q: c, value: 25.0 }, None).unwrap();
     let id = sk.add_constraint(ConstraintKind::Distance { p: b, q: c2, value: 25.0 }, None).unwrap();
     let d = decompose_from(&sk, &known(&sk), &current(&sk));
-    assert_eq!(d.pos[c], d.pos[c2]);
-    assert!(d.pos[c].unwrap().dist(Vec2::new(20.0, 15.0)) < 1e-12);
+    assert_eq!(d.pos[c.0], d.pos[c2.0]);
+    assert!(d.pos[c.0].unwrap().dist(Vec2::new(20.0, 15.0)) < 1e-12);
     // Sides that can't meet: nothing placed, the solver reports the conflict.
     sk.constraints.iter_mut().find(|k| k.id == id).unwrap().kind.set_value(5.0);
     let d = decompose_from(&sk, &known(&sk), &current(&sk));
-    assert!(d.pos[c].is_none() && d.pos[c2].is_none());
+    assert!(d.pos[c.0].is_none() && d.pos[c2.0].is_none());
 }
 
 #[test]
@@ -914,19 +914,19 @@ fn hostile_input_never_panics() {
     let q = sk.add_point(Vec2::new(5.0, 1.0), None).unwrap();
     let r = sk.add_point(Vec2::new(3.0, 4.0), None).unwrap();
     for kind in [
-        ConstraintKind::Distance { p, q: 999, value: 1.0 },
+        ConstraintKind::Distance { p, q: PointIdx(999), value: 1.0 },
         ConstraintKind::Distance { p, q, value: f64::NAN },
         ConstraintKind::Distance { p, q: r, value: f64::INFINITY },
         ConstraintKind::Distance { p: q, q: r, value: -3.0 },
         ConstraintKind::Distance { p, q: p, value: 2.0 },
-        ConstraintKind::Length { l: 77, value: 1.0 },
-        ConstraintKind::Horizontal { l: 3 },
+        ConstraintKind::Length { l: CurveIdx(77), value: 1.0 },
+        ConstraintKind::Horizontal { l: CurveIdx(3) },
         ConstraintKind::DistanceX { p, q, value: 1e300 },
         ConstraintKind::DistanceY { p, q, value: 1e300 },
-        ConstraintKind::Coincident { p: 999, q: p },
+        ConstraintKind::Coincident { p: PointIdx(999), q: p },
         ConstraintKind::Coincident { p, q },
         ConstraintKind::Coincident { p: q, q: p },
-        ConstraintKind::Fix { p: 12345 },
+        ConstraintKind::Fix { p: PointIdx(12345) },
     ] {
         sk.constraints.push(raw(kind));
     }
@@ -945,7 +945,7 @@ fn hostile_input_never_panics() {
         chain.add_point(Vec2::new(i as f64, 0.0), None).unwrap();
     }
     for i in 1..chain.points.len() {
-        chain.constraints.push(raw(ConstraintKind::Coincident { p: i, q: i - 1 }));
+        chain.constraints.push(raw(ConstraintKind::Coincident { p: PointIdx(i), q: PointIdx(i - 1) }));
     }
     let d = decompose_from(&chain, &known(&chain), &[]);
     assert!(d.pos.iter().all(|p| *p == Some(Vec2::ZERO)));
@@ -977,7 +977,7 @@ fn large_inputs_are_capped() {
     }
     for i in 0..n {
         for j in i + 1..n {
-            sk.constraints.push(raw(ConstraintKind::Distance { p: i, q: j, value: 1.0 + (i + j) as f64 }));
+            sk.constraints.push(raw(ConstraintKind::Distance { p: PointIdx(i), q: PointIdx(j), value: 1.0 + (i + j) as f64 }));
         }
     }
     assert!(sk.constraints.len() > MAX_CLUSTERS);
@@ -987,7 +987,7 @@ fn large_inputs_are_capped() {
     // A dense complete graph under the cap finishes (the merge loop is bounded).
     let mut sk = Sketch::new();
     let pts: Vec<Vec2> = (0..60).map(|i| Vec2::new((i as f64 * 1.7).sin() * 50.0, (i as f64 * 2.3).cos() * 50.0)).collect();
-    let ids: Vec<usize> = pts.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
+    let ids: Vec<PointIdx> = pts.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
     sk.add_constraint(ConstraintKind::Fix { p: ids[0] }, None).unwrap();
     sk.add_constraint(ConstraintKind::Fix { p: ids[1] }, None).unwrap();
     for i in 0..ids.len() {
@@ -997,7 +997,7 @@ fn large_inputs_are_capped() {
     }
     let d = decompose_from(&sk, &known(&sk), &current(&sk));
     for (i, id) in ids.iter().enumerate() {
-        assert!(d.pos[*id].unwrap().dist(pts[i]) < 1e-6);
+        assert!(d.pos[id.0].unwrap().dist(pts[i]) < 1e-6);
     }
 }
 

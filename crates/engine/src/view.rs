@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use solidcraft_geom::{Aabb3, Plane, Vec3};
 use solidcraft_render::{AnalysisColors, Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
-use solidcraft_sketch::Sketch;
+use solidcraft_sketch::{CurveIdx, PointIdx, Sketch};
 
 use crate::{Sel, Session};
 
@@ -218,7 +218,7 @@ pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool
 }
 
 /// A sketch curve as world polylines: the sampler of [`scene`] and [`sketch_lines`].
-pub fn world_curve_parts(sk: &Sketch, i: usize, plane: &Plane) -> Vec<Vec<Vec3>> {
+pub fn world_curve_parts(sk: &Sketch, i: CurveIdx, plane: &Plane) -> Vec<Vec<Vec3>> {
     sk.segs(i).into_iter().map(|seg| seg.polyline(0.02).iter().map(|p| plane.to_world(*p)).collect()).collect()
 }
 
@@ -233,7 +233,7 @@ pub fn sketch_lines_with_sampler(
     plane: &Plane,
     active: bool,
     determined: &[bool],
-    sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
+    sampler: impl FnMut(&Sketch, CurveIdx, &Plane) -> Vec<Vec<Vec3>>,
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     sketch_lines_in(sk, plane, active, determined, sampler, &Palette::DEFAULT)
 }
@@ -244,11 +244,11 @@ fn sketch_lines_in(
     plane: &Plane,
     active: bool,
     determined: &[bool],
-    mut sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
+    mut sampler: impl FnMut(&Sketch, CurveIdx, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
-    for (i, c) in sk.curves.iter().enumerate() {
+    for (i, c) in sk.curves.iter_enumerated() {
         if !sketch_curve_visible(sk, i) {
             continue;
         }
@@ -262,7 +262,7 @@ fn sketch_lines_in(
             p.sketch_construction
         } else if !active {
             p.sketch_done
-        } else if determined.get(i).copied().unwrap_or(false) {
+        } else if determined.get(i.0).copied().unwrap_or(false) {
             p.sketch_fixed
         } else {
             p.sketch
@@ -303,7 +303,7 @@ fn sketch_lines_in(
 ///
 /// Drawing and picking share this one answer so they cannot drift: geometry that is not on
 /// screen is never clickable, and geometry on screen always is.
-pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
+pub fn sketch_curve_visible(sk: &Sketch, i: CurveIdx) -> bool {
     let Some(c) = sk.curves.get(i) else { return false };
     if c.link.is_some() && !sk.is_text_curve(i) {
         return !sk.view.hide_projected;
@@ -347,7 +347,7 @@ impl<'a> SketchPointVisibility<'a> {
 
 /// Should sketch point `i` be drawn or picked individually? Text outlines and derived
 /// offset fit nodes (but an open offset's ends) are private. Batch callers use [`SketchPointVisibility`].
-pub fn sketch_point_visible(sk: &Sketch, i: usize) -> bool {
+pub fn sketch_point_visible(sk: &Sketch, i: PointIdx) -> bool {
     sk.points.get(i).is_some_and(|p| SketchPointVisibility::new(sk).takes(p))
 }
 
@@ -402,7 +402,7 @@ pub fn scene_with_guides(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)
 /// A headless scene using supplied display paths for its visible sketch curves.
 /// Callers can use the same pixel sampler as a GPU viewport without changing the
 /// body, grid, appearance, section or sketch styling policies of [`scene`].
-pub fn scene_with_sketch_sampler(s: &Session, cam: &Camera, sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>) -> Scene {
+pub fn scene_with_sketch_sampler(s: &Session, cam: &Camera, sampler: impl FnMut(&Sketch, CurveIdx, &Plane) -> Vec<Vec<Vec3>>) -> Scene {
     scene_with_section_and_sketch_sampler(s, cam, s.section, sampler)
 }
 
@@ -411,7 +411,7 @@ pub fn scene_with_section_and_sketch_sampler(
     s: &Session,
     cam: &Camera,
     section: Option<(Vec3, Vec3)>,
-    sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
+    sampler: impl FnMut(&Sketch, CurveIdx, &Plane) -> Vec<Vec<Vec3>>,
 ) -> Scene {
     scene_with_palette(s, cam, section, sampler, &Palette::DEFAULT)
 }
@@ -421,7 +421,7 @@ pub fn scene_with_palette(
     s: &Session,
     cam: &Camera,
     section: Option<(Vec3, Vec3)>,
-    sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
+    sampler: impl FnMut(&Sketch, CurveIdx, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
 ) -> Scene {
     build_scene(s, cam, section, Guides::default(), sampler, p)
@@ -432,7 +432,7 @@ pub fn scene_with_palette_and_guides(
     s: &Session,
     cam: &Camera,
     section: Option<(Vec3, Vec3)>,
-    sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
+    sampler: impl FnMut(&Sketch, CurveIdx, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
     guides: Guides,
 ) -> Scene {
@@ -444,7 +444,7 @@ fn build_scene(
     cam: &Camera,
     section: Option<(Vec3, Vec3)>,
     guides: Guides,
-    mut sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
+    mut sampler: impl FnMut(&Sketch, CurveIdx, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
 ) -> Scene {
     let st = s.world_state();

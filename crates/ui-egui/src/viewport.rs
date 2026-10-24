@@ -8,7 +8,7 @@ use serde_json::json;
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::{Vec2, Vec3};
 use solidcraft_engine::render::{Camera, Mat4, Rgb};
-use solidcraft_engine::sketch::CurveKind;
+use solidcraft_engine::sketch::{CurveKind, PointIdx};
 use solidcraft_engine::view::{GridPlane, colors, grid_plane, grid_step, sketch_lines_with_sampler};
 use std::hash::{Hash, Hasher};
 
@@ -1524,7 +1524,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     for sid in visible_sketches(app) {
         let Some(ss) = st.sketch(sid) else { continue };
         let bonus = if s.active_sketch == Some(sid) { 2.0 } else { 0.0 };
-        for (i, c) in ss.sketch.curves.iter().enumerate() {
+        for (i, c) in ss.sketch.curves.iter_enumerated() {
             if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) {
                 continue;
             }
@@ -3329,7 +3329,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let b = proj.to_screen(ss.plane.to_world(q + Vec2::X))?;
                     let mm_px = 1.0 / (a.distance(b) as f64).max(1e-9);
                     let d = q - from;
-                    let moving: Vec<(usize, Vec2)> =
+                    let moving: Vec<(PointIdx, Vec2)> =
                         own.iter().filter_map(|&p| if grab.is_some() { sk.point(p).map(|x| (p, x + d)) } else { Some((p, q)) }).collect();
                     crate::drag_snap::find(sk, &moving, &exclude, mm_px)
                 })
@@ -3932,7 +3932,7 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     {
         // What the selection filter lets through (window: wholly inside; crossing: touching).
         let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
-        for (i, c) in ss.sketch.curves.iter().enumerate().filter(|_| !off("sketch") && !off("sketch_curves")) {
+        for (i, c) in ss.sketch.curves.iter_enumerated().filter(|_| !off("sketch") && !off("sketch_curves")) {
             if accepts
                 .is_some_and(|a| a & crate::selection::CURVES == 0 && (a & crate::selection::AXES == 0 || !matches!(c.kind, CurveKind::Line { .. })))
             {
@@ -4160,9 +4160,9 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
         if sk.view.hide_points {
             continue;
         }
-        let used: std::collections::HashSet<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
+        let used: std::collections::HashSet<PointIdx> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
         let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);
-        for (i, p) in sk.points.iter().enumerate().skip(1) {
+        for (i, p) in sk.points.iter_enumerated().skip(1) {
             if !used.contains(&i) && p.link.is_none() && visible.takes(p) {
                 out.push(ss.plane.to_world(p.pos));
             }
@@ -4193,7 +4193,7 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let Some(ss) = st.sketch(sid) else { return };
     let sk = &ss.sketch;
     let locked = sk.locked_points();
-    let virtual_corners: Vec<usize> = sk.virtual_corners().into_iter().map(|(i, _)| i).collect();
+    let virtual_corners: Vec<PointIdx> = sk.virtual_corners().into_iter().map(|(i, _)| i).collect();
     let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);
     for (i, p) in sk.points.iter().enumerate() {
         if !visible.takes(p) {
@@ -4211,7 +4211,7 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         };
         if i == 0 {
             painter.circle(sp, 3.5, Color32::from_rgb(240, 200, 60), Stroke::new(1.0, t.body_edge));
-        } else if virtual_corners.binary_search(&i).is_ok() {
+        } else if virtual_corners.binary_search(&PointIdx(i)).is_ok() {
             // A virtual sharp corner: an open square, it is not on any drawn curve.
             painter.rect_stroke(Rect::from_center_size(sp, vec2(6.0, 6.0)), 0.0, Stroke::new(1.2, c), egui::StrokeKind::Middle);
         } else {
@@ -4244,7 +4244,7 @@ fn loose_end_markers(
     proj: &Proj,
     t: &Tokens,
 ) {
-    let screen = |i: usize| sk.point(i).and_then(|p| proj.to_screen(plane.to_world(p)));
+    let screen = |i: PointIdx| sk.point(i).and_then(|p| proj.to_screen(plane.to_world(p)));
     for sp in ends.open.iter().filter_map(|&i| screen(i)) {
         painter.circle_stroke(sp, 7.0, Stroke::new(1.8, t.warning));
     }

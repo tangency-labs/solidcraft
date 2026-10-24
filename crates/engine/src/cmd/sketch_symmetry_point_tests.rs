@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{ConstraintKind, Sketch};
+use solidcraft_sketch::{ConstraintKind, PointIdx, Sketch};
 
 use crate::Session;
 
@@ -44,7 +44,7 @@ fn two_points_symmetric_about_the_origin() {
         assert_eq!(created.len(), 1, "{r}");
         let l = sk.curve_index(created[0].as_str().unwrap()).unwrap();
         assert!(sk.curves[l].construction);
-        assert!(sk.constraints.iter().any(|k| k.kind == ConstraintKind::Midpoint { p: 0, l }));
+        assert!(sk.constraints.iter().any(|k| k.kind == ConstraintKind::Midpoint { p: PointIdx::ORIGIN, l }));
         // It holds: moving p moves q opposite.
         run(&mut s, "sketch.drag", json!({"entity": "p", "from": [10, 5], "to": [20, 8]}));
         let sk = sketch(&s);

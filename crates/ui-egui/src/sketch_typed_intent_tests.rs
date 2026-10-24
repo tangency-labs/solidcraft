@@ -1,7 +1,7 @@
 //! Keyboard-authored intent must survive stage transitions and later model edits.
 use crate::scenario::Harness;
 use serde_json::json;
-use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
+use solidcraft_engine::sketch::{ConstraintKind, CurveIdx, CurveKind};
 
 fn start(command: &str) -> Harness {
     let mut h = Harness::new();
@@ -44,7 +44,7 @@ fn typed_arc_radius_and_signed_sweep_survive_stages_parameter_edit_and_reopen() 
     h.app.run("doc.open", json!({"path":path})).unwrap();
     let state = h.app.session.world_state();
     let sketch = &state.sketches[0].sketch;
-    let curve = &sketch.curves[0];
+    let curve = &sketch.curves[CurveIdx(0)];
     assert!(curve.reversed, "negative typed sweep must remain clockwise");
     let CurveKind::Arc { c, a, .. } = curve.kind else { panic!("expected arc") };
     assert!((sketch.points[c].pos.dist(sketch.points[a].pos) - 8.0).abs() < 1e-6);
@@ -201,7 +201,7 @@ fn line_angle_survives_drag_and_one_undo_removes_geometry_and_dimensions() {
     h.step(&json!({"drag":[{"world":[8.660254037844386,5,0]},{"world":[16,14,0]}]})).unwrap();
     let state = h.app.session.world_state();
     let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
-    let CurveKind::Line { a, b } = sketch.curves[0].kind else { panic!("expected line") };
+    let CurveKind::Line { a, b } = sketch.curves[CurveIdx(0)].kind else { panic!("expected line") };
     let vector = sketch.points[b].pos - sketch.points[a].pos;
     assert!((vector.len() - 10.0).abs() < 1e-6);
     assert!((vector.angle() - 30f64.to_radians()).abs() < 1e-6);
@@ -228,8 +228,8 @@ fn typed_drawing_preserves_construction_and_centerline_modes_at_undo_limit() {
         assert_eq!(h.app.session.undo.len(), 200);
         let state = h.app.session.world_state();
         let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
-        assert_eq!(sketch.curves[0].construction, mode == 1);
-        assert_eq!(sketch.curves[0].centerline, mode == 2);
+        assert_eq!(sketch.curves[CurveIdx(0)].construction, mode == 1);
+        assert_eq!(sketch.curves[CurveIdx(0)].centerline, mode == 2);
         h.app.run("edit.undo", json!({})).unwrap();
         let state = h.app.session.world_state();
         let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;

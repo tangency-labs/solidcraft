@@ -2,7 +2,7 @@
 use serde_json::{Value, json};
 use solidcraft_doc::{Document, FeatureKind, ProfileSel};
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{CurveKind, Sketch};
+use solidcraft_sketch::{CurveKind, PointIdx, Sketch};
 
 use crate::{Session, Snapshot};
 
@@ -24,7 +24,7 @@ fn offset(s: &mut Session, curve: &str, distance: f64) -> (String, Vec<String>) 
 fn solved(s: &Session, id: u64) -> Sketch {
     s.model.state().sketch(id).unwrap().sketch.clone()
 }
-fn arc_centres(sk: &Sketch, curves: &[String]) -> Vec<(String, usize, Vec2)> {
+fn arc_centres(sk: &Sketch, curves: &[String]) -> Vec<(String, PointIdx, Vec2)> {
     curves
         .iter()
         .filter_map(|id| {

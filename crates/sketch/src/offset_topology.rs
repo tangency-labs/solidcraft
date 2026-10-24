@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Seg2, Vec2};
+use solidcraft_geom::{IndexVec, Seg2, Vec2};
 
-use crate::{Curve, CurveKind, OffsetChain, Sketch, SketchError};
+use crate::{Curve, CurveIdx, CurveKind, OffsetChain, PointIdx, Sketch, SketchError};
 type Result<T> = std::result::Result<T, SketchError>;
 const MAX_GROUPS: usize = 128;
 const MAX_ROLES: usize = 512;
@@ -72,7 +72,7 @@ struct Arc {
     radius: f64,
     start: f64,
     sweep: f64,
-    centre_index: usize,
+    centre_index: PointIdx,
 }
 #[derive(Clone, Copy)]
 struct Source {
@@ -360,9 +360,9 @@ impl Sketch {
         let mut groups = BTreeSet::new();
         let mut outputs = BTreeSet::new();
         let mut total = 0usize;
-        let point_index: BTreeMap<_, _> = self.points.iter().enumerate().map(|(i, p)| (p.id.as_str(), i)).collect();
-        let curve_index: BTreeMap<_, _> = self.curves.iter().enumerate().map(|(i, p)| (p.id.as_str(), i)).collect();
-        let mut owners: BTreeMap<usize, BTreeSet<&str>> = BTreeMap::new();
+        let point_index: BTreeMap<_, _> = self.points.iter_enumerated().map(|(i, p)| (p.id.as_str(), i)).collect();
+        let curve_index: BTreeMap<_, _> = self.curves.iter_enumerated().map(|(i, p)| (p.id.as_str(), i)).collect();
+        let mut owners: BTreeMap<PointIdx, BTreeSet<&str>> = BTreeMap::new();
         for curve in &self.curves {
             for p in curve.kind.point_ids() {
                 owners.entry(p).or_default().insert(curve.id.as_str());
@@ -430,7 +430,7 @@ impl Sketch {
                 let a = *point_index.get(role.start.as_str()).ok_or_else(|| invalid("missing offset endpoint role"))?;
                 let b = *point_index.get(role.end.as_str()).ok_or_else(|| invalid("missing offset endpoint role"))?;
                 for p in [a, b] {
-                    if p == 0
+                    if p == PointIdx::ORIGIN
                         || self.points.get(p).is_none_or(|p| !p.fixed || p.link.is_some())
                         || owners.get(&p).is_none_or(|users| users.is_empty() || users.iter().any(|id| !record_outputs.contains(id)))
                     {
@@ -693,7 +693,7 @@ impl Sketch {
         }
         let retiring: BTreeSet<_> =
             topology.roles.iter().zip(&spans).filter_map(|(r, s)| (s.retired && !r.retired).then_some(r.output.clone())).collect();
-        let dead: BTreeSet<_> = self.curves.iter().enumerate().filter_map(|(i, c)| retiring.contains(c.id.as_str()).then_some(i)).collect();
+        let dead: BTreeSet<_> = self.curves.iter_enumerated().filter_map(|(i, c)| retiring.contains(c.id.as_str()).then_some(i)).collect();
         for role in &mut topology.roles {
             if retiring.contains(role.output.as_str()) {
                 let curve = self
@@ -714,20 +714,16 @@ impl Sketch {
         {
             return Err(invalid("an extinguished offset arc is retained by a dependent association"));
         }
-        let mut map = vec![None; self.curves.len()];
+        let mut map: IndexVec<CurveIdx, Option<CurveIdx>> = vec![None; self.curves.len()].into();
         let mut next = 0usize;
-        for (i, slot) in map.iter_mut().enumerate() {
+        for (i, slot) in map.iter_enumerated_mut() {
             if !dead.contains(&i) {
-                *slot = Some(next);
+                *slot = Some(CurveIdx(next));
                 next += 1;
             }
         }
-        let mut i = 0;
-        self.curves.retain(|_| {
-            let keep = !dead.contains(&i);
-            i += 1;
-            keep
-        });
+        let mut kept = map.iter().map(Option::is_some);
+        self.curves.retain(|_| kept.next().unwrap_or(false));
         for constraint in &mut self.constraints {
             if !constraint.kind.remap(&Some, &|i| map.get(i).copied().flatten()) {
                 return Err(invalid("offset constraint remapping failed"));
@@ -841,7 +837,7 @@ impl Sketch {
         candidate.offsets.remove(index);
         candidate.constraints.retain(|c| !matches!(&c.kind, crate::ConstraintKind::OffsetDistance { output, .. } if record.owns_output(output)));
         for point in owned {
-            if point != 0
+            if point != PointIdx::ORIGIN
                 && candidate.curves.iter().all(|c| !c.kind.uses(point) || outputs.contains(c.id.as_str()))
                 && let Some(p) = candidate.points.get_mut(point)
             {

@@ -4,7 +4,7 @@ use crate::viewport::Proj;
 use serde_json::{Value, json};
 use solidcraft_engine::geom::{Plane, Vec2, Vec3};
 use solidcraft_engine::render::{Camera, Mat4};
-use solidcraft_engine::sketch::Sketch;
+use solidcraft_engine::sketch::{CurveIdx, Sketch};
 
 fn tool(command: &str, points: &[[f64; 2]]) -> Tool {
     let mut tool = Tool::for_command(command).unwrap();
@@ -12,7 +12,7 @@ fn tool(command: &str, points: &[[f64; 2]]) -> Tool {
     tool
 }
 fn spans(sk: &Sketch) -> Vec<solidcraft_engine::geom::Seg2> {
-    sk.exact_segs(0).unwrap_or_else(|| sk.segs(0))
+    sk.exact_segs(CurveIdx(0)).unwrap_or_else(|| sk.segs(CurveIdx(0)))
 }
 fn projection(scale: f64) -> Proj {
     Proj {
@@ -103,8 +103,8 @@ fn pixel_preview_temporary_curves_match_committed_geometry_and_sampling() {
         for ppp in [1.0, 1.5, 2.0] {
             for scale in [2.0, 20.0, 220.0, 1000.0] {
                 let proj = projection(scale / f64::from(ppp));
-                let temporary = crate::sketch_display::curve_parts(&preview, 0, &Plane::XY, &proj, ppp);
-                let permanent = crate::sketch_display::curve_parts(committed, 0, &Plane::XY, &proj, ppp);
+                let temporary = crate::sketch_display::curve_parts(&preview, CurveIdx(0), &Plane::XY, &proj, ppp);
+                let permanent = crate::sketch_display::curve_parts(committed, CurveIdx(0), &Plane::XY, &proj, ppp);
                 assert_eq!(temporary, permanent, "{command}");
                 assert!(temporary.iter().map(Vec::len).sum::<usize>() <= 65_536);
                 let mut visible = 0;
@@ -133,7 +133,7 @@ fn pixel_preview_fully_offscreen_circle_is_clipped_without_false_connections() {
     let proj = projection(1000.0);
     // The viewport half diagonal is about 832px: a 1000px circle never enters it.
     assert!((proj.rect.width() * 0.5).hypot(proj.rect.height() * 0.5) < 1000.0);
-    assert!(crate::sketch_display::curve_parts(&curve, 0, &Plane::XY, &proj, 1.0).is_empty());
+    assert!(crate::sketch_display::curve_parts(&curve, CurveIdx(0), &Plane::XY, &proj, 1.0).is_empty());
 }
 
 #[test]
@@ -218,7 +218,7 @@ fn slot_preview_matches_every_committed_side_and_cap() {
         let state = h.app.session.world_state();
         let committed = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert_eq!(preview.curves.len(), committed.curves.len(), "{command}");
-        for index in 0..committed.curves.len() {
+        for index in committed.curves.indices() {
             let a = preview.exact_segs(index).unwrap_or_else(|| preview.segs(index));
             let b = committed.exact_segs(index).unwrap_or_else(|| committed.segs(index));
             assert_eq!(a.len(), b.len(), "{command}, curve {index}");
@@ -270,7 +270,7 @@ fn typed_small_slot_width_preview_matches_the_final_click() {
         let state = h.app.session.world_state();
         let committed = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert_eq!(committed.curves.len(), 4, "{command}: final click commits the typed width");
-        let solidcraft_engine::geom::Seg2::Arc { radius, .. } = committed.segs(1)[0] else { panic!("missing slot cap") };
+        let solidcraft_engine::geom::Seg2::Arc { radius, .. } = committed.segs(CurveIdx(1))[0] else { panic!("missing slot cap") };
         assert!((radius - 0.00005).abs() < 1e-10, "{command}: the typed width determines the cap radius");
         let mut output = ctx.run_ui(input(), |ui| {
             super::paint_preview_curve(committed.clone(), &Plane::XY, ui.painter(), &proj, egui::Stroke::new(1.5, egui::Color32::WHITE), 0);

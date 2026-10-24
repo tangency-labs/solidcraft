@@ -4,7 +4,7 @@
 use super::*;
 use serde_json::json;
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource};
+use solidcraft_sketch::{CurveIdx, LinkGeom, LinkKind, LinkSource};
 
 /// No colour here is one of [`colors`] or an appearance below, and each field has its own.
 const MARK: Palette = Palette {
@@ -33,8 +33,8 @@ const MARK: Palette = Palette {
 };
 
 /// Each curve's lines at x = its index, so a line tells which curve it draws.
-fn by_index(_: &Sketch, i: usize, _: &Plane) -> Vec<Vec<Vec3>> {
-    vec![vec![Vec3::new(i as f64, 0., 0.), Vec3::new(i as f64, 1., 0.)]]
+fn by_index(_: &Sketch, i: CurveIdx, _: &Plane) -> Vec<Vec<Vec3>> {
+    vec![vec![Vec3::new(i.0 as f64, 0., 0.), Vec3::new(i.0 as f64, 1., 0.)]]
 }
 
 #[test]
@@ -71,10 +71,10 @@ fn each_sketch_state_takes_its_palette_colour() {
     sk.curves[construction].construction = true;
     let determined = line(&mut sk, 4.);
     sk.add_link(LinkKind::Project, LinkSource::Origin, &[LinkGeom::Line(Vec2::new(0., 5.), Vec2::new(2., 5.))]).unwrap();
-    let projected = sk.curves.len() - 1;
+    let projected = CurveIdx(sk.curves.len() - 1);
     let lost_link = sk.add_link(LinkKind::Project, LinkSource::Origin, &[LinkGeom::Line(Vec2::new(0., 6.), Vec2::new(2., 6.))]).unwrap();
     sk.set_link_lost(&lost_link, true);
-    let lost = sk.curves.len() - 1;
+    let lost = CurveIdx(sk.curves.len() - 1);
     let text = LinkSource::Text {
         text: "A".into(),
         at: Vec2::ZERO,
@@ -85,12 +85,12 @@ fn each_sketch_state_takes_its_palette_colour() {
         exprs: Default::default(),
     };
     sk.add_link(LinkKind::Text, text, &[LinkGeom::Line(Vec2::new(0., 7.), Vec2::new(2., 7.))]).unwrap();
-    let text = sk.curves.len() - 1;
+    let text = CurveIdx(sk.curves.len() - 1);
     let mut flags = vec![false; sk.curves.len()];
-    flags[determined] = true;
-    let colour_of = |active: bool, i: usize| {
+    flags[determined.0] = true;
+    let colour_of = |active: bool, i: CurveIdx| {
         let lines = sketch_lines_in(&sk, &Plane::XY, active, &flags, by_index, &MARK);
-        let mut of_curve = lines.iter().filter(|(pts, _, _)| pts.first().is_some_and(|p| p.x == i as f64)).map(|(_, c, _)| *c);
+        let mut of_curve = lines.iter().filter(|(pts, _, _)| pts.first().is_some_and(|p| p.x == i.0 as f64)).map(|(_, c, _)| *c);
         let c = of_curve.next();
         assert!(of_curve.all(|other| Some(other) == c), "curve {i} drawn in two colours");
         c

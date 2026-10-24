@@ -2,7 +2,7 @@
 //! #2424: curves start at the ends of an associated offset spline, and follow them.
 use serde_json::{Value, json};
 use solidcraft_doc::Document;
-use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
+use solidcraft_sketch::{ConstraintKind, CurveKind, PointIdx, Sketch};
 
 use crate::Session;
 
@@ -20,7 +20,7 @@ fn offset_spline(s: &mut Session) -> (u64, String) {
     let result = run(s, "sketch.offset", json!({"curves":["s1"],"distance":"2 mm","chain":true}));
     (sketch, result["curves"][0].as_str().unwrap().into())
 }
-fn coincident(sk: &Sketch, a: usize, b: usize) -> bool {
+fn coincident(sk: &Sketch, a: PointIdx, b: PointIdx) -> bool {
     sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::Coincident { p, q } if (p, q) == (a, b) || (p, q) == (b, a)))
 }
 

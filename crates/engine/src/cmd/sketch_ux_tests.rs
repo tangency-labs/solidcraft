@@ -2,7 +2,7 @@
 //! which entity moves when a two-entity constraint is applied.
 
 use serde_json::{Value, json};
-use solidcraft_sketch::{DimFrame, Sketch, dim_frame, dim_layout};
+use solidcraft_sketch::{CurveIdx, DimFrame, Sketch, dim_frame, dim_layout};
 
 use crate::Session;
 
@@ -165,14 +165,14 @@ fn fixing_curves_holds_their_points_and_radius() {
     run(&mut s, "sketch.move_point", json!({"point": "c1.center", "to": [0, 0]}));
     assert_eq!(pt(&s, "c1.center"), solidcraft_geom::Vec2::new(10.0, 10.0));
     assert!(s.execute("sketch.dimension", &json!({"entities": ["c1"], "value": 20})).is_err());
-    let r0 = sketch(&s).radius(0);
+    let r0 = sketch(&s).radius(CurveIdx(0));
     assert_eq!(r0, Some(5.0));
     // Toggle without `fixed`: all fixed, so all are unfixed.
     let r = run(&mut s, "sketch.constraint.fix", json!({"entities": ["c1", "l1", "a1", "e1"]}));
     assert_eq!(r["result"]["fixed"], false);
     assert_eq!(dof(&mut s), free);
     run(&mut s, "sketch.dimension", json!({"entities": ["c1"], "type": "radius", "value": 7}));
-    assert!((sketch(&s).radius(0).unwrap_or(0.0) - 7.0).abs() < 1e-9);
+    assert!((sketch(&s).radius(CurveIdx(0)).unwrap_or(0.0) - 7.0).abs() < 1e-9);
     // Mixed selection: one fixed, one free → both end up fixed.
     run(&mut s, "sketch.constraint.fix", json!({"entity": "l1"}));
     let r = run(&mut s, "sketch.constraint.fix", json!({"entities": ["l1", "l1.start", "a1"]}));
@@ -190,7 +190,7 @@ fn projected_geometry_counts_as_fixed() {
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     let r = run(&mut s, "sketch.project", json!({"refs": [{"edge": [10, 0, 5]}]}));
     let sk = sketch(&s);
-    let ci = sk.curves.iter().position(|c| c.link.is_some()).unwrap_or_else(|| panic!("projected: {r}"));
+    let ci = sk.curves.iter().position(|c| c.link.is_some()).map(CurveIdx).unwrap_or_else(|| panic!("projected: {r}"));
     let id = sk.curves[ci].id.clone();
     assert!(sk.curve_locked(ci));
     let r = run(&mut s, "sketch.constraint.fix", json!({"entity": id}));
@@ -496,7 +496,7 @@ fn hiding_construction_geometry_is_per_sketch_saved_and_leaves_profiles_and_cent
     run(&mut s, "sketch.line", json!({"points": [[0, 55], [40, 55]], "connect": false, "infer": false}));
     run(&mut s, "sketch.construction", json!({"curves": ["l5"], "value": true}));
     run(&mut s, "sketch.centerline", json!({"curves": ["l6"], "value": true}));
-    let (rect, construction, centerline) = (0, 4, 5);
+    let (rect, construction, centerline) = (CurveIdx(0), CurveIdx(4), CurveIdx(5));
     let profiles = run(&mut s, "sketch.inspect", json!({}))["profiles"].clone();
     assert_eq!(profiles.as_array().map(Vec::len), Some(1), "the rectangle is one profile: {profiles}");
 
@@ -511,7 +511,7 @@ fn hiding_construction_geometry_is_per_sketch_saved_and_leaves_profiles_and_cent
     // Hiding is display only: the curves, their line types and the profiles are untouched.
     let after = run(&mut s, "sketch.inspect", json!({}));
     assert_eq!(after["profiles"], profiles);
-    assert_eq!(after["curves"][construction]["construction"], true);
+    assert_eq!(after["curves"][construction.0]["construction"], true);
     assert!(sketch(&s).curves[centerline].centerline, "the centerline keeps its line type");
     // Undo puts the option back.
     run(&mut s, "edit.undo", json!({}));
@@ -595,7 +595,7 @@ fn dragging_circles_and_arcs() {
 fn dragging_a_conic_reads_rho_off_the_cursor_and_its_apex_slides_like_any_point() {
     let mut s = new_sketch();
     run(&mut s, "sketch.conic", json!({"start": [0, 0], "end": [40, 0], "apex": [20, 20]}));
-    let rho = |s: &Session| match sketch(s).curves[0].kind {
+    let rho = |s: &Session| match sketch(s).curves[CurveIdx(0)].kind {
         solidcraft_sketch::CurveKind::Conic { rho, .. } => rho,
         ref k => panic!("not a conic: {k:?}"),
     };
@@ -976,7 +976,7 @@ fn a_dragged_fillet_stays_in_its_corner() {
         run(&mut s, "sketch.constraint.fix", json!({"entities": ["l1.start"]}));
         run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "l1", "mode": "horizontal"}));
         let sk0 = sketch(&s);
-        let arc = sk0.curves.iter().position(|c| matches!(c.kind, solidcraft_sketch::CurveKind::Arc { .. })).expect("fillet arc");
+        let arc = sk0.curves.iter().position(|c| matches!(c.kind, solidcraft_sketch::CurveKind::Arc { .. })).map(CurveIdx).expect("fillet arc");
         let arc_id = sk0.curves[arc].id.clone();
         let inside = |s: &Session| {
             let sk = sketch(s);

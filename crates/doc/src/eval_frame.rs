@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use solidcraft_geom::{Aabb2, Plane, Region2, Ring, Vec2, Vec3};
 use solidcraft_kernel as kernel;
-use solidcraft_sketch::CurveKind;
+use solidcraft_sketch::{CurveIdx, CurveKind};
 
 use super::{ModelBody, ModelState, SolvedSketch, new_name, path_in_frame, select_profiles, sketch_in_feature_frame, val};
 use crate::expr::{Kind, Value};
@@ -116,7 +116,7 @@ fn member_lines(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<(String, Vec3, 
     let sk = &ss.sketch;
     let mut out = Vec::new();
     if ids.is_empty() {
-        for (ci, c) in sk.curves.iter().enumerate() {
+        for (ci, c) in sk.curves.iter_enumerated() {
             if !c.construction
                 && !c.centerline
                 && c.link.is_none()
@@ -166,7 +166,7 @@ fn member_lines(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<(String, Vec3, 
 }
 
 /// A sketch line's ends in the sketch's frame.
-fn planar_line(ss: &SolvedSketch, ci: usize) -> Option<(Vec3, Vec3)> {
+fn planar_line(ss: &SolvedSketch, ci: CurveIdx) -> Option<(Vec3, Vec3)> {
     let CurveKind::Line { a, b } = ss.sketch.curves.get(ci)?.kind else { return None };
     let (pa, pb) = (ss.sketch.points.get(a)?.pos, ss.sketch.points.get(b)?.pos);
     Some((ss.plane.to_world(pa), ss.plane.to_world(pb)))

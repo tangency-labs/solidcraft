@@ -206,7 +206,7 @@ fn curve_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> String {
 
 /// "Point (arc 2 centre)": the role it plays in the first curve that uses it.
 fn point_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> String {
-    let Some(pi) = sk.points.iter().position(|p| p.id == id) else { return id.to_string() };
+    let Some(pi) = sk.point_index(id) else { return id.to_string() };
     let role = sk.curves.iter().find_map(|c| {
         let name = format!("{} {}", curve_kind_name(&c.kind).to_lowercase(), id_number(&c.id).unwrap_or(0));
         let (start, end) = if c.reversed { ("end", "start") } else { ("start", "end") };
@@ -224,8 +224,8 @@ fn point_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> String {
     let fixed = if sk.point_locked(pi) { ", fixed" } else { "" };
     match role {
         Some(r) => format!("Point ({r}{fixed})"),
-        None if fixed.is_empty() => format!("Point {}", id_number(id).unwrap_or(pi as u64 + 1)),
-        None => format!("Point {} (fixed)", id_number(id).unwrap_or(pi as u64 + 1)),
+        None if fixed.is_empty() => format!("Point {}", id_number(id).unwrap_or(pi.0 as u64 + 1)),
+        None => format!("Point {} (fixed)", id_number(id).unwrap_or(pi.0 as u64 + 1)),
     }
 }
 

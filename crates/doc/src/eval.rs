@@ -6497,9 +6497,12 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 (None, Some(sid)) => {
                     let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
                     // Each curve's exact segments (lines and arcs split by their own plane and cylinder).
-                    let curves: Vec<Vec<solidcraft_geom::Seg2>> = (0..ss.sketch.curves.len())
-                        .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
-                        .map(|ci| ss.sketch.segs(ci))
+                    let curves: Vec<Vec<solidcraft_geom::Seg2>> = ss
+                        .sketch
+                        .curves
+                        .iter_enumerated()
+                        .filter(|(_, c)| !c.construction)
+                        .map(|(ci, _)| ss.sketch.segs(ci))
                         .filter(|segs| !segs.is_empty())
                         .collect();
                     if curves.is_empty() {

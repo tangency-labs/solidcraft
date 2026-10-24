@@ -3,6 +3,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_geom::Vec3;
+use solidcraft_sketch::CurveIdx;
 
 use super::solve_counts;
 use crate::Session;
@@ -45,7 +46,7 @@ fn determined_pattern_geometry_does_not_attempt_conflicting_held_solves() {
     let dimension = before
         .constraints
         .iter()
-        .find(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Length { l: 0, .. }))
+        .find(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Length { l: CurveIdx(0), .. }))
         .and_then(|c| c.param.as_ref())
         .expect("the first line's dimension");
     s.doc_mut().params.iter_mut().find(|p| &p.name == dimension).expect("dimension parameter").expr = "3".into();

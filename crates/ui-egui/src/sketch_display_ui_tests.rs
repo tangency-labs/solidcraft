@@ -5,6 +5,7 @@ use crate::viewport::{Hit, Proj, pick, projection};
 use serde_json::json;
 use solidcraft_engine::geom::{Plane, Vec2, Vec3};
 use solidcraft_engine::render::{SampledPath, SamplingQuality};
+use solidcraft_engine::sketch::CurveIdx;
 use std::sync::Arc;
 
 fn circle(h: &mut Harness) -> u64 {
@@ -161,13 +162,13 @@ fn pixel_adapter_uses_exact_ellipse_periodic_fit_and_control_spline_spans() {
         let sid = h.app.session.active_sketch.unwrap();
         let state = h.app.session.world_state();
         let ss = state.sketch(sid).unwrap();
-        let exact = ss.sketch.exact_segs(0).unwrap();
+        let exact = ss.sketch.exact_segs(CurveIdx(0)).unwrap();
         assert!(
             exact.iter().all(|s| !matches!(s, solidcraft_engine::geom::Seg2::Line { .. })),
             "freeform display must reach the exact span extractor"
         );
         let proj = projection(&h.app, h.app.viewport.rect.unwrap());
-        let path = curve_sample(&h.app, sid, 0, &ss.plane, &proj);
+        let path = curve_sample(&h.app, sid, CurveIdx(0), &ss.plane, &proj);
         assert_eq!(path.quality, SamplingQuality::Complete, "{command}");
         assert!(path.vertex_count <= 4096);
         let lines: Vec<_> =
@@ -212,7 +213,7 @@ fn pixel_curve_second_nested_rotated_occurrence_uses_its_world_plane() {
         "independent expected occurrence rotation must tilt the actual sketch plane"
     );
     let proj = projection(&h.app, h.app.viewport.rect.unwrap());
-    let path = curve_sample(&h.app, sid, 0, &ss.plane, &proj);
+    let path = curve_sample(&h.app, sid, CurveIdx(0), &ss.plane, &proj);
     assert!(dense_circle_error(&path, &ss.plane, &proj, 1.0, h.app.viewport.pixels_per_point()) <= 1.0);
     let world = ss.plane.to_world(Vec2::new(0.8090169943749475, 0.5877852522924731));
     h.step(&json!({"click":{"world":[world.x,world.y,world.z]}})).unwrap();
@@ -257,7 +258,7 @@ fn pixel_annulus_fill_keeps_hole_and_cpu_bridge_matches_cached_boundaries() {
     let cpu = solidcraft_engine::view::sketch_lines_with_sampler(&ss.sketch, &ss.plane, true, &[], |sk, index, plane| {
         crate::sketch_display::curve_parts(sk, index, plane, &proj, ppp)
     });
-    let cached: Vec<_> = (0..ss.sketch.curves.len()).flat_map(|index| curve_sample(&h.app, sid, index, &ss.plane, &proj).parts.clone()).collect();
+    let cached: Vec<_> = ss.sketch.curves.indices().flat_map(|index| curve_sample(&h.app, sid, index, &ss.plane, &proj).parts.clone()).collect();
     assert_eq!(
         cpu.iter().map(|(points, _, _)| points.clone()).collect::<Vec<_>>(),
         cached,
@@ -279,7 +280,7 @@ fn pixel_frame_budget_does_not_cache_unbounded_empty_curve_results() {
         // Distinct legal placement keys of one source avoid manufacturing a huge
         // document. Even exhausted samples must not add entries forever.
         plane.origin.x = i as f64 * 1e-7;
-        let path = curve_sample(&h.app, sid, 0, &plane, &proj);
+        let path = curve_sample(&h.app, sid, CurveIdx(0), &plane, &proj);
         assert!(path.vertex_count <= 4096);
         if path.quality == SamplingQuality::BudgetLimited {
             limited += 1;

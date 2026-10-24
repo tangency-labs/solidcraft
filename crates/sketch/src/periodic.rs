@@ -119,6 +119,7 @@ impl Sketch {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::Hold;
     #[test]
     fn periodic_c2_unequal_chords_and_legacy_natural_are_distinct() {
         let p = [Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(3.0, 2.0), Vec2::new(-1.0, 1.0), Vec2::new(0.0, 0.0)];
@@ -163,7 +164,7 @@ mod tests {
         sk.add_curve(crate::CurveKind::Spline { pts: vec![first, a, b, seam], control: false, degree: 3, periodic: true }, None).unwrap();
         sk.add_curve(crate::CurveKind::Spline { pts: vec![seam, c, d, last], control: false, degree: 3, periodic: true }, None).unwrap();
         sk.points[first].pos = Vec2::new(0.2, 0.1);
-        assert!(crate::solve_with(&mut sk, &crate::Hold { points: vec![first], radii: vec![] }, None, crate::Analysis::Full, None).ok());
+        assert!(crate::solve_with(&mut sk, &Hold { points: vec![first], radii: vec![] }, None, crate::Analysis::Full, None).ok());
         assert_eq!(sk.point(first), sk.point(seam));
         assert_eq!(sk.point(first), sk.point(last));
         sk.validate_periodic_splines().unwrap();
@@ -177,7 +178,7 @@ mod tests {
         let mut collapsed = sk;
         collapsed.points[a].pos = collapsed.points[first].pos;
         let before = collapsed.clone();
-        assert!(!crate::solve_with(&mut collapsed, &crate::Hold { points: vec![first, a], radii: vec![] }, None, crate::Analysis::Full, None).ok());
+        assert!(!crate::solve_with(&mut collapsed, &Hold { points: vec![first, a], radii: vec![] }, None, crate::Analysis::Full, None).ok());
         assert_eq!(collapsed, before);
     }
 

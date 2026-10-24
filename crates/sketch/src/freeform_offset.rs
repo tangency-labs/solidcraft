@@ -4,7 +4,7 @@
 //! bounds their distance everywhere, rather than just at selected samples. At the
 //! node limit, interior splits align the curves geometrically instead of requiring
 //! identical parameter speeds; stored nodes and interpolation remain unchanged.
-use crate::{CurveKind, Sketch, SketchError, fit_beziers_mode};
+use crate::{CurveIdx, CurveKind, PointIdx, Sketch, SketchError, fit_beziers_mode};
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Seg2, Vec2};
 
@@ -311,7 +311,7 @@ fn verify_simple(points: &[Vec2], cubics: &[[Vec2; 4]], closed: bool) -> Result<
     Ok(())
 }
 
-fn geometry(sk: &Sketch, source: usize, forward: bool, d: f64, divisions: usize, fit: Fit, work: &mut usize) -> Result<(Vec<Vec2>, usize, bool)> {
+fn geometry(sk: &Sketch, source: CurveIdx, forward: bool, d: f64, divisions: usize, fit: Fit, work: &mut usize) -> Result<(Vec<Vec2>, usize, bool)> {
     if *work == 0 {
         return Err(bad("offset transaction certificate work limit exceeded"));
     }
@@ -401,7 +401,7 @@ impl Sketch {
                 if references > 1_000_000 {
                     return Err(bad("offset point ownership work limit exceeded"));
                 }
-                if let Some(count) = owners.get_mut(index) {
+                if let Some(count) = owners.get_mut(index.0) {
                     *count += 1;
                 }
             }
@@ -440,17 +440,18 @@ impl Sketch {
                     if *periodic == (record.certificate == 2)
                         && (record.certificate != 2 || record.closed)
                         && pts.len() == record.pieces * record.divisions + 1
-                        && pts.iter().all(|i| *i < self.points.len())
+                        && pts.iter().all(|i| i.0 < self.points.len())
                         && pts.iter().copied().collect::<std::collections::BTreeSet<_>>().len() == pts.len()
                         && pts
                             .iter()
-                            .all(|i| self.points.get(*i).is_some_and(|point| point.fixed && point.link.is_none()) && owners.get(*i) == Some(&1)) => {}
+                            .all(|i| self.points.get(*i).is_some_and(|point| point.fixed && point.link.is_none()) && owners.get(i.0) == Some(&1)) => {
+                }
                 _ => return Err(bad("invalid offset output point roles")),
             }
         }
         Ok(())
     }
-    pub fn add_freeform_offset(&mut self, source: usize, forward: bool, distance: f64) -> Result<usize> {
+    pub fn add_freeform_offset(&mut self, source: CurveIdx, forward: bool, distance: f64) -> Result<CurveIdx> {
         if self.freeform_offsets.len() >= MAX_ASSOCIATIONS {
             return Err(bad("too many associative free-form offsets"));
         }
@@ -597,18 +598,18 @@ impl Sketch {
             return Ok(Vec::new());
         }
         let outputs: std::collections::BTreeSet<&str> = self.freeform_offsets.iter().map(|o| o.output.as_str()).collect();
-        let nodes: std::collections::BTreeSet<usize> =
+        let nodes: std::collections::BTreeSet<PointIdx> =
             self.curves.iter().filter(|c| outputs.contains(c.id.as_str())).flat_map(|c| c.kind.point_ids()).collect();
-        let taken: Vec<(usize, usize)> = self
+        let taken: Vec<(CurveIdx, PointIdx)> = self
             .curves
-            .iter()
-            .enumerate()
+            .iter_enumerated()
             .filter(|(_, c)| !outputs.contains(c.id.as_str()))
             .flat_map(|(ci, c)| c.kind.point_ids().into_iter().filter(|p| nodes.contains(p)).map(move |p| (ci, p)))
             .collect();
         let mut added = Vec::new();
         for (ci, node) in taken {
-            let at = self.points.get(node).map(|p| p.pos).ok_or_else(|| bad("offset output point vanished"))?;
+            let at = self.point(node).ok_or_else(|| bad("offset output point vanished"))?;
+
             let own = self.add_point(at, None)?;
             let curve = self.curves.get_mut(ci).ok_or_else(|| bad("offset neighbour curve vanished"))?;
             curve.kind.map_points(&|p| if p == node { own } else { p });
@@ -635,7 +636,7 @@ mod tests {
             let mut sk = original.clone();
             let output = sk.add_freeform_offset(source, forward, distance).unwrap();
             assert_eq!(sk.freeform_offsets[0].divisions, 32);
-            assert_eq!(&sk.points[..original.points.len()], &original.points);
+            assert_eq!(&sk.points.as_slice()[..original.points.len()], original.points.as_slice());
             assert_eq!(sk.curves[source], original.curves[source]);
             let exact = sk.exact_segs(source).unwrap();
             let fitted = sk.exact_segs(output).unwrap();
@@ -682,7 +683,7 @@ mod tests {
         assert!(certify(&stationary, &cubic, 2.0, proof, 0, &mut budget).is_err());
     }
 
-    fn ellipse() -> (Sketch, usize) {
+    fn ellipse() -> (Sketch, CurveIdx) {
         let mut sketch = Sketch::new();
         let center = sketch.add_point(Vec2::ZERO, None).unwrap();
         let major = sketch.add_point(Vec2::new(10.0, 0.0), None).unwrap();
@@ -873,7 +874,7 @@ mod tests {
                             let exact = normal_point(piece, (j as f64 + t) / record.divisions as f64, record.distance).unwrap();
                             let got = sk.exact_segs(output).unwrap()[i * record.divisions + j].point_at(t);
                             assert!(got.dist(exact) <= OFFSET_TOLERANCE);
-                            if source == 0 {
+                            if source == CurveIdx(0) {
                                 // Independent ellipse implicit-gradient normal, rather
                                 // than using the offset implementation as its own oracle.
                                 let base = piece.point_at((j as f64 + t) / record.divisions as f64);

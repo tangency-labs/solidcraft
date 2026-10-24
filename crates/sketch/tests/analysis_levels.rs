@@ -1,7 +1,7 @@
 //! Reduced diagnostics must preserve placement, rollback, feasibility and exact freedom results.
 
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{Analysis, ConstraintKind, Hold, Sketch, solve_with};
+use solidcraft_sketch::{Analysis, ConstraintKind, Hold, PointIdx, Sketch, solve_with};
 
 fn compare(sketch: &Sketch, hold: &Hold) {
     let mut full_geometry = sketch.clone();
@@ -25,7 +25,7 @@ fn compare(sketch: &Sketch, hold: &Hold) {
 fn analysis_levels_preserve_results_on_anchored_floating_failed_and_held_geometry() {
     let mut anchored = Sketch::new();
     let q = anchored.add_point(Vec2::new(12.0, 3.0), None).unwrap();
-    let k = ConstraintKind::Distance { p: 0, q, value: 10.0 };
+    let k = ConstraintKind::Distance { p: PointIdx::ORIGIN, q, value: 10.0 };
     anchored.add_constraint(k.clone(), None).unwrap();
     let redundant = anchored.add_constraint(k, None).unwrap();
     let full = solve_with(&mut anchored.clone(), &Hold::default(), None, Analysis::Full, None);
@@ -36,7 +36,7 @@ fn analysis_levels_preserve_results_on_anchored_floating_failed_and_held_geometr
     compare(&anchored, &Hold { points: vec![q], radii: vec![] });
 
     let mut conflict = anchored.clone();
-    conflict.add_constraint(ConstraintKind::Distance { p: 0, q, value: 11.0 }, None).unwrap();
+    conflict.add_constraint(ConstraintKind::Distance { p: PointIdx::ORIGIN, q, value: 11.0 }, None).unwrap();
     assert!(!solve_with(&mut conflict.clone(), &Hold::default(), None, Analysis::Full, None).ok());
     compare(&conflict, &Hold::default());
 
@@ -55,7 +55,7 @@ fn analysis_levels_preserve_results_on_anchored_floating_failed_and_held_geometr
     let c = blocks.add_circle(Vec2::new(20.0, 30.0), 5.0, None, None).unwrap();
     blocks.add_constraint(ConstraintKind::Radius { c, value: 5.0 }, None).unwrap();
     blocks.add_constraint(ConstraintKind::Radius { c, value: 5.0 }, None).unwrap();
-    blocks.add_constraint(ConstraintKind::Distance { p: 0, q: p, value: 999.0 }, None).unwrap();
+    blocks.add_constraint(ConstraintKind::Distance { p: PointIdx::ORIGIN, q: p, value: 999.0 }, None).unwrap();
     blocks.constraints.last_mut().unwrap().driven = true;
     compare(&blocks, &Hold::default());
     compare(&blocks, &Hold { points: vec![p], radii: vec![c] });
@@ -63,6 +63,6 @@ fn analysis_levels_preserve_results_on_anchored_floating_failed_and_held_geometr
     let mut constants = Sketch::new();
     let q = constants.add_point(Vec2::new(5.0, 0.0), None).unwrap();
     constants.points[q].fixed = true;
-    constants.add_constraint(ConstraintKind::Distance { p: 0, q, value: 10.0 }, None).unwrap();
+    constants.add_constraint(ConstraintKind::Distance { p: PointIdx::ORIGIN, q, value: 10.0 }, None).unwrap();
     compare(&constants, &Hold::default());
 }

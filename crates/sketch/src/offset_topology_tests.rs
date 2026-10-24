@@ -60,7 +60,7 @@ fn convex_extinction_material_ring_and_identity_resurrection() {
     assert!((area(&sk, &inner.curves) - 4626.24).abs() < 1e-8);
     let ring_area = area(&sk, &outer.curves) - area(&sk, &inner.curves);
     assert!((ring_area - 332.570619298295).abs() < 1e-8);
-    assert_eq!(&sk.points[..source_points.len()], source_points.as_slice());
+    assert_eq!(&sk.points.as_slice()[..source_points.len()], source_points.as_slice());
     let topology = sk.offsets[1].topology.clone().unwrap();
     let nodes: Vec<_> = topology.roles.iter().map(|r| (r.start.clone(), r.end.clone())).collect();
     let reserved: Vec<_> = topology.roles.iter().map(|r| r.output.clone()).collect();

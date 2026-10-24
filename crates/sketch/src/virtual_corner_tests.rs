@@ -1,13 +1,13 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 
-use crate::{Constraint, ConstraintKind, CurveKind, Sketch};
+use crate::{Constraint, ConstraintKind, CurveIdx, CurveKind, PointIdx, Sketch};
 use solidcraft_geom::Vec2;
 
-fn point(sk: &mut Sketch, x: f64, y: f64) -> usize {
+fn point(sk: &mut Sketch, x: f64, y: f64) -> PointIdx {
     sk.add_point(Vec2::new(x, y), None).unwrap()
 }
 
-fn on(sk: &mut Sketch, p: usize, c: usize) {
+fn on(sk: &mut Sketch, p: PointIdx, c: CurveIdx) {
     sk.add_constraint(ConstraintKind::PointOnCurve { p, c }, None).unwrap();
 }
 
@@ -34,7 +34,7 @@ fn virtual_corner_inside_lines_stays_visible_without_extensions_and_origin_is_ex
     let b = sk.add_line(Vec2::new(1., 0.), Vec2::new(1., 2.), None, None, None).unwrap();
     for c in [a, b] {
         on(&mut sk, p, c);
-        on(&mut sk, 0, c);
+        on(&mut sk, PointIdx::ORIGIN, c);
     }
     assert_eq!(sk.virtual_corners(), vec![(p, vec![])]);
 }
@@ -58,7 +58,7 @@ fn curve_centres_and_spline_interior_points_are_used_and_invalid_incidence_is_sa
             on(&mut sk, p, c);
         }
     }
-    for (p, c) in [(usize::MAX, a), (centre, usize::MAX)] {
+    for (p, c) in [(PointIdx(usize::MAX), a), (centre, CurveIdx(usize::MAX))] {
         sk.constraints.push(Constraint {
             id: format!("damaged{p}{c}"),
             kind: ConstraintKind::PointOnCurve { p, c },
@@ -91,7 +91,7 @@ fn oversized_reference_input_is_refused_without_scanning_or_mutating_it() {
     let mut sk = Sketch::new();
     let a = sk.add_line(Vec2::new(0., 1.), Vec2::new(2., 1.), None, None, None).unwrap();
     let before = sk.points.clone();
-    sk.curves[a].kind = CurveKind::Spline { pts: vec![usize::MAX; 1_000_001], control: false, degree: 3, periodic: false };
+    sk.curves[a].kind = CurveKind::Spline { pts: vec![PointIdx(usize::MAX); 1_000_001], control: false, degree: 3, periodic: false };
     assert!(sk.virtual_corners().is_empty());
     assert_eq!(sk.points, before);
     assert_eq!(sk.curves[a].kind.point_ids().len(), 1_000_001);

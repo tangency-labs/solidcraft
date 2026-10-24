@@ -6,7 +6,7 @@ use std::sync::Arc;
 use solidcraft_engine::doc::ModelState;
 use solidcraft_engine::geom::{Loop2, Plane, Region2, Vec2, Vec3};
 use solidcraft_engine::render::{PixelCurveView, SampledPath, SamplingBudget, SamplingQuality, sample_segment, sample_segment_unclipped};
-use solidcraft_engine::sketch::Sketch;
+use solidcraft_engine::sketch::{CurveIdx, Sketch};
 
 use crate::SolveApp;
 use crate::viewport::Proj;
@@ -29,7 +29,7 @@ pub fn pixel_view(proj: &Proj, ppp: f32) -> PixelCurveView {
 /// The pieces a curve is drawn and picked from. An infinite line (#1359) reaches across the whole
 /// view: through the point of its line nearest the view's centre, far past the view each way
 /// (the sampler clips it to the view). Only the display changes: the line keeps its two points.
-fn display_segs(sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj) -> Vec<solidcraft_engine::geom::Seg2> {
+fn display_segs(sketch: &Sketch, index: CurveIdx, plane: &Plane, proj: &Proj) -> Vec<solidcraft_engine::geom::Seg2> {
     use solidcraft_engine::geom::Seg2;
     let segs = sketch.exact_segs(index).unwrap_or_else(|| sketch.segs(index));
     if !sketch.curves.get(index).is_some_and(|c| c.infinite) {
@@ -53,7 +53,7 @@ fn display_segs(sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj) -> Ve
         .collect()
 }
 
-pub fn curve_with_budget(sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj, ppp: f32, budget: &mut SamplingBudget) -> SampledPath {
+pub fn curve_with_budget(sketch: &Sketch, index: CurveIdx, plane: &Plane, proj: &Proj, ppp: f32, budget: &mut SamplingBudget) -> SampledPath {
     let segments = display_segs(sketch, index, plane, proj);
     let mut local = SamplingBudget::new(budget.remaining_vertices.min(4096), budget.remaining_nodes.min(65_536));
     let initial = local.clone();
@@ -71,7 +71,7 @@ pub fn curve_with_budget(sketch: &Sketch, index: usize, plane: &Plane, proj: &Pr
     out
 }
 
-pub fn curve_unclipped(sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj, ppp: f32) -> SampledPath {
+pub fn curve_unclipped(sketch: &Sketch, index: CurveIdx, plane: &Plane, proj: &Proj, ppp: f32) -> SampledPath {
     let mut budget = SamplingBudget::new(4096, 65_536);
     let mut out = SampledPath { parts: Vec::new(), quality: SamplingQuality::Complete, vertex_count: 0 };
     for segment in display_segs(sketch, index, plane, proj) {
@@ -86,7 +86,7 @@ pub fn curve_unclipped(sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj
 }
 
 #[cfg(test)]
-pub fn curve_parts(sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj, ppp: f32) -> Vec<Vec<Vec3>> {
+pub fn curve_parts(sketch: &Sketch, index: CurveIdx, plane: &Plane, proj: &Proj, ppp: f32) -> Vec<Vec<Vec3>> {
     curve_with_budget(sketch, index, plane, proj, ppp, &mut SamplingBudget::new(4096, 65_536)).parts
 }
 
@@ -176,7 +176,7 @@ pub fn boundary_parts(loop_: &Loop2, plane: &Plane, proj: &Proj, ppp: f32) -> Ve
 pub struct DisplayCache {
     state: Option<Arc<ModelState>>,
     view: u64,
-    curves: HashMap<(u64, usize, [u64; 9]), Arc<SampledPath>>,
+    curves: HashMap<(u64, CurveIdx, [u64; 9]), Arc<SampledPath>>,
     profiles: HashMap<(u64, usize, [u64; 9]), Arc<Option<Region2>>>,
     budget: SamplingBudget,
 }
@@ -208,7 +208,7 @@ impl DisplayCache {
         }
     }
 
-    fn curve(&mut self, state: Arc<ModelState>, sketch: u64, index: usize, plane: &Plane, proj: &Proj, ppp: f32) -> Arc<SampledPath> {
+    fn curve(&mut self, state: Arc<ModelState>, sketch: u64, index: CurveIdx, plane: &Plane, proj: &Proj, ppp: f32) -> Arc<SampledPath> {
         self.reset(&state, proj, ppp);
         let plane_key =
             [plane.origin.x, plane.origin.y, plane.origin.z, plane.x.x, plane.x.y, plane.x.z, plane.y.x, plane.y.y, plane.y.z].map(f64::to_bits);
@@ -260,7 +260,7 @@ pub fn profile_region(app: &SolveApp, sketch: u64, index: usize, plane: &Plane, 
     }
 }
 
-pub fn curve_sample(app: &SolveApp, sketch: u64, index: usize, plane: &Plane, proj: &Proj) -> Arc<SampledPath> {
+pub fn curve_sample(app: &SolveApp, sketch: u64, index: CurveIdx, plane: &Plane, proj: &Proj) -> Arc<SampledPath> {
     let state = app.session.world_state();
     let ppp = app.viewport.pixels_per_point();
     match app.viewport.display.lock() {

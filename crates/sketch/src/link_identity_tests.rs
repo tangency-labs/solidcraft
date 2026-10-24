@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ConstraintKind, solve};
+use crate::{ConstraintKind, CurveIdx, solve};
 
 fn square(size: f64) -> Vec<LinkGeom> {
     let pts = [Vec2::new(-size, -size), Vec2::new(size, -size), Vec2::new(size, size), Vec2::new(-size, size)];
@@ -96,8 +96,8 @@ fn geometric_refresh_updates_conic_and_ellipse_scalar_values() {
     };
     let link = sk.add_link(LinkKind::Project, LinkSource::Origin, &geom(0.4, 2.0)).unwrap();
     assert!(!sk.update_link(&link, &geom(0.6, 3.0)).unwrap());
-    assert!(matches!(sk.curves[0].kind, CurveKind::Conic { rho, .. } if rho == 0.6));
-    assert!(matches!(sk.curves[1].kind, CurveKind::Ellipse { r, .. } if r == 3.0));
+    assert!(matches!(sk.curves[CurveIdx(0)].kind, CurveKind::Conic { rho, .. } if rho == 0.6));
+    assert!(matches!(sk.curves[CurveIdx(1)].kind, CurveKind::Ellipse { r, .. } if r == 3.0));
 }
 
 #[test]
@@ -120,8 +120,8 @@ fn concentric_face_resize_keeps_inner_outer_circle_identity() {
     let link = sk.add_link(LinkKind::Project, face(), &[LinkGeom::Circle(Vec2::ZERO, 8.0), LinkGeom::Circle(Vec2::ZERO, 10.0)]).unwrap();
     let ids: Vec<String> = sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect();
     assert!(!sk.update_link(&link, &[LinkGeom::Circle(Vec2::ZERO, 20.0), LinkGeom::Circle(Vec2::ZERO, 16.0)]).unwrap());
-    assert!(matches!(sk.curves[0].kind, CurveKind::Circle { r, .. } if r == 16.0));
-    assert!(matches!(sk.curves[1].kind, CurveKind::Circle { r, .. } if r == 20.0));
+    assert!(matches!(sk.curves[CurveIdx(0)].kind, CurveKind::Circle { r, .. } if r == 16.0));
+    assert!(matches!(sk.curves[CurveIdx(1)].kind, CurveKind::Circle { r, .. } if r == 20.0));
     assert_eq!(ids, sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect::<Vec<_>>());
     // Coincident circles do not have a unique boundary identity.
     let before = sk.clone();
@@ -143,7 +143,7 @@ fn resized_dense_rim_matches_arc_centres_by_role_before_proximity() {
         out
     };
     let link = sk.add_link(LinkKind::Project, face(), &geometry(38.0, -26.5)).unwrap();
-    let arcs: Vec<usize> = sk.link_curves(&link).into_iter().filter(|i| matches!(sk.curves[*i].kind, CurveKind::Arc { .. })).collect();
+    let arcs: Vec<CurveIdx> = sk.link_curves(&link).into_iter().filter(|i| matches!(sk.curves[*i].kind, CurveKind::Arc { .. })).collect();
     let ids: Vec<String> = arcs.iter().map(|i| sk.curves[*i].id.clone()).collect();
     // The old centre is spatially closer in normalized space to a fresh endpoint.
     // Both semicircles must still keep the same shared centre and logical endpoints.

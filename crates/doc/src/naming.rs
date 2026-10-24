@@ -686,7 +686,7 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
 /// The sketch curve (id) nearest a point in the sketch plane, and how near.
 fn nearest_curve_dist(ss: &crate::SolvedSketch, q: Vec2) -> Option<(f64, String)> {
     let mut best: Option<(f64, String)> = None;
-    for (ci, c) in ss.sketch.curves.iter().enumerate() {
+    for (ci, c) in ss.sketch.curves.iter_enumerated() {
         if c.construction {
             continue;
         }
@@ -703,7 +703,7 @@ fn nearest_curve_dist(ss: &crate::SolvedSketch, q: Vec2) -> Option<(f64, String)
 /// The sketch curve (id) nearest a point in the sketch plane.
 fn nearest_curve(ss: &crate::SolvedSketch, q: Vec2) -> Option<String> {
     let mut best: Option<(f64, String)> = None;
-    for (ci, c) in ss.sketch.curves.iter().enumerate() {
+    for (ci, c) in ss.sketch.curves.iter_enumerated() {
         if c.construction {
             continue;
         }

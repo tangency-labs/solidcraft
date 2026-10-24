@@ -364,7 +364,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::panic)]
     use super::*;
     use solidcraft_geom::{Plane, Vec2};
-    use solidcraft_sketch::{Sketch, find_profiles, solve};
+    use solidcraft_sketch::{PointIdx, Sketch, find_profiles, solve};
 
     fn rounded_source(sketch: &mut Sketch, radius: f64) -> Vec<(String, bool)> {
         let endpoints = [
@@ -558,7 +558,7 @@ mod tests {
     fn periodic_offset_ring_whole_source_survives_adaptive_spans_and_reopen() {
         let mut sketch = Sketch::new();
         let major = sketch.add_point(Vec2::new(10., 0.), None).unwrap();
-        let ellipse = sketch.add_curve(solidcraft_sketch::CurveKind::Ellipse { c: 0, m: major, r: 5. }, None).unwrap();
+        let ellipse = sketch.add_curve(solidcraft_sketch::CurveKind::Ellipse { c: PointIdx::ORIGIN, m: major, r: 5. }, None).unwrap();
         let first = sketch.add_freeform_offset(ellipse, true, -1.).unwrap();
         sketch.add_freeform_offset(first, true, -0.5).unwrap();
         let mut document = crate::Document::new("periodic offset ring multiset");

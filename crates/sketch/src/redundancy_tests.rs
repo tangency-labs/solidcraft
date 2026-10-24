@@ -79,12 +79,12 @@ fn sparse_and_dense_rows_match_over_seeded_mixed_rank_matrices() {
 
 #[test]
 fn real_sketch_jacobians_keep_redundant_blocks_and_support() {
-    use crate::ConstraintKind;
+    use crate::{ConstraintKind, PointIdx};
     use solidcraft_geom::Vec2;
 
     for seed in 0..8 {
         let mut sk = Sketch::new();
-        let mut points = vec![0];
+        let mut points = vec![PointIdx::ORIGIN];
         for i in 1..10 {
             let p = sk.add_point(Vec2::new(i as f64 * 3.0, (i * seed % 7) as f64), None).unwrap();
             let q = points[i - 1];

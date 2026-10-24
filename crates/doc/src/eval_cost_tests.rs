@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use solidcraft_geom::{Plane, Vec2, Vec3};
 use solidcraft_kernel as kernel;
-use solidcraft_sketch::Sketch;
+use solidcraft_sketch::{PointIdx, Sketch};
 
 use crate::*;
 
@@ -197,7 +197,7 @@ fn a_sketch_on_a_fixed_plane_costs_the_same_in_a_large_placed_design() {
         assert_eq!(model.state().bodies.len(), parts * 2);
         // Editing the sketch again recomputes it alone, for the same cost.
         if let Ok(sk) = doc.sketch_mut(id)
-            && let Some(p) = sk.points.get_mut(1)
+            && let Some(p) = sk.points.get_mut(PointIdx(1))
         {
             p.pos = Vec2::new(12.0, 2.0);
         }

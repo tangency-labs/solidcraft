@@ -32,7 +32,7 @@ fn radii(s: &Session, arcs: &[String]) -> Vec<f64> {
     let sk = solved(s);
     arcs.iter()
         .map(|id| {
-            let i = sk.curves.iter().position(|c| &c.id == id).expect("arc in sketch");
+            let i = sk.curve_index(id).expect("arc in sketch");
             match &sk.curves[i].kind {
                 solidcraft_sketch::CurveKind::Arc { c, a, .. } => sk.point(*c).unwrap().dist(sk.point(*a).unwrap()),
                 k => panic!("{id} is not an arc: {k:?}"),

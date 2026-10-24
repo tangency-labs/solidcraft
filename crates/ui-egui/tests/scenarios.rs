@@ -94,8 +94,7 @@ fn dragging_a_conic_after_the_tool_sets_rho_and_its_apex_stays_separately_dragga
     let sk = h.app.session.model.state().sketches[0].sketch.clone();
     let (ci, apex_idx, rho) = sk
         .curves
-        .iter()
-        .enumerate()
+        .iter_enumerated()
         .find_map(|(i, c)| match c.kind {
             solidcraft_engine::sketch::CurveKind::Conic { apex, rho, .. } => Some((i, apex, rho)),
             _ => None,

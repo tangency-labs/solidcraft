@@ -5,7 +5,7 @@ use std::sync::Arc;
 use serde_json::json;
 use solidcraft_engine::Session;
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{Analysis, ConstraintKind, Sketch, profiling::capture};
+use solidcraft_sketch::{Analysis, ConstraintKind, CurveIdx, PointIdx, Sketch, profiling::capture};
 
 fn session(horizontal: bool) -> (Session, u64, String) {
     let mut s = Session::default();
@@ -13,8 +13,8 @@ fn session(horizontal: bool) -> (Session, u64, String) {
     let id = s.active_sketch.unwrap();
     let mut sk = Sketch::new();
     let q = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
-    let l = sk.add_line_pts(0, q, None).unwrap();
-    let k = ConstraintKind::Distance { p: 0, q, value: 10.0 };
+    let l = sk.add_line_pts(PointIdx::ORIGIN, q, None).unwrap();
+    let k = ConstraintKind::Distance { p: PointIdx::ORIGIN, q, value: 10.0 };
     sk.add_constraint(k.clone(), None).unwrap();
     let redundant = sk.add_constraint(k, None).unwrap();
     if horizontal {
@@ -70,14 +70,14 @@ fn a_live_drag_keeps_full_diagnostics_when_it_publishes_without_evaluation() {
             s.model.state().sketch(id).unwrap().report.redundant.contains(&redundant),
             "the pre-drag model must contain the fixture's full diagnostics"
         );
-        let endpoint = s.doc.sketch(id).unwrap().points[1].id.clone();
+        let endpoint = s.doc.sketch(id).unwrap().points[PointIdx(1)].id.clone();
         s.execute("sketch.drag", &json!({"entity": endpoint, "from": [10, 0], "to": [12, 8], "live": true})).unwrap();
         let state = s.model.state();
         let shown = state.sketch(id).unwrap();
         assert!(shown.report.redundant.contains(&redundant));
         assert_eq!(shown.report.dof, usize::from(!horizontal));
         if !horizontal {
-            assert!(s.doc.sketch(id).unwrap().points[1].pos.dist(Vec2::new(10.0, 0.0)) > 1.0, "exercise publication of changed geometry");
+            assert!(s.doc.sketch(id).unwrap().points[PointIdx(1)].pos.dist(Vec2::new(10.0, 0.0)) > 1.0, "exercise publication of changed geometry");
         }
     }
 }
@@ -149,7 +149,7 @@ fn document_analysis_levels_survive_parameter_application_and_offset_retries() {
                 .unwrap()
                 .to_owned()
         } else {
-            s.doc.sketch(id).unwrap().curves[0].id.clone()
+            s.doc.sketch(id).unwrap().curves[CurveIdx(0)].id.clone()
         };
         s.execute("sketch.offset", &json!({"curves": [curve], "distance": -1, "chain": false})).unwrap();
         let sk = s.doc.sketch(id).unwrap();

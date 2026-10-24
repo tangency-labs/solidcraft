@@ -5,7 +5,7 @@
 use solidcraft_geom::Vec2;
 
 use crate::construct::switch;
-use crate::model::{ConstraintKind, Sketch};
+use crate::model::{ConstraintKind, PointIdx, Sketch};
 use crate::solver::{DrivingValues, solve, solve_after_value_edit};
 
 struct Lcg(u64);
@@ -29,7 +29,7 @@ const PAIRS: [(usize, usize); 9] = [(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 
 /// its own (end points coincident with the corners) with a length dimension.
 fn linkage(rng: &mut Lcg, lo: f64, hi: f64, lines: bool) -> (Sketch, DrivingValues) {
     let mut sk = Sketch::new();
-    let ids: Vec<usize> = LAYOUT.iter().map(|p| sk.add_point(Vec2::new(p.0, p.1), None).unwrap()).collect();
+    let ids: Vec<PointIdx> = LAYOUT.iter().map(|p| sk.add_point(Vec2::new(p.0, p.1), None).unwrap()).collect();
     sk.add_constraint(ConstraintKind::Fix { p: ids[0] }, None).unwrap();
     let l = sk.add_line_pts(ids[0], ids[1], None).unwrap();
     sk.add_constraint(ConstraintKind::Horizontal { l }, None).unwrap();
@@ -61,7 +61,7 @@ fn distances(sk: &Sketch) -> Vec<f64> {
 
 /// Turn of both triangles (layout point `i` is sketch point `i + 1`, after the origin).
 fn turns(sk: &Sketch) -> [bool; 2] {
-    let p = |i: usize| sk.points[i + 1].pos;
+    let p = |i: usize| sk.points[PointIdx(i + 1)].pos;
     [(p(1) - p(0)).cross(p(2) - p(0)) > 0.0, (p(4) - p(3)).cross(p(5) - p(3)) > 0.0]
 }
 

@@ -96,7 +96,7 @@ pub(crate) fn end_drag(app: &mut SolveApp) {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
-    use solidcraft_engine::sketch::LinkSource;
+    use solidcraft_engine::sketch::{CurveIdx, LinkSource};
 
     fn setup() -> (Harness, String) {
         let (mut h, link, _) = crate::test_support::selected_text("II", [3, 4]);
@@ -132,7 +132,7 @@ mod tests {
         assert_eq!(h.app.session.undo.len(), undo + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), before);
-        let curve = h.app.session.doc.sketch(1).unwrap().curves[0].id.clone();
+        let curve = h.app.session.doc.sketch(1).unwrap().curves[CurveIdx(0)].id.clone();
         h.app.session.selection = vec![Sel::SketchCurve { id: curve }];
         h.app.start("sketch.move");
         h.frames(3);
@@ -164,7 +164,7 @@ mod tests {
         crate::dialogs::cancel(&mut h.app);
         let before = h.app.session.doc.to_json();
         let checkpoint = h.app.session.execute("edit.checkpoint", &json!({})).unwrap()["checkpoint"].as_u64().unwrap();
-        let curve = h.app.session.doc.sketch(1).unwrap().curves[0].id.clone();
+        let curve = h.app.session.doc.sketch(1).unwrap().curves[CurveIdx(0)].id.clone();
         h.app.session.execute("sketch.drag", &json!({"entity":curve,"from":[0,0],"to":[2,3],"live":true})).unwrap();
         h.app.viewport.text_drag = Some((checkpoint, link));
         h.app.viewport.point_drag = Some((curve, 0, None));

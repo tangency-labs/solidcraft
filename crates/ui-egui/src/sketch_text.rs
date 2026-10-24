@@ -663,6 +663,7 @@ fn edit_params(app: &SolveApp, k: &Tx) -> Result<Value, String> {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+    use solidcraft_engine::sketch::CurveIdx;
 
     fn setup() -> (Harness, String, String) {
         let (mut h, link, curve) = crate::test_support::selected_text("I", [0, 0]);
@@ -860,7 +861,7 @@ mod tests {
             h.app.session.doc.sketch(sid).unwrap().link(&link).unwrap().source,
             LinkSource::Text { text: "O".into(), at, height, angle, font: None, style: TextStyle::default(), exprs: Default::default() }
         );
-        h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[0].id.clone() }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[CurveIdx(0)].id.clone() }];
         h.app.start("sketch.edit_text");
         h.frames(3);
         let undo = h.app.session.undo.len();
@@ -887,7 +888,7 @@ mod tests {
         // The dialog closes with the selection; the text's first outline is selected again to open it.
         let reopen = |h: &mut Harness| {
             let sid = h.app.session.active_sketch.unwrap();
-            let id = h.app.session.doc.sketch(sid).unwrap().curves[0].id.clone();
+            let id = h.app.session.doc.sketch(sid).unwrap().curves[CurveIdx(0)].id.clone();
             h.app.session.selection = vec![Sel::SketchCurve { id }];
             h.app.start("sketch.edit_text");
             h.frames(3);
@@ -997,7 +998,7 @@ mod tests {
         h.app.cam.distance = 40.0;
         h.frames(3);
         let sid = h.app.session.active_sketch.unwrap();
-        let polyline = h.app.session.doc.sketch(sid).unwrap().polyline(0);
+        let polyline = h.app.session.doc.sketch(sid).unwrap().polyline(CurveIdx(0));
         let midpoint = (polyline[0] + polyline[1]) * 0.5;
         h.step(&json!({"start":"sketch.edit_text"})).unwrap();
         assert!(h.app.tool.is_some());
@@ -1407,7 +1408,7 @@ mod tests {
         assert_eq!(h.app.session.undo.len(), undo + 1);
         // Reopened, the dialog shows them.
         let sid = h.app.session.active_sketch.unwrap();
-        h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[0].id.clone() }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[CurveIdx(0)].id.clone() }];
         h.app.start("sketch.edit_text");
         h.frames(3);
         assert_eq!(tx(&h.app).style, live);

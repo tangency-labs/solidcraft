@@ -2,6 +2,7 @@
 use super::*;
 use crate::scenario::{self, Harness};
 use crate::sketch_modify_ui::Mod;
+use solidcraft_engine::sketch::CurveIdx;
 
 fn fixture() -> Harness {
     let mut h = Harness::new();
@@ -18,10 +19,10 @@ fn picked(h: &Harness, command: &str) -> Dialog {
         d.inputs[0].items = vec![if matches!(k, Mod::Corner { .. }) {
             Sel::SketchPoint { id: sk.points.iter().find(|p| p.id != "origin").unwrap().id.clone() }
         } else {
-            Sel::SketchCurve { id: sk.curves[0].id.clone() }
+            Sel::SketchCurve { id: sk.curves[CurveIdx(0)].id.clone() }
         }];
         if matches!(k, Mod::Mirror) {
-            d.inputs[1].items = vec![Sel::SketchCurve { id: sk.curves[3].id.clone() }];
+            d.inputs[1].items = vec![Sel::SketchCurve { id: sk.curves[CurveIdx(3)].id.clone() }];
         }
         if matches!(k, Mod::PatternCirc { .. }) {
             d.inputs[1].items = vec![Sel::SketchPoint { id: "origin".into() }];
@@ -132,7 +133,7 @@ fn apply_commits_once_keeps_values_and_waits_for_new_selection_ok_closes() {
 fn picked_list_removes_one_item_and_field_still_activates_input() {
     let mut h = fixture();
     let mut d = picked(&h, "sketch.scale");
-    let second = h.app.session.doc.sketch(1).unwrap().curves[1].id.clone();
+    let second = h.app.session.doc.sketch(1).unwrap().curves[CurveIdx(1)].id.clone();
     d.inputs[0].items.push(Sel::SketchCurve { id: second.clone() });
     h.app.dialog = Some(d);
     h.frames(4);

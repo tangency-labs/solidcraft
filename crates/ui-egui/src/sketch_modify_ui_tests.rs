@@ -10,6 +10,7 @@
 
 use serde_json::json;
 use solidcraft_engine::Sel;
+use solidcraft_engine::sketch::CurveIdx;
 
 use crate::dialogs::{Kind, apply_commands};
 use crate::scenario::Harness;
@@ -450,7 +451,7 @@ fn open(cmd: &str) -> (crate::scenario::Harness, String) {
     h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 5})).unwrap();
     h.settle();
     let sid = h.app.session.active_sketch.unwrap();
-    let id = h.app.session.model.state().sketch(sid).unwrap().sketch.curves[0].id.clone();
+    let id = h.app.session.model.state().sketch(sid).unwrap().sketch.curves[CurveIdx(0)].id.clone();
     h.step(&json!({"start": cmd})).unwrap();
     (h, id)
 }
@@ -663,7 +664,7 @@ fn open_circ() -> (crate::scenario::Harness, String) {
     let (curve, centre) = {
         let st = h.app.session.model.state();
         let sk = &st.sketch(sid).unwrap().sketch;
-        let curve = sk.curves[0].id.clone();
+        let curve = sk.curves[CurveIdx(0)].id.clone();
         let centre = sk.points.iter().find(|p| p.pos.len() < 1e-9).unwrap().id.clone();
         (curve, centre)
     };

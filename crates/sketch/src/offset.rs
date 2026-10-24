@@ -1,5 +1,5 @@
 //! Associative offsets keep their output entity ids while their source curves move.
-use crate::{ConstraintKind, CurveKind, Shape, Sketch, SketchError, intersections};
+use crate::{ConstraintKind, CurveIdx, CurveKind, PointIdx, Shape, Sketch, SketchError, intersections};
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::Vec2;
 
@@ -69,7 +69,7 @@ impl Sketch {
     /// Removing an output removes its relationship. A partial analytic chain
     /// deletion releases the surviving outputs, while retained dependents keep
     /// their source references so the command's refresh refuses broken sources.
-    pub(crate) fn prune_offsets_for_removed_curves(&mut self, which: &[usize]) {
+    pub(crate) fn prune_offsets_for_removed_curves(&mut self, which: &[CurveIdx]) {
         let removed = which.iter().filter_map(|i| self.curves.get(*i).map(|curve| curve.id.clone())).collect::<std::collections::BTreeSet<_>>();
         if removed.is_empty() {
             return;
@@ -91,7 +91,7 @@ impl Sketch {
             .flat_map(|curve| curve.kind.point_ids())
             .collect::<std::collections::BTreeSet<_>>();
         for index in points {
-            if index != 0
+            if index != PointIdx::ORIGIN
                 && self.curves.iter().all(|curve| !curve.kind.uses(index) || released.contains(&curve.id))
                 && let Some(point) = self.points.get_mut(index)
             {

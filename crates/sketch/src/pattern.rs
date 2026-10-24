@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::Vec2;
 
-use crate::{CurveKind, Sketch, SketchError};
+use crate::{CurveKind, PointIdx, Sketch, SketchError};
 
 /// Placement relative to the original, along a pattern direction's oriented line.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -319,7 +319,7 @@ impl Sketch {
                     }
                     let Some(source) = self.curves.get(*seed).cloned() else { continue };
                     if let CurveKind::Arc { c, a, b } = source.kind {
-                        let mapped = |p: usize| {
+                        let mapped = |p: PointIdx| {
                             self.points
                                 .get(p)
                                 .and_then(|p| instance.points.iter().find(|(id, _)| *id == p.id))

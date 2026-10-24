@@ -437,7 +437,7 @@ fn box_fillet_cut_part() {
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [38, 29]}));
     let l: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
-    let corner = s.doc.sketch(s.active_sketch.unwrap()).unwrap().curves[0].clone();
+    let corner = s.doc.sketch(s.active_sketch.unwrap()).unwrap().curves.first().unwrap().clone();
     let start = match corner.kind {
         solidcraft_sketch::CurveKind::Line { a, .. } => s.doc.sketch(s.active_sketch.unwrap()).unwrap().points[a].id.clone(),
         _ => panic!(),

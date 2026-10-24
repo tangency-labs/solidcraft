@@ -1,7 +1,7 @@
 //! Horizontal/Vertical accepts either one line or two distinct sketch points.
 
 use serde_json::json;
-use solidcraft_engine::sketch::ConstraintKind;
+use solidcraft_engine::sketch::{ConstraintKind, PointIdx};
 use solidcraft_ui_egui::scenario::Harness;
 
 fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> solidcraft_engine::geom::Vec2 {
@@ -318,7 +318,7 @@ fn midpoint_aligns_to_the_fixed_origin_without_straightening_the_line() {
         let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
         assert!(((a + b) * 0.5).x.abs() < 1e-6);
         assert!((b.x - a.x).abs() > 1. && (b.y - a.y).abs() > 1., "only the midpoint is aligned");
-        assert_eq!(sk.point(0).unwrap(), solidcraft_engine::geom::Vec2::ZERO);
+        assert_eq!(sk.point(PointIdx::ORIGIN).unwrap(), solidcraft_engine::geom::Vec2::ZERO);
     }
 }
 

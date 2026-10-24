@@ -6,7 +6,7 @@
 use std::time::Instant;
 
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{Analysis, Budget, ConstraintKind, Hold, Sketch, SolveReport, solve, solve_with};
+use solidcraft_sketch::{Analysis, Budget, ConstraintKind, Hold, PointIdx, Sketch, SolveReport, solve, solve_with};
 
 /// A small deterministic generator for the start offsets.
 struct Lcg(u64);
@@ -22,7 +22,7 @@ impl Lcg {
 fn grid(n: usize, jitter: f64) -> Result<Sketch, Box<dyn std::error::Error>> {
     let mut sk = Sketch::new();
     let mut rnd = Lcg(12345);
-    let mut id = vec![vec![0; n]; n];
+    let mut id = vec![vec![PointIdx::ORIGIN; n]; n];
     for (r, row) in id.iter_mut().enumerate() {
         for (c, slot) in row.iter_mut().enumerate() {
             let j = if r == 0 && c == 0 { Vec2::ZERO } else { Vec2::new(rnd.next(), rnd.next()) * jitter };
@@ -45,10 +45,10 @@ fn grid(n: usize, jitter: f64) -> Result<Sketch, Box<dyn std::error::Error>> {
 
 /// `n` rectangles side by side sharing their vertical edges: horizontal and vertical sides, every
 /// width dimensioned, the first height too. Returns the sketch and its first corner.
-fn strip(n: usize) -> Result<(Sketch, usize), Box<dyn std::error::Error>> {
+fn strip(n: usize) -> Result<(Sketch, PointIdx), Box<dyn std::error::Error>> {
     let mut sk = Sketch::new();
-    let bottom: Vec<usize> = (0..=n).map(|i| sk.add_point(Vec2::new(10.0 + i as f64 * 20.0, 10.0), None)).collect::<Result<_, _>>()?;
-    let top: Vec<usize> = (0..=n).map(|i| sk.add_point(Vec2::new(10.0 + i as f64 * 20.0, 25.0), None)).collect::<Result<_, _>>()?;
+    let bottom: Vec<PointIdx> = (0..=n).map(|i| sk.add_point(Vec2::new(10.0 + i as f64 * 20.0, 10.0), None)).collect::<Result<_, _>>()?;
+    let top: Vec<PointIdx> = (0..=n).map(|i| sk.add_point(Vec2::new(10.0 + i as f64 * 20.0, 25.0), None)).collect::<Result<_, _>>()?;
     for i in 0..=n {
         let l = sk.add_line_pts(bottom[i], top[i], None)?;
         sk.add_constraint(ConstraintKind::Vertical { l }, None)?;

@@ -9,7 +9,7 @@ use std::cell::{Cell, RefCell};
 use egui::{Align2, FontId, Shape, Stroke};
 use serde_json::{Value, json};
 use solidcraft_engine::geom::Vec2;
-use solidcraft_engine::sketch::{CurveKind, Sketch};
+use solidcraft_engine::sketch::{CurveIdx, CurveKind, PointIdx, Sketch};
 
 use crate::SolveApp;
 use crate::theme::Tokens;
@@ -85,16 +85,16 @@ fn keep(s: Option<Snap>) -> Option<Snap> {
 /// The best snap for points moving to `moving` (point index, position after the cursor's move),
 /// `mm_px` millimetres per pixel. Points in `exclude` (the ones moving with the drag) are not
 /// targets, nor are curves using them.
-pub fn find(sk: &Sketch, moving: &[(usize, Vec2)], exclude: &[usize], mm_px: f64) -> Option<Snap> {
+pub fn find(sk: &Sketch, moving: &[(PointIdx, Vec2)], exclude: &[PointIdx], mm_px: f64) -> Option<Snap> {
     if suppressed() || moving.is_empty() || !(mm_px > 0.0 && mm_px.is_finite()) {
         return keep(None);
     }
-    let id = |i: usize| sk.points.get(i).map(|p| p.id.clone()).unwrap_or_default();
+    let id = |i: PointIdx| sk.points.get(i).map(|p| p.id.clone()).unwrap_or_default();
     let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);
-    let targets: Vec<(usize, Vec2)> =
-        sk.points.iter().enumerate().filter(|(i, p)| !exclude.contains(i) && visible.takes(p)).map(|(i, p)| (i, p.pos)).collect();
-    let free_curves: Vec<usize> =
-        (0..sk.curves.len()).filter(|&c| sk.curves.get(c).is_some_and(|cu| !exclude.iter().any(|&p| cu.kind.uses(p)))).collect();
+    let targets: Vec<(PointIdx, Vec2)> =
+        sk.points.iter_enumerated().filter(|(i, p)| !exclude.contains(i) && visible.takes(p)).map(|(i, p)| (i, p.pos)).collect();
+    let free_curves: Vec<CurveIdx> =
+        sk.curves.indices().filter(|&c| sk.curves.get(c).is_some_and(|cu| !exclude.iter().any(|&p| cu.kind.uses(p)))).collect();
     let mut best: Option<(f64, Snap)> = None;
     let offer = |best: &mut Option<(f64, Snap)>, d: f64, s: Snap| {
         if best.as_ref().is_none_or(|b| d < b.0) {
@@ -141,7 +141,7 @@ pub fn find(sk: &Sketch, moving: &[(usize, Vec2)], exclude: &[usize], mm_px: f64
     }
     // Lining up: the nearest horizontal and the nearest vertical alignment, each on its own axis.
     let tol = ALIGN_PX * mm_px;
-    let (mut hx, mut vy): (Option<(f64, usize, Vec2, Vec2)>, Option<(f64, usize, Vec2, Vec2)>) = (None, None);
+    let (mut hx, mut vy): (Option<(f64, PointIdx, Vec2, Vec2)>, Option<(f64, PointIdx, Vec2, Vec2)>) = (None, None);
     for &(mi, p) in moving {
         for &(_, t) in &targets {
             let (dy, dx) = ((p.y - t.y).abs(), (p.x - t.x).abs());
@@ -176,8 +176,8 @@ pub fn find(sk: &Sketch, moving: &[(usize, Vec2)], exclude: &[usize], mm_px: f64
 }
 
 /// Points the drag of `entity` (a point or curve id) moves, and the points that move with them.
-pub fn moving_points(sk: &Sketch, entity: &str) -> (Vec<usize>, Vec<usize>) {
-    let own: Vec<usize> = if let Some(p) = sk.point_index(entity) {
+pub fn moving_points(sk: &Sketch, entity: &str) -> (Vec<PointIdx>, Vec<PointIdx>) {
+    let own: Vec<PointIdx> = if let Some(p) = sk.point_index(entity) {
         vec![p]
     } else {
         match sk.curve_index(entity).and_then(|c| sk.curves.get(c)) {
@@ -258,7 +258,7 @@ mod tests {
         let s = sk();
         let end = s.resolve_point("l2.start").map(|i| s.points[i].id.clone()).unwrap_or_default();
         let at = drag(&s, &end, Vec2::new(10.3, 0.4)).expect("point");
-        assert_eq!(at.target, Target::Point(s.points[s.resolve_point("l1.end").unwrap_or(0)].id.clone()));
+        assert_eq!(at.target, Target::Point(s.points[s.resolve_point("l1.end").unwrap_or(PointIdx::ORIGIN)].id.clone()));
         assert_eq!(at.at, Vec2::new(10.0, 0.0));
         let mid = drag(&s, &end, Vec2::new(5.2, 0.3)).expect("mid");
         assert_eq!(mid.target, Target::Mid("l1".into()));
@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn lining_up_moves_the_point_but_names_no_constraint() {
         let s = sk();
-        let end = s.points[s.resolve_point("l2.end").unwrap_or(0)].id.clone();
+        let end = s.points[s.resolve_point("l2.end").unwrap_or(PointIdx::ORIGIN)].id.clone();
         // Level with l1's end (y 0), far from it in x.
         let a = drag(&s, &end, Vec2::new(40.0, 0.35)).expect("aligned");
         assert_eq!(a.target, Target::Align);

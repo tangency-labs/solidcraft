@@ -34,7 +34,7 @@
 
 use solidcraft_geom::Vec2;
 
-use crate::model::{ConstraintKind, CurveKind, MAX_COORD, Sketch, in_range, radius_in_range};
+use crate::model::{ConstraintKind, CurveIdx, CurveKind, MAX_COORD, PointIdx, Sketch, in_range, radius_in_range};
 use crate::union_find::{find, union};
 
 /// Two intersections closer than this (relative to the size of the loci: radii, centre
@@ -478,14 +478,14 @@ enum Src {
     Fixed(Vec2),
     /// Line `from`'s direction turned by `by` (an angle between lines; for parallel and
     /// perpendicular lines the turn of the reference layout).
-    Turn { from: usize, by: f64 },
+    Turn { from: CurveIdx, by: f64 },
 }
 
 impl Src {
     fn key(&self) -> (u8, usize, u64, u64) {
         match *self {
             Src::Fixed(d) => (0, 0, d.x.to_bits(), d.y.to_bits()),
-            Src::Turn { from, by } => (1, from, by.to_bits(), 0),
+            Src::Turn { from, by } => (1, from.0, by.to_bits(), 0),
         }
     }
 }
@@ -507,25 +507,25 @@ impl Len {
     }
 }
 
-/// A relation between more than two points (lines `l` by curve index).
+/// A relation between more than two points, some on lines `l`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Tie {
     /// `p` lies on line `l` (or, for an end of `l`, `l` runs along its known direction).
     OnLine {
         p: usize,
-        l: usize,
+        l: CurveIdx,
     },
     /// `p` is `len` from line `l`, on its side in the reference.
     Offset {
         p: usize,
-        l: usize,
+        l: CurveIdx,
         len: Len,
     },
     /// `p − e` is normal to line `l` (the radius to a touch point; a point and its mirror).
     Normal {
         p: usize,
         e: usize,
-        l: usize,
+        l: CurveIdx,
     },
     Midpoint {
         p: usize,
@@ -536,7 +536,7 @@ enum Tie {
     Mirror {
         p: usize,
         q: usize,
-        l: usize,
+        l: CurveIdx,
     },
     /// |q1 − p1| = |q2 − p2|.
     SameLength {
@@ -561,21 +561,21 @@ impl Tie {
             Len::Between(a, b) => (1, u(a), u(b)),
         };
         match *self {
-            Tie::OnLine { p, l } => [0, u(p), u(l), 0, 0, 0],
+            Tie::OnLine { p, l } => [0, u(p), u(l.0), 0, 0, 0],
             Tie::Offset { p, l, len: n } => {
                 let (k, a, b) = len(n);
-                [1, u(p), u(l), k, a, b]
+                [1, u(p), u(l.0), k, a, b]
             }
-            Tie::Normal { p, e, l } => [2, u(p), u(e), u(l), 0, 0],
+            Tie::Normal { p, e, l } => [2, u(p), u(e), u(l.0), 0, 0],
             Tie::Midpoint { p, a, b } => [3, u(p), u(a), u(b), 0, 0],
-            Tie::Mirror { p, q, l } => [4, u(p), u(q), u(l), 0, 0],
+            Tie::Mirror { p, q, l } => [4, u(p), u(q), u(l.0), 0, 0],
             Tie::SameLength { p1, q1, p2, q2 } => [5, u(p1), u(q1), u(p2), u(q2), 0],
             Tie::Equidistant { c, a, b } => [6, u(c), u(a), u(b), 0, 0],
         }
     }
 
     /// The line whose direction it reads.
-    fn line(&self) -> Option<usize> {
+    fn line(&self) -> Option<CurveIdx> {
         match *self {
             Tie::OnLine { l, .. } | Tie::Offset { l, .. } | Tie::Normal { l, .. } | Tie::Mirror { l, .. } => Some(l),
             _ => None,
@@ -583,8 +583,8 @@ impl Tie {
     }
 
     /// The points it relates, given the lines' ends.
-    fn points(&self, ends: &dyn Fn(usize) -> Option<(usize, usize)>) -> Vec<usize> {
-        let line = |l: usize| ends(l).map(|(a, b)| [a, b]);
+    fn points(&self, ends: &dyn Fn(CurveIdx) -> Option<(usize, usize)>) -> Vec<usize> {
+        let line = |l: CurveIdx| ends(l).map(|(a, b)| [a, b]);
         let mut v: Vec<usize> = match *self {
             Tie::OnLine { p, l } => [p].into_iter().chain(line(l).into_iter().flatten()).collect(),
             Tie::Offset { p, l, len } => {
@@ -628,11 +628,11 @@ pub(crate) struct Reading {
     /// Per curve: a line's direction sources.
     sources: Vec<Vec<Src>>,
     /// Per curve: the lines whose direction derives from it.
-    dependents: Vec<Vec<usize>>,
+    dependents: Vec<Vec<CurveIdx>>,
     /// Per curve: the ties that read its direction.
     using: Vec<Vec<usize>>,
     /// Per point: the lines it ends.
-    lines_of: Vec<Vec<usize>>,
+    lines_of: Vec<Vec<CurveIdx>>,
     /// Per point: its position in the reference layout.
     before: Vec<Option<Vec2>>,
 }
@@ -677,13 +677,13 @@ fn level_at(angle: f64) -> Option<bool> {
 fn levels(lines: &[Option<(usize, usize)>], cons: &[&ConstraintKind]) -> Vec<Option<bool>> {
     use ConstraintKind::*;
     let m = lines.len();
-    let is_line = |l: usize| lines.get(l).is_some_and(Option::is_some);
+    let is_line = |l: CurveIdx| lines.get(l.0).is_some_and(Option::is_some);
     let mut adj: Vec<Vec<(usize, bool)>> = vec![Vec::new(); m];
     let mut seeds: Vec<Vec<bool>> = vec![Vec::new(); m];
     let mut angled = vec![false; m];
     for k in cons {
         if let LineAngle { l, .. } = **k
-            && let Some(a) = angled.get_mut(l)
+            && let Some(a) = angled.get_mut(l.0)
         {
             *a = true;
         }
@@ -698,13 +698,13 @@ fn levels(lines: &[Option<(usize, usize)>], cons: &[&ConstraintKind]) -> Vec<Opt
         };
         if let Some((a, b, swap)) = pair.filter(|(a, b, _)| a != b && is_line(*a) && is_line(*b)) {
             for (x, y) in [(a, b), (b, a)] {
-                if let Some(list) = adj.get_mut(x) {
-                    list.push((y, swap));
+                if let Some(list) = adj.get_mut(x.0) {
+                    list.push((y.0, swap));
                 }
             }
         }
         if let Some((l, row)) = seed.filter(|(l, _)| is_line(*l))
-            && let Some(s) = seeds.get_mut(l)
+            && let Some(s) = seeds.get_mut(l.0)
         {
             s.push(row);
         }
@@ -714,7 +714,7 @@ fn levels(lines: &[Option<(usize, usize)>], cons: &[&ConstraintKind]) -> Vec<Opt
     let mut parity: Vec<Option<bool>> = vec![None; m];
     let mut out = vec![None; m];
     for root in 0..m {
-        if parity.get(root).is_some_and(Option::is_some) || !is_line(root) {
+        if parity.get(root).is_some_and(Option::is_some) || !is_line(CurveIdx(root)) {
             continue;
         }
         let mut comp = vec![root];
@@ -763,11 +763,11 @@ fn levels(lines: &[Option<(usize, usize)>], cons: &[&ConstraintKind]) -> Vec<Opt
 }
 
 /// A circle or arc of `sk` (with valid point indices).
-fn round_of(sk: &Sketch, k: usize) -> Option<Round> {
+fn round_of(sk: &Sketch, k: CurveIdx) -> Option<Round> {
     let n = sk.points.len();
     match sk.curves.get(k)?.kind {
-        CurveKind::Circle { c, .. } if c < n => Some(Round { c, ends: None }),
-        CurveKind::Arc { c, a, b } if c < n && a < n && b < n && c != a && c != b => Some(Round { c, ends: Some((a, b)) }),
+        CurveKind::Circle { c, .. } if c.0 < n => Some(Round { c: c.0, ends: None }),
+        CurveKind::Arc { c, a, b } if c.0 < n && a.0 < n && b.0 < n && c != a && c != b => Some(Round { c: c.0, ends: Some((a.0, b.0)) }),
         _ => None,
     }
 }
@@ -786,12 +786,13 @@ pub(crate) fn radii(sk: &Sketch) -> Vec<Option<f64>> {
             radii.push((k, r));
         }
     }
-    let round = |k: usize| round_of(sk, k).is_some();
+    let round = |k: CurveIdx| round_of(sk, k).is_some();
     for c in sk.constraints.iter().filter(|c| !c.driven) {
         match c.kind {
-            Radius { c, value } if round(c) && radius_in_range(value) => radii.push((c, value)),
-            Diameter { c, value } if round(c) && radius_in_range(value / 2.0) => radii.push((c, value / 2.0)),
-            Equal { a, b } if round(a) && round(b) => equal.push((a, b)),
+            Radius { c, value } if round(c) && radius_in_range(value) => radii.push((c.0, value)),
+            Diameter { c, value } if round(c) && radius_in_range(value / 2.0) => radii.push((c.0, value / 2.0)),
+            Equal { a, b } if round(a) && round(b) => equal.push((a.0, b.0)),
+
             _ => {}
         }
     }
@@ -812,23 +813,23 @@ fn direction(ends: Option<(usize, usize)>, pos: &dyn Fn(usize) -> Option<Vec2>) 
 /// Every constraint on a line is read as a tie; a tie on a horizontal or vertical line is
 /// then lowered to the relations between two points it amounts to (a row, a column, an offset
 /// across it), which the decomposition builds clusters on.
-pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve: &[(usize, usize)], radius: &[Option<f64>]) -> Reading {
+pub(crate) fn read(sk: &Sketch, before: &dyn Fn(PointIdx) -> Option<Vec2>, on_curve: &[(PointIdx, CurveIdx)], radius: &[Option<f64>]) -> Reading {
     use ConstraintKind::*;
     let n = sk.points.len();
     let m = sk.curves.len();
-    let before: Vec<Option<Vec2>> = (0..n).map(|i| before(i).filter(|p| in_range(*p))).collect();
+    let before: Vec<Option<Vec2>> = sk.points.indices().map(|i| before(i).filter(|p| in_range(*p))).collect();
     let rf = |i: usize| before.get(i).copied().flatten();
     let lines: Vec<Option<(usize, usize)>> = sk
         .curves
         .iter()
         .map(|c| match c.kind {
-            CurveKind::Line { a, b } if a < n && b < n && a != b => Some((a, b)),
+            CurveKind::Line { a, b } if a.0 < n && b.0 < n && a != b => Some((a.0, b.0)),
             _ => None,
         })
         .collect();
-    let rounds: Vec<Option<Round>> = (0..m).map(|k| round_of(sk, k)).collect();
-    let line = |l: usize| lines.get(l).copied().flatten();
-    let round = |k: usize| rounds.get(k).copied().flatten();
+    let rounds: Vec<Option<Round>> = sk.curves.indices().map(|k| round_of(sk, k)).collect();
+    let line = |l: CurveIdx| lines.get(l.0).copied().flatten();
+    let round = |k: CurveIdx| rounds.get(k.0).copied().flatten();
     let cons: Vec<&ConstraintKind> = sk.constraints.iter().filter(|c| !c.driven && !sk.follows_its_source(&c.kind)).map(|c| &c.kind).collect();
     let dim = |v: f64| (v.is_finite() && (0.0..=MAX_COORD).contains(&v)).then_some(v);
 
@@ -837,16 +838,16 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     let mut equal_lines = Vec::new();
     for k in &cons {
         match **k {
-            Length { l, value } if line(l).is_some() => lengths.extend(dim(value).map(|v| (l, v))),
-            Equal { a, b } if line(a).is_some() && line(b).is_some() => equal_lines.push((a, b)),
+            Length { l, value } if line(l).is_some() => lengths.extend(dim(value).map(|v| (l.0, v))),
+            Equal { a, b } if line(a).is_some() && line(b).is_some() => equal_lines.push((a.0, b.0)),
             _ => {}
         }
     }
     let length = agreed(m, &lengths, &equal_lines);
     let level = levels(&lines, &cons);
-    let r_of = |k: usize| radius.get(k).copied().flatten();
-    let level_of = |l: usize| level.get(l).copied().flatten();
-    let ref_dir = |l: usize| direction(line(l), &rf);
+    let r_of = |k: CurveIdx| radius.get(k.0).copied().flatten();
+    let level_of = |l: CurveIdx| level.get(l.0).copied().flatten();
+    let ref_dir = |l: CurveIdx| direction(line(l), &rf);
 
     let mut rels = Vec::new();
     let mut ties = Vec::new();
@@ -857,9 +858,9 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     };
     for k in &cons {
         match **k {
-            Coincident { p, q } => rel(p, q, Rel::Same),
-            HorizontalPoints { p, q } => rel(p, q, Rel::SameY),
-            VerticalPoints { p, q } => rel(p, q, Rel::SameX),
+            Coincident { p, q } => rel(p.0, q.0, Rel::Same),
+            HorizontalPoints { p, q } => rel(p.0, q.0, Rel::SameY),
+            VerticalPoints { p, q } => rel(p.0, q.0, Rel::SameX),
             Distance { p, q, value } | DistanceX { p, q, value } | DistanceY { p, q, value } => {
                 if let Some(d) = dim(value) {
                     let r = match **k {
@@ -867,10 +868,11 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
                         DistanceY { .. } => Rel::OffsetY(d),
                         _ => Rel::Dist(d),
                     };
-                    rel(p, q, r);
+                    rel(p.0, q.0, r);
                 }
             }
-            PointOnCurve { p, c } if p < n => {
+            PointOnCurve { p, c } if p.0 < n => {
+                let p = p.0;
                 if line(c).is_some() {
                     ties.push(Tie::OnLine { p, l: c });
                 } else if let Some(rd) = round(c) {
@@ -881,10 +883,10 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
                     }
                 }
             }
-            PointLineDistance { p, l, value } | LinearDiameter { p, l, value } if p < n && line(l).is_some() => {
+            PointLineDistance { p, l, value } | LinearDiameter { p, l, value } if p.0 < n && line(l).is_some() => {
                 let d = if matches!(**k, LinearDiameter { .. }) { value / 2.0 } else { value };
                 if let Some(d) = dim(d) {
-                    ties.push(Tie::Offset { p, l, len: Len::Value(d) });
+                    ties.push(Tie::Offset { p: p.0, l, len: Len::Value(d) });
                 }
             }
             // The centre lies radius ± the gap from the line, on its side in the reference.
@@ -904,12 +906,12 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
                         ties.push(Tie::Offset { p: rd.c, l, len });
                     }
                     // The radius to the touch point is normal to the line.
-                    if let Some(e) = crate::solver::touch_point(sk, k, on_curve).filter(|e| *e < n && *e != rd.c) {
+                    if let Some(e) = crate::solver::touch_point(sk, k, on_curve).map(|e| e.0).filter(|e| *e < n && *e != rd.c) {
                         ties.push(Tie::Normal { p: rd.c, e, l });
                     }
                 } else if let (Some(r1), Some(r2), Some(k1), Some(k2)) = (r_of(a), r_of(b), round(a), round(b)) {
                     // External or internal, as the residual picks it on the reference.
-                    let ref_r = |k: usize, rd: Round| match (sk.curves.get(k).map(|c| &c.kind), rd.ends) {
+                    let ref_r = |k: CurveIdx, rd: Round| match (sk.curves.get(k).map(|c| &c.kind), rd.ends) {
                         (Some(CurveKind::Circle { r, .. }), _) => Some(*r),
                         (_, Some((s, _))) => Some(rf(rd.c)?.dist(rf(s)?)),
                         _ => None,
@@ -933,15 +935,16 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
                     rel(k1.c, k2.c, Rel::Dist(d));
                 }
             }
-            Midpoint { p, l } if p < n => {
+            Midpoint { p, l } if p.0 < n => {
+                let p = p.0;
                 if let Some((a, b)) = line(l).filter(|(a, b)| p != *a && p != *b) {
                     ties.push(Tie::OnLine { p, l });
                     ties.push(Tie::Midpoint { p, a, b });
                 }
             }
-            Symmetric { p, q, l } if p < n && q < n && p != q && line(l).is_some() => {
-                ties.push(Tie::Normal { p, e: q, l });
-                ties.push(Tie::Mirror { p, q, l });
+            Symmetric { p, q, l } if p.0 < n && q.0 < n && p != q && line(l).is_some() => {
+                ties.push(Tie::Normal { p: p.0, e: q.0, l });
+                ties.push(Tie::Mirror { p: p.0, q: q.0, l });
             }
             Collinear { a, b } => {
                 if let (Some((a0, a1)), Some((b0, b1))) = (line(a), line(b)) {
@@ -952,7 +955,7 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
             }
             Equal { a, b } => {
                 if let (Some((a0, a1)), Some((b0, b1))) = (line(a), line(b)) {
-                    if length.get(a).copied().flatten().is_none() {
+                    if length.get(a.0).copied().flatten().is_none() {
                         ties.push(Tie::SameLength { p1: a0, q1: a1, p2: b0, q2: b1 });
                     }
                 } else if let (Some(Round { c: c1, ends: Some((s1, _)) }), Some(Round { c: c2, ends: Some((s2, _)) })) = (round(a), round(b))
@@ -971,7 +974,7 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     }
     for (k, rd) in rounds.iter().enumerate() {
         let Some(Round { c, ends: Some((a, b)) }) = *rd else { continue };
-        match r_of(k) {
+        match r_of(CurveIdx(k)) {
             Some(r) => {
                 rel(c, a, Rel::Dist(r));
                 rel(c, b, Rel::Dist(r));
@@ -986,12 +989,12 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     {
         // The turn from `from` to `l` among `base` and `base + π` the reference has (`base`
         // when it has none).
-        let turn = |from: usize, l: usize, base: f64| match (ref_dir(from), ref_dir(l)) {
+        let turn = |from: CurveIdx, l: CurveIdx, base: f64| match (ref_dir(from), ref_dir(l)) {
             (Some(f), Some(d)) if turned(f, base).dot(d) < 0.0 => base + std::f64::consts::PI,
             _ => base,
         };
-        let mut add = |l: usize, s: Src| {
-            if let Some(list) = sources.get_mut(l) {
+        let mut add = |l: CurveIdx, s: Src| {
+            if let Some(list) = sources.get_mut(l.0) {
                 list.push(s);
             }
         };
@@ -1013,7 +1016,7 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
         }
         // A row or column gives no sign: the reference's (a line with a line angle has its
         // own, and no level).
-        for l in 0..m {
+        for l in sk.curves.indices() {
             if let Some(row) = level_of(l) {
                 let axis = if row { Vec2::X } else { Vec2::Y };
                 let d = if ref_dir(l).is_some_and(|d| d.dot(axis) < 0.0) { -axis } else { axis };
@@ -1021,8 +1024,9 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
             }
         }
     }
-    let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); m];
+    let mut dependents: Vec<Vec<CurveIdx>> = vec![Vec::new(); m];
     for (l, list) in sources.iter_mut().enumerate() {
+        let l = CurveIdx(l);
         list.sort_by_key(Src::key);
         list.dedup();
         list.truncate(MAX_SOURCES);
@@ -1032,7 +1036,7 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
         }
         for s in list.iter() {
             if let Src::Turn { from, .. } = s
-                && let Some(d) = dependents.get_mut(*from)
+                && let Some(d) = dependents.get_mut(from.0)
             {
                 d.push(l);
             }
@@ -1073,7 +1077,7 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
                 list.push(i);
             }
         }
-        if let Some(list) = t.line().and_then(|l| using.get_mut(l)) {
+        if let Some(list) = t.line().and_then(|l| using.get_mut(l.0)) {
             list.push(i);
         }
     }
@@ -1081,7 +1085,7 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     for (l, ends) in lines.iter().enumerate() {
         for p in ends.iter().flat_map(|(a, b)| [*a, *b]) {
             if let Some(list) = lines_of.get_mut(p) {
-                list.push(l);
+                list.push(CurveIdx(l));
             }
         }
     }
@@ -1152,13 +1156,13 @@ impl Reading {
     /// and of the ties reading the direction of a line it ends or of a line whose direction
     /// derives from one (at most [`MAX_WOKEN_LINES`] lines, [`DEPTH`] deep).
     pub(crate) fn woken(&self, p: usize) -> Vec<usize> {
-        let mut lines: Vec<usize> = self.lines_of.get(p).cloned().unwrap_or_default();
+        let mut lines: Vec<CurveIdx> = self.lines_of.get(p).cloned().unwrap_or_default();
         let mut start = 0;
         'deeper: for _ in 0..DEPTH {
             let end = lines.len();
             for k in start..end {
                 let Some(l) = lines.get(k).copied() else { break };
-                for d in self.dependents.get(l).into_iter().flatten() {
+                for d in self.dependents.get(l.0).into_iter().flatten() {
                     if lines.len() >= MAX_WOKEN_LINES {
                         break 'deeper;
                     }
@@ -1169,7 +1173,7 @@ impl Reading {
             }
             start = end;
         }
-        let ties = self.ties_of.get(p).into_iter().flatten().chain(lines.iter().flat_map(|l| self.using.get(*l).into_iter().flatten()));
+        let ties = self.ties_of.get(p).into_iter().flatten().chain(lines.iter().flat_map(|l| self.using.get(l.0).into_iter().flatten()));
         let mut out: Vec<usize> = ties.flat_map(|t| self.tie_points.get(*t).into_iter().flatten().copied()).filter(|o| *o != p).collect();
         out.sort_unstable();
         out.dedup();
@@ -1217,32 +1221,32 @@ impl Reading {
             && self.ties_of.get(t).into_iter().flatten().filter_map(|ti| self.ties.get(*ti)).all(|tie| self.tie_holds(tie, &pos))
     }
 
-    fn ends(&self, l: usize) -> Option<(usize, usize)> {
-        self.lines.get(l).copied().flatten()
+    fn ends(&self, l: CurveIdx) -> Option<(usize, usize)> {
+        self.lines.get(l.0).copied().flatten()
     }
 
     /// Line `l`'s unit direction in the reference layout.
-    fn ref_dir(&self, l: usize) -> Option<Vec2> {
+    fn ref_dir(&self, l: CurveIdx) -> Option<Vec2> {
         direction(self.ends(l), &|i| self.before(i))
     }
 
     /// Line `l`'s unit direction in `view`: from its placed ends, or derived from its sources
     /// (at most `depth` lines deep).
-    fn dir(&self, l: usize, view: &View, depth: usize) -> Option<Vec2> {
+    fn dir(&self, l: CurveIdx, view: &View, depth: usize) -> Option<Vec2> {
         if let Some(d) = direction(self.ends(l), view.at) {
             return Some(d);
         }
         if depth == 0 {
             return None;
         }
-        self.sources.get(l)?.iter().find_map(|s| match *s {
+        self.sources.get(l.0)?.iter().find_map(|s| match *s {
             Src::Fixed(d) => view.oriented.then_some(d),
             Src::Turn { from, by } => self.dir(from, view, depth - 1).map(|d| turned(d, by)),
         })
     }
 
     /// A placed point of line `l` other than `t` (its first end first).
-    fn line_point(&self, l: usize, t: usize, view: &View) -> Option<(usize, Vec2)> {
+    fn line_point(&self, l: CurveIdx, t: usize, view: &View) -> Option<(usize, Vec2)> {
         let (a, b) = self.ends(l)?;
         [a, b].into_iter().filter(|p| *p != t).find_map(|p| (view.at)(p).map(|at| (p, at)))
     }
@@ -1336,7 +1340,7 @@ impl Reading {
     /// Does `tie` hold at the positions `pos` (true when a point it needs is unknown)?
     fn tie_holds(&self, tie: &Tie, pos: &dyn Fn(usize) -> Option<Vec2>) -> bool {
         let check = |miss: f64, size: f64, pts: &[Vec2]| within(miss, size, pts.iter().fold(0.0, |m, p| m.max(mag(*p))));
-        let base = |l: usize| self.ends(l).and_then(|(a, b)| Some((pos(a)?, direction(Some((a, b)), pos)?)));
+        let base = |l: CurveIdx| self.ends(l).and_then(|(a, b)| Some((pos(a)?, direction(Some((a, b)), pos)?)));
         match *tie {
             Tie::OnLine { p, l } => match (pos(p), base(l)) {
                 (Some(x), Some((a, d))) => check(d.cross(x - a).abs(), 0.0, &[x, a]),
