@@ -24,16 +24,133 @@
 //! before. Headless use, tests and the web build ([`SolveApp::apply_off_thread`] unset) run
 //! everything at once, and so does the app unless the preference is on (Preferences > AI,
 //! `agent_off_thread`, off by default).
+//!
+//! The client that sent a request can cancel it (`control.cancel`, through its [`Ticket`]): one
+//! still waiting its turn is answered as cancelled without running, and one computing off the
+//! window thread is stopped as Stop stops it. Its worker is told to stop too: the evaluation
+//! skips the features it has not reached, and the kernel's booleans give up at their next try
+//! ([`solidcraft_engine::doc::progress`]); what it computed after that is not kept. One running
+//! on the window thread can't be cancelled.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use serde_json::{Value, json};
 
 use solidcraft_engine::doc::KeptResults;
+use solidcraft_engine::doc::progress::Progress;
 
 use crate::SolveApp;
 use crate::control::ControlRequest;
+
+/// Where a control request is: shared between the app, which moves it along, and the connection
+/// that sent it, which may cancel it (`control.cancel`). Whoever changes it first wins.
+#[derive(Debug, Default)]
+pub struct Ticket {
+    state: AtomicU8,
+    /// It is an export computing on a copy, whose worker writes its file.
+    writes_file: AtomicBool,
+    /// Tells its worker to stop.
+    progress: Arc<Progress>,
+}
+
+/// Waiting its turn (sent, or held behind another request).
+const WAITING: u8 = 0;
+/// Running on the window thread (or handed to something that can't stop it, such as the file
+/// loader).
+const RUNNING: u8 = 1;
+/// Computing off the window thread.
+const COMPUTING: u8 = 2;
+const CANCELLED: u8 = 3;
+
+/// What [`Ticket::cancel`] did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cancel {
+    /// It was waiting its turn: it will not run.
+    Removed,
+    /// It was computing off the window thread: it is answered as stopped and nothing of it is
+    /// applied. An export's worker may still write its file.
+    Stopped { writes_file: bool },
+    /// It runs on the window thread: it will finish.
+    Running,
+    /// It was cancelled or stopped before.
+    Already,
+}
+
+impl Ticket {
+    /// Cancel the request, unless it already runs on the window thread.
+    pub fn cancel(&self) -> Cancel {
+        let mut state = self.state.load(Ordering::Acquire);
+        loop {
+            let done = match state {
+                WAITING => Cancel::Removed,
+                COMPUTING => Cancel::Stopped { writes_file: self.writes_file.load(Ordering::Acquire) },
+                CANCELLED => return Cancel::Already,
+                _ => return Cancel::Running,
+            };
+            match self.state.compare_exchange(state, CANCELLED, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => {
+                    self.progress.cancel();
+                    return done;
+                }
+                Err(now) => state = now,
+            }
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.state.load(Ordering::Acquire) == CANCELLED
+    }
+
+    /// The window thread takes the request to run it: false when it was cancelled.
+    pub fn take(&self) -> bool {
+        self.moves(WAITING, RUNNING)
+    }
+
+    /// The window thread hands it to a worker (`writes_file`: an export on a copy).
+    pub(crate) fn computing(&self, writes_file: bool) {
+        self.writes_file.store(writes_file, Ordering::Release);
+        let _ = self.moves(RUNNING, COMPUTING) || self.moves(WAITING, COMPUTING);
+    }
+
+    /// Its worker is done and it runs here now (or it never left): false when it was cancelled
+    /// meanwhile. Only the window thread moves it on from running, so running stays running.
+    pub(crate) fn back(&self) -> bool {
+        self.moves(COMPUTING, RUNNING) || self.state.load(Ordering::Acquire) == RUNNING
+    }
+
+    /// Computed, but it waits its turn again (a file opening meanwhile): false when cancelled.
+    fn wait_again(&self) -> bool {
+        self.moves(COMPUTING, WAITING)
+    }
+
+    /// The person at the app stopped it (Stop): its worker stops too.
+    pub(crate) fn stop(&self) {
+        self.state.store(CANCELLED, Ordering::Release);
+        self.progress.cancel();
+    }
+
+    fn moves(&self, from: u8, to: u8) -> bool {
+        self.state.compare_exchange(from, to, Ordering::AcqRel, Ordering::Acquire).is_ok()
+    }
+}
+
+/// The reply to a request its client cancelled before it ran.
+pub(crate) fn cancelled_reply(method: &str) -> Value {
+    let method: String = method.chars().take(128).collect();
+    json!({"ok": false, "cancelled": true, "error": format!("cancelled: `{method}` was cancelled (control.cancel) before it ran; nothing was applied")})
+}
+
+/// The reply to a request its client cancelled while it computed off the window thread.
+pub(crate) fn stopped_reply(label: &str, writes_file: bool) -> Value {
+    let error = if writes_file {
+        format!("stopped: `{label}` was cancelled (control.cancel) while it computed; the design is unchanged, but its file may still be written")
+    } else {
+        format!("stopped: `{label}` was cancelled (control.cancel) while it computed; nothing was applied")
+    };
+    json!({"ok": false, "stopped": true, "error": error})
+}
 
 /// Areas whose commands only compute the design (no files written, nothing started outside the
 /// app), so evaluating them ahead on a copy has no effect but a warm cache.
@@ -161,17 +278,18 @@ fn label(app: &SolveApp, command: &str) -> String {
     language.label(solidcraft_engine::find_command(command).map_or(command, |c| c.label)).to_string()
 }
 
-/// Run `f` on a worker thread (with the request's folder scope), answering on the returned
-/// channel. `None` without threads (the web).
+/// Run `f` on a worker thread (with the request's folder scope, stopping early once `progress`
+/// is cancelled), answering on the returned channel. `None` without threads (the web).
 fn spawn(
     scope: Option<solidcraft_engine::io::vfs::PathScope>,
+    progress: Arc<Progress>,
     f: impl FnOnce() -> Option<Value> + Send + 'static,
 ) -> Option<Receiver<Option<Value>>> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::Builder::new()
         .name("agent".into())
         .spawn(move || {
-            let r = solidcraft_engine::io::vfs::scoped(scope, f);
+            let r = solidcraft_engine::io::vfs::scoped(scope, || solidcraft_engine::doc::progress::watch(progress, f));
             let _ = tx.send(r);
         })
         .ok()?;
@@ -179,12 +297,18 @@ fn spawn(
 }
 
 /// Evaluate `commands` ahead on a copy of the session, on a worker (with the folder scope
-/// `request` names). What it computes is kept for the run here.
-fn evaluate_ahead(app: &SolveApp, request: &Value, commands: Vec<(String, Value)>) -> Option<(Receiver<Option<Value>>, Arc<KeptResults>)> {
+/// `request` names, stopping early once `ticket` is cancelled). What it computes is kept for the
+/// run here.
+fn evaluate_ahead(
+    app: &SolveApp,
+    request: &Value,
+    ticket: &Ticket,
+    commands: Vec<(String, Value)>,
+) -> Option<(Receiver<Option<Value>>, Arc<KeptResults>)> {
     let scope = crate::control::request_scope(app, request).ok()?;
     let ahead = app.session.ahead();
     let kept = ahead.kept();
-    let rx = spawn(scope, move || {
+    let rx = spawn(scope, ticket.progress.clone(), move || {
         let _ = ahead.evaluate(&commands);
         None
     })?;
@@ -193,7 +317,7 @@ fn evaluate_ahead(app: &SolveApp, request: &Value, commands: Vec<(String, Value)
 
 /// Start computing a design change ahead, for the design as it is now.
 fn begin_ahead(app: &SolveApp, req: &ControlRequest, commands: Vec<(String, Value)>, tries: u8) -> Option<(Work, Receiver<Option<Value>>)> {
-    let (rx, kept) = evaluate_ahead(app, &req.params, commands.clone())?;
+    let (rx, kept) = evaluate_ahead(app, &req.params, &req.ticket, commands.clone())?;
     Some((Work::Ahead { commands, doc: app.session.doc.clone(), revision: app.session.revision, tries, kept }, rx))
 }
 
@@ -228,14 +352,14 @@ impl Ahead {
     /// Start evaluating the design changes of the `request` (`method`: an `engine.execute` or an
     /// `engine.batch`) the pointer acts out; `None` when it just runs once the pointer is there
     /// (not computed off the window thread, or nothing to compute).
-    pub(crate) fn begin(app: &SolveApp, method: &str, request: &Value) -> Option<Ahead> {
+    pub(crate) fn begin(app: &SolveApp, method: &str, request: &Value, ticket: &Ticket) -> Option<Ahead> {
         app.apply_off_thread?;
         if !app.preferences.agent_off_thread || app.file_load.busy() || app.file_picker.is_some() {
             return None;
         }
         let commands = ahead_commands(method, request);
         let label = label(app, &commands.first()?.0);
-        let (done, kept) = evaluate_ahead(app, request, commands)?;
+        let (done, kept) = evaluate_ahead(app, request, ticket, commands)?;
         Some(Ahead { done, kept, started: crate::now_ms(), label })
     }
 
@@ -298,7 +422,10 @@ impl SolveApp {
     /// behind it go on.
     pub fn stop_agent_command(&mut self) {
         let stopped = match self.control_job.take() {
-            Some(job) => Some((job.req.reply, job.label)),
+            Some(job) => {
+                job.req.ticket.stop();
+                Some((job.req.reply, job.label))
+            }
             None => self.agent.stop(),
         };
         if let Some((reply, label)) = stopped {
@@ -345,6 +472,7 @@ impl SolveApp {
             self.run_with_kept(Some(kept), |app| app.run_control(ctx, job.req));
             return None;
         }
+        job.req.ticket.computing(false);
         self.control_job = Some(job);
         None
     }
@@ -355,7 +483,7 @@ impl SolveApp {
     fn answer_on_a_copy(&mut self, req: ControlRequest, id: &'static str, params: Value) -> Option<ControlRequest> {
         let Ok(scope) = crate::control::request_scope(self, &req.params) else { return Some(req) };
         let mut copy = self.session.scratch();
-        let rx = spawn(scope, move || {
+        let rx = spawn(scope, req.ticket.progress.clone(), move || {
             Some(match copy.execute(id, &params) {
                 Ok(v) => json!({"ok": true, "result": v}),
                 Err(e) => json!({"ok": false, "error": e.to_string()}),
@@ -365,7 +493,11 @@ impl SolveApp {
         let job = ControlJob { label: label(self, id), req, work: Work::Answer, done: rx, started: crate::now_ms() };
         match within_wait(self, &job.done) {
             Some(reply) => self.answered(job, reply),
-            None => self.control_answering.push(job),
+            None => {
+                // Stopped, an export's worker may still write its file; a reading writes none.
+                job.req.ticket.computing(ANSWERED_ON_A_COPY.contains(&id));
+                self.control_answering.push(job);
+            }
         }
         None
     }
@@ -373,6 +505,10 @@ impl SolveApp {
     /// An export's or a reading's reply, from its copy, with the echo an export leaves when it
     /// runs here.
     fn answered(&mut self, job: ControlJob, reply: Option<Value>) {
+        if !job.req.ticket.back() {
+            let _ = job.req.reply.send(stopped_reply(&job.label, true));
+            return;
+        }
         let reply = reply.unwrap_or_else(|| json!({"ok": false, "error": format!("`{}` ended without a reply", job.label)}));
         let export = executed(&job.req.params).and_then(|(command, _)| spec_id(command)).is_some_and(|id| ANSWERED_ON_A_COPY.contains(&id));
         if reply["ok"] == true && export {
@@ -383,11 +519,13 @@ impl SolveApp {
     }
 
     /// Each frame: exports that are done reply; a design change whose evaluation is in runs.
+    /// Those their client cancelled are answered as stopped.
     pub(crate) fn poll_control_jobs(&mut self, ctx: &egui::Context) {
         if !self.control_answering.is_empty() {
             let mut i = 0;
             while i < self.control_answering.len() {
-                match self.control_answering.get(i).and_then(ControlJob::poll) {
+                let cancelled = self.control_answering.get(i).is_some_and(|j| j.req.ticket.is_cancelled());
+                match self.control_answering.get(i).and_then(ControlJob::poll).or_else(|| cancelled.then_some(None)) {
                     Some(reply) => {
                         let job = self.control_answering.remove(i);
                         self.answered(job, reply);
@@ -398,14 +536,20 @@ impl SolveApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
         let Some(job) = &self.control_job else { return };
-        if job.poll().is_none() {
+        if job.poll().is_none() && !job.req.ticket.is_cancelled() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
             return;
         }
         let Some(job) = self.control_job.take() else { return };
+        ctx.request_repaint();
         // A file opening meanwhile: the request waits for it as any design change does.
-        if self.file_load.busy() || self.file_picker.is_some() {
+        if (self.file_load.busy() || self.file_picker.is_some()) && job.req.ticket.wait_again() {
             self.control_held.push_front(job.req);
+            return;
+        }
+        // Cancelled by its client while it computed (requests behind it go on).
+        if !job.req.ticket.back() {
+            let _ = job.req.reply.send(stopped_reply(&job.label, false));
             return;
         }
         let Work::Ahead { commands, doc, revision, tries, kept } = job.work else { return };
@@ -423,12 +567,12 @@ impl SolveApp {
         if (!same || s.revision != revision) && tries < MAX_TRIES {
             // A person's edit went first: computed again for the design as it is now.
             if let Some((work, rx)) = begin_ahead(self, &job.req, commands, tries + 1) {
+                job.req.ticket.computing(false);
                 self.control_job = Some(ControlJob { work, done: rx, ..job });
                 return;
             }
         }
         self.big_operation |= crate::now_ms() - job.started >= crate::recovery_ui::BIG_OPERATION_MS;
         self.run_with_kept(Some(kept), |app| app.run_control(ctx, job.req));
-        ctx.request_repaint();
     }
 }

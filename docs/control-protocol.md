@@ -118,6 +118,35 @@ a hidden folder, the open design's folder (whose hidden files stay out of reach)
 MCP server sends its folders this way on every request ([mcp.md](mcp.md)). Without
 `allow_paths` file paths are not limited: a client holding the token can do what the user can.
 
+### Cancelling a request
+
+`control.cancel {id?}` cancels the request the connection still waits for: the timed-out one
+`control.pending` reports (`id`, when given, must name it). A connection can only cancel its own
+requests; another id is refused with `nothing to cancel: request … is not running on this
+connection`. What happens depends on where the request is:
+
+- **Waiting its turn** (behind a design change that computes, a file opening, the agent cursor):
+  it is removed and never runs. `{"cancelled": <id>, "method": …, "outcome": "removed", "note":
+  "cancelled: …"}`; its own reply, if anyone still reads it, is `{"ok": false, "cancelled": true,
+  "error": "cancelled: …; nothing was applied"}`.
+- **Computing off the window thread** (a design change or an export, see below, or one the
+  agent cursor is acting out): it is stopped as **Stop** stops it, and nothing of it is applied:
+  `"outcome": "stopped"`. Its worker is told to stop as well: the evaluation skips the features it
+  has not reached, the kernel's booleans give up at their next try, and nothing it computed after
+  that is kept. A boolean or tessellation already under way still runs to its end in the
+  background. An export's worker may still write its file; the design is unchanged.
+- **Running on the window thread** (with the preference off, while it applies after computing, or
+  a file being opened or imported, which the app's own Cancel stops): it can't be cancelled.
+  `{"ok": false, "cancellable": false, "error": "cannot be cancelled: …"}`; it will still finish,
+  and `control.pending` gets its result.
+- **Finished**: its reply comes back as `control.pending` gives it (`done: true, reply`), with
+  `cancelled: null`.
+
+With nothing outstanding the reply is `{"cancelled": null, "note": "nothing to cancel: …"}`.
+After a request is cancelled or stopped the connection is free at once (`control.pending` says
+`{"pending": null}`). Since a connection sends one request at a time, only a request that
+outlasted its wait (60 s) can be cancelled from the connection that sent it.
+
 ## Engine
 
 | Method | Params | Result |
@@ -152,7 +181,8 @@ drawing and answering while it runs:
   replaced … nothing was applied`.
 - A chip in the view names the command, with **Stop**. Stop answers
   `{"ok": false, "stopped": true, "error": "stopped: …; nothing was applied"}` and the requests
-  waiting behind it go on. The computation finishes unseen in the background.
+  waiting behind it go on. The computation stops at its next feature or boolean try, in the
+  background. The agent can do the same for its own request with `control.cancel` (above).
 - `file.export` and `file.save_mesh` change nothing in the design. They run on a copy of the
   design as it was when they were asked for, and nothing waits behind them.
 - Batches with `timings` or `profile` still run on the window thread, so the times they report

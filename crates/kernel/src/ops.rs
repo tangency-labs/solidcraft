@@ -1989,6 +1989,10 @@ pub(crate) fn nudged(r: Body, nb: &Body, counts: &[(usize, usize)]) -> Body {
 /// copies) keep the operands' face and edge order, and so does moving the result back, so the
 /// history truck records holds for the operands themselves.
 pub(crate) fn truck_boolean(a: &Body, b: &Body, op: BoolOp, shift: Option<mt::Vector3>, tol: f64) -> Result<(Solid, Option<recorded::Shapeops>)> {
+    // Stopped by its watch: no more tries (every retry of a boolean comes through here).
+    if crate::watch::cancelled() {
+        return Err(crate::watch::cancelled_error("boolean"));
+    }
     if !take_attempt() {
         return Err(KernelError::Failed("no result in the tries it was given".into()));
     }

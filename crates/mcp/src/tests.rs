@@ -1670,6 +1670,59 @@ fn a_bridge_made_before_the_app_runs_connects_once_it_does() {
     app.join().unwrap();
 }
 
+/// #1989: the `cancel` tool sends `control.cancel` on the bridge's own connection, where the
+/// request still running waits, and reports what the app did: stopped, or why it can't be
+/// cancelled (a tool error). A bridge with no connection has nothing to cancel and sends nothing;
+/// headless calls always run to their end, so it refuses there.
+#[test]
+fn cancel_forwards_to_the_app_and_reports() {
+    use std::io::{BufRead, BufReader, Write};
+
+    let text = |r: &Value| r["content"][0]["text"].as_str().unwrap_or_default().to_string();
+    let mut never = crate::Remote::new("127.0.0.1:9", Some("0123456789abcdef0123456789abcdef"));
+    let r = crate::call_tool(&mut never, "cancel", &json!({}));
+    assert!(r["isError"] != json!(true) && text(&r).contains("nothing to cancel"), "{r}");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let app = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut lines = BufReader::new(stream.try_clone().unwrap());
+        let mut asked = Vec::new();
+        for reply in [
+            json!({"ok": true, "result": {"cancelled": 7, "method": "engine.execute", "outcome": "stopped", "note": "stopped: request 7 (`engine.execute`) was computing off the window thread; nothing was applied"}}),
+            json!({"ok": false, "cancellable": false, "error": "cannot be cancelled: request 8 (`engine.execute`) already runs in the app"}),
+        ] {
+            let mut line = String::new();
+            lines.read_line(&mut line).unwrap();
+            let req: Value = serde_json::from_str(&line).unwrap();
+            asked.push((req["method"].clone(), req["token"].clone()));
+            let mut reply = reply;
+            reply["id"] = req["id"].clone();
+            writeln!(&stream, "{reply}").unwrap();
+        }
+        asked
+    });
+    let mut remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap();
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert!(r["isError"] != json!(true), "{r}");
+    let body: Value = serde_json::from_str(&text(&r)).unwrap();
+    assert_eq!((&body["cancelled"], &body["outcome"]), (&json!(7), &json!("stopped")), "{body}");
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert!(r["isError"] == json!(true) && text(&r).starts_with("cannot be cancelled"), "{r}");
+    let asked = app.join().unwrap();
+    assert!(asked.iter().all(|(m, t)| m == "control.cancel" && t == "0123456789abcdef0123456789abcdef"), "{asked:?}");
+
+    let mut s = server();
+    let r = raw_tool(&mut s, "cancel", json!({}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert!(r["result"]["content"][0]["text"].as_str().is_some_and(|t| t.contains("headless")), "{r}");
+    let tools = crate::tools::tool_definitions();
+    let cancel = tools.iter().find(|t| t["name"] == "cancel").unwrap();
+    let a = &cancel["annotations"];
+    assert_eq!((&a["readOnlyHint"], &a["destructiveHint"], &a["openWorldHint"]), (&json!(false), &json!(false), &json!(false)), "{a}");
+}
+
 /// An app that quits while it runs a request may have applied it: the retry then finds nothing
 /// listening, and the error says the call may have run, not just that the app is not running.
 #[test]
@@ -1873,6 +1926,48 @@ fn running_is_asked_at_once_behind_a_request_still_running() {
     assert_eq!(seen.lock().unwrap().1, ["control.running"], "not behind the request still running");
     let e = remote.call("document.inspect", json!({})).unwrap_err();
     assert!(e.starts_with(STILL_RUNNING) && e.contains("earlier request"), "still outstanding: {e}");
+}
+
+/// #1989 with #1618: `cancel` goes out at once, not behind the request still running as other
+/// calls are; once the app has removed or stopped it, later calls are sent without waiting for it
+/// and `pending` has nothing. One that can't be cancelled is still waited for.
+#[test]
+fn cancel_frees_the_bridge_from_a_request_still_running() {
+    use crate::backend::{Backend, STILL_RUNNING};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let stuck = std::sync::Arc::new(AtomicBool::new(false));
+    let on_window = stuck.clone();
+    let (addr, seen) = scripted_app(move |req| match req["method"].as_str() {
+        Some("engine.execute") if req["params"]["command"] == "solid.fillet" => running(),
+        Some("control.pending") => json!({"ok": true, "result": {"pending": 1, "method": "engine.execute", "done": false}}),
+        Some("control.cancel") if on_window.load(Ordering::SeqCst) => {
+            json!({"ok": false, "cancellable": false, "error": "cannot be cancelled: request 1 already runs in the app"})
+        }
+        Some("control.cancel") => json!({"ok": true, "result": {"cancelled": 1, "method": "engine.execute", "outcome": "stopped"}}),
+        _ => json!({"ok": true, "result": "ran"}),
+    });
+    let mut remote = crate::Remote::connect(&addr).unwrap();
+    remote.set_waits(quick_waits(20, 20));
+    let methods = |seen: &std::sync::Mutex<(usize, Vec<String>)>| std::mem::take(&mut seen.lock().unwrap().1);
+    assert!(remote.call("engine.execute", json!({"command": "solid.fillet"})).unwrap_err().starts_with(STILL_RUNNING));
+    methods(&seen);
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert_ne!(r["isError"], true, "{r}");
+    assert_eq!(methods(&seen), ["control.cancel"], "sent at once");
+    assert_eq!(remote.call("document.inspect", json!({})).unwrap(), "ran");
+    assert_eq!(methods(&seen), ["document.inspect"], "not behind the stopped request");
+    assert_eq!(remote.call("control.pending", json!({})).unwrap(), json!({"pending": null}));
+
+    // One the app can't cancel stays outstanding: the next call still waits for it.
+    stuck.store(true, Ordering::SeqCst);
+    assert!(remote.call("engine.execute", json!({"command": "solid.fillet"})).is_err());
+    methods(&seen);
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert_eq!(r["isError"], true, "{r}");
+    let e = remote.call("document.inspect", json!({})).unwrap_err();
+    assert!(e.starts_with(STILL_RUNNING) && e.contains("earlier request"), "{e}");
+    assert!(!methods(&seen).iter().any(|m| m == "document.inspect"));
+    assert_eq!(seen.lock().unwrap().0, 1, "one connection throughout");
 }
 
 /// A request still running after the wait is left to the `pending` tool: the error says so

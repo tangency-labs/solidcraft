@@ -253,6 +253,98 @@ fn stopping_an_agent_command_applies_nothing_and_goes_on() {
     assert_eq!(h.app.session.doc.features.len(), features + 1, "only the boss");
 }
 
+/// A control request for the app, where its reply lands, and its ticket (what its connection
+/// cancels with `control.cancel`).
+fn ask_ticket(
+    tx: &std::sync::mpsc::Sender<crate::ControlRequest>,
+    method: &str,
+    params: serde_json::Value,
+) -> (std::sync::mpsc::Receiver<serde_json::Value>, std::sync::Arc<crate::control_job::Ticket>) {
+    let (req, reply) = crate::ControlRequest::new(method, params);
+    let ticket = req.ticket.clone();
+    tx.send(req).unwrap();
+    (reply, ticket)
+}
+
+fn boss_step() -> serde_json::Value {
+    json!({"command": "solid.box", "params": {"corner": [40, 5, 10], "length": 5, "width": 5, "height": 5, "operation": "join"}})
+}
+
+/// #1989: the agent cancels its design change while it computes off the window thread
+/// (`control.cancel`): stopped as Stop stops it, nothing applied, its worker told to stop, and
+/// the requests behind it go on.
+#[test]
+fn cancelling_an_agent_command_while_it_computes_applies_nothing() {
+    use crate::control_job::Cancel;
+    let (mut h, tx) = agent_harness();
+    let features = h.app.session.doc.features.len();
+    let undo = h.app.session.undo.len();
+    let (hole, ticket) = ask_ticket(&tx, "engine.execute", second_hole());
+    let boss = ask(&tx, "engine.execute", boss_step());
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some());
+    assert_eq!(ticket.cancel(), Cancel::Stopped { writes_file: false });
+    assert_eq!(ticket.cancel(), Cancel::Already, "once");
+    let r = reply_to(&mut h, &hole);
+    assert!(r["ok"] == false && r["stopped"] == true, "{r}");
+    assert!(r["error"].as_str().is_some_and(|e| e.contains("control.cancel") && e.contains("nothing was applied")), "{r}");
+    let r = reply_to(&mut h, &boss);
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(h.app.session.doc.features.len(), features + 1, "only the boss");
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert!(h.app.agent_computing().is_none());
+}
+
+/// A request still waiting its turn behind one that computes is removed when its client cancels
+/// it: answered as cancelled, never run. One that already ran can't be cancelled.
+#[test]
+fn a_queued_agent_request_cancelled_never_runs() {
+    use crate::control_job::Cancel;
+    let (mut h, tx) = agent_harness();
+    let features = h.app.session.doc.features.len();
+    let hole = ask(&tx, "engine.execute", second_hole());
+    let (boss, ticket) = ask_ticket(&tx, "engine.execute", boss_step());
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some() && boss.try_recv().is_err(), "the boss waits its turn");
+    assert_eq!(ticket.cancel(), Cancel::Removed);
+    let r = reply_to(&mut h, &hole);
+    assert_eq!(r["ok"], true, "{r}");
+    let r = reply_to(&mut h, &boss);
+    assert!(r["ok"] == false && r["cancelled"] == true, "{r}");
+    assert!(r["error"].as_str().is_some_and(|e| e.starts_with("cancelled:") && e.contains("nothing was applied")), "{r}");
+    until_settled(&mut h);
+    assert_eq!(h.app.session.doc.features.len(), features + 1, "only the hole");
+    // With the preference off it runs on the window thread at once: done, it can't be cancelled.
+    h.app.preferences.agent_off_thread = false;
+    let (boss, ticket) = ask_ticket(&tx, "engine.execute", boss_step());
+    h.frames(1);
+    assert!(boss.try_recv().is_ok_and(|r| r["ok"] == true));
+    assert_eq!(ticket.cancel(), Cancel::Running);
+    assert_eq!(h.app.session.doc.features.len(), features + 2);
+}
+
+/// With the agent cursor shown, a design change the pointer acts out can be cancelled until it
+/// runs: nothing applied, and the pointer is free for the next request.
+#[test]
+fn cancelling_a_design_change_the_agent_cursor_acts_out_applies_nothing() {
+    use crate::control_job::Cancel;
+    let (mut h, tx) = agent_harness();
+    h.app.ui.agent_cursor.show = true;
+    h.frames(2);
+    let features = h.app.session.doc.features.len();
+    let (hole, ticket) = ask_ticket(&tx, "engine.execute", second_hole());
+    h.frames(1);
+    assert!(h.app.agent.busy(), "the pointer acts it out");
+    assert_eq!(ticket.cancel(), Cancel::Stopped { writes_file: false });
+    let r = reply_to(&mut h, &hole);
+    assert!(r["ok"] == false && r["stopped"] == true, "{r}");
+    assert!(!h.app.agent.busy());
+    let boss = ask(&tx, "engine.execute", boss_step());
+    let r = reply_to(&mut h, &boss);
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(h.app.session.doc.features.len(), features + 1, "only the boss");
+}
+
 /// A batch computes off the window thread too, with the reply a batch run here gives.
 #[test]
 fn an_agent_batch_computes_off_the_window_thread() {

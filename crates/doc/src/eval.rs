@@ -2024,7 +2024,9 @@ impl Model {
                 }
                 Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
             };
-            if !self.no_cache {
+            // Work its watcher stopped may have been cut short (a boolean that gave up): it is not
+            // kept for anyone else.
+            if !self.no_cache && !crate::progress::cancelled() {
                 let e = CachedEval {
                     error: error.clone(),
                     warning: warning.clone(),

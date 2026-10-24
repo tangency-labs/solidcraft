@@ -1877,6 +1877,11 @@ impl SolveApp {
                 }
                 continue;
             }
+            // Its client cancelled it while it waited (`control.cancel`): it does not run.
+            if !req.ticket.take() {
+                let _ = req.reply.send(control_job::cancelled_reply(&req.method));
+                continue;
+            }
             req.started.store(true, std::sync::atomic::Ordering::Relaxed);
             // Opening or importing a file: answered when the file is in, without freezing the window.
             let Some(req) = file_load::control(self, req) else {
@@ -1884,7 +1889,7 @@ impl SolveApp {
                 continue;
             };
             let reply = req.reply.clone();
-            if agent_cursor::intercept(self, &req.method, &req.params, &reply) {
+            if agent_cursor::intercept(self, &req.method, &req.params, &reply, &req.ticket) {
                 ctx.request_repaint();
                 continue;
             }

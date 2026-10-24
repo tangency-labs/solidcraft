@@ -285,6 +285,24 @@ impl Remote {
         outcome(&v).inspect_err(|_| self.drop_conn())
     }
 
+    /// `control.cancel` for the request still running on this connection (a timed-out call's,
+    /// docs/control-protocol.md). Sent at once, without waiting for that request first, and never
+    /// on a fresh connection, which has nothing to cancel. Once the app no longer holds it
+    /// (removed, stopped or finished), later calls don't wait for it.
+    fn cancel_outstanding(&mut self, params: Value) -> Result<Value, String> {
+        if self.conn.is_none() {
+            return Ok(json!({"cancelled": null, "note": "nothing to cancel: no request of this bridge is running in the app"}));
+        }
+        let line = self.request_line("control.cancel", params);
+        let reply = self.roundtrip(&line).map_err(|e| self.explain(&e))?;
+        let v: Value = serde_json::from_str(&reply).map_err(|e| format!("bad reply from the app: {e}"))?;
+        let r = outcome(&v);
+        if r.is_ok() {
+            self.outstanding = None;
+        }
+        r
+    }
+
     /// Wait up to `limit` for the outstanding request, asking `control.pending` now and then and
     /// saying on stderr how long it takes. An error: the connection, and so the reply, was lost.
     fn wait_outstanding(&mut self, limit: Duration) -> Result<Waited, String> {
@@ -431,6 +449,10 @@ impl Backend for Remote {
         if method == "control.pending" {
             return self.pending_status();
         }
+        // Not behind the request it cancels, as other calls are.
+        if method == "control.cancel" {
+            return self.cancel_outstanding(params);
+        }
         self.call_once(method, params, true)
     }
     fn has_ui(&self) -> bool {
@@ -543,6 +565,7 @@ impl Backend for Headless {
             // is ever left running.
             "control.running" => Ok(json!({"running": []})),
             "control.pending" => Ok(json!({"pending": null})),
+            "control.cancel" => Err("nothing can be cancelled in headless mode: each call runs to its end before it returns".into()),
             other => Err(format!("unknown method `{other}`")),
         }
     }

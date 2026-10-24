@@ -198,7 +198,10 @@ impl Ahead {
     /// drops results past its budget, and a large design's states are past it.
     pub fn evaluate(self, commands: &[(String, Value)]) -> Result<Evaluated> {
         let (after, _) = self.0.preview_in_place(commands)?;
-        after.world_state().warm_display();
+        // Stopped by its watcher: nothing it ends with will be shown.
+        if !solidcraft_doc::progress::cancelled() {
+            after.world_state().warm_display();
+        }
         Ok(Evaluated(after.model))
     }
 

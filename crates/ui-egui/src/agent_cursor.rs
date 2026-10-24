@@ -19,6 +19,7 @@
 //! with `"animate": false` skips it.
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 #[cfg(test)]
@@ -30,6 +31,7 @@ use solidcraft_engine::geom::{Vec2, Vec3};
 
 use crate::SolveApp;
 use crate::control::ControlResponse;
+use crate::control_job::Ticket;
 
 /// How fast the pointer moves: 1× to 5×, or Instant (no animation: the command runs at once
 /// and the pointer jumps to where it acted, with a click ripple). Saved and sent as a number,
@@ -145,6 +147,8 @@ pub struct Job {
     /// The command computing ahead off the window thread while the pointer glides (#1989): at
     /// its last stop the pointer waits for it, then the command runs and finds it in the cache.
     ahead: Option<crate::control_job::Ahead>,
+    /// Its client may cancel it until it runs (`control.cancel`).
+    ticket: Arc<Ticket>,
 }
 
 /// The pointer's state.
@@ -187,6 +191,7 @@ impl AgentCursor {
     pub(crate) fn stop(&mut self) -> Option<(Sender<ControlResponse>, String)> {
         self.computing()?;
         let job = self.job.take()?;
+        job.ticket.stop();
         Some((job.reply, job.ahead.map(|a| a.label).unwrap_or_default()))
     }
 }
@@ -325,7 +330,7 @@ fn walk<'a>(v: &'a Value, key: Option<&'a str>, f: &mut dyn FnMut(Option<&'a str
 
 /// Take over a control request when the pointer should act it out first: returns the request
 /// back when it should simply run.
-pub fn intercept(app: &mut SolveApp, method: &str, params: &Value, reply: &Sender<ControlResponse>) -> bool {
+pub fn intercept(app: &mut SolveApp, method: &str, params: &Value, reply: &Sender<ControlResponse>, ticket: &Arc<Ticket>) -> bool {
     let s = app.ui.agent_cursor;
     if !s.show || params.get("animate").and_then(Value::as_bool) == Some(false) {
         return false;
@@ -356,7 +361,8 @@ pub fn intercept(app: &mut SolveApp, method: &str, params: &Value, reply: &Sende
     }
     let from = app.cursor_start();
     // Computed ahead (a command or a batch's steps) while the pointer glides (#1989).
-    let ahead = crate::control_job::Ahead::begin(app, method, params);
+    let ahead = crate::control_job::Ahead::begin(app, method, params, ticket);
+    ticket.computing(false);
     let (glide, click) = leg_times(s.speed, stops.len());
     app.agent.job = Some(Job {
         method: method.to_string(),
@@ -369,6 +375,7 @@ pub fn intercept(app: &mut SolveApp, method: &str, params: &Value, reply: &Sende
         started: app.now,
         clicked: false,
         ahead,
+        ticket: ticket.clone(),
     });
     true
 }
@@ -393,6 +400,14 @@ pub fn step(app: &mut SolveApp, ctx: &egui::Context) {
         ctx.request_repaint();
     }
     let Some(job) = app.agent.job.as_mut() else { return };
+    // Cancelled by its client before it ran: requests behind it go on.
+    if job.ticket.is_cancelled() {
+        if let Some(job) = app.agent.job.take() {
+            let _ = job.reply.send(crate::control_job::stopped_reply(&command_label(&job), false));
+        }
+        ctx.request_repaint();
+        return;
+    }
     let (glide, click) = (job.glide, job.click);
     ctx.request_repaint();
     let Some(&to) = job.stops.front() else {
@@ -423,9 +438,21 @@ pub fn step(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// The command a held request runs, as the toolbar names it (or its method).
+fn command_label(job: &Job) -> String {
+    match &job.ahead {
+        Some(a) => a.label.clone(),
+        None => job.params.get("command").or(job.params.get("id")).and_then(Value::as_str).unwrap_or(&job.method).chars().take(128).collect(),
+    }
+}
+
 /// Run the held request now (as a call without animation) and send its reply.
 fn finish(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(job) = app.agent.job.take() else { return };
+    if !job.ticket.back() {
+        let _ = job.reply.send(crate::control_job::stopped_reply(&command_label(&job), false));
+        return;
+    }
     let mut params = job.params;
     params["animate"] = json!(false);
     let cmd = params.get("command").or(params.get("id")).and_then(Value::as_str).unwrap_or_default().to_string();

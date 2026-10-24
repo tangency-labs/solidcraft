@@ -13,6 +13,7 @@ use solidcraft_engine::MAX_LINE;
 use solidcraft_engine::control_auth;
 use solidcraft_engine::control_pending;
 use solidcraft_ui_egui::ControlRequest;
+use solidcraft_ui_egui::control_job::{Cancel, Ticket as JobTicket};
 
 /// Connections served at once, so a flood must not be able to spawn threads without end.
 const MAX_CONNECTIONS: usize = 16;
@@ -208,6 +209,62 @@ struct Pending {
     /// The request in messages ("`engine.execute` (solid.fillet)").
     what: String,
     reply: Receiver<Value>,
+    /// Where it is in the app, to cancel it (`control.cancel`).
+    job: std::sync::Arc<JobTicket>,
+}
+
+/// `control.cancel {id?}`: cancel the request this connection still waits for (the one
+/// `control.pending` reports; `id`, when given, must name it). A connection can only cancel its
+/// own requests. Waiting its turn, it is removed; computing off the window thread, it is stopped
+/// as the app's Stop stops it. Either way nothing of it is applied and the connection is free.
+/// One that runs on the window thread can't be cancelled; one that finished is answered.
+fn cancel(pending: &mut Option<Pending>, late: Option<Value>, id: Option<&Value>) -> Value {
+    let id = id.filter(|v| !v.is_null());
+    let mine = pending.as_ref().filter(|p| id.is_none_or(|id| *id == p.id));
+    let Some(p) = mine else {
+        return match id {
+            None => json!({"ok": true, "result": {"cancelled": null, "note": "nothing to cancel: no request of this connection is running"}}),
+            Some(id) => json!({"ok": false, "error": format!(
+                "nothing to cancel: request {} is not running on this connection (a connection can only cancel its own requests)",
+                id.to_string().chars().take(64).collect::<String>()
+            )}),
+        };
+    };
+    let (what, id) = (format!("request {} ({})", p.id, p.what), p.id.clone());
+    let finished = |p: Pending, reply: Value| {
+        json!({"ok": true, "result": {"cancelled": null, "pending": p.id, "method": p.method, "done": true, "reply": reply,
+            "note": format!("nothing to cancel: {what} had already finished; its reply is here")}})
+    };
+    if let Some(reply) = late {
+        return pending.take().map_or(Value::Null, |p| finished(p, reply));
+    }
+    let outcome = p.job.cancel();
+    let note = match outcome {
+        Cancel::Removed => format!("cancelled: {what} was still waiting its turn and will not run; nothing was applied"),
+        Cancel::Stopped { writes_file: false } => format!("stopped: {what} was computing off the window thread; nothing was applied"),
+        Cancel::Stopped { writes_file: true } => {
+            format!("stopped: {what} was computing on a copy of the design, which is unchanged; its worker may still write the file")
+        }
+        Cancel::Already => format!("{what} was already cancelled or stopped; nothing of it was applied"),
+        Cancel::Running => {
+            // It may have just finished.
+            if let Some(reply) = pending.as_ref().and_then(|p| p.reply.try_recv().ok()) {
+                return pending.take().map_or(Value::Null, |p| finished(p, reply));
+            }
+            return json!({"ok": false, "cancellable": false, "error": format!(
+                "cannot be cancelled: {what} already runs in the app (on its window thread, or as a file it opens) and will \
+                 still finish; ask `control.pending` for its result. Only a request still waiting its turn, or a design change or \
+                 export computing off the window thread (Preferences > AI), can be cancelled"
+            )});
+        }
+    };
+    let method = pending.take().map(|p| p.method);
+    let how = match outcome {
+        Cancel::Removed => "removed",
+        Cancel::Stopped { .. } => "stopped",
+        _ => "already",
+    };
+    json!({"ok": true, "result": {"cancelled": id, "method": method, "outcome": how, "note": note}})
 }
 
 /// Every request the app has been sent and not answered yet, from every connection, for
@@ -337,11 +394,11 @@ fn timeout_message(what: &str, effect: control_pending::Effect) -> String {
         }
         control_pending::Effect::WritesFile => format!(
             "timeout: {what} is still running in the app and will still write the file when it finishes (it was not cancelled: \
-             don't send it again; the design does not change); ask `control.pending` for its result"
+             don't send it again; the design does not change); ask `control.pending` for its result, or `control.cancel` to cancel it"
         ),
         control_pending::Effect::Changes => format!(
             "timeout: {what} is still running in the app and will still apply when it finishes (it was not cancelled: don't send it \
-             again); ask `control.pending` for its result"
+             again); ask `control.pending` for its result, or `control.cancel` to cancel it"
         ),
     }
 }
@@ -412,6 +469,10 @@ fn serve_with(
                 });
                 let mut r = if method == "control.running" {
                     json!({"ok": true, "result": running.result(connection)})
+                } else if method == "control.cancel" {
+                    let r = cancel(&mut pending, late, params.get("id"));
+                    ctx.request_repaint();
+                    r
                 } else if method == "control.pending" {
                     match (pending.take(), late) {
                         (None, _) => json!({"ok": true, "result": {"pending": null}}),
@@ -436,6 +497,7 @@ fn serve_with(
                     let effect = control_pending::effect(&method, &params);
                     let (req, rrx) = ControlRequest::new(method.clone(), params);
                     let ticket = running.add(connection, &id, &req);
+                    let job = req.ticket.clone();
                     if tx.send(req).is_err() {
                         break;
                     }
@@ -444,7 +506,7 @@ fn serve_with(
                         Ok(r) => r,
                         Err(_) => {
                             let r = json!({"ok": false, "running": true, "error": timeout_message(&what, effect)});
-                            pending = Some(Pending { id: id.clone(), method, what, reply: watch(rrx, ticket) });
+                            pending = Some(Pending { id: id.clone(), method, what, reply: watch(rrx, ticket), job });
                             r
                         }
                     }
@@ -656,6 +718,104 @@ mod tests {
         assert!(save.contains("will still write the file") && !save.contains("apply"), "{save}");
         let render = says("ui.render", json!({"path": "/tmp/a.png"}));
         assert!(render.contains("will still write the file"), "{render}");
+    }
+
+    /// #1989: `control.cancel` cancels the connection's own outstanding request. One still
+    /// waiting its turn is removed and never runs, and the connection is free at once; one that
+    /// already runs in the app can't be, and says so; another connection's request is refused;
+    /// with nothing outstanding there is nothing to cancel.
+    #[test]
+    fn control_cancel_cancels_only_this_connections_request() {
+        static RUNNING: Running = Running::new();
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        let (gate_tx, gate_rx) = channel::<()>();
+        let ran = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen = ran.clone();
+        // A stand-in for the window thread: `queued` waits behind the others (never taken until
+        // `slow` is done), `slow` runs until the gate opens.
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for req in rx {
+                if req.method == "queued" {
+                    held.push(req);
+                    continue;
+                }
+                if !req.ticket.take() {
+                    continue;
+                }
+                seen.lock().unwrap().push(req.method.clone());
+                if req.method == "slow" {
+                    let _ = gate_rx.recv();
+                }
+                let _ = req.reply.send(json!({"ok": true, "result": req.method}));
+                if req.method == "slow" {
+                    for req in held.drain(..) {
+                        if req.ticket.take() {
+                            seen.lock().unwrap().push(req.method.clone());
+                        }
+                    }
+                }
+            }
+        });
+        let waits = Waits { short: Duration::from_millis(100), long: Duration::from_millis(100) };
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let tx = tx.clone();
+                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING));
+            }
+        });
+        let connect = || {
+            let s = TcpStream::connect(addr).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            let out = s.try_clone().unwrap();
+            (out, BufReader::new(s))
+        };
+        let ask = |(out, lines): &mut (TcpStream, BufReader<TcpStream>), v: Value| -> Value {
+            writeln!(out, "{v}").unwrap();
+            let mut l = String::new();
+            lines.read_line(&mut l).unwrap();
+            serde_json::from_str(&l).unwrap()
+        };
+        let mut a = connect();
+        let mut b = connect();
+        let r = ask(&mut b, json!({"id": 1, "method": "control.cancel", "token": token}));
+        assert!(r["ok"] == true && r["result"]["cancelled"].is_null(), "nothing to cancel: {r}");
+
+        // Waiting its turn: removed, never run, and the connection is free.
+        let r = ask(&mut a, json!({"id": 1, "method": "queued", "token": token}));
+        assert_eq!(r["running"], true, "{r}");
+        let r = ask(&mut a, json!({"id": 2, "method": "control.cancel", "params": {"id": 1}}));
+        assert_eq!((&r["ok"], &r["result"]["cancelled"], &r["result"]["outcome"]), (&json!(true), &json!(1), &json!("removed")), "{r}");
+        assert!(r["result"]["note"].as_str().is_some_and(|n| n.contains("will not run")), "{r}");
+        let r = ask(&mut a, json!({"id": 3, "method": "control.pending"}));
+        assert_eq!(r["result"]["pending"], Value::Null, "{r}");
+
+        // Already running in the app: it can't be, and it still answers.
+        let r = ask(&mut a, json!({"id": 4, "method": "slow"}));
+        assert_eq!(r["running"], true, "{r}");
+        let r = ask(&mut b, json!({"id": 2, "method": "control.cancel", "params": {"id": 4}}));
+        assert!(r["ok"] == false && r["error"].as_str().is_some_and(|e| e.contains("its own requests")), "another connection's: {r}");
+        let r = ask(&mut a, json!({"id": 5, "method": "control.cancel", "params": {"id": 99}}));
+        assert!(r["ok"] == false && r["error"].as_str().is_some_and(|e| e.starts_with("nothing to cancel")), "{r}");
+        let r = ask(&mut a, json!({"id": 6, "method": "control.cancel"}));
+        assert!(r["ok"] == false && r["cancellable"] == false, "{r}");
+        assert!(r["error"].as_str().is_some_and(|e| e.starts_with("cannot be cancelled") && e.contains("control.pending")), "{r}");
+        gate_tx.send(()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let r = loop {
+            let r = ask(&mut a, json!({"id": 7, "method": "control.pending"}));
+            if r["result"]["done"] == true || std::time::Instant::now() > deadline {
+                break r;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(r["result"]["reply"]["result"], "slow", "{r}");
+        let r = ask(&mut a, json!({"id": 8, "method": "control.cancel"}));
+        assert!(r["ok"] == true && r["result"]["cancelled"].is_null(), "{r}");
+        assert_eq!(*ran.lock().unwrap(), ["slow"], "the cancelled request never ran");
     }
 
     /// #205: a connection runs nothing until a request carries the launch's token; a wrong or
