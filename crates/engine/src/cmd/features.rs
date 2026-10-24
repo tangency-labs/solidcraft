@@ -1866,6 +1866,54 @@ fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
     }
 }
 
+/// The refusal for a thread designation `parse_metric_thread` does not know. A plain `M<d>` with
+/// a sane diameter but no ISO coarse pitch (M28, M7) gets two pitches to try: the largest common
+/// pitch up to about an eighth of the diameter, and the next finer one.
+fn unknown_metric_thread(t: &str, examples: &str) -> String {
+    const PITCHES: [f64; 9] = [2.0, 1.5, 1.25, 1.0, 0.75, 0.5, 0.35, 0.25, 0.2];
+    let diameter = t.trim().strip_prefix(['M', 'm']).and_then(|d| d.trim().parse::<f64>().ok());
+    if let Some(d) = diameter.filter(|d| d.is_finite() && *d > 0.2 && *d <= 1e4) {
+        let first = PITCHES.iter().position(|p| *p <= 0.12 * d).unwrap_or(PITCHES.len() - 1);
+        let pitches: Vec<String> = PITCHES.iter().skip(first).take(2).filter(|p| **p < d).map(|p| format!("M{d}x{p}")).collect();
+        if !pitches.is_empty() {
+            return format!("M{d} has no coarse ISO pitch: give one, e.g. {}", pitches.join(" or "));
+        }
+    }
+    format!("unknown thread `{t}` (ISO metric, like {examples})")
+}
+
+/// Largest nominal diameter automatic thread sizing knows (the last ISO coarse size).
+const LARGEST_COARSE: f64 = 56.0;
+
+/// The refusal for automatic sizing on a cylinder too big for the coarse table (a Ø75 shaft):
+/// `None` when sizing finds a thread, or the cylinder is not past the table's end (the feature's
+/// own error then explains). It suggests sizes with a pitch to type, scaled to the diameter.
+fn beyond_coarse_range(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<String> {
+    if solidcraft_doc::suggested_thread(st, face).is_ok() {
+        return None;
+    }
+    let cyl = st.bodies.iter().filter_map(|b| solidcraft_doc::kernel::cylinder_face_at(&b.body, face)).min_by(|a, b| {
+        let dist =
+            |c: &solidcraft_doc::kernel::CylinderFace| ((face - c.axis_point - c.axis * (face - c.axis_point).dot(c.axis)).len() - c.radius).abs();
+        dist(a).total_cmp(&dist(b))
+    })?;
+    let dia = cyl.radius * 2.0;
+    if !dia.is_finite() || dia <= LARGEST_COARSE * 0.9 || dia > 1e4 {
+        return None;
+    }
+    // ISO fine pitches for large sizes: the largest up to about a 25th of the diameter, then the
+    // next finer one. A hole's major diameter is about its bore plus one pitch.
+    const PITCHES: [f64; 4] = [4.0, 3.0, 2.0, 1.5];
+    let first = PITCHES.iter().position(|p| *p <= dia / 25.0 + 1e-6).unwrap_or(PITCHES.len() - 1);
+    let sizes: Vec<String> =
+        PITCHES.iter().skip(first).take(2).map(|p| format!("M{}x{p}", if cyl.internal { dia + p } else { dia }.round())).collect();
+    let kind = if cyl.internal { "hole" } else { "cylinder" };
+    Some(format!(
+        "a {dia:.2} mm {kind} is beyond the coarse thread range (up to M{LARGEST_COARSE}): type a size with its pitch, e.g. {}",
+        sizes.join(" or ")
+    ))
+}
+
 fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.hole";
     // At sketch points: the holes go perpendicular to the sketch and follow its points.
@@ -1903,7 +1951,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(t) = &thread
         && solidcraft_doc::parse_metric_thread(t).is_none()
     {
-        return Err(bad(cmd, format!("unknown thread `{t}` (ISO metric, like M6 or M6x0.75)")));
+        return Err(bad(cmd, unknown_metric_thread(t, "M6 or M6x0.75")));
     }
     // A position given as length expressions (#1678), say `["leg_h*0.4", "width/2", "t"]`: kept,
     // so the hole follows the parameters; drilled where they evaluate now.
@@ -2296,13 +2344,18 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(t) = &designation
         && solidcraft_doc::parse_metric_thread(t).is_none()
     {
-        return Err(bad(cmd, format!("unknown thread `{t}` (ISO metric, like M8 or M8x1)")));
+        return Err(bad(cmd, unknown_metric_thread(t, "M8 or M8x1")));
     }
     let length = expr(p, "length");
     if let Some(l) = &length {
         check_expr(s, l, Kind::Length, cmd, "length")?;
     }
     let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
+    if designation.is_none()
+        && let Some(msg) = beyond_coarse_range(&s.model.state(), face)
+    {
+        return Err(bad(cmd, msg));
+    }
     let v = add_feature(s, p, FeatureKind::Thread { face: FacePick(face), designation, length, modeled })?;
     let st = s.model.state();
     let t = v.get("feature").and_then(Value::as_u64).and_then(|id| st.threads.iter().find(|t| t.feature == id).cloned());
