@@ -2356,6 +2356,15 @@ fn auto_operation(app: &SolveApp, d: &mut Dialog) {
         return;
     }
     let Some(params) = dialog_commands(app, d).ok().and_then(|c| c.into_iter().next()).map(|(_, p)| p) else { return };
+    // A new start (From Object, a start offset) puts the extrude somewhere else: the latch was
+    // decided for the old one (#467).
+    let start = json!([params.get("from"), params.get("start_offset")]);
+    if let Kind::Extrude { smart, .. } = &mut d.kind
+        && smart.start != start
+    {
+        smart.start = start;
+        smart.latch = None;
+    }
     // To an object, the extrude goes to it on whichever side it is: that is the side (#1633).
     if params.get("to").is_some()
         && let Some(reach) = solidcraft_engine::extrude_reach(&app.session, &params)

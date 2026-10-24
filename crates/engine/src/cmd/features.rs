@@ -208,10 +208,18 @@ fn auto_operation_in(s: &Session, p: &Value, world_faces: bool) -> Option<&'stat
     } else {
         extrude_base(s, p)?
     };
+    // The extrude starts at its From Object or start offset, not at the profile: probe from
+    // there (#467). To an object it then reaches only from that start.
+    let start = match p.get("from").and_then(vec3) {
+        Some(from) if grouped.is_none() => (from - base).dot(n),
+        _ => expr(p, "start_offset").and_then(|e| s.doc.eval(&e, Kind::Length).ok()).unwrap_or(0.0),
+    };
+    let start = if start.is_finite() { start } else { 0.0 };
+    let base = base + n * start;
     let d = if grouped.is_some() && p.get("to").is_some() {
         (p.get("to").and_then(vec3)? - base).dot(n)
     } else if let Some(d) = extrude_reach(s, p) {
-        d
+        if p.get("to").is_some() { d - start } else { d }
     } else {
         through_all_reach(&st, p, base)?
     };
