@@ -611,6 +611,8 @@ preference_settings! {
     view_dxf_tolerance: f64 = 0.01;
     save_mesh_send: bool = false;
     save_mesh_slicer: String = String::new();
+    /// Save as mesh: the last quality (`standard`, `fine` or `finest`, #4747).
+    save_mesh_quality: String = "standard".into();
     custom_slicers: Vec<String> = Vec::new();
     /// AI features (docs/agent-chat.md): the master switch. Off: no AI button, shortcut, menu
     /// entry or panel, and nothing is looked for or started.

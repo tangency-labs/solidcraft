@@ -23,6 +23,8 @@ use crate::theme::Tokens;
 /// The formats, as shown and as `file.save_mesh` names them.
 /// (label, `format` parameter, file extension).
 const FORMATS: [(&str, &str, &str); 3] = [("STL", "stl", "stl"), ("3MF", "3mf", "3mf"), ("3MF with face tags", "3mf-tagged", "3mf")];
+/// How closely the mesh follows curved faces (#4747): the label and `file.save_mesh`'s `quality`.
+const QUALITIES: [(&str, &str); 3] = [("Standard", "standard"), ("Fine", "fine"), ("Finest", "finest")];
 /// Edge of a slicer's icon in the list.
 const ICON: f32 = 16.0;
 /// Most programs the user can keep in the list.
@@ -32,6 +34,8 @@ const MAX_CUSTOM: usize = 24;
 #[derive(Clone, Debug, PartialEq)]
 pub struct SaveMesh {
     format: usize,
+    /// Index into [`QUALITIES`].
+    quality: usize,
     send: bool,
     /// The chosen slicer: an installed one's id, or the path of one the user added.
     slicer: String,
@@ -91,7 +95,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     }
     let p = &app.preferences;
     let format = FORMATS.iter().position(|f| f.1 == p.save_mesh_format).unwrap_or(0);
-    let kind = Kind::SaveMesh(SaveMesh { format, send: p.save_mesh_send, slicer: p.save_mesh_slicer.clone(), stale: true });
+    let quality = QUALITIES.iter().position(|q| q.1 == p.save_mesh_quality).unwrap_or(0);
+    let kind = Kind::SaveMesh(SaveMesh { format, quality, send: p.save_mesh_send, slicer: p.save_mesh_slicer.clone(), stale: true });
     Some((kind, vec![SelInput::new("Bodies", BODIES, true)]))
 }
 
@@ -171,6 +176,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) -> bool {
         k.send &= !entries.is_empty();
     }
     choice_row(ui, "Format", "sm_format", &mut k.format, &FORMATS.map(|f| f.0));
+    choice_row(ui, "Quality", "sm_quality", &mut k.quality, &QUALITIES.map(|q| q.0));
 
     // A browser has no installed programs to send a file to.
     if app.services.pick_program.is_none() {
@@ -294,6 +300,10 @@ fn add_custom(app: &mut SolveApp, path: &str) -> Result<(), String> {
 pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
     let format = FORMATS.get(k.format).map_or("stl", |f| f.1);
     let mut p = json!({ "format": format });
+    // Standard is the command's own default, so it is left out.
+    if let Some((_, quality)) = QUALITIES.get(k.quality).filter(|_| k.quality > 0) {
+        p["quality"] = json!(quality);
+    }
     let names = crate::selection::items(inputs, 0).body_names();
     if names.is_empty() {
         return Err(crate::i18n::tr("ui.save_mesh_pick_bodies").into());
@@ -326,6 +336,7 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
     let name = crate::selection::items(inputs, 0).body_names().first().cloned().unwrap_or_else(|| app.session.doc.name.clone());
     let p = &mut app.preferences;
     p.save_mesh_format = format.into();
+    p.save_mesh_quality = QUALITIES.get(k.quality).map_or("standard", |q| q.1).into();
     p.save_mesh_send = k.send;
     if !k.slicer.is_empty() {
         p.save_mesh_slicer = k.slicer.clone();

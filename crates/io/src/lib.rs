@@ -351,9 +351,46 @@ impl Format {
     }
 }
 
+/// How closely an exported mesh follows curved faces: its chord tolerance as a share of each
+/// body's size. Standard is what every mesh export used; Fine and Finest give the small round
+/// features of a large part more sides (#4747).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MeshQuality {
+    #[default]
+    Standard,
+    Fine,
+    Finest,
+}
+
+impl MeshQuality {
+    /// By the name commands take: `standard`, `fine` or `finest`.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "standard" => Some(Self::Standard),
+            "fine" => Some(Self::Fine),
+            "finest" => Some(Self::Finest),
+            _ => None,
+        }
+    }
+
+    /// The chord tolerance as a share of the body's size.
+    fn share(self) -> f64 {
+        match self {
+            Self::Standard => 2e-4,
+            Self::Fine => 5e-5,
+            Self::Finest => 1e-5,
+        }
+    }
+}
+
 /// Fine export mesh for a body (chord tolerance 2e-4 of its size).
 pub fn export_mesh(b: &solidcraft_kernel::Body) -> Result<Mesh> {
-    Ok(b.tessellate((b.size() * 2e-4).max(1e-3))?)
+    export_mesh_at(b, MeshQuality::Standard)
+}
+
+/// [`export_mesh`] at `quality` (never finer than 1 µm).
+pub fn export_mesh_at(b: &solidcraft_kernel::Body, quality: MeshQuality) -> Result<Mesh> {
+    Ok(b.tessellate((b.size() * quality.share()).max(1e-3))?)
 }
 
 /// Distance within which an exported mesh's vertices are welded (STL and 3MF alike).
@@ -459,6 +496,18 @@ fn threemf_metadata(meta: &Metadata) -> Vec<(&'static str, &str)> {
 /// STEP and IGES headers (author, organization; STEP also the description) and 3MF model
 /// metadata (project as the title, author as the designer, description, licence).
 pub fn export_with_metadata(state: &ModelState, bodies: &[String], format: Format, name: &str, meta: &Metadata) -> Result<Vec<u8>> {
+    export_with_quality(state, bodies, format, name, meta, MeshQuality::Standard)
+}
+
+/// [`export_with_metadata`], meshing STL, OBJ and 3MF at `quality`.
+pub fn export_with_quality(
+    state: &ModelState,
+    bodies: &[String],
+    format: Format,
+    name: &str,
+    meta: &Metadata,
+    quality: MeshQuality,
+) -> Result<Vec<u8>> {
     let sel: Vec<&solidcraft_doc::ModelBody> = state.bodies.iter().filter(|b| bodies.is_empty() || bodies.contains(&b.name)).collect();
     if sel.is_empty() {
         return Err(IoError::Empty);
@@ -470,7 +519,7 @@ pub fn export_with_metadata(state: &ModelState, bodies: &[String], format: Forma
             let meshes: Vec<Mesh> = sel
                 .iter()
                 .map(|b| {
-                    let m = export_mesh(&b.body)?;
+                    let m = export_mesh_at(&b.body, quality)?;
                     let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
                     Ok(Mesh { positions, triangles, ..Mesh::default() })
                 })
@@ -478,7 +527,7 @@ pub fn export_with_metadata(state: &ModelState, bodies: &[String], format: Forma
             if format == Format::StlBinary { stl_binary(&meshes, name) } else { stl_ascii(&meshes, name).into_bytes() }
         }
         Format::Obj => {
-            let meshes: Vec<(String, Mesh)> = sel.iter().map(|b| Ok((b.name.clone(), export_mesh(&b.body)?))).collect::<Result<_>>()?;
+            let meshes: Vec<(String, Mesh)> = sel.iter().map(|b| Ok((b.name.clone(), export_mesh_at(&b.body, quality)?))).collect::<Result<_>>()?;
             obj(&meshes).into_bytes()
         }
         Format::Step => {
@@ -492,7 +541,7 @@ pub fn export_with_metadata(state: &ModelState, bodies: &[String], format: Forma
             solidcraft_kernel::iges_export_bodies(&bs, &step_header(format!("{name}.igs"), meta))?.into_bytes()
         }
         Format::ThreeMf | Format::ThreeMfTagged => {
-            let objs: Vec<MeshObject> = sel.iter().map(|b| mesh_object(b, format == Format::ThreeMfTagged)).collect::<Result<_>>()?;
+            let objs: Vec<MeshObject> = sel.iter().map(|b| mesh_object(b, format == Format::ThreeMfTagged, quality)).collect::<Result<_>>()?;
             write_3mf_with(&objs, &threemf_metadata(meta))?
         }
         Format::Design => return Err(IoError::Format("solidcraft (save the document instead)".into())),
@@ -502,8 +551,8 @@ pub fn export_with_metadata(state: &ModelState, bodies: &[String], format: Forma
 
 /// A body as a 3MF mesh: welded watertight (T-junctions split), coloured, and with `tagged`
 /// each triangle keeps the B-rep face it came from.
-fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool) -> Result<MeshObject> {
-    let m = export_mesh(&b.body)?;
+fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool, quality: MeshQuality) -> Result<MeshObject> {
+    let m = export_mesh_at(&b.body, quality)?;
     let eps = weld_eps(&b.body);
     // Faces with colours of their own tag their triangles.
     let paint = b.body.paint();

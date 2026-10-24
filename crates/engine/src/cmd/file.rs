@@ -48,12 +48,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.export", "Export", export)
         .icon("export")
         .noundo()
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard)"),
     CommandSpec::new("file.save_mesh", "Save As Mesh", save_mesh)
         .at("INSERT", "FILES")
         .icon("mesh_export")
         .noundo()
-        .params("path; format?: stl|3mf|3mf-tagged (default from the extension, else stl; 3mf-tagged: docs/formats/3mf-face-tags.md); bodies?: [names] (default: all); ascii?: bool (STL); slicer?: id, name or program path from file.slicers (open the saved file there)"),
+        .params("path; format?: stl|3mf|3mf-tagged (default from the extension, else stl; 3mf-tagged: docs/formats/3mf-face-tags.md); bodies?: [names] (default: all); ascii?: bool (STL); slicer?: id, name or program path from file.slicers (open the saved file there); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard)"),
     CommandSpec::new("file.slicers", "Installed Slicers", slicers).icon("export")
         .noundo()
         .params("→ the slicers found on this machine: [{id, name, icon?}]; pass an id or name as file.save_mesh's `slicer`"),
@@ -497,7 +497,18 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Result<Value> {
+/// A mesh export's `quality`: standard (as every export was) unless asked for (#4747).
+fn mesh_quality(p: &Value, cmd: &str) -> Result<solidcraft_io::MeshQuality> {
+    match p.get("quality") {
+        None | Some(Value::Null) => Ok(solidcraft_io::MeshQuality::default()),
+        Some(v) => v
+            .as_str()
+            .and_then(solidcraft_io::MeshQuality::from_name)
+            .ok_or_else(|| bad(cmd, format!("`quality` must be standard, fine or finest, not {v}"))),
+    }
+}
+
+fn export_to(s: &Session, path: &str, format: Format, bodies: &[String], quality: solidcraft_io::MeshQuality) -> Result<Value> {
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // A design with components exports as a STEP assembly; otherwise bodies as placed.
     let bytes = if format == Format::Design {
@@ -510,7 +521,7 @@ fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Resu
     } else {
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
-        solidcraft_io::export_with_metadata(&s.doc.painted(&s.world_state()), bodies, format, &name, &s.doc.metadata)?
+        solidcraft_io::export_with_quality(&s.doc.painted(&s.world_state()), bodies, format, &name, &s.doc.metadata, quality)?
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
@@ -522,7 +533,8 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if format == Format::Urdf {
         return export_urdf(s, path, p);
     }
-    export_to(s, path, format, &string_list(p, "bodies"))
+    let quality = mesh_quality(p, "file.export")?;
+    export_to(s, path, format, &string_list(p, "bodies"), quality)
 }
 
 /// The assembly as a URDF and its meshes next to it (docs/urdf.md). Every path is checked before
@@ -603,7 +615,8 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
             crate::slicers::resolve(spec).ok_or_else(|| bad(cmd, format!("no slicer `{spec}` (see file.slicers, or give the path of a program)")))?,
         ),
     };
-    let mut out = export_to(s, path, format, &string_list(p, "bodies"))?;
+    let quality = mesh_quality(p, cmd)?;
+    let mut out = export_to(s, path, format, &string_list(p, "bodies"), quality)?;
     if let (Some(slicer), Some(obj)) = (slicer, out.as_object_mut()) {
         // The file is saved either way; a slicer that won't start is reported, not fatal.
         match slicer.open(path) {
@@ -676,6 +689,41 @@ mod urdf_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #4747: a mesh export's `quality` follows curved faces more closely. A 3 mm hole in a
+    /// 200 mm plate gets more triangles at fine and more again at finest, in STL and 3MF alike
+    /// (Save As Mesh too); standard is what the export always gave; anything else is refused.
+    #[test]
+    fn a_mesh_export_follows_round_faces_more_closely_at_a_finer_quality() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-mesh-quality-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 200, "width": 100, "height": 5})).unwrap();
+        s.execute("solid.cylinder", &json!({"base": [100, 50, -1], "radius": 1.5, "height": 7, "operation": "cut"})).unwrap();
+        let stl_triangles = |b: &[u8]| u32::from_le_bytes([b[80], b[81], b[82], b[83]]);
+        let mut counts = Vec::new();
+        for quality in [None, Some("standard"), Some("fine"), Some("finest")] {
+            let path = dir.join(format!("plate-{}.stl", quality.unwrap_or("default"))).to_string_lossy().to_string();
+            let mut p = json!({"path": path});
+            if let Some(q) = quality {
+                p["quality"] = json!(q);
+            }
+            s.execute("file.export", &p).unwrap();
+            counts.push(stl_triangles(&std::fs::read(&path).unwrap()));
+        }
+        assert_eq!(counts[0], counts[1], "standard is the default: {counts:?}");
+        assert!(counts[2] > counts[1] && counts[3] > counts[2], "finer, more triangles: {counts:?}");
+        let finest_3mf = dir.join("plate.3mf").to_string_lossy().to_string();
+        let standard_3mf = dir.join("plate-standard.3mf").to_string_lossy().to_string();
+        s.execute("file.save_mesh", &json!({"path": finest_3mf, "quality": "finest"})).unwrap();
+        s.execute("file.save_mesh", &json!({"path": standard_3mf})).unwrap();
+        assert!(std::fs::metadata(&finest_3mf).unwrap().len() > std::fs::metadata(&standard_3mf).unwrap().len());
+        for bad in [json!("ultra"), json!(3), json!(true)] {
+            let e = s.execute("file.export", &json!({"path": dir.join("bad.stl").to_string_lossy(), "quality": bad})).unwrap_err().to_string();
+            assert!(e.contains("`quality` must be standard, fine or finest"), "{bad}: {e}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// #3044: a save run on a scratch copy of the session (on a worker, so the window keeps
     /// drawing) and taken up with `adopt_save` leaves the session as saving it directly does:
