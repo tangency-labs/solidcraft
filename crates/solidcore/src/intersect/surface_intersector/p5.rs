@@ -72,6 +72,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::{surface_cache, SurfaceIntersection, TsectCurveType};
 use crate::surface::surface::Surface;
+use crate::surface::surface_cache::face_context::FaceQueries;
 use crate::surface::surface_cache::p1::{PatchBoundaryBoundingPlanes, SurfaceCache};
 
 use super::p1::{SrfIndex, SurfaceIntersector, TsectPnt};
@@ -381,7 +382,13 @@ pub fn do_intersection_with_context<O: SolutionObject + Copy + PartialEq>(
     ssi.base
         .set_use_surface_edges(use_surface_edges[0], use_surface_edges[1]);
     caches = intersection_surface_caches_with_context(k, &ssi.base, handles, context)?;
-    ssi.do_intersection_with_caches(k, &mut caches, opt_approx_tol_3d, opt_ang_tol_rad)
+    ssi.do_intersection_with_caches_and_queries(
+        k,
+        &mut caches,
+        opt_approx_tol_3d,
+        opt_ang_tol_rad,
+        context.face_queries(),
+    )
 }
 
 impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't, O> {
@@ -428,6 +435,32 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         caches: &'t mut [SurfaceCache<O>],
         opt_approx_tol_3d: Option<f64>,
         opt_ang_tol_rad: Option<f64>,
+    ) -> Result<SurfaceIntersection> {
+        self.do_intersection_with_caches_and_queries(
+            k,
+            caches,
+            opt_approx_tol_3d,
+            opt_ang_tol_rad,
+            None,
+        )
+    }
+
+    /// [`AdvSurfaceIntersector::do_intersection_with_caches`] with the face
+    /// classifications of the context that made the caches: the boundary start
+    /// points' solves on a face's trimmed cache classify on that face
+    /// ([`SurfaceIntersector::find_boundary_start_points_with_queries`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`AdvSurfaceIntersector::do_intersection_with_caches`].
+    #[allow(clippy::too_many_lines)] // one upstream function
+    pub fn do_intersection_with_caches_and_queries(
+        &mut self,
+        k: &Kernel,
+        caches: &'t mut [SurfaceCache<O>],
+        opt_approx_tol_3d: Option<f64>,
+        opt_ang_tol_rad: Option<f64>,
+        queries: Option<&dyn FaceQueries<O>>,
     ) -> Result<SurfaceIntersection> {
         let mut result = SurfaceIntersection::default();
 
@@ -588,11 +621,12 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         // Surf1/Surf2->NaturalBoundaryCurve Intersections (on copies of the caches)
         if !self.base.doing_self_intersection {
             let mut boundary_caches = caches.to_vec();
-            self.base.find_boundary_start_points_with_caches(
+            self.base.find_boundary_start_points_with_queries(
                 k,
                 &mut boundary_caches,
                 &bbox,
                 &mut out,
+                queries,
             )?;
         }
 

@@ -9,7 +9,7 @@
 //!
 //! | Rust                                                  | Upstream                                   |
 //! |-------------------------------------------------------|--------------------------------------------|
-//! | [`SurfaceIntersector::find_boundary_start_points`], [`SurfaceIntersector::find_boundary_start_points_with_caches`] | `FindBoundaryStartPoints` |
+//! | [`SurfaceIntersector::find_boundary_start_points`], [`SurfaceIntersector::find_boundary_start_points_with_caches`], [`SurfaceIntersector::find_boundary_start_points_with_queries`] | `FindBoundaryStartPoints` |
 //! | [`SurfaceIntersector::compute_next_point`], [`NextPoint`] | `ComputeNextPoint`                     |
 //! | [`SurfaceIntersector::update_tsect_point`], [`update_tsect_point_with`] | `sm_UpdateTsectPoint` (static) |
 //! | [`SurfaceIntersector::test_point`], [`test_point_with`] | `TestPoint`                              |
@@ -94,9 +94,11 @@ use crate::math::{max2, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface_cache::face_context::FaceQueries;
 use crate::surface::surface_cache::SurfaceCache;
 use crate::topology::ObjectHandle;
 
@@ -290,6 +292,27 @@ impl SurfaceIntersector<'_> {
         intersection_box: &Extent3d,
         out: &mut TsectCurves,
     ) -> Result<()> {
+        self.find_boundary_start_points_with_queries(k, caches, intersection_box, out, None)
+    }
+
+    /// [`SurfaceIntersector::find_boundary_start_points_with_caches`] with the face
+    /// classifications of the caller's context for trimmed caches: the boundary
+    /// curve intersections' point solves test their fast-drop solutions against the
+    /// face of a trimmed cache with point testing on (`GlobalPointSolve` reaching
+    /// `pFace->PointClassify`).
+    ///
+    /// # Errors
+    ///
+    /// As [`SurfaceIntersector::find_boundary_start_points_with_caches`], and those of
+    /// the classifications.
+    pub fn find_boundary_start_points_with_queries<O: Copy + PartialEq>(
+        &mut self,
+        k: &Kernel,
+        caches: &mut [SurfaceCache<O>],
+        intersection_box: &Extent3d,
+        out: &mut TsectCurves,
+        queries: Option<&dyn FaceQueries<O>>,
+    ) -> Result<()> {
         if caches.is_empty() {
             return Err(SolidError::Upstream {
                 operation: OP_FBSP,
@@ -308,7 +331,7 @@ impl SurfaceIntersector<'_> {
         for c in caches.iter_mut().take(2) {
             c.process_boundary_curves = true;
         }
-        let r = self.find_boundary_start_points_body(k, caches, intersection_box, out);
+        let r = self.find_boundary_start_points_body(k, caches, intersection_box, out, queries);
         for (c, s) in caches.iter_mut().zip(saved).rev() {
             c.process_boundary_curves = s;
         }
@@ -322,6 +345,7 @@ impl SurfaceIntersector<'_> {
         caches: &mut [SurfaceCache<O>],
         intersection_box: &Extent3d,
         out: &mut TsectCurves,
+        queries: Option<&dyn FaceQueries<O>>,
     ) -> Result<()> {
         let mut work = BoundaryWork::default();
         // sIntervals keeps its values from surface to surface (SetMinMax failures)
@@ -410,6 +434,7 @@ impl SurfaceIntersector<'_> {
                         &tgt_curve,
                         &bsc_ivl,
                         self.this_approx_tol_3d,
+                        queries,
                     )?
                 };
 
@@ -1486,12 +1511,80 @@ impl SolutionObject for SolveObject {
     }
 }
 
+/// The owning-face service of a trimmed cache for [`surface_global_curve_intersect`]'s
+/// solve, on its [`SolveObject`] handles: the cache (the surface's, renamed) and the
+/// caller's classifications of the cache's face.
+struct TrimmedFaceContext<'q, O> {
+    cache: SurfaceCache<SolveObject>,
+    face: O,
+    queries: &'q dyn FaceQueries<O>,
+}
+
+impl<O> core::fmt::Debug for TrimmedFaceContext<'_, O> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("TrimmedFaceContext").finish_non_exhaustive()
+    }
+}
+
+impl<O: Copy + PartialEq> SurfaceSolveContext<SolveObject> for TrimmedFaceContext<'_, O> {
+    fn build_surface_cache(
+        &mut self,
+        _: &Kernel,
+        _: &Surface,
+        _: Option<SolveObject>,
+    ) -> Result<SurfaceCache<SolveObject>> {
+        self.cache.map_handles(Ok)
+    }
+
+    fn face_queries(&self) -> Option<&dyn FaceQueries<SolveObject>> {
+        Some(self)
+    }
+}
+
+impl<O: Copy + PartialEq> FaceQueries<SolveObject> for TrimmedFaceContext<'_, O> {
+    fn face_zone_tol_3d(&self, _: SolveObject) -> Result<f64> {
+        self.queries.face_zone_tol_3d(self.face)
+    }
+
+    fn face_point_classify(
+        &self,
+        k: &Kernel,
+        _: SolveObject,
+        uv: Point2,
+        src_tol: f64,
+    ) -> Result<(i32, Option<SolveObject>)> {
+        // (the classification object does not name a solve object)
+        Ok((
+            self.queries
+                .face_point_classify(k, self.face, uv, src_tol)?
+                .0,
+            None,
+        ))
+    }
+
+    fn face_point_classify_fast_drop(
+        &self,
+        k: &Kernel,
+        _: SolveObject,
+        uv: Point2,
+        src_tol: f64,
+    ) -> Result<(i32, Option<SolveObject>)> {
+        Ok((
+            self.queries
+                .face_point_classify_fast_drop(k, self.face, uv, src_tol)?
+                .0,
+            None,
+        ))
+    }
+}
+
 /// `surface.GlobalCurveIntersect(domain, curve, interval, tol, solutions)`, which
 /// upstream runs on the surface's one cache: here on a copy of `cache` (the
 /// intersector's cache of `surface`; its handles, which name only the surface, become
 /// the [`SolveObject`] of the surface; a cache naming no surface cannot serve the leaf
 /// solves, so the solve then builds its own). The solutions, `[t, u, v]` each (their
 /// objects and nodes are not kept).
+#[allow(clippy::too_many_arguments)]
 fn surface_global_curve_intersect<O: Copy + PartialEq>(
     k: &Kernel,
     surface: &Surface,
@@ -1500,10 +1593,38 @@ fn surface_global_curve_intersect<O: Copy + PartialEq>(
     curve: &Curve,
     interval: &Extent1d,
     tol: f64,
+    queries: Option<&dyn FaceQueries<O>>,
 ) -> Result<Vec<Solution<()>>> {
     let surface_object = SolveObject::Surface(surface.natural_uv_domain());
     let curve_object = SolveObject::Curve(curve.natural_interval());
-    let found = if cache.surface_handle().is_some() {
+    // a trimmed cache of a face's surface: the solve's point solves classify their
+    // fast-drop solutions on that face (GlobalPointSolve -> pFace->PointClassify)
+    let face_context = match queries {
+        Some(queries) if cache.surface_handle().is_some() && cache.is_trimmed() => cache
+            .face()?
+            .map(|face| -> Result<TrimmedFaceContext<'_, O>> {
+                Ok(TrimmedFaceContext {
+                    cache: cache.map_handles(|_| Ok(surface_object))?,
+                    face,
+                    queries,
+                })
+            })
+            .transpose()?,
+        _ => None,
+    };
+    let found = if let Some(mut face_context) = face_context {
+        let mut solve_cache = cache.map_handles(|_| Ok(surface_object))?;
+        surface.global_curve_intersect_with_context::<SolveObject>(
+            k,
+            [Some(curve_object), Some(surface_object)],
+            Some(&mut solve_cache),
+            &mut face_context,
+            domain,
+            curve,
+            interval,
+            tol,
+        )?
+    } else if cache.surface_handle().is_some() {
         let mut solve_cache = cache.map_handles(|_| Ok(surface_object))?;
         surface.global_curve_intersect_in::<SolveObject>(
             k,

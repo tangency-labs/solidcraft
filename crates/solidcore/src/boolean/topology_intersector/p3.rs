@@ -118,6 +118,26 @@ pub trait IntersectorBrepP3<O>: IntersectorBrepP2<O> + MergeIntervalBrep<O> {
     ///
     /// Those of the lookup.
     fn surface_face(&self, surface: O) -> Result<Option<O>>;
+    /// `smsurf_GetSurfaceCache(pSurface)` of a face's surface, the cache
+    /// `SmSurfaceDropCurve::DoTrace` traces on: the face's trimmed cache, made on its
+    /// B-rep (`query::face::p2::face_surface_cache`). `None` (the default) is an
+    /// adapter that cannot reach the face's B-rep mutably; the trace then builds the
+    /// surface's cache itself.
+    ///
+    /// # Errors
+    ///
+    /// Those of the cache lookup.
+    fn face_surface_trace_cache(
+        &mut self,
+        k: &Kernel,
+        surface: O,
+    ) -> Result<Option<crate::surface::surface_cache::SurfaceCache<O>>>
+    where
+        O: Copy + PartialEq,
+    {
+        let _ = (k, surface);
+        Ok(None)
+    }
     /// `SmEdge::IsManifold` (`topology::edge::is_manifold`).
     ///
     /// # Errors
@@ -1579,9 +1599,18 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     .ok_or(dangling("face handle is unknown"))?;
                 let target = brep
                     .surface(target_surface)
-                    .ok_or(dangling("surface handle cannot be resolved"))?;
-                let dropped = ignore_soft(target.drop_and_trim_curve::<O>(
+                    .ok_or(dangling("surface handle cannot be resolved"))?
+                    .clone_for_evaluation()?;
+                // DoTrace traces on the surface's cache (smsurf_GetSurfaceCache: the
+                // face's trimmed cache); a cache that cannot be had fails the drop
+                let mut cache = match brep.face_surface_trace_cache(k, target_surface) {
+                    Ok(cache) => cache,
+                    Err(e) if e.is_unported() => return Err(e),
+                    Err(_) => continue,
+                };
+                let dropped = ignore_soft(target.drop_and_trim_curve_in::<O, O>(
                     k,
+                    cache.as_mut(),
                     &target_uv_domain,
                     &copy,
                     &copy.natural_interval(),

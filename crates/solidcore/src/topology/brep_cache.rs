@@ -551,6 +551,12 @@ impl crate::intersect::topology_solver::p1::TopologyObjects<CacheObject> for Bre
         Ok(self.brep.vertex(v)?.tolerance)
     }
     fn curve_edge(&self, object: CacheObject) -> Result<Option<CacheObject>> {
+        // a solve's own curve outside the B-rep's records (e.g. the line a caller
+        // intersects the B-rep with): no edge of the B-rep owns it, so its
+        // `GetEdge()` is null
+        if let CacheObject::Other(_) = object {
+            return Ok(None);
+        }
         let owner = self.curve(object)?.edge(self.owner_of)?;
         owner
             .map(|o| edge_id(self.brep, o, self.keys).map(CacheObject::Edge))

@@ -1665,16 +1665,31 @@ impl Surface {
             ignore_status(line.edit_parameterization(&line_interval_used))?;
             let line = Curve::from(line);
 
-            // Check Surface/LineSegment Coincidence
-            let found = self.simple_coincidence_checker::<O>(
-                k,
-                uv_domain,
-                &line,
-                &line_interval_used,
-                distance_tolerance,
-                true, // bAllowPartialCoinc [B122]
-                [None, surface],
-            )?;
+            // Check Surface/LineSegment Coincidence (its point solve reaches the
+            // surface's face through the caller's context, when there is one)
+            let found = if let Some(context) = context {
+                self.simple_coincidence_checker_with_context::<O>(
+                    k,
+                    uv_domain,
+                    &line,
+                    &line_interval_used,
+                    distance_tolerance,
+                    true, // bAllowPartialCoinc [B122]
+                    [None, surface],
+                    Some(cache),
+                    context,
+                )?
+            } else {
+                self.simple_coincidence_checker::<O>(
+                    k,
+                    uv_domain,
+                    &line,
+                    &line_interval_used,
+                    distance_tolerance,
+                    true, // bAllowPartialCoinc [B122]
+                    [None, surface],
+                )?
+            };
 
             // Put the end points of the intersection into separate solutions
             if found.is_some() {

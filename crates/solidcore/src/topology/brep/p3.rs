@@ -3620,14 +3620,14 @@ fn brep_curve_solve(
             &keys,
         )?;
         let owners = |_: ObjectRef| None;
-        let objects = crate::topology::brep_cache::BrepObjects {
-            preparation: None,
-            brep: b,
+        // the solve makes the face caches it reaches on the B-rep
+        // (smsurf_GetSurfaceCache) and classifies on it
+        let identity = crate::query::brep::BrepIdentity {
             brep_id: crate::topology::BrepId::from_index(0),
-            cache: Some(&cache),
             keys: &keys,
             owner_of: &owners,
         };
+        let objects = crate::query::brep::LiveBrepObjects::new(b, &identity, Some(&cache))?;
         let sols = TopologySolver::brep_curve_solve(
             k,
             &objects,
