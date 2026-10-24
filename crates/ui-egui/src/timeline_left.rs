@@ -920,6 +920,8 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         .collect();
     let groups = app.session.doc.timeline_groups.clone();
     let order = visible_order(app, &features, &groups);
+    // Find in Timeline: scroll the found feature into the history on this frame (#5850).
+    let reveal = app.tree.timeline_reveal.take();
     let first_indices: std::collections::BTreeMap<u64, Option<usize>> =
         groups.iter().map(|group| (group.id, group_first_feature(&groups, &features, group.id))).collect();
     let end_indices: std::collections::BTreeMap<u64, usize> = groups
@@ -999,6 +1001,9 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
             row
         };
         crate::scenario::publish_rect(&format!("history:feature:{name}"), rect);
+        if reveal == Some(*id) {
+            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+        }
         let fold_rect = Rect::from_min_size(rect.left_top() + vec2(indent, 0.0), vec2(16.0, rect.height()));
         let on_fold = has_patterns && response.interact_pointer_pos().is_some_and(|p| fold_rect.contains(p));
         crate::scenario::publish_handle(&format!("timeline:{name}"), rect.center());

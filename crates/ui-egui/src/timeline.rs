@@ -419,6 +419,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 .map(|f| (f.id, f.name.clone(), icon_of(&f.kind), f.suppressed, f.kind.type_name(), TimelineKind::of(&f.kind)))
                 .collect();
             let order: Vec<u64> = feats.iter().map(|f| f.0).collect();
+            // Find in Timeline: scroll the found feature into the strip on this frame (#5850).
+            let reveal = app.tree.timeline_reveal.take();
             // The feature whose body is under the cursor in the viewport.
             let st = app.session.world_state();
             let from_view = match &app.viewport.hover {
@@ -441,6 +443,9 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 }
                 xs.push(x);
                 let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
+                if reveal == Some(*id) {
+                    ui.scroll_to_rect(br, Some(egui::Align::Center));
+                }
                 crate::scenario::publish_handle(&format!("timeline:{name}"), br.center());
                 let resp = ui.interact(br, ui.id().with(("feat", *id)), Sense::click_and_drag());
                 let res = app.session.model.result(*id);
@@ -766,6 +771,38 @@ mod tests {
         let moved = crate::scenario::handle_at("timeline:S0").unwrap();
         assert!(moved.x < first.x - 100.0, "the wheel scrolled the timeline: {first:?} → {moved:?}");
         assert_eq!(moved.y, first.y);
+    }
+
+    /// Find in Timeline on the last body of a history longer than the timeline scrolls its
+    /// feature into view, in the bottom strip and in the history on the left (#5850).
+    #[test]
+    fn find_in_timeline_scrolls_both_timelines_to_the_found_feature() {
+        for left in [false, true] {
+            let mut h = Harness::new();
+            h.app.preferences.timeline_left = left;
+            for i in 0..80 {
+                h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+            }
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Last", "body_name": "Plate"})).unwrap();
+            h.app.run("select.clear", json!({})).unwrap();
+            h.frames(4);
+            let shown = |h: &Harness| {
+                let history = h.app.shell.history.unwrap();
+                let found = crate::scenario::handle_at("timeline:Last").unwrap();
+                history.contains(found)
+            };
+            assert!(!shown(&h), "left={left}: the last feature starts outside the timeline");
+
+            let target = crate::context_menu::Target::Body { name: "Plate".into() };
+            let item = crate::context_menu::items(&h.app, &target).into_iter().find(|item| item.id == "ui.findTimeline").unwrap();
+            crate::context_menu::run_item(&mut h.app, &item, egui::pos2(0.0, 0.0));
+            h.frames(30);
+            let last = h.app.session.doc.find_feature("Last").unwrap().id;
+            assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Feature { id: last }], "left={left}");
+            assert!(shown(&h), "left={left}: Find in Timeline scrolled the found feature into the timeline");
+            assert!(h.app.tree.timeline_reveal.is_none(), "left={left}: the request is done once drawn");
+        }
     }
 
     #[test]

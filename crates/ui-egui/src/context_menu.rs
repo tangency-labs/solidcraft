@@ -1139,6 +1139,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if let Some(f) = f {
                 app.ui.show_timeline = true;
                 let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": f}]}));
+                app.tree.timeline_reveal = Some(f);
             }
         }
         "ui.tangentChain" => tangent_chain(app),

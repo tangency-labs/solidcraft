@@ -89,6 +89,9 @@ pub struct TreeState {
     pub picked_timeline_groups: Vec<u64>,
     /// Last feature-history item clicked, for Shift ranges (`f:<id>` or `g:<id>`).
     pub timeline_anchor: Option<String>,
+    /// Find in Timeline: the feature the history scrolls to the next time it draws its items, in
+    /// the bottom strip or in the history on the left (#5850).
+    pub timeline_reveal: Option<u64>,
     /// The Edit Canvas / Calibrate panel.
     pub canvas_panel: Option<CanvasPanel>,
     /// A Section Analysis hidden with its eye in the Analysis folder: its plane (origin,
