@@ -1364,7 +1364,22 @@ impl<O: ClassObject, G: ClassGeometry<O>> ClassGeometry<O> for WithMadeTrimCurve
         self.inner.classification_vertex_point(vertex)
     }
     fn topology_zone_tol_3d(&self, object: O) -> Option<f64> {
-        self.inner.topology_zone_tol_3d(object)
+        // `SmTol::GetZoneTol3d` of an entity of the face's B-rep reads it as the
+        // classification has left it: the trimmed cache it builds on the snapshot
+        // (`smsurf_GetSurfaceCache`, upstream on the face's own B-rep) can raise vertex
+        // and edge tolerances
+        match self.inner.topology_entity(object) {
+            Some((b, e)) if core::ptr::eq(b, self.brep) => {
+                let s: &Brep = self.snapshot;
+                match e {
+                    EntityRef::Vertex(v) => s.vertex(v).ok().map(|v| v.tolerance),
+                    EntityRef::Edge(ed) => s.edge(ed).ok().map(|ed| ed.tolerance),
+                    EntityRef::Face(f) => s.face(f).ok().map(|f| f.tolerance),
+                    _ => self.inner.topology_zone_tol_3d(object),
+                }
+            }
+            _ => self.inner.topology_zone_tol_3d(object),
+        }
     }
     fn vertex_face_gap(&self, vertex: O, surface: &Surface, face: Option<O>) -> Option<f64> {
         self.inner.vertex_face_gap(vertex, surface, face)

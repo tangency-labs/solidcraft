@@ -1528,6 +1528,23 @@ impl ClassGeometry<IntersectObject> for IntersectObjects<'_> {
     fn point(&self, _o: IntersectObject) -> Option<Point3> {
         None
     }
+    // the topology handles name entities of the B-rep of their side, so the face
+    // queries of the interval classification (`SmFace::PointClassify`,
+    // `FindVertexSector`, ...) reach them as upstream's pointers do
+    fn topology_entity(&self, o: IntersectObject) -> Option<(&Brep, EntityRef)> {
+        match o {
+            IntersectObject::Topology(e, side) => Some((self.brep(side), e)),
+            _ => None,
+        }
+    }
+    fn topology_handle(&self, e: EntityRef) -> Option<IntersectObject> {
+        Some(IntersectObject::Topology(e, self.side))
+    }
+    fn topology_handle_in(&self, brep: &Brep, e: EntityRef) -> Option<IntersectObject> {
+        // side `true` only for the other face's B-rep when it is a different one
+        let side = !core::ptr::eq(brep, self.b);
+        (!side || core::ptr::eq(brep, self.other)).then_some(IntersectObject::Topology(e, side))
+    }
 }
 
 /// `FaceIntersect`: the curves (and, when asked, points) where face `f` meets

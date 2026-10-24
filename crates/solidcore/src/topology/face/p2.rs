@@ -1167,7 +1167,7 @@ pub fn calculate_an_internal_point(k: &Kernel, b: &Brep, f: FaceId) -> Result<Po
         b,
         f,
         line: None,
-        resolve_topology: false,
+        resolve_topology: true,
     };
 
     // first for constant U then V isoparameter lines

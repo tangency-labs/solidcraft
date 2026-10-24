@@ -1946,8 +1946,9 @@ fn run_rust_op(
             ang,
             want_points,
         } => {
-            let other = b.clone();
-            let (curves, points) = bp1::brep_intersect(k, b, &other, *tol, *ang, *want_points)?;
+            // the B-rep against itself, as the shim's `brep->BrepIntersect(ctx, brep, ..)`
+            let b: &Brep = b;
+            let (curves, points) = bp1::brep_intersect(k, b, b, *tol, *ang, *want_points)?;
             o.extend([
                 0.0,
                 curves.len() as f64,
