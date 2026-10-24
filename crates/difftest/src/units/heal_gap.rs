@@ -67,7 +67,7 @@ use super::topology_vertexuse::{
 };
 use crate::case::CaseContext;
 use crate::runner::default_cases;
-use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use crate::{Case, CaseSource, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 400;
@@ -215,6 +215,28 @@ fn twenty() -> usize {
     20
 }
 
+/// A native planar face with an exact `SmCircle`/`SmEllipse` edge and exact rational UV
+/// trims (the shared B-rep block kind 9, as `topology.edgeuse_p1` builds it). The graph
+/// export carries the edge curve losslessly (`sc_exact_curve_export`), so it is the case
+/// that distinguishes an exact healing import from the old B-spline stand-in.
+/// `angles` is the STEP interval in degrees and `natural` the NURB parameter interval.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct EllipseFaceIn {
+    /// `SmCircle` instead of `SmEllipse` (the radii must then be equal).
+    #[serde(default)]
+    circle: bool,
+    origin: [f64; 3],
+    /// 0: `x = +y, y = +z`; 1: `x = +x, y = +z`; 2: `x = +x, y = +y`.
+    axis: u8,
+    radii: [f64; 2],
+    angles: [f64; 2],
+    natural: [f64; 2],
+    #[serde(default)]
+    inside_out: bool,
+    #[serde(default)]
+    oob: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Inputs {
@@ -259,7 +281,14 @@ enum Inputs {
         b: Vec<f64>,
     },
     Topo {
-        brep: BrepIn,
+        /// The shared B-rep block (a `.smb` file, a wire edge, a face, the wire
+        /// network); `None` only with `ellipse_face`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        brep: Option<BrepIn>,
+        /// A native circle/ellipse face (the shared block's kind 9); `None` only with
+        /// `brep`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ellipse_face: Option<EllipseFaceIn>,
         /// 0 vertex/edge, 1 vertex/face trim curve, 2 vertex/face, 3 edge/edge, 4
         /// edge/face trim curve, 5 edge/face.
         kind: u8,
@@ -804,10 +833,46 @@ fn brep_block(brep: &BrepIn) -> Result<Vec<f64>, HarnessError> {
     Ok(v)
 }
 
-/// The graph of a topology case: its path, block, export, counts and import.
-fn topo_graph(brep: &BrepIn) -> Result<(String, Vec<f64>, Vec<f64>), HarnessError> {
-    let path = path_of(brep)?;
-    let block = brep_block(brep)?;
+/// The shared B-rep block kind 9 (a native circle/ellipse face); the layout
+/// `topology.edgeuse_p1`'s `ellipse_face_block` validates and
+/// `sc_topology_fixture::ellipse_face` builds.
+fn ellipse_face_block(e: &EllipseFaceIn) -> Vec<f64> {
+    let mut v = vec![9.0, flag(e.circle)];
+    v.extend(e.origin);
+    v.push(f64::from(e.axis));
+    v.extend(e.radii);
+    v.extend(e.angles);
+    v.extend(e.natural);
+    v.extend([flag(e.inside_out), flag(e.oob)]);
+    // validate_only, init_gaps
+    v.extend([0.0, 0.0]);
+    v
+}
+
+/// The B-rep of a topology case: the shared block or an analytic face.
+#[derive(Clone, Copy)]
+enum TopoBrep<'a> {
+    Shared(&'a BrepIn),
+    EllipseFace(&'a EllipseFaceIn),
+}
+
+fn topo_brep<'a>(
+    brep: Option<&'a BrepIn>,
+    ellipse_face: Option<&'a EllipseFaceIn>,
+) -> Result<TopoBrep<'a>, HarnessError> {
+    match (brep, ellipse_face) {
+        (Some(b), None) => Ok(TopoBrep::Shared(b)),
+        (None, Some(e)) => Ok(TopoBrep::EllipseFace(e)),
+        _ => Err(harness("topo: exactly one of brep/ellipse_face")),
+    }
+}
+
+/// The graph of a topology case: its path, block, export and import.
+fn topo_graph(brep: TopoBrep<'_>) -> Result<(String, Vec<f64>, Vec<f64>), HarnessError> {
+    let (path, block) = match brep {
+        TopoBrep::Shared(b) => (path_of(b)?, brep_block(b)?),
+        TopoBrep::EllipseFace(e) => (String::new(), ellipse_face_block(e)),
+    };
     let ex = ffi::export(&path, &block).map_err(|e| harness(format!("c++ export: {e}")))?;
     Ok((path, block, ex))
 }
@@ -861,6 +926,17 @@ fn topo_rust(k: &Kernel, b: &mut Brep, args: &[f64]) -> Result<Vec<f64>, SolidEr
     let mut c = gap;
     c.cache_gap(k, b)?;
     o.push(c.length());
+    // The concrete kind of the first edge's curve after import: the healing graph export
+    // carries native circles/ellipses, so a B-spline stand-in here is a disagreement.
+    let kind = match gap.edge(b, 0)? {
+        Some(edge) => b
+            .edge(edge)?
+            .curve
+            .as_ref()
+            .map_or(-1.0, |curve| curve.type_code() as f64),
+        None => -1.0,
+    };
+    o.push(kind);
     Ok(o)
 }
 
@@ -924,6 +1000,7 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
         }
         Inputs::Topo {
             brep,
+            ellipse_face,
             kind,
             sel0,
             sel1,
@@ -931,7 +1008,8 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
             f1,
             uv,
         } => {
-            let (path, block, ex) = topo_graph(brep)?;
+            let spec = topo_brep(brep.as_ref(), ellipse_face.as_ref())?;
+            let (path, block, ex) = topo_graph(spec)?;
             let Some(c) = counts(&ex) else {
                 return Ok(state(vec![-1.0, ex.get(1).copied().unwrap_or(0.0)]));
             };
@@ -1060,6 +1138,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         Inputs::Topo {
             brep,
+            ellipse_face,
             kind,
             sel0,
             sel1,
@@ -1067,7 +1146,8 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             f1,
             uv,
         } => {
-            let (_, _, ex) = topo_graph(brep)?;
+            let spec = topo_brep(brep.as_ref(), ellipse_face.as_ref())?;
+            let (_, _, ex) = topo_graph(spec)?;
             let Some(c) = counts(&ex) else {
                 return Ok(state(vec![-1.0, ex.get(1).copied().unwrap_or(0.0)]));
             };
@@ -1422,7 +1502,8 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
                 }
             };
             Inputs::Topo {
-                brep: gen_brep(rng),
+                brep: Some(gen_brep(rng)),
+                ellipse_face: None,
                 kind,
                 sel0: if rng.chance(0.05) {
                     -1
@@ -1438,6 +1519,97 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
     }
 }
 
+/// The native circle/ellipse faces of the exact-transport cases. Angles are the STEP
+/// interval in degrees, `natural` the NURB parameter interval; the radii stay inside
+/// the shared builder's `1e-3..=1e4` and the angular interval inside its
+/// `1..=360` range. `arc_*` faces also carry the closing chord (a second, line edge);
+/// `full` is a closed ellipse with a single edge.
+fn analytic_face_specs() -> Vec<(&'static str, EllipseFaceIn)> {
+    let face = |circle: bool,
+                radii: [f64; 2],
+                angles: [f64; 2],
+                natural: [f64; 2],
+                inside_out: bool,
+                oob: bool| EllipseFaceIn {
+        circle,
+        origin: [0.02, -0.03, 0.01],
+        axis: 0,
+        radii,
+        angles,
+        natural,
+        inside_out,
+        oob,
+    };
+    vec![
+        (
+            "arc_small",
+            face(false, [3.0e-3, 1.0e-3], [-90.0, 180.0], [-4.0, 3.0], false, false),
+        ),
+        (
+            "arc_unit",
+            face(false, [3.0, 1.0], [-90.0, 180.0], [-4.0, 3.0], false, false),
+        ),
+        (
+            "arc_large",
+            face(false, [3.0e3, 1.0e3], [-90.0, 180.0], [-4.0, 3.0], false, false),
+        ),
+        (
+            "circle",
+            face(true, [1.0, 1.0], [0.0, 270.0], [0.0, 4.71238898038469], false, false),
+        ),
+        (
+            "oob",
+            face(false, [2.0, 0.5], [10.0, 250.0], [1.0, 2.0], false, true),
+        ),
+        (
+            "inside_out",
+            face(false, [2.0, 0.5], [10.0, 250.0], [1.0, 2.0], true, false),
+        ),
+        (
+            "full",
+            face(false, [2.0, 0.5], [0.0, 360.0], [0.0, std::f64::consts::TAU], false, false),
+        ),
+    ]
+}
+
+/// The exact-transport cases: every gap record kind over the native circle/ellipse
+/// faces. The edge use/vertex use selectors follow the builder's topology: edge use 0
+/// is the analytic edge and edge use 1 its closing chord (on arcs); vertex use 0 is an
+/// end point of the analytic edge (vertex use 1 belongs to the chord on arcs and to the
+/// mate edge use on the closed ellipse).
+fn analytic_topo_cases() -> Result<Vec<Case>, HarnessError> {
+    let mut out = Vec::new();
+    for (label, face) in analytic_face_specs() {
+        let arc = face.angles[1] - face.angles[0] < 360.0;
+        for kind in 0u8..=5 {
+            // A closed ellipse has one edge (self edge/edge is not a gap).
+            if !arc && kind == 3 {
+                continue;
+            }
+            let (sel0, sel1) = if kind == 3 { (0, 1) } else { (0, -1) };
+            let inputs = Inputs::Topo {
+                brep: None,
+                ellipse_face: Some(face.clone()),
+                kind,
+                sel0,
+                sel1,
+                f0: Some(0.25),
+                f1: Some(0.75),
+                uv: Some([0.5, 0.5]),
+            };
+            let value = serde_json::to_value(&inputs)
+                .map_err(|e| harness(format!("analytic case {label}: {e}")))?;
+            out.push(Case {
+                unit: "heal.gap".into(),
+                name: format!("analytic_{label}_kind{kind}"),
+                source: CaseSource::Inline,
+                inputs: value,
+            });
+        }
+    }
+    Ok(out)
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "heal.gap"
@@ -1448,7 +1620,9 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &ctx)?;
+        v.extend(analytic_topo_cases()?);
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
@@ -1461,5 +1635,114 @@ impl UnitDiff for Runner {
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         serde_json::to_value(gen_inputs(rng)).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::curve::curve::p2::{CIRCLE_TYPE, ELLIPSE_TYPE};
+    use solidcore::curve::curve::CurveKind;
+
+    /// The exported graph keeps the native circle/ellipse identity and state, and the
+    /// exact head is what preserves it: the same export without the head imports the
+    /// curve as its B-spline part (the old stand-in).
+    #[test]
+    fn exact_transport_preserves_native_circle_and_ellipse() {
+        for (label, face) in analytic_face_specs() {
+            let block = ellipse_face_block(&face);
+            let ex = ffi::export("", &block).expect("export");
+            let (b, _) = import_raw(&ex).expect("import");
+            let ty = if face.circle { CIRCLE_TYPE } else { ELLIPSE_TYPE };
+            let found = b.edges().iter().find_map(|(id, edge)| {
+                let curve = edge.curve.as_ref()?;
+                (curve.type_code() == ty).then_some((id, curve))
+            });
+            let (id, curve) = found.unwrap_or_else(|| panic!("{label}: no analytic edge"));
+            let CurveKind::Ellipse(ellipse) = curve.kind() else {
+                panic!("{label}: not an ellipse/circle")
+            };
+            assert_eq!(ellipse.type_code(), ty, "{label}");
+            assert_eq!(ellipse.is_circle_class(), face.circle, "{label}");
+            assert_eq!(
+                [ellipse.x_radius(), ellipse.y_radius()],
+                face.radii,
+                "{label}"
+            );
+            assert_eq!(
+                ellipse.step_interval(),
+                Extent1d::from_raw(face.angles[0], face.angles[1]),
+                "{label}"
+            );
+            assert_eq!(
+                ellipse.base().natural_interval(),
+                Extent1d::from_raw(face.natural[0], face.natural[1]),
+                "{label}"
+            );
+            assert_eq!(ellipse.inside_out(), face.inside_out, "{label}");
+            assert_eq!(
+                ellipse.base().is_out_of_bounds_enabled(),
+                face.oob,
+                "{label}"
+            );
+
+            let head = ex
+                .windows(2)
+                .position(|w| w == [-3.0, ty as f64])
+                .unwrap_or_else(|| panic!("{label}: no exact head"));
+            assert_eq!(ex[head + 3], 3.0, "{label}: not 3D");
+            assert_eq!(ex[head + 4], f64::from(u8::from(face.oob)), "{label}");
+            let regular = 6 + ex[head + 5] as usize;
+            let mut old = ex.clone();
+            old.drain(head..head + regular);
+            let (old_b, _) = import_raw(&old).expect("old import");
+            let old_curve = old_b.edge(id).expect("edge").curve.as_ref().expect("curve");
+            assert!(
+                matches!(old_curve.kind(), CurveKind::BSpline(_)),
+                "{label}: old block must import as a B-spline stand-in"
+            );
+        }
+    }
+
+    /// Every gap record on a native circle/ellipse face matches the C++ after healing,
+    /// and the selected edge curve stays the analytic kind (not a B-spline stand-in).
+    #[test]
+    fn analytic_gap_records_match_native() {
+        let cases = analytic_topo_cases().expect("cases");
+        assert_eq!(cases.len(), 41);
+        for case in &cases {
+            let inputs: Inputs = case.parse().expect("inputs");
+            let Inputs::Topo {
+                kind,
+                ellipse_face: Some(face),
+                ..
+            } = &inputs
+            else {
+                panic!("{}: not an analytic case", case.name);
+            };
+            let cpp = run_cpp(&inputs).expect("cpp");
+            let rust = run_rust(&inputs).expect("rust");
+            assert!(
+                cpp.rejected.is_none() && cpp.error.is_none() && cpp.deferred.is_none(),
+                "{}: {cpp:?}",
+                case.name
+            );
+            assert!(
+                rust.rejected.is_none() && rust.error.is_none() && rust.deferred.is_none(),
+                "{}: {rust:?}",
+                case.name
+            );
+            let diff = crate::compare(&cpp, &rust, Runner.abs_floors());
+            assert!(diff.pass(), "{}: {diff:?}", case.name);
+            assert!(diff.values_compared > 10, "{}", case.name);
+            let ty = if face.circle { CIRCLE_TYPE } else { ELLIPSE_TYPE };
+            let expected = if *kind <= 2 && *kind != 0 {
+                -1.0
+            } else {
+                ty as f64
+            };
+            let state = rust.values.get("state").expect("state");
+            assert_eq!(state.last(), Some(&expected), "{}", case.name);
+        }
     }
 }

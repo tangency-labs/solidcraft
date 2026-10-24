@@ -7,11 +7,14 @@
 // The geometry blocks build real SmBSplineCurve, SmHermiteCurve, SmLine, SmEllipse,
 // SmCircle and SmCrvOnSurf curves and SmBSplineSurface, SmPlane and SmCurveBoundedSurface
 // surfaces. The topology op builds its SmBrep, walks and exports it exactly as the
-// `topology.vertexuse` shim does (that code is copied below, unchanged), so the Rust side
-// can import the graph with that runner's importer; ops whose upstream path would
-// dereference null output -2 instead of calling it.
+// `topology.vertexuse` shim does (that code is copied below; the build also accepts the
+// shared kind-9 circle/ellipse face and the export uses the shared exact circle/ellipse
+// transport), so the Rust side can import the graph with that runner's importer; ops
+// whose upstream path would dereference null output -2 instead of calling it.
 #include "sc_shim.h"
 #include "sc_analytic_export.h"
+#include "sc_exact_curve_export.h"
+#include "support/ellipse_face_fixture.h"
 #include "support/topology_fixture.h"
 
 
@@ -581,7 +584,7 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
         for (SmTopology* t : list_of(p->GetList()))
             v.push_back(g.find(6, t));
         put_list(o, v);
-        put_curve(o, p->GetCurve());
+        sc_exact_curve_export::put_export_curve(o, p->GetCurve(), the_context(), put_curve);
     }
     for (SmVertexuse* p : g.vertexuses)
     {
@@ -623,6 +626,11 @@ SmBrep* build(Rd& rd, const char* path, SmStatus& status)
     {
         bool rebuild = rd.flag();
         status = brep->ReadFromFile(ctx, path, SM_ASCII, rebuild ? TRUE : FALSE);
+    }
+    else if (kind == 9)
+    {
+        // native planar face with an exact circle/ellipse edge (shared fixture builder)
+        status = sc_topology_fixture::ellipse_face(brep, rd, ctx);
     }
     else if (kind == 1)
     {
@@ -1043,10 +1051,26 @@ SmBSplineCurve* plain_curve(SmCurve* c)
     return new (the_context()) SmBSplineCurve(sm_AllocateAndCopyNurbCurve(nurb), b->GetDim(), FALSE);
 }
 
+// Whether the graph export sends `c` losslessly as a native circle/ellipse:
+// sc_exact_curve_export::put_export_curve then emits its `-3` head and the shared
+// importer rebuilds the same concrete kind instead of only the B-spline part. The probe
+// runs the real exporter with this file's curve block writer, so it decides exactly what
+// the export of `c` contains (a curve the round trip cannot preserve falls back to its
+// B-spline part and is normalised below).
+bool exact_edge_curve(const SmCurve* c)
+{
+    if (c == nullptr || (c->GetType() != SmEllipse_TYPE && c->GetType() != SmCircle_TYPE))
+        return false;
+    std::vector<double> probe;
+    sc_exact_curve_export::put_export_curve(probe, c, the_context(), put_curve);
+    return !probe.empty() && probe.front() == -3.0;
+}
+
 // The Rust side imports the export's NURBs as plain B-splines (and lines), SmPlanes as
-// planes and the analytic surfaces the export sends exactly (sc_analytic_export.h) as
-// their own kind: give every other face and edge of the C++ B-rep the same geometry (the
-// analytic originals are left unowned and leaked).
+// planes, the analytic surfaces the export sends exactly (sc_analytic_export.h) and the
+// circles/ellipses the export sends exactly (sc_exact_curve_export.h) as their own kind:
+// give every other face and edge of the C++ B-rep the same geometry (the analytic
+// originals are left unowned and leaked).
 void normalise(Graph& g)
 {
     for (SmFace* f : g.faces)
@@ -1071,7 +1095,11 @@ void normalise(Graph& g)
     }
     for (SmEdge* e : g.edges)
     {
-        SmBSplineCurve* nc = plain_curve(e->*EdgePeek::curve());
+        SmCurve* c = e->*EdgePeek::curve();
+        // exported exactly: the Rust side imports the same native circle/ellipse
+        if (exact_edge_curve(c))
+            continue;
+        SmBSplineCurve* nc = plain_curve(c);
         if (nc != nullptr)
             e->*EdgePeek::curve() = nc;
     }
@@ -1163,6 +1191,10 @@ void run_topo(Rd& rd, const char* path, std::vector<double>& o)
     c->CacheGap();
     o.push_back(c->GetLength());
     delete c;
+    // The concrete kind of the first edge's curve after `normalise`: the shared import
+    // keeps native circles/ellipses, so a stand-in here is a visible disagreement.
+    SmEdge* e0 = gap->GetEdge(0);
+    o.push_back(e0 && e0->GetCurve() ? (double)e0->GetCurve()->GetType() : -1.0);
     delete gap;
     delete brep;
 }
