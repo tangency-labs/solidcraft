@@ -29,7 +29,9 @@
 // would dereference null output -2 instead of calling it.
 #include "sc_shim.h"
 #include "sc_analytic_export.h"
+#include "sc_exact_curve_export.h"
 #include "support/topology_fixture.h"
+#include "support/ellipse_face_fixture.h"
 
 
 #include "StdAfx.h"
@@ -651,7 +653,7 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
         for (SmTopology* t : list_of(p->GetList()))
             v.push_back(g.find(6, t));
         put_list(o, v);
-        put_curve(o, p->GetCurve());
+        sc_exact_curve_export::put_export_curve(o, p->GetCurve(), the_context(), put_curve);
     }
     for (SmVertexuse* p : g.vertexuses)
     {
@@ -693,6 +695,10 @@ SmBrep* build(Rd& rd, const char* path, SmStatus& status)
     {
         bool rebuild = rd.flag();
         status = brep->ReadFromFile(ctx, path, SM_ASCII, rebuild ? TRUE : FALSE);
+    }
+    else if (kind == 9)
+    {
+        status = sc_topology_fixture::ellipse_face(brep, rd, ctx);
     }
     else if (kind == 1)
     {

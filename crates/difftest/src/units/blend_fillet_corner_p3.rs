@@ -429,7 +429,7 @@ fn inexact(b: &Brep, types: &ImportTypes, eus: &[EdgeuseId]) -> Option<Output> {
         let ct = eu1::edge(b, eu)
             .ok()
             .flatten()
-            .and_then(|e| types.edge_curve_types.get(e.index() as usize).copied())
+            .and_then(|e| types.inexact_curve(e.index() as usize))
             .unwrap_or(-1);
         if ct >= 0 && !EXACT_CURVES.contains(&ct) {
             return Some(Output::deferred(

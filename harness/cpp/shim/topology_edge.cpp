@@ -25,6 +25,7 @@
 // would dereference null output -2 instead of calling it.
 #include "sc_shim.h"
 #include "sc_analytic_export.h"
+#include "sc_exact_curve_export.h"
 #include "support/topology_fixture.h"
 
 
@@ -484,121 +485,15 @@ void put_curve_base(std::vector<double>& o, const SmCurve* c)
     }
 }
 
-// Operation results retain the old line/B-spline layout. Ellipse results also
-// compare their analytic data and flags, without requiring a Rust database writer.
-struct CurvePeek : SmBSplineCurve
-{
-    static SmKnotType SmBSplineCurve::*knots() { return &CurvePeek::m_eKnotType; }
-    static SmBSplineCurveForm SmBSplineCurve::*form() { return &CurvePeek::m_eBSplineCurveForm; }
-};
-struct EllipsePeek : SmEllipse
-{
-    static SmPolarConversion SmEllipse::*polar() { return &EllipsePeek::m_vPolarConverter; }
-};
-
-std::string polar_record(const SmEllipse* e)
-{
-    std::ostringstream stream;
-    SmDatabaseIOStream db(SM_BINARY, &stream);
-    if ((e->*EllipsePeek::polar()).WriteToDB(db, SM_CURRENT_DATABASE_VERSION) != SM_SUCCESS)
-        throw std::runtime_error("ellipse polar table write failed");
-    return stream.str();
-}
-
+// Operation fingerprints and graph records use the same lossless curve transport.
 void put_curve(std::vector<double>& o, const SmCurve* c)
 {
-    put_curve_base(o, c);
-    if (c == nullptr || (c->GetType() != SmEllipse_TYPE && c->GetType() != SmCircle_TYPE))
-        return;
-    const SmEllipse* e = (const SmEllipse*)c;
-    const SmAxis2Placement& pos = e->GetPosition();
-    put_vec(o, pos.GetOrigin());
-    put_vec(o, pos.GetXAxis());
-    put_vec(o, pos.GetYAxis());
-    SmExtent1d domain = e->GetSTEPInterval();
-    o.push_back(domain.GetMin());
-    o.push_back(domain.GetMax());
-    o.push_back(e->GetXRadius());
-    o.push_back(e->GetYRadius());
-    o.push_back(flg(e->GetInsideOut()));
-    o.push_back(flg(e->IsOutOfBoundsEnabled()));
-    o.push_back((double)(e->*CurvePeek::knots()));
-    o.push_back((double)(e->*CurvePeek::form()));
+    sc_exact_curve_export::put_curve(o, c, put_curve_base);
 }
 
-bool same_curve_bits(const std::vector<double>& a, const std::vector<double>& b)
+void put_export_curve(std::vector<double>& o, const SmCurve* c)
 {
-    return a.size() == b.size() &&
-           std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0;
-}
-
-bool curve_record(const SmCurve* curve, std::string& bytes)
-{
-    std::ostringstream stream;
-    SmDatabaseIOStream db(SM_BINARY, &stream);
-    if (curve->WriteToDB(db, SM_CURRENT_DATABASE_VERSION) != SM_SUCCESS)
-        return false;
-    bytes = stream.str();
-    return true;
-}
-
-// Private graph transport: -3 type version dim oob nbytes bytes, then the
-// independent old B-spline block. No lazy NURB construction is allowed here.
-void put_export_curve(std::vector<double>& out, const SmCurve* c)
-{
-    if (c == nullptr || (c->GetType() != SmEllipse_TYPE && c->GetType() != SmCircle_TYPE))
-    {
-        put_curve_base(out, c);
-        return;
-    }
-    const SmEllipse* e = (const SmEllipse*)c;
-    if (e->GetGwNurbPointer() == nullptr)
-    {
-        put_curve_base(out, c);
-        return;
-    }
-    std::vector<double> before, after;
-    put_curve(before, c);
-    const SmObject* owner = c->GetOwner();
-    const gw_CURVE* nurb = e->GetGwNurbPointer();
-    const std::string polar = polar_record(e);
-    std::string bytes;
-    if (!curve_record(c, bytes))
-        throw std::runtime_error("ellipse database write failed");
-    put_curve(after, c);
-    if (!same_curve_bits(before, after) || c->GetOwner() != owner ||
-        e->GetGwNurbPointer() != nurb || polar_record(e) != polar)
-        throw std::runtime_error("ellipse database write mutated its source");
-    SmCurve* back = nullptr;
-    std::istringstream stream(bytes);
-    SmDatabaseIOStream db(SM_BINARY, &stream);
-    bool exact = false;
-    if (SmCurve::ReadFromDB(c->GetType(), db, e->GetDim(), the_context(), back,
-                          SM_CURRENT_DATABASE_VERSION) == SM_SUCCESS &&
-        back != nullptr && back->GetType() == c->GetType() &&
-        stream.peek() == std::char_traits<char>::eof())
-    {
-        std::unique_ptr<SmCurve> held(back);
-        ((SmBSplineCurve*)back)->SetOutOfBoundsEnabled(e->IsOutOfBoundsEnabled());
-        std::vector<double> restored;
-        put_curve(restored, back);
-        std::string again;
-        exact = same_curve_bits(before, restored) && curve_record(back, again) && again == bytes;
-        back = nullptr;
-    }
-    delete back;
-    if (exact)
-    {
-        out.push_back(-3.0);
-        out.push_back((double)c->GetType());
-        out.push_back((double)SM_CURRENT_DATABASE_VERSION);
-        out.push_back((double)e->GetDim());
-        out.push_back(flg(e->IsOutOfBoundsEnabled()));
-        out.push_back((double)bytes.size());
-        for (unsigned char byte : bytes)
-            out.push_back((double)byte);
-    }
-    put_curve_base(out, c);
+    sc_exact_curve_export::put_export_curve(o, c, the_context(), put_curve_base);
 }
 
 void put_surface(std::vector<double>& o, const SmSurface* s)

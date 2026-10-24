@@ -160,10 +160,9 @@ fn inexact(types: &ImportTypes) -> Option<Output> {
             ),
         ));
     }
-    if types
-        .edge_curve_types
-        .iter()
-        .any(|&t| t >= 0 && !EXACT_CURVES.contains(&t))
+    if (0..types.edge_curve_types.len())
+        .filter_map(|e| types.inexact_curve(e))
+        .any(|t| t >= 0 && !EXACT_CURVES.contains(&t))
     {
         return Some(Output::deferred(
             HARNESS_ANALYTIC_IMPORT,

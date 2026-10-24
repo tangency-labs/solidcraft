@@ -279,7 +279,7 @@ pub(super) fn inexact_geometry(s: &Setup) -> Option<Output> {
     let curve_type = eu1::edge(b, s.eu)
         .ok()
         .flatten()
-        .and_then(|e| s.types.edge_curve_types.get(e.index() as usize).copied())
+        .and_then(|e| s.types.inexact_curve(e.index() as usize))
         .unwrap_or(-1);
     if surface_type >= 0 && !EXACT_SURFACES.contains(&surface_type) {
         let (unit, symbol) = match (surface_type, surface_kind_gap(surface_type)) {

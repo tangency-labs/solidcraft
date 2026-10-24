@@ -394,10 +394,9 @@ fn resolve(i: &TopoIn) -> Result<Result<Resolved, Output>, HarnessError> {
         }
         let (brep, types) = import_with_types(&ex)?;
         exact &= (0..brep.faces().len()).all(|f| types.inexact_surface(f).is_none());
-        exact &= types
-            .edge_curve_types
-            .iter()
-            .all(|&t| t < 0 || t == BSPLINE_CURVE_TYPE || t == LINE_TYPE);
+        exact &= (0..types.edge_curve_types.len())
+            .filter_map(|e| types.inexact_curve(e))
+            .all(|t| t < 0 || t == BSPLINE_CURVE_TYPE || t == LINE_TYPE);
         breps.push(brep);
     }
     let mates = mates

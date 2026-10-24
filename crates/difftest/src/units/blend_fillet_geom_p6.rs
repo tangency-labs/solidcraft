@@ -528,7 +528,7 @@ impl Target {
 
     /// Whether target edge `e`'s curve is imported exactly.
     fn exact_edge(&self, e: Option<EdgeId>) -> bool {
-        e.and_then(|e| self.types.edge_curve_types.get(e.index() as usize).copied())
+        e.and_then(|e| self.types.inexact_curve(e.index() as usize))
             .is_none_or(|t| t < 0 || EXACT_CURVES.contains(&t))
     }
 

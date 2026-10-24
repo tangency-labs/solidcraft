@@ -14,6 +14,10 @@
 //! | `3 validate_only init_gaps`                   | the wire network of `prog_test` `my_test_topology` |
 //! | `5 np P[3]*np ne (a b has_curve [curve])*ne validate_only init_gaps` | `MakeShellVertex` at each point, then `MakeEdgeTopology` edges (a line, or the curve) as in the wire network |
 //!
+//! Kind `9` accepts the exact ellipse/circle face fixture documented in
+//! [`super::topology_edgeuse_p1`]. Its native curve record prefixes the regular
+//! B-spline edge block; UV trims retain their original NURB parameters.
+//!
 //! A surface block is `0 oob form n m p q r s cpts(x y z w) u v` (`SmBSplineSurface`) or
 //! `1 O[3] N[3]` (`SmPlane(O, N)`); a curve block `dim n p m cpts(x y z w) knots`
 //! (`SmBSplineCurve`). Indices refer to the export's traversal order. Every op's output
@@ -249,7 +253,7 @@ pub(crate) fn brep_block_at(input: &[f64], path: &str) -> Result<usize, FfiError
 
 /// A B-rep block.
 fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
-    let kind = rd.index(5)?;
+    let kind = rd.index(9)?;
     match kind {
         0 => {
             let p = Path::new(path);
@@ -320,7 +324,13 @@ fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
                 }
             }
         }
-        _ => {}
+        9 => {
+            rd.at += super::topology_edgeuse_p1::ellipse_face_block(
+                rd.input.get(rd.at..).ok_or_else(|| bad("short ellipse face"))?
+            )?;
+        }
+        3 => {}
+        _ => return Err(bad("unsupported B-rep kind")),
     }
     rd.flag()?;
     rd.flag()?;

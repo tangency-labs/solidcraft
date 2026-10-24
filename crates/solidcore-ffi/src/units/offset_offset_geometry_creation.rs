@@ -923,6 +923,11 @@ mod tests {
             }
         }
         out.extend_from_slice(tail);
+        // The current export protocol also carries one cache state per face.
+        for count in [faces, other_faces.unwrap_or(0)] {
+            out.push(count as f64);
+            out.extend(std::iter::repeat_n(0.0, count));
+        }
         out
     }
 

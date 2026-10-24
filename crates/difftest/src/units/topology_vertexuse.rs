@@ -372,11 +372,30 @@ fn orient_of(code: i64) -> Result<OrientType, HarnessError> {
     }
 }
 
-/// An exported curve block (`None` for `-1`). A B-spline or line is rebuilt exactly;
-/// another `SmBSplineCurve` kind is an error for a UV trim curve (`uv`) and its B-spline
-/// part for an edge curve (this runner compares no edge curve values; the `heal.gap`
-/// runner, which reuses this importer, gives the C++ edges the same B-splines).
+/// An exported curve block (`None` for `-1`). Native ellipse/circle edge records,
+/// B-splines and lines are rebuilt exactly. Unsupported edge kinds retain their
+/// B-spline part; unsupported analytic UV trim curves are rejected.
 fn read_curve(rd: &mut Rd<'_>, uv: bool) -> Result<Option<SmCurve>, HarnessError> {
+    if rd.v.get(rd.at) != Some(&-3.0) {
+        return read_regular_curve(rd, uv);
+    }
+    if uv {
+        return Err(harness("export: analytic UV trim curve"));
+    }
+    rd.at += 1;
+    let remaining = rd.v.len().saturating_sub(rd.at);
+    let exact = crate::util::exact_curve::read_head(&mut || rd.num(), remaining)?;
+    if rd.v.get(rd.at) != Some(&(exact.type_code() as f64)) {
+        return Err(harness(
+            "export: exact curve without its matching B-spline part",
+        ));
+    }
+    let fallback = read_regular_curve(rd, false)?;
+    crate::util::exact_curve::check_base(&exact, fallback.as_ref())?;
+    Ok(Some(exact))
+}
+
+fn read_regular_curve(rd: &mut Rd<'_>, uv: bool) -> Result<Option<SmCurve>, HarnessError> {
     let ty = rd.num()?;
     if ty == -1.0 {
         return Ok(None);

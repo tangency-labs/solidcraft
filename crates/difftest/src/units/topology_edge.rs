@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::curve::curve::p2::{
-    CurveKind, BSPLINE_CURVE_TYPE, CIRCLE_TYPE, ELLIPSE_TYPE, LINE_TYPE,
+    CurveKind, BSPLINE_CURVE_TYPE, LINE_TYPE,
 };
 use solidcore::curve::curve::Curve as SmCurve;
 use solidcore::curve::line::Line;
@@ -60,7 +60,6 @@ use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::p2::{DropCurveFail, B_SPLINE_SURFACE_TYPE};
 use solidcore::surface::surface::Surface;
 use solidcore::topology::edge as ed;
-use solidcore::topology::database_io::{DatabaseReader, FileType, InputStream};
 use solidcore::topology::{
     Brep, Edge, EdgeId, Edgeuse, EdgeuseId, EdgeuseOwner, Face, FaceId, Faceuse, FaceuseId,
     Loop, LoopId, Loopuse, LoopuseId, LoopuseStart, ObjectHandle, Region, RegionId, Shell,
@@ -407,55 +406,14 @@ fn read_curve(rd: &mut Rd<'_>, uv: bool) -> Result<(Option<SmCurve>, bool), Harn
         return Err(harness("export: analytic UV trim curve"));
     }
     rd.at += 1;
-    let integer = |rd: &mut Rd<'_>, max: f64| -> Result<u64, HarnessError> {
-        let n = rd.num()?;
-        if !n.is_finite() || !(0.0..=max).contains(&n) || n.fract() != 0.0 {
-            return Err(harness("export: bad exact curve head"));
-        }
-        Ok(n as u64)
-    };
-    let ty = integer(rd, 1e6)? as i64;
-    if ty != ELLIPSE_TYPE && ty != CIRCLE_TYPE {
-        return Err(harness("export: unsupported exact curve type"));
-    }
-    let version = integer(rd, 1e4)?;
-    let dim = integer(rd, 3.0)?;
-    if dim != 3 {
-        return Err(harness("export: exact edge curve is not 3D"));
-    }
-    let oob = integer(rd, 1.0)? != 0;
-    let n = integer(rd, 1e8)? as usize;
-    if n > rd.v.len().saturating_sub(rd.at) {
-        return Err(harness("export too short for exact curve record"));
-    }
-    let mut bytes = Vec::new();
-    for _ in 0..n {
-        bytes.push(integer(rd, 255.0)? as u8);
-    }
-    let mut db = DatabaseReader::with_stream(FileType::Binary, InputStream::new(bytes));
-    db.set_version(version);
-    let mut exact = SmCurve::read_from_db(&Kernel::default(), ty, &mut db, dim, version)
-        .map_err(|e| harness(format!("export: exact curve record: {e}")))?;
-    if db.in_stream().is_none_or(|s| s.remaining() != 0) {
-        return Err(harness("export: exact curve record not read whole"));
-    }
-    let CurveKind::Ellipse(ellipse) = exact.kind_mut() else {
-        return Err(harness("export: exact curve reader changed its kind"));
-    };
-    if ellipse.type_code() != ty {
-        return Err(harness("export: exact curve reader changed circle identity"));
-    }
-    ellipse.set_out_of_bounds_enabled(oob);
+    let remaining = rd.v.len().saturating_sub(rd.at);
+    let exact = crate::util::exact_curve::read_head(&mut || rd.num(), remaining)?;
+    let ty = exact.type_code();
     if rd.v.get(rd.at) != Some(&(ty as f64)) {
         return Err(harness("export: exact curve without its matching B-spline part"));
     }
     let (fallback, _) = read_regular_curve(rd, false)?;
-    let Some(CurveKind::BSpline(base)) = fallback.as_ref().map(SmCurve::kind) else {
-        return Err(harness("export: exact curve without its B-spline part"));
-    };
-    if curve_base_bits(ellipse.base()) != curve_base_bits(base) {
-        return Err(harness("export: exact curve B-spline part differs"));
-    }
+    crate::util::exact_curve::check_base(&exact, fallback.as_ref())?;
     Ok((Some(exact), true))
 }
 
@@ -504,21 +462,6 @@ fn read_regular_curve(rd: &mut Rd<'_>, uv: bool) -> Result<(Option<SmCurve>, boo
         return Err(harness(format!("export: UV trim curve of type {ty}")));
     }
     Ok((Some(SmCurve::from(base)), ty == BSPLINE_CURVE_TYPE))
-}
-
-fn curve_base_bits(base: &BSplineCurve) -> Vec<u64> {
-    let mut bits = vec![base.dim()];
-    match base.gw_nurb() {
-        None => bits.push(0),
-        Some(n) => {
-            bits.extend([1, n.n() as u64, n.degree() as u64, n.m() as u64]);
-            for p in n.cpts() {
-                bits.extend([p.x, p.y, p.z, p.w].map(f64::to_bits));
-            }
-            bits.extend(n.knots().iter().map(|v| v.to_bits()));
-        }
-    }
-    bits
 }
 
 fn read_surface(rd: &mut Rd<'_>) -> Result<(Option<Surface>, bool), HarnessError> {
@@ -2430,6 +2373,7 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::curve::curve::p2::{CIRCLE_TYPE, ELLIPSE_TYPE};
     use crate::{CaseContext, RunOptions};
     use solidcore::surface::surface::SurfaceKind;
 

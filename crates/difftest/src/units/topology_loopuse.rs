@@ -843,7 +843,7 @@ fn inexact_geometry(s: &Setup) -> Option<Output> {
         let Some(e) = b.edgeuse(eu).ok().and_then(|r| r.edge) else {
             continue;
         };
-        let t = s.types.edge_curve_types.get(e.index() as usize).copied().unwrap_or(-1);
+        let t = s.types.inexact_curve(e.index() as usize).unwrap_or(-1);
         if t >= 0 && !EXACT_CURVES.contains(&t) {
             return Some(Output::deferred(
                 "topology.brep_p10",

@@ -248,6 +248,7 @@ enum Op : int32_t
     OP_SEAM = 10,
     OP_SET_ORIENT = 11,
     OP_CACHE_STATES = 12,
+    OP_TRIM_SAMPLE = 13,
 };
 
 // Read access to a surface cache's protected tree pointer.
@@ -302,6 +303,33 @@ void run_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     case OP_EXPORT:
     {
         export_graph(b.brep, g, o);
+        break;
+    }
+    case OP_TRIM_SAMPLE:
+    {
+        SmEdgeuse* eu = g.edgeuses[(size_t)rd.idx()];
+        const double fraction = rd.num();
+        SmEdge* edge = eu->GetEdge();
+        SmFace* face = eu->GetFace();
+        SmBSplineCurve* trim = eu->GetUVTrimCurve();
+        if (!edge || !edge->GetCurve() || !face || !face->GetSurface() || !trim)
+        {
+            o.push_back(ST_NULL_DEREF);
+            break;
+        }
+        const SmExtent1d ivl = edge->GetInterval(), uv_ivl = trim->GetNaturalInterval();
+        const double t = ivl.Evaluate(fraction);
+        SmPoint3d xyz, uv, lifted;
+        SmStatus status = edge->GetCurve()->EvaluatePoint(t, xyz);
+        if (status == SM_SUCCESS) status = trim->EvaluatePoint(t, uv);
+        if (status == SM_SUCCESS) status = face->GetSurface()->EvaluatePoint(SmPoint2d(uv.x, uv.y), lifted);
+        o.push_back(st(status));
+        if (status != SM_SUCCESS) break;
+        o.insert(o.end(), {(double)edge->GetCurve()->GetType(), ivl.GetMin(), ivl.GetMax(),
+                          uv_ivl.GetMin(), uv_ivl.GetMax(), t});
+        put_vec(o, xyz);
+        o.insert(o.end(), {uv.x, uv.y});
+        put_vec(o, lifted);
         break;
     }
     case OP_EU_QUERY:
@@ -703,7 +731,7 @@ SC_EXPORT int32_t sc_topology_edgeuse_p1_eval(int32_t op, const char* path, cons
     SC_TRY
     Rd rd{in, 0};
     std::vector<double> o;
-    if (op <= OP_GAPS || op == OP_SET_ORIENT || op == OP_CACHE_STATES)
+    if (op <= OP_GAPS || op == OP_SET_ORIENT || op == OP_CACHE_STATES || op == OP_TRIM_SAMPLE)
         run_brep_op(op, rd, path, o);
     else
         run_geom_op(op, rd, o);

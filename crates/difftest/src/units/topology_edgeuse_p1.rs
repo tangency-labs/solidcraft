@@ -12,11 +12,12 @@
 //! exact [`Plane`] (origin, axes, scales, analytic domain), an `SmSurfOfRevolution` face
 //! surface as the exact surface of revolution (its database record, read by the ported
 //! `ReadFromDB`: [`crate::util::read_exact_surface`]), an `SmLine` edge curve as
-//! the exact [`Line`]) into a [`Brep`] and runs the ported functions on it; their
+//! the exact [`Line`]; ellipse/circle edge curves retain their native record and
+//! stored NURB, with unchanged UV trim parameters) into a [`Brep`] and runs the ported functions on it; their
 //! results are compared as traversal indices, and the gaps the gap ops compute by
 //! value. A case that evaluates a face surface or edge curve the import holds only as
 //! its B-spline part (an analytic subclass: cone, sphere, torus, extrusion,
-//! circle, ...) is deferred ([`inexact_geometry`]): the gap calculations and the 3D
+//! unsupported curve kinds, ...) is deferred ([`inexact_geometry`]): the gap calculations and the 3D
 //! drop branch of `GetStartPointUVLoopGap`. The skeleton fields no ported function
 //! reads (`Loop::edges`, `Shell::faces`, `Face::loops`) are filled minimally.
 //!
@@ -142,6 +143,17 @@ pub(crate) enum BrepIn {
         surface: SrfIn,
         dom: [f64; 4],
     },
+    /// Native planar face with exact rational UV trims, including a closing chord for arcs.
+    EllipseFace {
+        circle: bool,
+        origin: [f64; 3],
+        axis: u8,
+        radii: [f64; 2],
+        angles: [f64; 2],
+        natural: [f64; 2],
+        inside_out: bool,
+        oob: bool,
+    },
     Network,
     Vertices {
         points: Vec<[f64; 3]>,
@@ -195,6 +207,8 @@ enum OpIn {
     UvLoopGap {
         eu: i64,
     },
+    /// Evaluates the native 3D edge and retained UV trim at the same NURB parameter.
+    TrimSample { eu: i64, fraction: f64 },
     /// `kind`: 0 NULL, 1 the attached curve, 2 a new curve, 3 `DeleteUVTrimCurve`, 4
     /// `SetMemberUVTrimCurve` with a new curve.
     SetUv {
@@ -371,6 +385,15 @@ pub(crate) fn brep_block_of(
             push_surface(&mut v, surface)?;
             v.extend(dom);
         }
+        BrepIn::EllipseFace { circle, origin, axis, radii, angles, natural, inside_out, oob } => {
+            v.extend([9.0, flag(*circle)]);
+            v.extend(origin);
+            v.push(f64::from(*axis));
+            v.extend(radii);
+            v.extend(angles);
+            v.extend(natural);
+            v.extend([flag(*inside_out), flag(*oob)]);
+        }
         BrepIn::Network => v.push(3.0),
         BrepIn::Vertices { points } => {
             v.extend([4.0, points.len() as f64]);
@@ -469,6 +492,7 @@ fn resolve(op: &OpIn, c: [usize; 10]) -> Option<OpIn> {
             fu: sel(fu, n_fu).max(0),
             threshold,
         },
+        OpIn::TrimSample { eu: e, fraction } => OpIn::TrimSample { eu: eu(e), fraction },
         OpIn::UvLoopGap { eu: e } => OpIn::UvLoopGap { eu: eu(e) },
         OpIn::SetUv {
             eu: e,
@@ -540,6 +564,10 @@ fn op_args(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
                 threshold.unwrap_or(0.0),
             ]);
             Op::Collect
+        }
+        OpIn::TrimSample { eu, fraction } => {
+            v.extend([*eu as f64, *fraction]);
+            Op::TrimSample
         }
         OpIn::UvLoopGap { eu } => {
             v.push(*eu as f64);
@@ -744,9 +772,18 @@ fn brep_output(op: &OpIn, body: &[f64]) -> Output {
             let list = ints(body.get(2..).unwrap_or(&[]));
             Output::new().int("status", st).ints("list", list)
         }
+        OpIn::TrimSample { .. } => trim_sample_output(body),
         OpIn::UvLoopGap { .. } => Output::new().values("gap", body.to_vec()),
         OpIn::SetUv { .. } | OpIn::Gaps { .. } => Output::new().values("state", body.to_vec()),
         _ => Output::new().ints("q", ints(body)),
+    }
+}
+
+fn trim_sample_output(body: &[f64]) -> Output {
+    match body.split_first() {
+        Some((&0.0, values)) => Output::new().values("sample", values.to_vec()),
+        Some((&status, _)) => Output::err(format!("trim_sample_status_{status}")),
+        None => Output::err("trim_sample_empty"),
     }
 }
 
@@ -804,6 +841,32 @@ fn orient_code(o: OrientType) -> i64 {
         OrientType::Same => 1,
         OrientType::Opposite => 2,
     }
+}
+
+/// An edge curve retains its native ellipse/circle record and exact stored NURB.
+/// The regular block alone remains inexact for unsupported analytic kinds.
+fn read_edge_curve(rd: &mut Rd<'_>) -> Result<(Option<SmCurve>, i64, bool), HarnessError> {
+    if rd.v.get(rd.at) != Some(&-3.0) {
+        let ty = rd.v.get(rd.at).copied().unwrap_or(-1.0) as i64;
+        let curve = read_curve(rd, false)?;
+        return Ok((
+            curve,
+            ty,
+            matches!(ty, -1 | BSPLINE_CURVE_TYPE | LINE_TYPE | CRV_ON_SURF_TYPE),
+        ));
+    }
+    rd.at += 1;
+    let remaining = rd.v.len().saturating_sub(rd.at);
+    let exact = crate::util::exact_curve::read_head(&mut || rd.num(), remaining)?;
+    let ty = exact.type_code();
+    if rd.v.get(rd.at) != Some(&(ty as f64)) {
+        return Err(harness(
+            "export: exact curve without its matching B-spline part",
+        ));
+    }
+    let fallback = read_curve(rd, false)?;
+    crate::util::exact_curve::check_base(&exact, fallback.as_ref())?;
+    Ok((Some(exact), ty, true))
 }
 
 /// An exported curve block (`None` for `-1`). A B-spline or line is rebuilt exactly;
@@ -920,7 +983,8 @@ fn read_surface(rd: &mut Rd<'_>) -> Result<Option<Surface>, HarnessError> {
 /// and edge curves (`-1` none), by export index. A surface other than an
 /// `SmBSplineSurface`, an `SmPlane` or an exactly exported analytic kind (an
 /// `SmSurfOfRevolution`, see [`crate::util::read_exact_surface`]) is imported as its
-/// B-spline part, and an edge curve other than an `SmBSplineCurve` or `SmLine` likewise.
+/// B-spline part. Edge curves are exact for B-splines, lines, supported curve-on-surface
+/// records and losslessly exported native ellipses/circles.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ImportTypes {
     /// `GetSurface()->GetType()` of each face.
@@ -929,9 +993,17 @@ pub(crate) struct ImportTypes {
     pub(crate) face_exact: Vec<bool>,
     /// `GetCurve()->GetType()` of each edge.
     pub(crate) edge_curve_types: Vec<i64>,
+    /// Whether each edge curve was imported exactly (or the edge has none).
+    pub(crate) edge_exact: Vec<bool>,
 }
 
 impl ImportTypes {
+    /// Native type only when the edge's curve could not be imported exactly.
+    pub(crate) fn inexact_curve(&self, e: usize) -> Option<i64> {
+        let t = *self.edge_curve_types.get(e)?;
+        (t >= 0 && !self.edge_exact.get(e).copied().unwrap_or(false)).then_some(t)
+    }
+
     /// The upstream surface type code of face `f` when the import holds that surface
     /// only as its B-spline part (`None`: imported exactly, no surface, or no face `f`).
     pub(crate) fn inexact_surface(&self, f: usize) -> Option<i64> {
@@ -1188,10 +1260,9 @@ pub(crate) fn import_raw_with_types(ex: &[f64]) -> Result<(Brep, ImportTypes), H
             .into_iter()
             .map(|x| opt(x, EdgeuseId::from_index)?.ok_or_else(|| harness("null edge use")))
             .collect::<Result<Vec<_>, _>>()?;
-        extras
-            .edge_curve_types
-            .push(rd.v.get(rd.at).map_or(-1, |&t| t as i64));
-        let curve = read_curve(&mut rd, false)?;
+        let (curve, ty, exact) = read_edge_curve(&mut rd)?;
+        extras.edge_curve_types.push(ty);
+        extras.edge_exact.push(exact);
         let interval = Extent1d::from_raw(a, b);
         edges.push((tolerance, interval, list, curve));
     }
@@ -1450,10 +1521,11 @@ fn inexact_geometry(b: &Brep, types: &ImportTypes, op: &OpIn) -> Option<Output> 
     };
     let curve_of = |e: Option<EdgeuseId>| {
         e.and_then(|e| eu1::edge(b, e).ok().flatten())
-            .and_then(|x| types.edge_curve_types.get(x.index() as usize).copied())
+            .and_then(|x| types.inexact_curve(x.index() as usize))
             .unwrap_or(-1)
     };
     let (e, surface, other) = match op {
+        OpIn::TrimSample { eu, .. } => (eid(*eu), true, None),
         OpIn::Gaps { eu, which, .. } => {
             let e = eid(*eu);
             if !eu1::is_loop_edgeuse(b, e).unwrap_or(false) {
@@ -1680,6 +1752,35 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     .map(|x| i64::from(x.index()))
                     .collect::<Vec<_>>(),
             ))
+        }
+        OpIn::TrimSample { eu, fraction } => {
+            let eu = eid(*eu);
+            let curve = eu1::edge(b, eu)?.map(|e| b.edge(e)).transpose()?;
+            let face = eu1::face(b, eu)?.map(|f| b.face(f)).transpose()?;
+            let trim = eu1::uv_trim_curve(b, eu)?.0;
+            let (Some(edge), Some(surface), Some(trim)) = (curve, face.and_then(|f| f.surface.as_ref()), trim) else {
+                return Ok(trim_sample_output(&[-2.0]));
+            };
+            let Some(curve) = edge.curve.as_ref() else { return Ok(trim_sample_output(&[-2.0])); };
+            let t = edge.interval.evaluate(*fraction);
+            let evaluated = (|| -> Result<_, SolidError> {
+                let xyz = curve.evaluate_point(k, t)?;
+                let uv = trim.evaluate_point(k, t)?;
+                let lifted = surface.evaluate_point(k, solidcore::math::Point2::new(uv.x, uv.y))?;
+                Ok((xyz, uv, lifted))
+            })();
+            match evaluated {
+                Ok((xyz, uv, lifted)) => {
+                    let ivl = trim.natural_interval();
+                    Ok(Output::new().values("sample", vec![
+                        curve.type_code() as f64, edge.interval.min(), edge.interval.max(),
+                        ivl.min(), ivl.max(), t, xyz.x, xyz.y, xyz.z, uv.x, uv.y,
+                        lifted.x, lifted.y, lifted.z,
+                    ]))
+                }
+                Err(e) if e.is_unported() => Err(e.into()),
+                Err(e) => Ok(trim_sample_output(&[status_of(&e)])),
+            }
         }
         OpIn::UvLoopGap { eu } => Ok(Output::new().values(
             "gap",
@@ -2286,3 +2387,7 @@ impl UnitDiff for Runner {
         serde_json::to_value(i).ok()
     }
 }
+
+#[cfg(test)]
+#[path = "topology_edgeuse_p1/tests.rs"]
+mod tests;

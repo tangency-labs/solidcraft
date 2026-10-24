@@ -274,9 +274,7 @@ pub(crate) fn inexact(m: &Model, faces: &[FaceId], edges: &[EdgeId]) -> Option<O
     for e in edges {
         let ct = m
             .types
-            .edge_curve_types
-            .get(e.index() as usize)
-            .copied()
+            .inexact_curve(e.index() as usize)
             .unwrap_or(-1);
         if ct >= 0 && ![BSPLINE_CURVE_TYPE, LINE_TYPE, CRV_ON_SURF_TYPE].contains(&ct) {
             return Some(Output::deferred(

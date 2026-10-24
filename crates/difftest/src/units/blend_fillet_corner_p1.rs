@@ -714,9 +714,7 @@ pub(super) fn inexact(t: &Topo, edges: &[EdgeId], eus: &[EdgeuseId]) -> Option<O
     for e in all_edges {
         let ct = t
             .types
-            .edge_curve_types
-            .get(e.index() as usize)
-            .copied()
+            .inexact_curve(e.index() as usize)
             .unwrap_or(-1);
         if ct >= 0 && !EXACT_CURVES.contains(&ct) {
             return Some(Output::deferred(
