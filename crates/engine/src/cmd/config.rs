@@ -24,7 +24,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("config.activate", "Activate Configuration", activate).icon("activate").params("row: name — sets its parameter values and suppressions"),
     CommandSpec::new("config.preview", "Preview Configuration", preview).icon("eye").noundo().params("row: name — validates a rebuild without changing the design or history"),
-    CommandSpec::new("config.rule", "Configuration Rule", rule).icon("configuration_table").params("rule?: {id,name,enabled,condition,effect}; id? + delete?; id? + index? (ordered move)"),
+    CommandSpec::new("config.rule", "Configuration Rule", rule).icon("configuration_table").params(
+        "rule?: {id,name,enabled,condition,effect}; rules?: [rule…] (added or replaced together, then the rows checked once); id? + delete?; id? + index? (ordered move)",
+    ),
     CommandSpec::new("config.rules", "Configuration Rules", show).icon("list").noundo().params("ordered typed rules, rows and active state"),
 ];
 
@@ -327,32 +329,49 @@ fn validate_rows(s: &Session, cmd: &str) -> Result<()> {
     Ok(())
 }
 
+/// Adds `value` as a rule, or replaces the rule with its id.
+fn put_rule(s: &mut Session, value: &Value, cmd: &str) -> Result<()> {
+    solidcraft_doc::config::validate_rules_json(&json!({"configs":{"rules":[value]}})).map_err(|e| bad(cmd, e.to_string()))?;
+    let mut rule: solidcraft_doc::config::ConfigRule = serde_json::from_value(value.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    if rule.length_unit.is_none() {
+        rule.length_unit = s
+            .doc
+            .configs
+            .rules
+            .iter()
+            .find(|existing| existing.id == rule.id)
+            .and_then(|existing| existing.length_unit.clone())
+            .or_else(|| Some(s.doc.units.clone()));
+    }
+    let rules = &mut s.doc_mut().configs.rules;
+    if let Some(index) = rules.iter().position(|r| r.id == rule.id) {
+        rules[index] = rule;
+    } else {
+        if rules.len() >= solidcraft_doc::config::MAX_RULES {
+            return Err(bad(cmd, "too many rules"));
+        }
+        rules.push(rule);
+    }
+    Ok(())
+}
+
 fn rule(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "config.rule";
     if let Some(value) = p.get("rule") {
-        solidcraft_doc::config::validate_rules_json(&json!({"configs":{"rules":[value]}})).map_err(|e| bad(cmd, e.to_string()))?;
-        let mut rule: solidcraft_doc::config::ConfigRule = serde_json::from_value(value.clone()).map_err(|e| bad(cmd, e.to_string()))?;
-        if rule.length_unit.is_none() {
-            rule.length_unit = s
-                .doc
-                .configs
-                .rules
-                .iter()
-                .find(|existing| existing.id == rule.id)
-                .and_then(|existing| existing.length_unit.clone())
-                .or_else(|| Some(s.doc.units.clone()));
+        put_rule(s, value, cmd)?;
+    } else if let Some(values) = p.get("rules") {
+        // Several rules in one step: each row is checked once, with all of them in place (one
+        // rebuild per row instead of one per row and rule, and rules that only hold together,
+        // such as a body's and its cut's, can be added).
+        let values = values.as_array().ok_or_else(|| bad(cmd, "`rules` is a list of rules"))?;
+        if values.len() > solidcraft_doc::config::MAX_RULES {
+            return Err(bad(cmd, "too many rules"));
         }
-        let rules = &mut s.doc_mut().configs.rules;
-        if let Some(index) = rules.iter().position(|r| r.id == rule.id) {
-            rules[index] = rule;
-        } else {
-            if rules.len() >= solidcraft_doc::config::MAX_RULES {
-                return Err(bad(cmd, "too many rules"));
-            }
-            rules.push(rule);
+        for value in values {
+            put_rule(s, value, cmd)?;
         }
     } else {
-        let id = str_(p, "id").ok_or_else(|| bad(cmd, "give rule or id"))?;
+        let id = str_(p, "id").ok_or_else(|| bad(cmd, "give rule, rules or id"))?;
         let rules = &mut s.doc_mut().configs.rules;
         let index = rules.iter().position(|r| r.id == id).ok_or_else(|| bad(cmd, "unknown rule"))?;
         if bool_(p, "delete").unwrap_or(false) {
@@ -544,6 +563,42 @@ mod tests {
         assert_eq!(s.doc, before);
         let reopened = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
         assert_eq!(reopened.configs.rules, s.doc.configs.rules);
+    }
+
+    #[test]
+    fn configuration_rules_given_together_are_checked_with_all_of_them_in_place() {
+        // A cut on a box: suppressing the box alone leaves the cut without a body, so a row that
+        // switches both off fails while only the box's rule is in; the two rules together pass.
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name":"on","expression":"1","unit":""}));
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10}));
+        run(&mut s, "solid.cylinder", json!({"radius":2,"height":20,"base":[5,5,-5],"axis":"Z","operation":"cut"}));
+        let (body, cut) = (s.doc.features[0].id, s.doc.features[1].id);
+        let names = [s.doc.features[0].name.clone(), s.doc.features[1].name.clone()];
+        run(&mut s, "config.configure", json!({"params":["on"],"features":names}));
+        run(&mut s, "config.row", json!({"name":"Off","values":{"param:on":"0"}}));
+        let off = |id: u64| {
+            json!({"id":format!("off_{id}"),"name":format!("off_{id}"),"enabled":true,
+            "condition":{"type":"parameter","parameter":"on","operator":"eq","expression":"0"},
+            "effect":{"type":"drive_suppression","feature":id,"value":true}})
+        };
+        let before = s.doc.clone();
+        assert!(s.execute("config.rule", &json!({"rule":off(body)})).is_err(), "the box off alone leaves its cut nothing to cut");
+        assert_eq!(s.doc, before);
+        run(&mut s, "config.rule", json!({"rules":[off(body), off(cut)]}));
+        assert_eq!(s.doc.configs.rules.len(), 2);
+        run(&mut s, "config.activate", json!({"row":"Off"}));
+        assert!(s.doc.features.iter().all(|f| f.suppressed));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()));
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.doc.configs.rules.is_empty(), "one undo step for the rules given together");
+        // A bad rule among them adds none of them.
+        let mut bad = off(cut);
+        bad["effect"]["feature"] = json!("nothing");
+        assert!(s.execute("config.rule", &json!({"rules":[off(body), bad]})).is_err());
+        assert!(s.execute("config.rule", &json!({"rules":{"id":"x"}})).is_err());
+        assert!(s.doc.configs.rules.is_empty());
     }
 
     #[test]

@@ -136,7 +136,9 @@ Configure the `depth` column before adding this example drive. Conditions may re
 existing design parameter; effect targets must be configured columns. `config.rules` lists
 rules. `config.rule` replaces a rule with the same ID, deletes with `id` and `delete: true`,
 or moves it to a zero-based `index`. Editing a rule validates every saved row before committing;
-editing a row validates that row. Invalid geometry, dependency cycles, incompatible units,
+`rules: [...]` adds or replaces several rules in one step and validates the rows once, with all
+of them in place (rules that only hold together, such as suppressing a body and the cut on it).
+Editing a row validates that row. Invalid geometry, dependency cycles, incompatible units,
 or restrictions leave the previous document intact and explain the failure. Delete rules
 before removing the last row. Parameter renames update rule targets and expressions; rule
 references prevent parameter deletion until removed.
