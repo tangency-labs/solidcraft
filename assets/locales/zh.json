@@ -2249,6 +2249,7 @@
   "ui.agent_chat_ctx_bodies": "实体",
   "ui.agent_chat_ctx_elements": "元素",
   "ui.agent_chat_ctx_features": "特征",
+  "ui.agent_chat_ctx_gone": "已不在设计中:它被修改或删除了。",
   "ui.agent_chat_ctx_more": "另有 {n} 项",
   "ui.agent_chat_ctx_other": "其他",
   "ui.agent_chat_custom_hint": "任何通过标准输入输出使用 Agent Client Protocol 的程序。不经过 shell 运行。",

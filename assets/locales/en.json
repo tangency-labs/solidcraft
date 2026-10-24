@@ -2249,6 +2249,7 @@
   "ui.agent_chat_ctx_bodies": "Bodies",
   "ui.agent_chat_ctx_elements": "Elements",
   "ui.agent_chat_ctx_features": "Features",
+  "ui.agent_chat_ctx_gone": "No longer in the design: it was changed or deleted.",
   "ui.agent_chat_ctx_more": "+{n} more",
   "ui.agent_chat_ctx_other": "Other",
   "ui.agent_chat_custom_hint": "Any program that speaks the Agent Client Protocol on stdin and stdout. No shell runs it.",

@@ -253,7 +253,9 @@ The agent reaches the open design only through SolidCraft's own tools (the
   place (so they can be found again after an edit), features with their name and kind, bodies with
   their name. The agent gets them as text after your message; the conversation shows your message
   as typed with the things as chips below it, grouped (Elements, Features, Bodies) with a count;
-  hover a chip for what the agent was told about it. At most 64 things go with one message; the
+  hover a chip to light its target in the model and to see what the agent was told about it. A chip
+  whose target has since left the design (deleted, or changed so its face or edge is gone) is
+  struck through, with a note on hover. At most 64 things go with one message; the
   rest are counted ("+N more"), not dropped silently. The selection is read when you send, also for
   a message that waits in the queue.
 - **Pick context:** press it to choose what the message is about on purpose. A picker opens with

@@ -1807,7 +1807,7 @@ fn the_picker_fills_a_tray_of_chips_that_can_be_trimmed() {
         assert!(h.widget(heading).is_some(), "{heading} is drawn in the tray");
     }
     // × takes the body out: the tray and the picks stay in step.
-    let cross = crate::scenario::handle_at("agent_chat:picked_remove:3").expect("every chip has an ×");
+    let cross = crate::scenario::handle_at("agent_chat:tray:remove:3").expect("every chip has an ×");
     h.call("ui.click", json!({"x": cross.x, "y": cross.y}));
     h.frames(4);
     assert_eq!(h.app.agent_chat.picked.len(), 3);
@@ -1920,6 +1920,55 @@ fn a_split_wall_clicked_once_is_one_item() {
     send(&mut app, &ctx, "this wall".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.contains("1 item(s)") && prompt.contains("Round face r10"), "{prompt}");
+}
+
+// ---- Chips: hover and things that are gone (#2286) ----
+
+/// The chip under the pointer lights its target in the model for as long as the pointer is on it.
+#[test]
+fn hovering_a_chip_lights_what_it_stands_for() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    let context = context::describe(&mut h.app.session, &sels);
+    h.app.agent_chat.items.push(Item::User { text: "look".into(), image: false, pictures: Vec::new(), context: context.clone(), files: Vec::new() });
+    h.frames(4);
+    assert!(h.app.highlighted().iter().all(|s| !sels.contains(s)), "nothing is lit without the pointer");
+    // The feature's chip is the third item.
+    let at = crate::scenario::handle_at("agent_chat:sent:0:chip:2").expect("the chip is drawn");
+    h.call("ui.move", json!({"x": at.x, "y": at.y}));
+    h.call("ui.move", json!({"x": at.x + 1.0, "y": at.y}));
+    h.frames(3);
+    assert!(h.app.highlighted().contains(&sels[2]), "the feature is lit: {:?}", h.app.highlighted());
+    assert!(!h.app.highlighted().contains(&sels[3]), "only the chip's own item");
+    h.call("ui.move", json!({"x": 5.0, "y": 5.0}));
+    h.frames(3);
+    assert!(h.app.highlighted().iter().all(|s| !sels.contains(s)), "lit no longer once the pointer is away");
+}
+
+/// A chip whose body, feature, face or edge has left the design is struck through (flagged), in the
+/// tray and on a sent message; undoing that leaves them as they were.
+#[test]
+fn chips_of_things_that_are_gone_are_flagged() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    let context = context::describe(&mut h.app.session, &sels);
+    h.app.agent_chat.items.push(Item::User { text: "look".into(), image: false, pictures: Vec::new(), context: context.clone(), files: Vec::new() });
+    h.app.agent_chat.picked = sels.clone();
+    h.app.agent_chat.picked_context = context;
+    h.app.agent_chat.chips_version += 1;
+    h.frames(4);
+    assert_eq!(h.app.agent_chat.gone.sent.get(&0), Some(&vec![false; 4]), "everything is still there");
+    assert_eq!(h.app.agent_chat.gone.tray, vec![false; 4]);
+    // The box is undone: its body, feature, face and edge are gone.
+    h.app.run("edit.undo", json!({})).expect("undo");
+    h.frames(4);
+    assert_eq!(h.app.agent_chat.gone.sent.get(&0), Some(&vec![true; 4]), "all four are gone");
+    assert_eq!(h.app.agent_chat.gone.tray, vec![true; 4]);
+    h.app.run("edit.redo", json!({})).expect("redo");
+    h.frames(4);
+    assert_eq!(h.app.agent_chat.gone.sent.get(&0), Some(&vec![false; 4]), "back after a redo");
 }
 
 // ---- Attached pictures in the shared viewer ----

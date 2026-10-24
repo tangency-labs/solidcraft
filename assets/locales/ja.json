@@ -2249,6 +2249,7 @@
   "ui.agent_chat_ctx_bodies": "ボディ",
   "ui.agent_chat_ctx_elements": "要素",
   "ui.agent_chat_ctx_features": "フィーチャ",
+  "ui.agent_chat_ctx_gone": "デザインにはもうありません(変更または削除されました)。",
   "ui.agent_chat_ctx_more": "ほか{n}件",
   "ui.agent_chat_ctx_other": "その他",
   "ui.agent_chat_custom_hint": "標準入出力で Agent Client Protocol を話す任意のプログラム。シェルは使いません。",
