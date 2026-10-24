@@ -31,7 +31,7 @@
 //!   `ui.rename {text?, commit?}` finishes the rename box
 //! - `ui.window {action: minimize|maximize|restore|toggle|close}`: what the title bar's buttons do
 //! - `ui.confirm {accept?}`: the Delete confirmation (without `accept`: what it lists)
-//! - `ui.shortcut {command, key?, replace?}`: a command's key, or bind one ("" clears)
+//! - `ui.shortcut {command, key?, slot?, replace?}`: a command's keys, or bind one ("" clears)
 //! - `ui.help {item?: about|shortcuts|report}`: the Help menu; returns the version and diagnostics
 //! - `ui.prefs {...}`: the preferences (default_units, nav, zoom_reverse, orbit_around, msaa,
 //!   length_decimals, angle_decimals); returns them all
@@ -780,12 +780,14 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         },
         "ui.shortcut" => {
             let Some(id) = s("command") else { return err("missing `command`") };
+            let slot = p.get("slot").and_then(Value::as_u64).map(|n| usize::try_from(n).unwrap_or(usize::MAX));
+            let report = |app: &SolveApp| ok(json!({"command": id, "key": crate::keymap::effective(app, id), "keys": crate::keymap::keys(app, id)}));
             match s("key") {
-                Some(k) => match crate::keymap::bind(app, id, k, b("replace")) {
-                    Ok(()) => ok(json!({"command": id, "key": crate::keymap::effective(app, id)})),
+                Some(k) => match crate::keymap::bind_at(app, id, slot, k, b("replace")) {
+                    Ok(()) => report(app),
                     Err(e) => err(e),
                 },
-                None => ok(json!({"command": id, "key": crate::keymap::effective(app, id)})),
+                None => report(app),
             }
         }
         "ui.browser" => ok(json!({

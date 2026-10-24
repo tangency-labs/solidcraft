@@ -728,7 +728,7 @@ struct Snapshot {
     agent: crate::agent_cursor::Settings,
     autosave: f64,
     auto_project: bool,
-    keys: std::collections::BTreeMap<String, String>,
+    keys: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 impl Snapshot {
@@ -3891,7 +3891,7 @@ mod tests {
         assert!(app.prefs_window.open && app.prefs_window.section == 0);
         control(&mut app, &json!({"theme": "light", "ui_scale": 1.25, "zoom_to_cursor": false})).unwrap();
         assert!(!app.ui.dark, "light applies at once");
-        app.keymap.custom.insert("solid.extrude".into(), "Shift+E".into());
+        app.keymap.custom.insert("solid.extrude".into(), vec!["Shift+E".into()]);
         let v = control(&mut app, &json!({"button": "cancel"})).unwrap();
         assert_eq!(v["dialog"], serde_json::Value::Null);
         assert!(app.ui.dark && app.preferences.theme == "dark" && app.preferences.ui_scale == 1.0 && app.preferences.zoom_to_cursor);
