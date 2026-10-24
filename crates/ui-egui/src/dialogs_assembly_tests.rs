@@ -74,6 +74,7 @@ fn joint_and_drive_preview_on_the_placed_model() {
         new_body: [2, 2, 2, 255],
         removed: [3, 3, 3, 100],
         edge: [0, 0, 0, 255],
+        ghost: true,
     };
     let cmds = preview_commands(&app, &d).unwrap();
     let b = world_preview(&app.session, &cmds, colors).unwrap().unwrap();
@@ -101,6 +102,12 @@ fn joint_and_drive_preview_on_the_placed_model() {
     assert_eq!(cmds[0].0, "joint.drive");
     let b = world_preview(&app.session, &cmds, colors).unwrap().unwrap();
     assert_eq!(b.replaced, vec!["Body2".to_string()]);
+    // The moved part's old place is the ghost, unless Show ghost is off (#5905).
+    assert!(!b.scene.ghost.is_empty());
+    let hidden = world_preview(&app.session, &cmds, crate::preview::Colors { ghost: false, ..colors }).unwrap().unwrap();
+    assert!(hidden.scene.ghost.is_empty());
+    assert_eq!(hidden.replaced, b.replaced, "the moved part is still shown where it goes");
+    assert_eq!(hidden.scene.tris, b.scene.tris);
     // Features preview as before while nothing is placed away from its frame, and on the
     // placed model once something is (B moved by its joint).
     assert!(world_preview(&two_boxes().session, &[("solid.extrude".into(), json!({}))], colors).is_none());
@@ -595,6 +602,7 @@ fn drive_says_where_a_loop_stopped_it() {
         new_body: [2, 2, 2, 255],
         removed: [3, 3, 3, 100],
         edge: [0, 0, 0, 255],
+        ghost: true,
     };
     let rocker = app.session.doc.assembly.joints.iter().position(|j| j.name == "Rocker").unwrap();
     let mut d = drive_joint(&app, app.session.doc.assembly.joints[rocker].id).unwrap();
@@ -654,6 +662,7 @@ fn drive_says_when_its_joint_is_joined_to_nothing_grounded() {
         new_body: [2, 2, 2, 255],
         removed: [3, 3, 3, 100],
         edge: [0, 0, 0, 255],
+        ghost: true,
     };
     let b = world_preview(&app.session, &apply_commands(&app, &d).unwrap(), colors).unwrap().unwrap();
     let why = b.stopped.as_ref().and_then(drive_stop).unwrap();

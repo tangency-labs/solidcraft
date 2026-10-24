@@ -667,6 +667,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                     ui.label(RichText::new(why).color(t.warning));
                 });
             }
+            // The moved parts' old place, drawn as a ghost; remembered between uses (#5905).
+            form_row(ui, "Show ghost", |ui| {
+                crate::ui_kit::checkbox(ui, "", &mut app.preferences.drive_joints_ghost);
+            });
         }
         Asm::MotionLink { a, b, ia, ib, ratio, offset } => {
             let s = &app.session;
@@ -1047,6 +1051,9 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
     let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::preview::build(&before, &after, colors)));
     Some(match built {
         Ok(mut b) => {
+            if !colors.ghost {
+                b.scene.ghost.clear();
+            }
             b.bounds = after.bodies.iter().fold(Aabb3::EMPTY, |acc, x| acc.union(&x.mesh().bounds()));
             b.stopped = stopped;
             Ok(b)
