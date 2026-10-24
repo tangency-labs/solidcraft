@@ -136,16 +136,12 @@ impl Document {
     pub fn next_d_name(&self) -> String {
         // Every taken name at once: asking `name_taken` for d1, d2, … searched the whole
         // design once per number, quadratic in the number of named inputs.
-        let taken: std::collections::HashSet<&str> =
-            self.params.iter().map(|p| p.name.as_str()).chain(self.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str))).collect();
-        let mut n = 1;
-        loop {
-            let c = format!("d{n}");
-            if !taken.contains(c.as_str()) {
-                return c;
-            }
-            n += 1;
-        }
+        // Their numbers, so trying d1, d2 … writes no names: a design with thousands of named
+        // inputs wrote that many for every new one.
+        let names = self.params.iter().map(|p| p.name.as_str()).chain(self.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str)));
+        let taken = numbers_after("d", names);
+        let n = (1..).find(|n| !taken.contains(n)).unwrap_or(1);
+        format!("d{n}")
     }
 
     /// Give a feature's inputs parameter names (keeping existing names in place).
@@ -1015,4 +1011,14 @@ pub fn cycles(list: &[(String, String, Kind)]) -> BTreeSet<String> {
         }
     }
     bad
+}
+
+/// The numbers `n` for which `{base}{n}` is among `names` (written as `n` is: no sign or
+/// leading zeros).
+pub(crate) fn numbers_after<'a>(base: &str, names: impl Iterator<Item = &'a str>) -> std::collections::HashSet<u64> {
+    names
+        .filter_map(|name| name.strip_prefix(base))
+        .filter(|digits| !digits.is_empty() && !digits.starts_with('0') && digits.bytes().all(|b| b.is_ascii_digit()))
+        .filter_map(|digits| digits.parse().ok())
+        .collect()
 }

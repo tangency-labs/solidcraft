@@ -3108,14 +3108,11 @@ impl Document {
     }
 
     fn unique_name(&self, base: &str) -> String {
-        let mut n = 1;
-        loop {
-            let name = format!("{base}{n}");
-            if !self.features.iter().any(|f| f.name == name) {
-                return name;
-            }
-            n += 1;
-        }
+        // The numbers taken after `base`, gathered once: the thousandth cylinder of a design
+        // tried Cylinder1, Cylinder2 … each against every feature's name.
+        let taken = crate::params::numbers_after(base, self.features.iter().map(|f| f.name.as_str()));
+        let n = (1..).find(|n| !taken.contains(n)).unwrap_or(1);
+        format!("{base}{n}")
     }
 
     /// The deepest timeline folder spanning the insertion slot between `marker - 1` and
