@@ -141,7 +141,7 @@ or restrictions leave the previous document intact and explain the failure. Dele
 before removing the last row. Parameter renames update rule targets and expressions; rule
 references prevent parameter deletion until removed.
 
-Tables support at most 128 rules; conditions allow eight levels and 64 nodes, and allowed
+Tables support at most 2048 rules; conditions allow eight levels and 64 nodes, and allowed
 value lists support up to 128 expressions. These bounds are checked before saved rules are
 decoded. Driven appearance/material rules and repeated fixed-point evaluation are outside
 the current rule scope.

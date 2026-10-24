@@ -1,7 +1,7 @@
 //! Configuration graph remapping for independent component copies.
 use super::{Column, ConfigTable};
 use crate::{DocError, Result};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Default)]
 pub struct ConfigCloneMaps {
@@ -106,6 +106,9 @@ impl ConfigTable {
                 }
             }
         }
+        // The ids taken so far, looked up rather than scanned: copies of rules whose ids share
+        // their first 40 characters try one id after another.
+        let mut taken: BTreeSet<String> = next.rules.iter().map(|rule| rule.id.clone()).collect();
         for rule in &self.rules {
             if let Some(mut copied) = rule.clone_for_targets(maps) {
                 if next.rules.len() >= super::MAX_RULES {
@@ -114,8 +117,9 @@ impl ConfigTable {
                 let stem: String = rule.id.chars().take(40).collect();
                 copied.id = (1..=super::MAX_RULES + 1)
                     .map(|i| format!("{stem}_copy{i}"))
-                    .find(|id| !next.rules.iter().any(|rule| rule.id == *id))
+                    .find(|id| !taken.contains(id))
                     .ok_or_else(|| DocError::Invalid("no configuration rule ID available".into()))?;
+                taken.insert(copied.id.clone());
                 copied.name = format!("{} (copy)", rule.name.chars().take(120).collect::<String>());
                 next.rules.push(copied);
             }

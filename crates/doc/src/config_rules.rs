@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const MAX_RULES: usize = 128;
+/// Most configuration rules a design keeps. A rule drives one feature's suppression, so an
+/// assembly that switches a few hundred parts on and off, by two rules each, needs hundreds.
+pub const MAX_RULES: usize = 2048;
 const MAX_NODES: usize = 64;
 const MAX_DEPTH: usize = 8;
 
@@ -572,7 +574,16 @@ mod tests {
         .unwrap();
         assert!(validate_rules_json(&serde_json::json!({"configs":{"rules":[valid.clone()]}})).is_ok());
         assert!(validate_rules_json(&serde_json::json!({"configs":{"rules":null}})).is_err());
-        assert!(validate_rules_json(&serde_json::json!({"configs":{"rules":vec![valid.clone();129]}})).is_err());
+        // An assembly that switches a few hundred parts on and off, by two rules each, keeps them.
+        let many: Vec<Value> = (0..600)
+            .map(|i| {
+                let mut r = valid.clone();
+                r["id"] = serde_json::json!(format!("r{i}"));
+                r
+            })
+            .collect();
+        assert!(validate_rules_json(&serde_json::json!({"configs":{"rules":many}})).is_ok());
+        assert!(validate_rules_json(&serde_json::json!({"configs":{"rules":vec![valid.clone();MAX_RULES + 1]}})).is_err());
         let mut condition = serde_json::json!({"type":"always"});
         for _ in 0..8 {
             condition = serde_json::json!({"type":"not","condition":condition});
@@ -636,7 +647,7 @@ mod tests {
             Value::Null,
             serde_json::json!([deep]),
             serde_json::json!([wide]),
-            serde_json::json!(vec![valid; 129]),
+            serde_json::json!(vec![valid; MAX_RULES + 1]),
             serde_json::json!([invalid_context]),
         ] {
             let mut saved = serde_json::to_value(design()).unwrap();
