@@ -707,3 +707,82 @@ fn patterns_and_mirrors_of_a_rib() {
     check(&s, &[ribs[0], ribs[2]]);
     assert!(rel(volume(&mut s), before + 2.0 * rib) < 1e-6, "two ribs: {} vs {}", volume(&mut s), before + 2.0 * rib);
 }
+
+#[test]
+fn pattern_count_units_explain_how_to_use_a_parameter() -> Result<(), Box<dyn std::error::Error>> {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Seed"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [100, 0]], "ids": ["line"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.add", json!({"name": "columns", "expression": "3", "unit": "mm"}));
+    run(&mut s, "parameters.add", json!({"name": "turns", "expression": "3", "unit": "deg"}));
+    for (command, field, params) in [
+        ("solid.pattern.rectangular", "count1", json!({"bodies": ["Seed"], "dir1": [1, 0, 0], "spacing1": 10})),
+        (
+            "solid.pattern.rectangular",
+            "count2",
+            json!({"bodies": ["Seed"], "dir1": [1, 0, 0], "spacing1": 10, "count1": 2, "dir2": [0, 1, 0], "spacing2": 10}),
+        ),
+        ("solid.pattern.circular", "count", json!({"bodies": ["Seed"], "axis": "Z"})),
+        ("solid.pattern.path", "count", json!({"bodies": ["Seed"], "path_sketch": "Path", "path": ["line"], "spacing": 10})),
+    ] {
+        for (expression, message) in [
+            ("columns", "`columns` is a length (mm); set its Unit to none to use it as a count"),
+            ("columns * 2", "this expression is a length (mm)"),
+            ("turns", "`turns` is an angle (deg); set its Unit to none to use it as a count"),
+        ] {
+            let mut params = params.clone();
+            params[field] = json!(expression);
+            let before = s.doc.to_json();
+            let error = s.execute(command, &params).err().ok_or("dimensioned count was accepted")?.to_string();
+            assert!(error.contains(message), "{command} {field}: {error}");
+            assert_eq!(s.doc.to_json(), before);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn pattern_count_fractions_are_refused() -> Result<(), Box<dyn std::error::Error>> {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Seed"}));
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "2.5", "unit": ""}));
+    for expression in [json!(2.5), json!("n"), json!("n * 2 - 2.5")] {
+        let params = json!({"bodies": ["Seed"], "dir1": [1, 0, 0], "count1": expression, "spacing1": 10});
+        let error = s.execute("solid.pattern.rectangular", &params).err().ok_or("fractional count was accepted")?.to_string();
+        assert!(error.contains("a count must be a whole number;"), "{error}");
+        assert!(error.contains("is 2.5"), "{error}");
+        if expression == json!("n") {
+            assert!(error.contains("`n` is 2.5"), "{error}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn pattern_count_integer_parameters_survive_save_and_reject_fractional_edits() -> Result<(), Box<dyn std::error::Error>> {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Seed"}));
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "3", "unit": ""}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Seed"], "dir1": [1, 0, 0], "count1": "n", "spacing1": 10, "name": "Copies"}));
+    assert_eq!(s.model.state().bodies.len(), 3);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json())?);
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(reopened.model.state().bodies.len(), 3);
+    let error = reopened
+        .execute("timeline.edit", &json!({"feature": "Copies", "set": {"pattern": {"count1": "n / 2"}}}))
+        .err()
+        .ok_or("fractional edit was accepted")?
+        .to_string();
+    assert!(error.contains("a count must be a whole number;"), "{error}");
+    let mut saved = solidcraft_doc::Document::from_json(&s.doc.to_json())?;
+    for feature in &mut saved.features {
+        if let solidcraft_doc::FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Rectangular { count1, .. }, .. } = &mut feature.kind {
+            *count1 = "n / 2".into();
+        }
+    }
+    let invalid = Session::new(solidcraft_doc::Document::from_json(&saved.to_json())?);
+    assert!(invalid.model.results.iter().any(|r| r.error.as_ref().is_some_and(|e| e.contains("a count must be a whole number;"))));
+    Ok(())
+}

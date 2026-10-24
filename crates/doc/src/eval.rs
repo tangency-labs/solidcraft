@@ -5266,7 +5266,7 @@ pub fn pattern_matrices(doc: &Document, st: &ModelState, p: &crate::PatternKind)
 
 fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, component: u64, p: &crate::PatternKind) -> Result<Vec<Mat>> {
     let count = |e: &str| -> Result<usize> {
-        let n = val(vals, e, Kind::Unitless)?.round();
+        let n = expr::eval_count(e, vals)?;
         if !(1.0..=MAX_INSTANCES as f64).contains(&n) {
             return Err(DocError::Invalid(format!("pattern count must be 1…{MAX_INSTANCES}")));
         }

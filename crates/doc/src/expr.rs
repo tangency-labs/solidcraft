@@ -896,6 +896,24 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
     })
 }
 
+/// Evaluate a count: a unit-less whole number. A length or angle says how to fix it, and a
+/// fraction is refused rather than rounded to a different number of copies.
+pub fn eval_count(s: &str, vals: &BTreeMap<String, Value>) -> Result<f64, DocError> {
+    let e = s.trim();
+    let value = eval_with(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))))?;
+    if let Some(kind @ (Kind::Length | Kind::Angle)) = value.kind() {
+        let subject = if vals.contains_key(e) { format!("`{e}`") } else { "this expression".into() };
+        let remedy = if vals.contains_key(e) { "set its Unit to none to use it as a count" } else { "use a unit-less expression as a count" };
+        return Err(DocError::Expr(format!("{subject} is {} ({}); {remedy}", value.describe(), kind.default_unit())));
+    }
+    let n = value.to_kind(Kind::Unitless)?;
+    // Allow float noise such as `10 / 3 * 3`, never a real fraction.
+    if !n.is_finite() || (n - n.round()).abs() > 1e-9 {
+        return Err(DocError::Expr(format!("a count must be a whole number; `{e}` is {n}")));
+    }
+    Ok(n.round())
+}
+
 /// Evaluate an expression; `lookup` resolves parameter names. Bare numbers are mm / degrees.
 pub fn eval_with(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>) -> Result<Value, DocError> {
     eval_with_defaults(s, lookup, Defaults::default())

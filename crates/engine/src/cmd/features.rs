@@ -480,6 +480,12 @@ pub(super) fn check_expr(s: &Session, e: &str, kind: Kind, cmd: &str, what: &str
     s.doc.eval(e, kind).map(|_| ()).map_err(|err| bad(cmd, format!("{what}: {err}")))
 }
 
+/// A pattern count: a whole, unit-less number (see `expr::eval_count`).
+pub(super) fn check_count(s: &Session, e: &str, cmd: &str, what: &str) -> Result<()> {
+    let (vals, _) = s.doc.param_values();
+    solidcraft_doc::expr::eval_count(e, &vals).map(|_| ()).map_err(|err| bad(cmd, format!("{what}: {err}")))
+}
+
 /// Add a feature, evaluate, and report its result (an evaluation error fails the command).
 pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
     add_feature_in(s, p, kind, true)
@@ -1511,12 +1517,12 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     let dir1 = p.get("dir1").and_then(vec3).ok_or_else(|| bad(cmd, "`dir1` must be [x, y, z]"))?;
     let count1 = req_expr(cmd, p, "count1")?;
     let spacing1 = req_expr(cmd, p, "spacing1")?;
-    check_expr(s, &count1, Kind::Unitless, cmd, "count1")?;
+    check_count(s, &count1, cmd, "count1")?;
     check_expr(s, &spacing1, Kind::Length, cmd, "spacing1")?;
     let dir2 = p.get("dir2").and_then(vec3);
     let (count2, spacing2) = (expr(p, "count2"), expr(p, "spacing2"));
     if let Some(c) = &count2 {
-        check_expr(s, c, Kind::Unitless, cmd, "count2")?;
+        check_count(s, c, cmd, "count2")?;
     }
     if let Some(c) = &spacing2 {
         check_expr(s, c, Kind::Length, cmd, "spacing2")?;
@@ -1541,7 +1547,7 @@ fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
     let (features, bodies) = pattern_sources(s, p, cmd)?;
     let (origin, axis, axis_feature) = axis_line(s, p, cmd)?;
     let count = req_expr(cmd, p, "count")?;
-    check_expr(s, &count, Kind::Unitless, cmd, "count")?;
+    check_count(s, &count, cmd, "count")?;
     let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let pattern = solidcraft_doc::PatternKind::Circular {
@@ -1565,7 +1571,7 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
     }
     let count = req_expr(cmd, p, "count")?;
-    check_expr(s, &count, Kind::Unitless, cmd, "count")?;
+    check_count(s, &count, cmd, "count")?;
     let (spacing, extent) = match (expr(p, "spacing"), expr(p, "distance")) {
         (Some(x), _) => (x, false),
         (None, Some(x)) => (x, true),
