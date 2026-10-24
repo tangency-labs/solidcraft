@@ -1,6 +1,8 @@
 # Keyboard shortcuts
 
-Command shortcuts can be changed in File › Keyboard Shortcuts; these are the defaults.
+Command shortcuts can be changed in File › Keyboard Shortcuts; these are the defaults. Click a
+key to replace it, or the **+** after it to give the command another key: every key it has
+runs it, and menus and tooltips show the first one.
 
 Click a binding to record a new shortcut. A shortcut can contain Shift, Ctrl/Cmd and
 Alt/Option modifiers plus exactly one other key. Hold the modifiers, then press the final
