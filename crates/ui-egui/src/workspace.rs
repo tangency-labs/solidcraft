@@ -61,8 +61,8 @@ pub struct Section {
 }
 
 /// Parameters and Configurations stay on every design tab they were on before the ribbon
-/// redesign (MODEL and SHEET METAL), on SKETCH while editing a sketch, and in MANAGE, their
-/// canonical home.
+/// redesign (MODEL and SHEET METAL), on SKETCH while editing a sketch, on WELDMENTS, and in
+/// MANAGE, their canonical home.
 const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.configure"];
 
 /// Commands that stay for agents, MCP and scripts but are not offered to people: the sketch solves
@@ -259,6 +259,11 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "SHEET METAL", panel: "OUTPUT", promoted: 2, ids: &["sheet.export_dxf", "sheet.export_bend_table"] },
     Section { tab: "SHEET METAL", panel: "RULES", promoted: 1, ids: &["sheet.manage_rules"] },
     Section { tab: "SHEET METAL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
+    // A frame starts from a sketch of its lines; its profile sizes are often parameters.
+    Section { tab: "WELDMENTS", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
+    Section { tab: "WELDMENTS", panel: "CREATE", promoted: 1, ids: &["frame.member"] },
+    Section { tab: "WELDMENTS", panel: "MODIFY", promoted: 1, ids: &["frame.trim"] },
+    Section { tab: "WELDMENTS", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     Section { tab: "RENDER", panel: "SCENE", promoted: 2, ids: &["render.scene"] },
     Section { tab: "RENDER", panel: "IMAGE", promoted: 1, ids: &["render.start"] },
 ];
@@ -278,6 +283,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("contact.enable_sets", "Contact Sets"),
     ("document.inspect", "Inspect"),
     ("document.units", "Units"),
+    ("frame.trim", "Trim"),
     ("inspect.accessibility", "Access"),
     ("inspect.center_of_mass", "Mass Center"),
     ("inspect.curvature_comb", "Curv. Comb"),
@@ -347,6 +353,8 @@ pub const PLACEMENTS: &[(&str, &str, &str, &str)] = &[
     ("SKETCH", "FINISH SKETCH", "SKETCH", "FINISH SKETCH"),
     ("SHEET METAL", "CREATE", "SHEET METAL", "CREATE"),
     ("SHEET METAL", "MODIFY", "SHEET METAL", "FLAT"),
+    ("WELDMENTS", "CREATE", "WELDMENTS", "CREATE"),
+    ("WELDMENTS", "MODIFY", "WELDMENTS", "MODIFY"),
     ("PLASTIC", "CREATE", "MODEL", "CREATE"),
     ("PLASTIC", "SETUP", "MANAGE", "RULES"),
     ("MESH", "MODIFY", "INSERT", "FILES"),
@@ -429,19 +437,33 @@ pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
 }
 
 /// Selected geometry identifies the active body; without a body selection use the last body
-/// of the active component, matching feature dialogs. Rules on unrelated bodies do not count.
-pub fn sheet_body(app: &crate::SolveApp) -> Option<String> {
+/// of the active component, matching feature dialogs.
+fn active_body<'a>(app: &'a crate::SolveApp, state: &'a solidcraft_engine::doc::ModelState) -> Option<&'a str> {
     use solidcraft_engine::Sel;
-    let state = app.session.model.state();
     let selected = app.session.selection.iter().find_map(|s| match s {
         Sel::Body { name } => Some(name.as_str()),
         Sel::Face { body, .. } | Sel::Edge { body, .. } => Some(body.as_str()),
         _ => None,
     });
-    let body = selected.or_else(|| {
+    selected.or_else(|| {
         state.bodies.iter().rev().find(|b| app.session.doc.model_body_component(b) == app.session.active_component).map(|b| b.name.as_str())
-    })?;
+    })
+}
+
+/// The active body when it is sheet metal. Rules on unrelated bodies do not count.
+pub fn sheet_body(app: &crate::SolveApp) -> Option<String> {
+    let state = app.session.model.state();
+    let body = active_body(app, &state)?;
     state.sheets.iter().find(|s| s.body == body).map(|s| s.body.clone())
+}
+
+/// The active body when a Frame Member feature made it.
+pub fn frame_body(app: &crate::SolveApp) -> Option<String> {
+    let state = app.session.model.state();
+    let name = active_body(app, &state)?;
+    let body = state.bodies.iter().find(|b| b.name == name)?;
+    let made_by = app.session.doc.feature(body.feature)?;
+    matches!(made_by.kind, FeatureKind::FrameMember { .. }).then(|| body.name.clone())
 }
 
 pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
@@ -453,18 +475,26 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
         tabs.push("SKETCH");
     }
     // Always reachable, as before the ribbon redesign: a sheet-metal part starts from an
-    // ordinary sketch or solid, so the tab cannot wait for a sheet body.
+    // ordinary sketch or solid, so the tab cannot wait for a sheet body. A frame starts
+    // from a sketch of its lines, so Weldments is always there too.
     tabs.push("SHEET METAL");
+    tabs.push("WELDMENTS");
     tabs
 }
 
-/// Select contextual tabs on entry (or a different sheet body), allowing the other tabs to
-/// remain usable for the rest of that context. Sketch takes precedence over sheet metal.
+/// Select contextual tabs on entry (or a different sheet body or frame member), allowing the
+/// other tabs to remain usable for the rest of that context. Sketch takes precedence over sheet
+/// metal, and sheet metal over weldments.
 pub fn sync_context(app: &mut crate::SolveApp) {
     if crate::render_workspace::active(app) {
         return;
     }
-    let context = app.session.active_sketch.map(|id| format!("sketch:{id}")).or_else(|| sheet_body(app).map(|body| format!("sheet:{body}")));
+    let context = app
+        .session
+        .active_sketch
+        .map(|id| format!("sketch:{id}"))
+        .or_else(|| sheet_body(app).map(|body| format!("sheet:{body}")))
+        .or_else(|| frame_body(app).map(|body| format!("frame:{body}")));
     if app.ui.ribbon_context != context {
         let was_sketch = app.ui.ribbon_context.as_deref().is_some_and(|c| c.starts_with("sketch:"));
         let back = if app.session.active_sketch.is_some() {
@@ -483,6 +513,8 @@ pub fn sync_context(app: &mut crate::SolveApp) {
         } else if let Some(back) = back.as_deref().filter(|t| *t != "SKETCH" && visible_tabs(app).contains(t)) {
             // Finishing a sketch goes back to the tab it came from (#3250).
             visible_tabs(app).into_iter().find(|t| t == &back).unwrap_or("MODEL")
+        } else if context.as_deref().is_some_and(|c| c.starts_with("frame:")) {
+            "WELDMENTS"
         } else if context.is_some() {
             "SHEET METAL"
         } else {
@@ -676,8 +708,8 @@ mod tests {
     fn contextual_tabs_follow_the_active_body_and_allow_other_tabs() {
         let mut h = crate::scenario::Harness::new();
         let mut fresh = TABS.to_vec();
-        fresh.push("SHEET METAL");
-        assert_eq!(visible_tabs(&h.app), fresh, "SHEET METAL is reachable before any sheet body exists");
+        fresh.extend(["SHEET METAL", "WELDMENTS"]);
+        assert_eq!(visible_tabs(&h.app), fresh, "SHEET METAL and WELDMENTS are reachable before any sheet body or member exists");
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         assert_eq!(h.app.ui.tab, "SKETCH");
         h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
@@ -702,6 +734,50 @@ mod tests {
         h.app.run("select.set", json!({"items":[{"type":"body","name":"Sheet"}]})).unwrap();
         sync_context(&mut h.app);
         assert_eq!(h.app.ui.tab, "SHEET METAL");
+    }
+
+    /// Weldments is there in a fresh document (a frame starts from a sketch of its lines), holds
+    /// Frame Member, and selects itself while a member is the active body, as Sheet Metal does for
+    /// a sheet body, but keeps the ordinary tab look.
+    #[test]
+    fn weldments_tab_holds_frame_member_and_follows_a_member_body() {
+        let specs = solidcraft_engine::command_specs();
+        assert_eq!(panels("WELDMENTS"), ["SKETCH", "CREATE", "MODIFY", "CONFIGURE"]);
+        let (create, n) = layout("WELDMENTS", "CREATE", &specs).unwrap();
+        assert_eq!(create.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.member"]);
+        assert!(!panel_ids("MODEL", &specs).contains(&"frame.member"), "Frame Member's home is Weldments");
+
+        let mut h = crate::scenario::Harness::new();
+        h.step(&json!({"click":{"handle":"tab:WELDMENTS"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.ui.tab, "WELDMENTS");
+        for id in ["sketch.create", "frame.member", "parameters.change"] {
+            assert!(crate::scenario::handle_at(&format!("button:{id}")).is_some(), "{id} is a button on the Weldments tab");
+        }
+        h.step(&json!({"click":{"handle":"button:frame.member"}})).unwrap();
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Frame(_))));
+        assert_eq!(h.app.ui.tab, "WELDMENTS", "Frame Member opens from the tab without leaving it");
+        h.step(&json!({"key":"Escape"})).unwrap();
+
+        h.app.run("sketch.create", json!({"plane":"XZ", "name":"Frame"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[600,400]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.box", json!({"body_name":"Plate", "operation":"new", "length":100, "width":100, "height":10})).unwrap();
+        assert!(frame_body(&h.app).is_none(), "a plain solid is not a member");
+        h.app.ui.tab = "INSPECT".into();
+        let tube = json!({"kind":"rect_tube", "width":40, "height":40, "wall":3});
+        h.app.run("frame.member", json!({"sketch":"Frame", "profile":tube, "body_name":"Rail"})).unwrap();
+        assert_eq!(frame_body(&h.app).as_deref(), Some("Rail (4)"));
+        assert_eq!(h.app.ui.tab, "WELDMENTS", "a new member selects the tab");
+        assert!(!crate::toolbar::contextual_tab(&h.app, "WELDMENTS"), "selected on a member, it keeps the ordinary tab look");
+
+        h.app.run("select.set", json!({"items":[{"type":"body","name":"Plate"}]})).unwrap();
+        sync_context(&mut h.app);
+        assert!(frame_body(&h.app).is_none());
+        assert!(visible_tabs(&h.app).contains(&"WELDMENTS"), "the tab stays reachable off a member");
+        h.app.run("select.set", json!({"items":[{"type":"body","name":"Rail (2)"}]})).unwrap();
+        sync_context(&mut h.app);
+        assert_eq!(h.app.ui.tab, "WELDMENTS");
     }
 
     /// Parameters and Configurations are on the design tabs they were on before the redesign, and a

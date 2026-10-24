@@ -1,0 +1,25 @@
+{
+  "source": "analytic",
+  "method": "18 separate 45 x 45 bars (boxes): 4 uprights of 1500, 12 rails and 2 cross members of 600 - 2 x 45 = 510; V = 2025 (4 x 1500 + 14 x 510); area = sum of 4 x 45 L + 2 x 2025 per bar; centre of mass by moments (rails centred at z = 22.5, 722.5, 1477.5, cross members at x = 200 and 400 in the middle ring)",
+  "body_count": 18,
+  "volume_mm3": 26608500.0,
+  "area_mm2": 2438100.0,
+  "center_of_mass": [
+    300.0,
+    300.0,
+    743.5958904109589
+  ],
+  "bbox": {
+    "min": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "max": [
+      600.0,
+      600.0,
+      1500.0
+    ]
+  },
+  "faces": 108
+}

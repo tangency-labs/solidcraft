@@ -14,7 +14,7 @@ use serde_json::Value;
 use crate::cargo;
 
 /// Toolbar tabs in toolbar order; commands not on the toolbar come last, grouped by id prefix.
-const TABS: &[&str] = &["SOLID", "SKETCH", "SURFACE", "SHEET METAL", "PLASTIC"];
+const TABS: &[&str] = &["SOLID", "SKETCH", "SURFACE", "SHEET METAL", "WELDMENTS", "PLASTIC"];
 const SNAPSHOT_SIZE: (&str, &str) = ("960", "600");
 
 pub fn run(root: &Path, build: bool) -> Result<(), String> {
