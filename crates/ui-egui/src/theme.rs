@@ -904,6 +904,17 @@ mod tests {
     #[test]
     fn applying_a_theme_asks_for_a_repaint_with_the_new_visuals() {
         let ctx = egui::Context::default();
+        // Let egui's own startup repaints settle: the context must be idle before the
+        // theme changes, so the only repaint left is the one the theme asks for.
+        let mut settled = false;
+        for _ in 0..8 {
+            ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+            if !ctx.has_requested_repaint() {
+                settled = true;
+                break;
+            }
+        }
+        assert!(settled, "the context must be idle before the theme changes");
         let previous = super::is_dark();
         super::set_dark(!previous);
         ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -916,9 +927,8 @@ mod tests {
         .textures_delta
         .clear();
         super::set_dark(previous);
-        // The repaint request is reported by the pass that follows the one that asked for it.
-        ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
-        assert!(ctx.repaint_causes().iter().any(|cause| cause.file.ends_with("theme.rs")), "a theme change must ask for a repaint");
+        let causes: Vec<&str> = ctx.repaint_causes().iter().map(|cause| cause.file).collect();
+        assert!(ctx.has_requested_repaint(), "a theme change must ask for a repaint (causes: {causes:?})");
     }
 
     #[test]
