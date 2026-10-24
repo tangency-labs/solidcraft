@@ -1682,7 +1682,7 @@ fn step_conformance_parts_read_back_their_exact_shape() {
 /// measured as the body of that record.
 pub(super) fn schema_4_volume(text: &str) -> f64 {
     let ex = solidcraft_step::p21::parse(text).unwrap();
-    let r = solidcraft_step::topology::read_solids(&ex);
+    let r = solidcraft_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
     assert!(r.failures.is_empty() && r.solids.len() == 1, "{:?}", r.failures);
     measure(&Body::from_record(r.solids[0].brep.clone()).unwrap()).unwrap().volume
 }

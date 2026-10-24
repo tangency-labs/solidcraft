@@ -85,7 +85,7 @@ fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
 /// and brought back as a body: the part SMLib made of the file. A solid the reader or SMLib
 /// refuses is not imported, with the reason.
 pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result::Result<(Part, Vec<String>), Failure> {
-    let solid = solidcraft_step::topology::read_solid(ex, item, units).map_err(|msg| Failure { read: true, msg })?;
+    let solid = solidcraft_step::topology::read_solid_with(ex, item, units, &solidcraft_smlib::pcurves::SmlibTrims).map_err(|msg| Failure { read: true, msg })?;
     let failed = |e: KernelError| Failure { read: false, msg: e.to_string().trim_start_matches("the operation failed: ").to_string() };
     let (brep, smlib_order) = crate::native::smlib_record_ordered(&solid.brep).map_err(failed)?;
     let (body, body_order) = crate::native::body_from_smlib_ordered(&brep).map_err(failed)?;

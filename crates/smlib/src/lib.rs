@@ -23,6 +23,7 @@ pub mod history;
 pub mod import;
 mod measure;
 mod ops;
+pub mod pcurves;
 mod sheets;
 mod split;
 pub mod ssi;
