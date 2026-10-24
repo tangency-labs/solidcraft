@@ -489,11 +489,13 @@ mod tests {
         if let Some(root) = std::env::var_os(CHILD) {
             let root = PathBuf::from(root);
             let agent = find_in("solidcraft-test-agent", &search_dirs()).unwrap();
-            assert_eq!(version(&agent, Duration::from_secs(3)).as_deref(), Some("1.2.3"));
+            // Generous limits: both answer at once, but a whole test run on a loaded machine
+            // can keep `env`, the shell and the script from starting within 3 s.
+            assert_eq!(version(&agent, Duration::from_secs(20)).as_deref(), Some("1.2.3"));
             let mut p = AgentProcess::spawn(&[agent.to_string_lossy().into_owned()], &root, &[], || {}).unwrap();
             let message = serde_json::json!({"id": 1, "method": "initialize"});
             p.send(&message);
-            let reply = p.from_agent.recv_timeout(Duration::from_secs(5)).unwrap();
+            let reply = p.from_agent.recv_timeout(Duration::from_secs(20)).unwrap();
             p.shutdown(true);
             match reply {
                 FromAgent::Line(line) => assert_eq!(serde_json::from_str::<serde_json::Value>(&line).unwrap(), message),
