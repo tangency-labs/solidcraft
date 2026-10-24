@@ -18,7 +18,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("body.rename", "Rename Body", rename_body).icon("rename").params("body: its name, name: the new name (features that use the body follow)"),
     CommandSpec::new("sketch.redefine", "Redefine Sketch Plane", redefine_sketch)
         .icon("plane")
-        .params("sketch: id or name; plane: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names"),
+        .params("sketch: id or name; plane: as sketch.create; frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names"),
     CommandSpec::new("browser.group", "New Group", group)
         .icon("folder")
         .params("folder: bodies|sketches|construction; component?: id (default 0); name?; items?: [keys] (they leave other groups)"),
@@ -699,6 +699,8 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let component = feature.component;
     let index = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "sketch disappeared"))?;
     let author_path = super::sketch::author_path_for_rebind(s, feature, p, cmd)?;
+    let frame = super::sketch::plane_frame(p, cmd)?;
+    let placement = solidcraft_doc::EmbossFace::component_frame(&s.placed_document(), component, &author_path)?;
     let marker = s.doc.marker;
     let mut baseline = s.scratch();
     baseline.doc_mut().marker = Some(index + 1);
@@ -783,7 +785,9 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         }),
         _ => None,
     });
-    Ok(json!({ "sketch": id,"attachment":attachment }))
+    let mut out = json!({ "sketch": id,"attachment":attachment });
+    super::sketch::frame_reply(&mut out, frame, &placement);
+    Ok(out)
 }
 
 #[cfg(test)]

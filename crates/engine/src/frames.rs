@@ -391,8 +391,11 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
         out["params"] = inner;
         return Some(out);
     }
-    // Exact face capture retains the original world pick and occurrence identity.
-    if matches!(id, "sketch.create" | "sketch.redefine") && params.get("plane").and_then(|plane| plane.get("face")).is_some() {
+    // Exact face capture retains the original world pick and occurrence identity; an explicit
+    // plane with `frame: "component"` is already in the component's own coordinates (#6000).
+    if matches!(id, "sketch.create" | "sketch.redefine")
+        && (params.get("plane").and_then(|plane| plane.get("face")).is_some() || params.get("frame").and_then(Value::as_str) == Some("component"))
+    {
         return None;
     }
     let keys = table(id);

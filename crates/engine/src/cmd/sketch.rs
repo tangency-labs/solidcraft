@@ -29,7 +29,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.create", "Create Sketch", create_sketch)
         .at("SOLID", "CREATE")
         .icon("sketch")
-        .params("plane: XY|XZ|YZ | construction plane name or id | {origin?: [x,y,z] numbers in mm, default [0,0,0] (not an expression), x_dir, y_dir} | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), project_edges?: bool, name?"),
+        .params("plane: XY|XZ|YZ | construction plane name or id | {origin?: [x,y,z] numbers in mm, default [0,0,0] (not an expression), x_dir, y_dir} (in world coordinates unless frame says otherwise; a named plane is the active component's own) | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), frame?: world (default) | component (which coordinates an explicit plane is in; the reply's `frame` says which, with a `note` when the active component is moved or turned), project_edges?: bool, name?"),
     CommandSpec::new("sketch.edit", "Edit Sketch", edit_sketch).noundo().icon("sketch").params("sketch: id or name"),
     CommandSpec::new("sketch.finish", "Finish Sketch", finish_sketch).at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo(),
     CommandSpec::new("sketch.cancel", "Cancel Sketch", cancel_sketch)
@@ -658,6 +658,40 @@ pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
     })
 }
 
+/// `frame` of `sketch.create` and `sketch.redefine` (#6000): which coordinates an explicit
+/// `{origin, x_dir, y_dir}` plane is in, `world` (the default) or the component's own. `None`
+/// for a named plane or a face, which are where they are.
+pub(super) fn plane_frame(p: &Value, cmd: &str) -> Result<Option<&'static str>> {
+    let explicit = p.get("plane").is_some_and(Value::is_object) && !face::is_face(p);
+    let frame = match p.get("frame") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(f)) if f == "world" => Some("world"),
+        Some(Value::String(f)) if f == "component" => Some("component"),
+        Some(_) => return Err(bad(cmd, "`frame` must be \"world\" or \"component\"")),
+    };
+    match (explicit, frame) {
+        (true, f) => Ok(Some(f.unwrap_or("world"))),
+        (false, None) => Ok(None),
+        (false, Some(_)) => {
+            Err(bad(cmd, "`frame` is for an explicit plane {origin, x_dir, y_dir}: a named plane is the component's own, and a face is where it is"))
+        }
+    }
+}
+
+/// The reply's `frame` for an explicit plane, with a note when a world plane went into a moved
+/// or turned component (`placement`: that component's), where it differs from the component's own.
+pub(super) fn frame_reply(out: &mut Value, frame: Option<&str>, placement: &solidcraft_doc::Mat) {
+    let Some(o) = out.as_object_mut() else { return };
+    let Some(frame) = frame else { return };
+    o.insert("frame".into(), json!(frame));
+    if frame == "world" && !solidcraft_doc::is_identity(placement) {
+        o.insert(
+            "note".into(),
+            json!("the plane was read in world coordinates and the component is moved or turned, so it is stored at that world place in the component; frame: \"component\" reads it in the component's own coordinates"),
+        );
+    }
+}
+
 /// Does triangle set of face `fi` contain point `p` (within `tol` of the face plane)?
 pub(super) fn face_contains(m: &solidcraft_geom::Mesh, fi: usize, p: Vec3, tol: f64) -> bool {
     m.triangles.iter().zip(&m.tri_face).filter(|(_, f)| **f as usize == fi).any(|(t, _)| {
@@ -691,11 +725,14 @@ fn create_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, format!("`{key}` belongs inside `plane`: {example}")));
         }
     }
+    let frame = plane_frame(p, cmd)?;
     let mut plane = plane_ref(s, p, cmd)?;
     if let Some(about_y) = flip_param(s, p, &plane, cmd)? {
         plane = PlaneRef::Flipped { base: Box::new(plane), about_y };
     }
-    create_sketch_with_plane(s, p, plane, None)
+    let mut out = create_sketch_with_plane(s, p, plane, None)?;
+    frame_reply(&mut out, frame, &s.active_component_frame());
+    Ok(out)
 }
 
 /// `flip` of `sketch.create`: `None` keeps the plane's own side, otherwise the axis to turn
