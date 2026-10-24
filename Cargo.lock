@@ -4274,6 +4274,7 @@ dependencies = [
  "solidcraft-derive",
  "solidcraft-geom",
  "solidcraft-kernel",
+ "solidcraft-manufacture",
  "solidcraft-render",
  "solidcraft-sketch",
  "thiserror 2.0.21",
@@ -4369,6 +4370,15 @@ dependencies = [
  "truck-stepio",
  "truck-topology",
  "web-time",
+]
+
+[[package]]
+name = "solidcraft-manufacture"
+version = "0.20.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
