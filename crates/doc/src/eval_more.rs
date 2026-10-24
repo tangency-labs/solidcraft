@@ -561,7 +561,7 @@ pub(super) fn sheet_eval(
             st.sheets.push(sh);
             Ok(())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief } => {
+        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief, height_from } => {
             let i = sheet_for(st, body, edges.first().map(|e| e.point.0))?;
             let (h, a) = (val(vals, height, Kind::Length)?, val(vals, angle, Kind::Angle)?);
             // Each edge's own height and angle, else the feature's.
@@ -598,6 +598,11 @@ pub(super) fn sheet_eval(
                     None => None,
                 },
             };
+            let from = match height_from {
+                Some(name) => sheet::HeightFrom::parse(name)
+                    .ok_or_else(|| DocError::Invalid(format!("unknown flange height datum `{name}` (outer, inner or tangent)")))?,
+                None => sheet::HeightFrom::Outer,
+            };
             let sh = st.sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
             if sh.flat {
                 return Err(DocError::Invalid("refold the sheet before adding flanges".into()));
@@ -606,7 +611,7 @@ pub(super) fn sheet_eval(
             let each: Vec<sheet::EdgeFlange> = sheet_picks(sh, f, &points, warning)
                 .into_iter()
                 .zip(own)
-                .map(|(pick, (height, angle))| sheet::EdgeFlange { pick, height, angle })
+                .map(|(pick, (height, angle))| sheet::EdgeFlange { pick, height, angle, from })
                 .collect();
             let n0 = sh.flanges.len();
             let (_, notes) = sh.add_flanges_each(&each, rr, position, *flip, relief)?;

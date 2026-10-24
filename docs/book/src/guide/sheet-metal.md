@@ -24,6 +24,24 @@ flat pattern. Every copy takes further sheet metal features of its own. Mirrorin
 `combine` joins the two halves into one solid, which has no single sheet model yet; mirroring
 or patterning flange features themselves is not supported yet.
 
+An edge flange's `height` runs along the flange to its far edge. Where it is measured from is
+the feature's `height_from` (Height From in the Flange dialog): `outer` (the default, Outer
+Sharp) starts at the outer virtual sharp, where the lines of the base's and the flange's outer
+faces meet, so (R + T)·tan(θ/2) of it is bend before the flat leg starts (θ the bend angle, R
+the inner radius, T the thickness); `inner` (Inner Sharp) starts at the inner virtual sharp,
+R·tan(θ/2) before the leg; `tangent` is for bends past 90°, where the outer sharp runs far
+out: it starts at the line square to the flange that touches the outside of the bend, R + T
+before the leg. Up to 90° `tangent` is the outer sharp (at 90° the two are the same line, the
+base's outer face, so the leg does not jump as the angle passes 90°). A height shorter than
+what lies before the leg is refused with the smallest one that fits. With a 2 mm sheet and a
+2 mm radius, a 90° flange 20 high has a leg of 16 from the outer sharp or the tangent and 18
+from the inner sharp; at 120° it has a leg of 13.07 from the outer sharp, 16.54 from the inner
+sharp and 16 from the tangent.
+
+```json
+{"command":"sheet.flange","params":{"edges":[[50,0,2]],"height":20,"height_from":"inner"}}
+```
+
 An edge flange takes its setback off its own edge only. Where that edge ends at an inside
 corner of the base (the base runs on past it, like the leg of an L), the rest of the base
 stays, and the rule's **bend relief** (`relief_width` and `relief_depth`; Relief Width and

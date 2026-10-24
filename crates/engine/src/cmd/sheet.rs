@@ -18,7 +18,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sheet.flange", "Flange", flange).at("SHEET METAL", "CREATE").icon("flange").params(
         "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines) + distance (rule?, flip?, reverse?) | \
          edge: edges: [[x,y,z] on top/bottom edges, or {point: [x,y,z], angle?, height?} for an edge with its own angle and height] + \
-         height (to the outer face), angle? (default 90 deg), radius? (default: rule), \
+         height (along the flange, to its far edge), angle? (default 90 deg), radius? (default: rule), \
+         height_from?: outer|inner|tangent (where the height is measured from: the outer virtual sharp (default), \
+         the inner virtual sharp, or past 90 deg the line square to the flange touching the bend's outside (tangent; up to 90 deg the outer sharp)), \
          position?: inside|outside|middle, flip?, body?, corner_relief_shape?: notch|round|rectangular|tear and corner_relief? (size across): \
          the relief at the corners these flanges make (default: the rule's); \
          type?: base|edge|contour (default from the inputs); name?, body_name? (the new body). \
@@ -206,6 +208,12 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             if !matches!(position.as_str(), "inside" | "outside" | "middle") {
                 return Err(bad(cmd, "`position` must be inside, outside or middle"));
             }
+            // Where the heights are measured from; the outer sharp (the default) is saved as nothing.
+            let height_from = match p.get("height_from").filter(|v| !v.is_null()) {
+                Some(v) => v.as_str().and_then(sheet::HeightFrom::parse).ok_or_else(|| bad(cmd, "`height_from` must be outer, inner or tangent"))?,
+                None => sheet::HeightFrom::Outer,
+            };
+            let height_from = (height_from != sheet::HeightFrom::Outer).then(|| height_from.name().to_string());
             if s.model.state().sheets.is_empty() {
                 return Err(no_sheet_body(cmd));
             }
@@ -237,6 +245,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     body: body.map(BodyName),
                     corner_relief_shape,
                     corner_relief,
+                    height_from,
                 },
             )
         }

@@ -5004,3 +5004,147 @@ fn mirroring_or_copying_a_sheet_body_leaves_the_original_sheet_as_it_was() {
         assert_eq!(copy["bends"], original["bends"], "{name}");
     }
 }
+
+/// A 100 x 60 base on XY under a rule 2 mm thick, R 2, K 0.4.
+fn r2_base(s: &mut Session) {
+    run(s, "sheet.manage_rules", json!({"name": "R2", "thickness": "2 mm", "k_factor": 0.4, "bend_radius": "2 mm", "active": true}));
+    base(s, 100.0, 60.0);
+}
+
+/// The top (z) of the sheet and its flat length across the flanged edge.
+fn top_and_flat(s: &mut Session) -> (f64, f64) {
+    let top = bbox(s)["max"][2].as_f64().unwrap_or(f64::NAN);
+    (top, flat(s)["flat_size_mm"][1].as_f64().unwrap_or(f64::NAN))
+}
+
+#[test]
+fn an_edge_flange_height_is_measured_from_the_outer_sharp_the_inner_sharp_or_the_bend_tangent() {
+    // T = 2, R = 2, K = 0.4, height 20 on the edge y = 0, inside position (setback (R + T)·tan(θ/2)).
+    // Before the leg: outer (R + T)·tan(θ/2), inner R·tan(θ/2), tangent the outer's up to 90° and
+    // R + T past it.
+    // The bend's axis is at z = T + R = 4; its far edge is the leg along the flange from the bend's
+    // end, so the top of the part is 4 − min((R + T)·cos θ, R·cos θ) + leg·sin θ, and the flat is
+    // 60 − setback + θ·(R + K·T) + leg.
+    let (t, r, k) = (2.0, 2.0, 0.4);
+    for deg in [90.0f64, 60.0, 120.0] {
+        let th = deg.to_radians();
+        let half = (th / 2.0).tan();
+        for (from, before) in [("outer", (r + t) * half), ("inner", r * half), ("tangent", if deg <= 90.0 { (r + t) * half } else { r + t })] {
+            let what = format!("{deg}° from {from}");
+            let mut s = Session::default();
+            r2_base(&mut s);
+            run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": format!("{deg} deg"), "height_from": from}));
+            let leg = 20.0 - before;
+            let top = r + t - ((r + t) * th.cos()).min(r * th.cos()) + leg * th.sin();
+            let length = 60.0 - (r + t) * half + th * (r + k * t) + leg;
+            let (got_top, got_flat) = top_and_flat(&mut s);
+            assert!((got_top - top).abs() < 1e-6, "{what}: top {got_top}, want {top}");
+            assert!((got_flat - length).abs() < 1e-6, "{what}: flat {got_flat}, want {length}");
+        }
+    }
+    // At 90°: legs 16, 18 and 16, so the far edge is at z = 20, 22 and 20.
+    let tops: Vec<f64> = ["outer", "inner", "tangent"]
+        .iter()
+        .map(|from| {
+            let mut s = Session::default();
+            r2_base(&mut s);
+            run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "height_from": from}));
+            top_and_flat(&mut s).0
+        })
+        .collect();
+    for (got, want) in tops.iter().zip([20.0, 22.0, 20.0]) {
+        assert!((got - want).abs() < 1e-6, "{tops:?}");
+    }
+}
+
+#[test]
+fn an_edge_flange_measured_from_the_outer_sharp_saves_and_builds_as_before() {
+    let build = |extra: Option<&str>| {
+        let mut s = Session::default();
+        r2_base(&mut s);
+        let mut p = json!({"edges": [[50, 0, 2]], "height": 20, "angle": "75 deg"});
+        if let Some(from) = extra {
+            p["height_from"] = json!(from);
+        }
+        run(&mut s, "sheet.flange", p);
+        let kind = serde_json::to_value(s.doc.features.last().map(|f| f.kind.clone())).unwrap_or_default();
+        let (top, length) = top_and_flat(&mut s);
+        (kind, top, length, volume(&mut s))
+    };
+    let (plain, top, length, v) = build(None);
+    assert!(plain.get("height_from").is_none(), "{plain}");
+    let (outer, top_o, length_o, v_o) = build(Some("OUTER"));
+    assert_eq!(plain, outer);
+    assert_eq!((top, length, v), (top_o, length_o, v_o));
+    let (inner, ..) = build(Some("inner"));
+    assert_eq!(inner["height_from"], "inner", "{inner}");
+}
+
+#[test]
+fn an_edge_flange_too_short_for_its_height_datum_or_with_an_unknown_one_is_refused() {
+    let mut s = Session::default();
+    r2_base(&mut s);
+    let (features, v) = (s.doc.features.len(), volume(&mut s));
+    let err = |s: &mut Session, p: Value| match s.execute("sheet.flange", &p) {
+        Ok(v) => panic!("{p} was accepted: {v}"),
+        Err(e) => e.to_string(),
+    };
+    // From the inner sharp at 90° the bend takes R·tan 45° = 2; from the tangent past 90°, R + T = 4.
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 1.5, "height_from": "inner"}));
+    assert!(e.contains("from the inner sharp must be at least 2.000 mm"), "{e}");
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 3, "angle": "120 deg", "height_from": "tangent"}));
+    assert!(e.contains("from the bend's tangent must be at least 4.000 mm"), "{e}");
+    // From the outer sharp the message is the one it always was.
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 3.9, "height_from": "outer"}));
+    assert!(e.contains("height must be at least 4.000 mm"), "{e}");
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 20, "height_from": "middle"}));
+    assert!(e.contains("`height_from` must be outer, inner or tangent"), "{e}");
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 20, "height_from": 3}));
+    assert!(e.contains("`height_from`"), "{e}");
+    assert_eq!(s.doc.features.len(), features);
+    assert!(rel(volume(&mut s), v) < 1e-12);
+    // Up to 90° the tangent is the outer sharp: at 90° the bend takes R + T = 4, at 60° 4·tan 30°.
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 3.9, "height_from": "tangent"}));
+    assert!(e.contains("from the bend's tangent must be at least 4.000 mm"), "{e}");
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 2.3, "angle": "60 deg", "height_from": "tangent"}));
+    assert!(e.contains("from the bend's tangent must be at least 2.309 mm"), "{e}");
+    assert_eq!(s.doc.features.len(), features);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 4, "height_from": "tangent"}));
+    assert_eq!(s.doc.features.len(), features + 1);
+}
+
+#[test]
+fn an_edge_flange_measured_from_the_tangent_does_not_jump_as_its_angle_passes_90_degrees() {
+    // T = 2, R = 2, K = 0.4, height 20 from the tangent, inside position. Before the leg:
+    // (R + T)·tan(θ/2) up to 90° (the outer sharp), R + T past it; at 90° both are 4, so the leg,
+    // the top and the flat change smoothly through 90°.
+    let (t, r, k) = (2.0, 2.0, 0.4);
+    let build = |deg: f64| {
+        let th = deg.to_radians();
+        let half = (th / 2.0).tan();
+        let before = if deg <= 90.0 { (r + t) * half } else { r + t };
+        let leg = 20.0 - before;
+        let top = r + t - ((r + t) * th.cos()).min(r * th.cos()) + leg * th.sin();
+        let length = 60.0 - (r + t) * half + th * (r + k * t) + leg;
+        let mut s = Session::default();
+        r2_base(&mut s);
+        run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": format!("{deg} deg"), "height_from": "tangent"}));
+        let (got_top, got_flat) = top_and_flat(&mut s);
+        assert!((got_top - top).abs() < 1e-6, "{deg}°: top {got_top}, want {top}");
+        assert!((got_flat - length).abs() < 1e-6, "{deg}°: flat {got_flat}, want {length}");
+        (got_top, got_flat)
+    };
+    // 60°: leg 20 − 4·tan 30° = 17.691, as from the outer sharp; the inner face's end is highest
+    // at the bend, 4 − R·cos 60° = 3.
+    let (top60, _) = build(60.0);
+    let want = 4.0 - 2.0 * 0.5 + (20.0 - 4.0 * (30f64.to_radians()).tan()) * (60f64.to_radians()).sin();
+    assert!((top60 - want).abs() < 1e-6, "60°: top {top60}, want {want}");
+    // 90°: leg 16, top 20.
+    let (top90, flat90) = build(90.0);
+    assert!((top90 - 20.0).abs() < 1e-6, "90°: top {top90}");
+    // A thousandth of a degree either side moves the top and the flat by hundredths at most.
+    for deg in [90.0 - 1e-3, 90.0 + 1e-3] {
+        let (top, flat) = build(deg);
+        assert!((top - top90).abs() < 1e-2 && (flat - flat90).abs() < 1e-2, "{deg}°: top {top} flat {flat}, at 90° {top90} {flat90}");
+    }
+}

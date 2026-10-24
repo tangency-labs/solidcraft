@@ -23,6 +23,9 @@ const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of 
 const FLANGE_TYPES: [&str; 3] = ["Base", "Edge", "Contour"];
 const POSITIONS: [&str; 3] = ["inside", "outside", "middle"];
 const POSITION_LABELS: [&str; 3] = ["Inside", "Outside", "Middle"];
+/// Where an edge flange's height is measured from (`height_from`; the first is the default).
+const HEIGHT_FROM: [&str; 3] = ["outer", "inner", "tangent"];
+const HEIGHT_FROM_LABELS: [&str; 3] = ["Outer Sharp", "Inner Sharp", "Tangent"];
 /// Rule fields the manager edits (parameter name, label).
 const RULE_FIELDS: [(&str, &str); 8] = [
     ("thickness", "Thickness"),
@@ -65,6 +68,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 angle: String,
                 radius: String,
                 position: usize,
+                /// Edge flanges: where the height is measured from (index into `HEIGHT_FROM`).
+                height_from: usize,
                 flip: bool,
                 distance: String,
                 reverse: bool,
@@ -142,6 +147,7 @@ fn new_flange(ty: usize) -> Sm {
         angle: "90 deg".into(),
         radius: String::new(),
         position: 0,
+        height_from: 0,
         flip: false,
         distance: "20 mm".into(),
         reverse: false,
@@ -207,7 +213,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
     let t = Tokens::get();
     let mut enter = false;
     match k {
-        Sm::Flange { ty, height, angle, radius, position, flip, distance, reverse, rule, own, relief, relief_size } => {
+        Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
                 ui.label(FLANGE_TYPES.get(*ty).copied().unwrap_or(""));
@@ -217,6 +223,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     enter |= expr_row(ui, "Height", height);
                     enter |= expr_row(ui, "Angle", angle);
                     choice_row(ui, "Bend Position", "sm_pos", position, &POSITION_LABELS);
+                    choice_row(ui, "Height From", "sm_height_from", height_from, &HEIGHT_FROM_LABELS);
                     crate::ui_kit::section(ui, "flange_advanced", "Advanced", false, |ui| {
                         enter |= hint_row(ui, "Bend Radius", radius, crate::i18n::tr_label("from the rule"));
                         // The relief at the corners these flanges make: the rule's unless set here.
@@ -476,12 +483,15 @@ fn flange_edges(inputs: &[SelInput], own: &[(Vec3, String, String)]) -> Vec<Valu
 pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
     let (cmd, mut p): (&str, Value) = match k {
-        Sm::Flange { height, angle, radius, position, flip, distance, reverse, rule, own, relief, relief_size, .. } => {
+        Sm::Flange { height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, .. } => {
             let mut p = match flange_type(inputs) {
                 1 => {
                     let mut p = json!({"type": "edge", "edges": flange_edges(inputs, own), "height": height, "angle": angle,
                         "position": POSITIONS.get(*position).copied().unwrap_or("inside")});
                     put(&mut p, &[("radius", radius)]);
+                    if let Some(from) = HEIGHT_FROM.get(*height_from).filter(|_| *height_from > 0) {
+                        p["height_from"] = json!(from);
+                    }
                     if let Some(shape) = relief.checked_sub(1).and_then(|i| RELIEF_SHAPES.get(i)) {
                         p["corner_relief_shape"] = json!(shape);
                     }
@@ -613,7 +623,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (f, curves.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief } => {
+        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief, height_from } => {
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
             }
@@ -637,6 +647,10 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 angle: angle.to_string(),
                 radius: radius.as_deref().map(str::to_string).unwrap_or_default(),
                 position: POSITIONS.iter().position(|p| p == position).unwrap_or(0),
+                height_from: height_from
+                    .as_deref()
+                    .and_then(|name| HEIGHT_FROM.iter().position(|h| h.eq_ignore_ascii_case(name.trim())))
+                    .unwrap_or(0),
                 flip: *flip,
                 distance: "20 mm".into(),
                 reverse: false,

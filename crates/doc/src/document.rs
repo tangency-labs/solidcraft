@@ -1085,6 +1085,11 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Corner relief")]
         corner_relief: Option<Expr>,
+        /// Where the heights are measured from: `inner` (the inner virtual sharp) or `tangent`
+        /// (past 90° the line square to the flange touching the bend's outside); none is the outer
+        /// virtual sharp (`sheet::HeightFrom`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        height_from: Option<String>,
     },
     /// Flat hems on sheet edges.
     SheetHem {
