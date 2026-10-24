@@ -20,6 +20,12 @@ pub(crate) struct Segments<'a> {
 }
 
 pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Segments<'_>) -> bool {
+    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, options) {
+        return false;
+    }
+    if crate::prefs_search::querying(ui) && !crate::prefs_search::shows_all(ui) {
+        crate::prefs_search::reveal(ui);
+    }
     let Segments { states, compact, primary, intrinsic, proportional } = config;
     let t = Tokens::get();
     let segment_width = dimension(ui.available_width()) / options.len().max(1) as f32;

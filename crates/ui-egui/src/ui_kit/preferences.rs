@@ -84,6 +84,10 @@ impl From<Tokens> for ThemeSwatch {
 
 /// Controls and one explanatory specimen side by side, stacked on narrow viewports.
 pub(crate) fn settings_pair<R>(ui: &mut Ui, controls: impl FnOnce(&mut Ui) -> R, preview: impl FnOnce(&mut Ui, R)) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        let _ = controls(ui);
+        return;
+    }
     let t = Tokens::get();
     let preview_width = t.form_card_width - t.space_8;
     let gap = t.space_16 + t.space_4;
@@ -134,6 +138,9 @@ pub(crate) fn theme_rail(ui: &mut Ui, tiles: impl FnOnce(&mut Ui), import: impl 
 
 /// Dashed import tile matches the swatch tiles, while remaining permanently visible.
 pub(crate) fn theme_import_tile(ui: &mut Ui, label: &str, note: &str) -> Response {
+    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[label, note]) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     let t = Tokens::get();
     let width = t.form_label_width + t.space_24 + t.space_6;
     let height = t.control_height + t.space_6 * 2.0 + t.space_4 + t.space_16 * 2.0;
@@ -169,6 +176,9 @@ pub(crate) fn theme_import_tile(ui: &mut Ui, label: &str, note: &str) -> Respons
 
 /// Compact informational state badge for settings; never an interactive control.
 pub(crate) fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
+    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[text]) {
+        return;
+    }
     let t = Tokens::get();
     let ink =
         if warning { if crate::theme::contrast_ratio(t.warning, t.dialog_body) >= 4.5 { t.warning } else { t.form_ink } } else { t.form_success };
@@ -451,6 +461,9 @@ pub(crate) fn layout_preview(ui: &mut Ui, state: LayoutPreview) {
 }
 
 pub(crate) fn tab_accent_strip(ui: &mut Ui) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let t = Tokens::get();
     super::text(ui, crate::i18n::tr("prefs.tab_accent_note"), super::Text::Hint("tab_accent"));
     let names =
@@ -533,6 +546,9 @@ pub(crate) fn settings_font_row(ui: &mut Ui, label: &str, mut add: impl FnMut(&m
 
 /// Natural-width dim text, for inline suffixes and metadata without a full-width note row.
 pub(crate) fn settings_inline_note(ui: &mut Ui, text: &str) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let t = Tokens::get();
     let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_body), t.form_dim);
     let (r, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
@@ -542,6 +558,9 @@ pub(crate) fn settings_inline_note(ui: &mut Ui, text: &str) {
 
 /// Framed font specimen, inheriting the chosen application font and its fallback glyphs.
 pub(crate) fn font_specimen(ui: &mut Ui, text: &str) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let t = Tokens::get();
     let (r, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height + t.space_10), Sense::hover());
     t.container_rect(ui.painter(), r, t.control_radius, t.control_fill, t.dialog_rule);
