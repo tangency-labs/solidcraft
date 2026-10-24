@@ -3,7 +3,7 @@
 //! the executive object.
 //!
 //! Upstream: `source/SMLib/src/SmFilletExecutive.cpp` (lines 30-292, 488-523,
-//! 1601-1881, 4909-4929, 5126-6132), `source/SMLib/inc/SmFilletExecutive.h`.
+//! 1601-1881, 3979-4120, 4909-4929, 5126-6132), `source/SMLib/inc/SmFilletExecutive.h`.
 //!
 //! The law type itself ([`FilletLaw`], [`FilletLawKind`]) was CO-PORTED by unit
 //! `blend.fillet_standard_solver_p1` into
@@ -40,6 +40,8 @@
 //! | [`FilletExecutive::new`], [`ExecutiveObjects`] | `SmFilletExecutive::SmFilletExecutive`        |
 //! | [`FilletExecutive::load_fillet_solver`] | `LoadFilletSolver` |
 //! | [`FilletExecutive::create_fillet_corners`] | `CreateFilletCorners` |
+//! | [`remove_topo_edges`]                  | `RemoveTopoEdges`                                     |
+//! | [`FilletExecutive::set_bevel_corner`]  | `SetBevelCorner`                                      |
 //! | [`FilletExecutive::add_fillet_surface_generator`] | `AddFilletSurfaceGenerator`                |
 //! | [`FilletExecutive::remove_from_topo_edges`] | `RemoveFromTopoEdges`                            |
 //! | [`FilletExecutive::set_do_global_merge`], [`FilletExecutive::set_do_trimming`], [`FilletExecutive::set_self_intersection_handler`] | `SetDoGlobalMerge`, `SetDoTrimming`, `SetSelfIntersectionHandler` |
@@ -81,8 +83,23 @@
 //!   leaves `m_bIsInitialized` unset; it is `false` here, the value the first upstream
 //!   write (`SetFilletParameters`) gives it. A null surface generator is not
 //!   representable (no upstream caller adds one). `GetContext` is
-//!   not ported (no context object). The destructor (deleting the owned objects) and
-//!   `SetBevelCorner` wait for the owner's object model.
+//!   not ported (no context object). The destructor (deleting the owned objects)
+//!   waits for the owner's object model. `SetBevelCorner` reaches the corner through
+//!   the owner's closure.
+//! - `RemoveTopoEdges` is the free function [`remove_topo_edges`] over the target
+//!   B-rep and the topo edges (the executive holds handles; its owner resolves them and
+//!   calls it from `ExecutiveAccess::remove_topo_edges`). Faces own their surfaces, so
+//!   two faces' surfaces differ unless both are null or the faces are the same face; a
+//!   face with a surface beside one without is [`SolidError::InvalidInput`] (upstream
+//!   dereferences null). The copy replacing a deleted surface keeps the identity that
+//!   surface named its face by. An edge or vertex freed by an earlier deletion is
+//!   [`SolidError::NotFound`] (upstream reads freed memory). A failed
+//!   `DeleteTopologicalVertex` is ignored as upstream does, except
+//!   [`SolidError::Unported`] and the port's own [`SolidError::InvalidInput`] /
+//!   [`SolidError::NotFound`]. The deletions run with local notification
+//!   environments, and the replaced surface is dropped without a destruction
+//!   notification: an owner whose attributes (the fillet-edges attribute the topo
+//!   edges are users of) must follow the deletions keeps them itself.
 //! - No recursion.
 
 use std::collections::BTreeMap;
@@ -93,6 +110,7 @@ use crate::blend::fillet_executive::p3::{
 use crate::blend::fillet_geom::p1::{FilStatus, FilletCornerType, FilletEdgeType, FilletErrorType};
 pub use crate::blend::fillet_standard_solver::p1::{FilletLaw, FilletLawKind};
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
+use crate::error::EntityRef;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -102,6 +120,11 @@ use crate::intersect::point_class::ClassObject;
 use crate::kernel::Kernel;
 use crate::math::{Point3, EFF_ZERO, EFF_ZERO_SQ, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::surface::surface::Surface;
+use crate::topology::brep::{p4 as brep_p4, p5 as brep_p5};
+use crate::topology::edge as topo_edge;
+use crate::topology::face::{p1 as face_p1, p2 as face_p2};
+use crate::topology::{loopuse, vertex, Brep, EdgeId};
 
 const OP_EVAL: &str = "blend::fillet_executive::p1::FilletLaw::evaluate";
 const OP_NOTE: &str = "blend::fillet_executive::p1::FilletExecutive::note_fillet_error";
@@ -978,6 +1001,132 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         }
         Ok(())
     }
+
+    /// `SmFilletExecutive::SetBevelCorner`: makes the corner of `vertex` a bevel
+    /// (`SetBevel(TRUE)`) through `set_bevel`, the owner's access to its corner
+    /// objects.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NULL_POINTER` ([`SolidError::null_pointer`]) when `vertex` has no entry
+    /// (`NER`); [`SolidError::InvalidInput`] when its entry is still the pending
+    /// edge-use list (upstream casts the list to a corner); those of `set_bevel`.
+    pub fn set_bevel_corner(
+        &self,
+        vertex: Option<O>,
+        set_bevel: impl FnOnce(O) -> Result<()>,
+    ) -> Result<()> {
+        use crate::blend::fillet_executive::p3::VertexEntry;
+
+        const OP: &str = "blend::fillet_executive::p1::FilletExecutive::set_bevel_corner";
+        match self.vertex_corner_map.get(&vertex) {
+            Some(VertexEntry::Corner(corner)) => set_bevel(*corner),
+            Some(VertexEntry::SolverEdgeuses(_)) => Err(SolidError::invalid_input(
+                OP,
+                "no corner created for the vertex",
+            )),
+            None => Err(SolidError::null_pointer(OP)),
+        }
+    }
+}
+
+// ---- RemoveTopoEdges -----------------------------------------------------------------------
+
+/// `SmFilletExecutive::RemoveTopoEdges`: deletes the target B-rep's `m_vTopoEdges`
+/// (`edges`, in order), edges that can go without changing the modelled shape, such
+/// as struts.
+///
+/// Where an edge joins two faces with different surfaces, the face whose surface's
+/// natural domain lies inside the other's (to `SM_EFF_ZERO`; otherwise the second
+/// face) takes a `CopyAndAddAnalytics` copy of the other surface and its own is
+/// deleted. Then the edge is deleted, its vertices left without edges are deleted,
+/// and a vertex left between two different manifold edges (four vertex uses) is
+/// removed by `DeleteTopologicalVertex`, merging the edges; when that fails the
+/// vertex stays, as upstream ignores the status. The faces of `b` own their surfaces
+/// (as every face here does); the edits notify through local environments only.
+///
+/// # Errors
+///
+/// The statuses of `DeleteEdge`, `DeleteVertex` and `CopyAndAddAnalytics`; the port's
+/// own errors from `DeleteTopologicalVertex`;
+/// [`SolidError::InvalidInput`] for a null edge or vertex, or for one face with a
+/// surface and one without, where upstream dereferences null;
+/// [`SolidError::NotFound`] for an edge or vertex an earlier deletion removed
+/// (upstream reads freed memory).
+pub fn remove_topo_edges(k: &mut Kernel, b: &mut Brep, edges: &[Option<EdgeId>]) -> Result<()> {
+    const OP: &str = "blend::fillet_executive::p1::remove_topo_edges";
+
+    // for every Edge in the m_vTopoEdges list
+    for &edge in edges {
+        let edge = edge.ok_or_else(|| SolidError::invalid_input(OP, "null topo edge"))?;
+        let verts = topo_edge::vertices(b, edge, None)?;
+        let faces = topo_edge::faces(b, edge, None)?;
+
+        // for manifold edges, when faces are defined by different surfaces:
+        // copy one surface, delete the other, and map its face to the copy
+        if let [f0, f1] = faces[..] {
+            let domains = match (face_p2::surface(b, f0)?, face_p2::surface(b, f1)?) {
+                (None, None) => None,
+                (Some(s0), Some(s1)) => Some((s0.natural_uv_domain(), s1.natural_uv_domain())),
+                _ => return Err(SolidError::invalid_input(OP, "face without surface")),
+            };
+            if let Some((domain0, domain1)) = domains {
+                // pick a surface to delete
+                let (kept_face, delete_face) = if domain0.is_contained_by(&domain1, EFF_ZERO) {
+                    (f1, f0)
+                } else {
+                    (f0, f1)
+                };
+
+                // Copy the KeptSurface, when possible as an analytic surface
+                let new_surface = face_p2::surface(b, kept_face)?
+                    .ok_or_else(|| SolidError::invalid_input(OP, "face without surface"))?
+                    .copy_and_add_analytics(k)?;
+                let face_domain = new_surface.natural_uv_domain();
+                face_p2::set_uv_domain(b, delete_face, &face_domain)?;
+                // the face owns the copy (under the identity the DeleteSurface names it
+                // by); the DeleteSurface is deleted
+                let this = face_p2::surface(b, delete_face)?
+                    .and_then(Surface::owner)
+                    .unwrap_or_else(|| loopuse::notify_ref(EntityRef::Face(delete_face)));
+                face_p1::set_surface(b, delete_face, this, new_surface, true)?;
+            }
+        }
+
+        // Now delete the edge
+        brep_p4::with_local_env(|d| brep_p4::delete_edge(k, b, d, edge, None))?;
+
+        // Delete topological vertex and combine two adjacent edges
+        for vertex in verts {
+            let vertex = vertex.ok_or_else(|| SolidError::invalid_input(OP, "null vertex"))?;
+            match vertex::edges(b, vertex, None)?[..] {
+                [] => brep_p4::with_local_env(|d| brep_p4::delete_vertex(k, b, d, vertex))?,
+                // when vertex is connected to just two different manifold edges
+                [e1, e2]
+                    if vertex::vertexuses(b, vertex)?.len() == 4
+                        && topo_edge::is_manifold(b, e1)?
+                        && topo_edge::is_manifold(b, e2)?
+                        && e1 != e2 =>
+                {
+                    // Not passing in an edge to delete will remove the shorter edge;
+                    // when unable to really combine edges, go on
+                    let editing = b.editing_enabled();
+                    if let Err(
+                        e @ (SolidError::Unported { .. }
+                        | SolidError::InvalidInput { .. }
+                        | SolidError::NotFound { .. }),
+                    ) = brep_p5::delete_topological_vertex(k, b, editing, Some(vertex), None)
+                    {
+                        // the port's own failures (a dangling id, a modelled null
+                        // dereference) are not upstream statuses
+                        return Err(e);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

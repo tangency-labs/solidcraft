@@ -35,6 +35,11 @@
 //!                     GetFilletCornerOfVertex / GetFilletSolverOfEdgeuse
 //! 20 code fe_type status text                             (ExecScript only) a real
 //!                     SmFilletEdge of that type and status, then NoteFilletError(code, it, text)
+//! 21 v                                                    (ExecScript only) a real
+//!                     SmFilletConvexNxNCorner, added to m_vFilletCorners and mapped to v
+//! 22 v                                                    (ExecScript only) query
+//!                     SetBevelCorner(v): `status [is_bevel]` (IsBevelCorner on success);
+//!                     refused when v maps to a fake corner pointer
 //! ```
 //!
 //! In an `ExecScript` calls 2, 3 and 5 go through the matching `NoteFilletError`
@@ -77,6 +82,17 @@ mod sys {
             op: i32,
             input: *const f64,
             n_in: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+        pub fn sc_blend_fillet_executive_p1_remove_topo_edges(
+            path: *const std::ffi::c_char,
+            input: *const f64,
+            n_in: i64,
+            edges: *const i64,
+            n_edges: i64,
+            editing: i32,
             out: *mut f64,
             cap: i64,
             out_len: *mut i64,
@@ -180,10 +196,16 @@ fn text(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     Ok(())
 }
 
-/// One call of the script; `exec` allows the executive calls.
-fn call(rd: &mut Reader<'_>, exec: bool) -> Result<(), FfiError> {
+/// Validates one call of the script; `exec` allows the executive calls. `corners` follows `m_vVertexCornerMap`: `true` for a vertex
+/// whose entry is NULL or a real corner (call 21), `false` for a fake corner pointer,
+/// which `SetBevelCorner` (call 22) would dereference.
+fn call(
+    rd: &mut Reader<'_>,
+    exec: bool,
+    corners: &mut std::collections::BTreeMap<usize, bool>,
+) -> Result<(), FfiError> {
     let (code, status, corner, fe_type) = (7, 12, 12, 14);
-    match rd.index(20)? {
+    match rd.index(22)? {
         0 => {
             rd.index(code)?;
             text(rd)
@@ -232,9 +254,27 @@ fn call(rd: &mut Reader<'_>, exec: bool) -> Result<(), FfiError> {
         }
         10 | 11 if exec => rd.flag().map(|_| ()),
         12..=15 | 18 | 19 if exec => handle(rd),
-        16 | 17 if exec => {
+        16 if exec => {
+            let v = rd.index(MAX_HANDLE)?;
+            let c = rd.index(MAX_HANDLE)?;
+            corners.insert(v, c == 0);
+            Ok(())
+        }
+        17 if exec => {
             handle(rd)?;
             handle(rd)
+        }
+        21 if exec => {
+            corners.insert(rd.index(MAX_HANDLE)?, true);
+            Ok(())
+        }
+        22 if exec => {
+            if corners.get(&rd.index(MAX_HANDLE)?) == Some(&false) {
+                return Err(crate::units::blend_fillet_standard_solver_p1::bad(
+                    "SetBevelCorner on a fake corner pointer",
+                ));
+            }
+            Ok(())
         }
         20 if exec => {
             rd.index(code)?;
@@ -263,8 +303,9 @@ fn call(rd: &mut Reader<'_>, exec: bool) -> Result<(), FfiError> {
 pub fn object_eval(op: ObjectOp, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     let mut rd = Reader { input, at: 0 };
     handle(&mut rd)?;
+    let mut corners = std::collections::BTreeMap::new();
     for _ in 0..rd.index(MAX_SCRIPT)? {
-        call(&mut rd, op == ObjectOp::ExecScript)?;
+        call(&mut rd, op == ObjectOp::ExecScript, &mut corners)?;
     }
     rd.done()?;
     call_with_buffer(16384, |buf, len| {
@@ -277,6 +318,51 @@ pub fn object_eval(op: ObjectOp, input: &[f64]) -> Result<Vec<f64>, FfiError> {
                 op as i32,
                 input.as_ptr(),
                 input.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}
+
+/// `SmFilletExecutive::RemoveTopoEdges` on the fixture B-rep the block `input` builds
+/// (`topology_topology_traverser::export`), its `edges` given as indices into the walk
+/// of that B-rep. Output: `-1` when the fixture does not build, `-3` when two listed
+/// edges share a vertex and `-4` when a face of one does not own its surface (the
+/// shim's guards), else `status editing graph...` (the
+/// B-rep's exported graph after the call, as the traverser exports it).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for an edge index out of range or more than
+/// [`MAX_LIST`] edges; those of the traverser export.
+pub fn remove_topo_edges(
+    path: &str,
+    input: &[f64],
+    edges: &[i64],
+    editing: bool,
+) -> Result<Vec<f64>, FfiError> {
+    let fixture = crate::units::topology_topology_traverser::export(path, input)?;
+    let Some(c) = crate::units::topology_vertexuse::counts(&fixture.graph) else {
+        // the fixture does not build: the shim reports it without running anything
+        return Ok(vec![-1.0]);
+    };
+    if edges.len() > MAX_LIST || edges.iter().any(|&e| e < 0 || e as u64 >= c[7] as u64) {
+        return Err(FfiError::InvalidArgument("blend.fillet_executive_p1: edge index".into()));
+    }
+    let cpath = std::ffi::CString::new(path).map_err(|_| FfiError::InvalidArgument("blend.fillet_executive_p1: path".into()))?;
+    call_with_buffer(1 << 16, |buf, len| {
+        // SAFETY: the block was validated by the traverser export above, the edge
+        // indices are in range of the B-rep it builds, and all buffers are owned here.
+        unsafe {
+            sys::sc_blend_fillet_executive_p1_remove_topo_edges(
+                cpath.as_ptr(),
+                input.as_ptr(),
+                input.len() as i64,
+                edges.as_ptr(),
+                edges.len() as i64,
+                i32::from(editing),
                 buf.as_mut_ptr(),
                 buf.len() as i64,
                 &raw mut *len,

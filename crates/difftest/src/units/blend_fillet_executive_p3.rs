@@ -237,6 +237,19 @@ impl ExecutiveAccess<Handle> for Access {
         }
         r
     }
+    /// The fixture's B-reps carry no edge objects, so only an empty topo-edge list
+    /// (`remove_topo_edges` over no edges, a no-op) can run.
+    fn remove_topo_edges(
+        &mut self,
+        _: &mut Kernel,
+        executive: &mut FilletExecutive<Handle>,
+    ) -> SolidResult<()> {
+        if executive.topo_edges.is_empty() {
+            Ok(())
+        } else {
+            missing()
+        }
+    }
     fn orient_trimmed_surfaces(
         &mut self,
         k: &mut Kernel,

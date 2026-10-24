@@ -7,7 +7,8 @@
 //! intervals (forward or reversed), then dumps the extension the B-spline law cached
 //! and `IsKindOf` answers. An object case (`object_eval`) runs a script of `NoteError`
 //! calls on an `SmFilletErrorInfo`, or of those and the setters on a new
-//! `SmFilletExecutive`, and dumps the resulting members.
+//! `SmFilletExecutive`, and dumps the resulting members. A `remove_topo_edges` case
+//! ([`topo`]) runs `RemoveTopoEdges` on a fixture B-rep and compares the B-reps after it.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -26,16 +27,21 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::object::OBJECT_TYPE;
 use solidcore::math::EFF_ZERO;
 use solidcore::nurbs::math::NOW;
+use solidcore::SolidError;
 use solidcore_ffi::units::blend_fillet_executive_p1 as ffi;
 
 use super::blend_fillet_standard_solver_p1::{
     bcurve_of, dump_curve, push_crv, status, uniform_knots, InlineCrv,
 };
 use crate::util::flag;
-use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use crate::runner::default_cases;
+use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 
 /// `blend.fillet_executive_p1` runner.
 pub struct Runner;
+
+#[path = "blend_fillet_executive_p1/topo.rs"]
+mod topo;
 
 /// The law to build.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +80,9 @@ struct Inputs {
 enum CaseIn {
     Loader {
         loader: super::blend_fillet_executive_p2::LoaderScript,
+    },
+    Topo {
+        remove_topo_edges: topo::TopoIn,
     },
     Law(Inputs),
     Object(ObjectIn),
@@ -243,6 +252,7 @@ impl UnitDiff for Runner {
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let flat = match case.parse()? {
+            CaseIn::Topo { remove_topo_edges } => return topo::cpp(&remove_topo_edges),
             CaseIn::Loader { loader } => super::blend_fillet_executive_p2::loader_cpp(&loader),
             CaseIn::Law(i) => ffi::law_eval(&cpp_input(&i)),
             CaseIn::Object(i) => ffi::object_eval(i.parts().0, &object_cpp_input(&i)),
@@ -253,10 +263,27 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         match case.parse()? {
+            CaseIn::Topo { remove_topo_edges } => topo::rust(&remove_topo_edges),
             CaseIn::Loader { loader } => super::blend_fillet_executive_p2::loader_rust(&loader),
             CaseIn::Law(i) => rust(&i),
             CaseIn::Object(i) => object_rust(&i),
         }
+    }
+
+    fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
+        let mut v = default_cases(self, ctx)?;
+        // the `RemoveTopoEdges` cases under their own names and seeds, so that each
+        // `gen` case stays the one the baseline has
+        let topo_ctx = CaseContext {
+            seeds: ctx.seeds.max(topo::MIN_GENERATED),
+            ..ctx.clone()
+        };
+        for mut c in topo_ctx.generated_cases("blend.fillet_executive_p1:topo", topo::generate) {
+            c.unit = self.id().to_string();
+            c.name = c.name.replacen("gen", "topo", 1);
+            v.push(c);
+        }
+        Ok(v)
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
@@ -437,6 +464,10 @@ enum Step {
     CornerOf { v: u32 },
     /// `GetFilletSolverOfEdgeuse(eu)`.
     SolverOf { eu: u32 },
+    /// A real `SmFilletConvexNxNCorner` in `m_vFilletCorners`, mapped to `v`.
+    MakeCorner { v: u32 },
+    /// `SetBevelCorner(v)`, then `IsBevelCorner` of its corner on success.
+    Bevel { v: u32 },
     /// `NoteFilletError(code, pFilletEdge, cComment)` on a new fillet edge of `fe_type`
     /// and `status`.
     NoteFilletError {
@@ -568,6 +599,8 @@ fn object_cpp_input(i: &ObjectIn) -> Vec<f64> {
             Step::MapSolver { eu, s } => o.extend([17.0, f64::from(*eu), f64::from(*s)]),
             Step::CornerOf { v } => o.extend([18.0, f64::from(*v)]),
             Step::SolverOf { eu } => o.extend([19.0, f64::from(*eu)]),
+            Step::MakeCorner { v } => o.extend([21.0, f64::from(*v)]),
+            Step::Bevel { v } => o.extend([22.0, f64::from(*v)]),
             Step::NoteFilletError {
                 code,
                 fe_type,
@@ -833,6 +866,30 @@ fn exec_step(
         }
         Step::CornerOf { v } => q.push(out_handle(x.fillet_corner_of_vertex(H(*v)).map_err(|e| HarnessError::new(e.to_string()))?)),
         Step::SolverOf { eu } => q.push(out_handle(x.fillet_solver_of_edgeuse(H(*eu)))),
+        Step::MakeCorner { v } => {
+            let corner = H(MADE - *made);
+            *made += 1;
+            x.corners.push(corner);
+            x.vertex_corner_map.insert(
+                Some(H(*v)),
+                solidcore::blend::fillet_executive::p3::VertexEntry::Corner(corner),
+            );
+        }
+        Step::Bevel { v } => {
+            // the made corners take the bevel; a NULL map value is `NER`'s null pointer
+            let mut bevel = false;
+            let r = x.set_bevel_corner(Some(H(*v)), |c| {
+                if c == H(0) {
+                    return Err(SolidError::null_pointer("harness::set_bevel"));
+                }
+                bevel = true;
+                Ok(())
+            });
+            match r {
+                Ok(()) => q.extend([0.0, f64::from(u8::from(bevel))]),
+                Err(e) => q.push(status(&e)),
+            }
+        }
         Step::NoteFilletError {
             code,
             fe_type,
@@ -962,7 +1019,7 @@ fn gen_named_edge_type(rng: &mut Rng) -> u8 {
 fn gen_step(rng: &mut Rng, exec: bool) -> Step {
     let code = rng.below(8) as u8;
     let status = rng.below(13) as u8;
-    match rng.below(if exec { 17 } else { 6 }) {
+    match rng.below(if exec { 19 } else { 6 }) {
         0 => Step::Note {
             code,
             comment: gen_text(rng),
@@ -1029,6 +1086,8 @@ fn gen_step(rng: &mut Rng, exec: bool) -> Step {
         },
         14 => Step::CornerOf { v: gen_handle(rng) },
         15 => Step::SolverOf { eu: gen_handle(rng) },
+        16 => Step::MakeCorner { v: gen_handle(rng) },
+        17 => Step::Bevel { v: gen_handle(rng) },
         _ => Step::NoteFilletError {
             code,
             fe_type: gen_named_edge_type(rng),
@@ -1041,7 +1100,22 @@ fn gen_step(rng: &mut Rng, exec: bool) -> Step {
 fn gen_object(rng: &mut Rng) -> ObjectIn {
     let exec = rng.chance(0.5);
     let n = rng.below(17);
-    let script = (0..n).map(|_| gen_step(rng, exec)).collect();
+    let mut script: Vec<Step> = (0..n).map(|_| gen_step(rng, exec)).collect();
+    // `SetBevelCorner` dereferences the corner: not on a fake corner pointer (the
+    // wrapper refuses it), there a lookup instead
+    let mut fake = std::collections::BTreeSet::new();
+    for step in &mut script {
+        match *step {
+            Step::MapCorner { v, c } if c != 0 => {
+                fake.insert(v);
+            }
+            Step::MapCorner { v, .. } | Step::MakeCorner { v } => {
+                fake.remove(&v);
+            }
+            Step::Bevel { v } if fake.contains(&v) => *step = Step::CornerOf { v },
+            _ => {}
+        }
+    }
     if exec {
         ObjectIn::Executive {
             target: gen_handle(rng),

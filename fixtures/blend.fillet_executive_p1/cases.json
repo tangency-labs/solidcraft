@@ -2811,6 +2811,39 @@
      }
     ]
    }
+  },
+  {
+   "name": "remove_topo_edges_mouse_edge_2",
+   "inputs": {
+    "remove_topo_edges": {
+     "brep": {
+      "kind": "file",
+      "file": "Mouse.smb",
+      "rebuild": false
+     },
+     "edges": [
+      2
+     ],
+     "editing": true
+    }
+   }
+  },
+  {
+   "name": "remove_topo_edges_mouse_two_struts",
+   "inputs": {
+    "remove_topo_edges": {
+     "brep": {
+      "kind": "file",
+      "file": "Mouse.smb",
+      "rebuild": false
+     },
+     "edges": [
+      1,
+      2
+     ],
+     "editing": true
+    }
+   }
   }
  ]
 }

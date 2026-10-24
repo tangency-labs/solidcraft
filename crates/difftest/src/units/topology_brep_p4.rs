@@ -126,7 +126,7 @@ fn check_knots(surface: &impl Serialize) -> Result<(), HarnessError> {
 }
 
 /// The fixture block of `brep` (validate-only off, no cached gaps).
-fn block(brep: &BrepIn) -> Result<(String, Vec<f64>), HarnessError> {
+pub(crate) fn block(brep: &BrepIn) -> Result<(String, Vec<f64>), HarnessError> {
     let mut v = Vec::new();
     match brep {
         BrepIn::File { rebuild, .. } => v.extend([0.0, f64::from(u8::from(*rebuild))]),
@@ -189,7 +189,7 @@ fn request(i: &Inputs) -> Request {
 }
 
 /// The imported fixture with the vertex use lists in their raw order.
-fn import(
+pub(crate) fn import(
     f: &solidcore_ffi::units::topology_topology_traverser::Fixture,
 ) -> Result<Brep, HarnessError> {
     let (mut b, _) = shared::import(&f.graph)?;
@@ -714,7 +714,7 @@ fn face_owner(index: u32) -> ObjectRef {
 
 /// The importer names an owned surface's face `1 + index`; the B-rep names it by its
 /// arena identity ([`face_owner`]). Surfaces the C++ face owns stay owned.
-fn own_surfaces(b: &mut Brep) -> Result<(), HarnessError> {
+pub(crate) fn own_surfaces(b: &mut Brep) -> Result<(), HarnessError> {
     let ids: Vec<FaceId> = b.faces().ids().collect();
     for f in ids {
         let imported = ObjectRef {

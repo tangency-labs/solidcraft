@@ -20,6 +20,7 @@
 #include <SmBSplineCurve.h>
 #include <SmContext.h>
 #include <SmExtent1d.h>
+#include <SmFilletCorner.h>
 #include <SmFilletExecutive.h>
 #include <SmVector3d.h>
 #include <nurbs.h>
@@ -409,7 +410,7 @@ struct Exec : public SmFilletExecutive
     // The fake generator pointers must not reach the base destructor's delete.
     ~Exec() { m_vFSGs.ReSet(); }
 
-    // Calls 16-20; false for another kind. Queries append to `q`. The lookups cast the
+    // Calls 16-22; false for another kind. Queries append to `q`. The lookups cast the
     // fake map values to SmFilletCorner* / SmFilletSolver* (single inheritance from
     // SmObject: the address is unchanged) and never dereference them.
     bool step(Rd& rd, int64_t kind, std::vector<double>& q)
@@ -445,6 +446,27 @@ struct Exec : public SmFilletExecutive
             fe->SetStatus(st);
             g_made.push_back(fe);
             NoteFilletError(code, fe, c.c());
+            return true;
+        }
+        case 21:
+        {
+            // a real corner (the base destructor deletes m_vFilletCorners)
+            SmVertex* v = ptr<SmVertex>(rd.idx());
+            SmFilletCorner* c =
+                new (m_crContext) SmFilletConvexNxNCorner(m_crContext, NULL, NULL, NULL, this, 1e-6, 1e-6);
+            m_vFilletCorners.Add(c);
+            m_vVertexCornerMap.Insert(v, (SmObject*)c);
+            g_made.push_back(c);
+            return true;
+        }
+        case 22:
+        {
+            // the wrapper refuses a vertex mapped to a fake corner pointer
+            SmVertex* v = ptr<SmVertex>(rd.idx());
+            SmStatus s = SetBevelCorner(v);
+            q.push_back(st(s));
+            if (s == SM_SUCCESS)
+                q.push_back(((SmFilletCorner*)m_vVertexCornerMap.At(v))->IsBevelCorner() ? 1.0 : 0.0);
             return true;
         }
         default:
