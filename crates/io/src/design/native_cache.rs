@@ -207,8 +207,14 @@ fn current(manifest: &Value, document: &[u8]) -> bool {
         && is("app", env!("CARGO_PKG_VERSION"))
         && is("build", &build())
         && is("document", &digest(document))
-        // A development build of unknown source never trusts a cache.
-        && env!("SOLIDCRAFT_SOURCE_COMMIT") != "unknown"
+        && source_trusted(env!("SOLIDCRAFT_SOURCE_COMMIT"), cfg!(any(test, feature = "trust-unknown-source")))
+}
+
+/// A build of unknown source (no git) never trusts a cache, unless `in_tests`: test builds
+/// trust it so the cache tests also pass in a source tarball (the `trust-unknown-source`
+/// feature is only enabled by dev-dependencies).
+pub(super) fn source_trusted(commit: &str, in_tests: bool) -> bool {
+    commit != "unknown" || in_tests
 }
 
 pub(super) fn read_geometry_with<R: Read + Seek>(reader: &mut PackageReader<R>, document: &[u8]) -> Result<SavedModel> {

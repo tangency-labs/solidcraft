@@ -965,6 +965,13 @@ mod tests {
     }
 
     #[test]
+    fn a_build_of_unknown_source_never_trusts_a_cache_outside_tests() {
+        assert!(!native_cache::source_trusted("unknown", false));
+        assert!(native_cache::source_trusted("unknown", true));
+        assert!(native_cache::source_trusted("0123abc", false));
+    }
+
+    #[test]
     fn native_cache_round_trip_and_preview_defer_original_sources() {
         let mut doc = Document::new("Native cache");
         let step = noise(2_600_000);
