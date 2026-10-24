@@ -156,6 +156,70 @@ fn auto_constrain_fully_constrains_a_rough_sketch() {
 }
 
 #[test]
+fn auto_constrain_dimensions_construction_curves_without_moving_them() {
+    for command in ["sketch.auto_constrain", "sketch.auto_constrain_from_datum", "sketch.finish_auto_constrain"] {
+        for (create, params, dimension) in [
+            ("sketch.circle.center", json!({"center": [20, 15], "radius": 5}), "diameter"),
+            ("sketch.line", json!({"points": [[10, 20], [30, 35]]}), "length"),
+            ("sketch.arc.center_point", json!({"center": [20, 15], "start": [25, 15], "end": [20, 20]}), "radius"),
+        ] {
+            let mut s = new_sketch();
+            let curves = run(&mut s, create, params)["curves"].clone();
+            run(&mut s, "sketch.construction", json!({"curves": curves, "value": true}));
+            let id = s.active_sketch.unwrap();
+            let before = sketch(&s);
+            let r = run(&mut s, command, json!({"datum": "origin"}));
+            assert_eq!(r["dof"], 0, "{command}, {create}: {r}");
+            let si = run(&mut s, "sketch.inspect", json!({"sketch": id}));
+            assert_eq!(si["fully_constrained"], true, "{si}");
+            assert!(si["constraints"].as_array().unwrap().iter().any(|c| c["type"] == dimension), "{si}");
+            let state = s.model.state();
+            let after = &state.sketch(id).unwrap().sketch;
+            assert_eq!(before.curves.len(), after.curves.len());
+            assert_eq!(before.points.len(), after.points.len());
+            for (a, b) in before.curves.iter().zip(&after.curves) {
+                assert_eq!(a.id, b.id);
+                assert!(b.construction);
+            }
+            for (i, _) in before.points.iter().enumerate() {
+                assert!(before.point(i).unwrap().dist(after.point(i).unwrap()) < 1e-6);
+            }
+            for i in 0..before.curves.len() {
+                if let Some(radius) = before.radius(i) {
+                    assert!((radius - after.radius(i).unwrap()).abs() < 1e-6);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn auto_constrain_construction_circle_respects_options_and_existing_constraints() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 15], "radius": 5, "construction": true}));
+    let r = run(&mut s, "sketch.auto_constrain", json!({"dimensions": false}));
+    assert_eq!(r["dof"], 3, "{r}");
+    assert!(r["added"].as_array().unwrap().is_empty());
+    run(&mut s, "sketch.auto_constrain", json!({}));
+    let constrained = sketch(&s);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "sketch.inspect", json!({}))["dof"], 3);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(sketch(&s), constrained);
+    let r = run(&mut s, "sketch.auto_constrain", json!({}));
+    assert!(r["added"].as_array().unwrap().is_empty(), "{r}");
+    assert_eq!(sketch(&s), constrained);
+
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 15], "radius": 5, "construction": true}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "c1"}));
+    let fixed = sketch(&s);
+    let r = run(&mut s, "sketch.auto_constrain", json!({}));
+    assert!(r["added"].as_array().unwrap().is_empty(), "{r}");
+    assert_eq!(sketch(&s), fixed);
+}
+
+#[test]
 fn internal_freedom_queries_skip_redundancy_and_keep_constraint_acceptance() {
     use solidcraft_sketch::{ConstraintKind, Sketch, profiling::capture};
 
