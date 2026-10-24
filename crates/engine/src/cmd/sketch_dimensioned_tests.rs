@@ -183,6 +183,26 @@ fn invalid_dimensioned_shapes_are_atomic_including_late_constraint_failure() {
 }
 
 #[test]
+fn a_dimensioned_midpoint_line_carries_its_length_and_angle() {
+    let mut s = session();
+    let out = draw(&mut s, "sketch.line.midpoint", json!({"mid":[0,0],"end":[10,0]}), json!({"length":20,"angle":0}));
+    assert_eq!(out["curves"].as_array().map(|c| c.len()), Some(1), "{out}");
+    close(measure(&s, |k| matches!(k, ConstraintKind::Length { .. })), 20.0);
+    close(measure(&s, |k| matches!(k, ConstraintKind::LineAngle { .. })), 0.0);
+    let sk = sketch(&s);
+    let line = sk.curve_index(out["curves"][0].as_str().unwrap()).unwrap();
+    let solidcraft_sketch::CurveKind::Line { a, b } = sk.curves[line].kind else { panic!("a line") };
+    // The clicked middle is the line's middle.
+    close((sk.points[a].pos.x + sk.points[b].pos.x) * 0.5, 0.0);
+    close((sk.points[a].pos.y + sk.points[b].pos.y) * 0.5, 0.0);
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { l, .. } if l == line)),
+        "the middle is constrained: {:?}",
+        sk.constraints
+    );
+}
+
+#[test]
 fn dimensioned_authoring_uses_selected_occurrence_and_keeps_local_geometry() {
     let mut s = Session::default();
     let component = run(&mut s, "component.create", json!({"name":"Shared"}))["component"].as_u64().unwrap();

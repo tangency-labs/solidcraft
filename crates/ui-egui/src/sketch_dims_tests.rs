@@ -365,6 +365,53 @@ fn a_line_end_on_a_circle_outside_the_axis_snap_stays_at_the_cursor() {
     assert!((end.len() - 30.0).abs() < 1e-9 && end.dist(at) < 0.5, "{end:?}");
 }
 
+/// #6198: the Midpoint Line tool shows the same Length/Angle readout as the Line tool while
+/// the line is being drawn.
+#[test]
+fn a_midpoint_line_shows_its_length_and_angle_while_it_is_drawn() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.step(&json!({"start": "sketch.line.midpoint"})).unwrap();
+    h.step(&json!({"click": {"world": [0, 0, 0]}})).unwrap();
+    h.step(&json!({"move": {"world": [10, 0, 0]}})).unwrap();
+    let tool = h.app.tool.as_ref().unwrap();
+    assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), ["Length", "Angle"], "the midpoint line shows the line tool's boxes");
+    // The line runs from the cursor's mirror image through the clicked middle to the
+    // cursor: its length is twice the middle-to-cursor distance.
+    let length: f64 = tool.dims[0].value.parse().unwrap_or_default();
+    assert!((length - 20.0).abs() < 0.01, "the whole line's length: {}", tool.dims[0].value);
+    let angle: f64 = tool.dims[1].value.trim_end_matches(" deg").parse().unwrap_or_default();
+    assert!(angle.abs() < 0.1, "the line's angle: {}", tool.dims[1].value);
+}
+
+/// #6198: a typed length and angle drive the midpoint line that is drawn.
+#[test]
+fn a_midpoint_line_takes_a_typed_length_and_angle() {
+    use solidcraft_engine::sketch::ConstraintKind;
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.step(&json!({"start": "sketch.line.midpoint"})).unwrap();
+    h.step(&json!({"click": {"world": [0, 0, 0]}})).unwrap();
+    h.step(&json!({"move": {"world": [10, 0, 0]}})).unwrap();
+    type_value(&mut h, "20");
+    tab(&mut h, false);
+    type_value(&mut h, "45 deg");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Length { value, .. } if (value - 20.0).abs() < 1e-9)),
+        "the typed length is a driving dimension: {:?}",
+        sk.constraints
+    );
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::LineAngle { value, .. } if (value - 45f64.to_radians()).abs() < 1e-9)),
+        "the typed angle is a driving dimension: {:?}",
+        sk.constraints
+    );
+}
+
 /// A value box set off the cursor stays in the drawing area (#2201): past an edge it goes to the
 /// cursor's other side, still clear of it; with no room either side it is pushed inside.
 #[test]

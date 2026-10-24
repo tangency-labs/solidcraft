@@ -11,7 +11,7 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.draw.dimensioned";
     let create = str_(p, "command").ok_or_else(|| bad(cmd, "`command` must name a supported sketch creator"))?;
     let roles: &[&str] = match create {
-        "sketch.line" => &["length", "angle"],
+        "sketch.line" | "sketch.line.midpoint" => &["length", "angle"],
         "sketch.rectangle.two_point" | "sketch.rectangle.center" | "sketch.rectangle.three_point" | "sketch.rectangle.rounded" => {
             &["width", "height"]
         }
@@ -87,8 +87,8 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     let mut added = serde_json::Map::new();
     for (role, value) in dimensions {
         let (entities, ty) = match (create, role.as_str()) {
-            ("sketch.line", "length") => (vec![curve(0)?], "length"),
-            ("sketch.line", "angle") => (vec![curve(0)?], "angle"),
+            ("sketch.line" | "sketch.line.midpoint", "length") => (vec![curve(0)?], "length"),
+            ("sketch.line" | "sketch.line.midpoint", "angle") => (vec![curve(0)?], "angle"),
             // A rounded rectangle's sides stop at the arcs: its size is between opposite sides.
             ("sketch.rectangle.rounded", "width" | "height") => {
                 let [a, b] = if role == "width" { ["left", "right"] } else { ["bottom", "top"] };
