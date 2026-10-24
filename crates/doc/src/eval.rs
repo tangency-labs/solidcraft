@@ -5080,9 +5080,17 @@ fn pipe_region(vals: &BTreeMap<String, Value>, r: f64, wall: &Option<crate::Expr
     Ok(Region2 { outer: solidcraft_geom::Loop2::circle(Vec2::ZERO, r), holes })
 }
 
-fn map_wire(wire: &mut solidcraft_sketch::Wire, matrix: &Mat) {
+pub fn map_wire(wire: &mut solidcraft_sketch::Wire, matrix: &Mat) {
     for point in wire.pts.iter_mut().chain(&mut wire.fit) {
         *point = crate::apply_point(matrix, *point);
+    }
+    if let Some(arc) = &mut wire.arc {
+        let normal = crate::apply_vector(matrix, arc.normal);
+        arc.center = crate::apply_point(matrix, arc.center);
+        arc.start = crate::apply_point(matrix, arc.start);
+        arc.end = crate::apply_point(matrix, arc.end);
+        arc.normal = normal.normalized().unwrap_or(arc.normal);
+        arc.radius = arc.center.dist(arc.start);
     }
 }
 

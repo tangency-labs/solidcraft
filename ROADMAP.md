@@ -596,6 +596,9 @@ The design's first part is grounded when it is made, and a left-button drag repo
 3D sketch drawing snaps to points on other visible sketch planes without flattening them onto
 the active plane. Bridge endpoints capture their source positions; associative endpoint links,
 construction-plane selection of 3D wires and loft guide rails remain separate work.
+The 3-Point Arc tool draws exact 3D arcs off the plane (`sketch.arc3d`): stored analytically
+(centre, normal, radius, ends), movable point by point, and usable as sweep and pipe paths
+(#5681).
 Feature dialog header chevrons collapse and restore the form without discarding selections
 or edited values, including the Appearance panel.
 ## Construction on 3D paths

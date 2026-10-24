@@ -840,6 +840,7 @@
   "cmd.sheet_refold": "折り戻し",
   "cmd.sheet_rules": "板金ルールを一覧表示",
   "cmd.sheet_unfold": "展開",
+  "cmd.sketch_arc3d": "3D 円弧",
   "cmd.sketch_arc_center_point": "中心点円弧",
   "cmd.sketch_arc_tangent": "正接円弧",
   "cmd.sketch_arc_three_point": "3点指定円弧",

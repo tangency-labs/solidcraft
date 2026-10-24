@@ -638,9 +638,7 @@ impl Session {
                     }
                     for wire in &mut sketch.sketch.wires {
                         if wire.space == solidcraft_doc::sketch::WireSpace::Component {
-                            for point in wire.pts.iter_mut().chain(&mut wire.fit) {
-                                *point = solidcraft_doc::apply_point(&delta, *point);
-                            }
+                            solidcraft_doc::map_wire(wire, &delta);
                         }
                     }
                 }

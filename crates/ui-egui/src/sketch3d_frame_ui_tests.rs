@@ -194,3 +194,69 @@ fn second_occurrence_drawn_wire_fit_picks_and_world_triad_drag_stay_aligned() {
     let restored = h.app.session.model.state();
     assert!(restored.sketch(sketch).unwrap().sketch.wires[0].fit[0].dist(Vec3::new(2.0, 3.0, 5.0)) < 1e-6);
 }
+
+#[test]
+fn arc_tool_draws_an_exact_3d_arc_off_the_plane() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"corner":[10,0,5],"length":10,"width":10,"height":5,"body_name":"ArcPicks"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Arcs"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    h.app.ui.show_origin = false;
+    h.call("ui.view", json!({"view":"home"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(3);
+    h.app.start("sketch.arc.three_point");
+    h.frames(2);
+    h.app.status = None;
+    // Three top-face vertices: off the XY sketch plane, so the arc tool draws a 3D arc.
+    for p in [[10.0, 0.0, 10.0], [20.0, 10.0, 10.0], [10.0, 10.0, 10.0]] {
+        let [x, y] = h.at(&json!({"world": p})).unwrap();
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let picked = crate::sketch3d::point_at(&h.app, &proj, egui::pos2(x as f32, y as f32));
+        assert!(picked.is_some_and(|(q, _)| (q - Vec3::new(p[0], p[1], p[2])).dist(Vec3::ZERO) < 1e-5), "p={p:?}, picked={picked:?}");
+        h.step(&json!({"click": {"world": p}})).unwrap();
+    }
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let state = h.app.session.world_state();
+    let wires = &state.sketch(sketch).unwrap().sketch.wires;
+    assert_eq!(wires.len(), 1, "three off-plane clicks draw one 3D arc");
+    let w = &wires[0];
+    let arc = w.arc.expect("the drawn arc is stored exactly");
+    assert!(arc.center.dist(Vec3::new(15.0, 5.0, 10.0)) < 1e-6, "{:?}", arc.center);
+    assert!((arc.radius - 50.0_f64.sqrt()).abs() < 1e-6, "{}", arc.radius);
+    assert_eq!(w.fit.len(), 3);
+}
+
+#[test]
+fn arc3d_button_starts_its_own_tool() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"corner":[10,0,5],"length":10,"width":10,"height":5,"body_name":"Arc3dBtn"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Arcs"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    h.app.ui.show_origin = false;
+    h.call("ui.view", json!({"view":"home"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(3);
+    h.app.start("sketch.arc3d");
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.arc3d"), "the 3D Arc button starts a tool: {:?}", h.app.status);
+    h.frames(2);
+    h.app.status = None;
+    // Same click order as the 2D arc tool: start, end, then a point on the arc.
+    for p in [[10.0, 0.0, 10.0], [10.0, 10.0, 10.0], [20.0, 10.0, 10.0]] {
+        h.step(&json!({"click": {"world": p}})).unwrap();
+    }
+    let state = h.app.session.world_state();
+    let wires = &state.sketch(sketch).unwrap().sketch.wires;
+    assert_eq!(wires.len(), 1, "three clicks draw one exact 3D arc");
+    let arc = wires[0].arc.expect("the drawn arc is stored exactly");
+    assert!(arc.center.dist(Vec3::new(15.0, 5.0, 10.0)) < 1e-6, "{:?}", arc.center);
+    assert!((arc.radius - 50.0_f64.sqrt()).abs() < 1e-6, "{}", arc.radius);
+    assert!(arc.start.dist(Vec3::new(10.0, 0.0, 10.0)) < 1e-6, "{:?}", arc.start);
+    assert!(arc.end.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-6, "{:?}", arc.end);
+    // With 3D Sketch off the button is not offered: its tool could only fail.
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(h.app.tool.is_none(), "Escape ends the tool");
+    h.app.run("sketch.options", json!({"sketch_3d": false})).unwrap();
+    h.app.start("sketch.arc3d");
+    assert!(h.app.tool.is_none(), "3D Arc is disabled while 3D Sketch is off");
+}

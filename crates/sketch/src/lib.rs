@@ -71,7 +71,7 @@ pub use solver::{
 };
 pub use text::{MAX_TEXT_CHARS, TextAlign, TextStyle, text_geometry, text_geometry_in, text_geometry_styled};
 pub use thin::{MAX_THIN_SEGMENTS, thin_wall_regions};
-pub use wire::{MAX_FIT_POINTS, MAX_WIRE_POINTS, Wire, WireSpace, fit_polyline};
+pub use wire::{MAX_FIT_POINTS, MAX_WIRE_POINTS, Wire, WireArc, WireSpace, arc_from_3_points, arc_polyline, arc_sweep, fit_polyline};
 
 #[cfg(test)]
 mod construct_rounds_tests;

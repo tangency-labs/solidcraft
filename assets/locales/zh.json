@@ -840,6 +840,7 @@
   "cmd.sheet_refold": "重新折弯",
   "cmd.sheet_rules": "列出钣金规则",
   "cmd.sheet_unfold": "展开",
+  "cmd.sketch_arc3d": "三维圆弧",
   "cmd.sketch_arc_center_point": "中心点圆弧",
   "cmd.sketch_arc_tangent": "相切圆弧",
   "cmd.sketch_arc_three_point": "三点圆弧",
