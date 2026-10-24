@@ -12,6 +12,7 @@
     "text_dim": "#a89984",
     "accent": "#83a598",
     "accent_soft": "#48544f",
+    "selected_ink": "#ebdbb2",
     "sketch_accent": "#83a598",
     "error": "#fb4934",
     "warning": "#fabd2f",

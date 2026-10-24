@@ -698,6 +698,23 @@ mod tests {
     }
 
     #[test]
+    fn built_in_selected_tab_labels_hold_wcag_small_text_contrast() {
+        let mut themes = vec![("Dark", super::Tokens::dark()), ("Light", super::Tokens::light())];
+        themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
+        let mut failures = Vec::new();
+        for (name, tokens) in themes {
+            for tab in crate::workspace::TABS.iter().copied().chain(["SKETCH", "MESH", "FORM", "SHEET METAL", "RENDER"]) {
+                let accent = super::TabAccent::for_tab(&tokens, tab);
+                let ratio = super::contrast_ratio(accent.ink, accent.soft);
+                if ratio < 4.5 {
+                    failures.push(format!("{name} {tab}: {ratio:.4}:1 ({:?} on {:?})", accent.ink, accent.soft));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "selected tab contrast below 4.5:1:\n{}", failures.join("\n"));
+    }
+
+    #[test]
     fn tab_accents_hold_wcag_small_text_contrast_in_both_themes() {
         for (dark, t) in [(false, super::Tokens::light()), (true, super::Tokens::dark())] {
             for tab in ["MODEL", "SKETCH", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER"] {
