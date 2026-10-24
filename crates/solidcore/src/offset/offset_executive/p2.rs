@@ -63,6 +63,7 @@ use crate::topology::brep::p1 as bp1;
 use crate::topology::brep::p4::shrink_geometry;
 use crate::topology::brep::p7::{make_face_with_curves_with_kernel_context, FaceCurvesInput};
 
+use crate::sweep::topology_sweep::store::SweepIdentities;
 use crate::topology::edge::{NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p2 as eu2};
 use crate::topology::face::p2 as face;
@@ -105,6 +106,13 @@ pub struct OffsetNotifications<'a> {
     pub boolean_source_lists: &'a dyn Fn(bool, RegionId) -> [ObjectRef; 2],
     /// Reserved, caller-owned identity of the result B-rep.
     pub result_brep: ObjectRef,
+    /// Identities of the B-reps the merging `PiecewiseMerge` creates (its merge
+    /// B-rep, which becomes the result, and `SmMerge`'s stand-alone face B-reps), by
+    /// the handles they receive in that merge's `SweepStore`: handle 0 is the offset
+    /// temporary (which keeps the result identities above and is not asked for), each
+    /// new B-rep takes the next handle. They must be disjoint from every other
+    /// identity in the shared stores. `None` refuses a merging `PiecewiseMerge`.
+    pub merge_identities: Option<&'a dyn SweepIdentities>,
 }
 
 impl core::fmt::Debug for OffsetNotifications<'_> {
@@ -345,10 +353,16 @@ impl OffsetExecutive {
                 for &edgeuse in &offset_edgeuses {
                     let edge = required(eu::edge(original, edgeuse)?, OP_SOLID)?;
                     if eu::edge_is_lamina(original, edge)? {
-                        crate::error::ignore_status(self.build_side_wall_of_edgeuse(
+                        let mut stores = NotificationStores {
+                            records: &mut *notifications.records,
+                            attributes: &mut *notifications.attributes,
+                            key_of: notifications.result_key_of,
+                        };
+                        crate::error::ignore_status(self.build_side_wall_of_edgeuse_with(
                             kernel,
                             original,
                             Some(edgeuse),
+                            Some(&mut NotifyState::from_kernel_stores(&mut stores)),
                         ))?;
                     }
                 }
@@ -382,7 +396,7 @@ impl OffsetExecutive {
             }
 
             // cpp:887–902: a failed merge drops its partial result.
-            let mut result = self.piecewise_merge(kernel, original)?;
+            let mut result = self.piecewise_merge(kernel, original, Some(&mut *notifications))?;
             // cpp:965: the stitch status is only asserted.
             crate::error::ignore_status(stitch::stitch_into_solid(kernel, &mut result))?;
             // cpp:1009–1027: label the regions only when MakeManifold succeeds.
@@ -505,10 +519,16 @@ impl OffsetExecutive {
                     let edge = required(eu::edge(original, edgeuse)?, OP_EXTENDED)?;
                     if eu::edge_is_lamina(original, edge)? {
                         // SE, not SER, upstream: propagate Unported, ignore other errors.
-                        crate::error::ignore_status(self.build_side_wall_of_edgeuse(
+                        let mut stores = NotificationStores {
+                            records: &mut *notifications.records,
+                            attributes: &mut *notifications.attributes,
+                            key_of: notifications.result_key_of,
+                        };
+                        crate::error::ignore_status(self.build_side_wall_of_edgeuse_with(
                             kernel,
                             original,
                             Some(edgeuse),
+                            Some(&mut NotifyState::from_kernel_stores(&mut stores)),
                         ))?;
                     }
                 }
@@ -519,7 +539,7 @@ impl OffsetExecutive {
             // trim bounds; restore the original before reporting an out-of-domain error.
             self.extend_result_faces_prefix(kernel, mark_type, notifications)?;
 
-            let mut result = self.piecewise_merge(kernel, original)?;
+            let mut result = self.piecewise_merge(kernel, original, Some(&mut *notifications))?;
             if !self.create_offset_solid() {
                 self.remove_excess_faces_with_kernel_context(kernel, original, &mut result)?;
             }
@@ -1264,6 +1284,54 @@ mod tests {
         })
     }
 
+    /// Identities of the merge's new B-reps, disjoint from the fixture keys above
+    /// (namespaces from 1000, curves and source lists from 700e9 / 800e9).
+    struct MergeBodies;
+    impl SweepIdentities for MergeBodies {
+        fn topology(&self, brep: BrepId, entity: EntityRef) -> ObjectRef {
+            crate::boolean::merge::p4::notification_key(1000 + brep.index(), false, entity)
+        }
+        fn owned_auxiliary_objects(&self, brep: BrepId, model: &Brep) -> Vec<ObjectKey> {
+            model
+                .edges()
+                .iter()
+                .filter(|(_, e)| e.curve.is_some())
+                .map(|(edge, _)| merge_curve(brep, edge, 0).key)
+                .collect()
+        }
+        fn curve(
+            &self,
+            brep: BrepId,
+            edge: EdgeId,
+            curve: &crate::curve::curve::Curve,
+        ) -> ObjectRef {
+            merge_curve(brep, edge, curve.type_code())
+        }
+        fn new_curve(&self, brep: BrepId, edge: EdgeId, type_code: i64) -> Result<ObjectRef> {
+            Ok(merge_curve(brep, edge, type_code))
+        }
+        fn source_lists(&self, brep: BrepId, region: RegionId) -> Result<[ObjectRef; 2]> {
+            Ok([0, 1].map(|list| ObjectRef {
+                key: ObjectKey(
+                    800_000_000_000
+                        + u64::from(brep.index()) * 1_000_000_000
+                        + u64::from(region.index()) * 2
+                        + list,
+                ),
+                type_code: 0,
+            }))
+        }
+    }
+
+    fn merge_curve(brep: BrepId, edge: EdgeId, type_code: i64) -> ObjectRef {
+        ObjectRef {
+            key: ObjectKey(
+                700_000_000_000 + u64::from(brep.index()) * 1_000_000_000 + u64::from(edge.index()),
+            ),
+            type_code,
+        }
+    }
+
     fn source_brep() -> Brep {
         let mut brep = Brep::new();
         brep.set_key(original_key(EntityRef::Brep(BrepId::from_index(0))).key);
@@ -1344,6 +1412,7 @@ mod tests {
                 result_curve_ref: &result_curve,
                 boolean_source_lists: &boolean_source_lists,
                 result_brep: result_key(EntityRef::Brep(BrepId::from_index(0))),
+                merge_identities: Some(&MergeBodies),
             }
         }
     }
@@ -1389,8 +1458,10 @@ mod tests {
     }
 
     fn assert_dependency<T: core::fmt::Debug>(result: Result<T>, symbol: &str, owner: &str) {
+        let error = result.unwrap_err();
         assert!(
-            matches!(result.unwrap_err(), SolidError::Unported { upstream, unit } if upstream == symbol && unit == owner)
+            matches!(&error, SolidError::Unported { upstream, unit } if *upstream == symbol && *unit == owner),
+            "{error:?}"
         );
     }
 
@@ -2348,6 +2419,7 @@ mod tests {
                 result_curve_ref: &never_curve,
                 boolean_source_lists: &|_, _| panic!("guard called a source-list callback"),
                 result_brep: result_key(EntityRef::Brep(BrepId::from_index(0))),
+                merge_identities: None,
             };
             assert_status(
                 api_offset_brep_full(
@@ -2615,7 +2687,12 @@ mod tests {
                         assert_eq!(result.tolerance(), exec.approximation_tol_3d());
                         assert!(exec.offset_brep().is_none());
                     } else if merge {
-                        assert_dependency(result, "SmMerge::PiecewiseMerge", "boolean.merge_p3");
+                        // the empty offset merges into the new merge B-rep, which
+                        // takes the original's tolerance; the temporary is deleted
+                        let result = result.unwrap();
+                        assert!(result.faces().is_empty());
+                        assert_eq!(result.tolerance(), original.tolerance());
+                        assert!(exec.offset_brep().is_none());
                     } else {
                         assert!(result.unwrap().faces().is_empty());
                         assert!(exec.offset_brep().is_none());
@@ -2905,22 +2982,20 @@ mod tests {
         let mut kernel = Kernel::default();
         let mut exec = executive();
         exec.set_merge_results(true);
-        assert_dependency(
-            {
-                let mut notifications = NotificationFixture::new(&original);
-                exec.do_extended_offset(
-                    &mut kernel,
-                    Some(&mut original),
-                    &mut notifications.context(),
-                )
-            },
-            "SmMerge::PiecewiseMerge",
-            "boolean.merge_p3",
-        );
-        assert!(exec.offset_brep().is_some());
+        let result = {
+            let mut notifications = NotificationFixture::new(&original);
+            exec.do_extended_offset(
+                &mut kernel,
+                Some(&mut original),
+                &mut notifications.context(),
+            )
+        };
+        // the empty offset merges into an empty result
+        assert!(result.unwrap().faces().is_empty());
         // RemoveFaces ran with the temporary's real editing flag before the
-        // later piecewise-merge dependency, and released its nested mark.
-        assert_eq!(kernel.context.current_mark(MarkType::Mark2), 3);
+        // piecewise merge, and again in RemoveExcessFaces on the merged result
+        // (cpp:1772), releasing its nested mark each time.
+        assert_eq!(kernel.context.current_mark(MarkType::Mark2), 5);
         assert!(!kernel.context.is_mark_locked(MarkType::Mark2));
         assert_eq!(kernel.context.current_mark(MarkType::Mark), 3);
         assert!(!kernel.context.is_mark_locked(MarkType::Mark));
@@ -2933,19 +3008,15 @@ mod tests {
         let mut exec = executive();
         exec.set_merge_results(true);
         exec.set_shell_faces(&[FaceId::from_index(0)]);
-        assert_dependency(
-            {
-                let mut notifications = NotificationFixture::new(&original);
-                exec.do_extended_offset(
-                    &mut kernel,
-                    Some(&mut original),
-                    &mut notifications.context(),
-                )
-            },
-            "SmMerge::PiecewiseMerge",
-            "boolean.merge_p3",
-        );
-        assert!(exec.offset_brep().is_some());
+        let result = {
+            let mut notifications = NotificationFixture::new(&original);
+            exec.do_extended_offset(
+                &mut kernel,
+                Some(&mut original),
+                &mut notifications.context(),
+            )
+        };
+        assert!(result.unwrap().faces().is_empty());
         assert!(!kernel.context.is_mark_locked(MarkType::Mark));
     }
 
@@ -3308,11 +3379,9 @@ mod tests {
                 assert_status(outcome.result, 1007);
                 assert_eq!(kernel.context.current_mark(MarkType::Mark), 1);
             } else {
-                assert_dependency(
-                    outcome.result,
-                    "SmMerge::PiecewiseMerge",
-                    "boolean.merge_p3",
-                );
+                // the empty offset merges; a solid shell of a non-manifold input goes
+                // on to MergeBrep
+                assert_dependency(outcome.result, "SmBrep::MergeBrep", "topology.brep_p3");
                 assert_eq!(kernel.context.current_mark(MarkType::Mark), 3);
             }
             let retained = outcome.retained_input.as_ref().unwrap();

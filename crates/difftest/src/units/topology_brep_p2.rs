@@ -661,7 +661,17 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: Op, a: &[f64]) -> Result<Vec<f6
             let s = match arg(0)? as u8 {
                 0 => status(bp2::make_shell_vertex_topology(b, region))?.0,
                 1 => status(bp2::make_edge_vertex_topology(b, region, v1))?.0,
-                _ => status(bp2::make_edge_topology(k, b, region, v1, v2))?.0,
+                _ => {
+                    let mut records = BTreeMap::new();
+                    let mut attrs = AttributeStore::default();
+                    let mut env = NotifyEnv {
+                        records: &mut records,
+                        attributes: &mut attrs,
+                        context: None,
+                        key_of: &key_of,
+                    };
+                    status(bp2::make_edge_topology(k, b, region, v1, v2, &mut env))?.0
+                }
             };
             out.push(s);
             topology_summary(b, &mut out)?;

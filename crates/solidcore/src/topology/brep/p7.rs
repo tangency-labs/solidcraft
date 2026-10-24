@@ -23,8 +23,9 @@
 //!   [`BrepData::read_from_file`] (unit `topology.brep_data`), which bounds every count it
 //!   reads and the nesting of its polymorphic readers (AGENTS.md section 1).
 //! - **Arena records.** `GlueEdgesGeneral` destroys the deleted edge's stable arena
-//!   record after its last edgeuse pair moves. Other plain `delete`s of edge uses,
-//!   vertex uses, shells and regions unlink the record (it stays as an orphan).
+//!   record after its last edgeuse pair moves, and the shell it merges away
+//!   (`delete pDelShell`). Other plain `delete`s of edge uses, vertex uses and regions
+//!   unlink the record (it stays as an orphan).
 //!   `m_pEdgeListHead->Remove` takes the edge off [`Brep::edge_list`] before the
 //!   transfers begin. The owning-list edits
 //!   `SmEdge::Remove(eu)`, `SmVertex::Remove(vu)`, `SmRegion::Remove(shell)` and
@@ -612,9 +613,16 @@ fn edge_remove(b: &mut Brep, e: EdgeId, eu: EdgeuseId) -> Result<()> {
     Ok(())
 }
 
-/// Merges `del_shell` into `keep_shell` and drops the empty region (the shell-merging
-/// tails of `GlueEdgesGeneral`).
-fn merge_shells(k: &mut Kernel, b: &mut Brep, mut del: ShellId, mut keep: ShellId) -> Result<()> {
+/// Merges `del_shell` into `keep_shell`, deletes it (`delete pDelShell`: its destruction
+/// notification under `env`, its record and attribute uses) and drops the emptied
+/// region (the shell-merging tails of `GlueEdgesGeneral`).
+fn merge_shells(
+    k: &mut Kernel,
+    b: &mut Brep,
+    mut del: ShellId,
+    mut keep: ShellId,
+    env: &mut ed::NotifyEnv<'_>,
+) -> Result<()> {
     // m_pInfiniteRegion (NULL when unset; pointer equality, NULL == NULL)
     let inf = b.infinite_region();
     let keep_region = eu1::shell_region(b, keep)?;
@@ -633,8 +641,9 @@ fn merge_shells(k: &mut Kernel, b: &mut Brep, mut del: ShellId, mut keep: ShellI
 
     // remove it from its region, then the region when empty
     let reg = eu1::shell_region(b, del)?.ok_or_else(|| null("shell without region"))?;
-    // pReg->Remove(pDelShell), then pReg->GetSize()
+    // pReg->Remove(pDelShell); delete pDelShell; then pReg->GetSize()
     crate::topology::shell::region_remove_shell(b, reg, del)?;
+    crate::topology::shell::destroy(k, b, del, env)?;
     if b.region(reg)?.shells.is_empty() {
         remove_emptied_region(b, reg)?;
     }
@@ -1950,7 +1959,7 @@ pub fn glue_edges_general(
         let del_shell = eu1::shell(b, eu)?.ok_or_else(|| null("edge use without shell"))?;
         let keep_shell = eu1::shell(b, radial)?.ok_or_else(|| null("edge use without shell"))?;
         if del_shell != keep_shell {
-            merge_shells(k, b, del_shell, keep_shell)?;
+            merge_shells(k, b, del_shell, keep_shell, env)?;
         }
     }
 

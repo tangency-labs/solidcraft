@@ -1,11 +1,14 @@
-//! Borrowed and owned topology access for sweeps and primitive creation.
+//! Borrowed and owned topology access for sweeps, primitive creation and the offset
+//! executive's merge.
 //!
 //! Upstream: `source/SMLib/src/SmTopologySweep.cpp`,
-//! `source/SMLib/src/SmPrimitiveCreation.cpp` (caller-owned modeling services).
+//! `source/SMLib/src/SmPrimitiveCreation.cpp` (caller-owned modeling services),
+//! `source/SMLib/src/SmOffsetExecutive.cpp` (`PiecewiseMerge`'s `SmMerge`).
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`SweepStore`] | B-rep/context ownership used by the two modeling callers |
+//! | [`SweepStore`] | B-rep/context ownership used by the modeling callers |
+//! | [`SweepStore::piecewise_merge_skipping`] | `SmMerge::PiecewiseMerge` with its skip relation |
 //!
 //! Deviations: checked, never-reused handles replace pointers. Contexts are shared
 //! by id, not copied. Notification identities reuse the Boolean adapter's encoding.
@@ -34,6 +37,7 @@ use crate::geom::attribute::{
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::{Context, MarkLock, MarkType};
 use crate::geom::object::ObjectRef;
+use crate::geom::tol::Relation;
 use crate::kernel::Kernel;
 use crate::primitive::primitive_creation::p3::PrimitiveAccess;
 use crate::topology::brep::p3 as brep_p3;
@@ -467,6 +471,87 @@ impl<'a> SweepStore<'a> {
             return Err(invalid("body already has external object identities"));
         }
         self.insert_body(context, Body::Owned(Box::new(brep)))
+    }
+
+    /// Move in a caller body whose objects already carry the caller's identities for
+    /// the handle it receives (its key and records, as the caller notified them
+    /// before). Unlike [`Self::insert_brep`] nothing is re-keyed: the store edits the
+    /// body under those same identities, and a Boolean may consume it.
+    ///
+    /// # Errors
+    /// An unknown context, exhausted handles, no caller identities, or a B-rep key
+    /// that disagrees with the caller resolver; no registration is made.
+    pub fn adopt_brep(&mut self, context: ContextId, brep: Brep) -> Result<BrepId> {
+        self.kernels
+            .get(context.0 as usize)
+            .ok_or_else(|| invalid("unknown context"))?;
+        if self.identities.0.is_none() {
+            return Err(invalid("adopting a body needs caller identities"));
+        }
+        let index = u32::try_from(self.bodies.len()).map_err(|_| invalid("too many bodies"))?;
+        let namespace = index
+            .checked_add(1)
+            .filter(|n| *n <= 0x03ff_ffff)
+            .ok_or_else(|| invalid("body identity namespace exhausted"))?;
+        let id = BrepId::from_index(index);
+        if brep.key() != self.identities.object(namespace, EntityRef::Brep(id)).key {
+            return Err(invalid(
+                "adopted B-rep identity disagrees with caller resolver",
+            ));
+        }
+        self.bodies.push(Some(BodyEntry {
+            context,
+            namespace,
+            body: Body::Owned(Box::new(brep)),
+        }));
+        Ok(id)
+    }
+
+    /// Move an owned body out to the caller, with its records and attributes left in
+    /// the caller's stores under its identities (the counterpart of
+    /// [`Self::adopt_brep`]). The id is not reused.
+    ///
+    /// # Errors
+    /// An unknown or released id, or a borrowed or retained HCR body.
+    pub fn take_brep(&mut self, id: BrepId) -> Result<Brep> {
+        if !matches!(entry(&self.bodies, id)?.body, Body::Owned(_)) {
+            return Err(invalid("only an owned body can be taken"));
+        }
+        let slot = self
+            .bodies
+            .get_mut(id.index() as usize)
+            .ok_or_else(|| invalid("unknown body"))?;
+        match slot.take().map(|e| e.body) {
+            Some(Body::Owned(b)) => Ok(*b),
+            _ => Err(invalid("only an owned body can be taken")),
+        }
+    }
+
+    /// `SmMerge::PiecewiseMerge(pOptSkipPairs, bUseExistingTopology,
+    /// bCreateNewBrepsForFaces, rpResult)` with the surface pairs whose SSI is skipped
+    /// (`SmTArrayRelation` of surfaces, as the driver's surface identities; `None` is
+    /// a `NULL` relation, as [`SweepAccess::piecewise_merge`] passes).
+    ///
+    /// # Errors
+    /// Those of [`crate::boolean::merge::p3::piecewise_merge`]; `SM_ERR_NULL_POINTER`
+    /// for a null result.
+    pub fn piecewise_merge_skipping(
+        &mut self,
+        id: SweepMergeId,
+        skip_pairs: Option<&Relation<ObjectRef, ObjectRef>>,
+        use_existing_topology: bool,
+        create_new_breps_for_faces: bool,
+    ) -> Result<BrepId> {
+        self.run_merge(id, |k, driver| {
+            crate::boolean::merge::p3::piecewise_merge(
+                k,
+                driver,
+                skip_pairs,
+                use_existing_topology,
+                create_new_breps_for_faces,
+            )?
+            .ok_or_else(|| SolidError::null_pointer(OP))
+        })
     }
 
     fn insert_body(&mut self, context: ContextId, mut body: Body<'a>) -> Result<BrepId> {
@@ -983,16 +1068,7 @@ impl SweepAccess for SweepStore<'_> {
         use_existing_topology: bool,
         create_new_breps_for_faces: bool,
     ) -> Result<BrepId> {
-        self.run_merge(id, |k, driver| {
-            crate::boolean::merge::p3::piecewise_merge(
-                k,
-                driver,
-                None,
-                use_existing_topology,
-                create_new_breps_for_faces,
-            )?
-            .ok_or_else(|| SolidError::null_pointer(OP))
-        })
+        self.piecewise_merge_skipping(id, None, use_existing_topology, create_new_breps_for_faces)
     }
     fn union(&mut self, id: SweepMergeId) -> Result<BrepId> {
         self.run_merge(id, |k, driver| driver.union(k))
@@ -1815,6 +1891,37 @@ mod borrowed_tests {
         assert!(store.register_brep(c, &mut b).is_err());
         assert_eq!(*store.bodies.next, 15);
         assert!(store.bodies.slots.is_empty());
+    }
+    #[test]
+    fn adopted_bodies_keep_their_identities_and_can_be_taken_back() {
+        let mut k = Kernel::default();
+        let mut records = BTreeMap::new();
+        let mut attributes = AttributeStore::new();
+        let mut next = 4;
+        let mut store = SweepStore::new(&Identities, &mut records, &mut attributes, &mut next);
+        let c = store.register_kernel(&mut k).unwrap();
+        let id = BrepId::from_index(4);
+        let mut wrong = Brep::new();
+        wrong.set_key(ObjectKey(991));
+        assert!(store.adopt_brep(c, wrong).is_err());
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        b.set_key(Identities.topology(id, EntityRef::Brep(id)).key);
+        b.set_tolerance(0.25);
+        assert_eq!(store.adopt_brep(c, b).unwrap(), id);
+        // nothing is re-keyed or registered for the adopted body
+        assert_eq!(
+            store.brep(id).unwrap().key(),
+            Identities.topology(id, EntityRef::Brep(id)).key
+        );
+        assert!(store.records.is_empty());
+        let b = store.take_brep(id).unwrap();
+        assert_eq!(b.tolerance(), 0.25);
+        assert!(!store.contains_brep(id));
+        assert!(store.take_brep(id).is_err());
+        // a store without caller identities cannot adopt
+        let mut owned = SweepStore::owned();
+        let c = owned.insert_kernel(Kernel::default()).unwrap();
+        assert!(owned.adopt_brep(c, Brep::new()).is_err());
     }
     #[test]
     fn actual_shared_and_distinct_contexts_and_borrow_orders() {

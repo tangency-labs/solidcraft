@@ -88,7 +88,7 @@ use solidcore::offset::offset_executive::p2::{
 use solidcore::query::api_queries::BrepRef;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::{Surface, SurfaceKind};
-use solidcore::topology::brep::p1 as brep_p1;
+use solidcore::sweep::topology_sweep::store::SweepIdentities;
 use solidcore::topology::topology::Topology;
 use solidcore::topology::{
     Brep, BrepId, Edge, EdgeId, Edgeuse, EdgeuseOwner, FaceId, Region, RegionId, Shell, ShellId,
@@ -1455,6 +1455,67 @@ fn result_curve_key(edge: EdgeId, type_code: i64) -> ObjectRef {
     }
 }
 
+/// Identities of the B-reps a merging `PiecewiseMerge` creates, in the unused
+/// namespace 0 (bits 60-62), disjoint from the fixture, result and curve keys above
+/// and below the kernel's reserved bit 63: bits 58-59 tell topology (1), curves (2)
+/// and source lists (3) apart, bits 46-57 hold the merge-store handle, bits 32-45 the
+/// type code.
+struct MergeBodies;
+impl MergeBodies {
+    fn key(class: u64, brep: BrepId, kind: u64, index: u32) -> ObjectKey {
+        ObjectKey(
+            (class << 58)
+                | ((u64::from(brep.index()) & 0xfff) << 46)
+                | ((kind & 0x3fff) << 32)
+                | u64::from(index),
+        )
+    }
+}
+impl SweepIdentities for MergeBodies {
+    fn topology(&self, brep: BrepId, entity: EntityRef) -> ObjectRef {
+        let local = notification_key(entity, 0);
+        let index = (local.key.0 & 0xffff_ffff) as u32;
+        ObjectRef {
+            key: Self::key(1, brep, local.type_code as u64, index),
+            type_code: local.type_code,
+        }
+    }
+    fn owned_auxiliary_objects(&self, brep: BrepId, model: &Brep) -> Vec<ObjectKey> {
+        model
+            .edges()
+            .iter()
+            .filter_map(|(edge, e)| {
+                let curve = e.curve.as_ref()?;
+                Some(self.curve(brep, edge, curve).key)
+            })
+            .collect()
+    }
+    fn curve(&self, brep: BrepId, edge: EdgeId, curve: &Curve) -> ObjectRef {
+        let type_code = curve.type_code();
+        ObjectRef {
+            key: Self::key(2, brep, type_code as u64, edge.index()),
+            type_code,
+        }
+    }
+    fn new_curve(
+        &self,
+        brep: BrepId,
+        edge: EdgeId,
+        type_code: i64,
+    ) -> solidcore::Result<ObjectRef> {
+        Ok(ObjectRef {
+            key: Self::key(2, brep, type_code as u64, edge.index()),
+            type_code,
+        })
+    }
+    fn source_lists(&self, brep: BrepId, region: RegionId) -> solidcore::Result<[ObjectRef; 2]> {
+        Ok([0_u64, 1].map(|list| ObjectRef {
+            key: Self::key(3, brep, list, region.index()),
+            type_code: 0,
+        }))
+    }
+}
+
 /// The notification namespace of the source fixture's identities.
 const NAMESPACE_SOURCE: u64 = 1;
 /// The notification namespace of the foreign fixture's identities.
@@ -1548,6 +1609,7 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         result_curve_ref: &result_curve_key,
         boolean_source_lists: &boolean_source_lists,
         result_brep,
+        merge_identities: Some(&MergeBodies),
     };
     let keys = selections(input, source.as_ref(), foreign.as_ref())?;
     let selected_before = observe_selections(&keys, source.as_ref(), foreign.as_ref(), None);
@@ -2498,7 +2560,7 @@ mod tests {
     fn face_geometry_paths_reach_distinct_actual_callees() {
         // MakeWireEdgeVertex now runs, and concrete-Surface CrvOnSurf construction
         // lets the rounded and extended paths through DropCurve, ShrinkGeometry and
-        // the edge-use offset creator: they stop at the merge or the gap-fill
+        // the edge-use offset creator and PiecewiseMerge: they stop at the gap-fill
         // evaluation, or return a result B-rep that is compared.
         let context = CaseContext {
             root: repo_root(),
@@ -2506,11 +2568,7 @@ mod tests {
         };
         let fixtures = context.fixture_cases(Runner.id()).unwrap();
         for (name, owner, symbol) in [
-            (
-                "static_offset_real_plane_sheet_round",
-                "boolean.merge_p3",
-                "SmMerge::PiecewiseMerge",
-            ),
+            ("static_offset_real_plane_sheet_round", "", RESULT),
             (
                 "static_offset_real_plane_sheet_extended",
                 "",

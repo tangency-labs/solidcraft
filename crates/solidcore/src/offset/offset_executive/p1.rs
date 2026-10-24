@@ -92,6 +92,7 @@ use crate::nurbs::knots::Side;
 use crate::offset::offset_geometry_creation::{OffsetGeometryCreation, SsiData};
 
 use super::edgeuse::{CapNotifications, MarkSource};
+use super::p2::OffsetNotifications;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
@@ -641,11 +642,24 @@ impl OffsetExecutive {
     }
 
     /// Builds a closing ruled side wall, or succeeds without work for null/ambiguous mappings.
+    /// The new face is named in an arena-only store (`topology::loopuse::notify_ref`).
     pub fn build_side_wall_of_edgeuse(
         &mut self,
         kernel: &mut Kernel,
         original_brep: &mut Brep,
         original: Option<EdgeuseId>,
+    ) -> Result<()> {
+        self.build_side_wall_of_edgeuse_with(kernel, original_brep, original, None)
+    }
+
+    /// [`Self::build_side_wall_of_edgeuse`] notifying the new face through
+    /// `notifications`, keyed by result identities (`None`: an arena-only store).
+    pub(super) fn build_side_wall_of_edgeuse_with(
+        &mut self,
+        kernel: &mut Kernel,
+        original_brep: &mut Brep,
+        original: Option<EdgeuseId>,
+        notifications: Option<&mut NotifyState<'_>>,
     ) -> Result<()> {
         let Some(original) = original else {
             return Ok(());
@@ -668,7 +682,28 @@ impl OffsetExecutive {
         )?;
         // cpp:2819: m_pOffsetBrep->CreateFaceFromSurface(pNewSurface, natural domain)
         let domain = new_surface.natural_uv_domain();
-        let new_face = create_face_from_surface(kernel, offset_brep, &new_surface, &domain)?;
+        let new_face = match notifications {
+            Some(notifications) => {
+                let key_of = notifications.key_of;
+                let this_face = |face: FaceId| key_of(EntityRef::Face(face));
+                notifications.with_kernel_env(kernel, |kernel, env| {
+                    let mut marks = crate::topology::topology_traverser::Marks::default();
+                    let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
+                        env,
+                        marks: &mut marks,
+                        this_face: &this_face,
+                    };
+                    crate::topology::brep::p8::create_face_from_surface(
+                        kernel,
+                        offset_brep,
+                        Some(new_surface),
+                        &domain,
+                        &mut fenv,
+                    )
+                })?
+            }
+            None => create_face_from_surface(kernel, offset_brep, &new_surface, &domain)?,
+        };
         self.closing_faces.push(new_face); // [B549]
         Ok(())
     }
@@ -1260,7 +1295,20 @@ impl OffsetExecutive {
     ///
     /// On the non-merge path the B-rep is taken and relations are cleared *before*
     /// stitching, as upstream. A deferred stitch therefore leaves `offset_brep()` empty.
-    pub fn piecewise_merge(&mut self, kernel: &mut Kernel, original: &mut Brep) -> Result<Brep> {
+    /// The merge path builds a new merge B-rep and runs `SmMerge::PiecewiseMerge` over
+    /// the offset temporary in the caller's `notifications` stores (`None` refuses it);
+    /// the temporary stays in `offset_brep()`, as `m_pOffsetBrep` upstream.
+    ///
+    /// # Errors
+    ///
+    /// Those of the stitch and of the merge; [`SolidError::InvalidInput`] for a merge
+    /// without `notifications` or without their merge identities.
+    pub fn piecewise_merge(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &mut Brep,
+        notifications: Option<&mut OffsetNotifications<'_>>,
+    ) -> Result<Brep> {
         if !self.merge_results {
             self.clear_relations();
             let mut result = required(self.offset_brep.take())?;
@@ -1359,14 +1407,20 @@ impl OffsetExecutive {
         self.clear_relations();
         // Shrink the geometry - this helps some for self intersections
         shrink_geometry(kernel, required(self.offset_brep.as_mut())?)?;
-        // Continuation cpp:2429–2474: construct a merge B-rep with the original
-        // tolerance, editing enabled; SmMerge uses 20*PI/180 angular tolerance,
-        // PiecewiseMerge(&no_ssi, TRUE, TRUE). It keeps the original offset B-rep.
-        // UNPORTED(boolean.merge_p3): SmMerge::PiecewiseMerge
-        Err(SolidError::unported(
-            "SmMerge::PiecewiseMerge",
-            "boolean.merge_p3",
-        ))
+        // Now Get things ready for piecewise merge (cpp:2453–2474)
+        let notifications = notifications.ok_or_else(|| {
+            SolidError::invalid_input(OP, "a merging PiecewiseMerge needs notification stores")
+        })?;
+        let offset = required(self.offset_brep.take())?;
+        let (result, offset) = super::merge::merge_offset(
+            kernel,
+            offset,
+            original.tolerance(),
+            &no_ssi,
+            notifications,
+        );
+        self.offset_brep = offset;
+        result
     }
 
     /// Builds a face from the supplied offset surface (`BuildOffsetOfFaceuse`).
@@ -3552,7 +3606,7 @@ mod tests {
             // StitchIntoShell and StitchIntoSolid of the empty offset B-rep succeed (the
             // B-rep box is ported, query.brep); the merged B-rep is handed back
             let merged = executive
-                .piecewise_merge(&mut kernel, &mut original)
+                .piecewise_merge(&mut kernel, &mut original, None)
                 .unwrap();
             assert!(merged.faces().is_empty());
             assert!(executive.offset_brep().is_none());
@@ -3562,13 +3616,12 @@ mod tests {
         executive.set_merge_results(true);
         executive.set_offset_brep(Brep::new());
         executive.relate_edgeuses(EdgeuseId::from_index(1), EdgeuseId::from_index(2));
-        // ShrinkGeometry of the (empty) offset B-rep succeeds; the merge continuation
-        // defers at SmMerge::PiecewiseMerge
-        assert_dependency(
-            executive.piecewise_merge(&mut kernel, &mut original),
-            "SmMerge::PiecewiseMerge",
-            "boolean.merge_p3",
-        );
+        // ShrinkGeometry of the (empty) offset B-rep succeeds; the merge itself needs
+        // the caller's notification stores, and the temporary stays
+        assert!(matches!(
+            executive.piecewise_merge(&mut kernel, &mut original, None),
+            Err(SolidError::InvalidInput { .. })
+        ));
         assert!(executive.offset_brep().is_some());
         assert_eq!(executive.offset_edgeuse(EdgeuseId::from_index(1)), None);
     }

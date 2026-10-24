@@ -43,6 +43,8 @@ use std::collections::BTreeMap;
 #[derive(Debug)]
 pub(super) struct Session {
     context: ContextId,
+    /// The constructed primary (`PiecewiseMerge`'s final result).
+    destination: BrepId,
     primary: Option<BrepId>,
     other: Option<BrepId>,
     pub(super) intersector: KernelManifoldIntersector,
@@ -74,6 +76,7 @@ impl Session {
         let engine = MergeEngine::from_merge(&merge)?;
         Ok(Self {
             context,
+            destination,
             primary: Some(destination),
             other: Some(source),
             intersector: engine.intersector,
@@ -737,12 +740,17 @@ impl PiecewiseAccess for Driver<'_, '_> {
         .mark_action(|contexts| lock.release(contexts))
     }
     fn register_empty_ssi(&mut self, skip: ObjectRef, user: ObjectRef) -> Result<()> {
+        // PiecewiseMerge registers the pair for its next Merge (the final result with
+        // the new face B-rep) while the operands are still the PartialMerge's (the
+        // new face B-rep with the original other). The users also name the surfaces
+        // of other bodies (the original other's own); upstream registers those pairs
+        // too, but no surface of the next Merge's operands ever matches them, so they
+        // are skipped here (face ids are per body).
         let (a, af) = self.surface_face(skip)?;
         let (b, bf) = self.surface_face(user)?;
-        if self.session.operands()? != (a, b) {
-            return Err(invalid("SSI surfaces outside merge operands"));
+        if a == self.session.destination && self.session.primary == Some(b) && a != b {
+            self.session.intersector.register_empty_ssi(af, bf);
         }
-        self.session.intersector.register_empty_ssi(af, bf);
         Ok(())
     }
     fn clear_existing_ssi(&mut self) -> Result<()> {

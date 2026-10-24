@@ -2423,7 +2423,7 @@ fn rust_probe(k: &Kernel, branch: Probe, tolerance: f64) -> RResult<Output> {
             })
         }
         Probe::PiecewiseEmpty => executive
-            .piecewise_merge(&mut kernel, &mut original)
+            .piecewise_merge(&mut kernel, &mut original, None)
             .map(|_| {
                 counts = [0, 0, 0, 1];
             }),

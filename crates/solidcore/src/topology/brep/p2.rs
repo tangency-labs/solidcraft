@@ -55,8 +55,9 @@
 //! - `MakeShellVertexTopology` / `MakeEdgeVertexTopology` / `MakeEdgeTopology` add their
 //!   records to the arenas as they link them, not all up front; `MakeEdgeTopology`'s
 //!   `TransferChildrenTo` (the one shell call that can fail) runs before any new record
-//!   exists, so upstream's `SmObjDelete` guards have nothing to undo. Deleted records
-//!   (the merged end shell, a vertex shell's vertex use) stay in the arena, unlinked.
+//!   exists, so upstream's `SmObjDelete` guards have nothing to undo. The merged end
+//!   shell is deleted ([`shell::destroy`]); a deleted vertex shell's vertex use stays in
+//!   the arena, unlinked.
 //! - `MateLaminaEdgeToSurface` checks for the face's surface before the neighbour
 //!   (lamina / seam) checks; upstream binds the surface only for `IsSeam`, so a face
 //!   without surface there ends in the distance loop instead of
@@ -1779,21 +1780,24 @@ pub fn make_edge_vertex_topology(
 /// `MakeEdgeTopology`: a new wire edge in `region` (the infinite region for `None`)
 /// from `start` to `end`. When the vertices are in different shells of the region the
 /// end shell is merged into the start shell (a vertex shell is always the one
-/// removed: its vertex use is deleted, else its children are transferred) and
-/// removed. The edge has no curve.
+/// removed: its vertex use is deleted, else its children are transferred), removed
+/// and deleted (`delete pEndShell`: [`shell::destroy`] under `env`). The edge has no
+/// curve.
 ///
 /// # Errors
 ///
 /// `SM_ERR` when a vertex has no shell in the region; [`SolidError::InvalidInput`]
 /// without infinite region or where upstream dereferences null (a vertex shell without
 /// vertex use, a shell without region); those of `TransferChildrenTo`
-/// ([`shell::transfer_children`]); [`SolidError::NotFound`] for a dangling id.
+/// ([`shell::transfer_children`]) and of the shell's destruction
+/// ([`shell::destroy`]); [`SolidError::NotFound`] for a dangling id.
 pub fn make_edge_topology(
     k: &mut Kernel,
     b: &mut Brep,
     region: Option<RegionId>,
     start: VertexId,
     end: VertexId,
+    env: &mut NotifyEnv<'_>,
 ) -> Result<EdgeId> {
     b.vertex(start)?;
     b.vertex(end)?;
@@ -1822,6 +1826,8 @@ pub fn make_edge_topology(
             shell_transfer_children(k, b, end_shell, start_shell)?;
         }
         region_remove_shell(b, end_shell)?;
+        // delete pEndShell
+        shell::destroy(k, b, end_shell, env)?;
     }
 
     let (e, eu) = link_new_wire_edge(b, start, end)?;
@@ -2774,6 +2780,24 @@ mod tests {
             assert!(state.records.contains_key(&key));
             assert_eq!(entity_of_notify_key(key), Some(EntityRef::Region(r)));
         }
+    }
+
+    /// `MakeEdgeTopology` between two shell vertices deletes the end vertex shell
+    /// (`delete pEndShell`): the region keeps one wire shell and the arena no orphan.
+    #[test]
+    fn edge_between_shell_vertices_deletes_the_merged_shell() {
+        let mut k = Kernel::default();
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let (_, v1) = make_shell_vertex_topology(&mut b, None).unwrap();
+        let (end_shell, v2) = make_shell_vertex_topology(&mut b, None).unwrap();
+        assert_eq!(b.shells().len(), 2);
+        let mut state = ArenaNotifyState::new(&b);
+        let mut env = state.env(None);
+        make_edge_topology(&mut k, &mut b, None, v1, v2, &mut env).unwrap();
+        assert_eq!(b.shells().len(), 1);
+        assert!(b.shell(end_shell).is_err());
+        let region = b.infinite_region().unwrap();
+        assert_eq!(b.region(region).unwrap().shells.len(), 1);
     }
 
     fn solution(objects: &[CacheObject], params: &[f64]) -> Solution<CacheObject> {

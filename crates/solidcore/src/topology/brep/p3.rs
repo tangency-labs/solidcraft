@@ -2501,7 +2501,7 @@ fn make_wire_edge_in(
     let region = region_or_infinite(b, region);
 
     // make new edge connected to vertices and region
-    let e = p2::make_edge_topology(k, b, region, start, end)?;
+    let e = p2::make_edge_topology(k, b, region, start, end, env)?;
 
     // Set edge parameters
     let t = b.tolerance();
