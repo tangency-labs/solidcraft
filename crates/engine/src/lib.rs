@@ -52,8 +52,8 @@ use solidcraft_doc::{Document, Model, ModelState};
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{
-    Addition, CommandInfo, CommandSpec, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach,
-    find_command, resolve_design_links, shown_scope, standard_view,
+    Addition, CommandInfo, CommandSpec, LinkProblem, LinkState, LinkedState, OpenSteps, addition, auto_operation, command_specs, dimension_roles,
+    extrude_reach, find_command, linked_design_states, resolve_design_links, shown_scope, standard_view,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
@@ -2514,6 +2514,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         plastic,
         parts,
         links,
+        linked_designs,
         configs,
         favorites,
         canvases,
@@ -2550,6 +2551,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *plastic == b.plastic
         && *parts == b.parts
         && *links == b.links
+        && *linked_designs == b.linked_designs
         && *configs == b.configs
         && *favorites == b.favorites
         && *canvases == b.canvases

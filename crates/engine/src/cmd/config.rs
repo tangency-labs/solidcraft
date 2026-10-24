@@ -149,6 +149,10 @@ fn column_of(s: &Session, p: &Value, cmd: &str) -> Result<Column> {
         if !s.doc.all_param_exprs().iter().any(|(m, _, _)| m == n) && s.doc.text_param(n).is_none() {
             return Err(bad(cmd, format!("no parameter `{n}`")));
         }
+        // A configured column changes its parameter on each row: a linked one can't be changed.
+        if matches!(s.doc.owner(n), Some(solidcraft_doc::Owner::Linked { .. })) {
+            s.doc.editable(n).map_err(|e| bad(cmd, e.to_string()))?;
+        }
         return Ok(Column::Param(n.to_string()));
     }
     let f = str_(p, "feature").ok_or_else(|| bad(cmd, "give `param` or `feature`"))?;

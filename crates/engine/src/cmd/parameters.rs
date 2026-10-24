@@ -57,8 +57,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ParamListResult>)
         .params(
-        "favorites?: bool (only favourites), filter?: all|user|sketch|feature|favorites → parameters (name, expression, unit, value (mm/deg in every \
-         reply), display_value (in its own unit), source, feature/input, comment, favorite, uses, used_by, error) and cycles",
+        "favorites?: bool (only favourites), filter?: all|user|sketch|feature|model|linked|favorites → parameters (name, expression, unit, value \
+         (mm/deg in every reply), display_value (in its own unit), source, feature/input, design (linked), comment, favorite, uses, used_by, error) \
+         and cycles",
     ),
     CommandSpec::new("parameters.add", "Add User Parameter", crate::checked!("parameters.add", add))
         .icon("new")
@@ -142,12 +143,12 @@ fn param_name<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
 }
 
 /// Features that fail (name and error).
-fn failing(s: &Session) -> Vec<FailedFeature> {
+pub(super) fn failing(s: &Session) -> Vec<FailedFeature> {
     FailedFeature::of(&s.model.results)
 }
 
 pub(super) fn known(s: &Session, name: &str) -> bool {
-    s.doc.param(name).is_some() || s.doc.text_param(name).is_some() || s.doc.features.iter().any(|f| f.param_names.iter().any(|n| n == name))
+    s.doc.owner(name).is_some()
 }
 
 /// Whether `name` is (or, with this unit, becomes) a text parameter, whose expression is text.
@@ -423,8 +424,8 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         .into_iter()
         .filter(|r| match filter.as_str() {
             "favorites" | "favourites" | "favorite" => r.favorite,
-            "user" | "sketch" | "feature" => r.source == filter,
-            "model" => r.source != "user",
+            "user" | "sketch" | "feature" | "linked" => r.source == filter,
+            "model" => r.source == "sketch" || r.source == "feature",
             _ => true,
         })
         .collect();

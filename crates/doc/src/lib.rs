@@ -46,6 +46,7 @@ pub use format_offsets::whole_profile_selection_from_value;
 pub use inline_params::Defined;
 pub mod joints;
 mod lineage;
+pub mod linked;
 pub mod metadata;
 pub use metadata::Metadata;
 pub mod motion;
@@ -106,7 +107,7 @@ pub use eval::{
 pub use eval::{EvalCache, KeptResults};
 pub use expr::Expr;
 pub use names::{BodyName, FeatureId, FeatureName, SketchId, copy_name};
-pub use params::{ParamRow, ParamUser, cycles, name_words_match};
+pub use params::{Owner, ParamRow, ParamUser, cycles, name_words_match};
 pub use points::{Dir, FacePick, Position, plain};
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_sketch as sketch;

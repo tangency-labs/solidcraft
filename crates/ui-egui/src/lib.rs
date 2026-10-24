@@ -115,6 +115,7 @@ mod kit_gallery_tests;
 mod kit_host_tests;
 mod length_input;
 mod linked_source;
+mod linked_watch;
 #[cfg(test)]
 mod loft_rails_dialog_tests;
 #[cfg(test)]
@@ -627,6 +628,11 @@ pub struct SolveApp {
     pub(crate) remembered_commands: Vec<dialogs::RememberedCommand>,
     /// The Change Parameters window, when open.
     pub params: Option<params_dialog::ParamsDialog>,
+    /// The watch on the open design's linked designs (desktop only).
+    pub linked_watch: linked_watch::LinkedWatch,
+    /// Commands that need the user's attention (by command id), with why: their buttons and
+    /// rows show the shared mark (`ui_kit::attention_mark`).
+    pub attention: std::collections::BTreeMap<&'static str, String>,
     /// The Design Properties window, when open.
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
@@ -927,6 +933,8 @@ impl SolveApp {
             snaps: Default::default(),
             remembered_commands: Vec::new(),
             params: None,
+            linked_watch: Default::default(),
+            attention: Default::default(),
             design_properties: None,
             sketch_report: None,
             bom: None,
@@ -3716,6 +3724,7 @@ impl SolveApp {
         if !self.universal_panel_host_enabled() {
             self.resolve_fit(ui.ctx());
         }
+        linked_watch::step(self, ui.ctx());
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());

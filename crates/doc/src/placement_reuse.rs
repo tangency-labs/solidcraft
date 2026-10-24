@@ -143,6 +143,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         plastic,
         parts,
         links,
+        linked_designs,
         configs,
         favorites,
         canvases,
@@ -179,6 +180,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *plastic == b.plastic
         && *parts == b.parts
         && *links == b.links
+        && *linked_designs == b.linked_designs
         && *configs == b.configs
         && *favorites == b.favorites
         && *canvases == b.canvases

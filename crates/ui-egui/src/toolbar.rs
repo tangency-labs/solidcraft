@@ -1005,6 +1005,8 @@ struct PanelButton {
     disabled: Option<String>,
     split_title: String,
     split_name: String,
+    /// The command waits for the user (`SolveApp::attention`).
+    attention: bool,
 }
 
 impl PanelButton {
@@ -1022,6 +1024,7 @@ impl PanelButton {
             split: self.family.map(|f| ribbon::Split { key: f.label, title: &self.split_title, name: &self.split_name }),
             app_paints: self.persistent,
             covers: self.covers,
+            attention: self.attention,
         }
     }
 }
@@ -1108,6 +1111,7 @@ impl RibbonPanels {
                         disabled: info.disabled_reason,
                         split_title: family.map(|f| app.tr_label(crate::workspace::ribbon_family_label(f)).to_string()).unwrap_or_default(),
                         split_name: family.map(|f| app.tr_label(f.label).to_string()).unwrap_or_default(),
+                        attention: app.attention.contains_key(selected.id),
                     }
                 };
                 let cell = |c: &'static solidcraft_engine::CommandSpec| {
@@ -1128,6 +1132,7 @@ impl RibbonPanels {
                         disabled: info.disabled_reason,
                         split_title: String::new(),
                         split_name: String::new(),
+                        attention: app.attention.contains_key(c.id),
                     }
                 };
                 let more = menu_commands(cmds, shown)
@@ -2001,6 +2006,10 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
         }
         if let Some(reason) = disabled {
             ui.add(egui::Label::new(egui::RichText::new(app.tr_label(reason)).color(t.text_dim)).wrap());
+        }
+        // What waits for the user, as the button's mark says.
+        if let Some(why) = app.attention.get(command.id) {
+            ui.add(egui::Label::new(egui::RichText::new(why).color(t.warning)).wrap());
         }
     })
 }
