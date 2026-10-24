@@ -1,0 +1,14 @@
+[package]
+name = "solidcraft-manufacture"
+description = "SolidCraft CNC manufacture domain: setups, tools, operations, machine/post profiles, and normalized toolpath contracts. Document types plus CamBackend/MachineBackend host traits; no companion HTTP or UI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
