@@ -16,6 +16,9 @@ pub(crate) struct RecentRow<'a> {
     pub when: &'a str,
     pub workspace: &'a str,
     pub thumbnail: Option<(TextureId, Vec2)>,
+    /// The design's picture could not be made (empty or unreadable). Draws a dimmed placeholder,
+    /// so it reads as "no preview" rather than as one still loading.
+    pub thumbnail_failed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -274,12 +277,15 @@ impl FileView {
         let preview = Rect::from_min_size(inner.min, vec2(t.space_24 * 2.0, inner.height()).min(inner.size()));
         thumbnail(ui, preview, row.thumbnail);
         if row.thumbnail.is_none() {
+            // A design whose picture could not be made shows a fainter box, so it reads as "no
+            // preview" rather than as one still being drawn.
+            let opacity = if row.thumbnail_failed { 0.4 } else { 1.0 };
             crate::icons::paint_accented(
                 ui.painter(),
                 Rect::from_center_size(preview.center(), Vec2::splat(t.space_24.min(preview.height()))),
                 "box",
                 None,
-                1.0,
+                opacity,
             );
         }
         let left = (preview.right() + t.space_14).min(inner.right());
