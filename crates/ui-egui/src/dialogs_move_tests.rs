@@ -373,3 +373,44 @@ fn inch_move_lengths_agree_in_the_triad_and_every_numeric_move_route() {
         }
     }
 }
+
+/// After a body is picked, Point to Point, Point to Position and Rotate go on to their empty
+/// From, Point or Axis, so the next click picks that instead of another body (#6170). Free
+/// Move stays on Bodies: its Pivot is optional.
+#[test]
+fn a_body_pick_goes_on_to_the_point_or_axis() {
+    for (mode, next) in [(POINT_TO_POINT, Some(1)), (POINT_TO_POSITION, Some(1)), (ROTATE, Some(1)), (FREE, None)] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10})).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.app.cam.distance = 160.0;
+        h.settle();
+        h.app.start("solid.move");
+        let d = h.app.dialog.as_mut().unwrap();
+        d.kind = kind(mode, &h.app.session.doc);
+        d.inputs = inputs(mode);
+        d.active = 0;
+        h.step(&json!({ "click": { "world": [30, 20, 10] } })).unwrap();
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Body1".into() }], "{}", TYPES[mode]);
+        assert_eq!(d.active, next.unwrap_or(0), "{} goes on after the body", TYPES[mode]);
+    }
+    // Point to Point: the click after the body is the From point, the body stays picked.
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10})).unwrap();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.app.cam.distance = 160.0;
+    h.settle();
+    h.app.start("solid.move");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = kind(POINT_TO_POINT, &h.app.session.doc);
+    d.inputs = inputs(POINT_TO_POINT);
+    d.active = 0;
+    h.step(&json!({ "click": { "world": [30, 30, 10] } })).unwrap();
+    h.step(&json!({ "click": { "world": [60, 0, 10] } })).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items.len(), 1, "the body is still picked");
+    assert!(matches!(d.inputs[1].items.as_slice(), [Sel::Vertex { .. }]), "{:?}", d.inputs[1].items);
+}
