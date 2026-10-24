@@ -211,7 +211,7 @@ enum Tool {
 
 /// Evaluate a `FrameTrim` feature: rebuild each member with the end that meets each target moved
 /// to it, `gap` short of it. The member keeps its body's name and its record.
-pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     let FeatureKind::FrameTrim { members, to, end, gap } = &f.kind else {
         return Err(DocError::Invalid("not a frame trim feature".into()));
     };
@@ -234,7 +234,7 @@ pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         .iter()
         .map(|t| match t {
             TrimTarget::Member { member, side } => Ok(Tool::Member { at: find(doc, vals, f, st, &mut layouts, member, false)?, side: *side }),
-            TrimTarget::Plane { plane } => Ok(Tool::Plane(doc.resolve_plane_in(vals, plane, 0, Some(st))?)),
+            TrimTarget::Plane { plane } => Ok(Tool::Plane(target_plane(doc, vals, f, st, plane, warning)?)),
         })
         .collect::<Result<Vec<_>>>()?;
     let mut seen = HashSet::new();
@@ -285,13 +285,34 @@ pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         let i = st.bodies.iter().position(|b| b.name == rec.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", rec.body)))?;
         let Some(mb) = st.bodies.get(i) else { return Err(DocError::Unknown(format!("body `{}`", rec.body))) };
         let made = record(rec.feature, &rec.line, &rec.body, ends, &body);
-        let rebuilt = ModelBody::traced_new(mb.name.clone(), crate::lineage::numbered_tool(body), mb.feature);
+        // Its faces keep the names the member feature gave them, so what later features picked
+        // on it stays picked.
+        let rebuilt = ModelBody::traced_new(mb.name.clone(), crate::lineage::numbered_rebuilt(body, rec.feature), mb.feature);
         if let (Some(slot), Some(r)) = (st.bodies.get_mut(i), st.frame_members.get_mut(m.record)) {
             *slot = rebuilt;
             *r = made;
         }
     }
     Ok(())
+}
+
+/// A plane a member is trimmed to, where it is now: a body face's plane follows the face, as a
+/// sketch on that face does.
+fn target_plane(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+    plane: &crate::PlaneRef,
+    warning: &mut Option<String>,
+) -> Result<Plane> {
+    let Some(anchor) = crate::face_anchor::plane_face_anchor(plane) else { return doc.resolve_plane_in(vals, plane, 0, Some(st)) };
+    let fst = crate::state_in_face_anchor_frame(doc, st, anchor, f.component)?;
+    let (pl, note) = doc.resolve_attached_plane_noted(vals, plane, f.component, st, &fst)?;
+    if let Some(note) = note {
+        super::append_warning(warning, note);
+    }
+    Ok(pl)
 }
 
 /// Find a member in the model: its record, and its feature laid out (into `layouts`). It must be
@@ -321,8 +342,11 @@ fn find(
         .ok_or_else(|| DocError::Unknown(format!("member on line `{}` of `{}` (it must come earlier in the timeline)", r.line, r.feature)))?;
     let rec = st.frame_members.get(record).ok_or_else(|| DocError::Invalid("member record".into()))?;
     if rebuilt {
-        let body =
-            st.body(&rec.body).ok_or_else(|| DocError::Unknown(format!("body `{}` (member on line `{}` of `{}`)", rec.body, r.line, r.feature)))?;
+        // A later feature may have removed the member's body and given its name to another.
+        let body = st
+            .body(&rec.body)
+            .filter(|b| b.feature == rec.feature)
+            .ok_or_else(|| DocError::Unknown(format!("body `{}` (member on line `{}` of `{}`)", rec.body, r.line, r.feature)))?;
         if !unchanged(rec, &body.body) {
             return Err(DocError::Invalid(format!("`{}` was changed after it was made: trim it before the features that change it", rec.body)));
         }
