@@ -636,7 +636,7 @@ fn unsupported_intent_is_rejected_and_export_preserves_existing_files() {
         json!({"settings":{"mode":"final"}}),
         json!({"settings":{"format":"exr"}}),
         json!({"settings":{"backend":"missing"}}),
-        json!({"settings":{"exposure_ev":1}}),
+        json!({"settings":{"exposure_ev":1},"integrator":"raytrace"}),
         json!({"unknown":true}),
     ] {
         assert!(s.execute("render.preflight", &params).is_err());
@@ -1170,4 +1170,21 @@ fn explicit_render_camera_preserves_orientation_and_refuses_invalid_state_atomic
     assert_eq!(s.camera, before_camera);
     assert!(Arc::ptr_eq(&document, &s.doc));
     assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len(), s.model.is_stale()));
+}
+
+/// #5089: a setup saved with exposure (the render workspace and the other executors use it)
+/// renders on the raster executor, which has no exposure, and the reply says what it left out.
+#[test]
+fn a_setup_saved_with_exposure_renders_and_names_the_controls_it_leaves_out() {
+    let (mut s, host) = session();
+    s.execute("render.settings.set", &json!({"name":"x","set":{"mode":"preview","width":16,"height":16,"exposure_ev":0.3}})).unwrap();
+    let reply = s.execute("render.preflight", &json!({"setup":"x"})).unwrap();
+    assert_eq!(reply["ignored_controls"], json!(["exposure_ev"]));
+    let plain = s.execute("render.preflight", &request()).unwrap();
+    assert_eq!(plain["ignored_controls"], json!([]));
+    let started = s.execute("render.start", &json!({"setup":"x"})).unwrap();
+    assert_eq!(started["ignored_controls"], json!(["exposure_ev"]));
+    finish(&host);
+    let id: JobId = serde_json::from_value(started["job"].clone()).unwrap();
+    assert_eq!(s.execute("render.status", &json!({"job":id})).unwrap()["progress"]["phase"], "completed");
 }

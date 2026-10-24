@@ -47,6 +47,12 @@ the existing camera model. Both existing camera up axes are retained. Setup name
 are trimmed, nonempty, at most 128 UTF-8 bytes, without control characters. A document
 has at most 32 setups. Validation also runs during document deserialization.
 
+The raster product-image executor (`render.preflight` / `render.start` without `progressive`)
+doesn't apply exposure or the environment controls. A setup that sets them still renders there;
+the reply's `ignored_controls` lists the ones that render leaves out (for example
+`["exposure_ev"]`). A raytrace request with them is refused; progressive rendering applies the
+exposure, and a saved job passes it to its executor.
+
 ## Complete numerical job intent
 
 `job` is tagged by `method`. It saves the active method, rather than separate CPU

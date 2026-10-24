@@ -355,7 +355,14 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
     } else {
         settings.validate().map_err(|e| bad(command, e.to_string()))?;
     }
-    if settings.exposure_ev != 0.0 || settings.environment_rotation != 0.0 || settings.environment_intensity != 1.0 {
+    // The raster image executor has no exposure or environment controls. A setup saved with them
+    // (the render workspace and the other executors use them) still renders here, and the reply
+    // names what this render leaves out (#5089). The raytrace path takes them only through a
+    // saved job, so a raytrace request with them is still refused.
+    let ignored = if input.integrator == Integrator::Raster { ignored_controls(&settings) } else { Vec::new() };
+    if input.integrator != Integrator::Raster
+        && (settings.exposure_ev != 0.0 || settings.environment_rotation != 0.0 || settings.environment_intensity != 1.0)
+    {
         return Err(bad(command, "exposure and environment controls are not supported by the R4a CPU image executor"));
     }
     let mut descriptor = host.descriptor_for(input.integrator).map_err(job_error)?;
@@ -422,7 +429,7 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
         Integrator::Raytrace if refraction => "physical_transmission",
         Integrator::Raytrace => "opaque_only",
     };
-    let reply = json!({"stage_panels":settings.stage.len(),"stage_transport":"CPU direct/specular only; no diffuse interreflection", "cpu_budget":budget,"cpu_limits":budget.limits(),"environment":environment_info,"retained_request_bytes":retained_request_bytes,"resolved":resolved,"admission":admission,"request":request,"scene_generation":s.revision,"host":host.kind(),"transparency":transparency,"refraction":refraction,"dielectric_boundaries":if refraction {vec!["thin_sheet","closed_box"]} else {Vec::<&str>::new()}});
+    let reply = json!({"ignored_controls":ignored,"stage_panels":settings.stage.len(),"stage_transport":"CPU direct/specular only; no diffuse interreflection", "cpu_budget":budget,"cpu_limits":budget.limits(),"environment":environment_info,"retained_request_bytes":retained_request_bytes,"resolved":resolved,"admission":admission,"request":request,"scene_generation":s.revision,"host":host.kind(),"transparency":transparency,"refraction":refraction,"dielectric_boundaries":if refraction {vec!["thin_sheet","closed_box"]} else {Vec::<&str>::new()}});
     Ok(Prepared { replace: input.replace, scene, request, reply, environment, executor: resolved.executor, options: Default::default() })
 }
 
@@ -625,6 +632,21 @@ fn prepare_progressive(
     Ok(Prepared { replace: input.replace, scene, request, reply, executor: resolved.executor, options, environment: None })
 }
 
+/// The setup's controls the raster image executor doesn't apply: those not at their neutral value.
+fn ignored_controls(settings: &RenderSetup) -> Vec<&'static str> {
+    let mut ignored = Vec::new();
+    if settings.exposure_ev != 0.0 {
+        ignored.push("exposure_ev");
+    }
+    if settings.environment_rotation != 0.0 {
+        ignored.push("environment_rotation");
+    }
+    if settings.environment_intensity != 1.0 {
+        ignored.push("environment_intensity");
+    }
+    ignored
+}
+
 pub(super) fn preflight(s: &mut Session, params: &Value) -> Result<Value> {
     prepare(s, params, "render.preflight").map(|p| p.reply)
 }
@@ -641,7 +663,11 @@ pub(super) fn start(s: &mut Session, params: &Value) -> Result<Value> {
             crate::render_jobs::Execution { executor: p.executor, options: p.options, environment: p.environment },
         )
         .map_err(job_error)?;
-    Ok(json!(status))
+    let mut status = json!(status);
+    if let (Some(out), Some(ignored)) = (status.as_object_mut(), p.reply.get("ignored_controls")) {
+        out.insert("ignored_controls".into(), ignored.clone());
+    }
+    Ok(status)
 }
 
 #[derive(Deserialize)]
