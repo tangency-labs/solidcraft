@@ -18,19 +18,18 @@
 //! same `-2`, so a refusal on one side only is a mismatch. The two conservative guards of
 //! the shim (a duplicated entry in the list a resolve deletes from, zero-length intervals
 //! where a reparameterisation can follow, plan/upstream-issues.md HANG-12) are mirrored
-//! here explicitly.
+//! here explicitly, as is its `Imprint` guard for a merge into a bare region, face or
+//! edge stand-in, whose `GetBrep` is `NULL` ([`imprint_reaches_missing_brep`]).
 //!
 //! The pool's bare edges and vertices carry the interval and zone tolerance the shim gives
 //! its stand-ins (`ObjIn::EdgeIvl`, `ObjIn::VertexTol`); the pool answers the port's
 //! [`ProtoBrep`](solidcore::topology::proto_topology::ProtoBrep) queries with them.
 //!
-//! Deferred: everything past `SmBrep::MakeEdgeInFace` (unit `topology.brep_p5`), the
-//! merges of `SmPointClassification::MergeIntoObject` (unresolved region/face
-//! owners and vertex methods), bare-face `UpdateFaces` scripts without owning
-//! geometry, the B-rep walks of `sm_AreConnected` and point classifications on
-//! bare topology (units `topology.edge`, `topology.vertex`, `topology.face_p2`), and
-//! `SmProtoVertex::ContainsPoint` (unit `query.face_p2`). Bare-edge merges without
-//! an arena defer to `topology.brep_p9` until mutable arena context is supplied.
+//! Deferred: everything past `SmBrep::MakeEdgeInFace` (unit `topology.brep_p5`),
+//! bare-face `UpdateFaces` scripts without owning geometry, the B-rep walks of
+//! `sm_AreConnected` and point classifications on bare topology (units `topology.edge`,
+//! `topology.vertex`, `topology.face_p2`), and `SmProtoVertex::ContainsPoint` (unit
+//! `query.face_p2`).
 
 use serde_json::{json, Value};
 
@@ -77,6 +76,30 @@ fn res<T>(r: solidcore::Result<T>, status_out: &mut f64, skip: &mut bool) -> Res
             Ok(None)
         }
     }
+}
+
+/// The shim's guard of `SmVertexDefinition::Imprint`, mirrored from the inputs: its
+/// `MergeIntoObject` calls `GetBrep()->...` on a region, face or edge, and the pool's bare
+/// stand-ins have no B-rep (upstream dereferences `NULL`); a vertex merges, after which
+/// the manager is reached through the proto vertex (`NULL` without one). The shim checks
+/// both classifications before the call, so the whole op is refused, as here.
+fn imprint_reaches_missing_brep(r: &ProtoRun, d: VertexDefId) -> bool {
+    use solidcore::intersect::point_class::ClassObjectKind as K;
+    let Some(v) = r.mgr.vertex_def(d) else {
+        return false;
+    };
+    for which in [1, 2] {
+        let Some(H(_, kind)) = v.brep_point_classif(which).object() else {
+            break;
+        };
+        match kind {
+            K::Region | K::Face | K::Edge => return true,
+            K::Vertex if v.proto_vertex().is_none() => return true,
+            K::Vertex => {}
+            _ => break,
+        }
+    }
+    false
 }
 
 /// The objects calls made get the next ids of their kinds (the shim numbers them after the
@@ -230,6 +253,10 @@ pub(super) fn run_op(
                 *skip = true;
                 return Ok(());
             };
+            if imprint_reaches_missing_brep(r, d) {
+                *skip = true;
+                return Ok(());
+            }
             let _ = res(r.mgr.imprint_vertex_definition(&mut r.k, &mut r.pool, d), st, skip)?;
             if let Some(v) = r.mgr.vertex_def(d) {
                 out.push(r.pool.id(v.final_vertex(1)));

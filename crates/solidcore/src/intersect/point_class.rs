@@ -1438,9 +1438,9 @@ impl<O: ClassObject> PointClassification<O> {
     /// # Errors
     ///
     /// `SM_ERR_NULL_POINTER` for no object (upstream's `NER`); `SM_ERR` for an object
-    /// that is not a region, face, edge or vertex; unresolved region/face owners
-    /// return `Unported`. An opaque edge needs [`Self::merge_into_brep`] to supply
-    /// its mutable arena and defers the split here until it is supplied.
+    /// that is not a region, face, edge or vertex. A region, face or edge is edited in
+    /// its owning B-rep, which [`Self::merge_into_brep`] takes mutably: through an
+    /// opaque handle the edit returns `Unported` here.
     pub fn merge_into_object(&mut self, k: &Kernel, src_point: Point3) -> Result<MergeOutputs<O>> {
         let _ = k;
         let object = self.object.ok_or_else(|| null_object(OP_MERGE))?;
@@ -1452,19 +1452,16 @@ impl<O: ClassObject> PointClassification<O> {
 
         // the vertex the point merges into
         let new_v: O = match object.class_kind() {
-            ClassObjectKind::Region | ClassObjectKind::Edge => {
-                // The opaque API has no mutable owning-arena lookup. The actual
-                // p9 operation is available through merge_into_brep; canonical
-                // B-rep owner storage remains part 1's integration boundary.
+            ClassObjectKind::Region | ClassObjectKind::Face | ClassObjectKind::Edge => {
+                // `GetBrep()->MakeShellVertex / MakeVertexLoop / MakeVertexSplitEdge`
+                // edit the B-rep that owns the object, which an opaque handle cannot
+                // reach mutably (the face's `GetBrep` itself is ported): the edit runs
+                // through merge_into_brep, which callers with the B-rep use.
                 // UNPORTED(topology.brep_p1): SmBrep mutable owning context
                 return Err(SolidError::unported(
                     "SmBrep mutable owning context",
                     "topology.brep_p1",
                 ));
-            }
-            ClassObjectKind::Face => {
-                // UNPORTED(topology.face_p4): SmFace::GetBrep
-                return Err(SolidError::unported("SmFace::GetBrep", "topology.face_p4"));
             }
             // Almost no work to do. There is already a vertex here.
             ClassObjectKind::Vertex => object,

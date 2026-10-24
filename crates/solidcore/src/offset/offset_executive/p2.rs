@@ -721,6 +721,7 @@ impl OffsetExecutive {
             &ssi,
             &mut stores,
             notifications.result_key_of,
+            notifications.result_curve_ref,
         )
     }
 
@@ -2034,6 +2035,7 @@ mod tests {
                     key_of: &original_key,
                 },
                 &result_key,
+                &result_curve,
             );
             if has_surface {
                 assert_status(status, SM_ERR_NULL_POINTER);

@@ -68,7 +68,13 @@
 //!   then `intersect.curve_class_p1`'s `SetCurve` and `intersect.curve_class_p5`'s
 //!   `MergeIntervals`, over `topology.face_p3`'s [`IntersectObject`] handles (the merge's
 //!   curve `i` is `Curve(i)`, its UV curves `UvCurve(i, false / true)`, the surface
-//!   `Surface(face)`); their unported callees defer the call. The classification's
+//!   `Surface(face)`); their unported callees defer the call. The merges run
+//!   `merge_intervals_mut` over the B-rep (upstream edits it through the
+//!   classification's topology pointers), so `MergeIntoObject` makes its vertex loops,
+//!   edge splits and edges in `b`; the caller's `curve_ref` names the curves of split
+//!   edges in the notifications. The 3D curves are the call's copies of the caller's
+//!   (`SetXSectCurveThroughPoint` edits those copies, not the caller's values, which
+//!   are borrowed shared). The classification's
 //!   borrowed interval array is not modelled (`lOptDataSize = 16` is passed through). The
 //!   upstream interval loop around them is ported (`GetSize() != 1` skips before the
 //!   second merge, `SM_ERR` after it, `SE(SM_ERR)` for a middle not on an edge).
@@ -111,7 +117,9 @@ use crate::geom::tools::{
 };
 use crate::intersect::curve_class::p1::{CurveClassification, CurveInterval};
 use crate::intersect::curve_class::p4::ClassificationInit;
-use crate::intersect::point_class::PointClassType;
+use crate::intersect::curve_class::p5::ClassGeometryMut;
+use crate::intersect::curve_class::p6::{MergeContext as ClassMergeContext, MergeIntervalBrep};
+use crate::intersect::point_class::{ClassGeometry, PointClassType};
 use crate::kernel::Kernel;
 use crate::math::{Point3, EFF_ZERO, EFF_ZERO_DEG, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -119,6 +127,7 @@ use crate::nurbs::b_spline_curve_n_lib::InValueType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::face::p2 as qf2;
 use crate::surface::surface::Surface;
+use crate::surface::volume::Volume;
 use crate::topology::brep::p1;
 use crate::topology::brep::p10::{self, MakeTopologyOptions, TopologyEnv};
 use crate::topology::brep::p2;
@@ -458,16 +467,119 @@ fn classify_on_faces(
     Ok(cc)
 }
 
+/// The objects of [`merge_self_intersection_curves`]' merges over the B-rep they edit:
+/// upstream's `MergeIntervals` edits the B-rep through the classification's `SmFace*`,
+/// `SmEdge*` and `SmVertex*` pointers (a vertex loop, an edge split, a new edge), and
+/// `SetXSectCurveThroughPoint` edits the merged 3D curve. The handles are those of
+/// [`IntersectObjects`] over one B-rep (side `false`).
+struct SelfMergeObjects<'a, 'e> {
+    b: &'a mut Brep,
+    curves_3d: &'a mut [Curve],
+    uv1: &'a [Option<Curve>],
+    uv2: &'a [Option<Curve>],
+    env: &'a mut ed::NotifyEnv<'e>,
+    curve_ref: &'a dyn Fn(EdgeId, i64) -> ObjectRef,
+}
+
+impl SelfMergeObjects<'_, '_> {
+    /// The read-only objects over the same B-rep and curves.
+    fn view(&self) -> IntersectObjects<'_> {
+        IntersectObjects {
+            b: &*self.b,
+            other: &*self.b,
+            side: false,
+            curves_3d: &*self.curves_3d,
+            uv1: self.uv1,
+            uv2: self.uv2,
+        }
+    }
+}
+
+impl ClassGeometry<IntersectObject> for SelfMergeObjects<'_, '_> {
+    fn classification_vertex_point(&self, o: IntersectObject) -> Option<Point3> {
+        self.view().classification_vertex_point(o)
+    }
+    fn topology_zone_tol_3d(&self, o: IntersectObject) -> Option<f64> {
+        self.view().topology_zone_tol_3d(o)
+    }
+    fn curve(&self, o: IntersectObject) -> Option<&Curve> {
+        self.view().object_curve(o)
+    }
+    fn surface(&self, o: IntersectObject) -> Option<&Surface> {
+        self.view().object_surface(o)
+    }
+    fn volume(&self, _o: IntersectObject) -> Option<&Volume> {
+        None
+    }
+    fn point(&self, _o: IntersectObject) -> Option<Point3> {
+        None
+    }
+    fn topology_entity(&self, o: IntersectObject) -> Option<(&Brep, EntityRef)> {
+        self.view().object_entity(o)
+    }
+    fn topology_handle(&self, e: EntityRef) -> Option<IntersectObject> {
+        self.view().topology_handle(e)
+    }
+    fn topology_handle_in(&self, brep: &Brep, e: EntityRef) -> Option<IntersectObject> {
+        self.view().topology_handle_in(brep, e)
+    }
+}
+
+impl ClassGeometryMut<IntersectObject> for SelfMergeObjects<'_, '_> {
+    fn curve_mut(&mut self, o: IntersectObject) -> Option<&mut Curve> {
+        match o {
+            IntersectObject::Curve(i) => self.curves_3d.get_mut(i),
+            _ => None,
+        }
+    }
+    fn topology_entity_mut(&mut self, o: IntersectObject) -> Option<(&mut Brep, EntityRef)> {
+        match o {
+            // (both sides name this one B-rep)
+            IntersectObject::Topology(e, _) => Some((&mut *self.b, e)),
+            _ => None,
+        }
+    }
+}
+
+impl MergeIntervalBrep<IntersectObject> for SelfMergeObjects<'_, '_> {
+    fn merge_context(
+        &mut self,
+        o: IntersectObject,
+    ) -> Option<ClassMergeContext<'_, IntersectObject>> {
+        let IntersectObject::Topology(target, side) = o else {
+            return None;
+        };
+        if !matches!(
+            target,
+            EntityRef::Vertex(_) | EntityRef::Edge(_) | EntityRef::Face(_) | EntityRef::Region(_)
+        ) {
+            return None;
+        }
+        Some(ClassMergeContext {
+            brep: &mut *self.b,
+            target,
+            handle: Box::new(move |e| IntersectObject::Topology(e, side)),
+            notifications: ed::NotifyEnv {
+                records: &mut *self.env.records,
+                attributes: &mut *self.env.attributes,
+                context: self.env.context.as_deref_mut(),
+                key_of: self.env.key_of,
+            },
+            curve_ref: self.curve_ref,
+        })
+    }
+}
+
 /// `sCC.SetCurve(curve_3d)` and `sCC.MergeIntervals(&newFaces, NULL, NULL, face)`: the
 /// faces the merge made.
 fn set_curve_and_merge(
-    k: &Kernel,
-    objects: &IntersectObjects<'_>,
+    k: &mut Kernel,
+    objects: &mut SelfMergeObjects<'_, '_>,
     cc: &mut SelfClassification,
     curve_3d: IntersectObject,
 ) -> Result<Vec<FaceId>> {
     cc.set_curve(Some(curve_3d), false);
-    let merged = cc.merge_intervals(k, objects, false)?;
+    let merged = cc.merge_intervals_mut(k, objects, false)?;
     merged
         .faces
         .into_iter()
@@ -1902,13 +2014,16 @@ pub struct SelfIntersectionCurve {
 
 /// `MergeSelfIntersectionCurves`: imprints each self-intersection curve of the surface of
 /// `face` on the face (through both UV curves) and glues the two edges made for it,
-/// giving non-manifold edges with four face uses. Returns the glued edges.
+/// giving non-manifold edges with four face uses. Returns the glued edges. The merges
+/// edit `b` (vertex loops, edge splits and new edges, notified in `env`); `curve_ref`
+/// names an edge's curve by the edge and the curve's type code, the curve of an edge a
+/// split makes included.
 ///
 /// # Errors
 ///
 /// `SM_ERR` when the second classification does not give one interval; those of the
-/// classifications, vertex and edge gluing; [`SolidError::Unported`] (the
-/// classifications' callees, `GlueVertices`, `GlueEdgesGeneral`'s callees).
+/// classifications, their B-rep edits, vertex and edge gluing; [`SolidError::Unported`]
+/// (the classifications' callees, `GlueVertices`, `GlueEdgesGeneral`'s callees).
 pub fn merge_self_intersection_curves(
     k: &mut Kernel,
     b: &mut Brep,
@@ -1916,6 +2031,7 @@ pub fn merge_self_intersection_curves(
     tol_3d: f64,
     curves: &[SelfIntersectionCurve],
     env: &mut ed::NotifyEnv<'_>,
+    curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
 ) -> Result<Vec<EdgeId>> {
     let mut new_edges = Vec::new();
     let mut all_faces: Vec<FaceId> = face.into_iter().collect();
@@ -1926,7 +2042,7 @@ pub fn merge_self_intersection_curves(
     };
     // the classifications' curves: curve i is IntersectObject::Curve(i), its UV curves
     // IntersectObject::UvCurve(i, false / true)
-    let curves_3d: Vec<Curve> = curves.iter().map(|c| c.curve_3d.clone()).collect();
+    let mut curves_3d: Vec<Curve> = curves.iter().map(|c| c.curve_3d.clone()).collect();
     let uv1: Vec<Option<Curve>> = curves.iter().map(|c| Some(c.uv_curve_1.clone())).collect();
     let uv2: Vec<Option<Curve>> = curves.iter().map(|c| Some(c.uv_curve_2.clone())).collect();
     for (i, c) in curves.iter().enumerate() {
@@ -1949,7 +2065,15 @@ pub fn merge_self_intersection_curves(
             c.uv_curve_1.natural_interval(),
             tol,
         )?;
-        let new_faces = set_curve_and_merge(k, &objects, &mut cc1, curve_3d)?;
+        let mut merge_objects = SelfMergeObjects {
+            b: &mut *b,
+            curves_3d: &mut curves_3d,
+            uv1: &uv1,
+            uv2: &uv2,
+            env: &mut *env,
+            curve_ref,
+        };
+        let new_faces = set_curve_and_merge(k, &mut merge_objects, &mut cc1, curve_3d)?;
         all_faces.extend(new_faces);
         // (the intervals are copied: the gluing below edits the B-rep the
         // classification's objects borrow)
@@ -1979,7 +2103,15 @@ pub fn merge_self_intersection_curves(
             if cc2.size() != 1 {
                 continue;
             }
-            let new_faces = set_curve_and_merge(k, &objects, &mut cc2, curve_3d)?;
+            let mut merge_objects = SelfMergeObjects {
+                b: &mut *b,
+                curves_3d: &mut curves_3d,
+                uv1: &uv1,
+                uv2: &uv2,
+                env: &mut *env,
+                curve_ref,
+            };
+            let new_faces = set_curve_and_merge(k, &mut merge_objects, &mut cc2, curve_3d)?;
             all_faces.extend(new_faces);
             let [ivl2] = cc2.intervals() else {
                 return Err(SolidError::sm_err(OP));
@@ -2914,16 +3046,32 @@ mod tests {
             context: None,
             key_of: &key_of,
         };
-        assert!(
-            merge_self_intersection_curves(&mut k, &mut b, Some(f), 1e-5, &[], &mut env)
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            merge_self_intersection_curves(&mut k, &mut b, None, 1e-5, &[], &mut env)
-                .unwrap()
-                .is_empty()
-        );
+        let curve_ref = |_: EdgeId, type_code: i64| ObjectRef {
+            type_code,
+            key: ObjectKey(0),
+        };
+        assert!(merge_self_intersection_curves(
+            &mut k,
+            &mut b,
+            Some(f),
+            1e-5,
+            &[],
+            &mut env,
+            &curve_ref
+        )
+        .unwrap()
+        .is_empty());
+        assert!(merge_self_intersection_curves(
+            &mut k,
+            &mut b,
+            None,
+            1e-5,
+            &[],
+            &mut env,
+            &curve_ref
+        )
+        .unwrap()
+        .is_empty());
     }
 
     #[test]

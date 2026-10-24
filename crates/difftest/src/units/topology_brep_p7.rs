@@ -759,6 +759,15 @@ fn read_key_of(e: EntityRef) -> ObjectRef {
     }
 }
 
+/// The identity of an edge's curve (a split edge's new curve included), keyed above
+/// [`read_key_of`]'s topology identities.
+fn edge_curve_key(e: EdgeId, type_code: i64) -> ObjectRef {
+    ObjectRef {
+        type_code,
+        key: ObjectKey(12 << 40 | u64::from(e.index())),
+    }
+}
+
 fn this_face(f: FaceId) -> ObjectRef {
     key_of(EntityRef::Face(f))
 }
@@ -1214,7 +1223,9 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                 records: &mut records,
                 attributes: &mut attrs,
                 context: None,
-                key_of: &key_of,
+                // (the merges make vertices, vertex uses and loops: every object gets
+                // an identity of its own)
+                key_of: &read_key_of,
             };
             let curves = curves
                 .iter()
@@ -1226,7 +1237,15 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                     })
                 })
                 .collect::<Result<Vec<_>, HarnessError>>()?;
-            let r = p7::merge_self_intersection_curves(k, &mut b, Some(f), *tol, &curves, &mut env);
+            let r = p7::merge_self_intersection_curves(
+                k,
+                &mut b,
+                Some(f),
+                *tol,
+                &curves,
+                &mut env,
+                &edge_curve_key,
+            );
             let s = status(&r)?;
             let n = r.map_or(0, |v| v.len());
             let mut o = vec![0.0, s, n as f64];

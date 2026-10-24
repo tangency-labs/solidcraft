@@ -1226,8 +1226,9 @@ impl OffsetExecutive {
     /// offset surface's natural domain (or for a local operation) the offset face is
     /// made from the face's UV curve copies and takes ownership of the surface
     /// (`offset_surface` becomes `None`); `notifications` keys original-side
-    /// entities and `offset_key_of` offset-side ones. Otherwise the 2D domain boolean
-    /// defers at the B-rep face constructor.
+    /// entities and `offset_key_of` offset-side ones, and `offset_curve_ref` the curves
+    /// of offset edges split by the self-intersection merge. Otherwise the 2D domain
+    /// boolean defers at the B-rep face constructor.
     #[allow(clippy::too_many_arguments)]
     pub fn build_offset_of_faceuse(
         &mut self,
@@ -1238,6 +1239,7 @@ impl OffsetExecutive {
         self_intersections: &SsiData<Curve>,
         notifications: &mut NotifyEnv<'_>,
         offset_key_of: &dyn Fn(EntityRef) -> ObjectRef,
+        offset_curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
     ) -> Result<()> {
         let faceuse = required(faceuse)?;
         let Some(surface) = offset_surface.as_mut() else {
@@ -1284,6 +1286,7 @@ impl OffsetExecutive {
                 self_intersections,
                 notifications,
                 offset_key_of,
+                offset_curve_ref,
             )?;
             for new_face in new_faces {
                 self.relate_faceuse(original_faceuse, new_face);
@@ -1369,6 +1372,7 @@ impl OffsetExecutive {
         self_intersections: &SsiData<Curve>,
         notifications: &mut NotifyEnv<'_>,
         offset_key_of: &dyn Fn(EntityRef) -> ObjectRef,
+        offset_curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
     ) -> Result<Vec<FaceId>> {
         let mut loops = Vec::new();
         for &count in &curves.curve_loops {
@@ -1438,6 +1442,7 @@ impl OffsetExecutive {
                 tolerance,
                 &merged,
                 &mut offset_env(notifications, offset_key_of),
+                offset_curve_ref,
             )?;
         }
         let mut new_faces = vec![new_face];
@@ -1687,6 +1692,7 @@ impl OffsetExecutive {
         self_intersections: &SsiData<Curve>,
         notifications: &mut NotificationStores<'_>,
         offset_key_of: &dyn Fn(EntityRef) -> ObjectRef,
+        offset_curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
     ) -> Result<()> {
         crate::geom::context::Context::with_notification_context(kernel, |kernel, context| {
             self.build_offset_of_faceuse(
@@ -1702,6 +1708,7 @@ impl OffsetExecutive {
                     key_of: notifications.key_of,
                 },
                 offset_key_of,
+                offset_curve_ref,
             )
         })?
     }
@@ -3205,6 +3212,10 @@ mod tests {
                 &SsiData::default(),
                 env,
                 offset_key_of,
+                &|_, type_code| ObjectRef {
+                    key: ObjectKey(3),
+                    type_code,
+                },
             )
         })
     }
