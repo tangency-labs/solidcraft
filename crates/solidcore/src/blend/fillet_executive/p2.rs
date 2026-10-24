@@ -59,7 +59,7 @@ use crate::blend::fillet_executive::p1::SolverLoadingAccess;
 use crate::blend::fillet_executive::p3::{
     ContextMark, ErrorInfo, ExecutionOptions, ExecutiveAccess, FilletExecutive,
 };
-use crate::blend::fillet_geom::p1::{FilStatus, FilletErrorType};
+use crate::blend::fillet_geom::p1::{FilStatus, FilletEdgeType, FilletErrorType};
 use crate::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use crate::blend::fillet_standard_solver::p1::{
     BoundaryTrimmingType, FilletLaw, FilletLawKind, FilletSolverType, FilletSurfaceGeneratorType,
@@ -78,6 +78,105 @@ use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use crate::surface::surface::Surface;
+
+/// Actual retained objects used by the native fillet-edge mapping algorithm.
+pub trait EdgeMapAccess<O: ClassObject + SolutionObject + Ord> {
+    /// Body edges in native order.
+    /// # Errors
+    /// Invalid or missing object.
+    fn mapping_edges(&self, body: O) -> Result<Vec<O>>;
+    /// Geometry retained by this solver, in native order.
+    /// # Errors
+    /// Invalid or missing object.
+    fn mapping_solver_geoms(&self, solver: O) -> Result<Vec<O>>;
+    /// Primary and additional rails in native order.
+    /// # Errors
+    /// Invalid or missing object.
+    fn mapping_geom_rails(&self, geom: O) -> Result<Vec<Option<O>>>;
+    /// Side edge uses in native order.
+    /// # Errors
+    /// Invalid or missing object.
+    fn mapping_side_edgeuses(&self, geom: O) -> Result<Vec<O>>;
+    /// The edge owning this edge use.
+    /// # Errors
+    /// Invalid or missing object.
+    fn mapping_edgeuse_edge(&self, edgeuse: O) -> Result<Option<O>>;
+    /// The source face of a fillet edge.
+    /// # Errors
+    /// Invalid or missing object.
+    fn mapping_original_face(&self, edge: O) -> Result<Option<O>>;
+    /// The source edge of a fillet edge.
+    /// # Errors
+    /// Invalid or missing object.
+    fn mapping_original_edge(&self, edge: O) -> Result<Option<O>>;
+    /// Corner edges in native order.
+    /// # Errors
+    /// Invalid or missing object.
+    fn mapping_corner_edges(&self, corner: O) -> Result<Vec<Option<O>>>;
+    /// The corner setback distance.
+    /// # Errors
+    /// Invalid or missing object.
+    fn mapping_setback(&self, corner: O) -> Result<f64>;
+    /// The edge name, type and status used in error reports.
+    /// # Errors
+    /// Invalid or missing object.
+    fn mapping_note(&self, edge: O) -> Result<(Option<&'static str>, FilletEdgeType, FilStatus)>;
+    /// Map the actual pseudo edge to the actual intermediate candidate edges.
+    /// # Errors
+    /// Native lookup/evaluation errors, retaining earlier mapped edges.
+    fn mapping_find(
+        &mut self,
+        k: &mut Kernel,
+        edge: O,
+        candidates: &[O],
+        multiple: bool,
+    ) -> Result<()>;
+}
+impl<O, A> EdgeMapAccess<O> for A
+where
+    O: ClassObject + SolutionObject + Ord,
+    A: ExecutiveAccess<O> + ?Sized,
+{
+    fn mapping_edges(&self, body: O) -> Result<Vec<O>> {
+        ExecutiveAccess::edges(self, body)
+    }
+    fn mapping_solver_geoms(&self, solver: O) -> Result<Vec<O>> {
+        ExecutiveAccess::solver_geoms(self, solver)
+    }
+    fn mapping_geom_rails(&self, geom: O) -> Result<Vec<Option<O>>> {
+        ExecutiveAccess::geom_rails(self, geom)
+    }
+    fn mapping_side_edgeuses(&self, geom: O) -> Result<Vec<O>> {
+        ExecutiveAccess::geom_side_edgeuses(self, geom)
+    }
+    fn mapping_edgeuse_edge(&self, edgeuse: O) -> Result<Option<O>> {
+        ExecutiveAccess::edgeuse_edge(self, edgeuse)
+    }
+    fn mapping_original_face(&self, edge: O) -> Result<Option<O>> {
+        ExecutiveAccess::fillet_edge_original_face(self, edge)
+    }
+    fn mapping_original_edge(&self, edge: O) -> Result<Option<O>> {
+        ExecutiveAccess::fillet_edge_original_edge(self, edge)
+    }
+    fn mapping_corner_edges(&self, corner: O) -> Result<Vec<Option<O>>> {
+        ExecutiveAccess::corner_edges(self, corner)
+    }
+    fn mapping_setback(&self, corner: O) -> Result<f64> {
+        ExecutiveAccess::corner_setback_distance(self, corner)
+    }
+    fn mapping_note(&self, edge: O) -> Result<(Option<&'static str>, FilletEdgeType, FilStatus)> {
+        ExecutiveAccess::fillet_edge_note(self, edge)
+    }
+    fn mapping_find(
+        &mut self,
+        k: &mut Kernel,
+        edge: O,
+        candidates: &[O],
+        multiple: bool,
+    ) -> Result<()> {
+        ExecutiveAccess::find_fillet_brep_edge(self, k, edge, candidates, multiple)
+    }
+}
 
 const OP: &str = "blend::fillet_executive::p2";
 
@@ -852,39 +951,39 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// those of `FindFilletBrepEdge` (a side edge's failure is noted first).
     pub fn set_fillet_brep_edge_map<A>(&mut self, k: &mut Kernel, access: &mut A) -> Result<()>
     where
-        A: ExecutiveAccess<O> + ?Sized,
+        A: EdgeMapAccess<O> + ?Sized,
     {
         // get edges from FilletBrep (fillet edges already created)
         let fillet = self.fillet.ok_or_else(|| null!("no fillet B-rep"))?;
-        let edges = access.edges(fillet)?;
+        let edges = access.mapping_edges(fillet)?;
 
         // for every FilletEdgeSolver
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
             index += 1;
-            for geom in access.solver_geoms(solver)? {
+            for geom in access.mapping_solver_geoms(solver)? {
                 // set every rail's fillet B-rep edge
-                for rail in access.geom_rails(geom)? {
+                for rail in access.mapping_geom_rails(geom)? {
                     let rail = rail.ok_or_else(|| null!("null rail"))?;
-                    access.find_fillet_brep_edge(k, rail, &edges, false)?;
+                    access.mapping_find(k, rail, &edges, false)?;
                 }
 
                 // set every non-rail fillet edge's fillet B-rep edge
-                for eu in access.geom_side_edgeuses(geom)? {
+                for eu in access.mapping_side_edgeuses(geom)? {
                     let fe = access
-                        .edgeuse_edge(eu)?
+                        .mapping_edgeuse_edge(eu)?
                         .ok_or_else(|| null!("null side edge"))?;
-                    if access.fillet_edge_original_face(fe)?.is_none() {
+                    if access.mapping_original_face(fe)?.is_none() {
                         continue;
                     }
-                    if let Err(error) = access.find_fillet_brep_edge(k, fe, &edges, false) {
+                    if let Err(error) = access.mapping_find(k, fe, &edges, false) {
                         if error.is_unported() {
                             return Err(error);
                         }
-                        self.note_fillet_error(
-                            access,
+                        self.note_fillet_edge(
                             FilletErrorType::EdgeProblem,
                             fe,
+                            access.mapping_note(fe)?,
                             Some("Unable to map new Fillet Edge back to Edge in Target Brep"),
                         )?;
                         return Err(error);
@@ -898,12 +997,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         while let Some(corner) = self.corners.get(index).copied() {
             index += 1;
             // Setback corner might have split the edge
-            let find_multiple_edges = access.corner_setback_distance(corner)? > EFF_ZERO;
-            for fe in access.corner_edges(corner)?.into_iter().flatten() {
-                if access.fillet_edge_original_face(fe)?.is_some()
-                    || access.fillet_edge_original_edge(fe)?.is_some()
+            let find_multiple_edges = access.mapping_setback(corner)? > EFF_ZERO;
+            for fe in access.mapping_corner_edges(corner)?.into_iter().flatten() {
+                if access.mapping_original_face(fe)?.is_some()
+                    || access.mapping_original_edge(fe)?.is_some()
                 {
-                    access.find_fillet_brep_edge(k, fe, &edges, find_multiple_edges)?;
+                    access.mapping_find(k, fe, &edges, find_multiple_edges)?;
                 }
             }
         }

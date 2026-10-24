@@ -313,6 +313,48 @@
           "checkpoint": "shrunk_faces"
         }
       }
+    },
+    {
+      "name": "real-box-create-fillet-brep-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:1891 (actual complete CreateFilletBrep after real parameter/corner setup; unchanged direct context; no target merge/DoFilleting)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "created_fillet_brep"
+        }
+      }
+    },
+    {
+      "name": "real-box-edge-map-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:4147 (direct actual CreateFilletBrep, first-FG owner shrink, then ordered SetFilletBrepEdgeMap; unchanged context, no target integration)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "mapped_fillet_edges"
+        }
+      }
     }
   ]
 }

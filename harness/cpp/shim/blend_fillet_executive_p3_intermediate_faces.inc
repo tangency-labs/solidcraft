@@ -1,3 +1,4 @@
+#include <stdexcept>
 // Actual native intermediate body allocation/corner/solver face component.
 #include <SmFaceuse.h>
 #include <SmRegion.h>
@@ -100,6 +101,23 @@ std::pair<std::vector<double>,std::vector<double>> shrink_state(SmFilletExecutiv
     for(ULONG i=0;i<edges.GetSize();++i){auto d=edges[i]->GetInterval();values.insert(values.end(),{d.GetMin(),d.GetMax()});auto* c=edges[i]->GetCurve();state.push_back(double(c!=nullptr));
         if(c){state.push_back(double(c->GetType()));auto interval=c->GetNaturalInterval();values.insert(values.end(),{interval.GetMin(),interval.GetMax()});}
         SmTArray<SmEdgeuse*> uses;edges[i]->GetEdgeuses(uses);state.push_back(double(uses.GetSize()));for(ULONG u=0;u<uses.GetSize();++u)state.push_back(double(uses[u]->GetUVTrimCurvePointer()!=nullptr));
+    }
+    return {state,values};
+}
+
+double managed_map_label(const SmTArray<SmEdge*>& edges,SmEdge* edge) {
+    auto result=label(edges,edge);if(edge&&result<0)throw std::runtime_error("mapped edge outside actual managed body");return result;
+}
+std::pair<std::vector<double>,std::vector<double>> edge_map_state(SmFilletExecutive& exec,SmBrep* target) {
+    SmTArray<SmEdge*> edges,managed,target_edges;SmTArray<SmVertex*> target_vertices;
+    exec.GetPseudoBrep()->GetEdges(edges);if(exec.GetFilletBrep())exec.GetFilletBrep()->GetEdges(managed);target->GetEdges(target_edges);target->GetVertices(target_vertices);
+    auto* info=exec.GetFilletErrorInfo();size_t text_size=std::char_traits<TCHAR>::length(info->m_cComment);
+    std::vector<double> state{1,double(edges.GetSize()),double(info->GetErrorCode()),label(target_edges,const_cast<SmEdge*>(info->m_pFilletedEdge)),label(target_vertices,const_cast<SmVertex*>(info->m_pFilletedVertex)),double(text_size)},values;
+    for(size_t i=0;i<text_size;++i)state.push_back(double(static_cast<unsigned char>(info->m_cComment[i])));
+    for(ULONG i=0;i<edges.GetSize();++i){auto* edge=SM_CAST_PTR(SmFilletEdge,edges[i]);if(!edge)throw std::runtime_error("actual pseudo fillet edge required");
+        auto raw=edge->GetInterval();values.insert(values.end(),{raw.GetMin(),raw.GetMax()});SmTArray<SmEdge*> maps;edge->GetFilletBrepEdges(maps);
+        state.insert(state.end(),{double(i),double(edge->GetFilletEdgeType()),double(edge->GetStatus()),managed_map_label(managed,edge->GetFilletBrepEdge()),double(maps.GetSize())});
+        for(ULONG j=0;j<maps.GetSize();++j)state.push_back(managed_map_label(managed,maps[j]));
     }
     return {state,values};
 }

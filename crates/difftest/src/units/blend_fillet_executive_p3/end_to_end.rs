@@ -29,6 +29,8 @@ enum Checkpoint {
     IntermediateFaces,
     StitchedFaces,
     ShrunkFaces,
+    CreatedFilletBrep,
+    MappedFilletEdges,
 }
 impl Checkpoint {
     fn all_corners(self) -> bool {
@@ -67,6 +69,8 @@ impl Checkpoint {
             Self::IntermediateFaces => 11,
             Self::StitchedFaces => 12,
             Self::ShrunkFaces => 13,
+            Self::CreatedFilletBrep => 14,
+            Self::MappedFilletEdges => 15,
         }
     }
 }

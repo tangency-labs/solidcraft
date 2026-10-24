@@ -589,3 +589,55 @@ fn actual_box_face_stage_constructs_a_distinct_intermediate_body() {
     assert_eq!((after.min().x, after.max().x), (0.25, 0.75));
     assert_eq!((after.min().y, after.max().y), (0.0, 1.0));
 }
+
+#[test]
+fn actual_box_shared_constructor_builds_and_stitches_native_intermediate_body() {
+    let mut k = Kernel::default();
+    let mut target = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
+    let edge = target.edges().ids().next().unwrap();
+    let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[edge], 0.5, 1, 1, 1.0)
+        .unwrap();
+    session.create_corners(&k, None).unwrap();
+    let mut error_info = solidcore::blend::fillet_executive::p3::ErrorInfo {
+        code: 1,
+        ..Default::default()
+    };
+    session
+        .create_fillet_brep(&mut k, Some(&mut error_info))
+        .unwrap();
+    let body = session.intermediate_brep().unwrap();
+    // Independently measured native intermediate-body construction endpoint.
+    assert_eq!(
+        (
+            body.vertices().len(),
+            body.edges().len(),
+            body.faces().len()
+        ),
+        (4, 4, 1)
+    );
+    let geometry = solidcore::blend::fillet_geom::p1::FilletGeomId(0);
+    let surface = session.fillet_surface(geometry).unwrap().unwrap();
+    let face = body.faces().ids().next().unwrap();
+    assert!(core::ptr::eq(
+        surface,
+        body.face(face).unwrap().surface.as_ref().unwrap()
+    ));
+    assert_eq!(
+        surface.owner(),
+        Some(
+            session
+                .intermediate_identity(EntityRef::Face(face))
+                .unwrap()
+        )
+    );
+    let domain = surface.natural_uv_domain();
+    assert_eq!((domain.min().x, domain.max().x), (0.0, 1.0));
+    let Some(FilletObject::Attribute(marker)) = session.executive().edge_attribute else {
+        panic!("constructor must retain actual executive edge attribute");
+    };
+    assert_eq!(session.attributes().users(marker).unwrap().len(), 4);
+    assert_eq!(error_info.code, 0);
+    assert!(!k.context.doing_boolean());
+}

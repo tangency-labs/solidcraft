@@ -1274,6 +1274,36 @@ where
     }
 }
 
+/// Actual capabilities used by the complete intermediate-body constructor.
+/// Every stage delegates its existing algorithm and the caller's real object stores.
+pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
+    FaceStitchAccess<O>
+    + CornerAdjustmentAccess<O>
+    + CornerEdgeAccess<O>
+    + RailTrimAccess<O>
+    + RailClassificationAccess<O>
+{
+    /// Execute the actual smooth-sequence prelude on this executive.
+    ///
+    /// # Errors
+    /// Real smoothing or missing live tangent-collection context.
+    fn creation_smooth(&mut self, k: &mut Kernel, executive: &mut FilletExecutive<O>)
+        -> Result<()>;
+}
+impl<O, A> BrepCreationAccess<O> for A
+where
+    O: ClassObject + SolutionObject + Ord,
+    A: ExecutiveAccess<O> + ?Sized,
+{
+    fn creation_smooth(
+        &mut self,
+        k: &mut Kernel,
+        executive: &mut FilletExecutive<O>,
+    ) -> Result<()> {
+        ExecutiveAccess::process_smooth_edge_sequences(self, k, executive)
+    }
+}
+
 /// Actual surface-owner resolution and face shrinking after fillet construction.
 pub trait FaceShrinkAccess<O: ClassObject + SolutionObject + Ord>:
     FaceConstructionAccess<O>
@@ -1894,7 +1924,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     pub fn create_fillet_brep(
         &mut self,
         k: &mut Kernel,
-        access: &mut impl ExecutiveAccess<O>,
+        access: &mut impl BrepCreationAccess<O>,
         error_out: Option<&mut ErrorInfo<O>>,
     ) -> Result<()> {
         // NER: upstream returns SM_ERR_NULL_POINTER, not invalid input.
@@ -1903,7 +1933,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             code: 1006,
             entity: None,
         })?;
-        ignore(access.process_smooth_edge_sequences(k, self))?;
+        ignore(access.creation_smooth(k, self))?;
 
         self.create_corner_vertices(k, access)?;
         self.adjust_corner_topology(k, access)?;
