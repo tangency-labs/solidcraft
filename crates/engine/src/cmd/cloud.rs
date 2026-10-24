@@ -35,6 +35,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .doc_only()
         .params("connection?: saved connection id, or proposed?: connection to verify before configuring; git_executable?: override for this test; returns operation id and verified host metadata"),
+    CommandSpec::new("cloud.thumbnail", "Load Design Preview", thumbnail)
+        .icon("inspect")
+        .noundo()
+        .doc_only()
+        .params("destination: {connection,project,file}; asynchronously reads only a bounded optional PNG; result png is base64 or null; consume with cloud.thumbnail.finish"),
+    CommandSpec::new("cloud.thumbnail.finish", "Finish Loading Design Preview", finish_thumbnail)
+        .icon("inspect")
+        .noundo()
+        .doc_only()
+        .params("operation: completed cloud.thumbnail operation id; returns and consumes the transient base64 PNG reply"),
     CommandSpec::new("cloud.list", "Open Repository", list)
         .icon("open")
         .noundo()
@@ -44,7 +54,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("open")
         .noundo()
         .doc_only()
-        .params("destination: {connection,project,file}; returns operation id; finish with cloud.open.finish"),
+        .params("destination: {connection,project,file}; local_revision?: exact queued capture to inspect offline; returns operation id; finish with cloud.open.finish"),
     CommandSpec::new("cloud.open.finish", "Finish Opening Cloud Design", finish)
         .icon("open")
         .noundo()
@@ -233,15 +243,45 @@ struct Open {
     destination: Destination,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenRevision {
+    destination: Destination,
+    local_revision: Option<String>,
+}
+
+fn thumbnail(session: &mut Session, params: &Value) -> Result<Value> {
+    session.poll_cloud()?;
+    if session.cloud_configuring() {
+        return Err(bad("cloud.thumbnail", "connection settings are still being stored or loaded"));
+    }
+    let input: Open = serde_json::from_value(params.clone()).map_err(|e| bad("cloud.thumbnail", e.to_string()))?;
+    input.destination.validate().map_err(error)?;
+    let connection = session.cloud.settings.destination(Some(&input.destination.connection)).cloned().map_err(error)?;
+    submit(session, Operation::Thumbnail { connection, destination: input.destination })
+}
+
+fn finish_thumbnail(session: &mut Session, params: &Value) -> Result<Value> {
+    let id = operation_id(params)?;
+    let job = session.cloud.jobs.get(id).ok_or_else(|| bad("cloud.thumbnail.finish", "unknown operation"))?;
+    let status = job.status().map_err(error)?;
+    solidcraft_cloud::Thumbnail::decode_response(status.result.as_ref().ok_or_else(|| bad("cloud.thumbnail.finish", "preview missing"))?)
+        .map_err(error)?;
+    job.take_result().map_err(error)
+}
+
 fn open(session: &mut Session, params: &Value) -> Result<Value> {
     session.poll_cloud()?;
     if session.cloud_configuring() {
         return Err(bad("cloud.open", "connection settings are still being stored or loaded"));
     }
-    let input: Open = serde_json::from_value(params.clone()).map_err(|e| bad("cloud.open", e.to_string()))?;
+    let input: OpenRevision = serde_json::from_value(params.clone()).map_err(|e| bad("cloud.open", e.to_string()))?;
     input.destination.validate().map_err(error)?;
     let connection = session.cloud.settings.destination(Some(&input.destination.connection)).cloned().map_err(error)?;
-    submit(session, Operation::Open { connection, destination: input.destination })
+    if input.local_revision.as_ref().is_some_and(|id| id.len() != 64 || !id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))) {
+        return Err(bad("cloud.open", "invalid local revision"));
+    }
+    submit(session, Operation::Open { connection, destination: input.destination, local_revision: input.local_revision })
 }
 
 fn operation_id(params: &Value) -> Result<&str> {
@@ -308,7 +348,10 @@ pub(super) fn save(session: &mut Session, params: &Value) -> Result<Value> {
 
 fn capture(session: &mut Session, connection: solidcraft_cloud::Connection, destination: Destination) -> Result<Value> {
     let parent = session.cloud.binding.as_ref().filter(|binding| binding.destination == destination).and_then(|binding| binding.revision.clone());
-    let snapshot = solidcraft_io::cloud::prepare_document(&session.design()).map_err(error)?;
+    let mut snapshot = solidcraft_io::cloud::prepare_document(&session.design()).map_err(error)?;
+    if let Some(png) = crate::thumbnail::saved(session) {
+        let _ = solidcraft_cloud::attach_thumbnail(&mut snapshot, png);
+    }
     let save = PendingSave::stage(&connection, &destination.project, &destination.file, parent, snapshot).map_err(error)?;
     let binding = Binding { destination, revision: Some(save.record.id.clone()) };
     let reply = submit(session, Operation::Save { connection, save: Box::new(save), synchronize: session.cloud.settings.sync_after_save })?;

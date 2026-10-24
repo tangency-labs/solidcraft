@@ -23,6 +23,7 @@ impl Host for MockHost {
             | Operation::Test(connection)
             | Operation::List(connection)
             | Operation::Synchronize(connection)
+            | Operation::Thumbnail { connection, .. }
             | Operation::Open { connection, .. }
             | Operation::Save { connection, .. } => connection.id.clone(),
         };
@@ -65,6 +66,39 @@ fn configured() -> (Session, Arc<MockHost>, Destination) {
         .unwrap();
     let destination = Destination { connection: "github".into(), project: "Robot".into(), file: "parts/bracket".into() };
     (session, host, destination)
+}
+
+#[test]
+fn cloud_saves_include_previews_for_assemblies_drawn_from_shared_meshes() {
+    crate::capture::install_test_renderer();
+    let (mut session, host, destination) = configured();
+    let part = session.execute("component.create", &json!({"name":"Placed bracket","grounded":false})).unwrap();
+    session.execute("solid.box", &json!({"length":8,"width":6,"height":4})).unwrap();
+    session.execute("occurrence.move", &json!({"occurrence":part["occurrence"],"translate":[30,10,5]})).unwrap();
+    let world = session.world_state();
+    for body in &world.bodies {
+        body.mesh_in_place();
+        assert!(body.cached_mesh().is_none(), "the viewport does not make moved mesh copies");
+    }
+    session.execute("cloud.save", &json!({"destination":destination})).unwrap();
+    let jobs = host.0.lock().unwrap();
+    let (_, Operation::Save { save, .. }) = jobs.last().unwrap() else { panic!("cloud capture") };
+    let png = solidcraft_io::cloud::read_thumbnail(&save.record.manifest, |path| Ok(save.objects[path].clone())).unwrap();
+    assert!(png.is_some(), "a visible assembly must have a portable cloud preview");
+    assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()), "thumbnail capture keeps shared meshes");
+}
+
+#[test]
+fn explicit_local_revision_opening_is_validated_before_submitting() {
+    let (mut session, host, destination) = configured();
+    let before = session.doc.clone();
+    assert!(session.execute("cloud.open", &json!({"destination":destination,"local_revision":"../../wrong"})).is_err());
+    assert!(host.0.lock().unwrap().is_empty());
+    session.execute("cloud.open", &json!({"destination":destination,"local_revision":"a".repeat(64)})).unwrap();
+    let jobs = host.0.lock().unwrap();
+    let (_, Operation::Open { local_revision, .. }) = jobs.last().unwrap() else { panic!("opening") };
+    assert_eq!(local_revision.as_deref(), Some("a".repeat(64).as_str()));
+    assert!(Arc::ptr_eq(&before, &session.doc));
 }
 
 #[test]
@@ -429,4 +463,27 @@ fn key_generation_consumes_secret_input_without_serializing_it() {
     session.set_cloud_ssh_key_input(solidcraft_cloud::jobs::SshKeyInput { passphrase: "one shot".to_owned().into(), remember: false }).unwrap();
     assert!(session.execute("cloud.ssh.generate", &json!({})).is_err());
     assert!(session.cloud.ssh_key_input.is_none());
+}
+
+#[test]
+fn preview_commands_validate_destinations_and_consume_transient_results_once() {
+    let (mut session, host, destination) = configured();
+    let before = session.doc.clone();
+    let reply = session.execute("cloud.thumbnail", &json!({"destination":destination})).unwrap();
+    assert!(matches!(host.0.lock().unwrap()[0].1, Operation::Thumbnail { .. }));
+    assert!(session.execute("cloud.thumbnail.finish", &json!({"operation":reply["operation"]})).is_err());
+    let png = include_bytes!("../../../../assets/samples/exports/0.png").to_vec();
+    host.job(0)
+        .update(|s| {
+            s.phase = Phase::Ready;
+            s.result = Some(solidcraft_cloud::Thumbnail::response(Some(png.clone())));
+        })
+        .unwrap();
+    let result = session.execute("cloud.thumbnail.finish", &json!({"operation":reply["operation"]})).unwrap();
+    assert_eq!(solidcraft_cloud::Thumbnail::decode_response(&result).unwrap(), Some(png));
+    assert!(host.job(0).status().unwrap().result.is_none());
+    assert!(session.execute("cloud.thumbnail.finish", &json!({"operation":reply["operation"]})).is_err());
+    assert!(Arc::ptr_eq(&before, &session.doc));
+    let invalid = Destination { connection: "not-connected".into(), ..destination };
+    assert!(session.execute("cloud.thumbnail", &json!({"destination":invalid})).is_err());
 }

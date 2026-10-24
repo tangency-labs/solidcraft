@@ -63,6 +63,16 @@ impl FileView {
         ui.painter().galley(rect.min, galley, t.file_dim);
     }
 
+    /// Start-page controls share form sizing and wrap with an equal gap on both axes.
+    pub(crate) fn control_row<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
+        super::scope(ui, |ui| {
+            let t = Tokens::get();
+            ui.spacing_mut().item_spacing = vec2(t.space_8, t.space_8);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+            ui.horizontal_wrapped(add)
+        })
+    }
+
     pub(crate) fn section<R>(ui: &mut Ui, title: &str, gap: f32, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;

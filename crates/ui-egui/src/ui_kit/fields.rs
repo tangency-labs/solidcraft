@@ -192,6 +192,7 @@ fn searchable_dropdown_with(
     let row = label(ui).to_owned();
     let combo = egui::ComboBox::from_id_salt(id)
         .width(if icon.is_some() { Tokens::get().control_height } else { dimension(ui.available_width()) })
+        .truncate()
         .height(Tokens::get().space_24 * 14.0)
         .selected_text(if icon.is_some() { "" } else { current })
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
@@ -945,12 +946,18 @@ pub(crate) fn text_area(ui: &mut Ui, label: &str, id: egui::Id, value: &mut Stri
 /// Secret input with a stable ID. Never publishes its value in accessibility/scenario metadata.
 /// Tokens: cell_editor tokens.
 pub(crate) fn password_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
+    bounded_password_field(ui, id, value, hint, usize::MAX)
+}
+
+/// Secret input with an application-specific character cap; keeps values out of metadata.
+pub(crate) fn bounded_password_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, limit: usize) -> Response {
     let t = Tokens::get();
     let mut response = ui.add_sized(
         vec2(dimension(ui.available_width()), row_height()),
         text_input(egui::TextEdit::singleline(value))
             .id(id)
             .password(true)
+            .char_limit(limit)
             .hint_text(hint)
             .font(egui::FontId::monospace(t.font_label))
             .background_color(t.input_fill()),

@@ -198,7 +198,7 @@ impl GitRepository {
         Ok((opened, snapshot.manifest))
     }
 
-    pub fn snapshot(&self, destination: &Destination) -> Result<Snapshot> {
+    fn head(&self, destination: &Destination) -> Result<(Manifest, Vec<u8>)> {
         if destination.connection != self.connection.id {
             return Err(storage("repository connection mismatch"));
         }
@@ -208,13 +208,43 @@ impl GitRepository {
         let manifest = Manifest::read(&self.read(&format!("{prefix}/manifest.json"))?.ok_or_else(|| storage("design manifest not found"))?)?;
         let document = self.read(&format!("{prefix}/document.json"))?.ok_or_else(|| storage("document not found"))?;
         super::check_document(&document)?;
+        if solidcraft_cloud::digest(&document) != manifest.document_hash {
+            return Err(Error::Invalid("document hash mismatch".into()));
+        }
+        Ok((manifest, document))
+    }
+
+    pub(super) fn thumbnail(&self, destination: &Destination) -> Result<Option<Vec<u8>>> {
+        let (manifest, _) = self.head(destination)?;
+        super::read_thumbnail(&manifest, |path| self.read(&format!("{}/{path}", destination.project))?.ok_or_else(|| storage("preview unavailable")))
+    }
+
+    pub fn snapshot(&self, destination: &Destination) -> Result<Snapshot> {
+        let (manifest, document) = self.head(destination)?;
         let mut objects = std::collections::BTreeMap::new();
         Snapshot::hydrate(&manifest, &document, |path| {
             let bytes = self.read(&format!("{}/{path}", destination.project))?.ok_or_else(|| storage("asset not found"))?;
             objects.insert(path.into(), bytes.clone());
             Ok(bytes)
         })?;
+        objects.extend(solidcraft_cloud::Thumbnail::objects(&manifest, |path| {
+            self.read(&format!("{}/{path}", destination.project))?.ok_or_else(|| storage("preview unavailable"))
+        })?);
         Ok(Snapshot { manifest, document, objects })
+    }
+
+    pub(super) fn matches_stored(&self, entry: &solidcraft_cloud::StoredDesign) -> Result<bool> {
+        let prefix = entry.destination.design_path()?;
+        let Some(bytes) = self.read(&format!("{prefix}/manifest.json"))? else { return Ok(false) };
+        // An unsupported design remains listed so Open can show its upgrade message.
+        let Ok(manifest) = Manifest::read(&bytes) else { return Ok(false) };
+        if manifest.document_hash != entry.document_hash
+            || solidcraft_cloud::manifest_digest(&manifest)? != entry.manifest_hash
+            || solidcraft_cloud::revision(&manifest) != entry.revision.as_deref()
+        {
+            return Ok(false);
+        }
+        Ok(self.read(&format!("{prefix}/document.json"))?.is_some_and(|bytes| solidcraft_cloud::digest(&bytes) == entry.document_hash))
     }
 
     pub fn list(&self) -> Result<Vec<Destination>> {
@@ -256,6 +286,10 @@ impl GitRepository {
 
     /// The durable outbox remains authoritative until this method succeeds.
     pub fn publish(&self, save: &PendingSave, snapshot: Snapshot) -> Result<Published> {
+        self.publish_with_parent(save, snapshot, None)
+    }
+
+    pub fn publish_with_parent(&self, save: &PendingSave, snapshot: Snapshot, parent: Option<&Published>) -> Result<Published> {
         save.check_connection(&self.connection)?;
         if save.destination.connection != self.connection.id {
             return Err(storage("repository connection mismatch"));
@@ -271,7 +305,8 @@ impl GitRepository {
             self.fetch_destinations(remote)?;
         }
         let base = self.text(&["rev-parse", "HEAD"])?;
-        let prefix = save.destination.design_path()?;
+        let target = Published::target(save, parent)?;
+        let prefix = target.design_path()?;
         let marker_path = format!("{}/{PROJECT_MARKER}", save.destination.project);
         if let Some(bytes) = self.read(&marker_path)? {
             solidcraft_cloud::Project::read(&bytes)?;
@@ -286,10 +321,13 @@ impl GitRepository {
             super::check_document(&bytes)?;
         }
         let existing = self.committed(&base, &manifest_path)?;
-        let publication = Publication::prepare(save, snapshot, marker.as_deref(), existing.as_deref())?;
+        let publication = Publication::prepare_with_parent(save, snapshot, marker.as_deref(), existing.as_deref(), parent)?;
         let published_path = format!("{}/manifest.json", publication.destination.design_path()?);
-        let existing_conflict =
-            if publication.conflict { self.committed(&base, &published_path)?.map(|bytes| Manifest::read(&bytes)).transpose()? } else { None };
+        let existing_conflict = if publication.destination != target {
+            self.committed(&base, &published_path)?.map(|bytes| Manifest::read(&bytes)).transpose()?
+        } else {
+            None
+        };
         if existing_conflict.as_ref().is_some_and(|manifest| solidcraft_cloud::revision(manifest) != Some(save.id.as_str())) {
             return Err(Error::Conflict);
         }

@@ -567,7 +567,7 @@ pub fn button(ui: &mut Ui, label: impl Into<egui::WidgetText>, options: Button) 
         return crate::prefs_search::hidden_response(ui);
     }
     let response = match options {
-        Button::Enabled(enabled) => ui.add_enabled_ui(enabled, |ui| ui.add(button_widget(crate::i18n::tr_label(&key).into(), options))).inner,
+        Button::Enabled(enabled) => ui.add_enabled(enabled, button_widget(crate::i18n::tr_label(&key).into(), options)),
         _ => ui.add(button_widget(label, options)),
     };
     if !matches!(options, Button::Ghost) {

@@ -8,7 +8,7 @@ use std::sync::Arc;
 mod drawing;
 mod native_cache;
 pub(crate) mod package;
-mod thumbnail;
+pub(crate) mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use native_cache::read_design_geometry;
 pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail_file};

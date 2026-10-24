@@ -746,6 +746,15 @@ const ELEMENTS: &[Element] = &[
             },
         );
     }),
+    element!("file_control_row", |ui, state| {
+        FileView::control_row(ui, |ui| {
+            button(ui, "Save", Button::Normal);
+            settings_control_width(ui, Tokens::get().form_label_width, |ui| {
+                dropdown(ui, "gallery_file_repository", &mut state.selected, &["Designs"])
+            });
+            button(ui, "Refresh", Button::Normal);
+        });
+    }),
     element!("file_sample", |ui, _| {
         FileView::sample_grid(
             ui,
@@ -1078,6 +1087,9 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("password_field", |ui, s| {
         password_field(ui, ui.id().with("secret"), &mut s.value, "API key");
+    }),
+    element!("bounded_password_field", |ui, s| {
+        bounded_password_field(ui, ui.id().with("bounded_secret"), &mut s.value, "Access token", 8192);
     }),
     element!("number_field", |ui, _| {
         number_field(ui, &mut 3_u32, 1..=200, 1.0, "");

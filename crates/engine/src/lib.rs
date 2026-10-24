@@ -36,6 +36,7 @@ pub mod slicers;
 pub mod snap;
 pub mod status_details;
 pub mod status_items;
+mod thumbnail;
 pub mod timing;
 pub mod view;
 

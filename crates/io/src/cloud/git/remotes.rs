@@ -3,6 +3,20 @@ use super::*;
 use solidcraft_cloud::GitRemote;
 
 impl GitRepository {
+    /// Bring an idle checkout up to date too. Git's fast-forward operation preserves
+    /// unrelated working/index changes and refuses divergent or unresolved operations.
+    pub(crate) fn refresh(&self) -> Result<()> {
+        let _lock = self.lock()?;
+        self.check_ready()?;
+        if self.token.is_some() {
+            self.check_token_destination()?;
+        }
+        if let Some(remote) = self.pinned_remote()? {
+            self.fetch_destinations(&remote)?;
+        }
+        Ok(())
+    }
+
     fn remote_names(&self) -> Result<std::collections::BTreeSet<String>> {
         let text = self.text(&["remote"])?;
         let names: std::collections::BTreeSet<_> = text.lines().take(10_001).map(str::to_owned).collect();

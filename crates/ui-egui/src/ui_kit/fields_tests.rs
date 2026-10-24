@@ -165,24 +165,30 @@ fn preference_dropdown_keeps_disabled_choices_inert_and_closes_after_selection()
 
 #[test]
 fn secret_field_retains_focus_and_masks_paint_and_accessibility_events() {
-    let ctx = crate::fonts::test_context();
-    let id = egui::Id::new("secret_test");
-    let mut secret = String::new();
-    let mut draw = |ui: &mut Ui| {
-        row(ui, "API key", |ui| {
-            password_field(ui, id, &mut secret, "Key").request_focus();
-        });
-    };
-    frame(&ctx, vec![], &mut draw);
-    assert!(ctx.memory(|m| m.has_focus(id)));
-    let mut output = ctx
-        .run_ui(egui::RawInput { events: vec![egui::Event::Text("opaque-secret".into())], focused: true, ..Default::default() }, |ui| {
-            scope(ui, &mut draw)
-        });
-    assert!(!format!("{:?}", output.platform_output.events).contains("opaque-secret"));
-    assert!(!format!("{:?}", output.shapes).contains("opaque-secret"));
-    output.textures_delta.clear();
-    assert_eq!(secret, "opaque-secret");
+    for limit in [None, Some(8)] {
+        let ctx = crate::fonts::test_context();
+        let id = egui::Id::new("secret_test");
+        let mut secret = String::new();
+        let mut draw = |ui: &mut Ui| {
+            row(ui, "API key", |ui| {
+                match limit {
+                    Some(limit) => bounded_password_field(ui, id, &mut secret, "Key", limit),
+                    None => password_field(ui, id, &mut secret, "Key"),
+                }
+                .request_focus();
+            });
+        };
+        frame(&ctx, vec![], &mut draw);
+        assert!(ctx.memory(|m| m.has_focus(id)));
+        let mut output = ctx
+            .run_ui(egui::RawInput { events: vec![egui::Event::Text("opaque-secret".into())], focused: true, ..Default::default() }, |ui| {
+                scope(ui, &mut draw)
+            });
+        assert!(!format!("{:?}", output.platform_output.events).contains("opaque-s"));
+        assert!(!format!("{:?}", output.shapes).contains("opaque-s"));
+        output.textures_delta.clear();
+        assert_eq!(secret, if limit.is_some() { "opaque-s" } else { "opaque-secret" });
+    }
 }
 
 #[test]

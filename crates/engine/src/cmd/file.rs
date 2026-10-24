@@ -1,7 +1,6 @@
 //! Documents and files: new, open designs, CAD files and drawings, insert STEP, save, export.
 
-#[path = "file_thumbnail.rs"]
-mod thumbnail;
+use crate::thumbnail;
 
 #[path = "file_easyprint.rs"]
 mod easyprint;

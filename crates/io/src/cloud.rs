@@ -15,6 +15,8 @@ mod catalog;
 #[cfg(not(target_arch = "wasm32"))]
 mod git;
 #[cfg(not(target_arch = "wasm32"))]
+mod previews;
+#[cfg(not(target_arch = "wasm32"))]
 mod process;
 #[cfg(not(target_arch = "wasm32"))]
 mod provision;
@@ -37,7 +39,10 @@ pub fn prepare_document(document: &Document) -> Result<Snapshot> {
     })
     .map_err(invalid)?;
     let metadata: serde_json::Value = serde_json::from_slice(&bytes).map_err(invalid)?;
-    Snapshot::prepare(serde_json::to_vec_pretty(&metadata).map_err(invalid)?, assets)
+    let mut snapshot = Snapshot::prepare(serde_json::to_vec_pretty(&metadata).map_err(invalid)?, assets)?;
+    let title = if document.name.len() <= 512 && !document.name.chars().any(char::is_control) { &document.name } else { "" };
+    snapshot.manifest.extra.insert("title".into(), title.into());
+    Ok(snapshot)
 }
 
 /// Compatibility validation happens before any asset is fetched or decompressed.
@@ -76,6 +81,11 @@ pub fn check_document(bytes: &[u8]) -> Result<()> {
         Document::from_json(std::str::from_utf8(bytes).map_err(invalid)?).map_err(invalid)?;
     }
     Ok(())
+}
+
+/// Read only the disposable preview, without touching authoritative source assets.
+pub fn read_thumbnail(manifest: &Manifest, read: impl FnMut(&str) -> Result<Vec<u8>>) -> Result<Option<Vec<u8>>> {
+    Ok(solidcraft_cloud::Thumbnail::png(manifest, read)?.filter(|png| crate::design::thumbnail::valid_header(png)))
 }
 
 pub fn open_document(manifest: &Manifest, document: &[u8], read: impl FnMut(&str) -> Result<Vec<u8>>) -> Result<Document> {

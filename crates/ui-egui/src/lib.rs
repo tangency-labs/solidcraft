@@ -1168,7 +1168,9 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
-        if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
+        if (self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some())
+            && !matches!(id, "cloud.cancel" | "cloud.status" | "cloud.thumbnail.finish")
+        {
             return Err("a file operation is in progress".into());
         }
         // Commands may start only detected slicers and the programs the user added under Custom….
@@ -1185,7 +1187,7 @@ impl SolveApp {
             return Ok(reply);
         }
         // Global cloud operations can outlive the tab from which they were started.
-        if matches!(id, "cloud.cancel" | "cloud.status")
+        if matches!(id, "cloud.cancel" | "cloud.status" | "cloud.thumbnail.finish")
             && let Some(operation) = params.get("operation").and_then(Value::as_str)
             && !self.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation)
         {

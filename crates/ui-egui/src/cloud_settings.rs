@@ -194,22 +194,27 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 editor.selected = editor.draft.connections.first().map(|c| c.id.clone());
             }
             let selected = editor.selected.as_deref().and_then(|id| editor.draft.connection(id));
-            let r = egui::ComboBox::from_id_salt("cloud_settings_repositories")
-                .selected_text(selected.map(|c| c.name.as_str()).unwrap_or(tr("cloud.connections")))
-                .show_ui(ui, |ui| {
+            let r = ui_kit::dropdown_menu(
+                ui,
+                "cloud_settings_repositories",
+                selected.map(|c| c.name.as_str()).unwrap_or(tr("cloud.connections")),
+                |ui| {
                     for c in &editor.draft.connections {
-                        ui.selectable_value(&mut editor.selected, Some(c.id.clone()), &c.name);
+                        if ui_kit::list_picker(ui, &c.id, &c.name, editor.selected.as_deref() == Some(&c.id)).clicked() {
+                            editor.selected = Some(c.id.clone());
+                        }
                     }
-                });
-            crate::scenario::publish_target("cloud_settings:repositories", r.response.rect);
+                },
+            );
+            crate::scenario::publish_target("cloud_settings:repositories", r.rect);
             if let Some(c) = editor.selected.as_deref().and_then(|id| editor.draft.connections.iter_mut().find(|c| c.id == id)) {
                 ui_kit::row(ui, tr("cloud.connection_name"), |ui| {
-                    let r = ui.add(egui::TextEdit::singleline(&mut c.name).char_limit(4096));
+                    let r = ui_kit::bounded_cell_editor(ui, egui::Id::new("cloud_connection_name"), &mut c.name, "", false, 4096);
                     crate::scenario::publish_target("cloud_settings:name", r.rect);
                 });
                 ui.label(if c.repository.is_empty() { &c.checkout } else { &c.repository });
                 let mut default = editor.draft.default_connection.as_deref() == Some(&c.id);
-                let r = ui.checkbox(&mut default, tr("cloud.default_repository"));
+                let r = ui_kit::checkbox(ui, tr("cloud.default_repository"), &mut default);
                 crate::scenario::publish_target("cloud_settings:default", r.rect);
                 if r.changed() {
                     editor.draft.default_connection = default.then(|| c.id.clone());
@@ -280,9 +285,9 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
         ui_kit::settings_section(ui, "cloud_sync", tr("cmd.cloud.sync"), |ui| {
-            let r = ui.checkbox(&mut editor.draft.sync_after_save, tr("cloud.sync_after_save"));
+            let r = ui_kit::checkbox(ui, tr("cloud.sync_after_save"), &mut editor.draft.sync_after_save);
             crate::scenario::publish_target("cloud_settings:sync_after_save", r.rect);
-            let r = ui.checkbox(&mut editor.draft.retry_pending, tr("cloud.retry_pending"));
+            let r = ui_kit::checkbox(ui, tr("cloud.retry_pending"), &mut editor.draft.retry_pending);
             crate::scenario::publish_target("cloud_settings:retry_pending", r.rect);
         });
     });

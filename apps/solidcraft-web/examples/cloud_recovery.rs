@@ -1,6 +1,6 @@
 //! Real-browser persistence fixture. Build for wasm32, run `wasm-bindgen --target web`, and
 //! call `cloud_recovery_phase` from a same-origin test page before and after browser restart.
-//! Uses the application's actual IndexedDB/OPFS adapter, without launching the renderer.
+//! Uses the actual IndexedDB/OPFS adapter and picture renderer, without launching the UI.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
@@ -23,6 +23,12 @@ pub mod disk;
 #[path = "../src/files.rs"]
 pub mod files;
 #[cfg(target_arch = "wasm32")]
+#[path = "cloud_recovery/lineage.rs"]
+mod lineage;
+#[cfg(target_arch = "wasm32")]
+#[path = "cloud_recovery/previews.rs"]
+mod previews;
+#[cfg(target_arch = "wasm32")]
 #[path = "cloud_recovery/worker.rs"]
 mod worker;
 
@@ -41,6 +47,12 @@ mod fixture {
     }
 
     async fn phase(phase: &str, identity: String) -> Result<Value> {
+        if phase.starts_with("lineage-") {
+            return super::lineage::phase(phase, identity).await;
+        }
+        if phase.starts_with("preview-") {
+            return super::previews::phase(phase, identity).await;
+        }
         if phase.starts_with("worker-") {
             return super::worker::phase(phase, identity).await;
         }
@@ -56,7 +68,7 @@ mod fixture {
                     "Robot",
                     "parts/bracket",
                     None,
-                    Snapshot::prepare(b"first offline edit".to_vec(), assets.clone())?,
+                    Snapshot::prepare(solidcraft_engine::doc::Document::new("first offline edit").to_json().into_bytes(), assets.clone())?,
                 )?;
                 let first = store.stage(first).await?;
                 let second = PendingSave::stage(
@@ -64,7 +76,7 @@ mod fixture {
                     "Robot",
                     "parts/bracket",
                     Some(first.id),
-                    Snapshot::prepare(b"latest offline edit".to_vec(), assets)?,
+                    Snapshot::prepare(solidcraft_engine::doc::Document::new("latest offline edit").to_json().into_bytes(), assets)?,
                 )?;
                 let second = store.stage(second).await?;
                 let pending = store.pending().await?;
@@ -77,7 +89,10 @@ mod fixture {
                 require(pending.len() == 2, "queue survived restart")?;
                 let latest = pending.last().ok_or_else(|| Error::Storage("latest capture missing".into()))?;
                 let snapshot = store.recover(latest).await?;
-                require(snapshot.document == b"latest offline edit", "recovered the captured revision")?;
+                require(
+                    snapshot.document == solidcraft_engine::doc::Document::new("latest offline edit").to_json().as_bytes(),
+                    "recovered the captured revision",
+                )?;
                 let assets = Snapshot::hydrate(&snapshot.manifest, &snapshot.document, |path| {
                     snapshot.objects.get(path).cloned().ok_or_else(|| Error::Storage("missing fixture object".into()))
                 })?;
@@ -117,12 +132,20 @@ mod fixture {
             }
             "confirmed-read" => {
                 require(store.pending().await?.is_empty(), "acknowledgement survived restart")?;
-                let destinations = store.cached_destinations().await?;
+                let catalog = solidcraft_cloud::stored_designs(store.cached_entries().await?, store.pending().await?)?;
+                require(
+                    catalog.iter().all(|entry| entry.phase == solidcraft_cloud::jobs::Phase::Synced && entry.conflict),
+                    "confirmed conflict status survived restart",
+                )?;
+                let destinations: Vec<_> = catalog.into_iter().map(|entry| entry.destination).collect();
                 require(destinations.len() == 1, "only the actual conflict destination remains")?;
                 let destination = destinations.first().ok_or_else(|| Error::Storage("cached destination missing".into()))?;
                 let cached = store.cached(destination).await?.ok_or_else(|| Error::Storage("cached snapshot missing".into()))?;
                 let snapshot = store.recover(&cached.save).await?;
-                require(snapshot.document == b"latest offline edit", "confirmed capture remains recoverable")?;
+                require(
+                    snapshot.document == solidcraft_engine::doc::Document::new("latest offline edit").to_json().as_bytes(),
+                    "confirmed capture remains recoverable",
+                )?;
                 require(store.receipt(&cached.save.id).await?.is_some(), "publication receipt survived restart")?;
                 Ok(json!({"phase":phase,"destination":destination}))
             }

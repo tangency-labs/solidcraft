@@ -140,7 +140,7 @@ pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
     // Fill the card: the fit leaves room for a whole window's margins.
     cam.distance *= 0.7;
     let scene = solidcraft_engine::view::scene(s, &cam);
-    // Drawn on the GPU by the renderer the app installs; none (a browser): no picture.
+    // Drawn by the picture renderer the host installed.
     let picture = solidcraft_engine::capture::rgba(&scene, &cam, THUMB[0] as u32, THUMB[1] as u32).ok()?;
     Some(egui::ColorImage::from_rgba_unmultiplied(THUMB, &picture.rgba))
 }
@@ -171,7 +171,7 @@ fn cached(key: &str) -> Option<egui::ColorImage> {
     decode_thumbnail(bytes)
 }
 
-fn decode_thumbnail(bytes: Vec<u8>) -> Option<egui::ColorImage> {
+pub(crate) fn decode_thumbnail(bytes: Vec<u8>) -> Option<egui::ColorImage> {
     if bytes.len() > 512 * 1024 {
         return None;
     }

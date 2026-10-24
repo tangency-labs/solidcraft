@@ -668,6 +668,8 @@ persistence, thumbnail jobs and recovery decisions.
 - `title`, `subtitle`, `detail` and `section` own typography. `section` accepts a
   token-based heading/body gap: `space_12` for New, `space_10` for Recent/Samples.
   Callers retain semantic section order and the larger `file_section_gap`.
+- `control_row` gives buttons and dropdowns the shared form height, centers their
+  content and wraps controls with equal horizontal and vertical gaps.
 - `grid` provides responsive columns with 14 pt gutters and no trailing row gap.
   `action_tile` supplies an 84 pt card with 44 pt original artwork and vertically
   centered label/subtitle. `tile_min_width` informs responsive columns.

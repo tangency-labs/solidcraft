@@ -11,7 +11,7 @@ use indexed_db_futures::{
     transaction::{TransactionDurability, TransactionMode, TransactionOptions},
 };
 use js_sys::{Function, Promise, Reflect};
-use solidcraft_cloud::{Connection, Destination, Error, PendingSave, Published, Result, Snapshot, StagedSave};
+use solidcraft_cloud::{CachedEntry, Connection, Destination, Error, PendingSave, Published, Result, Snapshot, StagedSave};
 use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
 use wasm_bindgen_futures::{JsFuture, future_to_promise};
 use web_sys::{FileSystemDirectoryHandle, FileSystemFileHandle, FileSystemGetDirectoryOptions, FileSystemGetFileOptions};
@@ -64,43 +64,6 @@ impl Drop for Store {
         if Rc::strong_count(&self.database) == 1 {
             self.database.as_ref().clone().close();
         }
-    }
-}
-
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub struct CachedEntry {
-    format: String,
-    pub save: PendingSave,
-    pub destination: Destination,
-    pub revision: Option<String>,
-}
-
-impl CachedEntry {
-    fn read(text: &str) -> Result<Self> {
-        if text.len() > solidcraft_cloud::MAX_MANIFEST_BYTES {
-            return Err(storage("cached entry too large"));
-        }
-        let value: serde_json::Value = serde_json::from_str(text).map_err(storage)?;
-        if value.get("format").and_then(serde_json::Value::as_str) != Some("solidcraft-cache/1") {
-            return Err(Error::UpgradeRequired("browser cached entry format".into()));
-        }
-        let save = value.get("save").ok_or_else(|| storage("cached capture missing"))?;
-        PendingSave::read(&serde_json::to_vec(save).map_err(storage)?)?;
-        let entry: Self = serde_json::from_value(value).map_err(storage)?;
-        entry.destination.validate()?;
-        if entry.destination.connection != entry.save.destination.connection
-            || entry.destination.project != entry.save.destination.project
-            || entry.revision.as_ref().is_some_and(|revision| revision.is_empty() || revision.len() > 128 || revision.chars().any(char::is_control))
-        {
-            return Err(storage("cached destination or revision mismatch"));
-        }
-        Ok(entry)
-    }
-
-    fn write(&self) -> Result<String> {
-        let text = serde_json::to_string(self).map_err(storage)?;
-        Self::read(&text)?;
-        Ok(text)
     }
 }
 
@@ -193,16 +156,17 @@ impl Store {
             {
                 return Err(Error::Conflict);
             }
-            store.receipt(&save.record.id).await?;
-            store.cached(&save.record.destination).await?;
+            if store.receipt(&save.record.id).await?.is_some() {
+                // An uncertain acknowledgement can be retried after a newer child was
+                // confirmed. Its immutable receipt wins; never rewind the cached head.
+                return Ok(save.record);
+            }
+            if let Some(current) = store.cached(&save.record.destination).await? {
+                store.check_cached_document(&current).await?;
+            }
             store.put_objects(save.objects).await?;
             let text = String::from_utf8(save.record_bytes).map_err(storage)?;
-            let entry = CachedEntry {
-                format: "solidcraft-cache/1".into(),
-                save: save.record.clone(),
-                destination: save.record.destination.clone(),
-                revision: Some(save.record.id.clone()),
-            };
+            let entry = CachedEntry::new(save.record.clone(), save.record.destination.clone(), Some(save.record.id.clone()), false)?;
             let cached = entry.write()?;
             let key = cache_key(&entry.destination)?;
             // No OPFS or network awaits occur after the transaction begins.
@@ -288,7 +252,32 @@ impl Store {
                 }
             }
         }
+        if let Some(thumbnail) = solidcraft_cloud::Thumbnail::read(&save.manifest)? {
+            for path in thumbnail.paths()? {
+                if let Ok(value) = self.read(&path).await {
+                    bytes.insert(path, value);
+                }
+            }
+        }
         save.recover(|path| bytes.get(path).cloned().ok_or_else(|| storage("recovery object missing")))
+    }
+
+    pub async fn thumbnail(&self, save: &PendingSave) -> Result<Option<Vec<u8>>> {
+        save.check_connection(&self.connection)?;
+        let document = self.read(&format!("documents/{}", save.manifest.document_hash)).await?;
+        solidcraft_engine::io::cloud::check_document(&document)?;
+        if solidcraft_cloud::digest(&document) != save.manifest.document_hash {
+            return Err(Error::Invalid("preview document hash mismatch".into()));
+        }
+        let mut objects = BTreeMap::new();
+        if let Some(thumbnail) = solidcraft_cloud::Thumbnail::read(&save.manifest)? {
+            for path in thumbnail.paths()? {
+                if let Ok(bytes) = self.read(&path).await {
+                    objects.insert(path, bytes);
+                }
+            }
+        }
+        solidcraft_engine::io::cloud::read_thumbnail(&save.manifest, |path| objects.get(path).cloned().ok_or_else(|| storage("preview unavailable")))
     }
 
     pub async fn cached(&self, destination: &Destination) -> Result<Option<CachedEntry>> {
@@ -306,7 +295,15 @@ impl Store {
         Ok(entry)
     }
 
-    pub async fn cached_destinations(&self) -> Result<Vec<Destination>> {
+    async fn check_cached_document(&self, entry: &CachedEntry) -> Result<()> {
+        let document = self.read(&format!("documents/{}", entry.save.manifest.document_hash)).await?;
+        if solidcraft_cloud::digest(&document) != entry.save.manifest.document_hash {
+            return Err(Error::Invalid("cached document hash mismatch".into()));
+        }
+        solidcraft_engine::io::cloud::check_document(&document)
+    }
+
+    pub async fn cached_entries(&self) -> Result<Vec<CachedEntry>> {
         let transaction = self.database.transaction("cached").build().map_err(storage)?;
         let keys = transaction
             .object_store("cached")
@@ -322,17 +319,22 @@ impl Store {
             return Err(storage("too many cached files"));
         }
         let mut destinations = Vec::new();
+        let mut total_bytes = 0usize;
         for key in keys {
             let transaction = self.database.transaction("cached").build().map_err(storage)?;
             let text: Option<String> = transaction.object_store("cached").map_err(storage)?.get(key.as_str()).await.map_err(storage)?;
             transaction.commit().await.map_err(storage)?;
             if let Some(text) = text {
+                total_bytes = total_bytes
+                    .checked_add(text.len())
+                    .filter(|n| *n <= MAX_QUEUE_METADATA)
+                    .ok_or_else(|| storage("cached metadata exceeds the safe listing limit"))?;
                 let entry = CachedEntry::read(&text)?;
                 entry.save.check_connection(&self.connection)?;
                 if cache_key(&entry.destination)? != key {
                     return Err(storage("cached file identifier mismatch"));
                 }
-                destinations.push(entry.destination);
+                destinations.push(entry);
             }
         }
         Ok(destinations)
@@ -348,15 +350,16 @@ impl Store {
         save.validate()?;
         let store = self.clone();
         with_lock(&self.lock, async move {
-            if let Some(current) = store.cached(&destination).await?
-                && store.record(&current.save.id).await?.is_some()
-            {
-                // Another tab saved while the download was in flight. The pending capture
-                // remains the local head; a downloaded snapshot cannot replace it.
-                return Ok(());
+            if let Some(current) = store.cached(&destination).await? {
+                if store.record(&current.save.id).await?.is_some() {
+                    // Another tab saved while the download was in flight. The pending capture
+                    // remains the local head; a downloaded snapshot cannot replace it.
+                    return Ok(());
+                }
+                store.check_cached_document(&current).await?;
             }
             store.put_objects(save.objects).await?;
-            let entry = CachedEntry { format: "solidcraft-cache/1".into(), save: save.record, destination, revision };
+            let entry = CachedEntry::new(save.record, destination, revision, true)?;
             let text = entry.write()?;
             let key = cache_key(&entry.destination)?;
             let transaction = store
@@ -388,9 +391,22 @@ impl Store {
         let store = self.clone();
         with_lock(&self.lock, async move {
             store.record(&save.id).await?;
-            store.receipt(&save.id).await?;
+            if let Some(existing) = store.receipt(&save.id).await?
+                && serde_json::to_value(existing).map_err(storage)? != serde_json::to_value(&published).map_err(storage)?
+            {
+                return Err(Error::Conflict);
+            }
+            let parent = match &save.expected_revision {
+                Some(id) => store.receipt(id).await?,
+                None => None,
+            };
+            published.validate(&save, parent.as_ref())?;
             let current = store.cached(&published.destination).await?;
-            let update_cache = current.as_ref().is_none_or(|entry| entry.save.id == save.id);
+            if let Some(current) = &current {
+                store.check_cached_document(current).await?;
+            }
+            let update_cache = current.as_ref().is_none_or(|entry| entry.save.id == save.id)
+                || parent.as_ref().is_some_and(|parent| current.as_ref().and_then(|entry| entry.revision.as_ref()) == Some(&parent.revision));
             let old_key = if published.destination != save.destination
                 && store.cached(&save.destination).await?.is_some_and(|entry| entry.save.id == save.id)
             {
@@ -398,12 +414,8 @@ impl Store {
             } else {
                 None
             };
-            let entry = CachedEntry {
-                format: "solidcraft-cache/1".into(),
-                save,
-                destination: published.destination.clone(),
-                revision: Some(published.revision.clone()),
-            };
+            let mut entry = CachedEntry::new(save, published.destination.clone(), Some(published.revision.clone()), true)?;
+            entry.conflict = published.conflict;
             let cached = entry.write()?;
             let key = cache_key(&entry.destination)?;
             let receipt = serde_json::to_string(&serde_json::json!({"format":"solidcraft-receipt/1","published":published})).map_err(storage)?;
