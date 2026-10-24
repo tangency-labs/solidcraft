@@ -931,6 +931,7 @@ fn measure_line(app: &SolveApp, painter: &egui::Painter, proj: &Proj, r: &serde_
     for s in [sa, sb] {
         painter.circle(s, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
     }
+    pick_numbers(painter, sa, sb);
     let mid = sa + (sb - sa) * 0.5 + vec2(10.0, -14.0);
     let galley = painter.layout_no_wrap(crate::prefs::show_mm(app, d, 1), egui::FontId::proportional(crate::theme::Tokens::get().font_label), t.text);
     let rect = egui::Rect::from_min_size(mid, galley.size() + vec2(10.0, 6.0));
@@ -940,6 +941,24 @@ fn measure_line(app: &SolveApp, painter: &egui::Painter, proj: &Proj, r: &serde_
     }
     painter.rect(rect, t.radius_sm.saturating_sub(1), t.overlay, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     painter.galley(rect.min + vec2(5.0, 3.0), galley, t.text);
+}
+
+/// "1" and "2" beside the measured line's ends (#6020), as the panel lists the picks: each just
+/// past its end, away from the line and its length in the middle.
+fn pick_numbers(painter: &egui::Painter, sa: Pos2, sb: Pos2) {
+    let t = Tokens::get();
+    let along = (sb - sa).normalized();
+    // Ends on one spot (or one behind the other): side by side above it.
+    let (out_a, out_b) = if along.is_finite() && along.length_sq() > 0.5 { (-along, along) } else { (vec2(-0.7, -0.7), vec2(0.7, -0.7)) };
+    for (n, at, out) in [("1", sa, out_a), ("2", sb, out_b)] {
+        let galley = painter.layout_no_wrap(n.to_string(), egui::FontId::proportional(t.font_label), t.text);
+        let size = galley.size() + vec2(8.0, 4.0);
+        let side = size.x.max(size.y);
+        let rect = egui::Rect::from_center_size(at + out * (side * 0.5 + 8.0), vec2(side, size.y));
+        painter.rect(rect, t.radius_sm.saturating_sub(1), t.overlay, Stroke::new(1.0, t.manipulator), egui::StrokeKind::Inside);
+        painter.galley(rect.center() - galley.size() * 0.5, galley, t.text);
+        crate::scenario::publish_target(&format!("measure:item:{n}"), rect);
+    }
 }
 
 /// A world-axis-aligned chain between the same two measured points. Zero-length and
