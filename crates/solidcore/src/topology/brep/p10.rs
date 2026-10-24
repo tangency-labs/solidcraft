@@ -1690,7 +1690,7 @@ struct ProjectionCurves {
 
 fn create_parallel_projection_curves(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
     curve: &BSplineCurve,
     direction: Vec3,
     tol: f64,

@@ -1627,20 +1627,20 @@ fn face_surface(b: &Brep, face: FaceId) -> Result<&Surface> {
 /// `SM_ERR` when the global drop finds nothing or the test point is on the surface;
 /// [`SolidError::InvalidInput`] where upstream dereferences null (no surface, face
 /// use, mate or shell; a shell without region returns `None`, as upstream); those of
-/// the surface evaluations and solves. Deviation: without a guess upstream turns the
-/// surface cache's point test off (`SmTemporaryChangeValue` on `m_bPointTestEnabled`)
-/// around `GlobalPointSolve`; the Rust cache has no such switch, so for a face-owned
-/// surface the solve defers on `SmFace::PointClassify` (unit `query.face_p2`, see
-/// `surface::surface::p4`) where upstream keeps every solution.
+/// the surface evaluations and solves. Without a guess the face's surface cache is
+/// fetched (`smsurf_GetSurfaceCache`, which makes the face's trimmed cache and its UV
+/// trim curves on `b`) and checked out with its point test off around the
+/// `GlobalPointSolve`, so every solution is kept unclassified, as upstream.
 pub fn find_sector_of_face(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
     face: FaceId,
     uv_guess: Option<Point2>,
     test_point: Point3,
     test_dir: Vec3,
 ) -> Result<(f64, Option<RegionId>)> {
-    let surface = face_surface(b, face)?;
+    // (an exact evaluation copy: the cache lookup below changes the B-rep)
+    let surface = &face_surface(b, face)?.clone_for_evaluation()?;
     let eval = |uv: Point2| -> Result<(Point3, Vec3)> {
         // found Surface Point, Found Surface Point Normal
         let p = surface.evaluate_point(k, uv)?;
@@ -1683,18 +1683,37 @@ pub fn find_sector_of_face(
         }
     } else {
         {
-            // without cpUVGuess do a more expensive global solve (point testing off:
-            // every point solution is kept without classifying it against the trims)
-            let solutions = surface.global_point_solve::<NoObject>(
-                k,
-                Some(NoObject),
-                &face2::uv_domain(b, face)?,
-                SolverOperation::Minimize,
-                test_point,
-                EFF_ZERO,
-                None,
-                SolutionRequested::All,
-            )?;
+            // without cpUVGuess do a more expensive global solve
+            // smsurf_GetSurfaceCache(pFace->GetSurface()), NER; checked out
+            // (SmCacheCheckOutIn) unless an enclosing caller already holds it
+            let lease = if surface.trim_cache_in_use() {
+                None
+            } else {
+                match crate::query::face::p2::face_surface_cache(k, b, face) {
+                    Ok(lease) => Some(lease),
+                    Err(e) if e.is_unported() => return Err(e),
+                    Err(_) => return Err(SolidError::null_pointer(OP)),
+                }
+            };
+            // Turn off point testing so GlobalPointSolve() will keep all point
+            // solutions without classifying the solution point against the trim
+            // boundaries.
+            let solved = face2::uv_domain(b, face).and_then(|domain| {
+                surface.global_point_solve_point_test_off::<NoObject>(
+                    k,
+                    Some(NoObject),
+                    &domain,
+                    SolverOperation::Minimize,
+                    test_point,
+                    EFF_ZERO,
+                    None,
+                    SolutionRequested::All,
+                )
+            });
+            if let Some(lease) = lease {
+                lease.release();
+            }
+            let solutions = solved?;
             let Some(first) = solutions.get(0) else {
                 return Err(sm_err());
             };
@@ -2292,10 +2311,12 @@ fn face_intersect(
         want_points: true,
         ..Default::default()
     };
+    // (the B-reps are read shared here: a face-owned surface's cache defers)
     let out = crate::topology::face::p3::face_intersect_breps(
         k,
-        (b, this_face),
-        (other, other_face),
+        crate::topology::face::p3::FaceBreps::Shared(b, other),
+        this_face,
+        other_face,
         approx_tol_3d,
         crv_angle_tolerance_deg,
         &options,
@@ -2911,7 +2932,7 @@ pub struct ParallelProjectionCurves {
 /// far on failure; here they are dropped with the error).
 pub fn create_parallel_projection_curves(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
     curve: &BSplineCurve,
     projection_vector: Vec3,
     opts: &ParallelProjectionOptions<'_>,
@@ -2929,16 +2950,29 @@ pub fn create_parallel_projection_curves(
 
     for face in face_list {
         let uv_domain = face2::uv_domain(b, face)?;
-        let surface = face_surface(b, face)?;
-        let (curves_3d, uv_curves) = surface.create_parallel_projection_curves(
-            k,
-            &uv_domain,
-            curve,
-            projection_vector,
-            opts.projection_distance,
-            opts.approx_tol_3d,
-            opts.angle_tol_radians,
-        )?;
+        // pFace->GetSurface()->CreateParallelProjectionCurves(..): the surface reaches
+        // its face's cache (smsurf_GetSurfaceCache) through the B-rep, lent to the
+        // projection's live view
+        let identity = crate::query::brep::BrepIdentity::default();
+        let (curves_3d, uv_curves) = {
+            use crate::intersect::topology_solver::p1::TopologyObjects;
+            let live = crate::query::brep::LiveBrepObjects::new(b, &identity, None)?;
+            let surface = live.surface(CacheObject::Surface(face))?;
+            let mut context = live
+                .surface_solve_context()
+                .ok_or_else(|| null("CreateParallelProjectionCurves: no surface context"))?;
+            surface.create_parallel_projection_curves_with_context(
+                k,
+                &uv_domain,
+                curve,
+                projection_vector,
+                opts.projection_distance,
+                opts.approx_tol_3d,
+                opts.angle_tol_radians,
+                &mut *context,
+                Some(CacheObject::Surface(face)),
+            )?
+        };
         let curves_3d: Vec<Option<Curve>> = curves_3d.into_iter().map(Some).collect();
 
         let trimmed = face2::create_curves_by_trimming(

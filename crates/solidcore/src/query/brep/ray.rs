@@ -15,8 +15,8 @@
 //! the number of requests. Cache handles are mapped explicitly; no B-rep copy is kept.
 
 mod live;
-pub use live::LiveBrepObjects;
 pub(crate) use live::{solve_mutable_brep_point, solve_mutable_ray};
+pub use live::{BrepFaceServices, LiveBrepObjects, SideObject, SidedFaceServices};
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};

@@ -295,3 +295,8 @@ why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-
 unit = "topology.brep_p10"
 case = "gen0165"
 why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-rep upstream (CurveOnClassify -> IntersectTSBound -> ComputeUVPoint(bOKToMakeUVTrimCurve=TRUE); SetUVTrimCurve resets vertex/face gaps), the port runs it on a copy (plan/findings.md: ClassifyLoops' loop bisector builds UV trim curves upstream, on a copy in the port) [ints.ints[170] cpp 1 rust 0]"
+
+[[mismatch]]
+unit = "topology.brep_p10"
+case = "project_t0_Defeature_brep1"
+why = "ProjectAndTrim removes every face; C++ keeps the former solid region as the infinite region, the port keeps the original one (its SmTopology fields differ: cpp 99999999, rust 0) (plan/findings.md: 'topology.brep_p10 project_t0_Defeature_brep1: the region left after ProjectAndTrim')"

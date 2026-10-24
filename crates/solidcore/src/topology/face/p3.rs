@@ -95,6 +95,7 @@ use crate::math::{Point3, Vec3, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::brep::{BrepFaceServices, SideObject, SidedFaceServices};
 use crate::query::face::p2 as qf2;
 use crate::surface::surface::p2::{smos_max, TsectCurveType};
 use crate::surface::surface::p4::NoObject;
@@ -102,6 +103,7 @@ use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::surface::trim_srf_cache::TrimSrfCache;
 use crate::surface::volume::Volume;
+use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge::{self, NotifyEnv};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p2 as eu2;
@@ -1544,7 +1546,7 @@ impl ClassGeometry<IntersectObject> for IntersectObjects<'_> {
 /// constructor).
 pub fn face_intersect(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
     f: FaceId,
     other: FaceId,
     approx_tol_3d: f64,
@@ -1553,12 +1555,42 @@ pub fn face_intersect(
 ) -> Result<FaceIntersection> {
     face_intersect_breps(
         k,
-        (b, f),
-        (b, other),
+        FaceBreps::One(b),
+        f,
+        other,
         approx_tol_3d,
         crv_ang_tol_deg,
         options,
     )
+}
+
+/// This face's B-rep and the other face's, read shared.
+fn shared_breps<'a>(
+    this: Option<&'a Brep>,
+    other: Option<&'a Brep>,
+    shared: Option<(&'a Brep, &'a Brep)>,
+) -> Result<(&'a Brep, &'a Brep)> {
+    if let Some(pair) = shared {
+        return Ok(pair);
+    }
+    let b = this.ok_or_else(|| null("FaceIntersect: no B-rep"))?;
+    Ok((b, other.unwrap_or(b)))
+}
+
+/// The B-reps of the two faces of [`face_intersect_breps`]: one B-rep holding both,
+/// or this face's and the other face's. They are lent mutably because the surface
+/// intersection makes the faces' trimmed caches on them (`smsurf_GetSurfaceCache`,
+/// which creates the faces' UV trim curves).
+#[derive(Debug)]
+pub enum FaceBreps<'a> {
+    /// Both faces are of this B-rep.
+    One(&'a mut Brep),
+    /// This face's B-rep and the other face's.
+    Two(&'a mut Brep, &'a mut Brep),
+    /// This face's B-rep and the other face's (possibly the same), held shared by a
+    /// caller that cannot lend them: the faces' caches cannot be made on them, so a
+    /// face-owned surface's cache defers as before.
+    Shared(&'a Brep, &'a Brep),
 }
 
 /// [`face_intersect`] of face `this.1` of B-rep `this.0` and face `other.1` of B-rep
@@ -1572,15 +1604,24 @@ pub fn face_intersect(
 #[allow(clippy::too_many_lines)] // one upstream routine
 pub fn face_intersect_breps(
     k: &Kernel,
-    this: (&Brep, FaceId),
-    other: (&Brep, FaceId),
+    breps: FaceBreps<'_>,
+    f: FaceId,
+    other: FaceId,
     approx_tol_3d: f64,
     crv_ang_tol_deg: f64,
     options: &FaceIntersectOptions,
 ) -> Result<FaceIntersection> {
-    let ((b, f), (ob, other)) = (this, other);
+    let (mut this_brep, mut other_brep, shared) = match breps {
+        FaceBreps::One(b) => (Some(b), None, None),
+        FaceBreps::Two(b, ob) => (Some(b), Some(ob), None),
+        FaceBreps::Shared(b, ob) => (None, None, Some((b, ob))),
+    };
     // the other face's objects name its own B-rep when it is not this one
-    let other_side = !core::ptr::eq(b, ob);
+    let other_side = match shared {
+        Some((b, ob)) => !core::ptr::eq(b, ob),
+        None => other_brep.is_some(),
+    };
+    let (b, ob) = shared_breps(this_brep.as_deref(), other_brep.as_deref(), shared)?;
     let mut out = FaceIntersection {
         this_uv_curves: options.want_this_uv_curves.then(Vec::new),
         other_uv_curves: options.want_other_uv_curves.then(Vec::new),
@@ -1637,20 +1678,56 @@ pub fn face_intersect_breps(
     }
 
     if !have_curves {
-        let r = surface_of(b, f)?.global_surface_intersect(
-            k,
-            &face2::uv_domain(b, f)?,
-            surface_of(ob, other)?,
-            &face2::uv_domain(ob, other)?,
-            use_surface_edges,
-            Some(approx_tol_3d),
-            Some(ang_tol_rad),
-        )?;
+        // the surfaces reach their faces' caches through the B-reps
+        // (smsurf_GetSurfaceCache); exact evaluation copies, as the caches are made
+        // on the B-reps meanwhile
+        let surface = surface_of(b, f)?.clone_for_evaluation()?;
+        let other_copy = surface_of(ob, other)?.clone_for_evaluation()?;
+        // a face intersected with itself intersects one surface object with itself
+        // (the intersectors compare the two surfaces by identity)
+        let other_surface = if !other_side && other == f {
+            &surface
+        } else {
+            &other_copy
+        };
+        let (domain, other_domain) = (face2::uv_domain(b, f)?, face2::uv_domain(ob, other)?);
+        let r = if let Some(this_brep) = this_brep.as_deref_mut() {
+            let mut services = vec![BrepFaceServices::new(this_brep)];
+            if let Some(ob) = other_brep.as_deref_mut() {
+                services.push(BrepFaceServices::new(ob));
+            }
+            let other_index = usize::from(other_side);
+            surface.global_surface_intersect_with_context(
+                k,
+                [
+                    Some(SideObject(0, CacheObject::Surface(f))),
+                    Some(SideObject(other_index, CacheObject::Surface(other))),
+                ],
+                &mut SidedFaceServices(services),
+                &domain,
+                other_surface,
+                &other_domain,
+                use_surface_edges,
+                Some(approx_tol_3d),
+                Some(ang_tol_rad),
+            )?
+        } else {
+            surface.global_surface_intersect(
+                k,
+                &domain,
+                other_surface,
+                &other_domain,
+                use_surface_edges,
+                Some(approx_tol_3d),
+                Some(ang_tol_rad),
+            )?
+        };
         curves_3d = r.curves_3d;
         uv_curves1 = r.surface1_uv_curves;
         uv_curves2 = r.surface2_uv_curves;
         curve_types = r.curve_types;
     }
+    let (b, ob) = shared_breps(this_brep.as_deref(), other_brep.as_deref(), shared)?;
 
     for (ii, curve) in curves_3d.iter().enumerate() {
         let curve_type = curve_types

@@ -1648,6 +1648,64 @@ impl Surface {
         opt_approx_tol_3d: Option<f64>,
         opt_angle_tol_rad: Option<f64>,
     ) -> Result<(Vec<Curve>, Vec<Option<Curve>>)> {
+        self.create_parallel_projection_curves_in::<super::p4::NoObject>(
+            k,
+            uv_domain,
+            curve,
+            projection_vector,
+            opt_projection_distance,
+            opt_approx_tol_3d,
+            opt_angle_tol_rad,
+            None,
+        )
+    }
+
+    /// [`Surface::create_parallel_projection_curves`] of a face's surface by a caller
+    /// that holds the face: `context` makes this surface's cache from `handle`
+    /// (`smsurf_GetSurfaceCache`, the face's trimmed cache) for the continuity check
+    /// and the intersection, and the swept surface's (no handle) as its own.
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::create_parallel_projection_curves`], and those of the context's
+    /// cache preparation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_parallel_projection_curves_with_context<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        curve: &BSplineCurve,
+        projection_vector: Vec3,
+        opt_projection_distance: Option<f64>,
+        opt_approx_tol_3d: Option<f64>,
+        opt_angle_tol_rad: Option<f64>,
+        context: &mut dyn SurfaceSolveContext<O>,
+        handle: Option<O>,
+    ) -> Result<(Vec<Curve>, Vec<Option<Curve>>)> {
+        self.create_parallel_projection_curves_in(
+            k,
+            uv_domain,
+            curve,
+            projection_vector,
+            opt_projection_distance,
+            opt_approx_tol_3d,
+            opt_angle_tol_rad,
+            Some((context, handle)),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn create_parallel_projection_curves_in<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        curve: &BSplineCurve,
+        projection_vector: Vec3,
+        opt_projection_distance: Option<f64>,
+        opt_approx_tol_3d: Option<f64>,
+        opt_angle_tol_rad: Option<f64>,
+        mut context: Option<(&mut dyn SurfaceSolveContext<O>, Option<O>)>,
+    ) -> Result<(Vec<Curve>, Vec<Option<Curve>>)> {
         // check input (ZERO_VEC_ER: fails unless |v|^2 >= SM_EFF_ZERO_SQ, so also for NaN)
         if projection_vector
             .length_squared()
@@ -1659,14 +1717,22 @@ impl Surface {
 
         // check state - internal surface continuities are better than C0 (NER; the
         // continuity is only reported)
-        let cache = super::p2::surface_cache::<()>(k, self, None).map_err(|e| {
+        let ner = |e: SolidError| {
             if e.is_unported() {
                 e
             } else {
                 SolidError::null_pointer(OP_PROJ)
             }
-        })?;
-        cache.surface_continuity(uv_domain)?;
+        };
+        match context.as_mut() {
+            Some((context, handle)) => context
+                .build_surface_cache(k, self, *handle)
+                .map_err(ner)?
+                .surface_continuity(uv_domain)?,
+            None => super::p2::surface_cache::<()>(k, self, None)
+                .map_err(ner)?
+                .surface_continuity(uv_domain)?,
+        };
 
         // check state - internal curve continuities are better than C0 (only reported)
         curve.calculate_continuities(k, CONTINUITY_ANGLE)?;
@@ -1712,16 +1778,32 @@ impl Surface {
 
         // intersection
         let projection_domain = projection_surface.natural_uv_domain();
-        let x = crate::intersect::surface_intersector::p5::do_intersection(
-            k,
-            self,
-            uv_domain,
-            &projection_surface,
-            &projection_domain,
-            [true, true],
-            opt_approx_tol_3d,
-            opt_angle_tol_rad,
-        )?;
+        let x = match context {
+            Some((context, handle)) => {
+                crate::intersect::surface_intersector::p5::do_intersection_with_context(
+                    k,
+                    self,
+                    uv_domain,
+                    &projection_surface,
+                    &projection_domain,
+                    [true, true],
+                    opt_approx_tol_3d,
+                    opt_angle_tol_rad,
+                    context,
+                    [handle, None],
+                )?
+            }
+            None => crate::intersect::surface_intersector::p5::do_intersection(
+                k,
+                self,
+                uv_domain,
+                &projection_surface,
+                &projection_domain,
+                [true, true],
+                opt_approx_tol_3d,
+                opt_angle_tol_rad,
+            )?,
+        };
         Ok((x.curves_3d, x.surface1_uv_curves))
     }
 }

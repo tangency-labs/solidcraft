@@ -1751,11 +1751,27 @@ impl IntersectorBrep<H> for Two {
             want_points: wants.points_3d,
             coincidence: opt_coincidence_flag,
         };
-        // the faces may be of two B-reps (`face_intersect_breps`)
+        // the faces may be of two B-reps (`face_intersect_breps`); their caches are
+        // made on them (smsurf_GetSurfaceCache)
+        let breps = if face1.b == face2.b {
+            fp3::FaceBreps::One(self.brep_m(face1)?)
+        } else {
+            let [first, second] = &mut self.breps;
+            let (this, other) = match (face1.b, face2.b) {
+                (0, 1) => (first.as_mut(), second.as_mut()),
+                (1, 0) => (second.as_mut(), first.as_mut()),
+                _ => (None, None),
+            };
+            match (this, other) {
+                (Some(this), Some(other)) => fp3::FaceBreps::Two(this, other),
+                _ => return Err(invalid("handle names an absent B-rep")),
+            }
+        };
         let out = fp3::face_intersect_breps(
             k,
-            (self.brep_r(face1)?, fid(face1)),
-            (self.brep_r(face2)?, fid(face2)),
+            breps,
+            fid(face1),
+            fid(face2),
             approx_tol_3d,
             ang_tol_deg,
             &options,

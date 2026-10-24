@@ -971,10 +971,30 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             coincidence: opt_coincidence_flag,
         };
         // the faces may be of the two operands (`face_intersect_breps`)
+        // the faces' caches are made on their B-rep(s) (smsurf_GetSurfaceCache)
+        let breps = if face1.b == face2.b {
+            fp3::FaceBreps::One(self.brep_m(face1)?)
+        } else {
+            let (i, j) = (
+                usize::try_from(face1.b).map_err(|_| invalid("handle names an absent B-rep"))?,
+                usize::try_from(face2.b).map_err(|_| invalid("handle names an absent B-rep"))?,
+            );
+            let [first, second] = &mut self.breps;
+            let (this, other) = match (i, j) {
+                (0, 1) => (first.as_deref_mut(), second.as_deref_mut()),
+                (1, 0) => (second.as_deref_mut(), first.as_deref_mut()),
+                _ => (None, None),
+            };
+            match (this, other) {
+                (Some(this), Some(other)) => fp3::FaceBreps::Two(this, other),
+                _ => return Err(invalid("handle names an absent B-rep")),
+            }
+        };
         let out = fp3::face_intersect_breps(
             k,
-            (self.brep_r(face1)?, fid(face1)),
-            (self.brep_r(face2)?, fid(face2)),
+            breps,
+            fid(face1),
+            fid(face2),
             approx_tol_3d,
             ang_tol_deg,
             &options,
