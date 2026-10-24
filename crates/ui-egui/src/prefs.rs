@@ -1700,7 +1700,10 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     if crate::prefs_search::querying(ui) {
         for (index, item) in WINDOW_PAGES.iter().enumerate() {
             crate::prefs_search::begin_page(ui, crate::i18n::tr(item.label));
-            draw_page(app, ui, index, t);
+            let before = crate::prefs_search::hits(ui);
+            let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-page", index));
+            draw_page(app, &mut child, index, t);
+            crate::prefs_search::commit_search_child(ui, &child, before);
         }
         if crate::prefs_search::hits(ui) == 0 {
             ui.label(egui::RichText::new(crate::i18n::tr("prefs.search_empty")).size(t.font_body).color(t.form_dim));

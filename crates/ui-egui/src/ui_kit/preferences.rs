@@ -54,7 +54,11 @@ pub(crate) fn settings_heading(ui: &mut Ui, title: &str, description: &str) {
 pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
     if crate::prefs_search::querying(ui) {
         crate::prefs_search::begin_section(ui, title);
-        return Some(add(ui));
+        let before = crate::prefs_search::hits(ui);
+        let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-section", key));
+        let result = add(&mut child);
+        crate::prefs_search::commit_search_child(ui, &child, before);
+        return Some(result);
     }
     let t = Tokens::get();
     ui.add_space(t.space_8);
@@ -112,6 +116,14 @@ pub(crate) fn settings_pair<R>(ui: &mut Ui, controls: impl FnOnce(&mut Ui) -> R,
 /// A horizontally scrollable, draggable tile rail with its import action pinned outside it.
 /// The hidden scrollbar never reserves vertical space; a vertical wheel also moves the rail.
 pub(crate) fn theme_rail(ui: &mut Ui, tiles: impl FnOnce(&mut Ui), import: impl FnOnce(&mut Ui)) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = Tokens::get().space_8;
+            tiles(ui);
+        });
+        import(ui);
+        return;
+    }
     let t = Tokens::get();
     let action_width = t.form_label_width + t.space_24 + t.space_6;
     let rail_width = (dimension(ui.available_width()) - action_width - t.space_8).max(0.0);

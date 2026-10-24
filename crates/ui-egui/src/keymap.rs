@@ -555,22 +555,21 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
         if filtering && commands.is_empty() {
             return;
         }
-        if filtering {
-            crate::prefs_search::reveal(ui);
-        }
-        let t = crate::theme::Tokens::get();
-        let key_width = commands
-            .iter()
-            .map(|(_, key, _)| ui_kit::ContentWidth::button(ui, &display(key)))
-            .chain(app.keymap.recorder.preview().filter(|_| app.keymap.capturing.is_some()).map(|text| ui_kit::ContentWidth::button(ui, &text)))
-            .fold(ui_kit::ContentWidth::button(ui, app.tr_label("press a key…")), f32::max)
-            .max(ui_kit::ContentWidth::label(ui, app.tr_label("Keyboard Shortcuts")) + t.space_8);
-        let action_width = if app.keymap.read_only {
-            t.control_height
-        } else {
-            ui_kit::ContentWidth::button(ui, app.tr_label("Clear")) + ui_kit::ContentWidth::button(ui, app.tr_label("Reset")) + t.space_4
-        };
+        let count = commands.len();
+        let shortcut_title = app.tr("prefs.shortcuts").to_string();
         let paint = |ui: &mut egui::Ui| {
+            let t = crate::theme::Tokens::get();
+            let key_width = commands
+                .iter()
+                .map(|(_, key, _)| ui_kit::ContentWidth::button(ui, &display(key)))
+                .chain(app.keymap.recorder.preview().filter(|_| app.keymap.capturing.is_some()).map(|text| ui_kit::ContentWidth::button(ui, &text)))
+                .fold(ui_kit::ContentWidth::button(ui, app.tr_label("press a key…")), f32::max)
+                .max(ui_kit::ContentWidth::label(ui, app.tr_label("Keyboard Shortcuts")) + t.space_8);
+            let action_width = if app.keymap.read_only {
+                t.control_height
+            } else {
+                ui_kit::ContentWidth::button(ui, app.tr_label("Clear")) + ui_kit::ContentWidth::button(ui, app.tr_label("Reset")) + t.space_4
+            };
             let columns = [
                 ui_kit::Column::new("Command", 1.5).flex().min_content_width(t.form_label_width),
                 ui_kit::Column::new(crate::i18n::tr("keymap.command_id"), 1.8).flex().min_content_width(t.form_label_width),
@@ -636,7 +635,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         };
         if filtering {
-            paint(ui);
+            ui_kit::search_fold(ui, &shortcut_title, count, paint);
         } else {
             ui_kit::settings_scroll(ui, "sc_keymap_scroll", paint);
         }

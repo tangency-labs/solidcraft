@@ -300,6 +300,77 @@ pub(crate) fn section_count<R>(
     open.then(|| ui.push_id(id, add).inner)
 }
 
+/// Shortcut matches during Preferences search. Closed until opened, and closed again when the
+/// query changes, so a short word does not lay out every command.
+pub(crate) fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+    let t = Tokens::get();
+    let id = egui::Id::new(("prefs_search_fold", title));
+    let query = crate::prefs_search::query(ui);
+    let mut open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
+    let previous = ui.data(|data| data.get_temp::<String>(id.with("query"))).unwrap_or_default();
+    if previous != query {
+        open = false;
+    }
+    crate::prefs_search::reveal(ui);
+    ui.add_space(t.space_2);
+    let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::click());
+    if response.hovered() || response.has_focus() {
+        ui.painter().rect_filled(rect.shrink2(vec2(0.0, 1.0)), t.radius_sm, t.hover);
+    }
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + t.form_section_icon_size / 2.0, rect.center().y),
+        vec2(t.form_section_icon_size, t.form_section_icon_size),
+    );
+    super::disclosure(ui.painter(), icon_rect.center(), open, t.form_dim);
+    let text_rect = egui::Rect::from_min_max(egui::pos2((icon_rect.right() + t.form_gap_y).min(rect.right()), rect.top()), rect.max);
+    let caption = title.to_uppercase();
+    let badge_value = count.to_string();
+    let badge_width = label_width(ui, &badge_value) + t.space_12;
+    let reserved = badge_width + t.space_12;
+    let mut format = egui::TextFormat::simple(crate::fonts::semibold(t.font_caption), t.form_dim);
+    format.extra_letter_spacing = t.font_caption * t.font_section_tracking;
+    let title_width = ui
+        .fonts_mut(|fonts| fonts.layout_job(egui::text::LayoutJob::single_section(caption.clone(), format)))
+        .size()
+        .x
+        .ceil()
+        .min((text_rect.width() - reserved).max(0.0));
+    let title_rect = egui::Rect::from_min_max(text_rect.min, egui::pos2(text_rect.left() + title_width, text_rect.bottom()));
+    paint_text(ui, title_rect, &caption, crate::fonts::semibold(t.font_caption), t.form_dim, true);
+    let mut rule_left = title_rect.right() + t.space_12;
+    let width = badge_width.min((rect.right() - rule_left).max(0.0));
+    let badge = egui::Rect::from_min_size(egui::pos2(rule_left.min(rect.right()), rect.center().y - t.space_10), vec2(width, t.space_10 * 2.0));
+    ui.painter().rect_filled(badge, t.radius_xl, t.dialog_footer);
+    ui.painter().with_clip_rect(ui.clip_rect().intersect(badge)).text(
+        badge.center(),
+        egui::Align2::CENTER_CENTER,
+        &badge_value,
+        egui::FontId::proportional(t.font_small),
+        t.form_dim,
+    );
+    rule_left = badge.right() + t.space_12;
+    if rule_left < rect.right() {
+        t.secondary_hline(ui.painter(), rule_left..=rect.right(), rect.center().y, t.dialog_rule);
+    }
+    let accessible = format!("{title} ({count})");
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, ui.is_enabled(), open, &accessible));
+    scenario::publish_rect("prefs:search:shortcuts", rect);
+    scenario::publish_handle("prefs:search:shortcuts", response.rect.center());
+    if response.clicked() {
+        open = !open;
+    }
+    ui.data_mut(|data| {
+        data.insert_temp(id.with("query"), query);
+        data.insert_temp(id, open);
+    });
+    open.then(|| {
+        crate::prefs_search::push_force(ui);
+        let result = add(ui);
+        crate::prefs_search::pop_force(ui);
+        result
+    })
+}
+
 /// Picked-item list entry with a remove action. Returns that action's Response.
 /// Tokens: control_height, space_8, font_label, text and icon-button tokens.
 /// Picked-item row with a remove action. Tokens: `control_height, space_8, font_label, text; icon-button tokens`.

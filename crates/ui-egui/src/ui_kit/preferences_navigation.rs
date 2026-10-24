@@ -99,6 +99,9 @@ fn axis_columns(rect: Rect) -> [Rect; 5] {
 }
 
 pub(crate) fn settings_axis_header(ui: &mut Ui) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_24), Sense::hover());
     for (column, label) in axis_columns(rect).into_iter().zip(["prefs.axis", "prefs.live_input", "", "prefs.speed", "prefs.source"]) {
@@ -116,6 +119,15 @@ pub(crate) fn settings_axis_row(
     speed: impl FnOnce(&mut Ui),
     source: impl FnOnce(&mut Ui),
 ) {
+    if crate::prefs_search::querying(ui) && crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[name]) {
+        invert(ui);
+        speed(ui);
+        source(ui);
+        return;
+    }
+    if crate::prefs_search::querying(ui) {
+        crate::prefs_search::reveal(ui);
+    }
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height + t.space_4), Sense::hover());
     t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
