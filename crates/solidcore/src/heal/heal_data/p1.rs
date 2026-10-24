@@ -591,7 +591,7 @@ impl<O: LoopObject> HealData<O> {
     pub fn cache_face_props_stage3(
         &mut self,
         k: &Kernel,
-        b: &Brep,
+        b: &mut Brep,
         _this_healer_op: HealerOpType,
     ) -> Result<bool> {
         // init output
@@ -619,7 +619,14 @@ impl<O: LoopObject> HealData<O> {
                     return Err(no_face());
                 };
                 let face_index = p.face_index;
-                let rtn = p.set_props(k, b, PropStage::Stage3, face, face_index, done_heal_op);
+                let rtn = p.set_props_with_query_gaps(
+                    k,
+                    b,
+                    PropStage::Stage3,
+                    face,
+                    face_index,
+                    done_heal_op,
+                );
 
                 match rtn {
                     // When Face has NotYet supported problems
@@ -940,7 +947,7 @@ mod tests {
             .cache_face_props_stage2(&k, &mut b, HealerOpType::CacheFaceprops2)
             .unwrap());
         assert!(!h
-            .cache_face_props_stage3(&k, &b, HealerOpType::CacheFaceprops3)
+            .cache_face_props_stage3(&k, &mut b, HealerOpType::CacheFaceprops3)
             .unwrap());
         let mut b = Brep::default();
         h.make_uv_trim_curves(&k, &mut b, true, HealerOpType::MakeUvtrimcurves)
@@ -955,7 +962,7 @@ mod tests {
         let mut h: HealData<H> = HealData::with_targets(&v, &e, &f);
         let r = h.cache_face_props_stage2(&k, &mut b, HealerOpType::CacheFaceprops2);
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })));
-        let r = h.cache_face_props_stage3(&k, &b, HealerOpType::CacheFaceprops3);
+        let r = h.cache_face_props_stage3(&k, &mut b, HealerOpType::CacheFaceprops3);
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })));
     }
 

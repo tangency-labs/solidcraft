@@ -74,6 +74,7 @@ use crate::intersect::curve_class::p2::ResetOptions;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::face::p2::CurveOnClassifyCache;
 use crate::query::face::p3 as qf3;
 use crate::topology::face::p2 as face_p2;
 use crate::topology::{loopuse, vertex, Brep, FaceId, LoopId, LoopuseStart, VertexId};
@@ -237,6 +238,7 @@ fn find_and_classify_loop_bisector<O: LoopObject>(
     classification: &mut CurveClassification<O>,
     start_on_seam: &mut bool,
     stop_on_seam: &mut bool,
+    cache: &mut CurveOnClassifyCache,
 ) -> Result<()> {
     let mut out = qf3::LoopBisector {
         start_on_seam: *start_on_seam,
@@ -244,7 +246,7 @@ fn find_and_classify_loop_bisector<O: LoopObject>(
         closed_3d: None,
         has_curve: false,
     };
-    let r = qf3::find_and_classify_loop_bisector_into(
+    let r = qf3::find_and_classify_loop_bisector_cached(
         k,
         b,
         face,
@@ -256,6 +258,7 @@ fn find_and_classify_loop_bisector<O: LoopObject>(
         curves,
         classification,
         &mut out,
+        cache,
     );
     *start_on_seam = out.start_on_seam;
     *stop_on_seam = out.stop_on_seam;
@@ -321,7 +324,6 @@ fn touch_orient<O: Copy>(done: &[TouchData<O>], j1: usize) -> Result<OrientType>
 /// [`CurveClassification::get_loop_crossings`] other than its ignored statuses; the
 /// errors of the topology queries and of [`FaceProps::set_props_stage2`]'s
 /// [`SolidError::Unported`].
-#[allow(clippy::too_many_lines)]
 pub fn classify_loops<O: LoopObject>(
     k: &Kernel,
     b: &Brep,
@@ -330,6 +332,24 @@ pub fn classify_loops<O: LoopObject>(
     out: &mut ClassifyLoopsOut,
     scratch: &mut CurveClassification<O>,
     props: &mut FaceProps<O>,
+) -> Result<()> {
+    let mut cache = CurveOnClassifyCache::default();
+    classify_loops_cached(k, b, face, loops, out, scratch, props, &mut cache)
+}
+
+/// [`classify_loops`] on the query state `cache`, shared by every loop's bisector: the UV
+/// trim curves, tolerance growth and gap caches they make stay on its snapshot for the
+/// caller to keep, as upstream's on the face's own B-rep.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub(crate) fn classify_loops_cached<O: LoopObject>(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    loops: &mut Vec<LoopId>,
+    out: &mut ClassifyLoopsOut,
+    scratch: &mut CurveClassification<O>,
+    props: &mut FaceProps<O>,
+    cache: &mut CurveOnClassifyCache,
 ) -> Result<()> {
     // Fill Tgt Loops when input LoopList is empty
     if loops.is_empty() {
@@ -461,6 +481,7 @@ pub fn classify_loops<O: LoopObject>(
                 scratch,
                 &mut start_on_seam,
                 &mut stop_on_seam,
+                cache,
             ))?;
             if scratch.size() == 0 {
                 continue;

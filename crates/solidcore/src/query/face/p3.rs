@@ -40,9 +40,11 @@
 //!   may attach missing UV trim curves to the B-rep, and `SetUVTrimCurve` then raises
 //!   the edge (and vertex) tolerances, which changes later tolerance-expanded boxes.
 //!   The tight box takes a [`LazyBrep`]: given `&mut Brep` the edits persist, as
-//!   upstream; given `&Brep` they go to a private copy and are lost. The bisector runs
-//!   on one private copy of the B-rep per call, as `query::face::p2`'s boundary views
-//!   do.
+//!   upstream; given `&Brep` they go to a private copy and are lost. The bisector's
+//!   `IsSeam` and classifications share one snapshot of the B-rep (a
+//!   `CurveOnClassifyCache`, shared by every loop of `SmFace::ClassifyLoops`): the
+//!   healer copies its UV trims, tolerance growth and gap caches back to its B-rep, as
+//!   upstream's stay on the face's own B-rep; the public entry points discard it.
 //! - **Surface boxes of a face's surface.** `IsPlanar` and `CalculateBoundingBox` of a
 //!   B-spline, plane or surface of revolution expand their boxes by the owning face's
 //!   tolerance (`GetFace()->GetTolerance()`); the port's surface cannot reach its face,
@@ -106,7 +108,8 @@ use crate::nurbs::knots::Side;
 use crate::query::brep::LazyBrep;
 use crate::query::edge as qe;
 use crate::query::face::p2::{
-    curve_on_classify, face_vertices, point_classify, CurveOnClassifyObjects, PointClassifyOptions,
+    curve_on_classify, curve_on_classify_cached, face_vertices, point_classify,
+    CurveOnClassifyCache, CurveOnClassifyObjects, PointClassifyOptions,
 };
 use crate::query::r#loop::contains_uv_point;
 use crate::surface::surface::p2::SurfaceEval;
@@ -851,7 +854,7 @@ pub fn find_and_classify_loop_bisector<O: LoopObject + PartialEq>(
 /// # Errors
 ///
 /// As [`find_and_classify_loop_bisector`].
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 pub fn find_and_classify_loop_bisector_into<O: LoopObject + PartialEq>(
     k: &Kernel,
     b: &Brep,
@@ -865,6 +868,42 @@ pub fn find_and_classify_loop_bisector_into<O: LoopObject + PartialEq>(
     cc: &mut CurveClassification<O>,
     out: &mut LoopBisector,
 ) -> Result<()> {
+    find_and_classify_loop_bisector_cached(
+        k,
+        b,
+        f,
+        target,
+        loops,
+        ios,
+        marked,
+        props,
+        objects,
+        cc,
+        out,
+        &mut CurveOnClassifyCache::default(),
+    )
+}
+
+/// [`find_and_classify_loop_bisector_into`] on the query state `cache`: `IsSeam` and the
+/// classifications run on its snapshot of `b`, where the UV trim curves, tolerance growth
+/// and gap caches they make stay for the caller to keep
+/// ([`CurveOnClassifyCache::apply_uv_trim_updates`]), as upstream's on the face's own
+/// B-rep.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub(crate) fn find_and_classify_loop_bisector_cached<O: LoopObject + PartialEq>(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    target: usize,
+    loops: &[LoopId],
+    ios: &[ClassifyLoopIo],
+    marked: &BTreeSet<LoopId>,
+    props: &FaceProps<O>,
+    objects: &mut impl ClassifyCurveObjects<O>,
+    cc: &mut CurveClassification<O>,
+    out: &mut LoopBisector,
+    cache: &mut CurveOnClassifyCache,
+) -> Result<()> {
     let surface = face_surface(b, f, OP_BISECTOR)?;
 
     // check state - FaceDomain within SurfaceDomain
@@ -876,9 +915,6 @@ pub fn find_and_classify_loop_bisector_into<O: LoopObject + PartialEq>(
             "FaceUVDomain Not contained by SurfaceUVDomain",
         ));
     }
-
-    // (IsSeam may attach missing UV trim curves: a private snapshot of the B-rep)
-    let mut snapshot = b.clone();
 
     // init output
     *out = LoopBisector {
@@ -951,7 +987,8 @@ pub fn find_and_classify_loop_bisector_into<O: LoopObject + PartialEq>(
         let half0 = ends[0].distance(sp[0]);
         let half1 = ends[1].distance(sp[0]);
         let this_length = max2(half0, half1);
-        let edge_is_seam = topo_edge::is_seam(k, &mut snapshot, e)?;
+        // (IsSeam may attach missing UV trim curves: on the classifications' snapshot)
+        let edge_is_seam = topo_edge::is_seam(k, cache.snapshot(b), e)?;
         if longest_eu.is_none()
             || (this_length > max_edge_length && (!longest_is_seam || edge_is_seam))
         {
@@ -1221,8 +1258,8 @@ pub fn find_and_classify_loop_bisector_into<O: LoopObject + PartialEq>(
 
             // Classify the sCrvOnSurf against this Loop and all unmarked loops only
             // (status ignored)
-            ignored(curve_on_classify(
-                k, b, f, objects, true, cc, true, true, false,
+            ignored(curve_on_classify_cached(
+                k, b, f, objects, true, cc, true, true, false, cache,
             ))?;
 
             // get the classification curve vertex intersections

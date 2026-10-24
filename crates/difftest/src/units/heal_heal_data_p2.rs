@@ -1551,7 +1551,7 @@ fn rust_heal(
                 h.cache_face_props_stage2(&k, &mut b, HealerOpType::CacheFaceprops2)
             }
             Step::CacheFacePropsStage3 => {
-                h.cache_face_props_stage3(&k, &b, HealerOpType::CacheFaceprops3)
+                h.cache_face_props_stage3(&k, &mut b, HealerOpType::CacheFaceprops3)
             }
             Step::FixBadSheets => {
                 let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)

@@ -1158,6 +1158,13 @@ pub(crate) struct CurveOnClassifyCache {
 }
 
 impl CurveOnClassifyCache {
+    /// The B-rep as the queries sharing this state have left it: a copy of `b` (sharing
+    /// its surface caches) made on first use.
+    pub(crate) fn snapshot(&mut self, b: &Brep) -> &mut Brep {
+        self.snapshot
+            .get_or_insert_with(|| b.clone_sharing_surface_caches())
+    }
+
     /// Copy back what the classification's lazy queries left on its snapshot that
     /// upstream keeps on the face's B-rep: the gap caches ([`Self::apply_gap_updates`]),
     /// the edge uses' UV trim curves and the edge and vertex tolerances
