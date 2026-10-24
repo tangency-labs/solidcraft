@@ -158,6 +158,34 @@ fn second_hole() -> serde_json::Value {
     json!({"command": "solid.cylinder", "params": {"base": [50, 10, -1], "axis": [0, 0, 1], "radius": 3, "height": 20, "operation": "cut"}})
 }
 
+/// While an agent's batch computes, the chip says which step it is on, of how many, and that
+/// step's command (`2/3 · Cylinder`); a single command shows just its name.
+#[test]
+fn a_computing_batch_says_its_step() {
+    let (mut h, tx) = agent_harness();
+    let hole = |x: f64| json!({"command": "solid.cylinder", "params": {"base": [x, 10, -1], "axis": [0, 0, 1], "radius": 3, "height": 20, "operation": "cut"}});
+    let batch = ask(&tx, "engine.batch", json!({"commands": [hole(50.0), hole(30.0), hole(70.0)]}));
+    h.frames(1);
+    let (_, label) = h.app.agent_computing().expect("the batch computes");
+    let (step, command) = label.split_once(" · ").expect(&label);
+    assert!(["1/3", "2/3", "3/3"].contains(&step), "{label}");
+    assert!(!command.is_empty() && !command.contains('.'), "the toolbar's name, not the id: {label}");
+    // Centred on the navigation bar and above it, clear of the window's own toasts.
+    let chip = crate::scenario::rect_of("agent:chip").expect("the chip is drawn");
+    let nav = h.app.viewport.layout.as_ref().expect("laid out").navigation;
+    assert!((chip.center().x - nav.center().x).abs() < 1.0 && chip.bottom() < nav.top(), "{chip:?} not centred above {nav:?}");
+    for toast in ["toast", "toast:computing"].into_iter().filter_map(crate::scenario::rect_of) {
+        assert!(!chip.intersects(toast), "{chip:?} over {toast:?}");
+    }
+    assert_eq!(reply_to(&mut h, &batch)["ok"], true);
+    let single = ask(&tx, "engine.execute", second_hole());
+    h.frames(1);
+    if let Some((_, label)) = h.app.agent_computing() {
+        assert!(!label.contains('/'), "{label}");
+    }
+    assert_eq!(reply_to(&mut h, &single)["ok"], true);
+}
+
 /// #1989: an agent's design change computes off the window thread. The window keeps answering
 /// (`ui.*`, inspection) while it computes and shows which command it is; the agent's next
 /// design change waits its turn; each lands as its own undo step with its usual reply.

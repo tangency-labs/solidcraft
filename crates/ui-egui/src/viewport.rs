@@ -3537,8 +3537,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::select_other::show(app, ui.ctx());
     axis_view(app, ui, rect);
     nav_bar(app, ui, rect);
-    agent_chip(app, ui, overlay_rect);
-    // The notices first, so the 3D mouse picture can keep clear of them.
+    // The notices and the agent chip first, so the 3D mouse picture can keep clear of them.
     let toasts = transient_messages(app, ui, rect);
     if app.preferences.space_mouse_in_view
         && app.space_mouse.calibrating.is_none()
@@ -3547,11 +3546,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         use crate::prefs::SpaceMouseGhost;
         let calibration = app.preferences.space_mouse_calibrations.get(device);
         let position = app.preferences.space_mouse_ghost_position;
-        // The agent chip (an agent command computing off the window thread) sits at the lower left
-        // too: the picture stays clear of it.
-        let chip = app.agent_computing().map(|_| Rect::from_min_size(agent_chip_anchor(app, overlay_rect), vec2(400.0, 34.0)));
         let navigation = app.viewport.layout.as_ref().map(|layout| layout.navigation);
-        let obstacles = [navigation, chip].into_iter().flatten().chain(toasts).collect::<Vec<_>>();
+        let obstacles = navigation.into_iter().chain(toasts).collect::<Vec<_>>();
         // The Viewport positions sit in the content area (right of the browser), Left Window in the
         // corner of the whole window; both stay above the floating History card, like the legend.
         let area = if position == SpaceMouseGhost::LeftWindow { rect } else { crate::shell::content_rect(app, rect) };
@@ -3581,25 +3577,31 @@ fn paint_box_selection(painter: &egui::Painter, bx: BoxSel, sketch: bool) {
     }
 }
 
-/// Where the agent chip's top left is: above the History bar, and above the computing notice when
-/// that is up too.
-fn agent_chip_anchor(app: &SolveApp, rect: Rect) -> Pos2 {
-    let above = if app.computing_since().is_some() { 106.0 } else { 76.0 };
-    pos2(rect.left() + 12.0, rect.bottom() - above)
-}
-
 /// An agent's command computing off the window thread (#1989): which one, in the agent cursor's
-/// colour, and a button that stops waiting for it.
-fn agent_chip(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
+/// colour, and a button that stops waiting for it. Centred on the navigation bar, just above it,
+/// and moved up past anything it would cover (`taken`: the toasts and other controls).
+fn agent_chip(app: &mut SolveApp, ui: &egui::Ui, view: Rect, taken: &[Rect]) -> Option<Rect> {
     let t = Tokens::get();
     let painter = ui.painter().clone();
-    if let Some((since, label)) = app.agent_computing().map(|(since, label)| (since, label.to_string())) {
+    if let Some((since, label)) = app.agent_computing() {
         let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
         let computing = crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
-        let pos = agent_chip_anchor(app, rect);
         let galley = painter.layout_no_wrap(format!("{label} · {computing}"), FontId::proportional(t.font_label), t.text);
         let stop = painter.layout_no_wrap(crate::i18n::tr("ui.agent_chat_stop").to_string(), FontId::proportional(t.font_label), t.text);
-        let r = Rect::from_min_size(pos, vec2(galley.size().x + stop.size().x + 54.0, galley.size().y.max(stop.size().y) + 8.0));
+        let size = vec2(galley.size().x + stop.size().x + 54.0, galley.size().y.max(stop.size().y) + 8.0);
+        let nav = app.viewport.layout.as_ref().map(|l| l.navigation).filter(|n| n.is_positive() && n.is_finite());
+        let (x, bottom) = nav.map_or((view.center().x, view.bottom() - t.space_8), |n| (n.center().x, n.top() - t.space_8));
+        let x = x.clamp(view.left() + size.x * 0.5, (view.right() - size.x * 0.5).max(view.left() + size.x * 0.5));
+        let mut r = Rect::from_min_size(pos2(x - size.x * 0.5, bottom - size.y), size);
+        // Each step clears one rectangle, so this ends after at most `taken.len()` moves.
+        for _ in 0..=taken.len() {
+            match taken.iter().filter(|o| o.expand(t.space_4).intersects(r)).map(|o| o.top()).reduce(f32::min) {
+                Some(top) => r = r.translate(vec2(0.0, top - t.space_8 - r.bottom())),
+                None => break,
+            }
+        }
+        let pos = r.min;
+        crate::scenario::publish_rect("agent:chip", r);
         painter.rect_filled(r, t.radius_sm, t.overlay);
         painter.rect_stroke(r, t.radius_sm, Stroke::new(1.0, crate::icons::pointer::agent()), egui::StrokeKind::Inside);
         egui::Spinner::new()
@@ -3616,7 +3618,9 @@ fn agent_chip(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
             app.stop_agent_command();
         }
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        return Some(r);
     }
+    None
 }
 
 /// How long a status message stays in the view (milliseconds).
@@ -3627,7 +3631,11 @@ const STATUS_TOAST_MS: f64 = 6000.0;
 fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> Vec<Rect> {
     // Nothing to show or time: an idle window skips the layout. The offer is checked too, as its clock
     // runs from the frames `due` sees.
-    if app.status.is_none() && app.computing_since().is_none() && crate::space_mouse_offer::offerable(app).is_none() {
+    if app.status.is_none()
+        && app.computing_since().is_none()
+        && app.agent_computing().is_none()
+        && crate::space_mouse_offer::offerable(app).is_none()
+    {
         return Vec::new();
     }
     let t = Tokens::get();
@@ -3636,13 +3644,15 @@ fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> Vec<
     if let Some(layout) = &app.viewport.layout {
         obstacles.extend([layout.navigation, layout.axis_view]);
     }
-    let mut free = crate::viewport_layout::free_rect(crate::shell::content_rect(app, viewport), &obstacles).shrink(t.space_8);
+    let view = crate::shell::content_rect(app, viewport);
+    let mut free = crate::viewport_layout::free_rect(view, &obstacles).shrink(t.space_8);
     // The 3D mouse calibration offer: text and actions from its module, drawn by the shared toast.
     if let Some(offer) = crate::space_mouse_offer::due(app, ui.ctx()) {
         let labels: Vec<String> = offer.actions.iter().map(|action| crate::i18n::tr(action.label()).to_string()).collect();
         let labels: Vec<(&str, ToastKind)> = labels.iter().map(String::as_str).zip(offer.actions.iter().map(|action| action.kind())).collect();
         if let Some((r, clicked)) = paint_toast_with(ui, free, crate::i18n::tr("ui.3d_mouse_offer").to_string(), ToastLead::Dot(false), &labels) {
             crate::scenario::publish_rect("toast:space_mouse_offer", r);
+            obstacles.push(r);
             free.max.y = r.top() - t.space_8;
             shown.push(r);
             crate::space_mouse_offer::keep(app, ui.ctx(), r);
@@ -3656,6 +3666,7 @@ fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> Vec<
         let shown_ms = crate::now_ms() - at;
         if shown_ms < STATUS_TOAST_MS {
             if let Some(r) = paint_toast(ui, free, msg, error, false) {
+                obstacles.push(r);
                 crate::scenario::publish_rect("toast", r);
                 free.max.y = r.top() - t.space_8;
                 shown.push(r);
@@ -3683,6 +3694,7 @@ fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> Vec<
         let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
         let text = crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
         if let Some(r) = paint_toast(ui, free, text, false, true) {
+            obstacles.push(r);
             crate::scenario::publish_rect("toast:computing", r);
             if app.status.is_none() {
                 crate::scenario::publish_rect("toast", r);
@@ -3691,6 +3703,10 @@ fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> Vec<
         }
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
+    // The navigation bar is the chip's anchor, so it doesn't count as something to move past.
+    let nav = app.viewport.layout.as_ref().map(|l| l.navigation);
+    obstacles.retain(|o| Some(*o) != nav);
+    shown.extend(agent_chip(app, ui, view, &obstacles));
     shown
 }
 

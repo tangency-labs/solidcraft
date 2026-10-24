@@ -197,7 +197,13 @@ impl Ahead {
     /// [`Session::prime`], so running them for real evaluates nothing again: the shared cache
     /// drops results past its budget, and a large design's states are past it.
     pub fn evaluate(self, commands: &[(String, Value)]) -> Result<Evaluated> {
-        let (after, _) = self.0.preview_in_place(commands)?;
+        self.evaluate_counting(commands, &std::sync::atomic::AtomicUsize::new(0))
+    }
+
+    /// [`Ahead::evaluate`], setting `step` to the number of the command running (from 1), so a
+    /// front end can say how far a batch has got.
+    pub fn evaluate_counting(self, commands: &[(String, Value)], step: &std::sync::atomic::AtomicUsize) -> Result<Evaluated> {
+        let (after, _) = self.0.preview_in_place(commands, Some(step))?;
         after.world_state().warm_display();
         Ok(Evaluated(after.model))
     }
@@ -1131,12 +1137,20 @@ impl Session {
     /// A `timeline.redefine` is shown even while the timeline is rolled back to the feature
     /// being edited.
     pub fn preview(&self, commands: &[(String, Value)]) -> Result<Preview> {
-        self.scratch().preview_in_place(commands).map(|(after, replies)| Preview { before: self.model.state(), after: after.model.state(), replies })
+        self.scratch().preview_in_place(commands, None).map(|(after, replies)| Preview {
+            before: self.model.state(),
+            after: after.model.state(),
+            replies,
+        })
     }
 
     /// The same evaluated preview in occurrence coordinates, including uncaptured moves.
     pub fn preview_world(&self, commands: &[(String, Value)]) -> Result<Preview> {
-        self.scratch().preview_in_place(commands).map(|(after, replies)| Preview { before: self.world_state(), after: after.world_state(), replies })
+        self.scratch().preview_in_place(commands, None).map(|(after, replies)| Preview {
+            before: self.world_state(),
+            after: after.world_state(),
+            replies,
+        })
     }
 
     /// World preview with each session's visibility applied, including new body placements.
@@ -1147,7 +1161,7 @@ impl Session {
             shown.bodies.retain(|body| session.body_visible(&body.name));
             Arc::new(shown)
         };
-        self.scratch().preview_in_place(commands).map(|(after, replies)| Preview { before: visible(self), after: visible(&after), replies })
+        self.scratch().preview_in_place(commands, None).map(|(after, replies)| Preview { before: visible(self), after: visible(&after), replies })
     }
 
     /// Run `commands` on a [`Session::scratch`] copy that keeps the undo and redo stacks: what
@@ -1162,12 +1176,15 @@ impl Session {
         Ahead(copy)
     }
 
-    fn preview_in_place(mut self, commands: &[(String, Value)]) -> Result<(Self, Vec<Value>)> {
+    fn preview_in_place(mut self, commands: &[(String, Value)], step: Option<&std::sync::atomic::AtomicUsize>) -> Result<(Self, Vec<Value>)> {
         if commands.is_empty() {
             return Err(EngineError::Other("nothing to preview".into()));
         }
         let mut replies = Vec::with_capacity(commands.len());
-        for (id, params) in commands {
+        for (i, (id, params)) in commands.iter().enumerate() {
+            if let Some(step) = step {
+                step.store(i + 1, std::sync::atomic::Ordering::Relaxed);
+            }
             let r = self.execute(id, params)?;
             replies.push(r.clone());
             if id == "timeline.redefine"
