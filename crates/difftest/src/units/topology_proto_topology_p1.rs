@@ -251,6 +251,9 @@ pub(super) enum TObjIn {
         s: SurfIn,
     },
     Brep,
+    PrimitiveBox { origin: [f64; 3], size: [f64; 3] },
+    PrimitiveSphere { origin: [f64; 3], radius: f64 },
+    CallerFace { origin: [f64; 3], size: [f64; 2] },
     /// An empty `SmPolyBrep`.
     Poly,
     /// An `SmPolyBrep` with poly vertices `x y z tol` (1 to 4).
@@ -470,6 +473,21 @@ pub(super) fn cpp_input(s: &Script) -> Vec<f64> {
                     surface_block(&mut v, s);
                 }
                 TObjIn::Brep => v.push(tobj::BREP as f64),
+                TObjIn::PrimitiveBox { origin, size } => {
+                    v.push(tobj::PRIMITIVE_BOX as f64);
+                    v.extend_from_slice(origin);
+                    v.extend_from_slice(size);
+                }
+                TObjIn::PrimitiveSphere { origin, radius } => {
+                    v.push(tobj::PRIMITIVE_SPHERE as f64);
+                    v.extend_from_slice(origin);
+                    v.push(*radius);
+                }
+                TObjIn::CallerFace { origin, size } => {
+                    v.push(tobj::CALLER_FACE as f64);
+                    v.extend_from_slice(origin);
+                    v.extend_from_slice(size);
+                }
                 TObjIn::Poly => v.push(tobj::POLY as f64),
                 TObjIn::PolyPts { pts } => {
                     v.extend([tobj::POLY_PTS as f64, pts.len() as f64]);
@@ -4896,7 +4914,34 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
         brep: b,
         env: &mut env,
     });
-    let mut brep = Brep::new();
+    let mut brep = match obj {
+        TObjIn::PrimitiveBox { origin, size: [x, y, z] } => st(solidcore::primitive::api_primitives::create_box(
+            &mut k, v3(*origin), *x, *y, *z,
+        ))?.map_err(|code| harness(format!("box construction status {code}")))?,
+        TObjIn::PrimitiveSphere { origin, radius } => st(solidcore::primitive::api_primitives::create_sphere(
+            &mut k, v3(*origin), *radius,
+        ))?.map_err(|code| harness(format!("sphere construction status {code}")))?,
+        TObjIn::CallerFace { origin, size: [width, height] } => {
+            let mut body = st(solidcore::topology::brep::p3::new_brep(&mut k, solidcore::geom::tol::USE_DEFAULT, solidcore::geom::tol::USE_DEFAULT))?
+                .map_err(|code| harness(format!("caller body status {code}")))?;
+            let keys = |entity| {
+                let named = solidcore::topology::brep::p3::topology_ref(0, entity);
+                ObjectRef { type_code: named.type_code, key: ObjectKey(named.type_code as u64 * 1_000_000 + (named.key.0 & 0xffff_ffff)) }
+            };
+            let mut state = solidcore::topology::brep::p2::ArenaNotifyState::new(&body);
+            let mut env = state.env(None);
+            env.key_of = &keys;
+            let this_face = |face| keys(EntityRef::Face(face));
+            let mut marks = solidcore::topology::topology_traverser::Marks::default();
+            let mut fenv = solidcore::topology::brep::p8::FaceBuildEnv { env: &mut env, marks: &mut marks, this_face: &this_face };
+            st(solidcore::topology::brep::p8::create_face_from_surface(&mut k, &mut body,
+                Some(Surface::from(Plane::from_normal(v3(*origin), Vec3::new(0.0, 0.0, 1.0)))),
+                &Extent2d::from_bounds(0.0, 0.0, *width, *height), &mut fenv))?
+                .map_err(|code| harness(format!("caller face status {code}")))?;
+            body
+        }
+        _ => Brep::new(),
+    };
     let target = match obj {
         TObjIn::Composite { .. } | TObjIn::CrvOnSurf { .. } => {
             special.as_mut().map(TransformObject::Curve)
@@ -4905,7 +4950,7 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
         TObjIn::Plane { .. } | TObjIn::Bsurf { .. } => {
             surface.as_mut().map(TransformObject::Surface)
         }
-        TObjIn::Brep => Some(TransformObject::Brep(&mut brep)),
+        TObjIn::Brep | TObjIn::PrimitiveBox { .. } | TObjIn::PrimitiveSphere { .. } | TObjIn::CallerFace { .. } => Some(TransformObject::Brep(&mut brep)),
         TObjIn::Poly | TObjIn::PolyPts { .. } => poly_target
             .as_mut()
             .map(|t| TransformObject::PolyBrep(t as &mut dyn PolyBrepTransform)),
@@ -4933,6 +4978,14 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
         },
     };
     let mut o = vec![s];
+    if matches!(obj, TObjIn::PrimitiveBox { .. } | TObjIn::PrimitiveSphere { .. } | TObjIn::CallerFace { .. }) {
+        let vertices = solidcore::topology::brep::p1::vertices(&brep, None).map_err(|e| harness(e.to_string()))?;
+        let edges = solidcore::topology::brep::p1::edges(&brep, None).map_err(|e| harness(e.to_string()))?;
+        let faces = solidcore::topology::brep::p1::faces(&brep, None).map_err(|e| harness(e.to_string()))?;
+        o.extend([vertices.len() as f64, edges.len() as f64, faces.len() as f64, brep.this_model_size_estimate(&k, false)]);
+        st(crate::util::primitive::append(&k, &brep, &mut o))?.map_err(|code| harness(format!("solid geometry status {code}")))?;
+        for face in faces { o.push(f64::from(brep.face(face).map_err(|e| harness(e.to_string()))?.rectangular_trim)); }
+    }
     if let Some(c) = &curve {
         put_curve(&k, &mut o, c);
     }

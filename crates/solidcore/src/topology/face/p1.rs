@@ -1017,6 +1017,7 @@ fn store_surface(
     face.uv_domain = surface.natural_uv_domain();
     surface.set_owner(Some(this));
     face.surface = Some(surface);
+    b.geometry_owner_keys.insert(EntityRef::Face(f), this);
     // the surface reads the face's tolerance through GetFace()
     b.sync_face_surface_tolerance(f)?;
     Ok(old)

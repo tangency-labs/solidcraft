@@ -654,6 +654,9 @@ pub struct Brep {
     /// its objects' topology keys hold it (`topology::brep::p3::topology_ref`). A
     /// clone is a new B-rep without one.
     notify_identity: IdentitySlot,
+    /// Edge/face identities supplied when their geometry was bound. These record
+    /// producer provenance; they are never inferred from an opaque geometry owner.
+    geometry_owner_keys: std::collections::BTreeMap<EntityRef, crate::geom::object::ObjectRef>,
 }
 
 impl Default for Brep {
@@ -684,6 +687,7 @@ impl Default for Brep {
             surface_owner_cleared: Vec::new(),
             locked_bounding_box: None,
             notify_identity: IdentitySlot::default(),
+            geometry_owner_keys: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -1164,6 +1168,7 @@ impl Brep {
             .remove(id)
             .ok_or_else(|| not_found("topology::Brep::remove_face_record", id))?;
         self.face_list.retain(|&x| x != id);
+        self.geometry_owner_keys.remove(&EntityRef::Face(id));
         Ok(face)
     }
 
@@ -1182,6 +1187,7 @@ impl Brep {
             .remove(id)
             .ok_or_else(|| not_found("topology::Brep::remove_edge_record", id))?;
         self.edge_list.retain(|&x| x != id);
+        self.geometry_owner_keys.remove(&EntityRef::Edge(id));
         Ok(edge)
     }
 

@@ -704,8 +704,11 @@ fn make_face_with_state(
     face_set_tolerance(b, new_face, tol, true, true)?;
 
     // make the face->surface connections
-    surface.set_owner(Some(this_face(new_face)));
+    let owner = this_face(new_face);
+    surface.set_owner(Some(owner));
     b.face_mut(new_face)?.surface = Some(surface);
+    b.geometry_owner_keys
+        .insert(EntityRef::Face(new_face), owner);
     b.sync_face_surface_tolerance(new_face)?;
 
     Ok(NewFace {

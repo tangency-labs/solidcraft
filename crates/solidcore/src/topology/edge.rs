@@ -2576,6 +2576,7 @@ pub fn set_curve(
 
     // update the value
     b.edge_mut(e)?.curve = new_curve;
+    b.geometry_owner_keys.insert(EntityRef::Edge(e), this);
 
     // side effect: Add to spatial cache.
     if options.call_notify && has_brep {
