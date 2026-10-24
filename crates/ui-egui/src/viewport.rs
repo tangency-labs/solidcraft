@@ -2473,8 +2473,10 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         match x {
             Sel::Face { body, index, .. } => {
                 // A live preview stands in for the body: its old faces would fight with it.
+                // Lit, not flat: an imported mesh (STL, OBJ) is one face, and a flat fill would
+                // paint the whole part as a single silhouette.
                 if let Some(b) = st.body(body).filter(|_| app.session.body_visible(body) && !app.preview.effective_replaced().contains(body)) {
-                    face_tris(&mut feedback, &shown(b), *index, c4(t.sel_face), false);
+                    face_tris(&mut feedback, &shown(b), *index, c4(t.sel_face), true);
                     hidden_face_outline(&mut feedback, &drawn_mesh(app, b), *index, t.sel_edge);
                 }
             }

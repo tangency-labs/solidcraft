@@ -614,7 +614,7 @@ pub struct Tokens {
     pub timeline: Color32,
     pub hover: Color32,
     // ---- viewport selection feedback ----
-    /// Selected face (flat fill).
+    /// Selected face (shaded fill).
     pub sel_face: Color32,
     /// Selected edge core and its lighter rim.
     pub sel_edge: Color32,
