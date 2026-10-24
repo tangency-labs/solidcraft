@@ -433,7 +433,7 @@ fn context_menu_alignment_requires_exactly_two_points_and_preserves_conflicts() 
     h.app.run("sketch.circle.center", json!({"center":[20,30],"radius":3})).unwrap();
     let origin = Sel::SketchPoint { id: "origin".into() };
     let center = Sel::SketchPoint { id: "c1.center".into() };
-    let curve = Sel::SketchCurve { id: "c1".into() };
+    let curve = Sel::SketchCurve { id: "c1".into(), sketch: None };
     for selection in [vec![], vec![origin.clone()], vec![origin.clone(), curve.clone()], vec![origin.clone(), center.clone(), curve]] {
         h.app.session.selection = selection;
         assert!(
@@ -575,7 +575,7 @@ fn idle_midpoints_are_selectable_without_modifying_the_sketch() {
         assert_eq!(h.app.session.undo.len(), undo);
         // Ordinary edge and endpoint picks still work away from MID.
         h.step(&json!({"click":{"sketch":[20,12.5]}})).unwrap();
-        assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: "l1".into() }]);
+        assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: "l1".into(), sketch: None }]);
         h.step(&json!({"click":{"sketch":[10,10]}})).unwrap();
         assert!(matches!(h.app.session.selection.as_slice(), [Sel::SketchPoint { .. }]));
         h.app.ui.pick_off.push("sketch_points".into());

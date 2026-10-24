@@ -122,7 +122,7 @@ fn selected_circles_all_become_equal() {
         sk.radius(sk.curve_index(id).unwrap()).unwrap()
     };
     let r1 = radius(&h, "c1");
-    h.app.session.selection = ["c4", "c3", "c2", "c1"].iter().map(|id| Sel::SketchCurve { id: (*id).into() }).collect();
+    h.app.session.selection = ["c4", "c3", "c2", "c1"].iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
     let undo = h.app.session.undo.len();
     h.run(&json!([{"start":"sketch.constraint.equal"}])).unwrap();
     assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
