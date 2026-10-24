@@ -21,6 +21,19 @@ Setting `SOLIDCRAFT_SAFE_MODE=1` does the same. From 0.10.2, if two launches in 
 before the window opens, the next one starts in safe mode by itself. `SOLIDCRAFT_RENDERER=cpu`
 uses only the software renderer and keeps your settings.
 
+## A design won't open or hangs while opening
+
+- **Open the previous save.** Every save keeps the version it replaced next to it as
+  `<file>.bak` (see [Files](files.md)). Copy it to a new name ending in `.solidcraft`, for
+  example `bracket-previous.solidcraft`, and open that. Work saved after the previous save is
+  not in it.
+- **Check the crash reports.** If SolidCraft crashed while the design was open, the newest report
+  in the `crashes` folder (see the table below) usually holds a `design.solidcraft` with the
+  design as it was. `solidcraft-cli crashes` lists the reports.
+- **Unsaved designs** are in the `recovery` folder, not next to the file.
+- **Report it.** GitHub doesn't accept `.solidcraft` attachments, so zip the file
+  (`design.solidcraft.zip`) and attach it to an issue, with the crash report if there is one.
+
 ## Reset the settings
 
 SolidCraft keeps its settings and its data in the folders below. All installed versions share
