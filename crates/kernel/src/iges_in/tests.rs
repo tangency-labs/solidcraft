@@ -361,6 +361,33 @@ fn surfaces_in_separate_groups_remain_separate_parts() {
     }
 }
 
+/// Disconnected trimmed surfaces in one part (a 308 subfigure, or loose surfaces) sew into
+/// separate closed shells instead of one disconnected shell.
+#[test]
+fn disconnected_surfaces_in_one_part_sew_into_separate_solids() {
+    let mut subfigure = Vec::new();
+    let mut members = trimmed_box(&mut subfigure, 0.0);
+    members.extend(trimmed_box(&mut subfigure, 100.0));
+    let list = members.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(",");
+    subfigure.push((308, 0, format!("0,5HBoxes,{},{list}", members.len())));
+
+    let mut loose = Vec::new();
+    trimmed_box(&mut loose, 0.0);
+    trimmed_box(&mut loose, 100.0);
+
+    for (ents, expected_names) in [(subfigure, ["Boxes", "Boxes 2"]), (loose, ["Body1", "Body1 2"])] {
+        let imp = iges_import(&iges_file(&ents)).unwrap();
+        assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+        assert_eq!(imp.bodies.len(), 2);
+        assert_eq!(imp.bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), expected_names);
+        for (body, x) in imp.bodies.iter().zip([0.0, 100.0]) {
+            let m = measure(&body.body).unwrap();
+            assert!(body.closed && rel(m.volume, 6000.0) < 1e-6 && rel(m.area, 2200.0) < 1e-6);
+            assert!(m.bbox.min.dist(Vec3::new(x, 0.0, 0.0)) < 1e-6 && m.bbox.max.dist(Vec3::new(x + 10.0, 20.0, 30.0)) < 1e-6);
+        }
+    }
+}
+
 #[test]
 fn a_drill_point_round_trips_through_iges() {
     // A blind hole with a cone tip: the tip's face closes at its apex (its seam runs out to the
