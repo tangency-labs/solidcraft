@@ -83,20 +83,44 @@ pub struct Budget {
     left: usize,
     spent: usize,
     cut: bool,
+    /// A live drag frame's allowance for the numerical solves (LM), which are counted but never
+    /// stopped by it: once it is spent, the drag takes no more steps this frame (`None`: not
+    /// counted).
+    numeric_left: Option<usize>,
 }
 
 impl Budget {
     /// A budget of `work` units: membership scans or estimated dense arithmetic operations.
     pub fn new(work: usize) -> Budget {
-        Budget { left: work, spent: 0, cut: false }
+        Budget { left: work, spent: 0, cut: false, numeric_left: None }
     }
     /// The budget of one solve: about 0.3 s, so a hostile sketch can't stall it.
     pub fn full() -> Budget {
         Budget::new(MAX_WORK)
     }
-    /// The budget of one live drag frame: about 16 ms.
+    /// The budget of one live drag frame: about 16 ms, and as much again for its numerical
+    /// solves ([`Budget::numeric_exhausted`]).
     pub fn frame() -> Budget {
-        Budget::new(FRAME_WORK)
+        Budget { numeric_left: Some(FRAME_WORK), ..Budget::new(FRAME_WORK) }
+    }
+    /// The frame's numerical solves have done their share of work: a drag takes no more steps
+    /// this frame and goes on in the next.
+    pub fn numeric_exhausted(&self) -> bool {
+        self.numeric_left == Some(0)
+    }
+    /// This budget with `work` units for its numerical solves (a frame that runs out sooner).
+    pub fn with_numeric(self, work: usize) -> Budget {
+        Budget { numeric_left: Some(work), ..self }
+    }
+    /// Whether the numerical solves' work is counted ([`Budget::frame`]).
+    pub(crate) fn counts_numeric(&self) -> bool {
+        self.numeric_left.is_some()
+    }
+    /// Count a numerical solve's work against the frame's allowance.
+    pub(crate) fn charge_numeric(&mut self, work: usize) {
+        if let Some(left) = &mut self.numeric_left {
+            *left = left.saturating_sub(work);
+        }
     }
     /// Some decomposition or cursor work stopped because the budget ran out.
     pub fn exhausted(&self) -> bool {

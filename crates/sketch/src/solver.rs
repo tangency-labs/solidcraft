@@ -969,6 +969,26 @@ fn lm(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], vars: &[usize],
     lm_capped(sk, lay, blocks, vars, x, col, MAX_ITERS)
 }
 
+/// [`lm`], counting its work against a live drag frame's numerical allowance when `budget` has
+/// one ([`Budget::frame`]). The solve itself runs as it would without it.
+fn lm_in(
+    sk: &Sketch,
+    lay: &Layout,
+    blocks: &[(Block, Vec<usize>)],
+    vars: &[usize],
+    x: &mut Vec<f64>,
+    col: &[usize],
+    budget: &mut Budget,
+) -> (usize, f64) {
+    if !budget.counts_numeric() {
+        return lm(sk, lay, blocks, vars, x, col);
+    }
+    let mut meter = Budget::new(usize::MAX);
+    let out = lm_capped_with_budget(sk, lay, blocks, vars, x, col, MAX_ITERS, Some(&mut meter)).unwrap_or((0, f64::INFINITY));
+    budget.charge_numeric(meter.spent());
+    out
+}
+
 /// [`lm`] with at most `max_iters` iterations.
 fn lm_capped(
     sk: &Sketch,
@@ -2097,7 +2117,7 @@ fn solve_inner(
                     let rest = unpinned(vars, &pin, None);
                     let rest_blocks = blocks_reading(&sub, &rest);
                     columns(&mut col, &rest, vars);
-                    let (its, r) = if rest.is_empty() { (0, 0.0) } else { lm(sk, &lay, &rest_blocks, &rest, &mut x, &col) };
+                    let (its, r) = if rest.is_empty() { (0, 0.0) } else { lm_in(sk, &lay, &rest_blocks, &rest, &mut x, &col, budget) };
                     iterations += its;
                     residual = r;
                     solved = residual < ACCEPT;
@@ -2121,7 +2141,7 @@ fn solve_inner(
             // the seed did not move it.
             let reseeded = unseeded.as_ref().filter(|plain| vars.iter().any(|v| plain.get(*v).is_some_and(Option::is_some)));
             if !(solved || pinned_failed && reseeded.is_some()) {
-                let (its, r) = lm(sk, &lay, &sub, vars, &mut x, &col);
+                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget);
                 iterations += its;
                 residual = r;
             }
@@ -2135,7 +2155,7 @@ fn solve_inner(
                         *s = plain.get(v).copied().flatten().unwrap_or(*s0);
                     }
                 }
-                let (its, r) = lm(sk, &lay, &sub, vars, &mut x, &col);
+                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget);
                 iterations += its;
                 residual = r;
             }
@@ -2166,7 +2186,7 @@ fn solve_inner(
                 iterations += its;
                 if !done {
                     // The last sub-step's solution, solved for the new values in one jump.
-                    let (its, r) = lm(sk, &lay, &sub, vars, &mut from, &col);
+                    let (its, r) = lm_in(sk, &lay, &sub, vars, &mut from, &col, budget);
                     iterations += its;
                     done = edit.holds(r, &State { sk, lay: &lay, x: &from });
                 }
