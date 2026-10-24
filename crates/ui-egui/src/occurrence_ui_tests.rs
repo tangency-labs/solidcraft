@@ -266,3 +266,119 @@ fn a_body_dropped_on_a_bodies_folder_moves_into_that_component() {
     h.frames(3);
     assert_eq!(owner(&h, "Pin"), 0, "Pin moved back into the root component");
 }
+
+/// Where a placement's first body sits (world space, min X).
+fn placement_x(h: &Harness, path: &[u64]) -> f64 {
+    let name = h.app.session.occurrence_bodies(path, true).unwrap()[0].clone();
+    h.app.session.world_state().body(&name).unwrap().mesh().bounds().min.x
+}
+
+#[test]
+fn move_of_a_picked_component_moves_only_that_placement() {
+    let (mut h, _, first, second) = fixture();
+    let (before_first, before_second) = (placement_x(&h, &[first]), placement_x(&h, &[second]));
+    click(&mut h, &[second], "row");
+    h.app.start("solid.move");
+    let mut d = h.app.dialog.clone().unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::Occurrence { path: vec![second] }], "Move takes the picked component");
+    if let crate::dialogs::Kind::Move { x, .. } = &mut d.kind {
+        *x = "7 mm".into();
+    }
+    for (command, params) in crate::dialogs_move::commands(&h.app, &d).unwrap() {
+        assert_eq!(command, "occurrence.move");
+        h.app.run(&command, params).unwrap();
+    }
+    assert!((placement_x(&h, &[second]) - before_second - 7.0).abs() < 1e-6, "the picked placement moved 7 mm");
+    assert!((placement_x(&h, &[first]) - before_first).abs() < 1e-6, "the other placement stayed");
+}
+
+#[test]
+fn move_of_picked_bodies_still_runs_solid_move() {
+    let (mut h, _, _, second) = fixture();
+    let body = h.app.session.occurrence_bodies(&[second], true).unwrap()[0].clone();
+    h.app.run("select.set", json!({"items":[Sel::Body{name:body.clone()}]})).unwrap();
+    h.app.start("solid.move");
+    let d = h.app.dialog.clone().unwrap();
+    let commands = crate::dialogs_move::commands(&h.app, &d).unwrap();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].0, "solid.move");
+    assert_eq!(commands[0].1["bodies"], json!([body]));
+}
+
+#[test]
+fn a_picked_component_does_not_fill_other_dialogs_bodies() {
+    let (mut h, _, _, second) = fixture();
+    click(&mut h, &[second], "row");
+    for id in ["solid.remove", "solid.combine"] {
+        h.app.start(id);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert!(d.inputs.iter().all(|i| i.items.is_empty()), "{id} takes no bodies from a picked component");
+        h.app.dialog = None;
+    }
+}
+
+fn move_dialog_for(h: &mut Harness, path: &[u64], set: impl FnOnce(&mut crate::dialogs::Kind)) -> crate::dialogs::Dialog {
+    click(h, path, "row");
+    h.app.start("solid.move");
+    let mut d = h.app.dialog.clone().unwrap();
+    set(&mut d.kind);
+    d
+}
+
+#[test]
+fn move_turns_a_picked_placement_about_its_own_centre() {
+    use solidcraft_engine::{doc::apply_point, geom::Vec3};
+    let (mut h, _, first, second) = fixture();
+    let origin = |h: &Harness, id: u64| apply_point(&h.app.session.occurrence_placement(&[id]).unwrap().world, Vec3::ZERO);
+    let (before_first, before_second) = (origin(&h, first), origin(&h, second));
+    let d = move_dialog_for(&mut h, &[second], |k| {
+        if let crate::dialogs::Kind::Move { rz, .. } = k {
+            *rz = "90 deg".into();
+        }
+    });
+    crate::dialogs::run_dialog(&mut h.app, &d).unwrap();
+    // The 10 mm cube at x 50..60 turns about its centre (55, 5, 5): its origin corner goes to (60, 0, 0).
+    assert!((origin(&h, second) - Vec3::new(60.0, 0.0, 0.0)).len() < 1e-6, "{before_second:?} -> {:?}", origin(&h, second));
+    let world = h.app.session.occurrence_placement(&[second]).unwrap().world;
+    assert!((apply_point(&world, Vec3::X) - apply_point(&world, Vec3::ZERO) - Vec3::Y).len() < 1e-6, "local X now points along world Y");
+    assert!((origin(&h, first) - before_first).len() < 1e-9, "the other placement stayed");
+}
+
+#[test]
+fn move_of_a_nested_picked_component_moves_the_shared_child_in_every_copy_of_its_parent() {
+    let mut h = Harness::new();
+    let parent = h.app.run("component.create", json!({"name":"Assembly"})).unwrap();
+    let (parent_component, parent_occurrence) = (parent["component"].as_u64().unwrap(), parent["occurrence"].as_u64().unwrap());
+    let child = h.app.run("component.create", json!({"name":"Child"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    let other = h.app.run("occurrence.copy", json!({"component":parent_component,"translate":[80,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+    h.frames(3);
+    let (inside, outside) = ([other, child], [parent_occurrence, child]);
+    let (before_inside, before_outside) = (placement_x(&h, &inside), placement_x(&h, &outside));
+    let d = move_dialog_for(&mut h, &inside, |k| {
+        if let crate::dialogs::Kind::Move { x, .. } = k {
+            *x = "7 mm".into();
+        }
+    });
+    crate::dialogs::run_dialog(&mut h.app, &d).unwrap();
+    // The child's position is part of the parent's definition, so both parent copies show it moved.
+    assert!((placement_x(&h, &inside) - before_inside - 7.0).abs() < 1e-6, "the picked nested copy moved 7 mm");
+    assert!((placement_x(&h, &outside) - before_outside - 7.0).abs() < 1e-6, "the same child inside the other assembly moved too");
+}
+
+#[test]
+fn move_of_a_grounded_placement_says_why_it_cannot() {
+    let (mut h, _, first, second) = fixture();
+    h.app.run("occurrence.ground", json!({"occurrence":second,"grounded":true})).unwrap();
+    let before = placement_x(&h, &[second]);
+    let d = move_dialog_for(&mut h, &[second], |k| {
+        if let crate::dialogs::Kind::Move { x, .. } = k {
+            *x = "7 mm".into();
+        }
+    });
+    let error = crate::dialogs::run_dialog(&mut h.app, &d).unwrap_err();
+    assert!(error.contains("grounded"), "{error}");
+    assert_eq!(placement_x(&h, &[second]), before);
+    let _ = first;
+}
