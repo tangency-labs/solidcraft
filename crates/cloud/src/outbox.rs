@@ -48,6 +48,30 @@ impl StagedSave {
 }
 
 impl PendingSave {
+    /// Select explicitly when offline tabs have competing heads. A stale choice is an
+    /// error, never permission to substitute another document or a remote revision.
+    pub fn local_head(records: Vec<Self>, destination: &Destination, revision: Option<&str>) -> Result<Option<Self>> {
+        destination.validate()?;
+        let pending: Vec<_> = Self::ordered(records)?.into_iter().filter(|save| &save.destination == destination).collect();
+        if let Some(revision) = revision {
+            if revision.len() != 64 || !revision.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+                return Err(Error::Invalid("invalid local revision".into()));
+            }
+            return pending
+                .into_iter()
+                .find(|save| save.id == revision)
+                .map(Some)
+                .ok_or_else(|| Error::Storage("selected local revision is no longer queued; refresh this repository".into()));
+        }
+        let parents: std::collections::BTreeSet<_> = pending.iter().filter_map(|save| save.expected_revision.as_ref()).collect();
+        let mut tips = pending.iter().filter(|save| !parents.contains(&save.id));
+        let tip = tips.next().cloned();
+        if tips.next().is_some() {
+            return Err(Error::Conflict);
+        }
+        Ok(tip)
+    }
+
     /// Pending children depend on captured local revisions, never on the latest editor state.
     /// Separate repositories and projects have no dependency on one another.
     pub fn ordered(records: Vec<Self>) -> Result<Vec<Self>> {
@@ -83,11 +107,13 @@ impl PendingSave {
         }
         Ok(ordered)
     }
-    pub fn stage(connection: &Connection, project: &str, file: &str, expected_revision: Option<String>, snapshot: Snapshot) -> Result<StagedSave> {
+    /// Describe a captured head without cloning its immutable payloads. The staging or
+    /// cache adapter validates and persists the referenced objects before its metadata.
+    pub fn describe(connection: &Connection, project: &str, file: &str, expected_revision: Option<String>, manifest: Manifest) -> Result<Self> {
         connection.validate()?;
         let destination = Destination { connection: connection.id.clone(), project: project.into(), file: file.into() };
         destination.validate()?;
-        let manifest_bytes = snapshot.manifest.write()?;
+        let manifest_bytes = manifest.write()?;
         let identity = serde_json::to_vec(&(&destination, connection, &expected_revision, digest(&manifest_bytes)))
             .map_err(|e| Error::Invalid(e.to_string()))?;
         let id = digest(&identity);
@@ -97,13 +123,20 @@ impl PendingSave {
             destination,
             connection: connection.clone(),
             expected_revision,
-            manifest: snapshot.manifest,
+            manifest,
         };
+        Self::read(&serde_json::to_vec(&record).map_err(|e| Error::Invalid(e.to_string()))?)?;
+        Ok(record)
+    }
+
+    pub fn stage(connection: &Connection, project: &str, file: &str, expected_revision: Option<String>, snapshot: Snapshot) -> Result<StagedSave> {
+        let record = Self::describe(connection, project, file, expected_revision, snapshot.manifest)?;
         let mut objects = snapshot.objects;
         objects.insert(format!("documents/{}", record.manifest.document_hash), snapshot.document);
         let record_bytes = serde_json::to_vec_pretty(&record).map_err(|e| Error::Invalid(e.to_string()))?;
         Self::read(&record_bytes)?;
-        Ok(StagedSave { record, objects, record_path: format!("pending/{id}.json"), record_bytes })
+        let record_path = format!("pending/{}.json", record.id);
+        Ok(StagedSave { record, objects, record_path, record_bytes })
     }
 
     pub fn read(bytes: &[u8]) -> Result<Self> {
@@ -169,6 +202,7 @@ impl PendingSave {
             objects.insert(path.into(), bytes.clone());
             Ok(bytes)
         })?;
+        objects.extend(crate::Thumbnail::objects(&self.manifest, &mut read)?);
         Ok(Snapshot { manifest: self.manifest.clone(), document, objects })
     }
 }

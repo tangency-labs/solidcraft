@@ -652,24 +652,49 @@ fn dropdown_popups_own_escape_and_return_focus_without_canceling_the_window() {
 
 #[test]
 fn secret_field_retains_focus_and_masks_paint_and_accessibility_events() {
+    for limit in [None, Some(8)] {
+        let ctx = crate::fonts::test_context();
+        let id = egui::Id::unique("secret_test");
+        let mut secret = String::new();
+        let mut draw = |ui: &mut Ui| {
+            row(ui, "API key", |ui| {
+                match limit {
+                    Some(limit) => bounded_password_field(ui, id, &mut secret, "Key", limit),
+                    None => password_field(ui, id, &mut secret, "Key"),
+                }
+                .request_focus();
+            });
+        };
+        frame(&ctx, vec![], &mut draw);
+        assert!(ctx.memory(|m| m.has_focus(id)));
+        let mut output = ctx
+            .run_ui(egui::RawInput { events: vec![egui::Event::Text("opaque-secret".into())], focused: true, ..Default::default() }, |ui| {
+                scope(ui, &mut draw)
+            });
+        assert!(!format!("{:?}", output.platform_output.events).contains("opaque-s"));
+        assert!(!format!("{:?}", output.shapes).contains("opaque-s"));
+        output.textures_delta.clear();
+        assert_eq!(secret, if limit.is_some() { "opaque-s" } else { "opaque-secret" });
+    }
+}
+
+#[test]
+fn bounded_secret_context_menu_paste_obeys_the_same_limit_as_typing() {
     let ctx = crate::fonts::test_context();
-    let id = egui::Id::unique("secret_test");
-    let mut secret = String::new();
-    let mut draw = |ui: &mut Ui| {
-        row(ui, "API key", |ui| {
-            password_field(ui, id, &mut secret, "Key").request_focus();
-        });
-    };
-    frame(&ctx, vec![], &mut draw);
-    assert!(ctx.memory(|m| m.has_focus(id)));
-    let mut output = ctx
-        .run_ui(egui::RawInput { events: vec![egui::Event::Text("opaque-secret".into())], focused: true, ..Default::default() }, |ui| {
-            scope(ui, &mut draw)
-        });
-    assert!(!format!("{:?}", output.platform_output.events).contains("opaque-secret"));
-    assert!(!format!("{:?}", output.shapes).contains("opaque-secret"));
-    output.textures_delta.clear();
-    assert_eq!(secret, "opaque-secret");
+    let id = egui::Id::unique("bounded_secret_paste");
+    let value = RefCell::new(String::new());
+    let rect = Cell::new(egui::Rect::NOTHING);
+    let mut draw = |ui: &mut Ui| rect.set(bounded_password_field(ui, id, &mut value.borrow_mut(), "Key", 4).rect);
+    menu_frame(&ctx, vec![], &mut draw);
+    set_clipboard(Some("秘密abc"));
+    right_click(&ctx, rect.get().center(), &mut draw);
+    assert!(pick(&ctx, "text_paste", &mut draw).is_empty());
+    assert_eq!(*value.borrow(), "秘密ab");
+    right_click(&ctx, rect.get().center(), &mut draw);
+    pick(&ctx, "text_select_all", &mut draw);
+    right_click(&ctx, rect.get().center(), &mut draw);
+    assert!(pick(&ctx, "text_copy", &mut draw).is_empty(), "secret values stay off the clipboard");
+    set_clipboard(None);
 }
 
 #[test]

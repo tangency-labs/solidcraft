@@ -1245,7 +1245,9 @@ impl SolveApp {
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
         }
-        if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
+        if (self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some())
+            && !matches!(id, "cloud.cancel" | "cloud.status" | "cloud.thumbnail.finish")
+        {
             return Err("a file operation is in progress".into());
         }
         // The editor's own marker moves come through here, so only Undo, Redo and Play close it.
@@ -1267,7 +1269,7 @@ impl SolveApp {
             return Ok(reply);
         }
         // Global cloud operations can outlive the tab from which they were started.
-        if matches!(id, "cloud.cancel" | "cloud.status")
+        if matches!(id, "cloud.cancel" | "cloud.status" | "cloud.thumbnail.finish")
             && let Some(operation) = params.get("operation").and_then(Value::as_str)
             && !self.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation)
         {
