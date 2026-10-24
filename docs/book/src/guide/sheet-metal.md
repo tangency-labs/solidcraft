@@ -7,11 +7,26 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
 - **Flange** (`sheet.flange`): a base flange from a sketch profile, a contour flange from an open
   sketch, or an edge flange from a part edge.
 - **Hem** (`sheet.hem`) and **Fold** (`sheet.fold`) along a sketch line.
+- **Jog** (`sheet.jog`) steps a flat panel across a line: it bends, runs straight for a short wall
+  and bends back, in one feature.
 - **Unfold / Refold** (`sheet.unfold`, `sheet.refold`) for working on the flat part.
 - **Convert** (`sheet.convert`) turns a plate of constant thickness into sheet metal, or, with
   bend edges, a solid or a shelled body.
 - **Create Flat Pattern** (`sheet.flat_pattern`) shows the flat part with its bend lines and a
   bend table, and exports it as DXF or a bend-table CSV through the save picker.
+
+A **jog** makes two bends of opposite turn along one line, so the far side ends up parallel to
+where it was, `offset` away. `measure` says what the offset is between: `outside` (outer face to
+outer face, the default), `inside` (inner face to inner face) or `faces` (a face to the same
+face). `angle` (default 90 deg) turns both bends, `position` puts the line at the `start`,
+`middle` or `end` of the whole jog, from the line toward the side that moves, and `flip` steps
+the other way. The two bends are cut out of the sheet like a fold, so the flat pattern keeps its
+size and the bend table lists one bend up and one down. An offset too small for the two bends is
+refused with the smallest that fits.
+
+```json
+{"command": "sheet.jog", "params": {"points": [[50, 0, 2], [50, 60, 2]], "fixed": [100, 30, 2], "offset": "20 mm", "measure": "outside"}}
+```
 
 Bends follow the rule's K-factor, so flat lengths match what a press brake will make. Tests
 check flat lengths against hand-computed bend allowances.

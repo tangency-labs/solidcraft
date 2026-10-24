@@ -125,6 +125,8 @@ sheet_hem
 sheet_perforate
 sheet_fold
   moves: a[0], a[1], a[2], b[1], b[2], fixed[0], fixed[1], fixed[2]
+sheet_jog
+  moves: a[0], a[1], a[2], b[1], b[2], fixed[0], fixed[1], fixed[2]
 sheet_unfold
 sheet_convert
   moves: bends[0][0], bends[0][1], bends[0][2], face[0], face[1], face[2]

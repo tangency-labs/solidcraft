@@ -281,6 +281,12 @@ sheet_fold
     Angle = fold.angle (Angle)
     Bend radius = fold.radius (Length)
   expressions: fold.angle, fold.radius
+sheet_jog
+  inputs:
+    Offset = jog.offset (Length)
+    Angle = jog.angle (Angle)
+    Bend radius = jog.radius (Length)
+  expressions: jog.offset, jog.angle, jog.radius
 sheet_unfold
 sheet_convert
 boss

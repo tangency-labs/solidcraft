@@ -709,6 +709,51 @@ pub(super) fn sheet_eval(
             tag_flanges(sh, n0, f.id);
             rebuild_sheet(st, i)
         }
+        FeatureKind::SheetJog { sketch, curve, a, b, offset, measure, angle, radius, position, flip, fixed, body } => {
+            // The sketch line, where it is now.
+            let (a, b) = match (sketch, curve) {
+                (Some(sk), Some(c)) => {
+                    let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk}")))?;
+                    let ci = ss.sketch.curve_index(c).ok_or_else(|| DocError::Unknown(format!("curve `{c}`")))?;
+                    match ss.sketch.segs(ci).as_slice() {
+                        [Seg2::Line { a, b }] => (ss.plane.to_world(*a), ss.plane.to_world(*b)),
+                        _ => return Err(DocError::Invalid("the jog line must be a sketch line".into())),
+                    }
+                }
+                _ => (a.0, b.0),
+            };
+            let i = sheet_for(st, body, Some((a + b) * 0.5))?;
+            let off = val(vals, offset, Kind::Length)?;
+            let ang = val(vals, angle, Kind::Angle)?;
+            let rr = match radius {
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => {
+                    let rule = st.sheets.get(i).map(|s| s.rule.clone()).unwrap_or_default();
+                    doc.rule_values(vals, &doc.sheet_rule(Some(&rule)))?.bend_radius
+                }
+            };
+            // A fixed point that touches no material at all (e.g. far above the sheet) still picks
+            // the side it lies on, so a stored jog keeps recomputing; it says so (#371).
+            if let Some(p) = fixed
+                && !on_sheet_material(st, i, p.0)
+            {
+                *warning = Some(format!(
+                    "{} at ({:.3}, {:.3}, {:.3}); the side of the jog line it lies on stays",
+                    sheet::FOLD_FIXED_OFF_SHEET,
+                    p.x,
+                    p.y,
+                    p.z
+                ));
+            }
+            let sh = st.sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            if sh.flat {
+                return Err(DocError::Invalid("refold the sheet before jogging it".into()));
+            }
+            let n0 = sh.flanges.len();
+            sh.add_jog(a, b, off, measure, ang, rr, position, *flip, fixed.map(Vec3::from), warning)?;
+            tag_flanges(sh, n0, f.id);
+            rebuild_sheet(st, i)
+        }
         FeatureKind::SheetUnfold { body, refold } => {
             let i = match body {
                 Some(_) => sheet_for(st, body, None)?,

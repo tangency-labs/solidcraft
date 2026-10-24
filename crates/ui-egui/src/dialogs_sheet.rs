@@ -20,6 +20,10 @@ use crate::theme::Tokens;
 
 const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
+const JOG_MEASURES: [&str; 3] = ["outside", "inside", "faces"];
+const JOG_MEASURE_LABELS: [&str; 3] = ["Outside", "Inside", "Faces"];
+const JOG_POSITIONS: [&str; 3] = ["start", "middle", "end"];
+const JOG_POSITION_LABELS: [&str; 3] = ["Start of Jog", "Middle of Jog", "End of Jog"];
 const FLANGE_TYPES: [&str; 3] = ["Base", "Edge", "Contour"];
 const POSITIONS: [&str; 3] = ["inside", "outside", "middle"];
 const POSITION_LABELS: [&str; 3] = ["Inside", "Outside", "Middle"];
@@ -57,6 +61,21 @@ crate::dialog_descriptor::dialog_descriptors! {
             position: usize = 0 => FOLD_POSITIONS.iter().position(|x| x == position || (*x == "mould" && position == "mold")).unwrap_or(0),
             flip: bool = false => *flip,
         } => json!({"angle": angle, "position": FOLD_POSITIONS.get(*position).copied().unwrap_or("centerline"), "flip": flip});
+        Jog("sheet.jog", "JOG", [("Jog Line", AXES, false), ("Stationary Side", PLANAR_FACES, false)],
+            FeatureKind::SheetJog { offset, measure, angle, radius, position, flip, .. }) {
+            offset: String = "10 mm".into() => offset.to_string(),
+            measure: usize = 0 => JOG_MEASURES.iter().position(|x| x == measure).unwrap_or(0),
+            angle: String = "90 deg".into() => angle.to_string(),
+            radius: String = String::new() => radius.as_deref().map(str::to_string).unwrap_or_default(),
+            position: usize = 0 => JOG_POSITIONS.iter().position(|x| x == position).unwrap_or(0),
+            flip: bool = false => *flip,
+        } => json!({
+            "offset": offset,
+            "measure": JOG_MEASURES.get(*measure).copied().unwrap_or("outside"),
+            "angle": angle,
+            "position": JOG_POSITIONS.get(*position).copied().unwrap_or("start"),
+            "flip": flip
+        });
         ; custom {
             /// Base, edge or contour flange (`ty` follows the picks: profiles, edges, sketch lines).
             Flange {
@@ -130,6 +149,7 @@ impl Sm {
             Sm::Flange { ty: 2, distance, .. } => ("Distance", ValueKind::Length, distance),
             Sm::Hem { length, .. } => ("Length", ValueKind::Length, length),
             Sm::Fold { angle, .. } => ("Angle", ValueKind::Angle, angle),
+            Sm::Jog { offset, .. } => ("Offset", ValueKind::Length, offset),
             _ => return None,
         })
     }
@@ -281,6 +301,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
         Sm::Fold { angle, radius, position, flip } => {
             choice_row(ui, "Bend Line Position", "sm_fold_pos", position, &FOLD_POSITION_LABELS);
             enter |= expr_row(ui, "Angle", angle);
+            enter |= hint_row(ui, "Bend Radius", radius, crate::i18n::tr_label("from the rule"));
+            crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
+        }
+        Sm::Jog { offset, measure, angle, radius, position, flip } => {
+            enter |= expr_row(ui, "Offset", offset);
+            choice_row(ui, "Measure", "sm_jog_measure", measure, &JOG_MEASURE_LABELS);
+            enter |= expr_row(ui, "Angle", angle);
+            choice_row(ui, "Bend Line Position", "sm_jog_pos", position, &JOG_POSITION_LABELS);
             enter |= hint_row(ui, "Bend Radius", radius, crate::i18n::tr_label("from the rule"));
             crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
         }
@@ -522,7 +550,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             put(&mut p, &[("gap", gap)]);
             ("sheet.hem", p)
         }
-        Sm::Fold { radius, .. } => {
+        Sm::Fold { radius, .. } | Sm::Jog { radius, .. } => {
             let mut p = json!({});
             match items(inputs, 0).first() {
                 Some(Sel::SketchCurve { id }) => {
@@ -539,13 +567,14 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                 }
                 // An edited fold made from two points keeps them (in `extra`).
                 _ if extra.contains_key("points") => {}
+                _ if matches!(k, Sm::Jog { .. }) => return Err("select the jog line (a sketch line) first".into()),
                 _ => return Err("select the bend line (a sketch line) first".into()),
             }
             put(&mut p, &[("radius", radius)]);
             if let Some(Sel::Face { point, .. }) = items(inputs, 1).first() {
                 p["fixed"] = pt(*point);
             }
-            ("sheet.fold", p)
+            (if matches!(k, Sm::Jog { .. }) { "sheet.jog" } else { "sheet.fold" }, p)
         }
         Sm::Unfold { refold } => {
             let mut p = json!({});
@@ -669,6 +698,28 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     }
                 }
                 // A fold given by two points keeps them.
+                None => {
+                    extra.insert("points".into(), json!([pt(a.0), pt(b.0)]));
+                }
+            }
+            if let Some(i) = ins.get_mut(1) {
+                i.items = fixed.and_then(|f| face_sel(s, f.0)).into_iter().collect();
+            }
+            return Some((Kind::Sheet(k), ins, extra));
+        }
+        FeatureKind::SheetJog { curve, a, b, fixed, body, .. } => {
+            if let Some(bd) = body {
+                extra.insert("body".into(), json!(bd));
+            }
+            let k = Sm::simple_restore(kind)?;
+            let (_, mut ins) = start(app, "sheet.jog")?;
+            match curve {
+                Some(c) => {
+                    if let Some(i) = ins.first_mut() {
+                        i.items = vec![Sel::SketchCurve { id: c.clone() }];
+                    }
+                }
+                // A jog given by two points keeps them.
                 None => {
                     extra.insert("points".into(), json!([pt(a.0), pt(b.0)]));
                 }

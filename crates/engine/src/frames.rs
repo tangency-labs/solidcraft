@@ -72,7 +72,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "plastic.lip" => &[("face", Pick), ("body", Body)],
         "sheet.convert" => &[("face", Pick), ("bends", Picks), ("body", Body)],
         "sheet.flange" | "sheet.hem" => &[("edges", Picks), ("body", Body)],
-        "sheet.fold" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
+        "sheet.fold" | "sheet.jog" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
         "sheet.perforate" => &[("body", Body)],
         "sketch.create" | "sketch.redefine" => &[("plane", HerePlane)],
         "canvas.decal" => &[("face", Here)],
