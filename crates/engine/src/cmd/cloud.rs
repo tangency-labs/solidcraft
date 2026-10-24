@@ -240,6 +240,24 @@ pub(super) fn save(session: &mut Session, params: &Value) -> Result<Value> {
         .or_else(|| session.cloud.binding.as_ref().map(|b| b.destination.clone()))
         .ok_or_else(|| bad("cloud.save", "choose a repository, project folder, and file name"))?;
     let connection = session.cloud.settings.destination(Some(&destination.connection)).cloned().map_err(error)?;
+    destination.validate().map_err(error)?;
+    // Like native Save, an unnamed document takes the name chosen for its destination.
+    // Cloud design paths are directories, so dots in their names are not extensions.
+    let renamed = (session.doc.name.trim().is_empty() || session.doc.name == "Untitled")
+        .then(|| (session.doc.name.clone(), destination.file.rsplit('/').next().unwrap_or(&destination.file).to_owned()));
+    if let Some((from, to)) = &renamed {
+        super::file::rename_design(session, from, to);
+    }
+    let result = capture(session, connection, destination);
+    if result.is_err()
+        && let Some((from, to)) = &renamed
+    {
+        super::file::rename_design(session, to, from);
+    }
+    result
+}
+
+fn capture(session: &mut Session, connection: solidcraft_cloud::Connection, destination: Destination) -> Result<Value> {
     let parent = session.cloud.binding.as_ref().filter(|binding| binding.destination == destination).and_then(|binding| binding.revision.clone());
     let snapshot = solidcraft_io::cloud::prepare_document(&session.design()).map_err(error)?;
     let save = PendingSave::stage(&connection, &destination.project, &destination.file, parent, snapshot).map_err(error)?;

@@ -8,6 +8,7 @@ use crate::SolveApp;
 #[derive(Default)]
 pub(crate) struct State {
     pub setup: Option<crate::cloud_setup::Wizard>,
+    pub browser: crate::cloud_browser::Browser,
     retry_at: f64,
     messages: BTreeMap<String, String>,
 }
@@ -23,6 +24,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
             return;
         }
     };
+    crate::cloud_browser::tick(app, &statuses);
     let live: BTreeSet<_> = statuses.iter().map(|status| status.operation.as_str()).collect();
     app.cloud.messages.retain(|id, _| live.contains(id.as_str()));
     for status in &statuses {
@@ -36,7 +38,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     if statuses.iter().any(|status| matches!(status.phase, Phase::Working | Phase::Syncing)) {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
-    if !app.session.cloud_save_pending() {
+    if !app.session.cloud_save_pending() && !crate::cloud_browser::choosing_destination(app) {
         crate::documents::saved_for_close(app);
     }
     // Retry after startup and once a minute. Queues and their failures remain independent.

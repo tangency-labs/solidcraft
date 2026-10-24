@@ -27,20 +27,6 @@ pub(crate) fn open(app: &mut SolveApp) {
     }
 }
 
-pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if app.services.cloud_host.is_none() {
-        return;
-    }
-    let t = crate::theme::Tokens::get();
-    ui_kit::FileView::section(ui, tr("cloud.title"), t.space_10, |ui| {
-        ui_kit::FileView::detail(ui, tr("cloud.setup_hint"));
-        if ui_kit::button(ui, tr("cmd.cloud.connect"), ui_kit::Button::Normal).clicked() {
-            app.start("cloud.connect");
-        }
-    });
-    ui.add_space(t.file_section_gap);
-}
-
 fn poll(app: &mut SolveApp, wizard: &mut Wizard) -> Result<bool, String> {
     let Some(pending) = wizard.pending.take() else { return Ok(false) };
     let applying = matches!(&pending, Pending::Apply(_));

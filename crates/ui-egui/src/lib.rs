@@ -18,6 +18,7 @@ pub mod browser_canvas;
 pub mod browser_prompts;
 pub mod canvas;
 mod cloud;
+mod cloud_browser;
 mod cloud_setup;
 #[cfg(test)]
 mod colour_tokens_tests;
@@ -951,6 +952,10 @@ impl SolveApp {
             cloud_setup::open(self);
             return;
         }
+        if matches!(id, "cloud.list" | "cloud.save") {
+            cloud_browser::start(self, id);
+            return;
+        }
         if id == "ui.palette" {
             shortcut_box::open(self, None);
             return;
@@ -1714,6 +1719,7 @@ impl SolveApp {
         issue_report::CadInput::block(self, ui, &mut report_input);
         self.cad_ui(ui, &mut report_input);
         cloud_setup::show(self, ui.ctx());
+        cloud_browser::show(self, ui.ctx());
         drop(report_input);
         // After everything else, on every page (the start page too, which returns early from
         // `cad_ui`): the window's edges resize it (#1381).

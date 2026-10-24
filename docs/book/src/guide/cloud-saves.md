@@ -36,20 +36,31 @@ you do not need an SSH key or a GitHub password.
 
 ## Save and synchronize
 
-This feature is under development. The connection wizard is available; the
-repository browser and destination picker are still being built. For now, the
-command palette's JSON form can save a design using the registered command:
+1. On **Start → Cloud Saves**, choose **Save to Cloud Project**. For a new design,
+   normal **Save** opens the same picker when a default cloud repository is connected.
+2. Choose a repository, enter a project folder (or choose an existing one), and name
+   the design. For example, project `Robot` and name `bracket` create
+   `Robot/parts/bracket` inside the repository. Parts and assemblies use the same
+   design representation; you can also store ordinary documents in the project.
+3. Choose **Save**. Future saves use this destination even if you change the default
+   repository. Native **Save As** creates a `.solidcraft` file and detaches that
+   document from its cloud destination.
 
-```text
-cloud.save {"destination":{"connection":"<connection id>","project":"Robot","file":"parts/bracket"}}
-```
+On **Start**, use the repository selector to browse connected repositories and
+click a design to open it. Other open designs and unsaved edits are preserved.
+**Refresh** reloads the list; **Synchronize Repository** retries pending saves for
+the selected repository. A failed refresh keeps the last displayed list; availability
+offline depends on the designs retained by local storage. Connect another repository
+with **Connect GitHub**; each connection has independent credentials and queues.
 
-`cloud.settings {}` lists your connection identifiers. Once a design has a cloud
-destination, normal **Save** uses it. Native **Save As** creates a `.solidcraft`
-file and detaches that document from its cloud destination.
+The picker refuses names already shown in that project. If another device creates
+the same name after listing, synchronization preserves a conflict copy. Changing
+the active design while the picker is open cancels the choice so it cannot save a
+different tab by accident. The full settings editor and thumbnail previews remain
+under development.
 
 Saving first records the captured design on this device, then synchronizes it.
-**Saved locally** means it is recoverable here and still needs publication.
+**Saved on this device** means it is recoverable here and still needs publication.
 **Syncing** means publication is running. **Synced** means the remote accepted it.
 Edits made while an upload runs remain unsaved until you save again.
 

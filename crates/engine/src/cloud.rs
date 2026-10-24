@@ -79,6 +79,17 @@ impl Session {
         self.cloud.jobs.values().map(|job| job.status().map_err(error)).collect()
     }
 
+    /// Complete a download through the registered command in a separate editor. The UI can
+    /// adopt it as a new tab without replacing edits made while the download was running.
+    pub fn cloud_open_session(&self, operation: &str) -> Result<Session> {
+        let job = self.cloud.jobs.get(operation).ok_or_else(|| EngineError::Other("unknown cloud opening operation".into()))?;
+        let mut opened = Session::default();
+        opened.inherit_cloud_services(self);
+        opened.cloud.jobs.insert(operation.into(), job.clone());
+        opened.execute("cloud.open.finish", &serde_json::json!({"operation":operation}))?;
+        Ok(opened)
+    }
+
     /// A captured save may become the saved baseline after later edits. Adopting the captured
     /// Arc instead of calling mark_saved keeps those newer edits dirty.
     pub fn poll_cloud(&mut self) -> Result<()> {
