@@ -220,12 +220,17 @@ fn auto_operation_in(s: &Session, p: &Value, world_faces: bool) -> Option<&'stat
     }
     // Match the evaluator's implicit participants: a grouped cut from an empty
     // assembly component considers every body; otherwise keep the active scope.
-    // Explicit participants override either default.
+    // Explicit targets, else participants, override either default.
     // A component with no body of its own works on those of the components inside it (#3223).
-    let parts = string_list(p, "participants");
+    let parts = match string_list(p, "targets") {
+        targets if targets.is_empty() => string_list(p, "participants"),
+        targets => targets,
+    };
     let implicit_all = grouped.is_some() && !st.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component);
     let bodies: Vec<_> = if !parts.is_empty() {
-        st.bodies.iter().filter(|b| parts.contains(&b.name)).collect()
+        // `*` alone is every body, as the evaluator reads it.
+        let every = parts.len() == 1 && parts.first().is_some_and(|t| t == "*");
+        st.bodies.iter().filter(|b| every || parts.contains(&b.name)).collect()
     } else if implicit_all {
         st.bodies.iter().collect()
     } else {
@@ -754,6 +759,22 @@ fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
         Ok(found) if found.len() == material.len() && material.iter().all(|p| !p.outer_curves.is_empty()) => sel,
         _ => ProfileSel::All,
     }
+}
+
+/// The body a Join takes without targets: the picked face's, or the one its sketch lies on.
+pub fn join_face_body(s: &Session, p: &Value) -> Option<String> {
+    if let Some(body) = str_(p, "face_body") {
+        return Some(body.to_string());
+    }
+    if p.get("face").is_some() || p.get("faces").is_some() {
+        return None;
+    }
+    sketch_face_body(s, feature_sketch(s, p, "solid.extrude").ok()?)
+}
+
+/// The bodies the active component works on when a feature names none ([`active_scope`]).
+pub fn scope_bodies(s: &Session) -> Vec<String> {
+    active_scope(s, &s.model.state()).into_iter().map(|b| b.name.clone()).collect()
 }
 
 /// The body whose face `sketch` is attached to (on the face itself, not offset from it), when

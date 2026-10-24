@@ -38,7 +38,7 @@ mod features_more;
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, edge_ref_form, sketch_key};
-pub use features::{auto_operation, extrude_reach};
+pub use features::{auto_operation, extrude_reach, join_face_body, scope_bodies};
 pub use sketch_modify::trim_piece;
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
 mod component_link;
