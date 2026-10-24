@@ -35,9 +35,11 @@
 #include <SmBSplineSurface.h>
 #include <SmBrep.h>
 #include <SmContext.h>
+#include <SmCircle.h>
 #include <SmCurve.h>
 #include <SmEdge.h>
 #include <SmEdgeuse.h>
+#include <SmEllipse.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
 #include <SmFace.h>
@@ -63,6 +65,9 @@
 #include <nurbs.h>
 
 #include <map>
+#include <cstring>
+#include <memory>
+#include <stdexcept>
 #include <vector>
 
 #include "sc_sm.h"
@@ -439,7 +444,7 @@ void walk(SmBrep* brep, Graph& g)
 
 // A curve block: `-1` (none), `-2` (not an SmBSplineCurve), else `type dim has_nurb
 // [n p m cpts(x y z w) knots]` and, for an SmLine, `P[3] V[3] a0 a1 scale inside_out`.
-void put_curve(std::vector<double>& o, const SmCurve* c)
+void put_curve_base(std::vector<double>& o, const SmCurve* c)
 {
     if (c == nullptr || !c->IsKindOf(SmBSplineCurve_TYPE))
     {
@@ -477,6 +482,123 @@ void put_curve(std::vector<double>& o, const SmCurve* c)
         o.push_back(l->GetLineScale());
         o.push_back(flg(l->GetInsideOut()));
     }
+}
+
+// Operation results retain the old line/B-spline layout. Ellipse results also
+// compare their analytic data and flags, without requiring a Rust database writer.
+struct CurvePeek : SmBSplineCurve
+{
+    static SmKnotType SmBSplineCurve::*knots() { return &CurvePeek::m_eKnotType; }
+    static SmBSplineCurveForm SmBSplineCurve::*form() { return &CurvePeek::m_eBSplineCurveForm; }
+};
+struct EllipsePeek : SmEllipse
+{
+    static SmPolarConversion SmEllipse::*polar() { return &EllipsePeek::m_vPolarConverter; }
+};
+
+std::string polar_record(const SmEllipse* e)
+{
+    std::ostringstream stream;
+    SmDatabaseIOStream db(SM_BINARY, &stream);
+    if ((e->*EllipsePeek::polar()).WriteToDB(db, SM_CURRENT_DATABASE_VERSION) != SM_SUCCESS)
+        throw std::runtime_error("ellipse polar table write failed");
+    return stream.str();
+}
+
+void put_curve(std::vector<double>& o, const SmCurve* c)
+{
+    put_curve_base(o, c);
+    if (c == nullptr || (c->GetType() != SmEllipse_TYPE && c->GetType() != SmCircle_TYPE))
+        return;
+    const SmEllipse* e = (const SmEllipse*)c;
+    const SmAxis2Placement& pos = e->GetPosition();
+    put_vec(o, pos.GetOrigin());
+    put_vec(o, pos.GetXAxis());
+    put_vec(o, pos.GetYAxis());
+    SmExtent1d domain = e->GetSTEPInterval();
+    o.push_back(domain.GetMin());
+    o.push_back(domain.GetMax());
+    o.push_back(e->GetXRadius());
+    o.push_back(e->GetYRadius());
+    o.push_back(flg(e->GetInsideOut()));
+    o.push_back(flg(e->IsOutOfBoundsEnabled()));
+    o.push_back((double)(e->*CurvePeek::knots()));
+    o.push_back((double)(e->*CurvePeek::form()));
+}
+
+bool same_curve_bits(const std::vector<double>& a, const std::vector<double>& b)
+{
+    return a.size() == b.size() &&
+           std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0;
+}
+
+bool curve_record(const SmCurve* curve, std::string& bytes)
+{
+    std::ostringstream stream;
+    SmDatabaseIOStream db(SM_BINARY, &stream);
+    if (curve->WriteToDB(db, SM_CURRENT_DATABASE_VERSION) != SM_SUCCESS)
+        return false;
+    bytes = stream.str();
+    return true;
+}
+
+// Private graph transport: -3 type version dim oob nbytes bytes, then the
+// independent old B-spline block. No lazy NURB construction is allowed here.
+void put_export_curve(std::vector<double>& out, const SmCurve* c)
+{
+    if (c == nullptr || (c->GetType() != SmEllipse_TYPE && c->GetType() != SmCircle_TYPE))
+    {
+        put_curve_base(out, c);
+        return;
+    }
+    const SmEllipse* e = (const SmEllipse*)c;
+    if (e->GetGwNurbPointer() == nullptr)
+    {
+        put_curve_base(out, c);
+        return;
+    }
+    std::vector<double> before, after;
+    put_curve(before, c);
+    const SmObject* owner = c->GetOwner();
+    const gw_CURVE* nurb = e->GetGwNurbPointer();
+    const std::string polar = polar_record(e);
+    std::string bytes;
+    if (!curve_record(c, bytes))
+        throw std::runtime_error("ellipse database write failed");
+    put_curve(after, c);
+    if (!same_curve_bits(before, after) || c->GetOwner() != owner ||
+        e->GetGwNurbPointer() != nurb || polar_record(e) != polar)
+        throw std::runtime_error("ellipse database write mutated its source");
+    SmCurve* back = nullptr;
+    std::istringstream stream(bytes);
+    SmDatabaseIOStream db(SM_BINARY, &stream);
+    bool exact = false;
+    if (SmCurve::ReadFromDB(c->GetType(), db, e->GetDim(), the_context(), back,
+                          SM_CURRENT_DATABASE_VERSION) == SM_SUCCESS &&
+        back != nullptr && back->GetType() == c->GetType() &&
+        stream.peek() == std::char_traits<char>::eof())
+    {
+        std::unique_ptr<SmCurve> held(back);
+        ((SmBSplineCurve*)back)->SetOutOfBoundsEnabled(e->IsOutOfBoundsEnabled());
+        std::vector<double> restored;
+        put_curve(restored, back);
+        std::string again;
+        exact = same_curve_bits(before, restored) && curve_record(back, again) && again == bytes;
+        back = nullptr;
+    }
+    delete back;
+    if (exact)
+    {
+        out.push_back(-3.0);
+        out.push_back((double)c->GetType());
+        out.push_back((double)SM_CURRENT_DATABASE_VERSION);
+        out.push_back((double)e->GetDim());
+        out.push_back(flg(e->IsOutOfBoundsEnabled()));
+        out.push_back((double)bytes.size());
+        for (unsigned char byte : bytes)
+            out.push_back((double)byte);
+    }
+    put_curve_base(out, c);
 }
 
 void put_surface(std::vector<double>& o, const SmSurface* s)
@@ -620,7 +742,7 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
         o.push_back((double)g.find(8, p->*EuPeek::vu()));
         o.push_back((double)p->GetOrientation());
         SmBSplineCurve* uv = p->*EuPeek::uv();
-        put_curve(o, uv);
+        put_export_curve(o, uv);
         o.push_back(uv ? (double)g.find(6, uv->GetOwner()) : -1.0);
         SmDropCurveFail* fail = p->*EuPeek::fail();
         o.push_back(fail ? 1.0 : 0.0);
@@ -640,7 +762,7 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
         for (SmTopology* t : list_of(p->GetList()))
             v.push_back(g.find(6, t));
         put_list(o, v);
-        put_curve(o, p->GetCurve());
+        put_export_curve(o, p->GetCurve());
         o.push_back(p->GetCurve() && p->GetCurve()->GetOwner() == (SmObject*)p ? 1.0 : 0.0);
     }
     for (SmVertexuse* p : g.vertexuses)
@@ -698,6 +820,44 @@ SmBrep* build(Rd& rd, const char* path, SmStatus& status)
         SmPoint2d a = rd.uv(), b = rd.uv();
         SmFace* pFace = nullptr;
         status = brep->CreateFaceFromSurface(s, SmExtent2d(a, b), pFace);
+    }
+    else if (kind == 5)
+    {
+        bool circle = rd.flag();
+        SmPoint3d center = rd.vec();
+        SmVector3d x = rd.vec(), y = rd.vec();
+        double a = rd.num(), b = rd.num(), rx = rd.num(), ry = rd.num();
+        SmBoolean inside_out = rd.bflag();
+        double n0 = rd.num(), n1 = rd.num(), f0 = rd.num(), f1 = rd.num();
+        SmBoolean oob = rd.bflag();
+        double tolerance = rd.num();
+        SmOrientType orientation = (SmOrientType)rd.idx();
+        std::unique_ptr<SmEllipse> held(circle
+            ? (SmEllipse*)new (ctx) SmCircle(center, x, y, SmExtent1d(a, b), rx, 3, &ctx, NULL, inside_out)
+            : new (ctx) SmEllipse(center, x, y, SmExtent1d(a, b), rx, ry, 3, &ctx, NULL, inside_out));
+        SmEllipse* curve = held.get();
+        const SM_TYPE expected = circle ? SmCircle_TYPE : SmEllipse_TYPE;
+        if (curve->GetType() != expected)
+            throw std::runtime_error("analytic wire constructor changed its type");
+        status = curve->GetGwNurbPointer() == nullptr
+            ? SM_ERR : curve->EditParameterization(SmExtent1d(n0, n1));
+        if (status == SM_SUCCESS)
+        {
+            curve->SetOutOfBoundsEnabled(oob);
+            SmEdge* edge = nullptr;
+            SmExtent1d natural = curve->GetNaturalInterval();
+            status = brep->CreateWireEdgeFromCurve(
+                curve, SmExtent1d(natural.Evaluate(f0), natural.Evaluate(f1)), edge);
+            if (curve->GetOwner() != nullptr)
+                held.release();
+            if (status == SM_SUCCESS)
+            {
+                if (edge == nullptr || edge->GetCurve() != curve || edge->GetCurve()->GetType() != expected)
+                    throw std::runtime_error("analytic wire builder changed the curve kind");
+                edge->SetTolerance(tolerance, FALSE, FALSE);
+                edge->SetOrientation(orientation);
+            }
+        }
     }
     else if (kind == 4)
     {

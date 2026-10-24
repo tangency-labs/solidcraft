@@ -37,6 +37,7 @@
 //! | [`Ellipse::step_interval`], [`Ellipse::set_step_interval`], [`Ellipse::degree`] | `GetSTEPInterval`, `SetSTEPInterval`, `GetDegree` (inline) |
 //! | [`Ellipse::start_angle_deg`], [`Ellipse::end_angle_deg`], [`Ellipse::position`] | `GetStartAngleDeg`, `GetEndAngleDeg`, `GetPosition` (inline) |
 //! | [`Ellipse::x_radius`], [`Ellipse::y_radius`], [`Ellipse::inside_out`] | `GetXRadius`, `GetYRadius`, `GetInsideOut` (inline) |
+//! | [`Ellipse::set_out_of_bounds_enabled`]             | inherited `SmBSplineCurve::SetOutOfBoundsEnabled` |
 //! | [`Ellipse::is_analytic`], [`Ellipse::is_domain_boundary`] | `IsAnalytic`, `IsDomainBoundary` (inline)  |
 //! | [`MAX_PERIOD_SHIFTS`]                             | no counterpart (loop bound)                      |
 //!
@@ -931,6 +932,12 @@ impl Ellipse {
     #[must_use]
     pub const fn base(&self) -> &BSplineCurve {
         &self.base
+    }
+
+    /// Enables evaluation beyond the natural interval, without changing the NURB
+    /// or STEP domain (inherited `SmBSplineCurve::SetOutOfBoundsEnabled`).
+    pub fn set_out_of_bounds_enabled(&mut self, enabled: bool) {
+        self.base.set_out_of_bounds_enabled(enabled);
     }
 
     /// The `SmBSplineCurve` base object, mutable (for the base-class edits).
@@ -2538,5 +2545,21 @@ mod tests {
         assert_eq!(c.class_string(), "SmEllipse");
         assert_eq!(c.is_domain_boundary(), SurfParamType::Neither);
         assert!(c.approx_eq(&c.clone()));
+    }
+
+    #[test]
+    fn out_of_bounds_flag_controls_evaluation_without_editing_geometry() {
+        let k = kernel();
+        let mut c = circle(&k, 15.0, 225.0, 2.0, false);
+        let nurb = c.base().gw_nurb().unwrap().clone();
+        let interval = c.step_interval();
+        let clamped = c.base().evaluate_point(-0.1).unwrap();
+        c.set_out_of_bounds_enabled(true);
+        let extended = c.base().evaluate_point(-0.1).unwrap();
+        assert_ne!(clamped, extended);
+        assert_eq!(c.base().gw_nurb(), Some(&nurb));
+        assert_eq!(c.step_interval(), interval);
+        c.set_out_of_bounds_enabled(false);
+        assert_eq!(c.base().evaluate_point(-0.1).unwrap(), clamped);
     }
 }
