@@ -236,7 +236,7 @@ pub fn label(app: &SolveApp, sel: &Sel) -> String {
         |sketch: u64, f: &dyn Fn(&solidcraft_engine::sketch::Sketch) -> String| st.sketch(sketch).map(|ss| f(&ss.sketch)).unwrap_or_default();
     match sel {
         Sel::SketchPoint { id } => app.session.active_sketch.map(|s| in_sketch(s, &|sk| point_label(sk, id))).unwrap_or_else(|| id.clone()),
-        Sel::SketchCurve { id } => app.session.active_sketch.map(|s| in_sketch(s, &|sk| curve_label(sk, id))).unwrap_or_else(|| id.clone()),
+        Sel::SketchCurve { id, .. } => app.session.active_sketch.map(|s| in_sketch(s, &|sk| curve_label(sk, id))).unwrap_or_else(|| id.clone()),
         Sel::ExternalSketchPoint { sketch, id } => format!("{} · {}", in_sketch(*sketch, &|sk| point_label(sk, id)), sketch_name(app, *sketch)),
         Sel::ExternalSketchCurve { sketch, id } => format!("{} · {}", in_sketch(*sketch, &|sk| curve_label(sk, id)), sketch_name(app, *sketch)),
         Sel::SketchConstraint { id } => format!("Constraint {id}"),
@@ -268,7 +268,7 @@ fn icon(app: &SolveApp, sel: &Sel) -> &'static str {
     };
     match sel {
         Sel::SketchPoint { .. } | Sel::ExternalSketchPoint { .. } | Sel::Vertex { .. } => "point",
-        Sel::SketchCurve { id } => curve(app.session.active_sketch, id),
+        Sel::SketchCurve { id, .. } => curve(app.session.active_sketch, id),
         Sel::ExternalSketchCurve { sketch, id } => curve(Some(*sketch), id),
         Sel::SketchConstraint { .. } => "dimension",
         Sel::Edge { .. } => "fillet",

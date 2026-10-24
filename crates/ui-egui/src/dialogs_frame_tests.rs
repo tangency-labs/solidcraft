@@ -42,7 +42,7 @@ fn body_names(app: &SolveApp) -> Vec<String> {
 
 /// The dialog started with the given lines picked.
 fn dialog_on(app: &mut SolveApp, lines: &[String]) -> Dialog {
-    app.session.selection = lines.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    app.session.selection = lines.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     app.start("frame.member");
     app.dialog.clone().unwrap()
 }

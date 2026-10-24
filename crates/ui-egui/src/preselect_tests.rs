@@ -760,9 +760,9 @@ fn line_and_profile_then_revolve_routes_each() {
         {"command": "sketch.line", "params": {"points": [[0, 0], [0, 30]], "ids": ["axis"]}},
     ]));
     let sk = app.session.active_sketch.unwrap();
-    let d = start(&mut app, vec![Sel::SketchCurve { id: "axis".into() }, Sel::Profile { sketch: sk, index: 0 }], "solid.revolve");
+    let d = start(&mut app, vec![Sel::SketchCurve { id: "axis".into(), sketch: None }, Sel::Profile { sketch: sk, index: 0 }], "solid.revolve");
     assert_eq!(d.inputs[0].items, vec![Sel::Profile { sketch: sk, index: 0 }]);
-    assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { id: "axis".into() }]);
+    assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { id: "axis".into(), sketch: None }]);
 }
 
 #[test]
@@ -1595,7 +1595,7 @@ fn surface_extrude_dialog_takes_profiles_and_curves() {
     ]));
     let sk = app.session.doc.features.last().unwrap().id;
     let mut d = start(&mut app, vec![], "surface.extrude");
-    d.inputs[0].items = vec![Sel::Profile { sketch: sk, index: 0 }, Sel::SketchCurve { id: "free".into() }];
+    d.inputs[0].items = vec![Sel::Profile { sketch: sk, index: 0 }, Sel::SketchCurve { id: "free".into(), sketch: None }];
     let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!(id, "surface.extrude");
     assert_eq!(p["curves"], json!(["free"]), "{p}");
@@ -1647,7 +1647,7 @@ fn surface_revolve_dialog_takes_curves_and_an_axis() {
         {"command": "sketch.finish", "params": {}}
     ]));
     let mut d = start(&mut app, vec![], "surface.revolve");
-    d.inputs[0].items = vec![Sel::SketchCurve { id: "side".into() }];
+    d.inputs[0].items = vec![Sel::SketchCurve { id: "side".into(), sketch: None }];
     assert!(apply_commands(&app, &d).is_err(), "no axis yet");
     d.inputs[1].items = vec![Sel::Axis { name: "y".into() }];
     if let Kind::Surface(crate::dialogs_surface::Surf::Revolve { angle, .. }) = &mut d.kind {
@@ -1661,7 +1661,8 @@ fn surface_revolve_dialog_takes_curves_and_an_axis() {
     assert!((area - want).abs() < want * 2e-3, "{area} vs {want}");
     let fid = app.session.doc.features.last().unwrap().id;
     let back = crate::dialogs::for_feature(&app, fid, None).unwrap();
-    assert_eq!(back.inputs[0].items, vec![Sel::SketchCurve { id: "side".into() }]);
+    // Editing brings the curves back from the sketch the feature is built on.
+    assert_eq!(back.inputs[0].items, vec![Sel::SketchCurve { id: "side".into(), sketch: Some(1) }]);
     assert_eq!(back.inputs[1].items, vec![Sel::Axis { name: "y".into() }]);
 }
 
@@ -1678,9 +1679,9 @@ fn surface_sweep_dialog_takes_curves_and_a_path() {
         {"command": "sketch.finish", "params": {}}
     ]));
     let mut d = start(&mut app, vec![], "surface.sweep");
-    d.inputs[0].items = vec![Sel::SketchCurve { id: "l".into() }];
+    d.inputs[0].items = vec![Sel::SketchCurve { id: "l".into(), sketch: None }];
     assert!(apply_commands(&app, &d).is_err(), "no path yet");
-    d.inputs[1].items = vec![Sel::SketchCurve { id: "up".into() }];
+    d.inputs[1].items = vec![Sel::SketchCurve { id: "up".into(), sketch: None }];
     let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!((id.as_str(), &p["path"], &p["curves"]), ("surface.sweep", &json!(["up"]), &json!(["l"])), "{p}");
     assert_ne!(p["path_sketch"], p["sketch"], "{p}");
@@ -1689,8 +1690,8 @@ fn surface_sweep_dialog_takes_curves_and_a_path() {
     assert!((area - 50.0).abs() < 1e-6, "{area}");
     let fid = app.session.doc.features.last().unwrap().id;
     let back = crate::dialogs::for_feature(&app, fid, None).unwrap();
-    assert_eq!(back.inputs[0].items, vec![Sel::SketchCurve { id: "l".into() }]);
-    assert_eq!(back.inputs[1].items, vec![Sel::SketchCurve { id: "up".into() }]);
+    assert_eq!(back.inputs[0].items, vec![Sel::SketchCurve { id: "l".into(), sketch: Some(1) }]);
+    assert_eq!(back.inputs[1].items, vec![Sel::SketchCurve { id: "up".into(), sketch: Some(2) }]);
 }
 
 #[test]
@@ -1707,9 +1708,9 @@ fn surface_loft_dialog_makes_a_section_per_sketch() {
         {"command": "sketch.finish", "params": {}}
     ]));
     let mut d = start(&mut app, vec![], "surface.loft");
-    d.inputs[0].items = vec![Sel::SketchCurve { id: "a".into() }];
+    d.inputs[0].items = vec![Sel::SketchCurve { id: "a".into(), sketch: None }];
     assert!(apply_commands(&app, &d).is_err(), "one section");
-    d.inputs[0].items.push(Sel::SketchCurve { id: "b".into() });
+    d.inputs[0].items.push(Sel::SketchCurve { id: "b".into(), sketch: None });
     let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!(id, "surface.loft");
     assert_eq!(p["sections"].as_array().map(Vec::len), Some(2), "{p}");
@@ -1719,7 +1720,10 @@ fn surface_loft_dialog_makes_a_section_per_sketch() {
     assert!((area - 50.0).abs() < 1e-6, "{area}");
     let fid = app.session.doc.features.last().unwrap().id;
     let back = crate::dialogs::for_feature(&app, fid, None).unwrap();
-    assert_eq!(back.inputs[0].items, vec![Sel::SketchCurve { id: "a".into() }, Sel::SketchCurve { id: "b".into() }]);
+    assert_eq!(
+        back.inputs[0].items,
+        vec![Sel::SketchCurve { id: "a".into(), sketch: Some(2) }, Sel::SketchCurve { id: "b".into(), sketch: Some(3) }]
+    );
 }
 
 #[test]
@@ -1782,7 +1786,7 @@ fn trim_dialog_takes_curves_several_keep_points_and_another_surface() {
     let mut d = start(&mut app, vec![], "surface.trim");
     assert_eq!(d.inputs.len(), 5);
     d.inputs[0].items = vec![Sel::Body { name: "Floor".into() }];
-    d.inputs[1].items = vec![Sel::SketchCurve { id: "c1".into() }];
+    d.inputs[1].items = vec![Sel::SketchCurve { id: "c1".into(), sketch: None }];
     // Two places on the one face both count (a face pick would toggle the face off).
     d.inputs[2].toggle(vec![face("Floor", [1.0, 5.0, 0.0])]);
     d.inputs[2].toggle(vec![face("Floor", [-5.0, 5.0, 0.0])]);

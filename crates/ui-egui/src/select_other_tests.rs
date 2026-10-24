@@ -24,7 +24,7 @@ fn labels(h: &Harness) -> Vec<String> {
 }
 
 fn curves(h: &Harness) -> Vec<String> {
-    h.app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id } = s { Some(id.clone()) } else { None }).collect()
+    h.app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id, .. } = s { Some(id.clone()) } else { None }).collect()
 }
 
 #[test]

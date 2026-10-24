@@ -68,7 +68,7 @@ fn ctrl_c_ctrl_v_pastes_the_sketch_selection_at_the_cursor_selected_in_one_undo_
     assert!(start(&h, &rect[0]).dist(Vec2::ZERO) < 1e-9);
     // Selected, ready to move.
     let selected: Vec<String> =
-        h.app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id } = s { Some(id.clone()) } else { None }).collect();
+        h.app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id, .. } = s { Some(id.clone()) } else { None }).collect();
     assert_eq!(selected, pasted);
     // One undo step.
     assert_eq!(h.app.session.undo.len(), undo + 1);

@@ -530,7 +530,7 @@ pub(crate) fn constraint_preselection(command: &str, selection: &[solidcraft_eng
         let ids: Vec<&str> = selection
             .iter()
             .map(|s| match s {
-                SketchCurve { id } => Some(id.as_str()),
+                SketchCurve { id, .. } => Some(id.as_str()),
                 SketchPoint { id } if !curves_only => Some(id.as_str()),
                 _ => None,
             })
@@ -541,12 +541,12 @@ pub(crate) fn constraint_preselection(command: &str, selection: &[solidcraft_eng
     match (command, selection) {
         ("sketch.constraint.fix", _) => selected_ids(false, 1).map(|ids| json!({"entities":ids})),
         ("sketch.constraint.polygon", _) => selected_ids(true, 3).map(|ids| json!({"lines":ids})),
-        ("sketch.constraint.curvature", [SketchCurve { id: a }, SketchCurve { id: b }]) if a != b => Some(json!({"a":a,"b":b})),
-        ("sketch.constraint.horizontal_vertical", [SketchCurve { id }]) => Some(json!({"line":id})),
+        ("sketch.constraint.curvature", [SketchCurve { id: a, .. }, SketchCurve { id: b, .. }]) if a != b => Some(json!({"a":a,"b":b})),
+        ("sketch.constraint.horizontal_vertical", [SketchCurve { id, .. }]) => Some(json!({"line":id})),
         ("sketch.constraint.horizontal_vertical", [SketchPoint { id: a }, SketchPoint { id: b }]) if a != b => Some(json!({"points":[a,b]})),
         ("sketch.constraint.coincident", [a, b]) => {
             let entity = |s: &solidcraft_engine::Sel| match s {
-                SketchPoint { id } | SketchCurve { id } => Some(id.clone()),
+                SketchPoint { id } | SketchCurve { id, .. } => Some(id.clone()),
                 _ => None,
             };
             let (a, b) = (entity(a)?, entity(b)?);
@@ -554,16 +554,16 @@ pub(crate) fn constraint_preselection(command: &str, selection: &[solidcraft_eng
         }
         (
             "sketch.constraint.midpoint",
-            [SketchPoint { id: point }, SketchCurve { id: line }] | [SketchCurve { id: line }, SketchPoint { id: point }],
+            [SketchPoint { id: point }, SketchCurve { id: line, .. }] | [SketchCurve { id: line, .. }, SketchPoint { id: point }],
         ) => Some(json!({"point":point,"line":line})),
-        ("sketch.constraint.midpoint", [SketchCurve { id: a }, SketchCurve { id: b }]) if a != b => Some(json!({"a":a,"b":b})),
+        ("sketch.constraint.midpoint", [SketchCurve { id: a, .. }, SketchCurve { id: b, .. }]) if a != b => Some(json!({"a":a,"b":b})),
         ("sketch.constraint.symmetry", [a, b, c]) => {
             let mut points = Vec::new();
             let mut lines = Vec::new();
             for entity in [a, b, c] {
                 match entity {
                     SketchPoint { id } => points.push(id),
-                    SketchCurve { id } => lines.push(id),
+                    SketchCurve { id, .. } => lines.push(id),
                     _ => return None,
                 }
             }

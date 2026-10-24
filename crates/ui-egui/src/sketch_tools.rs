@@ -931,7 +931,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             if cmd == "sketch.edit_text" {
                 let selection = hits.first().and_then(|hit| match hit {
                     Hit::SketchCurve { sketch, id, .. } if Some(*sketch) == active_sketch(app) => {
-                        Some(solidcraft_engine::Sel::SketchCurve { id: id.clone() })
+                        Some(solidcraft_engine::Sel::SketchCurve { id: id.clone(), sketch: None })
                     }
                     Hit::Profile { sketch, index } => Some(solidcraft_engine::Sel::Profile { sketch: *sketch, index: *index }),
                     _ => None,

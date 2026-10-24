@@ -86,7 +86,7 @@ fn a_second_escape_stays_in_the_sketch() {
     press(&mut h, "Escape");
     assert_eq!(h.app.session.active_sketch, sketch, "a second Escape stays in the sketch");
     h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
-    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into() }];
+    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }];
     pause(&mut h);
     press(&mut h, "Escape");
     assert!(h.app.session.selection.is_empty(), "Escape still clears a selection");
@@ -131,7 +131,7 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
     let sketch = h.app.session.active_sketch;
-    let selection = vec![Sel::SketchCurve { id: "l1".into() }];
+    let selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }];
     h.app.session.selection = selection.clone();
 
     press(&mut h, "M");

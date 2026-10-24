@@ -93,7 +93,7 @@ fn axis_and_plane_preselection_projects_as_one_command() {
 #[test]
 fn mixed_local_and_external_selection_keeps_ordinary_project_picking() {
     let (mut h, source) = setup();
-    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into() }, Sel::ExternalSketchCurve { sketch: source, id: "l1".into() }];
+    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }, Sel::ExternalSketchCurve { sketch: source, id: "l1".into() }];
     let before = h.app.session.doc.to_json();
     let selection = h.app.session.selection.clone();
     let undo = h.app.session.undo.len();

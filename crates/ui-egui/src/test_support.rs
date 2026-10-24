@@ -63,7 +63,7 @@ pub(crate) fn selected_text(text: &str, at: [i32; 2]) -> (Harness, String, Strin
     let result = h.app.run("sketch.text", json!({"text":text,"at":at,"height":10})).unwrap();
     let link = result["link"].as_str().unwrap().to_owned();
     let curve = result["curves"][0].as_str().unwrap().to_owned();
-    h.app.session.selection = vec![Sel::SketchCurve { id: curve.clone() }];
+    h.app.session.selection = vec![Sel::SketchCurve { id: curve.clone(), sketch: None }];
     (h, link, curve)
 }
 

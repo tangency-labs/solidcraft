@@ -58,7 +58,7 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         } else if input.accept & crate::selection::SKETCH_LINES != 0 {
             vec![Sel::ExternalSketchCurve { sketch: s.world_state().sketches.last().unwrap().feature, id: path.clone() }]
         } else if input.accept & CURVES != 0 || command == "sheet.fold" && index == 0 {
-            vec![Sel::SketchCurve { id: path.clone() }]
+            vec![Sel::SketchCurve { id: path.clone(), sketch: None }]
         } else if input.accept & AXES != 0 {
             vec![Sel::Axis { name: "Z".into() }]
         } else if input.accept & (FACES | PLANAR_FACES) != 0 {

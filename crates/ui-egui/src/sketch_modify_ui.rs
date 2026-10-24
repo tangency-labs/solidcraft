@@ -222,7 +222,7 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
     let active = session.active_sketch?;
     match hit {
         Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } if *sketch != active => None,
-        _ => d.active_input()?.accepts(hit, |_, _| false),
+        _ => d.active_input()?.accepts(hit, Some(active), |_, _| false),
     }
 }
 
@@ -254,11 +254,14 @@ pub fn edit_pattern(app: &mut SolveApp, id: &str) -> bool {
     };
     let mut dialog = Dialog::new(Kind::SketchModify(kind.clone()), inputs(&kind));
     if let Some(input) = dialog.inputs.first_mut() {
-        input.items = pattern
-            .entities
-            .iter()
-            .map(|id| if sk.curve_index(id).is_some() { Sel::SketchCurve { id: id.clone() } } else { Sel::SketchPoint { id: id.clone() } })
-            .collect();
+        input.items =
+            pattern
+                .entities
+                .iter()
+                .map(|id| {
+                    if sk.curve_index(id).is_some() { Sel::SketchCurve { id: id.clone(), sketch: None } } else { Sel::SketchPoint { id: id.clone() } }
+                })
+                .collect();
     }
     match &pattern.kind {
         SketchPatternKind::Circular { center, .. } => {
@@ -273,7 +276,7 @@ pub fn edit_pattern(app: &mut SolveApp, id: &str) -> bool {
                 if let Some(id) = id
                     && let Some(input) = dialog.inputs.get_mut(index)
                 {
-                    input.items = vec![Sel::SketchCurve { id: id.clone() }];
+                    input.items = vec![Sel::SketchCurve { id: id.clone(), sketch: None }];
                 }
             }
         }
@@ -523,7 +526,7 @@ fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usiz
     items(inputs, i)
         .iter()
         .filter_map(|x| match x {
-            Sel::SketchCurve { id } => Some(id.clone()),
+            Sel::SketchCurve { id, .. } => Some(id.clone()),
             _ => point_id(session, x).map(str::to_string),
         })
         .collect()
@@ -531,7 +534,7 @@ fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usiz
 
 /// Sketch curve ids picked in input `i`.
 fn curve_ids(inputs: &[SelInput], i: usize) -> Vec<String> {
-    items(inputs, i).iter().filter_map(|x| if let Sel::SketchCurve { id } = x { Some(id.clone()) } else { None }).collect()
+    items(inputs, i).iter().filter_map(|x| if let Sel::SketchCurve { id, .. } = x { Some(id.clone()) } else { None }).collect()
 }
 
 /// A typed scale factor as the command wants it: the field evaluated against the document's
@@ -605,7 +608,7 @@ fn line_ids(inputs: &[SelInput], i: usize) -> Vec<String> {
     items(inputs, i)
         .iter()
         .filter_map(|x| match x {
-            Sel::SketchCurve { id } => Some(id.clone()),
+            Sel::SketchCurve { id, .. } => Some(id.clone()),
             _ => None,
         })
         .collect()
@@ -711,7 +714,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             // The AXES mask also takes an origin axis, which is not a curve of this sketch and
             // cannot be a mirror line.
             let line = match items(inputs, 1).first() {
-                Some(Sel::SketchCurve { id }) => id.clone(),
+                Some(Sel::SketchCurve { id, .. }) => id.clone(),
                 Some(_) => return Err("The mirror line must be a straight curve of this sketch, not an origin axis".into()),
                 None => return Err("Select the mirror line".into()),
             };
@@ -763,7 +766,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                     let d = sketch_dir(app, sel).ok_or("The direction must be an axis or a straight sketch curve that lies in the sketch plane")?;
                     p[vector_key] = json!([d.x, d.y]);
                     p[line_key] = match sel {
-                        Sel::SketchCurve { id } => json!(id),
+                        Sel::SketchCurve { id, .. } => json!(id),
                         _ => Value::Null,
                     };
                 } else {

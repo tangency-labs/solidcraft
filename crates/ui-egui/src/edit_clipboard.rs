@@ -34,7 +34,7 @@ fn sketch_selection(app: &SolveApp) -> Vec<String> {
         .selection
         .iter()
         .filter_map(|s| match s {
-            Sel::SketchCurve { id } | Sel::SketchPoint { id } => Some(id.clone()),
+            Sel::SketchCurve { id, .. } | Sel::SketchPoint { id } => Some(id.clone()),
             _ => None,
         })
         .collect()

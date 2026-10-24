@@ -491,12 +491,9 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                 2 => {
                     let ids: Vec<String> = items(inputs, 0).curve_ids();
                     let st = s.world_state();
-                    let sketch = st
-                        .sketches
-                        .iter()
-                        .rev()
-                        .find(|ss| ids.iter().all(|id| ss.sketch.curve_index(id).is_some()))
-                        .map(|ss| ss.feature)
+                    let sketch = items(inputs, 0)
+                        .named_sketch()
+                        .or_else(|| st.sketches.iter().rev().find(|ss| ids.iter().all(|id| ss.sketch.curve_index(id).is_some())).map(|ss| ss.feature))
                         .ok_or("pick lines of one sketch")?;
                     json!({"type": "contour", "sketch": sketch, "curves": ids, "distance": distance, "reverse": reverse})
                 }
@@ -525,14 +522,10 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
         Sm::Fold { radius, .. } => {
             let mut p = json!({});
             match items(inputs, 0).first() {
-                Some(Sel::SketchCurve { id }) => {
+                Some(Sel::SketchCurve { id, sketch: named }) => {
                     let st = s.world_state();
-                    let sketch = st
-                        .sketches
-                        .iter()
-                        .rev()
-                        .find(|ss| ss.sketch.curve_index(id).is_some())
-                        .map(|ss| ss.feature)
+                    let sketch = named
+                        .or_else(|| st.sketches.iter().rev().find(|ss| ss.sketch.curve_index(id).is_some()).map(|ss| ss.feature))
                         .ok_or("the line's sketch is gone")?;
                     p["sketch"] = json!(sketch);
                     p["curve"] = json!(id);
@@ -603,7 +596,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (f, ps.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect())
         }
-        FeatureKind::SheetContour { curves, distance, rule, flip, reverse, .. } => {
+        FeatureKind::SheetContour { sketch, curves, distance, rule, flip, reverse, .. } => {
             let mut f = new_flange(2);
             if let Sm::Flange { flip: fl, rule: r, distance: d, reverse: rv, .. } = &mut f {
                 *fl = *flip;
@@ -611,7 +604,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 *d = distance.to_string();
                 *rv = *reverse;
             }
-            (f, curves.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect())
+            (f, curves.iter().map(|id| crate::selection::curve_pick(id, sketch.0, app.session.active_sketch)).collect())
         }
         FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief } => {
             if let Some(b) = body {
@@ -656,7 +649,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (Sm::simple_restore(kind)?, edges.iter().filter_map(|p| edge_sel(s, p.0)).collect())
         }
-        FeatureKind::SheetFold { curve, a, b, fixed, body, .. } => {
+        FeatureKind::SheetFold { sketch, curve, a, b, fixed, body, .. } => {
             if let Some(bd) = body {
                 extra.insert("body".into(), json!(bd));
             }
@@ -665,7 +658,10 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             match curve {
                 Some(c) => {
                     if let Some(i) = ins.first_mut() {
-                        i.items = vec![Sel::SketchCurve { id: c.clone() }];
+                        i.items = vec![match sketch {
+                            Some(k) => crate::selection::curve_pick(c, k.0, app.session.active_sketch),
+                            None => Sel::SketchCurve { id: c.clone(), sketch: None },
+                        }];
                     }
                 }
                 // A fold given by two points keeps them.

@@ -34,7 +34,13 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: us
                     .entities
                     .iter()
                     .chain(pattern.instances.iter().flat_map(|i| &i.curves))
-                    .map(|id| if sk.curve_index(id).is_some() { Sel::SketchCurve { id: id.clone() } } else { Sel::SketchPoint { id: id.clone() } })
+                    .map(|id| {
+                        if sk.curve_index(id).is_some() {
+                            Sel::SketchCurve { id: id.clone(), sketch: None }
+                        } else {
+                            Sel::SketchPoint { id: id.clone() }
+                        }
+                    })
                     .collect()
             })
             .unwrap_or_default();

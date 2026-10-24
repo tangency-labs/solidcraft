@@ -78,7 +78,7 @@ fn pixel_circle_fit_exact_half_chord_hover_click_and_model_invariance() {
             h.app.viewport.hover
         );
         h.step(&json!({"click":{"world":[world.x,world.y,world.z]}})).unwrap();
-        assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchCurve{id} if id == "c1")));
+        assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchCurve{id, ..} if id == "c1")));
         h.app.session.selection.clear();
     }
     assert_eq!(h.app.session.doc.to_json(), baseline, "display and selection must not alter stored geometry, constraints or expressions");
@@ -216,7 +216,7 @@ fn pixel_curve_second_nested_rotated_occurrence_uses_its_world_plane() {
     assert!(dense_circle_error(&path, &ss.plane, &proj, 1.0, h.app.viewport.pixels_per_point()) <= 1.0);
     let world = ss.plane.to_world(Vec2::new(0.8090169943749475, 0.5877852522924731));
     h.step(&json!({"click":{"world":[world.x,world.y,world.z]}})).unwrap();
-    assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchCurve{id} if id == "c1")));
+    assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchCurve{id, ..} if id == "c1")));
     assert_eq!(h.app.session.doc.to_json(), baseline);
 }
 

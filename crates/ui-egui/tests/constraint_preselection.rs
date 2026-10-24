@@ -16,7 +16,7 @@ fn select_lines(h: &mut Harness) {
         {"click":{"sketch":[25,32.5]},"shift":true}
     ]))
     .unwrap();
-    assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: "l1".into() }, Sel::SketchCurve { id: "l2".into() }]);
+    assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: "l1".into(), sketch: None }, Sel::SketchCurve { id: "l2".into(), sketch: None }]);
 }
 
 fn assert_line_geometry(h: &Harness, command: &str) {
@@ -106,8 +106,12 @@ fn selected_circles_apply_constraints() {
 fn ambiguous_selection_preserves_tool_first_workflow() {
     for selection in [
         vec![],
-        vec![Sel::SketchCurve { id: "l1".into() }],
-        vec![Sel::SketchCurve { id: "l1".into() }, Sel::SketchCurve { id: "l2".into() }, Sel::SketchPoint { id: "origin".into() }],
+        vec![Sel::SketchCurve { id: "l1".into(), sketch: None }],
+        vec![
+            Sel::SketchCurve { id: "l1".into(), sketch: None },
+            Sel::SketchCurve { id: "l2".into(), sketch: None },
+            Sel::SketchPoint { id: "origin".into() },
+        ],
     ] {
         let mut h = lines();
         h.app.session.selection = selection;
@@ -224,7 +228,7 @@ fn remaining_constraints_preserve_mixed_selections_and_rejected_geometry() {
         let mut h = lines();
         let before = h.app.session.doc.to_json();
         let undo = h.app.session.undo.len();
-        let mixed = vec![Sel::SketchCurve { id: "l1".into() }, Sel::Body { name: "missing".into() }];
+        let mixed = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }, Sel::Body { name: "missing".into() }];
         h.app.session.selection = mixed.clone();
         h.step(&json!({"start":format!("sketch.constraint.{command}")})).unwrap();
         assert!(h.app.tool.is_some());
@@ -233,7 +237,7 @@ fn remaining_constraints_preserve_mixed_selections_and_rejected_geometry() {
         assert_eq!(h.app.session.undo.len(), undo);
     }
     let mut h = lines();
-    let selection = vec![Sel::SketchCurve { id: "l1".into() }, Sel::SketchCurve { id: "missing".into() }];
+    let selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }, Sel::SketchCurve { id: "missing".into(), sketch: None }];
     h.app.session.selection = selection.clone();
     let before = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();

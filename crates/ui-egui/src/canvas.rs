@@ -48,8 +48,11 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         Sel::Face { body, index, point } => (*point, crate::dialogs::planar_face(&app.session, body, *index).map(|(_, n)| n)),
         Sel::Edge { body, index, point } => (*point, st.body(body).and_then(|b| edge_bisector(&b.mesh(), *index, *point))),
         Sel::Vertex { point, .. } => (*point, None),
-        Sel::SketchCurve { id } => {
-            let ss = st.sketches.iter().rev().find(|ss| ss.sketch.curve_index(id).is_some())?;
+        Sel::SketchCurve { id, sketch } => {
+            let ss = match sketch {
+                Some(k) => st.sketch(*k)?,
+                None => st.sketches.iter().rev().find(|ss| ss.sketch.curve_index(id).is_some())?,
+            };
             let pts = ss.sketch.polyline(ss.sketch.curve_index(id)?);
             let (mid, tangent) = poly_mid(&pts)?;
             // An offset's drag arrow: the in-plane direction the distance grows along. The
