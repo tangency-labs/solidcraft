@@ -223,6 +223,12 @@ fn trace(face: &mt::Face, g: &Field, size: f64) -> Result<Vec<Chain>> {
     if gv.iter().any(|x| !x.is_finite()) {
         return Err(KernelError::Failed("the splitting tool cannot be evaluated on the face".into()));
     }
+    // A face that only touches the tool (along an edge in it, or tangent) does not cross it:
+    // its corners there are on the tool up to rounding, which would trace a line along the edge.
+    let on = size * 1e-7;
+    if gv.iter().all(|x| *x <= on) || gv.iter().all(|x| *x >= -on) {
+        return Ok(Vec::new());
+    }
     let side = |i: usize| gv.get(i).copied().unwrap_or(0.0) >= 0.0;
     // Mesh edges crossed by the zero set, and which triangles link them.
     let key = |a: usize, b: usize| (a.min(b), a.max(b));
@@ -372,6 +378,15 @@ fn trace_flat(face: &mt::Face, g: &Field, size: f64) -> Option<Vec<Chain>> {
 /// Where the zero set crosses a boundary edge of the face (exact, by bisection on the curve).
 fn boundary_hits(face: &mt::Face, g: &Field) -> Vec<Hit> {
     let mut out = Vec::new();
+    // An end of an edge on the tool is a hit too (a line ending at a corner of the face, where
+    // no sign change is seen); the edges meeting there give it once.
+    let endpoint_tol = face
+        .boundaries()
+        .iter()
+        .flat_map(|w| w.edge_iter())
+        .map(|e| from_p3(e.front().point()).dist(Vec3::ZERO).max(from_p3(e.back().point()).dist(Vec3::ZERO)))
+        .fold(1.0_f64, f64::max)
+        * 1e-10;
     for w in face.absolute_boundaries() {
         for e in w.edge_iter() {
             let c = e.curve();
@@ -379,6 +394,9 @@ fn boundary_hits(face: &mt::Face, g: &Field) -> Vec<Hit> {
             let n = 64;
             let val = |t: f64| g.eval(from_p3(c.subs(t)));
             let mut prev = (t0, val(t0));
+            if prev.1.is_finite() && prev.1.abs() <= endpoint_tol {
+                out.push(Hit { edge: e.clone(), t: t0, p: c.subs(t0) });
+            }
             for k in 1..=n {
                 let t = t0 + (t1 - t0) * k as f64 / n as f64;
                 let cur = (t, val(t));
@@ -398,8 +416,13 @@ fn boundary_hits(face: &mt::Face, g: &Field) -> Vec<Hit> {
                 }
                 prev = cur;
             }
+            if prev.1.is_finite() && prev.1.abs() <= endpoint_tol {
+                out.push(Hit { edge: e.clone(), t: t1, p: c.subs(t1) });
+            }
         }
     }
+    out.sort_by(|a, b| a.p.x.total_cmp(&b.p.x).then(a.p.y.total_cmp(&b.p.y)).then(a.p.z.total_cmp(&b.p.z)));
+    out.dedup_by(|a, b| a.p.distance(b.p) <= endpoint_tol);
     out
 }
 
@@ -1223,6 +1246,21 @@ fn side_of(face: &mt::Face, g: &Field, size: f64) -> Result<f64> {
     Ok(best)
 }
 
+/// Which half of a plane owns a body face that lies on the plane. Its outward normal points
+/// toward the empty half; the solid itself is on the opposite side.
+fn split_side(face: &mt::Face, g: &Field, size: f64) -> Result<f64> {
+    if let Field::Plane { o, n } = g
+        && let Some(crate::FaceSurface::Plane { normal, point }) = crate::surface_kind::surface_of(face, size)
+    {
+        let aligned = normal.dot(*n);
+        let exact = (size * 1e-7).max(1e-9) * 10.0;
+        if aligned.abs() >= 1.0 - 1e-9 && (point - *o).dot(*n).abs() <= exact {
+            return Ok(-aligned);
+        }
+    }
+    side_of(face, g, size)
+}
+
 /// Loops from edges (each used once), chained end to start; edges are turned round as needed.
 fn chain_loops(edges: &[mt::Edge]) -> Result<Vec<Vec<mt::Edge>>> {
     let mut pool: Vec<mt::Edge> = edges.to_vec();
@@ -1388,12 +1426,56 @@ pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
     let all: Vec<usize> = (0..total).collect();
     guard("split body", || {
         let imp = imprint(body, &all, &fields, size)?;
-        let new_edges = imp.new_edges;
+        let mut new_edges = imp.new_edges;
         if imp.made.values().all(|m| *m == 0) || new_edges.is_empty() {
             return Ok(vec![crate::boolean_record::operand(body, 0, &crate::record::counts(&[body]))]);
         }
         let mut rec = imp.rec;
         let faces: Vec<mt::Face> = imp.shells.into_iter().flatten().collect();
+        // Where the plane runs along an edge of the body (the rim of a face lying in the plane,
+        // or a crease it passes through), nothing is traced, yet the edge may bound the section:
+        // it does where its two faces go to opposite sides, the material reaching across the
+        // plane on one side of the edge only. Where both go to one side the plane only touches
+        // the body there (the outer rim of a face in the plane, a convex edge).
+        if let Field::Plane { o, n } = g {
+            let tol = (size * 1e-7).max(1e-9) * 10.0;
+            let d = n.dot(*o);
+            let traced: std::collections::HashSet<_> = new_edges.iter().map(mt::Edge::id).collect();
+            let mut in_plane: Vec<mt::EdgeID> = Vec::new();
+            let mut owners: HashMap<mt::EdgeID, (mt::Edge, Vec<usize>)> = HashMap::new();
+            for (fi, face) in faces.iter().enumerate() {
+                for edge in face.boundaries().iter().flat_map(|w| w.edge_iter()) {
+                    if traced.contains(&edge.id()) {
+                        continue;
+                    }
+                    let entry = owners.entry(edge.id()).or_insert_with(|| {
+                        let curve = edge.curve();
+                        let (t0, t1) = curve.range_tuple();
+                        if [0.0, 0.25, 0.5, 0.75, 1.0].iter().all(|t| (n.dot(from_p3(curve.subs(t0 + (t1 - t0) * t))) - d).abs() <= tol) {
+                            in_plane.push(edge.id());
+                        }
+                        (edge.clone(), Vec::new())
+                    });
+                    entry.1.push(fi);
+                }
+            }
+            let mut sides: HashMap<usize, f64> = HashMap::new();
+            for id in in_plane {
+                let Some((edge, [f0, f1])) = owners.get(&id).map(|(e, fs)| (e, fs.as_slice())) else { continue };
+                let mut side = |fi: usize| -> Result<f64> {
+                    if let Some(x) = sides.get(&fi) {
+                        return Ok(*x);
+                    }
+                    let x = split_side(faces.get(fi).ok_or_else(|| KernelError::Failed("a face of the split".into()))?, g, size)?;
+                    sides.insert(fi, x);
+                    Ok(x)
+                };
+                let (s0, s1) = (side(*f0)?, side(*f1)?);
+                if s0 * s1 < 0.0 {
+                    new_edges.push(edge.clone());
+                }
+            }
+        }
         // The section: loops of the new edges on the tool surface, outer loops counter-clockwise
         // about its normal and holes inside them.
         let loops = chain_loops(&new_edges)?;
@@ -1487,7 +1569,7 @@ pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
         // Each face goes to the side its inside is on.
         let (mut back, mut front) = (Vec::new(), Vec::new());
         for f in faces {
-            let x = side_of(&f, g, size)?;
+            let x = split_side(&f, g, size)?;
             if x.abs() <= size * 1e-9 {
                 return Err(KernelError::Invalid("not supported yet: the tool lies along a face of the body".into()));
             }
