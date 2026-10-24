@@ -54,7 +54,7 @@ class BaselineTests(unittest.TestCase):
     def test_event_matrix(self):
         repo = dict(id=b.REPOSITORY_ID, full_name=b.REPOSITORY)
         for event, extra in [("pull_request", {"pull_request": {"base": {"sha": BASE}}}),
-                             ("merge_group", {"merge_group": {"base_sha": BASE}}),
+                             ("merge_group", {"merge_group": {"base_sha": BASE, "base_ref": "refs/heads/main"}}),
                              ("push", {"ref": "refs/heads/main", "before": BASE}),
                              ("workflow_dispatch", {"inputs": {"baseline_sha": BASE}})]:
             p = dict(repository=repo, **extra)
@@ -69,11 +69,94 @@ class BaselineTests(unittest.TestCase):
         with self.assertRaises(b.BaselineError):
             b.resolve_base("push", "", dict(repository=repo, ref="refs/heads/main", before=""))
 
+    def test_queue_base_is_pinned_to_main_ancestry(self):
+        speculative, advanced = "b" * 40, "c" * 40
+        for queue, main, ancestor, status in [
+            (BASE, BASE, BASE, "identical"),
+            (speculative, BASE, BASE, "ahead"),
+            (speculative, advanced, BASE, "diverged"),
+            (BASE, advanced, BASE, "behind"),
+        ]:
+            with self.subTest(status=status):
+                calls = []
+                class API:
+                    def json(self, path):
+                        calls.append(path)
+                        if path.endswith("/git/ref/heads/main"):
+                            return dict(ref="refs/heads/main", object=dict(type="commit", sha=main))
+                        self_path = f"repos/{b.REPOSITORY}/compare/{main}...{queue}"
+                        if path != self_path:
+                            raise AssertionError(path)
+                        return dict(base_commit=dict(sha=main),
+                                    merge_base_commit=dict(sha=ancestor), status=status)
+                self.assertEqual(b.resolve_queue_base(API(), queue), (ancestor, main))
+                self.assertEqual(len(calls), 2)
+
+    def test_queue_base_rejects_invalid_provenance(self):
+        repo = dict(id=b.REPOSITORY_ID, full_name=b.REPOSITORY)
+        for ref in [None, "main", "refs/heads/release"]:
+            with self.subTest(ref=ref), self.assertRaises(b.BaselineError):
+                b.resolve_base("merge_group", BASE, dict(repository=repo,
+                    merge_group=dict(base_sha=BASE, base_ref=ref)))
+        main = dict(ref="refs/heads/main", object=dict(type="commit", sha=BASE))
+        comparison = dict(base_commit=dict(sha=BASE), merge_base_commit=dict(sha=BASE), status="ahead")
+        invalid = [
+            (dict(main, ref="refs/heads/other"), comparison),
+            (dict(main, object=dict(type="tag", sha=BASE)), comparison),
+            (dict(main, object=dict(type="commit", sha="0" * 40)), comparison),
+            (main, dict(comparison, base_commit=dict(sha="c" * 40))),
+            (main, dict(comparison, merge_base_commit={})),
+            (main, dict(comparison, merge_base_commit=dict(sha="0" * 40))),
+            (main, dict(comparison, merge_base_commit=dict(sha="c" * 40))),
+            (main, dict(comparison, status="behind")),
+            (main, dict(comparison, status="identical")),
+            (main, dict(comparison, status="unknown")),
+        ]
+        for ref, compare in invalid:
+            class API:
+                def json(self, path):
+                    return ref if "/git/ref/" in path else compare
+            with self.subTest(ref=ref, compare=compare), self.assertRaises(b.BaselineError):
+                b.resolve_queue_base(API(), "b" * 40)
+
+    def test_default_wait_covers_main_ci_and_stays_bounded(self):
+        from unittest.mock import patch
+        for ready_at in [780, None]:
+            clock, queries = [0], []
+            class API(b.GitHub):
+                def json(self, path):
+                    if path.endswith("/ci.yml"):
+                        return dict(id=b.WORKFLOW_ID, path=b.WORKFLOW_PATH)
+                    run = run_metadata()
+                    if ready_at is None or clock[0] < ready_at:
+                        run.update(status="in_progress", conclusion=None)
+                    if "/runs?" in path:
+                        queries.append(path)
+                        return dict(workflow_runs=[] if clock[0] < 20 else [run])
+                    if path.endswith("/runs/101"):
+                        return run
+                    if "/artifacts?" in path:
+                        return dict(artifacts=[dict(artifact(), expires_at="9999-01-01T00:00:00Z")])
+                    raise AssertionError(path)
+            def sleep(seconds):
+                clock[0] += seconds
+            with self.subTest(ready_at=ready_at), \
+                 patch("time.monotonic", side_effect=lambda: clock[0]), patch("time.sleep", side_effect=sleep):
+                if ready_at is None:
+                    with self.assertRaisesRegex(b.BaselineError, "exact-base CI pending"):
+                        b.fetch_exact(API(), BASE)
+                    self.assertEqual(clock[0], 1500)
+                else:
+                    run, _ = b.fetch_exact(API(), BASE)
+                    self.assertEqual(run["head_sha"], BASE)
+                    self.assertEqual(clock[0], ready_at)
+            self.assertEqual(set(queries), {f"repos/{b.REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha={BASE}&per_page=100&page=1"})
+
     def test_run_trust_and_latest_failure(self):
         r = run_metadata()
         self.assertEqual(b.select_run([r], BASE, b.REPOSITORY, b.WORKFLOW_ID), r)
         for key, value in [("head_sha", "b" * 40), ("event", "pull_request"), ("head_branch", "fork"),
-                           ("workflow_id", 1), ("path", "nightly.yml")]:
+                           ("event", "merge_group"), ("workflow_id", 1), ("path", "nightly.yml")]:
             with self.subTest(key=key), self.assertRaises(b.BaselineError):
                 b.select_run([dict(r, **{key: value})], BASE, b.REPOSITORY, b.WORKFLOW_ID)
         for key in ["repository", "head_repository"]:
@@ -211,6 +294,8 @@ class BaselineTests(unittest.TestCase):
             provenance = json.loads((out / "provenance.json").read_text())
             self.assertEqual((provenance["run_event"], provenance["run_branch"], provenance["base_sha"]), ("push", "main", BASE))
             self.assertEqual(provenance["source_event"], "pull_request")
+            self.assertEqual(provenance["source_base_sha"], BASE)
+            self.assertNotIn("queue_main_snapshot_sha", provenance)
             # A corrupted download must emit no usable argument and install nothing.
             art["digest"] = "sha256:" + "0" * 64
             args[3] = str(Path(tmp) / "corrupt")
@@ -245,6 +330,26 @@ class BaselineTests(unittest.TestCase):
         with patch("time.monotonic", side_effect=[0, 0, 0, 2]), patch("time.sleep") as sleep, self.assertRaises(b.BaselineError):
             b.fetch_exact(Pending(), BASE, 1)
         sleep.assert_called_once_with(1)
+        class Failed(Pending):
+            def json(self, path):
+                response = super().json(path)
+                for run in response.get("workflow_runs", []):
+                    run.update(status="completed", conclusion="failure")
+                return response
+        with patch("time.sleep") as sleep, self.assertRaisesRegex(b.BaselineError, "not successful"):
+            b.fetch_exact(Failed(), BASE)
+        sleep.assert_not_called()
+
+    def test_cli_wait_bounds(self):
+        import subprocess
+        helper = Path(__file__).resolve().with_name("difftest-baseline.sh")
+        for seconds in [-1, 1501]:
+            with self.subTest(seconds=seconds):
+                result = subprocess.run(["bash", str(helper), "pull_request", BASE, "unused",
+                    "--wait-seconds", str(seconds)], text=True, capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("wait must be between zero and 1500 seconds", result.stderr)
 
     def test_workflow_checks_empty_selection_before_native_setup(self):
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
@@ -336,6 +441,52 @@ class BaselineTests(unittest.TestCase):
             result = invoke("retained")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), "--baseline " + str(root / "retained/reports"))
+            # A later queue entry contains units not yet on main. Read the plan
+            # and artifact at the resolved main ancestor, not this speculative SHA.
+            plan.write_text('id = "a.b"\nstatus = "green"\n')
+            queue_unit = plan.with_name("queue.only.toml")
+            queue_unit.write_text('id = "queue.only"\nstatus = "green"\n')
+            git("add", "plan/units/a.b.toml", "plan/units/queue.only.toml")
+            git("-c", "user.name=Gate test", "-c", "user.email=gate@example.invalid",
+                "commit", "--quiet", "-m", "speculative queue entry with another unit")
+            queue = git("rev-parse", "HEAD")
+            queue_responses = {
+                f"repos/{b.REPOSITORY}/git/ref/heads/main":
+                    dict(ref="refs/heads/main", object=dict(type="commit", sha=base)),
+                f"repos/{b.REPOSITORY}/compare/{base}...{queue}":
+                    dict(base_commit=dict(sha=base), merge_base_commit=dict(sha=base), status="ahead"),
+            }
+            for i, (api, response) in enumerate(queue_responses.items()):
+                file = root / f"queue-response-{i}.json"
+                file.write_text(json.dumps(response)); paths[api] = str(file)
+            mapping.write_text(json.dumps(paths))
+            payload["merge_group"] = dict(base_sha=queue, base_ref="refs/heads/main")
+            event.write_text(json.dumps(payload))
+            result = invoke("queue-retained", "merge_group", queue)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "--baseline " + str(root / "queue-retained/reports"))
+            provenance = json.loads((root / "queue-retained/provenance.json").read_text())
+            self.assertEqual(provenance["source_base_sha"], queue)
+            self.assertEqual(provenance["queue_main_snapshot_sha"], base)
+            self.assertEqual(provenance["base_sha"], base)
+            self.assertEqual(provenance["source_event"], "merge_group")
+            self.assertEqual((provenance["run_event"], provenance["run_branch"]), ("push", "main"))
+            self.assertEqual(provenance["units"], ["a.b"])
+            self.assertNotIn(f"head_sha={queue}", calls.read_text())
+            self.assertEqual(calls.read_text().count("/git/ref/heads/main"), 1)
+            plan.write_text('id = "a.b"\nstatus = "todo"\n')
+            result = invoke("queue-dropped", "merge_group", queue)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("current --green selection drops exact-base numeric units", result.stderr)
+            zipped.write_bytes(b"corrupt")
+            result = invoke("queue-corrupt", "merge_group", queue)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("artifact ZIP size/digest mismatch", result.stderr)
+            self.assertFalse((root / "queue-corrupt").exists())
+            zipped.write_bytes(blob)
+            plan.write_text('id = "a.b"\nstatus = "partial"\n')
             # The producer prerequisite adds counts without a schema-version bump.
             # A length-only known mismatch is ambiguous without that actual count,
             # even when an unrelated new unit is selected by the current plan.

@@ -296,8 +296,16 @@ least one value-bearing case. Both-error and vacuous passes stay in the
 denominator. Known mismatches are not passes and cannot waive new discrepancies.
 
 CI retrieves the exact base SHA's successful push/main CI artifact through
-`scripts/ci/difftest-baseline.sh`. PRs use `pull_request.base.sha`, merge queues
-use `merge_group.base_sha`, and main pushes use `before`. Repository/workflow,
+`scripts/ci/difftest-baseline.sh`. PRs use `pull_request.base.sha` and main pushes
+use `before`. For a merge queue, the helper snapshots the trusted repository's
+`main` SHA once and uses its merge base with `merge_group.base_sha`. Later queue
+entries have speculative bases with no push/main run; their cumulative changes
+are checked against this common main ancestor. If main has advanced, only changes
+already in the queue's ancestry can advance its baseline. The event base, main
+snapshot and resolved baseline are recorded in provenance. Resolution happens
+before looking for artifacts and is never changed to find a successful run.
+Absent or pending exact-base runs are retried for up to 25 minutes (configurable
+downwards with `--wait-seconds`); failed runs are rejected immediately. Repository/workflow,
 run/attempt, artifact ownership, SHA256 and complete report set must validate.
 Missing/expired/corrupt baselines fail closed; no latest-main or committed-report
 fallback is allowed. Only a genuine zero-before first push, or a manual run with

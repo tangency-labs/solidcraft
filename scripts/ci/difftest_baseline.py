@@ -206,6 +206,7 @@ WORKFLOW_PATH = ".github/workflows/ci.yml"
 MAX_ZIP_BYTES = 128 * 1024 * 1024
 MAX_REPORT_BYTES = 64 * 1024 * 1024
 MAX_EXPANDED_BYTES = 1024 * 1024 * 1024
+MAX_WAIT_SECONDS = 25 * 60  # main CI takes about 13 minutes, before runner queueing.
 
 
 def timestamp(value):
@@ -226,6 +227,8 @@ def resolve_base(event, base, payload):
     if event == "pull_request":
         expected = payload.get("pull_request", {}).get("base", {}).get("sha")
     elif event == "merge_group":
+        if payload.get("merge_group", {}).get("base_ref") != "refs/heads/main":
+            raise BaselineError("baseline merge group must target main")
         expected = payload.get("merge_group", {}).get("base_sha")
     elif event == "push":
         if payload.get("ref") != "refs/heads/main":
@@ -243,6 +246,34 @@ def resolve_base(event, base, payload):
     if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{40}", expected) or expected == "0" * 40 or base != expected:
         raise BaselineError("event requires its exact nonzero full base SHA")
     return expected
+
+
+def resolve_queue_base(api, queue_base):
+    """Find the queue's main ancestor, pinning main once before any artifact wait."""
+    # Later queue entries are based on speculative merges, which have never had
+    # push/main CI. Compare their cumulative changes with the shared main ancestor.
+    # Do not parse GitHub's temporary branch names or use a latest-successful run.
+    ref = api.json(f"repos/{REPOSITORY}/git/ref/heads/main")
+    main = ref.get("object", {}).get("sha")
+    if (ref.get("ref") != "refs/heads/main" or ref.get("object", {}).get("type") != "commit"
+            or not isinstance(main, str) or not re.fullmatch(r"[0-9a-f]{40}", main) or main == "0" * 40):
+        raise BaselineError("invalid trusted main reference")
+    comparison = api.json(f"repos/{REPOSITORY}/compare/{main}...{queue_base}")
+    base = comparison.get("merge_base_commit", {}).get("sha")
+    if (comparison.get("base_commit", {}).get("sha") != main
+            or not isinstance(base, str) or not re.fullmatch(r"[0-9a-f]{40}", base) or base == "0" * 40):
+        raise BaselineError("invalid queue/main merge base")
+    # main may have advanced since the event, including merging queue_base itself.
+    # The immutable comparison must still prove the selected ancestry relation.
+    relations = {
+        "identical": main == queue_base == base,
+        "ahead": base == main and main != queue_base,
+        "behind": base == queue_base and main != queue_base,
+        "diverged": base not in (main, queue_base) and main != queue_base,
+    }
+    if not relations.get(comparison.get("status"), False):
+        raise BaselineError("inconsistent queue/main ancestry")
+    return base, main
 
 
 class GitHub:
@@ -276,7 +307,7 @@ class GitHub:
         raise BaselineError("API pagination limit exceeded")
 
 
-def fetch_exact(api, base, wait_seconds=600):
+def fetch_exact(api, base, wait_seconds=MAX_WAIT_SECONDS):
     import time
     workflow = api.json(f"repos/{REPOSITORY}/actions/workflows/ci.yml")
     if workflow.get("id") != WORKFLOW_ID or workflow.get("path") != WORKFLOW_PATH:
@@ -405,28 +436,36 @@ def main():
     parser.add_argument("event")
     parser.add_argument("base")
     parser.add_argument("out")
-    parser.add_argument("--wait-seconds", type=int, default=600)
+    parser.add_argument("--wait-seconds", type=int, default=MAX_WAIT_SECONDS)
     parser.add_argument("--current-plan", help="working-tree root whose --green selection must retain the base units")
     args = parser.parse_args()
     try:
-        if not 0 <= args.wait_seconds <= 600:
-            raise BaselineError("wait must be between zero and 600 seconds")
+        if not 0 <= args.wait_seconds <= MAX_WAIT_SECONDS:
+            raise BaselineError(f"wait must be between zero and {MAX_WAIT_SECONDS} seconds")
         with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as stream:
             payload = json.load(stream, object_pairs_hook=unique_object)
         base = resolve_base(args.event, args.base, payload)
         if base is None:
             print("difftest-baseline: explicitly running without a prior base (bootstrap/diagnostic mode)", file=sys.stderr)
             return 0
-        run, artifact = fetch_exact(GitHub(), base, args.wait_seconds)
+        api = GitHub()
+        source_base = base
+        queue_main = None
+        if args.event == "merge_group":
+            base, queue_main = resolve_queue_base(api, source_base)
+            print(f"difftest-baseline: queue base {source_base}, main snapshot {queue_main}, baseline {base}", file=sys.stderr)
+        run, artifact = fetch_exact(api, base, args.wait_seconds)
         expected = base_units(base)
         provenance = {"repository": REPOSITORY, "repository_id": REPOSITORY_ID,
                       "workflow_id": WORKFLOW_ID, "workflow_path": WORKFLOW_PATH,
                       "source_event": args.event, "run_event": run["event"],
+                      "source_base_sha": source_base,
                       "run_branch": run["head_branch"], "run_head_sha": run["head_sha"],
                       "base_sha": base, "run_id": run["id"], "run_attempt": run.get("run_attempt", 1),
                       "artifact_id": artifact["id"], "digest": artifact["digest"],
                       "selection_policy": "exact-base green/partial numeric units; audit.recursion excluded only when explicitly declared by exact-base selector"}
-        api = GitHub()
+        if queue_main is not None:
+            provenance["queue_main_snapshot_sha"] = queue_main
         detail = api.json(f"repos/{REPOSITORY}/actions/artifacts/{artifact['id']}")
         select_artifact([detail], run, base, datetime.now(timezone.utc))
         if detail.get("id") != artifact["id"] or detail.get("digest") != artifact["digest"]:
