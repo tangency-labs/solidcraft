@@ -9,9 +9,24 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_form(ui, labels, |ui| {
             ui_kit::row(ui, app.tr("prefs.interface_language"), |ui| {
                 ui_kit::settings_control_width(ui, t.form_card_width - t.space_4, |ui| {
-                    ui_kit::dropdown_menu(ui, "pref_language", crate::i18n::Locale::for_language(&app.preferences.language).name(), |ui| {
+                    let lang = &app.preferences.language;
+                    let current_name = if cfg!(target_arch = "wasm32")
+                        && crate::fonts::needs_cjk_font(lang)
+                        && crate::web_fonts::WebFace::for_language(lang).is_some_and(|f| !crate::web_fonts::stored_faces(ui.ctx()).contains(f))
+                    {
+                        match lang.as_str() {
+                            "ja" => "Japanese",
+                            "ko" => "Korean",
+                            "zh" => "Simplified Chinese",
+                            "zh-TW" => "Traditional Chinese",
+                            _ => crate::i18n::Locale::for_language(lang).name(),
+                        }
+                    } else {
+                        crate::i18n::Locale::for_language(lang).name()
+                    };
+                    ui_kit::dropdown_menu(ui, "pref_language", current_name, |ui| {
                         for locale in crate::i18n::LOCALES {
-                            if ui_kit::list_picker(ui, locale.id, locale.name, app.preferences.language == locale.id).clicked() {
+                            if crate::locale_labels::list_picker_locale(ui, locale.id, locale.name, app.preferences.language == locale.id).clicked() {
                                 app.preferences.language = locale.id.into();
                             }
                         }

@@ -84,6 +84,9 @@ Editable drawing code, native projects and shipped exports are collected under `
 | docs/book/src/generated/tool-preview.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/tool-preview.json`; gitignored) | MIT OR Apache-2.0 |
 | assets/fonts/liberation-sans/LiberationSans-Regular.ttf | Red Hat, Inc. (Liberation Fonts 2.x; digitized data Google) | https://github.com/liberationfonts (Debian fonts-liberation), unmodified; licence text in assets/fonts/liberation-sans/OFL.txt; used for sketch Text outlines | SIL OFL 1.1 |
 | assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf | The BIZ UDGothic Project Authors | https://github.com/googlefonts/morisawa-biz-ud-gothic (Google Fonts), unmodified; licence text in assets/fonts/biz-udp-gothic/OFL.txt; used for web UI Japanese font | SIL OFL 1.1 |
+| assets/fonts/noto-sans-kr/NotoSansKR-Regular.otf | Google LLC, Adobe Systems Inc. | https://github.com/notofonts/noto-cjk, unmodified; licence text in assets/fonts/noto-sans-kr/OFL.txt; used for web UI Korean font | SIL OFL 1.1 |
+| assets/fonts/noto-sans-sc/NotoSansSC-Regular.otf | Google LLC, Adobe Systems Inc. | https://github.com/notofonts/noto-cjk, unmodified; licence text in assets/fonts/noto-sans-sc/OFL.txt; used for web UI Simplified Chinese font | SIL OFL 1.1 |
+| assets/fonts/noto-sans-tc/NotoSansTC-Regular.otf | Google LLC, Adobe Systems Inc. | https://github.com/notofonts/noto-cjk, unmodified; licence text in assets/fonts/noto-sans-tc/OFL.txt; used for web UI Traditional Chinese font | SIL OFL 1.1 |
 | tests/step-conformance/cone_point.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
 | tests/step-conformance/cone_point_vertex.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
 | tests/step-conformance/cylinder.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
@@ -127,6 +130,9 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/fonts/ibm-plex-mono/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
 | assets/fonts/ibm-plex-sans/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
 | assets/fonts/liberation-sans/OFL.txt | Red Hat, Inc.; Liberation Fonts contributors | Unmodified accompanying font licence | SIL OFL 1.1 |
+| assets/fonts/noto-sans-kr/OFL.txt | Google LLC, Adobe Systems Inc. | Unmodified accompanying font licence | SIL OFL 1.1 |
+| assets/fonts/noto-sans-sc/OFL.txt | Google LLC, Adobe Systems Inc. | Unmodified accompanying font licence | SIL OFL 1.1 |
+| assets/fonts/noto-sans-tc/OFL.txt | Google LLC, Adobe Systems Inc. | Unmodified accompanying font licence | SIL OFL 1.1 |
 | assets/icons/app/linux/exports/hicolor/128x128/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
 | assets/icons/app/linux/exports/hicolor/16x16/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
 | assets/icons/app/linux/exports/hicolor/24x24/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
@@ -156,6 +162,11 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/locales/it.json | SolidCraft contributors | Original Italian translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/locales/ja.json | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
 | assets/locales/ko.json | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
+| assets/locales/labels/ja.svg | SolidCraft contributors | Original vector label for Japanese language picker, derived from BIZ UDPGothic outlines | MIT OR Apache-2.0 |
+| assets/locales/labels/ko.svg | SolidCraft contributors | Original vector label for Korean language picker, derived from Noto Sans KR outlines | MIT OR Apache-2.0 |
+| assets/locales/labels/make_language_labels.py | SolidCraft contributors | Python script to generate minimal standalone SVG labels from font outlines | MIT OR Apache-2.0 |
+| assets/locales/labels/zh-TW.svg | SolidCraft contributors | Original vector label for Traditional Chinese language picker, derived from Noto Sans TC outlines | MIT OR Apache-2.0 |
+| assets/locales/labels/zh.svg | SolidCraft contributors | Original vector label for Simplified Chinese language picker, derived from Noto Sans SC outlines | MIT OR Apache-2.0 |
 | assets/locales/ms.json | A.Hakim (a-hakim) | Malay translation of the English message catalog | MIT OR Apache-2.0 |
 | assets/locales/nl.json | SolidCraft contributors | Original Dutch translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/locales/pl.json | cyryllo | Polish translation of the English catalog, contributed upstream | MIT OR Apache-2.0 |

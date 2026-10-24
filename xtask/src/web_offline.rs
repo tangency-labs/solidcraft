@@ -59,6 +59,7 @@ pub fn generate(root: &Path, dir: &Path) -> Result<(String, usize), String> {
     let version = format!("{}-{}", env!("CARGO_PKG_VERSION"), digest.get(..16).unwrap_or(&digest));
     let template = template(root)?;
     let sw = render(&template, &version, &manifest)?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     std::fs::write(dir.join(SW), sw).map_err(|e| format!("{}: {e}", dir.join(SW).display()))?;
     let build = json!({ "version": version, "files": manifest }).to_string();
     std::fs::write(dir.join(BUILD), build).map_err(|e| format!("{}: {e}", dir.join(BUILD).display()))?;
@@ -69,6 +70,7 @@ pub fn generate(root: &Path, dir: &Path) -> Result<(String, usize), String> {
 pub fn retire(root: &Path, dir: &Path) -> Result<(), String> {
     let template = template(root)?;
     let sw = render(&template, RETIRE_VERSION, &json!([]))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     std::fs::write(dir.join(SW), sw).map_err(|e| format!("{}: {e}", dir.join(SW).display()))
 }
 

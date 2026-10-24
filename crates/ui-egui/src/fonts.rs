@@ -1,5 +1,6 @@
 //! Bundled IBM Plex interface faces, user overrides, and language-specific system fallbacks.
-//! The same definitions are used on desktop and web; the web shell adds Japanese on demand.
+//! The same definitions are used on desktop and web; the web shell adds the face of a CJK
+//! interface language on demand (see `web_fonts`).
 
 use std::sync::Arc;
 
@@ -13,7 +14,7 @@ fn sans_families() -> [FontFamily; 4] {
     [FontFamily::Proportional, medium_family(), semibold_family(), bold_family()]
 }
 
-fn all_families() -> impl Iterator<Item = FontFamily> {
+pub(crate) fn all_families() -> impl Iterator<Item = FontFamily> {
     sans_families().into_iter().chain([FontFamily::Monospace])
 }
 
@@ -162,8 +163,8 @@ pub fn with_symbol_fallback(mut fonts: egui::FontDefinitions) -> egui::FontDefin
     fonts
 }
 
-/// UI languages whose text needs the CJK font. The web app's bundled font covers Japanese only;
-/// add Chinese or Korean here together with a font that covers them.
+/// UI languages whose text needs a CJK font. The web app fetches the face of the chosen one
+/// only (see [`crate::web_fonts::WebFace`]); a new entry needs its face there too.
 pub const CJK_LANGUAGES: &[&str] = &["ja", "zh", "zh-TW", "ko"];
 
 /// Whether the UI language needs a CJK font (the web app fetches one only then).
@@ -172,7 +173,8 @@ pub fn needs_cjk_font(language: &str) -> bool {
 }
 
 /// Whether `text` has characters only the CJK fallback draws: kana, CJK ideographs and their
-/// punctuation, and full-width forms. Hangul is left out: the web app's font has none.
+/// punctuation, and full-width forms. Hangul is left out: the Japanese face the web app fetches for
+/// such text has none, and a design's Korean name does not fetch the Korean face by itself.
 pub fn has_cjk(text: &str) -> bool {
     text.chars().any(|c| {
         matches!(u32::from(c),
@@ -224,7 +226,7 @@ fn with_fallback(mut fonts: egui::FontDefinitions, name: &str, bytes: Vec<u8>) -
 
 /// Use one primary CJK face for mixed-script labels in every sans weight family.
 /// An explicit interface font stays first; Plex and the other fallbacks remain available.
-fn promote_font_to_front(fonts: &mut FontDefinitions, name: &str) {
+pub(crate) fn promote_font_to_front(fonts: &mut FontDefinitions, name: &str) {
     for family in sans_families() {
         if let Some(list) = fonts.families.get_mut(&family)
             && let Some(pos) = list.iter().position(|entry| entry == name)
@@ -233,21 +235,6 @@ fn promote_font_to_front(fonts: &mut FontDefinitions, name: &str) {
             let first = usize::from(list.first().is_some_and(|entry| entry == UI_FONT));
             list.insert(first, item);
         }
-    }
-}
-
-/// Install the downloaded font with the CJK UI's shared mixed-script baseline.
-pub fn install_cjk_font_for(ctx: &egui::Context, bytes: Vec<u8>, language: &str) -> bool {
-    let fonts = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap_or_else(base_font_definitions);
-    match with_cjk_fallback(fonts, bytes) {
-        Some(mut fonts) => {
-            if needs_cjk_font(language) {
-                promote_font_to_front(&mut fonts, CJK_FALLBACK);
-            }
-            install(ctx, fonts);
-            true
-        }
-        None => false,
     }
 }
 
@@ -308,91 +295,6 @@ pub const CHINESE_FONT_KEYWORDS: &[&str] = &[
 pub fn is_chinese_font_name(file_name: &str) -> bool {
     let name = file_name.to_ascii_lowercase();
     CHINESE_FONT_KEYWORDS.iter().any(|k| name.contains(k))
-}
-
-/// Session state of the web app's on-demand CJK font. Pure state so it can be tested off the web:
-/// the shell does the fetch when [`CjkFontLoader::tick`] asks for it.
-#[derive(Debug, Default)]
-pub struct CjkFontLoader {
-    status: CjkFontStatus,
-    /// The saved language while this session falls back to English after a failed load.
-    saved_language: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CjkFontStatus {
-    #[default]
-    Unloaded,
-    Loading,
-    Installed,
-    Failed,
-}
-
-impl CjkFontLoader {
-    pub fn status(&self) -> CjkFontStatus {
-        self.status
-    }
-
-    /// Called every frame with the live language. Returns true when the font fetch should start
-    /// now (only for a CJK language, only once). After a failed load a CJK language falls back to
-    /// English for this session; the saved preference is kept (see [`Self::persisted_language`]).
-    pub fn tick(&mut self, language: &mut String) -> bool {
-        if self.saved_language.is_some() && language != "en" {
-            // The user picked a language themselves since the fallback: that is the preference now.
-            self.saved_language = None;
-        }
-        if !needs_cjk_font(language) {
-            return false;
-        }
-        match self.status {
-            CjkFontStatus::Unloaded => {
-                self.status = CjkFontStatus::Loading;
-                true
-            }
-            CjkFontStatus::Failed => {
-                self.fall_back(language);
-                false
-            }
-            CjkFontStatus::Loading | CjkFontStatus::Installed => false,
-        }
-    }
-
-    /// CJK text is on screen (whatever the UI language). Returns true when the font fetch should
-    /// start now: once, and never again after a failed load (the UI language stays as it is).
-    pub fn text_needs_font(&mut self) -> bool {
-        if self.status == CjkFontStatus::Unloaded {
-            self.status = CjkFontStatus::Loading;
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Whether the session still watches painted text for CJK characters.
-    pub fn watching_text(&self) -> bool {
-        self.status == CjkFontStatus::Unloaded
-    }
-
-    /// Record the outcome of the fetch and install.
-    pub fn finished(&mut self, installed: bool, language: &mut String) {
-        if installed {
-            self.status = CjkFontStatus::Installed;
-        } else {
-            self.status = CjkFontStatus::Failed;
-            if needs_cjk_font(language) {
-                self.fall_back(language);
-            }
-        }
-    }
-
-    fn fall_back(&mut self, language: &mut String) {
-        self.saved_language = Some(std::mem::replace(language, "en".to_owned()));
-    }
-
-    /// The language to write to storage: the user's own choice, not this session's fallback.
-    pub fn persisted_language<'a>(&'a self, live: &'a str) -> &'a str {
-        self.saved_language.as_deref().unwrap_or(live)
-    }
 }
 
 /// Candidate font paths to look for on different operating systems.
@@ -843,8 +745,9 @@ fn find_chinese_font_in(dirs: &[std::path::PathBuf]) -> Option<Vec<u8>> {
     dirs.iter().find_map(|dir| scan_dir_for_font_where(dir, 3, is_chinese_font_name, draws_simplified_chinese))
 }
 
-/// Web installs the bundled faces synchronously; Japanese is fetched by the shell on demand.
-/// Preserve that downloaded face when preferences change later in the session.
+/// Web installs the bundled faces synchronously; the face of a CJK language is fetched by the shell
+/// on demand (see [`crate::web_fonts`]). Every face that arrived is kept in `ctx`, so changing the
+/// language or the interface font later in the session installs the right ones again.
 #[cfg(target_arch = "wasm32")]
 pub fn load_system_fonts_in_background(_ctx: &egui::Context) {}
 
@@ -860,30 +763,10 @@ pub fn setup_fonts_without_waiting(ctx: &egui::Context, language: &str, ui_font:
 
 #[cfg(target_arch = "wasm32")]
 pub fn setup_fonts_for(ctx: &egui::Context, language: &str, ui_font: &str) {
-    let previous = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id()));
-    let mut fonts = web_font_definitions(ui_font, previous);
-    if needs_cjk_font(language) {
-        promote_font_to_front(&mut fonts, CJK_FALLBACK);
-    }
-    install(ctx, fonts);
+    install(ctx, crate::web_fonts::definitions(ui_font, language, &crate::web_fonts::stored_faces(ctx)));
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
-fn web_font_definitions(ui_font: &str, previous: Option<FontDefinitions>) -> FontDefinitions {
-    let mut fonts = base_font_definitions();
-    if let Some(font) = self::ui_font(ui_font) {
-        fonts = with_ui_font(fonts, font);
-    }
-    if let Some(data) = previous.and_then(|f| f.font_data.get(CJK_FALLBACK).cloned()) {
-        fonts.font_data.insert(CJK_FALLBACK.to_owned(), data);
-        for family in all_families() {
-            fonts.families.entry(family).or_default().push(CJK_FALLBACK.to_owned());
-        }
-    }
-    with_symbol_fallback(fonts)
-}
-
-/// Web starts with the bundled faces and symbol fallback; Japanese loads on demand.
+/// Web starts with the bundled faces and symbol fallback; a CJK face loads on demand.
 #[cfg(target_arch = "wasm32")]
 pub fn setup_fonts(ctx: &egui::Context) {
     setup_fonts_for(ctx, "en", "");
@@ -1031,35 +914,6 @@ mod tests {
     }
 
     #[test]
-    fn web_download_and_preference_changes_compose_without_losing_plex_or_japanese() {
-        let ctx = test_context();
-        let chosen = solidcraft_engine::sketch::DEFAULT_FONT_FAMILY;
-        install(&ctx, web_font_definitions(chosen, None));
-        // Both installations happen before the first frame, like a fast cached web fetch.
-        assert!(install_cjk_font_for(
-            &ctx,
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf")).to_vec(),
-            "ja",
-        ));
-        let installed = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap();
-        for family in sans_families() {
-            assert_eq!(installed.families[&family][0], UI_FONT);
-            assert_eq!(installed.families[&family].get(1).map(String::as_str), Some(CJK_FALLBACK));
-        }
-        let reset = web_font_definitions("", Some(installed));
-        for ((name, _), family) in WEIGHTS.into_iter().zip(sans_families()) {
-            assert_eq!(reset.families[&family][0], name);
-            let list = &reset.families[&family];
-            assert_eq!(list.get(list.len() - 2).map(String::as_str), Some(CJK_FALLBACK));
-            assert_eq!(list.last().map(String::as_str), Some(SYMBOL_FALLBACK));
-        }
-        install(&ctx, reset);
-        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
-        output.textures_delta.clear();
-        assert!(ctx.fonts_mut(|f| f.has_glyphs(&semibold(14.0), "日本語テスト")));
-    }
-
-    #[test]
     fn japanese_and_chinese_fallbacks_cover_semibold_text() {
         let japanese = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf"));
         let chinese = find_system_chinese_font();
@@ -1176,30 +1030,6 @@ mod tests {
         }
     }
 
-    /// A Ukrainian UI drew Cyrillic wide and loose: the bundled CJK face (BIZ UDPGothic) sets every
-    /// Cyrillic glyph in a full em, so it may only draw a non-CJK UI's text when nothing else has
-    /// the glyph. A CJK UI still leads with it, so its digits share the CJK baseline.
-    #[test]
-    fn a_non_cjk_ui_keeps_the_cjk_face_as_a_fallback() {
-        let installed = |language: &str| {
-            let ctx = egui::Context::default();
-            assert!(install_cjk_font_for(&ctx, latin_font_bytes(), language), "{language}: the font installs");
-            ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
-            ctx.fonts(|f| f.definitions().families[&egui::FontFamily::Proportional].clone())
-        };
-        let latin = base_font_definitions().families[&egui::FontFamily::Proportional][0].clone();
-        for language in ["uk", "en", "de"] {
-            let list = installed(language);
-            assert_eq!(list.first(), Some(&latin), "{language} keeps the Latin face first: {list:?}");
-            assert_eq!(list.last().map(String::as_str), Some(SYMBOL_FALLBACK), "{language} ends with the symbol fallback: {list:?}");
-            assert!(list.iter().position(|name| name == CJK_FALLBACK).is_some_and(|at| at > 0), "{language} keeps CJK behind Latin: {list:?}");
-        }
-        for language in ["ja", "zh", "ko"] {
-            let list = installed(language);
-            assert_eq!(list.first().map(String::as_str), Some(CJK_FALLBACK), "{language} leads with the CJK face: {list:?}");
-        }
-    }
-
     #[test]
     fn hangul_font_falls_back_after_the_cjk_font() {
         let defaults = base_font_definitions();
@@ -1312,90 +1142,5 @@ mod tests {
         // …but it doesn't draw simplified Chinese, so it isn't taken as the Chinese fallback.
         assert_eq!(find_chinese_font_in(std::slice::from_ref(&folder.0)), None);
         assert_eq!(find_chinese_font_in(&[folder.0.join("missing")]), None);
-    }
-
-    #[test]
-    fn web_font_is_fetched_only_for_a_cjk_language() {
-        let mut loader = CjkFontLoader::default();
-        for lang in ["en", "de"] {
-            let mut language = lang.to_owned();
-            assert!(!loader.tick(&mut language), "no CJK font fetch for {lang}");
-        }
-        let mut language = "ja".to_owned();
-        assert!(loader.tick(&mut language), "Japanese starts the fetch");
-        assert!(!loader.tick(&mut language), "the fetch starts once");
-        loader.finished(true, &mut language);
-        assert_eq!(loader.status(), CjkFontStatus::Installed);
-        assert_eq!(language, "ja");
-    }
-
-    #[test]
-    fn cjk_text_is_recognised() {
-        for cjk in ["テスト", "ひらがな", "部品", "ﾃｽﾄ", "Bracket（改）", "Plate 板"] {
-            assert!(has_cjk(cjk), "{cjk} has CJK characters");
-        }
-        for other in ["", "Bracket", "Ø12 × 3 mm", "Größe", "Привет", "한국어", "émoji ✓"] {
-            assert!(!has_cjk(other), "{other} has no CJK characters the fallback draws");
-        }
-    }
-
-    /// An English UI fetches the font once CJK text is painted (#720), and a failed fetch leaves
-    /// the language alone.
-    #[test]
-    fn cjk_text_fetches_the_font_with_an_english_ui() {
-        let mut loader = CjkFontLoader::default();
-        let mut language = "en".to_owned();
-        assert!(!loader.tick(&mut language));
-        assert!(loader.watching_text());
-        assert!(loader.text_needs_font(), "CJK text starts the fetch");
-        assert!(!loader.text_needs_font(), "the fetch starts once");
-        assert!(!loader.tick(&mut language), "no second fetch from the language");
-        assert!(!loader.watching_text());
-        loader.finished(false, &mut language);
-        assert_eq!(loader.status(), CjkFontStatus::Failed);
-        assert_eq!(language, "en");
-        assert!(!loader.text_needs_font(), "no retry loop after a failure");
-
-        let mut loader = CjkFontLoader::default();
-        assert!(loader.text_needs_font());
-        loader.finished(true, &mut language);
-        assert_eq!(loader.status(), CjkFontStatus::Installed);
-        // Switching to Japanese afterwards needs no second fetch.
-        let mut ja = "ja".to_owned();
-        assert!(!loader.tick(&mut ja));
-    }
-
-    /// The painted-text check finds CJK in the frame's labels and nothing else.
-    #[test]
-    fn painted_cjk_sees_labels_in_the_frame() {
-        let ctx = egui::Context::default();
-        let run = |text: &'static str| {
-            let mut seen = false;
-            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
-                ui.label(text);
-                seen = painted_cjk(ui.ctx());
-            });
-            out.textures_delta.clear();
-            seen
-        };
-        assert!(!run("Untitled"));
-        assert!(run("テスト"));
-    }
-
-    #[test]
-    fn failed_font_fetch_falls_back_for_the_session_without_changing_the_saved_language() {
-        let mut loader = CjkFontLoader::default();
-        let mut language = "ja".to_owned();
-        assert!(loader.tick(&mut language));
-        loader.finished(false, &mut language);
-        assert_eq!(language, "en", "this session shows English instead of tofu");
-        assert_eq!(loader.persisted_language(&language), "ja", "the saved preference stays Japanese");
-        assert!(!loader.tick(&mut language));
-        assert_eq!(loader.persisted_language(&language), "ja");
-
-        // Choosing a language afterwards makes that the saved preference.
-        language = "de".to_owned();
-        assert!(!loader.tick(&mut language));
-        assert_eq!(loader.persisted_language(&language), "de");
     }
 }
