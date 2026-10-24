@@ -1666,3 +1666,55 @@ fn cancel_refuses_once_undo_has_gone_back_past_where_the_sketch_was_opened() {
     assert!(e.contains("Undo"), "{e}");
     assert_eq!(s.doc.to_json(), before, "nothing changed");
 }
+
+/// #5961: `sketch.move_points` moves several points of a polyline, each to its own target, by id
+/// or by `near`, in one undo step; it says where each ended up, refuses a `near` that finds
+/// nothing or two points as close, and reports a fixed point that can't move.
+#[test]
+fn move_points_moves_each_point_to_its_own_target() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0], [20, 0], [30, 0]]}));
+    let undo_before = run(&mut s, "document.inspect", json!({}))["undo"].clone();
+    let r = run(&mut s, "sketch.move_points", json!({"moves": [{"point": "l1.end", "to": [10, 5]}, {"near": [20.05, 0], "to": [20, -5]}]}));
+    let moved = r["moved"].as_array().unwrap();
+    assert_eq!(moved.len(), 2, "{r}");
+    assert!(moved.iter().all(|m| m["reached"] == true), "{r}");
+    assert_eq!(moved[1]["to"], json!([20.0, -5.0]));
+    let sk = sketch(&s);
+    let at = |id: &str| sk.point(sk.resolve_point(id).unwrap()).unwrap();
+    assert!(at("l1.end").dist(solidcraft_geom::Vec2::new(10.0, 5.0)) < 1e-9);
+    assert!(at("l2.end").dist(solidcraft_geom::Vec2::new(20.0, -5.0)) < 1e-9);
+    assert!(at("l3.end").dist(solidcraft_geom::Vec2::new(30.0, 0.0)) < 1e-9, "the other points stay");
+    // One undo step takes both back.
+    let undo_after = run(&mut s, "document.inspect", json!({}))["undo"].as_u64().unwrap();
+    assert_eq!(undo_after, undo_before.as_u64().unwrap() + 1);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(pt(&s, "l1.end").dist(solidcraft_geom::Vec2::new(10.0, 0.0)) < 1e-9);
+    // `near` that finds nothing, or a malformed move, is refused and moves nothing.
+    for bad in [
+        json!({"moves": [{"near": [100, 100], "to": [0, 0]}]}),
+        json!({"moves": [{"near": [10, 0]}]}),
+        json!({"moves": []}),
+        json!({"moves": [{"point": "l1.end", "to": [1, 1]}], "tolerance": -1}),
+    ] {
+        let before = sketch(&s);
+        assert!(s.execute("sketch.move_points", &bad).is_err(), "{bad}");
+        assert_eq!(sketch(&s), before, "{bad}");
+    }
+    // A fixed point is reported, not silently left where it was.
+    run(&mut s, "sketch.constraint.fix", json!({"entities": ["l3.end"]}));
+    let r = run(&mut s, "sketch.move_points", json!({"moves": [{"point": "l3.end", "to": [40, 0]}]}));
+    assert_eq!(r["moved"][0]["reached"], false, "{r}");
+    assert_eq!(r["moved"][0]["at"], json!([30.0, 0.0]), "{r}");
+}
+
+/// Two sketch points as close to `near` (two points at one place) can't be told apart: the
+/// move is refused.
+#[test]
+fn move_points_refuses_a_near_that_two_points_answer() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.point", json!({"point": [10, 0]}));
+    run(&mut s, "sketch.point", json!({"point": [10, 0]}));
+    let e = s.execute("sketch.move_points", &json!({"moves": [{"near": [10, 0], "to": [12, 0]}]})).unwrap_err().to_string();
+    assert!(e.contains("as close"), "{e}");
+}

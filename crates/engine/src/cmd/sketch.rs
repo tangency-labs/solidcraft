@@ -187,6 +187,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .params("entities: [curve, point or constraint ids]"),
     CommandSpec::new("sketch.move_point", "Drag Sketch Point", move_point).icon("sketch_move").enabled(in_sketch).params("point: ref, to: [x,y]"),
+    CommandSpec::new("sketch.move_points", "Move Sketch Points", move_points).icon("sketch_move").enabled(in_sketch).params(
+        "moves: [{point: ref | near: [x,y], to: [x,y]}] (each point to its own target; `near`: the sketch point closest to it, \
+         refused when none lies within `tolerance` or two are as close), tolerance?: mm (default 0.1); sketch? → moved: \
+         [{point, to, at, reached}] (`at`: where it ended up after the one solve; `reached`: whether that is `to`)",
+    ),
     CommandSpec::new("sketch.drag", "Drag Sketch Geometry", drag).icon("sketch_move").enabled(in_sketch).live(drag_live).params(
         "entity: point or curve, from: [x,y] where it was grabbed, to: [x,y], live?: bool: points and the material point grabbed on a line move toward `to` within the design constraints. When exact placement is impossible, bounded feasible steps minimize cursor distance. Splines slide by to - from; a circle or arc grabbed on its edge takes the radius to `to`. `with?`: [point or curve ids] moves the rest of a selection with the entity as one translation (circles keep their radii). Long moves retain the solution branch; arcs cannot sweep through their starts. Returns `reached`: progress projected onto the requested move (0..1), `at`: the grabbed position for the next frame, and `retry`: budget-limited progress can continue in another frame. `live: true` shares a work budget across held-solve decomposition and cursor correction; ordinary recovery and the final model evaluation retain their existing limits, not a wall-clock deadline. Later features stay stale until `sketch.drag_end`; `dof` stays from before the drag",
     ),
@@ -2778,6 +2783,67 @@ fn move_point(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(((), drag_entity(sk, Ent::Point(q), &[], to, to, false, last).1.solve_again()))
     })?;
     Ok(json!({"sketch": rep.as_ref().map(report_json)}))
+}
+
+/// `sketch.move_points`: several points, each dragged to its own target, in one edit (one undo
+/// step), then solved; each move's point by reference or by `near` (#5961).
+fn move_points(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.move_points";
+    let moves =
+        p.get("moves").and_then(Value::as_array).filter(|m| !m.is_empty()).ok_or_else(|| bad(cmd, "`moves` must be a list of {point | near, to}"))?;
+    let tol = match p.get("tolerance") {
+        None | Some(Value::Null) => 0.1,
+        Some(_) => num(p, "tolerance").filter(|t| *t > 0.0).ok_or_else(|| bad(cmd, "`tolerance` must be a positive length (mm)"))?,
+    };
+    let id = target_sketch(s, p, cmd)?;
+    let state = s.model.result(id).map(|r| r.state.clone());
+    let last = state.as_ref().and_then(|state| state.sketch(id));
+    let (picked, rep) = edit_solved(s, id, false, Analysis::Freedom, |sk, _| {
+        if moves.len() > sk.points.len().max(1) {
+            return Err(bad(cmd, "`moves` lists more moves than the sketch has points"));
+        }
+        // Every point is found before any moves, so `near` reads the sketch as it was.
+        let mut picked = Vec::with_capacity(moves.len());
+        for (k, m) in moves.iter().enumerate() {
+            let to = req_vec2(cmd, m, "to").map_err(|_| bad(cmd, format!("moves[{k}]: `to` must be a point [x, y]")))?;
+            let q = match m.get("near") {
+                Some(v) => {
+                    let at = vec2(v).ok_or_else(|| bad(cmd, format!("moves[{k}]: `near` must be a point [x, y]")))?;
+                    let mut d: Vec<(f64, usize)> = (0..sk.points.len()).filter_map(|i| Some((sk.point(i)?.dist(at), i))).collect();
+                    d.sort_by(|a, b| a.0.total_cmp(&b.0));
+                    match d.as_slice() {
+                        [(best, q), rest @ ..] if *best <= tol => {
+                            if rest.first().is_some_and(|(next, _)| *next - *best <= 1e-9) {
+                                return Err(bad(
+                                    cmd,
+                                    format!("moves[{k}]: two sketch points are as close to `near` [{}, {}]; name the point", at.x, at.y),
+                                ));
+                            }
+                            *q
+                        }
+                        _ => return Err(bad(cmd, format!("moves[{k}]: no sketch point within {tol} mm of `near` [{}, {}]", at.x, at.y))),
+                    }
+                }
+                None => point_ref(sk, m.get("point"), cmd, "point")?,
+            };
+            picked.push((q, to));
+        }
+        let mut left = Left::Unsolved;
+        for (q, to) in &picked {
+            left = drag_entity(sk, Ent::Point(*q), &[], *to, *to, false, last).1.solve_again();
+        }
+        Ok((picked, left))
+    })?;
+    let solved = s.doc.sketch(id).ok();
+    let moved: Vec<Value> = picked
+        .iter()
+        .map(|(q, to)| {
+            let point = solved.and_then(|sk| sk.points.get(*q)).map(|pt| pt.id.clone());
+            let at = solved.and_then(|sk| sk.point(*q));
+            json!({"point": point, "to": [to.x, to.y], "at": at.map(|a| [a.x, a.y]), "reached": at.is_some_and(|a| a.dist(*to) <= 1e-6)})
+        })
+        .collect();
+    Ok(json!({"moved": moved, "sketch": rep.as_ref().map(report_json)}))
 }
 
 fn drag(s: &mut Session, p: &Value) -> Result<Value> {
