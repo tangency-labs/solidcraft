@@ -79,6 +79,8 @@
 //!   (UB-120) cannot be passed.
 //! - **`CheckLoop`** takes the surface separately, as upstream; `CheckFace` passes a
 //!   copy of the face's surface (the edge use UV extremes need the B-rep mutably).
+//!   Its gap limit also honours a shared vertex's zone tolerance (#476); upstream
+//!   uses only the edge intersection tolerance and rejects consistent widened vertices.
 //! - **Callees.** `SmBrep::MakeFaceWithCurves` (`topology.brep_p7`) and
 //!   `SmBrep::MakeFacesWithCurves` (`topology.brep_p8`) call their ports. Unported callees
 //!   return [`SolidError::Unported`]: `SmFace::FlipFaceOrientation` and `SmFace::SplitAtSeam` (`topology.face_p1`),
@@ -2028,25 +2030,41 @@ fn edge_zone_tol(k: &Kernel, b: &Brep, e: Option<EdgeId>) -> Result<f64> {
     })
 }
 
-// A projected endpoint is known only modulo the natural period. Exact UV trims
-// keep their chosen sheet. This lift is only for the UV gap test: surface points
-// are evaluated at the original parameters so a real 3D gap cannot be hidden by
-// a B-spline clamping an out-of-domain periodic representative.
-fn nearest_period(value: f64, target: f64, period: f64) -> f64 {
-    if !value.is_finite() || !target.is_finite() || !period.is_finite() || period <= 0.0 {
-        return value;
+// Only a genuinely shared topological vertex can enlarge the edge/edge limit.
+// Use the previous edge use's mate: its vertex use is the previous end regardless
+// of either edge use's orientation (including closed edges and reversed loops).
+fn loop_junction_tolerance(
+    k: &Kernel,
+    b: &Brep,
+    current: EdgeuseId,
+    previous: EdgeuseId,
+) -> Result<f64> {
+    let edge_limit = tol::xsect_tol_3d_from_zones(
+        k,
+        edge_zone_tol(k, b, eu1::edge(b, current)?)?,
+        edge_zone_tol(k, b, eu1::edge(b, previous)?)?,
+    );
+    let Some(start_use) = eu1::vertexuse(b, current)? else {
+        return Ok(edge_limit);
+    };
+    let Some(end) = eu1::mate(b, previous)? else {
+        return Ok(edge_limit);
+    };
+    let Some(end_use) = eu1::vertexuse(b, end)? else {
+        return Ok(edge_limit);
+    };
+    let start_vertex = b.vertexuse(start_use)?.vertex;
+    let end_vertex = b.vertexuse(end_use)?.vertex;
+    if let Some(vertex) = start_vertex.filter(|v| Some(*v) == end_vertex) {
+        return Ok(edge_limit.max(tol::zone_tol3d(k, b.vertex(vertex)?.tolerance)));
     }
-    let lifted = value + ((target - value) / period).round() * period;
-    if lifted.is_finite() {
-        lifted
-    } else {
-        value
-    }
+    Ok(edge_limit)
 }
 
 /// `CheckLoop`: for each pair of consecutive edge uses of the loop whose UV ends differ
-/// (by more than `1e-10`), the surface points must be within the edges' intersection
-/// tolerance (else closure 3, signalled only) and the UV jump must stay under a tenth of
+/// (by more than `1e-10`), the surface points must be within the larger of the edges'
+/// intersection tolerance and their shared vertex's zone tolerance (else closure 3,
+/// signalled only) and the UV jump must stay under a tenth of
 /// the natural domain in each direction, unless both ends are singular in that
 /// direction or the gap is certified by [`is_loop_uv_gap_within_tolerance`] (not across
 /// a seam). A large UV jump gives closure 1 when an end is singular, else `SM_ERR`.
@@ -2088,12 +2106,9 @@ pub fn check_loop(
             let current_start_3d = surface.evaluate_point(k, current_start)?;
             let end_start_dist = previous_end_3d.distance(current_start_3d);
 
-            // check the Edge/Edge xsect distance
-            let xsect = tol::xsect_tol_3d_from_zones(
-                k,
-                edge_zone_tol(k, b, eu1::edge(b, cur)?)?,
-                edge_zone_tol(k, b, eu1::edge(b, prev)?)?,
-            );
+            // A widened shared vertex covers gaps that the two edge zones alone
+            // need not cover (#476). Retain the existing edge intersection limit.
+            let xsect = loop_junction_tolerance(k, b, cur, prev)?;
             report(
                 &mut alist,
                 lp,
@@ -2396,6 +2411,162 @@ mod tests {
         ];
         let nl = NlCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
         Curve::from(BSplineCurve::from_nurb(nl, 3, false))
+    }
+
+    // A closed topological edge with a small geometric trim gap at its vertex.
+    fn vertex_gap_loop(gap: f64, vertex_tol: f64, same_vertex: bool) -> (Brep, LoopId) {
+        use crate::topology::{
+            Edge, Edgeuse, EdgeuseOwner, Loop, Loopuse, LoopuseStart, Vertex, Vertexuse,
+            VertexuseId,
+        };
+        let mut b = Brep::new();
+        let v = b
+            .add_vertex_record(Vertex {
+                point: Vec3::ZERO,
+                tolerance: vertex_tol,
+                ..Vertex::default()
+            })
+            .unwrap();
+        let other = if same_vertex {
+            v
+        } else {
+            b.add_vertex_record(Vertex {
+                point: Vec3::new(gap, 0.0, 0.0),
+                tolerance: vertex_tol,
+                ..Vertex::default()
+            })
+            .unwrap()
+        };
+        let e = b
+            .add_edge_record(Edge {
+                vertices: [v, other],
+                curve: None,
+                interval: Extent1d::from_min_max(0.0, 1.0),
+                tolerance: 5.8e-6,
+                edgeuses: vec![EdgeuseId::from_index(0), EdgeuseId::from_index(1)],
+            })
+            .unwrap();
+        let l = b
+            .add_loop_record(Loop {
+                face: FaceId::from_index(0),
+                edges: Vec::new(),
+                loopuse: Some(crate::topology::LoopuseId::from_index(0)),
+            })
+            .unwrap();
+        let lu = b
+            .add_loopuse_record(Loopuse {
+                loop_: Some(l),
+                start: LoopuseStart::Edgeuse(Some(EdgeuseId::from_index(0))),
+                ..Loopuse::default()
+            })
+            .unwrap();
+        for (i, vertex) in [v, other].into_iter().enumerate() {
+            let eu = EdgeuseId::from_index(i as u32);
+            b.add_vertexuse_record(Vertexuse {
+                vertex: Some(vertex),
+                ..Vertexuse::default()
+            })
+            .unwrap();
+            b.add_edgeuse_record(Edgeuse {
+                edge: Some(e),
+                owner: EdgeuseOwner::Loopuse(Some(lu)),
+                ccw: Some(eu),
+                cw: Some(eu),
+                vertexuse: Some(VertexuseId::from_index(i as u32)),
+                orientation: if i == 0 {
+                    OrientType::Same
+                } else {
+                    OrientType::Opposite
+                },
+                uv_trim_curve: (i == 0).then(|| uv_line([0.0, 0.0], [gap, 0.0])),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+        }
+        (b, l)
+    }
+
+    #[test]
+    fn loop_gap_uses_shared_vertex_tolerance() {
+        let k = Kernel::default();
+        let surface = Surface::from(crate::surface::plane::Plane::from_normal(
+            Vec3::ZERO,
+            Vec3::Z,
+        ));
+        for (gap, vertex_tol, same_vertex, expected) in [
+            (1.3e-5, 2.6e-5, true, 0),
+            (2.6e-5, 2.6e-5, true, 0),
+            (2.61e-5, 2.6e-5, true, 3),
+            (1.3e-5, 1e-6, true, 3),
+            (1e-5, 1e-6, true, 0), // Existing edge intersection tolerance remains valid.
+            (1.3e-5, 2.6e-5, false, 3), // Unrelated vertices cannot bridge the gap.
+        ] {
+            for start in 0..2 {
+                let (mut b, l) = vertex_gap_loop(gap, vertex_tol, same_vertex);
+                b.loopuse_mut(crate::topology::LoopuseId::from_index(0))
+                    .unwrap()
+                    .start =
+                    crate::topology::LoopuseStart::Edgeuse(Some(EdgeuseId::from_index(start)));
+                assert_eq!(
+                    check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(),
+                    expected,
+                    "gap={gap}, vertex_tol={vertex_tol}, shared={same_vertex}, start={start}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn loop_junction_uses_previous_end_not_previous_start() {
+        use crate::topology::{Edge, Edgeuse, VertexId, Vertexuse, VertexuseId};
+        let k = Kernel::default();
+        let (mut b, l) = vertex_gap_loop(1.3e-5, 2.6e-5, false);
+        // The first edge leaves a tight vertex; its far end joins the second edge
+        // at the widened vertex. Looking at the previous start gives the wrong limit.
+        b.vertex_mut(VertexId::from_index(0)).unwrap().tolerance = 1e-6;
+        b.edgeuse_mut(EdgeuseId::from_index(0))
+            .unwrap()
+            .uv_trim_curve = Some(uv_line([0.0, 0.0], [0.5, 0.0]));
+        let e = b
+            .add_edge_record(Edge {
+                vertices: [VertexId::from_index(1), VertexId::from_index(0)],
+                interval: Extent1d::from_min_max(0.0, 1.0),
+                tolerance: 5.8e-6,
+                curve: None,
+                edgeuses: vec![EdgeuseId::from_index(2), EdgeuseId::from_index(3)],
+            })
+            .unwrap();
+        for (i, vertex) in [(2, 1), (3, 0)] {
+            let vu = b
+                .add_vertexuse_record(Vertexuse {
+                    vertex: Some(VertexId::from_index(vertex)),
+                    ..Vertexuse::default()
+                })
+                .unwrap();
+            let mut eu: Edgeuse = b.edgeuse(EdgeuseId::from_index(i - 2)).unwrap().clone();
+            eu.edge = Some(e);
+            eu.vertexuse = Some(vu);
+            eu.uv_trim_curve = (i == 2).then(|| uv_line([0.5 + 1.3e-5, 0.0], [0.0, 0.0]));
+            b.add_edgeuse_record(eu).unwrap();
+        }
+        for (a, c) in [(0, 2), (2, 0), (1, 3), (3, 1)] {
+            let eu = b.edgeuse_mut(EdgeuseId::from_index(a)).unwrap();
+            eu.ccw = Some(EdgeuseId::from_index(c));
+            eu.cw = eu.ccw;
+        }
+        let surface = Surface::from(crate::surface::plane::Plane::from_normal(
+            Vec3::ZERO,
+            Vec3::Z,
+        ));
+        for start in 0..4 {
+            b.loopuse_mut(crate::topology::LoopuseId::from_index(0))
+                .unwrap()
+                .start = crate::topology::LoopuseStart::Edgeuse(Some(EdgeuseId::from_index(start)));
+            assert_eq!(check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(), 0);
+        }
+        // Missing endpoint topology must fall back to the edges, not another vertex.
+        b.vertexuse_mut(VertexuseId::from_index(2)).unwrap().vertex = None;
+        assert_eq!(check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(), 3);
     }
 
     #[test]

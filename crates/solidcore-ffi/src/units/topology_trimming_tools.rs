@@ -27,6 +27,11 @@
 //! | `TrimNull`    | `surface k curve*k` | `status` |
 //! | `BPresent` .. | B-rep block, then the op's selectors | `0` (or `-1 status`) then the op's results |
 //!
+//! `BCheckLoop` appends `l tol want_list mirror_eu mirror_side has_gap_edit`
+//! `[gap_eu gap_u] has_model_tolerances [edge_zone_tol vertex_zone_tol]`.
+//! Gap displacement is finite; model tolerances are finite and nonnegative.
+//! These set model inputs on both sides; comparison tolerances are unchanged.
+//!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: well-formed
 //! clamped B-splines, lines with a non-zero vector, ellipses with non-zero radii and
 //! independent axes, planes with a non-zero normal, finite values, indices inside the
@@ -514,6 +519,14 @@ fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError
             mirror(rd)?;
             if rd.flag()? {
                 rd.index(1_000_000_000)?;
+                rd.finite()?;
+            }
+            if rd.flag()? {
+                for _ in 0..2 {
+                    if rd.finite()? < 0.0 {
+                        return Err(bad("negative model tolerance"));
+                    }
+                }
             }
         }
         Op::BCheckFace => {
