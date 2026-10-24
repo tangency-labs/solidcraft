@@ -20,6 +20,8 @@ pub enum BooleanStrategy {
     ToolNudge,
     /// A rotationally symmetric tool turned about its own axis; its volume is unchanged.
     ToolReseam,
+    /// A sphere (either operand) turned about its centre; the solid is unchanged.
+    SphereReseam,
     Piecewise,
     /// No retry gave a result, and the answer from sample points was kept although the bodies'
     /// facetings disagree with it.
@@ -64,6 +66,7 @@ impl BooleanFallback {
             BooleanStrategy::PlanarFallback => "exact planar fallback (no displacement)".into(),
             BooleanStrategy::ToolNudge => format!("tool displacement {:.6e} mm, rotation {:.6e} rad", self.translation_mm, self.rotation_rad),
             BooleanStrategy::ToolReseam => format!("axisymmetric tool reseamed by {:.6e} rad (no displacement)", self.rotation_rad),
+            BooleanStrategy::SphereReseam => format!("sphere's patches turned about its centre by {:.6e} rad (no displacement)", self.rotation_rad),
             BooleanStrategy::Piecewise => "piecewise retry (no displacement)".into(),
             BooleanStrategy::UnverifiedShortcut => format!(
                 "not verified: the bodies' facets pass through each other by more than {:.6e} mm, but they could not be intersected there; that part is ignored",
