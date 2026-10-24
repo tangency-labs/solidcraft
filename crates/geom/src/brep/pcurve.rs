@@ -241,6 +241,30 @@ fn cut(c: Curve2, [t0, t1]: [f64; 2]) -> Result<Curve2> {
     })
 }
 
+/// A degree-1 patch of four control points on a parallelogram (a plane as a file's B-spline
+/// writes it) as that plane: the patch is affine in (u, v), so it is the plane at every
+/// parameter, and its pcurves have the plane's closed forms.
+fn flat_patch(s: &Surface) -> Option<Surface> {
+    let Surface::Spline { u_knots, v_knots, points } = s else { return None };
+    let (&[a, a1, b, b1], &[c, c1, d, d1]) = (u_knots.as_slice(), v_knots.as_slice()) else { return None };
+    let [row0, row1] = points.as_slice() else { return None };
+    let (&[p00, p01], &[p10, p11]) = (row0.as_slice(), row1.as_slice()) else { return None };
+    let [p00, p01, p10, p11] = [p00, p01, p10, p11].map(Vec3::from);
+    if a != a1 || b != b1 || c != c1 || d != d1 || !(a < b && c < d) {
+        return None;
+    }
+    let size = [p00, p01, p10, p11].iter().flat_map(|p| [p.x.abs(), p.y.abs(), p.z.abs()]).fold(1.0, f64::max);
+    if (p00 + p11 - p10 - p01).len() > EXACT * size {
+        return None;
+    }
+    let (du, dv) = ((p10 - p00) * (1.0 / (b - a)), (p01 - p00) * (1.0 / (d - c)));
+    if !(du.cross(dv).len() > EXACT * size * size) {
+        return None;
+    }
+    let origin = p00 - du * a - dv * c;
+    Some(Surface::Plane { origin: [origin.x, origin.y, origin.z], u_axis: [du.x, du.y, du.z], v_axis: [dv.x, dv.y, dv.z] })
+}
+
 /// What a curve record is, for a message.
 fn curve_kind(c: &Curve) -> &'static str {
     match c {
@@ -266,7 +290,8 @@ struct On {
 
 impl On {
     fn new(s: &Surface) -> Result<Self> {
-        let surface = SurfaceEval::new(s)?;
+        let flat = flat_patch(s);
+        let surface = SurfaceEval::new(flat.as_ref().unwrap_or(s))?;
         let dom = surface.domain();
         Ok(On { surface, starts: uv::Starts::default(), dom, face: None })
     }

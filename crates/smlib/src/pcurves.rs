@@ -25,22 +25,35 @@ fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
     let body = crate::flat::Flat::from_arrays(&arrays).and_then(|f| f.import()).map_err(|e| e.to_string())?;
     let (out, order) = body.to_native_ordered().map_err(|e| e.to_string())?;
     let [made] = out.faces.as_slice() else { return Err(format!("SMLib made {} faces of one", out.faces.len())) };
+    let made_uses: Vec<&OrientedEdge> = made
+        .loops
+        .iter()
+        .flat_map(|l| match l {
+            Loop::Edges { edges } => edges.as_slice(),
+            Loop::Vertex { .. } => &[],
+        })
+        .collect();
+    // SMLib keeps the edges in the order they came; the record renumbers them.
+    let edge_of = |u: u32| order.edges.get(u as usize).copied().ok_or("an edge SMLib lost");
+    // A sheet's loops come back the way SMLib runs them, which may be against ours: a use is the
+    // same pcurve either way (on its edge's interval in its curve's direction), and the loop's
+    // way round is read from an edge the face uses once.
+    let ours = face.loops.iter().flatten();
+    let once = ours.clone().find(|u| ours.clone().filter(|v| v.edge == u.edge).count() == 1).ok_or("a face of seam edges only")?;
+    let at = edge_of(once.edge)?;
+    let reversed = made_uses.iter().find(|m| m.edge as usize == at).ok_or("a use SMLib did not keep")?.forward != once.forward;
     let mut result = Vec::with_capacity(face.loops.len());
     for l in &face.loops {
         let mut pcs = Vec::with_capacity(l.len());
         for u in l {
-            // SMLib keeps the edges in the order they came; the record renumbers them.
-            let e = order.edges.get(u.edge as usize).copied().ok_or("an edge SMLib lost")?;
+            let e = edge_of(u.edge)?;
             let edge = out.edges.get(e).ok_or("an edge SMLib lost")?;
             let ours = face.edges.get(u.edge as usize).ok_or("edge reference")?;
             let slack = 1e-9 * ours.interval.iter().fold(1.0f64, |m, t| m.max(t.abs()));
             if (0..2).any(|k| (edge.interval[k] - ours.interval[k]).abs() > slack) {
                 return Err(format!("SMLib moved an edge's interval from {:?} to {:?}", ours.interval, edge.interval));
             }
-            let found = made.loops.iter().find_map(|ml| match ml {
-                Loop::Edges { edges } => edges.iter().find(|m| m.edge as usize == e && m.forward == u.forward),
-                Loop::Vertex { .. } => None,
-            });
+            let found = made_uses.iter().find(|m| m.edge as usize == e && m.forward == (u.forward != reversed));
             pcs.push(found.ok_or("a use SMLib did not keep")?.pcurve.clone());
         }
         result.push(pcs);
