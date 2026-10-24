@@ -1064,8 +1064,9 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
     app.agent_chat.ended = None;
     let limit = app.preferences.agent_chat_turn_limit.clamp(1, gate::MAX_REQUESTS_PER_TURN);
     if let Some(b) = app.agent_chat.backend.as_mut() {
-        // The API agent's own loop stops after this many model requests. The gate still
-        // counts design changes against the same setting (#3881).
+        // The API agent treats this as the floor of its model-request ceiling
+        // (at least the old 24, at most the overall request cap). The gate counts
+        // design changes against the same setting (#3881).
         b.set_turn_requests(limit);
         b.prompt(&parts);
     }

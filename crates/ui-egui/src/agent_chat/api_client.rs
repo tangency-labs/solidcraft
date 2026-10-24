@@ -62,7 +62,9 @@ pub struct ApiBackend {
     events: Receiver<Event>,
     cancel: Arc<AtomicBool>,
     mcp: Option<ProcessHandle>,
-    /// Model requests the next message may make (the AI page's "Changes per message").
+    /// Safety ceiling on model requests for the next message. At least the
+    /// design-change limit and at least the old hard stop of 24, and at most the
+    /// overall request ceiling. The gate counts design changes.
     turn_requests: u32,
 }
 
@@ -109,7 +111,12 @@ impl ChatBackend for ApiBackend {
         self.events.try_iter().take(512).collect()
     }
     fn set_turn_requests(&mut self, n: u32) {
-        self.turn_requests = n.clamp(1, super::gate::MAX_REQUESTS_PER_TURN);
+        // `n` is the design-change limit. This loop only stops runaway model
+        // requests: the ceiling stays at least that limit (a higher change
+        // allowance is not cut off at 24) and at least the old 24 (reads are not
+        // squeezed into a small change limit), and never above the overall cap.
+        let cap = super::gate::MAX_REQUESTS_PER_TURN;
+        self.turn_requests = n.clamp(1, cap).max(super::gate::DEFAULT_TURN_LIMIT).min(cap);
     }
     fn prompt(&mut self, parts: &[PromptPart]) {
         self.cancel.store(false, Ordering::Relaxed);
@@ -926,10 +933,12 @@ mod tests {
         b.shutdown(true);
     }
 
-    /// #3881: "Changes per message" is how many model requests the API agent may make.
-    /// A model that keeps calling tools used to stop at 24 no matter what the AI page said.
+    /// #3881: the model-request loop is a safety ceiling, not the design-change
+    /// setting. A change limit of 30 lets a model that keeps calling tools get
+    /// past the old hard stop of 24. The stop message still names that request
+    /// ceiling. The gate, not this loop, counts design changes.
     #[test]
-    fn the_request_cap_follows_changes_per_message() {
+    fn the_request_loop_passes_the_old_cap_when_the_change_limit_is_higher() {
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let n = calls.clone();
         let http: HttpFn = Arc::new(move |r: &HttpRequest| {
@@ -954,7 +963,7 @@ mod tests {
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
-        b.set_turn_requests(3);
+        b.set_turn_requests(30);
         b.prompt(&[PromptPart::Text("keep going".into())]);
         let mut events = Vec::new();
         let start = std::time::Instant::now();
@@ -962,8 +971,10 @@ mod tests {
             events.extend(b.poll());
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert_eq!(calls.load(Ordering::Relaxed), 3, "three requests, not the old cap of 24");
-        assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text.contains('3'))), "{events:?}");
+        let made = calls.load(Ordering::Relaxed);
+        assert!(made > 24, "the loop got past the old hard stop of 24, saw {made}");
+        assert_eq!(made, 30, "the ceiling is the change limit when that is above 24");
+        assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text.contains("30"))), "{events:?}");
         assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason == "max_turn_requests"), "{events:?}");
         b.shutdown(true);
     }
