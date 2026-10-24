@@ -356,10 +356,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut rows = Vec::new();
     let mut design = Vec::new();
     let mut mode = None;
+    // Closed, the field is part of the ribbon and belongs under the system windows the rest of
+    // the ribbon goes under (Preferences, say); open, its sheet floats over everything.
+    let floating = open || progress > 0.0;
     let response = Container::new(ctx, Surface::Popup)
         .area(egui::Id::new("sc_sbox"))
         .fixed_pos(pos)
-        .order(egui::Order::Foreground)
+        .order(if floating { egui::Order::Foreground } else { egui::Order::Background })
         .fade_in(false)
         .constrain(false)
         .show(ctx, |ui| {
@@ -839,6 +842,31 @@ mod tests {
         h.call("ui.palette", json!({"open":false}));
         assert!(!h.app.ui.palette_open);
     }
+    #[test]
+    fn the_closed_field_draws_under_system_windows_and_the_open_sheet_over_them() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(3);
+        let order = |h: &crate::scenario::Harness| {
+            h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().find(|l| l.id == egui::Id::new("sc_sbox")).map(|l| l.order))
+        };
+        // Closed, the field is ribbon chrome: Preferences and the other system windows cover it.
+        assert_eq!(order(&h), Some(egui::Order::Background), "the closed field belongs to the ribbon");
+        h.call("ui.prefs", json!({"open": "General"}));
+        h.frames(3);
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+        let field = crate::scenario::rect_of("ribbon:search").unwrap();
+        assert!(order(&h) < Some(egui::Order::Middle), "a system window draws over the closed field");
+        assert!(
+            !window.contains(field.center()) || h.ctx.memory(|m| m.layer_id_at(field.center())).is_some_and(|l| l.id == egui::Id::new("sc_prefs"))
+        );
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        // Open, the sheet is a popup again and floats over every window.
+        h.call("ui.palette", json!({}));
+        h.frames(3);
+        assert_eq!(order(&h), Some(egui::Order::Foreground), "the open sheet floats over windows");
+    }
+
     #[test]
     fn ribbon_field_is_one_editor_and_interpolates_with_anchored_right_edge() {
         let mut h = crate::scenario::Harness::new();
