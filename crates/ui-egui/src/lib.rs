@@ -463,8 +463,10 @@ pub struct SolveApp {
     pub stand_up_occurrence: Option<u64>,
     /// The file's header names an exporter that saves Y up (SolidWorks): the offer says so.
     pub stand_up_reason: bool,
-    /// The anti-aliasing sample counts the graphics device supports (empty without a GPU).
+    /// The anti-aliasing sample counts the scene colour/depth formats support (empty without a GPU).
     pub msaa_supported: Vec<u32>,
+    /// The AMD/D3D12 default or startup check selected 1x; Graphics explains the workaround.
+    pub msaa_compatibility: bool,
     /// Settings put back at start because they kept SolidCraft from starting, one line each,
     /// shown until dismissed (`prefs::show_reset_notice`).
     pub settings_reset: Vec<prefs::SettingReset>,
@@ -598,6 +600,7 @@ impl SolveApp {
             stand_up_occurrence: None,
             stand_up_reason: false,
             msaa_supported: Vec::new(),
+            msaa_compatibility: false,
             settings_reset: Vec::new(),
             big_operation: false,
             autosave_minutes: 5.0,
@@ -661,8 +664,9 @@ impl SolveApp {
 
     /// Draw the viewport on the GPU with the scene drawn offscreen: `depth_bits`/`stencil_bits`
     /// and `samples` are the scene's, while the window's pass (egui's) has no depth and one
-    /// sample. The scene keeps its depth and anti-aliasing; the UI pass pays for neither.
-    pub fn set_wgpu_split(&mut self, rs: &egui_wgpu::RenderState, depth_bits: u8, stencil_bits: u8, samples: u32) {
+    /// sample. Native hosts check the installed renderer and fall back to 1x only when that
+    /// succeeds where multisampling fails. Returns the effective scene sample count.
+    pub fn set_wgpu_split(&mut self, rs: &egui_wgpu::RenderState, depth_bits: u8, stencil_bits: u8, samples: u32) -> u32 {
         let scene = crate::gpu::GpuTarget {
             format: rs.target_format,
             depth: egui_wgpu::depth_format_from_bits(depth_bits, stencil_bits),
@@ -671,10 +675,34 @@ impl SolveApp {
         };
         let window = crate::gpu::GpuTarget { format: rs.target_format, depth: None, samples: 1, tess: false };
         self.set_wgpu_targets(rs, scene, window);
+        self.viewport.gpu.map_or(samples, |g| g.samples)
     }
 
     fn set_wgpu_targets(&mut self, rs: &egui_wgpu::RenderState, scene: crate::gpu::GpuTarget, window: crate::gpu::GpuTarget) {
-        self.viewport.gpu = Some(gpu::install(rs, scene, window, !self.cpu_meshing));
+        #[allow(unused_mut)] // Only native hosts can wait for the startup readback.
+        let mut installed = gpu::install(rs, scene, window, !self.cpu_meshing);
+        #[cfg(not(target_arch = "wasm32"))]
+        if scene.depth.is_some() && window.depth.is_none() && window.samples == 1 {
+            let mut renderer = rs.renderer.write();
+            if let Some(res) = renderer.callback_resources.get_mut::<gpu::Renderer>() {
+                match res.check_msaa(&rs.device, &rs.queue) {
+                    Ok(solidcraft_gpu::view::MsaaCheck::Passed) => {}
+                    Ok(solidcraft_gpu::view::MsaaCheck::Fallback) => {
+                        installed.samples = 1;
+                        self.msaa_compatibility = true;
+                        eprintln!(
+                            "SolidCraft graphics: anti-aliasing check failed at {}x and passed at 1x; using 1x for this session",
+                            scene.samples
+                        );
+                    }
+                    Ok(solidcraft_gpu::view::MsaaCheck::FailedAtOne) => {
+                        eprintln!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
+                    }
+                    Err(error) => eprintln!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
+                }
+            }
+        }
+        self.viewport.gpu = Some(installed);
         render_workspace::invalidate_scene(self);
         let (samples, has_depth) = self.viewport.gpu.map_or((1, false), |g| (g.samples.max(1), g.depth.is_some()));
         self.render_workspace.host = match render_workspace::host_executor(rs.device.limits().max_texture_dimension_2d, has_depth, samples) {

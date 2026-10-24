@@ -1192,10 +1192,9 @@ fn save_graphics(app: &SolveApp) {
     }
 }
 
-/// At start, with the graphics device known: the saved anti-aliasing (`requested` samples, as
-/// the host read it) is more than the device supports. The window would not have opened with it,
-/// so the renderer fell back; put the setting back to its default (or the largest supported
-/// count below it) and tell the user what changed.
+/// At start, with the scene formats known: the saved anti-aliasing (`requested` samples, as
+/// the host read it) is unsupported. Match the renderer's fallback to the default (or the
+/// largest supported count below it) and tell the user what changed.
 pub fn check_msaa(app: &mut SolveApp, requested: u32) {
     let supported = &app.msaa_supported;
     if requested <= 1 || supported.is_empty() || supported.contains(&requested) {

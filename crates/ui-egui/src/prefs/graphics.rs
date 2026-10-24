@@ -78,6 +78,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
         ui_kit::text(ui, app.tr("prefs.anti_aliasing_note"), ui_kit::Text::Hint("msaa"));
+        if app.msaa_compatibility {
+            ui_kit::text(ui, app.tr("prefs.anti_aliasing_amd_dx12"), ui_kit::Text::Hint("msaa_compatibility"));
+        }
         ui.add_space(t.space_6);
         ui_kit::text(ui, app.tr("ui.supersampling"), ui_kit::Text::Heading("supersampling"));
         ui.horizontal_wrapped(|ui| {
