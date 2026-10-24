@@ -209,6 +209,14 @@ fn halton(mut i: usize, b: usize) -> f64 {
     r
 }
 
+/// Most triangles of the operands' meshes [`trivial`] samples together. Membership goes through
+/// [`solidcraft_geom::Mesh::inside_index`] and the crossing test through a spatial search, so the
+/// cost grows about linearly and the cap bounds memory. Meshes refined for a thin meeting region
+/// (a board 1 mm thick in a case with a rounded rim) reach a hundred thousand triangles or more:
+/// past the cap the bodies were not seen to be apart, and the intersection's retries could end
+/// in a body that kept the whole board, which the result check (capped lower) did not look at.
+const MAX_SHORTCUT_TRIANGLES: usize = 600_000;
+
 /// Fraction of sample points where `result` disagrees with `op` applied to `a` and `b`
 /// (membership by ray parity). Samples cover the overlap box densely and the union box lightly.
 fn mismatch(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, result: &solidcraft_geom::Mesh, op: BoolOp) -> Option<f64> {
@@ -514,7 +522,7 @@ fn trivial(
     counts: &[(usize, usize)],
     tol: f64,
 ) -> Option<(Option<Body>, bool)> {
-    if ma.triangles.len() + mb.triangles.len() > 80_000 {
+    if ma.triangles.len() + mb.triangles.len() > MAX_SHORTCUT_TRIANGLES {
         return None;
     }
     let (ia, ib) = (ma.inside_index(), mb.inside_index());
@@ -558,6 +566,32 @@ fn trivial(
 #[cfg(test)]
 mod shortcut_tests {
     use super::*;
+
+    /// A board in the open cavity of a case whose outer rim (a full circle) is rounded: they
+    /// share nothing, so the sampled shortcut answers without an intersection. The board is thin
+    /// (0.2 mm), so both bodies are meshed finely (the case in about 180 000 triangles, most of
+    /// them on the round), more than the shortcut once took. It was skipped, and so was the check
+    /// of the result, capped lower still: a numerical intersection that kept the whole board (as
+    /// a shifted retry did in a watch case) was accepted. Here the intersection always answers so.
+    #[test]
+    fn a_board_in_the_cavity_of_a_rounded_case_is_clear_however_fine_the_meshes() {
+        let case = crate::cylinder(Vec3::new(0.0, 0.0, 1.5), Vec3::Z, 25.0, 14.3).unwrap();
+        let case = crate::fillet(&case, &[Vec3::new(25.0, 0.0, 15.8)], 1.5).unwrap();
+        let cavity = crate::cylinder(Vec3::new(0.0, 0.0, 1.5), Vec3::Z, 21.5, 11.7).unwrap();
+        let case = boolean(&case, &cavity, BoolOp::Cut).unwrap().unwrap();
+        let board = crate::box_solid(Vec3::new(-12.0, -15.0, 6.9), Vec3::new(13.0, 15.0, 7.1)).unwrap();
+        let calls = std::cell::Cell::new(0);
+        let whole_board = |_: &Body, b: &Body, _: BoolOp, _: Option<mt::Vector3>, _: f64| {
+            calls.set(calls.get() + 1);
+            Ok((b.deep_copy(), None))
+        };
+        let (result, diagnostics) = capture_boolean_diagnostics(|| {
+            boolean_via(&case, &board, BoolOp::Intersect, &|a, b, op| boolean_whole_with(a, b, op, false, &whole_board))
+        });
+        assert!(result.as_ref().is_ok_and(Option::is_none), "{:?}", result.map(|r| r.map(|b| volume(&b))));
+        assert_eq!(calls.get(), 0, "the bodies are apart: no intersection is needed");
+        assert!(diagnostics.events.is_empty(), "{:?}", diagnostics.summary());
+    }
 
     #[test]
     fn seam_roundoff_is_not_a_thin_meeting_but_real_thin_solids_are() {
