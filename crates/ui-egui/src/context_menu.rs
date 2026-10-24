@@ -910,8 +910,26 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
             _ => {}
         }
     }
+    // Dimensions (#320): a selected dimension switches between driving and driven through the
+    // engine's `sketch.toggle_driven`, which takes one constraint, so the item appears for a
+    // single selected dimension. Non-dimension constraints (coincident, tangent, ...) have no
+    // driven state and get no item.
+    let dims: Vec<String> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|s| match s {
+            Sel::SketchConstraint { id } => Some(id.clone()),
+            _ => None,
+        })
+        .filter(|id| ss.sketch.constraints.iter().any(|c| &c.id == id && c.kind.value().is_some()))
+        .collect();
     let mut v = Vec::new();
     if curves.is_empty() && points.is_empty() {
+        if dims.len() == 1 {
+            v.push(cmd(app, "sketch.toggle_driven", "Toggle Driven Dimension").with(json!({ "constraint": dims[0] })));
+            v.push(Item::sep());
+        }
         if crate::sketch_text::selected_entity(app).is_some() {
             v.push(cmd(app, "sketch.edit_text", "Edit Text"));
             v.extend(explode_text(app));
@@ -2008,6 +2026,54 @@ pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #320: a selected sketch dimension gets the Toggle Driven Dimension item, it round-trips
+    /// driving -> driven -> driving, and non-dimension selections get no such item.
+    #[test]
+    fn dimension_menu_toggles_driving_driven_and_other_selections_get_no_item() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        let l = h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"connect":false,"infer":false})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let dparam = h.app.run("sketch.dimension", json!({"entities":[l],"value":10})).unwrap()["param"].as_str().unwrap().to_owned();
+        let dim = h.app.run("sketch.glyphs", json!({})).unwrap()["glyphs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["param"].as_str() == Some(dparam.as_str()))
+            .and_then(|x| x["id"].as_str())
+            .expect("the dimension glyph carries its constraint id")
+            .to_owned();
+        let horiz = h.app.run("sketch.constrainer", json!({"entities":[l]})).unwrap()["constraint"].as_str().unwrap().to_owned();
+        let is_driven = |h: &crate::scenario::Harness| {
+            h.app.session.world_state().sketch(sid).unwrap().sketch.constraints.iter().any(|c| c.id == dim && c.driven)
+        };
+
+        // A selected dimension offers the toggle, aimed at that constraint.
+        h.app.session.selection = vec![Sel::SketchConstraint { id: dim.clone() }];
+        let menu = items(&h.app, &Target::Viewport);
+        let item = menu.iter().find(|i| i.id == "sketch.toggle_driven").expect("a selected dimension must offer Toggle Driven Dimension");
+        assert!(item.enabled);
+        assert_eq!(item.params, Some(json!({"constraint": dim})));
+
+        // Running it flips the state both ways.
+        run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
+        assert!(is_driven(&h), "the dimension is driven now");
+        let menu = items(&h.app, &Target::Viewport);
+        let item = menu.iter().find(|i| i.id == "sketch.toggle_driven").expect("a driven dimension still offers the toggle");
+        run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
+        assert!(!is_driven(&h), "and driving again");
+
+        // A non-dimension constraint, and a plain curve, get no toggle item.
+        h.app.session.selection = vec![Sel::SketchConstraint { id: horiz }];
+        assert!(!items(&h.app, &Target::Viewport).iter().any(|i| i.id == "sketch.toggle_driven"), "a horizontal constraint is not a dimension");
+        h.app.session.selection = vec![Sel::SketchCurve { id: l }];
+        assert!(!items(&h.app, &Target::Viewport).iter().any(|i| i.id == "sketch.toggle_driven"));
+    }
 
     #[test]
     fn line_offset_context_menu_breaks_association_and_allows_trim() {
