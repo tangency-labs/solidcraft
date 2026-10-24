@@ -1,0 +1,10 @@
+{
+  "description": "Issue #3303: circular top face of a widening conical frustum (radius 1 to 5 mm, height 10 mm) cut inward by 4.4 mm. The cylinder touches the top rim but encloses the target; the result is a frustum of height 5.6 mm and top radius 3.24 mm.",
+  "commands": [
+    {"command": "sketch.create", "params": {"plane": "XY", "name": "Circle"}},
+    {"command": "sketch.circle.center", "params": {"center": [-6.7692028035233704, 15.405295625108298], "radius": 1}},
+    {"command": "sketch.finish", "params": {}},
+    {"command": "solid.extrude", "params": {"distance": 10, "taper": "21.80140948635181 deg", "body_name": "Body3", "name": "Frustum"}},
+    {"command": "solid.extrude", "params": {"direction": "positive", "distance": "-4.4 mm", "face": [-6.7692028035233704, 15.405295625108298, 9.999999999999972], "face_body": "Body3", "operation": "cut", "name": "Face cut"}}
+  ]
+}
