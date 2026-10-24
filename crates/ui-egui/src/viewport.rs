@@ -4512,13 +4512,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             crate::edit_in_place::double_click_face(app, &body);
         }
-        // A right-click, unless the same press opened the mouse gestures' ring. egui's click
-        // already allows the pointer a few points of travel, as a mouse moves while it is clicked.
+        // A right-click, unless the same press opened the mouse gestures' ring: it finishes a
+        // tool, confirms a dialog's input (when that preference is on), or opens the menu. egui's
+        // click already allows the pointer a few points of travel, as a mouse moves while it is
+        // clicked.
         if resp.secondary_clicked() && !crate::mouse_gesture::took_press(app) {
             if app.tool.is_some() {
                 crate::tools::finish(app);
             } else if app.dialog.is_none() {
                 crate::context_menu::open(app, p, held_mods);
+            } else if app.preferences.right_click_confirms {
+                crate::dialogs::right_click(app);
             }
         }
     }
