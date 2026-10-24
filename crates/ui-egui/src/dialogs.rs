@@ -2159,6 +2159,11 @@ fn awaiting_selection(error: &str) -> bool {
     error.get(..7).is_some_and(|start| start.eq_ignore_ascii_case("select "))
 }
 
+/// A dialog's refusal that names what to pick ("select the plane first", "pick an axis").
+fn missing_pick(error: &str) -> bool {
+    awaiting_selection(error) || error.get(..5).is_some_and(|start| start.eq_ignore_ascii_case("pick "))
+}
+
 fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) {
     if matches!(d.kind, Kind::SketchModify(_))
         && d.previews()
@@ -2175,6 +2180,12 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
         // "Select the curves to offset first" is not a failure: nothing is picked yet. The header hint
         // and the disabled OK already say so, so it is not drawn as a red error with an issue button.
         if matches!(d.kind, Kind::SketchModify(_)) && awaiting_selection(&error) {
+            return;
+        }
+        // Other dialogs say so on OK ("select a plane first", "pick an axis"): that is what is
+        // left to pick, not a failure, so it is shown plainly, with no Create Issue (#3292, #3773).
+        if missing_pick(&error) {
+            crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("missing_pick"));
             return;
         }
         ui.vertical(|ui| {
@@ -5323,7 +5334,7 @@ fn face_point(x: &Sel) -> Option<Value> {
 
 #[cfg(test)]
 mod awaiting_selection_tests {
-    use super::awaiting_selection;
+    use super::{awaiting_selection, missing_pick};
 
     #[test]
     fn missing_selection_messages_are_guidance_and_real_failures_are_not() {
@@ -5338,6 +5349,22 @@ mod awaiting_selection_tests {
         }
         for failure in ["Offset distance must be positive", "the sketch has no curves", "Selection is not on this sketch", "", "sel"] {
             assert!(!awaiting_selection(failure), "{failure}");
+            assert!(!missing_pick(failure), "{failure}");
         }
+        assert!(missing_pick("pick an axis") && missing_pick("select a plane first") && !missing_pick("pickle"));
+    }
+
+    /// Plane at Angle's OK with nothing picked says what to pick, without the red error and its
+    /// Create Issue button that made people file it as a bug (#3292, #3773).
+    #[test]
+    fn a_missing_pick_is_guidance_without_an_issue_button() {
+        let mut h = crate::scenario::Harness::new();
+        h.step(&serde_json::json!({"start":"construct.plane.at_angle"})).unwrap();
+        h.frames(2);
+        h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().expect("the dialog stays open");
+        assert_eq!(d.error.as_deref(), Some("select a plane first"));
+        assert!(crate::scenario::handle_at("dialog:create_issue").is_none(), "no Create Issue for a missing pick");
     }
 }
