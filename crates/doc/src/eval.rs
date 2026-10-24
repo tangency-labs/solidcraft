@@ -1108,7 +1108,7 @@ fn fingerprint(prev: u64, f: &Feature, vals: &BTreeMap<String, Value>, rolled_ba
     prev.hash(&mut h);
     rolled_back.hash(&mut h);
     vals.get(DESIGN_LEN).map(|v| v.v.to_bits()).hash(&mut h);
-    feature_json(f, steps).hash(&mut h);
+    hash_feature_json(f, steps, &mut h);
     for n in param_names(f) {
         n.hash(&mut h);
         match vals.get(&n) {
@@ -1187,6 +1187,36 @@ fn quantize(sk: &mut solidcraft_sketch::Sketch) {
 
 /// A feature as fingerprinted: its definition, a sketch's stored solve quantized, an imported
 /// file's text by its digest.
+/// Hash [`feature_json`] of `f` into `h`. Every evaluation fingerprints every feature, and in a
+/// design built command by command almost all of them are the same as last time: the text of a
+/// feature is kept (per thread, by id) with the feature it was written from, and written again
+/// only when the feature differs. An Import's text also depends on its STEP digest, so it is
+/// written each time as before.
+fn hash_feature_json(f: &Feature, steps: &StepDigests, h: &mut impl Hasher) {
+    if matches!(f.kind, FeatureKind::Import { .. }) {
+        feature_json(f, steps).hash(h);
+        return;
+    }
+    thread_local! {
+        static WRITTEN: std::cell::RefCell<std::collections::HashMap<u64, (Feature, String)>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    WRITTEN.with(|written| {
+        let mut written = written.borrow_mut();
+        if let Some((seen, json)) = written.get(&f.id)
+            && seen == f
+        {
+            json.hash(h);
+            return;
+        }
+        let json = feature_json(f, steps);
+        json.hash(h);
+        if written.len() >= 1 << 15 {
+            written.clear();
+        }
+        written.insert(f.id, (f.clone(), json));
+    });
+}
+
 fn feature_json(f: &Feature, steps: &StepDigests) -> String {
     if let FeatureKind::Import { step, .. } = &f.kind {
         let mut g = f.clone();
