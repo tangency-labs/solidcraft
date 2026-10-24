@@ -925,17 +925,16 @@ mod tests {
         let before = requests.load(Ordering::Relaxed);
         let previous = super::is_dark();
         super::set_dark(!previous);
-        ctx.run_ui(egui::RawInput::default(), |ui| {
-            let dark = super::is_dark();
-            let expected = super::visuals(dark);
-            super::apply(ui.ctx());
-            let theme = if dark { egui::Theme::Dark } else { egui::Theme::Light };
-            assert_eq!(ui.ctx().style_of(theme).visuals, expected, "the new theme's visuals must be in place");
-        })
-        .textures_delta
-        .clear();
+        let dark = super::is_dark();
+        let expected = super::visuals(dark);
+        // The theme is applied outside a pass: inside one egui schedules repaints of its
+        // own, and the request of the theme would hide among them.
+        super::apply(&ctx);
         super::set_dark(previous);
         assert!(requests.load(Ordering::Relaxed) > before, "a theme change must ask for a repaint");
+        assert!(ctx.has_requested_repaint(), "a theme change must leave a repaint pending");
+        let theme = if dark { egui::Theme::Dark } else { egui::Theme::Light };
+        assert_eq!(ctx.style_of(theme).visuals, expected, "the new theme's visuals must be in place");
     }
 
     #[test]
