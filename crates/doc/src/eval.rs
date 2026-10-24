@@ -1219,6 +1219,14 @@ impl ModelState {
         self.bodies.iter().find(|b| b.name == name)
     }
 
+    /// The frame member whose body is the body called `name` now. A member's record stays when a
+    /// later feature removes its body, and another body can take the name; it counts only while
+    /// the body of that name is the one its feature made.
+    pub fn frame_member(&self, name: &str) -> Option<&crate::frame::MemberRecord> {
+        let body = self.body(name)?;
+        self.frame_members.iter().rev().find(|m| m.body == name && m.feature == body.feature)
+    }
+
     /// Make every body's display mesh now, on all cores (bodies are meshed independently and
     /// each keeps its own mesh, so the meshes are those `ModelBody::mesh` makes one by one).
     /// Stops starting bodies once `go_on` says no.
@@ -8006,7 +8014,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             Ok(())
         }
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
-        FeatureKind::FrameTrim { .. } => frame_member::trim(doc, vals, f, st),
+        FeatureKind::FrameTrim { .. } => frame_member::trim(doc, vals, f, st, warning),
         FeatureKind::BoundingSolid { bodies, margin } => {
             let m = val(vals, margin, Kind::Length)?;
             let mut bb = solidcraft_geom::Aabb3::EMPTY;

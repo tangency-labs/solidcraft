@@ -272,5 +272,24 @@ fn trim_from_picked_members_and_targets() {
     assert!(t.keep && t.kept.len() == 1, "{:?}", t.kept);
     let c = apply_commands(&app, &e).unwrap();
     assert_eq!(c[0].1["params"]["to"][0]["side"], json!("left"), "{}", c[0].1);
+    // Unticked, it goes, and with nothing else picked there is nothing to trim to.
+    trim(&mut e).keep = false;
+    assert!(apply_commands(&app, &e).unwrap_err().contains("trim them to"));
     run_all(&mut app, c);
+}
+
+/// A face of a body that isn't a member is a plane target, sent as the exact face picked (its
+/// body, index and path), as Start Sketch sends one.
+#[test]
+fn a_face_target_is_the_exact_face_picked() {
+    let mut app = post_and_rail();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [400, 0, 0], "body_name": "Block"})).unwrap();
+    app.session.selection = vec![Sel::Body { name: "Rail".into() }];
+    app.start("frame.trim");
+    let mut d = app.dialog.clone().unwrap();
+    d.inputs[1].items = vec![Sel::Face { body: "Block".into(), index: 2, point: solidcraft_engine::geom::Vec3::new(400.0, 5.0, 5.0) }];
+    let c = apply_commands(&app, &d).unwrap();
+    let plane = &c[0].1["to"][0]["plane"];
+    assert_eq!((&plane["face"], &plane["body"], &plane["index"]), (&json!([400.0, 5.0, 5.0]), &json!("Block"), &json!(2)), "{}", c[0].1);
+    assert!(plane["path"].is_array(), "{}", c[0].1);
 }

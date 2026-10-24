@@ -289,11 +289,7 @@ fn member_ref(s: &Session, v: &Value, cmd: &str) -> Result<MemberRef> {
     match v {
         Value::String(body) => {
             let st = s.model.state();
-            let rec = st
-                .frame_members
-                .iter()
-                .find(|m| m.body == body.trim())
-                .ok_or_else(|| bad(cmd, format!("`{}` is not a frame member's body", body.trim())))?;
+            let rec = st.frame_member(body.trim()).ok_or_else(|| bad(cmd, format!("`{}` is not a frame member's body", body.trim())))?;
             let feature = feature_name(rec.feature).ok_or_else(|| bad(cmd, format!("the feature of `{}` is gone", body.trim())))?;
             Ok(MemberRef { feature: feature.into(), line: rec.line.clone() })
         }
@@ -320,8 +316,9 @@ fn member_ref(s: &Session, v: &Value, cmd: &str) -> Result<MemberRef> {
 }
 
 /// A trim target from a parameter: a member (body name, `{member, side?}` or `{feature, line}`)
-/// or `{plane}`.
-fn trim_target(s: &Session, v: &Value, cmd: &str) -> Result<TrimTarget> {
+/// or `{plane}`, in the active component's frame. A body face is attached, as a sketch on it is,
+/// and kept in `faces` too.
+fn trim_target(s: &Session, v: &Value, cmd: &str, faces: &mut Vec<solidcraft_doc::PlaneRef>) -> Result<TrimTarget> {
     match v {
         // A plane as the design saves it, as Edit Feature passes a trim's planes back.
         Value::Object(o) if o.contains_key("plane_ref") => {
@@ -332,8 +329,17 @@ fn trim_target(s: &Session, v: &Value, cmd: &str) -> Result<TrimTarget> {
         Value::Object(o) if o.contains_key("plane") => {
             let pv = o.get("plane");
             let plane = match pv {
-                Some(face @ Value::Object(po)) if po.contains_key("face") => super::sketch::face::capture(s, face, cmd)?,
-                _ => super::features::plane_param(s, pv, cmd)?,
+                // Captured in the authoring frame already.
+                Some(face @ Value::Object(po)) if po.contains_key("face") => {
+                    let plane = super::sketch::face::capture(s, face, cmd)?;
+                    faces.push(plane.clone());
+                    plane
+                }
+                _ => {
+                    let mut plane = super::features::plane_param(s, pv, cmd)?;
+                    super::component::plane_to_active_frame(s, &mut plane);
+                    plane
+                }
             };
             Ok(TrimTarget::Plane { plane })
         }
@@ -362,11 +368,12 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(twice) = members.iter().find(|m| !seen.insert(*m)) {
         return Err(bad(cmd, format!("member `{}` of `{}` is listed twice", twice.line, twice.feature)));
     }
+    let mut faces = Vec::new();
     let to = match p.get("to") {
         Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_TRIM_TARGETS => {
-            a.iter().map(|v| trim_target(s, v, cmd)).collect::<Result<Vec<_>>>()?
+            a.iter().map(|v| trim_target(s, v, cmd, &mut faces)).collect::<Result<Vec<_>>>()?
         }
-        Some(v @ (Value::String(_) | Value::Object(_))) => vec![trim_target(s, v, cmd)?],
+        Some(v @ (Value::String(_) | Value::Object(_))) => vec![trim_target(s, v, cmd, &mut faces)?],
         _ => return Err(bad(cmd, format!("`to` must list 1…{} targets (members or {{plane}})", frame::MAX_TRIM_TARGETS))),
     };
     let end: TrimEnd = match p.get("end") {
@@ -384,5 +391,10 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
             Some(e)
         }
     };
-    add_feature(s, p, FeatureKind::FrameTrim { members, to, end, gap })
+    // A face's attachment holds the placements it was picked under, as a sketch's does.
+    for face in &faces {
+        super::sketch::face::capture_positions(s, face)?;
+    }
+    // Every target is in the active component's frame already.
+    super::features::add_feature_in(s, p, FeatureKind::FrameTrim { members, to, end, gap }, false)
 }

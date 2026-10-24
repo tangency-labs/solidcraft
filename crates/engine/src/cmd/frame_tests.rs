@@ -860,6 +860,15 @@ fn trims_undo_reopen_and_keep_their_members_through_the_saved_model() {
         run(&mut r, "frame.trim", json!({"members": [uprights[0]], "to": [{"plane": {"origin": [0, 0, 1499], "normal": [0, 0, 1]}}]}));
         assert!((lengths(&mut r)[&uprights[0]] - 1499.0).abs() < 1e-6);
     }
+    // A model saved before members were recorded knows none: it is not adopted, the design is
+    // evaluated again, and a trim still finds its members.
+    let mut old = solidcraft_doc::SavedModel { records: saved.records.clone(), bodies: saved.bodies.clone() };
+    for st in old.records["states"].as_array_mut().unwrap() {
+        st.as_object_mut().unwrap().remove("frame_members");
+    }
+    let mut r = Session::opened(solidcraft_doc::Document::from_json(&json).unwrap(), Some(&old));
+    run(&mut r, "frame.trim", json!({"members": [uprights[0]], "to": [{"plane": {"origin": [0, 0, 1499], "normal": [0, 0, 1]}}]}));
+    assert!((lengths(&mut r)[&uprights[0]] - 1499.0).abs() < 1e-6);
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.undo", json!({}));
     assert!(rel(total_volume(&mut s), full) < 1e-9, "both trims undone");
@@ -879,6 +888,75 @@ fn a_renamed_trimmed_member_stays_trimmed() {
     let len = lengths(&mut s);
     assert!((len["Front rail"] - 510.0).abs() < 1e-6, "{len:?}");
     assert!((len[&cross[0]] - 510.0).abs() < 1e-6, "{len:?}");
+}
+
+#[test]
+fn a_member_trimmed_to_a_face_follows_the_face() {
+    // A plate `T` thick (10 mm) and a post above it along Z, from z = 100 to 300.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "T", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": 200, "width": 200, "height": "T", "corner": [0, 0, 0], "body_name": "Plate"}));
+    let post = members_3d(&mut s, "Post", &[([100.0, 100.0, 100.0], [100.0, 100.0, 300.0])]);
+    // Its start extends down to the plate's top face: 290 long.
+    run(&mut s, "frame.trim", json!({"members": post, "to": {"plane": {"face": [50, 50, 10]}}}));
+    assert!((lengths(&mut s)["Post"] - 290.0).abs() < 1e-6, "{:?}", lengths(&mut s));
+    // A thicker plate: the post still stands on its top, now 270 long.
+    run(&mut s, "parameters.change", json!({"name": "T", "expression": "30 mm"}));
+    let bs = boxes(&mut s);
+    assert!(near3(bs["Post"].0, [77.5, 77.5, 30.0]) && near3(bs["Post"].1, [122.5, 122.5, 300.0]), "{:?}", bs["Post"]);
+}
+
+#[test]
+fn a_trim_in_a_moved_component_meets_the_face_where_it_is_shown() {
+    // A post line in the root, z = 100 to 300; then a component moved 100 up holding the post and
+    // a plate whose top is shown at z = 50.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Post"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[100, 100, 100], [100, 100, 300]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let c = run(&mut s, "component.create", json!({"name": "Stand", "grounded": false}))["component"].as_u64().unwrap();
+    let o = s.doc.occurrence_of(c).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": o, "translate": [0, 0, 100], "capture": true}));
+    let post = made(&run(&mut s, "frame.member", json!({"sketch": "Post", "profile": bar45(), "body_name": "Post"})));
+    run(&mut s, "solid.box", json!({"length": 200, "width": 200, "height": 10, "corner": [0, 0, 40], "body_name": "Plate"}));
+    // The face picked where it is shown: the post's start comes down to z = 50, 250 long.
+    run(&mut s, "frame.trim", json!({"members": post, "to": {"plane": {"face": [50, 50, 50]}}}));
+    let bs = boxes(&mut s);
+    assert!(near3(bs["Post"].0, [77.5, 77.5, 50.0]) && near3(bs["Post"].1, [122.5, 122.5, 300.0]), "{:?}", bs["Post"]);
+    // And so does a plane given by numbers, in world coordinates.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "frame.trim", json!({"members": post, "to": {"plane": {"origin": [0, 0, 60], "normal": [0, 0, 1]}}}));
+    assert!(near3(boxes(&mut s)["Post"].0, [77.5, 77.5, 60.0]), "{:?}", boxes(&mut s)["Post"]);
+}
+
+#[test]
+fn a_member_name_given_again_means_the_new_member() {
+    // A member removed, and a new member along another line given its name.
+    let mut s = Session::default();
+    let old = members_3d(&mut s, "Rail", &[([0.0, 0.0, 0.0], [100.0, 0.0, 0.0])]);
+    run(&mut s, "solid.remove", json!({"bodies": old}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Second"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[0, 200, 0], [100, 200, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let new = made(&run(&mut s, "frame.member", json!({"sketch": "Second", "profile": bar45(), "body_name": "Rail"})));
+    assert_eq!(old, new);
+    // The name is the new member's: it extends to x = 150, where it runs.
+    run(&mut s, "frame.trim", json!({"members": new, "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}}));
+    let bs = boxes(&mut s);
+    assert!(near3(bs[&new[0]].0, [0.0, 177.5, -22.5]) && near3(bs[&new[0]].1, [150.0, 222.5, 22.5]), "{:?}", bs[&new[0]]);
+}
+
+#[test]
+fn a_trimmed_member_keeps_its_face_names() {
+    // What later features picked on a member stays picked when a trim goes in before them.
+    let mut s = Session::default();
+    let m = members_3d(&mut s, "Bar", &[([0.0, 0.0, 0.0], [100.0, 0.0, 0.0])]);
+    let names = |s: &Session| solidcraft_doc::naming::face_names(s.model.state().body(&m[0]).unwrap()).to_vec();
+    let before = names(&s);
+    run(&mut s, "frame.trim", json!({"members": m, "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}}));
+    assert_eq!(names(&s), before);
 }
 
 /// Hostile values in every parameter of `frame.trim`, on a real tower so they get past the member
@@ -903,6 +981,13 @@ fn hostile_trims_are_refused_not_crashed() {
         json!([{"plane": {"origin": [1e308, 0, 0], "normal": [0, 0, 0]}}]),
         json!([{"plane": {"origin": [0, 0, 0], "normal": [1e-300, 0, 0]}}]),
         json!([{"plane": {"face": [1e308, 1e308, 1e308]}}]),
+        json!([{"plane": {"face": [0, 0, 0], "body": "Upright", "index": 1e300}}]),
+        json!([{"plane_ref": {"type": "custom", "plane": {"origin": [0, 0, 0], "x_dir": [0, 0, 0], "y_dir": [0, 0, 0]}}}]),
+        json!([{"plane_ref": {"type": "custom", "plane": {"origin": [1e308, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1e-300, 0]}}}]),
+        json!([{"plane_ref": {"type": "offset", "base": {"type": "origin", "name": "XY"}, "distance": "1e400 mm"}}]),
+        json!([{"plane_ref": 7}]),
+        json!([{"member": "nope", "side": "left"}]),
+        json!([{"member": {"feature": "Member1"}, "side": "left"}]),
         json!("x".repeat(100_000)),
     ];
     let good = json!({"members": [rails[0]], "to": uprights});

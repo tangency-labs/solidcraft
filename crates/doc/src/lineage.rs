@@ -35,6 +35,9 @@ pub(crate) enum Operand {
     /// pattern or mirror of that feature: its faces named by their roles in that feature
     /// (`F<feature>:<role>@F<pattern>.<instance>`).
     CopiedTool { roles: Vec<Vec<String>>, feature: u64, instance: usize },
+    /// A body another feature (`feature`) builds, built again by this one in its place (a frame
+    /// member with its ends trimmed): its faces keep that feature's names (`F<feature>:<role>`).
+    Rebuilt { roles: Vec<Vec<String>>, feature: u64 },
     /// A body the feature made on the way to its result (a cut body before it falls into lumps),
     /// named as a whole first so pieces of one face in different results are told apart.
     Stage(Box<Stage>),
@@ -90,6 +93,7 @@ impl Lineage {
             .iter()
             .map(|op| match op.as_ref() {
                 Operand::Made(roles) => Arc::new(Operand::CopiedTool { roles: roles.clone(), feature, instance }),
+                Operand::Rebuilt { roles, feature: built } => Arc::new(Operand::CopiedTool { roles: roles.clone(), feature: *built, instance }),
                 _ => op.clone(),
             })
             .collect();
@@ -469,6 +473,13 @@ pub(crate) fn link_role(fid: u64, name: &str, depth: usize) -> String {
         role.push_str(&format!("#{k}"));
     }
     role
+}
+
+/// [`numbered_tool`] for a body feature `feature` built, built again by another feature: its
+/// faces keep the names `feature` gave them.
+pub(crate) fn numbered_rebuilt(body: Body, feature: u64) -> Traced {
+    let roles = (0..body.face_count()).map(|k| vec![format!("face:{k}")]).collect();
+    Traced { lineage: Some(Lineage::of(&body, Operand::Rebuilt { roles, feature })), body }
 }
 
 /// The role of an extrude's cap at `height` along the sketch normal: on the sketch plane, above

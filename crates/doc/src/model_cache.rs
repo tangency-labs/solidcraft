@@ -689,6 +689,15 @@ impl Model {
                 unkept: state.is_none(),
                 state: state.unwrap_or_else(|| before.clone()),
             };
+            // A model saved before members were recorded (#4003) knows none in any state after
+            // its members: trims need them, so the design is evaluated again instead.
+            if !result.skipped
+                && !result.unkept
+                && matches!(f.kind, crate::FeatureKind::FrameMember { .. })
+                && !result.state.frame_members.iter().any(|m| m.feature == f.id)
+            {
+                return Err(bad("saved model: frame members"));
+            }
             if !result.skipped {
                 exact = !result.unkept;
                 before = result.state.clone();
