@@ -58,11 +58,19 @@ pub struct Entry {
     /// The persistent names of its faces or edges: they survive an edit, so an item whose names are
     /// all gone was changed away or deleted.
     pub names: Vec<String>,
+    /// The pill in the message it was picked for (`«n: …»`), 0 for what is not placed in the text
+    /// (Attach selection).
+    pub group: u32,
 }
 
 impl Entry {
+    /// Whether both stand for the same thing, whichever pill each is in.
+    pub fn same_item(&self, other: &Entry) -> bool {
+        self.kind == other.kind && self.label == other.label && self.detail == other.detail && self.sels == other.sels
+    }
+
     fn new(kind: Kind, label: String, detail: String) -> Entry {
-        Entry { kind, label, detail, sels: Vec::new(), names: Vec::new() }
+        Entry { kind, label, detail, sels: Vec::new(), names: Vec::new(), group: 0 }
     }
 }
 
@@ -72,6 +80,8 @@ pub struct Context {
     pub items: Vec<Entry>,
     /// Selected things past [`MAX_ITEMS`], not described.
     pub omitted: usize,
+    /// The pills of the message: their numbers and labels, in reading order.
+    pub groups: Vec<(u32, String)>,
 }
 
 impl Context {
@@ -87,6 +97,11 @@ impl Context {
     /// Add the items of another message (queued messages go as one prompt), up to the limit.
     pub fn merge(&mut self, other: Context) {
         self.omitted += other.omitted;
+        for group in other.groups {
+            if !self.groups.iter().any(|(n, _)| *n == group.0) {
+                self.groups.push(group);
+            }
+        }
         for item in other.items {
             if self.items.len() < MAX_ITEMS {
                 self.items.push(item);
@@ -96,17 +111,38 @@ impl Context {
         }
     }
 
-    /// The block of text the agent gets after the message, `""` when nothing was selected.
-    pub fn prompt_block(&self) -> String {
-        if self.is_empty() {
-            return String::new();
+    /// These items as the pick the pill `id` stands for.
+    pub fn in_group(mut self, id: u32, label: &str) -> Context {
+        for item in &mut self.items {
+            item.group = id;
         }
-        let mut out = format!(
-            "[Selected in SolidCraft when this message was sent: {} item(s). A face or edge name stays the same when the model is edited; indices and points are as they were then (`model.faces` and `model.edges` list the current ones).]",
-            self.total()
-        );
+        self.groups = vec![(id, label.to_string())];
+        self
+    }
+
+    /// The same with every pill number raised by `by`: a queued message joining an earlier one in
+    /// one prompt must not reuse its numbers.
+    pub fn shifted(mut self, by: u32) -> Context {
+        for item in &mut self.items {
+            if item.group > 0 {
+                item.group = item.group.saturating_add(by);
+            }
+        }
+        for group in &mut self.groups {
+            group.0 = group.0.saturating_add(by);
+        }
+        self
+    }
+
+    /// The highest pill number.
+    pub fn last_group(&self) -> u32 {
+        self.groups.iter().map(|(n, _)| *n).max().unwrap_or(0)
+    }
+
+    /// The items of one group (0: those not placed in the text), a section per kind.
+    fn sections(&self, group: u32, out: &mut String) {
         for kind in Kind::ALL {
-            let mut lines = self.items.iter().filter(|i| i.kind == kind).peekable();
+            let mut lines = self.items.iter().filter(|i| i.kind == kind && i.group == group).peekable();
             if lines.peek().is_none() {
                 continue;
             }
@@ -118,10 +154,91 @@ impl Context {
                 }
             }
         }
+    }
+
+    /// The block of text the agent gets after the message, `""` when nothing was selected. Picks
+    /// made at a place in the text come numbered, as the marks in the text are.
+    pub fn prompt_block(&self) -> String {
+        if self.is_empty() {
+            return String::new();
+        }
+        let placed = !self.groups.is_empty();
+        let mut out = format!("[Selected in SolidCraft when this message was sent: {} item(s). ", self.total());
+        if placed {
+            out.push_str("A mark like «1: …» in the message stands for the numbered group below, at the place where the user picked it. ");
+        }
+        out.push_str(
+            "A face or edge name stays the same when the model is edited; indices and points are as they were then (`model.faces` and `model.edges` list the current ones).]",
+        );
+        if placed {
+            let mut groups = self.groups.clone();
+            groups.sort_by_key(|(n, _)| *n);
+            for (n, label) in groups {
+                // The same mark as in the message (made safe the same way).
+                out.push('\n');
+                out.push_str(&super::pills::marker(n, &label));
+                if self.items.iter().any(|i| i.group == n) {
+                    self.sections(n, &mut out);
+                } else {
+                    out.push_str("\n(none listed: past the limit)");
+                }
+            }
+            if self.items.iter().any(|i| i.group == 0) {
+                out.push_str("\nSelected as well, not placed in the message:");
+            }
+        }
+        self.sections(0, &mut out);
         if self.omitted > 0 {
             out.push_str(&format!("\n(and {} more, not listed)", self.omitted));
         }
         out
+    }
+
+    /// The short phrase for a pick: the item's own label for one, else what it holds, "3 faces + 1
+    /// edge", and the body when they are all of one.
+    pub fn group_label(&self) -> String {
+        if self.items.len() == 1 {
+            return self.items.first().map(|i| i.label.clone()).unwrap_or_default();
+        }
+        let (mut faces, mut edges, mut vertices, mut features, mut bodies, mut other) = (0, 0, 0, 0, 0, 0);
+        let mut body: Option<Option<&str>> = None;
+        for item in &self.items {
+            let sel = item.sels.first();
+            match sel {
+                Some(Sel::Face { .. }) => faces += 1,
+                Some(Sel::Edge { .. }) => edges += 1,
+                Some(Sel::Vertex { .. }) => vertices += 1,
+                Some(Sel::Feature { .. }) => features += 1,
+                Some(Sel::Body { .. }) => bodies += 1,
+                _ => other += 1,
+            }
+            let of = match sel {
+                Some(Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } | Sel::Body { name: body }) => Some(body.as_str()),
+                _ => None,
+            };
+            body = match body {
+                None => Some(of),
+                Some(prev) if prev == of => Some(prev),
+                Some(_) => Some(None),
+            };
+        }
+        let count = |n: usize, one: &str, many: &str| (n > 0).then(|| format!("{n} {}", if n == 1 { one } else { many }));
+        let parts: Vec<String> = [
+            count(faces, "face", "faces"),
+            count(edges, "edge", "edges"),
+            count(vertices, "vertex", "vertices"),
+            count(features, "feature", "features"),
+            count(bodies, "body", "bodies"),
+            count(other, "item", "items"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let what = parts.join(" + ");
+        match body {
+            Some(Some(name)) if faces + edges + vertices > 0 && !name.is_empty() => format!("{name} · {what}"),
+            _ => what,
+        }
     }
 }
 
