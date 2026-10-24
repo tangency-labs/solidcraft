@@ -62,7 +62,7 @@
 //! | 47   | `n touch*n`                                  | `SmTouchData::GetWindingCount`              | `count orient`           |
 //! | 48   | `e P[3] (s u v)*2 param`                     | `sm_SetXSectEdgeThroughPoint`               | `param dev modified`     |
 //! | 49   | `e`                                          | `sm_GetCCIGeometry`                         | `n_surfaces count`       |
-//! | 50   | `f P[3] tol`                                 | `sm_ComputeFacePointClass`                  | `class`                  |
+//! | 50   | `f P[3] tol`                                 | `sm_ComputeFacePointClass`                  | `status` + point classification |
 //!
 //! A touch is `connected_to loop_dir loop_index param pt_index pt_classify` (ids or `-1`).
 //! A curve record is `min max n m (status [P[3]])*7`: the natural interval, the NURB's highest

@@ -28,7 +28,16 @@
 //! `sm_SetXSectEdgeThroughPoint` and `sm_GetCCIGeometry` run on the edge's B-rep record
 //! (an edited edge curve is written back to the pool curve the shim's edge shares).
 //!
-//! Deferred cases: ops that reach other topology members (`sm_ComputeFacePointClass`),
+//! `sm_ComputeFacePointClass` runs on the face's B-rep record; both sides emit the status and the whole
+//! point classification (object, face, deviation, parameters). On the one-face B-rep the points sit
+//! on the corners, edges and interior, lifted off the surface, and strays, so the classes are
+//! vertex, edge, face and outside. On a bare face (a surface, no loops, an empty UV domain) the
+//! point solve finds nothing and both sides end in `SM_ERR` with the default record, so those
+//! cases check the status, not a classification; so do points too far from the one-face
+//! B-rep's surface. The shim rejects a face whose UV domain has zero size on either axis (the
+//! C++ crashes on the single-point domain; cause not located).
+//!
+//! Inputs the shim rejects, for which the Rust side would defer or that are undefined upstream:
 //! surface point solves (`ComputePointParameters` on surfaces, `sm_GetCCISurfaceGaps` with
 //! surfaces), `SmTol::MapTo2d` for a curve of dimension other than 2 or 3 on a surface
 //! (`SmSurface::DropPoint`) and an `SmCrvOnSurf` over a plane. Generated scripts are filtered by the shim's
@@ -1765,9 +1774,35 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                 }
                 OpIn::FacePointClass { f, p, tol, .. } => {
                     let h = pool.handle(*f)?.ok_or_else(|| harness("no face"))?;
-                    let mut pc = PointClassification::new(zone_tol3d(&k, USE_DEFAULT));
-                    must(cc_mod::compute_face_point_class(v3(*p), zone_tol3d(&k, *tol), h, &mut pc))?;
-                    return Err(harness("face point class ported").into());
+                    let Some((_, EntityRef::Face(fid))) = pool.topology_entity(h) else {
+                        return Err(harness("face handle without a face").into());
+                    };
+                    let mut pc = PointClassification::<EntityRef>::new(zone_tol3d(&k, USE_DEFAULT));
+                    let brep = match pool.topo.as_mut() {
+                        Some(t) => &mut t.brep,
+                        None => &mut pool.bare.brep,
+                    };
+                    let r = cc_mod::p1::compute_face_point_class_in(
+                        &k,
+                        brep,
+                        fid,
+                        v3(*p),
+                        zone_tol3d(&k, *tol),
+                        &mut pc,
+                    );
+                    // the status, then the whole classification (also on failure, as the shim)
+                    o.push(match st(r)? {
+                        Ok(()) => 0.0,
+                        Err(s) => s,
+                    });
+                    let pc = pc
+                        .map_objects(&mut |e| {
+                            pool.topology_handle(e).ok_or_else(|| {
+                                SolidError::invalid_input("difftest", "entity without a pool handle")
+                            })
+                        })
+                        .map_err(|e| harness(e.to_string()))?;
+                    put_pc(&mut o, &pc);
                 }
                 _ => {}
             }
@@ -2387,7 +2422,14 @@ fn gen_script(rng: &mut Rng) -> Script {
             let all: Vec<usize> = (0..objects.len()).collect();
             for _ in 0..=rng.below(6) {
                 let t = rng.below(2) as usize;
-                let op = match rng.below(5) {
+                let op = match rng.below(6) {
+                    // sm_ComputeFacePointClass on a bare face (a surface, no loops)
+                    5 => OpIn::FacePointClass {
+                        t,
+                        f: pick(rng, &of_kind(&objects, kind::FACE)),
+                        p: rp(rng, 10.0),
+                        tol: *rng.choose(&[1e-5, 1e-4, 1e-3, 1e-6, 0.05]).unwrap_or(&1e-5),
+                    },
                     0 | 1 => {
                         let c1 = maybe(rng, &curves, 0.05);
                         let c2 = if rng.chance(0.2) { c1 } else { maybe(rng, &curves, 0.05) };
@@ -2590,6 +2632,30 @@ fn gen_face_script(rng: &mut Rng) -> Option<Script> {
             }
         }
     }
+    // sm_ComputeFacePointClass over the face (the first topology object): points on its
+    // corners, edges and interior, lifted off its surface, and strays. Not on the heal.face_props
+    // degenerate domain [0, 0, t, t] with t = 1e-300: the shim rejects the op there (single-point
+    // domain) and would drop the whole script with its other ops.
+    if face.domain[2] - face.domain[0] > 1e-200 && rng.chance(0.6) {
+        let n = corners.len() as f64;
+        let centroid = corners.iter().fold([0.0; 3], |s, c| [s[0] + c[0], s[1] + c[1], s[2] + c[2]]);
+        let centroid = [centroid[0] / n, centroid[1] / n, centroid[2] / n];
+        let mid = [(a[0] + c[0]) / 2.0, (a[1] + c[1]) / 2.0, (a[2] + c[2]) / 2.0];
+        for _ in 0..=rng.below(2) {
+            let mut p = match rng.below(5) {
+                0 => a,
+                1 => mid,
+                2 => centroid,
+                3 => rp(rng, 3.0),
+                _ => c,
+            };
+            if rng.chance(0.3) {
+                p[2] += *rng.choose(&[1e-7, 1e-4, 0.05, -0.05]).unwrap_or(&1e-4);
+            }
+            let tol = *rng.choose(&[1e-5, 1e-4, 1e-3, 1e-6, 0.05]).unwrap_or(&1e-5);
+            ops.push(OpIn::FacePointClass { t: 0, f: Some(n_obj), p, tol });
+        }
+    }
     for _ in 0..=rng.below(2) {
         ops.push(OpIn::MakeConsistent { t: 0 });
     }
@@ -2742,7 +2808,7 @@ fn edge_cases() -> Vec<(String, Value)> {
         OpIn::Gaps { t: 0, cp: [0.0; 3], ep: [3.0, 4.0, 0.0], sol: [0.0, 0.0], pairs: vec![], count: 0 },
     ];
     out.push(("edge_angles".into(), json!(Script { objects: objs, face: None, ops })));
-    // the topology helpers (the face point classification is deferred in the port)
+    // the topology helpers
     let objs = vec![
         line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0]),
         ObjIn::Plane { o: [0.0, 0.0, 0.0], n: [0.0, 0.0, 1.0] },

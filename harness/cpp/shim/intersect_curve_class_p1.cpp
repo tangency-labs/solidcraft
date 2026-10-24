@@ -2900,10 +2900,18 @@ int32_t run(Rd& rd, std::vector<double>& o)
             double tol = rd.num();
             if (!ok || f == NULL || f->GetSurface() == NULL)
                 return SC_ERR_ARG;
+            // a face whose UV domain is a single point crashes this (a heal.face_props domain
+            // of size 1e-300 collapses to one; 1e-100 and up run; cause not located, a NULL
+            // surface cache at the unchecked pSC->m_bPointTestEnabled is a candidate): reject
+            // zero size on either axis as undefined. A bare face's empty domain (min above
+            // max, negative size) is fine: nothing is inside it.
+            SmPoint2d dsz = f->GetUVDomain().GetSize();
+            if (dsz.x == 0.0 || dsz.y == 0.0)
+                return SC_ERR_ARG;
             SmPointClassification pc;
             SmStatus s = sc_cc_p1::sm_ComputeFacePointClass(p, SmZoneTol3d(tol), f, pc);
             o.push_back(st(s));
-            o.push_back((double)pc.GetPointClass());
+            put_pc(o, pc, pool);
             break;
         }
         default: return SC_ERR_ARG;
