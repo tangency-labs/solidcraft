@@ -46,58 +46,98 @@ mod app_icon;
 use solidcraft_engine::Session;
 use solidcraft_engine::view::Guides;
 
-const USAGE: &str = "usage:
-  solidcraft-cli run <script.json|design.solidcraft|part.step> [--in design.solidcraft|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]
-  solidcraft-cli run --in <design.solidcraft|part.step> [--out FILE]...
-      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)
-      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;
-       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)
-  solidcraft-cli eval <script.json|design.solidcraft|part.step> [--json-out FILE]     (alias: inspect; or --in FILE)
-      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,
-       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)
-  solidcraft-cli script <design.solidcraft|script.json> [--out script.json]
-      (the design's history as a command script that eval and run replay)
-  solidcraft-cli bench-open <design.solidcraft | part.step> [--parse-only] [--save OUT.solidcraft] [--display LEVEL [--edit NAME EXPR]] [--ops script.json]
-      (--ops: after opening, run each command of the script and undo it, timing the command, the
-       evaluations it caused and the view it leaves: placing and meshing what changed)
-  solidcraft-cli bench-agent [--scale F] [--save design.solidcraft] [--script-out script.json]
-  solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N] [--timeout-s 300] [--json out.json] [--markdown out.md]
-  solidcraft-cli snapshot <script|design> [--in design.solidcraft|part.step] --out shot.png [--width W] [--height H] [--view NAME | --camera JSON] [--no-grid] [--no-axes]
-      [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27]
-  solidcraft-cli snapshot --in <design.solidcraft|part.step> --out shot.png ...
-      (as with run, --in starts from a design and the script runs on top of it; an option snapshot doesn't take is an error;
-       --view: iso, front, back, top, bottom, left, right, or the name of a view saved in the design with view.save;
-       --camera: {target: [x,y,z], yaw, pitch, distance, fov?} in mm and radians, as the MCP screenshot takes it (docs/mcp.md);
-       --no-grid and --no-axes leave the ground grid (on Z 0) and the origin's axes out of the picture;
-       --body: how one body is drawn, as appearance.assign takes it: opacity 0-1 (below 1 is see-through, so what is inside
-         it shows) and color #rrggbb, either or both, once per body;
-       --tool: draw this body solid in the tool colour and every other body see-through, so a cut's or a join's tool body
-         is visible inside the material it meets; a later --body overrides it;
-       --section: cut the model as inspect.section does, so the inside shows: z=27 (the plane through that world
-         coordinate, keeping the smaller side), add ,flip to keep the other side, or XY, XZ, YZ, or its own JSON)
-  solidcraft-cli render <script|design> --out image.png [--setup NAME] [--width W] [--height H] [--transparent] [--overwrite] [--timeout SECONDS]
-  solidcraft-cli exec <command> [json-params]
-  solidcraft-cli commands
-  solidcraft-cli recipe <recipe.json>
-  solidcraft-cli oracle <case-dir>... [--json]
-  solidcraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]
-  solidcraft-cli mcp [--headless] [--in design.solidcraft|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path]
-                     [--param-check off|warn|strict]
-  solidcraft-cli crashes [list [--json] | show <id> | replay <id> | dir | clear [<id>]]
-  solidcraft-cli licences
-  solidcraft-cli gpu [--policy auto|hardware|software|cpu]
-      (the GPU adapters a headless render can open, best first, the one the policy picks and the tier it
-       lands on: gpu, gpu-software, or the CPU rasterizer (auto with no adapter, or cpu); the policy defaults
-       to SOLIDCRAFT_GPU, else auto; exits with an error when hardware or software finds no such adapter)
-  solidcraft-cli icon --out icon.png [--size 256] | --out icon.ico
-  --debug, with any command: what SolidCraft logs (why a body has no display plan, why a save left its
-      model cache out), on stderr; RUST_LOG=error|warn|info|debug|trace sets one level for every crate
-";
+/// One command the CLI takes: the name to type, the usage it prints for `--help`,
+/// and whether the top-level usage lists it (an alias answers to another command's name).
+struct Command {
+    name: &'static str,
+    usage: &'static str,
+    listed: bool,
+}
+
+/// `run`'s lines in the usage.
+const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.solidcraft|part.step> [--in design.solidcraft|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]\n  solidcraft-cli run --in <design.solidcraft|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n";
+/// `eval`'s lines in the usage.
+const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.solidcraft|part.step> [--json-out FILE]     (alias: inspect; or --in FILE)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n";
+/// `script`'s lines in the usage.
+const USAGE_SCRIPT: &str = "  solidcraft-cli script <design.solidcraft|script.json> [--out script.json]\n      (the design's history as a command script that eval and run replay)\n";
+/// `bench-open`'s lines in the usage.
+const USAGE_BENCH_OPEN: &str = "  solidcraft-cli bench-open <design.solidcraft | part.step> [--parse-only] [--save OUT.solidcraft] [--display LEVEL [--edit NAME EXPR]] [--ops script.json]\n      (--ops: after opening, run each command of the script and undo it, timing the command, the\n       evaluations it caused and the view it leaves: placing and meshing what changed)\n";
+/// `bench-agent`'s lines in the usage.
+const USAGE_BENCH_AGENT: &str = "  solidcraft-cli bench-agent [--scale F] [--save design.solidcraft] [--script-out script.json]\n";
+/// `bench-assistant`'s lines in the usage.
+const USAGE_BENCH_ASSISTANT: &str = "  solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N] [--timeout-s 300] [--json out.json] [--markdown out.md]\n";
+/// `snapshot`'s lines in the usage.
+const USAGE_SNAPSHOT: &str = "  solidcraft-cli snapshot <script|design> [--in design.solidcraft|part.step] --out shot.png [--width W] [--height H] [--view NAME | --camera JSON] [--no-grid] [--no-axes]\n      [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27]\n  solidcraft-cli snapshot --in <design.solidcraft|part.step> --out shot.png ...\n      (as with run, --in starts from a design and the script runs on top of it; an option snapshot doesn't take is an error;\n       --view: iso, front, back, top, bottom, left, right, or the name of a view saved in the design with view.save;\n       --camera: {target: [x,y,z], yaw, pitch, distance, fov?} in mm and radians, as the MCP screenshot takes it (docs/mcp.md);\n       --no-grid and --no-axes leave the ground grid (on Z 0) and the origin's axes out of the picture;\n       --body: how one body is drawn, as appearance.assign takes it: opacity 0-1 (below 1 is see-through, so what is inside\n         it shows) and color #rrggbb, either or both, once per body;\n       --tool: draw this body solid in the tool colour and every other body see-through, so a cut's or a join's tool body\n         is visible inside the material it meets; a later --body overrides it;\n       --section: cut the model as inspect.section does, so the inside shows: z=27 (the plane through that world\n         coordinate, keeping the smaller side), add ,flip to keep the other side, or XY, XZ, YZ, or its own JSON)\n";
+/// `render`'s lines in the usage.
+const USAGE_RENDER: &str = "  solidcraft-cli render <script|design> --out image.png [--setup NAME] [--width W] [--height H] [--transparent] [--overwrite] [--timeout SECONDS]\n";
+/// `exec`'s lines in the usage.
+const USAGE_EXEC: &str = "  solidcraft-cli exec <command> [json-params]\n";
+/// `commands`'s lines in the usage.
+const USAGE_COMMANDS: &str = "  solidcraft-cli commands\n";
+/// `recipe`'s lines in the usage.
+const USAGE_RECIPE: &str = "  solidcraft-cli recipe <recipe.json>\n";
+/// `oracle`'s lines in the usage.
+const USAGE_ORACLE: &str = "  solidcraft-cli oracle <case-dir>... [--json]\n";
+/// `fuzz`'s lines in the usage.
+const USAGE_FUZZ: &str =
+    "  solidcraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]\n";
+/// `mcp`'s lines in the usage.
+const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.solidcraft|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path]\n                     [--param-check off|warn|strict]\n";
+/// `crashes`'s lines in the usage.
+const USAGE_CRASHES: &str = "  solidcraft-cli crashes [list [--json] | show <id> | replay <id> | dir | clear [<id>]]\n";
+/// `licences`'s lines in the usage.
+const USAGE_LICENCES: &str = "  solidcraft-cli licences\n";
+/// `gpu`'s lines in the usage.
+const USAGE_GPU: &str = "  solidcraft-cli gpu [--policy auto|hardware|software|cpu]\n      (the GPU adapters a headless render can open, best first, the one the policy picks and the tier it\n       lands on: gpu, gpu-software, or the CPU rasterizer (auto with no adapter, or cpu); the policy defaults\n       to SOLIDCRAFT_GPU, else auto; exits with an error when hardware or software finds no such adapter)\n";
+/// `icon`'s lines in the usage.
+const USAGE_ICON: &str = "  solidcraft-cli icon --out icon.png [--size 256] | --out icon.ico\n";
+/// `fuzz-one`'s lines in the usage: a seed and the flags of one fuzz run.
+const USAGE_FUZZ_ONE: &str = "  solidcraft-cli fuzz-one <seed> [--steps N] [--minimise]\n";
+/// `bench-edit`'s lines in the usage: the parameter a script changes.
+const USAGE_BENCH_EDIT: &str = "  solidcraft-cli bench-edit <script.json|recipe.json> <param> <expr>\n";
+/// `save-stress`'s lines in the usage: the file saved over and over.
+const USAGE_SAVE_STRESS: &str = "  solidcraft-cli save-stress <path> <rounds>\n";
+/// The flags every command takes, at the end of the top-level usage.
+const USAGE_DEBUG: &str = "  --debug, with any command: what SolidCraft logs (why a body has no display plan, why a save left its\n      model cache out), on stderr; RUST_LOG=error|warn|info|debug|trace sets one level for every crate\n";
+
+/// The commands the CLI takes, in the order the top-level usage lists them.
+const COMMANDS: &[Command] = &[
+    Command { name: "run", usage: USAGE_RUN, listed: true },
+    Command { name: "eval", usage: USAGE_EVAL, listed: true },
+    Command { name: "inspect", usage: USAGE_EVAL, listed: false },
+    Command { name: "script", usage: USAGE_SCRIPT, listed: true },
+    Command { name: "bench-open", usage: USAGE_BENCH_OPEN, listed: true },
+    Command { name: "bench-agent", usage: USAGE_BENCH_AGENT, listed: true },
+    Command { name: "bench-assistant", usage: USAGE_BENCH_ASSISTANT, listed: true },
+    Command { name: "snapshot", usage: USAGE_SNAPSHOT, listed: true },
+    Command { name: "render", usage: USAGE_RENDER, listed: true },
+    Command { name: "exec", usage: USAGE_EXEC, listed: true },
+    Command { name: "commands", usage: USAGE_COMMANDS, listed: true },
+    Command { name: "recipe", usage: USAGE_RECIPE, listed: true },
+    Command { name: "oracle", usage: USAGE_ORACLE, listed: true },
+    Command { name: "fuzz", usage: USAGE_FUZZ, listed: true },
+    Command { name: "fuzz-one", usage: USAGE_FUZZ_ONE, listed: false },
+    Command { name: "mcp", usage: USAGE_MCP, listed: true },
+    Command { name: "crashes", usage: USAGE_CRASHES, listed: true },
+    Command { name: "licences", usage: USAGE_LICENCES, listed: true },
+    Command { name: "licenses", usage: USAGE_LICENCES, listed: false },
+    Command { name: "gpu", usage: USAGE_GPU, listed: true },
+    Command { name: "icon", usage: USAGE_ICON, listed: true },
+    Command { name: "bench-edit", usage: USAGE_BENCH_EDIT, listed: false },
+    Command { name: "save-stress", usage: USAGE_SAVE_STRESS, listed: false },
+];
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     logger::init(&mut args);
     let r = match args.first().map(String::as_str) {
+        // Asked-for help is not an error: the command's usage on stdout, exit 0. It is read
+        // before the command runs, so `--help` never starts a run (a fuzz run, a server).
+        Some(cmd) if wants_help(&args[1..]) && is_command(cmd) => {
+            use std::io::Write as _;
+            let _ = std::io::stdout().lock().write_all(command_usage(cmd).as_bytes());
+            Ok(())
+        }
         Some("run") => cmd_run(&args[1..]),
         Some("eval" | "inspect") => cmd_eval(&args[1..]),
         Some("script") => cmd_script(&args[1..]),
@@ -118,7 +158,7 @@ fn main() -> ExitCode {
                 }
             })
         }
-        Some("recipe") => args.get(1).ok_or_else(|| USAGE.to_string()).and_then(|p| {
+        Some("recipe") => args.get(1).ok_or_else(usage).and_then(|p| {
             let v = read_json(p)?;
             recipe::to_script(&v).map(|s| println!("{}", pretty(&s)))
         }),
@@ -150,10 +190,10 @@ fn main() -> ExitCode {
         // Asked-for help is not an error: usage on stdout, exit 0.
         Some("--help" | "-h" | "help") => {
             use std::io::Write as _;
-            let _ = std::io::stdout().lock().write_all(USAGE.as_bytes());
+            let _ = std::io::stdout().lock().write_all(usage().as_bytes());
             Ok(())
         }
-        _ => Err(USAGE.to_string()),
+        _ => Err(usage()),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,
@@ -166,6 +206,35 @@ fn main() -> ExitCode {
 
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default()
+}
+
+/// The whole usage: every command's lines under one `usage:` line. The lines come from the
+/// same place a command's own `--help` prints, so the two cannot drift apart.
+fn usage() -> String {
+    let mut s = String::from("usage:\n");
+    for c in COMMANDS.iter().filter(|c| c.listed) {
+        s.push_str(c.usage);
+    }
+    s.push_str(USAGE_DEBUG);
+    s
+}
+
+/// A command's own usage: its lines under a `usage:` line.
+fn command_usage(cmd: &str) -> String {
+    match COMMANDS.iter().find(|c| c.name == cmd) {
+        Some(c) => format!("usage:\n{}", c.usage),
+        None => usage(),
+    }
+}
+
+/// Whether the name is a command the CLI takes.
+fn is_command(cmd: &str) -> bool {
+    COMMANDS.iter().any(|c| c.name == cmd)
+}
+
+/// Whether the arguments ask for help.
+fn wants_help(args: &[String]) -> bool {
+    args.iter().any(|a| a == "--help" || a == "-h")
 }
 
 pub fn read_json(path: &str) -> Result<Value, String> {
@@ -273,7 +342,7 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     let base = flag(args, "--in");
     let path = positional(args);
     if path.is_none() && base.is_none() {
-        return Err(USAGE.to_string());
+        return Err(usage());
     }
     let want_results = args.iter().any(|a| a == "--results");
     // `--profile` times each command and splits out its kernel time; it implies `--timings`.
@@ -333,13 +402,14 @@ fn open(base: Option<&str>, path: Option<&String>) -> Result<Session, String> {
         }
         (Some(b), None) => load(b),
         (None, Some(p)) => load(p),
-        (None, None) => Err(USAGE.to_string()),
+        (None, None) => Err(usage()),
     }
 }
 
 /// Refuses an option `cmd` doesn't take, and one missing its value: a typo, or another
-/// command's option, would otherwise be ignored without a word.
-fn known_flags(cmd: &str, args: &[String], valued: &[&str], switches: &[&str]) -> Result<(), String> {
+/// command's option, would otherwise be ignored without a word. `positionals` says whether the
+/// command takes a word of its own (a file, a seed): `fuzz` takes none, and would start a run.
+fn known_args(cmd: &str, args: &[String], valued: &[&str], switches: &[&str], positionals: bool) -> Result<(), String> {
     let mut i = 0;
     while let Some(a) = args.get(i) {
         if valued.contains(&a.as_str()) {
@@ -347,7 +417,9 @@ fn known_flags(cmd: &str, args: &[String], valued: &[&str], switches: &[&str]) -
                 Some(v) if !v.starts_with("--") => i += 2,
                 _ => return Err(format!("{cmd}: {a} needs a value")),
             }
-        } else if a.starts_with("--") && !switches.contains(&a.as_str()) {
+        } else if switches.contains(&a.as_str()) {
+            i += 1;
+        } else if a.starts_with("--") || !positionals {
             return Err(format!("{cmd} doesn't take {a} (it takes {})", [valued, switches].concat().join(", ")));
         } else {
             i += 1;
@@ -371,7 +443,7 @@ fn timeline_ok(s: &Session) -> Result<(), String> {
 
 fn cmd_eval(args: &[String]) -> Result<(), String> {
     let json_out = json_out(args)?;
-    let path = flag(args, "--in").or_else(|| positional(args).map(String::as_str)).ok_or_else(|| USAGE.to_string())?;
+    let path = flag(args, "--in").or_else(|| positional(args).map(String::as_str)).ok_or_else(usage)?;
     let mut s = load(path)?;
     let m = s.execute("inspect.measure", &json!({})).map_err(|e| e.to_string())?;
     let d = s.execute("document.inspect", &json!({})).map_err(|e| e.to_string())?;
@@ -389,7 +461,7 @@ fn cmd_eval(args: &[String]) -> Result<(), String> {
 /// A design's history as a command script (`timeline.export_script`): printed, or written to
 /// `--out`; what the script leaves out goes to stderr.
 fn cmd_script(args: &[String]) -> Result<(), String> {
-    let path = positional(args).ok_or_else(|| USAGE.to_string())?;
+    let path = positional(args).ok_or_else(usage)?;
     let s = &mut load(path)?;
     let out = flag(args, "--out");
     let r = s.execute("timeline.export_script", &json!({"path": out})).map_err(|e| e.to_string())?;
@@ -450,14 +522,15 @@ fn install_renderer() {
 
 fn cmd_snapshot(args: &[String]) -> Result<(), String> {
     install_renderer();
-    known_flags(
+    known_args(
         "snapshot",
         args,
         &["--in", "--out", "--width", "--height", "--view", "--camera", "--body", "--tool", "--section"],
         &["--no-grid", "--no-axes"],
+        true,
     )?;
     if positional(args).is_none() && flag(args, "--in").is_none() {
-        return Err(USAGE.to_string());
+        return Err(usage());
     }
     let out = flag(args, "--out").ok_or("snapshot needs --out FILE.png")?;
     let size = |name: &str, default: u32| match flag(args, name) {
@@ -541,7 +614,7 @@ fn ico(images: &[(usize, Vec<u8>)]) -> Result<Vec<u8>, String> {
 
 fn cmd_exec(args: &[String]) -> Result<(), String> {
     install_renderer();
-    let id = args.first().ok_or_else(|| USAGE.to_string())?;
+    let id = args.first().ok_or_else(usage)?;
     let p: Value = match args.get(1) {
         Some(t) => serde_json::from_str(t).map_err(|e| format!("params: {e}"))?,
         None => json!({}),
