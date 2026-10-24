@@ -2544,6 +2544,7 @@ impl SolveApp {
         if let Some(d) = &self.dialog {
             v.extend(d.highlighted(&self.session));
         }
+        v.extend(agent_chat::hovered_chip(self).iter().cloned());
         v.extend(sketch_text::highlighted(self));
         v.extend(sketch_text_move::highlighted(self));
         v

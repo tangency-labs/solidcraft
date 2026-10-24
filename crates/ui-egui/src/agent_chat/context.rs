@@ -52,6 +52,18 @@ pub struct Entry {
     pub kind: Kind,
     pub label: String,
     pub detail: String,
+    /// What it stands for in the model (one selection item, or the pieces of a rim): to light it up
+    /// and to tell later whether it is still there.
+    pub sels: Vec<Sel>,
+    /// The persistent names of its faces or edges: they survive an edit, so an item whose names are
+    /// all gone was changed away or deleted.
+    pub names: Vec<String>,
+}
+
+impl Entry {
+    fn new(kind: Kind, label: String, detail: String) -> Entry {
+        Entry { kind, label, detail, sels: Vec::new(), names: Vec::new() }
+    }
 }
 
 /// The things a message was sent with.
@@ -90,7 +102,7 @@ impl Context {
             return String::new();
         }
         let mut out = format!(
-            "[Selected in SolidCraft when this message was sent: {} item(s). The names, indices and points are the ones the tools take.]",
+            "[Selected in SolidCraft when this message was sent: {} item(s). A face or edge name stays the same when the model is edited; indices and points are as they were then (`model.faces` and `model.edges` list the current ones).]",
             self.total()
         );
         for kind in Kind::ALL {
@@ -110,6 +122,33 @@ impl Context {
             out.push_str(&format!("\n(and {} more, not listed)", self.omitted));
         }
         out
+    }
+}
+
+/// Persistent names of a body's faces and of its edges, kept per body while checking a batch.
+pub type NameCache = HashMap<String, (Vec<String>, Vec<String>)>;
+
+/// Whether what `entry` stands for has left the design: its body or feature is gone, or none of its
+/// faces or edges has its persistent name any more (they survive edits, so the item was changed
+/// away or deleted). Items that cannot tell, and ones with no names, count as there.
+pub fn is_gone(session: &Session, entry: &Entry, names: &mut NameCache) -> bool {
+    let Some(sel) = entry.sels.first() else { return false };
+    let state = session.world_state();
+    match sel {
+        Sel::Body { name } => state.body(name).is_none(),
+        Sel::Feature { id } => session.doc.feature(*id).is_none(),
+        Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => {
+            let Some(model_body) = state.body(body) else { return true };
+            if entry.names.is_empty() {
+                return false;
+            }
+            let (faces, edges) = names.entry(body.clone()).or_insert_with(|| {
+                (solidcraft_engine::doc::naming::face_names(model_body).to_vec(), solidcraft_engine::doc::naming::edge_names(model_body))
+            });
+            let current = if matches!(sel, Sel::Face { .. }) { faces } else { edges };
+            !entry.names.iter().any(|n| current.contains(n))
+        }
+        _ => false,
     }
 }
 
@@ -177,6 +216,7 @@ pub fn describe_groups(session: &mut Session, groups: &[Vec<Sel>]) -> Context {
             if group.len() > 1 {
                 join_pieces(session, group, &mut item, &mut listings);
             }
+            item.sels = group.clone();
             context.items.push(item);
         }
     }
@@ -224,8 +264,9 @@ fn join_pieces(session: &mut Session, group: &[Sel], item: &mut Entry, listings:
         item.label = format!("{} ({pieces} pieces)", item.label);
     }
     let whole = if sizes.len() == pieces { format!(", total {} {unit}", num(total)) } else { String::new() };
-    let names = if names.is_empty() { String::new() } else { format!(", names {}", names.join(" + ")) };
-    item.detail = format!("clicked as one: {pieces} pieces, indices {indices:?}{names}{whole}; first piece: {}", item.detail);
+    let said = if names.is_empty() { String::new() } else { format!(", names {}", names.join(" + ")) };
+    item.detail = format!("clicked as one: {pieces} pieces, indices {indices:?}{said}{whole}; first piece: {}", item.detail);
+    item.names = names;
 }
 
 fn entry(session: &mut Session, sel: &Sel, listings: &mut HashMap<(&'static str, String), Value>) -> Entry {
@@ -260,7 +301,9 @@ fn entry(session: &mut Session, sel: &Sel, listings: &mut HashMap<(&'static str,
                 parts.push(format!("index {index}"));
             }
             parts.push(format!("pick point {}", point3(&json!(point))));
-            Entry { kind: Kind::Element, label: format!("{shape} · {body}"), detail: parts.join(", ") }
+            let mut entry = Entry::new(Kind::Element, format!("{shape} · {body}"), parts.join(", "));
+            entry.names = face.as_ref().and_then(|f| f["name"].as_str()).map(str::to_string).into_iter().collect();
+            entry
         }
         Sel::Edge { body, index, point } => {
             let edge = listed_edge(session, listings, body, *index, *point);
@@ -278,17 +321,17 @@ fn entry(session: &mut Session, sel: &Sel, listings: &mut HashMap<(&'static str,
                 parts.push(format!("index {index}"));
             }
             parts.push(format!("pick point {}", point3(&json!(point))));
-            Entry { kind: Kind::Element, label: format!("{shape} · {body}"), detail: parts.join(", ") }
+            let mut entry = Entry::new(Kind::Element, format!("{shape} · {body}"), parts.join(", "));
+            entry.names = edge.as_ref().and_then(|e| e["name"].as_str()).map(str::to_string).into_iter().collect();
+            entry
         }
-        Sel::Vertex { body, point } => {
-            Entry { kind: Kind::Element, label: format!("Vertex of {body}"), detail: format!("at {}", point3(&json!(point))) }
-        }
-        Sel::Body { name } => Entry { kind: Kind::Body, label: name.clone(), detail: String::new() },
-        Sel::Occurrence { path } => Entry {
-            kind: Kind::Body,
-            label: format!("Component occurrence {}", path.iter().map(u64::to_string).collect::<Vec<_>>().join("/")),
-            detail: format!("occurrence path {path:?}"),
-        },
+        Sel::Vertex { body, point } => Entry::new(Kind::Element, format!("Vertex of {body}"), format!("at {}", point3(&json!(point)))),
+        Sel::Body { name } => Entry::new(Kind::Body, name.clone(), String::new()),
+        Sel::Occurrence { path } => Entry::new(
+            Kind::Body,
+            format!("Component occurrence {}", path.iter().map(u64::to_string).collect::<Vec<_>>().join("/")),
+            format!("occurrence path {path:?}"),
+        ),
         Sel::Feature { id } => {
             let feature = session.doc.find_feature(&id.to_string());
             let name = feature.map(|f| f.name.clone()).unwrap_or_else(|| format!("#{id}"));
@@ -300,7 +343,7 @@ fn entry(session: &mut Session, sel: &Sel, listings: &mut HashMap<(&'static str,
             if feature.is_some_and(|f| f.suppressed) {
                 detail.push_str(", suppressed");
             }
-            Entry { kind: Kind::Feature, label: name, detail }
+            Entry::new(Kind::Feature, name, detail)
         }
         other => {
             // Planes, axes and sketch geometry: named by their kind and whatever identifies them.
@@ -316,7 +359,7 @@ fn entry(session: &mut Session, sel: &Sel, listings: &mut HashMap<(&'static str,
                 None => kind,
             };
             let label: String = label.chars().take(60).collect();
-            Entry { kind: Kind::Other, label: capitalised(&label), detail: String::new() }
+            Entry::new(Kind::Other, capitalised(&label), String::new())
         }
     }
 }
