@@ -1431,6 +1431,7 @@
   "ui.agent_chat_none_found_short": "Kein Agent gefunden",
   "ui.agent_chat_not_installed": "Nicht installiert",
   "ui.agent_chat_not_signed_in": "nicht angemeldet",
+  "ui.agent_chat_old_node": "Node.js v{version} ist für diesen Agenten zu alt: Installieren Sie Node.js 20.10 oder neuer (empfohlen: 22 LTS), sodass es im PATH zuerst kommt, und starten Sie den Agenten dann neu.",
   "ui.agent_chat_open_settings": "Einstellungen öffnen",
   "ui.agent_chat_own_window": "Eigenes Fenster",
   "ui.agent_chat_paste_picture": "Bild einfügen",

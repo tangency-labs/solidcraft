@@ -617,15 +617,32 @@ impl AgentChat {
             Event::Exited { tail } => {
                 self.state = Some(State::Exited);
                 self.steering = false;
+                // An adapter that needs a newer Node.js stops at its first import with Node's own
+                // syntax error, which doesn't say the version is the problem (#2207).
+                let old_node = old_node_version(&tail);
                 let last: Vec<String> = tail.into_iter().rev().take(6).collect::<Vec<_>>().into_iter().rev().collect();
                 let detail = if last.is_empty() { String::new() } else { format!("\n{}", last.join("\n")) };
                 self.notice(format!("{}{detail}", tr("ui.agent_chat_exited")), true);
+                if let Some(version) = old_node {
+                    self.notice(trf("ui.agent_chat_old_node", &[("version", &version)]), true);
+                }
                 self.stop_backend(false);
                 return Some(Outcome::TurnEnd);
             }
         }
         None
     }
+}
+
+/// The Node.js version an agent's last lines name (`Node.js v18.19.1`, which Node prints after
+/// an uncaught error) when it is too old for the npm adapters: they load JSON with import
+/// attributes (`import … with { type: "json" }`), which Node parses from 18.20, 20.10 and 21 on.
+fn old_node_version(tail: &[String]) -> Option<String> {
+    let v = tail.iter().rev().find_map(|l| l.trim().strip_prefix("Node.js v"))?;
+    let mut parts = v.split('.').map(|p| p.parse::<u32>().ok());
+    let (major, minor) = (parts.next()??, parts.next().flatten().unwrap_or(0));
+    let old = major < 18 || (major == 18 && minor < 20) || major == 19 || (major == 20 && minor < 10);
+    old.then(|| v.to_string())
 }
 
 /// What an event asks of the app.
