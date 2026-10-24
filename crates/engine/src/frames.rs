@@ -387,6 +387,14 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
                 }
             }
         }
+        // Edit Feature passes a primitive's placement through as saved (it can hold
+        // expressions), as `timeline.inspect` reports it: mapping it again would move a
+        // primitive in a moved component (#2926).
+        for (key, saved) in primitive_placement(&feature.kind, cmd) {
+            if params.get("params").and_then(|p| p.get(key)).is_some_and(|given| same_coordinates(given, &saved)) {
+                inner[key] = saved;
+            }
+        }
         let mut out = params.clone();
         out["params"] = inner;
         return Some(out);
@@ -465,6 +473,42 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
         }
     }
     m.changed.then_some(Value::Object(out))
+}
+
+/// A primitive's saved placement inputs, in its component's frame, for redefining it with `cmd`.
+fn primitive_placement(kind: &solidcraft_doc::FeatureKind, cmd: &str) -> Vec<(&'static str, Value)> {
+    use solidcraft_doc::FeatureKind as Feature;
+    let point = |p: &solidcraft_doc::PointExpr| {
+        Value::Array(
+            p.iter()
+                .map(|e| e.as_str().trim().parse::<f64>().ok().filter(|x| x.is_finite()).map_or_else(|| Value::from(e.as_str()), Value::from))
+                .collect(),
+        )
+    };
+    match (kind, cmd) {
+        (Feature::Box { corner, .. }, "solid.box") => vec![("corner", point(corner))],
+        (Feature::Sphere { center, .. }, "solid.sphere") | (Feature::Torus { center, .. }, "solid.torus") => vec![("center", point(center))],
+        (Feature::Cylinder { base, axis, .. }, "solid.cylinder") | (Feature::Coil { base, axis, .. }, "solid.coil") => {
+            vec![("base", point(base)), ("axis", pt(axis.0))]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Do two coordinate lists hold the same values (`0` and `0.0` and `"0"` alike, expressions
+/// by their text)?
+fn same_coordinates(a: &Value, b: &Value) -> bool {
+    let number = |v: &Value| v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()));
+    match (a.as_array(), b.as_array()) {
+        (Some(a), Some(b)) => {
+            a.len() == b.len()
+                && a.iter().zip(b).all(|(x, y)| match (number(x), number(y)) {
+                    (Some(x), Some(y)) => x == y,
+                    _ => x.as_str().map(str::trim).is_some_and(|x| Some(x) == y.as_str().map(str::trim)),
+                })
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]

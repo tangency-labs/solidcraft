@@ -286,3 +286,48 @@ fn root_picks_on_a_moved_component_build_where_it_is_shown() {
     let across = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Across").unwrap().2;
     assert!((across.origin.y - 40.0).abs() < 1e-6, "{across:?}");
 }
+
+/// Edit Feature passes a primitive's placement through as saved, so changing the radius of
+/// Leaf B's rod in the Hinge Assembly leaves the leaf where it was (#2926).
+#[test]
+fn editing_a_primitive_in_a_turned_component_keeps_its_placement() {
+    let sample = crate::sample::samples().into_iter().find(|x| x.name == "Hinge Assembly").unwrap();
+    let mut s = Session::default();
+    s.run_script(&(sample.script)()).unwrap();
+    let (plate_lo, plate_hi) = world_bbox(&s, "Body3");
+    let (rod_lo, rod_hi) = world_bbox(&s, "Body4");
+    // What the dialog sends: the saved definition, with the new radius.
+    let definition = run(&mut s, "timeline.inspect", json!({"feature": "Cylinder2"}))["definition"].clone();
+    let params = json!({"base": definition["base"], "axis": definition["axis"], "radius": "6", "height": "40", "operation": "new_body"});
+    run(&mut s, "timeline.redefine", json!({"feature": "Cylinder2", "command": "solid.cylinder", "params": params}));
+    let after = run(&mut s, "timeline.inspect", json!({"feature": "Cylinder2"}))["definition"].clone();
+    assert_eq!((&after["base"], &after["axis"]), (&definition["base"], &definition["axis"]));
+    let (lo, hi) = world_bbox(&s, "Body3");
+    assert!(near(lo, plate_lo) && near(hi, plate_hi), "the leaf moved: {lo:?} {hi:?}");
+    // The rod grows about its own axis (its mesh is faceted, so its size is close, not exact).
+    let (lo, hi) = world_bbox(&s, "Body4");
+    assert!(((lo + hi) * 0.5).dist((rod_lo + rod_hi) * 0.5) < 1e-3, "the rod moved: {lo:?} {hi:?}");
+    let (size, before) = (hi - lo, rod_hi - rod_lo);
+    assert!((size.x - before.x).abs() < 1e-6 && (size.y - 12.0).abs() < 0.05 && (size.z - 12.0).abs() < 0.05, "{size:?}");
+}
+
+/// A new placement given to `timeline.redefine` is still a world point.
+#[test]
+fn a_new_primitive_placement_is_still_mapped_from_the_world() {
+    let mut s = moved_part();
+    run(&mut s, "component.activate", json!({"component": "Part"}));
+    run(&mut s, "solid.cylinder", json!({"base": [60, 10, 10], "radius": 2, "height": 5, "operation": "new", "name": "Peg"}));
+    let base = |s: &mut Session| run(s, "timeline.inspect", json!({"feature": "Peg"}))["definition"]["base"].clone();
+    assert_eq!(base(&mut s), json!([10.0, 10.0, 10.0]));
+    let redefine = |s: &mut Session, at: Value| {
+        run(
+            s,
+            "timeline.redefine",
+            json!({"feature": "Peg", "command": "solid.cylinder", "params": {"base": at, "radius": 3, "height": 5, "operation": "new"}}),
+        );
+    };
+    redefine(&mut s, json!([10, 10, 10]));
+    assert_eq!(base(&mut s), json!([10.0, 10.0, 10.0]));
+    redefine(&mut s, json!([70, 10, 10]));
+    assert_eq!(base(&mut s), json!([20.0, 10.0, 10.0]));
+}
