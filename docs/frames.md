@@ -85,7 +85,9 @@ from a sketch: draw it or insert the vendor's DXF.
   worked out from the other member's line and profile, not from a face of its body, so the joint
   follows sketch and parameter edits: widen the frame and the rails between the posts grow with it.
 - **A plane or a planar face**: an origin or construction plane, or a flat face of any body. A
-  face that slants across the member cuts its end at that slant.
+  face that slants across the member cuts its end at that slant. A face is attached as a sketch on
+  it is, so the trim follows the face: make the plate under a post thicker and the post stands on
+  its new top.
 
 A member trims or extends alike: an end short of its target grows to it. Each member keeps its
 body and its name, and later trims see it as it now is (trim the cross members to rails that were
@@ -102,7 +104,8 @@ themselves trimmed to the posts).
 - `to`: what to trim them to, one or a list: a member (its body name, or `{member, side}` with
   `side` one of `right`, `left`, `top`, `bottom` of its profile; by default the side the trimmed
   member meets), or `{plane}` as `sketch.create` takes it (`XY`, a construction plane,
-  `{origin, normal}`, or `{face: [x, y, z]}` for a planar face).
+  `{origin, normal}`, or `{face: [x, y, z]}` for a planar face, with `body`, `index` and `path` for
+  the exact face picked).
 - `end`: `auto` (the default: for each target, the end of the member nearer it), `start` or `end`.
 - `gap`: the weld gap between each end and its target, a length expression (default 0, at most
   1 m).
@@ -122,8 +125,8 @@ it. Members of another component are not supported yet.
 - **To**: pick members, planar faces or planes. A face of a member is that member.
 - **End** (Nearer End, Start, End) and **Gap** as above.
 - **Edit Feature** reopens the dialog with the trim's picks and values. Targets a pick can't show
-  (a member's chosen side, a plane given by its origin and normal) are listed as **Keep: n more
-  targets**, kept while ticked.
+  (a member's chosen side, a face, a plane given by its origin and normal) are listed as **Keep:
+  n more targets**, kept while ticked; untick it to drop them all and pick again.
 
 ## Built-in profiles
 
