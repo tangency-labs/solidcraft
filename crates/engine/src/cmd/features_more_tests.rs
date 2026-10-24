@@ -1050,6 +1050,34 @@ fn a_tapered_text_joins_a_block_on_its_face_or_hanging_over_its_edge() {
     }
 }
 
+/// A tapered pocket cut 5 mm down from a block's top face, from a 282 × 176 rounded rectangle whose
+/// 2 mm corners are smaller than the 2.89 mm the 30° taper widens it by (#4825). Run on out of the
+/// block with its slope, the tool narrowed there and closed its corner arcs: "the taper closes
+/// the profile", though the pocket only grows. It runs on less, then starts on the face.
+#[test]
+fn a_tapered_cut_that_widens_cuts_from_small_corners() {
+    let (w, h, r, depth) = (282.0, 176.0, 2.0, 5.0);
+    for deg in [20.0f64, 30.0, 45.0] {
+        let k = deg.to_radians().tan();
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane":"XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-159,-106],"p1":[159,106]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance":20,"body_name":"Block"}));
+        run(&mut s, "sketch.create", json!({"plane":"XY","offset":20}));
+        run(&mut s, "sketch.rectangle.rounded", json!({"p0":[-w / 2.0,-h / 2.0],"p1":[w / 2.0,h / 2.0],"radius":r}));
+        run(&mut s, "sketch.finish", json!({}));
+        let cut = json!({"distance":depth,"direction":"negative","taper":format!("{deg} deg"),"operation":"cut","targets":["Block"]});
+        run(&mut s, "solid.extrude", cut);
+        // The pocket: a rounded rectangle grown by k·t at depth t.
+        let (l, c) = (depth, 4.0 - std::f64::consts::PI);
+        let pocket = w * h * l + k * (w + h) * l * l + 4.0 / 3.0 * k * k * l.powi(3) - c * (r * r * l + r * k * l * l + k * k * l.powi(3) / 3.0);
+        let v = volume(&mut s);
+        assert!((v - (318.0 * 212.0 * 20.0 - pocket)).abs() < 1e-3 * pocket, "{deg}°: {v}, a {pocket} mm³ pocket");
+        assert_eq!(s.world_state().bodies.len(), 1);
+    }
+}
+
 /// A tapered foot extruded 3 mm down from a part's bottom face and joined (#1534). Run on into
 /// the part with their slope, sides that narrow the foot away from the face widened it past the
 /// face: a box got a lip round its walls (0.16 mm wide, and nothing said), a cylinder's join found

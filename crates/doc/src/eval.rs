@@ -4438,8 +4438,25 @@ fn feature_tools_with_constructor(
                         // A start that can't run on (the profile hangs over the face's edge):
                         // the sides stand straight for a hair first, so the boolean can push the
                         // face the tool stands on into the body.
-                        let foot = if a >= 0.0 && on_face { TAPER_FOOT.min((b - a) * 0.01) } else { 0.0 };
-                        let body = kernel::extrude_tapered_between(&start_plane, r, a, b, foot, sign, taper)?;
+                        let build = |a: f64| {
+                            let foot = if a >= 0.0 && on_face { TAPER_FOOT.min((b - a) * 0.01) } else { 0.0 };
+                            kernel::extrude_tapered_between(&start_plane, r, a, b, foot, sign, taper)
+                        };
+                        let mut body = build(a);
+                        // A taper that widens the tool where it cuts narrows it behind its start, so
+                        // the run on can close a small corner arc the tool itself never shrinks
+                        // (#4825): run on less, then start on the face.
+                        for k in [0.5, 0.25, 0.0] {
+                            if body.is_ok() || a >= 0.0 {
+                                break;
+                            }
+                            let shorter = build(a * k);
+                            if shorter.is_ok() {
+                                a *= k;
+                                body = shorter;
+                            }
+                        }
+                        let body = body?;
                         growth = growth.max(a.abs().max(b.abs()) * taper.tan().abs());
                         Ok(roles.tool(body, None))
                     })
