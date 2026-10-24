@@ -6572,14 +6572,37 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 return replay(doc, vals, f, st, &crate::plain(features), &mats, warning);
             }
             // Bodies: each copy is a new body named after its source.
+            let here = doc.component_transform(f.component);
             let mut output = 0;
             for n in bodies {
                 let mb = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
+                // A body of another component is held in that component's frame, the pattern's
+                // transforms in this feature's: each copy is moved as the pattern moves it in the
+                // world and kept beside its source, in its component (#4763). Taken as they were,
+                // the copies landed where the source sits before its component is placed.
+                let owner = (mb.component != f.component).then(|| {
+                    let frame = doc.component_transform(mb.component);
+                    let singular = || DocError::Invalid(format!("the component holding `{n}` has a singular placement"));
+                    Ok::<_, DocError>((frame, crate::mat_inverse(&frame).ok_or_else(singular)?, crate::mat_inverse(&here).ok_or_else(singular)?))
+                });
+                let owner = owner.transpose()?;
                 for (k, m) in mats.iter().enumerate() {
-                    let copy = moved_copy(&mb, kernel::transform_matrix(&mb.body, *m)?, k + 1);
+                    let local = match &owner {
+                        Some((frame, frame_inv, here_inv)) => {
+                            crate::mat_mul(&crate::mat_mul(frame_inv, &here), &crate::mat_mul(&crate::mat_mul(m, here_inv), frame))
+                        }
+                        None => *m,
+                    };
+                    let copy = moved_copy(&mb, kernel::transform_matrix(&mb.body, local)?, k + 1);
                     let name = pattern_copy_name(st, f, output, &mb.name);
-                    copy_sheet(st, &mb.name, &name, m);
-                    st.bodies.push(ModelBody::traced_new(name, copy, f.id));
+                    copy_sheet(st, &mb.name, &name, &local);
+                    let mut body = ModelBody::traced_new(name, copy, f.id);
+                    if owner.is_some() {
+                        // Kept in that component as a moved body is (and through later features).
+                        body.component = mb.component;
+                        body.transferred = true;
+                    }
+                    st.bodies.push(body);
                     output += 1;
                 }
             }

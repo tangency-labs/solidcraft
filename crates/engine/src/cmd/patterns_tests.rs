@@ -335,6 +335,37 @@ fn patterns_of_components_place_occurrences() {
     assert!(s.execute("solid.pattern.circular", &json!({"components": ["Nope"], "axis": "Z", "count": 2})).is_err());
 }
 
+/// #4763: a body of a component moved 60 mm along X, patterned from the root. The copy goes
+/// where the pattern puts the body as it is shown (beside it), not where the body sits before
+/// its component is placed (x 10, near the origin).
+#[test]
+fn patterns_of_a_body_in_a_moved_component_follow_its_placement() {
+    for (kind, params, want) in [
+        ("solid.pattern.path", json!({"bodies": ["Pin"], "path_sketch": "Path", "path": ["l1"], "count": 2, "spacing": 10}), [70.0, 0.0]),
+        ("solid.pattern.rectangular", json!({"bodies": ["Pin"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 10}), [70.0, 0.0]),
+        ("solid.pattern.circular", json!({"bodies": ["Pin"], "axis": "Z", "count": 2, "angle": "90 deg"}), [-4.0, 60.0]),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Screw"}));
+        run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "body_name": "Pin"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": 2, "translate": [60, 0, 0]}));
+        run(&mut s, kind, params);
+        let m = run(&mut s, "inspect.measure", json!({}));
+        let bodies = m["bodies"].as_array().unwrap();
+        let at = |name: &str| {
+            let b = bodies.iter().find(|b| b["name"] == name).unwrap_or_else(|| panic!("{kind}: no `{name}` in {m}"));
+            [b["bbox"]["min"][0].as_f64().unwrap(), b["bbox"]["min"][1].as_f64().unwrap()]
+        };
+        assert!((at("Pin")[0] - 60.0).abs() < 1e-6, "{kind}: the source stays at x 60");
+        let copy = at("Pin (2)");
+        assert!((copy[0] - want[0]).abs() < 1e-6 && (copy[1] - want[1]).abs() < 1e-6, "{kind}: the copy is at {copy:?}, want {want:?}");
+    }
+}
+
 #[test]
 fn path_pattern_orientation_follows_the_path() {
     let width_of_copy = |orient: &str| {
