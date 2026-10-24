@@ -45,9 +45,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("timeline.roll_to", "Roll History Marker", roll_to).icon("rollback")
         .params("position: number of features to keep active, or \"end\" (omit = end) | feature: id|name (the marker goes right after it)"),
     CommandSpec::new("timeline.reorder", "Reorder Feature", reorder).icon("reorder")
-        .params("feature: id|name, position: its new index, active?: bool (true = it ends up before the history marker, false = behind it; other features keep their state); refused when a feature that worked would fail"),
+        .params("feature: id|name, position: its new index, active?: bool (true = it ends up before the history marker, false = behind it; other features keep their state); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke"),
     CommandSpec::new("timeline.reorder_many", "Reorder Features", reorder_many).icon("reorder").params(
-        "features: [id|name], position: insertion slot in the current history; selected features keep their relative order; refused when a feature that worked would fail",
+        "features: [id|name], position: insertion slot in the current history; selected features keep their relative order; active?: bool (as timeline.reorder's); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke",
     ),
     CommandSpec::new("timeline.redefine", "Edit Feature", redefine).icon("edit")
         .params("feature: id|name, command: the feature's command id, params: its parameters (the feature is rebuilt in place)"),
@@ -505,7 +505,7 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
     sort_group_features(&mut next);
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
     let active = active_param(p, cmd)?;
-    let (mut next, ordered) = reorder_features(s, next, &moving, slot, cmd)?;
+    let (mut next, ordered, _) = reorder_features(s, next, &moving, slot, false, cmd)?;
     place_marker(s, &mut next, &moving, active, cmd)?;
     if next != *s.doc {
         *s.doc_mut() = next;
@@ -1156,7 +1156,9 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     let mut after = s.model.clone();
     after.evaluate(&next);
     let broken = newly_broken(&s.model, &after);
-    if !broken.is_empty() {
+    // `allow_errors`: made anyway, with what it broke said (#5962).
+    let allow = allow_errors(p, cmd)?;
+    if !broken.is_empty() && !allow {
         let list: Vec<String> = broken.iter().map(|(n, e)| format!("{n} ({e})")).collect();
         return Err(bad(cmd, format!("moving {name} there breaks {}", list.join("; "))));
     }
@@ -1164,7 +1166,25 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     if next != *s.doc {
         *s.doc_mut() = next;
     }
-    Ok(json!({"feature": id, "position": to}))
+    let mut out = json!({"feature": id, "position": to});
+    if allow {
+        out["broken"] = broken_json(&broken);
+    }
+    Ok(out)
+}
+
+/// The optional `allow_errors` of a move: make it even when it breaks features that worked.
+fn allow_errors(p: &Value, cmd: &str) -> Result<bool> {
+    match p.get("allow_errors") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(allow)) => Ok(*allow),
+        Some(_) => Err(bad(cmd, "`allow_errors` must be true or false")),
+    }
+}
+
+/// The features a move broke, as `[{feature, error}]`.
+fn broken_json(broken: &[(String, String)]) -> Value {
+    broken.iter().map(|(feature, error)| json!({"feature": feature, "error": error})).collect()
 }
 
 /// The optional `active` of a move: whether the moved features end up before the history marker.
@@ -1197,11 +1217,18 @@ fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.reorder_many";
     let ids = group_features(s, p, true, cmd)?;
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
-    let (next, ordered) = reorder_features(s, (*s.doc).clone(), &ids, slot, cmd)?;
+    let active = active_param(p, cmd)?;
+    let allow = allow_errors(p, cmd)?;
+    let (mut next, ordered, broken) = reorder_features(s, (*s.doc).clone(), &ids, slot, allow, cmd)?;
+    place_marker(s, &mut next, &ordered, active, cmd)?;
     if next != *s.doc {
         *s.doc_mut() = next;
     }
-    Ok(json!({"features": ordered, "position": slot.min(s.doc.features.len())}))
+    let mut out = json!({"features": ordered, "position": slot.min(s.doc.features.len())});
+    if allow {
+        out["broken"] = broken_json(&broken);
+    }
+    Ok(out)
 }
 
 fn reorder_features(
@@ -1209,8 +1236,9 @@ fn reorder_features(
     mut next: solidcraft_doc::Document,
     ids: &[u64],
     slot: usize,
+    allow_errors: bool,
     cmd: &str,
-) -> Result<(solidcraft_doc::Document, Vec<u64>)> {
+) -> Result<(solidcraft_doc::Document, Vec<u64>, Vec<(String, String)>)> {
     let n = next.features.len();
     let slot = slot.min(n);
     let selected: std::collections::BTreeSet<u64> = ids.iter().copied().collect();
@@ -1235,16 +1263,17 @@ fn reorder_features(
     next.features.splice(insert_at..insert_at, moving);
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
+    let mut broken = Vec::new();
     if !unchanged {
         let mut after = solidcraft_doc::Model::new();
         after.evaluate(&next);
-        let broken = newly_broken(&s.model, &after);
-        if !broken.is_empty() {
+        broken = newly_broken(&s.model, &after);
+        if !broken.is_empty() && !allow_errors {
             let list: Vec<String> = broken.iter().map(|(name, error)| format!("{name} ({error})")).collect();
             return Err(bad(cmd, format!("moving the selected features there breaks {}", list.join("; "))));
         }
     }
-    Ok((next, ordered))
+    Ok((next, ordered, broken))
 }
 
 fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
