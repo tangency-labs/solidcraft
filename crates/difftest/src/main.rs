@@ -70,6 +70,7 @@ struct Args {
     fuzz_out: Option<PathBuf>,
     digest_dir: Option<PathBuf>,
     digest_debug: bool,
+    case_timeout: Option<u64>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -106,6 +107,10 @@ fn parse_args() -> Result<Args, String> {
             "--fuzz-out" => a.fuzz_out = Some(PathBuf::from(val("--fuzz-out")?)),
             "--digest-dir" => a.digest_dir = Some(PathBuf::from(val("--digest-dir")?)),
             "--digest-debug" => a.digest_debug = true,
+            "--case-timeout" => {
+                let v = val("--case-timeout")?;
+                a.case_timeout = Some(v.parse().map_err(|_| format!("bad --case-timeout `{v}`"))?);
+            }
             "-h" | "--help" => return Err(String::new()),
             other
                 if (a.ssi_corpus || a.solidcraft_cases)
@@ -246,6 +251,7 @@ fn main() -> ExitCode {
                 let opts = RunOptions {
                     filter: args.filter.clone(),
                     perturb: false,
+                    case_timeout: args.case_timeout.map(std::time::Duration::from_secs),
                 };
                 let res = run_unit(unit.as_ref(), &ctx, &opts);
                 // The value-share floor is part of the gate (`--green` enforces it too).
@@ -347,6 +353,7 @@ fn main() -> ExitCode {
     let opts = RunOptions {
         filter: args.filter.clone(),
         perturb: args.perturb,
+        case_timeout: args.case_timeout.map(std::time::Duration::from_secs),
     };
     let report_dir = args
         .report_dir

@@ -1360,6 +1360,15 @@ impl UnitDiff for Runner {
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)
     }
+
+    fn skipped_platform(&self, case: &Case) -> Option<String> {
+        let i: Inputs = case.parse().ok()?;
+        if matches!(i.op, OpIn::ReadDb { .. }) {
+            Some("libc++ istream extraction differs from libstdc++".into())
+        } else {
+            None
+        }
+    }
 }
 
 // `srf` is part of the shared helpers: keep the import used by the fixtures path.

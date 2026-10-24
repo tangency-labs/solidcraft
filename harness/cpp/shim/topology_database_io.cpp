@@ -361,3 +361,13 @@ SC_EXPORT int32_t sc_topology_database_io_run(int32_t mode, const uint8_t* data,
     return SC_OK;
     SC_CATCH
 }
+
+#include "sc_shim.h"
+
+extern "C" int sc_cpp_stdlib_is_libstdcxx(void) {
+#ifdef __GLIBCXX__
+    return 1;
+#else
+    return 0;
+#endif
+}

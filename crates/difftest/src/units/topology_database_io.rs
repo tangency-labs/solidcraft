@@ -621,4 +621,11 @@ impl UnitDiff for Runner {
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         run_rust_script(&case.parse()?)
     }
+
+    fn skipped_platform(&self, _case: &Case) -> Option<String> {
+        // The C++ reference's ASCII reader relies on libstdc++ `istream`
+        // extraction behaviour (UB-new, UB-5, UB-6); libc++ differs, so this
+        // unit is only authoritative on a libstdc++ build.
+        Some("libc++ istream extraction differs from libstdc++".into())
+    }
 }

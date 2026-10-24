@@ -581,6 +581,7 @@ mod tests {
             both_errored: false,
             rejected: None,
             deferred: None,
+            skipped_platform: None,
             perturbed: None,
             diagnostics: BTreeMap::new(),
             known_mismatch: None,

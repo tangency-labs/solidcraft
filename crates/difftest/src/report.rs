@@ -97,6 +97,9 @@ pub fn unit_report(r: &UnitResult) -> Value {
     if r.rejected() > 0 {
         m.insert("cases_rejected".into(), json!(r.rejected()));
     }
+    if r.skipped_platform() > 0 {
+        m.insert("cases_skipped_platform".into(), json!(r.skipped_platform()));
+    }
     let by_unit: Map<String, Value> = r
         .deferred_by_unit()
         .into_iter()
@@ -228,6 +231,9 @@ pub fn summary_line(r: &UnitResult) -> String {
     if r.known_mismatches() > 0 {
         let _ = write!(s, " known_mismatch={}", r.known_mismatches());
     }
+    if r.skipped_platform() > 0 {
+        let _ = write!(s, " skipped_platform={}", r.skipped_platform());
+    }
     let blocked: Vec<String> = r
         .deferred_by_unit()
         .iter()
@@ -301,6 +307,7 @@ mod tests {
                 both_errored: false,
                 rejected: None,
                 deferred: None,
+                skipped_platform: None,
                 perturbed: None,
                 diagnostics: std::collections::BTreeMap::new(),
                 known_mismatch: Some("test comparison".into()),

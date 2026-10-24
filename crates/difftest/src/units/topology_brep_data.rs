@@ -538,6 +538,15 @@ impl UnitDiff for Runner {
         }
     }
 
+    fn skipped_platform(&self, case: &Case) -> Option<String> {
+        let i: Inputs = case.parse().ok()?;
+        if i.mode == "db" {
+            Some("libc++ istream extraction differs from libstdc++".into())
+        } else {
+            None
+        }
+    }
+
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         serde_json::to_value(generate(rng)).ok()
     }
