@@ -13,6 +13,7 @@ agent without file access (such as the one in SolidCraft's own chat) can still r
 | [`solidcraft-editing`](solidcraft-editing/SKILL.md) | changes, fixes or extends an existing design |
 | [`solidcraft-checking`](solidcraft-checking/SKILL.md) | builds, changes or ports a design, next to the two above: parameter ranges, every allowed value, exact STEP comparison, regression tests, designs kept in git |
 | [`solidcraft-mechanisms`](solidcraft-mechanisms/SKILL.md) | builds, drives or animates an assembly: components, joints, motion links, closed loops such as actuators, contact sets, motion studies |
+| [`solidcraft-reporting`](solidcraft-reporting/SKILL.md) | hears that something went wrong (a crash, a failed command, a wrong shape or number, a hang): reproduces it in a fresh design, shrinks it to a minimal script and writes the bug report |
 
 They teach the agent to:
 - plan the part as numbers
@@ -22,7 +23,7 @@ They teach the agent to:
 
 They also list the traps that otherwise cost failed calls. Examples are the sketch axes of the XZ plane, edge picks that snap to the nearest edge, and cuts that miss but still report success.
 
-They are written for SolidCraft 0.8 and later; `solidcraft-mechanisms` for `main` after 0.11.1 (the next release), which counts the degrees of freedom of closed loops.
+They are written for SolidCraft 0.8 and later; `solidcraft-mechanisms` for `main` after 0.11.1 (the next release), which counts the degrees of freedom of closed loops; `solidcraft-reporting` for 0.18 and later.
 
 ## Install
 
