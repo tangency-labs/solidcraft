@@ -450,9 +450,41 @@ fn line_dist(p: Vec2, a: Vec2, b: Vec2) -> f64 {
     d.cross(p - a) / l
 }
 
+/// A dimension whose value is zero holds what it measures at its limit. The magnitude's
+/// derivative is zero there, and the rank analysis reads that as a constraint that is not
+/// there: the sketch reports a degree of freedom that is not there (#4368, #5505). The signed
+/// form says the same and keeps its derivative. `true` when it handled the constraint.
+///
+/// A distance or a length of zero holds the two points together, so it says it with the
+/// vector between them, as a coincidence does.
+fn zero_dimension(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) -> bool {
+    use ConstraintKind::*;
+    match *k {
+        Distance { p, q, value: 0.0 } => {
+            let d = s.p(q) - s.p(p);
+            out.extend([d.x, d.y]);
+            true
+        }
+        Length { l, value: 0.0 } => {
+            let (a, b) = s.line(l);
+            out.extend([b.x - a.x, b.y - a.y]);
+            true
+        }
+        PointLineDistance { p, l, value: 0.0 } => {
+            let (a, b) = s.line(l);
+            out.push(line_dist(s.p(p), a, b));
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Residual rows of one constraint.
 fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
     use ConstraintKind::*;
+    if zero_dimension(s, k, out) {
+        return;
+    }
     match *k {
         PatternPoint { p, q, center, angle, mut offset, directions } => {
             for (l, distance) in directions.into_iter().flatten() {
