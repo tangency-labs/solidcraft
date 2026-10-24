@@ -8,12 +8,13 @@
 //! the design gives them (`Feature::link_faces`), so a joint on a linked face stays on that face
 //! when the design changes, as it would inside the design, and reports it when the face is gone.
 
-use std::path::{Component as PathPart, Path, PathBuf};
+use std::path::Path;
 
 use serde_json::{Value, json};
-use solidcraft_doc::{DesignLink, Document, FeatureKind};
+use solidcraft_doc::{DesignLink, FeatureKind};
 
 use super::CommandSpec;
+use super::design_link::{absolute, link_presence, open_linked, resolve, same_file, stored};
 use crate::params::{bad, str_, vec3};
 use crate::{EngineError, Result, Session};
 
@@ -57,71 +58,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.links", "List Links", list_links)
         .icon("chain")
         .noundo()
-        .params("→ linked components: component, name, path, file (resolved), found"),
+        .params(
+            "→ linked components: component, name, path, file (resolved), found; state and reason when the file can't be reached \
+             (missing, unreadable or not_allowed: outside the folders this agent may use)",
+        ),
 ];
-
-/// The folder relative link paths are kept against: the design's own, once it has a file.
-fn base_dir(path: Option<&str>) -> Option<PathBuf> {
-    path.and_then(|p| absolute(Path::new(p)).parent().map(Path::to_path_buf))
-}
-
-/// A path as given, made absolute when the platform can, with `.` and `..` worked out.
-fn absolute(p: &Path) -> PathBuf {
-    let full = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
-    let mut out = PathBuf::new();
-    for c in full.components() {
-        match c {
-            PathPart::CurDir => {}
-            PathPart::ParentDir if matches!(out.components().next_back(), Some(PathPart::Normal(_))) => {
-                out.pop();
-            }
-            c => out.push(c.as_os_str()),
-        }
-    }
-    out
-}
-
-/// `target` relative to the folder `base` (both absolute), when they share a root.
-fn relative(base: &Path, target: &Path) -> Option<PathBuf> {
-    let (b, t): (Vec<_>, Vec<_>) = (base.components().collect(), target.components().collect());
-    let root = |c: &[PathPart]| c.iter().take_while(|x| matches!(x, PathPart::Prefix(_) | PathPart::RootDir)).count();
-    if root(&b) == 0 || b.get(..root(&b)) != t.get(..root(&b)) {
-        return None;
-    }
-    let common = b.iter().zip(&t).take_while(|(x, y)| x == y).count();
-    let mut out = PathBuf::new();
-    for _ in common..b.len() {
-        out.push("..");
-    }
-    for c in t.iter().skip(common) {
-        out.push(c.as_os_str());
-    }
-    Some(out)
-}
-
-/// How a link stores `file` for a design saved at `design` (`None`: not saved yet).
-fn stored(design: Option<&str>, file: &Path) -> String {
-    let file = absolute(file);
-    match base_dir(design).and_then(|d| relative(&d, &file)) {
-        // Relative paths are written with `/`, so a design moves between systems with its parts.
-        Some(rel) => rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"),
-        None => file.to_string_lossy().into_owned(),
-    }
-}
-
-/// The file a stored link path names, for a design saved at `design`.
-fn resolve(design: Option<&str>, link: &str) -> PathBuf {
-    let p = Path::new(link);
-    match base_dir(design) {
-        Some(d) if p.is_relative() => d.join(p),
-        _ => p.to_path_buf(),
-    }
-}
-
-/// The links of `doc` stored for a design saved at `to` instead of at `from`.
-pub(super) fn rebased(doc: &Document, from: Option<&str>, to: &str) -> std::collections::BTreeMap<u64, DesignLink> {
-    doc.links.iter().map(|(c, l)| (*c, DesignLink { path: stored(Some(to), &resolve(from, &l.path)), feature: l.feature })).collect()
-}
 
 /// The bodies of a linked design: its name, the Import feature that holds them and the names
 /// the design gives their faces (`Feature::link_faces`).
@@ -130,11 +71,10 @@ type Linked = (String, solidcraft_io::StepFeature, Vec<Vec<String>>);
 /// The solid bodies of the design at `file`, evaluated, as an Import feature.
 fn linked_bodies(file: &Path, own: Option<&str>) -> Result<Linked> {
     let shown = file.display().to_string();
-    if own.is_some_and(|o| absolute(Path::new(o)) == absolute(file)) {
+    if own.is_some_and(|o| same_file(Path::new(o), file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
-    let bytes = solidcraft_io::vfs::read(&shown, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    let doc = solidcraft_io::read_design(&bytes).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+    let doc = open_linked(file).map_err(|e| EngineError::Other(e.reason))?;
     session_bodies(&Session::new(doc), &shown)
 }
 
@@ -178,7 +118,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => vec3(v).filter(|t| t.is_finite() && t.len() < 1e9).ok_or_else(|| bad(cmd, "`translate` must be [x, y, z] in mm"))?,
     };
     let file = absolute(Path::new(given));
-    if s.path.as_deref().is_some_and(|own| absolute(Path::new(own)) == file) {
+    if s.path.as_deref().is_some_and(|own| same_file(Path::new(own), &file)) {
         return Err(bad(cmd, "a design can't be linked into itself"));
     }
     if p.get("reuse").and_then(Value::as_bool).unwrap_or(false) {
@@ -317,11 +257,9 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     if !file.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("solidcraft")) {
         return Err(bad(cmd, "choose a saved .solidcraft design"));
     }
-    // The ordinary lexical check in linked_bodies also works in the browser VFS. On native
-    // hosts, reject an alias of this assembly too (a symlink or a path with different case).
-    if let (Ok(candidate), Some(Ok(own))) = (file.canonicalize(), s.path.as_deref().map(std::fs::canonicalize))
-        && candidate == own
-    {
+    // The same path, or on native hosts an alias of this assembly (a symlink or a path with
+    // different case): the one self-link rule Insert Design and Update Links use too.
+    if s.path.as_deref().is_some_and(|own| same_file(Path::new(own), &file)) {
         return Err(bad(cmd, "a design can't be linked into itself"));
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
@@ -381,7 +319,12 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
         .map(|(c, l)| {
             let file = resolve(s.path.as_deref(), &l.path);
             let name = s.doc.components.iter().find(|x| x.id == *c).map(|x| x.name.clone());
-            json!({"component": c, "name": name, "path": l.path, "file": file.display().to_string(), "found": file.is_file()})
+            let mut out = json!({"component": c, "name": name, "path": l.path, "file": file.display().to_string(), "found": file.is_file()});
+            if let Some(why) = link_presence(&file) {
+                out["state"] = json!(why.state);
+                out["reason"] = json!(why.reason);
+            }
+            out
         })
         .collect();
     Ok(json!({"links": links}))
@@ -391,30 +334,6 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn link_paths_are_kept_relative_to_the_design_and_follow_save_as() {
-        let root = absolute(Path::new("projects"));
-        let part = root.join("parts").join("plate.solidcraft");
-        let design = root.join("assembly").join("case.solidcraft");
-        let design = design.to_string_lossy().into_owned();
-        assert_eq!(stored(Some(&design), &part), "../parts/plate.solidcraft");
-        assert_eq!(absolute(&resolve(Some(&design), "../parts/plate.solidcraft")), part);
-        // A design path given relative to the working folder works the same.
-        assert_eq!(stored(Some("case.solidcraft"), &absolute(Path::new("parts/plate.solidcraft"))), "parts/plate.solidcraft");
-        // Before the design has a file the path is kept whole; saving it makes it relative.
-        let unsaved = stored(None, &part);
-        assert!(Path::new(&unsaved).is_absolute(), "{unsaved}");
-        let mut doc = Document::default();
-        doc.links.insert(7, DesignLink { path: unsaved, feature: 3 });
-        let moved = rebased(&doc, None, &design);
-        assert_eq!(moved.get(&7).map(|l| l.path.as_str()), Some("../parts/plate.solidcraft"));
-        let beside = root.join("parts").join("asm.solidcraft").to_string_lossy().into_owned();
-        assert_eq!(
-            rebased(&Document { links: moved, ..Document::default() }, Some(&design), &beside).get(&7).map(|l| l.path.as_str()),
-            Some("plate.solidcraft")
-        );
-    }
 
     fn run(s: &mut Session, id: &str, p: Value) -> Value {
         s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))
@@ -460,6 +379,8 @@ mod tests {
         std::fs::remove_file(&part).unwrap();
         let err = b.execute("component.update_links", &json!({})).unwrap_err().to_string();
         assert!(err.contains("plate"), "{err}");
+        let links = run(&mut b, "component.links", json!({}));
+        assert_eq!((&links["links"][0]["found"], &links["links"][0]["state"]), (&json!(false), &json!("missing")), "{links}");
         assert!((volume(&mut b) - 9000.0).abs() < 1e-6);
         // Break Link keeps the bodies and forgets the file.
         run(&mut b, "component.break_link", json!({"component": "plate"}));
