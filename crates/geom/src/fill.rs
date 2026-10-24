@@ -1087,4 +1087,94 @@ mod tests {
         assert!(fill_loop(6, &mut lifted(&hex, &dome), 2e-5, MAX_CROWN).is_ok());
         assert!(fill_loop(6, &mut lifted(&hex, &dome), 2e-5, MIN_CROWN).is_ok());
     }
+
+    /// The unit square, counter-clockwise: a point in it is inside, a point outside it is not.
+    #[test]
+    fn inside_loop_tells_a_square_inside_from_outside() {
+        let square = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        assert!(inside_loop([0.5, 0.5], &square), "the middle of the square");
+        assert!(!inside_loop([1.5, 0.5], &square), "right of the square");
+        assert!(!inside_loop([-0.5, 0.5], &square), "left of the square");
+        assert!(!inside_loop([0.5, 1.5], &square), "above the square");
+        assert!(!inside_loop([0.5, -0.5], &square), "below the square");
+        // The rule counts crossings, so it does not depend on the way the loop runs round.
+        let mut round = square.to_vec();
+        round.reverse();
+        assert!(inside_loop([0.5, 0.5], &round), "the middle of the square, the other way round");
+        assert!(!inside_loop([1.5, 0.5], &round), "right of the square, the other way round");
+        // A loop with no area holds nothing.
+        assert!(!inside_loop([0.0, 0.0], &[]), "an empty loop");
+        assert!(!inside_loop([0.0, 0.0], &[[0.0, 0.0]]), "a loop of one point");
+    }
+
+    /// A point on the loop is resolved by the ray casting rule itself, not by a rule of its own:
+    /// an edge counts when it straddles the horizontal line through the point — its lower end may
+    /// sit exactly on the line, its upper end may not — and the crossing lies strictly to the right
+    /// of the point. For the unit square that makes the bottom and the left edge inside and the
+    /// top and the right edge outside, the bottom-left corner inside and the other corners outside.
+    #[test]
+    fn inside_loop_resolves_a_point_on_the_loop_by_the_ray_casting_rule() {
+        let square = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        // On an edge.
+        assert!(inside_loop([0.5, 0.0], &square), "the bottom edge: the ray crosses the right edge once, at the corner it shares with it");
+        assert!(
+            inside_loop([0.0, 0.5], &square),
+            "the left edge: the ray crosses the right edge once, the left edge itself is not to the right of the point"
+        );
+        assert!(
+            !inside_loop([1.0, 0.5], &square),
+            "the right edge: the ray crosses the right edge exactly at the point, which is not a crossing to the right"
+        );
+        assert!(
+            !inside_loop([0.5, 1.0], &square),
+            "the top edge: the ray runs along the edge and the two side edges end on it, so nothing crosses to the right"
+        );
+        // On a vertex.
+        assert!(inside_loop([0.0, 0.0], &square), "the bottom-left corner: the ray crosses the right edge once");
+        assert!(!inside_loop([1.0, 0.0], &square), "the bottom-right corner: the ray crosses the right edge exactly at the point");
+        assert!(
+            !inside_loop([0.0, 1.0], &square),
+            "the top-left corner: the ray crosses the right edge at the point's height, which the side edge's upper end may not reach"
+        );
+        assert!(!inside_loop([1.0, 1.0], &square), "the top-right corner: nothing crosses to the right");
+    }
+
+    /// A non-convex loop: a point in the notch is outside the loop, a point in the body inside.
+    #[test]
+    fn inside_loop_finds_the_notch_of_a_non_convex_loop() {
+        // An L: the square [0, 2]² without its top-right corner.
+        let ell = [[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0], [1.0, 2.0], [0.0, 2.0]];
+        // The body: the bottom bar and the left arm.
+        assert!(inside_loop([0.5, 0.5], &ell), "the bottom bar");
+        assert!(inside_loop([1.5, 0.5], &ell), "the bottom bar, near its right end");
+        assert!(inside_loop([0.5, 1.5], &ell), "the left arm");
+        // The notch.
+        assert!(!inside_loop([1.5, 1.5], &ell), "the notch");
+        assert!(!inside_loop([1.2, 1.8], &ell), "the notch, near its corner");
+        // Outside the L altogether.
+        assert!(!inside_loop([3.0, 0.5], &ell), "right of the L");
+        assert!(!inside_loop([0.5, 3.0], &ell), "above the L");
+    }
+
+    /// Whether two segments share a point: crossing, touching and overlapping count, being apart
+    /// does not.
+    #[test]
+    fn segments_meet_finds_the_point_two_segments_share() {
+        // Crossing.
+        assert!(segments_meet([0.0, 0.0], [2.0, 2.0], [0.0, 2.0], [2.0, 0.0]), "crossing");
+        // Apart.
+        assert!(!segments_meet([0.0, 0.0], [1.0, 0.0], [2.0, 1.0], [3.0, 1.0]), "apart");
+        // Sharing an endpoint.
+        assert!(segments_meet([0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 1.0]), "an endpoint");
+        // One segment's end in the middle of the other.
+        assert!(segments_meet([0.0, 0.0], [2.0, 0.0], [1.0, 0.0], [1.0, 1.0]), "a touch in the middle");
+        // Collinear and overlapping.
+        assert!(segments_meet([0.0, 0.0], [3.0, 0.0], [1.0, 0.0], [4.0, 0.0]), "collinear, overlapping");
+        assert!(segments_meet([0.0, 0.0], [10.0, 0.0], [2.0, 0.0], [3.0, 0.0]), "collinear, one inside the other");
+        // Collinear and apart.
+        assert!(!segments_meet([0.0, 0.0], [1.0, 0.0], [3.0, 0.0], [4.0, 0.0]), "collinear, apart");
+        // The two segments do not swap their roles.
+        let (a, b, c, d) = ([0.0, 0.0], [2.0, 2.0], [0.0, 2.0], [2.0, 0.0]);
+        assert_eq!(segments_meet(a, b, c, d), segments_meet(c, d, a, b));
+    }
 }
