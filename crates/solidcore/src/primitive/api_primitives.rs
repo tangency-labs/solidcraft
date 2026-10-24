@@ -922,14 +922,6 @@ mod tests {
         ));
     }
 
-    /// The unit of the first call a construction stops at.
-    fn deferred_at<T>(r: &Result<T>) -> Option<&'static str> {
-        match r {
-            Err(SolidError::Unported { unit, .. }) => Some(*unit),
-            _ => None,
-        }
-    }
-
     #[test]
     fn complete_solids_construct_and_partial_solids_report_dependencies() {
         let k = &mut Kernel::default();
@@ -954,22 +946,10 @@ mod tests {
             assert_eq!((faces, edges, vertices), counts);
             assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
         }
-        // partial solids sweep a profile (topology sweep) past SmBrep::DeleteEdge and
-        // the axis' SmFace::CurveOnClassify, until SmFace::FindVertexSector (sphere,
-        // cylinder); the torus, whose point classification runs and whose later ray
-        // fires classify against the prepared trimmed surface cache, completes
-        for (r, unit) in [
-            (
-                create_partial_sphere(k, o(), 5.0, 0.0, 90.0),
-                "topology.face_p4",
-            ),
-            (
-                create_partial_cylinder(k, o(), 5.0, 10.0, 0.0, 90.0),
-                "topology.face_p4",
-            ),
-        ] {
-            assert_eq!(deferred_at(&r), Some(unit));
-        }
+        let sphere = create_partial_sphere(k, o(), 5.0, 0.0, 90.0).unwrap();
+        assert!(crate::topology::brep::p2::is_manifold_solid(&sphere).unwrap());
+        let cylinder = create_partial_cylinder(k, o(), 5.0, 10.0, 0.0, 90.0).unwrap();
+        assert!(crate::topology::brep::p2::is_manifold_solid(&cylinder).unwrap());
         let torus = create_partial_torus(k, o(), 10.0, 2.0, 0.0, 90.0).unwrap();
         assert!(crate::topology::brep::p2::is_manifold_solid(&torus).unwrap());
         // edges without an edge use on their face

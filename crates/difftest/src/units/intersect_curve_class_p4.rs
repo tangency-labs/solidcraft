@@ -835,14 +835,7 @@ fn build_pool(k: &Kernel, s: &Script) -> Result<Pool, HarnessError> {
     }
     if let Some(face) = &s.face {
         let (mut b, f) = face_brep(k, face)?;
-        let is_closed = match &face.surf {
-            Some(FaceSurfIn::Revolution { sweep, .. }) => (*sweep - 360.0).abs() < 1e-6,
-            None => false,
-        };
-        if is_closed {
-            solidcore::topology::face::p3::create_uv_trim_curves(k, &mut b, f, true, None)
-                .map_err(|e| harness(format!("create_uv_trim_curves: {e}")))?;
-        }
+
         // the down face use's loops, so that edge mates (an edge's end vertex, the end edge
         // use of a vertex use's UV sector) exist as upstream
         hfp::add_down_side(&mut b, f)?;

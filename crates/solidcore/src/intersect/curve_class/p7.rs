@@ -2137,11 +2137,39 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FaceQueries<O> for Mutable<'_, G> {
         src_zone_tol_3d: f64,
         uv_space_okay: bool,
     ) -> Result<EndInside> {
-        // (not yet wired on the mutable path: the read-only deferral)
-        ReadOnly(&*self.0).find_vertex_sector(
+        let unresolved = || {
+            // DISPATCH GAP: the adapter cannot resolve the face or vertex handle to its
+            // `Brep` entity (`ClassGeometry::topology_entity`).
+            SolidError::unported("SmFace::FindVertexSector", "topology.face_p4")
+        };
+        let v = {
+            let geometry = &*self.0;
+            let (b, _) = resolve_face(geometry, face).ok_or_else(unresolved)?;
+            same_brep_vertex(geometry, b, vertex).ok_or_else(unresolved)??
+        };
+        let Some(v) = v else {
+            return Ok(EndInside::default());
+        };
+        let Some((b, f)) = resolve_face_mut(self.0, face) else {
+            return ReadOnly(&*self.0).find_vertex_sector(
+                k,
+                face,
+                vertex,
+                curve,
+                uv_curve,
+                from,
+                to,
+                direction,
+                src_zone_tol_3d,
+                uv_space_okay,
+            );
+        };
+        let before = Tolerances::of(b);
+        let r = find_vertex_sector_in(
             k,
-            face,
-            vertex,
+            b,
+            f,
+            v,
             curve,
             uv_curve,
             from,
@@ -2149,7 +2177,9 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FaceQueries<O> for Mutable<'_, G> {
             direction,
             src_zone_tol_3d,
             uv_space_okay,
-        )
+        )?;
+        before.check_unchanged(b, "SmFace::FindVertexSector")?;
+        Ok(r)
     }
     fn edge_curve_on_classify(
         &mut self,
@@ -2383,6 +2413,61 @@ fn same_brep_edge<O: ClassObject>(
         )));
     };
     Some(Ok(core::ptr::eq(b, edge_brep).then_some(e)))
+}
+
+/// The vertex behind vertex handle `vertex` when it is one of B-rep `b`'s: `Some(None)`
+/// for a vertex of another B-rep (no vertex use on a face of `b`), `None` for a handle the
+/// adapter cannot resolve.
+fn same_brep_vertex<O: ClassObject>(
+    geometry: &impl ClassGeometry<O>,
+    b: &Brep,
+    vertex: O,
+) -> Option<Result<Option<VertexId>>> {
+    let (vertex_brep, entity) = geometry.topology_entity(vertex)?;
+    let EntityRef::Vertex(v) = entity else {
+        return Some(Err(SolidError::invalid_input(
+            OP_FACE,
+            "vertex class object not a vertex",
+        )));
+    };
+    Some(Ok(core::ptr::eq(b, vertex_brep).then_some(v)))
+}
+
+/// [`crate::topology::face::p4::find_vertex_sector`] of face `f` of `b`.
+#[allow(clippy::too_many_arguments)]
+fn find_vertex_sector_in(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    v: VertexId,
+    curve: &Curve,
+    uv_curve: Option<&Curve>,
+    from: f64,
+    to: f64,
+    direction: OrientType,
+    src_zone_tol_3d: f64,
+    uv_space_okay: bool,
+) -> Result<EndInside> {
+    let sector = crate::topology::face::p4::find_vertex_sector(
+        k,
+        b,
+        f,
+        crate::topology::face::p4::FindVertexSectorArgs {
+            vertex: v,
+            curve,
+            uv_curve,
+            param_at_vertex: from,
+            param_ivl_end: to,
+            orientation: direction,
+            zone_tol_3d: src_zone_tol_3d,
+            validate_sector: true,
+            uv_space_okay,
+        },
+    )?;
+    Ok(EndInside {
+        inside: sector.vertexuse.is_some(),
+        possible_problem: sector.possible_problem,
+    })
 }
 
 /// [`qf1::edge_curve_on_classify`] of face `f` of `b` (an edge of another B-rep has no
