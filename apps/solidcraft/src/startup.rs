@@ -110,6 +110,77 @@ pub fn pick_cpu_adapter(adapters: &[eframe::wgpu::Adapter], surface: Option<&efr
         })
 }
 
+/// Adapter properties used to choose a card without opening a device.
+#[derive(Clone, Debug)]
+pub struct AdapterChoice {
+    pub name: String,
+    pub device_type: eframe::wgpu::DeviceType,
+    pub max_buffer_size: u64,
+    pub compatible: bool,
+}
+
+/// Choose only surface-compatible adapters. Names saved in preferences are exact; the
+/// environment override follows wgpu's case-insensitive substring convention.
+pub fn choose_adapter(adapters: &[AdapterChoice], environment: Option<&str>, preference: Option<&str>) -> Option<usize> {
+    // wgpu's environment helper panics on a missing name; an override must remain recoverable.
+    let compatible = || adapters.iter().enumerate().filter(|(_, a)| a.compatible);
+    if let Some(name) = environment.filter(|s| !s.is_empty()) {
+        let name = name.to_lowercase();
+        if let Some((index, _)) = compatible().find(|(_, a)| a.name.to_lowercase().contains(&name)) {
+            return Some(index);
+        }
+    }
+    if let Some(name) = preference.filter(|s| !s.is_empty())
+        && let Some((index, _)) = compatible().find(|(_, a)| a.name == name)
+    {
+        return Some(index);
+    }
+    // max_buffer_size is a capacity hint, not a measurement of dedicated video memory.
+    // Keep the first adapter on ties, preserving the existing order on a single GPU.
+    let rank = |a: &AdapterChoice| {
+        use eframe::wgpu::DeviceType;
+        let kind = match a.device_type {
+            DeviceType::DiscreteGpu => 4,
+            DeviceType::IntegratedGpu => 3,
+            DeviceType::VirtualGpu => 2,
+            DeviceType::Other => 1,
+            DeviceType::Cpu => 0,
+        };
+        (kind, a.max_buffer_size)
+    };
+    compatible().fold(
+        None,
+        |best: Option<usize>, (i, adapter)| {
+            if best.and_then(|j| adapters.get(j)).is_none_or(|current| rank(adapter) > rank(current)) { Some(i) } else { best }
+        },
+    )
+}
+
+/// Select the requested card, or rank the hardware available for this window.
+pub fn pick_adapter(
+    adapters: &[eframe::wgpu::Adapter],
+    surface: Option<&eframe::wgpu::Surface<'_>>,
+    environment: Option<&str>,
+    preference: Option<&str>,
+) -> Result<eframe::wgpu::Adapter, String> {
+    let choices: Vec<_> = adapters
+        .iter()
+        .map(|a| {
+            let info = a.get_info();
+            AdapterChoice {
+                name: info.name,
+                device_type: info.device_type,
+                max_buffer_size: a.limits().max_buffer_size,
+                compatible: surface.is_none_or(|s| a.is_surface_supported(s)),
+            }
+        })
+        .collect();
+    choose_adapter(&choices, environment, preference)
+        .and_then(|i| adapters.get(i))
+        .cloned()
+        .ok_or_else(|| "no graphics adapter can draw the window".into())
+}
+
 /// `WGPU_BACKEND`: when set, wgpu picks the backends from it and the order below is not used.
 pub const WGPU_BACKEND_ENV: &str = "WGPU_BACKEND";
 
@@ -206,6 +277,42 @@ pub fn no_window_message(error: &str, settings: Option<&Path>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cards() -> Vec<AdapterChoice> {
+        use eframe::wgpu::DeviceType::*;
+        [("Integrated", IntegratedGpu, 64), ("Discrete small", DiscreteGpu, 8), ("Discrete large", DiscreteGpu, 16)]
+            .into_iter()
+            .map(|(name, device_type, max_buffer_size)| AdapterChoice { name: name.into(), device_type, max_buffer_size, compatible: true })
+            .collect()
+    }
+
+    #[test]
+    fn adapter_names_environment_override_and_missing_card_fallback() {
+        let cards = cards();
+        assert_eq!(choose_adapter(&cards, None, Some("Discrete small")), Some(1));
+        assert_eq!(choose_adapter(&cards, Some("LARGE"), Some("Discrete small")), Some(2));
+        assert_eq!(choose_adapter(&cards, None, Some("removed")), Some(2));
+        assert_eq!(choose_adapter(&cards, Some("missing"), Some("Discrete small")), Some(1));
+        assert_eq!(choose_adapter(&cards, Some(""), Some("Discrete small")), Some(1));
+        assert_eq!(choose_adapter(&cards, None, Some("Discrete")), Some(2), "saved names are exact");
+    }
+
+    #[test]
+    fn automatic_adapter_prefers_discrete_then_capacity_and_requires_surface_support() {
+        let mut cards = cards();
+        assert_eq!(choose_adapter(&cards, None, None), Some(2));
+        cards[2].compatible = false;
+        assert_eq!(choose_adapter(&cards, Some("large"), Some("Discrete large")), Some(1));
+        cards[2].compatible = true;
+        cards[2].max_buffer_size = cards[1].max_buffer_size;
+        assert_eq!(choose_adapter(&cards, None, None), Some(1), "ties keep enumeration order");
+        assert_eq!(choose_adapter(&cards[..1], None, None), Some(0));
+        for card in &mut cards {
+            card.compatible = false;
+        }
+        assert_eq!(choose_adapter(&cards, None, None), None);
+        assert_eq!(choose_adapter(&[], None, None), None);
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("solidcraft-startup-{name}-{}", std::process::id()));

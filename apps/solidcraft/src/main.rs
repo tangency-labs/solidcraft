@@ -288,6 +288,7 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
             let future = dialog.save_file();
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
         })),
+        graphics_adapters: Vec::new(),
         graphics_path: graphics_path().map(|p| p.to_string_lossy().to_string()),
         http_get: Some(std::sync::Arc::new(http_get)),
         http_download: Some(std::sync::Arc::new(http_download)),
@@ -726,7 +727,19 @@ fn main() -> eframe::Result {
                 restart_on_software: device_lost::restart_on_software(after_loss, cpu_renderer),
                 lost_at: None,
             });
+            if !safe_mode {
+                app.preferences.graphics_adapter =
+                    graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string)).unwrap_or_default();
+            }
             if let Some(rs) = &cc.wgpu_render_state {
+                app.services.graphics_adapters = rs
+                    .available_adapters
+                    .iter()
+                    .map(|adapter| {
+                        let info = adapter.get_info();
+                        (info.name.clone(), format!("{} ({:?}, {:?})", info.name, info.device_type, info.backend))
+                    })
+                    .collect();
                 let scene_samples = scene_samples(rs.adapter.get_info().backend, u32::from(samples), &rs.msaa_supported);
                 eprintln!("SolidCraft graphics: {:?}, MSAA {scene_samples}x (requested {}x)", rs.adapter.get_info().backend, samples);
                 solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
@@ -855,6 +868,12 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
         }
         if cpu {
             setup.native_adapter_selector = Some(std::sync::Arc::new(startup::pick_cpu_adapter));
+        } else {
+            let environment = std::env::var("WGPU_ADAPTER_NAME").ok();
+            let adapter = graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string));
+            setup.native_adapter_selector = Some(std::sync::Arc::new(move |adapters, surface| {
+                startup::pick_adapter(adapters, surface, environment.as_deref(), adapter.as_deref())
+            }));
         }
         // A float depth buffer with a stencil, wherever the adapter has it (see `FLOAT_DEPTH_BITS`).
         let base = setup.device_descriptor.clone();

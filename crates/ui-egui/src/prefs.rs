@@ -508,6 +508,8 @@ preference_settings! {
     space_mouse_offered: std::collections::BTreeSet<String> = Default::default();
     /// Anti-aliasing samples (applies on restart).
     msaa: u32 = 4, PAGE_GRAPHICS;
+    /// Exact graphics adapter name; empty selects automatically on the next start.
+    graphics_adapter: String = String::new(), PAGE_GRAPHICS;
     /// Soft contact shading in the GPU viewport; optional and applied immediately.
     ambient_occlusion: bool = false, PAGE_GRAPHICS;
     /// The grid turns to the upright origin plane facing a side view (#1470). Off by default: the
@@ -745,6 +747,7 @@ impl Snapshot {
     }
     fn restore(self, app: &mut SolveApp) {
         let msaa = app.preferences.msaa;
+        let adapter = app.preferences.graphics_adapter.clone();
         let units_changed = app.preferences.default_units != self.prefs.default_units;
         // Update bookkeeping isn't a setting: a check that finished while the dialog was open stays.
         let update = std::mem::take(&mut app.preferences.update);
@@ -765,7 +768,7 @@ impl Snapshot {
         set_autosave(app);
         app.session.auto_project = self.auto_project;
         app.keymap.custom = self.keys;
-        if app.preferences.msaa != msaa {
+        if app.preferences.msaa != msaa || app.preferences.graphics_adapter != adapter {
             save_graphics(app);
         }
     }
@@ -920,7 +923,6 @@ fn ui_font_row(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 /// Restore Defaults for one page.
 fn defaults(app: &mut SolveApp, page: usize) {
-    let msaa = app.preferences.msaa;
     let units = app.preferences.default_units.clone();
     reset_preferences(&mut app.preferences, page);
     if app.preferences.default_units != units {
@@ -943,9 +945,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
             app.ui.show_grid = true;
             app.ui.ground_shadow = true;
             app.ui.perspective = false;
-            if app.preferences.msaa != msaa {
-                save_graphics(app);
-            }
+            save_graphics(app);
         }
         PAGE_SKETCH => {
             app.session.auto_project = true;
@@ -1144,6 +1144,7 @@ fn save_graphics(app: &SolveApp) {
             .filter(serde_json::Value::is_object)
             .unwrap_or_else(|| json!({}));
         graphics["msaa"] = json!(app.preferences.msaa);
+        graphics["adapter"] = json!(app.preferences.graphics_adapter);
         let _ = std::fs::write(path, graphics.to_string());
     }
 }
@@ -1256,7 +1257,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Action::Cancel => Some("cancel"),
         ui_kit::Action::None => button,
     };
-    if app.preferences.msaa != before.msaa {
+    if app.preferences.msaa != before.msaa || app.preferences.graphics_adapter != before.graphics_adapter {
         save_graphics(app);
     }
     if app.preferences.up_axis != before.up_axis {
@@ -2099,6 +2100,9 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     if new.msaa != app.preferences.msaa && !app.msaa_supported.is_empty() && !app.msaa_supported.contains(&new.msaa) {
         return Err(format!("this graphics device doesn't support `msaa` {}; it supports {:?}", new.msaa, app.msaa_supported));
     }
+    if new.graphics_adapter.len() > 1024 || new.graphics_adapter.chars().any(char::is_control) {
+        return Err("`graphics_adapter` must be a name of at most 1024 bytes without control characters".into());
+    }
     let file = crate::theme_files::find(&new.theme, &new.custom_themes);
     if (!THEMES.iter().any(|(id, _)| *id == new.theme) && file.is_none()) || !["z", "y"].contains(&new.up_axis.as_str()) {
         return Err("`theme` must be dark, light, system or a theme's id (see `theme_ids`) and `up_axis` z or y".into());
@@ -2137,7 +2141,7 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     }
     let units_changed = new.default_units != app.preferences.default_units;
     let up_changed = new.up_axis != app.preferences.up_axis;
-    let msaa_changed = new.msaa != app.preferences.msaa;
+    let graphics_changed = new.msaa != app.preferences.msaa || new.graphics_adapter != app.preferences.graphics_adapter;
     if p.get("layout").is_some() {
         app.ui.layout = new.layout;
     }
@@ -2145,7 +2149,7 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     if units_changed {
         default_units_changed(app);
     }
-    if msaa_changed {
+    if graphics_changed {
         save_graphics(app);
     }
     if up_changed {
@@ -3441,6 +3445,32 @@ mod tests {
 
     use super::*;
     use crate::navigation::orbit;
+
+    #[test]
+    fn graphics_card_preference_persists_cancels_and_resets_without_changing_backend() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-graphics-card-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"backend":"vulkan","msaa":4}"#).unwrap();
+        let services = crate::Services { graphics_path: Some(path.to_string_lossy().into()), ..Default::default() };
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), services);
+        let snapshot = Snapshot::take(&app);
+        set(&mut app, &json!({"graphics_adapter":"Discrete large"})).unwrap();
+        let read = || serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(read()["adapter"], "Discrete large");
+        assert_eq!(read()["backend"], "vulkan");
+        let saved = serde_json::to_value(&app.preferences).unwrap();
+        assert_eq!(lenient(&saved).graphics_adapter, "Discrete large");
+        snapshot.restore(&mut app);
+        assert_eq!(read()["adapter"], "");
+        set(&mut app, &json!({"graphics_adapter":"Discrete small"})).unwrap();
+        defaults(&mut app, PAGE_GRAPHICS);
+        assert_eq!(read()["adapter"], "");
+        assert_eq!(read()["backend"], "vulkan");
+        assert!(set(&mut app, &json!({"graphics_adapter":"x".repeat(1025)})).is_err());
+        assert!(set(&mut app, &json!({"graphics_adapter":"card\nname"})).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn unsupported_saved_msaa_is_reset_to_the_default_with_a_notice() {

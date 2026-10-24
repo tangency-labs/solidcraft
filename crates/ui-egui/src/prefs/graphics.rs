@@ -4,6 +4,33 @@ use super::*;
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get();
     ui_kit::settings_heading(ui, app.tr("prefs.graphics"), app.tr("prefs.graphics_note"));
+    if app.services.graphics_path.is_some() {
+        ui_kit::settings_section(ui, "graphics_card", app.tr("prefs.graphics_card"), |ui| {
+            let adapters = &app.services.graphics_adapters;
+            let selected = adapters.iter().position(|(name, _)| *name == app.preferences.graphics_adapter);
+            let missing = !app.preferences.graphics_adapter.is_empty() && selected.is_none();
+            let current = selected.and_then(|i| adapters.get(i)).map_or(app.tr("prefs.graphics_card_auto"), |(_, label)| label.as_str());
+            let mut requested = None;
+            let response = ui_kit::dropdown_menu(ui, "graphics_card", current, |ui| {
+                if ui.selectable_label(selected.is_none(), app.tr("prefs.graphics_card_auto")).clicked() {
+                    requested = Some(String::new());
+                }
+                for (index, (name, label)) in adapters.iter().enumerate() {
+                    if ui.selectable_label(selected == Some(index), label).clicked() {
+                        requested = Some(name.clone());
+                    }
+                }
+            });
+            crate::scenario::publish_target("prefs:graphics_card", response.rect);
+            if let Some(name) = requested {
+                let _ = super::set(app, &json!({"graphics_adapter": name}));
+            }
+            ui_kit::text(ui, app.tr("prefs.graphics_card_restart"), ui_kit::Text::Hint("graphics_card_restart"));
+            if missing {
+                ui_kit::text(ui, app.tr("prefs.graphics_card_missing"), ui_kit::Text::Hint("graphics_card_missing"));
+            }
+        });
+    }
     ui.horizontal_wrapped(|ui| {
         let response =
             ui.allocate_ui_with_layout(egui::vec2(t.form_card_width + t.space_24 * 2.0, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
