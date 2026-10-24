@@ -435,16 +435,20 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     } else {
         1.0
     };
-    // Extrudes and moves go either way; radii and thicknesses stay positive.
-    let signed = matches!(
-        d.kind,
+    // Extrudes, moves, pattern spacings and one-sided sketch offsets go either way (#5497);
+    // radii, thicknesses, depths and heights stay positive. A symmetric offset takes the
+    // distance's size only, so a drag past its curve would just turn the arrow round.
+    let signed = match &d.kind {
         Kind::Extrude { .. }
-            | Kind::Move { .. }
-            | Kind::Section { .. }
-            | Kind::OffsetPlane { .. }
-            | Kind::OffsetFaces { .. }
-            | Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. })
-    );
+        | Kind::Move { .. }
+        | Kind::Section { .. }
+        | Kind::OffsetPlane { .. }
+        | Kind::OffsetFaces { .. }
+        | Kind::PatternRect { .. } => true,
+        Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. } | crate::sketch_modify_ui::Mod::PatternRect { .. }) => true,
+        Kind::SketchModify(crate::sketch_modify_ui::Mod::Offset { mode, .. }) => !crate::sketch_modify_ui::offset_symmetric(*mode),
+        _ => false,
+    };
     let focus = std::mem::take(&mut d.focus);
     let half_height = app.cam.half_height();
     let axis = revolve_axis(app, d);
@@ -477,7 +481,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         if let Some(spacing2) = spacing2
             && let Some(l2) = app.session.doc.eval(spacing2, ValueKind::Length).ok().filter(|v| v.is_finite())
         {
-            drag_arrow(ui, painter, proj, base, bs, n2, l2, false, egui::Id::new("sc_manipulator2"), half_height, spacing2);
+            drag_arrow(ui, painter, proj, base, bs, n2, l2, true, egui::Id::new("sc_manipulator2"), half_height, spacing2);
         }
     }
     // An offset plane shows where it will be.
