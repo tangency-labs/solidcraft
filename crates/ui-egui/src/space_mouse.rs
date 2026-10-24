@@ -2,7 +2,9 @@
 //! desktop through HID, the web app through the browser's Gamepad API) and hands its six raw axes
 //! to [`navigate_frame`] once per frame. This module maps them, applies the dead zone and drops
 //! 3DxWare's emulated wheel; the page showing the camera moves it (`navigation::device`), so the
-//! cap does what that page's camera may do.
+//! cap does what that page's camera may do. A device with a program of its own can drive the view
+//! through that program instead: the desktop app reads it over the navigation bridge and hands
+//! its motion to [`bridge_frame`], which goes to the same page.
 
 use std::time::Duration;
 
@@ -94,6 +96,9 @@ pub struct Input {
     /// Which of the Linux readers exist, as the app's reader last saw them; none where there is
     /// only one way to read the device.
     pub drivers: Option<DriversPresent>,
+    /// The device app connected over the navigation bridge, by the name it gave (or "?" before it
+    /// gave one); none while no app is connected, and in builds without a bridge.
+    pub bridge: Option<String>,
 }
 
 /// What the Linux reader found: the spacenavd socket and a direct (hidraw) 3D mouse, and whether that
@@ -596,6 +601,76 @@ pub fn navigate_frame(app: &mut SolveApp, ctx: &egui::Context, mapping: DriverMa
     app.viewport.device_motion = Some(handed);
     ctx.request_repaint_after(Duration::from_millis(16));
     true
+}
+
+/// How far one message of a device app may move the view along one of its motions (points, or
+/// zoom steps), and how far a frame may sum to: a flood of large values can't throw the camera out.
+pub const BRIDGE_MAX_STEP: f64 = 10_000.0;
+
+/// The standard views a device app may ask for over the navigation bridge, by the names
+/// `SolveApp::animate_view` takes ("fit" frames everything, as Fit does).
+pub const BRIDGE_VIEWS: [&str; 8] = ["front", "back", "left", "right", "top", "bottom", "iso", "fit"];
+
+/// What a device app (a homemade 3D input device's own program, read by the desktop app through
+/// its navigation bridge) moved the view by since the last frame. Unlike a 3D mouse's deflection,
+/// these are distances: orbit and pan as a pointer drag of that many points would move the view
+/// (the model follows), and zoom in steps (positive zooms in, as a wheel turned forward).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BridgeMotion {
+    pub orbit: [f64; 2],
+    pub pan: [f64; 2],
+    pub zoom: f64,
+}
+
+impl BridgeMotion {
+    /// Nothing to move.
+    pub fn is_still(self) -> bool {
+        self == Self::default()
+    }
+
+    /// Both motions summed, each within [`BRIDGE_MAX_STEP`]; a value that isn't a finite number
+    /// counts as none.
+    pub fn plus(self, other: Self) -> Self {
+        let sum = |a: f64, b: f64| (bridge_step(a) + bridge_step(b)).clamp(-BRIDGE_MAX_STEP, BRIDGE_MAX_STEP);
+        Self {
+            orbit: [sum(self.orbit[0], other.orbit[0]), sum(self.orbit[1], other.orbit[1])],
+            pan: [sum(self.pan[0], other.pan[0]), sum(self.pan[1], other.pan[1])],
+            zoom: sum(self.zoom, other.zoom),
+        }
+    }
+}
+
+/// One value of a device app's message: finite and within [`BRIDGE_MAX_STEP`], else none.
+pub fn bridge_step(value: f64) -> f64 {
+    if value.is_finite() { value.clamp(-BRIDGE_MAX_STEP, BRIDGE_MAX_STEP) } else { 0.0 }
+}
+
+/// Hands one frame of a device app's navigation to the page showing the camera, and shows the
+/// standard `views` it asked for (names outside [`BRIDGE_VIEWS`] are ignored). As with a 3D mouse,
+/// nothing happens with the bridge switched off, on the start page or while a file picker is open,
+/// or in a window without focus. Returns whether there was anything to hand over.
+pub fn bridge_frame(app: &mut SolveApp, ctx: &egui::Context, motion: BridgeMotion, views: &[String]) -> bool {
+    if !app.preferences.nav_bridge_enabled || app.home.open || app.file_picker_busy() || !ctx.input(|i| i.focused) {
+        return false;
+    }
+    let motion = BridgeMotion::default().plus(motion);
+    let moved = !motion.is_still();
+    if moved {
+        app.begin_external_navigation();
+        app.viewport.bridge_motion = Some(app.viewport.bridge_motion.unwrap_or_default().plus(motion));
+        ctx.request_repaint();
+    }
+    // After the motion, which would stop the view's animation.
+    let mut viewed = false;
+    for view in views.iter().filter_map(|name| BRIDGE_VIEWS.iter().find(|v| **v == name.as_str())) {
+        if *view == "fit" {
+            app.animate_fit_all();
+        } else {
+            app.animate_view(view);
+        }
+        viewed = true;
+    }
+    moved || viewed
 }
 
 /// A small dead zone avoids drift at rest. A full cap deflection takes roughly one viewport
@@ -1632,6 +1707,99 @@ mod tests {
         let (_, wizard) = app.space_mouse.calibrating.as_ref().unwrap();
         let calibration = wizard.result().unwrap().unwrap();
         assert!(calibration.axes.iter().enumerate().all(|(c, axis)| axis.source == c && !axis.reversed), "{calibration:?}");
+    }
+
+    /// One frame of a device app's navigation, taken by the modelling viewport.
+    fn bridge(app: &mut SolveApp, ctx: &egui::Context, motion: BridgeMotion, views: &[&str]) -> bool {
+        let views: Vec<String> = views.iter().map(|v| v.to_string()).collect();
+        let handed = bridge_frame(app, ctx, motion, &views);
+        let page = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        crate::navigation::device(app, page, crate::navigation::NavCaps::MODEL);
+        handed
+    }
+
+    const ORBIT: BridgeMotion = BridgeMotion { orbit: [40.0, 10.0], pan: [0.0; 2], zoom: 0.0 };
+
+    #[test]
+    fn a_device_app_moves_the_view_only_with_the_bridge_on_and_the_window_focused() {
+        let ctx = window(true);
+        let mut off = app();
+        let before = off.cam;
+        assert!(!bridge(&mut off, &ctx, ORBIT, &[]), "the bridge is off by default");
+        assert_eq!(off.cam, before);
+        let on = || {
+            let mut app = app();
+            app.preferences.nav_bridge_enabled = true;
+            app
+        };
+        let mut home = on();
+        home.home.open = true;
+        assert!(!bridge(&mut home, &ctx, ORBIT, &[]));
+        let mut unfocused = on();
+        assert!(!bridge(&mut unfocused, &window(false), ORBIT, &[]));
+        assert_eq!((home.cam, unfocused.cam), (before, before));
+        let mut app = on();
+        assert!(bridge(&mut app, &ctx, ORBIT, &[]));
+        assert_ne!((app.cam.yaw, app.cam.pitch), (before.yaw, before.pitch), "orbit turns the view");
+        assert!(app.viewport.bridge_motion.is_none(), "the page took the motion");
+        // At rest, nothing to hand over.
+        assert!(!bridge(&mut app, &ctx, BridgeMotion::default(), &[]));
+    }
+
+    #[test]
+    fn a_device_apps_motion_pans_and_zooms_as_a_drag_and_the_wheel_would() {
+        let ctx = window(true);
+        let mut app = app();
+        app.preferences.nav_bridge_enabled = true;
+        let before = app.cam;
+        bridge(&mut app, &ctx, BridgeMotion { pan: [30.0, -20.0], ..Default::default() }, &[]);
+        let mut dragged = before;
+        dragged.pan(30.0, -20.0, 600.0);
+        assert_eq!(app.cam, dragged, "a pan of so many points is a pan drag of as many");
+        let panned = app.cam;
+        bridge(&mut app, &ctx, BridgeMotion { zoom: 2.0, ..Default::default() }, &[]);
+        assert!(app.cam.distance < panned.distance, "positive steps zoom in");
+        bridge(&mut app, &ctx, BridgeMotion { zoom: -2.0, ..Default::default() }, &[]);
+        assert!((app.cam.distance - panned.distance).abs() < 1e-9, "and back out to where it was");
+        // Reverse zoom direction reverses it, as it does the wheel's.
+        app.preferences.zoom_reverse = true;
+        bridge(&mut app, &ctx, BridgeMotion { zoom: 2.0, ..Default::default() }, &[]);
+        assert!(app.cam.distance > panned.distance);
+    }
+
+    #[test]
+    fn a_device_app_asks_for_standard_views_by_name() {
+        let ctx = window(true);
+        let mut app = app();
+        app.preferences.nav_bridge_enabled = true;
+        app.preferences.look_at_anim = false;
+        assert!(bridge(&mut app, &ctx, BridgeMotion::default(), &["top"]));
+        let mut top = Camera::default();
+        top.set_view(solidcraft_engine::render::StandardView::Top);
+        let target = app.cam_anim.map_or(app.cam, |a| a.to);
+        assert_eq!((target.yaw, target.pitch), (top.yaw, top.pitch));
+        // Names it doesn't know are no view.
+        let still = app.cam;
+        assert!(!bridge(&mut app, &ctx, BridgeMotion::default(), &["TOP", "named view", ""]));
+        assert_eq!(app.cam, still);
+    }
+
+    #[test]
+    fn a_flood_of_device_app_motion_stays_within_range() {
+        let ctx = window(true);
+        let mut app = app();
+        app.preferences.nav_bridge_enabled = true;
+        let hostile = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX, -f64::MAX, 1e12];
+        for value in hostile {
+            let motion = BridgeMotion { orbit: [value, -value], pan: [value, value], zoom: value };
+            for _ in 0..3 {
+                bridge(&mut app, &ctx, motion, &[]);
+                assert!(app.cam.is_valid(), "{value}");
+            }
+        }
+        let summed = (0..10).fold(BridgeMotion::default(), |sum, _| sum.plus(BridgeMotion { pan: [f64::MAX, 1.0], ..Default::default() }));
+        assert_eq!(summed.pan, [BRIDGE_MAX_STEP, 10.0]);
+        assert_eq!(BridgeMotion { zoom: f64::NAN, ..Default::default() }.plus(BridgeMotion::default()), BridgeMotion::default());
     }
 
     #[test]

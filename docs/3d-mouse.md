@@ -44,3 +44,30 @@ The driver keeps the device to itself, and sends it only to a program it can ide
 as an `.app` (the packaged app). Without the driver, or with its helper not running, SolidCraft reads the device through IOKit like on Windows.
 
 SolidCraft does not follow 3DxWare's profile on macOS. Its default is 3DxWare's object mode.
+
+## Device apps: the navigation bridge
+
+Some homemade input devices come with a program of their own that reads the device and turns its
+knobs, rings and buttons into navigation (profiles, sensitivity, button actions). Such a program can
+move SolidCraft's view directly instead of emulating mouse drags, so the mouse pointer stays the
+user's and both can be used at once. Turn on **Navigate with a device app on this computer** in
+Preferences › Navigation › 3D mouse (off by default) and set the port the program listens on
+(8765 unless the program says otherwise). The desktop app then connects to `127.0.0.1:<port>`,
+retries every second while nothing answers, and shows **Connected** with the program's name once it
+is. Only the window with focus moves, and not on the start page or while a file dialog is open.
+
+The program is the server; SolidCraft connects and first sends one line,
+`{"t":"hello","app":"solidcraft","version":"<version>"}`. Then the program sends one JSON object per
+line (UTF-8, `\n`-terminated, at most 4096 bytes); anything else, and any message SolidCraft doesn't
+know, is ignored:
+
+| Message | Meaning |
+|---|---|
+| `{"t":"hello","server":"MAKMOUSE","device":"MAKMOUSE"}` | The program's name (shown in Preferences) and, optionally, a name in the device's USB manufacturer or product string. A 3D mouse with that name is then left to the program, so its motion doesn't reach the view twice. |
+| `{"t":"axis","x":4.0,"y":-2.5}` | Motion since the last message, in points: it orbits as a drag of that many points would (the model follows), or pans or zooms in the current mode. Where the view can't turn (a sketch being edited, a flat page) an orbit pans. |
+| `{"t":"zoom","d":1.0}` | Zoom steps (8 % of the distance each); positive zooms in, as a wheel turned forward. Reverse zoom direction applies. |
+| `{"t":"mode","mode":"pan","on":true}` | What `axis` drives: `orbit` (the default), `pan` or `zoom` (up zooms in, 8 points a step). `"on":false` goes back to orbit. |
+| `{"t":"view","name":"iso"}` | A standard view: `front`, `back`, `left`, `right`, `top`, `bottom`, `iso`, or `fit` to frame everything. |
+
+Values that aren't finite numbers count as none, and each is limited to ±10 000 per message and per
+frame. The protocol is the one the MAKMOUSE driver app uses for its add-ins.

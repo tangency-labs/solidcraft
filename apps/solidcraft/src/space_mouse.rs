@@ -510,8 +510,15 @@ fn hid_api() -> hidapi::HidResult<HidApi> {
     HidApi::new()
 }
 
+/// The device's manufacturer and product strings, which say whether a device app has it
+/// ([`crate::nav_bridge::Claim`]). Asked of the opened 3D mouse only.
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-fn reader(ctx: Context, shared: Arc<Mutex<Reading>>) {
+fn device_strings(device: &hidapi::HidDevice) -> Vec<String> {
+    [device.get_manufacturer_string(), device.get_product_string()].into_iter().filter_map(|s| s.ok().flatten()).collect()
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn reader(ctx: Context, shared: Arc<Mutex<Reading>>, bridge: crate::nav_bridge::Claim) {
     let Ok(mut api) = hid_api() else {
         log::warn!("3D mouse: HID initialization failed");
         return;
@@ -534,10 +541,14 @@ fn reader(ctx: Context, shared: Arc<Mutex<Reading>>) {
             Some((device, layout, (info.vendor_id(), info.product_id())))
         }) {
             connected(&ctx, &shared, Source::Hid(Some(ids)));
+            let strings = device_strings(&device);
             let mut report = [0_u8; REPORT_BUFFER_BYTES];
             loop {
                 match device.read_timeout(&mut report, 100) {
                     Ok(0) => {}
+                    // The device's own app moves the view over the navigation bridge: read here as
+                    // well, the device would move it twice. What was read before ages out.
+                    Ok(_) if bridge.claims(&strings) => {}
                     Ok(size) => publish(&ctx, &shared, layout, report.get(..size).unwrap_or_default()),
                     Err(error) => {
                         log::info!("3D mouse disconnected: {error}");
@@ -928,7 +939,8 @@ pub struct SpaceMouse {
 }
 
 impl SpaceMouse {
-    pub fn start(ctx: &Context) -> Self {
+    /// Starts the reader. A device that `bridge` says its own app reads is left to that app.
+    pub fn start(ctx: &Context, bridge: crate::nav_bridge::Claim) -> Self {
         let now = Instant::now();
         let shared = Arc::new(Mutex::new(Reading::new(now)));
         let worker_state = Arc::clone(&shared);
@@ -937,11 +949,14 @@ impl SpaceMouse {
         let drivers = Arc::new(Drivers::default());
         #[cfg(target_os = "linux")]
         let worker_drivers = Arc::clone(&drivers);
+        // hidraw names no device's strings to compare (`Claim`).
+        #[cfg(target_os = "linux")]
+        let _ = bridge;
         let spawned = std::thread::Builder::new().name("solidcraft-3d-mouse".into()).spawn(move || {
             #[cfg(target_os = "linux")]
             reader(worker_ctx, worker_state, worker_drivers, Machine);
             #[cfg(not(target_os = "linux"))]
-            reader(worker_ctx, worker_state);
+            reader(worker_ctx, worker_state, bridge);
         });
         if let Err(error) = spawned {
             log::warn!("3D mouse: reader could not start: {error}");

@@ -506,6 +506,12 @@ preference_settings! {
     /// the page would otherwise bring the offer back for every device.
     #[serde(deserialize_with = "devices_that_read")]
     space_mouse_offered: std::collections::BTreeSet<String> = Default::default();
+    /// A device's own app on this computer moves the view (the navigation bridge, docs/3d-mouse.md):
+    /// the desktop app connects to it on `nav_bridge_port`. Off unless asked for, so the app
+    /// doesn't connect to whatever else listens on that port.
+    nav_bridge_enabled: bool = false, PAGE_NAVIGATION;
+    /// The loopback port the device app listens on (0: none).
+    nav_bridge_port: u16 = 8765, PAGE_NAVIGATION;
     /// Anti-aliasing samples (applies on restart).
     msaa: u32 = 4, PAGE_GRAPHICS;
     /// Linux: the window system the app opens with at its next start (#3083): `auto` (XWayland
@@ -1490,6 +1496,9 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     });
+    // A device whose own app drives the view instead (the navigation bridge).
+    ui_kit::divider(ui, "nav_bridge");
+    navigation::nav_bridge(app, ui);
     // The rarely needed settings sit behind one disclosure, closed until the reader opens it.
     ui_kit::section(ui, "space_mouse_advanced", crate::i18n::tr_label("Advanced"), false, |ui| {
         ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
