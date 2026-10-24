@@ -237,6 +237,8 @@ fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::settings_number(ui, &mut app.preferences.agent_chat_turn_limit, 1..=200, 1.0).on_hover_text(tr("ai.prefs.turn_limit_hint"));
             });
         });
+        // Takes effect when the agent next connects.
+        ui_kit::checkbox(ui, tr("ui.agent_design_feedback"), &mut app.preferences.agent_design_feedback);
         ui_kit::text(ui, tr("ai.prefs.privacy_note"), ui_kit::Text::Hint("privacy"));
     });
 }

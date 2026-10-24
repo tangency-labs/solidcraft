@@ -9,6 +9,7 @@ use solidcraft_engine::MAX_LINE;
 use solidcraft_engine::io::vfs::{self, PathScope};
 
 use crate::backend::Backend;
+use crate::feedback::Feedback;
 use crate::tools::{call_tool, check_arguments, tool_definitions};
 
 /// The newest protocol revision we speak; offered when the client asks for one we don't know.
@@ -34,10 +35,16 @@ edge], radius}`, `solid.chamfer`, patterns, mirror, primitives). Use `batch` for
 `list_commands` for ids and parameter docs, `describe_command` for a command's schemas, `inspect_design` / `measure` to verify, `body_topology` to find edge points, \
 `set_parameter` to drive the design and `screenshot` to look at it.";
 
+/// Added to the instructions when the server sends design feedback.
+const FEEDBACK_INSTRUCTIONS: &str = " A result may end with a \"Design feedback:\" block: \
+features the call broke (new_errors) or mended (fixed), new warnings, and changed_since_your_last_call when the person \
+at the app (or another client) changed the design between your calls; act on it before going on.";
+
 pub struct Server {
     backend: Box<dyn Backend>,
     initialized: bool,
     scope: Option<PathScope>,
+    feedback: Feedback,
 }
 
 fn response(id: Value, result: Value) -> Value {
@@ -49,12 +56,19 @@ fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
 
 impl Server {
     pub fn new(backend: Box<dyn Backend>) -> Self {
-        Self { backend, initialized: false, scope: None }
+        Self { backend, initialized: false, scope: None, feedback: Feedback::default() }
     }
     /// Confine the files tool calls may reach to `scope` (`None`: anywhere). `solidcraft-cli mcp`
     /// always sets one unless started with `--allow-any-path` (docs/mcp.md).
     pub fn with_path_scope(mut self, scope: Option<PathScope>) -> Self {
         self.scope = scope;
+        self
+    }
+    /// End tool results with the design feedback block (see `feedback.rs` and docs/mcp.md). Off by
+    /// default, so agents that don't expect it see the replies they always did;
+    /// `solidcraft-cli mcp --design-feedback` and the agent chat's preference turn it on.
+    pub fn with_design_feedback(mut self, on: bool) -> Self {
+        self.feedback.on = on;
         self
     }
     pub fn backend(&mut self) -> &mut dyn Backend {
@@ -170,7 +184,11 @@ impl Server {
                     "protocolVersion": version,
                     "capabilities": {"tools": {"listChanged": false}, "resources": {"listChanged": false}},
                     "serverInfo": {"name": "solidcraft", "title": "SolidCraft", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": format!("{INSTRUCTIONS} Backend: {}.", self.backend.describe()),
+                    "instructions": format!(
+                        "{INSTRUCTIONS}{} Backend: {}.",
+                        if self.feedback.on { FEEDBACK_INSTRUCTIONS } else { "" },
+                        self.backend.describe()
+                    ),
                 }))
             }
             "ping" => Ok(json!({})),
@@ -185,7 +203,8 @@ impl Server {
                 // The open design's folder counts as it is now (a save-as or open moves it).
                 let scope = self.scope.clone().map(|s| s.with_design(self.backend.design_path().as_deref()));
                 let backend = self.backend.as_mut();
-                Ok(vfs::scoped(scope, || call_tool(backend, name, &args)))
+                let feedback = &mut self.feedback;
+                Ok(vfs::scoped(scope, || feedback.around(backend, |b| call_tool(b, name, &args))))
             }
             "resources/list" => Ok(json!({"resources": [
                 {"uri": "solidcraft://design", "name": "Active design", "description": "document.inspect with measurements", "mimeType": "application/json"},
