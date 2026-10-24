@@ -1141,6 +1141,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             app.pick_save_command(&format!("{name}.step"), &["step", "stp", "igs", "stl", "3mf", "obj"], "file.export", json!({"bodies": bodies}));
         }
         "ui.findBrowser" => {
+            // Find in Browser shows the whole tree, for a body or for the feature that made a
+            // face: it ends a search (#1413). A pick in the view keeps one (`browser::reveal_pick`).
+            app.tree.search.clear();
             if let Some(feature) = id_of(&p, "feature") {
                 if let Some(body) = p.get("body").and_then(Value::as_str) {
                     crate::browser::reveal_feature(app, feature, body);

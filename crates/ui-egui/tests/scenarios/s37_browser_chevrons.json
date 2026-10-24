@@ -3,6 +3,16 @@
   "note": "Browser chevrons expand and collapse every kind of node (folders, components, groups, the origin, named views, document settings). Model: two components with a body each, a joint, a sketch, an offset plane, a named view."
  },
  {
+  "note": "The window is tall enough for the fully expanded tree below the Browser's search field and kind list (#1413)."
+ },
+ {
+  "call": "ui.resize",
+  "params": {
+   "width": 1600,
+   "height": 1100
+  }
+ },
+ {
   "start": "component.create"
  },
  {

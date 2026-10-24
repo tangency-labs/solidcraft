@@ -97,6 +97,7 @@ extrude	false
 eye	false
 fastener	false
 fillet	false
+filter	false
 finish	false
 fit	false
 fit_section	false

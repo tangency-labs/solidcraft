@@ -881,14 +881,15 @@ mod tests {
         assert!(sheet.height() > unfolding.height());
         let footer = crate::scenario::rect_of("ribbon:search_footer").unwrap();
         assert_eq!(footer, Rect::from_min_max(pos2(sheet.left(), footer.top()), sheet.right_bottom()));
-        // Inspect native accessibility widgets, not just aliases or painted labels.
+        // Inspect native accessibility widgets, not just aliases or painted labels, inside the
+        // field and sheet (the Browser has a search field of its own elsewhere in the window).
         let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
         let search_edit = h.ctx.read_response(egui::Id::new("sc_sbox_text")).unwrap().rect;
-        let fields: Vec<_> = nodes
-            .iter()
-            .filter(|(_, n)| n.role() == egui::accesskit::Role::TextInput)
-            .filter(|(_, n)| n.bounds().is_some_and(|b| b.y0 >= f64::from(field.top()) && b.y1 <= f64::from(sheet.bottom())))
-            .collect();
+        let inside = |b: egui::accesskit::Rect| {
+            b.y0 >= f64::from(field.top()) && b.y1 <= f64::from(sheet.bottom()) && b.x0 >= f64::from(field.left()) && b.x1 <= f64::from(field.right())
+        };
+        let fields: Vec<_> =
+            nodes.iter().filter(|(_, n)| n.role() == egui::accesskit::Role::TextInput).filter(|(_, n)| n.bounds().is_some_and(inside)).collect();
         assert_eq!(fields.len(), 1, "one editor in the field and sheet: {fields:?}");
         assert!(field.contains_rect(search_edit));
         let editor_id = fields[0].0;

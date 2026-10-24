@@ -16,6 +16,9 @@ pub mod bom_panel;
 pub mod browser;
 pub mod browser_canvas;
 pub mod browser_prompts;
+pub mod browser_search;
+#[cfg(test)]
+mod browser_search_tests;
 pub mod canvas;
 #[cfg(test)]
 mod colour_tokens_tests;
