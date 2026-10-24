@@ -30,8 +30,11 @@ The control channel and connected MCP clients can use the same command as the UI
 `ui.prefs {"ambient_occlusion": true}` also sets the preference. The command changes
 only display preferences, without adding a modelling undo step or moving the camera.
 
-The GPU viewport uses 32 deterministic hemisphere samples per shaded pixel against
-an opaque depth prepass (at most 2048 pixels on its longest side). The radius follows
+The GPU viewport uses 32 hemisphere samples per shaded pixel against an opaque depth
+prepass (at most 2048 pixels on its longest side), the sample pattern turned by a
+different angle at each pixel. One pattern for every pixel drew faint shifted copies of
+nearby parts (#4167) and stepped bands along contacts (#3407); turned, they become an
+even fine grain, which 2× supersampling smooths further. The radius follows
 model size, and depth-range rejection avoids shadows from distant foreground objects.
 It supports orthographic and perspective cameras and respects section clipping.
 Wireframe, transparent bodies, overlays and surface-analysis colours are unaffected.

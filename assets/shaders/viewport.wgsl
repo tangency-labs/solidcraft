@@ -296,9 +296,10 @@ fn opaque_depth(i: TOut, front: bool) -> AoDepth {
     return AoDepth(depth, bitcast<u32>(depth));
 }
 
-// Deterministic cosine-weighted hemisphere samples. Projecting the sample and a point one
-// radius toward the eye supplies a depth range in both orthographic and perspective views;
-// distant foreground geometry cannot cast a dark halo onto a background surface.
+// Cosine-weighted hemisphere samples, the pattern turned by a different angle at each pixel.
+// Projecting the sample and a point one radius toward the eye supplies a depth range in both
+// orthographic and perspective views; distant foreground geometry cannot cast a dark halo onto
+// a background surface.
 fn occlusion(i: TOut) -> f32 {
     let radius = u.ao.x;
     if (radius <= 0.0 || length(i.n) < 0.5) { return 1.0; }
@@ -311,6 +312,14 @@ fn occlusion(i: TOut) -> f32 {
     // The map is a 1 × 1 stand-in until a frame draws into it (the product preview draws no
     // prepass): sampling it tells nothing, so leave the surface unoccluded.
     if (size.x < 2 || size.y < 2) { return 1.0; }
+    // The same offsets at every pixel made each sample darken its own shifted copy of a nearby
+    // part's outline: faint ghosts of the part where the radius is large on screen (#4167),
+    // stepped bands along contacts where it is small (#3407). Turned by interleaved gradient
+    // noise (Jimenez 2014), neighbouring pixels sample different points and the copies break up
+    // into an even grain.
+    let turn = fract(52.9829189 * fract(dot(i.pos.xy, vec2<f32>(0.06711056, 0.00583715))));
+    let t = tangent * cos(turn * 6.28318531) + bitangent * sin(turn * 6.28318531);
+    let b = cross(n, t);
     // One comparison for both depth directions: depths read as 0 near / 1 far (mirrored when
     // the buffer runs reversed). The map is cleared to its far plane either way, so a texel
     // with nothing in it reads as 1 and the `d < 1.0` test below skips it.
@@ -319,7 +328,7 @@ fn occlusion(i: TOut) -> f32 {
     for (var j = 0u; j < 32u; j = j + 1u) {
         let f = (f32(j) + 0.5) / 32.0;
         let angle = f32(j) * 2.39996323;
-        let direction = tangent * (cos(angle) * sqrt(f)) + bitangent * (sin(angle) * sqrt(f)) + n * sqrt(1.0 - f);
+        let direction = t * (cos(angle) * sqrt(f)) + b * (sin(angle) * sqrt(f)) + n * sqrt(1.0 - f);
         let reach = radius * (0.2 + 0.8 * fract(f32(j) * 0.61803399 + 0.5));
         let sample = i.wp + n * (radius * 0.025) + direction * reach;
         let q = u.vp * vec4<f32>(sample, 1.0);
