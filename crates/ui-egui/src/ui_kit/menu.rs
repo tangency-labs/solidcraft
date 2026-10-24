@@ -11,6 +11,21 @@ impl Menu {
     }
 
     pub(crate) fn button<R>(ui: &mut Ui, label: impl Into<egui::WidgetText>, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
+        Self::button_with(
+            ui,
+            |ui, nested| {
+                let button = egui::Button::new(label.into());
+                ui.add(if nested { button.right_text(egui::menu::SubMenuButton::RIGHT_ARROW) } else { button })
+            },
+            add,
+        )
+    }
+
+    pub(crate) fn item_button<R>(ui: &mut Ui, item: &MenuItem<'_>, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
+        Self::button_with(ui, |ui, _| item.show(ui), add)
+    }
+
+    fn button_with<R>(ui: &mut Ui, button: impl FnOnce(&mut Ui, bool) -> Response, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
         let previous = ui.style().clone();
         let frame = Self::frame();
         let style = ui.style_mut();
@@ -20,8 +35,7 @@ impl Menu {
         style.visuals.window_fill = frame.fill;
         style.visuals.window_stroke = frame.stroke;
         let nested = egui::menu::is_in_menu(ui);
-        let button = egui::Button::new(label.into());
-        let response = ui.add(if nested { button.right_text(egui::menu::SubMenuButton::RIGHT_ARROW) } else { button });
+        let response = button(ui, nested);
         let popup_id = if nested { egui::menu::SubMenu::id_from_widget_id(response.id) } else { egui::Popup::default_response_id(&response) };
         let was_open = ui.ctx().read_response(popup_id).is_some();
         let gate_id = popup_id.with("opening_click");

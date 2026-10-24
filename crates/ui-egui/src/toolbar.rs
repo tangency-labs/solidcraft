@@ -1813,8 +1813,11 @@ fn sketch_create_menu(
     egui::ScrollArea::vertical().id_salt("sketch_create_rows").max_height(room).show(ui, |ui| {
         for f in crate::sketch_families::FAMILIES {
             let variants: Vec<_> = f.commands.iter().filter_map(|id| cmds.iter().find(|c| c.id == *id).copied()).collect();
-            if !variants.is_empty() {
-                let response = crate::ui_kit::Menu::button(ui, app.tr_label(f.label).to_string(), |ui| {
+            if let Some(first) = variants.first() {
+                // The row translates its own label.
+                let mut item = crate::ui_kit::MenuItem::new(f.label, f.label, first.icon);
+                item.submenu = true;
+                let response = crate::ui_kit::Menu::item_button(ui, &item, |ui| {
                     dropdown_keys(app, ui, &variants);
                     sketch_menu_rows(app, ui, &variants, menu, toggle);
                 });
@@ -2684,6 +2687,43 @@ mod home_tests {
 #[cfg(test)]
 mod dropdown_tests {
     use super::*;
+
+    #[test]
+    fn sketch_create_families_have_icons_and_open_their_variants() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"panel:SKETCH:CREATE"}})).unwrap();
+        h.frames(4);
+        let family = crate::scenario::rect_of("menu:Line").expect("Line is a shared menu row");
+        assert!(family.contains(crate::scenario::handle_at("create_family:Line").unwrap()));
+        h.step(&json!({"click":{"handle":"create_family:Line"}})).unwrap();
+        h.frames(4);
+        for id in ["sketch.line", "sketch.line.midpoint"] {
+            assert!(crate::scenario::handle_at(&format!("dropdown:{id}")).is_some(), "missing variant {id}");
+        }
+        h.step(&json!({"click":{"handle":"dropdown:sketch.line.midpoint"}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some("sketch.line.midpoint"));
+    }
+
+    #[test]
+    fn sketch_create_family_rows_paint_the_first_variants_icons() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let cmds: Vec<_> = solidcraft_engine::command_specs().into_iter().filter(|c| c.tab == "SKETCH" && c.panel == "CREATE").collect();
+        crate::icon_svg::audit::start();
+        let _ = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+            sketch_create_menu(&mut h.app, ui, &cmds, &mut None, &mut None);
+        });
+        let requested = crate::icon_svg::audit::take();
+        crate::icon_svg::audit::stop();
+        for family in crate::sketch_families::FAMILIES {
+            let first = solidcraft_engine::find_command(family.commands[0]).unwrap();
+            assert!(!first.icon.is_empty());
+            assert!(requested.iter().any(|icon| icon.name == first.icon && !icon.placeholder), "{} must paint {}", family.label, first.icon);
+        }
+    }
 
     /// A drop-down taller than the window stops at its bottom and scrolls: the last row is
     /// reached with the arrow keys and comes into view.
