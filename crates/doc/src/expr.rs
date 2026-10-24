@@ -503,6 +503,28 @@ fn is_reference(toks: &[Tok], i: usize, id: &str) -> bool {
 
 /// Identifiers an expression refers to (excluding units, constants and functions).
 pub fn references(s: &str) -> Vec<String> {
+    // Every evaluation fingerprints every feature by the parameters its expressions name, so the
+    // same short expressions are asked about on every command: the answers are kept (per thread,
+    // bounded) instead of being lexed again.
+    thread_local! {
+        static SEEN: std::cell::RefCell<std::collections::HashMap<String, Vec<String>>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    if let Some(hit) = SEEN.with(|seen| seen.borrow().get(s).cloned()) {
+        return hit;
+    }
+    let out = scan_references(s);
+    SEEN.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if seen.len() >= 1 << 16 {
+            seen.clear();
+        }
+        seen.insert(s.to_string(), out.clone());
+    });
+    out
+}
+
+/// [`references`], worked out.
+fn scan_references(s: &str) -> Vec<String> {
     let Ok(toks) = lex(s) else { return Vec::new() };
     let mut out: Vec<String> = Vec::new();
     for (i, t) in toks.iter().enumerate() {
@@ -919,7 +941,7 @@ pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocErr
 }
 
 /// One parameter to evaluate: name, expression and unit (`mm`, `in`, `deg`, empty…).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ParamDef {
     pub name: String,
     pub expr: String,
@@ -930,6 +952,38 @@ pub struct ParamDef {
 /// name. Circular references are reported with their path (`a → b → a`). `doc_len` is the
 /// document's length unit in mm (bare numbers of unit-less-unit parameters next to lengths).
 pub fn eval_params(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
+    // Each command evaluates the design's parameters (every named feature input is one) several
+    // times over, mostly unchanged: the last few results are kept (per thread) for the same
+    // definitions, compared in full.
+    type Evaluated = (BTreeMap<String, Value>, BTreeMap<String, String>);
+    thread_local! {
+        static LAST: std::cell::RefCell<Vec<(Vec<ParamDef>, u64, Evaluated)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    let key = doc_len.to_bits();
+    let hit = LAST.with(|last| {
+        let mut last = last.borrow_mut();
+        let at = last.iter().position(|(defs, len, _)| *len == key && defs.as_slice() == params)?;
+        let entry = last.remove(at);
+        let out = entry.2.clone();
+        last.push(entry);
+        Some(out)
+    });
+    if let Some(out) = hit {
+        return out;
+    }
+    let out = eval_params_uncached(params, doc_len);
+    LAST.with(|last| {
+        let mut last = last.borrow_mut();
+        if last.len() >= 4 {
+            last.remove(0);
+        }
+        last.push((params.to_vec(), key, out.clone()));
+    });
+    out
+}
+
+/// [`eval_params`], worked out.
+fn eval_params_uncached(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
     let mut done: BTreeMap<String, Value> = BTreeMap::new();
     let mut errors: BTreeMap<String, String> = BTreeMap::new();
     let index: BTreeMap<&str, &ParamDef> = params.iter().map(|p| (p.name.as_str(), p)).collect();
@@ -975,6 +1029,9 @@ pub fn eval_params(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value
         cx.stack.pop();
         let r = match err {
             Some(e) => Err(e),
+            // Most parameters are named feature inputs with a literal value ("10 mm"): those are
+            // worked out once (per thread) rather than parsed again on every evaluation.
+            None if vals.is_empty() => eval_constant(p, cx.doc_len),
             None => eval_def(p, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))), cx.doc_len),
         };
         match &r {
@@ -1007,6 +1064,28 @@ pub fn eval_def(p: &ParamDef, lookup: &dyn Fn(&str) -> Result<Value, DocError>, 
         Kind::Angle => Value::angle(x),
         Kind::Unitless => Value::num(x),
     })
+}
+
+/// [`eval_def`] of a parameter whose expression names no other parameter, remembered by its
+/// expression, unit and the design's length unit.
+fn eval_constant(p: &ParamDef, doc_len: f64) -> Result<Value, DocError> {
+    type Key = (String, String, u64);
+    thread_local! {
+        static SEEN: std::cell::RefCell<std::collections::HashMap<Key, Result<Value, DocError>>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    let key = (p.expr.clone(), p.unit.clone(), doc_len.to_bits());
+    if let Some(hit) = SEEN.with(|seen| seen.borrow().get(&key).cloned()) {
+        return hit;
+    }
+    let out = eval_def(p, &|n| Err(DocError::Expr(format!("unknown parameter `{n}`"))), doc_len);
+    SEEN.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if seen.len() >= 1 << 16 {
+            seen.clear();
+        }
+        seen.insert(key, out.clone());
+    });
+    out
 }
 
 /// Dependency edges between parameters: (parameter, parameter it references).
@@ -1286,5 +1365,31 @@ mod tests {
         assert_eq!(problem("pi"), "`pi` is a constant, so it cannot be a parameter name");
         assert_eq!(crate::Document::param_name_problem("width"), None);
         assert!(problem("2w").contains("not a valid parameter name"));
+    }
+
+    /// The kept answers of `references` and `eval_params` never stand for different input: an
+    /// edited expression, unit or design length unit gives its own values.
+    #[test]
+    fn kept_parameter_values_follow_every_change() {
+        assert_eq!(references("width * 2 + 3 mm"), vec!["width".to_string()]);
+        assert_eq!(references("width * 2 + 3 mm"), vec!["width".to_string()]);
+        assert!(references("10 mm").is_empty());
+        let mm = |v: &BTreeMap<String, Value>, n: &str| v.get(n).map(|x| x.v);
+        let mut defs = vec![def("a", "10 mm", "mm"), def("b", "a * 2", "mm"), def("c", "5", "mm")];
+        let (first, _) = eval_params(&defs, 1.0);
+        assert_eq!((mm(&first, "a"), mm(&first, "b"), mm(&first, "c")), (Some(10.0), Some(20.0), Some(5.0)));
+        defs[0].expr = "12 mm".into();
+        let (edited, _) = eval_params(&defs, 1.0);
+        assert_eq!((mm(&edited, "a"), mm(&edited, "b")), (Some(12.0), Some(24.0)));
+        defs[0].expr = "10 mm".into();
+        assert_eq!(eval_params(&defs, 1.0).0, first, "back as it was");
+        // Whatever changes, the kept answer is the one worked out afresh.
+        for (unit, expr, len) in [("mm", "5", 25.4), ("", "5", 25.4), ("in", "5", 1.0), ("deg", "5", 1.0), ("", "5", 1.0)] {
+            defs[2].unit = unit.into();
+            defs[2].expr = expr.into();
+            assert_eq!(eval_params(&defs, len), eval_params_uncached(&defs, len), "{unit} {expr} {len}");
+        }
+        defs[2].expr = "bad +".into();
+        assert!(eval_params(&defs, 1.0).1.contains_key("c"));
     }
 }
