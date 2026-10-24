@@ -3404,8 +3404,10 @@ fn edge_dir(e: &kernel::EdgeInfo) -> Vec3 {
 
 /// References for edges picked at `pts` on the body a blend would go on (the state before it).
 pub fn edge_refs(st: &ModelState, body: &Option<crate::BodyName>, pts: &[Vec3]) -> Vec<EdgeRef> {
-    let Ok(ti) = blend_target(st, body, pts) else { return Vec::new() };
-    let Some(mb) = st.bodies.get(ti) else { return Vec::new() };
+    per_blend_body(st, body, pts, || EdgeRef { dir: Vec3::ZERO, min: Vec3::ZERO, max: Vec3::ZERO }, edge_refs_on)
+}
+
+fn edge_refs_on(mb: &ModelBody, pts: &[Vec3]) -> Vec<EdgeRef> {
     let size = mb.body.size();
     let Ok(edges) = mb.body.edges((size * 1e-3).max(1e-3)) else { return Vec::new() };
     let bb = mb.mesh().bounds();
@@ -3422,10 +3424,48 @@ pub fn edge_refs(st: &ModelState, body: &Option<crate::BodyName>, pts: &[Vec3]) 
 
 /// Persistent names of the edges picked at `pts` on the body a blend would go on.
 pub fn edge_names_for(st: &ModelState, body: &Option<crate::BodyName>, pts: &[Vec3]) -> Vec<String> {
-    match blend_target(st, body, pts).ok().and_then(|i| st.bodies.get(i)) {
-        Some(b) => crate::naming::edge_names_at(b, pts),
-        None => Vec::new(),
+    per_blend_body(st, body, pts, String::new, crate::naming::edge_names_at)
+}
+
+/// `at` of each pick on the body it is blended on, in pick order (`missing` where none).
+fn per_blend_body<T>(
+    st: &ModelState,
+    body: &Option<crate::BodyName>,
+    pts: &[Vec3],
+    missing: fn() -> T,
+    at: impl Fn(&ModelBody, &[Vec3]) -> Vec<T>,
+) -> Vec<T> {
+    let Ok(groups) = blend_groups(st, body, pts) else { return Vec::new() };
+    let mut out: Vec<T> = pts.iter().map(|_| missing()).collect();
+    for (ti, picks) in groups {
+        let Some(mb) = st.bodies.get(ti) else { continue };
+        let sub: Vec<Vec3> = picks.iter().filter_map(|&i| pts.get(i).copied()).collect();
+        for (&i, v) in picks.iter().zip(at(mb, &sub)) {
+            if let Some(slot) = out.get_mut(i) {
+                *slot = v;
+            }
+        }
     }
+    out
+}
+
+/// A Fillet's or Chamfer's picks grouped by the body each lies on: (body index, pick indices),
+/// in pick order. A named body takes every pick; a pick near no body's edge (one an upstream
+/// edit moved) stays with the first pick's body, as before (#5634).
+fn blend_groups(st: &ModelState, body: &Option<crate::BodyName>, pts: &[Vec3]) -> Result<Vec<(usize, Vec<usize>)>> {
+    let first = blend_target(st, body, pts)?;
+    if body.is_some() {
+        return Ok(vec![(first, (0..pts.len()).collect())]);
+    }
+    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    for (i, p) in pts.iter().enumerate() {
+        let ti = blend_target(st, &None, std::slice::from_ref(p)).unwrap_or(first);
+        match groups.iter_mut().find(|(t, _)| *t == ti) {
+            Some((_, g)) => g.push(i),
+            None => groups.push((ti, vec![i])),
+        }
+    }
+    Ok(groups)
 }
 
 /// The stored pick sits on the axis of a round, not on an edge. The nearest edge within a
@@ -6151,6 +6191,127 @@ fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> 
     }
 }
 
+/// One body's part of a Fillet or Chamfer: the picks at `picks` (indices into `points`, the
+/// feature's edge points) found again on body `ti` and blended there. Returns the edges used.
+#[allow(clippy::too_many_arguments)]
+fn blend_body(
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    ti: usize,
+    points: &[Vec3],
+    picks: &[usize],
+    r: f64,
+    warning: &mut Option<String>,
+) -> Result<Vec<Vec3>> {
+    let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
+    let edges: Vec<Vec3> = picks.iter().filter_map(|&i| points.get(i).copied()).collect();
+    let names: Vec<&str> = picks.iter().map(|&i| f.edge_names.get(i).map_or("", String::as_str)).collect();
+    let picked_refs: Vec<EdgeRef> = picks.iter().filter_map(|&i| f.edge_refs.get(i).cloned()).collect();
+    let edges = if names.iter().any(|n| !n.is_empty()) {
+        // By name first; a name that is gone falls back to the point, with a warning.
+        let (mut out, mut notes) = (Vec::new(), Vec::new());
+        for (k, p) in edges.iter().enumerate() {
+            match names.get(k).filter(|n| !n.is_empty()).map(|n| (*n, crate::naming::locate_edge(mb, n, *p))) {
+                Some((n, Ok(hit))) => {
+                    if let Some(note) = hit.note(n) {
+                        notes.push(note);
+                    }
+                    out.push(hit.point);
+                }
+                Some((_, Err(_))) | None => {
+                    let mut w = None;
+                    let refs: Vec<EdgeRef> = picks.get(k).and_then(|&i| f.edge_refs.get(i)).cloned().into_iter().collect();
+                    let skipped = format!("edge `{}` no longer exists and was skipped", names.get(k).copied().unwrap_or("?"));
+                    // The name is gone. A pick on the axis of a round must not fall
+                    // through to the tangency seam (#775). A sharp edge that moved
+                    // still resolves from the point, which an edit relies on.
+                    if pick_lies_on_a_round_axis(&mb.body, *p) {
+                        notes.push(skipped);
+                    } else if let Ok(q) = resolve_edges(&mb.body, &[*p], &refs, &mut w) {
+                        out.extend(q);
+                        notes.push(match names.get(k) {
+                            Some(n) if !n.is_empty() => format!("edge `{n}` no longer exists; using the edge at the picked point"),
+                            _ => "an edge reference without a name was found by its point".into(),
+                        });
+                    } else {
+                        notes.push(skipped);
+                    }
+                }
+            }
+        }
+        if out.is_empty() {
+            let why = if notes.is_empty() { String::new() } else { format!(" ({})", notes.join("; ")) };
+            return Err(DocError::Invalid(format!("none of the selected edges exist any more{why}")));
+        }
+        if !notes.is_empty() {
+            append_warning(warning, notes.join("; "));
+        }
+        out
+    } else {
+        resolve_edges(&mb.body, &edges, &picked_refs, warning)?
+    };
+    let input = mb.traced();
+    // A G2 corner is built by the corner construction alone, for a constant radius: any
+    // other style (or a fitted radius) has no corner patch to repeat.
+    if let FeatureKind::Fillet { corner: crate::FilletCorner::G2, style, fit, .. } = &f.kind
+        && (!matches!(style, crate::FilletStyle::Constant) || !matches!(fit, crate::FilletFit::Exact))
+    {
+        return Err(DocError::Invalid("a G2 corner is built for a constant-radius fillet (type: constant, fit: exact) only".into()));
+    }
+    // The blended body, and the lineage of what the last blend started from.
+    let (nb, from) = match &f.kind {
+        FeatureKind::Fillet { corner: crate::FilletCorner::G2, .. } => (kernel::fillet_g2_corners(&mb.body, &edges, r)?, input),
+        FeatureKind::Fillet { style: crate::FilletStyle::Curvature, .. } => (kernel::fillet_g2(&mb.body, &edges, r)?, input),
+        FeatureKind::Fillet { style: crate::FilletStyle::Chord, .. } => (kernel::fillet_chord(&mb.body, &edges, r)?, input),
+        FeatureKind::Fillet { style: crate::FilletStyle::Variable { radius2, start, mid, smooth }, .. } => {
+            let r2 = val(vals, radius2, Kind::Length)?;
+            let mut pts = vec![(0.0, r), (1.0, r2)];
+            for (t, e) in mid {
+                pts.push((*t, val(vals, e, Kind::Length)?));
+            }
+            one_by_one(input, &edges, |b, p| kernel::fillet_variable_points(b, p, start.0, &pts, *smooth))?
+        }
+        FeatureKind::Fillet { style: crate::FilletStyle::Spline { start, knots, radii }, .. } => {
+            let mut values = vec![r];
+            for e in radii {
+                values.push(val(vals, e, Kind::Length)?);
+            }
+            let law = crate::FilletStyle::spline(knots, values);
+            one_by_one(input, &edges, |b, p| kernel::fillet_variable_spline(b, p, start.0, &law))?
+        }
+        FeatureKind::Fillet { fit: crate::FilletFit::Taper, .. } => {
+            let (b, tapers) = kernel::fillet_tapered(&mb.body, &edges, r)?;
+            if let Some(note) = tapered_note(&tapers) {
+                append_warning(warning, note);
+            }
+            let tapered: Vec<(Vec3, kernel::Taper)> = edges.iter().copied().zip(tapers).filter_map(|(p, t)| Some((p, t?))).collect();
+            if !tapered.is_empty() {
+                st.tapered.insert(f.id, tapered);
+            }
+            (b, input)
+        }
+        FeatureKind::Fillet { fit, .. } => {
+            let (b, used) = fillet_fitted(&mb.body, &edges, r, *fit)?;
+            if let Some(used) = used {
+                append_warning(warning, reduced_note(&used, r));
+                st.fitted.insert(f.id, used);
+            }
+            (b, input)
+        }
+        FeatureKind::Chamfer { distance2, angle, flip, .. } => (chamfer_with(vals, &mb.body, &edges, r, distance2, angle, *flip)?, input),
+        _ => return Err(DocError::Invalid("blend".into())),
+    };
+    // Keeping the input's planar certificates may join faces; their history stays over
+    // the same operand.
+    let nb = Traced::step(nb.with_preserved_planar_sources(&mb.body)?, &[&from]);
+    let (name, feat) = (mb.name.clone(), mb.feature);
+    if let Some(slot) = st.bodies.get_mut(ti) {
+        *slot = ModelBody::traced_new(name, nb, feat);
+    }
+    Ok(edges)
+}
+
 /// A chamfer, equal or by its second distance or angle.
 fn chamfer_with(
     vals: &BTreeMap<String, Value>,
@@ -6643,111 +6804,14 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         }
         FeatureKind::Fillet { edges, radius, body, .. } | FeatureKind::Chamfer { edges, distance: radius, body, .. } => {
             let r = val(vals, radius, Kind::Length)?;
-            let ti = blend_target(st, body, &crate::plain(edges))?;
-            let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
-            let edges = if f.edge_names.iter().any(|n| !n.is_empty()) {
-                // By name first; a name that is gone falls back to the point, with a warning.
-                let (mut out, mut notes) = (Vec::new(), Vec::new());
-                for (i, p) in edges.iter().enumerate() {
-                    match f.edge_names.get(i).filter(|n| !n.is_empty()).map(|n| (n, crate::naming::locate_edge(mb, n, p.0))) {
-                        Some((n, Ok(hit))) => {
-                            if let Some(note) = hit.note(n) {
-                                notes.push(note);
-                            }
-                            out.push(hit.point);
-                        }
-                        Some((_, Err(_))) | None => {
-                            let mut w = None;
-                            let refs: Vec<EdgeRef> = f.edge_refs.get(i).cloned().into_iter().collect();
-                            let skipped =
-                                format!("edge `{}` no longer exists and was skipped", f.edge_names.get(i).map(String::as_str).unwrap_or("?"));
-                            // The name is gone. A pick on the axis of a round must not fall
-                            // through to the tangency seam (#775). A sharp edge that moved
-                            // still resolves from the point, which an edit relies on.
-                            if pick_lies_on_a_round_axis(&mb.body, p.0) {
-                                notes.push(skipped);
-                            } else if let Ok(q) = resolve_edges(&mb.body, &[p.0], &refs, &mut w) {
-                                out.extend(q);
-                                notes.push(match f.edge_names.get(i) {
-                                    Some(n) if !n.is_empty() => format!("edge `{n}` no longer exists; using the edge at the picked point"),
-                                    _ => "an edge reference without a name was found by its point".into(),
-                                });
-                            } else {
-                                notes.push(skipped);
-                            }
-                        }
-                    }
-                }
-                if out.is_empty() {
-                    let why = if notes.is_empty() { String::new() } else { format!(" ({})", notes.join("; ")) };
-                    return Err(DocError::Invalid(format!("none of the selected edges exist any more{why}")));
-                }
-                if !notes.is_empty() {
-                    *warning = Some(notes.join("; "));
-                }
-                out
-            } else {
-                resolve_edges(&mb.body, &crate::plain(edges), &f.edge_refs, warning)?
-            };
-            st.blend_edges.insert(f.id, edges.clone());
-            let input = mb.traced();
-            // A G2 corner is built by the corner construction alone, for a constant radius: any
-            // other style (or a fitted radius) has no corner patch to repeat.
-            if let FeatureKind::Fillet { corner: crate::FilletCorner::G2, style, fit, .. } = &f.kind
-                && (!matches!(style, crate::FilletStyle::Constant) || !matches!(fit, crate::FilletFit::Exact))
-            {
-                return Err(DocError::Invalid("a G2 corner is built for a constant-radius fillet (type: constant, fit: exact) only".into()));
+            // Each picked edge is blended on the body it lies on: edges on two bodies blend both,
+            // and a pick is never looked for again on another body (#5634).
+            let points = crate::plain(edges);
+            let mut used = Vec::new();
+            for (ti, picks) in blend_groups(st, body, &points)? {
+                used.extend(blend_body(vals, f, st, ti, &points, &picks, r, warning)?);
             }
-            // The blended body, and the lineage of what the last blend started from.
-            let (nb, from) = match &f.kind {
-                FeatureKind::Fillet { corner: crate::FilletCorner::G2, .. } => (kernel::fillet_g2_corners(&mb.body, &edges, r)?, input),
-                FeatureKind::Fillet { style: crate::FilletStyle::Curvature, .. } => (kernel::fillet_g2(&mb.body, &edges, r)?, input),
-                FeatureKind::Fillet { style: crate::FilletStyle::Chord, .. } => (kernel::fillet_chord(&mb.body, &edges, r)?, input),
-                FeatureKind::Fillet { style: crate::FilletStyle::Variable { radius2, start, mid, smooth }, .. } => {
-                    let r2 = val(vals, radius2, Kind::Length)?;
-                    let mut pts = vec![(0.0, r), (1.0, r2)];
-                    for (t, e) in mid {
-                        pts.push((*t, val(vals, e, Kind::Length)?));
-                    }
-                    one_by_one(input, &edges, |b, p| kernel::fillet_variable_points(b, p, start.0, &pts, *smooth))?
-                }
-                FeatureKind::Fillet { style: crate::FilletStyle::Spline { start, knots, radii }, .. } => {
-                    let mut values = vec![r];
-                    for e in radii {
-                        values.push(val(vals, e, Kind::Length)?);
-                    }
-                    let law = crate::FilletStyle::spline(knots, values);
-                    one_by_one(input, &edges, |b, p| kernel::fillet_variable_spline(b, p, start.0, &law))?
-                }
-                FeatureKind::Fillet { fit: crate::FilletFit::Taper, .. } => {
-                    let (b, tapers) = kernel::fillet_tapered(&mb.body, &edges, r)?;
-                    if let Some(note) = tapered_note(&tapers) {
-                        append_warning(warning, note);
-                    }
-                    let tapered: Vec<(Vec3, kernel::Taper)> = edges.iter().copied().zip(tapers).filter_map(|(p, t)| Some((p, t?))).collect();
-                    if !tapered.is_empty() {
-                        st.tapered.insert(f.id, tapered);
-                    }
-                    (b, input)
-                }
-                FeatureKind::Fillet { fit, .. } => {
-                    let (b, used) = fillet_fitted(&mb.body, &edges, r, *fit)?;
-                    if let Some(used) = used {
-                        append_warning(warning, reduced_note(&used, r));
-                        st.fitted.insert(f.id, used);
-                    }
-                    (b, input)
-                }
-                FeatureKind::Chamfer { distance2, angle, flip, .. } => (chamfer_with(vals, &mb.body, &edges, r, distance2, angle, *flip)?, input),
-                _ => return Err(DocError::Invalid("blend".into())),
-            };
-            // Keeping the input's planar certificates may join faces; their history stays over
-            // the same operand.
-            let nb = Traced::step(nb.with_preserved_planar_sources(&mb.body)?, &[&from]);
-            let (name, feat) = (mb.name.clone(), mb.feature);
-            if let Some(slot) = st.bodies.get_mut(ti) {
-                *slot = ModelBody::traced_new(name, nb, feat);
-            }
+            st.blend_edges.insert(f.id, used);
             Ok(())
         }
         FeatureKind::Box { corner, length, width, height, operation } => {

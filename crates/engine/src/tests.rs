@@ -429,6 +429,44 @@ fn fillet_and_chamfer_the_top_loop_of_rounded_overlapping_cylinders() {
     assert!((v - expect).abs() < 1.5, "{v} vs {expect}");
 }
 
+/// #5634: a Chamfer or Fillet with edges on two bodies blends each edge on its own body. All
+/// the picks went to the body of the first one, where the other body's picks found that body's
+/// nearest edges instead: the other body was left as it was and an edge nobody picked was cut.
+#[test]
+fn a_blend_over_two_bodies_blends_each_edge_on_its_own_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 30}));
+    run(&mut s, "solid.box", json!({"length": 80, "width": 40, "height": 10, "corner": [10, 10, 30], "operation": "new_body"}));
+    let upper = [[10, 10, 35], [90, 10, 35], [90, 50, 35], [10, 50, 35]];
+    let lower = [[0, 0, 15], [100, 0, 15], [100, 60, 15], [0, 60, 15]];
+    let bodies = |s: &mut Session| {
+        let m = run(s, "inspect.measure", json!({"bodies": ["Body1", "Body2"]}));
+        let b = |i: usize| (m["bodies"][i]["volume_mm3"].as_f64().unwrap(), m["bodies"][i]["faces"].as_u64().unwrap());
+        (b(0), b(1))
+    };
+    let ((v1, _), (v2, _)) = bodies(&mut s);
+    for edges in [[upper, lower].concat(), [lower, upper].concat()] {
+        // A 4 mm chamfer takes 8 mm² along each vertical edge: 30 mm high below, 10 above.
+        run(&mut s, "solid.chamfer", json!({"edges": edges, "distance": 4}));
+        let ((w1, f1), (w2, f2)) = bodies(&mut s);
+        assert!((v1 - w1 - 4.0 * 8.0 * 30.0).abs() < 1e-6 && f1 == 10, "lower block: {} mm³ off, {f1} faces", v1 - w1);
+        assert!((v2 - w2 - 4.0 * 8.0 * 10.0).abs() < 1e-6 && f2 == 10, "upper block: {} mm³ off, {f2} faces", v2 - w2);
+        run(&mut s, "edit.undo", json!({}));
+    }
+    // A Fillet the same way: each block gets its four rounds, 16 - 4π mm² along each edge.
+    let both = [upper, lower].concat();
+    run(&mut s, "solid.fillet", json!({"edges": both, "radius": 4}));
+    let ((w1, f1), (w2, f2)) = bodies(&mut s);
+    let corner = 16.0 - 4.0 * std::f64::consts::PI;
+    assert!((v1 - w1 - 4.0 * corner * 30.0).abs() < 0.5 && f1 == 10, "lower block: {} mm³ off, {f1} faces", v1 - w1);
+    assert!((v2 - w2 - 4.0 * corner * 10.0).abs() < 0.5 && f2 == 10, "upper block: {} mm³ off, {f2} faces", v2 - w2);
+    // The saved design rebuilds it the same way.
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    *s.doc_mut() = doc;
+    let ((r1, _), (r2, _)) = bodies(&mut s);
+    assert!((r1 - w1).abs() < 1e-6 && (r2 - w2).abs() < 1e-6, "rebuilt: {r1} {r2} vs {w1} {w2}");
+}
+
 /// Sketch a 40 x 30 rectangle with dimensions, extrude 20, fillet a vertical edge, cut a hole.
 #[test]
 fn box_fillet_cut_part() {
