@@ -725,7 +725,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                     },
                     None => crate::context_menu::Target::Viewport,
                 };
-                crate::context_menu::request_open(app, egui::pos2(x as f32, y as f32), target);
+                crate::context_menu::request_open(app, egui::pos2(x as f32, y as f32), target, b("radial"));
                 return ok(json!({"pending": true}));
             }
             ok(crate::context_menu::describe(app))

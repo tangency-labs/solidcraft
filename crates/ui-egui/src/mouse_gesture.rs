@@ -17,8 +17,10 @@
 //!
 //! A [`Studio`] is the part of the application the person is working in: a tab of the Design
 //! workspace, a sketch being edited, or the Render workspace. Each has its own default tools, and
-//! [`Config`] (kept with the preferences, edited in [`editor`]) holds the person's own list for
-//! any of them: how many tools and in which place, clockwise from the top.
+//! [`Config`] (kept with the preferences, edited in [`editor`]) holds the person's own lists for
+//! any of them: an inner and an outer list of up to [`MAX_RING`] tools each, clockwise from the
+//! top. The radial context menu shows them as its two layers of sectors
+//! ([`radial_items`]); the ring of tools takes both lists in turn.
 
 use crate::ui_kit::{Container, Surface};
 use std::collections::BTreeMap;
@@ -30,8 +32,10 @@ use crate::SolveApp;
 use crate::context_menu::{Item, act, cmd};
 use crate::theme::Tokens;
 
-/// Most tools one ring may hold.
-pub(crate) const MAX_TOOLS: usize = 12;
+/// Most tools one list may hold: the radial menu's sectors in a layer.
+pub(crate) const MAX_RING: usize = 8;
+/// Most tools one ring may hold: both lists.
+pub(crate) const MAX_TOOLS: usize = 2 * MAX_RING;
 /// Radius of the hub: the ring is 280 points across inside.
 pub(crate) const HUB: f32 = 140.0;
 /// Outer radius: 350 points across. The zones themselves continue outward.
@@ -158,12 +162,25 @@ pub(crate) fn label_of(id: &str) -> Option<String> {
     solidcraft_engine::find_command(id).map(|spec| short(spec.label).to_string())
 }
 
+/// The icon of tool `id`, empty when it has none or is not a tool.
+pub(crate) fn icon_of(id: &str) -> &'static str {
+    match id {
+        "repeat" => "redo",
+        "delete" => "delete",
+        "undo" => solidcraft_engine::find_command("edit.undo").map(|spec| spec.icon).unwrap_or(""),
+        _ => match ACTIONS.iter().find(|(i, _, _)| *i == id) {
+            Some((_, _, icon)) => icon,
+            None => solidcraft_engine::find_command(id).map(|spec| spec.icon).unwrap_or(""),
+        },
+    }
+}
+
 /// The tool `id` as a menu item (its state follows the design), or none for an unknown id.
 pub(crate) fn item(app: &SolveApp, id: &str) -> Option<Item> {
     match id {
         "repeat" => Some(match &app.last_command {
-            Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo"),
-            None => act("ui.repeat", "Repeat", "redo").on(false),
+            Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo").key(crate::keymap::REPEAT_KEY),
+            None => act("ui.repeat", "Repeat", "redo").key(crate::keymap::REPEAT_KEY).on(false),
         }),
         "delete" => Some(act("ui.delete", "Delete", "delete").key("Del").on(!app.session.selection.is_empty())),
         "undo" => Some(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty())),
@@ -197,36 +214,70 @@ pub(crate) fn catalog() -> Vec<(String, String)> {
 pub struct Config {
     /// Gestures are on (they also need the SolidWorks mouse mode, see [`active`]).
     pub enabled: bool,
-    /// A studio's own list of tool ids, clockwise from the top, by [`Studio::key`]. A studio
-    /// without an entry uses its default tools.
+    /// A studio's own inner list of tool ids, clockwise from the top, by [`Studio::key`]. A
+    /// studio without an entry uses its default tools. Lists saved before the outer list existed
+    /// may hold up to 12: the tools past [`MAX_RING`] belong to the outer list.
     pub wheels: BTreeMap<String, Vec<String>>,
+    /// A studio's own outer list, by [`Studio::key`]. Without an entry it holds what the inner
+    /// list has past [`MAX_RING`], usually nothing.
+    pub outer: BTreeMap<String, Vec<String>>,
+}
+
+/// `ids` cleaned of unknown ids, ids in `taken` and repeats, cut to `max`.
+fn clean<'a>(ids: impl IntoIterator<Item = &'a String>, taken: &[String], max: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in ids {
+        if out.len() < max && label_of(id).is_some() && !out.contains(id) && !taken.contains(id) {
+            out.push(id.clone());
+        }
+    }
+    out
 }
 
 impl Config {
-    /// The tool ids of `studio`: the person's list cleaned of unknown and repeated ids and cut
-    /// to [`MAX_TOOLS`], or the studio's defaults when nothing usable is left.
+    /// The tool ids of `studio`'s ring: the inner list, then the outer one.
     pub(crate) fn tools(&self, studio: Studio) -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
-        for id in self.wheels.get(studio.key()).into_iter().flatten() {
-            if out.len() < MAX_TOOLS && label_of(id).is_some() && !out.contains(id) {
-                out.push(id.clone());
-            }
+        let (mut inner, outer) = self.rings(studio);
+        inner.extend(outer);
+        inner
+    }
+
+    /// The tool ids of `studio`'s inner and outer lists: the person's lists cleaned of unknown
+    /// and repeated ids and cut to [`MAX_RING`] each, with no tool in both, or the studio's
+    /// defaults (inside) when nothing usable is left.
+    pub(crate) fn rings(&self, studio: Studio) -> (Vec<String>, Vec<String>) {
+        let mut inner = clean(self.wheels.get(studio.key()).into_iter().flatten(), &[], MAX_TOOLS);
+        if inner.is_empty() {
+            inner = studio.defaults().iter().map(|s| (*s).to_string()).collect();
         }
-        if out.is_empty() { studio.defaults().iter().map(|s| (*s).to_string()).collect() } else { out }
+        let spill = inner.split_off(inner.len().min(MAX_RING));
+        let outer = match self.outer.get(studio.key()) {
+            Some(list) => clean(list, &inner, MAX_RING),
+            None => spill,
+        };
+        (inner, outer)
     }
 
     /// Whether `studio` has a list of its own.
     pub(crate) fn is_custom(&self, studio: Studio) -> bool {
-        self.wheels.contains_key(studio.key())
+        self.wheels.contains_key(studio.key()) || self.outer.contains_key(studio.key())
     }
 
+    /// Sets the inner list of `studio`, leaving the outer one as it is.
+    #[cfg(test)]
     pub(crate) fn set_tools(&mut self, studio: Studio, tools: Vec<String>) {
         self.wheels.insert(studio.key().to_string(), tools);
+    }
+
+    pub(crate) fn set_rings(&mut self, studio: Studio, inner: Vec<String>, outer: Vec<String>) {
+        self.wheels.insert(studio.key().to_string(), inner);
+        self.outer.insert(studio.key().to_string(), outer);
     }
 
     /// Puts `studio` back to its default tools.
     pub(crate) fn reset(&mut self, studio: Studio) {
         self.wheels.remove(studio.key());
+        self.outer.remove(studio.key());
     }
 }
 
@@ -238,6 +289,13 @@ pub(crate) fn active(app: &SolveApp) -> bool {
 /// The ring's tools in `studio` as menu items, unknown ids dropped.
 pub(crate) fn items(app: &SolveApp, studio: Studio) -> Vec<Item> {
     app.preferences.mouse_gestures.tools(studio).iter().filter_map(|id| item(app, id)).collect()
+}
+
+/// The radial menu's two layers in the studio the application is in now, as menu items.
+pub(crate) fn radial_items(app: &SolveApp) -> (Vec<Item>, Vec<Item>) {
+    let (inner, outer) = app.preferences.mouse_gestures.rings(Studio::of(app));
+    let of = |ids: Vec<String>| ids.iter().filter_map(|id| item(app, id)).collect();
+    (of(inner), of(outer))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -515,11 +573,17 @@ fn paint_open(app: &SolveApp, ctx: &egui::Context) {
 pub(crate) struct Editor {
     pub(crate) open: bool,
     pub(crate) studio: Studio,
+    /// The sector picked in the preview, (layer, place), whose command the picker beside it sets.
+    pub(crate) slot: Option<(usize, usize)>,
+    /// Where the picker opens, and the frame it opened in (that frame's click is not a click
+    /// outside it).
+    slot_at: Pos2,
+    slot_frame: u64,
 }
 
 impl Default for Editor {
     fn default() -> Self {
-        Editor { open: false, studio: Studio::Part }
+        Editor { open: false, studio: Studio::Part, slot: None, slot_at: Pos2::ZERO, slot_frame: 0 }
     }
 }
 
@@ -531,16 +595,19 @@ enum Op {
     Remove(usize),
     Add,
     Set(usize, String),
+    /// Add this tool at the end.
+    Push(String),
 }
 
-/// The first tool of the catalog that `list` doesn't hold.
-fn next_unused(list: &[String]) -> Option<String> {
-    catalog().into_iter().map(|(id, _)| id).find(|id| !list.contains(id))
+/// The first tool of the catalog that neither `list` nor `other` holds.
+fn next_unused(list: &[String], other: &[String]) -> Option<String> {
+    catalog().into_iter().map(|(id, _)| id).find(|id| !list.contains(id) && !other.contains(id))
 }
 
-/// Applies `op` to `list`; false when it was refused (a ring keeps 1 to [`MAX_TOOLS`] tools, each
-/// of them known and none twice).
-fn apply(list: &mut Vec<String>, op: Op) -> bool {
+/// Applies `op` to `list`, one list of tools beside `other`, the other list; false when it was
+/// refused (a list keeps `least` to [`MAX_RING`] tools, each of them known and none in both
+/// lists or twice).
+fn apply(list: &mut Vec<String>, other: &[String], least: usize, op: Op) -> bool {
     match op {
         Op::Up(i) if i > 0 && i < list.len() => {
             list.swap(i, i - 1);
@@ -550,19 +617,23 @@ fn apply(list: &mut Vec<String>, op: Op) -> bool {
             list.swap(i, i + 1);
             true
         }
-        Op::Remove(i) if list.len() > 1 && i < list.len() => {
+        Op::Remove(i) if list.len() > least && i < list.len() => {
             list.remove(i);
             true
         }
-        Op::Add if list.len() < MAX_TOOLS => match next_unused(list) {
+        Op::Add if list.len() < MAX_RING => match next_unused(list, other) {
             Some(id) => {
                 list.push(id);
                 true
             }
             None => false,
         },
-        Op::Set(i, id) if i < list.len() && label_of(&id).is_some() && !list.contains(&id) => {
+        Op::Set(i, id) if i < list.len() && label_of(&id).is_some() && !list.contains(&id) && !other.contains(&id) => {
             list[i] = id;
+            true
+        }
+        Op::Push(id) if list.len() < MAX_RING && label_of(&id).is_some() && !list.contains(&id) && !other.contains(&id) => {
+            list.push(id);
             true
         }
         _ => false,
@@ -578,8 +649,7 @@ pub(crate) fn nav_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             let customize = crate::ui_kit::button(ui, crate::i18n::tr_label("Customize…"), crate::ui_kit::Button::Normal);
             crate::scenario::publish_handle("gestures:customize", customize.rect.center());
             if customize.clicked() {
-                app.gesture.editor.open = true;
-                app.gesture.editor.studio = Studio::of(app);
+                open_editor(app);
             }
         });
         if app.preferences.nav != MOUSE_MODE {
@@ -604,8 +674,14 @@ pub(crate) fn nav_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     });
 }
 
-/// The customization window: pick a studio, then how many tools its ring holds, which, and in
-/// which place (clockwise from the top), with a preview of the ring.
+/// Opens the customization window on the studio the application is in now.
+pub(crate) fn open_editor(app: &mut SolveApp) {
+    app.gesture.editor.open = true;
+    app.gesture.editor.studio = Studio::of(app);
+}
+
+/// The customization window: pick a studio, then how many tools each of its lists holds, which,
+/// and in which place (clockwise from the top), with a preview of the radial menu they make.
 fn editor(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.gesture.editor.open {
         return;
@@ -613,11 +689,20 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
     let t = Tokens::get();
     let mut studio = app.gesture.editor.studio;
     let mut config = app.preferences.mouse_gestures.clone();
-    let closed = crate::ui_kit::Window::new(egui::Id::new("sc_gesture_editor"), "settings", crate::i18n::tr_label("Mouse gestures"))
-        .cards(3.0)
+    let mut radial = app.preferences.radial_context_menu;
+    let mut slot = app.gesture.editor.slot;
+    let mut slot_at = app.gesture.editor.slot_at;
+    let mut slot_frame = app.gesture.editor.slot_frame;
+    let frame = ctx.cumulative_frame_nr();
+    let closed = crate::ui_kit::Window::new(egui::Id::new("sc_gesture_editor"), "settings", crate::i18n::tr_label("Radial menu and mouse gestures"))
+        .cards(4.4)
         .show_body(ctx, |ui| {
-            crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Ring of tools on the right button"), &mut config.enabled);
-            if app.preferences.nav != MOUSE_MODE {
+            ui.horizontal(|ui| {
+                crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Radial context menu"), &mut radial);
+                ui.add_space(t.space_24);
+                crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Ring of tools on the right button"), &mut config.enabled);
+            });
+            if config.enabled && app.preferences.nav != MOUSE_MODE {
                 ui.colored_label(
                     t.warning,
                     crate::i18n::tr_label("Mouse gestures only work with the SolidWorks mouse mode (the wheel orbits, Ctrl + wheel pans)."),
@@ -646,86 +731,202 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             });
             ui.separator();
-            let mut list = config.tools(studio);
+            let (inner, outer) = config.rings(studio);
+            let mut lists = [inner, outer];
             let catalog = catalog();
-            let mut op: Option<Op> = None;
+            let mut op: Option<(usize, Op)> = None;
             ui.horizontal_top(|ui| {
-                ui.vertical(|ui| {
-                    ui.set_min_width(330.0);
-                    ui.label(
-                        egui::RichText::new(format!("{} {}/{}", crate::i18n::tr_label("Tools, clockwise from the top"), list.len(), MAX_TOOLS))
-                            .size(t.font_small)
-                            .color(t.text_dim),
-                    );
-                    for i in 0..list.len() {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{}", i + 1));
-                            let shown = label_of(&list[i]).unwrap_or_default();
-                            ui.scope(|ui| {
-                                ui.set_max_width(200.0);
-                                crate::ui_kit::dropdown_menu(ui, ("gesture_tool", i), &shown, |ui| {
-                                    let filter_id = ui.id().with("filter");
-                                    let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
-                                    crate::ui_kit::text_field(ui, &mut filter, crate::i18n::tr_label("Filter…"));
-                                    ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
-                                    let needle = filter.trim().to_lowercase();
-                                    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                                        for (id, label) in &catalog {
-                                            if !needle.is_empty() && !label.to_lowercase().contains(&needle) && !id.to_lowercase().contains(&needle) {
-                                                continue;
+                for (r, (heading, add)) in
+                    [("Inner ring, clockwise from the top", "Add a tool"), ("Outer ring, clockwise from the top", "Add an outer tool")]
+                        .into_iter()
+                        .enumerate()
+                {
+                    ui.vertical(|ui| {
+                        ui.set_min_width(300.0);
+                        let (list, other) = if r == 0 { (&lists[0], &lists[1]) } else { (&lists[1], &lists[0]) };
+                        // The inner list keeps a tool; the outer one may be empty.
+                        let least = if r == 0 { 1 } else { 0 };
+                        ui.label(
+                            egui::RichText::new(format!("{} {}/{}", crate::i18n::tr_label(heading), list.len(), MAX_RING))
+                                .size(t.font_small)
+                                .color(t.text_dim),
+                        );
+                        for i in 0..list.len() {
+                            ui.horizontal(|ui| {
+                                // The place picked in the preview stands out in its list.
+                                let number = egui::RichText::new(format!("{}", i + 1));
+                                ui.label(if slot == Some((r, i)) { number.color(t.accent).strong() } else { number });
+                                let (slot, _) = ui.allocate_exact_size(vec2(t.space_24, t.space_24), Sense::hover());
+                                crate::icons::paint_icon(ui.painter(), slot.shrink(t.space_2), icon_of(&list[i]), 1.0);
+                                let shown = label_of(&list[i]).unwrap_or_default();
+                                ui.scope(|ui| {
+                                    ui.set_max_width(200.0);
+                                    crate::ui_kit::dropdown_menu(ui, ("gesture_tool", r, i), &shown, |ui| {
+                                        let filter_id = ui.id().with("filter");
+                                        let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
+                                        crate::ui_kit::text_field(ui, &mut filter, crate::i18n::tr_label("Filter…"));
+                                        ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
+                                        let needle = filter.trim().to_lowercase();
+                                        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                                            for (id, label) in &catalog {
+                                                if !needle.is_empty()
+                                                    && !label.to_lowercase().contains(&needle)
+                                                    && !id.to_lowercase().contains(&needle)
+                                                {
+                                                    continue;
+                                                }
+                                                let taken = (list.contains(id) || other.contains(id)) && *id != list[i];
+                                                let mut row = crate::ui_kit::MenuItem::new(id, label, icon_of(id));
+                                                row.enabled = !taken;
+                                                row.highlighted = *id == list[i];
+                                                let picked = row.show(ui);
+                                                if picked.clicked() {
+                                                    op = Some((r, Op::Set(i, id.clone())));
+                                                    ui.close();
+                                                }
                                             }
-                                            let taken = list.contains(id) && *id != list[i];
-                                            let r = ui.add_enabled_ui(!taken, |ui| crate::ui_kit::list_picker(ui, id, label, *id == list[i])).inner;
-                                            if r.clicked() {
-                                                op = Some(Op::Set(i, id.clone()));
-                                                ui.close();
-                                            }
-                                        }
+                                        });
                                     });
                                 });
+                                if crate::ui_kit::button(ui, "↑", crate::ui_kit::Button::Enabled(i > 0)).clicked() {
+                                    op = Some((r, Op::Up(i)));
+                                }
+                                if crate::ui_kit::button(ui, "↓", crate::ui_kit::Button::Enabled(i + 1 < list.len())).clicked() {
+                                    op = Some((r, Op::Down(i)));
+                                }
+                                if crate::ui_kit::button(ui, "×", crate::ui_kit::Button::Enabled(list.len() > least)).clicked() {
+                                    op = Some((r, Op::Remove(i)));
+                                }
                             });
-                            if crate::ui_kit::button(ui, "↑", crate::ui_kit::Button::Enabled(i > 0)).clicked() {
-                                op = Some(Op::Up(i));
-                            }
-                            if crate::ui_kit::button(ui, "↓", crate::ui_kit::Button::Enabled(i + 1 < list.len())).clicked() {
-                                op = Some(Op::Down(i));
-                            }
-                            if crate::ui_kit::button(ui, "×", crate::ui_kit::Button::Enabled(list.len() > 1)).clicked() {
-                                op = Some(Op::Remove(i));
-                            }
-                        });
-                    }
-                    if crate::ui_kit::button(ui, crate::i18n::tr_label("Add a tool"), crate::ui_kit::Button::Enabled(list.len() < MAX_TOOLS))
-                        .clicked()
-                    {
-                        op = Some(Op::Add);
-                    }
-                });
-                ui.separator();
-                // The ring as it will look, a little smaller.
-                let scale = 0.62;
-                let side = 2.0 * RING * scale + 8.0;
-                let (r, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                // Every tool as available, whatever the design allows now.
-                let preview: Vec<Item> = list
-                    .iter()
-                    .filter_map(|id| item(app, id))
-                    .map(|mut i| {
-                        i.enabled = true;
-                        i
-                    })
-                    .collect();
-                paint(&ui.painter_at(r), r.center(), scale, studio, &preview, None, t);
+                        }
+                        if crate::ui_kit::button(ui, crate::i18n::tr_label(add), crate::ui_kit::Button::Enabled(list.len() < MAX_RING)).clicked() {
+                            op = Some((r, Op::Add));
+                        }
+                    });
+                    ui.separator();
+                }
+                // The radial menu as it will look, a little smaller: a click on a sector picks
+                // its command beside it, a click on a free place (a plus) adds one there.
+                let scale = 0.44;
+                let side = 2.0 * crate::ui_kit::RadialLayout { compact: false }.reach(true) * scale + 8.0;
+                let (r, response) = ui.allocate_exact_size(vec2(side, side), Sense::click());
+                crate::scenario::publish_rect("gestures:preview", r);
+                let layout = crate::ui_kit::RadialLayout { compact: app.preferences.radial_compact };
+                let under = response.hover_pos().and_then(|p| layout.slot_at(p - r.center(), scale));
+                if response.clicked()
+                    && let Some(p) = response.interact_pointer_pos()
+                    && let Some(picked) = layout.slot_at(p - r.center(), scale)
+                {
+                    slot = Some(picked);
+                    slot_at = p + vec2(t.space_12, t.space_12);
+                    slot_frame = frame;
+                }
+                let preview = |list: &[String]| -> Vec<Item> { list.iter().filter_map(|id| item(app, id)).collect() };
+                crate::ui_kit::radial_preview(
+                    &ui.painter_at(r),
+                    r.center(),
+                    scale,
+                    &preview(&lists[0]),
+                    &preview(&lists[1]),
+                    layout.compact,
+                    under.or(slot),
+                    true,
+                );
+                if under.is_some() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
             });
-            if let Some(op) = op
-                && apply(&mut list, op)
-            {
-                config.set_tools(studio, list);
+            if let Some((r, op)) = op {
+                let [inner, outer] = &mut lists;
+                let changed = if r == 0 { apply(inner, outer, 1, op) } else { apply(outer, inner, 0, op) };
+                if changed {
+                    let [inner, outer] = lists;
+                    config.set_rings(studio, inner, outer);
+                }
             }
         });
+    if closed {
+        slot = None;
+    }
+    if let Some(picked) = slot
+        && let Some(op) = slot_picker(ctx, &config, studio, picked, slot_at, slot_frame == frame, &mut slot)
+    {
+        let (mut inner, mut outer) = config.rings(studio);
+        let changed = if picked.0 == 0 { apply(&mut inner, &outer, 1, op) } else { apply(&mut outer, &inner, 0, op) };
+        if changed {
+            config.set_rings(studio, inner, outer);
+        }
+    }
     app.gesture.editor.studio = studio;
+    app.gesture.editor.slot = slot;
+    app.gesture.editor.slot_at = slot_at;
+    app.gesture.editor.slot_frame = slot_frame;
     app.preferences.mouse_gestures = config;
+    app.preferences.radial_context_menu = radial;
     app.gesture.editor.open = !closed;
+}
+
+/// The picker beside the sector `picked` (layer, place) of the editor's preview: every tool with
+/// its icon, the ones the lists already hold greyed, and Remove when the place has a tool. It
+/// closes on a choice, on Esc and on a click outside it (not the one that opened it, made in
+/// this frame when `opening`). Returns the change to the list of that layer.
+fn slot_picker(
+    ctx: &egui::Context,
+    config: &Config,
+    studio: Studio,
+    picked: (usize, usize),
+    at: Pos2,
+    opening: bool,
+    slot: &mut Option<(usize, usize)>,
+) -> Option<Op> {
+    let t = Tokens::get();
+    let (layer, k) = picked;
+    let (inner, outer) = config.rings(studio);
+    let (list, other) = if layer == 0 { (&inner, &outer) } else { (&outer, &inner) };
+    let current = list.get(k).cloned();
+    let least = if layer == 0 { 1 } else { 0 };
+    let mut op = None;
+    let shown = Container::new(ctx, Surface::Popup).area(egui::Id::new("sc_radial_slot_picker")).fixed_pos(at).order(egui::Order::Foreground).show(
+        ctx,
+        |ui| {
+            // The shared menu card: an opaque surface with its border and shadow.
+            crate::ui_kit::Menu::show(ui, 260.0, |ui| {
+                let ring = if layer == 0 { "Inner ring" } else { "Outer ring" };
+                // A free place takes the next one in its list.
+                let place = k.min(list.len()) + 1;
+                ui.label(egui::RichText::new(format!("{} · {place}", crate::i18n::tr_label(ring))).size(t.font_small).color(t.text_dim));
+                let filter_id = ui.id().with("filter");
+                let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
+                crate::ui_kit::text_field(ui, &mut filter, crate::i18n::tr_label("Filter…"));
+                ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
+                let needle = filter.trim().to_lowercase();
+                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    for (id, label) in catalog() {
+                        if !needle.is_empty() && !label.to_lowercase().contains(&needle) && !id.to_lowercase().contains(&needle) {
+                            continue;
+                        }
+                        let mut row = crate::ui_kit::MenuItem::new(&id, &label, icon_of(&id));
+                        row.enabled = !(list.contains(&id) || other.contains(&id)) || current.as_deref() == Some(id.as_str());
+                        row.highlighted = current.as_deref() == Some(id.as_str());
+                        if row.show(ui).clicked() {
+                            op = Some(if current.is_some() { Op::Set(k, id.clone()) } else { Op::Push(id.clone()) });
+                        }
+                    }
+                });
+                if current.is_some() && list.len() > least {
+                    ui.separator();
+                    if crate::ui_kit::MenuItem::new("remove", "Remove", "delete").show(ui).clicked() {
+                        op = Some(Op::Remove(k));
+                    }
+                }
+            });
+        },
+    );
+    let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+    if op.is_some() || escape || (!opening && shown.response.clicked_elsewhere()) {
+        *slot = None;
+    }
+    op
 }
 
 #[cfg(test)]
@@ -941,6 +1142,37 @@ mod tests {
             serde_json::from_str::<Config>(r#"{"enabled":true,"wheels":{"part":["undo"],"future":["x"]}}"#).is_ok(),
             "unknown studios are kept, not fatal"
         );
+        config.set_rings(Studio::Part, vec!["undo".into()], vec!["solid.hole".into()]);
+        let json = serde_json::to_string(&config).expect("serializes");
+        assert_eq!(serde_json::from_str::<Config>(&json).expect("loads"), config, "both lists");
+    }
+
+    #[test]
+    fn a_twelve_tool_list_saved_before_the_outer_list_keeps_every_tool() {
+        let twelve: Vec<String> = catalog().into_iter().map(|(id, _)| id).take(12).collect();
+        let mut config = Config::default();
+        config.set_tools(Studio::Part, twelve.clone());
+        let (inner, outer) = config.rings(Studio::Part);
+        assert_eq!(inner, twelve[..MAX_RING], "the first eight stay inside");
+        assert_eq!(outer, twelve[MAX_RING..], "the rest go to the outer list");
+        assert_eq!(config.tools(Studio::Part), twelve, "the ring keeps all twelve, in order");
+    }
+
+    #[test]
+    fn a_tool_is_in_one_list_only_and_the_radial_menu_shows_both() {
+        let mut app = app();
+        let ids = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        app.preferences.mouse_gestures.set_rings(Studio::Part, ids(&["undo", "solid.extrude"]), ids(&["solid.extrude", "solid.hole", "bad.id"]));
+        assert_eq!(app.preferences.mouse_gestures.rings(Studio::Part), (ids(&["undo", "solid.extrude"]), ids(&["solid.hole"])));
+        let (inner, outer) = radial_items(&app);
+        assert_eq!((inner.len(), outer.len()), (2, 1));
+        assert_eq!(outer[0].id, "solid.hole");
+        let many: Vec<String> = catalog().into_iter().map(|(id, _)| id).skip(20).take(30).collect();
+        app.preferences.mouse_gestures.set_rings(Studio::Part, ids(&["undo"]), many);
+        assert_eq!(app.preferences.mouse_gestures.rings(Studio::Part).1.len(), MAX_RING, "at most eight outside");
+        app.preferences.mouse_gestures.reset(Studio::Part);
+        assert!(!app.preferences.mouse_gestures.is_custom(Studio::Part) && radial_items(&app).1.is_empty());
+        assert_eq!(radial_items(&app).0.len(), 8, "the default first layer");
     }
 
     #[test]
@@ -962,6 +1194,9 @@ mod tests {
             h.step(&json!({"widget":"Add a tool"})).unwrap();
             h.frames(4);
             assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part).len(), 3);
+            h.step(&json!({"widget":"Add an outer tool"})).unwrap();
+            h.frames(4);
+            assert_eq!(h.app.preferences.mouse_gestures.rings(Studio::Part).1.len(), 1, "a tool for the outer list");
             let window = rect_of("dialog:window").unwrap();
             for at in [window.left_center(), window.right_center(), window.right_bottom()] {
                 h.call("ui.move", json!({"x":at.x,"y":at.y}));
@@ -978,34 +1213,85 @@ mod tests {
             h.call("ui.click", json!({"x":close.x,"y":close.y}));
             h.frames(2);
             assert!(!h.app.gesture.editor.open);
-            assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part).len(), 3, "closing retains edits");
+            assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part).len(), 4, "closing retains edits");
         }
+    }
+
+    #[test]
+    fn a_click_on_the_preview_picks_that_place_and_its_command() {
+        use crate::scenario::{Harness, rect_of};
+        use serde_json::json;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1400,"height":900}));
+        h.app.preferences.mouse_gestures.set_rings(Studio::Part, vec!["undo".into(), "solid.extrude".into()], vec![]);
+        h.app.gesture.editor.open = true;
+        h.app.gesture.editor.studio = Studio::Part;
+        h.frames(6);
+        let preview = rect_of("gestures:preview").unwrap();
+        // The free place at the top of the outer layer: its middle, at the preview's scale.
+        let top = preview.center() - vec2(0.0, (crate::ui_kit::RadialLayout { compact: false }.edge() + 4.0 + 250.0) / 2.0 * 0.44);
+        h.call("ui.click", json!({"x":top.x,"y":top.y}));
+        h.frames(3);
+        assert_eq!(h.app.gesture.editor.slot, Some((1, 0)), "the outer layer's top place is picked");
+        h.step(&json!({"click":{"handle":"menu:ui.fit"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.mouse_gestures.rings(Studio::Part).1, vec!["ui.fit".to_string()], "added there");
+        assert_eq!(h.app.gesture.editor.slot, None, "the picker closes on a choice");
+        // The inner layer's second place (to the upper right) holds Extrude: replace it.
+        // The new row can move the window, and the preview with it.
+        let preview = rect_of("gestures:preview").unwrap();
+        let d = vec2((45.0_f32).to_radians().sin(), -(45.0_f32).to_radians().cos()) * (56.0 + 150.0) / 2.0 * 0.44;
+        h.call("ui.click", json!({"x":preview.center().x + d.x,"y":preview.center().y + d.y}));
+        h.frames(3);
+        assert_eq!(h.app.gesture.editor.slot, Some((0, 1)));
+        h.step(&json!({"click":{"handle":"menu:ui.home"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.mouse_gestures.rings(Studio::Part).0, vec!["undo".to_string(), "ui.home".to_string()]);
     }
 
     #[test]
     fn the_editor_changes_how_many_tools_and_where_they_sit() {
         let mut list: Vec<String> = ["solid.extrude", "undo", "solid.hole"].iter().map(|s| s.to_string()).collect();
-        assert!(apply(&mut list, Op::Down(0)));
+        let other: Vec<String> = vec!["solid.shell".into()];
+        assert!(apply(&mut list, &other, 1, Op::Down(0)));
         assert_eq!(list, ["undo", "solid.extrude", "solid.hole"]);
-        assert!(apply(&mut list, Op::Up(2)));
+        assert!(apply(&mut list, &other, 1, Op::Up(2)));
         assert_eq!(list, ["undo", "solid.hole", "solid.extrude"]);
-        assert!(!apply(&mut list, Op::Up(0)) && !apply(&mut list, Op::Down(2)), "can't move past the ends");
-        assert!(apply(&mut list, Op::Add) && list.len() == 4, "a tool is added");
-        assert!(!list[3].is_empty() && !list[..3].contains(&list[3]), "one the ring doesn't hold yet");
-        assert!(apply(&mut list, Op::Set(0, "solid.fillet".into())));
+        assert!(!apply(&mut list, &other, 1, Op::Up(0)) && !apply(&mut list, &other, 1, Op::Down(2)), "can't move past the ends");
+        assert!(apply(&mut list, &other, 1, Op::Add) && list.len() == 4, "a tool is added");
+        assert!(!list[3].is_empty() && !list[..3].contains(&list[3]) && !other.contains(&list[3]), "one neither list holds yet");
+        assert!(apply(&mut list, &other, 1, Op::Set(0, "solid.fillet".into())));
         assert_eq!(list[0], "solid.fillet");
-        assert!(!apply(&mut list, Op::Set(1, "solid.fillet".into())), "no tool twice");
-        assert!(!apply(&mut list, Op::Set(1, "not.a.tool".into())), "only real tools");
-        assert!(!apply(&mut list, Op::Set(9, "undo".into())), "no such place");
-        assert!(apply(&mut list, Op::Remove(0)) && list.len() == 3);
+        assert!(!apply(&mut list, &other, 1, Op::Set(1, "solid.fillet".into())), "no tool twice");
+        assert!(!apply(&mut list, &other, 1, Op::Set(1, "solid.shell".into())), "no tool in both lists");
+        assert!(!apply(&mut list, &other, 1, Op::Set(1, "not.a.tool".into())), "only real tools");
+        assert!(!apply(&mut list, &other, 1, Op::Set(9, "undo".into())), "no such place");
+        assert!(apply(&mut list, &other, 1, Op::Remove(0)) && list.len() == 3);
         while list.len() > 1 {
-            assert!(apply(&mut list, Op::Remove(0)));
+            assert!(apply(&mut list, &other, 1, Op::Remove(0)));
         }
-        assert!(!apply(&mut list, Op::Remove(0)), "a ring keeps at least one tool");
-        while list.len() < MAX_TOOLS {
-            assert!(apply(&mut list, Op::Add));
+        assert!(!apply(&mut list, &other, 1, Op::Remove(0)), "the inner list keeps at least one tool");
+        assert!(apply(&mut list, &other, 0, Op::Remove(0)) && list.is_empty(), "the outer list may be empty");
+        while list.len() < MAX_RING {
+            assert!(apply(&mut list, &other, 0, Op::Add));
         }
-        assert!(!apply(&mut list, Op::Add), "and at most {MAX_TOOLS}");
+        assert!(!apply(&mut list, &other, 0, Op::Add), "and at most {MAX_RING}");
+        assert!(!apply(&mut list, &other, 0, Op::Push("solid.fillet".into())), "a full list takes no more");
+        list.pop();
+        assert!(!apply(&mut list, &other, 0, Op::Push("solid.shell".into())), "nor a tool the other list holds");
+        assert!(apply(&mut list, &other, 0, Op::Push("solid.fillet".into())) && list.last().map(String::as_str) == Some("solid.fillet"));
+    }
+
+    #[test]
+    fn every_tool_in_the_catalog_has_an_icon() {
+        let missing: Vec<String> = catalog().into_iter().filter(|(id, _)| id != "ui.clear" && icon_of(id).is_empty()).map(|(id, _)| id).collect();
+        assert!(missing.is_empty(), "tools without an icon in the editor: {missing:?}");
+        assert_eq!(icon_of("not.a.tool"), "");
+        let app = app();
+        for id in ["repeat", "delete", "undo", "ui.fit", "solid.extrude"] {
+            assert_eq!(item(&app, id).map(|i| i.icon), Some(icon_of(id).to_string()), "{id}: the editor shows the menu's icon");
+        }
     }
 
     #[test]
@@ -1197,6 +1483,9 @@ mod tests {
                             modifiers: egui::Modifiers::NONE,
                         },
                     ]
+                } else if k == 39 {
+                    // Held still, then moved: what opens the radial menu.
+                    vec![egui::Event::PointerMoved(PRESS + vec2(20.0, 0.0))]
                 } else {
                     vec![egui::Event::PointerMoved(PRESS)]
                 };
@@ -1208,7 +1497,7 @@ mod tests {
                 out.textures_delta.clear();
             }
         };
-        // Held 0.8 s with the radial menu on, the usual way opens its menu...
+        // Held 0.8 s and moved with the radial menu on, the usual way opens its menu...
         let mut app = app();
         app.preferences.nav = MOUSE_MODE.into();
         app.preferences.radial_context_menu = true;
@@ -1219,7 +1508,7 @@ mod tests {
         app.preferences.radial_context_menu = true;
         held(&mut app);
         assert!(app.viewport.context_menu.is_none(), "gestures on: no radial menu");
-        assert!(!is_open(&app), "held without moving: no ring either");
+        assert!(is_open(&app), "the move opens the ring instead");
     }
 
     #[test]

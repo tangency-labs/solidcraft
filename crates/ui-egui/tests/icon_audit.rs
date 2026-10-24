@@ -46,7 +46,7 @@ fn menu(h: &mut Harness, target: Value, surface: &str, requested: &mut BTreeMap<
     let selection = h.app.session.selection.clone();
     let viewport = target["type"] == "viewport";
     let rect = h.app.viewport.rect.expect("a viewport");
-    let reply = h.call("ui.menu", json!({"x":rect.right()-8.0,"y":rect.bottom()-8.0,"target":target}));
+    let reply = h.call("ui.menu", json!({"x":rect.right()-8.0,"y":rect.bottom()-8.0,"target":target,"radial":viewport}));
     assert_eq!(reply["ok"], true, "{surface}: {reply}");
     h.frames(3);
     let reply = h.call("ui.menu", json!({}));

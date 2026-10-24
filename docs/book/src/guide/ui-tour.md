@@ -67,7 +67,15 @@
   keeps the orientation, or turn it off).
   Right-click for the marking menu: eight commands around the cursor, plus a
   menu for whatever is under it. Near the window's bottom or right edge a menu opens above or
-  to the left of the cursor, so it stays in view.
+  to the left of the cursor, so it stays in view. With **Radial menu** on (Preferences ›
+  Navigation), hold the right button still for **Hold before the radial menu opens** (350 ms by
+  default), then move: the menu opens where you pressed, and letting go over a sector runs its
+  command. Moving sooner moves the view as usual; a plain right-click, or a held press let go
+  without moving, opens the list alone. **Compact (icons only)** draws smaller sectors with icons
+  only and the lit command's name above the menu. **Commands…** sets each studio's commands: up
+  to eight in the first layer and eight more in a second layer around it, taken by letting go past
+  the first layer's edge. Click a sector of its preview to pick that place's command from a list
+  with icons; a plus marks a free place.
   Shaded views omit certified smooth joins between spline spans on extruded
   walls. Real creases, cap outlines and authored face splits remain visible.
   Wireframe retains its edge presentation, and hiding a join does not remove its CAD
