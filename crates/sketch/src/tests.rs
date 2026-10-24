@@ -215,6 +215,50 @@ fn under_constrained_reports_dof() {
     assert!((a.y - 0.5).abs() < 0.05 && (b.y - 0.5).abs() < 0.05, "{a:?} {b:?}");
 }
 
+/// A dimension whose value is zero still constrains the sketch: the absolute value in the
+/// residual has no derivative where it is zero, so the rank analysis read the constraint as if
+/// it were not there and the sketch reported a degree of freedom that is not there (#4368,
+/// #5505).
+#[test]
+fn a_zero_dimension_does_not_free_a_degree_of_freedom() {
+    use ConstraintKind::*;
+    // A distance of zero holds the two points together: it holds both of them.
+    let mut sk = Sketch::new();
+    let a = sk.add_point(v(0.0, 0.0), None).unwrap();
+    let b = sk.add_point(v(0.0, 10.0), None).unwrap();
+    sk.add_constraint(Fix { p: a }, None).unwrap();
+    sk.add_constraint(Distance { p: a, q: b, value: 0.0 }, None).unwrap();
+    let rep = solve(&mut sk);
+    assert!(rep.ok(), "{rep:?}");
+    assert_eq!(rep.dof, 0, "a zero distance holds the point it measures: {rep:?}");
+    assert!(rep.redundant.is_empty(), "a zero distance is not a redundant constraint: {rep:?}");
+    assert!(sk.point(b).unwrap().dist(v(0.0, 0.0)) < 1e-9, "{:?}", sk.point(b));
+    // A length of zero holds the line's two ends together.
+    let mut sk = Sketch::new();
+    let a = sk.add_point(v(0.0, 0.0), None).unwrap();
+    let b = sk.add_point(v(10.0, 0.0), None).unwrap();
+    let l = sk.add_line_pts(a, b, None).unwrap();
+    sk.add_constraint(Fix { p: a }, None).unwrap();
+    sk.add_constraint(Length { l, value: 0.0 }, None).unwrap();
+    let rep = solve(&mut sk);
+    assert!(rep.ok(), "{rep:?}");
+    assert_eq!(rep.dof, 0, "a zero length holds the line's ends together: {rep:?}");
+    assert!(sk.point(b).unwrap().dist(v(0.0, 0.0)) < 1e-9, "{:?}", sk.point(b));
+    // A point on a line at zero distance is on the line: it still slides along it.
+    let mut sk = Sketch::new();
+    let a = sk.add_point(v(0.0, 0.0), None).unwrap();
+    let b = sk.add_point(v(10.0, 0.0), None).unwrap();
+    let p = sk.add_point(v(5.0, 5.0), None).unwrap();
+    let l = sk.add_line_pts(a, b, None).unwrap();
+    sk.add_constraint(Fix { p: a }, None).unwrap();
+    sk.add_constraint(Fix { p: b }, None).unwrap();
+    sk.add_constraint(PointLineDistance { p, l, value: 0.0 }, None).unwrap();
+    let rep = solve(&mut sk);
+    assert!(rep.ok(), "{rep:?}");
+    assert_eq!(rep.dof, 1, "a zero point-line distance holds the point on the line: {rep:?}");
+    assert!(sk.point(p).unwrap().y.abs() < 1e-9, "{:?}", sk.point(p));
+}
+
 #[test]
 fn conflicting_constraints_fail_and_restore() {
     let mut sk = Sketch::new();
