@@ -185,6 +185,21 @@ fn remember_at(s: &Session, key: &str, #[cfg(not(target_arch = "wasm32"))] ident
     Some(img)
 }
 
+/// Waits up to `within` for the threads drawing Home pictures, and drops what they made: the
+/// window is going, and a picture still on the GPU as the process exits can crash the driver.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn finish_pictures(h: &mut HomeState, within: std::time::Duration) {
+    let end = std::time::Instant::now() + within;
+    for rx in [h.rx.take(), h.sample_rx.take(), h.remembering.take()].into_iter().flatten() {
+        // Each thread sends what it made and ends; its channel closes when it has.
+        while let Some(left) = end.checked_duration_since(std::time::Instant::now()) {
+            if let Err(std::sync::mpsc::RecvTimeoutError::Disconnected) = rx.recv_timeout(left) {
+                break;
+            }
+        }
+    }
+}
+
 /// A Home picture is being drawn off the UI thread.
 #[cfg(test)]
 pub(crate) fn remembering(h: &HomeState) -> bool {

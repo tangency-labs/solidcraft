@@ -542,6 +542,15 @@ pub struct SolveApp {
     applied_system_fonts: bool,
 }
 
+impl Drop for SolveApp {
+    /// The Home pictures it started are drawn before it goes: one still on the GPU as the
+    /// process exits can crash the graphics driver.
+    fn drop(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        home::finish_pictures(&mut self.home, std::time::Duration::from_secs(10));
+    }
+}
+
 impl SolveApp {
     pub fn new(mut session: Session, services: Services) -> Self {
         #[cfg(test)]

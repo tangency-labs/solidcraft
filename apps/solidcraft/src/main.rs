@@ -165,6 +165,11 @@ impl eframe::App for App {
         solidcraft_ui_egui::agent_chat::shutdown(&mut self.solve);
         // A save still being written ends before the app does.
         solidcraft_ui_egui::save_job::tick(&mut self.solve, true);
+        // Pictures still being drawn off the window thread (Home cards, file previews) end
+        // before the GPU is torn down: one drawn while the process exits can crash the driver.
+        if !solidcraft_engine::capture::close(std::time::Duration::from_secs(5)) {
+            log::warn!("a picture was still being drawn as the app closed");
+        }
         solidcraft_ui_egui::recovery_ui::close(&mut self.solve);
         solidcraft_engine::crash::end_session();
         if let Some(lost_at) = self.gpu.as_ref().and_then(|g| g.lost_at) {
