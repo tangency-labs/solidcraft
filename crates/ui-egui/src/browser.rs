@@ -1828,7 +1828,7 @@ impl Entry {
             visible: !app.session.visibility.hidden_bodies.contains(&world),
             selected: app.session.selection.iter().any(|s| matches!(s, Sel::Body { name } if name == &world)),
             color: None,
-            locked: app.ui.locked_bodies.contains(&world),
+            locked: app.session.visibility.locked_bodies.contains(&world),
             sel: Some(Sel::Body { name: world.clone() }),
             target: Some(Target::Body { name: world.clone() }),
             bodies: vec![world],
@@ -2176,7 +2176,7 @@ fn entry_row(
     let (selected, mark) = lit_row(acts.lit.entry(app, e));
     let visible = e.is_visible(app);
     let locked = match &e.sel {
-        Some(Sel::Body { name }) => app.ui.locked_bodies.contains(name),
+        Some(Sel::Body { name }) => app.session.visibility.locked_bodies.contains(name),
         _ => e.locked,
     };
     let badges: &[&str] = if locked { &["lock"] } else { &[] };
