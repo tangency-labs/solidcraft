@@ -1158,6 +1158,12 @@ impl Dialog {
             return Some(target);
         }
         let inp = self.active_input()?;
+        if crate::dialogs_assembly::alignment_side(&self.kind, self.active).is_some()
+            && let Hit::SketchCurve { sketch, id, straight: true, .. } = h
+        {
+            let sel = Sel::ExternalSketchCurve { sketch: *sketch, id: id.clone() };
+            return crate::dialogs_assembly::alignment_accepts(s, self, &sel).then_some(sel);
+        }
         // Features are also picked on the canvas: a face stands for the feature that made it.
         if inp.accept == selection::FEATURES {
             return match h {
@@ -1173,6 +1179,7 @@ impl Dialog {
         }
         // The snap looked the face under the cursor up already, planar or not.
         inp.accepts(h, |body, face| snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some()))
+            .filter(|sel| crate::dialogs_assembly::alignment_accepts(s, self, sel))
     }
 
     /// Extrude's automatic To Object: with profiles picked, a face or vertex off their plane, or
@@ -1233,7 +1240,7 @@ impl Dialog {
 
     /// A pick in the viewport (already accepted by the active input).
     pub fn pick(&mut self, s: &Session, sel: Sel) {
-        if self.take_extrude_target(s, &sel) {
+        if !crate::dialogs_assembly::alignment_accepts(s, self, &sel) || self.take_extrude_target(s, &sel) {
             return;
         }
         if let Some(key) = feature_pattern_reference_key(self, self.active) {
@@ -1286,10 +1293,12 @@ impl Dialog {
         }
         self.error = None;
         self.sync_thread(s);
+        crate::dialogs_assembly::resolve_alignment_order(s, self, None);
     }
 
     /// Box selection result: replace (or add to) the active input.
     pub fn take_box(&mut self, s: &Session, sels: Vec<Sel>, add: bool) {
+        let sels: Vec<_> = sels.into_iter().filter(|sel| crate::dialogs_assembly::alignment_accepts(s, self, sel)).collect();
         if let Kind::PathPlane { sketch, .. } = &mut self.kind {
             *sketch = None;
             self.extra.remove("path");
@@ -2034,7 +2043,9 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, r
     let mut remove = None;
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
-        let stored_reference = feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
+        let alignment = crate::dialogs_assembly::stored_alignment(&d.kind, i);
+        let stored_reference =
+            feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).or(alignment.as_ref()).filter(|_| inp.items.is_empty());
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
                 let active = i == d.active;
@@ -2042,21 +2053,44 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, r
                 let custom_axis = i == 1 && inp.items.is_empty() && stored_revolve_axis(&d.kind).is_some();
                 let filled = !inp.items.is_empty() || custom_axis || stored_reference.is_some();
                 let text = if filled {
-                    RichText::new(if custom_axis || stored_reference.is_some() {
-                        crate::i18n::tr("dialog.custom_axis").into()
-                    } else if !inp.multi {
-                        inp.items.first().map(|item| selection_label(s, item)).unwrap_or_default()
-                    } else {
-                        let count = if i == 0 { shell_count.unwrap_or(inp.items.len()) } else { inp.items.len() };
-                        crate::i18n::format("dialog.selected_count", &[("count", &count.to_string())])
-                    })
+                    RichText::new(
+                        if let Some(face) = alignment.as_ref().and_then(|v| v.get("face")).and_then(Value::as_str).filter(|_| inp.items.is_empty()) {
+                            face.to_string()
+                        } else if let Some(reference) = alignment.as_ref().and_then(|v| v.get("reference")).filter(|_| inp.items.is_empty()) {
+                            reference
+                                .get("name")
+                                .or_else(|| reference.get("axis"))
+                                .or_else(|| reference.get("plane"))
+                                .and_then(Value::as_str)
+                                .map(str::to_string)
+                                .unwrap_or_else(|| {
+                                    let name = reference
+                                        .get("feature")
+                                        .or_else(|| reference.get("sketch"))
+                                        .and_then(Value::as_u64)
+                                        .and_then(|id| s.doc.feature(id))
+                                        .map(|feature| feature.name.clone())
+                                        .unwrap_or_else(|| "Missing reference".into());
+                                    reference.get("curve").and_then(Value::as_str).map_or_else(|| name.clone(), |curve| format!("{name} / {curve}"))
+                                })
+                        } else if custom_axis || stored_reference.is_some() {
+                            crate::i18n::tr("dialog.custom_axis").into()
+                        } else if !inp.multi {
+                            inp.items.first().map(|item| selection_label(s, item)).unwrap_or_default()
+                        } else {
+                            let count = if i == 0 { shell_count.unwrap_or(inp.items.len()) } else { inp.items.len() };
+                            crate::i18n::format("dialog.selected_count", &[("count", &count.to_string())])
+                        },
+                    )
                     .color(t.on_accent)
                 } else {
                     RichText::new(crate::i18n::tr("dialog.select")).color(t.text)
                 };
                 let selected_text = text.text().strip_prefix("↖ ").unwrap_or_else(|| text.text());
                 let prompt = if !filled && inp.label == "Edges" { tr("Select edges") } else { selected_text };
-                let chip = crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled });
+                let enabled = crate::dialogs_assembly::alignment_input_available(d, i);
+                let chip =
+                    ui.add_enabled_ui(enabled, |ui| crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled })).inner;
                 if matches!(d.kind, Kind::Shell { .. }) && i == 0 {
                     chip.widget_info(|| {
                         let mut info = egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr(inp.label));
@@ -2114,6 +2148,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, r
         d.active = i;
     }
     if let Some(i) = clear {
+        crate::dialogs_assembly::clear_alignment(&mut d.kind, i);
         if let Some(key) = feature_pattern_reference_key(d, i) {
             d.extra.remove(key);
         }

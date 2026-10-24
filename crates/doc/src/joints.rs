@@ -94,6 +94,18 @@ pub enum Snap {
 pub enum XRef {
     /// A direction (component coordinates); its part square to z is taken.
     Dir(Vec3),
+    Reference {
+        reference: AlignmentRef,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+    },
+    /// A secondary alignment face. Unlike legacy x references it must remain one planar
+    /// face on the origin's component, with a nonzero projection square to its axis.
+    Planar {
+        planar_face: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+    },
     /// A face: a plane's outward normal, a cylinder's way from the origin to its axis (another
     /// hole), any other face's way from the origin to the point of it nearest `pick` (component
     /// coordinates; it also tells the pieces of a split face apart, default the origin).
@@ -104,6 +116,67 @@ pub enum XRef {
     },
 }
 
+/// A directional or positional identity, resolved in the origin component on every solve. There is no
+/// nearest-geometry or captured-vector fallback when one disappears or changes its kind.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AlignmentRef {
+    Edge {
+        name: String,
+    },
+    Cylinder {
+        name: String,
+    },
+    /// Centre of the named rim of a cylindrical face; supplies a positional clocking reference.
+    CircleCenter(Box<CircleCenterRef>),
+    Construction {
+        feature: u64,
+    },
+    SketchLine {
+        sketch: u64,
+        curve: String,
+    },
+    OriginAxis {
+        axis: String,
+    },
+    OriginPlane {
+        plane: String,
+    },
+}
+
+/// A circle centre's persistent face and rim identities. Boxing this payload keeps the
+/// common reference and origin types compact when they contain existing direction refs.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CircleCenterRef {
+    pub name: String,
+    pub end: String,
+}
+
+impl XRef {
+    fn geometry_names(&self) -> Vec<&String> {
+        match self {
+            Self::Face { face, .. }
+            | Self::Planar { planar_face: face, .. }
+            | Self::Reference { reference: AlignmentRef::Edge { name: face } | AlignmentRef::Cylinder { name: face }, .. } => vec![face],
+            Self::Reference { reference: AlignmentRef::CircleCenter(rim), .. } => vec![&rim.name, &rim.end],
+            _ => Vec::new(),
+        }
+    }
+
+    fn geometry_names_mut(&mut self) -> Vec<&mut String> {
+        match self {
+            Self::Face { face, .. }
+            | Self::Planar { planar_face: face, .. }
+            | Self::Reference { reference: AlignmentRef::Edge { name: face } | AlignmentRef::Cylinder { name: face }, .. } => vec![face],
+            Self::Reference { reference: AlignmentRef::CircleCenter(rim), .. } => {
+                let rim = rim.as_mut();
+                vec![&mut rim.name, &mut rim.end]
+            }
+            _ => Vec::new(),
+        }
+    }
+}
+
 impl Snap {
     /// The persistent face and edge names the snap refers to (its face, its end's, its x reference's;
     /// an edge origin's edge, face and corner edge).
@@ -111,9 +184,7 @@ impl Snap {
         let mut out = Vec::new();
         if let Snap::FaceCenter { face, x, .. } | Snap::CircleCenter { face, x, .. } = self {
             out.extend(face.iter());
-            if let Some(XRef::Face { face, .. }) = x {
-                out.push(face);
-            }
+            out.extend(x.as_ref().into_iter().flat_map(XRef::geometry_names));
         }
         if let Snap::CircleCenter { end: Some(end), .. } = self {
             out.push(end);
@@ -130,16 +201,12 @@ impl Snap {
         match self {
             Snap::FaceCenter { face, x, .. } => {
                 out.extend(face.iter_mut());
-                if let Some(XRef::Face { face, .. }) = x {
-                    out.push(face);
-                }
+                out.extend(x.as_mut().into_iter().flat_map(XRef::geometry_names_mut));
             }
             Snap::CircleCenter { face, end, x, .. } => {
                 out.extend(face.iter_mut());
                 out.extend(end.iter_mut());
-                if let Some(XRef::Face { face, .. }) = x {
-                    out.push(face);
-                }
+                out.extend(x.as_mut().into_iter().flat_map(XRef::geometry_names_mut));
             }
             Snap::Edge { edge, face, corner, .. } => out.extend(edge.iter_mut().chain(face.iter_mut()).chain(corner.iter_mut())),
             _ => {}
@@ -172,6 +239,15 @@ impl Snap {
     pub fn is_finite(&self) -> bool {
         let x_ok = |x: &Option<XRef>| match x {
             Some(XRef::Dir(d)) => d.is_finite(),
+            Some(XRef::Reference { reference, .. }) => match reference {
+                AlignmentRef::Edge { name } | AlignmentRef::Cylinder { name } => !name.is_empty() && name.len() <= 512,
+                AlignmentRef::CircleCenter(rim) => !rim.name.is_empty() && rim.name.len() <= 512 && !rim.end.is_empty() && rim.end.len() <= 512,
+                AlignmentRef::SketchLine { curve, .. } => !curve.is_empty() && curve.len() <= 512,
+                AlignmentRef::OriginAxis { axis, .. } => matches!(axis.as_str(), "X" | "Y" | "Z"),
+                AlignmentRef::OriginPlane { plane, .. } => matches!(plane.as_str(), "XY" | "XZ" | "YZ"),
+                AlignmentRef::Construction { .. } => true,
+            },
+            Some(XRef::Planar { planar_face, .. }) => !planar_face.is_empty() && planar_face.len() <= 512,
             Some(XRef::Face { pick, .. }) => pick.is_none_or(|p| p.is_finite()),
             None => true,
         };
@@ -784,12 +860,12 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
                 Some(cn) => cn,
                 None => nearest_plane(doc, st, o, named.as_ref().map_or(*pick, |f| f.point))?,
             };
-            frame(c, n, face::x_axis(doc, st, x.as_ref(), c)?).ok_or_else(bad)
+            frame(c, n, face::x_axis(doc, st, x.as_ref(), c, n, o.occurrence)?).ok_or_else(bad)
         }
         Snap::Edge { .. } => edge::edge_frame(doc, st, component_of(doc, o.occurrence)?, &o.snap),
         Snap::CircleCenter { x, .. } => {
             let r = round_of(doc, st, o)?;
-            frame(r.centre, r.z, face::x_axis(doc, st, x.as_ref(), r.centre)?).ok_or_else(bad)
+            frame(r.centre, r.z, face::x_axis(doc, st, x.as_ref(), r.centre, r.z, o.occurrence)?).ok_or_else(bad)
         }
     }
 }

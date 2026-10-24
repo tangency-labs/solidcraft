@@ -446,6 +446,8 @@ macro_rules! preference_settings {
 }
 
 preference_settings! {
+    /// Primary order captured by newly opened Joint dialogs.
+    joint_moving_first: bool = false, PAGE_DESIGN => check_id("settings.joint_moving_first");
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
