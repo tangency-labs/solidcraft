@@ -1674,7 +1674,9 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::assistant_bubble(ui, |ui| {
                     if !text.is_empty() {
                         let gone = app.agent_chat.gone.sent.get(&n).map_or(&[][..], Vec::as_slice);
-                        user_text(ui, text, context, gone);
+                        if let Some(sels) = user_text(ui, text, context, gone, &format!("agent_chat:sent:{n}")) {
+                            hover_sels = Some(sels);
+                        }
                     }
                     if !pictures.is_empty() {
                         if let Some(at) = picture_strip(ui, n, pictures) {
@@ -1684,9 +1686,11 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                         // Taken when the agent starts on the message: nothing to show yet.
                         ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(t.font_small));
                     }
+                    // The picks that are pills in the text light up from there; chips are for the rest.
                     let flags = app.agent_chat.gone.sent.get(&n).map(Vec::as_slice).unwrap_or_default();
-                    if let Some(at) = context_chips(ui, context, flags, &format!("agent_chat:sent:{n}")).hovered {
-                        hover_sels = context.items.get(at).map(|i| i.sels.clone());
+                    let (rest, rest_flags) = unplaced(context, flags);
+                    if let Some(at) = context_chips(ui, &rest, &rest_flags, &format!("agent_chat:sent:{n}")).hovered {
+                        hover_sels = rest.items.get(at).map(|i| i.sels.clone());
                     }
                     files_line(ui, files.iter().map(String::as_str));
                     if copyable {
@@ -1889,13 +1893,16 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                         });
                     }
                     _ => {
-                        if !p.text.is_empty() {
-                            user_text(ui, &p.text, &p.context, &[]);
+                        if !p.text.is_empty()
+                            && let Some(sels) = user_text(ui, &p.text, &p.context, &[], "agent_chat:queued")
+                        {
+                            hover_sels = Some(sels);
                         }
                         if p.image {
                             ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(crate::theme::Tokens::get().font_small));
                         }
-                        let _ = context_chips(ui, &p.context, &[], "agent_chat:queued");
+                        let (rest, _) = unplaced(&p.context, &[]);
+                        let _ = context_chips(ui, &rest, &[], "agent_chat:queued");
                         files_line(ui, p.files.iter().map(|f| f.name.as_str()));
                     }
                 }
@@ -1980,13 +1987,29 @@ fn files_line<'a>(ui: &mut egui::Ui, names: impl Iterator<Item = &'a str>) {
 /// The widest a file chip gets; a narrower chat makes them narrower.
 const CHIP_W: f32 = 170.0;
 
+/// The items of a message that are not pills in its text (those of Attach selection, or all of them
+/// when the message has no pills), with their "gone" flags: the chips below the message.
+fn unplaced(context: &Context, gone: &[bool]) -> (Context, Vec<bool>) {
+    if context.groups.is_empty() {
+        return (context.clone(), gone.to_vec());
+    }
+    let mut rest = Context { omitted: context.omitted, ..Context::default() };
+    let mut flags = Vec::new();
+    for (at, item) in context.items.iter().enumerate().filter(|(_, i)| i.group == 0) {
+        rest.items.push(item.clone());
+        flags.push(gone.get(at).copied().unwrap_or(false));
+    }
+    (rest, flags)
+}
+
 /// A sent message's text, its pills drawn as pills: `gone` flags the context's items that have left
-/// the design, which strikes through the pills they are in.
-fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool]) {
+/// the design, which strikes through the pills they are in. Returns what the pill under the pointer
+/// stands for, to light up in the model.
+fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool], handle: &str) -> Option<Vec<solidcraft_engine::Sel>> {
     let t = Tokens::get();
     if context.groups.is_empty() {
         ui.add(egui::Label::new(RichText::new(text).color(t.text)).selectable(true).wrap());
-        return;
+        return None;
     }
     let look = |id: u32| {
         context.groups.iter().any(|(n, _)| *n == id).then(|| {
@@ -1996,7 +2019,18 @@ fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool]) {
         })
     };
     let font = egui::FontId::proportional(ui.style().text_styles.get(&egui::TextStyle::Body).map_or(t.font_label, |f| f.size));
-    ui.add(egui::Label::new(pills::job(text, &font, t.text, ui.available_width(), &look)).selectable(true).wrap());
+    let galley = ui.fonts_mut(|f| f.layout_job(pills::job(text, &font, t.text, ui.available_width(), &look)));
+    let response = ui.add(egui::Label::new(egui::WidgetText::Galley(Arc::clone(&galley))).selectable(true));
+    // Where each pill is, for tests and scripts.
+    for span in pills::spans(text) {
+        let row = galley.pos_from_cursor(egui::text::CCursor::new(span.start + 2));
+        crate::scenario::publish_handle(&format!("{handle}:pill:{}", span.id), response.rect.min + row.center().to_vec2());
+    }
+    // The pointer on a pill: which one is read from the text layout, which starts at the label's corner.
+    let pos = ui.input(|i| i.pointer.hover_pos()).filter(|p| response.rect.contains(*p))?;
+    let at = galley.cursor_from_pos(pos - response.rect.min).index.0;
+    let id = pills::spans(text).into_iter().find(|s| s.start <= at && at < s.end).map(|s| s.id)?;
+    Some(context.items.iter().filter(|i| i.group == id).flat_map(|i| i.sels.iter().cloned()).collect())
 }
 
 /// The id of the message box.

@@ -3937,6 +3937,33 @@ fn hovering_a_chip_lights_what_it_stands_for() {
     assert!(h.app.highlighted().iter().all(|s| !sels.contains(s)), "lit no longer once the pointer is away");
 }
 
+/// The pill in a sent message lights what it stands for while the pointer is on it, and the chips
+/// below the message are only for what is not in a pill.
+#[test]
+fn hovering_a_pill_in_a_sent_message_lights_its_group() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    let in_pill = context::describe(&mut h.app.session, &sels[2..3]).in_group(1, "the feature");
+    let mut context = in_pill;
+    context.merge(context::describe(&mut h.app.session, &sels[3..]));
+    let text = format!("check {} against the body", pills::marker(1, "the feature"));
+    h.app.agent_chat.items.push(Item::User { text, image: false, pictures: Vec::new(), context, files: Vec::new() });
+    h.frames(4);
+    let at = crate::scenario::handle_at("agent_chat:sent:0:pill:1").expect("the pill is drawn in the message");
+    h.call("ui.move", json!({"x": at.x, "y": at.y}));
+    h.call("ui.move", json!({"x": at.x + 1.0, "y": at.y}));
+    h.frames(3);
+    assert!(h.app.highlighted().contains(&sels[2]), "the pill's feature is lit: {:?}", h.app.highlighted());
+    assert!(!h.app.highlighted().contains(&sels[3]), "only the pill's own group");
+    h.call("ui.move", json!({"x": 5.0, "y": 5.0}));
+    h.frames(3);
+    assert!(h.app.highlighted().iter().all(|s| !sels.contains(s)), "lit no longer once the pointer is away");
+    // The feature is in the pill, so it has no chip; the body (from Attach selection) has one.
+    assert!(crate::scenario::handle_at("agent_chat:sent:0:chip:0").is_some(), "the unplaced body has a chip");
+    assert!(crate::scenario::handle_at("agent_chat:sent:0:chip:1").is_none(), "the feature has none: it is a pill");
+}
+
 /// A chip or pill whose body, feature, face or edge has left the design is struck through (flagged), in the
 /// pill and on a sent message; undoing that leaves them as they were.
 #[test]
