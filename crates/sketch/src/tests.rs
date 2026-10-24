@@ -96,6 +96,112 @@ fn fully_constrained_rectangle() {
 }
 
 #[test]
+fn zero_distance_matches_coincident() {
+    for seed in [false, true] {
+        seeded(seed, || {
+            for fixed in [false, true] {
+                for value in [0.0, 1e-12] {
+                    let mut sk = Sketch::new();
+                    let p = if fixed { 0 } else { sk.add_point(v(2.0, 3.0), None).unwrap() };
+                    let q = sk.add_point(sk.point(p).unwrap(), None).unwrap();
+                    let mut equivalent = sk.clone();
+                    let id = sk.add_constraint(ConstraintKind::Distance { p, q, value }, None).unwrap();
+                    equivalent.add_constraint(ConstraintKind::Coincident { p, q }, None).unwrap();
+                    let report = solve(&mut sk);
+                    let expected = solve(&mut equivalent);
+                    assert!(report.ok() && expected.ok(), "{report:?}, {expected:?}");
+                    assert_eq!(report.dof, if fixed { 0 } else { 2 }, "{report:?}");
+                    assert_eq!(report.dof, expected.dof);
+                    assert_eq!(report.point_determined, expected.point_determined);
+                    assert!(!report.redundant.contains(&id), "{report:?}");
+                    assert!(determined_by(&sk, 0).is_empty());
+                    assert!(sk.point(q).unwrap().dist(equivalent.point(q).unwrap()) < 1e-8);
+                    sk.add_constraint(ConstraintKind::Coincident { p, q }, None).unwrap();
+                    assert_eq!(solve(&mut sk).redundant.len(), 1);
+                    assert_eq!(determined_by(&sk, 1), vec![0]);
+                }
+            }
+        });
+    }
+}
+
+#[test]
+fn zero_distance_to_line_matches_point_on_line() {
+    for seed in [false, true] {
+        seeded(seed, || {
+            for value in [0.0, 1e-12] {
+                for start in [v(2.0, 2.0), v(3.0, 1.0)] {
+                    let mut sk = Sketch::new();
+                    let l = sk.add_line(v(1.0, 1.0), v(4.0, 4.0), None, None, None).unwrap();
+                    sk.curves[l].fixed = true;
+                    let p = sk.add_point(start, None).unwrap();
+                    let mut equivalent = sk.clone();
+                    let id = sk.add_constraint(ConstraintKind::PointLineDistance { p, l, value }, None).unwrap();
+                    equivalent.add_constraint(ConstraintKind::PointOnCurve { p, c: l }, None).unwrap();
+                    let report = solve(&mut sk);
+                    let expected = solve(&mut equivalent);
+                    assert!(report.ok() && expected.ok(), "{report:?}, {expected:?}");
+                    assert_eq!(report.dof, 1, "{report:?}");
+                    assert_eq!(report.dof, expected.dof);
+                    assert_eq!(report.point_determined, expected.point_determined);
+                    assert!(!report.redundant.contains(&id), "{report:?}");
+                    assert!(determined_by(&sk, 0).is_empty());
+                    assert!(sk.point(p).unwrap().dist(equivalent.point(p).unwrap()) < 1e-8);
+                    sk.add_constraint(ConstraintKind::PointOnCurve { p, c: l }, None).unwrap();
+                    assert_eq!(solve(&mut sk).redundant.len(), 1);
+                    assert_eq!(determined_by(&sk, 1), vec![0]);
+                }
+            }
+        });
+    }
+}
+
+#[test]
+fn zero_distance_edits_preserve_dimension_rank() {
+    for seed in [false, true] {
+        seeded(seed, || {
+            for point_line in [false, true] {
+                for direction in [Vec2::X, Vec2::Y, v(1.0, -1.0) / 2.0_f64.sqrt()] {
+                    let mut sk = Sketch::new();
+                    let p = sk.add_point(direction * 5.0, None).unwrap();
+                    let kind = if point_line {
+                        let along = direction.perp() * 10.0;
+                        let l = sk.add_line(along * -1.0, along, None, None, None).unwrap();
+                        sk.curves[l].fixed = true;
+                        ConstraintKind::PointLineDistance { p, l, value: 5.0 }
+                    } else {
+                        ConstraintKind::Distance { p: 0, q: p, value: 5.0 }
+                    };
+                    let id = sk.add_constraint(kind, None).unwrap();
+                    let alignment = if direction == Vec2::X {
+                        ConstraintKind::HorizontalPoints { p: 0, q: p }
+                    } else if direction == Vec2::Y {
+                        ConstraintKind::VerticalPoints { p: 0, q: p }
+                    } else {
+                        let l = sk.add_line(direction * -10.0, direction * 10.0, None, None, None).unwrap();
+                        sk.curves[l].fixed = true;
+                        ConstraintKind::PointOnCurve { p, c: l }
+                    };
+                    sk.add_constraint(alignment, None).unwrap();
+                    for value in [5.0, 0.0, 5.0] {
+                        let old = sk.driving_values();
+                        sk.constraints[0].kind.set_value(value);
+                        let report = solve_after_value_edit(&mut sk, &old);
+                        assert!(report.ok(), "{point_line}, {direction:?}, {value}: {report:?}");
+                        assert_eq!(report.dof, 0, "{point_line}, {direction:?}, {value}: {report:?}");
+                        assert!(report.point_determined[p]);
+                        assert!(!report.redundant.contains(&id), "{report:?}");
+                        assert!(determined_by(&sk, 0).is_empty());
+                        assert!(constraint_residual(&sk, 0).unwrap() < 1e-6);
+                        assert!((sk.point(p).unwrap().len() - value).abs() < 1e-6);
+                    }
+                }
+            }
+        });
+    }
+}
+
+#[test]
 fn under_constrained_reports_dof() {
     let mut sk = Sketch::new();
     let l = sk.add_line(v(0.0, 0.0), v(10.0, 1.0), None, None, None).unwrap();

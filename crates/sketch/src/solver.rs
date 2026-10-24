@@ -550,12 +550,20 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
             out.push((qq - pp).dot(dir) / len);
         }
         Fix { .. } => {}
+        // A distance within convergence tolerance of zero means coincidence: two
+        // component rows keep both directions constrained even when the points meet.
+        Distance { p, q, value } if value.abs() <= TOL => {
+            let d = s.p(p) - s.p(q);
+            out.extend([d.x, d.y]);
+        }
         Distance { p, q, value } => out.push(s.p(p).dist(s.p(q)) - value),
         DistanceX { p, q, value } => out.push((s.p(q).x - s.p(p).x).abs() - value),
         DistanceY { p, q, value } => out.push((s.p(q).y - s.p(p).y).abs() - value),
         PointLineDistance { p, l, value } => {
             let (a, b) = s.line(l);
-            out.push(line_dist(s.p(p), a, b).abs() - value);
+            let d = line_dist(s.p(p), a, b);
+            // At zero this is point-on-line; the signed distance retains its slope.
+            out.push(if value.abs() <= TOL { d } else { d.abs() - value });
         }
         LineCircleDistance { l, c, value, inside } => out.push(s.line_circle_gap(l, c, inside) - value),
         Length { l, value } => {
@@ -848,6 +856,45 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
     }
 }
 
+/// A positive distance edited from zero needs an opening direction: central differences
+/// of its magnitude cancel at coincidence. Use a unit radial subgradient there, or the
+/// signed line normal. Once separated, ordinary central differences apply again.
+fn distance_opening_slope(s: &State, b: &Block, v: usize) -> Option<f64> {
+    let point = |p: usize, gradient: Vec2| match s.lay.pvar.get(p).copied().flatten() {
+        Some(first) if v == first => gradient.x,
+        Some(first) if v == first + 1 => gradient.y,
+        _ => 0.0,
+    };
+    match b {
+        Block::User(_, ConstraintKind::Distance { p, q, value }) if *value > TOL => {
+            let d = s.p(*q) - s.p(*p);
+            if d.len() > TOL {
+                return None;
+            }
+            // Unequal nonzero components avoid symmetry with axes and 45-degree guides.
+            let direction = d.normalized().unwrap_or(Vec2::new(0.6, 0.8));
+            Some(point(*q, direction) - point(*p, direction))
+        }
+        Block::User(_, ConstraintKind::PointLineDistance { p, l, value }) if *value > TOL => {
+            let (a, b) = s.line(*l);
+            let signed = line_dist(s.p(*p), a, b);
+            if signed.abs() > TOL {
+                return None;
+            }
+            let Some(CurveKind::Line { a: ai, b: bi }) = s.sk.curves.get(*l).map(|c| &c.kind) else { return None };
+            let d = b - a;
+            let length = d.len();
+            if length <= 1e-12 {
+                return None;
+            }
+            let normal = d.perp() * (if signed < 0.0 { -1.0 } else { 1.0 } / length);
+            let along = (s.p(*p) - a).dot(d) / (length * length);
+            Some(point(*p, normal) + point(*ai, normal * (along - 1.0)) - point(*bi, normal * along))
+        }
+        _ => None,
+    }
+}
+
 /// Residual vector and Jacobian (rows × all n vars) for the given blocks.
 fn system(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], x: &mut [f64], with_j: bool) -> (Vec<f64>, Option<Mat>, Vec<usize>) {
     #[cfg(feature = "solver-profiling")]
@@ -881,6 +928,7 @@ fn system(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], x: &mut [f6
         let rows = plus.len();
         for &v in vars {
             let Some(x0) = x.get(v).copied() else { continue };
+            let opening = distance_opening_slope(&State { sk, lay, x }, b, v);
             let h = 1e-7 * x0.abs().max(1.0);
             if let Some(xv) = x.get_mut(v) {
                 *xv = x0 + h;
@@ -897,7 +945,7 @@ fn system(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], x: &mut [f6
             }
             for k in 0..rows {
                 let d = (plus.get(k).copied().unwrap_or(0.0) - minus.get(k).copied().unwrap_or(0.0)) / (2.0 * h);
-                j.set(row + k, v, d);
+                j.set(row + k, v, if k == 0 { opening.unwrap_or(d) } else { d });
             }
         }
         row += rows;
@@ -932,6 +980,7 @@ fn local_system(
         for &v in vars {
             let Some(c) = col.get(v).copied().filter(|c| *c < ncols) else { continue };
             let Some(x0) = x.get(v).copied() else { continue };
+            let opening = distance_opening_slope(&State { sk, lay, x }, b, v);
             let h = 1e-7 * x0.abs().max(1.0);
             if let Some(xv) = x.get_mut(v) {
                 *xv = x0 + h;
@@ -948,7 +997,7 @@ fn local_system(
             }
             for k in 0..rows {
                 let d = (plus.get(k).copied().unwrap_or(0.0) - minus.get(k).copied().unwrap_or(0.0)) / (2.0 * h);
-                j.set(row + k, c, d);
+                j.set(row + k, c, if k == 0 { opening.unwrap_or(d) } else { d });
             }
         }
         row += rows;
