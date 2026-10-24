@@ -6252,6 +6252,9 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let report = doc.solve_sketch(vals, &mut sk, &stored, Some(sketch))?;
             if !report.keeps_orientation() {
                 warns.insert(0, report.failure(|f| format!("the sketch constraints conflict ({f})")));
+            } else {
+                // The solve may have moved the curve a text runs along.
+                warns.extend(crate::project::relay_path_texts(&mut sk));
             }
             if !warns.is_empty() {
                 *warning = Some(warns.join("; "));

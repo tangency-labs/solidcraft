@@ -189,6 +189,36 @@ fn text_on_a_path_follows_its_curve_when_the_curve_moves() {
     assert_eq!(solidcraft_doc::Document::from_json(&saved).unwrap().to_json(), saved);
 }
 
+/// A path placed by a parameter: the text on it follows in the same evaluation. (Texts are laid
+/// out with the sketch's links, before the solve that moves the path: the text came one
+/// evaluation late, where the path had been before the change.)
+#[test]
+fn text_on_a_path_follows_the_path_when_a_parameter_moves_it() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"W","expression":"20 mm"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    let line = run(&mut s, "sketch.line", json!({"points":[[20,15],[80,15]],"construction":true}))["curves"][0].as_str().unwrap().to_string();
+    let start = format!("{line}.start");
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line":line,"mode":"horizontal"}));
+    run(&mut s, "sketch.dimension", json!({"entities":[start,"origin"],"type":"horizontal","value":"W"}));
+    run(&mut s, "sketch.dimension", json!({"entities":[start,"origin"],"type":"vertical","value":"15 mm"}));
+    run(&mut s, "sketch.dimension", json!({"entities":[line],"type":"length","value":"60 mm"}));
+    let link =
+        run(&mut s, "sketch.text", json!({"text":"AB-12","at":[0,0],"height":8,"path":line,"align":"center"}))["link"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let middle = |s: &Session| {
+        let (lo, hi) = text_box(s, &link);
+        (lo.x + hi.x) / 2.0
+    };
+    let drawn = middle(&s);
+    assert!((drawn - 50.0).abs() < 1.0, "{drawn}");
+    for w in [300.0, 20.0, 140.0] {
+        run(&mut s, "parameters.change", json!({"name":"W","expression":format!("{w} mm")}));
+        let moved = middle(&s) - drawn;
+        assert!((moved - (w - 20.0)).abs() < 1e-6, "W {w}: the text moved {moved}");
+    }
+}
+
 #[test]
 fn text_style_parameters_are_checked() {
     let (mut s, link, _) = setup();
