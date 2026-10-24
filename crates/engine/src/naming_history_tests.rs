@@ -115,6 +115,40 @@ fn an_upstream_cut_that_splits_a_face_keeps_the_edge_that_bounded_it() {
 }
 
 #[test]
+fn a_blend_follows_its_named_edge_to_a_moved_lid_instead_of_the_body_below() {
+    for (command, size, removed) in [("solid.fillet", "radius", (4.0 - std::f64::consts::PI) * 5.0), ("solid.chamfer", "distance", 2.0 * 5.0)] {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "height", "expression": "10 mm"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "height", "corner": [0, 0, 0]}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "LidSketch"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5, "start_offset": "height", "name": "Lid"}));
+        run(&mut s, command, json!({"edges": [[40, 30, 12.5]], size: 2, "name": "Blend"}));
+        let blend = s.doc.find_feature("Blend").unwrap();
+        assert!(blend.edge_names.iter().all(|n| !n.is_empty()));
+        // Exercise the saved reference, including files with no explicit target body.
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        s.refresh();
+
+        // The old pick lies on the lower body's edge after this edit. The saved name
+        // still identifies the lid's edge, now at z = 20..25.
+        change(&mut s, "height", "20 mm");
+        assert_eq!(error(&s, "Blend"), None, "{command}");
+        assert_eq!(warning(&s, "Blend"), None, "{command}");
+        let state = s.model.state();
+        let base = state.body("Body1").unwrap();
+        let lid = state.body("Body2").unwrap();
+        let base_volume = solidcraft_kernel::measure(&base.body).unwrap().volume;
+        let lid_volume = solidcraft_kernel::measure(&lid.body).unwrap().volume;
+        assert!((base_volume - 24000.0).abs() < 0.01, "{command}: the base stays sharp: {base_volume}");
+        assert!((lid_volume - (6000.0 - removed)).abs() < 0.01, "{command}: the lid keeps its blend: {lid_volume}");
+        assert!(base.body.contains(Vec3::new(39.9, 29.9, 12.5)));
+        assert!(!lid.body.contains(Vec3::new(39.9, 29.9, 22.5)));
+    }
+}
+
+#[test]
 fn a_piece_keeps_its_identity_when_the_cut_that_made_it_moves_or_shrinks() {
     let mut s = Session::default();
     block(&mut s);

@@ -2816,6 +2816,8 @@ mod tests {
             eye: [0.0; 4],
             ao_radius: 0.0,
             ssaa: 1.0,
+            hover_tint: [0.0; 3],
+            selection_tint: [0.0; 3],
         }
     }
 
@@ -3226,6 +3228,8 @@ mod glass_tests {
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
             ssaa,
+            hover_tint: [0.0; 3],
+            selection_tint: [0.0; 3],
         }
     }
 

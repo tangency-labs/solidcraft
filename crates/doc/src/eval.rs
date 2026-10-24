@@ -3378,7 +3378,7 @@ fn edge_dir(e: &kernel::EdgeInfo) -> Vec3 {
 
 /// References for edges picked at `pts` on the body a blend would go on (the state before it).
 pub fn edge_refs(st: &ModelState, body: &Option<crate::BodyName>, pts: &[Vec3]) -> Vec<EdgeRef> {
-    let Ok(ti) = blend_target(st, body, pts) else { return Vec::new() };
+    let Ok(ti) = blend_target(st, body, pts, &[]) else { return Vec::new() };
     let Some(mb) = st.bodies.get(ti) else { return Vec::new() };
     let size = mb.body.size();
     let Ok(edges) = mb.body.edges((size * 1e-3).max(1e-3)) else { return Vec::new() };
@@ -3396,7 +3396,7 @@ pub fn edge_refs(st: &ModelState, body: &Option<crate::BodyName>, pts: &[Vec3]) 
 
 /// Persistent names of the edges picked at `pts` on the body a blend would go on.
 pub fn edge_names_for(st: &ModelState, body: &Option<crate::BodyName>, pts: &[Vec3]) -> Vec<String> {
-    match blend_target(st, body, pts).ok().and_then(|i| st.bodies.get(i)) {
+    match blend_target(st, body, pts, &[]).ok().and_then(|i| st.bodies.get(i)) {
         Some(b) => crate::naming::edge_names_at(b, pts),
         None => Vec::new(),
     }
@@ -3481,10 +3481,25 @@ fn resolve_edges(b: &Body, pts: &[Vec3], refs: &[EdgeRef], warning: &mut Option<
     Ok(out)
 }
 
-/// The body a fillet/chamfer applies to: by name, or the one closest to the first edge point.
-fn blend_target(state: &ModelState, body: &Option<crate::BodyName>, edges: &[Vec3]) -> Result<usize> {
+/// The body a fillet/chamfer applies to: an explicit body, then the body holding a saved edge
+/// name, then the one closest to the first edge point. After an upstream move the old point can
+/// lie on another body's edge, so resolve names before using that point to choose a body.
+fn blend_target(state: &ModelState, body: &Option<crate::BodyName>, edges: &[Vec3], names: &[String]) -> Result<usize> {
     if let Some(n) = body {
         return state.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")));
+    }
+    for (p, name) in edges.iter().zip(names).filter(|(_, name)| !name.is_empty()) {
+        // A split can leave the named edge in several bodies: keep the piece nearest the pick,
+        // as locate_edge does for pieces within one body. Only named matches compete here.
+        if let Some((i, _)) = state
+            .bodies
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| crate::naming::locate_edge(b, name, *p).ok().map(|hit| (i, hit.point.dist(*p))))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        {
+            return Ok(i);
+        }
     }
     let p = edges.first().ok_or_else(|| DocError::Invalid("no edges selected".into()))?;
     let mut best: Option<(usize, f64)> = None;
@@ -5657,7 +5672,7 @@ fn replay(
             let found = st.blend_edges.get(&src.id).cloned().unwrap_or_else(|| crate::plain(edges));
             for m in mats {
                 let moved: Vec<Vec3> = found.iter().map(|p| crate::apply_point(m, *p)).collect();
-                let ti = blend_target(st, &None, &moved)?;
+                let ti = blend_target(st, &None, &moved, &[])?;
                 let Some(mb) = st.bodies.get(ti).cloned() else { continue };
                 let nb = match &src.kind {
                     FeatureKind::Chamfer { distance2, angle, flip, .. } => chamfer_with(vals, &mb.body, &moved, r, distance2, angle, *flip)?,
@@ -6582,7 +6597,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         }
         FeatureKind::Fillet { edges, radius, body, .. } | FeatureKind::Chamfer { edges, distance: radius, body, .. } => {
             let r = val(vals, radius, Kind::Length)?;
-            let ti = blend_target(st, body, &crate::plain(edges))?;
+            let ti = blend_target(st, body, &crate::plain(edges), &f.edge_names)?;
             let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
             let edges = if f.edge_names.iter().any(|n| !n.is_empty()) {
                 // By name first; a name that is gone falls back to the point, with a warning.
