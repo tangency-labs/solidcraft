@@ -526,9 +526,20 @@ mod tests {
         h.app.prefs_window.filter = "zzzz-no-setting".into();
         h.frames(2);
         assert!(h.widget("No matching settings").is_some());
-        h.app.prefs_window.filter.clear();
+        h.app.prefs_window.filter = "units".into();
         h.frames(2);
-        assert!(h.widget("Units of new designs").is_none());
-        assert!(h.widget("No matching settings").is_none());
+        h.step(&serde_json::json!({"click": {"handle": "prefs:page:Design"}})).expect("design page");
+        h.frames(2);
+        assert!(h.app.prefs_window.filter.is_empty(), "a page tab clears the search");
+        assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_DESIGN);
+        assert!(h.widget("Units of new designs").is_some(), "the tab shows its own page");
+        assert!(crate::scenario::rect_of("prefs:search:shortcuts").is_none(), "shortcut matches leave with the search");
+        h.app.prefs_window.filter = "zoom".into();
+        h.frames(2);
+        h.step(&serde_json::json!({"click": {"handle": "prefs:page:Design"}})).expect("same page");
+        h.frames(2);
+        assert!(h.app.prefs_window.filter.is_empty(), "the current tab also clears the search");
+        assert!(h.widget("Reverse zoom direction").is_none());
+        assert!(h.widget("Units of new designs").is_some());
     }
 }
