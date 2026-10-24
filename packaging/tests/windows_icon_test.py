@@ -1,10 +1,11 @@
-"""PE icon guard: Windows PE32/PE32+ resources, and missing/broken groups."""
+"""Windows packaging checks: PE icons and MSI command discovery."""
 import pathlib
 import shutil
 import struct
 import subprocess
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "windows/check-icon.ps1"
 
@@ -76,6 +77,34 @@ class IconGuard(unittest.TestCase):
 
     def test_truncated_executable_is_rejected(self):
         self.assertNotEqual(self.run_guard(b"MZ").returncode, 0)
+
+
+class InstallerPath(unittest.TestCase):
+    def test_install_folder_is_appended_to_machine_path_and_removed_on_uninstall(self):
+        root = ET.parse(SCRIPT.parents[2] / "assets/platforms/windows/solidcraft.wxs").getroot()
+        ns = {"w": "http://wixtoolset.org/schemas/v4/wxs"}
+        package = root.find("w:Package", ns)
+        self.assertEqual(package.get("Scope"), "perMachine")
+        entries = root.findall(".//w:Environment[@Name='PATH']", ns)
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        for name, value in {"Value": "[INSTALLFOLDER]", "Part": "last", "Action": "set",
+                            "Permanent": "no", "System": "yes"}.items():
+            self.assertEqual(entry.get(name), value, name)
+
+        group = root.find("w:Fragment/w:ComponentGroup[@Id='SolidcraftFiles']", ns)
+        self.assertEqual(group.get("Directory"), "INSTALLFOLDER")
+        component = group.find("w:Component[w:Environment]", ns)
+        self.assertIs(component.find("w:Environment", ns), entry)
+        self.assertEqual(component.get("Guid"), "C935C30E-B878-4A16-B059-1A40EF3A3201")
+        self.assertIsNone(component.find("w:File", ns))
+        self.assertNotEqual(component.get("Permanent"), "yes")
+        key = component.find("w:RegistryValue[@KeyPath='yes']", ns)
+        self.assertIsNotNone(key)
+        self.assertEqual(key.get("Root"), "HKLM")
+        self.assertEqual(key.get("Key"), r"Software\SolidCraft")
+        self.assertEqual(key.get("Name"), "PathAdded")
+        self.assertIsNotNone(package.find("w:Feature[@Level='1']/w:ComponentGroupRef[@Id='SolidcraftFiles']", ns))
 
 
 if __name__ == "__main__":

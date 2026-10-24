@@ -123,6 +123,11 @@
       <Component Id="SolidcraftCli">
         <File Id="SolidcraftCliExe" Source="$(var.BinDir)\solidcraft-cli.exe" KeyPath="yes" />
       </Component>
+      <Component Id="SolidcraftPath" Guid="C935C30E-B878-4A16-B059-1A40EF3A3201">
+        <RegistryValue Root="HKLM" Key="Software\SolidCraft" Name="PathAdded" Type="integer" Value="1" KeyPath="yes" />
+        <Environment Id="SolidcraftPathEntry" Name="PATH" Value="[INSTALLFOLDER]"
+            Part="last" Action="set" Permanent="no" System="yes" />
+      </Component>
       <!-- Compatibility shim (docs/compatibility.md): the old CLI name, forwarding to solidcraft-cli. -->
       <Component Id="SolidcraftCliAlias">
         <File Id="SolvecraftCliAliasExe" Source="$(var.BinDir)\solvecraft-cli.exe" KeyPath="yes" />
