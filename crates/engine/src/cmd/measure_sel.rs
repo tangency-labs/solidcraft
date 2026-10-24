@@ -363,6 +363,16 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
     }
 }
 
+/// A picked item's exact shape with its points (an edge's polyline) and triangles (a face's),
+/// as Measure sees it: what [`crate::snap`] takes an item's centres, middle and ends from.
+pub(crate) fn shape_of(s: &Session, sel: &Sel) -> Option<(Shape, Vec<Vec3>, Vec<[Vec3; 3]>)> {
+    let item = describe(s, sel)?;
+    Some(match item.geo {
+        Geo::Points(p) => (item.shape, p, Vec::new()),
+        Geo::Tris(t) => (item.shape, Vec::new(), t),
+    })
+}
+
 fn sample<T: Copy>(v: &[T], max: usize) -> Vec<T> {
     let step = v.len().div_ceil(max).max(1);
     v.iter().step_by(step).copied().collect()

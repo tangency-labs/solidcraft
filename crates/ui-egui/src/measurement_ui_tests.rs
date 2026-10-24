@@ -178,3 +178,70 @@ fn measurement_axis_distances_can_be_disabled_saved_and_restored_in_preferences(
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert!(h.app.preferences.measure_axis_distances, "Cancel restores the last Apply");
 }
+
+/// Hover pick points (#5912): hovering each hole's rim wakes its centre, and clicking the
+/// centres measures centre to centre: 30 mm between Ø6 and Ø8 holes at x = 15 and x = 45.
+#[test]
+fn measure_takes_woken_hole_centres() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_origin = false;
+    h.app.ui.show_browser = false;
+    h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 3, "height": 12, "base": [15, 20, -1], "operation": "cut"})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 4, "height": 12, "base": [45, 20, -1], "operation": "cut"})).unwrap();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.app.cam.distance = 160.0;
+    h.settle();
+    h.app.start("inspect.measure");
+    for (rim, centre) in [([18, 20, 10], [15, 20, 10]), ([49, 20, 10], [45, 20, 10])] {
+        h.step(&json!({ "move": { "world": rim } })).unwrap();
+        h.step(&json!({ "click": { "world": centre } })).unwrap();
+    }
+    let picked: Vec<Sel> = h.app.dialog.as_ref().unwrap().inputs.iter().flat_map(|i| i.items.clone()).collect();
+    assert!(matches!(picked.as_slice(), [Sel::Vertex { .. }, Sel::Vertex { .. }]), "{picked:?}");
+    assert!((result(&h)["distance_mm"].as_f64().unwrap() - 30.0).abs() < 1e-6, "{}", result(&h));
+}
+
+/// A woken centre doesn't take a click on its own rim: zoomed out, a Ø6 hole's centre is
+/// within a woken point's reach of the rim, and a click on the rim still measures the rim.
+#[test]
+fn a_click_on_a_small_rim_measures_the_rim_not_its_woken_centre() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_origin = false;
+    h.app.ui.show_browser = false;
+    h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 3, "height": 12, "base": [15, 20, -1], "operation": "cut"})).unwrap();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.app.cam.distance = 400.0;
+    h.settle();
+    h.app.start("inspect.measure");
+    // On the rim at -55 degrees: away from the two vertices the kernel splits the circle at.
+    h.step(&json!({ "move": { "world": [16.72073, 17.54254, 10] } })).unwrap();
+    assert!(!h.app.viewport.woken.points.is_empty(), "the rim wakes its centre: hover {:?}, woken {:?}", h.app.viewport.hover, h.app.viewport.woken);
+    h.step(&json!({ "click": { "world": [16.72073, 17.54254, 10] } })).unwrap();
+    let picked = &h.app.dialog.as_ref().unwrap().inputs[0].items;
+    assert!(matches!(picked.as_slice(), [Sel::Edge { .. }]), "{picked:?}");
+}
+
+/// In a sketch, hovering a line wakes its middle, and a click there takes the middle, not the
+/// line it lies on (#5912).
+#[test]
+fn measure_takes_a_sketch_lines_woken_middle() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_origin = false;
+    h.app.ui.show_browser = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, 0], [40, 10]]})).unwrap();
+    h.app.cam.distance = 120.0;
+    h.settle();
+    h.app.start("inspect.measure");
+    h.step(&json!({ "move": { "sketch": [10, 2.5] } })).unwrap();
+    let middle = solidcraft_engine::geom::Vec3::new(20.0, 5.0, 0.0);
+    assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(middle) < 1e-9), "{:?}", h.app.viewport.woken);
+    h.step(&json!({ "click": { "sketch": [20, 5] } })).unwrap();
+    let picked = &h.app.dialog.as_ref().unwrap().inputs[0].items;
+    assert!(matches!(picked.as_slice(), [Sel::Vertex { point, .. }] if point.dist(middle) < 1e-9), "{picked:?}");
+}

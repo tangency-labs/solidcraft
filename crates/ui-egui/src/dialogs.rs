@@ -688,8 +688,8 @@ impl Dialog {
                 Kind::Align { flip: false },
                 vec![
                     SelInput::new("Bodies", BODIES, true),
-                    SelInput::new("From", FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN, false),
-                    SelInput::new("To", FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN, false),
+                    SelInput::new("From", FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN | selection::SNAP_POINTS, false),
+                    SelInput::new("To", FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN | selection::SNAP_POINTS, false),
                 ],
             ),
             "solid.remove" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
@@ -727,7 +727,7 @@ impl Dialog {
             ),
             "inspect.measure" => Dialog::new(
                 Kind::Measure { result: None, of: Vec::new(), show: None },
-                vec![SelInput::new("Items", FACES | EDGES | selection::VERTICES | selection::CURVES | PROFILES, true)],
+                vec![SelInput::new("Items", FACES | EDGES | selection::VERTICES | selection::CURVES | PROFILES | selection::SNAP_POINTS, true)],
             ),
             "solid.pattern.rectangular" => Dialog::new(
                 Kind::PatternRect { count: "3".into(), spacing: "20 mm".into(), count2: "1".into(), spacing2: "20 mm".into() },
@@ -1992,6 +1992,8 @@ fn selection_label(s: &Session, item: &Sel) -> String {
             let p = s.active_sketch.and_then(|id| state.sketch(id)).map(|sk| sk.plane.to_local(*point)).unwrap_or_default();
             format!("({:.2}, {:.2}) mm", p.x, p.y)
         }
+        // A body vertex, or a hover pick point (a centre, a middle): where it is.
+        Sel::Vertex { point, .. } => crate::snap_wake::label(*point),
         _ => format!("{item:?}"),
     }
 }

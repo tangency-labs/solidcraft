@@ -111,6 +111,8 @@ pub struct ViewportState {
     pub(crate) modifier_nav: Option<(NavMode, Pos2)>,
     /// What a click would pick now (after the active command's filter).
     pub hover: Option<Hit>,
+    /// Hover pick points woken by the last edge or face hovered (`snap_wake`).
+    pub woken: crate::snap_wake::Woken,
     pub mouse: Option<Pos2>,
     /// Box selection being dragged.
     pub boxsel: Option<BoxSel>,
@@ -1394,6 +1396,9 @@ pub(crate) fn pick_cached(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit
     app.session.visibility.hidden_bodies.hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
     origin_point_shown(app).hash(&mut h);
+    for p in &app.viewport.woken.points {
+        [p.at.x, p.at.y, p.at.z].map(f64::to_bits).hash(&mut h);
+    }
     app.perspective_view().hash(&mut h);
     (proj.rect.width().to_bits(), proj.rect.height().to_bits()).hash(&mut h);
     crate::sketch_display::projection_key(proj, app.viewport.pixels_per_point()).hash(&mut h);
@@ -1550,6 +1555,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             }
         }
     }
+    let curve_near = bestc.v.iter().map(|x| x.0).fold(f32::INFINITY, f32::min);
     hits.extend(bestc.hits());
     // Nearest face along the ray (hides what is behind it); with `all`, every body's nearest.
     let mut bestf: Option<(f64, Hit)> = None;
@@ -1647,6 +1653,13 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             bestv.offer(dd, Hit::Vertex { body: String::new(), point: Vec3::ZERO });
         }
     }
+    // Woken hover pick points (a hole's centre, a line's middle) come first: right under the
+    // pointer over anything (a line's middle lies on the line), further out unless an edge or a
+    // sketch curve under the pointer is nearer (a small hole's rim stays pickable).
+    let edge_near = beste.v.iter().map(|x| x.0).fold(curve_near, f32::min);
+    let woken: Vec<Hit> =
+        crate::snap_wake::hits(app, proj, pos).into_iter().filter(|(dd, _)| *dd < crate::snap_wake::ON || *dd < edge_near).map(|x| x.1).collect();
+    hits.splice(0..0, woken);
     hits.extend(bestv.hits());
     hits.extend(beste.hits());
     // Origin axes.
@@ -2906,6 +2919,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         candidate(app, &hits).map(|(h, s)| (h, Some(s)))
     };
     app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
+    crate::snap_wake::update(app);
     // Select Other: a press held still opens the list of everything under it; while the list is
     // open its row under the pointer is what lights up.
     let held =
@@ -4081,6 +4095,7 @@ fn origin_point_shown(app: &SolveApp) -> bool {
 
 /// Screen-space dots: the origin point, and hovered or selected body vertices.
 fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    crate::snap_wake::draw(app, painter, proj);
     let t = Tokens::get();
     if origin_point_shown(app)
         && let Some(o) = proj.to_screen(Vec3::ZERO)
