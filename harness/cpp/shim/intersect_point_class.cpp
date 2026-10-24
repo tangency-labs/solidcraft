@@ -344,6 +344,7 @@ int32_t run(Rd& rd, std::vector<double>& o)
     SmPointClassification pcs[2] = {SmPointClassification(SmZoneTol3d(tol0)),
                                     SmPointClassification(SmZoneTol3d(tol1))};
 
+    std::vector<double> vertices;
     int64_t n_ops = rd.idx();
     for (int64_t i = 0; i < n_ops && !rd.bad; i++)
     {
@@ -441,6 +442,17 @@ int32_t run(Rd& rd, std::vector<double>& o)
             const SmPointClassification& r = pc.Combine(other);
             o.push_back(0.0);
             o.push_back(&r == &pc ? 0.0 : 1.0);
+            vertices.push_back((double)i);
+            size_t count = 0;
+            for (int64_t kind : pool.kinds)
+                count += kind == K_VERTEX;
+            vertices.push_back((double)count);
+            for (size_t j = 0; j < pool.ptrs.size(); ++j)
+                if (pool.kinds[j] == K_VERTEX)
+                {
+                    vertices.push_back((double)j);
+                    put_vec(vertices, ((SmVertex*)pool.ptrs[j])->GetPoint());
+                }
             break;
         }
         case OP_COMPUTE:
@@ -580,6 +592,7 @@ int32_t run(Rd& rd, std::vector<double>& o)
     }
     if (rd.bad || rd.at != rd.n)
         return SC_ERR_ARG;
+    o.insert(o.end(), vertices.begin(), vertices.end());
     return SC_OK;
 }
 } // namespace

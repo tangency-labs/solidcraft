@@ -20,7 +20,8 @@
 //! `MergeIntoObject` and `Combine` on a vertex run on the pool's B-rep
 //! (`merge_into_brep`, `combine_in_brep`): the merge compares its status, new-topology
 //! counts and repointed classification, and combine writes the propagated surf/surf/surf
-//! point to the vertex; a vertex's new position is not part of the record.
+//! point to the vertex. A trace appended after the existing records reads every
+//! pool vertex after each Combine: `op_index n_vertices (pool_index x y z)*`.
 //!
 //! Deferred cases: every op that reaches the other topology members (`SmVertex`, `SmEdge`,
 //! `SmFace`, ...: `IsConnectedTo`, `GetBrep`, `GetPoint` / `SetPoint` of `FindObjPoint3d`,
@@ -315,7 +316,9 @@ fn resolve(c: &CurveIn) -> Result<CurveIn, HarnessError> {
         solidcore::nurbs::b_spline_curve::NurbCircleParam::Quadratic,
     )
     .map_err(|e| harness(format!("circle: {e}")))?;
-    let cur = arc.gw_nurb().ok_or_else(|| harness("circle without NURB"))?;
+    let cur = arc
+        .gw_nurb()
+        .ok_or_else(|| harness("circle without NURB"))?;
     Ok(CurveIn::Bspline(BSplineIn {
         dim: 3,
         oob: false,
@@ -802,10 +805,11 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
         PointClassification::new(zone_tol3d(&k, s.tol[1])),
     ];
     let mut o: Vec<f64> = Vec::new();
+    let mut vertices = Vec::new();
     // after a deferred op the remaining ops still run (their state may differ from
     // upstream's) so that every op sees the run-time rejections of the shim
     let mut deferred: Option<Box<Output>> = None;
-    for x in &s.ops {
+    for (op_index, x) in s.ops.iter().enumerate() {
         let mut step = || -> Result<(), Fail> {
             let (code, t) = op_code(x);
             if t > 1 {
@@ -927,6 +931,8 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     let which = st(combined)?.map_err(|_| harness("combine failed"))?;
                     o.push(0.0);
                     o.push(if which == Precedence::This { 0.0 } else { 1.0 });
+                    vertices.push(op_index as f64);
+                    put_vertices(&mut vertices, &pool)?;
                 }
                 OpIn::Compute { p, .. } => {
                     if ok == Some(kind::POINT)
@@ -1019,14 +1025,13 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                             let key_of = |e: EntityRef| {
                                 super::boolean_topology_intersector_p1::p9_entity_ref(e)
                             };
-                            let curve_ref = |e: EdgeId, type_code: i64| {
-                                solidcore::geom::object::ObjectRef {
+                            let curve_ref =
+                                |e: EdgeId, type_code: i64| solidcore::geom::object::ObjectRef {
                                     key: solidcore::geom::attribute::ObjectKey(
                                         ((type_code as u64) << 32) | u64::from(e.index()),
                                     ),
                                     type_code,
-                                }
-                            };
+                                };
                             let mut records = std::collections::BTreeMap::new();
                             let mut attributes =
                                 solidcore::geom::attribute::AttributeStore::default();
@@ -1069,7 +1074,8 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     if matches!(ok, Some(kind::POINT | kind::EDGEUSE)) {
                         return Err(rejected());
                     }
-                    let r = st(pc.is_connected_to(&pool, tgt))?.map_err(|_| harness("connected failed"))?;
+                    let r = st(pc.is_connected_to(&pool, tgt))?
+                        .map_err(|_| harness("connected failed"))?;
                     o.extend([0.0, b(r)]);
                 }
                 OpIn::ConnectedAny { js, .. } => {
@@ -1124,10 +1130,36 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
             Err(e) => return Err(e),
         }
     }
-    match deferred {
-        Some(d) => Err(Fail::Deferred(d)),
-        None => Ok(o),
+    if let Some(d) = deferred {
+        Err(Fail::Deferred(d))
+    } else {
+        o.extend(vertices);
+        Ok(o)
     }
+}
+
+/// Read the arena, rather than the classification's copy of the SSS point.
+fn put_vertices(out: &mut Vec<f64>, pool: &Pool) -> Result<(), HarnessError> {
+    let vertices: Vec<_> = pool
+        .topo
+        .ents
+        .iter()
+        .enumerate()
+        .filter_map(|(index, e)| {
+            if let Some(EntityRef::Vertex(v)) = e {
+                Some((index, *v))
+            } else {
+                None
+            }
+        })
+        .collect();
+    out.push(vertices.len() as f64);
+    for (index, v) in vertices {
+        let p = solidcore::topology::vertex::point(&pool.topo.brep, v)
+            .map_err(|e| harness(e.to_string()))?;
+        out.extend([index as f64, p.x, p.y, p.z]);
+    }
+    Ok(())
 }
 
 /// A topology target of `IsConnectedTo`.
@@ -1263,18 +1295,13 @@ fn gen_objects(rng: &mut Rng) -> Vec<ObjIn> {
     if n.iter().map(|c| c * c).sum::<f64>() < 1e-3 {
         n = [0.0, 0.0, 1.0];
     }
-    objs.push(ObjIn::Plane {
-        o: rp(rng, 5.0),
-        n,
-    });
+    objs.push(ObjIn::Plane { o: rp(rng, 5.0), n });
     objs.push(ObjIn::Point(rp(rng, 10.0)));
     objs.push(ObjIn::Point(rp(rng, 10.0)));
     objs.push(ObjIn::Vertex);
     objs.push(ObjIn::Vertex);
     objs.push(ObjIn::Edge(Some(0)));
-    let plane = objs
-        .iter()
-        .position(|o| matches!(o, ObjIn::Plane { .. }));
+    let plane = objs.iter().position(|o| matches!(o, ObjIn::Plane { .. }));
     objs.push(ObjIn::Face(plane));
     objs.push(ObjIn::Volume);
     objs.push(ObjIn::Region);
@@ -1334,7 +1361,9 @@ fn gen_point(k: &Kernel, rng: &mut Rng, objs: &[ObjIn]) -> [f64; 3] {
                 let ivl = curve.natural_interval();
                 let t = ivl.min() + (ivl.max() - ivl.min()) * rng.uniform(-0.1, 1.1);
                 if let Ok(p) = curve.evaluate_point(k, t) {
-                    let d = *rng.choose(&[0.0, 1e-9, 1e-6, 1e-4, 0.1, 2.0]).unwrap_or(&0.0);
+                    let d = *rng
+                        .choose(&[0.0, 1e-9, 1e-6, 1e-4, 0.1, 2.0])
+                        .unwrap_or(&0.0);
                     return near(rng, [p.x, p.y, p.z], d);
                 }
             }
@@ -1365,8 +1394,7 @@ fn gen_class_object(rng: &mut Rng, objs: &[ObjIn], geometric: bool) -> (i32, Opt
 }
 
 fn gen_tol(rng: &mut Rng) -> f64 {
-    *rng
-        .choose(&[1e-5, 1e-5, 1e-3, 0.1, 2e-5, USE_DEFAULT, 0.0])
+    *rng.choose(&[1e-5, 1e-5, 1e-3, 0.1, 2e-5, USE_DEFAULT, 0.0])
         .unwrap_or(&1e-5)
 }
 
@@ -1384,7 +1412,11 @@ fn gen_op(k: &Kernel, rng: &mut Rng, objs: &[ObjIn], geometric: bool) -> OpIn {
         .filter(|(_, o)| !matches!(o, ObjIn::Point(_)))
         .map(|(i, _)| i)
         .filter(|&i| {
-            !geometric || matches!(objs.get(i), Some(ObjIn::Curve(_) | ObjIn::Plane { .. } | ObjIn::Volume))
+            !geometric
+                || matches!(
+                    objs.get(i),
+                    Some(ObjIn::Curve(_) | ObjIn::Plane { .. } | ObjIn::Volume)
+                )
         })
         .collect();
     loop {
@@ -1420,10 +1452,17 @@ fn gen_op(k: &Kernel, rng: &mut Rng, objs: &[ObjIn], geometric: bool) -> OpIn {
             },
             10 => OpIn::SetPresnap {
                 t,
-                v: if rng.chance(0.3) { BIG } else { rng.uniform(-3.0, 3.0) },
+                v: if rng.chance(0.3) {
+                    BIG
+                } else {
+                    rng.uniform(-3.0, 3.0)
+                },
             },
             11 => OpIn::SetSss { t, p: rp(rng, 5.0) },
-            12 => OpIn::SetSrcTol { t, tol: gen_tol(rng) },
+            12 => OpIn::SetSrcTol {
+                t,
+                tol: gen_tol(rng),
+            },
             13 => {
                 let faces = of_kind(objs, kind::FACE);
                 OpIn::SetFace {
@@ -1467,7 +1506,11 @@ fn gen_op(k: &Kernel, rng: &mut Rng, objs: &[ObjIn], geometric: bool) -> OpIn {
                     value: rng.uniform(0.0, 0.5),
                     params,
                     offset: rng.below(10) as usize,
-                    pre: if rng.chance(0.5) { BIG } else { rng.uniform(0.0, 1.0) },
+                    pre: if rng.chance(0.5) {
+                        BIG
+                    } else {
+                        rng.uniform(0.0, 1.0)
+                    },
                 }
             }
             26 => OpIn::Merge {
@@ -1568,6 +1611,33 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn combine_observes_vertex_mutation_and_bystanders() {
+        let script: Script = serde_json::from_value(serde_json::json!({
+            "objects": ["vertex", "vertex", "vertex"], "tol": [1e-5, 1e-5],
+            "ops": [
+                {"op": "set_class_object", "t": 0, "class": 104, "obj": 0},
+                {"op": "set_class_object", "t": 1, "class": 104, "obj": 1},
+                {"op": "set_gap", "t": 0, "g": 0.1},
+                {"op": "set_gap", "t": 1, "g": 0.2},
+                {"op": "set_sss", "t": 1, "p": [2, -3, 5]},
+                {"op": "combine", "t": 0}
+            ]
+        }))
+        .unwrap();
+        let native = cpp(&script).unwrap();
+        let mut actual = rust(&script).unwrap();
+        assert!(crate::compare::compare(&native, &actual, &[]).pass());
+        let out = actual.values.get_mut("out").unwrap();
+        let start = out.len() - 14;
+        assert_eq!(
+            &out[start..],
+            &[5., 3., 0., 2., -3., 5., 1., 0., 0., 0., 2., 0., 0., 0.]
+        );
+        out[start + 3] = 0.0; // losing the SetPoint side effect must be detected
+        assert!(!crate::compare::compare(&native, &actual, &[]).pass());
+    }
 
     /// Generated scripts are accepted by the ffi checks, and most of them are
     /// comparable now (not deferred).

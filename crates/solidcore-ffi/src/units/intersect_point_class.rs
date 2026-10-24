@@ -53,6 +53,8 @@
 //! face deviation t u v uvw[3] param_set pre_snap sss_flag sss[3] tolerance
 //! vertex_object edge_object face_object` (object ids are pool indices, `-1` for
 //! `NULL`, `-2` for an object outside the pool).
+//! A trace follows the existing records: after each Combine, `op_index n_vertices
+//! (pool_index x y z)*`, read from the real pool vertices in pool order.
 //!
 //! [`run`] accepts only well-formed scripts with bounded finite data whose
 //! `SetClassObject` pairs a class with no object or an object of that kind (no object

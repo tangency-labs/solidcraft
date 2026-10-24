@@ -1,0 +1,641 @@
+{
+  "cases": [
+    {
+      "name": "combine_vertices_other0_gap0.1_existingFalse",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp (Combine)",
+      "inputs": {
+        "objects": [
+          "vertex",
+          "vertex",
+          "vertex"
+        ],
+        "tol": [
+          1e-05,
+          1e-05
+        ],
+        "ops": [
+          {
+            "op": "set_class_object",
+            "t": 0,
+            "obj": 0,
+            "class": 104
+          },
+          {
+            "op": "set_class_object",
+            "t": 1,
+            "obj": 0,
+            "class": 104
+          },
+          {
+            "op": "set_gap",
+            "t": 0,
+            "g": 0.1
+          },
+          {
+            "op": "set_gap",
+            "t": 1,
+            "g": 0.2
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              2,
+              -3,
+              5
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              17,
+              19,
+              -23
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "combine",
+            "t": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "combine_vertices_other0_gap0.1_existingTrue",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp (Combine)",
+      "inputs": {
+        "objects": [
+          "vertex",
+          "vertex",
+          "vertex"
+        ],
+        "tol": [
+          1e-05,
+          1e-05
+        ],
+        "ops": [
+          {
+            "op": "set_class_object",
+            "t": 0,
+            "obj": 0,
+            "class": 104
+          },
+          {
+            "op": "set_class_object",
+            "t": 1,
+            "obj": 0,
+            "class": 104
+          },
+          {
+            "op": "set_gap",
+            "t": 0,
+            "g": 0.1
+          },
+          {
+            "op": "set_gap",
+            "t": 1,
+            "g": 0.2
+          },
+          {
+            "op": "set_sss",
+            "t": 0,
+            "p": [
+              -7,
+              11,
+              13
+            ]
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              2,
+              -3,
+              5
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              17,
+              19,
+              -23
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "combine",
+            "t": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "combine_vertices_other0_gap0.2_existingFalse",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp (Combine)",
+      "inputs": {
+        "objects": [
+          "vertex",
+          "vertex",
+          "vertex"
+        ],
+        "tol": [
+          1e-05,
+          1e-05
+        ],
+        "ops": [
+          {
+            "op": "set_class_object",
+            "t": 0,
+            "obj": 0,
+            "class": 104
+          },
+          {
+            "op": "set_class_object",
+            "t": 1,
+            "obj": 0,
+            "class": 104
+          },
+          {
+            "op": "set_gap",
+            "t": 0,
+            "g": 0.2
+          },
+          {
+            "op": "set_gap",
+            "t": 1,
+            "g": 0.1
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              2,
+              -3,
+              5
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              17,
+              19,
+              -23
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "combine",
+            "t": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "combine_vertices_other0_gap0.2_existingTrue",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp (Combine)",
+      "inputs": {
+        "objects": [
+          "vertex",
+          "vertex",
+          "vertex"
+        ],
+        "tol": [
+          1e-05,
+          1e-05
+        ],
+        "ops": [
+          {
+            "op": "set_class_object",
+            "t": 0,
+            "obj": 0,
+            "class": 104
+          },
+          {
+            "op": "set_class_object",
+            "t": 1,
+            "obj": 0,
+            "class": 104
+          },
+          {
+            "op": "set_gap",
+            "t": 0,
+            "g": 0.2
+          },
+          {
+            "op": "set_gap",
+            "t": 1,
+            "g": 0.1
+          },
+          {
+            "op": "set_sss",
+            "t": 0,
+            "p": [
+              -7,
+              11,
+              13
+            ]
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              2,
+              -3,
+              5
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              17,
+              19,
+              -23
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "combine",
+            "t": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "combine_vertices_other1_gap0.1_existingFalse",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp (Combine)",
+      "inputs": {
+        "objects": [
+          "vertex",
+          "vertex",
+          "vertex"
+        ],
+        "tol": [
+          1e-05,
+          1e-05
+        ],
+        "ops": [
+          {
+            "op": "set_class_object",
+            "t": 0,
+            "obj": 0,
+            "class": 104
+          },
+          {
+            "op": "set_class_object",
+            "t": 1,
+            "obj": 1,
+            "class": 104
+          },
+          {
+            "op": "set_gap",
+            "t": 0,
+            "g": 0.1
+          },
+          {
+            "op": "set_gap",
+            "t": 1,
+            "g": 0.2
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              2,
+              -3,
+              5
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              17,
+              19,
+              -23
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "combine",
+            "t": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "combine_vertices_other1_gap0.1_existingTrue",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp (Combine)",
+      "inputs": {
+        "objects": [
+          "vertex",
+          "vertex",
+          "vertex"
+        ],
+        "tol": [
+          1e-05,
+          1e-05
+        ],
+        "ops": [
+          {
+            "op": "set_class_object",
+            "t": 0,
+            "obj": 0,
+            "class": 104
+          },
+          {
+            "op": "set_class_object",
+            "t": 1,
+            "obj": 1,
+            "class": 104
+          },
+          {
+            "op": "set_gap",
+            "t": 0,
+            "g": 0.1
+          },
+          {
+            "op": "set_gap",
+            "t": 1,
+            "g": 0.2
+          },
+          {
+            "op": "set_sss",
+            "t": 0,
+            "p": [
+              -7,
+              11,
+              13
+            ]
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              2,
+              -3,
+              5
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              17,
+              19,
+              -23
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "combine",
+            "t": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "combine_vertices_other1_gap0.2_existingFalse",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp (Combine)",
+      "inputs": {
+        "objects": [
+          "vertex",
+          "vertex",
+          "vertex"
+        ],
+        "tol": [
+          1e-05,
+          1e-05
+        ],
+        "ops": [
+          {
+            "op": "set_class_object",
+            "t": 0,
+            "obj": 0,
+            "class": 104
+          },
+          {
+            "op": "set_class_object",
+            "t": 1,
+            "obj": 1,
+            "class": 104
+          },
+          {
+            "op": "set_gap",
+            "t": 0,
+            "g": 0.2
+          },
+          {
+            "op": "set_gap",
+            "t": 1,
+            "g": 0.1
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              2,
+              -3,
+              5
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              17,
+              19,
+              -23
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "combine",
+            "t": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "combine_vertices_other1_gap0.2_existingTrue",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp (Combine)",
+      "inputs": {
+        "objects": [
+          "vertex",
+          "vertex",
+          "vertex"
+        ],
+        "tol": [
+          1e-05,
+          1e-05
+        ],
+        "ops": [
+          {
+            "op": "set_class_object",
+            "t": 0,
+            "obj": 0,
+            "class": 104
+          },
+          {
+            "op": "set_class_object",
+            "t": 1,
+            "obj": 1,
+            "class": 104
+          },
+          {
+            "op": "set_gap",
+            "t": 0,
+            "g": 0.2
+          },
+          {
+            "op": "set_gap",
+            "t": 1,
+            "g": 0.1
+          },
+          {
+            "op": "set_sss",
+            "t": 0,
+            "p": [
+              -7,
+              11,
+              13
+            ]
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              2,
+              -3,
+              5
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              17,
+              19,
+              -23
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "combine",
+            "t": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "combine_vertex_face_precedence",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp (Combine)",
+      "inputs": {
+        "objects": [
+          "vertex",
+          "vertex",
+          "vertex",
+          {
+            "face": null
+          }
+        ],
+        "tol": [
+          1e-05,
+          1e-05
+        ],
+        "ops": [
+          {
+            "op": "set_class_object",
+            "t": 0,
+            "obj": 0,
+            "class": 104
+          },
+          {
+            "op": "set_class_object",
+            "t": 1,
+            "obj": 3,
+            "class": 102
+          },
+          {
+            "op": "set_sss",
+            "t": 1,
+            "p": [
+              3,
+              5,
+              7
+            ]
+          },
+          {
+            "op": "combine",
+            "t": 0
+          },
+          {
+            "op": "combine",
+            "t": 1
+          }
+        ]
+      }
+    }
+  ]
+}
