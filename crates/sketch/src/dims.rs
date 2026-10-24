@@ -104,6 +104,28 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
             let p0 = a + d * (p1 - a).dot(d);
             DimFrame::Linear { p0, p1, dir: unit(p1 - p0, normal) }
         }
+        ConcentricDistance { a, b, .. } => {
+            let center = sk.center(a)?;
+            let ra = sk.radius(a)?;
+            let rb = sk.radius(b)?;
+            let mid_angle = match sk.curves.get(a).map(|c| &c.kind) {
+                Some(CurveKind::Arc { .. }) => match sk.segs(a).first() {
+                    Some(solidcraft_geom::Seg2::Arc { start, sweep, .. }) => start + sweep * 0.5,
+                    _ => std::f64::consts::FRAC_PI_4,
+                },
+                _ => match sk.curves.get(b).map(|c| &c.kind) {
+                    Some(CurveKind::Arc { .. }) => match sk.segs(b).first() {
+                        Some(solidcraft_geom::Seg2::Arc { start, sweep, .. }) => start + sweep * 0.5,
+                        _ => std::f64::consts::FRAC_PI_4,
+                    },
+                    _ => std::f64::consts::FRAC_PI_4,
+                },
+            };
+            let u = Vec2::from_angle(mid_angle);
+            let p0 = center + u * ra;
+            let p1 = center + u * rb;
+            DimFrame::Linear { p0, p1, dir: unit(p1 - p0, u) }
+        }
         Radius { c, .. } | Diameter { c, .. } => {
             let (radius, arc) = match sk.curves.get(c)?.kind {
                 CurveKind::Ellipse { r, .. } => (r, None),
@@ -219,6 +241,7 @@ pub fn dim_reach(sk: &Sketch, k: &ConstraintKind) -> [Option<(Vec2, Vec2)>; 2] {
         PointLineDistance { p, l, .. } => (p, l, true),
         LinearDiameter { p, l, .. } => (p, l, false),
         LineCircleDistance { l, .. } => return [line_ends(sk, l), None],
+        ConcentricDistance { .. } => return [None, None],
         _ => return [None, None],
     };
     let Some((a, b)) = line_ends(sk, l) else { return [None, None] };
