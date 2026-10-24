@@ -5,6 +5,7 @@ use crate::{Error, Result, Settings};
 
 pub const MAX_SETTINGS_BYTES: usize = 1 << 20;
 const FORMAT: &str = "solidcraft-connections/1";
+const PINNED_FORMAT: &str = "solidcraft-connections/2";
 
 /// Retain optional fields understood by a newer compatible client when changing settings.
 pub struct Configuration(Value);
@@ -21,7 +22,7 @@ impl Configuration {
             return Err(Error::Storage("connection settings are too large".into()));
         }
         let value: Value = serde_json::from_slice(bytes).map_err(|e| Error::Invalid(e.to_string()))?;
-        if value.get("format").and_then(Value::as_str) != Some(FORMAT) {
+        if !matches!(value.get("format").and_then(Value::as_str), Some(FORMAT | PINNED_FORMAT)) {
             return Err(Error::UpgradeRequired("connection settings format".into()));
         }
         let config = Self(value);
@@ -46,13 +47,20 @@ impl Configuration {
                 if let Some(old) = previous.get("connections").and_then(Value::as_array).and_then(|entries| {
                     entries.iter().find(|old| old.get("id").and_then(Value::as_str) == connection.get("id").and_then(Value::as_str))
                 }) {
+                    let unpinned = connection.get("git_remote").is_none();
                     merge_optional(connection, old);
+                    if unpinned && let Some(fields) = connection.as_object_mut() {
+                        fields.remove("git_remote");
+                    }
                 }
             }
         }
         merge_optional(&mut next, previous);
         let mut updated = self.0.clone();
         updated["settings"] = next;
+        if settings.connections.iter().any(|c| c.git_remote.is_some()) {
+            updated["format"] = PINNED_FORMAT.into();
+        }
         let bytes = serde_json::to_vec_pretty(&updated).map_err(|e| Error::Invalid(e.to_string()))?;
         if bytes.len() > MAX_SETTINGS_BYTES {
             return Err(Error::Storage("connection settings are too large".into()));
@@ -86,10 +94,26 @@ mod tests {
         assert_eq!(saved["settings"]["connections"][0]["note"], "other");
         assert_eq!(saved["settings"]["connections"][1]["note"], "keep");
         assert_eq!(Configuration::read(&bytes).unwrap().settings().unwrap(), settings);
-        assert!(matches!(Configuration::read(br#"{"format":"solidcraft-connections/2","settings":{}}"#), Err(Error::UpgradeRequired(_))));
+        assert!(matches!(Configuration::read(br#"{"format":"solidcraft-connections/3","settings":{}}"#), Err(Error::UpgradeRequired(_))));
         assert!(matches!(
             Configuration::read(br#"{"format":"solidcraft-connections/1","settings":{"connections":[{"authentication":"future"}]}}"#),
             Err(Error::UpgradeRequired(_))
         ));
+    }
+
+    #[test]
+    fn pinned_destinations_use_a_recognizable_version_and_can_be_removed_explicitly() {
+        let mut config = Configuration::default();
+        let connection = crate::Connection {
+            git_remote: Some(crate::GitRemote { fetch: "../remote.git".into(), push: vec!["../mirror.git".into()] }),
+            ..Default::default()
+        };
+        let mut settings = Settings { connections: vec![connection], ..Default::default() };
+        let bytes = config.update(&settings).unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap()["format"], "solidcraft-connections/2");
+        assert_eq!(Configuration::read(&bytes).unwrap().settings().unwrap(), settings);
+        settings.connections[0].git_remote = None;
+        let bytes = config.update(&settings).unwrap();
+        assert_eq!(Configuration::read(&bytes).unwrap().settings().unwrap(), settings);
     }
 }

@@ -490,8 +490,13 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let program_parent = parent.clone();
     let file_parent = parent.clone();
     let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
+    let folder_parent = parent.clone();
     let mut services = Services {
         cloud_host: None,
+        pick_folder: Some(Box::new(move || {
+            let future = folder_parent.clone().pick_folder();
+            Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
+        })),
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The chooser that opens may not be the desktop's own (#10159).
             #[cfg(target_os = "linux")]
@@ -931,6 +936,9 @@ impl Drop for DriverClient {
 }
 
 fn main() -> eframe::Result {
+    if let Some(code) = cloud::askpass() {
+        std::process::exit(code);
+    }
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");

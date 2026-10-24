@@ -1378,9 +1378,8 @@ pub enum Answer {
 pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     let _language = crate::i18n::scope(&app.preferences.language);
     quit_step(app);
-    // Saved, it asks the Capture Position question first (#9736): that question is the one to
-    // answer meanwhile, not this one again.
-    if app.tree.capture_prompt.is_some() {
+    // Capture Position and the cloud destination each have their own prompt.
+    if app.tree.capture_prompt.is_some() || crate::cloud_browser::choosing_destination(app) {
         return;
     }
     let Some(i) = app.docs.closing else { return };
@@ -1480,8 +1479,8 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
 
 /// Resume Close/Quit only after Save As has answered and the write succeeded.
 pub(crate) fn saved_for_close(app: &mut SolveApp) {
-    // Close waits for Capture Position and for the accepted cloud save to finish.
-    if app.tree.capture_prompt.is_some() || app.session.cloud_save_pending() {
+    // Close waits for Capture Position, a cloud destination, and the accepted save.
+    if app.tree.capture_prompt.is_some() || app.session.cloud_save_pending() || crate::cloud_browser::choosing_destination(app) {
         return;
     }
     if !std::mem::take(&mut app.docs.saving) || app.docs.closing.is_none() {
