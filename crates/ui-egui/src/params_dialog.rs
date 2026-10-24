@@ -568,6 +568,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     let expr_id = ui.make_persistent_id("pnew_expr");
     let comment_id = ui.make_persistent_id("pnew_comment");
     let focused_id = ui.memory(|m| [name_id, expr_id, comment_id].into_iter().find(|id| m.has_focus(*id) || m.had_focus_last_frame(*id)));
+    let mut row_ids = vec![name_id, expr_id, comment_id];
     let menu_was_open = egui::Popup::is_any_open(ui.ctx());
     let mut submit = false;
     let mut left = false;
@@ -588,6 +589,8 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
         row.cell(|ui| {
             let units: Vec<_> = UNITS.iter().map(|u| unit_label(u)).collect();
             let response = ui_kit::dropdown(ui, "pnew_unit", &mut d.new_unit, &units);
+            row_ids.push(response.id);
+            left |= response.lost_focus();
             crate::scenario::publish_handle("param:new:unit", response.rect.center());
         });
         let unit = UNITS.get(d.new_unit).copied().unwrap_or("mm");
@@ -617,7 +620,10 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
             submit |= enter_for(ui, focused_id.is_some());
         });
         row.cell(|ui| {
-            discard = ui_kit::bin_button(ui, "Delete").clicked();
+            let response = ui_kit::bin_button(ui, "Delete");
+            row_ids.push(response.id);
+            left |= response.lost_focus();
+            discard = response.clicked();
         });
     });
     if reveal {
@@ -628,15 +634,21 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     let live = if blank { Err(String::new()) } else { new_check(app, d, unit) };
     let valid = !d.new_name.trim().is_empty() && live.is_ok();
     crate::scenario::publish_count("param:new:valid", f64::from(valid));
-    let abandoned = d.new_name.trim().is_empty()
-        && !menu_was_open
-        && ui.input(|i| i.pointer.any_click() && i.pointer.interact_pos().is_some_and(|p| !response.rect.contains(p)));
+    let clicked = ui.input(|i| i.pointer.any_click().then(|| i.pointer.interact_pos()).flatten());
+    let clicked_outside = !menu_was_open && clicked.is_some_and(|p| !response.rect.contains(p));
+    // Losing a cell's focus is not leaving the draft: a click or Tab into another cell
+    // must keep its values and geometry (#4461). The unit menu belongs to the draft too.
+    let left_row = !menu_was_open
+        && !egui::Popup::is_any_open(ui.ctx())
+        && (clicked_outside
+            || (left && !ui.memory(|m| row_ids.iter().any(|id| m.has_focus(*id))) && !clicked.is_some_and(|p| response.rect.contains(p))));
+    let abandoned = d.new_name.trim().is_empty() && clicked_outside;
     if discard || abandoned {
         d.adding = false;
         d.new_name.clear();
         d.new_comment.clear();
         d.new_expr.clear();
-    } else if submit || (left && valid) {
+    } else if submit || (left_row && valid) {
         if blank {
             // Enter after a name, before an expression is typed: on to the expression box. On an
             // empty row (as after an add), the box keeps the focus a single-line Enter gives up.
@@ -1059,6 +1071,58 @@ mod tests {
             let editing = h.app.params.as_ref().unwrap().editing.get("width").cloned();
             assert_eq!(editing.as_deref(), Some("1.1"), "favourite {favourite}, row {row}");
         }
+    }
+
+    #[test]
+    fn a_parameter_draft_stays_in_place_when_switching_fields() {
+        for keyboard in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.step(&json!({"start": "parameters.change"})).unwrap();
+            h.step(&json!({"click": {"handle": "dialog:table:user:add"}})).unwrap();
+            h.step(&json!({"text": "width"})).unwrap();
+            let before = crate::scenario::rect_of("dialog:table:user:new").unwrap();
+            if keyboard {
+                h.step(&json!({"key": "Tab"})).unwrap(); // Unit
+                h.step(&json!({"key": "Tab"})).unwrap(); // Expression
+            } else {
+                h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
+            }
+            assert!(h.app.session.doc.param("width").is_none(), "moving between cells must not save the draft");
+            assert_eq!(crate::scenario::rect_of("dialog:table:user:new"), Some(before), "the draft row must not move");
+            h.step(&json!({"key": "A", "cmd": true})).unwrap();
+            h.step(&json!({"text": "25 mm"})).unwrap();
+            if keyboard {
+                h.step(&json!({"key": "Tab"})).unwrap(); // Comment
+            } else {
+                h.step(&json!({"click": {"handle": "param:new:comment"}})).unwrap();
+            }
+            h.step(&json!({"text": "Overall width"})).unwrap();
+            assert!(h.app.session.doc.param("width").is_none());
+            assert_eq!(crate::scenario::rect_of("dialog:table:user:new"), Some(before));
+            h.step(&json!({"key": "Enter"})).unwrap();
+            let parameter = h.app.session.doc.param("width").unwrap();
+            assert_eq!(parameter.expr, "25 mm");
+            assert_eq!(parameter.comment, "Overall width");
+        }
+    }
+
+    #[test]
+    fn a_parameter_draft_keeps_unit_picks_and_saves_when_leaving_the_row() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:table:user:add"}})).unwrap();
+        h.step(&json!({"text": "width"})).unwrap();
+        h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
+        h.step(&json!({"text": "25 mm"})).unwrap();
+        h.step(&json!({"click": {"handle": "param:new:unit"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Unit:cm"}})).unwrap();
+        assert!(h.app.session.doc.param("width").is_none(), "choosing the draft's unit must not submit it");
+        assert_eq!(h.app.params.as_ref().unwrap().new_unit, 1);
+        h.step(&json!({"click": {"handle": "dialog:Filter"}})).unwrap();
+        assert_eq!(h.app.session.doc.param("width").unwrap().unit, "cm");
+        assert!(h.app.params.as_ref().unwrap().error.is_none());
     }
 
     /// A design with hundreds of chained parameters.
