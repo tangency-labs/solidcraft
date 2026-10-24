@@ -27,6 +27,34 @@ pub const LINE_SIZE: usize = 32;
 /// Placement of an [`InstancedMesh`]: the rows of its rigid move (3 × 4 f32; a point's x, y and z
 /// are each row's dot product with (p, 1)), then its colour (4 × u8).
 pub const INSTANCE_SIZE: usize = 52;
+
+/// The width slot of a lifted line ([`GpuScene::lifted_line`]): the top bit set (a plain line's
+/// width is a positive `f32`, whose top bit is clear), the width in eighths of a pixel (7 bits,
+/// up to 15.9 px), and the two faces' normals in octahedral form (6 bits a component). The
+/// shader reads the slot as `u32` so the bits arrive as they are.
+pub fn lifted_width(width: f32, normals: [[f32; 3]; 2]) -> u32 {
+    let w = if width.is_finite() { (width * 8.0).round().clamp(1.0, 127.0) as u32 } else { 8 };
+    let [a, b] = normals.map(octahedral6);
+    0x8000_0000 | (w << 24) | (b << 12) | a
+}
+
+/// A unit normal in octahedral form, 6 bits a component (12 bits); a zero or non-finite
+/// normal is 0, which reads back as "unknown".
+fn octahedral6(n: [f32; 3]) -> u32 {
+    let l1 = n[0].abs() + n[1].abs() + n[2].abs();
+    if !(l1.is_finite() && l1 > 1e-6) {
+        return 0;
+    }
+    let (mut x, mut y) = (n[0] / l1, n[1] / l1);
+    if n[2] < 0.0 {
+        let (ox, oy) = (x, y);
+        x = (1.0 - oy.abs()) * ox.signum();
+        y = (1.0 - ox.abs()) * oy.signum();
+    }
+    // 1..=63 (0 kept for "unknown"): -1 → 1, 1 → 63.
+    let q = |v: f32| ((v.clamp(-1.0, 1.0) + 1.0) * 31.0).round() as u32 + 1;
+    (q(y).min(63) << 6) | q(x).min(63)
+}
 /// The shader's `U`: the view-projection matrix, 10 `vec4`s (the tenth carries the ambient
 /// occlusion radius), the 8 analysis colours, their flags, the depth direction and the two
 /// whole-body highlight colours (`uniform_bytes`).
@@ -442,6 +470,18 @@ impl GpuScene {
         }
         self.guide_lines.extend_from_slice(&c);
         self.guide_lines.extend_from_slice(&width.to_le_bytes());
+    }
+    /// A thick highlight along an edge (a selected or hovered edge with its halo), lit like a
+    /// thin cylinder around it: its depth is pulled toward the eye by its half width times how
+    /// steeply the faces beside it are seen (`normals`: theirs along the segment; zero when
+    /// unknown), so a face seen at a grazing angle no longer buries part of the band (it showed as
+    /// a thin wedge instead of a line). See [`lifted_width`] for how this travels.
+    pub fn lifted_line(&mut self, a: [f32; 3], b: [f32; 3], c: [u8; 4], width: f32, normals: [[f32; 3]; 2]) {
+        for v in a.iter().chain(&b) {
+            self.lines.extend_from_slice(&v.to_le_bytes());
+        }
+        self.lines.extend_from_slice(&c);
+        self.lines.extend_from_slice(&lifted_width(width, normals).to_le_bytes());
     }
     pub fn line(&mut self, a: [f32; 3], b: [f32; 3], c: [u8; 4], width: f32, on_top: bool) {
         let out = if on_top { &mut self.overlay } else { &mut self.lines };
@@ -1408,7 +1448,7 @@ fn color_layout() -> wgpu::VertexBufferLayout<'static> {
 }
 
 fn line_layout() -> wgpu::VertexBufferLayout<'static> {
-    const A: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Unorm8x4, 3 => Float32];
+    const A: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Unorm8x4, 3 => Uint32];
     wgpu::VertexBufferLayout { array_stride: LINE_SIZE as u64, step_mode: wgpu::VertexStepMode::Instance, attributes: &A }
 }
 

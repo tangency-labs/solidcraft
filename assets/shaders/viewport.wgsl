@@ -482,8 +482,62 @@ struct LOut {
     @location(1) wp: vec3<f32>,
 };
 
+/// A normal from its 12-bit octahedral form (`octahedral6` in view.rs); 0 is unknown (zero).
+fn octahedral(q: u32) -> vec3<f32> {
+    let qx = q & 63u;
+    let qy = (q >> 6u) & 63u;
+    if (qx == 0u || qy == 0u) { return vec3<f32>(0.0); }
+    var x = f32(qx - 1u) / 31.0 - 1.0;
+    var y = f32(qy - 1u) / 31.0 - 1.0;
+    let z = 1.0 - abs(x) - abs(y);
+    if (z < 0.0) {
+        let ox = x;
+        let oy = y;
+        x = (1.0 - abs(oy)) * select(-1.0, 1.0, ox >= 0.0);
+        y = (1.0 - abs(ox)) * select(-1.0, 1.0, oy >= 0.0);
+    }
+    return normalize(vec3<f32>(x, y, z));
+}
+
+/// How steeply the faces beside an edge are seen at `p`: the depth a face gains per pixel across
+/// the edge, in pixels (tan of the angle between its normal and the view), the larger of the two;
+/// 1 when neither is known. Capped, so a face seen exactly edge on does not lift the band far.
+fn grazing(p: vec3<f32>, na: vec3<f32>, nb: vec3<f32>) -> f32 {
+    var toward = normalize(u.back.xyz);
+    if (u.eye.w > 0.5) { toward = normalize(u.eye.xyz - p); }
+    var g = 1.0;
+    for (var i = 0; i < 2; i++) {
+        let n = select(nb, na, i == 0);
+        if (dot(n, n) < 0.25) { continue; }
+        let d = abs(dot(n, toward));
+        g = max(g, sqrt(max(1.0 - d * d, 0.0)) / max(d, 0.02));
+    }
+    return min(g, 50.0);
+}
+
+/// Clip z of the world point `p` (clip position `c`) moved `px` pixels toward the eye: the front
+/// of a thin cylinder around an edge, so the band drawn along it is not buried by a face next to
+/// the edge seen at a grazing angle. Measured on the screen, it is the same at every zoom.
+fn lifted_z(p: vec3<f32>, c: vec4<f32>, px: f32, half: vec2<f32>) -> f32 {
+    let b = normalize(u.back.xyz);
+    var a = vec3<f32>(0.0, 0.0, 1.0);
+    if (abs(b.z) > 0.9) { a = vec3<f32>(1.0, 0.0, 0.0); }
+    let side = normalize(cross(b, a));
+    let cs = u.vp * vec4<f32>(p + side, 1.0);
+    if (cs.w <= 1e-6) { return c.z; }
+    // Pixels per millimetre across the view at the point's depth.
+    let ppm = length((cs.xy / cs.w - c.xy / c.w) * half);
+    if (ppm < 1e-9) { return c.z; }
+    var toward = b;
+    if (u.eye.w > 0.5) { toward = normalize(u.eye.xyz - p); }
+    let q = u.vp * vec4<f32>(p + toward * (px / ppm), 1.0);
+    if (q.w <= 1e-6) { return c.z; }
+    // The same depth at the original w, so the band stays where it was on the screen.
+    return q.z / q.w * c.w;
+}
+
 @vertex
-fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(1) b: vec3<f32>, @location(2) c: vec4<f32>, @location(3) w: f32) -> LOut {
+fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(1) b: vec3<f32>, @location(2) c: vec4<f32>, @location(3) wbits: u32) -> LOut {
     var pa = a;
     var pb = b;
     var ca = u.vp * vec4<f32>(a, 1.0);
@@ -518,11 +572,22 @@ fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(
     // A line thinner than a pixel is drawn a pixel wide, faded by the width it lacks: a narrower
     // quad covers no pixel centre when it falls between two rows, so without multisampling thin
     // lines (the grid's) came and went as the view zoomed (#2823).
-    let wd = max(w, 1.0);
+    // The top bit marks a lifted highlight (`GpuScene::lifted_line`, `lifted_width`); a plain
+    // line's slot is its width as an f32.
+    let lifted = (wbits & 0x80000000u) != 0u;
+    var wa = bitcast<f32>(wbits);
+    if (lifted) { wa = f32((wbits >> 24u) & 127u) / 8.0; }
+    let wd = max(wa, 1.0);
     let off = nrm * s * wd * 0.5 + dir * (t * 2.0 - 1.0) * wd * 0.5;
+    var z = base.z;
+    if (lifted && base.w > 1e-6) {
+        let p = select(pa, pb, t > 0.5);
+        let g = grazing(p, octahedral(wbits & 4095u), octahedral((wbits >> 12u) & 4095u));
+        z = lifted_z(p, base, wd * 0.5 * g + 1.0, half);
+    }
     var o: LOut;
-    o.pos = vec4<f32>(base.xy + off / half * base.w, base.z, base.w);
-    o.c = vec4<f32>(c.rgb, c.a * (w / wd));
+    o.pos = vec4<f32>(base.xy + off / half * base.w, z, base.w);
+    o.c = vec4<f32>(c.rgb, c.a * (wa / wd));
     o.wp = select(pa, pb, t > 0.5);
     return o;
 }

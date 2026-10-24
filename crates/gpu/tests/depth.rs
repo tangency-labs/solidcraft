@@ -182,6 +182,47 @@ fn an_edge_on_a_face_draws_whole_at_any_angle() {
     }
 }
 
+/// A selected edge's highlight (a 3 px core in a 6 px halo, drawn by `GpuScene::lifted_line`
+/// in the highlight scene) lying on a face seen almost edge on draws its whole width: the face
+/// no longer buries part of the band, which showed as a thin wedge instead of a line. The same
+/// band 5 mm behind a face seen square, beside faces seen square, stays hidden.
+#[test]
+fn a_selected_edge_on_a_grazing_face_draws_whole() {
+    let highlight = |a: Vec3, b: Vec3, n: Vec3| {
+        let mut sc = solidcraft_gpu::view::GpuScene::default();
+        sc.lifted_line(a.to_f32(), b.to_f32(), [255, 0, 0, 255], 6.0, [n.to_f32(), n.to_f32()]);
+        sc
+    };
+    let reference = |a: Vec3, b: Vec3| vec![SceneLine { points: vec![a, b], color: Rgb(255, 0, 0), width: 6.0, on_top: true }];
+    for (mode, c) in capturers() {
+        for tilt in [60.0_f64, 80.0, 85.0, 88.0] {
+            let tr = tilt.to_radians();
+            let t = tr.tan();
+            let n = Vec3::new(0.0, -tr.cos(), tr.sin());
+            let (a, b) = (Vec3::new(-12.0, 5.0 * t, 5.0), Vec3::new(12.0, 5.0 * t, 5.0));
+            for radius in [30.0, 17_000.0] {
+                for fov in [0.0, 0.6] {
+                    let (plain, cam) = front(sheet(tr), Vec::new(), radius, fov);
+                    let (top, _) = front(sheet(tr), reference(a, b), radius, fov);
+                    let shown = pixels(&c.rgba_highlighted(&plain, Some(highlight(a, b, n)), &cam, 200, 200).unwrap()).filter(|p| red(*p)).count();
+                    let all = red_pixels(c, &top, &cam);
+                    assert!(all > 100, "{mode}: the band itself ({all} px)");
+                    assert!(shown * 10 >= all * 9, "{mode} depth, tilt {tilt}°, radius {radius}, fov {fov}: {shown} of {all} px drawn");
+                }
+            }
+        }
+        for radius in [30.0, 17_000.0] {
+            for fov in [0.0, 0.6] {
+                let (a, b) = (Vec3::new(-12.0, 5.0, 5.0), Vec3::new(12.0, 5.0, 5.0));
+                let (plain, cam) = front(sheet(0.0), Vec::new(), radius, fov);
+                let img = c.rgba_highlighted(&plain, Some(highlight(a, b, Vec3::new(0.0, -1.0, 0.0))), &cam, 200, 200).unwrap();
+                let n = pixels(&img).filter(|p| red(*p)).count();
+                assert_eq!(n, 0, "{mode} depth, radius {radius}, fov {fov}: the band behind shows in {n} px");
+            }
+        }
+    }
+}
+
 /// An edge 0.5 mm behind a face seen square is hidden, however large the design: lines were pulled
 /// toward the eye by a share of the depth range, about 27 mm in a design 34 m across.
 #[test]

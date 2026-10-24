@@ -2103,15 +2103,44 @@ fn mesh_tris(sc: &mut GpuScene, m: &solidcraft_engine::geom::Mesh, col: [u8; 4],
 
 /// A highlighted edge: a halo and a core, and where the model hides it, the core dimmed (so a
 /// pick on the far side still shows).
-fn edge_lines(sc: &mut GpuScene, e: &[Vec3], core: Color32, halo: Color32, w: f32) {
+fn edge_lines(sc: &mut GpuScene, e: &[Vec3], core: Color32, halo: Color32, w: f32, normals: &[[[f32; 3]; 2]]) {
     for (col, width) in [(halo, w + 3.0), (core, w)] {
-        for p in e.windows(2) {
-            sc.line(p[0].to_f32(), p[1].to_f32(), c4(col), width, false);
+        for (i, p) in e.windows(2).enumerate() {
+            let n = normals.get(i).copied().unwrap_or_default();
+            sc.lifted_line(p[0].to_f32(), p[1].to_f32(), c4(col), width, n);
         }
     }
     for p in e.windows(2) {
         sc.hidden_line(p[0].to_f32(), p[1].to_f32(), c4(core.gamma_multiply(0.45)), (w * 0.7).max(1.0));
     }
+}
+
+/// The normals of the faces beside an edge, for each of its segments (the two most different
+/// ones found at the segment's ends; zero where none is found), so its highlight can be lifted
+/// over a face seen at a grazing angle (`GpuScene::lifted_line`). One pass over the mesh's
+/// vertices: the tessellation shares the edge's points with the faces on either side.
+fn edge_normals(m: &solidcraft_engine::geom::Mesh, e: &[Vec3]) -> Vec<[[f32; 3]; 2]> {
+    let tol = m.bounds().diagonal().max(1.0) * 1e-7;
+    let key = |p: Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
+    let mut at: std::collections::HashMap<(i64, i64, i64), Vec<Vec3>> = e.iter().map(|p| (key(*p), Vec::new())).collect();
+    for (p, n) in m.positions.iter().zip(&m.normals) {
+        if let Some(list) = at.get_mut(&key(*p))
+            && list.len() < 8
+        {
+            list.push(*n);
+        }
+    }
+    e.windows(2)
+        .map(|w| {
+            let mut found: Vec<Vec3> = Vec::new();
+            for p in w {
+                found.extend(at.get(&key(*p)).into_iter().flatten().copied());
+            }
+            let Some(first) = found.first().copied() else { return [[0.0; 3]; 2] };
+            let other = found.iter().copied().min_by(|a, b| a.dot(first).total_cmp(&b.dot(first))).unwrap_or(first);
+            [first.to_f32(), other.to_f32()]
+        })
+        .collect()
 }
 
 /// The outline of a highlighted face where the model hides it (dimmed).
@@ -2496,9 +2525,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             Sel::Edge { body, index, point } => {
                 if let Some(b) = st.body(body)
                     && app.session.body_visible(body)
-                    && let Some(e) = edge_of(&drawn_mesh(app, b), *index, *point)
                 {
-                    edge_lines(&mut feedback, e, t.sel_edge, t.sel_edge_rim, 3.0);
+                    let m = drawn_mesh(app, b);
+                    if let Some(e) = edge_of(&m, *index, *point) {
+                        edge_lines(&mut feedback, e, t.sel_edge, t.sel_edge_rim, 3.0, &edge_normals(&m, e));
+                    }
                 }
             }
             Sel::Profile { sketch, index } => profile_fill(&mut feedback, app, *sketch, *index, t.sel_profile, t.sel_profile_edge),
@@ -2599,7 +2630,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         }
         for (ei, e) in m.edges.iter().enumerate() {
             if m.edge_pickable(ei) && (whole || m.edge_faces.get(ei).is_some_and(|fs| fs.iter().any(|f| faces.contains(&(*f as usize))))) {
-                edge_lines(&mut feedback, e, t.hover_edge, t.hover_edge_halo, 1.5);
+                edge_lines(&mut feedback, e, t.hover_edge, t.hover_edge_halo, 1.5, &[]);
             }
         }
     }
@@ -2639,7 +2670,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     if let Some(p) = m.edges.get(e)
                         && m.edge_pickable(e)
                     {
-                        edge_lines(&mut feedback, p, t.hover_edge, t.hover_edge_halo, 1.5);
+                        edge_lines(&mut feedback, p, t.hover_edge, t.hover_edge_halo, 1.5, &[]);
                     }
                 }
             }
@@ -2651,7 +2682,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 for i in m.circular_rim(*index) {
                     let selected = sel.iter().any(|x| matches!(x, Sel::Edge { body: b, index: j, .. } if b == body && *j == i));
                     if !selected && let Some(e) = if i == *index { edge_of(&m, i, *mid) } else { m.edges.get(i) } {
-                        edge_lines(&mut feedback, e, t.hover_edge, t.hover_edge_halo, 2.0);
+                        edge_lines(&mut feedback, e, t.hover_edge, t.hover_edge_halo, 2.0, &edge_normals(&m, e));
                     }
                 }
             }

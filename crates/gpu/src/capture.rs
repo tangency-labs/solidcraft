@@ -170,6 +170,12 @@ impl Capturer {
 
     /// `scene` seen by `cam`, `width` × `height` pixels: straight RGBA, rows top to bottom.
     pub fn rgba(&self, scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<Vec<u8>> {
+        self.rgba_highlighted(scene, None, cam, width, height)
+    }
+
+    /// [`Capturer::rgba`] with `highlight` drawn as the viewport draws its highlight scene
+    /// (selection and hover feedback), over the model scene.
+    pub fn rgba_highlighted(&self, scene: &Scene, highlight: Option<GpuScene>, cam: &Camera, width: u32, height: u32) -> Result<Vec<u8>> {
         if !(1..=self.max_side).contains(&width) || !(1..=self.max_side).contains(&height) {
             return Err(GpuError::Render(format!("a picture is 1 to {} pixels a side, not {width} × {height}", self.max_side)));
         }
@@ -187,7 +193,11 @@ impl Capturer {
             }
             _ => None,
         };
-        let frame = frame(scene, cam, [width, height], state.key, access);
+        let mut frame = frame(scene, cam, [width, height], state.key, access);
+        if let Some(h) = highlight {
+            frame.hl_key = state.key;
+            frame.hl_slot = Arc::new(Mutex::new(Some(h)));
+        }
         let (device, queue) = (&self.device, &self.queue);
         let scopes = error_scopes(device);
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
