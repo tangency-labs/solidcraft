@@ -310,6 +310,7 @@ mod curved_seam_round;
 mod flush_join_loft;
 mod gltf_import;
 mod import_component;
+mod kicad_import;
 mod large_step_import;
 mod loft_cut;
 mod loft_ring;

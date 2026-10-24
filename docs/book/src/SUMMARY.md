@@ -34,6 +34,7 @@
 - [Reference tests](dev/oracle.md)
 - [Features](dev/features.md)
 - [STEP import](dev/step-import.md)
+- [KiCad PCB import](dev/kicad-import.md)
 
 # Reference
 

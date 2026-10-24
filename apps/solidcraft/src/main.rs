@@ -126,7 +126,7 @@ impl eframe::App for App {
         }
         #[cfg(target_os = "macos")]
         for f in if self.solve.file_picker_busy() { Vec::new() } else { open_documents::take() } {
-            self.solve.open_path_async(&f);
+            self.solve.open_chosen_file(&f);
         }
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
@@ -770,7 +770,7 @@ fn main() -> eframe::Result {
                 [files, open_documents::take()].concat()
             };
             for f in &files {
-                app.open_path_async(f);
+                app.open_chosen_file(f);
             }
             // No file and no sample: the empty design takes Units of new designs (#1205).
             // An opened file and the sample part keep the units they were saved or built with.

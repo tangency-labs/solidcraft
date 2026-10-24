@@ -24,6 +24,8 @@ pub enum ImportTarget {
     Brep,
     /// Mesh read as a MeshImport feature (`doc.open` / `file.insert_mesh`).
     Mesh,
+    /// A KiCad board, read by the importer into a substrate, copper and models (`doc.open`).
+    Board,
     /// A 2D drawing read into the active sketch (`sketch.insert_dxf` / `sketch.insert_svg`).
     Sketch,
 }
@@ -256,6 +258,14 @@ pub static FORMATS: &[FormatSpec] = &[
         export: None,
     },
     FormatSpec {
+        id: "kicad-pcb",
+        label: "KiCad PCB",
+        extensions: &["kicad_pcb", "kicad_pro"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::Board, options: &[], native_only: false }),
+        export: None,
+    },
+    FormatSpec {
         id: "urdf",
         label: "URDF robot",
         extensions: &["urdf"],
@@ -374,6 +384,7 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
             ImportTarget::Brep if import.native_only => add("FreeCAD and Rhino", f.extensions),
             ImportTarget::Brep => add(f.label, f.extensions),
             ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
+            ImportTarget::Board => add(f.label, f.extensions),
             ImportTarget::Sketch => add("Sketch drawings (DXF, SVG)", f.extensions),
         }
     }
@@ -418,6 +429,12 @@ mod tests {
         }
         for e in ["3mf", "stl", "obj", "glb", "gltf"] {
             assert!(with_target(ImportTarget::Mesh).contains(&e), "registry misses mesh .{e}");
+        }
+        for e in with_target(ImportTarget::Board) {
+            assert!(crate::is_kicad_path(&format!("board.{e}")), "is_kicad_path misses .{e}");
+        }
+        for e in ["kicad_pcb", "kicad_pro"] {
+            assert!(with_target(ImportTarget::Board).contains(&e), "registry misses board .{e}");
         }
         for e in with_target(ImportTarget::Design) {
             assert!(crate::is_design_path(&format!("part.{e}")), "is_design_path misses .{e}");

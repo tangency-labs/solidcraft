@@ -63,6 +63,28 @@ pub(crate) enum Tree<'a> {
     Mesh(&'a solidcraft_io::MeshPlan),
 }
 
+/// Add a STEP file's solids to an existing component: the exact part of an import whose other
+/// bodies are meshes (a KiCad board's substrate next to its copper).
+pub(crate) fn add_step_in_component(s: &mut Session, component: u64, file: &str, step: String, feature_name: &str) -> Result<u64> {
+    let imp = solidcraft_kernel::step_import_shared(&step).map_err(|e| EngineError::Other(format!("import: {e}")))?;
+    let kind = FeatureKind::Import { file: file.to_string(), step: step.into(), components: imp.tree.clone(), skip: Vec::new() };
+    let id = s.doc_mut().add_feature(kind, Some(feature_name))?;
+    if let Some(f) = s.doc_mut().feature_mut(id) {
+        f.component = component;
+    }
+    s.refresh();
+    if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
+        return Err(EngineError::Other(e));
+    }
+    let names: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
+    let d = s.doc_mut();
+    for name in names {
+        d.body_components.insert(name, component);
+    }
+    s.refresh();
+    Ok(id)
+}
+
 /// Can the components of `plan` be made as it says? (Otherwise its bodies are built in place.)
 pub(crate) fn mesh_plan_fits(plan: &solidcraft_io::MeshPlan) -> bool {
     Plan::of_mesh(plan).is_some()

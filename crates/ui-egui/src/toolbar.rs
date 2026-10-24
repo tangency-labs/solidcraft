@@ -552,11 +552,7 @@ impl FileAction {
         }
         match self {
             Self::New => crate::documents::new_design(app),
-            Self::Open => app.pick_open(|app, path| {
-                if let Some(path) = path {
-                    app.open_path_async(&path);
-                }
-            }),
+            Self::Open => app.pick_open_file(),
             Self::Save => save(app),
             Self::SaveAs => save_as(app),
             Self::Undo => drop(app.run("edit.undo", json!({}))),
@@ -612,7 +608,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     close = true;
                 }
                 if item(ui, &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open") {
-                    FileAction::Open.run(app);
+                    app.pick_open_file();
                     close = true;
                 }
                 crate::ui_kit::Menu::button(ui, app.tr("ui.open_recent"), |ui| {
@@ -1977,11 +1973,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::N => crate::documents::new_design(app),
                 Key::Comma => crate::prefs::open_at(app, 0),
                 Key::O => {
-                    app.pick_open(|app, path| {
-                        if let Some(path) = path {
-                            app.open_path_async(&path);
-                        }
-                    });
+                    app.pick_open_file();
                 }
                 _ if !shown => {}
                 Key::Z => drop(app.run("edit.undo", json!({}))),

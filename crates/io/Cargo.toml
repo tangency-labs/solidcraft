@@ -12,6 +12,7 @@ workspace = true
 solidcraft-geom = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
+solidcraft-sketch = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 zip = { workspace = true }
