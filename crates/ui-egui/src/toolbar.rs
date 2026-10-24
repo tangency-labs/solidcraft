@@ -1931,6 +1931,22 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     if app.file_load.busy() {
         return;
     }
+    // File is a custom Area, so it must claim Escape before the underlying editors and
+    // sketch shortcuts. Clear raw events too: egui may replay them on a layout pass.
+    let file_menu_id = egui::Id::new("sc_file_menu");
+    if !app.native_file_menu
+        && ctx.data(|d| d.get_temp::<bool>(file_menu_id).unwrap_or(false))
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        ctx.data_mut(|d| d.insert_temp(file_menu_id, false));
+        egui::Popup::close_all(ctx);
+        ctx.input_mut(|i| {
+            i.raw.events.retain(|event| !matches!(event, egui::Event::Key { key: egui::Key::Escape, modifiers, .. } if modifiers.matches_logically(egui::Modifiers::NONE)));
+        });
+        app.esc_handled = true;
+        app.last_escape = None;
+        return;
+    }
     // The Keyboard Shortcuts window is waiting for a key: it is not a shortcut.
     if crate::keymap::capturing(app) {
         // Parameters is drawn before Preferences; do not let its footer see this Escape.
@@ -2069,6 +2085,50 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod header_report_tests {
     use super::*;
+
+    #[test]
+    fn escape_closes_file_menu_on_home_and_over_a_sketch_without_cancelling_it() {
+        for home in [true, false] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+            h.app.start("sketch.line");
+            h.app.home.open = home;
+            h.frames(3);
+            let sketch = h.app.session.active_sketch;
+            let before = h.app.session.doc.to_json();
+            let menu_open = |h: &crate::scenario::Harness| h.ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_file_menu")).unwrap_or(false));
+            h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+            assert!(menu_open(&h));
+            h.app.last_escape = Some(h.ctx.input(|i| i.time));
+            h.step(&json!({"key":"Escape"})).unwrap();
+            assert!(!menu_open(&h), "Escape closes File on Home and in the design");
+            assert_eq!(h.app.home.open, home);
+            assert_eq!(h.app.session.active_sketch, sketch);
+            assert!(h.app.tool.is_some(), "closing File must not cancel the sketch tool");
+            assert_eq!(h.app.session.doc.to_json(), before);
+            assert!(h.app.last_escape.is_none(), "closing File must not arm Finish Sketch");
+        }
+    }
+
+    #[test]
+    fn escape_closes_file_menu_before_parameters_and_preserves_selection() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("parameters.change", json!({"name":"width","expression":"10 mm"})).unwrap();
+        h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "XY".into() }];
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.selection.clone());
+        h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+        assert!(h.ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_file_menu")).unwrap_or(false)));
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(!h.ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_file_menu")).unwrap_or(false)));
+        assert!(h.app.params.is_some(), "the first Escape belongs to File");
+        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.selection.clone()));
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(h.app.params.is_none(), "the next Escape still closes Parameters");
+        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.selection.clone()));
+    }
 
     #[test]
     fn native_file_menu_replaces_window_button_and_preserves_fallback() {
