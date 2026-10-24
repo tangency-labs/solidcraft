@@ -91,6 +91,11 @@ from the Start menu after you sign in again. From 0.11.1 the setting can also li
 `graphics.json` in the settings folder, as `{"msaa": 4, "backend": "dx12"}` (`auto` is the
 order above). Safe mode ignores it and always uses the software renderer.
 
+With OpenGL on Windows, the window has the Windows title bar above SolidCraft's application bar
+instead of using the application bar as its title bar. Some OpenGL drivers (older Intel HD and
+UHD graphics) otherwise show the picture a title bar's height lower than the window, so clicks
+land above what they point at.
+
 ## SolidCraft restarted, saying the graphics device was reset
 
 When the graphics driver stops responding, the system resets it (on Windows, "Display driver

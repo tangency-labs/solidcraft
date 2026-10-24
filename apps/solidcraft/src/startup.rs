@@ -208,6 +208,17 @@ pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
     adapters.iter().any(|a| a.get_info().device_type != eframe::wgpu::DeviceType::Cpu)
 }
 
+/// Windows with OpenGL: the window keeps the system title bar (#2063). The window without OS
+/// decorations keeps its caption style while having no frame, and some OpenGL drivers (older
+/// Intel HD/UHD) then show the picture a caption's height lower than the window, so it no longer
+/// lines up with the pointer. Direct3D 12 and Vulkan draw it in place and keep the application bar
+/// as the title bar. `backends` are the ones wgpu starts: OpenGL alone is decided before the
+/// window opens.
+pub fn system_title_bar(windows: bool, backends: eframe::wgpu::Backends) -> bool {
+    use eframe::wgpu::Backends;
+    windows && backends.contains(Backends::GL) && !backends.intersects(Backends::DX12 | Backends::VULKAN)
+}
+
 /// The message shown when no window could be opened at all.
 pub fn no_window_message(error: &str, settings: Option<&Path>) -> String {
     let folder = settings.map(|d| d.display().to_string()).unwrap_or_else(|| "the SolidCraft settings folder".into());
@@ -320,6 +331,18 @@ mod tests {
         // `auto` and blanks are the default order.
         assert_eq!(choose_backends(true, false, false, Some(" auto "), probe(&[Backends::DX12])), Some(Backends::DX12));
         assert_eq!(choose_backends(true, false, false, Some(""), probe(&[Backends::GL])), Some(Backends::GL));
+    }
+
+    #[test]
+    fn only_opengl_on_windows_gets_the_system_title_bar() {
+        use eframe::wgpu::Backends;
+        assert!(system_title_bar(true, Backends::GL));
+        for b in [Backends::DX12, Backends::VULKAN, Backends::DX12 | Backends::GL, Backends::VULKAN | Backends::GL, Backends::all()] {
+            assert!(!system_title_bar(true, b), "{b:?}");
+        }
+        for b in [Backends::GL, Backends::VULKAN, Backends::METAL] {
+            assert!(!system_title_bar(false, b), "{b:?}");
+        }
     }
 
     #[test]
