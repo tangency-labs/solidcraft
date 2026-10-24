@@ -4771,19 +4771,40 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("center".into(), pt_expr(center));
             d
         }
-        FeatureKind::Coil { base, axis, diameter, pitch, turns, section_size, section, position, start_angle, clockwise, operation, targets } => {
+        FeatureKind::Coil {
+            base,
+            axis,
+            sketch,
+            profiles,
+            diameter,
+            pitch,
+            turns,
+            section_size,
+            section,
+            position,
+            start_angle,
+            clockwise,
+            operation,
+            targets,
+        } => {
             let mut d = start("solid.coil")?;
             d.kind = Kind::Primitive {
                 cmd: "solid.coil",
                 fields: vec![
-                    ("diameter", stored_length(s, diameter)),
+                    ("diameter", diameter.as_ref().map(|e| stored_length(s, e)).unwrap_or_default()),
                     ("revolutions", turns.to_string()),
                     ("pitch", stored_length(s, pitch)),
-                    ("section_size", stored_length(s, section_size)),
+                    ("section_size", section_size.as_ref().map(|e| stored_length(s, e)).unwrap_or_default()),
                 ],
                 operation: op_index(operation),
                 at: None,
             };
+            if let Some(sketch) = sketch {
+                let items = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
+                if let Some(inp) = d.inputs.get_mut(0) {
+                    inp.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
+                }
+            }
             d.extra.insert("base".into(), pt_expr(base));
             d.extra.insert("axis".into(), pt3(axis.0));
             if *section == solidcraft_engine::doc::CoilSection::Square {
