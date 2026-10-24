@@ -20,6 +20,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
     });
+    crate::settings_profiles::section(app, ui, labels);
     ui_kit::settings_section(ui, "saving", app.tr("prefs.saving"), |ui| {
         ui_kit::settings_block_hint(ui, app.tr("ui.autosave_every"), crate::i18n::tr_label("0 turns it off"), labels, |ui| {
             ui.horizontal(|ui| {

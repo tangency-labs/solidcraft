@@ -43,6 +43,7 @@ use serde_json::Value;
 use solidcraft_doc::{Document, Model, ModelState};
 use solidcraft_geom::Vec3;
 
+pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{
     Addition, CommandInfo, CommandSpec, addition, auto_operation, command_specs, dimension_roles, extrude_reach, find_command, resolve_design_links,
     shown_scope, standard_view,

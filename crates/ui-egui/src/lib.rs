@@ -225,6 +225,9 @@ pub mod scenario;
 pub(crate) mod scene_palette;
 pub mod select_other;
 pub mod selection;
+pub mod settings_profiles;
+#[cfg(test)]
+mod settings_profiles_tests;
 pub mod shell;
 #[cfg(test)]
 mod shell_face_sketch_ui_tests;
@@ -514,6 +517,8 @@ pub struct SolveApp {
     pub install_steps: Option<install::Steps>,
     /// Toolbar buttons the user pinned, removed or reordered.
     pub toolbar_custom: toolbar_custom::ToolbarCustom,
+    /// Named settings profiles (#6237).
+    pub settings_profiles: settings_profiles::Profiles,
     /// Preferences kept between runs, and their window.
     pub preferences: prefs::Prefs,
     pub prefs_window: prefs::PrefsWindow,
@@ -728,6 +733,7 @@ impl SolveApp {
             updater: update::Updater::default(),
             install_steps: None,
             toolbar_custom: toolbar_custom::ToolbarCustom::default(),
+            settings_profiles: settings_profiles::Profiles::default(),
             preferences: prefs::Prefs::default(),
             prefs_window: prefs::PrefsWindow::default(),
             slicer_menu: dialogs_save_mesh::SlicerMenu::default(),
@@ -927,6 +933,7 @@ impl SolveApp {
             "shortcut_box": self.sbox.prefs(),
             "shortcuts": self.keymap.prefs(),
             "toolbar": self.toolbar_custom.prefs(),
+            "settings_profiles": self.settings_profiles.prefs(),
             "autosave_minutes": self.autosave_minutes,
             "ground_shadow": self.ui.ground_shadow,
             "agent_cursor": self.ui.agent_cursor,
@@ -994,6 +1001,9 @@ impl SolveApp {
         }
         if let Some(t) = v.get("toolbar") {
             self.toolbar_custom.load(t);
+        }
+        if let Some(p) = v.get("settings_profiles") {
+            self.settings_profiles.load(p);
         }
         if let Some(mut p) = v.get("preferences").filter(|p| p.is_object()).map(prefs::lenient) {
             if !prefs::MSAA.contains(&p.msaa) {
@@ -1264,6 +1274,11 @@ impl SolveApp {
             // Curves drawn in construction (or centerline) mode take that line type.
             sketch_palette::apply_mode(self, id, v);
         }
+        // Settings profiles live in the app: the engine only checked the parameters.
+        let r = match r {
+            Ok(v) if id.starts_with("settings.profile.") => settings_profiles::command(self, id, &v),
+            r => r,
+        };
         self.finish_command(id, &r);
         if render_workspace::active(self)
             && matches!(id, "appearance.assign" | "appearance.paste")
@@ -1501,6 +1516,11 @@ impl SolveApp {
         }
         if id == "view.history_layout" {
             let _ = self.run(id, json!({}));
+            return;
+        }
+        // Profiles are named and picked in Preferences.
+        if id.starts_with("settings.profile.") {
+            prefs::open_at(self, prefs::PAGE_GENERAL);
             return;
         }
         if id == "view.ambient_occlusion" {
