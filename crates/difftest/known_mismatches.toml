@@ -310,3 +310,13 @@ why = "merge ray fire on a created operand: primitive surfaces are owned under n
 unit = "topology.brep_p10"
 case = "project_t0_Defeature_brep1"
 why = "ProjectAndTrim removes every face; C++ keeps the former solid region as the infinite region, the port keeps the original one (its SmTopology fields differ: cpp 99999999, rust 0) (plan/findings.md: 'topology.brep_p10 project_t0_Defeature_brep1: the region left after ProjectAndTrim')"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "gen0000"
+why = "Rust ManifoldBoolean Difference drops a fully contained, non-intersecting inset shell: C++ hollow box 12 faces, Rust the original 6 (plan/findings.md: 'offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference')"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "gen0003"
+why = "Rust ManifoldBoolean Difference drops a fully contained, non-intersecting inset shell: C++ hollow box 12 faces, Rust the original 6 (plan/findings.md: 'offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference')"

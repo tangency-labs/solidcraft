@@ -40,8 +40,11 @@
 //! Edge-offset preparation and gap handling are shared with p2. Preparation can split
 //! result edges and notify through caller-owned stores, using either an external
 //! `NotifyEnv` or the actual kernel context. Geometry creators are ported separately;
-//! their cross-arena executive/SSI adapters remain explicit partial boundaries.
-//! Vertex caps use the shared geometry creator through a typed cross-arena adapter.
+//! vertex and edge caps use the shared creator through typed cross-arena adapters
+//! (`EdgeuseOffset` edits both B-reps through the caller's stores and selected
+//! context, and reads edge-use marks from the stores' records, or from the calling
+//! loop's set inside p2). Cap faces are built with the caller's result identities.
+//! The executive's creator snapshot keeps its angular tolerance.
 //! `BuildOffsetOfFaceuse` moves the offset surface into `MakeFaceWithCurves` (upstream
 //! hands over the pointer); a failed constructor drops it and, as upstream, relates no
 //! face. Its `SmSSIData` UV curves are cloned into the merge input; a missing entry,
@@ -54,7 +57,7 @@
 //! the offset B-rep alone (both upstream operands are that B-rep); it notifies under
 //! `DELETE_FACES_NAMESPACE` rather than the caller's offset keys.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::boolean::merge::p4::KernelManifoldIntersector;
 use crate::curve::curve::{Curve, CurveKind};
@@ -76,6 +79,8 @@ use crate::math::{Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::offset::offset_geometry_creation::{OffsetGeometryCreation, SsiData};
+
+use super::edgeuse::{CapNotifications, MarkSource};
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
@@ -654,14 +659,17 @@ impl OffsetExecutive {
         Ok(())
     }
 
-    /// Builds edge cap offsets. Notifications use distinct original/result object keys;
-    /// `offset_curve_ref` identifies offset edge curves split while synchronizing. The
-    /// geometry creation itself remains owned by `offset.offset_geometry_creation`.
+    /// Builds edge cap offsets (`BuildOffsetOfEdgeuses`). Notifications use distinct
+    /// original/result object keys; `offset_curve_ref` identifies offset edge curves
+    /// split while synchronizing. Every synchronized pair reaches the shared
+    /// `EdgeuseOffset` creator; a cap surface becomes a face of the offset B-rep that
+    /// the original edge is related to. Edge-use marks are read from the stores'
+    /// topology records under `mark_type`.
     #[allow(clippy::too_many_arguments)]
     pub fn build_offset_of_edgeuses(
         &mut self,
         kernel: &mut Kernel,
-        original: &Brep,
+        original: &mut Brep,
         edgeuse: EdgeuseId,
         other: EdgeuseId,
         mark_type: MarkType,
@@ -675,13 +683,14 @@ impl OffsetExecutive {
             edgeuse,
             other,
             mark_type,
+            MarkSource::Records,
             &mut NotifyState::from_env(notifications),
             offset_key_of,
             offset_curve_ref,
         )
     }
 
-    /// Builds the edge-offset prefix with real caller stores and the kernel context.
+    /// Builds the edge cap offsets with real caller stores and the kernel context.
     /// `notifications.key_of` identifies source entities; `offset_key_of` identifies
     /// result entities, including any edges created by synchronization. `mark_type`
     /// is the existing traversal mark, not a request to acquire or advance one.
@@ -689,7 +698,7 @@ impl OffsetExecutive {
     pub fn build_offset_of_edgeuses_with_kernel_context(
         &mut self,
         kernel: &mut Kernel,
-        original: &Brep,
+        original: &mut Brep,
         edgeuse: EdgeuseId,
         other: EdgeuseId,
         mark_type: MarkType,
@@ -703,6 +712,35 @@ impl OffsetExecutive {
             edgeuse,
             other,
             mark_type,
+            MarkSource::Records,
+            &mut NotifyState::from_kernel_stores(notifications),
+            offset_key_of,
+            offset_curve_ref,
+        )
+    }
+
+    /// As [`Self::build_offset_of_edgeuses_with_kernel_context`], with the original
+    /// edge uses the calling loop has marked as the mark source.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn build_offset_of_edgeuses_with_marked(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &mut Brep,
+        edgeuse: EdgeuseId,
+        other: EdgeuseId,
+        mark_type: MarkType,
+        marked: &BTreeSet<EdgeuseId>,
+        notifications: &mut NotificationStores<'_>,
+        offset_key_of: &dyn Fn(EntityRef) -> ObjectRef,
+        offset_curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
+    ) -> Result<()> {
+        self.build_offset_of_edgeuses_with_state(
+            kernel,
+            original,
+            edgeuse,
+            other,
+            mark_type,
+            MarkSource::Set(marked),
             &mut NotifyState::from_kernel_stores(notifications),
             offset_key_of,
             offset_curve_ref,
@@ -713,10 +751,11 @@ impl OffsetExecutive {
     fn build_offset_of_edgeuses_with_state(
         &mut self,
         kernel: &mut Kernel,
-        original: &Brep,
+        original: &mut Brep,
         edgeuse: EdgeuseId,
         other: EdgeuseId,
-        _mark_type: MarkType,
+        mark_type: MarkType,
+        marks: MarkSource<'_>,
         notifications: &mut NotifyState<'_>,
         offset_key_of: &dyn Fn(EntityRef) -> ObjectRef,
         offset_curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
@@ -732,18 +771,19 @@ impl OffsetExecutive {
         else {
             return Ok(());
         };
-        // Geometry creation is unconditional on the first pair, so no later
-        // iteration is reachable until EdgeuseOffset is available.
-        if let Some(offset) = synchronized.edgeuses.first() {
-            let other_offset = required(synchronized.other_edgeuses.first())?;
-            let _other_offset = if eu::edge_is_lamina(original, edge)? {
-                None
-            } else {
-                *other_offset
-            };
+        let creator = self.geometry_creator();
+        let mut new_faces = Vec::new();
+        // cpp:2918–3071: every mapped offset edge-use pair may need a cap face.
+        for (index, offset) in synchronized.edgeuses.iter().copied().enumerate() {
+            // sOtherEUS[ii]: the synchronized lists have one entry per pair.
+            let mut other_offset = *required(synchronized.other_edgeuses.get(index))?;
+            // clear lamina other offset edges
+            if eu::edge_is_lamina(original, edge)? {
+                other_offset = None;
+            }
             if let Some(offset) = offset {
                 let result = self.required_offset_brep()?;
-                let result_edge = edge_of(result, *offset)?;
+                let result_edge = edge_of(result, offset)?;
                 notifications.with_env(kernel, |env| {
                     notify_edge_and_vertices(
                         original,
@@ -755,18 +795,59 @@ impl OffsetExecutive {
                     )
                 })?;
             }
-            // The generic EdgeuseOffset creator is ported; its backend still needs
-            // this executive's source/result topology, SSI and mark adapters. Keep
-            // the caller's mark unchanged until that integration is available.
-            // Continuation cpp:2956–3071 constructs the cap and records edge->face.
-            // UNPORTED(offset.offset_executive_p1): SmOffsetExecutive::BuildOffsetOfEdgeuses (geometry-creation adapter)
-            return Err(SolidError::unported(
-                "SmOffsetExecutive::BuildOffsetOfEdgeuses (geometry-creation adapter)",
-                "offset.offset_executive_p1",
-            ));
+            // SER(m_rGeometryCreation.EdgeuseOffset(..)): the creator edits both
+            // B-reps through the caller's stores and the selected context.
+            let cap = notifications.with_kernel_env(kernel, |kernel, env| {
+                let mut result = required(self.offset_brep.take())?;
+                let made = super::edgeuse::build(
+                    kernel,
+                    &creator,
+                    self,
+                    original,
+                    &mut result,
+                    edgeuse,
+                    other,
+                    offset,
+                    other_offset,
+                    mark_type,
+                    marks,
+                    CapNotifications {
+                        records: &mut *env.records,
+                        attributes: &mut *env.attributes,
+                        context: env.context.as_deref_mut(),
+                        original_key_of: env.key_of,
+                        offset_key_of,
+                    },
+                );
+                self.offset_brep = Some(result);
+                made
+            })?;
+            let Some(surface) = cap.surface else {
+                continue;
+            };
+            // Build a face in m_pOffsetBrep for the new cap surface; its own
+            // `sLoopPoints` is empty.
+            let new_face = self.make_cap_face(
+                kernel,
+                surface,
+                cap.trim_curves,
+                cap.trim_orientations,
+                &[],
+                &mut notifications.rekey(offset_key_of),
+            )?;
+            // map origEdge to its offset capFaces
+            new_faces.push(new_face);
+            self.relate_edge_face(edge, new_face);
         }
 
-        self.fill_offset_edgeuse_gaps(kernel, original, edge, &synchronized)
+        self.fill_offset_edgeuse_gaps(kernel, original, edge, &synchronized, &new_faces)
+    }
+
+    /// The geometry creator this executive's scalars stand for
+    /// (`m_rGeometryCreation`), with its angular tolerance.
+    fn geometry_creator(&self) -> OffsetGeometryCreation {
+        OffsetGeometryCreation::new(self.offset_distance, self.approximation_tol_3d)
+            .with_tangency_tol_radians(self.tangency_tol_radians)
     }
 
     /// Shared prefix; synchronization mutates/notifies the result exactly once.
@@ -807,9 +888,10 @@ impl OffsetExecutive {
         original: &Brep,
         edge: EdgeId,
         synchronized: &SynchronizedEdgeuses,
+        new_faces: &[FaceId],
     ) -> Result<()> {
-        let first = self.fill_gap_edgeuses(kernel, edge, &synchronized.gaps, &[]);
-        let second = self.fill_gap_edgeuses(kernel, edge, &synchronized.other_gaps, &[]);
+        let first = self.fill_gap_edgeuses(kernel, edge, &synchronized.gaps, new_faces);
+        let second = self.fill_gap_edgeuses(kernel, edge, &synchronized.other_gaps, new_faces);
         let mut problems = false;
         for status in [first, second] {
             match status {
@@ -964,6 +1046,64 @@ impl OffsetExecutive {
             required(self.offset_brep.as_mut())?,
             bounding_edges,
         )
+    }
+
+    /// Builds a cap face for a new edge or vertex cap surface in the offset B-rep:
+    /// `CreateFaceFromSurface` over the surface's natural domain without trimming
+    /// curves, else `MakeFaceWithCurves` in the infinite region with one loop of all
+    /// curves, no UV curves, `SM_OT_SAME` and the caller's loop points.
+    /// `notifications` must be keyed by result identities.
+    pub(super) fn make_cap_face(
+        &mut self,
+        kernel: &mut Kernel,
+        surface: Surface,
+        curves: Vec<Curve>,
+        orientations: Vec<OrientType>,
+        loop_points: &[Vec3],
+        notifications: &mut NotifyState<'_>,
+    ) -> Result<FaceId> {
+        let domain = surface.natural_uv_domain();
+        let key_of = notifications.key_of;
+        let this_face = |face: FaceId| key_of(EntityRef::Face(face));
+        let brep = required(self.offset_brep.as_mut())?;
+        if curves.is_empty() {
+            return notifications.with_kernel_env(kernel, |kernel, env| {
+                let mut marks = crate::topology::topology_traverser::Marks::default();
+                let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
+                    env,
+                    marks: &mut marks,
+                    this_face: &this_face,
+                };
+                crate::topology::brep::p8::create_face_from_surface(
+                    kernel,
+                    brep,
+                    Some(surface),
+                    &domain,
+                    &mut fenv,
+                )
+            });
+        }
+        let region = brep.infinite_region();
+        let input = FaceCurvesInput {
+            loops: vec![curves.len()],
+            curves_3d: Some(curves.into_iter().map(Some).collect()),
+            uv_curves: None,
+            orientations,
+            loop_points: loop_points.to_vec(),
+        };
+        let made = bp7::make_face_with_curves_with_state(
+            kernel,
+            brep,
+            region,
+            input,
+            surface,
+            &domain,
+            OrientType::Same,
+            None,
+            &this_face,
+            notifications,
+        )?;
+        required(made.face)
     }
 }
 
@@ -2785,6 +2925,7 @@ mod tests {
                 &original,
                 edge,
                 &SynchronizedEdgeuses::default(),
+                &[],
             ),
             Ok(())
         );
@@ -2800,7 +2941,7 @@ mod tests {
                 ..SynchronizedEdgeuses::default()
             };
             assert_dependency(
-                exec.fill_offset_edgeuse_gaps(&kernel, &original, edge, &synchronized),
+                exec.fill_offset_edgeuse_gaps(&kernel, &original, edge, &synchronized, &[]),
                 "SmEdgeuse::NormalizedEvaluate",
                 "topology.edgeuse_p3",
             );
@@ -2811,7 +2952,7 @@ mod tests {
             ..SynchronizedEdgeuses::default()
         };
         assert_dependency(
-            exec.fill_offset_edgeuse_gaps(&kernel, &original, edge, &synchronized),
+            exec.fill_offset_edgeuse_gaps(&kernel, &original, edge, &synchronized, &[]),
             "SmBrep::CreateFacesFromSurface",
             "topology.brep_p8",
         );
@@ -3499,7 +3640,7 @@ mod tests {
         )
         .unwrap();
         // The public helper must still use these actual records and distinct
-        // arena keys before returning the geometry-creation dependency.
+        // arena keys before EdgeuseOffset dereferences the wire use's null face.
         for entity in [
             EntityRef::Edge(EdgeId::from_index(0)),
             EntityRef::Vertex(VertexId::from_index(0)),
@@ -3511,22 +3652,22 @@ mod tests {
         let mut exec = executive();
         exec.set_offset_brep(result);
         exec.relate_edgeuses(old, new);
-        assert_dependency(
-            exec.build_offset_of_edgeuses(
-                &mut Kernel::default(),
-                &original,
-                old,
-                old,
-                MarkType::Mark,
-                &mut env,
-                &offset_key,
-                &|edge, kind| ObjectRef {
-                    key: ObjectKey(1000 + u64::from(edge.index())),
-                    type_code: kind,
-                },
-            ),
-            "SmOffsetExecutive::BuildOffsetOfEdgeuses (geometry-creation adapter)",
-            "offset.offset_executive_p1",
+        let status = exec.build_offset_of_edgeuses(
+            &mut Kernel::default(),
+            &mut original,
+            old,
+            old,
+            MarkType::Mark,
+            &mut env,
+            &offset_key,
+            &|edge, kind| ObjectRef {
+                key: ObjectKey(1000 + u64::from(edge.index())),
+                type_code: kind,
+            },
+        );
+        assert!(
+            matches!(&status, Err(SolidError::InvalidInput { reason, .. }) if *reason == "edge use without face"),
+            "{status:?}"
         );
         for (entity, expected) in [
             (EntityRef::Edge(EdgeId::from_index(0)), 37),

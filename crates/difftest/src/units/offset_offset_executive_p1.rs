@@ -2470,7 +2470,7 @@ fn rust_probe(k: &Kernel, branch: Probe, tolerance: f64) -> RResult<Output> {
             };
             executive.build_offset_of_edgeuses(
                 &mut kernel,
-                &original,
+                &mut original,
                 first,
                 other,
                 MarkType::Mark,

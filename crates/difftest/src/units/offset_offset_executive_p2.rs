@@ -33,20 +33,23 @@
 //! on those early paths; independently, Rust checks its complete Debug-visible
 //! arena state and samples before/after the SAME owned input, not a reconstruction.
 //!
-//! Box input scaffolding has real shared vertices/edges, six analytic Plane faces,
-//! mated face/loop uses and two region/shell records, but does NOT reproduce native
-//! stitching/orientation/UV reparameterization or promise face-index geometric
-//! correspondence after stitching. Box parity is deliberately only counts of
-//! faces/edges/vertices, analytic kinds, vertex bounds, provenance and purity.
+//! Box inputs are built as natively, with the real primitive constructor
+//! (`SmApiCreateBox`, compared in `primitive.api_primitives`) and then the fixture
+//! tolerance, so the offset sees the native radial order and face-use orientations.
+//! Box input parity remains counts of faces/edges/vertices, analytic kinds, vertex
+//! bounds, provenance and purity.
 //! Sheet boundary scaffolding follows p1's typed rectangular fixture pattern;
 //! its Line boundaries are not claimed equivalent to native isocurve kinds.
 //! Native sheet/wire construction must preserve the projected counts (1/1/4/8/4
 //! and 0/0/1/2/2); otherwise the fixture is rejected before selector resolution.
 //! Unprojected shell/region counts and arbitrary size/tolerance cutoffs are not guards.
-//! No topology is globally sorted. No arbitrary returned-Brep shape equivalence
-//! is claimed: a Rust call that returns a result B-rep or leaves an offset temporary
-//! is deferred ([`HARNESS_RESULT_ADAPTER`]) until an output adapter is implemented,
-//! rather than guessing its missing metadata.
+//! No topology is globally sorted. A returned B-rep and a retained offset temporary
+//! are compared as a projection (every topology count, sorted face-surface and
+//! edge-curve kind multisets, tolerance and vertex bounds), not by traversal order
+//! or region/shell identity. A result that is the consumed source (identified by
+//! the source's B-rep key) reports native lifetime/origin 2, and the live source
+//! after the call is that result. The Rust purity check ignores the edge uses' UV
+//! trim curves, which offset queries may make lazily and the native block omits.
 //! Static/member shell lists currently support source faces only; nullable and
 //! foreign lists are exercised through the API's origin-qualified interface.
 //! Positive B-rep tolerances avoid the unported automatic `SetTolerance` path;
@@ -55,7 +58,7 @@
 //!
 //! This unit is necessarily PARTIAL: current positive geometry operations reach
 //! genuine missing manifold/copy/face-construction/shrink/merge/stitch work.
-//! Empty rounded offset still calls `ShrinkGeometry`; static shell queries manifold
+//! Empty rounded offset runs through `ShrinkGeometry` to its result; static shell queries manifold
 //! BEFORE its strict radius guard; valid API shell selections copy BEFORE shelling.
 //! Fixtures retain those native paths for future wiring, not manufactured success.
 //! Source test references are reductions of tests read at
@@ -87,9 +90,8 @@ use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::topology::Topology;
 use solidcore::topology::{
-    Brep, BrepId, Edge, EdgeId, Edgeuse, EdgeuseOwner, Face, FaceId, Faceuse, Loop, LoopEdge,
-    Loopuse, LoopuseStart, Region, RegionId, Shell, ShellId, Vertex, VertexId, Vertexuse,
-    VertexuseOwner,
+    Brep, BrepId, Edge, EdgeId, Edgeuse, EdgeuseOwner, FaceId, Region, RegionId, Shell, ShellId,
+    Vertex, VertexId, Vertexuse, VertexuseOwner,
 };
 use solidcore::SolidError;
 use solidcore_ffi::units::offset_offset_executive_p2 as ffi;
@@ -574,129 +576,10 @@ fn add_shell(brep: &mut Brep, region: RegionId) -> HResult<ShellId> {
 
 // Rectangular typed input scaffold, adapted from p1's face_with_edges, with a
 // shared shell rather than four extra wire shells. It is NOT an offset result.
-fn rectangular_face(
-    brep: &mut Brep,
-    surface: Surface,
-    shells: [ShellId; 2],
-    vertices: [VertexId; 4],
-    edges: [(EdgeId, bool); 4],
-) -> HResult<FaceId> {
-    let domain = surface.natural_uv_domain();
-    let [up_shell, down_shell] = shells;
-    let face = brep
-        .add_face_record(Face {
-            surface: Some(surface),
-            uv_domain: domain,
-            rectangular_trim: 1,
-            tolerance: brep.tolerance(),
-            ..Face::new(up_shell)
-        })
-        .map_err(setup)?;
-    brep.shell_mut(up_shell).map_err(setup)?.faces.push(face);
-    if down_shell != up_shell {
-        brep.shell_mut(down_shell).map_err(setup)?.faces.push(face);
+fn build(kernel: &mut Kernel, fixture: &Fixture, tolerance: f64, namespace: u64) -> HResult<Brep> {
+    if let Fixture::Box { origin, size } = *fixture {
+        return build_box(kernel, origin, size, tolerance);
     }
-    let up = brep
-        .add_faceuse_record(Faceuse {
-            face: Some(face),
-            shell: Some(up_shell),
-            orientation: OrientType::Same,
-            ..Faceuse::default()
-        })
-        .map_err(setup)?;
-    let down = brep
-        .add_faceuse_record(Faceuse {
-            face: Some(face),
-            shell: Some(down_shell),
-            mate: Some(up),
-            orientation: OrientType::Opposite,
-            ..Faceuse::default()
-        })
-        .map_err(setup)?;
-    brep.faceuse_mut(up).map_err(setup)?.mate = Some(down);
-    brep.face_mut(face).map_err(setup)?.faceuse = Some(up);
-    let loop_id = brep
-        .add_loop_record(Loop {
-            face,
-            edges: edges
-                .iter()
-                .map(|&(edge, forward)| LoopEdge { edge, forward })
-                .collect(),
-            loopuse: None,
-        })
-        .map_err(setup)?;
-    brep.face_mut(face).map_err(setup)?.loops.push(loop_id);
-    let up_loop = brep
-        .add_loopuse_record(Loopuse {
-            faceuse: Some(up),
-            loop_: Some(loop_id),
-            orientation: OrientType::Same,
-            ..Loopuse::default()
-        })
-        .map_err(setup)?;
-    let down_loop = brep
-        .add_loopuse_record(Loopuse {
-            faceuse: Some(down),
-            loop_: Some(loop_id),
-            mate: Some(up_loop),
-            orientation: OrientType::Same,
-            ..Loopuse::default()
-        })
-        .map_err(setup)?;
-    brep.loopuse_mut(up_loop).map_err(setup)?.mate = Some(down_loop);
-    brep.loop_mut(loop_id).map_err(setup)?.loopuse = Some(up_loop);
-    let lo = domain.min();
-    let hi = domain.max();
-    let uv = [[lo.x, lo.y], [hi.x, lo.y], [hi.x, hi.y], [lo.x, hi.y]];
-    for (faceuse, loopuse, reverse) in [(up, up_loop, false), (down, down_loop, true)] {
-        brep.faceuse_mut(faceuse)
-            .map_err(setup)?
-            .loopuses
-            .push(loopuse);
-        let mut uses = Vec::new();
-        for index in 0..4 {
-            let next = (index + 1) % 4;
-            let &(edge, forward) = at(&edges, index)?;
-            let start = *at(&vertices, if reverse { next } else { index })?;
-            let orientation = if forward == reverse {
-                OrientType::Opposite
-            } else {
-                OrientType::Same
-            };
-            let a = *at(&uv, if reverse { next } else { index })?;
-            let b = *at(&uv, if reverse { index } else { next })?;
-            let trim = line(
-                Vec3::new(a[0], a[1], 0.0),
-                Vec3::new(b[0], b[1], 0.0),
-                [0.0, 1.0],
-                2,
-            )?;
-            uses.push(add_use(
-                brep,
-                edge,
-                start,
-                EdgeuseOwner::Loopuse(Some(loopuse)),
-                orientation,
-                Some(trim),
-            )?);
-        }
-        if reverse {
-            uses.reverse();
-        }
-        brep.loopuse_mut(loopuse).map_err(setup)?.start =
-            LoopuseStart::Edgeuse(uses.first().copied());
-        for (index, &use_id) in uses.iter().enumerate() {
-            let ccw = *at(&uses, (index + 1) % uses.len())?;
-            let cw = *at(&uses, (index + uses.len() - 1) % uses.len())?;
-            let record = brep.edgeuse_mut(use_id).map_err(setup)?;
-            record.ccw = Some(ccw);
-            record.cw = Some(cw);
-        }
-    }
-    Ok(face)
-}
-
-fn build(kernel: &Kernel, fixture: &Fixture, tolerance: f64) -> HResult<Brep> {
     let mut brep = Brep::new();
     brep.set_tolerance(tolerance);
     // SmBrep.cpp:532–537: the constructor explicitly creates a void infinite region.
@@ -750,144 +633,81 @@ fn build(kernel: &Kernel, fixture: &Fixture, tolerance: f64) -> HResult<Brep> {
             scale,
             domain,
         } => {
+            // The native fixture: `CreateFaceFromSurface(new SmPlane(..), domain)` on
+            // the new B-rep, through the real constructor (its natural boundary
+            // edges, vertices and UV trims), with the face owning its surface
+            // under its notification identity.
             let [u0, v0, u1, v1] = domain;
+            let domain = Extent2d::from_bounds(u0, v0, u1, v1);
             let surface = Surface::from(Plane::new(
                 v3(origin),
                 v3(x_axis),
                 v3(y_axis),
                 point2(scale),
-                &Extent2d::from_bounds(u0, v0, u1, v1),
+                &domain,
             ));
-            let corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
-            let mut vertices = Vec::new();
-            for uv in corners {
-                vertices.push(add_vertex(
-                    &mut brep,
-                    surface.evaluate_point(kernel, point2(uv)).map_err(setup)?,
-                )?);
-            }
-            let shell = add_shell(&mut brep, region)?;
-            let mut edges = Vec::new();
-            for index in 0..4 {
-                let a = *at(&vertices, index)?;
-                let b = *at(&vertices, (index + 1) % 4)?;
-                let curve = line(
-                    brep.vertex(a).map_err(setup)?.point,
-                    brep.vertex(b).map_err(setup)?.point,
-                    [0.0, 1.0],
-                    3,
-                )?;
-                edges.push((add_edge(&mut brep, [a, b], curve, [0.0, 1.0])?, true));
-            }
-            rectangular_face(
+            let mut records = BTreeMap::new();
+            let mut attributes = AttributeStore::default();
+            let key_of = |entity| notification_key(entity, namespace);
+            let mut env = solidcore::topology::edge::NotifyEnv {
+                records: &mut records,
+                attributes: &mut attributes,
+                context: None,
+                key_of: &key_of,
+            };
+            let mut marks = solidcore::topology::topology_traverser::Marks::default();
+            let this_face = |face: FaceId| key_of(EntityRef::Face(face));
+            let mut fenv = solidcore::topology::brep::p8::FaceBuildEnv {
+                env: &mut env,
+                marks: &mut marks,
+                this_face: &this_face,
+            };
+            solidcore::topology::brep::p8::create_face_from_surface(
+                kernel,
                 &mut brep,
-                surface,
-                [shell, shell],
-                [
-                    *at(&vertices, 0)?,
-                    *at(&vertices, 1)?,
-                    *at(&vertices, 2)?,
-                    *at(&vertices, 3)?,
-                ],
-                [
-                    *at(&edges, 0)?,
-                    *at(&edges, 1)?,
-                    *at(&edges, 2)?,
-                    *at(&edges, 3)?,
-                ],
-            )?;
+                Some(surface),
+                &domain,
+                &mut fenv,
+            )
+            .map_err(setup)?;
+            // the shim's representable_topology(result, 1, 1, 4, 8, 4)
+            if [
+                brep.faces().len(),
+                brep.loops().len(),
+                brep.edges().len(),
+                brep.edgeuses().len(),
+                brep.vertices().len(),
+            ] != [1, 1, 4, 8, 4]
+            {
+                return Err(bad("sheet constructor did not build a single rectangular face"));
+            }
         }
-        Fixture::Box { origin, size } => build_box(&mut brep, region, origin, size)?,
+        Fixture::Box { .. } => return Err(bad("box fixtures use the primitive constructor")),
     }
     Ok(brep)
 }
 
-// Input-only rectilinear scaffold. Unlike the missing SmBrep copy constructor,
-// this creates distinct analytic geometry and typed topology from DTO scalars.
-fn build_box(brep: &mut Brep, region: RegionId, origin: [f64; 3], size: [f64; 3]) -> HResult<()> {
+/// The native fixture's `SmApiCreateBox(origin, dx, dy, dz)` then
+/// `SetTolerance(tolerance, FALSE)`, through the real primitive constructor: the
+/// stitched, consistently oriented box an offset needs (a hand-made scaffold would
+/// not reproduce the native radial order or face-use orientations).
+fn build_box(
+    kernel: &mut Kernel,
+    origin: [f64; 3],
+    size: [f64; 3],
+    tolerance: f64,
+) -> HResult<Brep> {
     if size.iter().any(|value| *value <= 0.0) {
         return Err(bad("box fixture constructor requires positive dimensions"));
     }
-    let [x, y, z] = origin;
     let [dx, dy, dz] = size;
-    let corners = [
-        [x, y, z],
-        [x + dx, y, z],
-        [x + dx, y + dy, z],
-        [x, y + dy, z],
-        [x, y, z + dz],
-        [x + dx, y, z + dz],
-        [x + dx, y + dy, z + dz],
-        [x, y + dy, z + dz],
-    ];
-    let mut vertices = Vec::new();
-    for point in corners {
-        vertices.push(add_vertex(brep, v3(point))?);
-    }
-    let inside = brep
-        .add_region_record(Region {
-            in_brep: true,
-            ..Region::default()
-        })
+    let mut brep = solidcore::primitive::api_primitives::create_box(kernel, v3(origin), dx, dy, dz)
         .map_err(setup)?;
-    let shells = [add_shell(brep, region)?, add_shell(brep, inside)?];
-    let mut edges: Vec<(usize, usize, EdgeId)> = Vec::new();
-    // Plane construction order follows SmPrimitiveCreation.cpp:287-344. Native
-    // post-stitch face traversal/order is intentionally NOT inferred from it.
-    for (quad, point, x_axis, y_axis, domain) in [
-        ([0, 1, 2, 3], origin, Vec3::X, Vec3::Y, [dx, dy]),
-        ([4, 5, 6, 7], [x, y, z + dz], Vec3::X, Vec3::Y, [dx, dy]),
-        ([0, 3, 7, 4], origin, Vec3::Y, Vec3::Z, [dy, dz]),
-        ([1, 2, 6, 5], [x + dx, y, z], Vec3::Y, Vec3::Z, [dy, dz]),
-        ([0, 1, 5, 4], origin, Vec3::X, Vec3::Z, [dx, dz]),
-        ([3, 2, 6, 7], [x, y + dy, z], Vec3::X, Vec3::Z, [dx, dz]),
-    ] {
-        let mut boundary = Vec::new();
-        for index in 0..4 {
-            let a = *at(&quad, index)?;
-            let b = *at(&quad, (index + 1) % 4)?;
-            if let Some(&(first, _, edge)) = edges.iter().find(|&&(first, second, _)| {
-                (first == a && second == b) || (first == b && second == a)
-            }) {
-                boundary.push((edge, first == a));
-            } else {
-                let curve = line(v3(*at(&corners, a)?), v3(*at(&corners, b)?), [0.0, 1.0], 3)?;
-                let edge = add_edge(
-                    brep,
-                    [*at(&vertices, a)?, *at(&vertices, b)?],
-                    curve,
-                    [0.0, 1.0],
-                )?;
-                edges.push((a, b, edge));
-                boundary.push((edge, true));
-            }
-        }
-        let surface = Surface::from(Plane::new(
-            v3(point),
-            x_axis,
-            y_axis,
-            point2([1.0, 1.0]),
-            &Extent2d::from_bounds(0.0, 0.0, domain[0], domain[1]),
-        ));
-        rectangular_face(
-            brep,
-            surface,
-            shells,
-            [
-                *at(&vertices, quad[0])?,
-                *at(&vertices, quad[1])?,
-                *at(&vertices, quad[2])?,
-                *at(&vertices, quad[3])?,
-            ],
-            [
-                *at(&boundary, 0)?,
-                *at(&boundary, 1)?,
-                *at(&boundary, 2)?,
-                *at(&boundary, 3)?,
-            ],
-        )?;
+    if brep.faces().len() != 6 || brep.edges().len() != 12 || brep.vertices().len() != 8 {
+        return Err(bad("box constructor did not build a closed box"));
     }
-    Ok(())
+    brep.set_tolerance(tolerance);
+    Ok(brep)
 }
 
 const SOURCE: BrepId = BrepId::from_index(17);
@@ -1257,6 +1077,100 @@ fn native_projection(fixture: &Fixture, decoded: &DecodedBrep) -> HResult<Projec
     }
     Ok(result)
 }
+/// What is compared of a returned B-rep or a retained offset temporary: every
+/// topology count, the face surface and edge curve kinds as sorted multisets, the
+/// B-rep tolerance and the vertex bounds. Traversal order and region/shell
+/// identities are deliberately not compared.
+struct ResultProjection {
+    counts: Vec<i64>,
+    face_kinds: Vec<i64>,
+    edge_kinds: Vec<i64>,
+    values: Vec<f64>,
+}
+fn native_result_projection(decoded: &DecodedBrep) -> ResultProjection {
+    let mut face_kinds: Vec<i64> = decoded.faces.iter().map(|face| face.kind).collect();
+    let mut edge_kinds: Vec<i64> = decoded.edges.iter().map(|edge| edge.kind).collect();
+    face_kinds.sort_unstable();
+    edge_kinds.sort_unstable();
+    let mut values = vec![decoded.tolerance];
+    values.extend(bounds(decoded.vertices.iter().copied()));
+    ResultProjection {
+        counts: decoded.counts.to_vec(),
+        face_kinds,
+        edge_kinds,
+        values,
+    }
+}
+/// The shim's `surface_kind`: 0 null, 1 an `SmPlane`, 2 another `SmBSplineSurface`
+/// kind, 3 anything else.
+fn surface_kind(surface: Option<&Surface>) -> HResult<i64> {
+    use solidcore::surface::surface::p2::{B_SPLINE_SURFACE_TYPE, PLANE_TYPE};
+    let Some(surface) = surface else {
+        return Ok(0);
+    };
+    Ok(if surface.is_kind_of(PLANE_TYPE).map_err(setup)? {
+        1
+    } else if surface.is_kind_of(B_SPLINE_SURFACE_TYPE).map_err(setup)? {
+        2
+    } else {
+        3
+    })
+}
+/// The shim's `curve_kind`: 0 null, 1 an `SmLine`, 2 another `SmBSplineCurve`
+/// kind, 3 anything else.
+fn curve_kind(curve: Option<&Curve>) -> i64 {
+    use solidcore::curve::curve::p2::BSPLINE_CURVE_TYPE;
+    match curve {
+        None => 0,
+        Some(curve) if matches!(curve.kind(), CurveKind::Line(_)) => 1,
+        Some(curve) if curve.is_kind_of(BSPLINE_CURVE_TYPE) => 2,
+        Some(_) => 3,
+    }
+}
+fn rust_result_projection(brep: &Brep) -> HResult<ResultProjection> {
+    let counts = vec![
+        brep.regions().len() as i64,
+        brep.shells().len() as i64,
+        brep.faces().len() as i64,
+        brep.loops().len() as i64,
+        brep.edges().len() as i64,
+        brep.edgeuses().len() as i64,
+        brep.vertices().len() as i64,
+    ];
+    let mut face_kinds = brep
+        .faces()
+        .iter()
+        .map(|(_, face)| surface_kind(face.surface.as_ref()))
+        .collect::<HResult<Vec<_>>>()?;
+    let mut edge_kinds: Vec<i64> = brep
+        .edges()
+        .iter()
+        .map(|(_, edge)| curve_kind(edge.curve.as_ref()))
+        .collect();
+    face_kinds.sort_unstable();
+    edge_kinds.sort_unstable();
+    let mut values = vec![brep.tolerance()];
+    values.extend(bounds(
+        brep.vertices().iter().map(|(_, vertex)| xyz(vertex.point)),
+    ));
+    Ok(ResultProjection {
+        counts,
+        face_kinds,
+        edge_kinds,
+        values,
+    })
+}
+fn project_result(output: Output, key: &str, projection: Option<ResultProjection>) -> Output {
+    let Some(projection) = projection else {
+        return output.int(&format!("{key}.present"), 0);
+    };
+    output
+        .int(&format!("{key}.present"), 1)
+        .ints(&format!("{key}.counts"), projection.counts)
+        .ints(&format!("{key}.face_kinds"), projection.face_kinds)
+        .ints(&format!("{key}.edge_kinds"), projection.edge_kinds)
+        .values(&format!("{key}.geometry"), projection.values)
+}
 fn project(output: Output, key: &str, projection: Option<Projection>) -> Output {
     let Some(projection) = projection else {
         return output.int(&format!("{key}.present"), 0);
@@ -1406,13 +1320,11 @@ fn native_output(input: &Inputs, snapshot: &ffi::Snapshot) -> HResult<Output> {
         ("result", &snapshot.result),
         ("executive_offset", &snapshot.executive_offset),
     ] {
-        output = output.int(&format!("{key}.present"), i64::from(block.is_some()));
-        if let Some(block) = block {
-            decode_block(block)?;
-            output = output
-                .ints(&format!("{key}.native_topology"), block.integers.clone())
-                .values(&format!("{key}.native_geometry"), block.values.clone());
-        }
+        let projection = block
+            .as_ref()
+            .map(|block| decode_block(block).map(|decoded| native_result_projection(&decoded)))
+            .transpose()?;
+        output = project_result(output, key, projection);
     }
     Ok(output)
 }
@@ -1480,6 +1392,10 @@ fn result_curve_key(edge: EdgeId, type_code: i64) -> ObjectRef {
     }
 }
 
+/// The notification namespace of the source fixture's identities.
+const NAMESPACE_SOURCE: u64 = 1;
+/// The notification namespace of the foreign fixture's identities.
+const NAMESPACE_FOREIGN: u64 = 2;
 fn register_notification_brep(
     records: &mut BTreeMap<ObjectKey, Topology>,
     brep: &mut Brep,
@@ -1523,28 +1439,40 @@ fn register_notification_brep(
 /// The deferral label of a Rust call that returned a B-rep or kept an offset temporary
 /// (reachable since `query.brep`'s box is ported): the scaffolded inputs are not
 /// native-equivalent, so the result needs an output adapter before it can be compared.
-const HARNESS_RESULT_ADAPTER: &str = "harness:offset-result-adapter";
-
+/// The Debug-visible arena state the purity check compares, without the edge
+/// uses' UV trim curves: offset queries may make them lazily in the input (as
+/// upstream's `NormalizedEvaluate` / `GetUVTrimCurve` do), and the native
+/// snapshot block, which the native purity bit compares, does not record them.
+fn purity_state(brep: &Brep) -> String {
+    let mut state = brep.clone();
+    let uses: Vec<_> = state.edgeuses().ids().collect();
+    for id in uses {
+        if let Ok(record) = state.edgeuse_mut(id) {
+            record.uv_trim_curve = None;
+        }
+    }
+    format!("{state:?}")
+}
 fn rust_output(input: &Inputs) -> RResult<Output> {
     validate(input)?;
     let mut kernel = Kernel::default();
     let mut source = input
         .source
         .as_ref()
-        .map(|fixture| build(&kernel, fixture, input.tolerance))
+        .map(|fixture| build(&mut kernel, fixture, input.tolerance, NAMESPACE_SOURCE))
         .transpose()?;
     let mut foreign = input
         .foreign
         .as_ref()
-        .map(|fixture| build(&kernel, fixture, input.tolerance))
+        .map(|fixture| build(&mut kernel, fixture, input.tolerance, NAMESPACE_FOREIGN))
         .transpose()?;
     let mut records = BTreeMap::new();
     let mut attributes = AttributeStore::default();
     if let Some(brep) = source.as_mut() {
-        register_notification_brep(&mut records, brep, 1);
+        register_notification_brep(&mut records, brep, NAMESPACE_SOURCE);
     }
     if let Some(brep) = foreign.as_mut() {
-        register_notification_brep(&mut records, brep, 2);
+        register_notification_brep(&mut records, brep, NAMESPACE_FOREIGN);
     }
     let result_brep = result_notification_key(EntityRef::Brep(BrepId::from_index(0)));
     records.insert(result_brep.key, Topology::new());
@@ -1560,8 +1488,8 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
     };
     let keys = selections(input, source.as_ref(), foreign.as_ref())?;
     let selected_before = observe_selections(&keys, source.as_ref(), foreign.as_ref());
-    let source_state_before = source.as_ref().map(|brep| format!("{brep:?}"));
-    let foreign_state_before = foreign.as_ref().map(|brep| format!("{brep:?}"));
+    let source_state_before = source.as_ref().map(purity_state);
+    let foreign_state_before = foreign.as_ref().map(purity_state);
     let source_before = input
         .source
         .as_ref()
@@ -1641,24 +1569,36 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         ),
     };
     let (status, result) = operation(result)?;
-    if result.is_some()
-        || exec
-            .as_ref()
-            .is_some_and(|exec| exec.offset_brep().is_some())
-    {
-        // (the scaffolded inputs are not native-equivalent: comparing the returned
-        // B-rep needs the output adapter this runner does not have yet)
-        return Ok(Output::deferred(
-            HARNESS_RESULT_ADAPTER,
-            "returned offset B-rep / temporary (no Rust output adapter)",
-        ));
-    }
+    let result_projection = result.as_ref().map(rust_result_projection).transpose()?;
+    let offset_projection = exec
+        .as_ref()
+        .and_then(OffsetExecutive::offset_brep)
+        .map(rust_result_projection)
+        .transpose()?;
+    // A consumed source that comes back as the result (a Difference assigns its
+    // result to the inset's primary operand, the original) keeps the source's
+    // identity: native lifetime/origin 2 (`result == source`). Any other result is
+    // a new allocation (origin 1).
+    let source_key = notification_key(EntityRef::Brep(BrepId::from_index(0)), NAMESPACE_SOURCE).key;
+    let result_is_source = input.source.is_some()
+        && source.is_none()
+        && result.as_ref().is_some_and(|brep| brep.key() == source_key);
+    let result_origin = match (&result, result_is_source) {
+        (None, _) => 0,
+        (Some(_), true) => 2,
+        (Some(_), false) => 1,
+    };
     let state = exec.as_ref().map(executive_state);
     let selected_after = observe_selections(&keys, source.as_ref(), foreign.as_ref());
+    // The native source snapshot after the call is the live source, which is the
+    // result when the result is the source.
+    let live_source = source
+        .as_ref()
+        .or_else(|| result.as_ref().filter(|_| result_is_source));
     let source_after = input
         .source
         .as_ref()
-        .zip(source.as_ref())
+        .zip(live_source)
         .map(|(fixture, brep)| rust_projection(&kernel, fixture, brep))
         .transpose()?;
     let foreign_after = input
@@ -1667,12 +1607,14 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         .zip(foreign.as_ref())
         .map(|(fixture, brep)| rust_projection(&kernel, fixture, brep))
         .transpose()?;
-    let source_pure = source_state_before == source.as_ref().map(|brep| format!("{brep:?}"));
-    let foreign_pure = foreign_state_before == foreign.as_ref().map(|brep| format!("{brep:?}"));
+    let source_pure = source_state_before == source.as_ref().map(purity_state);
+    let foreign_pure = foreign_state_before == foreign.as_ref().map(purity_state);
     let lifetime = if input.source.is_none() {
         0
     } else if source.is_some() {
         1
+    } else if result_is_source {
+        2
     } else {
         3
     };
@@ -1680,7 +1622,7 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         status,
         transferred,
         lifetime,
-        0,
+        result_origin,
         [boolean_before, kernel.context.doing_boolean()],
         state.as_ref(),
         &selected_before,
@@ -1690,8 +1632,9 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         "input.pure",
         vec![i64::from(source_pure), i64::from(foreign_pure)],
     )
-    .int("result.present", 0)
-    .int("executive_offset.present", 0);
+;
+    output = project_result(output, "result", result_projection);
+    output = project_result(output, "executive_offset", offset_projection);
     for (key, projection) in [
         ("source.before", source_before),
         ("source.after", source_after),
@@ -2035,12 +1978,12 @@ mod tests {
             .into_iter()
             .chain(result_lists)
             .all(|h| h.type_code == 0));
-        let mut source = build(&Kernel::default(), &sheet([0.0; 3], 1.0, 0), 1e-6).unwrap();
-        let mut foreign = build(&Kernel::default(), &sheet([0.0; 3], 1.0, 0), 1e-6).unwrap();
+        let mut source = build(&mut Kernel::default(), &sheet([0.0; 3], 1.0, 0), 1e-6, NAMESPACE_SOURCE).unwrap();
+        let mut foreign = build(&mut Kernel::default(), &sheet([0.0; 3], 1.0, 0), 1e-6, NAMESPACE_FOREIGN).unwrap();
         let mut records = BTreeMap::new();
-        register_notification_brep(&mut records, &mut source, 1);
+        register_notification_brep(&mut records, &mut source, NAMESPACE_SOURCE);
         let source_count = records.len();
-        register_notification_brep(&mut records, &mut foreign, 2);
+        register_notification_brep(&mut records, &mut foreign, NAMESPACE_FOREIGN);
         assert_eq!(records.len(), 2 * source_count);
         assert_ne!(source.key(), foreign.key());
         assert!(records.contains_key(&source_edge.key));
@@ -2065,7 +2008,7 @@ mod tests {
                 2,
             ),
         ] {
-            let brep = build(&Kernel::default(), &fixture, 1e-6).unwrap();
+            let brep = build(&mut Kernel::default(), &fixture, 1e-6, NAMESPACE_SOURCE).unwrap();
             assert_eq!(brep.regions().len(), regions);
             assert_eq!(brep.shells().len(), shells);
             let infinite = brep.infinite_region().unwrap();
@@ -2092,15 +2035,17 @@ mod tests {
         let mut input = input(Operation::ApiShell);
         input.foreign = Some(sheet([20.0, 3.0, -4.0], 3.0, 1));
         let source = build(
-            &Kernel::default(),
+            &mut Kernel::default(),
             input.source.as_ref().unwrap(),
             input.tolerance,
+            NAMESPACE_SOURCE,
         )
         .unwrap();
         let foreign = build(
-            &Kernel::default(),
+            &mut Kernel::default(),
             input.foreign.as_ref().unwrap(),
             input.tolerance,
+            NAMESPACE_FOREIGN,
         )
         .unwrap();
         assert_eq!(
@@ -2320,7 +2265,7 @@ mod tests {
         let fixture = Fixture::Empty;
         let block = empty_block(3e-12);
         let projection = native_projection(&fixture, &decode_block(&block).unwrap()).unwrap();
-        let brep = build(&Kernel::default(), &fixture, 3e-12).unwrap();
+        let brep = build(&mut Kernel::default(), &fixture, 3e-12, NAMESPACE_SOURCE).unwrap();
         assert_eq!(
             projection,
             rust_projection(&Kernel::default(), &fixture, &brep).unwrap()
@@ -2398,28 +2343,27 @@ mod tests {
         );
     }
 
+    /// A path that completes and returns a compared result B-rep.
+    const RESULT: &str = "result";
+
+    fn assert_reaches(output: &Output, symbol: &str) {
+        if symbol == RESULT {
+            assert!(output.deferred.is_none(), "{:?}", output.deferred);
+            assert!(output.error.is_none(), "{:?}", output.error);
+            assert_eq!(output.ints["result.present"], [1]);
+        } else {
+            assert_eq!(output.deferred.as_ref().unwrap().symbol, symbol);
+        }
+    }
+
     #[test]
     fn positive_geometry_and_strict_boundaries_preserve_explicit_partial_paths() {
         for (operation, fixture, extend, symbol) in [
             (Operation::ApiShell, Fixture::Empty, false, "SmBrep::SmBrep"),
-            (
-                Operation::StaticOffset,
-                Fixture::Empty,
-                false,
-                "SmBrep::ShrinkGeometry",
-            ),
-            (
-                Operation::Solid,
-                sheet([0.0; 3], 1.0, 0),
-                false,
-                "SmBrep::ShrinkGeometry",
-            ),
-            (
-                Operation::Extended,
-                sheet([0.0; 3], 1.0, 0),
-                true,
-                "SmOffsetExecutive::BuildOffsetOfEdgeuses (geometry-creation adapter)",
-            ),
+            // An empty rounded offset completes and returns its (empty) result.
+            (Operation::StaticOffset, Fixture::Empty, false, RESULT),
+            (Operation::Solid, sheet([0.0; 3], 1.0, 0), false, RESULT),
+            (Operation::Extended, sheet([0.0; 3], 1.0, 0), true, RESULT),
         ] {
             for distance in [0.0, 1.9999999999999995e-6, 2e-6, 2.0000000000000003e-6] {
                 let mut input = input(operation);
@@ -2428,7 +2372,7 @@ mod tests {
                 input.config.member_distance = distance;
                 input.config.extend_convex = extend;
                 let output = Runner.run_rust(&case(&input)).unwrap();
-                assert_eq!(output.deferred.unwrap().symbol, symbol);
+                assert_reaches(&output, symbol);
             }
         }
         // ShellBrep asks IsManifoldSolid before checking its strict radius guard.
@@ -2456,26 +2400,18 @@ mod tests {
             assert!(crate::compare::compare(&native, &output, Runner.abs_floors()).pass());
         }
         // The guard is strict: exactly 2*tolerance and the adjacent value above
-        // it proceed into DoSolidOffset and its ShrinkGeometry back-edge.
+        // it proceed into DoSolidOffset, which completes on the empty input.
         for distance in [2e-6, 2.0000000000000003e-6, -2e-6, -2.0000000000000003e-6] {
             let mut input = input(Operation::StaticShell);
             input.source = Some(Fixture::Empty);
             input.config.offset_distance = distance;
-            assert_eq!(
-                Runner
-                    .run_rust(&case(&input))
-                    .unwrap()
-                    .deferred
-                    .unwrap()
-                    .symbol,
-                "SmBrep::ShrinkGeometry"
-            );
+            assert_reaches(&Runner.run_rust(&case(&input)).unwrap(), RESULT);
         }
         let box_fixture = Fixture::Box {
             origin: [0.0; 3],
             size: [10.0; 3],
         };
-        let brep = build(&Kernel::default(), &box_fixture, 1e-6).unwrap();
+        let brep = build(&mut Kernel::default(), &box_fixture, 1e-6, NAMESPACE_SOURCE).unwrap();
         let projection = rust_projection(&Kernel::default(), &box_fixture, &brep).unwrap();
         assert_eq!(projection.counts, [6, 12, 8]);
         assert_eq!(projection.kinds, [1; 6]);
@@ -2497,8 +2433,9 @@ mod tests {
     #[test]
     fn face_geometry_paths_reach_distinct_actual_callees() {
         // MakeWireEdgeVertex now runs, and concrete-Surface CrvOnSurf construction
-        // lets the rounded paths get through DropCurve too: they stop at
-        // SmBrep::ShrinkGeometry, the extended ones at the edge-use offset adapter.
+        // lets the rounded and extended paths through DropCurve, ShrinkGeometry and
+        // the edge-use offset creator: they stop at the merge or the gap-fill
+        // evaluation, or return a result B-rep that is compared.
         let context = CaseContext {
             root: repo_root(),
             seeds: 0,
@@ -2507,34 +2444,36 @@ mod tests {
         for (name, owner, symbol) in [
             (
                 "static_offset_real_plane_sheet_round",
-                "topology.brep_p4",
-                "SmBrep::ShrinkGeometry",
+                "boolean.merge_p3",
+                "SmMerge::PiecewiseMerge",
             ),
             (
                 "static_offset_real_plane_sheet_extended",
-                "offset.offset_executive_p1",
-                "SmOffsetExecutive::BuildOffsetOfEdgeuses (geometry-creation adapter)",
+                "",
+                RESULT,
             ),
             (
                 "member_sheet_round_skip_true_still_real_geometry",
-                "topology.brep_p4",
-                "SmBrep::ShrinkGeometry",
+                "",
+                RESULT,
             ),
             (
                 "member_sheet_extended_dispatch_ignores_skip",
-                "offset.offset_executive_p1",
-                "SmOffsetExecutive::BuildOffsetOfEdgeuses (geometry-creation adapter)",
+                "topology.edgeuse_p3",
+                "SmEdgeuse::NormalizedEvaluate",
             ),
             (
                 "extended_sheet_direct_independent_flags",
-                "offset.offset_executive_p1",
-                "SmOffsetExecutive::BuildOffsetOfEdgeuses (geometry-creation adapter)",
+                "topology.edgeuse_p3",
+                "SmEdgeuse::NormalizedEvaluate",
             ),
         ] {
             let case = fixtures.iter().find(|case| case.name == name).unwrap();
-            let deferred = Runner.run_rust(case).unwrap().deferred.unwrap();
-            assert_eq!(deferred.unit, owner, "{name}");
-            assert_eq!(deferred.symbol, symbol, "{name}");
+            let output = Runner.run_rust(case).unwrap();
+            assert_reaches(&output, symbol);
+            if symbol != RESULT {
+                assert_eq!(output.deferred.unwrap().unit, owner, "{name}");
+            }
         }
     }
 
@@ -2737,8 +2676,10 @@ mod tests {
                 assert!(crate::compare::compare(&native, &output, Runner.abs_floors()).pass());
             } else {
                 positive += 1;
+                // Nonempty geometry either reaches a missing dependency or is
+                // compared through its real status and result projection.
                 assert!(
-                    output.deferred.is_some(),
+                    output.deferred.is_some() || output.error.is_none(),
                     "nonempty geometry must not be guessed: {input:?}"
                 );
             }

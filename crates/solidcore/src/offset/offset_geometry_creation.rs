@@ -1006,6 +1006,14 @@ impl OffsetGeometryCreation {
         }
     }
 
+    /// The same creator with the angular tolerance `tangency_tol_radians`, which an
+    /// upstream creator subclass may override (`m_dTangencyTolRadians`).
+    #[must_use]
+    pub const fn with_tangency_tol_radians(mut self, tangency_tol_radians: f64) -> Self {
+        self.tangency_tol_radians = tangency_tol_radians;
+        self
+    }
+
     /// `GetThisApproxTol3d` (`SM_ASSERT_TOL` only reports).
     #[must_use]
     pub const fn this_approx_tol_3d(&self) -> f64 {

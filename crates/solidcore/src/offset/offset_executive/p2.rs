@@ -30,6 +30,9 @@
 //! notification-aware builder exactly once, with the already-claimed traversal mark.
 //! Face geometry and SSI are obtained through the owned cross-arena face adapter;
 //! later topology construction and merge stages retain their explicit boundaries.
+//! `DoSolidOffset` marks original edge uses in a set local to its edge loop (the
+//! claimed mark is still acquired and released); the vertex caps reuse the last
+//! copied shell face's loop points, as upstream's shared `sLoopPoints` array.
 //! Continuations after missing calls are documented there, including ignored-status
 //! calls. The executive's temporary Boolean scope and mark locks are restored on
 //! every `Result` exit. The shell difference delegates native context/error state
@@ -52,10 +55,12 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::object::{FaceKey, NotifyOperation, ObjectRef};
 use crate::heal::stitch::p2 as stitch;
 use crate::kernel::Kernel;
+use crate::math::Vec3;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::api_queries::{brep_is_manifold_solid, BrepRef};
 
 use crate::topology::brep::p1 as bp1;
+use crate::topology::brep::p4::shrink_geometry;
 use crate::topology::brep::p7::{make_face_with_curves_with_kernel_context, FaceCurvesInput};
 
 use crate::topology::edge::{NotificationStores, NotifyState};
@@ -260,7 +265,7 @@ impl OffsetExecutive {
         &mut self,
         kernel: &mut Kernel,
         original: Option<&mut Brep>,
-        _options: SolidOffsetOptions,
+        options: SolidOffsetOptions,
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<Brep> {
         // cpp:411–418: dispatch must precede NER and the Boolean scope.
@@ -270,32 +275,133 @@ impl OffsetExecutive {
         let original = required(original, OP_SOLID)?;
         with_doing_boolean(kernel, |kernel| {
             self.allocate_offset_brep(notifications)?;
+            // `sLoopPoints` keeps the last copied shell face's vertex-loop points
+            // (CreateCurvesFromFace resets it); the vertex caps reuse it below.
+            let mut loop_points = Vec::new();
             let faces = bp1::faces(original, None)?;
             for id in faces {
                 if self.shell_faces().contains(&id) {
-                    self.copy_shell_face_prefix(kernel, original, id, false, notifications)?;
+                    loop_points =
+                        self.copy_shell_face_prefix(kernel, original, id, false, notifications)?;
                 } else {
                     self.offset_face_prefix(kernel, original, id, false, notifications)?;
                 }
             }
 
             // cpp:608 is unconditional, even with zero faces and skip=true.
-            // Continuation cpp:648–848: gather original edgeuses in arena/radial
-            // order (the upstream GetAllSeconds test is global, not per-use),
-            // claim/release a mark, call p1 BuildOffsetOfEdgeuses with ignored
-            // ordinary statuses, optionally build lamina side walls (also ignored),
-            // then BuildOffsetOfVertex and its trimmed/natural-domain cap faces.
-            // cpp:874–1051: only then may skip_stitch_merge transfer the temporary;
-            // otherwise PiecewiseMerge, ignored-status StitchIntoSolid, and
-            // MakeManifold. A successful MakeManifold labels every region by
-            // GetInfiniteRegion equality; failure is ignored. Finally release the
-            // temporary and return the real result. None may be replaced by an
-            // empty success here. `_options` is first used at that continuation.
-            // UNPORTED(topology.brep_p4): SmBrep::ShrinkGeometry -- justified: plan/findings.md "topology.brep_p4: the last stubs (PR #441)": the stub also marks where this unit's unported DoSolidOffset continuation (cpp:648-1051) begins; wiring the shrink alone would leave that remainder without a stop
-            Err(SolidError::unported(
-                "SmBrep::ShrinkGeometry",
-                "topology.brep_p4",
-            ))
+            let mut temporary = required(self.take_offset_brep(), OP_SOLID)?;
+            let status = shrink_geometry(kernel, &mut temporary);
+            self.set_offset_brep(temporary);
+            status?;
+
+            // cpp:651–672: every edge use of every original edge, in GetEdges and
+            // GetEdgeuses order, once the use relation holds any pair at all
+            // (upstream tests `m_vEUToEU.GetAllSeconds`, not this use's seconds).
+            let any_mapped = !self.mapped_original_edgeuses().is_empty();
+            let mut offset_edgeuses = Vec::new();
+            for edge in bp1::edges(original, None)? {
+                for edgeuse in crate::topology::edge::edgeuses(original, edge, None, None)? {
+                    if any_mapped {
+                        offset_edgeuses.push(edgeuse);
+                    }
+                }
+            }
+
+            // cpp:684–722: the claimed mark only tags original edge uses here.
+            with_mark_lock(kernel, ALL_MARKS, |kernel, mark_type| {
+                let mut marked = BTreeSet::new();
+                for &edgeuse in &offset_edgeuses {
+                    marked.insert(edgeuse);
+                    let mut radial = required(eu::radial(original, edgeuse)?, OP_SOLID)?;
+                    if marked.contains(&radial) {
+                        continue;
+                    }
+                    // FindElement of a null mate finds nothing.
+                    let mate = eu::mate(original, radial)?;
+                    if let Some(mate) = mate.filter(|mate| {
+                        offset_edgeuses.contains(mate) && !offset_edgeuses.contains(&radial)
+                    }) {
+                        radial = mate;
+                        if marked.contains(&radial) {
+                            continue;
+                        }
+                    }
+                    // SE upstream: propagate Unported, ignore other errors.
+                    crate::error::ignore_status(self.mapped_edge_prefix(
+                        kernel,
+                        original,
+                        edgeuse,
+                        radial,
+                        mark_type,
+                        &marked,
+                        notifications,
+                    ))?;
+                }
+                Ok(())
+            })??;
+
+            // cpp:745–753: ruled side walls for lamina edges (SE).
+            if self.create_offset_solid() {
+                for &edgeuse in &offset_edgeuses {
+                    let edge = required(eu::edge(original, edgeuse)?, OP_SOLID)?;
+                    if eu::edge_is_lamina(original, edge)? {
+                        crate::error::ignore_status(self.build_side_wall_of_edgeuse(
+                            kernel,
+                            original,
+                            Some(edgeuse),
+                        ))?;
+                    }
+                }
+            }
+
+            // cpp:776–846: vertex caps, in GetVertices order (SER).
+            for vertex in bp1::vertices(original, None)? {
+                let cap = self.build_offset_of_vertex(kernel, original, Some(vertex))?;
+                let Some(surface) = cap.surface else {
+                    continue;
+                };
+                let mut stores = NotificationStores {
+                    records: &mut *notifications.records,
+                    attributes: &mut *notifications.attributes,
+                    key_of: notifications.result_key_of,
+                };
+                let new_face = self.make_cap_face(
+                    kernel,
+                    surface,
+                    cap.trim_curves,
+                    cap.curve_orientations,
+                    &loop_points,
+                    &mut NotifyState::from_kernel_stores(&mut stores),
+                )?;
+                self.relate_vertex_face(vertex, new_face);
+            }
+
+            // cpp:874–882: hand over the temporary unstitched.
+            if options.skip_stitch_merge {
+                return required(self.take_offset_brep(), OP_SOLID);
+            }
+
+            // cpp:887–902: a failed merge drops its partial result.
+            let mut result = self.piecewise_merge(kernel, original)?;
+            // cpp:965: the stitch status is only asserted.
+            crate::error::ignore_status(stitch::stitch_into_solid(kernel, &mut result))?;
+            // cpp:1009–1027: label the regions only when MakeManifold succeeds.
+            if crate::error::ignored(crate::topology::brep::p5::make_manifold(
+                kernel,
+                &mut result,
+                None,
+                false,
+            ))?
+            .is_some()
+            {
+                for region in bp1::regions(&result, None)? {
+                    let is_void = Some(region) == result.infinite_region();
+                    result.region_mut(region)?.is_void = i32::from(is_void);
+                }
+            }
+            // cpp:1046: delete the temporary, if PiecewiseMerge left one.
+            let _ = self.take_offset_brep();
+            Ok(result)
         })
     }
 
@@ -317,7 +423,8 @@ impl OffsetExecutive {
         let faces = bp1::faces(original, None)?;
         for id in faces {
             if self.shell_faces().contains(&id) {
-                self.copy_shell_face_prefix(kernel, original, id, true, notifications)?;
+                // DoExtendedOffset builds no vertex caps from these loop points.
+                let _ = self.copy_shell_face_prefix(kernel, original, id, true, notifications)?;
             } else {
                 self.offset_face_prefix(kernel, original, id, true, notifications)?;
             }
@@ -351,6 +458,7 @@ impl OffsetExecutive {
                             edgeuse,
                             radial,
                             mark_type,
+                            &marked,
                             notifications,
                         )?;
                         marked.insert(radial);
@@ -380,6 +488,7 @@ impl OffsetExecutive {
                     edgeuse,
                     radial,
                     mark_type,
+                    &marked,
                     notifications,
                 )?;
             }
@@ -479,11 +588,13 @@ impl OffsetExecutive {
         id: FaceId,
         extended: bool,
         notifications: &mut OffsetNotifications<'_>,
-    ) -> Result<()> {
+    ) -> Result<Vec<Vec3>> {
         let operation = if extended { OP_EXTENDED } else { OP_SOLID };
         // Both the 3D and UV outputs are requested, in this order, upstream.
         let curves =
             face::create_curves_from_face(kernel, original, id, OrientType::Same, true, true)?;
+        // DoSolidOffset reuses this `sLoopPoints` array for its vertex caps.
+        let loop_points = curves.loop_points.clone();
         let source_face = original.face(id)?;
         let source_surface = required(source_face.surface.as_ref(), operation)?;
         let surface = source_surface.copy_and_add_analytics(kernel)?;
@@ -575,7 +686,8 @@ impl OffsetExecutive {
                 key_of: notifications.original_key_of,
             },
             notifications.result_key_of,
-        )
+        )?;
+        Ok(loop_points)
     }
 
     fn offset_face_prefix(
@@ -635,13 +747,15 @@ impl OffsetExecutive {
         Ok(false)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn mapped_edge_prefix(
         &mut self,
         kernel: &mut Kernel,
-        original: &Brep,
+        original: &mut Brep,
         edgeuse: EdgeuseId,
         radial: EdgeuseId,
         mark_type: MarkType,
+        marked: &BTreeSet<EdgeuseId>,
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
         let mut stores = NotificationStores {
@@ -649,12 +763,13 @@ impl OffsetExecutive {
             attributes: &mut *notifications.attributes,
             key_of: notifications.original_key_of,
         };
-        self.build_offset_of_edgeuses_with_kernel_context(
+        self.build_offset_of_edgeuses_with_marked(
             kernel,
             original,
             edgeuse,
             radial,
             mark_type,
+            marked,
             &mut stores,
             notifications.result_key_of,
             notifications.result_curve_ref,
@@ -1671,10 +1786,11 @@ mod tests {
                     let mut notifications = NotificationFixture::new(&original);
                     exec.mapped_edge_prefix(
                         &mut kernel,
-                        &original,
+                        &mut original,
                         first,
                         second,
                         MarkType::Mark,
+                        &BTreeSet::new(),
                         &mut notifications.context(),
                     )
                 },
@@ -1684,7 +1800,7 @@ mod tests {
             assert_eq!(kernel.context.current_mark(MarkType::Mark), 1);
             let missing = EdgeuseId::from_index(99);
             assert!(matches!(
-                { let mut notifications = NotificationFixture::new(&original); exec.mapped_edge_prefix(&mut kernel, &original, first, missing, MarkType::Mark, &mut notifications.context()) },
+                { let mut notifications = NotificationFixture::new(&original); exec.mapped_edge_prefix(&mut kernel, &mut original, first, missing, MarkType::Mark, &BTreeSet::new(), &mut notifications.context()) },
                 Err(SolidError::NotFound { entity: EntityRef::Edgeuse(id), .. }) if id == missing
             ));
         }
@@ -2026,17 +2142,25 @@ mod tests {
         let status = with_mark_lock(&mut kernel, ALL_MARKS, |kernel, mark| {
             assert_eq!(mark, MarkType::Mark2);
             let current = kernel.context.current_mark(mark);
-            let result =
-                exec.mapped_edge_prefix(kernel, &original, old, old, mark, &mut fixture.context());
+            let result = exec.mapped_edge_prefix(
+                kernel,
+                &mut original,
+                old,
+                old,
+                mark,
+                &BTreeSet::new(),
+                &mut fixture.context(),
+            );
             assert_eq!(kernel.context.current_mark(mark), current);
             assert!(kernel.context.is_mark_locked(mark));
             result
         })
         .unwrap();
-        assert_dependency(
-            status,
-            "SmOffsetExecutive::BuildOffsetOfEdgeuses (geometry-creation adapter)",
-            "offset.offset_executive_p1",
+        // EdgeuseOffset dereferences the wire use's null face (undefined upstream)
+        // only after the edge and vertex notifications below.
+        assert!(
+            matches!(&status, Err(SolidError::InvalidInput { reason, .. }) if *reason == "edge use without face"),
+            "{status:?}"
         );
         for (entity, value) in entities {
             assert_ne!(original_key(entity).key, result_key(entity).key);
@@ -2472,24 +2596,28 @@ mod tests {
                     let mut exec = executive();
                     exec.set_merge_results(merge);
                     exec.set_create_offset_solid(true);
-                    assert_dependency(
-                        {
-                            let mut notifications = NotificationFixture::new(&original);
-                            exec.do_solid_offset(
-                                &mut kernel,
-                                Some(&mut original),
-                                SolidOffsetOptions { skip_stitch_merge },
-                                &mut notifications.context(),
-                            )
-                        },
-                        "SmBrep::ShrinkGeometry",
-                        "topology.brep_p4",
-                    );
+                    let result = {
+                        let mut notifications = NotificationFixture::new(&original);
+                        exec.do_solid_offset(
+                            &mut kernel,
+                            Some(&mut original),
+                            SolidOffsetOptions { skip_stitch_merge },
+                            &mut notifications.context(),
+                        )
+                    };
                     assert_eq!(kernel.context.doing_boolean(), previous);
-                    let result = exec.offset_brep().unwrap();
-                    assert!(result.faces().is_empty());
-                    assert_eq!(result.tolerance(), exec.approximation_tol_3d());
-                    assert_eq!(kernel.context.current_mark(MarkType::Mark), 1);
+                    if skip_stitch_merge {
+                        // The shrunk empty temporary is handed over unstitched.
+                        let result = result.unwrap();
+                        assert!(result.faces().is_empty());
+                        assert_eq!(result.tolerance(), exec.approximation_tol_3d());
+                        assert!(exec.offset_brep().is_none());
+                    } else if merge {
+                        assert_dependency(result, "SmMerge::PiecewiseMerge", "boolean.merge_p3");
+                    } else {
+                        assert!(result.unwrap().faces().is_empty());
+                        assert!(exec.offset_brep().is_none());
+                    }
                 }
             }
         }
@@ -2883,7 +3011,8 @@ mod tests {
             if extended {
                 assert_reaches_merge(result);
             } else {
-                assert_dependency(result, "SmBrep::ShrinkGeometry", "topology.brep_p4");
+                // The rounded empty offset now completes.
+                assert!(result.unwrap().faces().is_empty());
             }
             assert!(!kernel.context.doing_boolean());
         }
