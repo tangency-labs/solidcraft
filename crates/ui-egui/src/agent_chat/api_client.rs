@@ -284,6 +284,21 @@ fn go_data_url(url: &str) -> Option<(&str, &str)> {
     Some((mime, data))
 }
 
+/// One OpenAI content part's text, if it has any.
+fn openai_part_text(p: &Value) -> Option<&str> {
+    p.get("text").and_then(Value::as_str)
+}
+
+/// One OpenAI content part's image URL, if it is an image part.
+fn openai_part_image_url(p: &Value) -> Option<&str> {
+    p.pointer("/image_url/url").and_then(Value::as_str)
+}
+
+/// One OpenAI tool call's id and function name.
+fn openai_tool_call(c: &Value) -> (&str, &str) {
+    (c.get("id").and_then(Value::as_str).unwrap_or(""), c.pointer("/function/name").and_then(Value::as_str).unwrap_or(""))
+}
+
 /// OpenAI-style history as Anthropic messages; the system note is dropped (the
 /// caller sends its own) and tool answers merge so roles alternate.
 fn go_anthropic_messages(history: &[Value]) -> Vec<Value> {
@@ -295,9 +310,9 @@ fn go_anthropic_messages(history: &[Value]) -> Vec<Value> {
                 Some(Value::String(t)) => go_push_block(&mut out, "user", json!({"type": "text", "text": t})),
                 Some(Value::Array(parts)) => {
                     for p in parts {
-                        if let Some(t) = p.get("text").and_then(Value::as_str) {
+                        if let Some(t) = openai_part_text(p) {
                             go_push_block(&mut out, "user", json!({"type": "text", "text": t}));
-                        } else if let Some(url) = p.pointer("/image_url/url").and_then(Value::as_str)
+                        } else if let Some(url) = openai_part_image_url(p)
                             && let Some((mime, data)) = go_data_url(url)
                         {
                             go_push_block(&mut out, "user", json!({"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}));
@@ -312,8 +327,7 @@ fn go_anthropic_messages(history: &[Value]) -> Vec<Value> {
                 }
                 if let Some(calls) = m.get("tool_calls").and_then(Value::as_array) {
                     for c in calls {
-                        let id = c.get("id").and_then(Value::as_str).unwrap_or("");
-                        let name = c.pointer("/function/name").and_then(Value::as_str).unwrap_or("");
+                        let (id, name) = openai_tool_call(c);
                         let input = tool_arguments(c.pointer("/function/arguments")).unwrap_or_else(|_| json!({}));
                         go_push_block(&mut out, "assistant", json!({"type": "tool_use", "id": id, "name": name, "input": input}));
                     }
@@ -350,10 +364,10 @@ fn go_responses_input(history: &[Value]) -> Vec<Value> {
                     let content: Vec<Value> = parts
                         .iter()
                         .filter_map(|p| {
-                            if let Some(t) = p.get("text").and_then(Value::as_str) {
+                            if let Some(t) = openai_part_text(p) {
                                 Some(json!({"type": "input_text", "text": t}))
                             } else {
-                                p.pointer("/image_url/url").and_then(Value::as_str).map(|url| json!({"type": "input_image", "image_url": url}))
+                                openai_part_image_url(p).map(|url| json!({"type": "input_image", "image_url": url}))
                             }
                         })
                         .collect();
@@ -369,6 +383,7 @@ fn go_responses_input(history: &[Value]) -> Vec<Value> {
                 }
                 if let Some(calls) = m.get("tool_calls").and_then(Value::as_array) {
                     for c in calls {
+                        let (id, name) = openai_tool_call(c);
                         let args = match c.pointer("/function/arguments") {
                             Some(Value::String(s)) if !s.trim().is_empty() => s.clone(),
                             Some(v @ Value::Object(_)) => v.to_string(),
@@ -376,8 +391,8 @@ fn go_responses_input(history: &[Value]) -> Vec<Value> {
                         };
                         out.push(json!({
                             "type": "function_call",
-                            "call_id": c.get("id").and_then(Value::as_str).unwrap_or(""),
-                            "name": c.pointer("/function/name").and_then(Value::as_str).unwrap_or(""),
+                            "call_id": id,
+                            "name": name,
                             "arguments": args,
                         }));
                     }
@@ -431,9 +446,9 @@ fn go_gemini_contents(history: &[Value], sigs: &std::collections::HashMap<String
                 Some(Value::String(t)) => go_push_part(&mut out, "user", json!({"text": t})),
                 Some(Value::Array(parts)) => {
                     for p in parts {
-                        if let Some(t) = p.get("text").and_then(Value::as_str) {
+                        if let Some(t) = openai_part_text(p) {
                             go_push_part(&mut out, "user", json!({"text": t}));
-                        } else if let Some(url) = p.pointer("/image_url/url").and_then(Value::as_str)
+                        } else if let Some(url) = openai_part_image_url(p)
                             && let Some((mime, data)) = go_data_url(url)
                         {
                             go_push_part(&mut out, "user", json!({"inlineData": {"mimeType": mime, "data": data}}));
@@ -448,8 +463,7 @@ fn go_gemini_contents(history: &[Value], sigs: &std::collections::HashMap<String
                 }
                 if let Some(calls) = m.get("tool_calls").and_then(Value::as_array) {
                     for c in calls {
-                        let id = c.get("id").and_then(Value::as_str).unwrap_or("");
-                        let name = c.pointer("/function/name").and_then(Value::as_str).unwrap_or("");
+                        let (id, name) = openai_tool_call(c);
                         let args = tool_arguments(c.pointer("/function/arguments")).unwrap_or_else(|_| json!({}));
                         let call = json!({"name": name, "args": args});
                         go_push_part(
