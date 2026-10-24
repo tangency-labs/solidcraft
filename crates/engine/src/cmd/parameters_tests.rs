@@ -1439,3 +1439,24 @@ fn an_expression_says_when_its_plain_numbers_are_read_as_mm() {
     let r = run(&mut s, "solid.box", json!({"length": "w + 1", "width": 10, "height": 10, "corner": [0, 0, 0]}));
     assert!(r.get("unit_warnings").is_none(), "a mm design reads plain numbers as mm anyway: {r}");
 }
+
+/// Editing a feature's input through the parameters table stores the expression just as
+/// creating the feature did, so it says the same thing about plain numbers read as mm (#5887).
+#[test]
+fn editing_a_feature_input_says_when_its_plain_numbers_are_read_as_mm() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "2 in"}));
+    run(&mut s, "document.units", json!({"units": "in"}));
+    // A plain length to start with: nothing to say, it takes the design's unit.
+    let r = run(&mut s, "solid.box", json!({"length": 3, "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    assert!(r.get("unit_warnings").is_none(), "a bare number takes the design unit: {r}");
+    // Editing it to an expression is where the two readings part company.
+    let r = run(&mut s, "parameters.change", json!({"name": "d1", "expression": "w + 1"}));
+    let w = r["unit_warnings"].as_array().cloned().unwrap_or_default();
+    assert_eq!(w.len(), 1, "the edit says the same as creating it would: {r}");
+    let said = w[0].as_str().unwrap_or_default();
+    assert!(said.contains("51.8") && said.contains("76.2"), "{said}");
+    // Editing it back to something unambiguous is silent again.
+    let r = run(&mut s, "parameters.change", json!({"name": "d1", "expression": "w + 1 in"}));
+    assert!(r.get("unit_warnings").is_none(), "a number with its unit is unambiguous: {r}");
+}

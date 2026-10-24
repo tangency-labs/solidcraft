@@ -528,7 +528,7 @@ fn a_switched_feature_serializes_as_the_schema_says() {
         errors: Vec::new(),
         switched: vec![SwitchedFeature { feature: 3, name: Some("Hole".into()), suppressed: true }],
     };
-    let reply = serde_json::to_value(ParamChanged { body, param_warnings: Vec::new() }).unwrap_or_default();
+    let reply = serde_json::to_value(ParamChanged { body, param_warnings: Vec::new(), unit_warnings: Vec::new() }).unwrap_or_default();
     assert_eq!(
         reply,
         json!({"changed": {"W": 1.0}, "recomputed": 2, "restored": 0, "errors": [], "switched": [{"feature": 3, "name": "Hole", "suppressed": true}]})
