@@ -396,7 +396,7 @@ fn sketch_color(t: &Tokens, c: Rgb) -> [u8; 4] {
 }
 
 /// With a component active, bodies outside it are drawn faded.
-fn body_faded(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, active_bodies: &Option<Vec<String>>) -> bool {
+pub(crate) fn body_faded(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, active_bodies: &Option<Vec<String>>) -> bool {
     let s = &app.session;
     if let Some(names) = active_bodies {
         !names.contains(&b.name)
@@ -1270,7 +1270,7 @@ pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
 /// Pick what is under `pos`: sketch points, sketch curves, vertices, edges and axes first, then
 /// the surfaces along the ray (profiles, faces, planes) nearest first.
 /// Bounding boxes of the shown model's bodies (cached until the model changes).
-fn body_bounds(
+pub(crate) fn body_bounds(
     app: &SolveApp,
     st: &std::sync::Arc<solidcraft_engine::doc::ModelState>,
 ) -> std::sync::Arc<Vec<(String, solidcraft_engine::geom::Aabb3)>> {
@@ -1332,7 +1332,7 @@ pub fn model_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
 }
 
 /// Where a ray enters a box (None: it misses).
-fn ray_box(o: Vec3, d: Vec3, b: &solidcraft_engine::geom::Aabb3, pad: f64) -> Option<f64> {
+pub(crate) fn ray_box(o: Vec3, d: Vec3, b: &solidcraft_engine::geom::Aabb3, pad: f64) -> Option<f64> {
     let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
     for (oo, dd, lo, hi) in [(o.x, d.x, b.min.x, b.max.x), (o.y, d.y, b.min.y, b.max.y), (o.z, d.z, b.min.z, b.max.z)] {
         let (lo, hi) = (lo - pad, hi + pad);
@@ -1350,7 +1350,7 @@ fn ray_box(o: Vec3, d: Vec3, b: &solidcraft_engine::geom::Aabb3, pad: f64) -> Op
 }
 
 /// The point of segment `a`–`b` nearest the ray from `o` along `d`.
-fn ray_segment_closest(o: Vec3, d: Vec3, a: Vec3, b: Vec3) -> Vec3 {
+pub(crate) fn ray_segment_closest(o: Vec3, d: Vec3, a: Vec3, b: Vec3) -> Vec3 {
     let u = b - a;
     let w = a - o;
     let (dd, du, uu) = (d.dot(d), d.dot(u), u.dot(u));
@@ -1367,7 +1367,7 @@ fn ray_segment_closest(o: Vec3, d: Vec3, a: Vec3, b: Vec3) -> Vec3 {
 }
 
 /// A box's outline on screen, grown by `px` (None: behind the eye).
-fn screen_box(proj: &Proj, b: &solidcraft_engine::geom::Aabb3, px: f32) -> Option<Rect> {
+pub(crate) fn screen_box(proj: &Proj, b: &solidcraft_engine::geom::Aabb3, px: f32) -> Option<Rect> {
     let mut r = Rect::NOTHING;
     for i in 0..8 {
         let p = Vec3::new(
@@ -2826,7 +2826,7 @@ fn body_rgb(app: &SolveApp, name: &str) -> (u8, u8, u8) {
 
 /// The ray `o` + t `d` in the frame of a mesh that `place` (a rigid move) puts in the world, with
 /// the same t along it; `None` for a move with no inverse.
-fn local_ray(place: &solidcraft_engine::doc::Mat, o: Vec3, d: Vec3) -> Option<(Vec3, Vec3)> {
+pub(crate) fn local_ray(place: &solidcraft_engine::doc::Mat, o: Vec3, d: Vec3) -> Option<(Vec3, Vec3)> {
     if solidcraft_engine::doc::is_identity(place) {
         return Some((o, d));
     }
@@ -2847,7 +2847,7 @@ pub(crate) fn polyline_mid(pts: &[Vec3]) -> Vec3 {
     pts.first().copied().unwrap_or_default()
 }
 
-fn seg_dist(p: Pos2, a: Pos2, b: Pos2) -> f32 {
+pub(crate) fn seg_dist(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let ab = b - a;
     let l2 = ab.length_sq();
     let t = if l2 > 0.0 { ((p - a).dot(ab) / l2).clamp(0.0, 1.0) } else { 0.0 };

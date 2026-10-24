@@ -256,6 +256,7 @@ pub mod ui_kit;
 #[cfg(test)]
 mod ui_kit_guard_tests;
 pub mod update;
+pub mod view_pick;
 pub mod viewport;
 mod viewport_layout;
 pub mod workspace;

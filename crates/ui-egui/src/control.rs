@@ -117,6 +117,13 @@ fn key_from(name: &str) -> Option<egui::Key> {
 /// Run one command as `engine.execute` does: through `app.run`, then the first-body fit and the
 /// camera the command asked for.
 fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
+    // `view.pick` is answered by the viewport, not the engine: pixels and rays need the
+    // window's camera and pick index, and the command must not touch the document, the
+    // selection or the undo stack. Intercepted here so `engine.execute` and `engine.batch`
+    // (and through them MCP `execute` and `batch`) reach it like any other command.
+    if id == "view.pick" {
+        return crate::view_pick::pick_command(app, &params);
+    }
     let r = app.run(id, params);
     if r.is_ok()
         && !matches!(id, "view.layout" | "view.navigate" | "view.ambient_occlusion" | "view.graphics_preset" | "view.history_layout")
@@ -591,6 +598,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             let list = crate::scenario::handles(s("prefix").unwrap_or(""));
             ok(json!(list.into_iter().map(|(n, p)| json!({"name": n, "x": p.x, "y": p.y})).collect::<Vec<_>>()))
         }
+        "ui.pick" => wrap(crate::view_pick::pick_command(app, p)),
         "ui.at" => {
             if let Some(path) = p.get("occurrence").and_then(Value::as_array) {
                 let ids: Option<Vec<u64>> = path.iter().map(Value::as_u64).collect();
