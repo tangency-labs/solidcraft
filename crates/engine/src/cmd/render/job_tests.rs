@@ -481,6 +481,55 @@ fn compiled_out_raytrace_is_rejected_before_scene_capture() {
 }
 
 #[test]
+fn preflight_and_start_reject_excessive_pixel_work_without_reserving_a_job() {
+    let (mut s, host) = session();
+    for _ in 0..8 {
+        s.execute("solid.box", &json!({"length":20,"width":20,"height":20,"corner":[-10,-10,-10]})).unwrap();
+    }
+    let mut camera = solidcraft_render::Camera { distance: 1.0, fov: 0.0, ..Default::default() };
+    camera.set_view(solidcraft_render::StandardView::Front);
+    let params = json!({"settings":{"width":1024,"height":1024,"camera":camera}});
+    let doc = s.doc.clone();
+    let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
+    for command in ["render.preflight", "render.start"] {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("128000000 pixel tests"), "{error}");
+        assert_eq!(host.admitted_bytes(), 0);
+    }
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+    {
+        let raytrace_host = CpuHost::for_platform().unwrap();
+        s.set_render_job_host(Some(raytrace_host.clone())).unwrap();
+        let params = json!({"settings":{"width":1024,"height":1024,"camera":camera},
+            "integrator":"raytrace","transparent_background":false});
+        let preflight = s.execute("render.preflight", &params).unwrap();
+        assert_eq!(preflight["resolved"]["executor"], "cpu-raytrace");
+        assert!(preflight["admission"].get("projected_pixel_tests").is_none());
+        assert_eq!(raytrace_host.admitted_bytes(), 0);
+        let started = s.execute("render.start", &params).unwrap();
+        let id: JobId = serde_json::from_value(started["job"].clone()).unwrap();
+        s.execute("render.cancel", &json!({"job":id})).unwrap();
+        let status = s.render_job_handle(id).unwrap().wait_timeout(std::time::Duration::from_secs(10)).unwrap();
+        assert_eq!(status.progress.phase, solidcraft_render::job::Phase::Cancelled);
+        assert_eq!(raytrace_host.admitted_bytes(), 0);
+        assert!(Arc::ptr_eq(&doc, &s.doc));
+        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+        s.set_render_job_host(Some(host.clone())).unwrap();
+    }
+
+    let params = json!({"settings":{"width":16,"height":16,"camera":camera}});
+    let preflight = s.execute("render.preflight", &params).unwrap();
+    assert!(preflight["admission"]["projected_pixel_tests"].as_u64().unwrap() > 0);
+    assert_eq!(host.admitted_bytes(), 0);
+    let id = s.execute("render.start", &params).unwrap()["job"].clone();
+    finish(&host);
+    assert_eq!(s.execute("render.status", &json!({"job":id})).unwrap()["progress"]["phase"], "completed");
+}
+
+#[test]
 fn identities_are_isolated_across_documents_scratch_and_new() {
     let (mut a, host) = session();
     let mut b = Session::default();

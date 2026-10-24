@@ -71,12 +71,17 @@ additionally yields after four rows. The UI pumps 1024 units per frame. These ar
 bounds, not hard real-time guarantees: allocation, codec compression and OS scheduling
 still have platform-dependent latency.
 
-Admission caps output at 4096 per dimension and 4 million pixels; pixel scratch is
+CPU raster admission caps output at 4096 per dimension and 4 million pixels; pixel scratch is
 estimated at 48 bytes per output pixel (2x supersampling). Other limits: 262144
 triangles/face overrides/edge polylines, 128 MiB retained source geometry, 384 MiB total
 estimated memory per job, 512 MiB shared host admission including retained PNGs, and
-128 million projected pixel tests. The projected-work limit is checked during bounded
-preparation and may fail an admitted job. Encoded PNG bytes have an additional
+128 million projected pixel tests. Preflight and Start check projected work using the
+same clipped, supersampled triangle bounds as the rasterizer, including face opacity
+overrides. Raster admission reports `projected_pixel_tests`; CPU raytracing and registered
+GPU executors omit this field and use their own work and memory budgets. Over-budget
+raster requests are rejected before a job is queued, with advice to reduce image
+dimensions or visible geometry.
+The worker retains its bounded preparation check. Encoded PNG bytes have an additional
 `8 * output_pixels + 65536` cap. Allocator and codec internals are estimates, not an
 operating-system memory quota. Limits fail with errors rather than allocating unbounded
 buffers. Completed frames keep their memory reservation while bytes are retained.

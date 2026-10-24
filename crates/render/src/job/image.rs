@@ -23,6 +23,9 @@ const SS: usize = 2;
 pub struct Admission {
     pub triangles: u64,
     pub face_appearances: u64,
+    /// Supersampled raster work only; absent for ray tracing and registered executors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub projected_pixel_tests: Option<u64>,
     pub geometry_bytes: u64,
     pub pixel_scratch_bytes: u64,
     pub preparation_bytes: u64,
@@ -79,7 +82,9 @@ pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> 
 }
 
 pub(crate) fn admit_base(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
-    admit_raster(admit_source(scene, request, MAX_TRIANGLES)?)
+    let mut admission = admit_raster(admit_source(scene, request, MAX_TRIANGLES)?)?;
+    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, request)?);
+    Ok(admission)
 }
 
 /// Common camera, dimension and source admission for registered executors, without any CPU
@@ -225,6 +230,7 @@ fn admit_source_with_limits(
         admission: Admission {
             triangles,
             face_appearances: faces,
+            projected_pixel_tests: None,
             geometry_bytes: geometry,
             pixel_scratch_bytes: 0,
             preparation_bytes: 0,
@@ -258,6 +264,137 @@ fn admit_raster(source: Source) -> Result<Admission> {
     a.preparation_bytes = preparation;
     a.estimated_total_bytes = total;
     Ok(a)
+}
+
+/// The same clipping, supersampling and bounds govern admission and raster work.
+struct Projection {
+    vp: Mat4,
+    back: Vec3,
+    target: Vec3,
+    sw: usize,
+    sh: usize,
+}
+
+impl Projection {
+    fn new(scene: &ProductScene, request: &ImageRequest) -> Result<Self> {
+        let (sw, sh) = (request.width as usize * SS, request.height as usize * SS);
+        let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(request.camera.target);
+        if !radius.is_finite() {
+            return Err(invalid("invalid product bounds"));
+        }
+        Ok(Self { vp: request.camera.view_proj(sw as f64 / sh as f64, radius), back: request.camera.back(), target: request.camera.target, sw, sh })
+    }
+
+    fn project(&self, body: &crate::ProductMesh, triangle: usize, look: Option<&FaceAppearance>) -> Result<Option<Triangle>> {
+        let mesh = &body.mesh;
+        let indices = mesh.triangles.get(triangle).ok_or_else(|| invalid("missing product triangle"))?;
+        let vertices = indices.map(|i| mesh.positions.get(i as usize).copied());
+        let normals = indices.map(|i| mesh.normals.get(i as usize).copied());
+        let ([Some(a), Some(b), Some(c)], [Some(na), Some(nb), Some(nc)]) = (vertices, normals) else {
+            return Err(invalid("invalid triangle index or missing normal"));
+        };
+        let world = [a, b, c];
+        let normals = [na, nb, nc];
+        if world.iter().chain(normals.iter()).any(|v| !v.is_finite()) {
+            return Err(invalid("non-finite product triangle"));
+        }
+        // Transmission is physical optical data, never a request to change CPU preview.
+        // Keep the existing scalar sorted-alpha shading for glass previews.
+        let (colour, opacity, surface) = look.map_or((body.color, body.opacity, body.surface.filter(|_| body.transmission.is_none())), |look| {
+            (look.color, look.opacity, look.surface.filter(|_| look.transmission.is_none()))
+        });
+        if surface.is_some() && opacity != 1.0 {
+            return Err(invalid("opaque PBR requires opacity 1"));
+        }
+        let normals = if surface.is_some() {
+            [crate::surface::unit_direction(na), crate::surface::unit_direction(nb), crate::surface::unit_direction(nc)]
+                .map(|n| n.map_err(|e| invalid(&e.to_string())))
+        } else {
+            [Ok(normals[0]), Ok(normals[1]), Ok(normals[2])]
+        };
+        let [na, nb, nc] = normals;
+        let normals = [na?, nb?, nc?];
+        if opacity <= 0.0 {
+            return Ok(None);
+        }
+        let clip = world.map(|p| self.vp.apply(p));
+        if clip.iter().flatten().any(|v| !v.is_finite()) {
+            return Err(invalid("non-finite product projection"));
+        }
+        if clip.iter().any(|p| p[3] <= 1e-9) {
+            return Ok(None);
+        }
+        let inv_w = clip.map(|p| 1.0 / p[3]);
+        let points = clip.map(|p| [(p[0] / p[3] + 1.0) * 0.5 * self.sw as f64, (1.0 - p[1] / p[3]) * 0.5 * self.sh as f64, p[2] / p[3]]);
+        if points.iter().flatten().any(|v| !v.is_finite()) || points.iter().any(|p| !(p[2] as f32).is_finite()) {
+            return Err(invalid("product projection exceeds pixel precision"));
+        }
+        let [a, b, c] = points;
+        let (x0, x1) = (a[0].min(b[0]).min(c[0]).floor().max(0.0), a[0].max(b[0]).max(c[0]).ceil().min(self.sw as f64 - 1.0));
+        let (y0, y1) = (a[1].min(b[1]).min(c[1]).floor().max(0.0), a[1].max(b[1]).max(c[1]).ceil().min(self.sh as f64 - 1.0));
+        let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+        if !(x0 <= x1 && y0 <= y1) || area.abs() < 1e-12 {
+            return Ok(None);
+        }
+        if !area.is_finite() {
+            return Err(invalid("invalid projected area"));
+        }
+        let centre_depth = (world[0] / 3.0 + world[1] / 3.0 + world[2] / 3.0 - self.target).dot(self.back);
+        if !centre_depth.is_finite() {
+            return Err(invalid("invalid triangle depth"));
+        }
+        Ok(Some(Triangle {
+            points,
+            world,
+            normals,
+            inv_w,
+            colour: colour.map(decode),
+            opacity,
+            surface,
+            centre_depth,
+            area,
+            bounds: [x0 as usize, x1 as usize, y0 as usize, y1 as usize],
+            x: x0 as usize,
+            y: y0 as usize,
+        }))
+    }
+}
+
+fn add_pixel_tests(sum: &mut u64, triangle: &Triangle) -> Result<()> {
+    let [x0, x1, y0, y1] = triangle.bounds;
+    let tests = ((x1 - x0 + 1) as u64).checked_mul((y1 - y0 + 1) as u64).ok_or_else(|| limit("pixel work overflow"))?;
+    *sum = sum.checked_add(tests).ok_or_else(|| limit("pixel work overflow"))?;
+    if *sum > MAX_PIXEL_TESTS {
+        return Err(limit("projected product exceeds 128000000 pixel tests; reduce image dimensions or visible geometry"));
+    }
+    Ok(())
+}
+
+fn validate_face(face: &FaceAppearance) -> Result<()> {
+    if !face.opacity.is_finite() || !(0.0..=1.0).contains(&face.opacity) {
+        return Err(invalid("invalid face opacity"));
+    }
+    Ok(())
+}
+
+fn projected_pixel_tests(scene: &ProductScene, request: &ImageRequest) -> Result<u64> {
+    let projection = Projection::new(scene, request)?;
+    let mut tests = 0;
+    for body in &scene.meshes {
+        let mut looks = BTreeMap::new();
+        for face in &body.faces {
+            validate_face(face)?;
+            // Match the document and task policy: the last assignment wins.
+            looks.insert(face.face, face);
+        }
+        for index in 0..body.mesh.triangles.len() {
+            let look = body.mesh.tri_face.get(index).and_then(|face| looks.get(face)).copied();
+            if let Some(triangle) = projection.project(body, index, look)? {
+                add_pixel_tests(&mut tests, &triangle)?;
+            }
+        }
+    }
+    Ok(tests)
 }
 
 fn reserve<T>(count: usize) -> Result<Vec<T>> {
@@ -320,10 +457,7 @@ pub struct ImageTask {
     admission: Admission,
     cancel: CancelToken,
     stage: Stage,
-    vp: Mat4,
-    back: Vec3,
-    sw: usize,
-    sh: usize,
+    projection: Projection,
     looks: Vec<BTreeMap<u32, FaceAppearance>>,
     body: usize,
     item: usize,
@@ -355,13 +489,8 @@ impl ImageTask {
             return Err(JobError::new(ErrorCode::InvalidRequest, "raster task cannot execute a raytrace request"));
         }
         let admission = admit(&scene, &request)?;
-        let (sw, sh) = (request.width as usize * SS, request.height as usize * SS);
-        let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(request.camera.target);
-        if !radius.is_finite() {
-            return Err(invalid("invalid product bounds"));
-        }
-        let vp = request.camera.view_proj(sw as f64 / sh as f64, radius);
-        let back = request.camera.back();
+        let projection = Projection::new(&scene, &request)?;
+        let (sw, sh) = (projection.sw, projection.sh);
         let looks = reserve(scene.meshes.len())?;
         let (opaque, glass, scratch) =
             (reserve(admission.triangles as usize)?, reserve(admission.triangles as usize)?, reserve(admission.triangles as usize)?);
@@ -372,10 +501,7 @@ impl ImageTask {
             admission,
             cancel,
             stage: Stage::Looks,
-            vp,
-            back,
-            sw,
-            sh,
+            projection,
             looks,
             body: 0,
             item: 0,
@@ -411,7 +537,9 @@ impl ImageTask {
             Stage::Clear | Stage::Opaque | Stage::Glass | Stage::Downsample => Progress {
                 phase: Phase::Running,
                 done: self.pixel_done,
-                total: self.pixel_tests + (self.sw * self.sh) as u64 + u64::from(self.request.width) * u64::from(self.request.height),
+                total: self.pixel_tests
+                    + (self.projection.sw * self.projection.sh) as u64
+                    + u64::from(self.request.width) * u64::from(self.request.height),
             },
             Stage::Encode => Progress {
                 phase: Phase::Encoding,
@@ -460,9 +588,7 @@ impl ImageTask {
             self.looks.push(BTreeMap::new());
         }
         if let Some(face) = body.faces.get(self.item) {
-            if !face.opacity.is_finite() || !(0.0..=1.0).contains(&face.opacity) {
-                return Err(invalid("invalid face opacity"));
-            }
+            validate_face(face)?;
             let looks = self.looks.get_mut(self.body).ok_or_else(|| invalid("missing body appearances"))?;
             // Match the document policy: the last assignment of a face wins.
             looks.insert(face.face, face.clone());
@@ -477,78 +603,9 @@ impl ImageTask {
 
     fn project(&self, draw: Draw) -> Result<Option<Triangle>> {
         let body = self.scene.meshes.get(draw.body as usize).ok_or_else(|| invalid("missing product body"))?;
-        let mesh = &body.mesh;
-        let indices = mesh.triangles.get(draw.triangle as usize).ok_or_else(|| invalid("missing product triangle"))?;
-        let vertices = indices.map(|i| mesh.positions.get(i as usize).copied());
-        let normals = indices.map(|i| mesh.normals.get(i as usize).copied());
-        let ([Some(a), Some(b), Some(c)], [Some(na), Some(nb), Some(nc)]) = (vertices, normals) else {
-            return Err(invalid("invalid triangle index or missing normal"));
-        };
-        let world = [a, b, c];
-        let normals = [na, nb, nc];
-        if world.iter().chain(normals.iter()).any(|v| !v.is_finite()) {
-            return Err(invalid("non-finite product triangle"));
-        }
-        let look = self.looks.get(draw.body as usize).and_then(|looks| mesh.tri_face.get(draw.triangle as usize).and_then(|face| looks.get(face)));
-        // Transmission is physical optical data, never a request to change CPU preview.
-        // Keep the existing scalar sorted-alpha shading for glass previews.
-        let (colour, opacity, surface) = look.map_or((body.color, body.opacity, body.surface.filter(|_| body.transmission.is_none())), |look| {
-            (look.color, look.opacity, look.surface.filter(|_| look.transmission.is_none()))
-        });
-        if surface.is_some() && opacity != 1.0 {
-            return Err(invalid("opaque PBR requires opacity 1"));
-        }
-        let normals = if surface.is_some() {
-            [crate::surface::unit_direction(na), crate::surface::unit_direction(nb), crate::surface::unit_direction(nc)]
-                .map(|n| n.map_err(|e| invalid(&e.to_string())))
-        } else {
-            [Ok(normals[0]), Ok(normals[1]), Ok(normals[2])]
-        };
-        let [na, nb, nc] = normals;
-        let normals = [na?, nb?, nc?];
-        if opacity <= 0.0 {
-            return Ok(None);
-        }
-        let clip = world.map(|p| self.vp.apply(p));
-        if clip.iter().flatten().any(|v| !v.is_finite()) {
-            return Err(invalid("non-finite product projection"));
-        }
-        if clip.iter().any(|p| p[3] <= 1e-9) {
-            return Ok(None);
-        }
-        let inv_w = clip.map(|p| 1.0 / p[3]);
-        let points = clip.map(|p| [(p[0] / p[3] + 1.0) * 0.5 * self.sw as f64, (1.0 - p[1] / p[3]) * 0.5 * self.sh as f64, p[2] / p[3]]);
-        if points.iter().flatten().any(|v| !v.is_finite()) || points.iter().any(|p| !(p[2] as f32).is_finite()) {
-            return Err(invalid("product projection exceeds pixel precision"));
-        }
-        let [a, b, c] = points;
-        let (x0, x1) = (a[0].min(b[0]).min(c[0]).floor().max(0.0), a[0].max(b[0]).max(c[0]).ceil().min(self.sw as f64 - 1.0));
-        let (y0, y1) = (a[1].min(b[1]).min(c[1]).floor().max(0.0), a[1].max(b[1]).max(c[1]).ceil().min(self.sh as f64 - 1.0));
-        let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-        if !(x0 <= x1 && y0 <= y1) || area.abs() < 1e-12 {
-            return Ok(None);
-        }
-        if !area.is_finite() {
-            return Err(invalid("invalid projected area"));
-        }
-        let centre_depth = (world[0] / 3.0 + world[1] / 3.0 + world[2] / 3.0 - self.request.camera.target).dot(self.back);
-        if !centre_depth.is_finite() {
-            return Err(invalid("invalid triangle depth"));
-        }
-        Ok(Some(Triangle {
-            points,
-            world,
-            normals,
-            inv_w,
-            colour: colour.map(decode),
-            opacity,
-            surface,
-            centre_depth,
-            area,
-            bounds: [x0 as usize, x1 as usize, y0 as usize, y1 as usize],
-            x: x0 as usize,
-            y: y0 as usize,
-        }))
+        let look =
+            self.looks.get(draw.body as usize).and_then(|looks| body.mesh.tri_face.get(draw.triangle as usize).and_then(|face| looks.get(face)));
+        self.projection.project(body, draw.triangle as usize, look)
     }
 
     fn prepare_step(&mut self) -> Result<()> {
@@ -565,12 +622,7 @@ impl ImageTask {
         }
         let mut draw = Draw { body: self.body as u32, triangle: self.item as u32, depth: 0.0 };
         if let Some(triangle) = self.project(draw)? {
-            let [x0, x1, y0, y1] = triangle.bounds;
-            let tests = ((x1 - x0 + 1) as u64).checked_mul((y1 - y0 + 1) as u64).ok_or_else(|| limit("pixel work overflow"))?;
-            self.pixel_tests = self.pixel_tests.checked_add(tests).ok_or_else(|| limit("pixel work overflow"))?;
-            if self.pixel_tests > MAX_PIXEL_TESTS {
-                return Err(limit("projected product exceeds 128000000 pixel tests"));
-            }
+            add_pixel_tests(&mut self.pixel_tests, &triangle)?;
             draw.depth = triangle.centre_depth;
             if triangle.opacity >= 1.0 {
                 self.opaque.push(draw);
@@ -631,7 +683,7 @@ impl ImageTask {
     }
 
     fn clear_step(&mut self) {
-        if self.pixels.len() >= self.sw * self.sh {
+        if self.pixels.len() >= self.projection.sw * self.projection.sh {
             self.stage = Stage::Opaque;
             self.draw = 0;
             return;
@@ -658,7 +710,7 @@ impl ImageTask {
         }
         let triangle = self.triangle.as_mut().ok_or_else(|| invalid("missing raster triangle"))?;
         let eye = (self.request.camera.fov > 0.0).then(|| self.request.camera.eye());
-        raster_pixel(triangle, self.sw, self.back, eye, &mut self.pixels, &mut self.depth)?;
+        raster_pixel(triangle, self.projection.sw, self.projection.back, eye, &mut self.pixels, &mut self.depth)?;
         triangle.x += 1;
         if triangle.x > triangle.bounds[1] {
             triangle.x = triangle.bounds[0];
@@ -693,7 +745,7 @@ impl ImageTask {
         let (mut colour, mut alpha) = ([0.0; 3], 0.0);
         for dy in 0..SS {
             for dx in 0..SS {
-                let p = self.pixels.get((y * SS + dy) * self.sw + x * SS + dx).ok_or_else(|| invalid("missing downsample pixel"))?;
+                let p = self.pixels.get((y * SS + dy) * self.projection.sw + x * SS + dx).ok_or_else(|| invalid("missing downsample pixel"))?;
                 let a = f64::from(p[3]) / 255.0;
                 for (sum, channel) in colour.iter_mut().zip(p.iter().take(3)) {
                     *sum += decode(*channel) * a;

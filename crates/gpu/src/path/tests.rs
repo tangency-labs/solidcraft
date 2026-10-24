@@ -569,6 +569,39 @@ fn admission_rejects_hostile_parameters_and_transparency() {
 }
 
 #[test]
+fn admission_ignores_the_cpu_raster_projected_pixel_limit() {
+    let mesh = Mesh {
+        positions: vec![Vec3::new(-10.0, -10.0, 0.0), Vec3::new(10.0, -10.0, 0.0), Vec3::new(10.0, 10.0, 0.0)],
+        normals: vec![Vec3::Z; 3],
+        triangles: vec![[0, 1, 2]; 3201],
+        tri_face: vec![0; 3201],
+        ..Default::default()
+    };
+    let scene = ProductScene {
+        bounds: mesh.bounds(),
+        meshes: vec![ProductMesh {
+            name: "overlapping triangles".into(),
+            mesh: Arc::new(mesh),
+            color: [255; 3],
+            opacity: 1.0,
+            surface: Some(white()),
+            transmission: None,
+            faces: Vec::new(),
+        }],
+    };
+    let mut r = request(100);
+    r.camera.distance = 1.0;
+    r.camera.fov = 0.0;
+    let raster_error = solidcraft_render::job::admit(&scene, &r).unwrap_err();
+    assert_eq!(raster_error.code, ErrorCode::LimitExceeded);
+    assert!(raster_error.message.contains("128000000 pixel tests"), "{raster_error:?}");
+    // Exercise the actual GPU admission path without requiring a Vulkan device.
+    let gpu = admission(&scene, &r, JobOptions::default()).unwrap();
+    assert_eq!(gpu.projected_pixel_tests, None);
+    assert!(gpu.estimated_total_bytes > gpu.geometry_bytes);
+}
+
+#[test]
 fn admission_applies_the_gpu_estimate_instead_of_the_cpu_raster_budget() {
     // A library-bounded source (not an ordinary UI scene): about 100 MiB of face appearances
     // on a small mesh at the largest image. Its CPU raster estimate is above 384 MiB (covered
