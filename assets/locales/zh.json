@@ -2342,6 +2342,7 @@
   "ui.up_axis_note": "视图中朝上的轴（轴视图、主视图、注视）。设计本身不变。",
   "ui.updateToCurrentView": "更新为当前视图",
   "ui.view_centre": "视图中心",
+  "ui.viewport_theme_follow": "跟随主题",
   "ui.visual_shaded_hidden_edges": "带隐藏边的着色",
   "ui.visual_shaded_with_edges": "带边着色",
   "ui.visual_style": "视觉样式",

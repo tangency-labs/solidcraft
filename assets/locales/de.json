@@ -2094,6 +2094,7 @@
   "ui.up_axis_note": "Welche Achse in den Ansichten nach oben zeigt (Achsenansicht, Home, Ansehen). Designs bleiben unverändert.",
   "ui.updateToCurrentView": "Auf aktuelle Ansicht aktualisieren",
   "ui.view_centre": "Ansichtszentrum",
+  "ui.viewport_theme_follow": "Dem Design folgen",
   "ui.visual_shaded_hidden_edges": "Schattiert mit verdeckten Kanten",
   "ui.visual_shaded_with_edges": "Schattiert mit Kanten",
   "ui.visual_style": "Ansichtsstil",

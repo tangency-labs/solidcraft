@@ -196,7 +196,8 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
     if !takes(t.cmd) || !active(app) {
         return false;
     }
-    let tk = Tokens::get();
+    // Drawn straight onto the view: its side's colours (#4146).
+    let tk = Tokens::view();
     let stroke = Stroke::new(1.5, tk.sketch_accent);
     let pts = if CHAIN.with(|c| c.borrow().0) == Some(t.cmd) { chain() } else { Vec::new() };
     let hover = HOVER.with(|h| *h.borrow());
@@ -355,7 +356,8 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if app.session.active_sketch.is_none() {
         return;
     }
-    let tk = Tokens::get();
+    // Drawn straight onto the view: its side's colours (#4146).
+    let tk = Tokens::view();
     let sel = TRIAD.with(|t| t.borrow().clone());
     for (w, i, p) in drawn_points(app) {
         if let Some(s) = proj.to_screen(p) {

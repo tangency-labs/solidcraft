@@ -5,6 +5,20 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_section(ui, "theme", app.tr("ui.theme"), |ui| {
         theme_row(app, ui);
         ui_kit::tab_accent_strip(ui);
+        // The 3D view in the theme's colours, or the Light or Dark theme's (#4146).
+        ui_kit::settings_form(ui, t.form_label_width + t.space_16 + t.space_6, |ui| {
+            let label = app.tr("prefs.viewport");
+            ui_kit::row(ui, label, |ui| {
+                let views = crate::theme::ViewportTheme::ALL;
+                let labels: Vec<_> = views.iter().map(|v| crate::i18n::tr(v.label_id())).collect();
+                let mut selected = views.iter().position(|v| *v == app.preferences.viewport_theme).unwrap_or(0);
+                if ui_kit::settings_segments(ui, label, &mut selected, &labels)
+                    && let Some(view) = views.get(selected)
+                {
+                    app.preferences.viewport_theme = *view;
+                }
+            });
+        });
     });
     ui_kit::settings_section(ui, "layout", app.tr("prefs.layout"), |ui| {
         ui_kit::settings_pair(

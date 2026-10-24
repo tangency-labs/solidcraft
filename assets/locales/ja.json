@@ -2342,6 +2342,7 @@
   "ui.up_axis_note": "ビュー（軸ビュー、ホーム、正面視）で上向きにする軸を指定します。デザインデータ自体は変更されません。",
   "ui.updateToCurrentView": "現在のビューに更新",
   "ui.view_centre": "ビュー中心",
+  "ui.viewport_theme_follow": "テーマに従う",
   "ui.visual_shaded_hidden_edges": "隠線付きシェーディング",
   "ui.visual_shaded_with_edges": "エッジ付きシェーディング",
   "ui.visual_style": "表示スタイル",

@@ -1505,6 +1505,11 @@ impl SolveApp {
         self.cam_anim = None;
     }
 
+    /// Is the 3D view dark? As the window, unless Preferences give the view its own (#4146).
+    pub fn viewport_dark(&self) -> bool {
+        self.preferences.viewport_theme.dark().unwrap_or(self.ui.dark)
+    }
+
     /// Hand the view to an external navigation device without a pending mouse orbit or spin
     /// immediately taking it back on the next frame.
     pub fn begin_external_navigation(&mut self) {
@@ -1539,6 +1544,8 @@ impl SolveApp {
         open_meshing::refresh(self, ctx.input(|i| i.time));
         self.esc_handled = false;
         prefs::apply(self, ctx);
+        // The view's own dark or light only changes tokens, not egui's visuals: no restyle.
+        theme::set_viewport_dark(self.preferences.viewport_theme.dark());
         if !self.styled || theme::is_dark() != self.ui.dark || theme::vision() != self.preferences.color_vision {
             theme::set_dark(self.ui.dark);
             theme::set_vision(self.preferences.color_vision);

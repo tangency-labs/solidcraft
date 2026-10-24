@@ -117,7 +117,9 @@ and command menus remain available.
 
 General › **Theme** lists Dark, Light and System (follows the operating system), the built-in
 Gruvbox themes (dark and light, each in hard, normal and soft contrast) and any themes you have
-imported. A choice applies at once.
+imported. A choice applies at once. Under the themes, **Viewport** draws the 3D view in the
+Light or Dark theme's colours whatever the window uses, for example the model on a light view in
+a dark window (**Follow theme**, the default, keeps the theme's own).
 
 A theme is a small JSON file that starts from the Dark or Light palette and changes any of its
 colours and corner radii by name:

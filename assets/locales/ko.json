@@ -1969,6 +1969,7 @@
   "ui.up_axis_note": "뷰(축 뷰, 홈, 보기)에서 위쪽을 가리키는 축입니다. 디자인은 변경되지 않습니다.",
   "ui.updateToCurrentView": "현재 보기로 업데이트",
   "ui.view_centre": "뷰 중심",
+  "ui.viewport_theme_follow": "테마 따르기",
   "ui.visual_shaded_hidden_edges": "음영 처리 및 숨겨진 모서리",
   "ui.visual_shaded_with_edges": "음영 처리 및 모서리",
   "ui.visual_style": "시각 스타일",
