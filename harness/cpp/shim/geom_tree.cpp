@@ -485,3 +485,76 @@ SC_EXPORT int32_t sc_geom_tree_subdiv_patches(const int64_t* desc, int64_t n_nod
     return sc_copy_out(values.data(), (int64_t)values.size(), out, cap, out_len);
     SC_CATCH
 }
+
+// Real-patch fixture: see geom_tree::validate_patch_lookup for the bounded format.
+SC_EXPORT int32_t sc_geom_tree_patch_lookup(const double* prog, int64_t n, double* out,
+                                          int64_t cap, int64_t* out_len)
+{
+    if (prog == nullptr || n < 2 || out_len == nullptr) return SC_ERR_ARG;
+    SC_TRY
+    int64_t cursor = 0;
+    auto number = [&]() { return prog[cursor++]; };
+    const int64_t ns = (int64_t)number(), owner = (int64_t)number();
+    SmContext ctx;
+    std::vector<std::unique_ptr<SmBSplineSurface>> surfaces;
+    for (int64_t k = 0; k < ns; ++k)
+    {
+        gw_SURFACE* s = sm_AllocateNurbSurface(1, 1, 1, 1, 3, 3);
+        if (!s) return SC_ERR_ARG;
+        for (int i = 0; i < 2; ++i)
+            for (int j = 0; j < 2; ++j)
+            {
+                auto& p = s->net->Pw[i][j];
+                p.x = number(); p.y = number(); p.z = number(); p.w = number();
+            }
+        for (int i = 0; i < 4; ++i) s->knu->U[i] = s->knv->U[i] = i < 2 ? 0.0 : 1.0;
+        surfaces.emplace_back(new (&ctx) SmBSplineSurface(s, FALSE, NULL));
+    }
+    SmSurfaceCache cache(*surfaces[(size_t)(owner < 0 ? 0 : owner)], SmExtent2d(0, 0, 1, 1));
+    SmTree tree(owner < 0 ? nullptr : &cache);
+    const int64_t nn = (int64_t)number();
+    std::vector<SmTreeNode> nodes((size_t)nn);
+    std::vector<SmBezierPatch> patches((size_t)nn);
+    for (int64_t i = 0; i < nn; ++i)
+    {
+        const int64_t parent = (int64_t)number(), aux = (int64_t)number();
+        const int64_t patch = (int64_t)number(), surface = (int64_t)number();
+        auto& nd = nodes[(size_t)i];
+        auto& data = patches[(size_t)i];
+        nd.m_pTree = &tree;
+        nd.m_pParent = parent < 0 ? nullptr : &nodes[(size_t)parent];
+        if (nd.m_pParent)
+        {
+            auto& p = *nd.m_pParent;
+            if (!p.m_pChild1) p.m_pChild1 = &nd; else p.m_pChild2 = &nd;
+        }
+        nd.m_eAuxDataType = (SmAuxDataType)aux;
+        data.m_pBezier = patch < 0 ? nullptr : surfaces[(size_t)patch]->GetGwNurbPointer();
+        data.mBA_pSurface = surface < 0 ? nullptr : surfaces[(size_t)surface].get();
+        nd.m_pData = &data;
+    }
+    std::vector<double> o;
+    const int64_t nq = (int64_t)number();
+    for (int64_t q = 0; q < nq; ++q)
+    {
+        gw_SURFACE* s = nodes[(size_t)number()].GetFirstBezierPatch();
+        if (!s) { o.push_back(-1); continue; }
+        int64_t selected = -1;
+        for (int64_t j = 0; j < ns; ++j)
+            if (s == surfaces[(size_t)j]->GetGwNurbPointer()) selected = j;
+        if (selected < 0) return SC_ERR_ARG;
+        o.push_back((double)selected);
+        o.insert(o.end(), {(double)s->net->n, (double)s->net->m, (double)s->p,
+                          (double)s->q, (double)s->knu->m, (double)s->knv->m});
+        for (gw_INDEX i = 0; i <= s->net->n; ++i)
+            for (gw_INDEX j = 0; j <= s->net->m; ++j)
+            {
+                const auto& p = s->net->Pw[i][j];
+                o.insert(o.end(), {p.x, p.y, p.z, p.w});
+            }
+        for (gw_INDEX i = 0; i <= s->knu->m; ++i) o.push_back(s->knu->U[i]);
+        for (gw_INDEX i = 0; i <= s->knv->m; ++i) o.push_back(s->knv->U[i]);
+    }
+    return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
+    SC_CATCH
+}

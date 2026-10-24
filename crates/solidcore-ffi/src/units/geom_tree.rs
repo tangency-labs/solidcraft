@@ -8,6 +8,7 @@
 //! | [`spatial`]   | `sc_geom_tree_spatial_ints`, `sc_geom_tree_spatial_floats` |
 //! | [`subdiv`]    | `sc_geom_tree_subdiv`                                      |
 //! | [`subdiv_patches`] | `sc_geom_tree_subdiv_patches`                         |
+//! | [`patch_lookup`] | `sc_geom_tree_patch_lookup`                              |
 //!
 //! Both run a small program against an upstream tree; the encodings are
 //! documented in the shim and validated here before any call.
@@ -17,6 +18,13 @@ use crate::{call_with_buffer, FfiError};
 
 mod sys {
     extern "C" {
+        pub fn sc_geom_tree_patch_lookup(
+            prog: *const f64,
+            n: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
         pub fn sc_geom_tree_spatial_ints(
             prog: *const f64,
             n: i64,
@@ -253,6 +261,90 @@ pub fn subdiv(desc: &[i64], prog: &[i64]) -> Result<Vec<i64>, FfiError> {
             sys::sc_geom_tree_subdiv(
                 desc.as_ptr(),
                 n_nodes,
+                prog.as_ptr(),
+                prog.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}
+
+/// Validate a real-patch lookup fixture: `ns owner`, `ns * 16` homogeneous control
+/// point values (bilinear 2x2 surfaces), `nn`, `nn * (parent aux patch surface)`,
+/// `nq`, query node indices. Each parent precedes its child; the native walk is
+/// bounded to 64 nodes. Surface and patch indices use -1 for absence.
+pub fn validate_patch_lookup(prog: &[f64]) -> Result<(), FfiError> {
+    let mut cursor = 0;
+    let mut number = || {
+        let v = at(prog, cursor)?;
+        cursor += 1;
+        Ok::<_, FfiError>(v)
+    };
+    let integer = |v: f64, lo: i64, hi: i64| -> Result<i64, FfiError> {
+        if !v.is_finite() || v.fract() != 0.0 || v < lo as f64 || v > hi as f64 {
+            return Err(bad("patch fixture index/count"));
+        }
+        Ok(v as i64)
+    };
+    let ns = integer(number()?, 1, 16)?;
+    integer(number()?, -1, ns - 1)?;
+    for _ in 0..ns * 4 {
+        for _ in 0..3 {
+            let v = number()?;
+            if !v.is_finite() || v.abs() > 1e50 {
+                return Err(bad("patch coordinate"));
+            }
+        }
+        let weight = number()?;
+        if !weight.is_finite() || !(1e-6..=1e6).contains(&weight) {
+            return Err(bad("patch weight"));
+        }
+    }
+    let nn = integer(number()?, 1, 64)?;
+    let mut children = [0; 64];
+    for i in 0..nn {
+        let parent = integer(number()?, -1, i - 1)?;
+        if parent >= 0 {
+            let count = children
+                .get_mut(parent as usize)
+                .ok_or_else(|| bad("patch parent"))?;
+            *count += 1;
+            if *count > 2 {
+                return Err(bad("nonbinary patch tree"));
+            }
+        }
+        let aux = integer(number()?, 0, 6)?;
+        if ![0, 3, 4, 6].contains(&aux) {
+            return Err(bad("patch aux type"));
+        }
+        let patch = integer(number()?, -1, ns - 1)?;
+        integer(number()?, -1, ns - 1)?;
+        if aux != 3 && patch != -1 {
+            return Err(bad("patch requires Bezier aux"));
+        }
+    }
+    let nq = integer(number()?, 1, 128)?;
+    for _ in 0..nq {
+        integer(number()?, 0, nn - 1)?;
+    }
+    if cursor != prog.len() {
+        return Err(bad("trailing patch fixture data"));
+    }
+    Ok(())
+}
+
+/// Run `GetFirstBezierPatch` on real patches and temporary B-spline surfaces.
+/// Returns, per query, the selected pool index (-1 absent), then the selected
+/// NURB's `n m p q r s`, homogeneous control net and U/V knot arrays.
+pub fn patch_lookup(prog: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate_patch_lookup(prog)?;
+    call_with_buffer(4096, |buf, len| {
+        // SAFETY: validation checks every count, index and record before the shim
+        // reads it. The shim honours the output capacity; all buffers live here.
+        unsafe {
+            sys::sc_geom_tree_patch_lookup(
                 prog.as_ptr(),
                 prog.len() as i64,
                 buf.as_mut_ptr(),

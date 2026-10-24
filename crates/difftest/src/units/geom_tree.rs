@@ -16,7 +16,9 @@
 //! degrees and knots selected by `first_patch`). Construction patches and temporary
 //! subdivision surfaces carry distinct rational bilinear payloads; Rust supplies
 //! those same payloads through the tree's existing caller-owned resolvers.
-//! Every run has at least [`MIN_GENERATED`] generated cases.
+//! Every run has at least [`MIN_GENERATED`] generated cases. Additional
+//! `patch_lookup` fixtures compare the selected pool identity and the actual NURB,
+//! including distinct patches with identical geometry.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -108,6 +110,14 @@ enum DOp {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct PatchNode {
+    parent: i64,
+    aux: i64,
+    patch: i64,
+    surface: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Inputs {
     Spatial {
@@ -120,6 +130,129 @@ enum Inputs {
         #[serde(default = "default_patch_scale")]
         patch_scale: f64,
     },
+    PatchLookup {
+        surfaces: Vec<[[f64; 4]; 4]>,
+        owner: i64,
+        nodes: Vec<PatchNode>,
+        queries: Vec<usize>,
+    },
+}
+
+fn patch_program(
+    surfaces: &[[[f64; 4]; 4]],
+    owner: i64,
+    nodes: &[PatchNode],
+    queries: &[usize],
+) -> Vec<f64> {
+    let mut out = vec![surfaces.len() as f64, owner as f64];
+    out.extend(surfaces.iter().flatten().flatten().copied());
+    out.push(nodes.len() as f64);
+    for n in nodes {
+        out.extend([
+            n.parent as f64,
+            n.aux as f64,
+            n.patch as f64,
+            n.surface as f64,
+        ]);
+    }
+    out.push(queries.len() as f64);
+    out.extend(queries.iter().map(|&q| q as f64));
+    out
+}
+
+fn rust_patch_lookup(
+    surfaces: &[[[f64; 4]; 4]],
+    owner: i64,
+    nodes: &[PatchNode],
+    queries: &[usize],
+) -> solidcore::Result<Vec<f64>> {
+    use solidcore::nurbs::{math::CPoint, srf_basic::Surface};
+    let surfaces = surfaces
+        .iter()
+        .map(|points| {
+            Surface::new(
+                points
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|p| CPoint::new(p[0], p[1], p[2], p[3]))
+                            .collect()
+                    })
+                    .collect(),
+                1,
+                1,
+                vec![0., 0., 1., 1.],
+                vec![0., 0., 1., 1.],
+            )
+        })
+        .collect::<solidcore::Result<Vec<_>>>()?;
+    let mut tree: Tree<i64> = Tree::new(None);
+    tree.set_owner_object(obj(owner).map(|_| TreeOwner::SurfaceCache));
+    tree.set_owner_surface(obj(owner));
+    for n in nodes {
+        let id = tree.add_node(TreeNode {
+            parent: link(n.parent),
+            aux_type: AuxDataType::from_code(n.aux as i32).unwrap_or_default(),
+            data: NodeData::Surface(SurfaceAux {
+                surface: obj(n.surface),
+                ..SurfaceAux::default()
+            }),
+            ..TreeNode::new()
+        });
+        if let Some(parent) = link(n.parent) {
+            let p = tree.node_mut(parent)?;
+            if p.child1.is_none() {
+                p.child1 = Some(id);
+            } else {
+                p.child2 = Some(id);
+            }
+        }
+    }
+    tree.set_top_node(Some(NodeId(0)));
+    let mut out = Vec::new();
+    for &query in queries {
+        let selected = tree.first_bezier_patch(
+            NodeId(query),
+            |n| {
+                let node = nodes.get(n.0).ok_or_else(|| {
+                    SolidError::invalid_input("difftest::patch_lookup", "node index")
+                })?;
+                obj(node.patch)
+                    .map(|i| {
+                        surfaces.get(i as usize).map(|s| (i, s)).ok_or_else(|| {
+                            SolidError::invalid_input("difftest::patch_lookup", "patch index")
+                        })
+                    })
+                    .transpose()
+            },
+            |&i| {
+                surfaces
+                    .get(i as usize)
+                    .map(|s| Some((i, s)))
+                    .ok_or_else(|| {
+                        SolidError::invalid_input("difftest::patch_lookup", "surface index")
+                    })
+            },
+        )?;
+        let Some((id, surface)) = selected else {
+            out.push(-1.0);
+            continue;
+        };
+        out.push(id as f64);
+        let (n, m, r, s) = surface.array_sizes();
+        let (p, q) = surface.degrees();
+        out.extend([n as f64, m as f64, p as f64, q as f64, r as f64, s as f64]);
+        for row in surface.rows() {
+            for p in row {
+                out.extend([p.x, p.y, p.z, p.w]);
+            }
+        }
+        out.extend(surface.u_knots());
+        out.extend(surface.v_knots());
+    }
+    Ok(out)
 }
 
 fn default_patch_scale() -> f64 {
@@ -730,6 +863,16 @@ impl UnitDiff for Runner {
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         match case.parse::<Inputs>()? {
+            Inputs::PatchLookup {
+                surfaces,
+                owner,
+                nodes,
+                queries,
+            } => {
+                let out = ffi::patch_lookup(&patch_program(&surfaces, owner, &nodes, &queries))
+                    .map_err(|e| ffi_err(&e))?;
+                Ok(Output::new().values("patches", out))
+            }
             Inputs::Spatial { ctor, ops } => {
                 let (oi, of) = ffi::spatial(&spatial_prog(&ctor, &ops)).map_err(|e| ffi_err(&e))?;
                 Ok(Output::new().ints("ints", oi).values("floats", of))
@@ -751,6 +894,19 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         match case.parse::<Inputs>()? {
+            Inputs::PatchLookup {
+                surfaces,
+                owner,
+                nodes,
+                queries,
+            } => {
+                ffi::validate_patch_lookup(&patch_program(&surfaces, owner, &nodes, &queries))
+                    .map_err(|e| ffi_err(&e))?;
+                match rust_patch_lookup(&surfaces, owner, &nodes, &queries) {
+                    Ok(out) => Ok(Output::new().values("patches", out)),
+                    Err(e) => Ok(rust_err(&e)),
+                }
+            }
             Inputs::Spatial { ctor, ops } => match run_spatial_rust(&ctor, &ops) {
                 Ok((oi, of)) => Ok(Output::new().ints("ints", oi).values("floats", of)),
                 Err(e) => Ok(rust_err(&e)),
@@ -879,5 +1035,78 @@ impl UnitDiff for Runner {
             });
         }
         Ok(cases)
+    }
+}
+
+#[cfg(test)]
+mod patch_lookup_tests {
+    use super::*;
+
+    #[test]
+    fn real_patch_identity_geometry_and_owner_boundary() {
+        let net = [
+            [0., 0., 0., 1.],
+            [0., 2., 0., 1.],
+            [3., 0., 1., 1.],
+            [3., 2., 1., 1.],
+        ];
+        let surfaces = vec![net, net, net];
+        let nodes = vec![
+            PatchNode {
+                parent: -1,
+                aux: 3,
+                patch: 1,
+                surface: -1,
+            },
+            PatchNode {
+                parent: 0,
+                aux: 3,
+                patch: 2,
+                surface: -1,
+            },
+            PatchNode {
+                parent: 0,
+                aux: 6,
+                patch: -1,
+                surface: 0,
+            },
+        ];
+        let queries = [0, 1, 2];
+        let native = ffi::patch_lookup(&patch_program(&surfaces, 0, &nodes, &queries)).unwrap();
+        let mut actual = rust_patch_lookup(&surfaces, 0, &nodes, &queries).unwrap();
+        assert_eq!(native, actual);
+        assert_eq!(actual.len(), 63);
+        assert_eq!([actual[0], actual[31], actual[62]], [1., 2., -1.]);
+        assert_eq!(&actual[1..31], &actual[32..62]);
+        actual[0] = 2.;
+        assert!(!crate::compare::compare(
+            &Output::new().values("patches", native),
+            &Output::new().values("patches", actual),
+            &[]
+        )
+        .pass());
+    }
+
+    #[test]
+    fn malformed_patch_programs_are_refused_before_native_access() {
+        let net = [[0., 0., 0., 1.]; 4];
+        let mut nodes = vec![PatchNode {
+            parent: -1,
+            aux: 3,
+            patch: 0,
+            surface: -1,
+        }];
+        let good = patch_program(&[net], 0, &nodes, &[0]);
+        assert!(ffi::validate_patch_lookup(&good).is_ok());
+        for len in 0..good.len() {
+            assert!(ffi::validate_patch_lookup(&good[..len]).is_err());
+        }
+        nodes[0].parent = 0;
+        assert!(ffi::patch_lookup(&patch_program(&[net], 0, &nodes, &[0])).is_err());
+        nodes[0].parent = -1;
+        assert!(ffi::patch_lookup(&patch_program(&[net], 0, &nodes, &[1])).is_err());
+        let mut bad_weight = net;
+        bad_weight[0][3] = 0.;
+        assert!(ffi::patch_lookup(&patch_program(&[bad_weight], 0, &nodes, &[0])).is_err());
     }
 }
