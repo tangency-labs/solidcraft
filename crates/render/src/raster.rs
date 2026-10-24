@@ -382,6 +382,7 @@ mod tests {
             triangles: vec![[0, 1, 2]],
             tri_face: vec![0],
             edges: vec![],
+            display_only_edges: false,
             seams: vec![],
             smooth_edges: vec![],
             sharp_edges: vec![],

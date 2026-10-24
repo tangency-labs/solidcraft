@@ -12,6 +12,7 @@ fn cube_mesh(s: f64) -> Mesh {
         triangles,
         tri_face: vec![0; n],
         edges: vec![],
+        display_only_edges: false,
         seams: vec![],
         smooth_edges: vec![],
         sharp_edges: vec![],
@@ -37,6 +38,9 @@ fn display_edge_masks_keep_identity_and_break_only_certified_sharp_patches() {
     assert_eq!(mesh.surface_patch(1), vec![1, 2]);
     assert_eq!(mesh.edges.len(), 2);
     assert_eq!(mesh.face_edges(1), vec![0, 1]);
+    mesh.display_only_edges = true;
+    assert!(mesh.edge_visible(0) && mesh.shaded_edge_visible(0));
+    assert!(!mesh.edge_pickable(0));
     assert_eq!(serde_json::to_value(&mesh).unwrap(), stored);
     let reopened: Mesh = serde_json::from_value(stored).unwrap();
     assert!(reopened.smooth_edges.is_empty() && reopened.sharp_edges.is_empty());

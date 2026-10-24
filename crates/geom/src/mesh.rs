@@ -92,7 +92,7 @@ impl Extend<Vec3> for Aabb3 {
 }
 
 /// An indexed triangle mesh with per-vertex normals, a face id per triangle (the B-rep face it
-/// came from) and edge polylines (the B-rep edges, for display and picking).
+/// came from) and edge polylines (B-rep edges for display and picking, or mesh outlines).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Mesh {
     pub positions: Vec<Vec3>,
@@ -101,8 +101,12 @@ pub struct Mesh {
     pub triangles: Vec<[u32; 3]>,
     /// B-rep face index per triangle.
     pub tri_face: Vec<u32>,
-    /// B-rep edges as polylines.
+    /// Edge polylines; mesh outlines have `display_only_edges` set.
     pub edges: Vec<Vec<Vec3>>,
+    /// These polylines belong to a triangle mesh, not selectable B-rep edges. Rebuilt with
+    /// the display mesh; never part of the saved design's geometry.
+    #[serde(skip)]
+    pub display_only_edges: bool,
     /// Per edge: a seam between two pieces of the same smooth surface (not drawn).
     #[serde(default)]
     pub seams: Vec<bool>,
@@ -369,11 +373,16 @@ impl Mesh {
 impl Mesh {
     /// Visibility in shaded edge presentation, independent of selection/topology.
     pub fn shaded_edge_visible(&self, index: usize) -> bool {
-        self.edge_pickable(index) && !self.smooth_edges.get(index).copied().unwrap_or(false)
+        self.edge_visible(index) && !self.smooth_edges.get(index).copied().unwrap_or(false)
+    }
+
+    /// Visibility in wireframe, including triangle-mesh outlines without B-rep identities.
+    pub fn edge_visible(&self, index: usize) -> bool {
+        !self.seams.get(index).copied().unwrap_or(false) || self.sharp_edges.get(index).copied().unwrap_or(false)
     }
 
     pub fn edge_pickable(&self, index: usize) -> bool {
-        !self.seams.get(index).copied().unwrap_or(false) || self.sharp_edges.get(index).copied().unwrap_or(false)
+        !self.display_only_edges && self.edge_visible(index)
     }
 
     /// Edges bounding face `f`.

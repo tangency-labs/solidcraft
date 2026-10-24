@@ -677,7 +677,7 @@ impl BodyDraw {
         }
         let at = |p: Vec3| self.place.as_ref().map_or(p, |m| solidcraft_engine::doc::apply_point(m, p)).to_f32();
         for (ei, e) in m.edges.iter().enumerate().filter(|_| edges) {
-            if !m.edge_pickable(ei) || (shaded && !m.shaded_edge_visible(ei)) {
+            if !m.edge_visible(ei) || (shaded && !m.shaded_edge_visible(ei)) {
                 continue;
             }
             for w in e.windows(2) {
@@ -5374,6 +5374,43 @@ mod tests {
             .map(|(_, e)| e.len().saturating_sub(1))
             .sum();
         assert_eq!(merged.lines.len(), 3 * segments * crate::gpu::LINE_SIZE);
+    }
+
+    #[test]
+    fn imported_mesh_edges_draw_in_each_style_without_brep_picks() {
+        let h = crate::scenario::Harness::new();
+        let path = h.dir.join("box.3mf");
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
+        app.run("file.save_mesh", json!({"path":path})).unwrap();
+        app.run("file.new", json!({})).unwrap();
+        let imported = app.run("file.insert_mesh", json!({"path":path})).unwrap();
+        app.run("component.activate", json!({"component":"root"})).unwrap();
+        app.run("occurrence.copy", json!({"component":imported["component"],"translate":[40,0,0]})).unwrap();
+        app.ui.show_grid = false;
+        app.ui.show_origin = false;
+        app.ui.ground_shadow = false;
+        app.fit_view();
+        for style in 0..4 {
+            app.ui.visual_style = style;
+            let scene = build_scene(&app).merged();
+            let lines = if style == 1 { 0 } else { 24 * crate::gpu::LINE_SIZE };
+            assert_eq!(scene.lines.len(), lines, "style {style}: twelve edges per placed box");
+            assert_eq!(scene.hidden.len(), if style == 3 { lines } else { 0 });
+            assert_eq!(scene.tris.is_empty(), style == 2, "wireframe draws only the edges");
+        }
+        let proj = projection(&app, Rect::from_min_size(Pos2::ZERO, vec2(800., 600.)));
+        for body in &app.session.world_state().bodies {
+            let mesh = body.mesh();
+            assert_eq!(mesh.edges.len(), 12, "the placed mesh keeps its outlines");
+            for (i, edge) in mesh.edges.iter().enumerate() {
+                assert!(!mesh.edge_pickable(i), "placements keep display-only edge semantics");
+                for point in [edge[0], (edge[0] + edge[1]) * 0.5] {
+                    let hits = pick_all(&app, &proj, proj.to_screen(point).unwrap());
+                    assert!(!hits.iter().any(|h| matches!(h, Hit::Edge { .. } | Hit::Vertex { .. })), "{hits:?}");
+                }
+            }
+        }
     }
 
     /// Manual GPU benchmark: 25 placements of the mesh `SOLIDCRAFT_BENCH_MESH` (an STL, OBJ or
