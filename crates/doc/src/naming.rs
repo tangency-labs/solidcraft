@@ -163,6 +163,10 @@ const MAX_DEPTH: usize = 400;
 /// Up to this many sample points per face.
 const SAMPLES: usize = 9;
 
+/// Up to this many sample points per face where a sheet's panel kept in place names the face it is
+/// part of (see [`geometric_from`]).
+const PANEL_SAMPLES: usize = 256;
+
 /// Unit normals of each face's triangles.
 fn normals(m: &Mesh, nf: usize) -> Vec<Vec<Vec3>> {
     let mut per: Vec<Vec<Vec3>> = vec![Vec::new(); nf];
@@ -178,6 +182,11 @@ fn normals(m: &Mesh, nf: usize) -> Vec<Vec<Vec3>> {
 
 /// Triangle centroids spread over each face: face → points.
 fn samples(m: &Mesh, nf: usize) -> Vec<Vec<Vec3>> {
+    samples_up_to(m, nf, SAMPLES)
+}
+
+/// [`samples`] with up to `most` points per face.
+fn samples_up_to(m: &Mesh, nf: usize, most: usize) -> Vec<Vec<Vec3>> {
     let mut per: Vec<Vec<Vec3>> = vec![Vec::new(); nf];
     for (t, f) in m.triangles.iter().zip(&m.tri_face) {
         if let (Some(v), Some([a, b, c])) = (per.get_mut(*f as usize), m.tri(t)) {
@@ -186,11 +195,11 @@ fn samples(m: &Mesh, nf: usize) -> Vec<Vec<Vec3>> {
     }
     per.into_iter()
         .map(|v| {
-            if v.len() <= SAMPLES {
+            if v.len() <= most {
                 return v;
             }
-            let step = v.len() as f64 / SAMPLES as f64;
-            (0..SAMPLES).filter_map(|i| v.get((i as f64 * step) as usize).copied()).collect()
+            let step = v.len() as f64 / most as f64;
+            (0..most).filter_map(|i| v.get((i as f64 * step) as usize).copied()).collect()
         })
         .collect()
 }
@@ -442,12 +451,26 @@ fn geometric_from(b: &ModelBody, o: &NamingOrigin, nf: usize, names_of: fn(&Mode
         inputs.iter().find(|(x, _, _)| x.name == b.name),
     ) {
         let input = std::slice::from_ref(input);
-        for (name, ps) in names.iter_mut().zip(&pts) {
+        let mut dense: Option<Vec<Vec<Vec3>>> = None;
+        for (fi, (name, ps)) in names.iter_mut().zip(&pts).enumerate() {
             if name.is_some() {
                 continue;
             }
-            let back: Option<Vec<Vec3>> = ps.iter().map(|p| after.point_before(before, *p)).collect();
-            if let Some(back) = back.filter(|b| !b.is_empty()) {
+            // The panel the feature kept in place (the base an unfold lays the flanges out beside)
+            // lies on its own face before, and that face names the whole face it is part of now:
+            // a flat face spans that panel, the panels laid out beside it and the bend strips
+            // between them, whatever share of it they take. The few sample points above may all
+            // miss it (a bend strip is many small triangles), so the face is looked at closer.
+            let dense = dense.get_or_insert_with(|| samples_up_to(&m, nf, PANEL_SAMPLES));
+            if let Some(kept) = dense.get(fi).and_then(|ps| plurality(ps, input, tol)) {
+                *name = Some(kept);
+                continue;
+            }
+            // A point on a bend lies on no panel and has no place before; the face's other points
+            // do. At least half of them must, so a face that is mostly bend is not named from a
+            // few points.
+            let back: Vec<Vec3> = ps.iter().filter_map(|p| after.point_before(before, *p)).collect();
+            if !back.is_empty() && back.len() * 2 >= ps.len() {
                 *name = vote(&back, input, tol, None);
             }
         }
@@ -552,6 +575,28 @@ fn vote(ps: &[Vec3], inputs: &[(&ModelBody, FaceIndex, Arc<Vec<String>>)], tol: 
     }
     votes.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     votes.first().filter(|(_, n)| *n * 2 >= ps.len().max(1) && votes.get(1).is_none_or(|(_, other)| n > other)).map(|(n, _)| n.clone())
+}
+
+/// The input face the most of `ps` lie on (pieces counted as their face), if at least two and a
+/// sixteenth of them lie on one: the face a sheet's unmoved panel was part of.
+fn plurality(ps: &[Vec3], inputs: &[(&ModelBody, FaceIndex, Arc<Vec<String>>)], tol: f64) -> Option<String> {
+    let mut votes: Vec<(String, usize)> = Vec::new();
+    for p in ps {
+        for (_, idx, nm) in inputs {
+            if let Some(f) = idx.face_at(*p, tol)
+                && let Some(n) = nm.get(f)
+            {
+                let n = strip_piece(n);
+                match votes.iter_mut().find(|(v, _)| v == n) {
+                    Some(v) => v.1 += 1,
+                    None => votes.push((n.to_string(), 1)),
+                }
+                break;
+            }
+        }
+    }
+    votes.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    votes.first().filter(|(_, n)| *n >= 2 && *n * 16 >= ps.len()).map(|(n, _)| n.clone())
 }
 
 /// A face name without its piece qualifiers: the face it is a piece of (`F2:top` for

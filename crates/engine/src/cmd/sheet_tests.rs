@@ -5004,3 +5004,52 @@ fn mirroring_or_copying_a_sheet_body_leaves_the_original_sheet_as_it_was() {
         assert_eq!(copy["bends"], original["bends"], "{name}");
     }
 }
+
+/// The top and bottom face names of every panel of the first sheet body, by sheet face.
+fn panel_face_names(s: &mut Session) -> std::collections::BTreeMap<String, String> {
+    let body = s.model.state().bodies[0].name.clone();
+    let faces = run(s, "model.faces", json!({"body": body}))["faces"].as_array().cloned().unwrap_or_default();
+    faces
+        .iter()
+        .filter_map(|f| {
+            let sheet = f["sheet_face"].as_str()?;
+            (sheet.ends_with(":top") || sheet.ends_with(":bottom")).then(|| (sheet.to_string(), f["name"].as_str().unwrap_or("").to_string()))
+        })
+        .collect()
+}
+
+/// An unfold keeps the base where it is and lays the flanges out beside it: the flat face that
+/// spans them and the bend strips between them is the base's face, and is named after it; so are
+/// the faces the refold makes of it, at every size. It was named after the unfold whenever few of
+/// its sample points fell on the base (the bend strips are many small triangles, the base two big
+/// ones), and that changed with the sizes: a refolded part's faces were renamed by a size change,
+/// and joints and sketches on them lost their faces.
+#[test]
+fn an_unfolded_sheets_flat_face_is_named_after_its_base_at_every_size() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","gap":"0.5 mm","active":true}));
+    run(&mut s, "parameters.add", json!({"name": "H", "expression": "5 mm"}));
+    base(&mut s, 200.0, 150.0);
+    run(&mut s, "sheet.flange", json!({"edges":[[100,0,2],[200,75,2],[100,150,2]],"height":"H","angle":"90 deg"}));
+    let folded = panel_face_names(&mut s);
+    let (top, bottom) = (folded["sheet:Body1:base:top"].clone(), folded["sheet:Body1:base:bottom"].clone());
+    run(&mut s, "sheet.unfold", json!({}));
+    let unfold = s.doc.features.last().map_or(0, |f| f.id);
+    run(&mut s, "sheet.refold", json!({}));
+    let stem = |n: &str| solidcraft_doc::naming::strip_piece(n).to_string();
+    for h in ["5 mm", "60 mm", "5 mm"] {
+        run(&mut s, "parameters.change", json!({"name": "H", "expression": h}));
+        let body = s.model.state().bodies[0].name.clone();
+        let flat_state = s.model.results.iter().find(|r| r.id == unfold).map(|r| r.state.clone());
+        {
+            let st = flat_state.expect("the unfold's state");
+            let flat = st.bodies.iter().find(|b| b.name == body).map(|b| solidcraft_doc::naming::face_names(b).as_ref().clone()).unwrap_or_default();
+            assert!(flat.iter().any(|n| stem(n) == stem(&top)) && flat.iter().any(|n| stem(n) == stem(&bottom)), "H {h}: the flat faces {flat:?}");
+            assert!(!flat.iter().any(|n| n.starts_with(&format!("F{unfold}:"))), "H {h}: a flat face named after the unfold: {flat:?}");
+        }
+        for (sheet, name) in panel_face_names(&mut s) {
+            let want = if sheet.ends_with(":top") { &top } else { &bottom };
+            assert_eq!(stem(&name), stem(want), "H {h}: {sheet} is {name} after the refold");
+        }
+    }
+}
