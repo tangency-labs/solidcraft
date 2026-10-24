@@ -17,10 +17,17 @@
 //! side asks the shim for them (`Probe`) and rebuilds classifications of the same shape
 //! (target-loop flag, interval count, middle point classes), which is all the port reads
 //! before its first unported callee. With `props` both sides also pass face properties
-//! with the given seam verdicts and closed flags.
+//! with the given seam verdicts and closed flags. The classification handles name the
+//! B-rep's own entities, surface, curves and seam temporaries (as upstream's `SmObject`
+//! pointers do), so the seam problem a `MoveSeam` with split recomputes after the move
+//! (`HasSeamProblem` over the face's own objects) runs as upstream's does. The split
+//! that follows defers: the caller's classification geometry here cannot borrow the
+//! B-rep the call mutates, so its merges resolve no topology (`plan/findings.md`).
 //!
 //! Deferred: the cone `TrimWithDomain` callbacks of `ShrinkGeometry`
-//! (`surface.surface_p2`). Rejected: the seam calls the C++ crash trap (below) catches.
+//! (`surface.surface_p2`), and the `MoveSeam` splits past the recomputed seam problem
+//! (trimmed surface cache history, `surface.surface_p2`, or merges whose handles the
+//! geometry cannot resolve). Rejected: the seam calls the C++ crash trap (below) catches.
 //!
 //! **C++ crash trap.** Upstream `SplitAtSeam`'s U-then-V branch recurses on the wrong
 //! face and crashes (`plan/upstream-issues.md` UB-137). The shim runs every seam call
@@ -61,7 +68,7 @@ use solidcore::surface::volume::Volume;
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::face::p1 as fp1;
 use solidcore::topology::face::p2 as fp2;
-use solidcore::topology::{Brep, EdgeId, FaceId, LoopId};
+use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, VertexId};
 use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::topology_face_p1::{self as ffi, Op};
 use solidcore_ffi::units::topology_vertexuse as fixture;
@@ -425,23 +432,104 @@ fn key_of(e: EntityRef) -> ObjectRef {
     }
 }
 
-/// A classification object (always null here).
+/// A classification object. The classifications rebuilt from the probe hold none; the
+/// ones the seam calls' own `HasSeamProblem` makes name the B-rep's entities, its
+/// surface, edge and trim curves and the seam temporaries, as upstream's `SmObject`
+/// pointers do (`topology::face::p4::BrepSeamObjects` requires all of them).
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct H(LoopId);
+enum H {
+    Topo(EntityRef),
+    Surface(FaceId),
+    Curve(bool),
+    EdgeCurve(EdgeId),
+    Trim(EdgeuseId),
+    /// A temporary curve (the seam curves of `SmFace::HasSeamProblem`).
+    Temp(usize),
+}
 
 impl ClassObject for H {
     fn class_kind(&self) -> ClassObjectKind {
-        ClassObjectKind::Loop
+        match self {
+            Self::Topo(e) => e.class_kind(),
+            Self::Surface(_) => ClassObjectKind::Surface,
+            Self::Curve(_) | Self::EdgeCurve(_) | Self::Trim(_) | Self::Temp(_) => {
+                ClassObjectKind::Curve
+            }
+        }
+    }
+
+    fn temporary(index: usize, kind: ClassObjectKind) -> Option<Self> {
+        (kind == ClassObjectKind::Curve).then_some(Self::Temp(index))
     }
 }
 
 impl LoopObject for H {
     fn from_loop(l: LoopId) -> Self {
-        Self(l)
+        Self::Topo(EntityRef::Loop(l))
+    }
+
+    fn as_loop(&self) -> Option<LoopId> {
+        match self {
+            Self::Topo(e) => e.as_loop(),
+            _ => None,
+        }
+    }
+
+    fn as_vertex(&self) -> Option<VertexId> {
+        match self {
+            Self::Topo(e) => e.as_vertex(),
+            _ => None,
+        }
+    }
+
+    fn from_face(f: FaceId) -> Option<Self> {
+        Some(Self::Topo(EntityRef::Face(f)))
+    }
+
+    fn from_face_surface(f: FaceId) -> Option<Self> {
+        Some(Self::Surface(f))
+    }
+
+    fn from_classify_curve(uv: bool) -> Option<Self> {
+        Some(Self::Curve(uv))
+    }
+
+    fn from_topology(t: EntityRef) -> Option<Self> {
+        Some(Self::Topo(t))
+    }
+
+    fn as_topology(&self) -> Option<EntityRef> {
+        match self {
+            Self::Topo(t) => Some(*t),
+            _ => None,
+        }
+    }
+
+    fn from_edge_curve(e: EdgeId) -> Option<Self> {
+        Some(Self::EdgeCurve(e))
+    }
+
+    fn as_edge_curve(&self) -> Option<EdgeId> {
+        match self {
+            Self::EdgeCurve(e) => Some(*e),
+            _ => None,
+        }
+    }
+
+    fn from_trim_curve(eu: EdgeuseId) -> Option<Self> {
+        Some(Self::Trim(eu))
+    }
+
+    fn as_trim_curve(&self) -> Option<EdgeuseId> {
+        match self {
+            Self::Trim(eu) => Some(*eu),
+            _ => None,
+        }
     }
 }
 
-/// Classification geometry for the null handles here: resolves nothing.
+/// Classification geometry for the seam calls: resolves nothing (it cannot borrow the
+/// B-rep the call mutates).
 struct NoGeometry;
 
 impl ClassGeometry<H> for NoGeometry {
