@@ -151,6 +151,46 @@ fn double_clicking_another_dimension_inserts_its_name_once() {
     crate::dim_view::cancel();
 }
 
+/// With the Dimension tool on, one click on an existing dimension edits its value, as a
+/// double-click does without a tool. The tool stays on, and geometry still starts a new one.
+#[test]
+fn dimension_tool_click_on_an_existing_dimension_edits_its_value() {
+    let mut h = line([20., 0.]);
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":20,"text_at":[10,8]})).unwrap();
+    let created = h.app.run("sketch.line", json!({"points":[[0,-10],[12,-10]],"infer":false})).unwrap();
+    let second = created["created"]["curves"][0].as_str().unwrap().to_string();
+    h.settle();
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
+    assert!(crate::dim_view::editing(), "a click on the dimension opens its value");
+    h.frames(5);
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "the value field takes the keyboard");
+    type_value(&mut h, "25");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
+    assert!((h.app.session.doc.eval("d1", solidcraft_engine::doc::expr::Kind::Length).unwrap() - 25.).abs() < 1e-6);
+    assert_eq!(h.app.session.doc.next_d_name(), "d2", "no new dimension was made");
+    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.dimension"), "the tool stays on");
+    // A click on geometry still picks it for a new dimension.
+    h.frames(40);
+    h.step(&json!({"click":{"world":[6,-10,0]}})).unwrap();
+    assert_eq!(h.app.tool.as_ref().map(|t| t.picks.clone()), Some(vec![second]));
+    crate::dim_view::cancel();
+}
+
+/// With dimensions off in the selection filter, the Dimension tool leaves them alone.
+#[test]
+fn dimension_tool_click_respects_the_selection_filter() {
+    let mut h = line([20., 0.]);
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":20,"text_at":[10,8]})).unwrap();
+    h.app.ui.pick_off.push("dimensions".into());
+    h.settle();
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
+    assert!(!crate::dim_view::editing(), "a filtered-out dimension opened for editing");
+    crate::dim_view::cancel();
+}
+
 #[test]
 fn dimension_parameters_use_typing_and_ctrl_space_completion() {
     for (prefix, expected) in [("wid", "width"), ("", "width"), ("d", "d1")] {

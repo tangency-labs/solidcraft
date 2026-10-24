@@ -214,6 +214,11 @@ text there and keeps the value box focused; a click on another point or line mak
 dimension a distance or angle instead; Tab leaves the picks waiting for a click to place the
 text.
 
+To change a dimension you already have, double-click it, or, with Sketch Dimension on and
+nothing picked yet, click it once: its value box opens with the value selected, Enter applies,
+and the tool stays on for the next dimension. The dimension's text always takes the click; its
+lines take it only away from sketch points and curves, which still start a new dimension.
+
 Between two points, or on a line, that don't line up with an axis, where you place the
 dimension picks what it measures: across from them, the distance between them; above or below
 them, the horizontal distance; beside them, the vertical distance.

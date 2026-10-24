@@ -147,7 +147,9 @@ pub fn hint(id: &str) -> String {
         "sketch.circle.center" => "Circle: click the centre, then a point on the circle".into(),
         "sketch.arc.three_point" => "Arc: click start, end, then a point on the arc".into(),
         "sketch.arc.center_point" => "Arc: click centre and start, then click end or type a signed sweep".into(),
-        "sketch.dimension" => "Dimension: pick one or two entities and type the value (or click to place it first); Enter applies".into(),
+        "sketch.dimension" => {
+            "Dimension: pick one or two entities and type the value (or click to place it first); click a dimension to edit it; Enter applies".into()
+        }
         "sketch.constraint.horizontal_vertical" => "Horizontal/Vertical: pick a line or two points; hold Shift to pick a line midpoint".into(),
         "sketch.slot.center_to_center" | "sketch.slot.overall" => "Slot: click both ends, then the width".into(),
         "sketch.constraint.midpoint" => "MidPoint: pick a point and a line, or two lines to centre the second on the first".into(),
@@ -316,6 +318,16 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 })
             });
             let fresh = |tool: &Tool, id: &String| !tool.picks.contains(id) && tool.picks.len() < 2;
+            // Before a new dimension is under way, a click on an existing one edits its value;
+            // the tool stays on for the next dimension.
+            if crate::dim_view::live().is_none()
+                && tool.picks.is_empty()
+                && !app.ui.pick_off.iter().any(|k| k == "dimensions")
+                && crate::dim_view::tool_click(app, pos, hit.is_some())
+            {
+                app.tool = Some(tool);
+                return;
+            }
             if let Some(typed) = crate::dim_view::live() {
                 match hit {
                     // Before anything is typed, another entity joins the dimension, as in the

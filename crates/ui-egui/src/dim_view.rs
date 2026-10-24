@@ -5,7 +5,8 @@
 //! `solidcraft_sketch::dim_layout`.
 //!
 //! A click selects a dimension (Delete removes it), a drag moves its text (and so the offset of
-//! its dimension line), a double-click edits its value in place with parameter completion.
+//! its dimension line), a double-click (or one click with the Dimension tool) edits its value
+//! in place with parameter completion.
 //! Everything acts through commands: `sketch.dimension_text`, `sketch.delete`,
 //! `parameters.change`.
 
@@ -383,10 +384,19 @@ pub fn text_rects() -> Vec<(String, Rect)> {
 
 /// A double-click on a dimension opens its value for editing (true: it was on one).
 pub fn double_click(app: &mut SolveApp, pos: Pos2) -> bool {
-    let Some(d) = DRAWN.with(|d| {
-        let id = hit(pos)?;
-        d.borrow().iter().find(|x| x.id == id).cloned()
-    }) else {
+    open_editor(app, hit(pos))
+}
+
+/// A click of the Dimension tool on an existing dimension opens its value for editing, as a
+/// double-click does without a tool (true: it was on one). Its text wins; its lines only off
+/// sketch geometry (`on_geometry`), which the click picks for a new dimension instead.
+pub fn tool_click(app: &mut SolveApp, pos: Pos2, on_geometry: bool) -> bool {
+    open_editor(app, hit_text(pos).or_else(|| if on_geometry { None } else { hit(pos) }))
+}
+
+/// Open the inline editor on the drawn dimension `id` (true: there was one to act on).
+fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
+    let Some(d) = id.and_then(|id| DRAWN.with(|d| d.borrow().iter().find(|x| x.id == id).cloned())) else {
         return false;
     };
     let Some(param) = d.param else {
