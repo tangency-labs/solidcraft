@@ -340,6 +340,24 @@ are kept, not deleted.
 - **For translators:** "history" is the undo history, not the timeline. French had three names
   for this marker while English did.
 
+### settings profile
+
+A named set of input and interface preferences that can be switched, exported and imported as
+one.
+
+A settings profile holds the Interface, Navigation and Sketch preferences, the interface
+language, keyboard shortcuts, the toolbar and the S box favourites. Settings that belong to one
+computer (the 3D mouse, graphics, units) stay out. It is an app setting, not part of a design.
+
+- **In SolidCraft:** `settings.profile.list`, `settings.profile.save`, `settings.profile.apply`,
+  `settings.profile.rename`, `settings.profile.delete`, `settings.profile.export`,
+  `settings.profile.import`; the `settings_profiles` key of the stored preferences; the
+  `solidcraft-profile/1` file format.
+- **Don't use:** preset, configuration, workspace (for the set of settings).
+- **Elsewhere:** settings profile, user profile, preferences set.
+- **For translators:** not a sketch profile and not a frame profile (see *Words with more than
+  one meaning*, "Profile"), and not a design configuration.
+
 ### sketch
 
 A set of points and curves, with their constraints, on one plane, that features use as profiles,
@@ -423,6 +441,9 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Part | a standard part | *standard part* | `parts.*` |
 | | a body, an occurrence or the design | *body*, *occurrence*, *design* | catalogue texts that say "part" |
 | | a design property | *part number* | Design Properties |
+| Profile | a closed region of a sketch that a feature uses | profile | `solid.extrude`, `solid.revolve` |
+| | the cross-section a frame member follows | frame profile | `frame.profile.*` |
+| | a named set of preferences | *settings profile* | `settings.profile.*`, Preferences › General |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
