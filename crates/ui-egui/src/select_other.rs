@@ -4,11 +4,12 @@
 //!
 //! - Holding the left button still (or a finger, on touch screens) for [`HOLD_SECS`], or the
 //!   viewport menu's "Select Other…", opens a list at the cursor of every pickable thing there,
-//!   in the selection filter's and the open dialog's terms: sketch points and curves first, then
-//!   vertices, edges, faces, bodies, profiles, planes and axes, each kind nearest first. On a
-//!   dense mesh (a modelled thread, an imported mesh) thousands of facets can share one cursor,
-//!   so at most [`MAX_PER_KIND`] rows are kept per kind, nearest first, and the list reports how
-//!   many things there were in all.
+//!   in the selection filter's and the open dialog's terms, front to back like layers: sketch
+//!   points and curves first (drawn over the model), then what belongs to a body, one body at a
+//!   time and the nearest body first (its vertices, edges, face, then the body itself), then
+//!   profiles, planes and axes. On a dense mesh (a modelled thread, an imported mesh) thousands
+//!   of facets can share one cursor, so at most [`MAX_PER_KIND`] rows are kept per kind, nearest
+//!   first, and the list reports how many things there were in all.
 //! - Hovering a row lights its entity up in the viewport; clicking it selects it (Shift/Ctrl add,
 //!   as clicks do) or, with a dialog open, gives it to the dialog's active selection input.
 //!   Esc or a click elsewhere closes the list.
@@ -86,7 +87,8 @@ pub struct State {
 // What is under the cursor
 // ---------------------------------------------------------------------------------------------
 
-/// Every pickable thing under `pos`, ordered by kind (the sketch being edited first), then depth.
+/// Every pickable thing under `pos`, front to back (the sketch being edited first): see
+/// [`order`].
 pub fn rows(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Row> {
     rows_capped(app, proj, pos).0
 }
@@ -114,7 +116,7 @@ fn rows_capped(app: &SolveApp, proj: &Proj, pos: Pos2) -> (Vec<Row>, usize) {
         }
     }
     let sketching = app.session.active_sketch.is_some();
-    out.sort_by_key(|(h, s)| rank(&shown_as(h, s), sketching));
+    let out = order(app, proj, pos, out, sketching);
     let total = out.len();
     // Nearest first within a kind, so capping drops the farther ones.
     let mut per_kind: std::collections::HashMap<u8, usize> = std::collections::HashMap::new();
@@ -135,6 +137,81 @@ fn rows_capped(app: &SolveApp, proj: &Proj, pos: Pos2) -> (Vec<Row>, usize) {
         })
         .collect();
     (rows, total)
+}
+
+/// The list's order, front to back like layers (#5345). Sketch points and curves come first
+/// (drawn over the model, the sketch being edited before the rest), then each body's things
+/// together, bodies by their nearest hit along the pick ray; within a body by kind (vertices,
+/// edges, its face, the body), each kind keeping the pick's nearest-first order. Profiles,
+/// planes and axes follow. The sort is stable.
+fn order(app: &SolveApp, proj: &Proj, pos: Pos2, found: Vec<(Hit, Sel)>, sketching: bool) -> Vec<(Hit, Sel)> {
+    let (o, d) = proj.ray(pos);
+    let st = crate::open_meshing::shown_world(app);
+    let index: std::collections::HashMap<&str, usize> = st.bodies.iter().enumerate().map(|(i, b)| (b.name.as_str(), i)).collect();
+    let mut nearest: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    for (h, _) in &found {
+        if let (Some(body), Some(t)) = (body_of(h), hit_depth(&st, &index, o, d, h)) {
+            let e = nearest.entry(body.to_string()).or_insert(t);
+            *e = e.min(t);
+        }
+    }
+    let mut keyed: Vec<((u8, u8, f64, u8), (Hit, Sel))> = found
+        .into_iter()
+        .map(|(h, s)| {
+            let (own, kind) = rank(&shown_as(&h, &s), sketching);
+            let key = match body_of(&h) {
+                Some(body) => (own, 1, nearest.get(body).copied().unwrap_or(f64::INFINITY), kind),
+                None => (own, if kind <= 3 { 0 } else { 2 }, 0.0, kind),
+            };
+            (key, (h, s))
+        })
+        .collect();
+    keyed.sort_by(|(a, _), (b, _)| (a.0, a.1).cmp(&(b.0, b.1)).then(a.2.total_cmp(&b.2)).then(a.3.cmp(&b.3)));
+    keyed.into_iter().map(|(_, x)| x).collect()
+}
+
+/// The body a hit lies on (the origin point, a vertex of no body, has none).
+fn body_of(h: &Hit) -> Option<&str> {
+    match h {
+        Hit::Vertex { body, .. } | Hit::Edge { body, .. } | Hit::Face { body, .. } if !body.is_empty() => Some(body),
+        _ => None,
+    }
+}
+
+/// How far along the pick ray (`o`, `d`) a body's hit lies: a face's or vertex's point, or an
+/// edge's point nearest the ray (its middle can lie much deeper or nearer).
+fn hit_depth(
+    st: &solidcraft_engine::doc::ModelState,
+    index: &std::collections::HashMap<&str, usize>,
+    o: solidcraft_engine::geom::Vec3,
+    d: solidcraft_engine::geom::Vec3,
+    h: &Hit,
+) -> Option<f64> {
+    let along = |p: solidcraft_engine::geom::Vec3| Some((p - o).dot(d)).filter(|t| t.is_finite());
+    match h {
+        Hit::Vertex { point, .. } | Hit::Face { point, .. } => along(*point),
+        Hit::Edge { body, index: ei, mid } => {
+            let under = index.get(body.as_str()).and_then(|i| st.bodies.get(*i)).and_then(|b| {
+                let (m, place) = b.mesh_in_place();
+                let at = |p: solidcraft_engine::geom::Vec3| solidcraft_engine::doc::apply_point(&place, p);
+                let dd = d.dot(d);
+                m.edges
+                    .get(*ei)?
+                    .windows(2)
+                    .map(|w| crate::viewport::ray_segment_closest(o, d, at(w[0]), at(w[1])))
+                    .map(|q| {
+                        let t = (q - o).dot(d);
+                        // Squared distance from the ray, to take the segment under the cursor.
+                        ((q - o).dot(q - o) - t * t / dd, t)
+                    })
+                    .filter(|(off, t)| off.is_finite() && t.is_finite())
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+                    .map(|(_, t)| t)
+            });
+            under.or_else(|| along(*mid))
+        }
+        _ => None,
+    }
 }
 
 /// What a row shows itself as: a face place a sketch point snapped is that point (ranked, capped

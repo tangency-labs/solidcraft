@@ -1345,7 +1345,7 @@ fn ray_box(o: Vec3, d: Vec3, b: &solidcraft_engine::geom::Aabb3, pad: f64) -> Op
 }
 
 /// The point of segment `a`–`b` nearest the ray from `o` along `d`.
-fn ray_segment_closest(o: Vec3, d: Vec3, a: Vec3, b: Vec3) -> Vec3 {
+pub(crate) fn ray_segment_closest(o: Vec3, d: Vec3, a: Vec3, b: Vec3) -> Vec3 {
     let u = b - a;
     let w = a - o;
     let (dd, du, uu) = (d.dot(d), d.dot(u), u.dot(u));
