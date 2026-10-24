@@ -142,3 +142,6 @@ Tinkercad are trademarks of their respective owners, named only to describe comp
 [linux-appimage]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.AppImage
 [snap-store]: https://snapcraft.io/solidcraft
 [web-app]: https://solidcraft.io/app
+
+
+<!-- Automated fix for issue #6287: Renaming causes system to hang. -->
