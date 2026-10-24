@@ -640,6 +640,17 @@ fn run_pick(app: &mut SolveApp, t: &Tool) {
     let _ = app.run(t.cmd, params);
 }
 
+/// Take back a pending spline point before undo or Backspace reaches the sketch.
+pub fn undo_spline_point(app: &mut SolveApp) -> bool {
+    let Some(t) = app.tool.as_mut() else { return false };
+    if !matches!(t.cmd, "sketch.spline.fit_point" | "sketch.spline.control_point" | "sketch.spline.control_point_5") || t.pts.is_empty() {
+        return false;
+    }
+    t.pts.pop();
+    crate::sketch_dims::reset(t);
+    true
+}
+
 /// Right click / Esc: end the current chain (line) or cancel the tool.
 pub fn finish(app: &mut SolveApp) {
     crate::dim_view::cancel();

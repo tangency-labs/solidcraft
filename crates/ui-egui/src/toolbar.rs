@@ -2001,7 +2001,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                 }
                 _ if !shown => {}
-                Key::Z => drop(app.run("edit.undo", json!({}))),
+                Key::Z => {
+                    if !crate::tools::undo_spline_point(app) {
+                        drop(app.run("edit.undo", json!({})));
+                    }
+                }
                 Key::Y => drop(app.run("edit.redo", json!({}))),
                 // Copy, Cut and Paste (`edit_clipboard::handle`).
                 Key::C | Key::X | Key::V if !mods.shift && !mods.alt => {}
@@ -2073,6 +2077,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 crate::context_menu::rename_selection(app, at);
             }
             Key::F6 => app.animate_view("fit"),
+            Key::Backspace if crate::tools::undo_spline_point(app) => {}
             Key::Delete | Key::Backspace => {
                 if !crate::timeline_left::delete_selected_folders(app) {
                     crate::viewport::delete_selection(app);

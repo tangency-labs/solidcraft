@@ -18,6 +18,59 @@ fn press(h: &mut Harness, key: &str) {
 }
 
 #[test]
+fn spline_undo_removes_pending_points_before_sketch_history() {
+    for cmd in ["sketch.spline.fit_point", "sketch.spline.control_point", "sketch.spline.control_point_5"] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[-20,-20],"p1":[-10,-10]})).unwrap();
+        h.settle();
+        h.step(&json!({"start":cmd})).unwrap();
+        for point in [[2, 2, 0], [8, 2, 0], [9, 7, 0]] {
+            h.step(&json!({"click":{"world":point}})).unwrap();
+        }
+        let points = h.app.tool.as_ref().unwrap().pts.clone();
+        assert_eq!(points.len(), 3);
+        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision);
+        for remaining in (0..3).rev() {
+            h.step(&json!({"key":"Z","cmd":true})).unwrap();
+            h.settle();
+            assert_eq!(h.app.tool.as_ref().unwrap().pts, points[..remaining], "{cmd}");
+            assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision), before, "{cmd}");
+        }
+        assert_eq!(tool(&h), Some(cmd));
+        h.step(&json!({"key":"Z","cmd":true})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.undo.len(), before.1 - 1, "history resumes once the spline is empty");
+        let sketch = h.app.session.active_sketch.unwrap();
+        assert!(h.app.session.model.state().sketch(sketch).unwrap().sketch.curves.is_empty());
+    }
+}
+
+#[test]
+fn spline_backspace_removes_pending_points_and_keeps_the_tool_ready() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[-20,-20],"p1":[-10,-10]})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.spline.fit_point"})).unwrap();
+    for point in [[2, 2, 0], [8, 2, 0], [9, 7, 0]] {
+        h.step(&json!({"click":{"world":point}})).unwrap();
+    }
+    let points = h.app.tool.as_ref().unwrap().pts.clone();
+    assert_eq!(points.len(), 3);
+    let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision);
+    for remaining in (0..3).rev() {
+        press(&mut h, "Backspace");
+        assert_eq!(h.app.tool.as_ref().unwrap().pts, points[..remaining]);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision), before);
+    }
+    assert_eq!(tool(&h), Some("sketch.spline.fit_point"));
+    press(&mut h, "Escape");
+    assert!(tool(&h).is_none());
+    assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision), before);
+}
+
+#[test]
 fn sketch_keys_outside_a_sketch_sketch_on_the_selected_plane_and_start_their_tool() {
     for (key, cmd) in
         [("C", "sketch.circle.center"), ("L", "sketch.line"), ("R", "sketch.rectangle.two_point"), ("D", "sketch.dimension"), ("P", "sketch.project")]
