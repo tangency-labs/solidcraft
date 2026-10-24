@@ -2897,6 +2897,28 @@ fn mixed_scene(o: &Options) -> (Vec<Prepared>, Vec<Placement>) {
     (defs, scene)
 }
 
+/// Timing, not a check (`cargo test --release -p solidcraft-geom --lib hlr_timing -- --ignored
+/// --nocapture`): preparing the bodies, then 100 placements (`SOLIDCRAFT_BENCH_HLR=N` for N),
+/// each turned differently, on one thread, two workers and one worker per core.
+#[test]
+#[ignore]
+fn hlr_timing() {
+    let n = std::env::var("SOLIDCRAFT_BENCH_HLR").ok().and_then(|s| s.parse().ok()).unwrap_or(100);
+    let o = Options::default();
+    let started = std::time::Instant::now();
+    let bodies = [cuboid([0.; 3], [8.; 3]), cylinder(4., 10.), sphere(4.), torus(5., 1.5)];
+    let defs: Vec<Prepared> = bodies.iter().map(|b| prepare(b, &o).unwrap()).collect();
+    eprintln!("prepare {} bodies: {:.3} s", defs.len(), started.elapsed().as_secs_f64());
+    let scene: Vec<Placement> = (0..n).map(|k| turned_about_z(k % 4, 0.07 * k as f64, [14. * (k % 10) as f64, 14. * (k / 10) as f64, 0.])).collect();
+    let view = View::new(Vec3::new(-1., -1., -1.), Vec3::new(0., 0., 1.)).unwrap();
+    for threads in [1, 2, 0] {
+        let started = std::time::Instant::now();
+        let d = hidden_lines(&defs, &scene, &view, &Options { threads, ..o }, &never).unwrap();
+        let s = &d.stats;
+        eprintln!("{n} placements, threads {threads}: {:.3} s, phases {:.0?} ms, {} rays", started.elapsed().as_secs_f64(), s.phase_ms, s.rays);
+    }
+}
+
 /// Everything a drawing holds, phase timings left out.
 fn fingerprint(mut d: Drawing) -> String {
     d.stats.phase_ms = [0.; 4];
