@@ -265,29 +265,6 @@ fn the_gate_refuses_and_limits() {
     assert!(get(late)["error"].as_str().is_some_and(|e| e.contains("no message in progress")));
 }
 
-#[test]
-fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
-    // Distinct designs: what counts is which `Arc` a snapshot holds.
-    let doc = |_: usize| Arc::new(solidcraft_engine::doc::Document::default());
-    let snap = |d: &Arc<solidcraft_engine::doc::Document>| solidcraft_engine::Snapshot {
-        label: String::new(),
-        doc: d.clone(),
-        active_sketch: None,
-        pending_moves: Default::default(),
-        visibility: Default::default(),
-    };
-    let docs: Vec<_> = (0..6).map(doc).collect();
-    // The turn began at depth 3 with docs[3]; the history then lost its oldest step.
-    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
-    assert_eq!(merge_undo(&mut undo, &docs[3], 3, "Agent"), 3);
-    assert_eq!(undo.len(), 3);
-    assert!(Arc::ptr_eq(&undo[2].doc, &docs[3]) && undo[2].label == "Agent");
-    // A start that is no longer in the history: nothing is merged.
-    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
-    assert_eq!(merge_undo(&mut undo, &doc(9), 3, "Agent"), 0);
-    assert_eq!(undo.len(), 5);
-}
-
 /// People who don't want AI never see it: with "Show AI features" off there is no button, the
 /// shortcut does nothing, no panel draws, nothing is looked for and nothing starts, even when
 /// asked over the control channel. Turned on, the button is there; discovery waits for the panel.

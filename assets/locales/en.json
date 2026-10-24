@@ -1301,6 +1301,8 @@
   "dialog.dimension_insert_hint": "Click another driving dimension to insert its name",
   "dialog.dimension_name": "Dimension: {name}",
   "dialog.edit_title": "EDIT {title}",
+  "dialog.new_sketch_hint": "Draw a new sketch for this feature: pick a plane or a planar face. Finish Sketch comes back here with its profiles picked.",
+  "dialog.new_sketch_return": "Finish the sketch to go back to {command}",
   "dialog.no_shown_body": "No shown body to change: show one, or choose New Body",
   "dialog.select": "↖ Select",
   "dialog.selected_count": "↖ {count} selected",

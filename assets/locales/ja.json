@@ -1301,6 +1301,8 @@
   "dialog.dimension_insert_hint": "別の駆動寸法をクリックして名前を挿入",
   "dialog.dimension_name": "寸法: {name}",
   "dialog.edit_title": "{title}を編集",
+  "dialog.new_sketch_hint": "このフィーチャー用に新しいスケッチを描きます。平面または平らな面を選択してください。「スケッチを終了」でここに戻り、そのプロファイルが選択されます。",
+  "dialog.new_sketch_return": "スケッチを終了すると {command} に戻ります",
   "dialog.no_shown_body": "変更できる表示中のボディがありません。ボディを表示するか、新規ボディを選択してください",
   "dialog.select": "↖ 選択",
   "dialog.selected_count": "↖ {count} 個選択中",

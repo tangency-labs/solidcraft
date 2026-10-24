@@ -1901,6 +1901,30 @@ fn deleting_a_path_sketch_deletes_its_pipe() {
     assert!(s.model.results.iter().all(|r| r.error.is_none()));
 }
 
+/// Steps made since a design are merged into one undo step, also when the history has lost
+/// its oldest steps meanwhile; a start no longer in the history merges nothing.
+#[test]
+fn merge_undo_since_finds_the_start_when_the_history_was_trimmed() {
+    // Distinct designs: what counts is which `Arc` a snapshot holds.
+    let doc = |_: usize| Arc::new(solidcraft_doc::Document::default());
+    let snap = |d: &Arc<solidcraft_doc::Document>| Snapshot {
+        label: String::new(),
+        doc: d.clone(),
+        active_sketch: None,
+        pending_moves: Default::default(),
+        visibility: Default::default(),
+    };
+    let docs: Vec<_> = (0..6).map(doc).collect();
+    // Started at depth 3 with docs[3]; the history then lost its oldest step.
+    let mut s = Session { undo: docs[1..6].iter().map(snap).collect(), ..Default::default() };
+    assert_eq!(s.merge_undo_since(&docs[3], 3, "Extrude"), 3);
+    assert_eq!(s.undo.len(), 3);
+    assert!(Arc::ptr_eq(&s.undo[2].doc, &docs[3]) && s.undo[2].label == "Extrude");
+    s.undo = docs[1..6].iter().map(snap).collect();
+    assert_eq!(s.merge_undo_since(&doc(9), 3, "Extrude"), 0);
+    assert_eq!(s.undo.len(), 5);
+}
+
 /// Regression: batches were rolled back by undoing as many steps as the undo history grew,
 /// which is none once the history is full, leaving their sketches behind.
 #[test]
