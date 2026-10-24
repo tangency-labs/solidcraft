@@ -514,6 +514,38 @@ fn rust(i: &Inputs) -> Result<Result<Vec<Item>, SolidError>, HarnessError> {
     Ok(Ok(d.o))
 }
 
+/// The first token of an ASCII database stream that libc++'s `num_get` rejects but
+/// libstdc++'s accepts: a finite decimal double literal whose correctly rounded value
+/// is subnormal or underflows to zero.
+///
+/// libc++ reports such an extraction as `failbit` (an underflowing `strtod`), libstdc++
+/// stores the value and leaves the stream good. Upstream's ASCII readers then keep
+/// reading unset locals (UB-6/UB-75). Overflowing literals (both standard libraries
+/// set `failbit`), `nan`/`inf` spellings and hex floats are not a platform divergence
+/// and are not matched here.
+fn libcxx_rejected_ascii_double(bytes: &[u8]) -> Option<String> {
+    bytes
+        .split(u8::is_ascii_whitespace)
+        .filter_map(|t| std::str::from_utf8(t).ok())
+        .find(|t| {
+            let decimal = !t.is_empty()
+                && t.bytes()
+                    .all(|b| b.is_ascii_digit() || matches!(b, b'+' | b'-' | b'.' | b'e' | b'E'));
+            if !decimal {
+                return false;
+            }
+            let Ok(v) = t.parse::<f64>() else {
+                return false;
+            };
+            let nonzero_digit = t
+                .bytes()
+                .take_while(|b| !matches!(b, b'e' | b'E'))
+                .any(|b| b.is_ascii_digit() && b != b'0');
+            v.is_subnormal() || (v == 0.0 && nonzero_digit)
+        })
+        .map(str::to_string)
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "topology.brep_data"
@@ -541,10 +573,25 @@ impl UnitDiff for Runner {
     fn skipped_platform(&self, case: &Case) -> Option<String> {
         let i: Inputs = case.parse().ok()?;
         if i.mode == "db" {
-            Some("libc++ istream extraction differs from libstdc++".into())
-        } else {
-            None
+            return Some("libc++ istream extraction differs from libstdc++".into());
         }
+        // `ReadFromFile` runs the whole B-rep through the same ASCII `>>` extraction
+        // path. libc++ sets `failbit` for a correctly rounded decimal double that
+        // underflows (`strtod` signals ERANGE), while libstdc++ stores the value and
+        // leaves the stream good. Upstream ignores the failed stream and keeps reading
+        // unset locals (UB-6/UB-75); `gen0110` then dies in `SmShellData::ReadFromDB`
+        // (#815). Only an ASCII file stream that actually carries such a token is
+        // affected: binary streams extract no text, and safe ASCII file cases keep
+        // their native comparison.
+        if i.mode == "file" && !i.binary {
+            if let Some(token) = libcxx_rejected_ascii_double(&bytes_of(&i).ok()?) {
+                return Some(format!(
+                    "libc++ istream rejects the out-of-range ASCII double `{token}` \
+                     (failbit; upstream then reads unset locals, UB-6/UB-75)"
+                ));
+            }
+        }
+        None
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
@@ -1413,5 +1460,164 @@ fn generate(rng: &mut Rng) -> Inputs {
         data,
         path: None,
         skip_lines: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn case(inputs: Inputs) -> Case {
+        Case {
+            unit: Runner.id().to_string(),
+            name: "case".into(),
+            source: crate::CaseSource::Generated { seed: 0 },
+            inputs: serde_json::to_value(inputs).unwrap(),
+        }
+    }
+
+    fn stream(mode: &str, binary: bool, text: &str) -> Inputs {
+        Inputs {
+            mode: mode.to_string(),
+            binary,
+            version: 33,
+            dim: 0,
+            persist: false,
+            source: 0,
+            pre: 0,
+            text: (!binary).then(|| text.to_string()),
+            data: binary.then(|| text.as_bytes().to_vec()),
+            path: None,
+            skip_lines: 0,
+        }
+    }
+
+    #[test]
+    fn rejects_only_out_of_range_finite_decimal_tokens() {
+        for token in [
+            "4.595e-321",
+            "5e-324",
+            "1e-310",
+            "1e-308",
+            "1e-400",
+            "-2.4703282292062328e-324",
+            "2.4703282292062327e-324",
+        ] {
+            assert_eq!(
+                libcxx_rejected_ascii_double(token.as_bytes()).as_deref(),
+                Some(token),
+                "{token}"
+            );
+        }
+        for token in [
+            "0",
+            "-0e0",
+            "0e-400",
+            "-0e12",
+            "+0.000E+99",
+            "0.000",
+            "1",
+            "-1.5",
+            "1e300",
+            "1e-300",
+            "2.2250738585072014e-308",
+            "1.7976931348623157e308",
+            // Overflow sets `failbit` in both standard libraries: not a divergence.
+            "1e400",
+            "-1e400",
+            "1.7976931348623159e308",
+            "Version",
+            "-",
+            "nan",
+            "inf",
+            "-inf",
+            "0x1p-1022",
+        ] {
+            assert_eq!(libcxx_rejected_ascii_double(token.as_bytes()), None, "{token}");
+        }
+    }
+
+    #[test]
+    fn file_stream_classification_is_token_and_format_based() {
+        let out_of_range = "Version 33\n4.595e-321 0 0 - Color\n1 1 - Manifold\n";
+        let skipped = case(stream("file", false, out_of_range));
+        let reason = Runner.skipped_platform(&skipped).expect("file ascii skipped");
+        assert!(reason.contains("4.595e-321"), "{reason}");
+        assert!(reason.contains("UB-6"), "{reason}");
+
+        // A safe ASCII file stream keeps its native comparison.
+        let safe = case(stream(
+            "file",
+            false,
+            "Version 33\n1 0 0 - Color\n1 1 - Manifold\n",
+        ));
+        assert_eq!(Runner.skipped_platform(&safe), None);
+
+        // Exponent digits do not turn a zero significand into an underflow.
+        let scientific_zero = case(stream(
+            "file",
+            false,
+            "Version 33\n0e-400 -0e12 +0.000E+99 - Color\n1 1 - Manifold\n",
+        ));
+        assert_eq!(Runner.skipped_platform(&scientific_zero), None);
+
+        // The same bytes parsed as binary extract no text: not this platform class.
+        let binary = case(stream("file", true, out_of_range));
+        assert_eq!(Runner.skipped_platform(&binary), None);
+
+        // The pre-existing `db` classification (which also covers binary streams) is
+        // unchanged, and construction does not run the readers.
+        assert_eq!(
+            Runner.skipped_platform(&case(stream("db", false, out_of_range))),
+            Some("libc++ istream extraction differs from libstdc++".into())
+        );
+        assert_eq!(
+            Runner.skipped_platform(&case(stream("db", true, out_of_range))),
+            Some("libc++ istream extraction differs from libstdc++".into())
+        );
+        assert_eq!(
+            Runner.skipped_platform(&case(stream("construct", false, out_of_range))),
+            None
+        );
+    }
+
+    /// The generated corpus: every skipped `file` case carries such a token, every
+    /// other ASCII file case stays native, and #815's `gen0110` is classified.
+    #[test]
+    fn generated_file_cases_are_classified_without_blanket_skips() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let mut skipped_file = 0;
+        let mut native_ascii_file = 0;
+        for case in &cases {
+            let i: Inputs = case.parse().unwrap();
+            let skip = Runner.skipped_platform(case);
+            if i.mode != "file" {
+                continue;
+            }
+            if i.binary {
+                assert_eq!(skip, None, "{}", case.name);
+                continue;
+            }
+            let bytes = bytes_of(&i).unwrap();
+            if let Some(token) = libcxx_rejected_ascii_double(&bytes) {
+                let reason = skip.unwrap_or_default();
+                assert!(reason.contains(&token), "{}: {reason}", case.name);
+                skipped_file += 1;
+            } else {
+                assert_eq!(skip, None, "{}: skipped without a token", case.name);
+                native_ascii_file += 1;
+            }
+        }
+        assert!(skipped_file > 0, "no generated file case is affected");
+        assert!(native_ascii_file > 0, "all ASCII file cases were skipped");
+        let gen0110 = cases
+            .iter()
+            .find(|c| c.name == "gen0110")
+            .expect("gen0110");
+        assert!(Runner.skipped_platform(gen0110).is_some());
     }
 }
