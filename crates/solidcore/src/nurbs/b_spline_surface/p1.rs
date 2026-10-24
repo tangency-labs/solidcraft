@@ -137,6 +137,7 @@ use crate::geom::geom_utility::p1::line_point_distance;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::polar_box::{PolarBox, PolarBoxState};
 use crate::geom::pseudo_box::PseudoBox;
+use crate::geom::solution_array::SolutionObject;
 use crate::geom::tol::are_same;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
@@ -151,6 +152,7 @@ use crate::nurbs::nurbs_crv::{extract_frame, fixup_knot_vector, get_knots, to_eu
 use crate::nurbs::nurbs_srf::{allocate_nurb_surface, copy_nurb_surface};
 use crate::nurbs::srf_basic::{Direction, Surface};
 use crate::nurbs::srf_common::{corner_pts, cyl_cone, extrude_crv, CylCone};
+use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::topology::database_io::{DatabaseReader, FileType};
 
 /// `SURF_BASE_TYPE` (`SmTypes.h`).
@@ -557,6 +559,43 @@ fn local_point_solve(
 /// `SmSurface::GlobalPointSolve(domain, SM_SO_INTERSECT, point, tol, NULL,
 /// SM_SR_ALL, ..)` on `surface` (the surface the B-spline part belongs to): the start
 /// parameters of every solution.
+/// [`global_point_solve`] under the caller's face context (the context and the
+/// surface's handle in it).
+fn global_point_solve_with_context<O: SolutionObject>(
+    k: &Kernel,
+    surface: &crate::surface::surface::Surface,
+    domain: &Extent2d,
+    point: Point3,
+    tol_3d: f64,
+    context: (&mut dyn SurfaceSolveContext<O>, Option<O>),
+) -> Result<Vec<Point2>> {
+    let (context, handle) = context;
+    let mut solutions = crate::geom::solution_array::SolutionArray::<O>::new();
+    surface.global_point_solve_into_with_context(
+        k,
+        handle,
+        None,
+        context,
+        domain,
+        SolverOperation::Intersect,
+        point,
+        tol_3d,
+        None,
+        SolutionRequested::All,
+        &mut solutions,
+    )?;
+    Ok(solutions
+        .as_slice()
+        .iter()
+        .map(|s| {
+            Point2::new(
+                s.start.parameters.first().copied().unwrap_or(0.0),
+                s.start.parameters.get(1).copied().unwrap_or(0.0),
+            )
+        })
+        .collect())
+}
+
 fn global_point_solve(
     k: &Kernel,
     surface: &crate::surface::surface::Surface,
@@ -1873,6 +1912,58 @@ impl BSplineSurface {
         tol_3d: f64,
         uv_guess: Option<Point2>,
     ) -> Result<(Point2, LocationType)> {
+        self.step_inversion_on_in::<crate::surface::surface::p4::NoObject>(
+            k,
+            surface,
+            anal_domain,
+            point_on_surf,
+            tol_3d,
+            uv_guess,
+            None,
+        )
+    }
+
+    /// [`BSplineSurface::step_inversion_on`] whose `GlobalPointSolve` runs under the
+    /// caller's face context (`context`: the solve context and the surface's handle in
+    /// it): a face-owned surface's solutions are then classified against the face's
+    /// trims, as upstream's `GlobalPointSolve` does through the surface's face.
+    ///
+    /// # Errors
+    ///
+    /// As [`BSplineSurface::step_inversion`], with those of the context.
+    #[allow(clippy::too_many_arguments)]
+    pub fn step_inversion_on_with_context<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface: &crate::surface::surface::Surface,
+        anal_domain: &Extent2d,
+        point_on_surf: Point3,
+        tol_3d: f64,
+        uv_guess: Option<Point2>,
+        context: (&mut dyn SurfaceSolveContext<O>, Option<O>),
+    ) -> Result<(Point2, LocationType)> {
+        self.step_inversion_on_in(
+            k,
+            surface,
+            anal_domain,
+            point_on_surf,
+            tol_3d,
+            uv_guess,
+            Some(context),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn step_inversion_on_in<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface: &crate::surface::surface::Surface,
+        anal_domain: &Extent2d,
+        point_on_surf: Point3,
+        tol_3d: f64,
+        uv_guess: Option<Point2>,
+        context: Option<(&mut dyn SurfaceSolveContext<O>, Option<O>)>,
+    ) -> Result<(Point2, LocationType)> {
         // init output
         let mut location = LocationType::Interior;
 
@@ -1890,13 +1981,17 @@ impl BSplineSurface {
         }
 
         if !local_succeeded {
-            solutions.extend(global_point_solve(
-                k,
-                surface,
-                anal_domain,
-                point_on_surf,
-                tol_3d,
-            )?);
+            solutions.extend(match context {
+                Some(context) => global_point_solve_with_context(
+                    k,
+                    surface,
+                    anal_domain,
+                    point_on_surf,
+                    tol_3d,
+                    context,
+                )?,
+                None => global_point_solve(k, surface, anal_domain, point_on_surf, tol_3d)?,
+            });
         }
 
         // Point not close enough to surface - error

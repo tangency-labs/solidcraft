@@ -10,6 +10,7 @@
 //! | Rust                                  | Upstream                                  |
 //! |---------------------------------------|-------------------------------------------|
 //! | [`Surface::drop_curve`] | `SmSurface::DropCurve` (the virtual call: plane override, else the base body) |
+//! | [`Surface::drop_curve_face_tested`] | `SmSurface::DropCurve` of a face-owned surface (the start drop's `PointClassify` trim test on the caller's face) |
 //! | [`Surface::drop_curve_base`], [`DropCurveOut`] | `SmSurface::DropCurve` (the base body, called non-virtually) |
 //!
 //! Deviations:
@@ -88,6 +89,7 @@ use crate::surface::plane::PlaneDropCurve;
 use crate::surface::surface::p2::{
     CreateUvTrimCurvePathType, DropCurveFailArgs, SurfaceKind, UNSURE,
 };
+use crate::surface::surface::p4::FaceTest;
 use crate::surface::surface::p7::approx_derivative_lengths;
 use crate::surface::surface::Surface;
 use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled;
@@ -396,7 +398,83 @@ impl Surface {
         interval: &Extent1d,
         approx_tol_3d: f64,
         keep_all_drop_curves: bool,
+        record: Option<DropFailRecord<'_, O>>,
+    ) -> Result<DropCurveOut> {
+        self.drop_curve_base_in(
+            k,
+            uv_domain,
+            curve,
+            interval,
+            approx_tol_3d,
+            keep_all_drop_curves,
+            record,
+            None,
+        )
+    }
+
+    /// [`Surface::drop_curve`] of a face's surface by a caller that holds the face: the
+    /// start point drop's trim boundary test (`pFace->PointClassify` in
+    /// `GlobalPointSolve`'s fast drop) is `classify`, as in
+    /// [`Surface::global_point_solve_face_tested`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::drop_curve`], and those of `classify`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn drop_curve_face_tested<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        approx_tol_3d: f64,
+        keep_all_drop_curves: bool,
+        record: Option<DropFailRecord<'_, O>>,
+        creating_uv_trim_curve: bool,
+        classify: FaceTest<'_>,
+    ) -> Result<PlaneDropCurve> {
+        if let SurfaceKind::Plane(p) = self.kind() {
+            return p.drop_curve(
+                k,
+                uv_domain,
+                curve,
+                interval,
+                approx_tol_3d,
+                keep_all_drop_curves,
+                creating_uv_trim_curve,
+                self.owner(),
+            );
+        }
+        let d = self.drop_curve_base_in::<O>(
+            k,
+            uv_domain,
+            curve,
+            interval,
+            approx_tol_3d,
+            keep_all_drop_curves,
+            record,
+            Some(classify),
+        )?;
+        Ok(PlaneDropCurve {
+            max_drop_to_surf: d.max_drop_to_surf,
+            max_approx_dev: d.max_approx_dev,
+            uv_curves: d.uv_curves.into_iter().map(Curve::from).collect(),
+        })
+    }
+
+    /// [`Surface::drop_curve_base`] whose start point drop's trim test is `face_test`
+    /// (`None`: the surface's own, as [`Surface::global_point_solve`]).
+    #[allow(clippy::too_many_arguments)]
+    fn drop_curve_base_in<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        approx_tol_3d: f64,
+        keep_all_drop_curves: bool,
         mut record: Option<DropFailRecord<'_, O>>,
+        face_test: Option<FaceTest<'_>>,
     ) -> Result<DropCurveOut> {
         // `SmApproxTol3d sApproxTol3d`: the constructor maps SM_USE_DEFAULT to zone/2
         // and stores fabs (SmTol.cpp:109, SmTol.h:167-168), so upstream runs with |tol|.
@@ -545,16 +623,30 @@ impl Surface {
         }
 
         // Drop curve StartPoint to surface (SM_SO_MINIMIZE, all solutions)
-        let mut solutions: SolutionArray<O> = this.global_point_solve(
-            k,
-            fs.surface, // `this`'s handle when the caller gave a record (minimize ignores it)
-            &s_uv_domain,
-            SolverOperation::Minimize,
-            start.crv_pd[0],
-            max2(approx_tol_3d / 100.0, EFF_ZERO),
-            None,
-            SolutionRequested::All,
-        )?;
+        let mut solutions: SolutionArray<O> = if let Some(classify) = face_test {
+            this.global_point_solve_face_tested(
+                k,
+                fs.surface,
+                &s_uv_domain,
+                SolverOperation::Minimize,
+                start.crv_pd[0],
+                max2(approx_tol_3d / 100.0, EFF_ZERO),
+                None,
+                SolutionRequested::All,
+                classify,
+            )?
+        } else {
+            this.global_point_solve(
+                k,
+                fs.surface, // `this`'s handle when the caller gave a record (minimize ignores it)
+                &s_uv_domain,
+                SolverOperation::Minimize,
+                start.crv_pd[0],
+                max2(approx_tol_3d / 100.0, EFF_ZERO),
+                None,
+                SolutionRequested::All,
+            )?
+        };
 
         // there should always be at least one solution
         if solutions.is_empty() {

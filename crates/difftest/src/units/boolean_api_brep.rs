@@ -238,25 +238,14 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 /// `IntersectInsertRelate`'s proto topology manager reads a proto edge it already
 /// freed, so the input is undefined in C++ (AGENTS.md section 4, step 5.6) and [`cpp`]
 /// rejects it. Decided from the inputs and the Rust side only: the port replays the
-/// teardown and returns exactly this `InvalidInput` where upstream reads freed memory.
+/// teardown, goes on with its defined result and records `"UB-175"` on the kernel
+/// ([`Kernel::upstream_ub_passed`]).
 fn ub_175(i: &Inputs) -> Result<bool, HarnessError> {
-    let hit = std::cell::Cell::new(false);
-    let seen = |e: &SolidError| hit.set(hit.get() || is_ub_175(e));
-    match rust_call_with(&mut Kernel::default(), i, &seen) {
-        Ok(_) | Err(Stop::Deferred(_)) => Ok(hit.get()),
+    let mut k = Kernel::default();
+    match rust_call_with(&mut k, i, &|_| {}) {
+        Ok(_) | Err(Stop::Deferred(_)) => Ok(k.upstream_ub_passed.contains(&"UB-175")),
         Err(Stop::Harness(e)) => Err(e),
     }
-}
-
-/// The port's UB-175 report (`TopologyIntersector::intersect_insert_relate`).
-fn is_ub_175(e: &SolidError) -> bool {
-    matches!(
-        e,
-        SolidError::InvalidInput {
-            operation: "boolean::topology_intersector::p2::intersect_insert_relate",
-            reason,
-        } if reason.contains("UB-175")
-    )
 }
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.

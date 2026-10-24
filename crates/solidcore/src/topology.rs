@@ -593,6 +593,30 @@ impl Default for Vertexuse {
     }
 }
 
+/// How a B-rep names its topology entities as the owners of its geometry (upstream's
+/// owner pointers): the port has no object pointers, so a geometry owner is an
+/// [`ObjectRef`](crate::geom::object::ObjectRef) under one of these schemes. A routine
+/// that attaches new geometry to topology (`SmEdgeuse::SetUVTrimCurve`'s `SetOwner`)
+/// names its owner by the B-rep's scheme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NamingScheme {
+    /// Not recorded: such routines leave the new geometry without owner (the caller
+    /// names it with its own identities).
+    #[default]
+    Unknown,
+    /// The Euler operators' notification identities
+    /// (`topology::loopuse::notify_ref`).
+    Notify,
+    /// A caller's own identities (a `TopologyEnv` / `NotifyEnv` `key_of`): such routines
+    /// leave the new geometry without owner, and the operation that holds the
+    /// caller's naming names it.
+    Caller,
+    /// The arena identities the crate's imported B-reps use
+    /// ([`brep_cache::arena_identity`](crate::topology::brep_cache::arena_identity):
+    /// the entity's type code and arena index).
+    Arena,
+}
+
 /// A boundary representation (`SmBrep`): arenas of shells, faces, loops, edges and
 /// vertices linked by typed ids.
 #[derive(Debug, Clone)]
@@ -644,6 +668,9 @@ pub struct Brep {
     /// the port's surface owners (not set on every imported face surface) cannot
     /// express on their own.
     surface_owner_cleared: Vec<FaceId>,
+    /// (not upstream) How the B-rep names its topology as an owner of geometry
+    /// ([`NamingScheme`]).
+    naming: NamingScheme,
     /// `m_pLockedBoundingBox` (unit `query.brep`): the box
     /// [`crate::query::brep::lock_bounding_box`] saved, which
     /// [`crate::query::brep::calculate_bounding_box`] returns while it is set. A clone
@@ -685,6 +712,7 @@ impl Default for Brep {
             large_small_size_ratio: USE_DEFAULT,
             deleted_surfaces: Vec::new(),
             surface_owner_cleared: Vec::new(),
+            naming: NamingScheme::Unknown,
             locked_bounding_box: None,
             notify_identity: IdentitySlot::default(),
             geometry_owner_keys: std::collections::BTreeMap::new(),
@@ -738,6 +766,18 @@ impl Brep {
     /// writes, this permits references to records added later.
     pub fn set_infinite_region_record(&mut self, region: Option<RegionId>) {
         self.infinite_region = region;
+    }
+
+    /// How this B-rep names its topology as the owner of geometry ([`NamingScheme`]).
+    #[must_use]
+    pub const fn naming(&self) -> NamingScheme {
+        self.naming
+    }
+
+    /// Records how this B-rep names its topology as the owner of geometry: set where a
+    /// B-rep is built or its geometry owners are relabelled.
+    pub fn set_naming(&mut self, naming: NamingScheme) {
+        self.naming = naming;
     }
 
     /// `m_bEditingEnabled`.

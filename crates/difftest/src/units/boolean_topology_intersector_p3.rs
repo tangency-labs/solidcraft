@@ -51,7 +51,7 @@ use solidcore::intersect::point_class::{
     ClassGeometry, ClassObjectKind, PointClassType, PointClassification,
 };
 use solidcore::kernel::Kernel;
-use solidcore::math::Point3;
+use solidcore::math::{Point2, Point3};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::query::face::p1 as qf1;
 use solidcore::topology::edge as ed;
@@ -967,46 +967,6 @@ impl IntersectorBrepP3<H> for Two {
         ))
     }
 
-    fn face_point_3d_classify(
-        &mut self,
-        k: &Kernel,
-        face: H,
-        point: Point3,
-        src_zone_tol_3d: f64,
-        do_boundary_intersections: bool,
-        pc: &mut PointClassification<H>,
-    ) -> solidcore::Result<()> {
-        if face.kind != K_FACE {
-            return Err(invalid("not a face"));
-        }
-        // the caller's classification in the face's B-rep handles (its other members are
-        // kept unless written, as upstream's out-param)
-        let mut pe = pc.map_objects(&mut |h: H| {
-            if h.b != face.b {
-                return Err(invalid("classification object of the other B-rep"));
-            }
-            self.topology_entity(h)
-                .map(|(_, e)| e)
-                .ok_or_else(|| invalid("classification object without a B-rep entity"))
-        })?;
-        let b = self.brep_m(face)?;
-        let r = qf1::point_3d_classify(
-            k,
-            b,
-            fid(face),
-            point,
-            src_zone_tol_3d,
-            do_boundary_intersections,
-            &mut pe,
-            qf1::Point3dClassifyOptions::default(),
-        );
-        // copied back whatever the status
-        *pc = pe.map_objects(&mut |e: EntityRef| {
-            Two::entity_h(face.b, e).ok_or_else(|| invalid("entity without a handle"))
-        })?;
-        r
-    }
-
     fn face_upward_loopuses(&self, face: H) -> solidcore::Result<Vec<H>> {
         if face.kind != K_FACE {
             return Err(invalid("not a face"));
@@ -1399,3 +1359,50 @@ impl UnitDiff for Runner {
         serde_json::to_value(gen_inputs(rng)).ok()
     }
 }
+
+/// `SmFace::Point3DClassify` on the runner's B-reps
+/// ([`solidcore::boolean::topology_intersector::p1::IntersectorBrep::face_point_3d_classify`]).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn face_point_3d_classify(
+        this: &mut Two,
+        k: &Kernel,
+        face: H,
+        point: Point3,
+        src_zone_tol_3d: f64,
+        do_boundary_intersections: bool,
+        pc: &mut PointClassification<H>,
+        opt_guess_uv: Option<Point2>,
+    ) -> solidcore::Result<()> {
+        if face.kind != K_FACE {
+            return Err(invalid("not a face"));
+        }
+        // the caller's classification in the face's B-rep handles (its other members are
+        // kept unless written, as upstream's out-param)
+        let mut pe = pc.map_objects(&mut |h: H| {
+            if h.b != face.b {
+                return Err(invalid("classification object of the other B-rep"));
+            }
+            this.topology_entity(h)
+                .map(|(_, e)| e)
+                .ok_or_else(|| invalid("classification object without a B-rep entity"))
+        })?;
+        let b = this.brep_m(face)?;
+        let r = qf1::point_3d_classify(
+            k,
+            b,
+            fid(face),
+            point,
+            src_zone_tol_3d,
+            do_boundary_intersections,
+            &mut pe,
+            qf1::Point3dClassifyOptions {
+                guess_uv: opt_guess_uv,
+                ..Default::default()
+            },
+        );
+        // copied back whatever the status
+        *pc = pe.map_objects(&mut |e: EntityRef| {
+            Two::entity_h(face.b, e).ok_or_else(|| invalid("entity without a handle"))
+        })?;
+        r
+    }

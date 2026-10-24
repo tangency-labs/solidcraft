@@ -249,6 +249,27 @@ pub trait IntersectorBrep<O>:
     + crate::topology::proto_topology::p3::BrepGlue<O>
     + crate::intersect::curve_class::p5::ClassGeometryMut<O>
 {
+    /// `SmFace::Point3DClassify(rPnt, sSrcZoneTol3d, bDoBoundaryIntersections,
+    /// rPointClass, pOptGuessUV)` with the remaining arguments at their defaults
+    /// (`bTgtLoopsOnly = FALSE`, `pOptTgtLoops = NULL`, `bUVSpaceOkay = TRUE`; unit
+    /// `query.face_p1`: `query::face::p1::point_3d_classify` on the B-rep behind the
+    /// handle). Mutable: the classification may build missing UV trim curves.
+    ///
+    /// # Errors
+    ///
+    /// Those of `point_3d_classify`; [`SolidError::InvalidInput`] for a handle that is
+    /// not a face of a known B-rep.
+    #[allow(clippy::too_many_arguments)]
+    fn face_point_3d_classify(
+        &mut self,
+        k: &Kernel,
+        face: O,
+        point: Point3,
+        src_zone_tol_3d: f64,
+        do_boundary_intersections: bool,
+        pc: &mut PointClassification<O>,
+        opt_guess_uv: Option<Point2>,
+    ) -> Result<()>;
     /// `SmBrep::MakeVertexLoop` with its default opposite orientation, using the
     /// caller's mutable arenas and notification state (`topology::brep::p9`).
     fn make_vertex_loop(&mut self, brep: O, face: O, point: Point3) -> Result<(O, O)>;
@@ -619,30 +640,6 @@ fn face_uv_domain_from_uv_trim_curves<O>(
         }) => Ok(None),
         r => ignore_soft(r),
     }
-}
-
-/// `SmFace::Point3DClassify(pt, tol, bDoBoundaryIntersections, pc, pOptGuessUV,
-/// bTgtLoopsOnly, pOptTgtLoops, bUVSpaceOkay)` (`NULL`, `FALSE`, `NULL`, `TRUE` by
-/// default); `opt_guess_uv` is the value `pOptGuessUV` points to (an input only).
-fn face_point_3d_classify<O>(
-    _k: &Kernel,
-    _face: O,
-    _point: Point3,
-    _src_zone_tol_3d: f64,
-    _do_boundary_intersections: bool,
-    _pc: &mut PointClassification<O>,
-    _opt_guess_uv: Option<Point2>,
-    _tgt_loops_only: bool,
-    _opt_tgt_loops: Option<&[O]>,
-    _uv_space_okay: bool,
-) -> Result<()> {
-    // DISPATCH GAP: SmFace::Point3DClassify is ported (`query::face::p1::point_3d_classify`,
-    // query.face_p1 partial; no UNPORTED marker), but it takes the face's `Brep` and
-    // `FaceId`, which this caller's opaque face handle does not carry.
-    Err(SolidError::unported(
-        "SmFace::Point3DClassify",
-        "query.face_p1",
-    ))
 }
 
 /// The curves and classifications `SmFace::FaceIntersect` returns.
@@ -2855,65 +2852,21 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let mut uv1 = pc1.uv_param();
         let mut uv2 = pc2.uv_param();
         // (every status below is ignored upstream)
-        ignore_soft(face_point_3d_classify(
-            k,
-            f1,
-            pt,
-            tol,
-            false,
-            pc1,
-            Some(uv1),
-            false,
-            None,
-            true,
-        ))?;
-        ignore_soft(face_point_3d_classify(
-            k,
-            f2,
-            pt,
-            tol,
-            false,
-            pc2,
-            Some(uv2),
-            false,
-            None,
-            true,
-        ))?;
+        ignore_soft(brep.face_point_3d_classify(k, f1, pt, tol, false, pc1, Some(uv1)))?;
+        ignore_soft(brep.face_point_3d_classify(k, f2, pt, tol, false, pc2, Some(uv2)))?;
 
         // The CC may be unknow when a new face was created prior. m_vMid was updated, so check that face
         if pc1.point_class() == PointClassType::Unknown {
             f1 = mid1
                 .face_object()
                 .ok_or(dangling("classification without face"))?;
-            ignore_soft(face_point_3d_classify(
-                k,
-                f1,
-                pt,
-                tol,
-                false,
-                pc1,
-                Some(uv1),
-                false,
-                None,
-                true,
-            ))?;
+            ignore_soft(brep.face_point_3d_classify(k, f1, pt, tol, false, pc1, Some(uv1)))?;
         }
         if pc2.point_class() == PointClassType::Unknown {
             f2 = mid2
                 .face_object()
                 .ok_or(dangling("classification without face"))?;
-            ignore_soft(face_point_3d_classify(
-                k,
-                f2,
-                pt,
-                tol,
-                false,
-                pc2,
-                Some(uv2),
-                false,
-                None,
-                true,
-            ))?;
+            ignore_soft(brep.face_point_3d_classify(k, f2, pt, tol, false, pc2, Some(uv2)))?;
         }
 
         // We have intersecting 3dcurves. Imprint the point as a vertex on each face.
@@ -2937,30 +2890,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             // Update classifications
             uv1 = pc1.uv_param();
             uv2 = pc2.uv_param();
-            ignore_soft(face_point_3d_classify(
-                k,
-                f1,
-                pt,
-                tol,
-                false,
-                pc1,
-                Some(uv1),
-                false,
-                None,
-                true,
-            ))?;
-            ignore_soft(face_point_3d_classify(
-                k,
-                f2,
-                pt,
-                tol,
-                false,
-                pc2,
-                Some(uv2),
-                false,
-                None,
-                true,
-            ))?;
+            ignore_soft(brep.face_point_3d_classify(k, f1, pt, tol, false, pc1, Some(uv1)))?;
+            ignore_soft(brep.face_point_3d_classify(k, f2, pt, tol, false, pc2, Some(uv2)))?;
         }
         Ok(())
     }
@@ -3036,7 +2967,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
                 if let Some(this_face) = this_face {
                     let uv = ci.mid.uv_param();
-                    ignore_soft(face_point_3d_classify(
+                    ignore_soft(brep.face_point_3d_classify(
                         k,
                         this_face,
                         pt,
@@ -3044,14 +2975,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         false,
                         &mut ci.mid,
                         Some(uv),
-                        false,
-                        None,
-                        true,
                     ))?;
                 }
                 if ci.mid.point_class() != PointClassType::Face && this_face.is_some() {
                     let uv = ci.mid.uv_param();
-                    ignore_soft(face_point_3d_classify(
+                    ignore_soft(brep.face_point_3d_classify(
                         k,
                         new_face,
                         pt,
@@ -3059,9 +2987,6 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         false,
                         &mut ci.mid,
                         Some(uv),
-                        false,
-                        None,
-                        true,
                     ))?;
                 }
             }

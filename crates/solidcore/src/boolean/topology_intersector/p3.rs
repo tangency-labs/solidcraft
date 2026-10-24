@@ -85,7 +85,7 @@ use crate::intersect::point_class::{
     ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
 use crate::kernel::Kernel;
-use crate::math::{max2, Point3, BIG_DOUBLE};
+use crate::math::{max2, BIG_DOUBLE};
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -189,24 +189,6 @@ pub trait IntersectorBrepP3<O>: IntersectorBrepP2<O> + MergeIntervalBrep<O> {
         classify_edgeuse: O,
         required_orientation: OrientType,
     ) -> Result<(Option<O>, Option<O>)>;
-    /// `SmFace::Point3DClassify(rPnt, sSrcZoneTol3d, bDoBoundaryIntersections,
-    /// rPointClass)` with the remaining arguments at their defaults (unit
-    /// `query.face_p1`: `query::face::p1::point_3d_classify` on the B-rep behind the
-    /// handle). Mutable: the classification may build missing UV trim curves.
-    ///
-    /// # Errors
-    ///
-    /// Those of `point_3d_classify`; [`SolidError::InvalidInput`] for a handle that is
-    /// not a face of a known B-rep.
-    fn face_point_3d_classify(
-        &mut self,
-        k: &Kernel,
-        face: O,
-        point: Point3,
-        src_zone_tol_3d: f64,
-        do_boundary_intersections: bool,
-        pc: &mut PointClassification<O>,
-    ) -> Result<()>;
     /// `SmFace::CalculateBoundingBox(rBox)` (`bTight = FALSE`; unit `query.face_p1`:
     /// `query::face::p1::calculate_bounding_box`).
     ///
@@ -1000,8 +982,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let mut point_class2 = PointClassification::new(curve_zone_tol);
             let tf = this_face.ok_or(dangling("no face"))?;
             let of = other_face.ok_or(dangling("no other face"))?;
-            brep.face_point_3d_classify(k, tf, pnt, curve_zone_tol, true, &mut point_class1)?;
-            brep.face_point_3d_classify(k, of, pnt, curve_zone_tol, true, &mut point_class2)?;
+            brep.face_point_3d_classify(k, tf, pnt, curve_zone_tol, true, &mut point_class1, None)?;
+            brep.face_point_3d_classify(k, of, pnt, curve_zone_tol, true, &mut point_class2, None)?;
 
             // when point was classified on both faces
             if point_class1.point_class() != PointClassType::Unknown

@@ -91,10 +91,12 @@
 
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::attribute::ObjectKey;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::local_solve_nd::EvalNFunctions;
 use crate::geom::matrix::Matrix;
+use crate::geom::object::ObjectRef;
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject};
 use crate::geom::tol::{context_xsect_tol_3d, SmallTopoType, ZONE_TOL_3D};
 use crate::heal::gap::{EdgeEdgeGap, EdgeFaceGap, GapFunction};
@@ -109,7 +111,7 @@ use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::topology::{
     topology as topo, Brep, EdgeId, EdgeuseId, EdgeuseOwner, FaceId, FaceuseId, LoopId, LoopuseId,
-    ObjectHandle, RegionId, ShellId, VertexId, VertexuseId, VertexuseOwner,
+    NamingScheme, ObjectHandle, RegionId, ShellId, VertexId, VertexuseId, VertexuseOwner,
 };
 
 const OP: &str = "topology::edgeuse::p1";
@@ -775,7 +777,7 @@ pub fn set_uv_trim_curve(
     }
 
     // if given a New UVTrimCurve - save it
-    if let Some(c) = new_curve {
+    if let Some(mut c) = new_curve {
         // `new SmDropCurveFail(*pOptDropCurveFail)`: the copy constructor copies the
         // UV curves only with a context, as `operator=`
         let copy = drop_curve_fail.map(|f| {
@@ -794,6 +796,11 @@ pub fn set_uv_trim_curve(
             // a UVTrimCurve is being temporarily placed onto a standalone Edgeuse
             None => eu,
         };
+        // pUVTrimCurve->SetOwner(holder), under the B-rep's naming (a UV trim curve
+        // notifies nothing)
+        if let Some(owner) = owner_ref(b.naming(), holder) {
+            let _ = c.set_owner(Some(owner), None);
+        }
         let r = b.edgeuse_mut(holder)?;
         r.uv_trim_curve = Some(c);
         r.drop_curve_fail = copy;
@@ -818,6 +825,19 @@ pub fn set_uv_trim_curve(
         }
     }
     Ok(detached)
+}
+
+/// The identity edge use `eu` owns geometry under in a B-rep with naming `naming`
+/// ([`NamingScheme`]); `None` when the B-rep records no scheme.
+fn owner_ref(naming: NamingScheme, eu: EdgeuseId) -> Option<ObjectRef> {
+    match naming {
+        NamingScheme::Unknown | NamingScheme::Caller => None,
+        NamingScheme::Notify => Some(crate::topology::loopuse::notify_ref(EntityRef::Edgeuse(eu))),
+        NamingScheme::Arena => Some(ObjectRef {
+            type_code: TYPE,
+            key: ObjectKey(u64::from(eu.index())),
+        }),
+    }
 }
 
 /// `DeleteUVTrimCurve`: `SetUVTrimCurve(NULL, 0.0, TRUE, NULL)`.

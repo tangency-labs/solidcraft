@@ -52,7 +52,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::query::brep::{self as qbrep, BoundingBoxOptions, BrepQuery};
+use crate::query::brep::{self as qbrep, BoundingBoxOptions, BrepIdentity, BrepQuery};
 use crate::topology::brep::p4;
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::shell;
@@ -295,7 +295,7 @@ pub fn find_brep_region_of_other_face(
         // (the classification's construction tolerance, the edge's, is not read)
         let Some(pc) = ignore_failure(classify_point_editing_disabled(
             k,
-            &BrepQuery::default(),
+            &BrepQuery::new(BrepIdentity::of_brep(brep)),
             brep,
             point,
             0.0,
@@ -525,6 +525,15 @@ pub fn boolean_post_process(
         }
         // SER(DeleteEdge(pEdge, pSurfToKeep)); the cleanup holds no notification state
         p4::with_local_env(|env| p4::delete_edge(k, brep, env, e, Some(keep)))?;
+        // `pSurfToKeep->GetFace()`: when the face holding the kept surface is the one
+        // merged away, DeleteEdge swaps that surface onto the surviving face first
+        let keep = if brep.face(keep).is_ok() {
+            keep
+        } else if keep == f0 {
+            f1
+        } else {
+            f0
+        };
         // The native output starts as a default SmExtent2d and is written back
         // unconditionally, even if IsTopological left it untouched.
         let domain = topological.merged_face_domain.unwrap_or_default();

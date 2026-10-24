@@ -107,7 +107,7 @@ use crate::topology::brep::{p1 as bp1, p2 as bp2};
 use crate::topology::brep_cache::{
     arena_identity, make_brep_cache, BrepCache, BrepObjects, CacheObject, CacheSource,
 };
-use crate::topology::{edge, face, vertex, Brep, BrepId, RegionId};
+use crate::topology::{edge, face, vertex, Brep, BrepId, NamingScheme, RegionId};
 
 const OP_CLASSIFY: &str = "query::brep::BrepQuery::point_3d_classify";
 const OP_EVAL_POINT: &str = "query::brep::evaluate_surface_point";
@@ -363,6 +363,32 @@ impl BrepIdentity<'static> {
             owner_of: &no_owner,
         }
     }
+}
+
+impl BrepIdentity<'static> {
+    /// The identities `b`'s geometry owners use by its recorded naming scheme
+    /// ([`Brep::naming`]): the Euler operators' notification identities for a
+    /// [`NamingScheme::Notify`] B-rep (one built through `new_brep` and the face
+    /// builders), else [`BrepIdentity::arena`]. A query under the wrong scheme resolves
+    /// no geometry owner and silently finds nothing (`plan/findings.md`, "two
+    /// owner-naming schemes").
+    #[must_use]
+    pub fn of_brep(b: &Brep) -> Self {
+        match b.naming() {
+            NamingScheme::Notify => Self {
+                brep_id: BrepId::from_index(0),
+                keys: &notify_identity,
+                owner_of: &no_owner,
+            },
+            _ => Self::arena(BrepId::from_index(0)),
+        }
+    }
+}
+
+/// The cache-object identities of a [`NamingScheme::Notify`] B-rep
+/// ([`crate::topology::loopuse::notify_ref`] for its edges, faces and vertices).
+fn notify_identity(object: CacheObject) -> ObjectRef {
+    crate::topology::brep::p2::caller_cache_key(&crate::topology::loopuse::notify_ref, object)
 }
 
 impl Default for BrepIdentity<'_> {

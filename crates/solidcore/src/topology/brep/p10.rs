@@ -382,6 +382,9 @@ pub fn make_topology_from_data(
     env: &mut TopologyEnv<'_>,
     options: MakeTopologyOptions,
 ) -> Result<()> {
+    // the B-rep's topology owns its geometry under the caller's identities
+    // (`TopologyEnv::key_of`)
+    b.set_naming(crate::topology::NamingScheme::Caller);
     // tell context Brep->TopologyGraph is under construction
     let previous = k.context.doing_boolean();
     k.context.set_doing_boolean(true);

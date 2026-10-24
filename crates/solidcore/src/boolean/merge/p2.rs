@@ -629,6 +629,35 @@ pub fn make_faceuse_attempt(
     )
 }
 
+/// The attributes of the copy `MakeFaceuse` makes of a face's surface: upstream's
+/// `CopyAndAddAnalytics` copies the surface through its copy constructor (or
+/// `IsNurbSurfacePlane`'s `SM_NO_COPY`), which copies every attribute of the other
+/// face's surface onto the new face's, a reference attribute (`SM_AI_SURFACEMAP`)
+/// gaining the copy as a user. A surface goes by its owner's name (the arena name
+/// without one), as the merges' surface identities.
+fn copy_surface_attributes(
+    attributes: &mut crate::geom::attribute::AttributeStore,
+    other: &Brep,
+    from_face: FaceId,
+    brep: &Brep,
+    to_face: FaceId,
+) -> Result<()> {
+    let surface_key = |b: &Brep, f: FaceId| -> Result<ObjectRef> {
+        let surface = b.face(f)?.surface.as_ref();
+        let surface = surface.ok_or(dangling(OP_FACEUSE, "face without surface"))?;
+        Ok(surface.owner().unwrap_or_else(|| {
+            crate::topology::brep_cache::arena_identity(
+                crate::topology::brep_cache::CacheObject::Face(f),
+            )
+        }))
+    };
+    let (from, to) = (surface_key(other, from_face)?, surface_key(brep, to_face)?);
+    for h in attributes.attributes(from.key) {
+        attributes.copy(h, from.key, to.key)?;
+    }
+    Ok(())
+}
+
 /// [`make_faceuse`] with the kernel and notification context given as a
 /// [`MergeContext`] (for callers whose two B-reps share one kernel).
 ///
@@ -880,6 +909,15 @@ pub fn make_faceuse_attempt_with(
     let new_face = attempt
         .face
         .ok_or(dangling(OP_FACEUSE, "MakeFace made no face"))?;
+
+    // the surface copy's attributes (`CopyAndAddAnalytics`)
+    copy_surface_attributes(
+        &mut *copy.vertices.attributes,
+        other,
+        face_to_make,
+        brep,
+        new_face,
+    )?;
 
     relations.relate_faces(brep, new_face, other, face_to_make)?;
     let (source, dest) = (
@@ -2070,6 +2108,83 @@ mod tests {
         .unwrap();
         copy.notify(None, source, edge_key(edge)).unwrap();
         assert_eq!(copy.vertices.records[&edge_key(edge).key].all_flags(), 17);
+    }
+
+    /// `MakeFaceuse`'s surface copy carries the source surface's attributes: a reference
+    /// `SM_AI_SURFACEMAP` lists both the source surface and its copy as users (as
+    /// `PiecewiseMerge`'s `RegisterExistingSSI` needs), and an owner-less surface goes by
+    /// its face's arena name.
+    #[test]
+    fn surface_copy_carries_the_surface_map_attribute_to_a_second_user() {
+        use crate::geom::attribute::{ids, Attribute, AttributeStore, Behavior, ObjectKey};
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::brep_cache::{arena_identity, CacheObject};
+
+        let mut k = Kernel::default();
+        let mut other = create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0).unwrap();
+        let mut brep = create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0).unwrap();
+        let from_face = other.faces().ids().next().unwrap();
+        let to_face = brep.faces().ids().nth(1).unwrap();
+        let face_type = crate::topology::face::p2::TYPE;
+        let from = ObjectRef {
+            key: ObjectKey(7_000_001),
+            type_code: face_type,
+        };
+        let to = ObjectRef {
+            key: ObjectKey(8_000_002),
+            type_code: face_type,
+        };
+        let _ = other
+            .face_mut(from_face)
+            .unwrap()
+            .surface
+            .as_mut()
+            .unwrap()
+            .set_owner(Some(from));
+        let _ = brep
+            .face_mut(to_face)
+            .unwrap()
+            .surface
+            .as_mut()
+            .unwrap()
+            .set_owner(Some(to));
+
+        let mut attributes = AttributeStore::new();
+        let map = attributes
+            .insert(Attribute::pointer(ids::SURFACEMAP, 0, Behavior::Reference))
+            .unwrap();
+        attributes.add_attribute(from.key, map).unwrap();
+
+        copy_surface_attributes(&mut attributes, &other, from_face, &brep, to_face).unwrap();
+        assert_eq!(
+            attributes.find_attribute(to.key, ids::SURFACEMAP),
+            Some(map)
+        );
+        assert_eq!(attributes.users(map).unwrap(), vec![from.key, to.key]);
+        // a second copy onto the same surface (the face notification under the same
+        // name) adds no second reference
+        copy_surface_attributes(&mut attributes, &other, from_face, &brep, to_face).unwrap();
+        assert_eq!(attributes.users(map).unwrap(), vec![from.key, to.key]);
+
+        // an owner-less copy goes by its face's arena name
+        let _ = brep
+            .face_mut(to_face)
+            .unwrap()
+            .surface
+            .as_mut()
+            .unwrap()
+            .set_owner(None);
+        copy_surface_attributes(&mut attributes, &other, from_face, &brep, to_face).unwrap();
+        let arena = arena_identity(CacheObject::Face(to_face));
+        assert_eq!(
+            attributes.find_attribute(arena.key, ids::SURFACEMAP),
+            Some(map)
+        );
+        assert_eq!(
+            attributes.users(map).unwrap(),
+            vec![from.key, to.key, arena.key]
+        );
     }
 
     #[test]

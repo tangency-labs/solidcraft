@@ -220,25 +220,29 @@ fn coincidence_check(
     Ok((c.are_coincident, c.max_distance))
 }
 
-/// `pFace->Point3DClassify(sPoint, tol, TRUE, sPC)`: classifies the point into `pc`.
+/// `pFace->Point3DClassify(sPoint, tol, TRUE, sPC)` of a face of a B-rep lent mutably
+/// (the classification makes the face's trimmed cache and UV trim curves on it): the
+/// point's class. A failed classification leaves `SM_PC_UNKNOWN` (the status is ignored
+/// upstream); [`SolidError::Unported`] propagates.
 fn point_3d_classify(
-    _k: &Kernel,
-    _b: &Brep,
-    _f: FaceId,
-    _point: Point3,
-    _tol: f64,
-    _pc: &mut PointClassification<IntersectObject>,
-) -> Result<()> {
-    // DISPATCH GAP: SmFace::Point3DClassify is ported
-    // (`query::face::p1::point_3d_classify`, query.face_p1 partial; no UNPORTED marker),
-    // but it takes `&mut Brep` (for `query::face::p2::point_classify`) and this caller's
-    // chain holds `&Brep` and an `IntersectObject` classification (`map_objects` converts
-    // it); wire it when the B-rep can be lent mutably here. Until then every such case
-    // would still defer inside it (topology.face_p2 / query.face_p2).
-    Err(SolidError::unported(
-        "SmFace::Point3DClassify",
-        "query.face_p1",
-    ))
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    point: Point3,
+    tol: f64,
+) -> Result<PointClassType> {
+    let mut pc = PointClassification::<EntityRef>::new(tol);
+    ignore_status(crate::query::face::p1::point_3d_classify(
+        k,
+        b,
+        f,
+        point,
+        tol,
+        true,
+        &mut pc,
+        crate::query::face::p1::Point3dClassifyOptions::default(),
+    ))?;
+    Ok(pc.point_class())
 }
 
 // ---- small accessors ----------------------------------------------------------------------
@@ -1760,6 +1764,38 @@ pub fn face_intersect_breps(
         uv_curves2 = r.surface2_uv_curves;
         curve_types = r.curve_types;
     }
+    // The touching points' classifications (`Point3DClassify` on both faces), made
+    // first because they need the B-reps mutably; they only read the B-reps' topology
+    // and geometry, which nothing below changes.
+    let mut touching_on: Vec<Option<Point3>> = Vec::new();
+    if out.points_3d.is_some() {
+        for (ii, curve) in curves_3d.iter().enumerate() {
+            if curve_types.get(ii).copied() != Some(TsectCurveType::Touching) {
+                touching_on.push(None);
+                continue;
+            }
+            // status ignored upstream
+            let point = ignored(curve.evaluate_point(k, 0.5))?.unwrap_or(Vec3::UNDEF);
+            let Some(tb) = this_brep.as_deref_mut() else {
+                // DISPATCH GAP: a caller sharing both B-reps immutably cannot lend
+                // them to the classification.
+                return Err(SolidError::unported(
+                    "SmFace::Point3DClassify",
+                    "query.face_p1",
+                ));
+            };
+            let pct1 = point_3d_classify(k, tb, f, point, this_zone_tol)?;
+            let ob = other_brep.as_deref_mut().unwrap_or(tb);
+            let pct2 = point_3d_classify(k, ob, other, point, other_zone_tol)?;
+            let on = |t: PointClassType| {
+                matches!(
+                    t,
+                    PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
+                )
+            };
+            touching_on.push((on(pct1) && on(pct2)).then_some(point));
+        }
+    }
     let (b, ob) = shared_breps(this_brep.as_deref(), other_brep.as_deref(), shared)?;
 
     for (ii, curve) in curves_3d.iter().enumerate() {
@@ -1771,28 +1807,7 @@ pub fn face_intersect_breps(
             let Some(points) = out.points_3d.as_mut() else {
                 continue;
             };
-            // status ignored upstream
-            let point = ignored(curve.evaluate_point(k, 0.5))?.unwrap_or(Vec3::UNDEF);
-            let mut pc1 = PointClassification::<IntersectObject>::new(this_zone_tol);
-            let mut pc2 = PointClassification::<IntersectObject>::new(other_zone_tol);
-            // statuses ignored upstream
-            ignore_status(point_3d_classify(k, b, f, point, this_zone_tol, &mut pc1))?;
-            ignore_status(point_3d_classify(
-                k,
-                ob,
-                other,
-                point,
-                other_zone_tol,
-                &mut pc2,
-            ))?;
-            let (pct1, pct2) = (pc1.point_class(), pc2.point_class());
-            let on = |t: PointClassType| {
-                matches!(
-                    t,
-                    PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
-                )
-            };
-            if on(pct1) && on(pct2) {
+            if let Some(point) = touching_on.get(ii).copied().flatten() {
                 points.push(point);
             }
             continue;

@@ -789,6 +789,49 @@ impl ProtoTopology<H> for ArenaPair<'_> {
 }
 
 impl IntersectorBrep<H> for ArenaPair<'_> {
+    fn face_point_3d_classify(
+        &mut self,
+        k: &Kernel,
+        face: H,
+        point: Point3,
+        src_zone_tol_3d: f64,
+        do_boundary_intersections: bool,
+        pc: &mut PointClassification<H>,
+        opt_guess_uv: Option<Point2>,
+    ) -> crate::Result<()> {
+        if face.kind != K_FACE {
+            return Err(invalid("not a face handle"));
+        }
+        // the caller's classification in the face's B-rep entities (its other members
+        // are kept unless written, as upstream's out-param)
+        let mut pe = pc.map_objects(&mut |h: H| {
+            if h.b != face.b {
+                return Err(invalid("classification object of the other B-rep"));
+            }
+            self.topology_entity(h)
+                .map(|(_, e)| e)
+                .ok_or_else(|| invalid("classification object without a B-rep entity"))
+        })?;
+        let r = crate::query::face::p1::point_3d_classify(
+            k,
+            self.brep_m(face)?,
+            fid(face),
+            point,
+            src_zone_tol_3d,
+            do_boundary_intersections,
+            &mut pe,
+            crate::query::face::p1::Point3dClassifyOptions {
+                guess_uv: opt_guess_uv,
+                ..Default::default()
+            },
+        );
+        // copied back whatever the status
+        *pc = pe.map_objects(&mut |e: EntityRef| {
+            Self::entity_h(face.b, e).ok_or_else(|| invalid("entity without a handle"))
+        })?;
+        r
+    }
+
     fn make_vertex_loop(&mut self, brep: H, face: H, point: Point3) -> crate::Result<(H, H)> {
         if brep.kind != K_BREP || face.kind != K_FACE || brep.b != face.b {
             return Err(invalid("vertex loop owner mismatch"));
@@ -1760,45 +1803,6 @@ impl IntersectorBrepP3<H> for ArenaPair<'_> {
                 .coincident_faceuse
                 .map(|fu| hd(edge.b, K_FACEUSE, fu.index())),
         ))
-    }
-
-    fn face_point_3d_classify(
-        &mut self,
-        k: &Kernel,
-        face: H,
-        point: Point3,
-        src_zone_tol_3d: f64,
-        do_boundary_intersections: bool,
-        pc: &mut PointClassification<H>,
-    ) -> crate::Result<()> {
-        if face.kind != K_FACE {
-            return Err(invalid("not a face handle"));
-        }
-        // the caller's classification in the face's B-rep entities (its other members
-        // are kept unless written, as upstream's out-param)
-        let mut pe = pc.map_objects(&mut |h: H| {
-            if h.b != face.b {
-                return Err(invalid("classification object of the other B-rep"));
-            }
-            self.topology_entity(h)
-                .map(|(_, e)| e)
-                .ok_or_else(|| invalid("classification object without a B-rep entity"))
-        })?;
-        let r = crate::query::face::p1::point_3d_classify(
-            k,
-            self.brep_m(face)?,
-            fid(face),
-            point,
-            src_zone_tol_3d,
-            do_boundary_intersections,
-            &mut pe,
-            crate::query::face::p1::Point3dClassifyOptions::default(),
-        );
-        // copied back whatever the status
-        *pc = pe.map_objects(&mut |e: EntityRef| {
-            Self::entity_h(face.b, e).ok_or_else(|| invalid("entity without a handle"))
-        })?;
-        r
     }
 
     fn face_bounding_box(&self, k: &Kernel, face: H) -> crate::Result<Extent3d> {

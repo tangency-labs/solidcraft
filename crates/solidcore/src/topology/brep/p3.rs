@@ -521,6 +521,8 @@ fn new_brep_in(
     caller_key: Option<ObjectKey>,
 ) -> Result<Brep> {
     let mut b = Brep::new();
+    // (its Euler operators name geometry owners by their notification identities)
+    b.set_naming(crate::topology::NamingScheme::Notify);
 
     // When asked (should be extremly rare) set SystemTolerance sizes
     b.set_this_model_size_estimate(k, model_size_estimate);

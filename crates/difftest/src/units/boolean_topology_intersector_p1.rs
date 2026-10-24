@@ -1513,6 +1513,28 @@ impl solidcore::topology::proto_topology::p3::BrepGlue<H> for Two {
 }
 
 impl IntersectorBrep<H> for Two {
+    fn face_point_3d_classify(
+        &mut self,
+        k: &Kernel,
+        face: H,
+        point: Point3,
+        src_zone_tol_3d: f64,
+        do_boundary_intersections: bool,
+        pc: &mut PointClassification<H>,
+        opt_guess_uv: Option<Point2>,
+    ) -> solidcore::Result<()> {
+        super::boolean_topology_intersector_p3::face_point_3d_classify(
+            self,
+            k,
+            face,
+            point,
+            src_zone_tol_3d,
+            do_boundary_intersections,
+            pc,
+            opt_guess_uv,
+        )
+    }
+
     fn make_vertex_loop(&mut self, brep: H, face: H, point: Point3) -> solidcore::Result<(H, H)> {
         if brep.kind != K_BREP || face.kind != K_FACE || brep.b != face.b {
             return Err(invalid("vertex loop owner mismatch"));
@@ -4044,7 +4066,16 @@ fn run_part2_op(
                 o.push(NULL_DEREF);
                 return Ok(());
             }
-            status(ti.intersect_insert_relate(k, two, TI_HANDLE), o)?;
+            // (where upstream reads a freed proto edge, UB-175, the shim's verbatim copy
+            // unlinks the stale entries and answers -2; the port goes on with its defined
+            // teardown and records the condition on the kernel)
+            k.upstream_ub_passed.clear();
+            let r = ti.intersect_insert_relate(k, two, TI_HANDLE);
+            if r.is_ok() && k.upstream_ub_passed.contains(&"UB-175") {
+                o.push(NULL_DEREF);
+                return Ok(());
+            }
+            status(r, o)?;
         }
         OpIn::FixupClass { b, o: oc } | OpIn::FixupSplit { b, o: oc, .. } => {
             let split = matches!(op, OpIn::FixupSplit { .. });

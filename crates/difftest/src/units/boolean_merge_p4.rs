@@ -1,6 +1,13 @@
 //! Real native `ManifoldBoolean` versus the Rust orchestration entry point.
 //! The real kernel adapter delegates the ported later stages;
 //! genuine missing dependencies still defer at their exact call sites.
+//!
+//! Both sides' B-reps are compared with each loop use's start edge use chosen
+//! canonically ([`canonical_loop_starts`]): upstream's `BooleanPostProcess` deletes
+//! the intersection edges in `m_sIntersectionEdges` order, which `GetMappedBrepObjects`
+//! takes from a pointer-keyed map (`plan/upstream-issues.md` ND-258), and each
+//! `DeleteEdge` -> `SmLoopuse::CollectEdgeuses` resets the loop's start, so the native
+//! start (and the walk numbering it seeds) depends on heap addresses.
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -87,6 +94,88 @@ fn own_geometry(b: &mut Brep) -> Result<(), HarnessError> {
     Ok(())
 }
 
+/// Rotates the start of every edge loop use the fixture walk reaches to its canonical
+/// edge use: the one whose own vertex point, then its CCW neighbour's vertex point, is
+/// least (exact, `f64::total_cmp`, x before y before z). The loop and its cycle are
+/// unchanged; only where the walk enters it. An exact tie between two edge uses of one loop has no
+/// canonical answer and is a harness error rather than a guess (ND-258).
+pub(super) fn canonical_loop_starts(b: &mut Brep) -> Result<(), HarnessError> {
+    use solidcore::topology::{EdgeuseId, LoopuseId, LoopuseStart};
+    let point = |b: &Brep, eu: EdgeuseId| -> Result<[f64; 3], HarnessError> {
+        let vu = b
+            .edgeuse(eu)
+            .map_err(|x| error(&x.to_string()))?
+            .vertexuse
+            .ok_or_else(|| error("loop edge use without vertex use"))?;
+        let v = b
+            .vertexuse(vu)
+            .map_err(|x| error(&x.to_string()))?
+            .vertex
+            .ok_or_else(|| error("vertex use without vertex"))?;
+        let p = b.vertex(v).map_err(|x| error(&x.to_string()))?.point;
+        Ok([p.x, p.y, p.z])
+    };
+    let cmp = |a: &[f64; 6], c: &[f64; 6]| {
+        a.iter()
+            .zip(c)
+            .map(|(x, y)| x.total_cmp(y))
+            .find(|o| o.is_ne())
+            .unwrap_or(core::cmp::Ordering::Equal)
+    };
+    // only the loop uses the fixture walk reaches: after a Boolean's deletes the arena
+    // keeps dead loop use records whose edge uses are gone
+    let walk_error = |_| error("fixture walk failed");
+    let g = super::topology_brep_p3::walk(b).map_err(walk_error)?;
+    let mut loopuses = Vec::with_capacity(g.len(4));
+    for i in 0..g.len(4) {
+        loopuses.push(LoopuseId::from_index(g.at(4, i).map_err(walk_error)?));
+    }
+    for lu in loopuses {
+        let start = b.loopuse(lu).map_err(|x| error(&x.to_string()))?.start;
+        let LoopuseStart::Edgeuse(Some(start)) = start else {
+            continue;
+        };
+        // the CCW cycle from the start
+        let mut cycle = vec![start];
+        loop {
+            let last = *cycle.last().ok_or_else(|| error("empty loop"))?;
+            let next = b
+                .edgeuse(last)
+                .map_err(|x| error(&x.to_string()))?
+                .ccw
+                .ok_or_else(|| error("open loop"))?;
+            if next == start {
+                break;
+            }
+            if cycle.len() > b.edgeuses().len() {
+                return Err(error("loop cycle does not close"));
+            }
+            cycle.push(next);
+        }
+        let mut keyed = Vec::with_capacity(cycle.len());
+        for &eu in &cycle {
+            let ccw = b
+                .edgeuse(eu)
+                .map_err(|x| error(&x.to_string()))?
+                .ccw
+                .ok_or_else(|| error("open loop"))?;
+            let [a, c, d] = point(b, eu)?;
+            let [e, f, g] = point(b, ccw)?;
+            keyed.push(([a, c, d, e, f, g], eu));
+        }
+        keyed.sort_by(|x, y| cmp(&x.0, &y.0));
+        if let [first, second, ..] = keyed.as_slice() {
+            if cmp(&first.0, &second.0).is_eq() {
+                return Err(error("unbreakable loop-start tie (ND-258)"));
+            }
+        }
+        let best = keyed.first().map(|x| x.1).ok_or_else(|| error("empty loop"))?;
+        b.loopuse_mut(lu).map_err(|x| error(&x.to_string()))?.start =
+            LoopuseStart::Edgeuse(Some(best));
+    }
+    Ok(())
+}
+
 fn append_graph(k: &Kernel, output: &mut Output, prefix: &str, brep: &Brep) -> Result<(), HarnessError> {
     let graph = super::topology_brep_p10::snapshot(k, brep)?;
     for (key, values) in graph.ints {
@@ -153,6 +242,8 @@ fn native_snapshot(k: &Kernel, raw: &[f64]) -> Result<Output, HarnessError> {
             return Err(error("inexact post-state surface import"));
         }
         b.set_editing_enabled(*editing != 0.0);
+        // (the loop starts in canonical order, as the Rust side's: ND-258)
+        canonical_loop_starts(&mut b)?;
         append_graph(k, &mut output, prefix, &b)
     };
     let mut presence = Vec::new();
@@ -270,6 +361,17 @@ impl UnitDiff for Runner {
             operation,
             if i.caller_lock { Some(&mut lock) } else { None },
         );
+        // (the loop starts in canonical order, as the native side's: ND-258)
+        if !matches!(&result, Err(e) if e.is_unported()) {
+            for b in primary
+                .iter_mut()
+                .chain(other.iter_mut())
+                .chain(state.primary_components.iter_mut())
+                .chain(state.other_components.iter_mut())
+            {
+                canonical_loop_starts(b)?;
+            }
+        }
         match result {
             Err(e) if e.is_unported() => {
                 Ok(Output::unported(&e).ok_or_else(|| error("missing deferral"))?)

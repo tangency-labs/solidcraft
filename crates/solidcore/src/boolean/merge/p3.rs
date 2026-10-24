@@ -17,7 +17,7 @@
 //! invalid indices and null operands dereferenced by a binary operation return
 //! `InvalidInput` instead of upstream
 //! undefined behavior, and an `InvalidInput` from `ManifoldBoolean` (undefined
-//! behaviour the port detects, such as UB-175) is returned as is rather than as
+//! behaviour the port detects) is returned as is rather than as
 //! `SM_ERR`. List inputs are copied once, as upstream requires. Debug
 //! drawing and the compile-time false IO experiment are omitted. No recursion;
 //! connected-component extraction is bounded by the initial face count, with an
@@ -242,6 +242,17 @@ impl BooleanDriver for DependencyMerge {
             operation,
             caller_lock,
         )?;
+        // The engine's notification namespace (and its attribute store) ends with the
+        // merge: geometry the merge made owns under the record's own name in the
+        // B-rep's scheme, as every other record's geometry (upstream's owner is the
+        // record itself).
+        if let Some(namespace) = engine.intersector.namespace() {
+            for (body, is_other) in [(primary.as_mut(), false), (other.as_mut(), true)] {
+                if let Some(body) = body {
+                    crate::boolean::merge::p4::adopt_namespace_owners(body, namespace, is_other)?;
+                }
+            }
+        }
         Ok(if assigned { primary.take() } else { None })
     }
 }
@@ -249,7 +260,7 @@ impl BooleanDriver for DependencyMerge {
 /// Evaluate all postfix trees, then append unused operands in original order.
 /// Leaves transfer an operand to the stack and clear its input slot immediately.
 /// Ordinary failures of `ManifoldBoolean` become `SM_ERR`; Unported propagates, and so
-/// does `InvalidInput`, the port's report of undefined behaviour upstream (UB-175).
+/// does `InvalidInput`, the port's report of undefined behaviour upstream.
 /// The token array is read-only, matching upstream despite its mutable signature.
 pub fn boolean_trees<D: BooleanDriver>(
     k: &mut Kernel,

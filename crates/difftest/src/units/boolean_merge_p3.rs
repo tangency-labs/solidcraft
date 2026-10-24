@@ -258,9 +258,30 @@ fn output(raw: &[f64], family: u8) -> Result<Output, HarnessError> {
         .values("record", rest.to_vec()))
 }
 
+/// The digest of a B-rep (`heal_stitch_p1::digest`'s layout: face, edge and vertex
+/// counts, then the vertex points) in the fixture walk's order: the native side's
+/// result arrives through the shim's export walk, so a Rust result listed in its own
+/// creation order would compare vertex slots of different vertices. The walk enters
+/// each edge loop at its canonical start
+/// ([`super::boolean_merge_p4::canonical_loop_starts`]): upstream's loop starts after a
+/// Boolean depend on heap addresses (ND-258), so the native walk's order changes from
+/// run to run. A B-rep with a loop that has no canonical start is walked as it is.
 fn record_brep(brep: &Brep, identity: i64, values: &mut Vec<f64>) -> solidcore::Result<()> {
-    let mut digest = Vec::new();
-    super::heal_stitch_p1::digest(brep, &mut digest)?;
+    let walk_error = |_| {
+        SolidError::invalid_input("difftest::boolean_merge_p3", "fixture walk failed")
+    };
+    let mut canonical = brep.clone();
+    let brep = match super::boolean_merge_p4::canonical_loop_starts(&mut canonical) {
+        Ok(()) => &canonical,
+        Err(_) => brep,
+    };
+    let g = super::topology_brep_p3::walk(brep).map_err(walk_error)?;
+    let mut digest = vec![g.len(3) as f64, g.len(7) as f64, g.len(9) as f64];
+    for i in 0..g.len(9) {
+        let v = solidcore::topology::VertexId::from_index(g.at(9, i).map_err(walk_error)?);
+        let p = brep.vertex(v)?.point;
+        digest.extend([p.x, p.y, p.z]);
+    }
     values.extend([identity as f64, digest.len() as f64]);
     values.extend(digest);
     Ok(())

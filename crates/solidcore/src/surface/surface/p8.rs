@@ -1452,8 +1452,13 @@ impl Surface {
                 }
             }
             LineCacheSource::Caller(c) => {
+                // A caller solving through a face-aware context holds a cache that
+                // context built, which already ran the owning face's virtual GetTree;
+                // the bare base cache cannot rebuild a face-owned tree.
+                let ready = context.is_some() && c.tree().is_some();
                 held = Some(c);
                 match held.as_deref_mut() {
+                    Some(c) if ready => &*c,
                     Some(c) => Self::held_cache(k, c, OP_LINE)?,
                     None => return Err(SolidError::null_pointer(OP_LINE)),
                 }
@@ -2261,7 +2266,13 @@ impl Surface {
         // cache right out of the queue. So get the curve's cache afterwards.)
         let built;
         let surface_cache = if let Some(c) = cache {
-            Self::held_cache(k, c, OP_CURVE)?
+            // (a cache of a face-aware context already ran the face's GetTree, as in
+            // the line intersection)
+            if context.is_some() && c.tree().is_some() {
+                &*c
+            } else {
+                Self::held_cache(k, c, OP_CURVE)?
+            }
         } else {
             built = self.solve_cache_from_context(
                 k,

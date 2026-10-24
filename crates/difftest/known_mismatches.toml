@@ -297,16 +297,6 @@ case = "gen0165"
 why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-rep upstream (CurveOnClassify -> IntersectTSBound -> ComputeUVPoint(bOKToMakeUVTrimCurve=TRUE); SetUVTrimCurve resets vertex/face gaps), the port runs it on a copy (plan/findings.md: ClassifyLoops' loop bisector builds UV trim curves upstream, on a copy in the port) [ints.ints[170] cpp 1 rust 0]"
 
 [[mismatch]]
-unit = "boolean.api_brep"
-case = "census_difference_cavity"
-why = "merge ray fire on a created operand: primitive surfaces are owned under notify_ref, the merge's BrepQuery::default keys arena_identity, so the inside box is classified in the infinite region (plan/findings.md: boolean.api_brep: the merge cannot ray-fire through a created operand)"
-
-[[mismatch]]
-unit = "boolean.api_brep"
-case = "gen0220"
-why = "merge ray fire on a created operand: primitive surfaces are owned under notify_ref, the merge's BrepQuery::default keys arena_identity, so the inside box is classified in the infinite region (plan/findings.md: boolean.api_brep: the merge cannot ray-fire through a created operand)"
-
-[[mismatch]]
 unit = "topology.brep_p10"
 case = "project_t0_Defeature_brep1"
 why = "ProjectAndTrim removes every face; C++ keeps the former solid region as the infinite region, the port keeps the original one (its SmTopology fields differ: cpp 99999999, rust 0) (plan/findings.md: 'topology.brep_p10 project_t0_Defeature_brep1: the region left after ProjectAndTrim')"
@@ -314,31 +304,81 @@ why = "ProjectAndTrim removes every face; C++ keeps the former solid region as t
 [[mismatch]]
 unit = "offset.offset_executive_p2"
 case = "gen0000"
-why = "Rust ManifoldBoolean Difference drops a fully contained, non-intersecting inset shell: C++ hollow box 12 faces, Rust the original 6 (plan/findings.md: 'offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference')"
+why = "Rust ManifoldBoolean Difference drops a fully contained, non-intersecting inset shell: C++ hollow box 12 faces, Rust the original 6 (plan/findings.md: 'offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference'; issue #833)"
 
 [[mismatch]]
 unit = "offset.offset_executive_p2"
 case = "gen0003"
-why = "Rust ManifoldBoolean Difference drops a fully contained, non-intersecting inset shell: C++ hollow box 12 faces, Rust the original 6 (plan/findings.md: 'offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference')"
+why = "Rust ManifoldBoolean Difference drops a fully contained, non-intersecting inset shell: C++ hollow box 12 faces, Rust the original 6 (plan/findings.md: 'offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference'; issue #833)"
 
 
 
 [[mismatch]]
 unit = "boolean.merge_p3"
 case = "upstream_merge_breps_operation_3"
-why = "same result topology and vertex positions, different vertex list order: C++ lists one part's exclusive vertices last (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces')"
+why = "same result topology and vertex positions, different vertex list order: C++ lists one part's exclusive vertices last (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; issue #832)"
 
 [[mismatch]]
 unit = "boolean.merge_p3"
 case = "upstream_piecewise_boxes_2_keep_other"
-why = "same result topology and vertex positions, different vertex list order: C++ lists one part's exclusive vertices last (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces')"
+why = "same result topology and vertex positions, different vertex list order: C++ lists one part's exclusive vertices last (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; issue #832)"
 
 [[mismatch]]
 unit = "boolean.merge_p3"
 case = "upstream_piecewise_boxes_3_keep_other"
-why = "same result topology and vertex positions, different vertex list order: C++ lists one part's exclusive vertices last (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces')"
+why = "same result topology and vertex positions, different vertex list order: C++ lists one part's exclusive vertices last (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; issue #832)"
 
 [[mismatch]]
 unit = "offset.offset_executive_p2"
 case = "gen0166"
-why = "Rust ManifoldBoolean Difference mishandles the inset shell: after a failed shell (status 1000 both) the port keeps 7 shells / 16 loops where C++ has 3 / 13 (plan/findings.md: 'offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference'; 'offset.offset_executive_p2: gen0166 leaves extra shells and loops after a failed shell')"
+why = "Rust ManifoldBoolean Difference mishandles the inset shell: after a failed shell (status 1000 both) the port keeps 7 shells / 16 loops where C++ has 3 / 13 (plan/findings.md: 'offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference'; 'offset.offset_executive_p2: gen0166 leaves extra shells and loops after a failed shell'; issue #833)"
+
+[[mismatch]]
+unit = "boolean.merge_p3"
+case = "upstream_merge_breps_operation_0"
+why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
+
+[[mismatch]]
+unit = "boolean.merge_p3"
+case = "upstream_merge_breps_operation_1"
+why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
+
+[[mismatch]]
+unit = "boolean.merge_p3"
+case = "upstream_merge_breps_operation_2"
+why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
+
+[[mismatch]]
+unit = "boolean.merge_p3"
+case = "upstream_piecewise_boxes_0"
+why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
+
+[[mismatch]]
+unit = "boolean.merge_p3"
+case = "upstream_piecewise_boxes_1"
+why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "gen0054"
+why = "inset shell region/shell/loop counts differ from C++; deferred on main (face-owned TrimSrfCache / SmRegion::GetBrep), compared since PR #816 (plan/findings.md: 'offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #833)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "gen0134"
+why = "inset shell region/shell/loop counts differ from C++; deferred on main (face-owned TrimSrfCache / SmRegion::GetBrep), compared since PR #816 (plan/findings.md: 'offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #833)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "gen0177"
+why = "inset shell region/shell/loop counts differ from C++; deferred on main (face-owned TrimSrfCache / SmRegion::GetBrep), compared since PR #816 (plan/findings.md: 'offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #833)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "gen0195"
+why = "inset shell region/shell/loop counts differ from C++; deferred on main (face-owned TrimSrfCache / SmRegion::GetBrep), compared since PR #816 (plan/findings.md: 'offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #833)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "gen0210"
+why = "inset shell region/shell/loop counts differ from C++; deferred on main (face-owned TrimSrfCache / SmRegion::GetBrep), compared since PR #816 (plan/findings.md: 'offset.offset_executive_p2: inset shell of a box loses the inner shell in the Rust Difference'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #833)"
