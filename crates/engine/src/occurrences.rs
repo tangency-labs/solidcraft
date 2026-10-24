@@ -336,7 +336,10 @@ impl Session {
         let mut plane = plane;
         loop {
             match plane {
-                PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => plane = base,
+                PlaneRef::Offset { base, .. }
+                | PlaneRef::ThroughPoint { base, .. }
+                | PlaneRef::AtAngle { base, .. }
+                | PlaneRef::Flipped { base, .. } => plane = base,
                 // A face attachment that names no exact source: which body it sits on is unknown,
                 // so none is taken from the view.
                 PlaneRef::Face { anchor: None, .. } => return none,

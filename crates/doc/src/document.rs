@@ -54,6 +54,9 @@ pub enum PlaneRef {
     },
     /// Another plane offset along its normal by an expression.
     Offset { base: Box<PlaneRef>, distance: Expr },
+    /// Another plane moved along its normal until it goes through a point (a vertex, sketch
+    /// point or construction point), so it follows the point.
+    ThroughPoint { base: Box<PlaneRef>, point: Box<GeoRef> },
     /// Another plane rotated about a line (in world coordinates) by an angle expression.
     AtAngle { base: Box<PlaneRef>, axis_origin: Vec3, axis_dir: Vec3, angle: Expr },
     /// A construction plane feature (by name).
@@ -3531,7 +3534,8 @@ impl Document {
             | PlaneRef::ThreePoints { .. }
             | PlaneRef::Tangent { .. }
             | PlaneRef::AlongPath { .. }
-            | PlaneRef::Perpendicular { .. } => {
+            | PlaneRef::Perpendicular { .. }
+            | PlaneRef::ThroughPoint { .. } => {
                 let st = st.ok_or_else(|| DocError::Invalid("this plane is built from the model: evaluate first".into()))?;
                 crate::construct::resolve_geo_plane(&crate::construct::Ctx { doc: self, vals, st, depth }, p)
             }

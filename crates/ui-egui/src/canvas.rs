@@ -68,14 +68,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         }
         // A corner picked into a sketch window ("<sketch id>:<point id>", or a bare id when it
         // was selected outside one): the value box sits on the corner itself.
-        Sel::SketchPoint { id } => {
-            let (sketch, point) = match id.split_once(':') {
-                Some((sketch, point)) => (sketch.parse().ok()?, point),
-                None => (app.session.active_sketch?, id.as_str()),
-            };
-            let ss = st.sketch(sketch)?;
-            (ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(point)?)?), None)
-        }
+        Sel::SketchPoint { id } => (sketch_point_at(app, &st, id)?, None),
         Sel::Body { name } => (st.body(name)?.mesh().bounds().center(), None),
         Sel::Plane { name } => {
             let pl = solidcraft_engine::geom::Plane::named(name).or_else(|| {
@@ -381,6 +374,16 @@ pub(crate) fn format_len(v: f64) -> String {
     format!("{} mm", if s == "-0" { "0" } else { s })
 }
 
+/// Where a sketch point picked as "<sketch id>:<point id>" (or a bare id of the active sketch) is.
+fn sketch_point_at(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, id: &str) -> Option<Vec3> {
+    let (sketch, point) = match id.split_once(':') {
+        Some((sketch, point)) => (sketch.parse().ok()?, point),
+        None => (app.session.active_sketch?, id),
+    };
+    let ss = st.sketch(sketch)?;
+    Some(ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(point)?)?))
+}
+
 /// The offset plane preview: a square of half side `h` around `c`, square to `n`.
 fn offset_plane_quad(proj: &Proj, c: Vec3, n: Vec3, h: f64) -> Option<Vec<Pos2>> {
     let u = n.cross(if n.z.abs() < 0.9 { Vec3::Z } else { Vec3::X }).normalized()?;
@@ -480,9 +483,14 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             drag_arrow(ui, painter, proj, base, bs, n2, l2, false, egui::Id::new("sc_manipulator2"), half_height, spacing2);
         }
     }
-    // An offset plane shows where it will be.
+    // An offset plane shows where it will be: at the distance, or through the picked point.
+    let through = crate::dialogs::offset_through_point(d).and_then(|p| match p {
+        Sel::Vertex { point, .. } => Some(*point),
+        Sel::SketchPoint { id } => sketch_point_at(app, &app.session.world_state(), id),
+        _ => None,
+    });
     if let (Kind::OffsetPlane { offset }, Some(n)) = (&d.kind, dir)
-        && let Ok(off) = app.session.doc.eval(offset, ValueKind::Length)
+        && let Some(off) = through.map(|p| (p - base).dot(n)).or_else(|| app.session.doc.eval(offset, ValueKind::Length).ok())
         && let Some(q) = offset_plane_quad(proj, base + n * off, n, half_height * 0.25)
     {
         painter.extend(projected_polygon(&q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));

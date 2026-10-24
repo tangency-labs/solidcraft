@@ -104,7 +104,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("construct.plane.offset", "Offset Plane", plane_offset)
         .at("SOLID", "CONSTRUCT")
         .icon("plane")
-        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; offset: expr; name?"),
+        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; offset: expr, or through: a point ref (vertex, sketch point, construction point) the plane goes through, parallel to base; name?"),
     CommandSpec::new("construct.plane.at_angle", "Plane at Angle", plane_angle)
         .at("SOLID", "CONSTRUCT")
         .icon("plane_angle")
@@ -1715,19 +1715,35 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
 }
 
 fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
+    use solidcraft_doc::PlaneRef;
     let cmd = "construct.plane.offset";
-    let d = req_expr(cmd, p, "offset")?;
-    check_expr(s, &d, Kind::Length, cmd, "offset")?;
+    // Through a point, or at a distance along the base's normal.
+    let through = match p.get("through").filter(|t| !t.is_null()) {
+        Some(_) if p.get("offset").is_some_and(|o| !o.is_null()) => return Err(bad(cmd, "give `offset` or `through`, not both")),
+        Some(t) => Some(super::construct::geo(s, Some(t), cmd, "through")?),
+        None => None,
+    };
+    let distance = match &through {
+        Some(_) => Default::default(),
+        None => {
+            let d = req_expr(cmd, p, "offset")?;
+            check_expr(s, &d, Kind::Length, cmd, "offset")?;
+            d
+        }
+    };
+    let offset = move |base: PlaneRef| match through {
+        Some(point) => PlaneRef::ThroughPoint { base: Box::new(base), point: Box::new(point) },
+        None => PlaneRef::Offset { base: Box::new(base), distance },
+    };
     // A planar body face: attached exactly, as a sketch on that face is, so the plane follows it.
     if let Some(face) = p.get("base").filter(|b| b.get("face").is_some()) {
         let base = super::sketch::face::capture(s, face, cmd)?;
         super::sketch::face::capture_positions(s, &base)?;
-        let kind = FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::Offset { base: Box::new(base), distance: d } };
         // The capture is already in the authoring frame.
-        return add_feature_in(s, p, kind, false);
+        return add_feature_in(s, p, FeatureKind::ConstructionPlane { plane: offset(base) }, false);
     }
     let base = plane_param(s, p.get("base"), cmd)?;
-    add_feature(s, p, FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::Offset { base: Box::new(base), distance: d } })
+    add_feature(s, p, FeatureKind::ConstructionPlane { plane: offset(base) })
 }
 
 fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {

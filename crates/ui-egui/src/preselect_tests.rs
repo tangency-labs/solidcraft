@@ -2081,6 +2081,30 @@ fn midplane_asks_for_two_planes_then_builds_the_one_between_them() {
     assert!((pl.origin.z - 10.0).abs() < 1e-6, "{pl:?}");
 }
 
+/// Offset Plane through a point: a vertex picked as well as the plane puts the plane through
+/// it, the distance row goes away, and editing the plane shows both picks again.
+#[test]
+fn offset_plane_through_a_picked_vertex() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Box"})).unwrap();
+    h.app.start("construct.plane.offset");
+    h.frames(1);
+    let d = h.app.dialog.as_mut().unwrap();
+    assert_eq!(d.inputs.len(), 2);
+    d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+    d.inputs[1].items = vec![Sel::Vertex { body: "Box".into(), point: Vec3::new(40.0, 30.0, 20.0) }];
+    assert!(d.primary().is_none(), "no distance to type or drag");
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands.first().map(|c| c.1.clone()), Some(json!({"base":"XY","through":{"vertex":[40.0,30.0,20.0]},"offset":null})));
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let (id, _, pl) = solidcraft_engine::view::construction_planes(&h.app.session).into_iter().next().expect("the plane");
+    assert!(pl.normal().cross(Vec3::Z).len() < 1e-6 && (pl.origin.z - 20.0).abs() < 1e-6, "{pl:?}");
+    let reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert_eq!(reopened.inputs[0].items, vec![Sel::Plane { name: "XY".into() }]);
+    assert!(matches!(reopened.inputs[1].items.as_slice(), [Sel::Vertex { body, .. }] if body == "Box"), "{:?}", reopened.inputs[1].items);
+}
+
 /// #2474, #2494: every construct tool asks for what it needs. Started from the toolbar with
 /// nothing selected, none of them runs its command and reports that `a` (or `face`, `edge`…)
 /// is required; a construct command added later without a dialog fails here too.

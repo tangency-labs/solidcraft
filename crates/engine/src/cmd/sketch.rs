@@ -593,7 +593,10 @@ pub(crate) fn author_path_for_rebind(s: &Session, feature: &solidcraft_doc::Feat
         let mut plane = plane;
         loop {
             match plane {
-                PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => plane = base,
+                PlaneRef::Offset { base, .. }
+                | PlaneRef::ThroughPoint { base, .. }
+                | PlaneRef::AtAngle { base, .. }
+                | PlaneRef::Flipped { base, .. } => plane = base,
                 PlaneRef::Face { anchor: Some(anchor), .. } => {
                     saved = Some(anchor.author_path.clone());
                     break;

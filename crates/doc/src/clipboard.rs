@@ -106,6 +106,10 @@ fn remap_plane(p: &mut PlaneRef, ids: &BTreeMap<u64, u64>, bodies: &BTreeMap<Str
     }
     match p {
         PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => remap_plane(base, ids, bodies, depth + 1)?,
+        PlaneRef::ThroughPoint { base, point } => {
+            remap_plane(base, ids, bodies, depth + 1)?;
+            remap_geo(point, ids, bodies, depth + 1)?;
+        }
         PlaneRef::Face { name, anchor, .. } => {
             if let Some(name) = name {
                 *name = remap_topology(name, ids, bodies);
@@ -284,6 +288,10 @@ fn checked_plane(p: &PlaneRef, depth: usize) -> crate::Result<()> {
         PlaneRef::Perpendicular { plane, line } => {
             checked_geo(plane, depth + 1)?;
             checked_geo(line, depth + 1)?;
+        }
+        PlaneRef::ThroughPoint { base, point } => {
+            checked_plane(base, depth + 1)?;
+            checked_geo(point, depth + 1)?;
         }
         PlaneRef::ThreePoints { a, b, c } => {
             checked_geo(a, depth + 1)?;

@@ -572,6 +572,7 @@ fn extra_options(ui: &mut egui::Ui, id: &str, extra: &mut serde_json::Map<String
 
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
+    let through_point = offset_through_point(d).is_some();
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
@@ -638,7 +639,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
         }
         Kind::OffsetPlane { offset } => {
-            enter |= expr_row(ui, "Distance", offset);
+            if !through_point {
+                enter |= expr_row(ui, "Distance", offset);
+            }
         }
         Kind::AnglePlane { angle } => {
             enter |= expr_row(ui, "Angle", angle);

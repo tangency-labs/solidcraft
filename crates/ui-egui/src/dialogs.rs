@@ -105,7 +105,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::Draft { angle, .. }) {
             angle: String = "5 deg".into() => angle.to_string(),
         } => json!({"angle": angle});
-        OffsetPlane("construct.plane.offset", "OFFSET PLANE", [("Plane", PLANES | PLANAR_FACES, false)],
+        // A point picked as well puts the plane through it instead of at the distance.
+        OffsetPlane("construct.plane.offset", "OFFSET PLANE", [("Plane", PLANES | PLANAR_FACES, false), ("Through point", selection::VERTICES | selection::POINTS, false)],
             FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { distance, .. } }) {
             offset: String = "0 mm".into() => distance.to_string(),
         } => json!({"offset": offset});
@@ -1001,6 +1002,7 @@ impl Dialog {
     /// The main value (shown on the canvas too): label, kind and the expression.
     pub fn primary(&mut self) -> Option<(&'static str, ValueKind, &mut String)> {
         let move_field = crate::dialogs_move::value_field(self);
+        let through_point = offset_through_point(self).is_some();
         Some(match &mut self.kind {
             Kind::Extrude { to_offset, .. } if to_object_on(&self.inputs) => ("To Offset", ValueKind::Length, to_offset),
             Kind::Extrude { distance, .. } => ("Distance", ValueKind::Length, distance),
@@ -1041,6 +1043,7 @@ impl Dialog {
             Kind::PatternRect { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
             Kind::PatternCirc { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Section { offset, .. } => ("Distance", ValueKind::Length, offset),
+            Kind::OffsetPlane { .. } if through_point => return None,
             Kind::OffsetPlane { offset } => ("Distance", ValueKind::Length, offset),
             Kind::PathPlane { t, .. } => ("Position (0 to 1)", ValueKind::Unitless, t),
             Kind::Rib { thickness, .. } => ("Thickness", ValueKind::Length, thickness),
@@ -1993,6 +1996,7 @@ fn selection_label(s: &Session, item: &Sel) -> String {
             let p = s.active_sketch.and_then(|id| state.sketch(id)).map(|sk| sk.plane.to_local(*point)).unwrap_or_default();
             format!("({:.2}, {:.2}) mm", p.x, p.y)
         }
+        Sel::Vertex { body, .. } => format!("{body} · vertex"),
         _ => format!("{item:?}"),
     }
 }
@@ -3554,7 +3558,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::OffsetPlane { .. } => {
             need(0, "a plane")?;
             let base = plane_arg(app, sels(d, 0).first())?;
-            ("construct.plane.offset", json!({"base": base}))
+            match offset_through_point(d) {
+                // A null `offset` keeps the descriptor's distance out: the plane goes through the point.
+                Some(point) => ("construct.plane.offset", json!({"base": base, "through": construct_ref(app, point)?, "offset": null})),
+                None => ("construct.plane.offset", json!({"base": base})),
+            }
         }
         Kind::MeshConvert { tolerance } => {
             need(0, "the mesh body")?;
@@ -4341,6 +4349,27 @@ fn plane_arg(app: &SolveApp, sel: Option<&Sel>) -> Result<Value, String> {
     }
 }
 
+/// The point an Offset Plane dialog puts its plane through, when one is picked.
+pub(crate) fn offset_through_point(d: &Dialog) -> Option<&Sel> {
+    if !matches!(d.kind, Kind::OffsetPlane { .. }) {
+        return None;
+    }
+    sels(d, 1).first()
+}
+
+/// A stored point reference back into a dialog pick: a body vertex or a sketch point.
+fn point_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
+    use solidcraft_engine::doc::construct::GeoRef;
+    match g {
+        GeoRef::Vertex { at, .. } => match face_sel(s, *at)? {
+            Sel::Face { body, .. } => Some(Sel::Vertex { body, point: *at }),
+            _ => None,
+        },
+        GeoRef::SketchPoint { sketch, point } => Some(Sel::SketchPoint { id: format!("{sketch}:{point}") }),
+        _ => None,
+    }
+}
+
 /// A stored construction reference back into a dialog pick.
 fn geo_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
     match g {
@@ -4911,6 +4940,16 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = plane_sel(s, base).into_iter().collect();
+            }
+            d
+        }
+        FeatureKind::ConstructionPlane { plane: PlaneRef::ThroughPoint { base, point } } => {
+            let mut d = start("construct.plane.offset")?;
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = plane_sel(s, base).into_iter().collect();
+            }
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = point_sel(s, point).into_iter().collect();
             }
             d
         }

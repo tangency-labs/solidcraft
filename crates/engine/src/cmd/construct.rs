@@ -89,7 +89,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 /// A reference from its JSON form.
-fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Result<GeoRef> {
+pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Result<GeoRef> {
     let v = v.ok_or_else(|| bad(cmd, format!("`{what}` is required: {REF}")))?;
     let p3 = |k: &str| v.get(k).and_then(vec3);
     let mut g = if v.get("type").is_some() {

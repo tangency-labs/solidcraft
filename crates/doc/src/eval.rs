@@ -6068,6 +6068,9 @@ pub(crate) fn sheet_face_plane_in_frame(doc: &Document, st: &ModelState, comp: u
         PlaneRef::Flipped { base, about_y } => {
             PlaneRef::Flipped { base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?), about_y: *about_y }
         }
+        PlaneRef::ThroughPoint { base, point } => {
+            PlaneRef::ThroughPoint { base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?), point: point.clone() }
+        }
         other => other.clone(),
     })
 }
@@ -7082,7 +7085,8 @@ fn plane_reads_geometry(plane: &PlaneRef) -> bool {
     match plane {
         PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } | PlaneRef::Construction { .. } => false,
         PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => plane_reads_geometry(base),
-        PlaneRef::Midplane { .. }
+        PlaneRef::ThroughPoint { .. }
+        | PlaneRef::Midplane { .. }
         | PlaneRef::TwoEdges { .. }
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::Tangent { .. }
