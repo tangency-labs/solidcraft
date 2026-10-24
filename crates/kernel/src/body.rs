@@ -1221,6 +1221,13 @@ impl Body {
         self.tessellate_with(tol, false)
     }
 
+    /// [`Body::tessellate`] in which no facet turns more than `angle` radians from the next
+    /// along a curved face either, so small holes and fillets on a large body get as many
+    /// facets as large ones (mesh export with an angle, #2846).
+    pub fn tessellate_angular(&self, tol: f64, angle: f64) -> Result<Mesh> {
+        self.tessellate_within(tol, angle, false)
+    }
+
     /// Like [`Body::tessellate`]; with `refine`, triangles that cut through curved faces are
     /// split until within `tol` of the surface (for measuring).
     pub fn tessellate_with(&self, tol: f64, refine: bool) -> Result<Mesh> {

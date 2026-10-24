@@ -49,6 +49,15 @@ a temporary folder and opens it in the chosen slicer instead of asking for a fil
 list shows the slicers found on the computer with their icons; **Custom…** adds any other program
 to the top of the list (kept between runs; hover an entry you added and press Delete to remove it).
 
+A mesh export follows each curved face within a chord tolerance of 2·10⁻⁴ of the body's size,
+which on a large part can leave a small hole or fillet with only a few facets. `file.save_mesh`
+and `file.export` (and the MCP `export` tool) take two options for STL, OBJ and 3MF:
+`tolerance`, how far in millimetres a facet may lie from the surface (0.001 to 10), and `angle`,
+how far in degrees a facet may turn from the next along a curved face (1 to 90). An angle gives
+small round features as many facets as large ones: with `angle: 10` every hole has at least 36
+sides. Finer settings mean bigger files; an export that would hold more than 20 million
+triangles is refused with a message rather than written.
+
 Closed mechanical meshes with a constant cross-section can be rebuilt as solids with the
 `mesh.convert` command (command palette, scripts and the control channel).
 

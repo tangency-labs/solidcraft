@@ -353,7 +353,44 @@ impl Format {
 
 /// Fine export mesh for a body (chord tolerance 2e-4 of its size).
 pub fn export_mesh(b: &solidcraft_kernel::Body) -> Result<Mesh> {
-    Ok(b.tessellate((b.size() * 2e-4).max(1e-3))?)
+    export_mesh_with(b, MeshOptions::default())
+}
+
+/// How finely STL, OBJ and 3MF exports turn bodies into triangles (#2846). Left out, each is
+/// what [`export_mesh`] uses: a chord tolerance of 2e-4 of the body's size and no angle limit.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MeshOptions {
+    /// How far (mm) a facet may lie from the surface it stands for.
+    pub tolerance: Option<f64>,
+    /// How far (radians) a facet may turn from the next along a curved face.
+    pub angle: Option<f64>,
+}
+
+/// The tolerances a mesh export accepts (mm): finer gives more triangles than any printer
+/// resolves, coarser gives shapes no one would print.
+pub const MESH_TOLERANCE_MM: (f64, f64) = (0.001, 10.0);
+/// The facet angles a mesh export accepts (degrees).
+pub const MESH_ANGLE_DEG: (f64, f64) = (1.0, 90.0);
+
+/// [`export_mesh`] with `options`.
+pub fn export_mesh_with(b: &solidcraft_kernel::Body, options: MeshOptions) -> Result<Mesh> {
+    let tol = options.tolerance.unwrap_or((b.size() * 2e-4).max(1e-3));
+    Ok(match options.angle {
+        Some(angle) => b.tessellate_angular(tol, angle)?,
+        None => b.tessellate(tol)?,
+    })
+}
+
+/// Adds a body's `n` triangles to the export's running count: an export never holds more than
+/// an STL may (and SolidCraft reads back), however fine its options.
+fn count_triangles(total: &mut usize, n: usize) -> Result<()> {
+    *total = total.saturating_add(n);
+    if *total > MAX_STL_TRIANGLES {
+        return Err(IoError::Invalid(format!(
+            "the export would hold more than {MAX_STL_TRIANGLES} triangles: use a coarser tolerance or a larger angle"
+        )));
+    }
+    Ok(())
 }
 
 /// Distance within which an exported mesh's vertices are welded (STL and 3MF alike).
@@ -459,10 +496,16 @@ fn threemf_metadata(meta: &Metadata) -> Vec<(&'static str, &str)> {
 /// STEP and IGES headers (author, organization; STEP also the description) and 3MF model
 /// metadata (project as the title, author as the designer, description, licence).
 pub fn export_with_metadata(state: &ModelState, bodies: &[String], format: Format, name: &str, meta: &Metadata) -> Result<Vec<u8>> {
+    export_with_options(state, bodies, format, name, meta, MeshOptions::default())
+}
+
+/// [`export_with_metadata`], with STL, OBJ and 3MF meshed by `mesh` (other formats ignore it).
+pub fn export_with_options(state: &ModelState, bodies: &[String], format: Format, name: &str, meta: &Metadata, mesh: MeshOptions) -> Result<Vec<u8>> {
     let sel: Vec<&solidcraft_doc::ModelBody> = state.bodies.iter().filter(|b| bodies.is_empty() || bodies.contains(&b.name)).collect();
     if sel.is_empty() {
         return Err(IoError::Empty);
     }
+    let mut triangles = 0usize;
     Ok(match format {
         Format::StlBinary | Format::StlAscii => {
             // Each body welded on its own (as for 3MF), so shared vertices are written identically
@@ -470,7 +513,8 @@ pub fn export_with_metadata(state: &ModelState, bodies: &[String], format: Forma
             let meshes: Vec<Mesh> = sel
                 .iter()
                 .map(|b| {
-                    let m = export_mesh(&b.body)?;
+                    let m = export_mesh_with(&b.body, mesh)?;
+                    count_triangles(&mut triangles, m.triangles.len())?;
                     let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
                     Ok(Mesh { positions, triangles, ..Mesh::default() })
                 })
@@ -478,7 +522,14 @@ pub fn export_with_metadata(state: &ModelState, bodies: &[String], format: Forma
             if format == Format::StlBinary { stl_binary(&meshes, name) } else { stl_ascii(&meshes, name).into_bytes() }
         }
         Format::Obj => {
-            let meshes: Vec<(String, Mesh)> = sel.iter().map(|b| Ok((b.name.clone(), export_mesh(&b.body)?))).collect::<Result<_>>()?;
+            let meshes: Vec<(String, Mesh)> = sel
+                .iter()
+                .map(|b| {
+                    let m = export_mesh_with(&b.body, mesh)?;
+                    count_triangles(&mut triangles, m.triangles.len())?;
+                    Ok((b.name.clone(), m))
+                })
+                .collect::<Result<_>>()?;
             obj(&meshes).into_bytes()
         }
         Format::Step => {
@@ -492,7 +543,14 @@ pub fn export_with_metadata(state: &ModelState, bodies: &[String], format: Forma
             solidcraft_kernel::iges_export_bodies(&bs, &step_header(format!("{name}.igs"), meta))?.into_bytes()
         }
         Format::ThreeMf | Format::ThreeMfTagged => {
-            let objs: Vec<MeshObject> = sel.iter().map(|b| mesh_object(b, format == Format::ThreeMfTagged)).collect::<Result<_>>()?;
+            let objs: Vec<MeshObject> = sel
+                .iter()
+                .map(|b| {
+                    let o = mesh_object(b, format == Format::ThreeMfTagged, mesh)?;
+                    count_triangles(&mut triangles, o.triangles.len())?;
+                    Ok(o)
+                })
+                .collect::<Result<_>>()?;
             write_3mf_with(&objs, &threemf_metadata(meta))?
         }
         Format::Design => return Err(IoError::Format("solidcraft (save the document instead)".into())),
@@ -502,8 +560,8 @@ pub fn export_with_metadata(state: &ModelState, bodies: &[String], format: Forma
 
 /// A body as a 3MF mesh: welded watertight (T-junctions split), coloured, and with `tagged`
 /// each triangle keeps the B-rep face it came from.
-fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool) -> Result<MeshObject> {
-    let m = export_mesh(&b.body)?;
+fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool, options: MeshOptions) -> Result<MeshObject> {
+    let m = export_mesh_with(&b.body, options)?;
     let eps = weld_eps(&b.body);
     // Faces with colours of their own tag their triangles.
     let paint = b.body.paint();

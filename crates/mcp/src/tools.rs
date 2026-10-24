@@ -237,6 +237,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "path": string("Output file"),
                     "format": {"type": "string", "enum": ["step", "3mf", "3mf-tagged", "stl", "stla", "obj", "urdf"]},
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
+                    "tolerance": {"type": "number", "description": "stl, stla, obj, 3mf: how far a facet may lie from the surface, mm (0.001 to 10; default 2e-4 of each body's size)"},
+                    "angle": {"type": "number", "description": "stl, stla, obj, 3mf: how far a facet may turn from the next along a curved face, degrees (1 to 90; default no limit). Use it for small holes and fillets on large parts"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
                     "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},
                     "velocity": {"type": "number", "description": "urdf: joint velocity limit, m/s or rad/s (default 10)"},
@@ -548,7 +550,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             p["expression"] = parameter_value(a)?;
             exec(b, "parameters.change", p)
         }
-        "export" => exec(b, "file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity"])),
+        "export" => exec(b, "file.export", pick(a, &["path", "format", "bodies", "tolerance", "angle", "mesh_prefix", "effort", "velocity"])),
         "crash_reports" => match a.get("id") {
             Some(_) => exec(b, "diagnostics.crash_report", pick(a, &["id"])),
             None => exec(b, "diagnostics.crash_reports", pick(a, &["limit"])),

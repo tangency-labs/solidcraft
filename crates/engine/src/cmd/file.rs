@@ -48,12 +48,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.export", "Export", export)
         .icon("export")
         .noundo()
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); stl, stla, obj and 3mf only: tolerance? (mm, 0.001 to 10: how far a facet may lie from the surface; default 2e-4 of each body's size), angle? (degrees, 1 to 90: how far a facet may turn from the next along a curved face, so small holes and fillets get as many facets as large ones; default no limit); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10)"),
     CommandSpec::new("file.save_mesh", "Save As Mesh", save_mesh)
         .at("INSERT", "FILES")
         .icon("mesh_export")
         .noundo()
-        .params("path; format?: stl|3mf|3mf-tagged (default from the extension, else stl; 3mf-tagged: docs/formats/3mf-face-tags.md); bodies?: [names] (default: all); ascii?: bool (STL); slicer?: id, name or program path from file.slicers (open the saved file there)"),
+        .params("path; format?: stl|3mf|3mf-tagged (default from the extension, else stl; 3mf-tagged: docs/formats/3mf-face-tags.md); bodies?: [names] (default: all); ascii?: bool (STL); tolerance? (mm, 0.001 to 10: how far a facet may lie from the surface; default 2e-4 of each body's size); angle? (degrees, 1 to 90: how far a facet may turn from the next along a curved face; default no limit); slicer?: id, name or program path from file.slicers (open the saved file there)"),
     CommandSpec::new("file.slicers", "Installed Slicers", slicers).icon("export")
         .noundo()
         .params("→ the slicers found on this machine: [{id, name, icon?}]; pass an id or name as file.save_mesh's `slicer`"),
@@ -497,7 +497,28 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Result<Value> {
+/// The mesh fineness of an export (#2846): `tolerance` in mm (how far a facet may lie from the
+/// surface) and `angle` in degrees (how far a facet may turn from the next along a curved face).
+/// Left out, each is the export's default; given, they must be in range, and only mesh formats
+/// take them.
+fn mesh_options(p: &Value, cmd: &str, format: Format) -> Result<solidcraft_io::MeshOptions> {
+    let ranged = |k: &str, (lo, hi): (f64, f64), unit: &str| match p.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => num(p, k)
+            .filter(|x| x.is_finite() && (lo..=hi).contains(x))
+            .map(Some)
+            .ok_or_else(|| bad(cmd, format!("`{k}` must be a number from {lo} to {hi} {unit}"))),
+    };
+    let tolerance = ranged("tolerance", solidcraft_io::MESH_TOLERANCE_MM, "mm")?;
+    let angle = ranged("angle", solidcraft_io::MESH_ANGLE_DEG, "degrees")?;
+    let mesh = matches!(format, Format::StlBinary | Format::StlAscii | Format::Obj | Format::ThreeMf | Format::ThreeMfTagged);
+    if (tolerance.is_some() || angle.is_some()) && !mesh {
+        return Err(bad(cmd, "`tolerance` and `angle` are for mesh formats (stl, stla, obj, 3mf, 3mf-tagged)"));
+    }
+    Ok(solidcraft_io::MeshOptions { tolerance, angle: angle.map(f64::to_radians) })
+}
+
+fn export_to(s: &Session, path: &str, format: Format, bodies: &[String], mesh: solidcraft_io::MeshOptions) -> Result<Value> {
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // A design with components exports as a STEP assembly; otherwise bodies as placed.
     let bytes = if format == Format::Design {
@@ -510,7 +531,7 @@ fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Resu
     } else {
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
-        solidcraft_io::export_with_metadata(&s.doc.painted(&s.world_state()), bodies, format, &name, &s.doc.metadata)?
+        solidcraft_io::export_with_options(&s.doc.painted(&s.world_state()), bodies, format, &name, &s.doc.metadata, mesh)?
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
@@ -519,10 +540,11 @@ fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Resu
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, "file.export")?;
     let format = Format::from_name(str_(p, "format").unwrap_or(path))?;
+    let mesh = mesh_options(p, "file.export", format)?;
     if format == Format::Urdf {
         return export_urdf(s, path, p);
     }
-    export_to(s, path, format, &string_list(p, "bodies"))
+    export_to(s, path, format, &string_list(p, "bodies"), mesh)
 }
 
 /// The assembly as a URDF and its meshes next to it (docs/urdf.md). Every path is checked before
@@ -603,7 +625,8 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
             crate::slicers::resolve(spec).ok_or_else(|| bad(cmd, format!("no slicer `{spec}` (see file.slicers, or give the path of a program)")))?,
         ),
     };
-    let mut out = export_to(s, path, format, &string_list(p, "bodies"))?;
+    let mesh = mesh_options(p, cmd, format)?;
+    let mut out = export_to(s, path, format, &string_list(p, "bodies"), mesh)?;
     if let (Some(slicer), Some(obj)) = (slicer, out.as_object_mut()) {
         // The file is saved either way; a slicer that won't start is reported, not fatal.
         match slicer.open(path) {

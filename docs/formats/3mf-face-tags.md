@@ -63,7 +63,8 @@ single face (tag 0).
 
 - `unit="millimeter"`, Z up. There is one `<object type="model">` with a `<mesh>` per body,
   named after the body, and one `<item>` per object, with no transform and no components.
-- The tessellation is the export mesh (chord tolerance 2·10⁻⁴ of the body size). It is welded
+- The tessellation is the export mesh (chord tolerance 2·10⁻⁴ of the body size, or the
+  export's `tolerance` and `angle` when given). It is welded
   watertight: vertices within 10⁻⁶ of the body size are merged and T-junctions between faces are
   split. Each piece of a split triangle keeps its face. Triangles are counter-clockwise seen from
   outside, and degenerate triangles are dropped.
