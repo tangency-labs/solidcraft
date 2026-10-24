@@ -311,6 +311,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-macos-universal
+      # dmgbuild (the DMG window layout, packaging/macos/package.sh) needs Python 3.10+.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
       - name: Build and package (dmg, CLI zip; the dmg is mounted and checked)
         run: packaging/macos/package.sh --arch universal
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
