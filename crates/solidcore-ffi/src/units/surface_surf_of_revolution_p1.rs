@@ -512,8 +512,21 @@ pub(crate) fn push_surf(o: &mut Vec<f64>, s: &Surf) -> Result<(), FfiError> {
             unit(*x, "placement X")?;
             unit(*y, "placement Y")?;
             domain(*d, "surface domain")?;
-            let [u0, _, u1, _] = *d;
+            let [u0, v0, u1, v1] = *d;
             angular(u0, u1, "surface domain")?;
+            // A circle/ellipse generator's v parameter is an angle in degrees;
+            // huge v domains hang in C++ (HANG-23 / HANG-1: polar set-up shifts
+            // one turn per iteration). Bound them like the generator's angular
+            // domain. Hyperbola/parabola generators bound v to their STEP range.
+            match &s.gen {
+                Gen::Circle { .. } => {
+                    angular(v0, v1, "surface domain")?;
+                }
+                Gen::Hyperbola { .. } if !(v0 < v1 && v0 >= -10.0 && v1 <= 10.0) => {
+                    return Err(bad("surface domain: bad hyperbola v domain"));
+                }
+                _ => {}
+            }
             o.push(1.0);
             push_gen(o, &s.gen)?;
             o.extend([f64::from(u8::from(s.oob)), f64::from(u8::from(s.swap))]);

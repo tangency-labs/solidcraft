@@ -2367,6 +2367,19 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Rust port:** Returns `NotConverged` after `curve::ellipse::p2::MAX_PERIOD_SHIFTS` (2^20) shifts or when a shift no longer changes the midpoint; the callers ignore that status as upstream ignores the set-up's, leaving the converter impossible.
 - **Harness:** the `surface.cone_p3` FFI accepts cone angles only within upstream's documented `[-360, 360]` (`SmCone.h:205-206`). A first guard at about `3.8e8` degrees (the Rust bound) still let fuzzed intersections run past 20 s natively: every surface evaluation of such a cone goes through `SmEllipse::STEPInversion` and `SmExtent1d::PeriodicWrap`, one turn per iteration (HANG-1), confirmed with gdb backtraces.
 - **Fuzz sweep trigger (2026-10-20):** `SmSurfOfExtrusion::AdjustSTEPUVDomain` of an ellipse extrusion to a domain whose u end is `9223372036854775807` degrees (`surface.surf_of_extrusion_p1` `fuzz00222`, `fuzz01418`); a revolution (sphere part / torus generator circle) whose v domain bound is `±2^63` or `-1e300` degrees, through `DropPoint` / `ConvertUVFromSTEPToNURBS` (`surface.surf_of_revolution_p3` `fuzz00476`, `fuzz01129`, `fuzz01853`). Confirmed: yes (C++ timeouts; the loop was not traced, so HANG-1 `PeriodicWrap` may be the one spinning). Not guarded yet (open).
+- **Fuzz sweep trigger (2026-10-24, PR #750):** `SmSurfOfExtrusion::AdjustSTEPUVDomain`
+  of an ellipse extrusion whose minor radius is below `1/DBL_MAX`
+  (`5.562684646268003e-309`, so `rx / ry` overflows) with a centre that is not exactly
+  `0` hangs C++ (`surface.surf_of_extrusion_p1` `fuzz01428`: centre `2^32`,
+  `ry = 5e-324`). Direct probes (8 s timeouts) confirm: every centre
+  `1e-16 .. 1e300` hangs while the origin returns via the degenerate branch;
+  `ry >= 5.6e-309` passes at any centre up to `1e300`; denormal major radii and
+  denormal circles never hang. Inside the subnormal centre edge the hang is
+  chaotic (`c = 6e-308/6.5e-308` pass, `6.1/6.3/6.7e-308` hang; `c = 1e-300`
+  hangs, `1e-309` passes, both with `ry = 5e-324`), so the loop was not isolated
+  (not traced; the point-inversion `SM_CP_POINT_INVERSION` inside the polar
+  converter's `ConvertToNURBSParameter` is the suspected non-converging solver).
+  Guarded: the FFI rejects the `rx / ry == inf && centre != origin` rectangle.
 #### HANG-35. Closed shells a few zone tolerances across take minutes to place in their region
 - **Location:** `source/SMLib/src/SmBrep.cpp:8666` `SmBrep::FindAndSetInfiniteRegion` -> `:8004` `FindInfiniteRegion` (ray fire at `:8417`) -> `source/SMLib/src/SmShell.cpp:592` `SmShell::RayFire` -> `SmSurface::GlobalLineIntersect`. The solver tree (`SmGlobalSolver::SolveBranch`, more than twenty levels) checks each new solution with `SmLSIGlobalSolver::IdenticalSolutions` (`SmSurface.cpp:18843`) or `LocalCurveIntersect`, which re-derive the surface's singularities (`SmSurface::GetSingularities`, `:12384`) every time. Reached from `TestClosureSplitRegion` (`SmBrep.cpp:27654`, `:27845`), both through `CreateFaceFromSurface` -> `MakeFaceWithCurves` for an analytic face and through `SmStitch::DoStitching` -> `GlueEdgesGeneral` for a stitched sweep.
 - **What happens:** Placing a small closed shell in its region takes minutes.

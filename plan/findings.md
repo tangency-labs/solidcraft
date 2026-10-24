@@ -14343,8 +14343,8 @@ FFI bounds added (harness only, upstream-hazard driven): `MAX_COORD = 1e6` (`nur
 
 - `surface.surface_p6` (FUZZ-FAIL 0/2/0/0 in `verify3`): `verify3/surface.surface_p6/fuzz01069.json` (`/op/dom/2 = 1e-300`, `trim` of a plane), `fuzz01289.json` (`/op/dom/0 = -1e-300`, `trim` of `offset_nurb.sms`): C++ segfault in `CreateNaturalUVTrimCurves` (UB-231); no guard yet.
 - `sweep.api_brep` (FUZZ-FAIL 0/5/0/2, unchanged): `verify2000/sweep.api_brep/fuzz00538`, `fuzz01054`, `fuzz01493` (line endpoint z `±2^63`, taper/draft), `fuzz01538` (two identical circles, taper): C++ segfault (UB-112 triggers); `fuzz01378` (pipe path point `1e300`): `SIGFPE` (UB-232); `fuzz01218`, `fuzz01458` (`from_faces`, path point `1e300`): C++ timeout (HANG-43). No guards yet; the Rust side is a stub.
-- `sweep.api_surfaces` (FUZZ-FAIL 0/0/0/10): `verify2000/sweep.api_surfaces/fuzz00106`, `fuzz00357`, `fuzz00476`, `fuzz00668`, `fuzz00746`, `fuzz00805`, `fuzz01000`, `fuzz01115`, `fuzz01151`, `fuzz01999` (path control point `±1e300`): C++ hang in `SmApiCreateSweep` -> `N_CreateSweepScale` (fixed `dTol = 1e-5`, HANG-5). Follow-up: apply the `MIN_SWEEP_TOL_FRACTION` guard to this FFI.
-- `surface.surf_of_extrusion_p1` (FUZZ-FAIL 0/0/0/2): `verify2000/surface.surf_of_extrusion_p1/fuzz00222`, `fuzz01418` (`adjust` of an ellipse extrusion to u end `2^63-1` degrees): C++ timeout (HANG-23 trigger). Needs an angular-domain bound like `surface.cone_p3`'s `[-360, 360]`.
+- `sweep.api_surfaces`: HANG-5 guard applied in `crates/solidcore-ffi/src/units/sweep_api_surfaces.rs` (path control polygon length bound). Status: guarded.
+- `surface.surf_of_extrusion_p1`: HANG-23 guard applied in `surface_surf_of_extrusion_p1.rs` (`surface_op` Adjust u domain). Status: guarded.
 - `surface.surf_of_revolution_p3` (FUZZ-FAIL 1/0/0/3): `fuzz00476`, `fuzz01129`, `fuzz01853` (v domain bound `±2^63` / `-1e300` degrees): C++ timeout (HANG-23 / HANG-1); `fuzz01771` (`/surf/build/domain/3 = 2147483648`): build `cpp=0 rust=1001`.
 - `surface.plane_p2` (FUZZ-FAIL 12/1/0/0): `verify2000/surface.plane_p2/fuzz00842` (`/header emptied`, C++ signal 11 only after 42 preceding cases: heap state from an earlier case, not minimised); 12 differs `rec.len cpp=N rust=1` (`fuzz00179`, `fuzz00303`, `fuzz00647`, `fuzz00703`, `fuzz00751`, `fuzz00761`, `fuzz01112`, `fuzz01365`, `fuzz01705`, `fuzz01788`, `fuzz01794`, `fuzz01845`): C++ writes/reads a DB record for a malformed surface (emptied/truncated knots, `p = 0`, `p > n`, huge `form`/`kt`) that Rust rejects; pre-existing (13 before).
 - `nurbs.b_spline_curve_p3` (FUZZ-FAIL 0/0/0/1): `verify2000/nurbs.b_spline_curve_p3/fuzz00919` (`assert`, `/this/crv/cpts/0/0 = 1e+300`, out-of-bounds enabled): Rust timeout; not traced.
@@ -19039,6 +19039,23 @@ round's complete input and 4125.906 mm net; the other rounds' tiny lower v exten
 bounds can differ in their last bits (at most 7e-20 in the checked run). The saved
 JSON inputs fix every bit for differential testing.
 
+- `surface.surf_of_extrusion_p1` (HANG-23 guard follow-up, 2026-10-24): the
+  in-flight centre-cap sketch (`|c| > 1e8`) was replaced after probing the C++
+  directly (`sc_surface_surf_of_extrusion_p1_eval`, 8 s timeouts): the hang is a
+  minor-radius razor, not a centre-distance one. An ellipse extrusion with
+  `rx = 1` and `ry` below `1/DBL_MAX` (5.562684646268003e-309) hangs C++ on
+  `AdjustSTEPUVDomain` for every centre except exactly `0` (`0/0.25/1e-16/0.001/
+  1/2/4/1e10/1e300 pounds all hang at ry = 5e-324; ry is fine for any one
+  centre >= 5.6e-309, including 1e300; `rx / ry` finite never hangs; a denormal
+  MAJOR radius with a normal minor one never hangs; circles with denormal
+  radii never hang). The hang is chaotic inside the subnormal centre edge:
+  `c = 6e-308` and `6.5e-308` pass while `6.1/6.3/6.7e-308` hang, and
+  `c = 1e-300` hangs while `1e-309` passes (with `ry = 5e-324`) — so no closed
+  predicate separates hang from pass inside that sliver; the guard rejects the
+  whole `rx / ry == inf && centre != origin` rectangle, which keeps every
+  probe-passing conic with resolvable radii (the accepted sliver's 21-order
+  noise regime included) documented here. Base counters unchanged (2071 cases,
+  2000-draw fuzz clean: rejected 337, ran 903, 0 timeouts/0 differs).
 ## Fuzz re-verification (2026-10-24)
 
 Re-ran 2000-draw fuzz per unit on main 76f27c381 with `--fuzz-out fuzz-out/reverify-1024/<unit>`.
