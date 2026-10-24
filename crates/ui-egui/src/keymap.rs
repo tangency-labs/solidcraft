@@ -1055,7 +1055,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.frames(2);
         bind(&mut h.app, "sketch.line", "Shift", true).unwrap();
-        press(&mut h.app, "Shift");
+        press(&mut h.app, "Shift", false);
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd.to_string()).as_deref(), Some("sketch.line"), "the bound Shift key starts its command");
     }
 
