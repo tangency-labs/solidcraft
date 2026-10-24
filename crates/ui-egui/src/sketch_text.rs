@@ -362,21 +362,32 @@ fn folded<T>(app: &mut SolveApp, k: &mut Tx, run: impl FnOnce(&mut SolveApp) -> 
 
 /// Each frame: show the fields on the canvas (a live edit) when they changed. Fields that make
 /// no text (an empty one, a half-typed value) leave the last good preview.
-pub(crate) fn preview(app: &mut SolveApp, k: &mut Tx) {
-    let Ok(params) = edit_params(app, k) else { return };
+/// A changed preview returns its result for the dialog's error row; unchanged fields keep it.
+pub(crate) fn preview(app: &mut SolveApp, k: &mut Tx) -> Option<Result<(), String>> {
+    let Ok(params) = edit_params(app, k) else { return None };
     if k.tried.as_ref() == Some(&params) {
-        return;
+        return None;
     }
     k.tried = Some(params.clone());
     if k.start.is_none() {
-        let Some(checkpoint) = app.session.execute("edit.checkpoint", &json!({})).ok().and_then(|r| r["checkpoint"].as_u64()) else { return };
+        let checkpoint = match app.session.execute("edit.checkpoint", &json!({})) {
+            Ok(result) => match result.get("checkpoint").and_then(Value::as_u64) {
+                Some(checkpoint) => checkpoint,
+                None => return Some(Err("the text preview could not create a checkpoint".into())),
+            },
+            Err(error) => return Some(Err(error.to_string())),
+        };
         k.start = Some(checkpoint);
     }
     let mut live = params;
     live["live"] = json!(true);
-    if folded(app, k, |app| app.session.execute("sketch.edit_text", &live)).is_ok() {
-        k.shown = source(app, k.sketch, &k.link);
-    }
+    Some(
+        folded(app, k, |app| app.session.execute("sketch.edit_text", &live))
+            .map(|_| {
+                k.shown = source(app, k.sketch, &k.link);
+            })
+            .map_err(|error| error.to_string()),
+    )
 }
 
 /// OK: the fields' final edit (which also brings the features after the sketch up to date), in
@@ -910,12 +921,13 @@ mod tests {
             h.step(&json!({"click":{"handle":"dialog:Font file"}})).unwrap();
             h.frames(3);
         };
-        // A font that is not there shows nothing new, keeps the dialog open with the reason at OK, and the design
+        // A font that is not there shows nothing new, reports the reason before OK, and keeps the design
         // as it was.
         let before = (h.app.session.doc.to_json(), h.app.session.undo.len());
         let missing = concat!(env!("CARGO_MANIFEST_DIR"), "/no-such-font-12345.ttf");
         choose_file(&mut h, missing);
         assert_eq!(tx(&h.app).font, missing);
+        assert!(h.app.dialog.as_ref().unwrap().error.as_ref().is_some_and(|error| error.contains("font file")));
         assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
         ok(&mut h);
         assert!(editing(&h.app));
@@ -924,6 +936,7 @@ mod tests {
         // A font file: other outlines on the canvas at once, one undo step, and the dialog shows the font when it is
         // opened again.
         choose_file(&mut h, font);
+        assert!(h.app.dialog.as_ref().unwrap().error.is_none(), "a valid font clears the preview error");
         assert!((area(&h) - 17.6385).abs() < 2e-3, "the canvas follows the font");
         ok(&mut h);
         assert!(!editing(&h.app));
@@ -1424,6 +1437,15 @@ mod tests {
         h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
         h.frames(2);
         assert!(!style_of(&h, &link).bold, "the canvas keeps the last text it could make");
+        let error = h.app.dialog.as_ref().unwrap().error.clone().unwrap_or_default();
+        assert!(error.contains("no bold face"), "the preview must explain the unchanged text before OK: {error}");
+        h.frames(2);
+        assert_eq!(h.app.dialog.as_ref().unwrap().error.as_deref(), Some(error.as_str()), "the reason stays visible on unchanged frames");
+        h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.dialog.as_ref().unwrap().error.is_none(), "a valid preview clears the refusal");
+        h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
+        h.frames(2);
         ok(&mut h);
         assert!(editing(&h.app));
         let error = h.app.dialog.as_ref().unwrap().error.clone().unwrap_or_default();

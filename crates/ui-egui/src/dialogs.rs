@@ -2716,8 +2716,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     if keep && !cancel {
         // The canvas follows Edit Text's fields.
-        if let Kind::Text(k) = &mut d.kind {
-            crate::sketch_text::preview(app, k);
+        if let Kind::Text(k) = &mut d.kind
+            && let Some(result) = crate::sketch_text::preview(app, k)
+        {
+            d.error = result.err();
         }
         app.dialog = Some(d);
     } else if let Some((_, marker)) = d.editing {
