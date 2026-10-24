@@ -149,13 +149,7 @@ pub fn sketch_visible(app: &SolveApp, id: u64) -> bool {
 }
 
 pub fn set_sketch_visible(app: &mut SolveApp, id: u64, on: bool) {
-    app.session.visibility.hidden_sketches.retain(|x| *x != id);
-    app.session.visibility.shown_sketches.retain(|x| *x != id);
-    if on {
-        app.session.visibility.shown_sketches.push(id);
-    } else {
-        app.session.visibility.hidden_sketches.push(id);
-    }
+    app.session.visibility.set_sketch_shown(id, on);
 }
 
 pub fn redefine_sketch(app: &mut SolveApp, id: u64) {
@@ -311,6 +305,8 @@ pub(crate) struct Row<'a> {
     pub(crate) color: Option<Color32>,
     /// Component rows: is it the active one?
     pub(crate) radio: Option<bool>,
+    /// Hover text for the radio, when it is not a component's activation.
+    pub(crate) radio_tip: Option<&'a str>,
     /// Trailing badges: "lock", "pin".
     pub(crate) badges: &'a [&'a str],
     /// Lit by the selection or the 3D view's pointer: the item's own row, or a row leading to it.
@@ -459,6 +455,7 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let tip = match hover_on {
         1 => Some(if row.fold == Some(true) { crate::i18n::tr("ui.collapse") } else { crate::i18n::tr("ui.expand") }),
         2 => Some(if row.eye == Some(true) { crate::i18n::tr("ui.hide") } else { crate::i18n::tr("ui.show") }),
+        3 if row.radio_tip.is_some() => row.radio_tip.map(crate::i18n::tr),
         3 => Some(if row.radio == Some(true) { crate::i18n::tr("ui.active_component") } else { crate::i18n::tr("ui.activate") }),
         _ => None,
     };
@@ -1047,12 +1044,9 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
     }
     if r.eye {
         if visible {
-            app.session
-                .visibility
-                .hidden_bodies
-                .extend(bodies.iter().filter(|b| !app.session.visibility.hidden_bodies.contains(b)).cloned().collect::<Vec<_>>());
+            app.session.visibility.hide_bodies(bodies.iter().cloned());
         } else {
-            app.session.visibility.hidden_bodies.retain(|b| !bodies.contains(b));
+            app.session.visibility.show_bodies(&bodies);
         }
     }
     if r.clicked {
@@ -1093,6 +1087,7 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
     if id == 0 {
         doc_settings(app, ui, d);
         named_view_rows(app, ui, d, acts);
+        display_state_rows(app, ui, d, acts);
         origin_rows(app, ui, d, acts);
         canvas_rows(app, ui, d, acts);
         analysis_rows(app, ui, d, acts);
@@ -1335,11 +1330,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actio
             &Row { depth: depth + 1, eye: Some(visible), icon, label, selected, dim: !visible || !app.ui.show_origin, mark, ..Default::default() },
         );
         if r.eye {
-            if visible {
-                app.session.visibility.hidden_origin.push(k.into());
-            } else {
-                app.session.visibility.hidden_origin.retain(|h| h != k);
-            }
+            app.session.visibility.set_origin_hidden(k, visible);
         }
         if let Some(p) = r.secondary
             && icon == "plane"
@@ -1395,6 +1386,77 @@ fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
             acts.menu = Some((p, Target::NamedView { name }));
         }
     }
+}
+
+/// Display States: what is shown and how it looks. A double-click applies one.
+fn display_state_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
+    let key = "displaystates";
+    let open = is_open(app, key, false);
+    let r = draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), icon: "folder", label: "Display States", ..Default::default() });
+    if r.fold || r.clicked {
+        toggle(app, key, false);
+    }
+    if let Some(p) = r.secondary {
+        acts.menu = Some((p, Target::DisplayStates));
+    }
+    if !open {
+        return;
+    }
+    let names: Vec<String> = app.session.doc.display_states.iter().map(|v| v.name.clone()).collect();
+    let active = app.session.active_display_state().map(str::to_string);
+    for name in names {
+        let on = active.as_deref() == Some(name.as_str());
+        let r = draw_row(
+            ui,
+            ui.id().with(("display_state", &name)),
+            &Row {
+                depth: depth + 1,
+                icon: "",
+                label: &name,
+                name: true,
+                radio: Some(on),
+                radio_tip: Some(if on { "Active display state" } else { "ui.apply" }),
+                dim: !on,
+                ..Default::default()
+            },
+        );
+        if let Some(rect) = r.rect {
+            let x = rect.left() + 2.0 + (depth + 1) as f32 * INDENT;
+            crate::scenario::publish_handle(&format!("activate:{name}"), pos2(x + 38.0, rect.center().y));
+        }
+        if r.double || r.radio {
+            apply_display_state(app, &name);
+        }
+        if let Some(p) = r.secondary {
+            acts.menu = Some((p, Target::DisplayState { name }));
+        }
+    }
+}
+
+/// Show what a display state shows.
+pub fn apply_display_state(app: &mut SolveApp, name: &str) {
+    if app.run("display.apply", json!({ "state": name })).is_ok() {
+        app.follow_view_request(true);
+    }
+}
+
+/// Save what is shown now as a display state (`name` replaces that state).
+pub fn save_display_state(app: &mut SolveApp, name: Option<&str>) {
+    if app.run("display.save", json!({ "name": name })).is_ok() {
+        app.tree.collapsed.remove("displaystates");
+        app.tree.expanded.insert("displaystates".into());
+    }
+}
+
+/// The menu of a display state.
+pub fn display_state_items(name: &str) -> Vec<Item> {
+    vec![
+        Item::action("ui.displayApply", "Apply", "check").with(json!({ "state": name })),
+        Item::action("ui.displayUpdate", "Update to What Is Shown Now", "refresh").with(json!({ "state": name })),
+        Item::sep(),
+        Item::action("ui.rename", "Rename", "rename").with(json!({ "display_state": name })),
+        Item::action("display.delete", "Delete", "delete").with(json!({ "state": name })),
+    ]
 }
 
 /// Turn the camera to a named view (a saved one or a standard one), animated.
@@ -1800,9 +1862,9 @@ fn set_visible(app: &mut SolveApp, folder: &str, items: &[&Entry], on: bool) {
     for e in items {
         match folder {
             "bodies" => {
-                app.session.visibility.hidden_bodies.retain(|b| !e.bodies.contains(b));
+                app.session.visibility.show_bodies(&e.bodies);
                 if !on {
-                    app.session.visibility.hidden_bodies.extend(e.bodies.clone());
+                    app.session.visibility.hide_bodies(e.bodies.clone());
                 }
             }
             "sketches" => {
@@ -1811,10 +1873,7 @@ fn set_visible(app: &mut SolveApp, folder: &str, items: &[&Entry], on: bool) {
                 }
             }
             _ => {
-                app.session.visibility.hidden_origin.retain(|p| *p != e.label);
-                if !on {
-                    app.session.visibility.hidden_origin.push(e.label.clone());
-                }
+                app.session.visibility.set_origin_hidden(&e.label, !on);
             }
         }
     }

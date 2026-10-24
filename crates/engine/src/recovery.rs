@@ -322,10 +322,10 @@ impl Autosaver {
             crate::crash::rebased(s, s.path.as_deref().map(Path::new), false);
             return None;
         }
-        if self.last.as_ref().is_some_and(|(l, v)| (Arc::ptr_eq(l, &s.doc) || **l == *s.doc) && *v == s.visibility) {
+        if self.last.as_ref().is_some_and(|(l, v)| (Arc::ptr_eq(l, &s.doc) || **l == *s.doc) && *v == *s.saved_view()) {
             return None;
         }
-        Some(Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc: s.doc.clone(), visibility: s.visibility.clone(), path: s.path.clone() })
+        Some(Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc: s.doc.clone(), visibility: s.saved_view().clone(), path: s.path.clone() })
     }
 
     /// The running write's outcome, once it has one (`wait`: wait for it). True when no write

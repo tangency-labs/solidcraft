@@ -2006,6 +2006,10 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // Copy, Cut and Paste (`edit_clipboard::handle`).
                 Key::C | Key::X | Key::V if !mods.shift && !mods.alt => {}
                 Key::S => save(app),
+                // Isolate: Ctrl+I a new layer, Ctrl+Shift+I one layer back, Ctrl+Alt+I all of them.
+                Key::I if mods.alt && !mods.shift => drop(crate::isolation_banner::exit_all(app)),
+                Key::I if mods.shift && !mods.alt => drop(crate::isolation_banner::exit_one(app)),
+                Key::I if !mods.shift && !mods.alt => crate::isolation_banner::isolate_selection(app),
                 _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
             }
             continue;

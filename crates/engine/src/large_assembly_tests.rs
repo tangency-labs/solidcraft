@@ -14,7 +14,7 @@ use solidcraft_geom::Vec3;
 use crate::Session;
 
 /// `parts` parts, four bodies each, in `parts / 4` (at least one) placed components.
-fn generated_assembly(parts: usize) -> Document {
+pub(crate) fn generated_assembly(parts: usize) -> Document {
     let mut doc = Document::new("generated assembly");
     let groups = parts.div_ceil(4).max(1);
     let comps: Vec<(u64, solidcraft_doc::Mat)> = (0..groups)

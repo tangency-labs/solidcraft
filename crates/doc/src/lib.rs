@@ -20,6 +20,7 @@ pub use component_removal::RemovedTree;
 pub mod config;
 pub mod construct;
 pub mod display_quality;
+pub mod display_state;
 pub mod display_units;
 mod document;
 mod eval;

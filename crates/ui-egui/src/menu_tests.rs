@@ -645,7 +645,7 @@ fn menus_follow_fusion_order() {
     assert!(["XY", "XZ", "YZ"].iter().all(|p| app.session.visibility.hidden_origin.iter().any(|h| h == p)));
     app.run("select.clear", json!({})).unwrap();
     let empty = context_menu::items(&app, &Target::Viewport);
-    order(&empty, &["Pan", "Zoom", "Orbit", "Show All", "Unisolate", "Extrude", "Fillet"]);
+    order(&empty, &["Pan", "Zoom", "Orbit", "Show All", "Exit Isolation", "Extrude", "Fillet"]);
     context_menu::run_item(&mut app, &find(&empty, "Pan"), pos2(0.0, 0.0));
     assert!(matches!(app.viewport.nav, Some(crate::viewport::NavMode::Pan)));
 }

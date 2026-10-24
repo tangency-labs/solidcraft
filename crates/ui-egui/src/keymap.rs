@@ -48,6 +48,10 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+Up",
     "Ctrl+Down",
     "Ctrl+8",
+    // Isolate layers (`isolation_banner`).
+    "Ctrl+I",
+    "Ctrl+Shift+I",
+    "Ctrl+Alt+I",
 ];
 
 #[derive(Default)]

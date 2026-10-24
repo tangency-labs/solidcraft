@@ -76,6 +76,11 @@ pub enum Target {
     NamedView {
         name: String,
     },
+    /// The Display States folder, and one state in it.
+    DisplayStates,
+    DisplayState {
+        name: String,
+    },
     /// A canvas (reference image).
     Canvas {
         id: u64,
@@ -161,6 +166,20 @@ impl Item {
 }
 
 /// A command entry: label, icon, shortcut and enablement come from the registry.
+/// The viewport menu's Display States submenu: save the current view, and switch to a saved one.
+fn display_states_item(app: &SolveApp) -> Item {
+    let mut item = act("ui.displayStates", "Display States", "folder");
+    item.children.push(act("ui.displaySave", "New Display State", "list"));
+    let states = &app.session.doc.display_states;
+    if !states.is_empty() {
+        item.children.push(Item::sep());
+    }
+    for s in states.iter().take(50) {
+        item.children.push(act("ui.displayApply", &s.name, "list").with(json!({ "state": s.name })));
+    }
+    item
+}
+
 pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
     let info = solidcraft_engine::find_command(id).map(|c| c.info(&app.session));
     let shortcut = match id {
@@ -236,6 +255,7 @@ pub enum RenameWhat {
     TimelineGroup(u64),
     Canvas(u64),
     View(String),
+    DisplayState(String),
     Joint(u64),
 }
 
@@ -282,7 +302,7 @@ fn sel_sketch(app: &SolveApp) -> Option<u64> {
 }
 
 /// Bodies the selection touches (bodies, and the bodies of selected faces and edges).
-fn touched_bodies(app: &SolveApp) -> Vec<String> {
+pub(crate) fn touched_bodies(app: &SolveApp) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
     for s in &app.session.selection {
         let b = match s {
@@ -364,6 +384,8 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Canvas { id } => crate::browser::canvas_items(app, *id),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
+        Target::DisplayStates => vec![act("ui.displaySave", "New Display State", "list")],
+        Target::DisplayState { name } => crate::browser::display_state_items(name),
         Target::Section => crate::browser::section_items(app),
         Target::Joint { id } => joint_items(app, *id),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
@@ -566,7 +588,12 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             || !app.session.visibility.hidden_sketches.is_empty()
             || !app.session.visibility.hidden_folders.is_empty();
         v.push(act("ui.showAll", "Show All", "eye").on(anything_hidden));
-        v.push(act("ui.showAll", "Unisolate", "eye").on(!app.session.visibility.hidden_bodies.is_empty()));
+        let isolated = app.session.isolation_depth();
+        v.push(act("ui.unisolate", "Exit Isolation", "eye").key("Ctrl+Shift+I").on(isolated > 0));
+        if isolated > 1 {
+            v.push(act("ui.unisolateAll", "Exit All Isolations", "eye").key("Ctrl+Alt+I"));
+        }
+        v.push(display_states_item(app));
         v.push(Item::sep());
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.fillet", "Fillet"));
@@ -615,7 +642,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         Item::sep(),
         act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
-        act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })),
+        act("ui.isolate", "Isolate", "body").key("Ctrl+I").with(json!({ "bodies": names })),
     ];
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
@@ -1043,24 +1070,36 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.hide" => {
-            for b in bodies {
-                if !app.session.visibility.hidden_bodies.contains(&b) {
-                    app.session.visibility.hidden_bodies.push(b);
-                }
-            }
+            app.session.visibility.hide_bodies(bodies);
         }
-        "ui.show" => app.session.visibility.hidden_bodies.retain(|b| !bodies.contains(b)),
+        "ui.show" => app.session.visibility.show_bodies(&bodies),
         "ui.showAll" => {
             let _ = app.run("browser.visibility", json!({"folder":"bodies", "visible":true}));
-            app.session.visibility.hidden_sketches.clear();
             // Hidden folders and groups too, so everything really shows.
-            app.session.visibility.hidden_folders.clear();
+            app.session.visibility.show_all_sketches_and_folders();
             app.ui.show_sketches = true;
         }
         "ui.isolate" => {
-            app.session.visibility.hidden_bodies =
-                app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
+            // A new layer; with nothing to isolate it does nothing.
+            if !bodies.is_empty()
+                && let Err(e) = app.run("display.isolate", json!({ "items": bodies }))
+            {
+                app.set_status(e, true);
+            }
         }
+        "ui.displaySave" => crate::browser::save_display_state(app, None),
+        "ui.displayUpdate" => {
+            if let Some(v) = p.get("state").and_then(Value::as_str) {
+                crate::browser::save_display_state(app, Some(v));
+            }
+        }
+        "ui.displayApply" => {
+            if let Some(v) = p.get("state").and_then(Value::as_str) {
+                crate::browser::apply_display_state(app, v);
+            }
+        }
+        "ui.unisolate" => drop(crate::isolation_banner::exit_one(app)),
+        "ui.unisolateAll" => drop(crate::isolation_banner::exit_all(app)),
         "ui.lock" => {
             let locked = bodies.iter().all(|b| app.ui.locked_bodies.contains(b));
             if locked {
@@ -1087,6 +1126,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 RenameWhat::Canvas(c)
             } else if let Some(v) = p.get("view").and_then(Value::as_str) {
                 RenameWhat::View(v.to_string())
+            } else if let Some(v) = p.get("display_state").and_then(Value::as_str) {
+                RenameWhat::DisplayState(v.to_string())
             } else if let Some(j) = id_of(&p, "joint") {
                 RenameWhat::Joint(j)
             } else {
@@ -1207,7 +1248,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.isolateOccurrence" => {
-            let _ = app.run("browser.visibility", json!({"visible": true, "paths": [p["path"]], "isolate": true}));
+            let _ = app.run("display.isolate", json!({"paths": [p["path"]]}));
         }
         "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
         "ui.toolbarPin" | "ui.toolbarRemove" | "ui.toolbarReset" | "ui.toolbarCustomize" | "ui.shortcutPin" => {
@@ -1256,15 +1297,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.originAll" => {
             app.ui.show_origin = true;
-            app.session.visibility.hidden_origin.retain(|h| !["O", "X", "Y", "Z", "XY", "XZ", "YZ"].contains(&h.as_str()));
+            app.session.visibility.show_standard_origin();
         }
         "ui.originPart" => {
             let show = p.get("show").and_then(Value::as_bool).unwrap_or(true);
             for k in strs(&p, "keys") {
-                app.session.visibility.hidden_origin.retain(|h| *h != k);
-                if !show {
-                    app.session.visibility.hidden_origin.push(k);
-                }
+                app.session.visibility.set_origin_hidden(&k, !show);
             }
         }
         "ui.editFeature" => {
@@ -1396,11 +1434,15 @@ pub fn toggle_visibility(app: &mut SolveApp) {
         || origin.iter().any(|o| !app.session.visibility.hidden_origin.contains(o))
         || app.session.doc.canvases.iter().any(|c| canvases.contains(&c.id) && c.visible);
     let hide = any_visible;
-    app.session.visibility.hidden_bodies.retain(|b| !bodies.contains(b));
-    app.session.visibility.hidden_origin.retain(|o| !origin.contains(o));
+    app.session.visibility.show_bodies(&bodies);
+    for o in &origin {
+        app.session.visibility.set_origin_hidden(o, false);
+    }
     if hide {
-        app.session.visibility.hidden_bodies.extend(bodies);
-        app.session.visibility.hidden_origin.extend(origin);
+        app.session.visibility.hide_bodies(bodies);
+        for o in &origin {
+            app.session.visibility.set_origin_hidden(o, true);
+        }
     }
     for s in sketches {
         crate::browser::set_sketch_visible(app, s, !hide);
@@ -1467,7 +1509,7 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::Group(g) => crate::browser::group_name(app, *g).unwrap_or_default(),
         RenameWhat::TimelineGroup(g) => doc.timeline_groups.iter().find(|group| group.id == *g).map(|group| group.name.clone()).unwrap_or_default(),
         RenameWhat::Canvas(c) => doc.canvases.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default(),
-        RenameWhat::View(v) => v.clone(),
+        RenameWhat::View(v) | RenameWhat::DisplayState(v) => v.clone(),
         RenameWhat::Joint(j) => doc.assembly.joints.iter().find(|x| x.id == *j).map(|x| x.name.clone()).unwrap_or_default(),
     };
     app.menu.rename = Some(Rename { what, text, at, focused: false });
@@ -1486,6 +1528,7 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) {
         RenameWhat::TimelineGroup(g) => drop(app.run("timeline.rename_group", json!({ "group": g, "name": name }))),
         RenameWhat::Canvas(c) => drop(app.run("canvas.edit", json!({ "canvas": c, "name": name }))),
         RenameWhat::View(v) => drop(app.run("view.rename", json!({ "view": v, "name": name }))),
+        RenameWhat::DisplayState(v) => drop(app.run("display.rename", json!({ "state": v, "name": name }))),
         RenameWhat::Joint(j) => drop(app.run("joint.edit", json!({ "joint": j, "name": name }))),
     }
 }

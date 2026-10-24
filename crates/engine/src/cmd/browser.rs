@@ -65,7 +65,7 @@ fn component_of(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
     Ok(c)
 }
 
-fn keys(p: &Value, k: &str, cmd: &str) -> Result<Vec<String>> {
+pub(super) fn keys(p: &Value, k: &str, cmd: &str) -> Result<Vec<String>> {
     let v = match p.get(k) {
         Some(Value::Array(a)) => {
             a.iter().map(|x| x.as_str().map(str::to_string).or_else(|| x.as_u64().map(|n| n.to_string()))).collect::<Option<Vec<_>>>()
@@ -263,33 +263,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             if !visible {
                 return Err(bad(cmd, "isolate requires visible:true"));
             }
-            let mut hidden = Vec::new();
-            let mut ancestor_bodies = Vec::new();
-            let mut stack = vec![Vec::<u64>::new()];
-            let mut count = 0;
-            while let Some(parent) = stack.pop() {
-                for child in s.occurrence_children(&parent)? {
-                    count += 1;
-                    if count > 100_000 {
-                        return Err(bad(cmd, "isolate exceeds 100000 placements"));
-                    }
-                    if paths.iter().any(|selected| child.path.starts_with(selected)) {
-                        continue;
-                    }
-                    if paths.iter().any(|selected| selected.starts_with(&child.path)) {
-                        ancestor_bodies.extend(child.bodies.into_iter().map(|b| b.world));
-                        stack.push(child.path);
-                    } else {
-                        hidden.push(child.path);
-                    }
-                }
-            }
-            let mut root_bodies: Vec<String> =
-                s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == 0).map(|b| b.name.clone()).collect();
-            root_bodies.extend(ancestor_bodies);
-            s.visibility.hidden_occurrences = hidden;
-            s.visibility.hidden_bodies = root_bodies;
-            s.revision += 1;
+            s.isolate_paths(&paths)?;
             return Ok(json!({"visible":true,"isolated":paths,"visibility":s.visibility}));
         }
         for path in &paths {
@@ -345,27 +319,16 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     for it in &items {
         match it {
             Shown::Sketch(id) => {
-                v.hidden_sketches.retain(|x| x != id);
-                v.shown_sketches.retain(|x| x != id);
-                if visible { v.shown_sketches.push(*id) } else { v.hidden_sketches.push(*id) }
+                v.set_sketch_shown(*id, visible);
             }
             Shown::Body(n) => {
-                v.hidden_bodies.retain(|x| x != n);
-                if !visible {
-                    v.hidden_bodies.push(n.clone());
-                }
+                v.set_body_hidden(n, !visible);
             }
             Shown::Origin(n) => {
-                v.hidden_origin.retain(|x| x != n);
-                if !visible {
-                    v.hidden_origin.push(n.clone());
-                }
+                v.set_origin_hidden(n, !visible);
             }
             Shown::Joint(id) => {
-                v.hidden_joints.retain(|x| x != id);
-                if !visible {
-                    v.hidden_joints.push(*id);
-                }
+                v.set_joint_hidden(*id, !visible);
             }
         }
     }
@@ -486,7 +449,7 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The orbit camera of a named view (Z up, no roll).
-fn camera_of(v: &solidcraft_doc::NamedView) -> crate::render::Camera {
+pub(super) fn camera_of(v: &solidcraft_doc::NamedView) -> crate::render::Camera {
     crate::render::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, ..Default::default() }
 }
 
@@ -675,9 +638,8 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, e));
     }
     d.rename_body_keys(&old, name);
-    for b in s.visibility.hidden_bodies.iter_mut().filter(|b| **b == old) {
-        *b = name.to_string();
-    }
+    s.visibility.rename_body(&old, name);
+    s.rename_body_in_layers(&old, name);
     Ok(json!({"body": old, "name": name}))
 }
 
