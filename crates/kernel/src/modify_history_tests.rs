@@ -301,6 +301,48 @@ fn offset_moves_a_face() {
 }
 
 #[test]
+fn offset_preserves_distant_freeform_geometry_and_history() {
+    use solidcraft_geom::Seg2;
+
+    let base = box_solid(Vec3::ZERO, Vec3::new(40.0, 20.0, 10.0)).unwrap();
+    let profile = Loop2 {
+        segs: vec![
+            Seg2::Line { a: Vec2::new(25.0, 5.0), b: Vec2::new(35.0, 5.0) },
+            Seg2::Cubic { p0: Vec2::new(35.0, 5.0), p1: Vec2::new(40.0, 20.0), p2: Vec2::new(20.0, 20.0), p3: Vec2::new(25.0, 5.0) },
+        ],
+    };
+    let boss = extrude(&Plane::XY.offset(10.0), &[Region2 { outer: profile, holes: vec![] }], 0.0, 5.0).unwrap().remove(0);
+    let b = boolean(&base, &boss, BoolOp::Union).unwrap().unwrap();
+    let freeform: Vec<_> = b.solid.face_iter().enumerate().filter(|(_, f)| crate::offset::surf_of(f, 1e-5).is_none()).collect();
+    assert!(!freeform.is_empty());
+    let moved = face_at(&b, Vec3::new(0.0, 10.0, 5.0));
+    let before = crate::measure(&b).unwrap();
+    for distance in [0.0, -1.0, 1.0] {
+        let r = crate::offset::offset_body(&b, |i, _| if i == moved { distance } else { 0.0 }).unwrap();
+        assert!(r.validity().is_empty(), "{:?}", r.validity());
+        assert_eq!((r.shell_count(), r.face_count(), r.edge_count()), (b.shell_count(), b.face_count(), b.edge_count()));
+        let m = crate::measure(&r).unwrap();
+        assert!((m.volume - before.volume - 200.0 * distance).abs() < 0.1, "{} vs {}", m.volume, before.volume);
+        assert!((m.bbox.min.x + distance).abs() < 1e-6);
+        let history = verified(&r, &b, Reach { made: 0.0, moved: distance.abs() * 1.1 });
+        for (i, original) in &freeform {
+            let kept = r.solid.face_iter().find(|f| f.id() == original.id()).unwrap();
+            assert_eq!(kept.orientation(), original.orientation());
+            assert_eq!(kept.edge_iter().map(|e| e.id()).collect::<Vec<_>>(), original.edge_iter().map(|e| e.id()).collect::<Vec<_>>());
+            assert_eq!(history.faces[*i].change, Change::Kept);
+            assert_eq!(history.faces[*i].origins, [face(*i)]);
+        }
+        assert!(history.edges.iter().all(|e| matches!(e.origins.as_slice(), [EdgeOrigin::Edge { .. }])));
+    }
+    // Moving the spline itself, or its planar cap, still needs a freeform offset/intersection.
+    let cap = face_at(&b, Vec3::new(30.0, 8.0, 15.0));
+    for moved in [freeform[0].0, cap] {
+        let err = crate::offset::offset_body(&b, |i, _| if i == moved { 1.0 } else { 0.0 }).unwrap_err();
+        assert!(err.to_string().contains("moved faces and their corner neighbours"), "{err}");
+    }
+}
+
+#[test]
 fn split_a_face() {
     let b = cube();
     let top = face_at(&b, Vec3::new(20.0, 15.0, 20.0));

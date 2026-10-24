@@ -440,8 +440,8 @@ fn split_corner(
     at: &[usize],
     faces: &[mt::Face],
     efaces: &HashMap<mt::EdgeID, Vec<usize>>,
-    old: &[Surf],
-    new: &[Surf],
+    old: &[Option<Surf>],
+    new: &[Option<Surf>],
     size: f64,
 ) -> Option<Vec<(Vec3, Vec<usize>)>> {
     if at.len() < 4 || at.len() > MAX_SPLIT_FACES {
@@ -452,7 +452,7 @@ fn split_corner(
     let planes: Vec<(usize, Vec3, f64, f64)> = at
         .iter()
         .map(|i| match (old.get(*i)?, new.get(*i)?) {
-            (Surf::Plane { n, d }, Surf::Plane { d: d2, .. }) => Some((*i, *n, *d, *d2)),
+            (Some(Surf::Plane { n, d }), Some(Surf::Plane { d: d2, .. })) => Some((*i, *n, *d, *d2)),
             _ => None,
         })
         .collect::<Option<_>>()?;
@@ -627,14 +627,14 @@ const MAX_CROSSING_EDGES: usize = 2000;
 /// edges turns round), if they do. Faces next to a collapsed round are left to the other checks.
 fn crossed_loops(
     faces: &[mt::Face],
-    old: &[Surf],
+    old: &[Option<Surf>],
     pos: &dyn Fn(&mt::Vertex, &mt::Edge) -> Option<Vec3>,
     edge_collapsed: &dyn Fn(&mt::Edge) -> bool,
     size: f64,
 ) -> Option<Vec3> {
     let eps = size * 1e-9;
     for (f, sf) in faces.iter().zip(old) {
-        let Surf::Plane { n, .. } = *sf else { continue };
+        let Some(Surf::Plane { n, .. }) = *sf else { continue };
         if f.edge_iter().any(|e| edge_collapsed(&e)) {
             continue;
         }
@@ -707,7 +707,8 @@ pub(crate) fn arc_mid(e: &mt::Edge, tol: f64) -> Option<Option<Vec3>> {
 }
 
 /// The body with each face moved along its outward normal by `shift(face index, normal at a
-/// face point)`, keeping the topology. Faces must be planes or cylinders. The result's history
+/// face point)`, keeping the topology. Moved faces and faces sharing their vertices must be
+/// analytic; other faces keep their geometry, including freeform surfaces. The result's history
 /// is over `[b]`: each face is the face it was moved from, each edge the edge it was moved from;
 /// faces moved to nothing are gone, and their neighbours meet along new edges.
 pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Result<Body> {
@@ -720,35 +721,45 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
     // Faces moved to nothing (a round thinner than the move): they go, their neighbours meet.
     let mut collapsed: Vec<bool> = Vec::with_capacity(faces.len());
     for (i, f) in faces.iter().enumerate() {
-        let sf = surf_of(f, tol * 100.0).ok_or_else(|| {
-            let at = samples(f).first().map(|(p, _)| format!(" (a face at [{:.2}, {:.2}, {:.2}])", p.x, p.y, p.z)).unwrap_or_default();
-            fail(&format!("only bodies with planes, cylinders, cones, spheres and tori{at}"))
-        })?;
+        let sf = surf_of(f, tol * 100.0);
         let n = match sf {
-            Surf::Plane { n, .. } => n,
-            Surf::Cylinder { a, .. } | Surf::Cone { a, .. } | Surf::Torus { a, .. } => a.any_perp(),
-            Surf::Sphere { .. } => Vec3::Z,
+            Some(Surf::Plane { n, .. }) => n,
+            Some(Surf::Cylinder { a, .. } | Surf::Cone { a, .. } | Surf::Torus { a, .. }) => a.any_perp(),
+            Some(Surf::Sphere { .. }) => Vec3::Z,
+            None => samples(f).first().map(|(_, n)| *n).unwrap_or(Vec3::Z),
         };
         let s = shift(i, n);
+        if !s.is_finite() {
+            return Err(fail("non-finite face shift"));
+        }
         old.push(sf);
-        match sf.moved(s) {
-            Some(x) => {
-                new.push(x);
+        match sf.map(|sf| sf.moved(s)) {
+            Some(Some(x)) => {
+                new.push(Some(x));
                 collapsed.push(false);
             }
-            None => {
+            Some(None) => {
                 new.push(sf);
                 collapsed.push(true);
+            }
+            None => {
+                new.push(None);
+                collapsed.push(false);
             }
         }
         shifts.push(s);
     }
-    let pick = |ids: &[usize]| -> (Vec<Surf>, Vec<f64>, Vec<Surf>) {
-        (
-            ids.iter().filter_map(|i| old.get(*i).copied()).collect(),
-            ids.iter().filter_map(|i| shifts.get(*i).copied()).collect(),
-            ids.iter().filter_map(|i| new.get(*i).copied()).collect(),
-        )
+    let pick = |ids: &[usize]| -> Result<(Vec<Surf>, Vec<f64>, Vec<Surf>)> {
+        let mut picked = (Vec::new(), Vec::new(), Vec::new());
+        for i in ids {
+            let (Some(Some(o)), Some(s), Some(Some(n))) = (old.get(*i), shifts.get(*i), new.get(*i)) else {
+                return Err(fail("faces meeting the move must be analytic"));
+            };
+            picked.0.push(*o);
+            picked.1.push(*s);
+            picked.2.push(*n);
+        }
+        Ok(picked)
     };
     // Vertex → its faces; edge → its faces.
     let mut vfaces: HashMap<mt::VertexID, Vec<usize>> = HashMap::new();
@@ -765,6 +776,15 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
             if !e.contains(&i) {
                 e.push(i);
             }
+        }
+    }
+    let shifted = |i: usize| shifts.get(i).is_some_and(|s| *s != 0.0);
+    let moves = |vid: &mt::VertexID| vfaces.get(vid).is_some_and(|fs| fs.iter().any(|i| shifted(*i)));
+    let touched: Vec<bool> = faces.iter().enumerate().map(|(i, f)| shifted(i) || f.vertex_iter().any(|v| moves(&v.id()))).collect();
+    for (i, f) in faces.iter().enumerate() {
+        if touched.get(i).copied().unwrap_or(false) && old.get(i).is_some_and(Option::is_none) {
+            let at = samples(f).first().map(|(p, _)| format!(" (a face at [{:.2}, {:.2}, {:.2}])", p.x, p.y, p.z)).unwrap_or_default();
+            return Err(fail(&format!("moved faces and their corner neighbours must be planes, cylinders, cones, spheres or tori{at}")));
         }
     }
     let is_collapsed = |i: usize| collapsed.get(i).copied().unwrap_or(false);
@@ -871,6 +891,10 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
     for v in b.solid.vertex_iter() {
         let at = vfaces.get(&v.id()).ok_or_else(|| fail("vertex"))?;
         let p = from_p3(v.point());
+        if !moves(&v.id()) {
+            newpos.insert(v.id(), p);
+            continue;
+        }
         let fs: Vec<usize> = if at.iter().any(|i| is_collapsed(*i)) {
             // On a collapsed round: its own faces, then the faces along the rounds it is on,
             // nearest first, until they fix a point.
@@ -878,7 +902,7 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
             let rank = |ids: &[usize]| -> usize {
                 let mut basis: Vec<Vec3> = Vec::new();
                 for i in ids {
-                    let Some(nv) = old.get(*i).and_then(|sf| sf.normal(p)) else { continue };
+                    let Some(nv) = old.get(*i).copied().flatten().and_then(|sf| sf.normal(p)) else { continue };
                     let mut w = nv;
                     for e in &basis {
                         w = w - *e * w.dot(*e);
@@ -899,7 +923,7 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
         } else {
             at.clone()
         };
-        let (o, s, n) = pick(&fs);
+        let (o, s, n) = pick(&fs)?;
         // A cone's apex goes with the cone (its normal is not defined there).
         let apex = o.iter().zip(&n).find_map(|(a, b)| match (a, b) {
             (Surf::Cone { v: va, .. }, Surf::Cone { v: vb, .. }) if va.dist(p) < size * 1e-6 => Some(*vb),
@@ -978,6 +1002,8 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
                         w
                     }
                 }
+            } else if !moves(&v.id()) {
+                v.clone()
             } else {
                 builder::vertex(p3(p))
             };
@@ -1001,6 +1027,15 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
         let mut merged: Vec<(mt::VertexID, mt::VertexID, Vec<Vec3>, mt::Edge)> = Vec::new();
         for e in b.solid.edge_iter() {
             if edges.contains_key(&e.id()) {
+                continue;
+            }
+            // Keep the original curve and topology when neither its surfaces nor its ends
+            // move. In particular, do not replace a distant spline with an interpolant.
+            if !moves(&e.absolute_front().id())
+                && !moves(&e.absolute_back().id())
+                && efaces.get(&e.id()).is_some_and(|fs| fs.iter().all(|i| !shifted(*i)))
+            {
+                edges.insert(e.id(), (e.absolute_clone(), false));
                 continue;
             }
             let (Some(a), Some(c)) = (vert_at(e.absolute_front(), &e), vert_at(e.absolute_back(), &e)) else { return Err(fail("edge")) };
@@ -1034,7 +1069,7 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
                 if meet.len() < 2 {
                     return Err(fail("an edge along a collapsed round with no face across it"));
                 }
-                let (o, s, n) = pick(&meet);
+                let (o, s, n) = pick(&meet)?;
                 let m = move_point(mid, &o, &s, &n, size * 1e-6).ok_or_else(|| fail("faces that don't meet along a collapsed round"))?;
                 let near = size * 1e-5;
                 let twin = merged.iter().find(|(x, y, pts, _)| {
@@ -1065,7 +1100,7 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
                 // faces, through a smooth curve.
                 use mt::{BoundedCurve, ParametricCurve};
                 let fs = efaces.get(&e.id()).ok_or_else(|| fail("edge faces"))?;
-                let (o, s, n) = pick(fs);
+                let (o, s, n) = pick(fs)?;
                 let cv = e.curve();
                 let (t0, t1) = cv.range_tuple();
                 let k = 16;
@@ -1087,7 +1122,7 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
                 None => builder::line(a, c),
                 Some(m) => {
                     let fs = efaces.get(&e.id()).ok_or_else(|| fail("edge faces"))?;
-                    let (o, s, n) = pick(fs);
+                    let (o, s, n) = pick(fs)?;
                     let m2 =
                         move_point(m, &o, &s, &n, size * 1e-6).ok_or_else(|| fail("an edge whose faces don't meet the same way after the move"))?;
                     // An arc turned round: its ends moved past its middle (next to a face it meets
@@ -1106,6 +1141,10 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
         let mut out = Vec::new();
         for (i, f) in faces.iter().enumerate() {
             if is_collapsed(i) {
+                continue;
+            }
+            if !touched.get(i).copied().unwrap_or(false) {
+                out.push(f.clone());
                 continue;
             }
             let mut wires: Vec<mt::Wire> = Vec::new();
@@ -1139,28 +1178,32 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
                 }
                 wires.push(wire.into());
             }
-            let (Some(o), Some(n)) = (old.get(i), new.get(i)) else { return Err(fail("face")) };
-            let surface = match (o.map_to(n), *o, *n) {
-                (Some(mat), _, _) => mt::Transformed::transformed(&f.surface(), mat),
-                // A torus: its tube's circle scaled about the tube's centre, revolved again.
-                (None, Surf::Torus { o: to, a, big, h, r, .. }, Surf::Torus { r: r2, .. }) => {
-                    use mt::{BoundedCurve, ParametricCurve};
-                    let mt::Surface::RevolutedCurve(rc) = f.surface() else { return Err(fail("torus surface")) };
-                    let curve = rc.entity().entity_curve().clone();
-                    let (t0, t1) = curve.range_tuple();
-                    let q = from_p3(curve.subs((t0 + t1) / 2.0));
-                    let c = tube_centre(to, a, big, h, q).ok_or_else(|| fail("torus"))?;
-                    let k = r2 / r;
-                    let t = c * (1.0 - k);
-                    let mat = mt::Matrix4::from_translation(mt::Vector3::new(t.x, t.y, t.z)) * mt::Matrix4::from_scale(k);
-                    let moved = mt::Transformed::transformed(&curve, mat);
-                    let mut p = mt::Processor::new(mt::RevolutedCurve::by_revolution(moved, rc.entity().origin(), rc.entity().axis()));
-                    if !rc.orientation() {
-                        mt::Invertible::invert(&mut p);
+            let (Some(Some(o)), Some(Some(n))) = (old.get(i), new.get(i)) else { return Err(fail("face")) };
+            let surface = if !shifted(i) {
+                f.surface()
+            } else {
+                match (o.map_to(n), *o, *n) {
+                    (Some(mat), _, _) => mt::Transformed::transformed(&f.surface(), mat),
+                    // A torus: its tube's circle scaled about the tube's centre, revolved again.
+                    (None, Surf::Torus { o: to, a, big, h, r, .. }, Surf::Torus { r: r2, .. }) => {
+                        use mt::{BoundedCurve, ParametricCurve};
+                        let mt::Surface::RevolutedCurve(rc) = f.surface() else { return Err(fail("torus surface")) };
+                        let curve = rc.entity().entity_curve().clone();
+                        let (t0, t1) = curve.range_tuple();
+                        let q = from_p3(curve.subs((t0 + t1) / 2.0));
+                        let c = tube_centre(to, a, big, h, q).ok_or_else(|| fail("torus"))?;
+                        let k = r2 / r;
+                        let t = c * (1.0 - k);
+                        let mat = mt::Matrix4::from_translation(mt::Vector3::new(t.x, t.y, t.z)) * mt::Matrix4::from_scale(k);
+                        let moved = mt::Transformed::transformed(&curve, mat);
+                        let mut p = mt::Processor::new(mt::RevolutedCurve::by_revolution(moved, rc.entity().origin(), rc.entity().axis()));
+                        if !rc.orientation() {
+                            mt::Invertible::invert(&mut p);
+                        }
+                        mt::Surface::RevolutedCurve(p)
                     }
-                    mt::Surface::RevolutedCurve(p)
+                    _ => return Err(fail("surface")),
                 }
-                _ => return Err(fail("surface")),
             };
             let mut nf = mt::Face::try_new(wires, surface).map_err(|e| fail(&e.to_string()))?;
             if !f.orientation() {

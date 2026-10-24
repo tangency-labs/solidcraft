@@ -187,6 +187,29 @@ fn volume(s: &mut Session) -> f64 {
 }
 
 #[test]
+fn offset_face_with_a_distant_spline_boss() {
+    // #745: the unshifted spline wall must not prevent moving the box's end.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner":[0,0,0],"length":40,"width":20,"height":10,"body_name":"B"}));
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,10],"x_dir":[1,0,0],"y_dir":[0,1,0]},"name":"S"}));
+    run(&mut s, "sketch.line", json!({"points":[[25,5],[35,5]]}));
+    run(&mut s, "sketch.spline.fit_point", json!({"points":[[35,5],[37,10],[30,15],[25,5]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"S","distance":5,"operation":"join","targets":["B"]}));
+    let before = volume(&mut s);
+    for distance in [-1.0, 1.0] {
+        let mut offset = s.scratch();
+        run(&mut offset, "solid.offset_face", json!({"faces":[[0,10,5]],"distance":format!("{distance} mm")}));
+        let state = offset.model.state();
+        let body = &state.body("B").unwrap().body;
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        let m = solidcraft_kernel::measure(body).unwrap();
+        assert!((m.bbox.min.x + distance).abs() < 1e-6, "{:?}", m.bbox);
+        assert!((m.volume - before - 20.0 * 10.0 * distance).abs() < 0.1, "{} vs {before}", m.volume);
+    }
+}
+
+#[test]
 fn separated_profile_cut_preserves_participants_and_removes_only_consumed_bodies() {
     for explicit in [false, true] {
         let mut s = Session::default();
