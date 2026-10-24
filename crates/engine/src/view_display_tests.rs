@@ -189,3 +189,84 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     let hidden = scene_with_sketch_sampler(&s, &cam, |_, _, _| panic!("hidden sketch sampled"));
     assert!(hidden.lines.iter().all(|line| !line.on_top));
 }
+
+#[test]
+fn colored_components_toggle_is_stable_and_does_not_change_the_design() {
+    let mut s = Session::default();
+    let first_id = s.doc_mut().add_component(Some("First"), 0).unwrap();
+    let second_id = s.doc_mut().add_component(Some("Second"), 0).unwrap();
+    let before = serde_json::to_value(&s.doc).unwrap();
+    assert_eq!(component_color(&s, first_id), None);
+    assert_eq!(s.execute("inspect.colored_components", &json!({})).unwrap()["enabled"], true);
+    s.colored_components = Some(());
+    let first = component_color(&s, first_id);
+    assert!(first.is_some());
+    assert_ne!(first, component_color(&s, second_id));
+    s.execute("inspect.colored_components", &json!({"enabled": true})).unwrap();
+    assert_eq!(component_color(&s, first_id), first);
+    assert!(s.execute("inspect.colored_components", &json!({"enabled": "yes"})).is_err());
+    assert_eq!(component_color(&s, first_id), first);
+    assert_eq!(s.execute("inspect.colored_components", &json!({})).unwrap()["enabled"], false);
+    assert_eq!(component_color(&s, first_id), None);
+    assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
+}
+
+#[test]
+fn colored_components_override_appearances_and_restore_them() {
+    let mut s = Session::default();
+    for (name, x) in [("Left", 0), ("Right", 20)] {
+        s.execute("component.activate", &json!({"component": 0})).unwrap();
+        s.execute("component.create", &json!({"name": name})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    s.selection.clear();
+    let cam = Camera::default();
+    let original = scene(&s, &cam);
+    s.execute("inspect.colored_components", &json!({"enabled": true})).unwrap();
+    s.colored_components = Some(());
+    let colored = scene(&s, &cam);
+    assert_eq!(colored.meshes.len(), 2);
+    assert_ne!(colored.meshes[0].color, colored.meshes[1].color);
+    for (body, mesh) in s.world_state().bodies.iter().zip(&colored.meshes) {
+        let [r, g, b] = component_color(&s, body.component).unwrap();
+        assert_eq!(mesh.color, Rgb(r, g, b));
+        assert!(mesh.face_colors.is_empty());
+    }
+    s.execute("inspect.colored_components", &json!({"enabled": false})).unwrap();
+    let restored = scene(&s, &cam);
+    for (a, b) in original.meshes.iter().zip(restored.meshes) {
+        assert_eq!(a.color, b.color);
+        assert_eq!(a.face_colors, b.face_colors);
+    }
+}
+
+#[test]
+fn cycling_component_color_is_saved_undoable_and_shared_by_instances() {
+    let mut s = Session::default();
+    let component = s.execute("component.create", &json!({"name":"Part"})).unwrap()["component"].as_u64().unwrap();
+    s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+    s.execute("occurrence.copy", &json!({"component":component,"translate":[20,0,0]})).unwrap();
+    let appearances = s.doc.appearances.clone();
+    s.execute("inspect.colored_components", &json!({"enabled":true})).unwrap();
+    let automatic = component_color(&s, component).unwrap();
+    s.execute("inspect.colored_components", &json!({"enabled":false})).unwrap();
+    s.execute("inspect.colored_components", &json!({"enabled":true})).unwrap();
+    assert_eq!(component_color(&s, component), Some(automatic));
+    let result = s.execute("component.cycle_color", &json!({"component":component})).unwrap();
+    let custom = component_color(&s, component).unwrap();
+    assert_ne!(custom, automatic);
+    assert_eq!(result["color"], json!(custom));
+    assert_eq!(s.doc.appearances, appearances);
+    let loaded = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(loaded.doc.component_identification_color(component), custom);
+    let copies: Vec<_> = s.world_state().bodies.iter().map(|b| b.component).collect();
+    assert_eq!(copies, [component, component]);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(component_color(&s, component), Some(automatic));
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(component_color(&s, component), Some(custom));
+    s.execute("component.paste_new", &json!({"component":component,"translate":[40,0,0]})).unwrap();
+    assert!(s.doc.components.iter().filter(|c| c.identification_color == Some(custom)).count() >= 2);
+    assert!(s.execute("component.cycle_color", &json!({"component":"missing"})).is_err());
+    assert!(s.execute("component.cycle_color", &json!({"component":0})).is_err());
+}

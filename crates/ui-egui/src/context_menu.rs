@@ -825,6 +825,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
             .with(if id == 0 { json!({ "bodies": names }) } else { json!({"component": id}) })
             .on(id != 0 || !bodies.is_empty()),
     );
+    if id != 0 {
+        v.push(cmd(app, "component.cycle_color", "Cycle Component Color").with(json!({"component": id})));
+    }
     v.push(act("ui.properties", "Properties", "measure").with(json!({ "component": id })));
     if doc.links.contains_key(&id) {
         v.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));

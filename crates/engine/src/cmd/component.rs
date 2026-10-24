@@ -26,6 +26,9 @@ mod transfer;
 mod occurrence_tests;
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("component.cycle_color", "Cycle Component Color", cycle_color)
+        .icon("colored_components").doc_only()
+        .params("component: id or name; saves the next identification colour and enables Component Colors; shared by every instance, separate from appearances"),
     CommandSpec::new("component.create", "New Component", new_component)
         .at("SOLID", "ASSEMBLE")
         .icon("component")
@@ -556,4 +559,14 @@ pub fn to_active_frame(s: &Session, kind: &mut FeatureKind) {
     if let Some(inv) = solidcraft_doc::mat_inverse(&m) {
         kind.transform_geometry(&inv);
     }
+}
+
+fn cycle_color(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.cycle_color";
+    let id = component(s, p, "component", cmd)?;
+    let next = solidcraft_doc::component_color::next_color(s.doc.component_identification_color(id));
+    let c = s.doc_mut().components.iter_mut().find(|c| c.id == id).ok_or_else(|| bad(cmd, "choose a component below the design root"))?;
+    c.identification_color = Some(next);
+    s.colored_components = Some(());
+    Ok(json!({"component": id, "color": next}))
 }

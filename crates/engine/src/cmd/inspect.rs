@@ -8,6 +8,9 @@ use crate::params::{bad, bool_, str_, string_list};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("inspect.colored_components", "Enable Component Colors", colored_components)
+        .at("SOLID", "INSPECT").icon("colored_components").noundo()
+        .params("enabled?: bool (omitted: toggle); temporary component colours, without changing appearances"),
     CommandSpec::new("inspect.measure", "Measure", measure)
         .at("SOLID", "INSPECT")
         .icon("measure")
@@ -703,4 +706,17 @@ fn material_list(s: &mut Session, _p: &Value) -> Result<Value> {
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(json!({"materials": built_in.chain(user).collect::<Vec<_>>()}))
+}
+
+fn colored_components(s: &mut Session, p: &Value) -> Result<Value> {
+    if p.get("enabled").is_some_and(|v| !v.is_boolean()) {
+        return Err(bad("inspect.colored_components", "enabled must be a boolean"));
+    }
+    let enabled = bool_(p, "enabled").unwrap_or(s.colored_components.is_none());
+    if enabled && s.colored_components.is_none() {
+        s.colored_components = Some(());
+    } else if !enabled {
+        s.colored_components = None;
+    }
+    Ok(json!({"enabled": enabled}))
 }

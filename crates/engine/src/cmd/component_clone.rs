@@ -257,6 +257,7 @@ pub(super) fn paste(
         if let Some(added) = scratch.doc_mut().components.iter_mut().find(|x| x.id == new) {
             added.metadata = c.metadata.clone();
             added.properties = c.properties.clone();
+            added.identification_color = c.identification_color;
         }
         components.insert(*old, new);
         if *old != component {

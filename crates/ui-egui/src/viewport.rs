@@ -320,6 +320,7 @@ pub fn view_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
 fn scene_key(app: &SolveApp) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     app.session.revision.hash(&mut h);
+    app.session.colored_components.hash(&mut h);
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     app.ui.show_grid.hash(&mut h);
     app.ui.visual_style.hash(&mut h);
@@ -858,12 +859,15 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     let mut instances = Instances::new(app, &shown, shaded);
     for b in shown {
         let faded = body_faded(app, b, &active_bodies);
-        let base = body_color(&s.doc, b).unwrap_or(tk.body);
+        let base = solidcraft_engine::view::component_color(s, b.component)
+            .map(|[r, g, b]| Color32::from_rgb(r, g, b))
+            .or_else(|| body_color(&s.doc, b))
+            .unwrap_or(tk.body);
         let col = if faded { c4(base.gamma_multiply(0.35)) } else { c4(base) };
         // Appearances: the body's opacity, and faces with looks of their own.
         let opacity = s.doc.model_body_opacity(b);
         let face_looks: std::collections::HashMap<usize, solidcraft_engine::doc::appearance::Look> =
-            if shaded { s.doc.face_colors(b).into_iter().collect() } else { Default::default() };
+            if shaded && s.colored_components.is_none() { s.doc.face_colors(b).into_iter().collect() } else { Default::default() };
         let opaque = !faded && opacity >= 0.999 && face_looks.values().all(|l| l.opacity >= 0.999);
         let planned = drawn_plan(app, b, opaque);
         let on_gpu = planned.is_some();
