@@ -19,7 +19,12 @@
   hides an item, a component's radio button makes it the active component, and right-clicking any
   row gives that item's menu. Right-click the design or a component and choose **Expand All** or
   **Collapse All** to open or close every folder under that row (the design row stays visible
-  when the whole tree is collapsed). Rows drag into groups and other components.
+  when the whole tree is collapsed). Rows drag into groups and other components. **Preferences ›
+  Interface › Bodies folders** sets when a component's bodies sit in a Bodies folder of their own:
+  **Several bodies only** (the default) lists a component's body straight under it when it has
+  only one and no groups, **Never** lists every component's bodies and groups straight under it
+  (the folder's menu items are then on the component's menu), and **Always** keeps the folder.
+  The design's own Bodies folder, and a folder hidden with its eye, always stay.
 - **Viewport.** Click to select, Shift or Ctrl to add (Preferences › Selection), drag for a window or crossing box. While sketching, Ctrl/Cmd or Alt/Option suppress auto-snap by default; Shift prefers a midpoint; the pointer also snaps to where two curves cross. To
   reach something under something else (two lines drawn on top of each other, coincident points,
   an edge in front of a face, overlapping bodies), hold the left button still for half a second

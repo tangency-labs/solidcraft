@@ -1,0 +1,32 @@
+{
+  "en": {
+    "prefs.bodies_folders": "Bodies folders",
+    "prefs.bodies_folders_always": "Always",
+    "prefs.bodies_folders_never": "Never",
+    "prefs.bodies_folders_several": "Several bodies only"
+  },
+  "de": {
+    "prefs.bodies_folders": "Körperordner",
+    "prefs.bodies_folders_always": "Immer",
+    "prefs.bodies_folders_never": "Nie",
+    "prefs.bodies_folders_several": "Nur bei mehreren Körpern"
+  },
+  "ja": {
+    "prefs.bodies_folders": "ボディフォルダー",
+    "prefs.bodies_folders_always": "常に表示",
+    "prefs.bodies_folders_never": "表示しない",
+    "prefs.bodies_folders_several": "複数ボディのみ"
+  },
+  "ko": {
+    "prefs.bodies_folders": "바디 폴더",
+    "prefs.bodies_folders_always": "항상 표시",
+    "prefs.bodies_folders_never": "표시 안 함",
+    "prefs.bodies_folders_several": "바디가 여러 개일 때만"
+  },
+  "zh": {
+    "prefs.bodies_folders": "实体文件夹",
+    "prefs.bodies_folders_always": "始终显示",
+    "prefs.bodies_folders_never": "不显示",
+    "prefs.bodies_folders_several": "仅限多个实体"
+  }
+}

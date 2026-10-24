@@ -360,6 +360,26 @@ pub fn folder_items(app: &SolveApp, component: u64, folder: &str, scope: &str) -
     v
 }
 
+/// A component's or placement's menu, while its Bodies folder is folded away (#4217), takes the
+/// folder's items it lacks: Create Components from Bodies and Group Selected (New Group and Show
+/// All are on every component's menu).
+pub fn folded_folder_items(app: &SolveApp, target: &Target) -> Vec<Item> {
+    let (comp, scope) = match target {
+        Target::Component { id } => (*id, format!("c{id}")),
+        Target::Occurrence { path } => match app.session.occurrence_placement(path) {
+            Ok(placement) => (placement.component, occurrence_key(path)),
+            Err(_) => return Vec::new(),
+        },
+        _ => return Vec::new(),
+    };
+    if !bodies_folded(app, comp, &scope, entries(app, comp, "bodies").len()) {
+        return Vec::new();
+    }
+    let items =
+        folder_items(app, comp, "bodies", &scope).into_iter().filter(|i| matches!(i.id.as_str(), "component.from_bodies" | "ui.groupSelected"));
+    std::iter::once(Item::sep()).chain(items).collect()
+}
+
 /// The menu of the Origin folder.
 pub fn origin_items(app: &SolveApp) -> Vec<Item> {
     let planes = ["XY", "XZ", "YZ"].iter().all(|p| !app.session.visibility.hidden_origin.iter().any(|h| h == p));
@@ -2275,6 +2295,22 @@ fn folder_static(folder: &str) -> &'static str {
     }
 }
 
+/// Whether a component's Bodies folder is folded away, its bodies (and groups) listed straight
+/// under the component or placement row (Preferences › Interface › Bodies folders, #4217).
+/// `scope` is that row's tree key (`c{id}`, `o:{path}`) and `bodies` how many items the folder
+/// holds. The design's own folder always stays, and so does a hidden one: its eye is the way back.
+fn bodies_folded(app: &SolveApp, comp: u64, scope: &str, bodies: usize) -> bool {
+    use crate::prefs::BodiesFolders;
+    if comp == 0 || bodies == 0 || app.session.folder_hidden(&format!("{scope}/bodies")) {
+        return false;
+    }
+    match app.preferences.browser_bodies_folders {
+        BodiesFolders::Always => false,
+        BodiesFolders::Several => bodies == 1 && !app.session.doc.browser_groups.iter().any(|g| g.component == comp && g.folder == "bodies"),
+        BodiesFolders::Never => true,
+    }
+}
+
 /// A component's folder: its row, its groups and its items. Rows are drag sources; items,
 /// groups and the folder row are drop targets (reorder, into a group, out of groups).
 #[allow(clippy::too_many_arguments)]
@@ -2304,26 +2340,34 @@ fn folder_rows_at(
             app.tree.collapsed.remove(&format!("g{}", g.id));
         }
     }
-    let open = is_open(app, key, true);
+    // A folded folder draws no row: its groups and items move up into its place, and their own
+    // eyes, hover and drops do its jobs. It is always open, as nothing could open it again.
+    let folded = folder == "bodies" && bodies_folded(app, comp, prefix, data.entries().count());
+    let open = folded || is_open(app, key, true);
+    let inner = if folded { depth } else { depth + 1 };
     // The folder's eye is its own: hiding it hides its items without changing theirs, and its
     // items never change it. It and everything in it fade while it or a placement above is
     // hidden, whatever their own eyes say.
     let shown = !app.session.folder_hidden(key);
     let folder_faded = !shown || path.is_some_and(|p| !app.session.occurrence_visible(p));
-    let r = draw_row(
-        ui,
-        ui.id().with(key),
-        &Row {
-            depth,
-            fold: Some(open),
-            eye: Some(shown),
-            icon: "folder",
-            label: folder_label(folder),
-            dim: folder_faded,
-            mark: acts.lit.branch(app, data.entries()),
-            ..Default::default()
-        },
-    );
+    let r = if folded {
+        RowResp::default()
+    } else {
+        draw_row(
+            ui,
+            ui.id().with(key),
+            &Row {
+                depth,
+                fold: Some(open),
+                eye: Some(shown),
+                icon: "folder",
+                label: folder_label(folder),
+                dim: folder_faded,
+                mark: acts.lit.branch(app, data.entries()),
+                ..Default::default()
+            },
+        )
+    };
     if r.fold {
         toggle(app, key, true);
     } else if r.clicked {
@@ -2368,7 +2412,7 @@ fn folder_rows_at(
             ui,
             ui.id().with(gkey),
             &Row {
-                depth: depth + 1,
+                depth: inner,
                 fold: Some(gopen),
                 eye: Some(gshown),
                 icon: "folder",
@@ -2403,12 +2447,12 @@ fn folder_rows_at(
         }
         if gopen {
             for e in items {
-                entry_row(app, ui, comp, path, fstatic, e, depth + 2, Some(id), loose_keys, group_faded, acts);
+                entry_row(app, ui, comp, path, fstatic, e, inner + 1, Some(id), loose_keys, group_faded, acts);
             }
         }
     }
     for e in &data.loose {
-        entry_row(app, ui, comp, path, fstatic, e, depth + 1, None, loose_keys, folder_faded, acts);
+        entry_row(app, ui, comp, path, fstatic, e, inner, None, loose_keys, folder_faded, acts);
     }
 }
 
