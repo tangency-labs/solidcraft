@@ -1021,12 +1021,25 @@ impl ModelState {
             }
         });
     }
-    /// [`ModelState::warm_meshes`], and every body's display plan at the current display quality
-    /// (what a GPU viewport draws).
+
+    /// Prepare reference meshes and display plans at the current quality for ahead jobs.
     pub fn warm_display(&self) {
-        kernel::for_each_on_threads(&self.bodies, 16, |b| {
-            let _ = b.mesh();
-            let _ = b.display_plan();
+        kernel::for_each_on_threads(&self.bodies, 16, |body| {
+            let _ = body.mesh();
+            let _ = body.display_plan();
+        });
+    }
+
+    /// Prepare reference picking geometry and the GPU plan/highlight mesh at exactly the
+    /// requested quality. The first viewport frame then consumes initialized caches only.
+    pub fn warm_display_at(&self, quality: crate::display_quality::DisplayQuality, go_on: impl Fn() -> bool + Sync) {
+        kernel::for_each_on_threads(&self.bodies, 16, |body| {
+            if go_on() {
+                let _ = body.mesh();
+            }
+            if go_on() {
+                let _ = body.plan_mesh_at(quality);
+            }
         });
     }
     pub fn sketch(&self, feature: u64) -> Option<&SolvedSketch> {
@@ -7485,6 +7498,51 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
     }
     *placed_before = placed_now;
     out
+}
+
+#[cfg(test)]
+mod display_preparation_tests {
+    use super::*;
+
+    fn state() -> ModelState {
+        let body = kernel::box_solid(Vec3::ZERO, Vec3::new(2.0, 3.0, 4.0)).unwrap();
+        ModelState { bodies: vec![ModelBody::new("Box".into(), body, 1)], ..Default::default() }
+    }
+
+    #[test]
+    fn prepared_display_reads_all_three_caches_without_cold_geometry_or_quality_changes() {
+        use crate::display_quality::{DisplayQuality, current};
+        let state = state();
+        let body = &state.bodies[0];
+        let quality = DisplayQuality::Fine;
+        let index = quality.index();
+        let current = current();
+        let tolerance = body.display_tol();
+        assert!(body.mesh.get().is_none() && body.plan[index].get().is_none() && body.plan_mesh[index].get().is_none());
+        state.warm_display_at(quality, || true);
+        // Inspect the caches before invoking any consumer that could initialize them.
+        let reference = body.mesh.get().unwrap();
+        let plan = body.plan[index].get().unwrap().as_ref().unwrap();
+        let display = body.plan_mesh[index].get().unwrap().as_ref().unwrap();
+        assert!(Arc::ptr_eq(reference, &body.mesh()));
+        assert!(Arc::ptr_eq(plan, &body.display_plan_at(quality).unwrap()));
+        assert!(Arc::ptr_eq(display, &body.plan_mesh_at(quality).unwrap()));
+        assert_eq!(crate::display_quality::current(), current);
+        assert_eq!(body.display_tol(), tolerance);
+        for other in DisplayQuality::ALL.into_iter().filter(|other| *other != quality) {
+            assert!(body.plan[other.index()].get().is_none() && body.plan_mesh[other.index()].get().is_none());
+        }
+    }
+
+    #[test]
+    fn cancelled_display_preparation_leaves_cold_caches_untouched() {
+        let state = state();
+        state.warm_display_at(crate::display_quality::DisplayQuality::Normal, || false);
+        let body = &state.bodies[0];
+        assert!(body.mesh.get().is_none());
+        assert!(body.plan.iter().all(|slot| slot.get().is_none()));
+        assert!(body.plan_mesh.iter().all(|slot| slot.get().is_none()));
+    }
 }
 
 #[cfg(test)]

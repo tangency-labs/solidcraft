@@ -192,14 +192,16 @@ fn apply_keeps_the_panel_open_after_asynchronous_evaluation() {
     let mut h = fixture();
     let mut d = picked(&h, "sketch.pattern.rectangular");
     let cmds = apply_commands(&h.app, &d).unwrap();
+    let prepared = h.app.session.scratch().compute_commands(&cmds, None).unwrap();
     d.repeat_after_apply = true;
     h.app.dialog = Some(d);
     let (finish, done) = std::sync::mpsc::channel();
-    h.app.applying = Some(Applying::computing(done, cmds));
+    h.app.applying =
+        Some(Applying { done, ready: None, started: crate::now_ms(), cmds, seen: true, progress: Default::default(), quality: Default::default() });
     let undo = h.app.session.undo.len();
     h.frames(2);
     assert_eq!(h.app.session.undo.len(), undo);
-    finish.send(None).unwrap();
+    finish.send(Ok(prepared)).ok().unwrap();
     h.frames(3);
     assert!(h.app.applying.is_none());
     let d = h.app.dialog.as_ref().unwrap();

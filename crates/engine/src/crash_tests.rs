@@ -46,6 +46,53 @@ fn child() {
         s.execute("document.inspect", &json!({})).unwrap();
     }
     match mode.as_str() {
+        "prepared" => {
+            let original = s.scratch();
+            s.execute("timeline.roll_to", &json!({"position":0})).unwrap();
+            let source = s.scratch();
+            let state = STATE.get().unwrap();
+            let journal_before_error = read_live_journal(state).replay;
+            let invalid = vec![(
+                "timeline.redefine".into(),
+                json!({"feature":1,"command":"solid.box","params":{"length":"missing_extent","width":20,"height":30}}),
+            )];
+            assert!(s.scratch().compute_editor_commands(&invalid, &source, original.scratch()).is_err());
+            assert_eq!(read_live_journal(state).replay, journal_before_error, "failed worker work never enters recovery");
+            let evaluations = s.evaluations;
+            s.restore_editor(&source, original).unwrap();
+            assert_eq!(s.evaluations, evaluations, "Cancel restores without evaluating");
+            assert_eq!(s.doc.marker, None);
+            let original = s.scratch();
+            s.execute("timeline.roll_to", &json!({"position":0})).unwrap();
+            let source = s.scratch();
+            let commands =
+                vec![("timeline.redefine".into(), json!({"feature":1,"command":"solid.box","params":{"length":12,"width":20,"height":30}}))];
+            let before = read_live_journal(state).replay;
+            let discarded = s.scratch().compute_editor_commands(&commands, &source, original.scratch()).unwrap();
+            drop(discarded);
+            assert_eq!(read_live_journal(state).replay, before, "discarded work never enters recovery");
+            let prepared = s.scratch().compute_editor_commands(&commands, &source, original).unwrap();
+            s.accept_commands(prepared).unwrap();
+            let journal = read_live_journal(state);
+            assert_eq!(journal.base, json!("new"), "accepted steps form one continuous replay");
+            assert_eq!(journal.replay.len(), before.len() + 2, "restore marker and redefine are recorded once");
+            let mut replay = Session::default();
+            for command in &journal.replay {
+                replay.execute(command["command"].as_str().unwrap(), &command["params"]).unwrap();
+            }
+            assert_eq!(replay.doc.marker, None);
+            let volume = replay.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+            assert!((volume - 7200.0).abs() < 0.001);
+            let path = state.dir.join("prepared-source.solidcraft");
+            s.execute("file.save_as", &json!({"path":path})).unwrap();
+            // A host can adopt an opened tab before any command has rebased its journal.
+            state.journal.lock().unwrap().last_doc = 0;
+            let commands = vec![("solid.box".into(), json!({"length":1,"width":1,"height":1}))];
+            let prepared = s.scratch().compute_commands(&commands, None).unwrap();
+            s.accept_commands(prepared).unwrap();
+            assert_eq!(read_live_journal(state).base, json!({"file":path}));
+            println!("PREPARED_JOURNAL_OK");
+        }
         "render" => {
             s.execute("render.settings.set", &json!({"name":"Studio","set":{"exposure_ev":2}})).unwrap();
             s.execute("render.settings.get", &json!({"name":"Studio"})).unwrap();
@@ -100,6 +147,14 @@ fn run_child(dir: &Path, mode: &str) -> (String, bool) {
         .output()
         .unwrap();
     (String::from_utf8_lossy(&out.stdout).into_owned(), out.status.success())
+}
+
+#[test]
+fn accepted_prepared_commands_replay_and_discarded_work_is_not_journaled() {
+    let directory = fresh_dir("prepared");
+    let (output, ok) = run_child(&directory, "prepared");
+    assert!(ok && output.contains("PREPARED_JOURNAL_OK"), "{output}");
+    let _ = fs::remove_dir_all(directory);
 }
 
 fn only_report(dir: &Path) -> (Summary, Value) {

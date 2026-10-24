@@ -246,6 +246,41 @@ impl WorldCache {
     }
 }
 
+/// Commands evaluated in isolation, ready for an atomic handoff to their source session.
+pub struct ComputedCommands {
+    source: Session,
+    computed: Session,
+    steps: Vec<ComputedCommand>,
+}
+
+struct ComputedCommand {
+    id: String,
+    params: Value,
+    before: Arc<Document>,
+    after: Arc<Document>,
+    changed: bool,
+    reply: Value,
+}
+
+impl ComputedCommands {
+    /// Whether the source design and authoring context still match this result.
+    pub fn is_current(&self, session: &Session) -> bool {
+        let source = &self.source;
+        session.same_document_context(source) && session.selection == source.selection
+    }
+
+    /// Prepare display tessellation before returning the transaction to the window.
+    pub fn warm_meshes(&self, keep_going: impl Fn() -> bool + Sync) {
+        self.warm_display(solidcraft_doc::display_quality::DisplayQuality::Normal, keep_going);
+    }
+
+    /// Prepare both the reference picking mesh and the GPU plan/highlight mesh at the
+    /// selected quality. Warming only the reference mesh leaves cold planning on the UI.
+    pub fn warm_display(&self, quality: solidcraft_doc::display_quality::DisplayQuality, keep_going: impl Fn() -> bool + Sync) {
+        self.computed.world_state().warm_display_at(quality, keep_going);
+    }
+}
+
 /// An editing session on one design.
 pub struct Session {
     pub doc: Arc<Document>,
@@ -1072,6 +1107,112 @@ impl Session {
         }
     }
 
+    /// Evaluate a feature dialog's complete transaction, including the dependent timeline.
+    /// `marker` restores an editor's original marker before recording its undo snapshot.
+    /// The source remains untouched, including its history and recovery journal.
+    pub fn compute_commands(self, commands: &[(String, Value)], marker: Option<Option<usize>>) -> Result<ComputedCommands> {
+        self.compute_commands_inner(commands, marker, None)
+    }
+
+    /// Start an edit from its pinned original model, so restoring the original marker cannot
+    /// recompute the obsolete suffix even when previews have evicted its evaluation cache.
+    pub fn compute_editor_commands(self, commands: &[(String, Value)], source: &Session, original: Session) -> Result<ComputedCommands> {
+        if !self.same_document_context(source) {
+            return Err(EngineError::Other("the design changed while the feature editor was open".into()));
+        }
+        let mut expected = (*original.doc).clone();
+        expected.marker = source.doc.marker;
+        if expected != *source.doc {
+            return Err(EngineError::Other("the original editor model does not match its source design".into()));
+        }
+        self.compute_commands_inner(commands, Some(original.doc.marker), Some(original))
+    }
+
+    fn compute_commands_inner(
+        self,
+        commands: &[(String, Value)],
+        marker: Option<Option<usize>>,
+        original: Option<Session>,
+    ) -> Result<ComputedCommands> {
+        let mut computed = self.scratch();
+        let mut steps = Vec::new();
+        if let Some(marker) = marker {
+            let before = computed.doc.clone();
+            let params = marker.map(|position| serde_json::json!({"position":position})).unwrap_or_else(|| serde_json::json!({}));
+            let reply = if let Some(original) = original {
+                computed.doc = original.doc;
+                computed.model = original.model;
+                computed.world_cache = original.world_cache;
+                serde_json::json!({"marker":marker.unwrap_or(computed.doc.features.len()),"features":computed.doc.features.len()})
+            } else {
+                let undo = std::mem::take(&mut computed.undo);
+                let redo = std::mem::take(&mut computed.redo);
+                let selection = computed.selection.clone();
+                let reply = computed.execute("timeline.roll_to", &params)?;
+                computed.undo = undo;
+                computed.redo = redo;
+                computed.selection = selection;
+                reply
+            };
+            let changed = !Arc::ptr_eq(&before, &computed.doc);
+            steps.push(ComputedCommand { id: "timeline.roll_to".into(), params, before, after: computed.doc.clone(), changed, reply });
+        }
+        for (id, params) in commands {
+            let before = computed.doc.clone();
+            let active_sketch = computed.active_sketch;
+            let pending_moves = computed.pending_moves.clone();
+            let reply = computed.execute(id, params)?;
+            let changed = !Arc::ptr_eq(&before, &computed.doc)
+                || active_sketch != computed.active_sketch
+                || pending_moves != computed.pending_moves
+                || id.starts_with("select.");
+            steps.push(ComputedCommand { id: id.clone(), params: params.clone(), before, after: computed.doc.clone(), changed, reply });
+        }
+        Ok(ComputedCommands { source: self, computed, steps })
+    }
+
+    /// Adopt evaluated commands only if their document and authoring context are still current.
+    /// No model evaluation occurs here. Rejected or cancelled work never enters the journal.
+    pub fn accept_commands(&mut self, prepared: ComputedCommands) -> Result<Vec<(String, Value)>> {
+        if !prepared.is_current(self) {
+            return Err(EngineError::Other("the design changed while the feature was computing".into()));
+        }
+        for step in &prepared.steps {
+            crash::accepted_command(self, &step.before, &step.after, &step.id, &step.params, step.changed);
+        }
+        let replies = prepared.steps.into_iter().map(|step| (step.id, step.reply)).collect();
+        self.accept_computed(prepared.computed);
+        Ok(replies)
+    }
+
+    fn same_document_context(&self, source: &Session) -> bool {
+        Arc::ptr_eq(&self.doc, &source.doc)
+            && self.revision == source.revision
+            && self.active_sketch == source.active_sketch
+            && self.active_component == source.active_component
+            && self.active_occurrence_path == source.active_occurrence_path
+            && self.pending_moves == source.pending_moves
+    }
+
+    /// Cancel an unchanged feature editor by restoring its original evaluated model, even
+    /// after preview work has evicted the old suffix from the shared evaluation cache.
+    pub fn restore_editor(&mut self, source: &Session, mut original: Session) -> Result<()> {
+        if !self.same_document_context(source) {
+            return Err(EngineError::Other("the design changed while the feature editor was open; its current timeline was preserved".into()));
+        }
+        let params = original.doc.marker.map(|position| serde_json::json!({"position":position})).unwrap_or_else(|| serde_json::json!({}));
+        crash::accepted_command(self, &self.doc, &original.doc, "timeline.roll_to", &params, !Arc::ptr_eq(&self.doc, &original.doc));
+        let undo = std::mem::take(&mut self.undo);
+        let redo = std::mem::take(&mut self.redo);
+        let selection = std::mem::take(&mut self.selection);
+        original.visibility.hidden_joints.clear();
+        self.accept_computed(original);
+        self.undo = undo;
+        self.redo = redo;
+        self.selection = selection;
+        Ok(())
+    }
+
     /// Refresh UI caches when adopting a session or switching tabs, without discarding its
     /// already prepared world-space geometry. This does not change the document.
     pub fn invalidate_view(&mut self, previous_revision: u64) {
@@ -1248,6 +1389,8 @@ impl Session {
 
 #[cfg(test)]
 mod boolean_regression_tests;
+#[cfg(test)]
+mod computed_commands_tests;
 #[cfg(test)]
 mod construct_tests;
 #[cfg(test)]

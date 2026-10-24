@@ -494,18 +494,45 @@ pub(crate) fn command_begin(s: &Session, id: &str, params: &Value) {
     let ptr = std::sync::Arc::as_ptr(&s.doc) as usize;
     if ptr != j.last_doc {
         // The design changed outside commands (opened, a new tab, a dialog): what is it now?
-        let base = if s.is_dirty() {
-            json!("unknown")
-        } else if let Some(p) = &s.path {
-            json!({ "file": p })
-        } else if s.doc.features.is_empty() {
-            json!("new")
-        } else {
-            json!("unknown")
-        };
+        j.rebase(&journal_base(s), ptr);
+    }
+    j.run(id, params);
+}
+
+fn journal_base(s: &Session) -> Value {
+    if s.is_dirty() {
+        json!("unknown")
+    } else if let Some(path) = &s.path {
+        json!({ "file": path })
+    } else if s.doc.features.is_empty() {
+        json!("new")
+    } else {
+        json!("unknown")
+    }
+}
+
+/// Record a successful isolated command only after its entire transaction is accepted.
+pub(crate) fn accepted_command(
+    s: &Session,
+    before: &std::sync::Arc<Document>,
+    after: &std::sync::Arc<Document>,
+    id: &str,
+    params: &Value,
+    changed: bool,
+) {
+    let Some(state) = STATE.get() else { return };
+    if !s.crash_journal {
+        return;
+    }
+    let Ok(mut j) = state.journal.lock() else { return };
+    let ptr = std::sync::Arc::as_ptr(before) as usize;
+    if ptr != j.last_doc {
+        let base = if std::sync::Arc::ptr_eq(&s.doc, before) { journal_base(s) } else { json!("unknown") };
         j.rebase(&base, ptr);
     }
     j.run(id, params);
+    j.done(&Ok(()), changed);
+    j.last_doc = std::sync::Arc::as_ptr(after) as usize;
 }
 
 /// A top-level command ended: the journal records how, and panics caught inside it are reported
