@@ -45,6 +45,10 @@ the existing camera model. Both existing camera up axes are retained. Setup name
 are trimmed, nonempty, at most 128 UTF-8 bytes, without control characters. A document
 has at most 32 setups. Validation also runs during document deserialization.
 
+The CPU product-image executor (`render.preflight` / `render.start`) doesn't apply exposure or
+the environment controls yet. A setup that sets them still renders there; the reply's
+`ignored_controls` lists the ones that render leaves out (for example `["exposure_ev"]`).
+
 ## Persistence and evaluation
 
 Document format 21 adds `render: {setups: {name: setup}}`. Format-20 and older designs migrate with

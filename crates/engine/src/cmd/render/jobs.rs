@@ -36,9 +36,10 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<(Start, solidcr
         settings
     };
     settings.validate().map_err(|e| bad(command, e.to_string()))?;
-    if settings.exposure_ev != 0.0 || settings.environment_rotation != 0.0 || settings.environment_intensity != 1.0 {
-        return Err(bad(command, "exposure and environment controls are not supported by the R4a CPU image executor"));
-    }
+    // The CPU image executor has no exposure or environment controls yet. A setup saved with them
+    // (the render workspace and other backends use them) still renders here, and the reply says
+    // which of them this render leaves out (#5089).
+    let ignored = ignored_controls(&settings);
     let host = s.render_job_host().ok_or_else(|| bad(command, "no image host is installed"))?;
     if !host.is_available() {
         return Err(bad(command, "image host is unavailable"));
@@ -68,8 +69,23 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<(Start, solidcr
         transparent_background: input.transparent_background,
     };
     let admission = solidcraft_render::job::admit(&scene, &request).map_err(job_error)?;
-    let reply = json!({"resolved":resolved,"admission":admission,"request":request,"scene_generation":s.revision,"host":host.kind(),"transparency":"sorted_alpha_approximation","refraction":false});
+    let reply = json!({"resolved":resolved,"admission":admission,"request":request,"scene_generation":s.revision,"host":host.kind(),"transparency":"sorted_alpha_approximation","refraction":false,"ignored_controls":ignored});
     Ok((input, scene, request, reply))
+}
+
+/// The setup's controls the CPU image executor doesn't apply: those not at their neutral value.
+fn ignored_controls(settings: &RenderSetup) -> Vec<&'static str> {
+    let mut ignored = Vec::new();
+    if settings.exposure_ev != 0.0 {
+        ignored.push("exposure_ev");
+    }
+    if settings.environment_rotation != 0.0 {
+        ignored.push("environment_rotation");
+    }
+    if settings.environment_intensity != 1.0 {
+        ignored.push("environment_intensity");
+    }
+    ignored
 }
 
 pub(super) fn preflight(s: &mut Session, params: &Value) -> Result<Value> {
@@ -77,9 +93,13 @@ pub(super) fn preflight(s: &mut Session, params: &Value) -> Result<Value> {
 }
 
 pub(super) fn start(s: &mut Session, params: &Value) -> Result<Value> {
-    let (input, scene, request, _) = prepare(s, params, "render.start")?;
+    let (input, scene, request, reply) = prepare(s, params, "render.start")?;
     let status = s.render_jobs.start(s.revision, scene, request, input.replace).map_err(job_error)?;
-    Ok(json!(status))
+    let mut status = json!(status);
+    if let (Some(out), Some(ignored)) = (status.as_object_mut(), reply.get("ignored_controls")) {
+        out.insert("ignored_controls".into(), ignored.clone());
+    }
+    Ok(status)
 }
 
 #[derive(Deserialize)]

@@ -84,7 +84,6 @@ fn unsupported_intent_is_rejected_and_export_preserves_existing_files() {
         json!({"settings":{"mode":"final"}}),
         json!({"settings":{"format":"exr"}}),
         json!({"settings":{"backend":"missing"}}),
-        json!({"settings":{"exposure_ev":1}}),
         json!({"unknown":true}),
     ] {
         assert!(s.execute("render.preflight", &params).is_err());
@@ -216,4 +215,19 @@ fn native_start_and_cancel_measure_cached_capture_without_timing_assertions() {
         status.progress.phase
     );
     assert!(status.progress.phase.terminal());
+}
+
+#[test]
+fn a_setup_saved_with_exposure_renders_and_names_the_controls_it_leaves_out() {
+    let (mut s, host) = session();
+    s.execute("render.settings.set", &json!({"name":"x","set":{"mode":"preview","width":16,"height":16,"exposure_ev":0.3}})).unwrap();
+    let reply = s.execute("render.preflight", &json!({"setup":"x"})).unwrap();
+    assert_eq!(reply["ignored_controls"], json!(["exposure_ev"]));
+    let plain = s.execute("render.preflight", &request()).unwrap();
+    assert_eq!(plain["ignored_controls"], json!([]));
+    let started = s.execute("render.start", &json!({"setup":"x"})).unwrap();
+    assert_eq!(started["ignored_controls"], json!(["exposure_ev"]));
+    finish(&host);
+    let id: JobId = serde_json::from_value(started["job"].clone()).unwrap();
+    assert_eq!(s.execute("render.status", &json!({"job":id})).unwrap()["progress"]["phase"], "completed");
 }
