@@ -13,16 +13,17 @@ use solidcraft_sketch::Sketch;
 
 use crate::*;
 
-/// Work counted on this thread: bodies moved, STEP texts digested, joint faces measured.
+/// Work counted on this thread: bodies moved, STEP/mesh contents digested, joint faces measured.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
     pub digested: usize,
     pub joint_faces: usize,
+    pub mesh_digested: usize,
 }
 
 thread_local! {
-    static COUNTS: Cell<Counts> = const { Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0 }) };
+    static COUNTS: Cell<Counts> = const { Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0, mesh_digested: 0 }) };
 }
 
 pub(super) fn count(f: impl FnOnce(&mut Counts)) {
@@ -353,4 +354,124 @@ fn a_tool_cutting_another_part_cuts_again_when_that_part_moves() {
     model.evaluate(&doc);
     assert_eq!(model.last_recomputed, 0);
     assert!((volume(&model, &body) - (400.0 - 16.0)).abs() < 1e-6, "{}", volume(&model, &body));
+}
+
+fn imported_meshes() -> Document {
+    let mut doc = Document::new("reference meshes");
+    let comp = doc.add_component(Some("Part"), 0).unwrap();
+    let meshes = (0..2)
+        .map(|i| MeshData {
+            name: format!("Mesh{i}"),
+            positions: [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0].into(),
+            triangles: [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].into(),
+            color: Some([0.2, 0.4, 0.6]),
+        })
+        .collect();
+    let id = doc.add_feature(FeatureKind::MeshImport { file: "tetrahedra.stl".into(), meshes }, Some("Meshes")).unwrap();
+    doc.feature_mut(id).unwrap().component = comp;
+    doc
+}
+
+fn meshes_mut(doc: &mut Document) -> &mut Vec<MeshData> {
+    let FeatureKind::MeshImport { meshes, .. } = &mut doc.features[0].kind else { panic!("mesh fixture") };
+    meshes
+}
+
+fn same_as_fresh(doc: &Document, model: &Model) {
+    let mut fresh = Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(doc);
+    assert_eq!(model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>(), fresh.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>());
+    let (actual, expected) = (model.state(), fresh.state());
+    assert_eq!(actual.bodies.len(), expected.bodies.len());
+    for (a, b) in actual.bodies.iter().zip(&expected.bodies) {
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.mesh().positions, b.mesh().positions);
+        assert_eq!(a.mesh().triangles, b.mesh().triangles);
+        assert_eq!(a.body.color(), b.body.color());
+    }
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+}
+
+#[test]
+fn unchanged_mesh_payloads_are_not_read_again_for_rigid_motion() {
+    let mut doc = imported_meshes();
+    let mut model = Model::new();
+    assert_eq!(counted(|| model.evaluate(&doc)).mesh_digested, 2);
+    for k in 1..5 {
+        doc = doc.clone(); // Undo/preview copies share the arrays, not the document itself.
+        doc.occurrences[0].transform = rigid(Vec3::new(f64::from(k), 2.0, 3.0), Vec3::ZERO, Vec3::Z, 0.1 * f64::from(k));
+        assert_eq!(
+            counted(|| {
+                model.evaluate(&doc);
+                assert!(model.is_current(&doc));
+            })
+            .mesh_digested,
+            0
+        );
+        assert_eq!(model.last_recomputed, 0);
+        same_as_fresh(&doc, &model);
+    }
+    let saved = serde_json::to_string(&doc).unwrap();
+    let reopened: Document = serde_json::from_str(&saved).unwrap();
+    assert_eq!(counted(|| model.evaluate(&reopened)).mesh_digested, 2, "new array identities must be checked");
+    assert_eq!(model.last_recomputed, 0, "equal content has equal fingerprints");
+    same_as_fresh(&reopened, &model);
+}
+
+#[test]
+fn mesh_payload_edits_invalidate_the_cache_and_undo_restores_the_geometry() {
+    let mut doc = imported_meshes();
+    let original = doc.clone();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let fingerprint = model.results[0].fingerprint;
+    Arc::make_mut(&mut meshes_mut(&mut doc)[0].positions)[3] = 5.0;
+    assert!(!model.is_current(&doc));
+    assert_eq!(counted(|| model.evaluate(&doc)).mesh_digested, 1);
+    assert_ne!(model.results[0].fingerprint, fingerprint);
+    same_as_fresh(&doc, &model);
+    let edited = doc.clone();
+    Arc::make_mut(&mut meshes_mut(&mut doc)[0].triangles).swap(0, 1);
+    assert_eq!(counted(|| model.evaluate(&doc)).mesh_digested, 1);
+    same_as_fresh(&doc, &model);
+    for restored in [&original, &edited, &original] {
+        model.evaluate(restored);
+        same_as_fresh(restored, &model);
+    }
+    assert_eq!(model.results[0].fingerprint, fingerprint);
+}
+
+#[test]
+fn mesh_metadata_and_order_remain_part_of_the_fingerprint() {
+    let mut doc = imported_meshes();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    for edit in 0..7 {
+        let before = model.results[0].fingerprint;
+        match edit {
+            0 => meshes_mut(&mut doc)[0].name = "Renamed".into(),
+            1 => meshes_mut(&mut doc)[0].color = Some([0.8, 0.1, 0.3]),
+            2 => doc.features[0].name = "Renamed feature".into(),
+            3 => meshes_mut(&mut doc).swap(0, 1),
+            4 => {
+                meshes_mut(&mut doc).pop();
+            }
+            5 => {
+                let mesh = meshes_mut(&mut doc)[0].clone();
+                meshes_mut(&mut doc).push(MeshData { name: "Added".into(), ..mesh });
+            }
+            _ => {
+                let FeatureKind::MeshImport { file, .. } = &mut doc.features[0].kind else { panic!("mesh fixture") };
+                *file = "renamed.stl".into();
+            }
+        }
+        assert!(!model.is_current(&doc));
+        let work = counted(|| model.evaluate(&doc));
+        if edit < 3 || edit == 6 {
+            assert_eq!(work.mesh_digested, 0, "metadata alone: {edit}");
+        }
+        assert_ne!(model.results[0].fingerprint, before, "edit {edit}");
+        same_as_fresh(&doc, &model);
+    }
 }
