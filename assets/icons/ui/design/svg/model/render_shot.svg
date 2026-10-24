@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Save camera view as a shot</title>
+  <path d="M11.95 23.55L20.95 23.55L24.95 14.55L34.95 14.55L38.95 23.55L48.95 23.55Q53.95 23.55 53.95 28.55L53.95 49.55Q53.95 54.55 48.95 54.55L11.95 54.55Q6.95 54.55 6.95 49.55L6.95 28.55Q6.95 23.55 11.95 23.55Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="28.95" cy="38.55" r="10" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M42.95 10.55L55.95 10.55L55.95 36.55L49.45 31.55L42.95 36.55Z" fill="#ffffff" stroke="#ffffff" stroke-width="4.75" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M42.95 10.55L55.95 10.55L55.95 36.55L49.45 31.55L42.95 36.55Z" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

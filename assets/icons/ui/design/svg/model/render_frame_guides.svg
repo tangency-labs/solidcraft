@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Rule-of-thirds frame guides</title>
+  <path d="M11 12L53 12A4 4 0 0 1 57 16L57 48A4 4 0 0 1 53 52L11 52A4 4 0 0 1 7 48L7 16A4 4 0 0 1 11 12Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 14L24 50M40 14L40 50M9 25L55 25M9 39L55 39" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

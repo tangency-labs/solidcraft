@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Shots strip</title>
+  <path d="M10 14L54 14A4 4 0 0 1 58 18L58 46A4 4 0 0 1 54 50L10 50A4 4 0 0 1 6 46L6 18A4 4 0 0 1 10 14Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M11 23L19 23A2 2 0 0 1 21 25L21 39A2 2 0 0 1 19 41L11 41A2 2 0 0 1 9 39L9 25A2 2 0 0 1 11 23Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="15" cy="32" r="3" fill="#8e9faf"/>
+  <path d="M13 18L17 18M13 46L17 46" fill="none" stroke="#ffffff" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28 23L36 23A2 2 0 0 1 38 25L38 39A2 2 0 0 1 36 41L28 41A2 2 0 0 1 26 39L26 25A2 2 0 0 1 28 23Z" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="3" fill="#236ead"/>
+  <path d="M30 18L34 18M30 46L34 46" fill="none" stroke="#ffffff" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M45 23L53 23A2 2 0 0 1 55 25L55 39A2 2 0 0 1 53 41L45 41A2 2 0 0 1 43 39L43 25A2 2 0 0 1 45 23Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="49" cy="32" r="3" fill="#8e9faf"/>
+  <path d="M47 18L51 18M47 46L51 46" fill="none" stroke="#ffffff" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
