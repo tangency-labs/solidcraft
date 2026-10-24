@@ -43,6 +43,7 @@ pub use sketch_modify::trim_piece;
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
 mod component_link;
 mod config;
+mod design_link;
 mod file;
 mod frame;
 mod inspect;
