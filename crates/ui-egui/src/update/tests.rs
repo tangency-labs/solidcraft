@@ -517,3 +517,15 @@ fn releases_under_either_owner_are_accepted() {
     assert!(!is_release_url("https://github.com.evil.example/tangency-labs/solidcraft/releases/x"));
     assert!(!is_release_url("https://github.com/tangency-labs/solidcraft/issues/1"));
 }
+
+#[test]
+fn the_version_links_to_its_release_notes() {
+    // A release build opens the page of its own release; stable, candidate and nightly tags all exist.
+    for v in ["0.17.0", "0.21.0-rc.2", "0.20.0-nightly.20261023.69.1"] {
+        assert_eq!(release_notes_url(v, true), format!("https://github.com/tangency-labs/solidcraft/releases/tag/v{v}"));
+    }
+    // A development build has no release of its own: the release history, which is what the issue asks for.
+    assert_eq!(release_notes_url("0.17.0", false), "https://github.com/tangency-labs/solidcraft/releases");
+    // Anything that is not a version never ends up in a URL.
+    assert_eq!(release_notes_url("0.1/../../x", true), "https://github.com/tangency-labs/solidcraft/releases");
+}

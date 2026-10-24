@@ -102,6 +102,18 @@ pub fn comparable(v: &semver::Version) -> semver::Version {
     v
 }
 
+/// Where the release notes of `version` are: its own release page for a release build (stable,
+/// candidate and nightly releases are all tagged `v<version>`), else, for a development build or
+/// a string that is not a version, the release history.
+pub fn release_notes_url(version: &str, release_build: bool) -> String {
+    const HISTORY: &str = "https://github.com/tangency-labs/solidcraft/releases";
+    if release_build && parse_version(version).is_some() && version.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) {
+        format!("{HISTORY}/tag/v{version}")
+    } else {
+        HISTORY.to_string()
+    }
+}
+
 /// `latest` (a release tag) is a stable release newer than the `current` build.
 pub fn is_newer(latest: &str, current: &str) -> bool {
     let (Some(latest), Some(current)) = (parse_version(latest), parse_version(current)) else { return false };
