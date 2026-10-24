@@ -52,6 +52,7 @@ pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
 pub mod documents;
+pub mod drag_extrude;
 pub mod drag_snap;
 pub mod edit_clipboard;
 #[cfg(test)]

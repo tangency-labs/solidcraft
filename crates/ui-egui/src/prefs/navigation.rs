@@ -123,6 +123,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         .on_hover_text(if touchpad { crate::i18n::tr("nav.touchpad.scroll") } else { crate::i18n::tr("ui.trackpad_pan_tip") });
                 });
                 setting::radial_context_menu(app, ui);
+                setting::direct_interaction(app, ui);
             });
         });
         ui_kit::divider(ui, "navigation_view_controls");
