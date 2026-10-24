@@ -37,6 +37,11 @@ started it (and removes the entry SolidCraft added before). To
 turn it off for good, create an empty file `~/.local/share/solidcraft/no-desktop-integration`, or
 start the AppImage with `SOLIDCRAFT_NO_DESKTOP_INTEGRATION=1`.
 
+If the AppImage doesn't start and prints a FUSE message followed by `execv error: No such file
+or directory`, AppImageLauncher 2.x is intercepting it: it can't start AppImages built on the
+static runtime, as SolidCraft's is. Update AppImageLauncher to 3.0 (so far only published as
+betas; 3.0.0-beta-3 or newer works), or remove it.
+
 ### Linux Flatpak
 
 Install Flatpak using your distribution's package manager. For an installation that receives
