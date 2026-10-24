@@ -1582,7 +1582,6 @@ fn sketches_after_split_body_and_intersect() {
 }
 
 #[test]
-#[ignore = "fails until #566 is fixed"]
 fn a_shell_of_a_swept_bar() {
     reproduces(
         None,

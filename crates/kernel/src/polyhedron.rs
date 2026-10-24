@@ -482,6 +482,9 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     if opened.is_empty() {
         return Err(KernelError::Invalid("select at least one face to remove".into()));
     }
+    // A hole wall split into halves (#4010): opening one half must open the whole sheet.
+    // Sphere/cone/torus patches share one surface; expanding them would open the whole body (#1969).
+    let opened = crate::offset::with_same_shell_open(&healed, &opened);
     // A successful Boolean is not evidence that a tangential rim has wall thickness.
     // Refuse only when the entire planar opening loses its rim. A single collapsed
     // round can still end in a valid sharp edge (the tutorial plate, for example).
@@ -489,6 +492,9 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
         return Err(unsupported_shell(&format!(
             "the rim would have no thickness: an open face meets a round of radius {r:.4} mm tangentially, and the shell is {thickness:.4} mm thick (make the round smaller than the thickness)"
         )));
+    }
+    if let Some(shell) = shell_sphere(&healed, &opened, thickness)? {
+        return Ok(record::after(shell, &healed, &record::counts(&[b])));
     }
     if let Some(shell) = shell_barrel(&healed, &opened, thickness)? {
         return Ok(record::after(shell, &healed, &record::counts(&[b])));
@@ -500,6 +506,141 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
         )),
         None => e,
     })
+}
+
+/// A sphere built from convex patches. Insetting every face works; pushing an open patch
+/// out does not (concentric spheres never meet). Sew the kept outer patches to the inset
+/// cavity and close each opening with planar walls in the planes of its boundary arcs (#1969).
+fn shell_sphere(b: &Body, opened: &[usize], thickness: f64) -> Result<Option<Body>> {
+    use crate::offset::Surf;
+    if b.solid.boundaries().len() != 1 || b.face_count() > 256 || opened.is_empty() {
+        return Ok(None);
+    }
+    let faces: Vec<mt::Face> = b.solid.face_iter().cloned().collect();
+    if opened.iter().any(|i| *i >= faces.len()) || opened.len() >= faces.len() {
+        return Ok(None);
+    }
+    let tol = (b.size() * 1e-7).max(1e-9) * 100.0;
+    let surfs: Option<Vec<Surf>> = faces.iter().map(|f| crate::offset::surf_of(f, tol)).collect();
+    let Some(surfs) = surfs else { return Ok(None) };
+    let Some((centre, radius)) = surfs.iter().find_map(|s| match *s {
+        Surf::Sphere { c, r, convex: true } => Some((c, r)),
+        _ => None,
+    }) else {
+        return Ok(None);
+    };
+    if surfs.iter().any(|s| !matches!(*s, Surf::Sphere { c, r, convex: true } if c.dist(centre) < tol && (r - radius).abs() < tol)) {
+        return Ok(None);
+    }
+    if radius - thickness <= tol {
+        return Err(KernelError::Invalid("shell thickness leaves no sphere cavity".into()));
+    }
+    let cavity = offset_planar(b, |_, _| -thickness)?;
+    let history = cavity.history().ok_or_else(|| unsupported_shell("the sphere cavity has no face history"))?;
+    if cavity.face_count() != faces.len()
+        || history.faces.iter().enumerate().any(|(i, f)| f.origins.as_slice() != [FaceOrigin::Face { operand: 0, face: i }])
+    {
+        return Err(unsupported_shell("the sphere cavity changed topology"));
+    }
+    let inner: Vec<mt::Face> = cavity.solid.face_iter().cloned().collect();
+    let mut out = Vec::new();
+    let mut provenance = Vec::new();
+    for (i, outer) in faces.iter().enumerate() {
+        let inset = inner.get(i).ok_or_else(|| unsupported_shell("the sphere cavity lost a face"))?;
+        if opened.contains(&i) {
+            let walls = sphere_open_rim_walls(outer, inset, centre)?;
+            provenance.extend(std::iter::repeat(record::from_face(0, i, Change::Modified)).take(walls.len()));
+            out.extend(walls);
+        } else {
+            out.extend([outer.clone(), inset.inverse()]);
+            provenance.extend([record::from_face(0, i, Change::Kept), record::generated(vec![FaceOrigin::Offset { operand: 0, face: i }])]);
+        }
+    }
+    let solid = Solid::try_new(vec![out.into()]).map_err(|e| KernelError::Failed(format!("shell sphere: {e}")))?;
+    let copies = record::edges_by_identity(&cavity, history).filter_map(|(id, origins)| origins.into_iter().next().map(|o| (id, o))).collect();
+    record::attach(Body::new(solid)?, &[record::Operand::new(b)], Some(provenance), copies).map(Some)
+}
+
+/// Planar walls between an open sphere patch and its inset: each boundary arc and its inset
+/// copy lie in one plane through the centre, so the strip between them is flat.
+fn sphere_open_rim_walls(outer: &mt::Face, inset: &mt::Face, centre: Vec3) -> Result<Vec<mt::Face>> {
+    let ob = outer.absolute_boundaries();
+    let ib = inset.absolute_boundaries();
+    let (Some(ow), Some(iw)) = (ob.first(), ib.first()) else {
+        return Err(unsupported_shell("a sphere open face needs one outer loop"));
+    };
+    if ob.len() != 1 || ib.len() != 1 {
+        return Err(unsupported_shell("a sphere open face has holes"));
+    }
+    let o_edges: Vec<mt::Edge> = ow.edge_iter().cloned().collect();
+    let i_verts: Vec<(mt::Vertex, Vec3)> = iw.vertex_iter().map(|v| (v.clone(), from_p3(v.point()))).collect();
+    if o_edges.is_empty() || i_verts.is_empty() {
+        return Err(unsupported_shell("a sphere open face has no rim"));
+    }
+    let inset_at = |op: Vec3| -> Result<mt::Vertex> {
+        let ray = (op - centre).normalized().ok_or_else(|| unsupported_shell("sphere open rim at the centre"))?;
+        i_verts
+            .iter()
+            .find(|(_, p)| (*p - centre).normalized().is_some_and(|d| d.dot(ray) > 1.0 - 1e-6))
+            .map(|(v, _)| v.clone())
+            .ok_or_else(|| unsupported_shell("sphere open rim lost an inset corner"))
+    };
+    let mut radials: HashMap<(u64, u64), mt::Edge> = HashMap::new();
+    let bit_key = |a: Vec3, b: Vec3| {
+        let (lo, hi) = if (a.x, a.y, a.z) <= (b.x, b.y, b.z) { (a, b) } else { (b, a) };
+        (
+            lo.x.to_bits() ^ lo.y.to_bits().rotate_left(1) ^ lo.z.to_bits().rotate_left(2),
+            hi.x.to_bits() ^ hi.y.to_bits().rotate_left(1) ^ hi.z.to_bits().rotate_left(2),
+        )
+    };
+    let mut radial = |from: &mt::Vertex, to: &mt::Vertex| -> mt::Edge {
+        let (pa, pb) = (from_p3(from.point()), from_p3(to.point()));
+        let k = bit_key(pa, pb);
+        if let Some(e) = radials.get(&k) {
+            return if from_p3(e.front().point()).dist(pa) <= from_p3(e.front().point()).dist(pb) {
+                e.clone()
+            } else {
+                e.inverse()
+            };
+        }
+        let e = builder::line(from, to);
+        radials.insert(k, e.clone());
+        e
+    };
+    let mut walls = Vec::with_capacity(o_edges.len());
+    for e_out in &o_edges {
+        let (va, vb) = (e_out.front().clone(), e_out.back().clone());
+        let (pa, pb) = (from_p3(va.point()), from_p3(vb.point()));
+        let (ia, ibv) = (inset_at(pa)?, inset_at(pb)?);
+        let e_in = edge_between(iw, &ia, &ibv)?;
+        let mid = (pa + pb) * 0.5;
+        let outward = (mid - centre).normalized().ok_or_else(|| unsupported_shell("sphere open rim mid"))?;
+        let ax = (pb - pa).normalized().unwrap_or(Vec3::X);
+        let mut ay = from_p3(ia.point()) - pa;
+        ay = ay - ax * ay.dot(ax);
+        let ay = ay.normalized().unwrap_or_else(|| outward.any_perp());
+        // Plane axes such that ax × ay points into the opening.
+        let (ax, ay) = if ax.cross(ay).dot(outward) >= 0.0 { (ax, ay) } else { (ax, ay * -1.0) };
+        let wire: mt::Wire = vec![e_out.clone(), radial(&vb, &ibv), e_in.inverse(), radial(&ia, &va)].into();
+        let surface = mt::Surface::Plane(mt::Plane::new(p3(pa), p3(pa + ax), p3(pa + ay)));
+        let mut face = mt::Face::try_new(vec![wire], surface).map_err(|e| KernelError::Failed(format!("shell sphere rim: {e}")))?;
+        use mt::{ParametricSurface3D, SearchParameter};
+        if let Some((u, v)) = face.oriented_surface().search_parameter(p3(mid), mt::SPHint2D::None, 100) {
+            let fnorm = face.oriented_surface().normal(u, v);
+            if mt::InnerSpace::dot(fnorm, v3(outward)) < 0.0 {
+                face.invert();
+            }
+        }
+        walls.push(face);
+    }
+    Ok(walls)
+}
+
+fn edge_between(wire: &mt::Wire, a: &mt::Vertex, b: &mt::Vertex) -> Result<mt::Edge> {
+    wire.edge_iter()
+        .find(|e| (e.front().id() == a.id() && e.back().id() == b.id()) || (e.front().id() == b.id() && e.back().id() == a.id()))
+        .map(|e| if e.front().id() == a.id() { e.clone() } else { e.inverse() })
+        .ok_or_else(|| unsupported_shell("sphere open rim lost an inset edge"))
 }
 
 /// A convex circular-meridian barrel between two axial caps. Sew its exact inset walls
@@ -634,12 +775,30 @@ fn rim_without_thickness(b: &Body, opened: &[usize], thickness: f64, whole_rim: 
 
 fn shell_opened(b: &Body, healed: &Body, open: &[Vec3], opened: &[usize], thickness: f64, margin: f64) -> Result<Body> {
     let size = healed.size();
+    let tol = (size * 1e-7).max(1e-9) * 100.0;
+    let faces: Vec<mt::Face> = healed.solid.face_iter().cloned().collect();
+    // Cylindrical open faces (#4010): leave them unmoved so the cavity keeps the bore radius,
+    // while every other face moves in. Pushing a hole wall out collapses or misses rim corners.
+    let cyl_open = opened.iter().any(|&fi| {
+        matches!(faces.get(fi).and_then(|f| crate::offset::surf_of(f, tol)), Some(crate::offset::Surf::Cylinder { .. }))
+    });
+    if cyl_open {
+        return shell_by_opening(healed, opened, thickness, margin);
+    }
     // Open faces pushed out past the body: the simple way, unless a face tangent to an open
     // one (a fillet along its edge) can't follow; then every face moves in (tangencies keep)
     // and the opening is the open face's copy swept out through the body.
     let cavity = match offset_planar(healed, |fi, _| if opened.contains(&fi) { margin } else { -thickness }) {
         Ok(c) => c,
-        Err(e) => return shell_by_opening(healed, opened, thickness, margin).map_err(|_| e),
+        // Pushing the open face out can miss a corner when that face meets a thin round
+        // (seed 38): the all-inward fallback names the wall-thickness limit instead.
+        Err(e) => {
+            return match shell_by_opening(healed, opened, thickness, margin) {
+                Ok(body) => Ok(body),
+                Err(e2) if shell_fallback_names_limit(&e2) => Err(e2),
+                Err(_) => Err(e),
+            };
+        }
     };
     let cavity = match opening_overreach(healed, &cavity, opened, thickness, margin) {
         Ok(Some(trimmed)) => trimmed,
@@ -771,7 +930,25 @@ fn opening_overreach(healed: &Body, cavity: &Body, opened: &[usize], thickness: 
 /// joined with each open face's moved copy swept out through the body. No history: the
 /// opening's walls, swept from the cavity's edges, come from nothing of `b`.
 fn shell_by_opening(b: &Body, opened: &[usize], thickness: f64, reach: f64) -> Result<Body> {
-    let closed = offset_planar(b, |_, _| -thickness)?;
+    let size = b.size();
+    let tol = (size * 1e-7).max(1e-9) * 100.0;
+    let src_faces: Vec<mt::Face> = b.solid.face_iter().cloned().collect();
+    let cyl_open = opened.iter().any(|&fi| {
+        matches!(src_faces.get(fi).and_then(|f| crate::offset::surf_of(f, tol)), Some(crate::offset::Surf::Cylinder { .. }))
+    });
+    // Through-hole wall (#4010): keep the open cylinder where it is (shift 0) and move every
+    // other face in. The cavity then has the same bore as the solid, so cutting it out leaves
+    // no tube wall — matching an inset box less the hole.
+    let closed = if cyl_open {
+        offset_planar(b, |fi, _| if opened.contains(&fi) { 0.0 } else { -thickness })?
+    } else {
+        offset_planar(b, |_, _| -thickness)?
+    };
+    if cyl_open {
+        let r = crate::ops::boolean(b, &closed, crate::BoolOp::Cut)?.ok_or_else(|| KernelError::Failed("the shell removed everything".into()))?;
+        return Ok(r.without_history());
+    }
+    // Planar opens: all-inward cavity, then a prism through each open face.
     let faces: Vec<mt::Face> = closed.solid.face_iter().cloned().collect();
     let mut cavity = closed.clone();
     for fi in opened {
@@ -794,6 +971,13 @@ fn shell_by_opening(b: &Body, opened: &[usize], thickness: f64, reach: f64) -> R
 
 fn unsupported_shell(m: &str) -> KernelError {
     KernelError::Failed(format!("not supported yet: {m}"))
+}
+
+/// Whether a shell fallback's error is the real limit (thin wall / unsupported) rather than a
+/// secondary boolean failure that would hide the first offset's corner message.
+fn shell_fallback_names_limit(e: &KernelError) -> bool {
+    let s = e.to_string();
+    s.contains("faces would cross") || s.contains("not supported yet") || s.contains("rim would have no thickness")
 }
 
 pub(crate) fn point_tri(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
@@ -901,4 +1085,108 @@ mod rim_preflight_tests {
         let faces: Vec<_> = (0..combined.solid.face_iter().count()).collect();
         assert!(rim_without_thickness(&combined, &faces, 2.0, true).is_none());
     }
+
+    /// #1969: shelling a sphere used to expand the open face across every patch (same surface)
+    /// and cut the body away; one patch open leaves a hollow ball.
+    #[test]
+    fn shell_of_a_sphere_opens_one_patch() {
+        use std::f64::consts::PI;
+        let b = crate::sphere(Vec3::ZERO, 10.0).unwrap();
+        let before = crate::measure(&b).unwrap().volume;
+        let s = shell(&b, &[Vec3::new(10.0, 0.0, 0.0)], 1.0).expect("shell");
+        assert!(s.validity().is_empty(), "{:?}", s.validity());
+        assert_eq!(s.shell_count(), 1);
+        let vol = crate::measure(&s).unwrap().volume;
+        // Closed hollow: 4/3 π (R³ − r³). Opening one of six cube patches removes roughly that
+        // share of the wall, so the volume sits a little under the closed hollow.
+        let closed = 4.0 / 3.0 * PI * (1000.0 - 729.0);
+        assert!(vol.is_finite() && vol > 0.0 && vol < before, "before {before}, shell {vol}");
+        assert!(vol > 0.7 * closed && vol < closed, "shell {vol}, closed hollow {closed}");
+    }
+
+    /// Robustness seed 6 (#1494): a cylinder joined on a box's side leaves a saddle on the
+    /// cylinder seam; the shell used to refuse that corner.
+    #[test]
+    fn shell_of_a_box_with_a_side_cylinder_opens_at_the_bottom() {
+        let b = crate::box_solid(Vec3::ZERO, Vec3::new(47.5, 45.0, 30.0)).unwrap();
+        let c = crate::cylinder(Vec3::new(47.5, 0.0, 10.0), Vec3::X, 7.5, 30.0).unwrap();
+        let u = crate::boolean(&b, &c, crate::BoolOp::Union).unwrap().unwrap();
+        let before = crate::measure(&u).unwrap().volume;
+        let s = shell(&u, &[Vec3::new(23.75, 22.5, 0.0)], 1.0).expect("shell");
+        assert!(s.validity().is_empty(), "{:?}", s.validity());
+        assert_eq!(s.shell_count(), 1);
+        let vol = crate::measure(&s).unwrap().volume;
+        assert!(vol.is_finite() && vol > 0.0 && vol < before, "before {before}, shell {vol}");
+    }
+
+    /// #4010: a plate with a through hole, shelled by opening the hole wall.
+    #[test]
+    fn shell_plate_opening_the_hole_wall() {
+        use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+        let outer = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(40.0, 0.0), Vec2::new(40.0, 30.0), Vec2::new(0.0, 30.0)]);
+        let hole = Loop2::circle(Vec2::new(20.0, 15.0), 5.0);
+        let plate = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![hole] }], 0.0, 12.5).unwrap().remove(0);
+        let before = crate::measure(&plate).unwrap().volume;
+        let s = shell(&plate, &[Vec3::new(25.0, 15.0, 6.25)], 2.5).expect("shell");
+        assert!(s.validity().is_empty(), "{:?}", s.validity());
+        assert_eq!(s.shell_count(), 1);
+        let vol = crate::measure(&s).unwrap().volume;
+        let want = 8044.80;
+        assert!(vol.is_finite() && vol > 0.0 && vol < before, "before {before}, shell {vol}");
+        assert!((vol - want).abs() < 1.0, "shell volume {vol}, want ~{want}");
+    }
+
+    /// Robustness seed 78 (#142): a half-revolve cut by a box. A shell thicker than the rim at
+    /// the cut used to look like a missed corner; it is refused as a wall cross.
+    #[test]
+    fn shell_half_revolve_cut_by_box_names_wall_cross() {
+        use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+        let rect = Loop2::polygon(&[Vec2::new(7.5, 0.0), Vec2::new(25.0, 0.0), Vec2::new(25.0, 5.0), Vec2::new(7.5, 5.0)]);
+        let rev = crate::revolve(&Plane::XZ, &[Region2 { outer: rect, holes: vec![] }], Vec2::ZERO, Vec2::Y, std::f64::consts::PI)
+            .unwrap()
+            .remove(0);
+        let cut = crate::box_solid(Vec3::new(-25.0, 0.0, -2.5), Vec3::new(-7.5, 22.5, 20.0)).unwrap();
+        let u = crate::boolean(&rev, &cut, crate::BoolOp::Cut).unwrap().unwrap();
+        let err = shell(&u, &[Vec3::new(16.25, 0.0, -2.5)], 2.0).expect_err("thick shell");
+        let msg = err.to_string();
+        assert!(msg.contains("faces would cross"), "{msg}");
+        assert!(!msg.contains("don't meet the same way"), "{msg}");
+    }
+
+    /// Robustness seed 38 (#142): a cylindrical notch on a box edge shells at half a millimetre;
+    /// at 2 mm (thicker than the notch) it is refused as a wall cross, not a missed corner.
+    #[test]
+    fn shell_box_with_edge_notch() {
+        let b = crate::box_solid(Vec3::ZERO, Vec3::new(47.5, 60.0, 27.5)).unwrap();
+        let c = crate::cylinder(Vec3::new(47.5, 0.0, 25.0), Vec3::new(0.0, 0.0, -1.0), 1.25, 22.5).unwrap();
+        let u = crate::boolean(&b, &c, crate::BoolOp::Cut).unwrap().unwrap();
+        let open = [Vec3::new(47.5, 30.509393063583815, 13.75)];
+        let thin = shell(&u, &open, 0.5).expect("thin shell");
+        assert!(thin.validity().is_empty(), "{:?}", thin.validity());
+        let err = shell(&u, &open, 2.0).expect_err("thick shell");
+        let msg = err.to_string();
+        assert!(msg.contains("faces would cross"), "{msg}");
+        assert!(!msg.contains("don't meet the same way"), "{msg}");
+    }
+
+    /// Robustness seed 69 (#142): a 90° revolve with a joined box, shelled twice. Cylinder
+    /// halves on the cavity wall used to leave a seam corner the second shell refused.
+    #[test]
+    fn shell_revolved_section_with_joined_box_twice() {
+        use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+        let rect = Loop2::polygon(&[Vec2::new(2.5, 0.0), Vec2::new(22.5, 0.0), Vec2::new(22.5, 30.0), Vec2::new(2.5, 30.0)]);
+        let rev = crate::revolve(&Plane::XZ, &[Region2 { outer: rect, holes: vec![] }], Vec2::ZERO, Vec2::Y, std::f64::consts::FRAC_PI_2)
+            .unwrap()
+            .remove(0);
+        let boxb = crate::box_solid(Vec3::new(22.5, 17.5, -7.5), Vec3::new(45.0, 25.0, -2.5)).unwrap();
+        let u = crate::boolean(&rev, &boxb, crate::BoolOp::Union).unwrap().unwrap();
+        let s1 = shell(&u, &[Vec3::new(33.75, 17.5, -5.0)], 1.5).expect("first shell");
+        assert!(s1.validity().is_empty(), "{:?}", s1.validity());
+        let s2 = shell(&s1, &[Vec3::new(1.5, 12.327229847555518, -15.0)], 1.5).expect("second shell");
+        assert!(s2.validity().is_empty(), "{:?}", s2.validity());
+        assert_eq!(s2.shell_count(), 1);
+        let vol = crate::measure(&s2).unwrap().volume;
+        assert!(vol.is_finite() && vol > 0.0);
+    }
 }
+
