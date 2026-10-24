@@ -92,4 +92,24 @@ mod tests {
         super::tick(&mut h.app, true);
         assert!(h.app.session.is_dirty() && h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
     }
+
+    /// Save As of a sample (named "Sample Plate", not after a file) makes the tab the new file:
+    /// it shows the name typed in the dialog, and the next Save writes there.
+    #[test]
+    fn save_as_shows_the_new_file_in_the_tab() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.session.doc_mut().name = "Sample Plate".into();
+        let path = h.dir.join("Bracket v2.solidcraft");
+        assert!(super::start(&mut h.app, "file.save_as", json!({"path": path.to_string_lossy()})));
+        super::tick(&mut h.app, true);
+        assert_eq!(crate::documents::tabs_info(&h.app), vec![("Bracket v2".to_string(), false)]);
+        assert_eq!(h.app.session.path.as_deref(), path.to_str());
+        h.app.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        crate::toolbar::save(&mut h.app);
+        super::tick(&mut h.app, true);
+        assert!(!h.app.session.is_dirty());
+        let saved = solidcraft_engine::io::read_design(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!((saved.name.as_str(), saved.features.len()), ("Bracket v2", h.app.session.doc.features.len()));
+    }
 }

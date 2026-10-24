@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.save_as", "Save As", save_as)
         .icon("save")
         .noundo()
-        .params("path; format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false)"),
+        .params("path (the design becomes this file and takes its name); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false)"),
     CommandSpec::new("doc.recovery_list", "Recoverable Designs", recovery_list).icon("restore")
         .noundo()
         .params("dir? (default: the recovery folder) → designs autosaved by apps that crashed or closed with unsaved changes"),
@@ -309,16 +309,21 @@ fn default_name_for(name: &str, path: &str) -> Option<String> {
     (!stem.is_empty()).then_some(stem)
 }
 
-/// The name a design takes when saved to `path`, if it changes: its file's name while it has
-/// none of its own ([`default_name_for`]), or while it still has the name it took from the file
-/// it was saved as before, so Save As under another name renames it too (#1710). A name the
-/// user chose is kept.
-fn saved_name(name: &str, old_path: Option<&str>, path: &str) -> Option<String> {
+/// The name a design takes when saved to `path`, if it changes. Save As (`save_as`) names it
+/// after the file it becomes: the name typed in the save dialog is the design's, whatever it was
+/// called before (a sample, or a file renamed outside SolidCraft). A plain save names it after
+/// its file while it has none of its own ([`default_name_for`]), or while it still has the name
+/// it took from the file it was saved as before (#1710); otherwise the name is kept.
+fn saved_name(name: &str, old_path: Option<&str>, path: &str, save_as: bool) -> Option<String> {
     if let Some(stem) = default_name_for(name, path) {
         return Some(stem);
     }
     let stem = |p: &str| std::path::Path::new(p).file_stem().map(|x| x.to_string_lossy().trim().to_string()).filter(|x| !x.is_empty());
-    let (old, new) = (stem(old_path?)?, stem(path)?);
+    let new = stem(path)?;
+    if save_as {
+        return (name.trim() != new).then_some(new);
+    }
+    let old = stem(old_path?)?;
     (name.trim() == old && new != old).then_some(new)
 }
 
@@ -344,11 +349,11 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
     }
 }
 
-fn write(s: &mut Session, path: &str, format: &str, compression: &str, preview: bool, cache: bool) -> Result<Value> {
+fn write(s: &mut Session, path: &str, format: &str, compression: &str, preview: bool, cache: bool, save_as: bool) -> Result<Value> {
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
-    // Saving an unnamed design, or one named after the file it was saved as, names it after its
-    // file (not an undoable edit).
-    let renamed = saved_name(&s.doc.name, s.path.as_deref(), path).map(|stem| (s.doc.name.clone(), stem));
+    // Save As, or saving an unnamed design or one named after the file it was saved as, names it
+    // after its file (not an undoable edit).
+    let renamed = saved_name(&s.doc.name, s.path.as_deref(), path, save_as).map(|stem| (s.doc.name.clone(), stem));
     if let Some((from, to)) = &renamed {
         rename_design(s, from, to);
     }
@@ -478,6 +483,7 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         str_(p, "compression").unwrap_or("fast"),
         bool_(p, "preview").unwrap_or(false),
         bool_(p, "cache").unwrap_or(true),
+        false,
     )
 }
 
@@ -494,6 +500,7 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
         str_(p, "compression").unwrap_or("fast"),
         bool_(p, "preview").unwrap_or(false),
         bool_(p, "cache").unwrap_or(true),
+        true,
     )
 }
 
@@ -1001,16 +1008,36 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Save As makes the design the file it was saved as, named as typed in the dialog, even when
+    /// its name did not come from its file (a sample, a file renamed outside SolidCraft). A plain
+    /// save keeps such a name.
     #[test]
-    fn save_as_keeps_a_name_the_user_chose() {
+    fn save_as_names_the_design_after_its_new_file() {
         let dir = name_dir("named");
         let mut s = Session::default();
         s.execute("file.new", &json!({"name":"Gearbox lid"})).unwrap();
-        s.execute("file.save_as", &json!({"path":dir.join("lid-v2.solidcraft")})).unwrap();
+        s.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
+        s.execute("file.save", &json!({"path":dir.join("lid.solidcraft")})).unwrap();
         assert_eq!(s.doc.name, "Gearbox lid");
+        let mut opened = Session::default();
+        opened.execute("doc.open", &json!({"path":dir.join("lid.solidcraft")})).unwrap();
+        assert_eq!(opened.doc.name, "Gearbox lid");
+        opened.execute("file.save", &json!({})).unwrap();
+        assert_eq!(opened.doc.name, "Gearbox lid", "a plain save keeps the name");
+        opened.execute("solid.sphere", &json!({"diameter":4})).unwrap();
+        let r = opened.execute("file.save_as", &json!({"path":dir.join("lid-v2.solidcraft")})).unwrap();
+        assert_eq!(r["name"], "lid-v2");
+        assert_eq!(opened.doc.name, "lid-v2");
+        assert_eq!(opened.path.as_deref(), dir.join("lid-v2.solidcraft").to_str());
+        assert!(!opened.is_dirty());
+        // Undo does not bring the old name back.
+        opened.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(opened.doc.name, "lid-v2");
         let mut reopened = Session::default();
         reopened.execute("doc.open", &json!({"path":dir.join("lid-v2.solidcraft")})).unwrap();
-        assert_eq!(reopened.doc.name, "Gearbox lid");
+        assert_eq!(reopened.doc.name, "lid-v2");
+        // The file it was opened from keeps its own name.
+        assert_eq!(solidcraft_io::read_design(&std::fs::read(dir.join("lid.solidcraft")).unwrap()).unwrap().name, "Gearbox lid");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
