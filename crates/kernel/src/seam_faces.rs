@@ -48,6 +48,11 @@ pub(crate) fn needed(a: &Body, b: &Body) -> bool {
     !a.is_mesh() && !b.is_mesh() && !SPLITTING.with(|c| c.get()) && (next_split(a).is_some() || next_split(b).is_some())
 }
 
+/// Whether `body` has a face for [`one_body`] to split.
+pub(crate) fn needed_one(body: &Body) -> bool {
+    !body.is_mesh() && !SPLITTING.with(|c| c.get()) && next_split(body).is_some()
+}
+
 /// `body` with every face that runs along a seam edge twice split in two, and its history over
 /// `body`. `None` when a split fails.
 fn halved(body: &Body) -> Option<(Body, Option<History>)> {
@@ -84,6 +89,28 @@ pub(crate) fn boolean(a: &Body, b: &Body, op: BoolOp, run: &dyn Fn(&Body, &Body,
         let history = recorded::of_pair(&body, &recorded::placed(hx.clone(), 0, 2), &recorded::placed(hy.clone(), 1, 2));
         body.with_checked_history(history, &counts)
     })))
+}
+
+/// `run` over `body` with every face that runs along a seam edge twice split in two, for an
+/// operation that takes one body. `None` when the body has no such face, a split fails, or the
+/// run over the split body fails: the caller then keeps the error it had.
+///
+/// The same answer as [`boolean`] gives, for the same reason — an operation that has to divide
+/// such a face can fail where the body with the face in two halves works — and it matters most
+/// to a body read from a STEP file, which is where a whole-turn face comes from. The result's
+/// history is composed back over `body` as it was given, so a caller that knows `body`'s faces
+/// still recognises them: the split is no authored boundary.
+pub(crate) fn one_body(body: &Body, what: &str, run: &dyn Fn(&Body) -> Result<Body>) -> Option<Result<Body>> {
+    if !needed_one(body) {
+        return None;
+    }
+    let (split, over) = halved(body)?;
+    SPLITTING.with(|c| c.set(true));
+    let result = crate::guard(what, || run(&split));
+    SPLITTING.with(|c| c.set(false));
+    let out = result.ok()?;
+    let history = recorded::through(&out, 0, over.as_ref());
+    Some(Ok(out.with_checked_history(history, &crate::record::counts(&[body]))))
 }
 
 #[cfg(test)]

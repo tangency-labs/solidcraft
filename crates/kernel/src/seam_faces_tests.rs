@@ -59,6 +59,34 @@ fn a_pin_read_from_step_has_one_face_along_its_seam() {
     assert!(rel(volume(&halved), PI * R * R * 40.0) < 1e-3);
 }
 
+/// Offset Face on a body read from STEP, where the hole's wall is one face along its seam.
+///
+/// Healing such a body, which Offset Face does before it moves anything, fails inside `truck`
+/// ("This wire is not simple"), so the top could not be moved at all — and importing is how a
+/// part with a hole usually arrives. The offset now splits the face off its seam and asks again,
+/// as a boolean does.
+#[test]
+fn the_top_of_a_read_block_with_a_hole_moves() {
+    // A 20 x 20 x 10 block with a 6 mm hole through the middle of it.
+    let block = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 10.0)).unwrap();
+    let drill = cylinder(Vec3::new(10.0, 10.0, -5.0), Vec3::Z, 3.0, 20.0).unwrap();
+    let built = boolean(&block, &drill, BoolOp::Cut).unwrap().unwrap();
+    let read = through_step(&built);
+    // Read back, the hole's wall is one whole turn instead of the two halves it was built as.
+    assert!(read.face_count() < built.face_count());
+    assert!(super::needed_one(&read) && !super::needed_one(&built));
+
+    // The top, 2 mm up: the part grows by the plate's section, the hole still through it.
+    let section = 400.0 - PI * 9.0;
+    let moved = offset_faces(&read, &[Vec3::new(5.0, 5.0, 10.0)], 2.0).unwrap();
+    assert!(rel(volume(&moved), volume(&read) + section * 2.0) < 1e-3, "{} {}", volume(&moved), volume(&read) + section * 2.0);
+    // The same answer as moving the built body's top, which never needed the split.
+    let straight = offset_faces(&built, &[Vec3::new(5.0, 5.0, 10.0)], 2.0).unwrap();
+    assert!(rel(volume(&moved), volume(&straight)) < 1e-5, "{} {}", volume(&moved), volume(&straight));
+    // And the faces still say where they came from, so names and sketches survive the retry.
+    assert!(moved.history().is_some());
+}
+
 #[test]
 fn a_block_pressed_into_a_read_pins_side_is_intersected_and_cut_exactly() {
     let (read, block) = (through_step(&pin()), block());
