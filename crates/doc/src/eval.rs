@@ -1085,6 +1085,10 @@ pub struct Model {
     step_digests: StepDigests,
     /// The document context the last `evaluate` ran in ([`context_digest`]).
     context: u64,
+    /// The last active result of each feature hidden by the history marker, with its document
+    /// context. These share the existing states, so rolling back does not surrender them to
+    /// the bounded cache. A result leaves this map when its feature is active again or removed.
+    rolled_results: std::collections::HashMap<u64, (u64, FeatureResult)>,
     /// Results another copy of this model evaluated (ahead, off the window thread) that
     /// `evaluate` takes for features they match ([`Model::prime`]), with that copy's context.
     primed: Option<(u64, Arc<std::collections::HashMap<u64, FeatureResult>>)>,
@@ -1809,6 +1813,8 @@ impl Model {
         let mut restored = 0;
         let marker = doc.marker.unwrap_or(usize::MAX);
         let ctx = context_digest(doc, &vals);
+        let previous_context = self.context;
+        let mut rolled_results = std::mem::take(&mut self.rolled_results);
         self.context = ctx;
         self.step_digests = StepDigests::of(doc, &self.step_digests);
         let primed = self.primed.as_ref().filter(|(context, _)| !self.no_cache && *context == ctx).map(|(_, results)| results.clone());
@@ -1821,6 +1827,20 @@ impl Model {
         let watched = crate::progress::begin(doc.features.len());
         for (i, f) in doc.features.iter().enumerate() {
             let rolled_back = i >= marker;
+            // Retain at most one active result per rolled-back feature, even across several
+            // marker moves. Build the map anew so deleted features release their states too.
+            let rolled = rolled_results.remove(&f.id);
+            let rolled = if self.no_cache {
+                None
+            } else if rolled_back {
+                let active = self.results.get(i).filter(|r| r.id == f.id && !r.skipped && !r.stale && !r.unkept);
+                if let Some(saved) = active.map(|r| (previous_context, r.clone())).or(rolled) {
+                    self.rolled_results.insert(f.id, saved);
+                }
+                None
+            } else {
+                rolled.filter(|(context, _)| *context == ctx).map(|(_, r)| r)
+            };
             // Opening was cancelled: the rest is skipped and the result discarded.
             let cancelled = watched.step(i);
             let fp = chain_fingerprint(doc, &vals, f, prev_fp, rolled_back, &self.step_digests, Some(&state));
@@ -1894,8 +1914,9 @@ impl Model {
                 });
                 continue;
             }
-            // Evaluated ahead on these same inputs (the same chain of definitions from the start).
-            if let Some(r) = primed.as_ref().and_then(|p| p.get(&f.id)).filter(|r| r.fingerprint == fp && !r.stale && !r.skipped) {
+            // An active result hidden by the marker, or evaluated ahead on these same inputs
+            // (the same chain of definitions from the start). Changed inputs never reuse it.
+            if let Some(r) = rolled.as_ref().filter(current).or_else(|| primed.as_ref().and_then(|p| p.get(&f.id)).filter(current)) {
                 restored += 1;
                 if r.error.is_none() {
                     state = r.state.clone();
