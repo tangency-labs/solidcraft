@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Copy look</title>
+  <path d="M13 8L35 8A4 4 0 0 1 39 12L39 41A4 4 0 0 1 35 45L13 45A4 4 0 0 1 9 41L9 12A4 4 0 0 1 13 8Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26 20L51 20A4 4 0 0 1 55 24L55 52A4 4 0 0 1 51 56L26 56A4 4 0 0 1 22 52L22 24A4 4 0 0 1 26 20Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="38.5" cy="38" r="10" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

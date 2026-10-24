@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Inherit the physical material look</title>
+  <circle cx="25" cy="24" r="18" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="19" cy="18" r="5" fill="#e2e8ef"/>
+  <path d="M39 37L53 37A4 4 0 0 1 57 41L57 54A4 4 0 0 1 53 58L39 58A4 4 0 0 1 35 54L35 41A4 4 0 0 1 39 37Z" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M9 43L9 50Q9 53 12 53L23 53" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M16 53L24 53" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M31 53L23 57.5L23 48.5Z" fill="#236ead"/>
+</svg>
