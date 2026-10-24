@@ -429,6 +429,8 @@ pub mod tobj {
     pub const PRIMITIVE_BOX: i64 = 10;
     pub const PRIMITIVE_SPHERE: i64 = 11;
     pub const CALLER_FACE: i64 = 12;
+    pub const COPIED_BOX: i64 = 13;
+    pub const COPIED_SPHERE: i64 = 14;
 }
 
 const MAX_SLOTS: i64 = 32;
@@ -842,10 +844,10 @@ fn validate_proto(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 }
 
 fn validate_transform(rd: &mut Reader<'_>) -> Result<(), FfiError> {
-    match rd.int(0, tobj::CALLER_FACE)? {
+    match rd.int(0, tobj::COPIED_SPHERE)? {
         tobj::CALLER_FACE => { rd.vec3()?; for _ in 0..2 { if rd.finite()? <= 1e-12 { return Err(bad("face dimension")); } } }
-        tobj::PRIMITIVE_BOX => { rd.vec3()?; for _ in 0..3 { if rd.finite()? <= 1e-12 { return Err(bad("box dimension")); } } }
-        tobj::PRIMITIVE_SPHERE => { rd.vec3()?; if rd.finite()?.abs() <= 1e-12 { return Err(bad("sphere radius")); } }
+        tobj::PRIMITIVE_BOX | tobj::COPIED_BOX => { rd.vec3()?; for _ in 0..3 { if rd.finite()? <= 1e-12 { return Err(bad("box dimension")); } } }
+        tobj::PRIMITIVE_SPHERE | tobj::COPIED_SPHERE => { rd.vec3()?; if rd.finite()?.abs() <= 1e-12 { return Err(bad("sphere radius")); } }
         tobj::POLY_PTS => {
             let n = rd.int(1, 4)?;
             for _ in 0..n {

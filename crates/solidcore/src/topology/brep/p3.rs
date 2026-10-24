@@ -1358,7 +1358,8 @@ fn merge_brep_in(
         } else {
             face_surf.copy(k)?
         };
-        *new_surface.owner_mut() = Some((env.key_of)(EntityRef::Face(new_f)));
+        let owner = (env.key_of)(EntityRef::Face(new_f));
+        *new_surface.owner_mut() = Some(owner);
         let (rect, dom, ftol) = (
             src_face.rectangular_trim,
             src_face.uv_domain,
@@ -1371,6 +1372,8 @@ fn merge_brep_in(
             nf.uv_domain = dom;
             nf.tolerance = ftol;
         }
+
+        b.geometry_owner_keys.insert(EntityRef::Face(new_f), owner);
 
         // add newFace to target Brep FaceList
         b.face_list.push(new_f);
@@ -1498,8 +1501,10 @@ fn merge_brep_in(
             tolerance: etol,
             curve: None,
         })?;
-        let _ = new_c.set_owner(Some((env.key_of)(EntityRef::Edge(new_e))), None);
+        let owner = (env.key_of)(EntityRef::Edge(new_e));
+        let _ = new_c.set_owner(Some(owner), None);
         b.edge_mut(new_e)?.curve = Some(new_c);
+        b.geometry_owner_keys.insert(EntityRef::Edge(new_e), owner);
 
         // Relate the Edges.
         set(

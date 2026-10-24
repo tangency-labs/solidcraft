@@ -254,6 +254,8 @@ pub(super) enum TObjIn {
     PrimitiveBox { origin: [f64; 3], size: [f64; 3] },
     PrimitiveSphere { origin: [f64; 3], radius: f64 },
     CallerFace { origin: [f64; 3], size: [f64; 2] },
+    CopiedBox { origin: [f64; 3], size: [f64; 3] },
+    CopiedSphere { origin: [f64; 3], radius: f64 },
     /// An empty `SmPolyBrep`.
     Poly,
     /// An `SmPolyBrep` with poly vertices `x y z tol` (1 to 4).
@@ -473,13 +475,13 @@ pub(super) fn cpp_input(s: &Script) -> Vec<f64> {
                     surface_block(&mut v, s);
                 }
                 TObjIn::Brep => v.push(tobj::BREP as f64),
-                TObjIn::PrimitiveBox { origin, size } => {
-                    v.push(tobj::PRIMITIVE_BOX as f64);
+                TObjIn::PrimitiveBox { origin, size } | TObjIn::CopiedBox { origin, size } => {
+                    v.push(if matches!(obj, TObjIn::CopiedBox { .. }) { tobj::COPIED_BOX } else { tobj::PRIMITIVE_BOX } as f64);
                     v.extend_from_slice(origin);
                     v.extend_from_slice(size);
                 }
-                TObjIn::PrimitiveSphere { origin, radius } => {
-                    v.push(tobj::PRIMITIVE_SPHERE as f64);
+                TObjIn::PrimitiveSphere { origin, radius } | TObjIn::CopiedSphere { origin, radius } => {
+                    v.push(if matches!(obj, TObjIn::CopiedSphere { .. }) { tobj::COPIED_SPHERE } else { tobj::PRIMITIVE_SPHERE } as f64);
                     v.extend_from_slice(origin);
                     v.push(*radius);
                 }
@@ -4915,10 +4917,10 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
         env: &mut env,
     });
     let mut brep = match obj {
-        TObjIn::PrimitiveBox { origin, size: [x, y, z] } => st(solidcore::primitive::api_primitives::create_box(
+        TObjIn::PrimitiveBox { origin, size: [x, y, z] } | TObjIn::CopiedBox { origin, size: [x, y, z] } => st(solidcore::primitive::api_primitives::create_box(
             &mut k, v3(*origin), *x, *y, *z,
         ))?.map_err(|code| harness(format!("box construction status {code}")))?,
-        TObjIn::PrimitiveSphere { origin, radius } => st(solidcore::primitive::api_primitives::create_sphere(
+        TObjIn::PrimitiveSphere { origin, radius } | TObjIn::CopiedSphere { origin, radius } => st(solidcore::primitive::api_primitives::create_sphere(
             &mut k, v3(*origin), *radius,
         ))?.map_err(|code| harness(format!("sphere construction status {code}")))?,
         TObjIn::CallerFace { origin, size: [width, height] } => {
@@ -4942,6 +4944,28 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
         }
         _ => Brep::new(),
     };
+    let copied = matches!(obj, TObjIn::CopiedBox { .. } | TObjIn::CopiedSphere { .. });
+    let mut source = None;
+    let mut source_before = Vec::new();
+    if copied {
+        st(crate::util::primitive::append(&k, &brep, &mut source_before))?
+            .map_err(|code| harness(format!("source geometry status {code}")))?;
+        let source_key = |entity| {
+            let named = solidcore::topology::brep::p3::topology_ref(0, entity);
+            ObjectRef { type_code: named.type_code, key: ObjectKey(named.type_code as u64 * 1_000_000 + (named.key.0 & 0xffff_ffff)) }
+        };
+        let target_key = |entity| {
+            let named = source_key(entity);
+            ObjectRef { type_code: named.type_code, key: ObjectKey(named.key.0 + 100_000_000) }
+        };
+        let mut state = solidcore::topology::brep::p2::ArenaNotifyState::new(&Brep::new());
+        let mut copy_env = state.env(None);
+        copy_env.key_of = &target_key;
+        let copy = st(solidcore::topology::brep::p3::api_brep_copy(&mut k, &mut copy_env, Some(&brep), &source_key))?
+            .map_err(|code| harness(format!("copy status {code}")))?;
+        source = Some(brep);
+        brep = copy;
+    }
     let target = match obj {
         TObjIn::Composite { .. } | TObjIn::CrvOnSurf { .. } => {
             special.as_mut().map(TransformObject::Curve)
@@ -4950,7 +4974,7 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
         TObjIn::Plane { .. } | TObjIn::Bsurf { .. } => {
             surface.as_mut().map(TransformObject::Surface)
         }
-        TObjIn::Brep | TObjIn::PrimitiveBox { .. } | TObjIn::PrimitiveSphere { .. } | TObjIn::CallerFace { .. } => Some(TransformObject::Brep(&mut brep)),
+        TObjIn::Brep | TObjIn::PrimitiveBox { .. } | TObjIn::PrimitiveSphere { .. } | TObjIn::CallerFace { .. } | TObjIn::CopiedBox { .. } | TObjIn::CopiedSphere { .. } => Some(TransformObject::Brep(&mut brep)),
         TObjIn::Poly | TObjIn::PolyPts { .. } => poly_target
             .as_mut()
             .map(|t| TransformObject::PolyBrep(t as &mut dyn PolyBrepTransform)),
@@ -4978,13 +5002,18 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
         },
     };
     let mut o = vec![s];
-    if matches!(obj, TObjIn::PrimitiveBox { .. } | TObjIn::PrimitiveSphere { .. } | TObjIn::CallerFace { .. }) {
+    if matches!(obj, TObjIn::PrimitiveBox { .. } | TObjIn::PrimitiveSphere { .. } | TObjIn::CallerFace { .. } | TObjIn::CopiedBox { .. } | TObjIn::CopiedSphere { .. }) {
         let vertices = solidcore::topology::brep::p1::vertices(&brep, None).map_err(|e| harness(e.to_string()))?;
         let edges = solidcore::topology::brep::p1::edges(&brep, None).map_err(|e| harness(e.to_string()))?;
         let faces = solidcore::topology::brep::p1::faces(&brep, None).map_err(|e| harness(e.to_string()))?;
         o.extend([vertices.len() as f64, edges.len() as f64, faces.len() as f64, brep.this_model_size_estimate(&k, false)]);
         st(crate::util::primitive::append(&k, &brep, &mut o))?.map_err(|code| harness(format!("solid geometry status {code}")))?;
         for face in faces { o.push(f64::from(brep.face(face).map_err(|e| harness(e.to_string()))?.rectangular_trim)); }
+    }
+    if let Some(source) = source {
+        o.extend(source_before);
+        st(crate::util::primitive::append(&k, &source, &mut o))?
+            .map_err(|code| harness(format!("source geometry status {code}")))?;
     }
     if let Some(c) = &curve {
         put_curve(&k, &mut o, c);

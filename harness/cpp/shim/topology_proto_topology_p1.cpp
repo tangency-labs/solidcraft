@@ -21,6 +21,7 @@
 #include "sc_shim.h"
 #include "support/primitive_record.h"
 #include <SmApiPrimitives.h>
+#include <SmApiQueries.h>
 
 #include "StdAfx.h"
 #include <SmApiGeneral.h>
@@ -5015,6 +5016,8 @@ enum TObj : int64_t
     T_PRIMITIVE_BOX = 10,
     T_PRIMITIVE_SPHERE = 11,
     T_CALLER_FACE = 12,
+    T_COPIED_BOX = 13,
+    T_COPIED_SPHERE = 14,
 };
 
 // SmCrvOnSurf's UV-line constructor is protected.
@@ -5029,6 +5032,8 @@ int32_t run_transform(Rd& rd, std::vector<double>& o)
     const SmContext& ctx = the_context();
     int64_t kind = rd.idx();
     SmObject* obj = NULL;
+    SmBrep* source = NULL;
+    std::vector<double> source_before;
     switch (kind)
     {
     case T_CURVE:
@@ -5052,13 +5057,21 @@ int32_t run_transform(Rd& rd, std::vector<double>& o)
     }
     case T_PRIMITIVE_BOX:
     case T_PRIMITIVE_SPHERE:
+    case T_COPIED_BOX:
+    case T_COPIED_SPHERE:
     {
         SmPoint3d origin = rd.vec(); SmBrep* body = NULL; SmApiStatus created;
-        if (kind == T_PRIMITIVE_BOX) {
+        if (kind == T_PRIMITIVE_BOX || kind == T_COPIED_BOX) {
             double x=rd.num(), y=rd.num(), z=rd.num();
             created = SmApiCreateBox(origin, x, y, z, body);
         } else { double radius=rd.num(); created=SmApiCreateSphere(origin, radius, body); }
         if (created != SM_SUCCESS || !body) { o.push_back((double)created); delete body; return SC_OK; }
+        if (kind == T_COPIED_BOX || kind == T_COPIED_SPHERE) {
+            source = body; primitive_record::append(source_before, source);
+            SmBrep* copy = NULL; auto copied = SmApiBrepCopy(source, copy);
+            if (copied != SM_SUCCESS || !copy) { o.push_back((double)copied); delete copy; delete source; return SC_OK; }
+            body = copy;
+        }
         obj = body; break;
     }
     case T_CALLER_FACE:
@@ -5172,7 +5185,7 @@ int32_t run_transform(Rd& rd, std::vector<double>& o)
     default: return SC_ERR_ARG;
     }
     o.push_back((double)s);
-    if (kind == T_PRIMITIVE_BOX || kind == T_PRIMITIVE_SPHERE || kind == T_CALLER_FACE) {
+    if (kind == T_PRIMITIVE_BOX || kind == T_PRIMITIVE_SPHERE || kind == T_CALLER_FACE || kind == T_COPIED_BOX || kind == T_COPIED_SPHERE) {
         SmBrep* body=(SmBrep*)obj;
         SmTArray<SmVertex*> vertices; body->GetVertices(vertices);
         SmTArray<SmEdge*> edges; body->GetEdges(edges);
@@ -5180,6 +5193,12 @@ int32_t run_transform(Rd& rd, std::vector<double>& o)
         o.insert(o.end(), {(double)vertices.GetSize(), (double)edges.GetSize(), (double)faces.GetSize(), (body->*get(BrepModelSize()))(FALSE)});
         primitive_record::append(o,body);
         for (ULONG i=0;i<faces.GetSize();i++) o.push_back((double)faces[i]->GetRectangularTrim());
+    }
+    if (source) {
+        o.insert(o.end(), source_before.begin(), source_before.end());
+        primitive_record::append(o, source);
+        delete (SmBrep*)obj; obj = NULL;
+        delete source;
     }
     if (kind == T_CURVE)
         put_curve(o, (SmCurve*)obj);
