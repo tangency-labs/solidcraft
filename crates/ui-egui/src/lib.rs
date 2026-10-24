@@ -1022,6 +1022,12 @@ impl SolveApp {
             self.pick_open_command(id, json!({}), &[ext]);
             return;
         }
+        if id == "component.update_links" && !self.session.doc.links.is_empty() {
+            // Reading the linked designs again takes a while in a large assembly: off the window
+            // thread, the overlay naming the one being read (#5329).
+            let _ = file_load::begin_request(self, file_load::Request::new("", file_load::Kind::UpdateLinks));
+            return;
+        }
         if id == "component.insert_design" {
             // Another design becomes a linked component; a STEP or mesh file picked here is
             // inserted the way Insert STEP or Insert Mesh would (#1240).

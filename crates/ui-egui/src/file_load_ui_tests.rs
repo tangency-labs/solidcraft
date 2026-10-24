@@ -181,6 +181,76 @@ fn cancel_stops_the_open_and_keeps_the_current_design() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Update Links reads the linked designs again off the window thread (#5329): the overlay says
+/// so and names the design being read, the assembly stays as it was meanwhile (Cancel keeps it),
+/// and the new bodies come in once it is done, as one undo step.
+#[test]
+fn update_links_names_the_design_it_reads_while_the_window_draws() {
+    let dir = scratch("links");
+    let part = dir.join("plate.solidcraft");
+    let case = dir.join("case.solidcraft");
+    // A plate with two holes (three features: the read can be held at the third).
+    let save_part = |height: f64| {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 20, "height": height})).unwrap();
+        for x in [10, 30] {
+            s.execute("solid.cylinder", &json!({"radius": 2, "height": 200, "base": [x, 10, -1], "operation": "cut"})).unwrap();
+        }
+        s.execute("file.save", &json!({"path": part})).unwrap();
+        s.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap()
+    };
+    let volume = |app: &mut SolveApp| app.session.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    // The holes come through the link's exchange as surfaces of their own: a close match.
+    let near = |app: &mut SolveApp, v: f64| {
+        let got = volume(app);
+        assert!((got - v).abs() < 1e-3 * v, "{got} mm³, not {v}");
+    };
+    let thin = save_part(5.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("component.insert_design", json!({"path": part})).unwrap();
+    h.app.run("file.save", json!({"path": case})).unwrap();
+    near(&mut h.app, thin);
+    let thick = save_part(12.0);
+    let until = |h: &mut crate::scenario::Harness, done: &dyn Fn(&SolveApp) -> bool| {
+        let began = std::time::Instant::now();
+        while !done(&h.app) {
+            assert!(began.elapsed() < std::time::Duration::from_secs(120), "Update Links went on");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(3);
+    };
+
+    // Held before the part's third feature: the window draws, saying what it reads.
+    let assembly = h.app.session.doc.clone();
+    h.app.file_load.hold_at = Some(2);
+    h.app.start("component.update_links");
+    assert!(h.app.file_load.busy(), "Update Links runs off the window thread");
+    until(&mut h, &|app| app.file_load.features().is_some_and(|(done, total)| done >= 2 && total == 3));
+    assert!(h.app.file_load.busy(), "Update Links is still reading the part");
+    assert!(h.widget("Updating links").is_some(), "the overlay says Update Links is running");
+    assert!(h.widget("plate (1 of 1)…").is_some(), "and names the linked design being read");
+    assert!(h.widget("Rebuilding feature 3 of 3").is_some(), "with the part's rebuild progress");
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &assembly), "the assembly waits");
+    // Cancel keeps the assembly as it was.
+    h.app.file_load.cancel();
+    until(&mut h, &|app| app.file_load.idle());
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &assembly), "a cancelled update changes nothing");
+    near(&mut h.app, thin);
+
+    // Run through, it brings the edited part in, and says it is done.
+    h.app.start("component.update_links");
+    until(&mut h, &|app| app.file_load.idle());
+    assert!(h.widget("Updating links").is_none(), "the overlay goes once it is done");
+    near(&mut h.app, thick);
+    assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some("Update Links done"));
+    h.app.run("edit.undo", json!({})).unwrap();
+    // One undo step takes it back.
+    near(&mut h.app, thin);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A control-channel (MCP) open is answered when the file is in, with the synchronous
 /// command's reply, and the window draws frames while it waits. Commands sent meanwhile wait.
 #[test]

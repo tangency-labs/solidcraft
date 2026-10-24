@@ -233,13 +233,16 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let links: Vec<(u64, DesignLink)> = s.doc.links.iter().filter(|(c, _)| only.is_none_or(|o| o == **c)).map(|(c, l)| (*c, l.clone())).collect();
     let (mut updated, mut unchanged, mut warnings) = (Vec::new(), Vec::new(), Vec::new());
-    for (comp, link) in links {
+    let count = links.len();
+    for (index, (comp, link)) in links.into_iter().enumerate() {
         let cname = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone());
         let Some(cname) = cname else {
             // The component was deleted: the link goes with it.
             s.doc_mut().links.remove(&comp);
             continue;
         };
+        // A window running this off its thread names the design being read again (#5329).
+        solidcraft_doc::progress::item(Some((&cname, index, count)));
         let Some(FeatureKind::Import { step: old, .. }) = s.doc.feature(link.feature).filter(|f| f.component == comp).map(|f| &f.kind) else {
             return Err(bad(
                 cmd,
@@ -279,6 +282,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if changed { updated.push(cname) } else { unchanged.push(cname) }
     }
+    solidcraft_doc::progress::item(None);
     s.refresh();
     if let Some(e) = s.doc.links.values().find_map(|l| s.model.result(l.feature).and_then(|r| r.error.clone())) {
         return Err(EngineError::Other(e));
