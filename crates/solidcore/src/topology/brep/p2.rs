@@ -91,7 +91,6 @@ use crate::intersect::curve_class::ClassificationInit;
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, PointClassType, PointClassification,
 };
-use crate::intersect::topology_solver::p1::TopologySolver;
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
@@ -105,7 +104,7 @@ use crate::query::face::p2::{curve_on_classify, CurveOnClassifyObjects};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::trim_srf_cache::TrimSrfCache;
 use crate::topology::brep::p1;
-use crate::topology::brep_cache::{self, BrepCache, BrepObjects, CacheObject, CacheSource};
+use crate::topology::brep_cache::{self, BrepCache, CacheObject, CacheSource};
 use crate::topology::edge::{self, AttributeFilter, NotifyEnv, SetCurveOptions};
 use crate::topology::edgeuse::p1::{self as eu1, UvTrimCurveArg};
 use crate::topology::edgeuse::p2 as eu2;
@@ -1347,15 +1346,12 @@ pub fn ray_fire(
         ray_zone_tol_3d,
         answer_limit,
         |b, point, options| {
-            let objects = BrepObjects {
-                preparation: None,
-                brep: b,
+            let identity = crate::query::brep::BrepIdentity {
                 brep_id,
-                cache: Some(cache),
                 keys,
                 owner_of,
             };
-            TopologySolver::brep_point_solve(k, &objects, Some(CacheObject::Brep), point, options)
+            crate::query::brep::solve_mutable_brep_point(k, b, &identity, cache, point, options)
         },
     )
 }
