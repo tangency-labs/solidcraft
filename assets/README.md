@@ -23,6 +23,7 @@ assets/
   materials/library.rs               # physical defaults and colours
   shaders/viewport.wgsl               # original viewport shader
   fonts/{liberation-sans,biz-udp-gothic}/ # unmodified fonts and OFL licences
+  fonts/noto-sans-sc/                # web Chinese font subset, its subset.py and OFL licence
   locales/{en,de,ja,ko}.json          # shared offline catalogs
   platforms/{macos,linux,windows}/    # bundle, freedesktop and WiX templates
   archive/icons/macos-v1/

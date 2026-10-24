@@ -173,6 +173,9 @@ fn render(root: &Path, crates: &[Crate]) -> String {
          - BIZUDPGothic-Regular.ttf (assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf)\n  \
            Copyright 2022 The BIZ UDGothic Project Authors (https://github.com/googlefonts/morisawa-biz-ud-mincho)\n  \
            Source: https://github.com/googlefonts/morisawa-biz-ud-gothic\n\n\
+         - NotoSansSC-Regular.ttf (assets/fonts/noto-sans-sc/NotoSansSC-Regular.ttf, a subset)\n  \
+           Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'\n  \
+           Source: https://github.com/notofonts/noto-cjk\n\n\
          - IBMPlexSans-Variable.ttf (assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf)\n  \
            Copyright 2017 IBM Corp. with Reserved Font Name \"Plex\"\n  \
            Source: https://github.com/IBM/plex\n\n\

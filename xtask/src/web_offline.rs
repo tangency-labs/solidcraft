@@ -19,8 +19,8 @@ use sha2::{Digest, Sha256};
 const MARKER: &str = "/* @build */";
 const SW: &str = "sw.js";
 const BUILD: &str = "build.json";
-/// Files the app fetches only when it needs them (the CJK font, ~4.7 MB: `JAPANESE_FONT_PATH`
-/// in apps/solidcraft-web/src/main.rs): not kept for offline use, so not every user downloads
+/// Files the app fetches only when it needs them (the CJK fonts, ~4.7 and ~3.3 MB: `JAPANESE_FONT_PATH`
+/// and `CHINESE_FONT_PATH` in apps/solidcraft-web/src/main.rs): not kept for offline use, so not every user downloads
 /// them. The worker leaves them to the network.
 const ON_DEMAND: &[&str] = &["fonts/"];
 /// The version that makes sw.js retire (the template's own).

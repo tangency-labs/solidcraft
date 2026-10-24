@@ -3,7 +3,7 @@
 // `cargo xtask web-offline` (Trunk's post_build hook) writes the build into the line below: the
 // version (workspace version + a hash of every built file) and the files to keep, each with its
 // SHA-256, and the same as `build.json` next to it. Files the app only fetches when it needs
-// them (the CJK font) aren't kept: they come from the network. Every download is checked
+// them (the CJK fonts) aren't kept: they come from the network. Every download is checked
 // against its SHA-256: a deployment that lands mid-download (another build's `index.html`) fails
 // the download instead of mixing into the kept build. A new build changes this file, so the
 // browser installs the new worker, which keeps the whole new build before taking over.

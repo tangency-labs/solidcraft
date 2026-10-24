@@ -107,8 +107,41 @@ mod web {
     }
 
     const JAPANESE_FONT_PATH: &str = "./fonts/BIZUDPGothic-Regular.ttf";
+    const CHINESE_FONT_PATH: &str = "./fonts/noto-sans-sc/NotoSansSC-Regular.ttf";
 
     type FontLoadResult = Rc<std::cell::RefCell<Option<Result<Vec<u8>, String>>>>;
+
+    /// One of the on-demand CJK fonts: fetched only for its UI languages, or for painted text
+    /// the fonts loaded so far can't draw.
+    struct WebFont {
+        path: &'static str,
+        loader: solidcraft_ui_egui::fonts::CjkFontLoader,
+        result: FontLoadResult,
+        /// The fetched font's bytes: kept so a language change can re-order the fallbacks.
+        bytes: Option<Vec<u8>>,
+    }
+
+    impl WebFont {
+        fn new(path: &'static str, languages: &'static [&'static str]) -> Self {
+            Self {
+                path,
+                loader: solidcraft_ui_egui::fonts::CjkFontLoader::for_languages(languages),
+                result: Rc::new(std::cell::RefCell::new(None)),
+                bytes: None,
+            }
+        }
+
+        fn fetch(&self, ctx: &egui::Context) {
+            let slot = self.result.clone();
+            let ctx = ctx.clone();
+            let path = self.path;
+            wasm_bindgen_futures::spawn_local(async move {
+                let res = fetch_font_bytes(path).await;
+                *slot.borrow_mut() = Some(res);
+                ctx.request_repaint();
+            });
+        }
+    }
 
     struct Shell {
         app: SolveApp,
@@ -123,11 +156,10 @@ mod web {
         rename_focus: bool,
         /// The start page's recent designs were filled from the stored ones.
         recents_synced: bool,
-        /// On-demand CJK font: fetched only when a CJK language is selected.
-        font: solidcraft_ui_egui::fonts::CjkFontLoader,
-        font_result: FontLoadResult,
-        /// The fetched CJK font's bytes: kept so a language change can re-order the fallbacks.
-        cjk_bytes: Option<Vec<u8>>,
+        /// On-demand Japanese font (Japanese and Korean UIs, kana and kanji in an English one).
+        japanese: WebFont,
+        /// On-demand Chinese font (Chinese UIs, Chinese characters the Japanese font lacks).
+        chinese: WebFont,
         /// The language the fonts were last set up for (a CJK UI leads with the CJK face).
         font_language: String,
         space_mouse: SpaceMouse,
@@ -435,68 +467,78 @@ mod web {
             files::autosave(&self.files, None);
         }
 
-        /// Fetch and install the CJK font when a CJK language is selected. If that fails, this
-        /// session falls back to English (no tofu); the saved language preference is kept.
+        /// Fetch and install each CJK font when one of its languages is selected. If that fails,
+        /// this session falls back to English (no tofu); the saved language preference is kept.
         fn tick_font(&mut self, ctx: &egui::Context) {
-            let done = self.font_result.borrow_mut().take();
-            if let Some(res) = done {
-                let installed = match res {
-                    Ok(bytes) => {
-                        self.cjk_bytes = Some(bytes);
-                        true
+            let language = &mut self.app.preferences.language;
+            let mut loaded = false;
+            for font in [&mut self.japanese, &mut self.chinese] {
+                let done = font.result.borrow_mut().take();
+                if let Some(res) = done {
+                    let installed = match res {
+                        Ok(bytes) => {
+                            font.bytes = Some(bytes);
+                            true
+                        }
+                        Err(err) => {
+                            log::warn!("failed to fetch CJK font from {}: {err}", font.path);
+                            false
+                        }
+                    };
+                    if installed {
+                        log::info!("loaded web CJK font from {}", font.path);
+                    } else if font.loader.needs_font(language) {
+                        log::warn!("CJK font unavailable; showing English for this session");
                     }
-                    Err(err) => {
-                        log::warn!("failed to fetch CJK font from {JAPANESE_FONT_PATH}: {err}");
-                        false
-                    }
-                };
-                if installed {
-                    log::info!("loaded web CJK font from {JAPANESE_FONT_PATH}");
-                } else if solidcraft_ui_egui::fonts::needs_cjk_font(&self.app.preferences.language) {
-                    log::warn!("CJK font unavailable; showing English for this session");
+                    font.loader.finished(installed, language);
+                    loaded = true;
                 }
-                self.font.finished(installed, &mut self.app.preferences.language);
-                self.apply_fonts(ctx);
-                ctx.request_repaint();
-            }
-            if self.font.tick(&mut self.app.preferences.language) {
-                self.fetch_font(ctx);
+                if font.loader.tick(language) {
+                    font.fetch(ctx);
+                }
             }
             // The CJK face leads only a CJK UI: its Cyrillic glyphs are full-width, so switching
             // to Ukrainian (or English) must put the Latin face back in front.
-            if self.app.preferences.language != self.font_language {
+            if loaded || self.app.preferences.language != self.font_language {
                 self.apply_fonts(ctx);
+                ctx.request_repaint();
             }
         }
 
-        /// Set up the UI fonts for the live language, keeping the fetched CJK font as a fallback
-        /// (it leads only for a CJK UI, see [`solidcraft_ui_egui::fonts::install_cjk_font_for`]).
+        /// Set up the UI fonts for the live language, keeping the fetched CJK fonts as fallbacks
+        /// (one leads only a CJK UI, see [`solidcraft_ui_egui::fonts::install_web_cjk_fonts`]).
         fn apply_fonts(&mut self, ctx: &egui::Context) {
-            match self.cjk_bytes.clone() {
-                Some(bytes) => {
-                    solidcraft_ui_egui::fonts::install_cjk_font_for(ctx, bytes, &self.app.preferences.language);
-                }
-                None => solidcraft_ui_egui::fonts::setup_fonts(ctx),
+            if self.japanese.bytes.is_some() || self.chinese.bytes.is_some() {
+                solidcraft_ui_egui::fonts::install_web_cjk_fonts(
+                    ctx,
+                    self.japanese.bytes.clone(),
+                    self.chinese.bytes.clone(),
+                    &self.app.preferences.language,
+                );
+            } else {
+                solidcraft_ui_egui::fonts::setup_fonts(ctx);
             }
             self.font_language.clone_from(&self.app.preferences.language);
         }
 
-        /// CJK text on screen with no CJK font yet (an English UI showing a Japanese name):
-        /// fetch the font, so the text does not stay tofu (#720).
+        /// CJK text on screen that the fonts loaded so far can't draw (an English UI showing a
+        /// Japanese name, #720, or a simplified Chinese one): fetch the Japanese font first, then
+        /// the Chinese one for what it lacks, one at a time, so the text does not stay tofu.
         fn watch_text_for_font(&mut self, ctx: &egui::Context) {
-            if self.font.watching_text() && solidcraft_ui_egui::fonts::painted_cjk(ctx) && self.font.text_needs_font() {
-                self.fetch_font(ctx);
+            let fonts = [&self.japanese, &self.chinese];
+            if fonts.iter().any(|f| f.loader.status() == solidcraft_ui_egui::fonts::CjkFontStatus::Loading)
+                || !fonts.iter().any(|f| f.loader.watching_text())
+            {
+                return;
             }
-        }
-
-        fn fetch_font(&self, ctx: &egui::Context) {
-            let slot = self.font_result.clone();
-            let ctx = ctx.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                let res = fetch_font_bytes(JAPANESE_FONT_PATH).await;
-                *slot.borrow_mut() = Some(res);
-                ctx.request_repaint();
-            });
+            let faces: Vec<&[u8]> = fonts.iter().filter_map(|f| f.bytes.as_deref()).collect();
+            if !solidcraft_ui_egui::fonts::painted_cjk_missing_from(ctx, &faces) {
+                return;
+            }
+            let font = if self.japanese.loader.watching_text() { &mut self.japanese } else { &mut self.chinese };
+            if font.loader.text_needs_font() {
+                font.fetch(ctx);
+            }
         }
     }
 
@@ -528,7 +570,7 @@ mod web {
         }
         fn save(&mut self, storage: &mut dyn eframe::Storage) {
             // Persist the user's own language, not a session-only English fallback.
-            let saved = self.font.persisted_language(&self.app.preferences.language).to_owned();
+            let saved = self.japanese.loader.persisted_language(self.chinese.loader.persisted_language(&self.app.preferences.language)).to_owned();
             let live = std::mem::replace(&mut self.app.preferences.language, saved);
             storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, self.app.prefs());
             self.app.preferences.language = live;
@@ -673,9 +715,8 @@ mod web {
                             renaming: None,
                             rename_focus: false,
                             recents_synced: false,
-                            font: Default::default(),
-                            font_result: Rc::new(std::cell::RefCell::new(None)),
-                            cjk_bytes: None,
+                            japanese: WebFont::new(JAPANESE_FONT_PATH, solidcraft_ui_egui::fonts::JAPANESE_WEB_LANGUAGES),
+                            chinese: WebFont::new(CHINESE_FONT_PATH, solidcraft_ui_egui::fonts::CHINESE_WEB_LANGUAGES),
                             font_language,
                             space_mouse: SpaceMouse::default(),
                             wheel_gestures: solidcraft_ui_egui::WebWheelGestures::default(),

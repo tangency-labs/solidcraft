@@ -94,16 +94,20 @@ Chinese font-name list (`PingFang`, `Microsoft YaHei`, `Noto Sans CJK SC`, …) 
 glyph. No fonts are redistributed in native desktop distribution packages; native builds rely
 entirely on existing operating system fonts or craft-fonts.
 
-In the browser, `solidcraft-web` bundles a self-hosted Japanese font (`BIZUDPGothic-Regular.ttf`, licensed
-under SIL OFL 1.1) within the web distribution artifacts only. The font is loaded asynchronously from the same
-origin (`./fonts/BIZUDPGothic-Regular.ttf`) on-demand when the interface language is a CJK one, or, with
-any other interface language, the first time Japanese text (kana, kanji or full-width forms in a design name,
-file name, body name or typed text) is drawn, without contacting any external CDNs or third-party servers.
-A session that never shows such text downloads no font. If font loading fails with a CJK interface, the web
+In the browser, `solidcraft-web` bundles two self-hosted CJK fonts, licensed under SIL OFL 1.1, within the
+web distribution artifacts only: a Japanese font (`./fonts/BIZUDPGothic-Regular.ttf`, ~4.7 MB) and a Chinese
+one (`./fonts/noto-sans-sc/NotoSansSC-Regular.ttf`, ~3.3 MB, Noto Sans SC at weight 400 cut down to GB 2312,
+Big5 level 1 and every character of the `zh` and `zh-TW` catalogs by `assets/fonts/noto-sans-sc/subset.py`).
+Each is loaded asynchronously from the same origin on demand, without contacting any external CDNs or
+third-party servers: the Japanese font for a Japanese or Korean interface, the Chinese font for a Chinese
+(`zh`, `zh-TW`) interface, which leads with it. With any other interface language, the Japanese font loads the
+first time CJK text (kana, kanji or full-width forms in a design name, file name, body name or typed text)
+is drawn, and the Chinese font once drawn Chinese characters remain that the fonts loaded so far lack. A
+session that never shows such text downloads no font. If font loading fails with a CJK interface, the web
 interface shows English for that session only to prevent missing glyphs (tofu); the saved language
-preference is kept, so the next visit tries again. The bundled font specifically targets Japanese; it also
-renders the kanji Chinese shares with Japanese, while Korean (Hangul) and simplified-only Chinese characters
-are not covered, so a self-hosted SC/Korean font bundle remains follow-up work for full web coverage.
+preference is kept, so the next visit tries again. Korean (Hangul) is not covered yet, so a self-hosted Korean
+font remains follow-up work for full web coverage. When a Chinese catalog gains a character the subset
+lacks, a `fonts.rs` test names it; rebuild the font with `subset.py`.
 
 The current messages support named substitution, not locale-specific plural selection,
 number/date formatting, or right-to-left layout and shaping. Add those capabilities when
