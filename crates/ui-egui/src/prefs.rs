@@ -453,6 +453,8 @@ preference_settings! {
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
     free_orbit: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit.label");
+    /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.
+    right_click_confirms: bool = true, PAGE_NAVIGATION => check("Right-click confirms dialog inputs", "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.

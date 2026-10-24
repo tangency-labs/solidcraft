@@ -68,6 +68,7 @@ Mouse and touch:
 | Click again on the same spot | select the next thing under the cursor (click cycling) |
 | Hold the left button still (long-press on touch), or right-click › Select Other… | list everything under the cursor to pick from |
 | Double-click a sketch curve or edge | select its chain or tangent loop |
+| Right-click in the view with a dialog open | go on to the dialog's next empty selection box; once every box has something, OK. An empty box the feature needs stays, and the status line says what to pick (Preferences › Navigation › Right-click confirms dialog inputs, on by default) |
 | Double-click the middle button | go Home: the home view, framing everything shown (Preferences › Navigation › Middle double-click: Home, Fit or Off) |
 
 Help › Keyboard Shortcuts in the app lists the current bindings, including any you changed.
