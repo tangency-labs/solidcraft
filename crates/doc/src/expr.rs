@@ -255,7 +255,12 @@ impl Value {
             Kind::Angle if self.unitless() => self.v * d.ang,
             Kind::Unitless if self.unitless() => self.v,
             _ => {
-                return Err(DocError::Expr(format!("expected {}, got {}", kind_word(k), self.describe())));
+                let hint = if k == Kind::Unitless && self.len == 1 && self.ang == 0 {
+                    " (a count needs a unit-less value: divide by a length, e.g. `floor(L / (210 mm))`)"
+                } else {
+                    ""
+                };
+                return Err(DocError::Expr(format!("expected {}, got {}{hint}", kind_word(k), self.describe())));
             }
         };
         if out.is_finite() { Ok(out) } else { Err(DocError::Expr("result is not a finite number".into())) }
@@ -1138,6 +1143,16 @@ mod tests {
         assert_eq!(ev("hypot(3 mm, 4 mm)", Kind::Length).unwrap(), 5.0);
         assert_eq!(ev("7 % 4", Kind::Unitless).unwrap(), 3.0);
         assert_eq!(ev("width^2 / width", Kind::Length).unwrap(), 40.0);
+    }
+
+    /// A count from a length (`(L - 20) / 210`, the 210 read as unit-less) names the fix (#5901).
+    #[test]
+    fn a_length_where_a_count_is_expected_says_to_divide_by_a_length() {
+        let e = ev("width / 2", Kind::Unitless).unwrap_err().to_string();
+        assert!(e.contains("expected a unit-less number, got a length") && e.contains("divide by a length"), "{e}");
+        assert_eq!(ev("floor(width / (6 mm))", Kind::Unitless).unwrap(), 6.0);
+        let e = ev("45 deg", Kind::Unitless).unwrap_err().to_string();
+        assert!(!e.contains("divide"), "{e}");
     }
 
     #[test]
