@@ -314,6 +314,42 @@ fn hex_nut(hole: f64) -> Session {
     s
 }
 
+/// Two threaded screws crossing each other, cut and joined (#1983, the hang half of #2038): each
+/// is thousands of flat faces, and the boolean went through every B-rep retry on them for many
+/// minutes. It now takes the exact polygon route alone, with a result or a clear refusal, and
+/// tries no B-rep boolean at all: counted, not timed, so a busy machine cannot fail it. A cross
+/// hole through one of them (a curved tool) still takes the B-rep boolean, and is drilled.
+#[test]
+fn booleans_of_two_modelled_threads_finish() {
+    let mut s = Session::default();
+    for (id, p) in [
+        ("solid.cylinder", json!({"radius": 2.5, "height": 10, "body_name": "A"})),
+        ("solid.thread", json!({"face": [-2.5, 0, 5], "designation": "M5", "length": 4, "modeled": true})),
+        ("solid.cylinder", json!({"radius": 2.5, "height": 10, "base": [3.5, 0, 2], "operation": "new", "body_name": "B"})),
+        ("solid.thread", json!({"face": [6, 0, 7], "designation": "M5", "length": 4, "modeled": true})),
+    ] {
+        run(&mut s, id, p);
+    }
+    for b in ["A", "B"] {
+        let faces = s.model.state().body(b).map(|b| b.body.face_count()).unwrap_or(0);
+        assert!(faces > 1000, "{b} is faceted: {faces} faces");
+    }
+    for op in ["cut", "join"] {
+        let (r, left) = solidcraft_kernel::with_attempt_budget(4, || {
+            let r = s.execute("solid.combine", &json!({"target": "A", "tools": ["B"], "operation": op, "keep_tools": true}));
+            (r, solidcraft_kernel::attempts_left())
+        });
+        assert_eq!(left, Some(4), "the {op} tried the B-rep boolean on two flat bodies");
+        if let Err(e) = r {
+            assert!(e.to_string().contains("not supported yet"), "{op}: {e}");
+        }
+    }
+    let before = volume(&mut s, "B");
+    run(&mut s, "solid.cylinder", json!({"radius": 0.8, "height": 10, "base": [-1.5, 0, 9], "axis": "X", "operation": "cut", "targets": ["B"]}));
+    let after = volume(&mut s, "B");
+    assert!(after < before - 1.0, "the cross hole is drilled: {before} -> {after}");
+}
+
 /// Issue 602: rounding the edges of a hex boss on a threaded shaft froze the app. The thread's
 /// thousands of facets were healed pair by pair, once per feature after it, and the fillet's
 /// preview then compared each of them with the whole old body.

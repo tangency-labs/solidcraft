@@ -874,6 +874,11 @@ thread_local! {
     static APART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// Set while a union runs with a bore narrowed off a common cylinder (no second round).
     static BORES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// What is left of a finely faceted pair's B-rep work ([`FACETED_WORK`]) while its boolean
+    /// runs; `None` otherwise.
+    static FACETED_BUDGET: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+    /// Set when a B-rep boolean was refused because that work ran out.
+    static FACETED_SPENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The intersections left to the booleans running under [`with_attempt_budget`], if any.
     static ATTEMPTS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
@@ -898,6 +903,12 @@ pub fn with_attempt_budget<T>(attempts: usize, f: impl FnOnce() -> T) -> T {
     f()
 }
 
+/// The attempts left under [`with_attempt_budget`] on this thread (`None`: no budget), so a
+/// caller can tell how many of the kernel's own intersections a boolean took.
+pub fn attempts_left() -> Option<usize> {
+    ATTEMPTS.with(|c| c.get())
+}
+
 /// Takes one of the attempts left under [`with_attempt_budget`]; false when none is left.
 fn take_attempt() -> bool {
     ATTEMPTS.with(|c| match c.get() {
@@ -917,7 +928,44 @@ fn take_attempt() -> bool {
 /// The result carries its exact history ([`Body::history`]) over the operands `[a, b]`,
 /// whichever way it was made, or none where a step it took does not report one.
 pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
-    crate::profile::timed(crate::profile::Kind::Boolean, || boolean_untimed(a, b, op))
+    crate::profile::timed(crate::profile::Kind::Boolean, || {
+        // A finely faceted body against a curved one: the B-rep retries are bounded by work, so
+        // the boolean finishes or fails within a known amount of it (#1983). The booleans it
+        // nests share the budget of the outermost one.
+        let faceted = FACETED_BUDGET.with(|b| b.get()).is_none().then(|| faceted_faces(a, b)).flatten().filter(|f| !f.both);
+        if faceted.is_none() {
+            return boolean_untimed(a, b, op);
+        }
+        /// Ends the budget however the boolean ends.
+        struct Budget;
+        impl Drop for Budget {
+            fn drop(&mut self) {
+                FACETED_BUDGET.with(|b| b.set(None));
+            }
+        }
+        FACETED_BUDGET.with(|b| b.set(Some(FACETED_WORK)));
+        FACETED_SPENT.with(|s| s.set(false));
+        let budget = Budget;
+        let r = boolean_untimed(a, b, op);
+        drop(budget);
+        match (r, faceted) {
+            (Err(_), Some(f)) if FACETED_SPENT.with(|s| s.get()) => Err(KernelError::Failed(faceted_refusal(f.faces))),
+            (r, _) => r,
+        }
+    })
+}
+
+/// Charges a B-rep boolean of `a` and `b` against a finely faceted pair's budget: `false` when
+/// the budget is spent (the boolean is not run).
+fn faceted_work(a: &Body, b: &Body) -> bool {
+    let Some(left) = FACETED_BUDGET.with(|c| c.get()) else { return true };
+    let work = (a.face_count() as u64).saturating_mul(b.face_count() as u64);
+    if work > left {
+        FACETED_SPENT.with(|s| s.set(true));
+        return false;
+    }
+    FACETED_BUDGET.with(|c| c.set(Some(left - work)));
+    true
 }
 
 fn boolean_untimed(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
@@ -996,8 +1044,13 @@ fn boolean_via(a: &Body, b: &Body, op: BoolOp, whole: &dyn Fn(&Body, &Body, Bool
     {
         // Numerical retries must not quietly alter a planar design's dimensions.
         // Prefer the exact polygon result; reject an edge-only pinch if it cannot
-        // form a closed solid without displacing either operand.
-        r = match crate::polybool::planar_boolean(a, b, op) {
+        // form a closed solid without displacing either operand. A finely faceted pair's result
+        // already is the polygon boolean's (#1983): asking it again would only repeat the work.
+        let exact = match faceted_faces(a, b) {
+            Some(faceted) if faceted.both => Err(KernelError::Failed(faceted_refusal(faceted.faces))),
+            _ => crate::polybool::planar_boolean(a, b, op),
+        };
+        r = match exact {
             Ok(Some(exact)) if preserves_planar_surfaces(a, b, &exact) => {
                 diagnostics = Default::default();
                 diagnostics.events.push(BooleanFallback::new(BooleanStrategy::PlanarFallback));
@@ -1098,6 +1151,45 @@ fn cut_around_voids(a: &Body, b: &Body, whole: &dyn Fn(&Body, &Body, BoolOp) -> 
     let mut all = cut.solid.boundaries().clone();
     all.extend(voids);
     Ok(Some(guard("voids back", || Body::new(Solid::try_new(all).map_err(|e| KernelError::Failed(format!("voids back: {e}")))?))?))
+}
+
+/// Flat faces from which a body counts as finely faceted (#1983): a modelled thread has about
+/// 3000, an exact part with a few hundred holes far fewer than this.
+const FACETED_FACES: usize = 1000;
+
+/// The B-rep work a boolean of a finely faceted body and a curved one may do, in face pairs (each
+/// B-rep boolean it tries is charged one body's faces times the other's). A modelled M8 thread
+/// cut by a cross hole needs 18 tries (about 275 000 face pairs) before one is taken; a threaded
+/// cylinder cut out of a bored block went on for 84 tries and three minutes and then failed.
+/// Counted in work, not time, so the same design always gets the same answer.
+const FACETED_WORK: u64 = 600_000;
+
+/// A pair of bodies at least one of which is finely faceted: B-rep, only planar faces, at least
+/// [`FACETED_FACES`] of them.
+struct Faceted {
+    /// Both bodies' faces together.
+    faces: usize,
+    /// The other body is all planar too.
+    both: bool,
+}
+
+/// The pair when either body is finely faceted; such a pair asks the exact polygon boolean first.
+fn faceted_faces(a: &Body, b: &Body) -> Option<Faceted> {
+    let planar = |x: &Body| {
+        !x.is_mesh()
+            && guard("faceted body", || Ok(x.solid.face_iter().all(|f| matches!(f.oriented_surface(), mt::Surface::Plane(_))))).unwrap_or(false)
+    };
+    let big = |x: &Body| x.face_count() >= FACETED_FACES;
+    let (pa, pb) = (big(a) && planar(a), big(b) && planar(b));
+    (pa || pb).then(|| Faceted { faces: a.face_count() + b.face_count(), both: (pa || planar(a)) && (pb || planar(b)) })
+}
+
+/// The refusal of a finely faceted pair the polygon boolean could not decide.
+fn faceted_refusal(faces: usize) -> String {
+    format!(
+        "not supported yet: a boolean with a body this finely faceted ({faces} flat faces between the two, such as a modelled thread) \
+         gave no reliable result; combine the bodies first and add modelled threads afterwards, or thread the hole itself"
+    )
 }
 
 /// Every face of an all-planar union must remain on an operand's original plane.
@@ -1381,6 +1473,28 @@ where
             Ok(None) => return Ok(None),
             // A failed prism attempt keeps trying the other strategies, as it did before.
             Err(_) => {}
+        }
+    }
+    // A body of thousands of flat faces (a modelled thread, a faceted result) asks the exact
+    // polygon boolean first (#1983). Every B-rep retry below meets each of its faces with each
+    // of the other body's, and the ladder of them ran for many minutes; the polygon route takes
+    // seconds. When both bodies are all flat and it cannot give a result it can stand behind,
+    // nothing below can either. A curved partner (a cross hole, a round boss) is still the
+    // B-rep boolean's to decide.
+    if let Some(faceted) = faceted_faces(a, b) {
+        let (exact, diagnostics) = capture_boolean_diagnostics(|| crate::polybool::planar_boolean(a, b, op));
+        match exact {
+            Ok(Some(body)) if check(&body).0 => {
+                merge(diagnostics);
+                record(BooleanFallback::new(BooleanStrategy::PlanarFallback));
+                return Ok(Some(body));
+            }
+            Ok(None) if plausible(0.0, op, va, vb, slack) => {
+                record(BooleanFallback::new(BooleanStrategy::PlanarFallback));
+                return Ok(None);
+            }
+            _ if faceted.both => return Err(KernelError::Failed(faceted_refusal(faceted.faces))),
+            _ => {}
         }
     }
     // Bodies touching along one whole face (a part joined with its mirror image).
@@ -1907,6 +2021,9 @@ pub(crate) fn nudged(r: Body, nb: &Body, counts: &[(usize, usize)]) -> Body {
 pub(crate) fn truck_boolean(a: &Body, b: &Body, op: BoolOp, shift: Option<mt::Vector3>, tol: f64) -> Result<(Solid, Option<recorded::Shapeops>)> {
     if !take_attempt() {
         return Err(KernelError::Failed("no result in the tries it was given".into()));
+    }
+    if !faceted_work(a, b) {
+        return Err(KernelError::Failed("not supported yet: the work allowed for a boolean with a finely faceted body is spent".into()));
     }
     guard("boolean", || {
         let (mut sa, mut sb) = (a.deep_copy(), b.deep_copy());
