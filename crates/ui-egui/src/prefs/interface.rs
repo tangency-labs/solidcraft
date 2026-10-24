@@ -28,6 +28,14 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                             app.preferences.ribbon_labels = selected == 0;
                         }
                     });
+                    // The ribbon's panel drop-downs: a list, or a grid of large icons (#4739).
+                    ui_kit::row(ui, app.tr("prefs.menus"), |ui| {
+                        let mut selected = usize::from(app.preferences.ribbon_icon_grid);
+                        if ui_kit::segmented(ui, &mut selected, &[app.tr("prefs.menu_list"), app.tr("prefs.menu_grid")], Default::default()) {
+                            app.preferences.ribbon_icon_grid = selected == 1;
+                        }
+                    });
+                    setting::ribbon_menus_skip_pinned(app, ui);
                     ui_kit::row(ui, app.tr("prefs.history"), |ui| {
                         let mut selected = if app.preferences.timeline_left { if app.preferences.timeline_under_browser { 2 } else { 1 } } else { 0 };
                         if ui_kit::segmented(
