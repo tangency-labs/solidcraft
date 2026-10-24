@@ -65,6 +65,9 @@ pub struct ModelBody {
     /// [`Body::outline_bounds`] of `body` (with the body it was measured on), worked out once
     /// and shared by clones.
     outline: Arc<OnceLock<(Body, solidcraft_geom::Aabb3)>>,
+    /// [`kernel::measure`] of `body` (with the body it was measured on), worked out once and
+    /// shared by clones: inspecting a design again measures only the bodies that changed.
+    measured: Arc<OnceLock<(Body, kernel::Result<kernel::BodyMeasure>)>>,
 }
 
 impl ModelBody {
@@ -89,6 +92,7 @@ impl ModelBody {
             bytes: 0,
             source_key: 0,
             outline: Arc::new(OnceLock::new()),
+            measured: Arc::new(OnceLock::new()),
         }
     }
 
@@ -112,6 +116,19 @@ impl ModelBody {
             // The body was replaced in this cell's holder since: measure it again.
             _ => self.body.outline_bounds(),
         }
+    }
+
+    /// [`kernel::measure`] of the body (volume, area, centre of mass, box and topology), worked
+    /// out once: snapshots and passed-through copies of this geometry share it.
+    pub fn measure(&self) -> kernel::Result<kernel::BodyMeasure> {
+        let measure = || {
+            #[cfg(test)]
+            cost_tests::count(|c| c.measures += 1);
+            kernel::measure(&self.body)
+        };
+        let (body, m) = self.measured.get_or_init(|| (self.body.clone(), measure()));
+        // The body was replaced in this cell's holder since: measure it again.
+        if body.same(&self.body) { m.clone() } else { measure() }
     }
 
     /// Identity of this body's geometry where it stands: the same for a body evaluated or
@@ -7352,6 +7369,7 @@ impl PlacedBodies {
             Some((_, placed)) => {
                 let mut fresh = ModelBody::new(name, placed.body.clone(), b.feature);
                 fresh.mesh = placed.mesh.clone();
+                fresh.measured = placed.measured.clone();
                 fresh.mesh_placement = placed.mesh_placement.clone();
                 fresh.plan = placed.plan.clone();
                 fresh.plan_mesh = placed.plan_mesh.clone();

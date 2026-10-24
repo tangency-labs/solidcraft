@@ -54,7 +54,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 pub fn measure_json(b: &solidcraft_doc::ModelBody) -> Value {
-    match solidcraft_kernel::measure(&b.body) {
+    match b.measure() {
         Ok(m) => json!({
             "name": b.name,
             "volume_mm3": m.volume,
@@ -248,11 +248,16 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     let with_measure = bool_(p, "measure").unwrap_or(false);
+    // Each body is measured on its own: on all cores, in body order (as `inspect.measure`).
+    let mut measured = if with_measure { solidcraft_kernel::map_on_threads(&st.bodies, 16, measure_json) } else { Vec::new() }.into_iter();
     let bodies: Vec<Value> = st
         .bodies
         .iter()
         .map(|b| {
-            let mut v = if with_measure { measure_json(b) } else { json!({"name": b.name, "feature": b.feature}) };
+            let mut v = match measured.next() {
+                Some(m) => m.unwrap_or_else(|| json!({"name": b.name, "error": "measuring this body failed"})),
+                None => json!({"name": b.name, "feature": b.feature}),
+            };
             if let Some(o) = v.as_object_mut() {
                 o.insert("visible".into(), json!(s.body_visible(&b.name)));
                 if s.body_removed_later(&b.name) {

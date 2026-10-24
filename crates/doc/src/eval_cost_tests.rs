@@ -13,16 +13,18 @@ use solidcraft_sketch::Sketch;
 
 use crate::*;
 
-/// Work counted on this thread: bodies moved, STEP texts digested, joint faces measured.
+/// Work counted on this thread: bodies moved, STEP texts digested, joint faces and bodies
+/// measured.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
     pub digested: usize,
     pub joint_faces: usize,
+    pub measures: usize,
 }
 
 thread_local! {
-    static COUNTS: Cell<Counts> = const { Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0 }) };
+    static COUNTS: Cell<Counts> = const { Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0, measures: 0 }) };
 }
 
 pub(super) fn count(f: impl FnOnce(&mut Counts)) {
@@ -353,4 +355,56 @@ fn a_tool_cutting_another_part_cuts_again_when_that_part_moves() {
     model.evaluate(&doc);
     assert_eq!(model.last_recomputed, 0);
     assert!((volume(&model, &body) - (400.0 - 16.0)).abs() < 1e-6, "{}", volume(&model, &body));
+}
+
+#[test]
+fn a_body_is_measured_once_while_it_stays_the_same() {
+    let mut doc = Document::new("measured once");
+    let cylinder = |doc: &mut Document, x: f64| {
+        let kind = FeatureKind::Cylinder {
+            base: point_expr(Vec3::new(x, 0.0, 0.0)),
+            axis: Dir(Vec3::Z),
+            radius: "2".into(),
+            height: "10".into(),
+            operation: Operation::NewBody,
+        };
+        doc.add_feature(kind, None).unwrap();
+    };
+    cylinder(&mut doc, 0.0);
+    cylinder(&mut doc, 10.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let measure_all = |st: &ModelState| {
+        for b in &st.bodies {
+            b.measure().unwrap();
+        }
+    };
+    let first = model.state();
+    assert_eq!(counted(|| measure_all(&first)).measures, 2);
+    assert_eq!(counted(|| measure_all(&first)).measures, 0, "measured again");
+    // A feature added: only its body is new.
+    cylinder(&mut doc, 20.0);
+    model.evaluate(&doc);
+    let st = model.state();
+    assert_eq!(counted(|| measure_all(&st)).measures, 1);
+    // A body replaced in its holder is measured as it is now; the others keep theirs.
+    let mut replaced = st.bodies[0].clone();
+    replaced.body = kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    assert!((replaced.measure().unwrap().volume - 6.0).abs() < 1e-9);
+    assert!((st.bodies[0].measure().unwrap().volume - first.bodies[0].measure().unwrap().volume).abs() < 1e-12);
+}
+
+#[test]
+fn placed_bodies_taken_as_before_keep_their_measure() {
+    let mut doc = Document::new("placed measure");
+    let component = doc.add_component(Some("Part"), 0).unwrap();
+    doc.body_components.insert("Pin".into(), component);
+    doc.occurrences[0].transform = rigid(Vec3::new(10.0, 0.0, 0.0), Vec3::ZERO, Vec3::Y, 0.3);
+    let mut state = ModelState::default();
+    state.bodies.push(ModelBody::new("Pin".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 8.0).unwrap(), 1));
+    let mut cache = PlacedBodies::default();
+    let before = world_state_reusing(&doc, &state, &mut cache);
+    let centroid = before.bodies[0].measure().unwrap().centroid;
+    let again = world_state_reusing(&doc, &state, &mut cache);
+    assert_eq!(counted(|| assert_eq!(again.bodies[0].measure().unwrap().centroid, centroid)).measures, 0);
 }
