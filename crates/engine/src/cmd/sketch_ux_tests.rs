@@ -1525,6 +1525,34 @@ fn the_first_dimension_does_not_scale_a_sketch_that_has_a_size() {
     assert!(out.get("scaled").is_none(), "{out}");
 }
 
+/// #3786: shapes that nothing links together are not one drawing: the first dimension sizes
+/// the shape it measures and leaves the other alone.
+#[test]
+fn the_first_dimension_leaves_a_separate_shape_alone() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [30, 10], "p1": [45, 20]}));
+    let other = sketch(&s);
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "30 mm", "scale_sketch": true}));
+    assert!(out.get("scaled").is_none(), "{out}");
+    let after = sketch(&s);
+    // The second rectangle (points 4..8, after the origin and the first rectangle's four) is untouched.
+    for (p, q) in other.points.iter().zip(&after.points).skip(5) {
+        assert!(q.pos.dist(p.pos) < 1e-6, "{} {:?} -> {:?}", p.id, p.pos, q.pos);
+    }
+}
+
+/// #1365 still holds for one drawing: shapes joined by a constraint scale together.
+#[test]
+fn the_first_dimension_scales_shapes_joined_by_a_constraint() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [30, 10], "p1": [45, 20]}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "l1.start", "b": "l5.start"}));
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "40 mm", "scale_sketch": true}));
+    assert!(out.get("scaled").is_some(), "{out}");
+}
+
 /// The cursor fallback shares the held solves' frame budget; a scripted drag can finish later.
 #[test]
 fn cursor_fallback_respects_an_exhausted_live_frame_budget() {

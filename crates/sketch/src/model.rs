@@ -1029,7 +1029,8 @@ impl Sketch {
     /// with nothing that fixes a size: no other driving length dimension, nothing fixed,
     /// projected or patterned, no offsets and no 3D curves. Every geometric constraint
     /// (coincident, horizontal, parallel, tangent, equal, symmetric, …) and every angle holds
-    /// on the scaled sketch as it held before. `None` when the sketch does not qualify.
+    /// on the scaled sketch as it held before. `None` when the sketch does not qualify, also
+    /// when its curves form several separate chains (#3786): the dimension sizes only its own.
     pub fn scaled_for_first_dimension(&self, factor: f64) -> Option<Sketch> {
         if !(factor.is_finite() && (1e-6..=1e6).contains(&factor)) {
             return None;
@@ -1046,6 +1047,31 @@ impl Sketch {
             || !self.wires.is_empty()
             || self.curves.iter().any(|c| c.fixed || c.link.is_some())
             || self.points.iter().enumerate().any(|(i, p)| (p.fixed || p.link.is_some()) && (i != 0 || p.pos != Vec2::ZERO))
+        {
+            return None;
+        }
+        // Shapes nothing joins (#3786) are not one drawing: only one connected chain of curves
+        // scales. Curves and driving constraints join their points; the origin is a point too.
+        let mut parent: Vec<usize> = (0..self.points.len()).collect();
+        for c in &self.curves {
+            let ids = c.kind.point_ids();
+            for w in ids.windows(2) {
+                if let [a, b] = *w {
+                    union(&mut parent, a, b);
+                }
+            }
+        }
+        for c in self.constraints.iter().filter(|c| !c.driven) {
+            let ids = self.constraint_points(&c.kind);
+            for w in ids.windows(2) {
+                if let [a, b] = *w {
+                    union(&mut parent, a, b);
+                }
+            }
+        }
+        let mut roots = self.curves.iter().filter_map(|c| c.kind.point_ids().first().map(|&p| find(&mut parent, p)));
+        if let Some(first) = roots.next()
+            && roots.any(|r| r != first)
         {
             return None;
         }
