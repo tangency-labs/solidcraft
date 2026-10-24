@@ -411,17 +411,33 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         let surface = ts.objects.surface(face_surface_handle)?;
         let domain = ts.objects.face_uv_domain(face)?;
         let tol = ts.base.tolerance_3d + ts.objects.face_tolerance(face)?;
+        // the surface reaches its face's cache through the caller's context
+        // (`smsurf_GetSurfaceCache`), when it provides one
+        let mut context = ts.objects.surface_solve_context();
         let solutions = if ts.base.operation == SolverOperation::Intersect {
             // surface->GlobalCurveIntersect(domain, curve, interval, tol, solutions)
             // (SER): the solutions name the curve and the surface
-            surface.global_curve_intersect(
-                ts.kernel,
-                [curve.handle, surface_handle],
-                &domain,
-                curve.curve,
-                &self.interval,
-                tol,
-            )?
+            if let Some(context) = context.as_deref_mut() {
+                surface.global_curve_intersect_with_context(
+                    ts.kernel,
+                    [Some(curve.handle), Some(surface_handle)],
+                    None,
+                    context,
+                    &domain,
+                    curve.curve,
+                    &self.interval,
+                    tol,
+                )?
+            } else {
+                surface.global_curve_intersect(
+                    ts.kernel,
+                    [curve.handle, surface_handle],
+                    &domain,
+                    curve.curve,
+                    &self.interval,
+                    tol,
+                )?
+            }
         } else {
             let mut vectors = ts.base.opt_vectors.clone();
             if ts.base.operation == SolverOperation::Signed3dDirectedMinimize && self.swap_order {
@@ -431,18 +447,34 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                 *vector = -*vector;
                 vectors.truncate(1);
             }
-            surface.global_curve_solve(
-                ts.kernel,
-                &domain,
-                curve.curve,
-                &self.interval,
-                ts.base.operation,
-                tol,
-                best,
-                &vectors,
-                SolutionRequested::All,
-                [Some(curve.handle), Some(face_surface_handle)],
-            )?
+            if let Some(context) = context.as_deref_mut() {
+                surface.global_curve_solve_with_context(
+                    ts.kernel,
+                    &domain,
+                    curve.curve,
+                    &self.interval,
+                    ts.base.operation,
+                    tol,
+                    best,
+                    &vectors,
+                    SolutionRequested::All,
+                    [Some(curve.handle), Some(face_surface_handle)],
+                    context,
+                )?
+            } else {
+                surface.global_curve_solve(
+                    ts.kernel,
+                    &domain,
+                    curve.curve,
+                    &self.interval,
+                    ts.base.operation,
+                    tol,
+                    best,
+                    &vectors,
+                    SolutionRequested::All,
+                    [Some(curve.handle), Some(face_surface_handle)],
+                )?
+            }
         };
         for found in solutions.as_slice() {
             let mut solution = *found;
@@ -564,18 +596,37 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         } else {
             let a = ts.objects.surface(surface1)?;
             let b = ts.objects.surface(surface2)?;
-            let solutions = a.global_surface_solve(
-                ts.kernel,
-                &ts.objects.face_uv_domain(face1)?,
-                b,
-                &ts.objects.face_uv_domain(face2)?,
-                ts.base.operation,
-                ts.base.tolerance_3d,
-                best,
-                &ts.base.opt_vectors,
-                ts.base.solution_requested,
-                [Some(surface1), Some(surface2)],
-            )?;
+            // the surfaces reach their faces' caches through the caller's context
+            // (`smsurf_GetSurfaceCache`), when it provides one
+            let mut context = ts.objects.surface_solve_context();
+            let solutions = if let Some(context) = context.as_deref_mut() {
+                a.global_surface_solve_with_context(
+                    ts.kernel,
+                    &ts.objects.face_uv_domain(face1)?,
+                    b,
+                    &ts.objects.face_uv_domain(face2)?,
+                    ts.base.operation,
+                    ts.base.tolerance_3d,
+                    best,
+                    &ts.base.opt_vectors,
+                    ts.base.solution_requested,
+                    [Some(surface1), Some(surface2)],
+                    context,
+                )?
+            } else {
+                a.global_surface_solve(
+                    ts.kernel,
+                    &ts.objects.face_uv_domain(face1)?,
+                    b,
+                    &ts.objects.face_uv_domain(face2)?,
+                    ts.base.operation,
+                    ts.base.tolerance_3d,
+                    best,
+                    &ts.base.opt_vectors,
+                    ts.base.solution_requested,
+                    [Some(surface1), Some(surface2)],
+                )?
+            };
             for found in solutions.as_slice() {
                 let mut solution = *found;
                 solution.objects[0] = Some(face1);

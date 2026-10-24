@@ -80,6 +80,7 @@
 mod ray;
 
 pub(crate) use ray::solve_mutable_brep_point;
+pub use ray::LiveBrepObjects;
 #[cfg(test)]
 pub(crate) use ray::PreparationRequest;
 pub use ray::RayPreparation;

@@ -1644,10 +1644,14 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
             let face_surface = objects.face_surface(face)?;
             let uv_domain = objects.face_uv_domain(face)?;
             let face_tol = objects.face_tolerance(face)?;
+            // (SER) the surface reaches its face's cache through the caller's
+            // context (`smsurf_GetSurfaceCache`), when it provides one
+            let mut context = objects.surface_solve_context();
             let solutions = surface_global_point_solve(
                 ts.kernel,
                 face_surface,
                 objects.surface(face_surface)?,
+                context.as_deref_mut(),
                 &uv_domain,
                 op,
                 self.point,
@@ -1973,27 +1977,48 @@ pub(super) fn face_silhouettes<O: Copy + PartialEq>(
 }
 
 /// `pFace->GetSurface()->GlobalPointSolve(uv_domain, op, point, tol,
-/// pdBestAnswer, SM_SR_ALL, solutions)`.
+/// pdBestAnswer, SM_SR_ALL, solutions)`. `context` is the caller's owning-face
+/// service: the fast drop's trim test reaches the face's cache and classifies
+/// through it.
+#[allow(clippy::too_many_arguments)]
 fn surface_global_point_solve<O: SolutionObject>(
     kernel: &Kernel,
     handle: O,
     surface: &Surface,
+    context: Option<&mut (dyn crate::surface::surface::p1::SurfaceSolveContext<O> + '_)>,
     uv_domain: &Extent2d,
     op: SolverOperation,
     point: Point3,
     tol: f64,
     best_answer: Option<f64>,
 ) -> Result<SolutionArray<O>> {
-    surface.global_point_solve::<O>(
+    let Some(context) = context else {
+        return surface.global_point_solve::<O>(
+            kernel,
+            Some(handle),
+            uv_domain,
+            op,
+            point,
+            tol,
+            best_answer,
+            SolutionRequested::All,
+        );
+    };
+    let mut solutions = SolutionArray::new();
+    surface.global_point_solve_into_with_context(
         kernel,
         Some(handle),
+        None,
+        context,
         uv_domain,
         op,
         point,
         tol,
         best_answer,
         SolutionRequested::All,
-    )
+        &mut solutions,
+    )?;
+    Ok(solutions)
 }
 
 /// The arguments of `SmCurve::GlobalCurveSolve` after the two curves and their

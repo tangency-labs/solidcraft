@@ -3535,9 +3535,52 @@ pub struct CsGlobalSolver<'t, 's, O> {
     pub surface_cache: Option<&'s SurfaceCache<O>>,
     /// The prepared owning-face classifier for trimmed candidate acceptance.
     pub face_queries: Option<&'s dyn FaceQueries<O>>,
+    /// The handles and parameter domains of the solve's curve and surface, which the
+    /// solutions name (`IdenticalSolutions` reads them through upstream's objects);
+    /// `None` reads them from the handles themselves.
+    pub operands: Option<SolveOperands<O>>,
     /// The kernel (upstream's `SmContext`) the leaf solve's evaluations and solves run
     /// with (part 11).
     pub kernel: &'s Kernel,
+}
+
+/// The parameter domain of a solve's operand (see [`SolveOperands`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OperandDomain {
+    /// A curve and its natural interval (`GetNaturalInterval`).
+    Curve(Extent1d),
+    /// A surface and its natural UV domain (`GetNaturalUVDomain`).
+    Surface(Extent2d),
+}
+
+/// The operands of a curve/surface or surface/surface solve as its solutions name
+/// them: each operand's handle and parameter domain, which `IdenticalSolutions`
+/// reads through upstream's objects (`&crCurve`, `this`, `&crOtherSurface`). A
+/// handle's own hooks answer first.
+#[derive(Debug, Clone, Copy)]
+pub struct SolveOperands<O> {
+    /// The handles of the operands and their domains.
+    pub operands: [Option<(O, OperandDomain)>; 2],
+}
+
+impl<O: SolutionObject> crate::geom::solution_array::ParameterDomains<O> for SolveOperands<O> {
+    fn natural_interval(&self, curve: &O) -> Option<Extent1d> {
+        curve.natural_interval().or_else(|| {
+            self.operands.iter().flatten().find_map(|(h, d)| match d {
+                OperandDomain::Curve(ivl) if h == curve => Some(*ivl),
+                _ => None,
+            })
+        })
+    }
+
+    fn natural_uv_domain(&self, surface: &O) -> Option<Extent2d> {
+        surface.natural_uv_domain().or_else(|| {
+            self.operands.iter().flatten().find_map(|(h, d)| match d {
+                OperandDomain::Surface(domain) if h == surface => Some(*domain),
+                _ => None,
+            })
+        })
+    }
 }
 
 impl<'t, 's, O: SolutionObject> CsGlobalSolver<'t, 's, O> {
@@ -3559,6 +3602,7 @@ impl<'t, 's, O: SolutionObject> CsGlobalSolver<'t, 's, O> {
             curve: None,
             surface_cache: None,
             face_queries: None,
+            operands: None,
             kernel: k,
         }
     }
@@ -3674,6 +3718,7 @@ impl<'t, 's, O: SolutionObject> SsGlobalSolver<'t, 's, O> {
             kernel,
             caches: [None, None],
             face_queries: None,
+            operands: None,
         }
     }
 }

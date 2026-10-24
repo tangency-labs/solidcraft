@@ -24,7 +24,7 @@
 //! | [`drop_vectors_at`]                               | `DropVectors`                                    |
 //! | [`Surface::find_degen_param_for_direction`], [`DegenParam`] | `FindDegenParamForDirection`           |
 //! | [`Surface::global_point_solve_0`]                 | `GlobalPointSolve_0`                             |
-//! | [`Surface::global_curve_solve`]                   | `GlobalCurveSolve`                               |
+//! | [`Surface::global_curve_solve`], [`Surface::global_curve_solve_with_context`] | `GlobalCurveSolve`        |
 //! | [`Surface::global_surface_solve`]                 | `GlobalSurfaceSolve`                             |
 //! | [`Surface::local_curve_solve`], [`CurveSurfaceSolution`] | `LocalCurveSolve`                         |
 //! | [`Surface::create_parallel_projection_curves`]    | `CreateParallelProjectionCurves`                 |
@@ -119,7 +119,7 @@ use crate::topology::BrepId;
 
 use super::p1::{
     evaluate_1st_derivatives, evaluate_2nd_derivatives, evaluate_directional_derivs, is_node_valid,
-    CsNormalizeEnfo, SecondDerivatives,
+    CsNormalizeEnfo, OperandDomain, SecondDerivatives, SolveOperands, SurfaceSolveContext,
 };
 use super::p2::{derivative_limit, drop_vectors, normal_limit, SurfaceEvaluate};
 use super::{Surface, SurfaceKind};
@@ -1214,8 +1214,79 @@ impl Surface {
         requested: SolutionRequested,
         handles: [Option<O>; 2],
     ) -> Result<SolutionArray<O>> {
+        self.global_curve_solve_in(
+            k,
+            uv_domain,
+            curve,
+            interval,
+            op,
+            distance_tolerance,
+            opt_target_distance,
+            opt_vectors,
+            requested,
+            handles,
+            None,
+        )
+    }
+
+    /// [`Surface::global_curve_solve`] of a face's surface by a caller that holds the
+    /// face: `context` makes the surface's cache (`smsurf_GetSurfaceCache`, the face's
+    /// trimmed cache) from the surface's handle, and its face queries serve the leaf
+    /// solve's trim tests.
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::global_curve_solve`], and those of the context's cache
+    /// preparation.
+    pub fn global_curve_solve_with_context<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        op: SolverOperation,
+        distance_tolerance: f64,
+        opt_target_distance: Option<f64>,
+        opt_vectors: &[Vec3],
+        requested: SolutionRequested,
+        handles: [Option<O>; 2],
+        context: &mut dyn SurfaceSolveContext<O>,
+    ) -> Result<SolutionArray<O>> {
+        self.global_curve_solve_in(
+            k,
+            uv_domain,
+            curve,
+            interval,
+            op,
+            distance_tolerance,
+            opt_target_distance,
+            opt_vectors,
+            requested,
+            handles,
+            Some(context),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn global_curve_solve_in<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        op: SolverOperation,
+        distance_tolerance: f64,
+        opt_target_distance: Option<f64>,
+        opt_vectors: &[Vec3],
+        requested: SolutionRequested,
+        handles: [Option<O>; 2],
+        mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+    ) -> Result<SolutionArray<O>> {
         // get target cache locals (NER: a cache that cannot be built or has no tree)
-        let surface_cache = solve_surface_cache(k, self, handles[1])?;
+        let surface_cache = match context.as_deref_mut() {
+            Some(context) => solve_surface_cache_with(k, self, handles[1], context)?,
+            None => solve_surface_cache(k, self, handles[1])?,
+        };
         let surface_tree = surface_cache
             .tree()
             .ok_or(SolidError::null_pointer(OP_SOLVE))?;
@@ -1240,6 +1311,15 @@ impl Surface {
         );
         gs.curve = Some(curve);
         gs.surface_cache = Some(&surface_cache);
+        if let Some(context) = context.as_deref() {
+            gs.face_queries = context.face_queries();
+            gs.operands = Some(SolveOperands {
+                operands: [
+                    handles[0].map(|h| (h, OperandDomain::Curve(curve.natural_interval()))),
+                    handles[1].map(|h| (h, OperandDomain::Surface(self.natural_uv_domain()))),
+                ],
+            });
+        }
 
         let best = pair_solve_best_answer_sq(op, opt_target_distance, false)?;
         if op == SolverOperation::AtDistance {
@@ -1324,9 +1404,90 @@ impl Surface {
         requested: SolutionRequested,
         handles: [Option<O>; 2],
     ) -> Result<(SolutionArray<O>, Vec<SolutionNodes>)> {
+        self.global_surface_solve_in(
+            k,
+            uv_domain,
+            other,
+            other_uv_domain,
+            op,
+            distance_tolerance,
+            opt_target_distance,
+            opt_vectors,
+            requested,
+            handles,
+            None,
+        )
+    }
+
+    /// [`Surface::global_surface_solve`] of face surfaces by a caller that holds the
+    /// faces: `context` makes each surface's cache (`smsurf_GetSurfaceCache`, the
+    /// face's trimmed cache) from its handle, and its face queries serve the leaf
+    /// solve's trim tests.
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::global_surface_solve`], and those of the context's cache
+    /// preparation.
+    pub fn global_surface_solve_with_context<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        other: &Surface,
+        other_uv_domain: &Extent2d,
+        op: SolverOperation,
+        distance_tolerance: f64,
+        opt_target_distance: Option<f64>,
+        opt_vectors: &[Vec3],
+        requested: SolutionRequested,
+        handles: [Option<O>; 2],
+        context: &mut dyn SurfaceSolveContext<O>,
+    ) -> Result<SolutionArray<O>> {
+        Ok(self
+            .global_surface_solve_in(
+                k,
+                uv_domain,
+                other,
+                other_uv_domain,
+                op,
+                distance_tolerance,
+                opt_target_distance,
+                opt_vectors,
+                requested,
+                handles,
+                Some(context),
+            )?
+            .0)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn global_surface_solve_in<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        other: &Surface,
+        other_uv_domain: &Extent2d,
+        op: SolverOperation,
+        distance_tolerance: f64,
+        opt_target_distance: Option<f64>,
+        opt_vectors: &[Vec3],
+        requested: SolutionRequested,
+        handles: [Option<O>; 2],
+        mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+    ) -> Result<(SolutionArray<O>, Vec<SolutionNodes>)> {
         // both surface caches and trees (NER)
-        let cache1 = solve_surface_cache(k, self, handles[0])?;
-        let cache2 = solve_surface_cache(k, other, handles[1])?;
+        let (cache1, cache2) = match context.as_deref_mut() {
+            Some(context) => {
+                let cache1 = solve_surface_cache_with(k, self, handles[0], context)?;
+                (
+                    cache1,
+                    solve_surface_cache_with(k, other, handles[1], context)?,
+                )
+            }
+            None => (
+                solve_surface_cache(k, self, handles[0])?,
+                solve_surface_cache(k, other, handles[1])?,
+            ),
+        };
         let tree1 = cache1.tree().ok_or(SolidError::null_pointer(OP_SOLVE))?;
         let tree2 = cache2.tree().ok_or(SolidError::null_pointer(OP_SOLVE))?;
 
@@ -1339,6 +1500,15 @@ impl Surface {
             k,
         );
         gs.caches = [Some(&cache1), Some(&cache2)];
+        if let Some(context) = context.as_deref() {
+            gs.face_queries = context.face_queries();
+            gs.operands = Some(SolveOperands {
+                operands: [
+                    handles[0].map(|h| (h, OperandDomain::Surface(self.natural_uv_domain()))),
+                    handles[1].map(|h| (h, OperandDomain::Surface(other.natural_uv_domain()))),
+                ],
+            });
+        }
 
         let best = pair_solve_best_answer_sq(op, opt_target_distance, true)?;
         if op == SolverOperation::AtDistance {
@@ -1629,6 +1799,27 @@ fn solve_surface_cache<O: SolutionObject>(
     handle: Option<O>,
 ) -> Result<SurfaceCache<O>> {
     let mut cache = match super::p1::get_surface_cache(k, surface, handle) {
+        Ok(c) => c,
+        Err(e) if e.is_unported() => return Err(e),
+        Err(_) => return Err(SolidError::null_pointer(OP_SOLVE)),
+    };
+    match cache.get_tree(k) {
+        Ok(_) => Ok(cache),
+        Err(e) if e.is_unported() => Err(e),
+        Err(_) => Err(SolidError::null_pointer(OP_SOLVE)),
+    }
+}
+
+/// [`solve_surface_cache`] through the caller's owning-face context: the context
+/// makes the cache from the surface's handle (`smsurf_GetSurfaceCache` reaching the
+/// face), with the same `NER` mapping of a cache or tree that cannot be built.
+fn solve_surface_cache_with<O: SolutionObject>(
+    k: &Kernel,
+    surface: &Surface,
+    handle: Option<O>,
+    context: &mut dyn SurfaceSolveContext<O>,
+) -> Result<SurfaceCache<O>> {
+    let mut cache = match context.build_surface_cache(k, surface, handle) {
         Ok(c) => c,
         Err(e) if e.is_unported() => return Err(e),
         Err(_) => return Err(SolidError::null_pointer(OP_SOLVE)),
@@ -2471,6 +2662,10 @@ pub struct SsGlobalSolver<'t, 's, O> {
     pub caches: [Option<&'s SurfaceCache<O>>; 2],
     /// One prepared classifier for both caches, which may belong to one B-rep.
     pub face_queries: Option<&'s dyn crate::surface::surface_cache::face_context::FaceQueries<O>>,
+    /// The handles and natural UV domains of the two surfaces, which the solutions
+    /// name (`IdenticalSolutions` reads them through upstream's objects); `None` reads
+    /// them from the handles themselves.
+    pub operands: Option<SolveOperands<O>>,
 }
 
 impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {

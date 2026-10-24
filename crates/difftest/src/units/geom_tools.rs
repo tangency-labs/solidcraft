@@ -258,18 +258,30 @@ fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessErro
             Ok(None) => Ok(status_only(SM_ERR)),
             Err(e) => Ok(rust_err(&e)),
         },
-        Inputs::Face { file, pnt } => match tools::find_face(
-            &solidcore::kernel::Kernel::default(),
-            &file_brep(file)?,
-            solidcore::topology::BrepId::from_index(0),
-            p3(*pnt),
-            &solidcore::topology::brep_cache::arena_identity,
-            &|_| None,
-        ) {
-            Ok(Some(f)) => Ok(status_only(0).int("face", i64::from(f.index()))),
-            Ok(None) => Ok(status_only(SM_ERR)),
-            Err(e) => Ok(rust_err(&e)),
-        },
+        Inputs::Face { file, pnt } => {
+            let mut brep = file_brep(file)?;
+            match tools::find_face(
+                &solidcore::kernel::Kernel::default(),
+                &mut brep,
+                solidcore::topology::BrepId::from_index(0),
+                p3(*pnt),
+                &solidcore::topology::brep_cache::arena_identity,
+                &|_| None,
+            ) {
+                // the shim reports the face's index in `GetFaces` (the face list
+                // order, not the arena order)
+                Ok(Some(f)) => {
+                    let faces = solidcore::topology::brep::p1::faces(&brep, None)
+                        .map_err(|e| harness(&e))?;
+                    let index = faces.iter().position(|&g| g == f).map_or(-1, |i| {
+                        i64::try_from(i).unwrap_or(-1)
+                    });
+                    Ok(status_only(0).int("face", index))
+                }
+                Ok(None) => Ok(status_only(SM_ERR)),
+                Err(e) => Ok(rust_err(&e)),
+            }
+        }
     }
 }
 

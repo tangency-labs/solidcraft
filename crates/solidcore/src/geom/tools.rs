@@ -348,7 +348,7 @@ pub fn find_edge(k: &Kernel, brep: &Brep, point: Point3) -> Result<Option<EdgePi
 /// explicit deferrals for their unfinished dependencies.
 pub fn find_face(
     kernel: &Kernel,
-    brep: &Brep,
+    brep: &mut Brep,
     brep_id: BrepId,
     point: Point3,
     keys: &dyn Fn(CacheObject) -> ObjectRef,
@@ -493,7 +493,7 @@ fn brep_edges(brep: &Brep) -> Result<Vec<EdgeId>> {
 /// SM_BIG_DOUBLE, NULL, solutions)`: per solution, its first object if it is a face.
 fn brep_point_solve_faces(
     kernel: &Kernel,
-    brep: &Brep,
+    brep: &mut Brep,
     brep_id: BrepId,
     pt: Point3,
     tol: f64,
@@ -501,22 +501,22 @@ fn brep_point_solve_faces(
     owner_of: &dyn Fn(ObjectRef) -> Option<ObjectRef>,
 ) -> Result<Vec<Option<FaceId>>> {
     use crate::geom::global_solver::{SolutionRequested, SolverOperation};
-    use crate::intersect::topology_solver::p1::TopologySolver;
     use crate::intersect::topology_solver::p2::TopologySolveOptions;
-    use crate::topology::brep_cache::{make_brep_cache, BrepObjects, CacheSource};
+    use crate::query::brep::{solve_mutable_brep_point, BrepIdentity};
+    use crate::topology::brep_cache::{make_brep_cache, CacheSource};
     let cache = make_brep_cache(kernel, CacheSource::Brep(brep), keys)?;
-    let objects = BrepObjects {
-        preparation: None,
-        brep,
+    // the solve builds the face caches it reaches (`smsurf_GetSurfaceCache`), which
+    // creates their UV trim curves on the B-rep
+    let identity = BrepIdentity {
         brep_id,
-        cache: Some(&cache),
         keys,
         owner_of,
     };
-    let solutions = TopologySolver::brep_point_solve(
+    let solutions = solve_mutable_brep_point(
         kernel,
-        &objects,
-        Some(CacheObject::Brep),
+        brep,
+        &identity,
+        &cache,
         pt,
         TopologySolveOptions {
             operation: SolverOperation::Minimize,
@@ -634,7 +634,7 @@ mod tests {
         // the solve finds none
         let r = find_face(
             &Kernel::default(),
-            &brep,
+            &mut brep,
             BrepId::from_index(7),
             p(0.0, 0.0, 0.0),
             &crate::topology::brep_cache::arena_identity,

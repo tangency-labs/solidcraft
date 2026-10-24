@@ -900,6 +900,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 kernel: &k,
                 caches: [None, None],
                 face_queries: None,
+                operands: None,
             };
             match st(solver.solutions_identical(&k, &a, &bb))? {
                 Ok((t, pref)) => {

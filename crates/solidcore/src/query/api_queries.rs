@@ -9,10 +9,11 @@
 //! | [`surface_closest_point`] | `SmApiSurfaceClosestPoint` |
 //! | [`get_closest_point`], [`brep_closest_point`], [`brep_closest_point_all`] | `SmApiGetClosestPoint`, `SmApiBrepClosestPoint`, `SmApiBrepClosestPointAll` |
 //! | [`brep_relationship`], [`brep_distance`] | `SmApiBrepRelationship`, `SmApiBrepDistance` |
+//! | [`brep_relationship_solve`], [`brep_relationship_classify`] | the solve and the classification of `SmApiBrepRelationship` |
 //! | [`get_edges`], [`get_faces`], [`find_edge`], [`find_faces`] | `SmApiGetEdges`, `SmApiGetFaces`, `SmApiFindEdge`, `SmApiFindFaces` |
 //! | [`face_get_boundary_loops`] | `SmApiFaceGetBoundaryLoops` |
 //! | [`brep_is_manifold_solid`], [`brep_bounding_box`] | `SmApiBrepIsManifoldSolid`, `SmApiBrepBoundingBox` |
-//! | [`face_bounding_box`], [`face_internal_point`], [`face_classify_uv`], [`face_closest_point`] | `SmApiFaceBoundingBox`, `SmApiFaceInternalPoint`, `SmApiFaceClassifyUV`, `SmApiFaceClosestPoint` |
+//! | [`face_bounding_box`], [`face_internal_point`], [`face_classify_uv`], [`face_closest_point`], [`face_closest_point_in_shape`] | `SmApiFaceBoundingBox`, `SmApiFaceInternalPoint`, `SmApiFaceClassifyUV`, `SmApiFaceClosestPoint` |
 //! | [`edge_bounding_box`], [`edge_closest_point`], [`edge_parameter_range`], [`edge_classify_parameter`], [`edge_tangent`] | `SmApiEdgeBoundingBox`, `SmApiEdgeClosestPoint`, `SmApiEdgeParameterRange`, `SmApiEdgeClassifyParameter`, `SmApiEdgeTangent` |
 //! | [`vertex_get_point`] | `SmApiVertexGetPoint` |
 //! | `count_contained_samples`, `point_in_solid` (private) | `sm_CountContainedSamples`, `sm_PointInSolid` |
@@ -20,7 +21,9 @@
 //!
 //! Deviations: typed references/ids replace nullable pointers; results replace
 //! output parameters (including append-only arrays), so errors expose no partial
-//! arrays. Callers supply the Kernel and topology-solver object adapter/cache;
+//! arrays. Callers supply the Kernel and topology-solver object adapter/cache (an
+//! adapter holding the B-reps mutably calls the split relationship and face
+//! closest-point steps, so the solve can make face caches on them);
 //! handles retain the caller's identity. Missing topology queries return Unported
 //! at the call site. Solution point extraction retains upstream's zero parameter
 //! advance for a preceding Surface and ignores ordinary evaluation errors (the
@@ -453,14 +456,60 @@ pub fn brep_relationship<O: SolutionObject>(
     a: BrepRef<'_, O>,
     b: BrepRef<'_, O>,
 ) -> Result<BrepRelationship> {
+    let solution = brep_relationship_solve(k, objects, a.handle, b.handle)?;
+    brep_relationship_classify(k, objects, &solution, a.brep, b.brep)
+}
+
+/// The boundary distance solve of [`brep_relationship`] (`BrepBrepSolve`, single
+/// solution) on the B-reps behind `a` and `b`. A caller whose `objects` hold the
+/// B-reps mutably (face caches made on demand) runs it, then
+/// [`brep_relationship_classify`] on the B-reps.
+///
+/// # Errors
+///
+/// Those of the solver; `SM_ERR` without a solution.
+pub fn brep_relationship_solve<O: SolutionObject>(
+    k: &Kernel,
+    objects: &dyn TopologyObjects<O>,
+    a: O,
+    b: O,
+) -> Result<Solution<O>> {
     let solutions = TopologySolver::brep_brep_solve(
         k,
         objects,
-        Some(a.handle),
-        Some(b.handle),
+        Some(a),
+        Some(b),
         solve_options(k, SolutionRequested::Single),
     )?;
-    let solution = solutions.as_slice().first().ok_or(SolidError::sm_err(OP))?;
+    solutions
+        .as_slice()
+        .first()
+        .copied()
+        .ok_or(SolidError::sm_err(OP))
+}
+
+/// The containment and touching classification of [`brep_relationship`] after its
+/// solve ([`brep_relationship_solve`]), `brep_a` and `brep_b` being the B-reps the
+/// solution's objects name.
+///
+/// # Errors
+///
+/// Those of the solution points and the point classifications.
+pub fn brep_relationship_classify<O: SolutionObject>(
+    k: &Kernel,
+    objects: &dyn TopologyObjects<O>,
+    solution: &Solution<O>,
+    brep_a: &Brep,
+    brep_b: &Brep,
+) -> Result<BrepRelationship> {
+    let a = BrepRef {
+        brep: brep_a,
+        handle: (),
+    };
+    let b = BrepRef {
+        brep: brep_b,
+        handle: (),
+    };
     let distance = solution.start.solution_value;
     let tolerance =
         crate::geom::tol::context_zone_tol_3d(k, None, crate::geom::tol::SmallTopoType::NormalSize);
@@ -596,7 +645,7 @@ pub fn find_edge(k: &Kernel, brep: &Brep, point: Point3) -> Result<EdgePick> {
 /// Finds a face (`SmApiFindFaces`); missing match is `SM_ERR`.
 pub fn find_faces(
     k: &Kernel,
-    brep: &Brep,
+    brep: &mut Brep,
     id: BrepId,
     point: Point3,
     keys: &dyn Fn(CacheObject) -> ObjectRef,
@@ -670,10 +719,27 @@ pub fn face_closest_point<O: SolutionObject>(
     point: Point3,
 ) -> Result<ClosestPoint> {
     let shape = Shape::new(k, breps, &[], &[face], &[], &[])?;
+    face_closest_point_in_shape(k, &shape, objects, face, point)
+}
+
+/// [`face_closest_point`] on the face's shape already made (`SmShape` of the face):
+/// the solve may then read the face's B-rep through `objects` mutably (face caches
+/// and UV trim curves made on demand).
+///
+/// # Errors
+///
+/// Those of the solver and of the solution point.
+pub fn face_closest_point_in_shape<O: SolutionObject>(
+    k: &Kernel,
+    shape: &Shape,
+    objects: &dyn TopologyObjects<O>,
+    face: FaceKey,
+    point: Point3,
+) -> Result<ClosestPoint> {
     let mut options = solve_options(k, SolutionRequested::Single);
     options.tolerance_3d =
         objects.face_tolerance(objects.shape_member_object(ShapeMember::Face(face))?)?;
-    let solutions = TopologySolver::shape_point_solve(k, objects, &shape, point, options)?;
+    let solutions = TopologySolver::shape_point_solve(k, objects, shape, point, options)?;
     let solution = solutions.as_slice().first().ok_or(SolidError::sm_err(OP))?;
     Ok(ClosestPoint {
         point: solution_point(k, objects, solution, 0)?,

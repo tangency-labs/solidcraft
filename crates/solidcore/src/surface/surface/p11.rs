@@ -101,7 +101,7 @@ use super::p1::{
     SspIntersectEnfo, SurfaceSolveContext,
 };
 use super::p2::{cs_are_perpen_disjoint_in, intersect_and_split, original_surface, set_up_breaks};
-use super::p5::{cs_identical_solutions, DropPointOptions};
+use super::p5::{cs_identical_solutions_in, DropPointOptions};
 use super::p6::{boundary_iso_curve, sc_local_solve, ScLocalSolveNodes};
 use super::p7::{pass_ss_convergence_test, SsGlobalSolver};
 use super::{Surface, SurfaceKind};
@@ -1196,7 +1196,25 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for CsGlobalSolver<'t, '_, O
         sol2: &Solution<O>,
     ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
         // (surface::surface::p5)
-        cs_identical_solutions(self.kernel, &self.base, self.surface, sol1, sol2)
+        // the solutions name the solve's curve and surface (`&crCurve`, `this`)
+        match &self.operands {
+            Some(operands) => cs_identical_solutions_in(
+                self.kernel,
+                &self.base,
+                self.surface,
+                sol1,
+                sol2,
+                operands,
+            ),
+            None => cs_identical_solutions_in(
+                self.kernel,
+                &self.base,
+                self.surface,
+                sol1,
+                sol2,
+                &crate::geom::solution_array::OwnDomains,
+            ),
+        }
     }
 }
 

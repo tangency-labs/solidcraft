@@ -21,7 +21,7 @@
 //! | [`sp_local_solve`]                                  | `sm_SpLocalSolve` (static)                    |
 //! | [`filter_solution`]                                 | `sm_FilterSolution` (static)                  |
 //! | [`SpGlobalSolver`]'s and [`LsiGlobalSolver`]'s `identical_solutions` | `SmSPGlobalSolver::IdenticalSolutions`, `SmLSIGlobalSolver::IdenticalSolutions` |
-//! | [`cs_identical_solutions`], [`csi_identical_solutions`] | `SmCSGlobalSolver::IdenticalSolutions`, `SmCSIGlobalSolver::IdenticalSolutions` |
+//! | [`cs_identical_solutions`], [`cs_identical_solutions_in`], [`csi_identical_solutions`] | `SmCSGlobalSolver::IdenticalSolutions`, `SmCSIGlobalSolver::IdenticalSolutions` |
 //!
 //! Deviations:
 //! - **Solver classes without a Rust struct.** `SmCSGlobalSolver` and
@@ -68,7 +68,9 @@ use crate::geom::global_solver::{
     GlobalSolver, PreferredSolution, SolutionPairType, SolutionRequested, SolverOperation,
 };
 use crate::geom::local_solve_nd::{BoundaryHandler, LocalSolveNd, TerminationReason};
-use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SolutionType};
+use crate::geom::solution_array::{
+    OwnDomains, ParameterDomains, Solution, SolutionArray, SolutionObject, SolutionType,
+};
 use crate::geom::tol::{are_same, ZONE_TOL_3D};
 use crate::geom::vector2d::Vec2;
 use crate::kernel::Kernel;
@@ -2041,6 +2043,7 @@ pub fn filter_solution<O: SolutionObject>(
 /// `uv_at` is the index of `u` in the solutions' parameters (`1` after a curve or line
 /// parameter, `0` for a point/surface solve) and `require_single` the extra
 /// `SM_ST_SINGLE_VALUE` condition of the curve/surface solvers.
+#[allow(clippy::too_many_arguments)]
 fn surface_identical_solutions<O: SolutionObject>(
     k: &Kernel,
     base: &GlobalSolver<'_, O>,
@@ -2049,9 +2052,10 @@ fn surface_identical_solutions<O: SolutionObject>(
     sol2: &Solution<O>,
     uv_at: usize,
     require_single: bool,
+    domains: &dyn ParameterDomains<O>,
 ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
     // If the parent thinks they're identical, then they are.
-    let (pair, preferred) = base.identical_solutions(sol1, sol2)?;
+    let (pair, preferred) = base.identical_solutions_in(sol1, sol2, domains)?;
     if pair == SolutionPairType::Identical {
         return Ok((pair, preferred));
     }
@@ -2122,7 +2126,24 @@ pub fn cs_identical_solutions<O: SolutionObject>(
     sol1: &Solution<O>,
     sol2: &Solution<O>,
 ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
-    surface_identical_solutions(k, base, surface, sol1, sol2, 1, true)
+    cs_identical_solutions_in(k, base, surface, sol1, sol2, &OwnDomains)
+}
+
+/// [`cs_identical_solutions`] reading the parameter intervals of the solutions'
+/// objects through `domains` (the solve's operands, which upstream's objects are).
+///
+/// # Errors
+///
+/// As [`cs_identical_solutions`].
+pub fn cs_identical_solutions_in<O: SolutionObject>(
+    k: &Kernel,
+    base: &GlobalSolver<'_, O>,
+    surface: Option<&Surface>,
+    sol1: &Solution<O>,
+    sol2: &Solution<O>,
+    domains: &dyn ParameterDomains<O>,
+) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
+    surface_identical_solutions(k, base, surface, sol1, sol2, 1, true, domains)
 }
 
 /// `SmCSIGlobalSolver::IdenticalSolutions`: as [`cs_identical_solutions`].
@@ -2137,7 +2158,7 @@ pub fn csi_identical_solutions<O: SolutionObject>(
     sol1: &Solution<O>,
     sol2: &Solution<O>,
 ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
-    surface_identical_solutions(k, base, surface, sol1, sol2, 1, true)
+    surface_identical_solutions(k, base, surface, sol1, sol2, 1, true, &OwnDomains)
 }
 
 impl<O: SolutionObject> LsiGlobalSolver<'_, '_, O> {
@@ -2152,7 +2173,16 @@ impl<O: SolutionObject> LsiGlobalSolver<'_, '_, O> {
         sol1: &Solution<O>,
         sol2: &Solution<O>,
     ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
-        surface_identical_solutions(k, &self.base, self.surface, sol1, sol2, 1, true)
+        surface_identical_solutions(
+            k,
+            &self.base,
+            self.surface,
+            sol1,
+            sol2,
+            1,
+            true,
+            &OwnDomains,
+        )
     }
 }
 
@@ -2168,7 +2198,16 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
         sol1: &Solution<O>,
         sol2: &Solution<O>,
     ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
-        surface_identical_solutions(k, &self.base, self.surface, sol1, sol2, 0, false)
+        surface_identical_solutions(
+            k,
+            &self.base,
+            self.surface,
+            sol1,
+            sol2,
+            0,
+            false,
+            &OwnDomains,
+        )
     }
 }
 

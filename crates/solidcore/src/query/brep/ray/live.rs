@@ -6,7 +6,7 @@
 //! |------|----------|
 //! | `solve_mutable_ray` | `SmShell::RayFire`'s `ShapePointSolve` |
 //! | `solve_mutable_brep_point` | `SmBrep::RayFire`'s `BrepPointSolve` |
-//! | `LiveRayObjects` | Geometry pointers and live topology reads during the solve |
+//! | [`LiveBrepObjects`] | Geometry pointers and live topology reads during the solve |
 //!
 //! Deviations: exact evaluation copies satisfy the solver's borrowed-geometry API.
 //! A checked, operation-local `RefCell` lends the original B-rep to lazy face queries;
@@ -51,7 +51,7 @@ pub(crate) fn solve_mutable_ray(
     point: Point3,
     options: TopologySolveOptions<'_>,
 ) -> Result<SolutionArray<CacheObject>> {
-    let objects = LiveRayObjects::new(brep, identity, None)?;
+    let objects = LiveBrepObjects::new(brep, identity, None)?;
     TopologySolver::shape_point_solve(k, &objects, shape, point, options)
 }
 
@@ -63,12 +63,22 @@ pub(crate) fn solve_mutable_brep_point(
     point: Point3,
     options: TopologySolveOptions<'_>,
 ) -> Result<SolutionArray<CacheObject>> {
-    let objects = LiveRayObjects::new(brep, identity, Some(cache))?;
+    let objects = LiveBrepObjects::new(brep, identity, Some(cache))?;
     TopologySolver::brep_point_solve(k, &objects, Some(CacheObject::Brep), point, options)
 }
 
-impl<'a, 'i> LiveRayObjects<'a, 'i> {
-    fn new(
+impl<'a, 'i> LiveBrepObjects<'a, 'i> {
+    /// The topology solver's view of `brep` for one solve: the geometry as exact
+    /// evaluation copies, the topology read live, and the face caches and
+    /// classifications the solve requests made on `brep` itself (upstream's
+    /// `smsurf_GetSurfaceCache` and `SmFace::PointClassify`, which create UV trim
+    /// curves). `cache` is the B-rep's cache for `BrepPointSolve`, `None` for shape
+    /// solves.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluation copies.
+    pub fn new(
         brep: &'a mut Brep,
         identity: &'a BrepIdentity<'i>,
         cache: Option<&'a BrepCache>,
@@ -102,7 +112,9 @@ impl<'a, 'i> LiveRayObjects<'a, 'i> {
     }
 }
 
-struct LiveRayObjects<'a, 'i> {
+/// Live topology objects for the topology solver over one mutable B-rep (see
+/// [`LiveBrepObjects::new`]).
+pub struct LiveBrepObjects<'a, 'i> {
     brep: RefCell<&'a mut Brep>,
     identity: &'a BrepIdentity<'i>,
     cache: Option<&'a BrepCache>,
@@ -111,7 +123,18 @@ struct LiveRayObjects<'a, 'i> {
     caches: RefCell<BTreeMap<FaceId, SurfaceCache<CacheObject>>>,
 }
 
-impl LiveRayObjects<'_, '_> {
+impl LiveBrepObjects<'_, '_> {
+    /// Runs `f` on the B-rep between solves (what a caller reads from it after one).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when called from inside a solve that holds the B-rep mutably;
+    /// those of `f`.
+    pub fn with_brep<T>(&self, f: impl FnOnce(&Brep) -> Result<T>) -> Result<T> {
+        let brep = self.brep.try_borrow().map_err(borrow_conflict)?;
+        f(&brep)
+    }
+
     fn read<T>(&self, f: impl FnOnce(&BrepObjects<'_>) -> Result<T>) -> Result<T> {
         let brep = self.brep.try_borrow().map_err(borrow_conflict)?;
         f(&BrepObjects {
@@ -191,7 +214,7 @@ impl LiveRayObjects<'_, '_> {
     }
 }
 
-impl TopologyObjects<CacheObject> for LiveRayObjects<'_, '_> {
+impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
     fn brep_cache(&self, brep: CacheObject) -> Result<&BrepCache> {
         if brep != CacheObject::Brep {
             return Err(SolidError::invalid_input(OP, "expected B-rep handle"));
@@ -317,7 +340,7 @@ impl TopologyObjects<CacheObject> for LiveRayObjects<'_, '_> {
     }
 }
 
-struct LiveSurfaceContext<'a, 'b, 'i>(&'a LiveRayObjects<'b, 'i>);
+struct LiveSurfaceContext<'a, 'b, 'i>(&'a LiveBrepObjects<'b, 'i>);
 impl core::fmt::Debug for LiveSurfaceContext<'_, '_, '_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("LiveSurfaceContext").finish_non_exhaustive()
