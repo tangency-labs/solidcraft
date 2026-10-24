@@ -4572,3 +4572,32 @@ fn a_picture_only_prompt_and_a_thought_have_no_copy_message_action() {
     assert!(crate::scenario::handle_at("agent_chat:copy:1").is_none(), "a thought has no copy action");
     assert!(h.widget("Copy message").is_none(), "nothing to click");
 }
+
+/// Enter sends the box's text with its picks, wherever the caret is; so does `send_input` on the
+/// control channel (the box is emptied, the picks go with the message).
+#[test]
+fn enter_and_the_control_channel_send_the_box_with_its_pills() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    h.app.agent_chat.input = "put it ".into();
+    pick_pill(&mut h.app, 7, &sels[3..]);
+    h.app.agent_chat.input.push_str("here");
+    h.app.agent_chat.caret_to = Some(3);
+    h.frames(4);
+    h.step(&json!({"key": "Enter"})).expect("key");
+    h.frames(4);
+    let last_user = |h: &crate::scenario::Harness| h.app.agent_chat.items.iter().rev().find(|i| matches!(i, Item::User { .. })).cloned();
+    let Some(Item::User { text, context, .. }) = last_user(&h) else { panic!("Enter sent it: {:?}", h.app.agent_chat.input) };
+    assert!(text.contains("«1: Body1»") && context.groups.len() == 1, "{text}");
+    assert!(h.app.agent_chat.input.is_empty() && h.app.agent_chat.pills.is_empty());
+    // The same through the control channel.
+    h.app.agent_chat.items.clear();
+    h.app.agent_chat.input = "again ".into();
+    pick_pill(&mut h.app, 6, &sels[3..]);
+    let reply = h.call("ui.agent_chat", json!({}));
+    assert!(reply["result"]["input"].as_str().is_some_and(|t| t.contains("«")), "the status shows the box");
+    h.call("ui.agent_chat", json!({"send_input": true}));
+    assert!(matches!(last_user(&h), Some(Item::User { context, .. }) if context.groups.len() == 1), "the control channel sent it");
+    assert!(h.app.agent_chat.input.is_empty());
+}

@@ -2371,7 +2371,7 @@ fn set_config_option_checked(app: &mut SolveApp, id: &str, value: &str, listed_o
 /// `ui.agent_chat` on the control channel (tests and screenshots): `enabled`, `command`,
 /// `connect_at_start` and `open_at_start` (the launch preferences), `open`,
 /// `side`, `minimized`, `width`, `refresh`, `connect`, `stop`, `attach` (a file's path, for the
-/// next message), `remove_file` (index), `send`, `attach_view`, `attach_selection`, `pick` (with `pick_at`: the character of the box the pill goes to),
+/// next message), `remove_file` (index), `send`, `send_input` (send what is in the message box, as Enter does), `attach_view`, `attach_selection`, `pick` (with `pick_at`: the character of the box the pill goes to),
 /// `permission` (an option id, or `"cancel"`), `approve` (`true`/`false`, the oldest held
 /// request), `cancel` (Stop), `send_now` (steer: stop, then send the queue), `remove_pending` (index), `undo` (the newest message's changes); returns the panel's state.
 pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Value, String> {
@@ -2524,6 +2524,11 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
             connect(app, ctx);
         }
     }
+    if p.get("send_input").and_then(Value::as_bool) == Some(true) {
+        // What Enter does: the box's text, with its picks, goes.
+        let text = std::mem::take(&mut app.agent_chat.input).trim_end_matches('\n').to_string();
+        send(app, ctx, text);
+    }
     if let Some(text) = p.get("send").and_then(Value::as_str) {
         send(app, ctx, text.to_string());
     }
@@ -2624,6 +2629,7 @@ pub fn status(app: &SolveApp) -> Value {
         "toolsPort": c.tools_port,
         "pid": pid,
         "waiting": c.waiting(),
+        "input": c.input,
         "pills": c.pills.iter().map(|p| json!({"id": p.id, "label": p.label, "items": p.context.items.iter().map(|i| json!({"label": i.label, "detail": i.detail})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
         "pending": c.pending.iter().map(|p| json!({"text": p.text, "image": p.image, "context": p.context.total(), "files": p.files.iter().map(|f| f.name.clone()).collect::<Vec<_>>()})).collect::<Vec<_>>(),
         "attachments": c.attachments.iter().map(|f| f.name.clone()).collect::<Vec<_>>(),
