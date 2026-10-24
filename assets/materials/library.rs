@@ -1,9 +1,14 @@
 //! Built-in physical materials: densities in g/cm³ and sRGB colours.
+
+/// The default material's name: what a body without a usable material of its own is made of.
+/// Assigning it clears a body's assignment.
+pub const DEFAULT_MATERIAL: &str = "Default";
+/// Density of the default material (g/cm³).
 pub const DEFAULT_DENSITY: f64 = 1.29;
 
 /// Physical materials: name and density (g/cm³).
 pub const MATERIALS: [(&str, f64); 14] = [
-    ("Default", DEFAULT_DENSITY),
+    (DEFAULT_MATERIAL, DEFAULT_DENSITY),
     ("Steel", 7.85),
     ("Stainless Steel", 8.0),
     ("Aluminum", 2.70),

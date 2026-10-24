@@ -66,3 +66,28 @@ fn a_merged_face_takes_the_shared_stem_or_the_first_name_and_answers_to_the_othe
     let names = qualify(vec![m], &[]);
     assert_eq!(matches(&names, 0, "F9:top"), Some(Match::Alias));
 }
+
+/// #3330: a linked design's faces are named after the names that design gave them, so what the
+/// name holds must mean nothing else in the assembly, while its pieces stay pieces.
+#[test]
+fn a_linked_designs_face_names_keep_their_pieces_and_nothing_else() {
+    use crate::lineage::link_role;
+    let role = |n: &str| link_role(7, n, 0);
+    // A whole face is a digest of its name, the same on every build.
+    assert_eq!(role("F2:top"), "link:eb25d870dc3c9480");
+    assert_ne!(role("F2:side:c0"), role("F3:side:c0"));
+    // No feature number, `@`, `|` or `#` of that design is left to be read as one of this design.
+    let blend = role("F3:blend:F2:top|F2:side:l4@F5.1");
+    assert!(blend.starts_with("link:") && !blend.contains(['@', '|', '#', 'F']), "{blend}");
+    // A piece keeps its qualifier, the faces around it named as they are here.
+    assert_eq!(role("F2:top#[F2:side:l4,F4:side:l4]#2"), format!("{}#[F7:{},F7:{}]#2", role("F2:top"), role("F2:side:l4"), role("F4:side:l4")));
+    assert_eq!(role("F2:top#3"), format!("{}#3", role("F2:top")));
+    let nested = format!("F7:{}", role("F2:top#[a]#[b]"));
+    assert_eq!(crate::naming::strip_piece(&nested), format!("F7:{}", role("F2:top")));
+    assert_eq!(crate::naming::parent_piece(&nested), Some(format!("F7:{}", role("F2:top#[a]")).as_str()));
+    // Hostile names never panic, and qualifiers are read only so deep.
+    assert!(role(&format!("F1:top{}", "#[a]".repeat(10_000))).len() < 2_000);
+    for n in ["", "#", "#[", "]", "a#[", "#[]", "x#[[]]]", "#1", "a#[b]#", "é#[ü]"] {
+        let _ = role(n);
+    }
+}

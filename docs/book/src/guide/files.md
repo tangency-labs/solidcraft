@@ -6,7 +6,7 @@
 | `.json` (self-contained plain JSON design) | yes | yes |
 | STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
-| FreeCAD `.FCStd`, Rhino `.3dm` | solids, through cadmpeg (desktop app only) | |
+| FreeCAD `.FCStd`, Rhino `.3dm` | solids, through cadmpeg | |
 | 3MF, STL, OBJ | mesh bodies | yes |
 | glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | |
 | 3MF with face tags | as 3MF | each triangle tagged with its B-rep face, exact coordinates |
@@ -36,13 +36,14 @@ message: save the file uncompressed first.
 
 A 3MF project saved by a slicer comes in too, also when it keeps its objects in model parts of
 their own inside the file (the 3MF Production extension): each object on the build plates becomes
-one mesh body, with all its volumes merged where the slicer placed them. Slicer-only data
-(modifier, negative and support volumes, painting, per-object settings, and names kept in the
-slicer's metadata) is not read: modifier and negative volumes come in as ordinary solid geometry,
-and objects without a name in the model itself are called Mesh1, Mesh2, …
+one mesh body, with all its volumes merged where the slicer placed them. Each body is named after
+its object: the name in the model, else the one the slicer keeps in its project settings (Bambu
+Studio's `Metadata/model_settings.config`), else Mesh1, Mesh2, … Other slicer-only data
+(modifier, negative and support volumes, painting, per-object settings) is not read: modifier and
+negative volumes come in as ordinary solid geometry.
 
-**File → Export STL…** and **File → Export 3MF…** (also on the Mesh tab under Modify as Save as
-mesh, and in the right-click menu of a body) open the same dialog with that format chosen; it saves
+**File → Export STL…** and **File → Export 3MF…** (also **Save As Mesh** on the Insert tab's Files
+panel, and in the right-click menu of a body) open the same dialog with that format chosen; it saves
 the selected bodies as STL, 3MF or 3MF with face tags (below), and you can change the format there. With **Send to slicer** ticked, it writes the file to
 a temporary folder and opens it in the chosen slicer instead of asking for a file name. The slicer
 list shows the slicers found on the computer with their icons; **Custom…** adds any other program

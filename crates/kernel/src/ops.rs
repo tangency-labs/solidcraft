@@ -921,6 +921,9 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
 }
 
 fn boolean_untimed(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
+    if let Some(r) = with_hollow_tool(a, b, op) {
+        return finished(a, b, op, Ok(r));
+    }
     // Earlier coarse bores can leave a junction a later pattern copy cannot intersect.
     // Resolve conical-cut junctions from the first copy, while the operands are unchanged.
     if op == BoolOp::Cut && !APART.with(|c| c.get()) && conical_cut_junction(a, b) {
@@ -1008,14 +1011,7 @@ fn boolean_via(a: &Body, b: &Body, op: BoolOp, whole: &dyn Fn(&Body, &Body, Bool
             )),
         };
     }
-    r = r.map(|result| result.map(|body| body.inherit_regularization_protection(a).inherit_regularization_protection(b)));
-    match op {
-        BoolOp::Cut => r = r.and_then(|result| result.map(|body| body.with_preserved_boolean_planar_sources(a, b, true)).transpose()),
-        BoolOp::Union => r = r.and_then(|result| result.map(|body| body.with_preserved_union_planar_sources(a, b)).transpose()),
-        // Every face of an intersection lies on one operand's face, as a union's does: the same
-        // roles carry over (#565).
-        BoolOp::Intersect => r = r.and_then(|result| result.map(|body| body.with_preserved_union_planar_sources(a, b)).transpose()),
-    }
+    r = finished(a, b, op, r);
     // A retry's result is held to what the operation can do at all; one that fails is refused
     // rather than returned wrong (issue #616).
     if (!diagnostics.events.is_empty() || diagnostics.truncated)
@@ -1032,6 +1028,19 @@ fn boolean_via(a: &Body, b: &Body, op: BoolOp, whole: &dyn Fn(&Body, &Body, Bool
         merge(diagnostics);
     }
     r
+}
+
+/// What a boolean's result keeps of its operands: their regularization protection, and the
+/// sources of the planar faces it keeps.
+fn finished(a: &Body, b: &Body, op: BoolOp, r: Result<Option<Body>>) -> Result<Option<Body>> {
+    let r = r.map(|result| result.map(|body| body.inherit_regularization_protection(a).inherit_regularization_protection(b)));
+    match op {
+        BoolOp::Cut => r.and_then(|result| result.map(|body| body.with_preserved_boolean_planar_sources(a, b, true)).transpose()),
+        BoolOp::Union => r.and_then(|result| result.map(|body| body.with_preserved_union_planar_sources(a, b)).transpose()),
+        // Every face of an intersection lies on one operand's face, as a union's does: the same
+        // roles carry over (#565).
+        BoolOp::Intersect => r.and_then(|result| result.map(|body| body.with_preserved_union_planar_sources(a, b)).transpose()),
+    }
 }
 
 /// The most shells [`cut_around_voids`] takes apart.
@@ -1098,6 +1107,81 @@ fn cut_around_voids(a: &Body, b: &Body, whole: &dyn Fn(&Body, &Body, BoolOp) -> 
     let mut all = cut.solid.boundaries().clone();
     all.extend(voids);
     Ok(Some(guard("voids back", || Body::new(Solid::try_new(all).map_err(|e| KernelError::Failed(format!("voids back: {e}")))?))?))
+}
+
+/// A cut or union with `b` when `b` is one outer shell with sealed voids, from booleans with the
+/// outer shell and with the solids the voids are: `a` cut by `b` is `a` cut by the outer shell
+/// beside `a` within each void, and `a` joined with `b` is `a` joined with the outer shell, with
+/// what of each void `a` does not fill as a void. truck takes a tool's shells one at a time, each
+/// as if it were a body of its own, which is neither: such cuts came out empty, or kept only what
+/// lies in the void (a block crossing both spheres of a spherical shell, #451). Planar tools are
+/// left to the exact paths. `None` for other operations and tools, a void not inside the outer
+/// shell, and a result that fails the membership samples the general way's results are held to
+/// (a piece that failed or came out empty): the bodies then go the general way.
+fn with_hollow_tool(a: &Body, b: &Body, op: BoolOp) -> Option<Option<Body>> {
+    let shells = b.solid.boundaries();
+    if op == BoolOp::Intersect || b.is_mesh() || shells.len() < 2 || shells.len() > MAX_VOID_SHELLS || is_planar(b) {
+        return None;
+    }
+    let (mut outer, mut voids) = (None, Vec::new());
+    for sh in shells {
+        if crate::body::faces_inward(sh).ok()? {
+            voids.push(sh.clone());
+        } else if outer.replace(sh.clone()).is_some() {
+            return None;
+        }
+    }
+    // Each shell a body of its own, a void turned outwards: the solid it holds.
+    let parts: Vec<Body> = std::iter::once(outer?)
+        .chain(voids)
+        .map(|sh| guard("hollow tool", || Body::new(Solid::try_new(vec![sh]).map_err(|e| KernelError::Failed(format!("hollow tool: {e}")))?)))
+        .collect::<Result<_>>()
+        .ok()?;
+    let t = a.size().max(b.size()) * 5e-4;
+    let (shell, holes) = parts.split_first()?;
+    let mesh = shell.tessellate(t).ok()?;
+    let inside = mesh.inside_index();
+    if !holes.iter().all(|h| h.solid.vertex_iter().all(|v| inside.contains(from_p3(v.point())))) {
+        return None;
+    }
+    let r = by_outer_and_voids(a, b, parts, op).ok()?;
+    let mr = match &r {
+        Some(r) => r.tessellate_with(t, true).ok()?,
+        None => solidcraft_geom::Mesh::default(),
+    };
+    mismatch(&a.tessellate_with(t, true).ok()?, &b.tessellate_with(t, true).ok()?, &mr, op).is_some_and(|f| f < 0.004).then_some(r)
+}
+
+/// [`with_hollow_tool`]'s booleans, with `b` as its outer shell's solid, then its voids'.
+fn by_outer_and_voids(a: &Body, b: &Body, parts: Vec<Body>, op: BoolOp) -> Result<Option<Body>> {
+    let counts = record::counts(&[a, b]);
+    let traced: Vec<Traced> = recorded::parts_of(&parts, b).into_iter().zip(parts).map(|(h, p)| (p, recorded::placed(h, 1, 2))).collect();
+    let pair = |(x, hx): &Traced, (y, hy): &Traced, op: BoolOp| -> Result<Option<Traced>> {
+        Ok(boolean(x, y, op)?.map(|r| {
+            let h = recorded::of_pair(&r, hx, hy);
+            (r, h)
+        }))
+    };
+    let a = (a.clone(), recorded::kept(a, 0, 2));
+    let Some((shell, voids)) = traced.split_first() else { return Ok(None) };
+    if op == BoolOp::Cut {
+        let mut pieces: Vec<Traced> = pair(&a, shell, BoolOp::Cut)?.into_iter().collect();
+        for v in voids {
+            pieces.extend(pair(&a, v, BoolOp::Intersect)?);
+        }
+        return recorded::join(pieces, &counts);
+    }
+    let Some(mut joined) = pair(&a, shell, BoolOp::Union)? else { return Ok(None) };
+    // What of a void `a` leaves empty lies inside the outer shell, clear of the outside: a void again.
+    for v in voids {
+        if let Some((left, hl)) = pair(v, &a, BoolOp::Cut)?
+            && let Some(r) = void(&joined.0, &left, &record::counts(&[&joined.0, &left]))?
+        {
+            let h = recorded::of_pair(&r, &joined.1, &hl);
+            joined = (r, h);
+        }
+    }
+    Ok(Some(joined.0.with_checked_history(joined.1, &counts)))
 }
 
 /// Every face of an all-planar union must remain on an operand's original plane.

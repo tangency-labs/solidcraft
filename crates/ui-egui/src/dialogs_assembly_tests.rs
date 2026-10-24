@@ -215,6 +215,19 @@ fn component_picks_become_occurrences() {
     assert_eq!(c[0].0, "component.create");
 }
 
+/// A body of a further instance of a component belongs to that instance, not the first (#3857).
+#[test]
+fn body_of_a_further_instance_is_its_own_occurrence() {
+    let mut app = two_boxes();
+    let copy = app.session.execute("occurrence.copy", &json!({"component": "B", "translate": [0, 40, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    let first = occ(&app, "B");
+    assert_ne!(copy, first);
+    let frames = app.session.doc.body_frames(&app.session.model.state());
+    let of = |o: u64| frames.iter().find(|f| f.2.last() == Some(&o)).map(|f| f.0.clone()).unwrap();
+    assert_eq!(occurrence_of_body(&app.session, &of(first)), Some(first));
+    assert_eq!(occurrence_of_body(&app.session, &of(copy)), Some(copy));
+}
+
 /// Round edges snap to their centre; straight ones are not circles.
 #[test]
 fn circles_from_edge_polylines() {
@@ -448,6 +461,59 @@ fn drive_slider_previews_intermediate_positions_before_release() {
     assert!(h.app.dialog.is_none());
     assert!(!h.app.preview.active);
     assert_eq!(h.app.session.doc, before, "cancel leaves the joint at its original angle");
+}
+
+/// Dragging the slider rewrites the value box, which keeps its focus (a drag is not a click) and
+/// its selection: the rewritten text must not open the parameter suggestions over the slider.
+#[test]
+fn slider_drag_does_not_open_suggestions_over_the_slider() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = two_boxes();
+    for name in ["depth", "drop"] {
+        h.app.run("parameters.add", json!({"name": name, "expression": "5 mm"})).unwrap();
+    }
+    let (a, b) = (occ(&h.app, "A"), occ(&h.app, "B"));
+    h.app
+        .run(
+            "joint.create",
+            json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]},
+        "b": {"occurrence": b, "face": [40, 10, 0]}, "limits": [[-90, 90]]}),
+        )
+        .unwrap();
+    h.app.start("joint.drive");
+    h.frames(4);
+    let editor = egui::Id::new("sc_drive_value");
+    let bounds = h
+        .output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .find_map(|(_, n)| (n.role() == egui::accesskit::Role::Slider).then(|| n.bounds()).flatten())
+        .expect("drive slider");
+    let at = |fraction: f64| egui::pos2((bounds.x0 + fraction * (bounds.x1 - bounds.x0)) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32);
+    h.app.synthetic.extend([
+        egui::Event::PointerMoved(at(0.3)),
+        egui::Event::PointerButton { pos: at(0.3), button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+    ]);
+    // Past 0 deg the selection left from "0 deg" ends after the "d" of "6.0 deg": a word.
+    for step in 0..=10 {
+        h.app.synthetic.push(egui::Event::PointerMoved(at(0.3 + 0.023 * step as f64)));
+        h.frames(2);
+        assert!(!crate::expression_complete::showing(&h.ctx, editor), "suggestions opened during the drag (step {step})");
+    }
+    h.app.synthetic.push(egui::Event::PointerButton {
+        pos: at(0.53),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Default::default(),
+    });
+    h.frames(3);
+    assert!(h.ctx.memory(|m| m.has_focus(editor)), "the value box kept its focus through the drag");
+    assert!(!crate::expression_complete::showing(&h.ctx, editor), "suggestions opened after the drag");
+    let Some(Dialog { kind: Kind::Assembly(Asm::Drive { values, .. }), .. }) = h.app.dialog.as_ref() else { panic!("drive dialog") };
+    assert_eq!(values[0].get(3..5), Some(" d"), "the caret ends after a \"d\": {values:?}");
 }
 
 /// Named joint origins are drawn where their component is: a drive of the occurrence, or a free

@@ -75,6 +75,15 @@ fn child() {
         "abort" => {
             let _ = s.execute("diagnostics.crash_test", &json!({"mode": "abort"}));
         }
+        // Back to the root between two components: only the session's active component changes.
+        "components" => {
+            s.execute("component.create", &json!({"name": "Tray"})).unwrap();
+            s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+            s.execute("component.activate", &json!({"component": "root"})).unwrap();
+            s.execute("component.create", &json!({"name": "Bracket"})).unwrap();
+            s.execute("solid.box", &json!({"length": 4, "width": 4, "height": 4})).unwrap();
+            let _ = s.execute("diagnostics.crash_test", &json!({"mode": "abort"}));
+        }
         _ => {}
     }
     end_session();
@@ -202,6 +211,27 @@ fn render_settings_survive_unclean_exit_and_journal_replay() {
     }
     assert_eq!(recovered.doc.features.len(), 1);
     assert_eq!(recovered.doc.render.setups["Studio"].exposure_ev, 3.0);
+    let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
+fn activating_a_component_is_journaled_so_the_replay_builds_in_the_same_component() {
+    let d = fresh_dir("components");
+    assert!(!run_child(&d, "components").1);
+    assert!(run_child(&d, "none").1);
+    let (_, report) = only_report(&d);
+    let replay: Value = serde_json::from_slice(&fs::read(report["replay_path"].as_str().unwrap()).unwrap()).unwrap();
+    let commands = replay["commands"].as_array().unwrap();
+    assert_eq!(commands.iter().filter(|c| c["command"] == "component.activate").count(), 1, "{replay}");
+    let mut recovered = Session::default();
+    for command in commands {
+        let id = command["command"].as_str().unwrap();
+        if id != "diagnostics.crash_test" {
+            recovered.execute(id, &command["params"]).unwrap();
+        }
+    }
+    let bracket = recovered.doc.components.iter().find(|c| c.name == "Bracket").unwrap();
+    assert_eq!(bracket.parent, 0, "the Bracket was made under the root");
     let _ = fs::remove_dir_all(&d);
 }
 

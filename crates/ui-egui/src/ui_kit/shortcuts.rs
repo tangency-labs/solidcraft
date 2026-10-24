@@ -67,7 +67,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
         r,
         t.control_radius,
         t.control_fill,
-        Stroke::new(1.0, if focused { t.form_primary } else { t.control_border }),
+        if focused { Stroke::new(1.0, t.form_primary) } else { t.control_border_stroke(t.control_border) },
         egui::StrokeKind::Inside,
     );
     let icon = Rect::from_center_size(pos2(r.left() + t.space_8 + t.space_16 * 0.5, r.center().y), vec2(t.space_16, t.space_16));

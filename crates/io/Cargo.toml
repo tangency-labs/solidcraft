@@ -22,14 +22,12 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 chardetng = { workspace = true }
 encoding_rs = { workspace = true }
+# FreeCAD and Rhino import (pure Rust, so the browser build has it too).
+cadmpeg-core = { workspace = true }
+cadmpeg-ir = { workspace = true }
+cadmpeg-registry = { workspace = true }
 
 # A plain fsync where a network share refuses Apple's full flush (src/safe_write.rs); already in
 # the tree through tempfile.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
-
-# FreeCAD and Rhino import. Not in the browser build: it compiles the zstd C library.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-cadmpeg-core = { workspace = true }
-cadmpeg-ir = { workspace = true }
-cadmpeg-registry = { workspace = true }

@@ -539,7 +539,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         crate::scenario::publish_handle(&format!("select_other:{i}"), r.center());
                         if resp.hovered() {
                             hovered = Some(i);
-                            ui.painter().rect_filled(r.shrink2(vec2(2.0, 1.0)), 4.0, t.hover);
+                            ui.painter().rect_filled(r.shrink2(vec2(2.0, 1.0)), t.radius_sm, t.hover);
                         }
                         crate::icons::paint_icon(
                             ui.painter(),
@@ -547,13 +547,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             row.icon,
                             f32::from(t.icon.a()) / 255.0,
                         );
-                        ui.painter().text(
-                            pos2(r.left() + 32.0, r.center().y),
-                            Align2::LEFT_CENTER,
-                            &row.label,
-                            FontId::proportional(crate::theme::Tokens::get().font_button),
-                            t.text,
-                        );
+                        // Names can be wider than the list. Keep one line inside the row and
+                        // expose the full name on hover, as the browser tree does.
+                        let text_rect = Rect::from_min_max(pos2(r.left() + 32.0, r.top()), pos2(r.right() - 8.0, r.bottom()));
+                        let mut job =
+                            egui::text::LayoutJob::simple(row.label.clone(), FontId::proportional(t.font_button), t.text, text_rect.width());
+                        job.wrap.max_rows = 1;
+                        job.wrap.break_anywhere = true;
+                        job.wrap.overflow_character = Some('\u{2026}');
+                        let galley = ui.painter().layout_job(job);
+                        let elided = galley.elided;
+                        let at = pos2(text_rect.left(), r.center().y - galley.size().y / 2.0);
+                        ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(at, galley, t.text);
+                        let resp = if elided { resp.on_hover_text(&row.label) } else { resp };
                         if resp.clicked() {
                             picked = Some(i);
                         }

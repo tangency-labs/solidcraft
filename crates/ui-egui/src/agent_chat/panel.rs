@@ -265,11 +265,11 @@ fn picture_strip(ui: &mut egui::Ui, n: usize, pictures: &[Picture]) -> Option<us
                 }
             };
             let size = fit(texture.size_vec2(), vec2(THUMB_MAX.0, THUMB_MAX.1));
-            let thumb = ui.add(egui::Image::new((texture.id(), size)).corner_radius(4.0).sense(Sense::click()));
+            let thumb = ui.add(egui::Image::new((texture.id(), size)).corner_radius(t.radius_sm).sense(Sense::click()));
             crate::scenario::publish_handle(&format!("agent_chat:picture:{n}:{i}"), thumb.rect.center());
             let hover_max = (ui.ctx().content_rect().size() * 0.5).min(vec2(PREVIEW_MAX.0, PREVIEW_MAX.1));
             let thumb = thumb.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_ui(|ui| {
-                ui.add(egui::Image::new((texture.id(), fit(texture.size_vec2(), hover_max))).corner_radius(4.0));
+                ui.add(egui::Image::new((texture.id(), fit(texture.size_vec2(), hover_max))).corner_radius(t.radius_sm));
                 if !picture.note.is_empty() {
                     ui.label(&picture.note);
                 }
@@ -319,7 +319,7 @@ fn gallery_window(app: &mut SolveApp, ctx: &egui::Context) {
         if let Some(picture) = gallery.pictures.get(gallery.at) {
             match picture.texture(ui.ctx()) {
                 Shown::Ready(texture) => {
-                    let resp = ui.add(egui::Image::new((texture.id(), fit(texture.size_vec2(), max))).corner_radius(4.0));
+                    let resp = ui.add(egui::Image::new((texture.id(), fit(texture.size_vec2(), max))).corner_radius(t.radius_sm));
                     crate::scenario::publish_rect("agent_chat:gallery_picture", resp.rect);
                 }
                 Shown::Loading => {
@@ -361,7 +361,7 @@ fn drop_hint(ctx: &egui::Context, area: Rect) {
     let t = Tokens::get();
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("sc_agent_chat_drop_hint")));
     let zone = area.shrink(6.0);
-    painter.rect(zone, 10.0, t.accent.gamma_multiply(0.16), Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
+    painter.rect(zone, t.radius_xl, t.accent.gamma_multiply(0.16), Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
     let font = egui::FontId::proportional(Tokens::get().font_heading);
     let text = painter.layout(tr("ui.agent_chat_drop_hint").to_string(), font, t.text, (zone.width() - 24.0).max(40.0));
     let at = zone.center() - text.size() / 2.0;
@@ -472,7 +472,7 @@ fn glyph_button(ui: &mut egui::Ui, kind: &str, tip: &str) -> egui::Response {
     let t = Tokens::get();
     let (r, resp) = ui.allocate_exact_size(vec2(t.form_close_size, t.form_close_size), Sense::click());
     if resp.hovered() {
-        ui.painter().rect_filled(r, 4.0, t.hover);
+        ui.painter().rect_filled(r, t.radius_sm, t.hover);
     }
     let c = r.center();
     let s = Stroke::new(1.4, t.text);
@@ -534,7 +534,7 @@ fn strip(app: &mut SolveApp, ui: &mut egui::Ui) {
     let resp = ui.interact(button, Id::new("sc_agent_chat_unfold"), Sense::click());
     crate::scenario::publish_handle("agent_chat:unfold", button.center());
     if resp.hovered() {
-        ui.painter().rect_filled(button, 4.0, t.hover);
+        ui.painter().rect_filled(button, t.radius_sm, t.hover);
     }
     ui_kit::disclosure(ui.painter(), button.center(), false, t.text);
     let state = app.agent_chat.state();
@@ -553,7 +553,7 @@ fn strip(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     ui.painter().line_segment(
         if app.preferences.agent_chat_side == "left" { [r.right_top(), r.right_bottom()] } else { [r.left_top(), r.left_bottom()] },
-        Stroke::new(1.0, t.border),
+        t.primary_border(t.border),
     );
     let tip = format!("{} · {}", tip(), state.label());
     if resp.on_hover_text(tip).clicked() {
@@ -1298,7 +1298,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
         Container::new(ui.ctx(), Surface::Panel)
             .edge_frame(t.panel)
             .stroke(Stroke::new(1.0, t.accent))
-            .corner_radius(6.0)
+            .corner_radius(t.control_radius)
             .inner_margin(egui::Margin::same(6))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -1481,9 +1481,12 @@ pub(super) fn remove_tip(f: &attach::Attachment) -> &'static str {
 fn loading_chip(ui: &mut egui::Ui, name: &str, importing: bool, i: usize, w: f32) -> bool {
     let t = Tokens::get();
     let mut clicked = false;
-    let r = egui::Frame::NONE.fill(t.toolbar).stroke(Stroke::new(1.0, t.border)).corner_radius(6.0).inner_margin(egui::Margin::symmetric(4, 3)).show(
-        ui,
-        |ui| {
+    let r = egui::Frame::NONE
+        .fill(t.toolbar)
+        .stroke(t.control_border_stroke(t.border))
+        .corner_radius(t.control_radius)
+        .inner_margin(egui::Margin::symmetric(4, 3))
+        .show(ui, |ui| {
             let inner = (w - 10.0).max(40.0);
             ui.set_width(inner);
             ui.horizontal(|ui| {
@@ -1505,8 +1508,7 @@ fn loading_chip(ui: &mut egui::Ui, name: &str, importing: bool, i: usize, w: f32
                 crate::scenario::publish_handle(&format!("agent_chat:file_loading_remove:{i}"), c);
                 clicked = x.on_hover_text(tr(if importing { "ui.agent_chat_remove_imported" } else { "ui.agent_chat_remove_file" })).clicked();
             });
-        },
-    );
+        });
     crate::scenario::publish_handle(&format!("agent_chat:file_loading:{i}"), r.response.rect.center());
     clicked
 }
@@ -1516,9 +1518,12 @@ fn loading_chip(ui: &mut egui::Ui, name: &str, importing: bool, i: usize, w: f32
 fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::TextureHandle>, f: &attach::Attachment, i: usize, w: f32) -> bool {
     let t = Tokens::get();
     let mut clicked = false;
-    let r = egui::Frame::NONE.fill(t.toolbar).stroke(Stroke::new(1.0, t.border)).corner_radius(6.0).inner_margin(egui::Margin::symmetric(4, 3)).show(
-        ui,
-        |ui| {
+    let r = egui::Frame::NONE
+        .fill(t.toolbar)
+        .stroke(t.control_border_stroke(t.border))
+        .corner_radius(t.control_radius)
+        .inner_margin(egui::Margin::symmetric(4, 3))
+        .show(ui, |ui| {
             let inner = (w - 10.0).max(40.0);
             ui.set_width(inner);
             ui.horizontal(|ui| {
@@ -1561,8 +1566,7 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
                 crate::scenario::publish_handle(&format!("agent_chat:file_remove:{i}"), c);
                 clicked = x.on_hover_text(remove_tip(f)).clicked();
             });
-        },
-    );
+        });
     crate::scenario::publish_target(&format!("agent_chat:file:{i}"), r.response.rect);
     clicked
 }

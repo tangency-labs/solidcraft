@@ -10,14 +10,92 @@ use std::path::{Path, PathBuf};
 /// Shortest token accepted from `SOLIDCRAFT_CONTROL_TOKEN` (hex characters).
 pub const MIN_TOKEN_LEN: usize = 32;
 
+/// The port the control channel tries first when `--control` and `SOLIDCRAFT_CONTROL_PORT` give none.
+/// Below the ephemeral ranges of Linux (32768+) and Windows/macOS (49152+), so the system never
+/// hands it to an outgoing connection.
+pub const DEFAULT_PORT: u16 = 27878;
+
+/// Ports tried from [`DEFAULT_PORT`] upward when it is taken (a second window, another program).
+pub const PORT_TRIES: u16 = 16;
+
+/// Where the control channel listens, from the launch's `--control`/environment port and the
+/// "Let AI agents connect" preference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Listen {
+    /// Exactly this port (`--control PORT`, `SOLIDCRAFT_CONTROL_PORT`); no fallback.
+    Exact(u16),
+    /// [`DEFAULT_PORT`], or the next free one of [`PORT_TRIES`].
+    Default,
+}
+
+/// What a launch listens on. An explicit port wins over the preference, so a scripted launch
+/// works with the setting off; with the setting off and no port, nothing listens.
+pub fn plan(explicit: Option<u16>, enabled: bool) -> Option<Listen> {
+    match explicit {
+        Some(port) => Some(Listen::Exact(port)),
+        None if enabled => Some(Listen::Default),
+        None => None,
+    }
+}
+
+/// Bind a loopback-only listener on `first`, or on the next free port when it is taken, up to
+/// `tries` ports in all.
+pub fn bind_with_fallback(first: u16, tries: u16) -> Result<std::net::TcpListener> {
+    let mut last = Error::new(ErrorKind::AddrInUse, "no port to try");
+    for port in (first..=u16::MAX).take(usize::from(tries.max(1))) {
+        match std::net::TcpListener::bind(("127.0.0.1", port)) {
+            Ok(l) => return Ok(l),
+            // In use; Windows reports a port another program holds exclusively as denied.
+            Err(e) if matches!(e.kind(), ErrorKind::AddrInUse | ErrorKind::PermissionDenied) => last = e,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last)
+}
+
+/// The folder of the token files: `<data folder>/control` (`SOLIDCRAFT_CONTROL_DIR` replaces it).
+fn control_dir() -> Option<PathBuf> {
+    match solidcraft_geom::env::var_os("CONTROL_DIR").filter(|d| !d.is_empty()) {
+        Some(d) => Some(PathBuf::from(d)),
+        None => Some(crate::recovery::data_dir()?.join("control")),
+    }
+}
+
 /// The token file of the app listening on `port`: `<data folder>/control/<port>.token`
 /// (`SOLIDCRAFT_CONTROL_DIR` replaces the folder).
 pub fn token_path(port: u16) -> Option<PathBuf> {
-    let dir = match solidcraft_geom::env::var_os("CONTROL_DIR").filter(|d| !d.is_empty()) {
-        Some(d) => PathBuf::from(d),
-        None => crate::recovery::data_dir()?.join("control"),
-    };
-    Some(dir.join(format!("{port}.token")))
+    Some(control_dir()?.join(format!("{port}.token")))
+}
+
+/// The discovery file: the port of the most recently started app, so a client with no port
+/// (`solidcraft-cli mcp`) finds it. It holds only the port; the token stays in its own file.
+pub fn current_port_path() -> Option<PathBuf> {
+    Some(control_dir()?.join("current.port"))
+}
+
+/// Record `port` as the running app's, readable only by the user like the token files.
+pub fn write_current_port(port: u16) -> Result<PathBuf> {
+    let path = current_port_path().ok_or_else(|| Error::new(ErrorKind::NotFound, "no data folder"))?;
+    write_token_file(&path, &port.to_string())?;
+    Ok(path)
+}
+
+/// The port the discovery file names, if there is one.
+pub fn read_current_port() -> Option<u16> {
+    parse_port(&std::fs::read_to_string(current_port_path()?).ok().filter(|t| t.len() <= 64)?)
+}
+
+fn parse_port(text: &str) -> Option<u16> {
+    text.trim().parse::<u16>().ok().filter(|p| *p != 0)
+}
+
+/// Remove the discovery file at exit, unless a later app has taken it over (it names another port).
+pub fn remove_current_port(port: u16) {
+    if read_current_port() == Some(port)
+        && let Some(path) = current_port_path()
+    {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// A token set on purpose with `SOLIDCRAFT_CONTROL_TOKEN` (test harnesses, sandboxed packages
@@ -106,6 +184,41 @@ mod tests {
         assert!(!tokens_match("abc123", "abc124"));
         assert!(!tokens_match("abc123", "abc12"));
         assert!(!tokens_match("", "a"));
+    }
+
+    /// The preference starts the listener by default, off it doesn't, and a port given on the
+    /// command line or in the environment wins over it either way.
+    #[test]
+    fn the_preference_decides_unless_a_port_is_given() {
+        assert_eq!(plan(None, true), Some(Listen::Default));
+        assert_eq!(plan(None, false), None);
+        assert_eq!(plan(Some(7878), false), Some(Listen::Exact(7878)));
+        assert_eq!(plan(Some(7878), true), Some(Listen::Exact(7878)));
+    }
+
+    /// A taken port falls through to the next free one, on loopback only; a run of taken ports
+    /// is an error, not a hang.
+    #[test]
+    fn a_taken_port_falls_back_to_the_next_free_one() {
+        let first = bind_with_fallback(DEFAULT_PORT, PORT_TRIES).unwrap();
+        let a = first.local_addr().unwrap();
+        assert!(a.ip().is_loopback() && (DEFAULT_PORT..DEFAULT_PORT + PORT_TRIES).contains(&a.port()), "{a}");
+        let second = bind_with_fallback(a.port(), PORT_TRIES).unwrap();
+        assert!(second.local_addr().unwrap().port() > a.port());
+        assert!(bind_with_fallback(a.port(), 1).is_err());
+    }
+
+    #[test]
+    fn the_discovery_file_holds_a_port() {
+        assert_eq!(parse_port("27879\n"), Some(27879));
+        assert_eq!(parse_port("0"), None);
+        assert_eq!(parse_port("70000"), None);
+        assert_eq!(parse_port("nope"), None);
+        let dir = std::env::temp_dir().join(format!("solidcraft-current-port-{}", std::process::id()));
+        let path = dir.join("current.port");
+        write_token_file(&path, "27881").unwrap();
+        assert_eq!(parse_port(&std::fs::read_to_string(&path).unwrap()), Some(27881));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The token file is the user's alone, and a client reads it back.

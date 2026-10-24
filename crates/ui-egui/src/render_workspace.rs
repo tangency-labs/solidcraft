@@ -174,7 +174,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.render_workspace.view.draft = app.session.doc.render.setups.get(&app.render_workspace.view.name).cloned().unwrap_or_default();
         app.render_workspace.revision = app.session.revision;
     }
-    Container::new(ui.ctx(), Surface::Panel)
+    let response = Container::new(ui.ctx(), Surface::Panel)
         .edge("sc_render_settings", Edge::Right)
         .exact_size(285.0)
         .resizable(false)
@@ -260,6 +260,8 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+    let frame = Container::new(ui.ctx(), Surface::Panel).edge_frame(Tokens::get().panel).inner_margin(10);
+    Container::paint_inset(ui.painter(), response.response.rect - frame.outer_margin, frame);
 }
 
 fn image_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -553,6 +555,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ao_radius: 0.0,
             eye: [eye.x as f32, eye.y as f32, eye.z as f32, if camera.fov > 0.0 { 1.0 } else { 0.0 }],
             ssaa: if width < full.0 { width as f32 / full.0 as f32 } else { 1.0 },
+            hover_tint: [0.0; 3],
+            selection_tint: [0.0; 3],
         });
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, callback));
         Ok(())

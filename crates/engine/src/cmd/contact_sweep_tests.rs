@@ -84,7 +84,7 @@ fn revolute_cannot_cross_a_blocker_between_clear_endpoints() {
     let mut s = Session::default();
     for (name, corner) in [("Arm", [20, -2, -2]), ("Blocker", [-2, 20, -2])] {
         run(&mut s, "component.activate", json!({"component": 0}));
-        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "component.create", json!({"name": name, "grounded": false}));
         run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": corner}));
     }
     run(

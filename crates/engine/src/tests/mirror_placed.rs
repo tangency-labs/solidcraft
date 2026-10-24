@@ -25,7 +25,7 @@ fn assert_box(got: (Vec3, Vec3), want: (Vec3, Vec3)) {
 
 /// A component "Arm" holding "ArmBody", its occurrence turned and moved; the root is active.
 fn moved_arm(s: &mut Session) -> (u64, u64) {
-    let c = run(s, "component.create", json!({"name": "Arm"}));
+    let c = run(s, "component.create", json!({"name": "Arm", "grounded": false}));
     let (component, occurrence) = (c["component"].as_u64().unwrap(), c["occurrence"].as_u64().unwrap());
     run(s, "solid.box", json!({"corner": [10, 0, 0], "length": 20, "width": 4, "height": 6, "body_name": "ArmBody"}));
     run(s, "component.activate", json!({"component": 0}));
@@ -171,6 +171,9 @@ fn moving_an_unrelated_occurrence_does_not_evaluate_the_mirror_again() {
     run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [30, 0, 0], "body_name": "B"}));
     run(&mut s, "component.from_bodies", json!({"bodies": ["A", "B"]}));
     let occurrences: Vec<u64> = s.doc.occurrences.iter().map(|o| o.id).collect();
+    for occurrence in &occurrences {
+        run(&mut s, "occurrence.ground", json!({"occurrence": occurrence, "grounded": false}));
+    }
     assert_eq!(occurrences.len(), 2, "{:?}", s.doc.occurrences);
     let a = s.doc.body_frames(&s.model.state()).into_iter().find(|(name, ..)| name == "A").map(|(_, _, path, _)| path).unwrap();
     let (mine, other) = if a.contains(&occurrences[0]) { (occurrences[0], occurrences[1]) } else { (occurrences[1], occurrences[0]) };
@@ -190,7 +193,7 @@ fn moving_an_unrelated_occurrence_does_not_evaluate_the_mirror_again() {
 #[test]
 fn mirrored_copies_of_a_placed_component_intersect() {
     let mut s = Session::default();
-    let c = run(&mut s, "component.create", json!({"name": "Pair"}));
+    let c = run(&mut s, "component.create", json!({"name": "Pair", "grounded": false}));
     let occurrence = c["occurrence"].as_u64().unwrap();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [10, 0, 0], "body_name": "P"}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [15, 5, 5], "body_name": "Q"}));

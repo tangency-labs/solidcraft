@@ -120,6 +120,41 @@ fn trapezoid_section(s: &mut Session, t: f64) -> Vec<[f64; 3]> {
 }
 
 #[test]
+fn rotated_component_bend_picks_follow_connected_panels() {
+    let mut sizes = Vec::new();
+    for rotated in [false, true] {
+        let mut s = Session::default();
+        let component = run(&mut s, "component.create", json!({"name": "Bent part", "grounded": false}));
+        rule(&mut s, "Test", 2.0, 0.5, 1.0, 0.5);
+        let corners = bent_section(&mut s, &[(0.0, 0.0), (60.0, 0.0), (60.0, 40.0), (90.0, 40.0)], 2.0, 1.0, 100.0);
+        // The remote bend is picked on its tangent edge, where it meets the web.
+        let bends = [corners[0].0, [60.0, 39.0, 50.0]];
+        if rotated {
+            run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "axis": [1, 0, 0], "angle": "90 deg"}));
+        }
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let world = |p: [f64; 3]| if rotated { [p[0], -p[2], p[1]] } else { p };
+        let bends: Vec<_> = bends.into_iter().map(world).collect();
+        run(&mut s, "sheet.convert", json!({"body": "Section", "face": world([30.0, 0.0, 50.0]), "bends": bends}));
+        assert_eq!(bend_rows(&mut s).len(), 2);
+        sizes.push(flat_size(&mut s));
+    }
+    assert!(same_size(sizes[0], sizes[1], 1e-6), "{sizes:?}");
+}
+
+#[test]
+fn rotated_component_disconnected_bend_reports_world_point() {
+    let mut s = Session::default();
+    let component = run(&mut s, "component.create", json!({"name": "Bent part", "grounded": false}));
+    rule(&mut s, "Test", 2.0, 0.5, 1.0, 0.5);
+    section(&mut s, &[(0.0, 0.0), (60.0, 0.0), (60.0, 40.0), (90.0, 40.0)], 2.0, 100.0);
+    run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "axis": [1, 0, 0], "angle": "90 deg"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let e = s.execute("sheet.convert", &json!({"body": "Section", "face": [30, -50, 0], "bends": [[60, -50, 40]]})).unwrap_err().to_string();
+    assert!(e.contains("the bend at (60.000, -50.000, 40.000) does not connect"), "{e}");
+}
+
+#[test]
 fn a_shelled_tray_keeps_its_walls_and_unfolds_by_the_k_factor() {
     let (t, k, r, gap) = (2.0, 0.44, 2.0, 0.5);
     let mut s = Session::default();

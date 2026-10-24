@@ -68,7 +68,13 @@ const NAMES_A_FILE: [&str; 8] = ["path", "paths", "file", "files", "dir", "folde
 /// Commands that change nothing in the design and write a file: they run on a copy.
 const ANSWERED_ON_A_COPY: [&str; 2] = ["file.export", "file.save_mesh"];
 
-/// Exports computing at once; more run here.
+/// Commands that only read the design, which can take long on a large one (a measure of every
+/// body, an inspection that measures them, #4604; a clearance or interference check of every pair
+/// of bodies, minutes on an assembly of 150): they run on a copy too, whatever the preference,
+/// since an answer from the design as it was when asked has no order to keep.
+const READ_ON_A_COPY: [&str; 4] = ["inspect.measure", "document.inspect", "inspect.clearance", "inspect.interference"];
+
+/// Exports and readings computing at once; more run here.
 const MAX_ANSWERING: usize = 4;
 
 /// How often a design change is computed again because the design changed under it before it
@@ -98,6 +104,20 @@ pub(crate) fn computes_ahead(command: &str, params: &Value) -> bool {
 fn executed(params: &Value) -> Option<(&str, Value)> {
     let command = params.get("command").or_else(|| params.get("id")).and_then(Value::as_str)?;
     Some((command, params.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))))
+}
+
+/// A request that only reads the design and can take long ([`READ_ON_A_COPY`]): an
+/// `engine.execute` of such a command, or the `document.inspect` method. The command and its
+/// parameters.
+fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
+    match req.method.as_str() {
+        "document.inspect" => Some(("document.inspect", req.params.clone())),
+        "engine.execute" | "command" => {
+            let (command, params) = executed(&req.params)?;
+            spec_id(command).filter(|id| READ_ON_A_COPY.contains(id)).map(|id| (id, params))
+        }
+        _ => None,
+    }
 }
 
 /// Requests that change the design: they wait while one computes.
@@ -293,7 +313,18 @@ impl SolveApp {
     /// Take a control request off the window thread when it computes long (see the module
     /// notes). Returns it when it should simply run here now.
     pub(crate) fn offload_control(&mut self, ctx: &egui::Context, req: ControlRequest) -> Option<ControlRequest> {
-        if self.apply_off_thread.is_none() || !self.preferences.agent_off_thread || self.file_load.busy() || self.file_picker.is_some() {
+        if self.apply_off_thread.is_none() || self.file_load.busy() || self.file_picker.is_some() {
+            return Some(req);
+        }
+        // Reading the design (a measure, an inspection that measures): on a copy, answered from
+        // there, preference or not. On a large assembly it took a minute on the window thread,
+        // and the window, answering nothing meanwhile, was closed as not responding (#4604).
+        if self.control_answering.len() < MAX_ANSWERING
+            && let Some((id, params)) = reading(&req)
+        {
+            return self.answer_on_a_copy(req, id, params);
+        }
+        if !self.preferences.agent_off_thread {
             return Some(req);
         }
         // An export: on a copy, answered from there.
@@ -302,21 +333,7 @@ impl SolveApp {
             && let Some((command, params)) = executed(&req.params)
             && let Some(id) = spec_id(command).filter(|id| ANSWERED_ON_A_COPY.contains(id))
         {
-            let Ok(scope) = crate::control::request_scope(self, &req.params) else { return Some(req) };
-            let mut copy = self.session.scratch();
-            let rx = spawn(scope, move || {
-                Some(match copy.execute(id, &params) {
-                    Ok(v) => json!({"ok": true, "result": v}),
-                    Err(e) => json!({"ok": false, "error": e.to_string()}),
-                })
-            });
-            let Some(rx) = rx else { return Some(req) };
-            let job = ControlJob { label: label(self, id), req, work: Work::Answer, done: rx, started: crate::now_ms() };
-            match within_wait(self, &job.done) {
-                Some(reply) => self.answered(job, reply),
-                None => self.control_answering.push(job),
-            }
-            return None;
+            return self.answer_on_a_copy(req, id, params);
         }
         let commands = ahead_commands(&req.method, &req.params);
         let Some(first) = commands.first().map(|(c, _)| c.clone()) else { return Some(req) };
@@ -332,10 +349,33 @@ impl SolveApp {
         None
     }
 
-    /// An export's reply, from its copy, with the echo the command leaves when it runs here.
+    /// Run command `id` on a copy of the session, off the window thread, and answer `req` from
+    /// there: at once when it is done within the app's wait, otherwise once it is in. `None`: it
+    /// is taken care of; `Some`: it runs here (no threads).
+    fn answer_on_a_copy(&mut self, req: ControlRequest, id: &'static str, params: Value) -> Option<ControlRequest> {
+        let Ok(scope) = crate::control::request_scope(self, &req.params) else { return Some(req) };
+        let mut copy = self.session.scratch();
+        let rx = spawn(scope, move || {
+            Some(match copy.execute(id, &params) {
+                Ok(v) => json!({"ok": true, "result": v}),
+                Err(e) => json!({"ok": false, "error": e.to_string()}),
+            })
+        });
+        let Some(rx) = rx else { return Some(req) };
+        let job = ControlJob { label: label(self, id), req, work: Work::Answer, done: rx, started: crate::now_ms() };
+        match within_wait(self, &job.done) {
+            Some(reply) => self.answered(job, reply),
+            None => self.control_answering.push(job),
+        }
+        None
+    }
+
+    /// An export's or a reading's reply, from its copy, with the echo an export leaves when it
+    /// runs here.
     fn answered(&mut self, job: ControlJob, reply: Option<Value>) {
         let reply = reply.unwrap_or_else(|| json!({"ok": false, "error": format!("`{}` ended without a reply", job.label)}));
-        if reply["ok"] == true {
+        let export = executed(&job.req.params).and_then(|(command, _)| spec_id(command)).is_some_and(|id| ANSWERED_ON_A_COPY.contains(&id));
+        if reply["ok"] == true && export {
             let language = crate::i18n::Locale::for_language(&self.preferences.language);
             self.session.echo(language.format("ui.command_done", &[("command", job.label.as_str())]));
         }

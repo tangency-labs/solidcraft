@@ -426,6 +426,40 @@ mod tests {
     }
 
     #[test]
+    fn plastic_sizes_below_the_minimum_are_refused_by_name() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 4}));
+        let v0 = volume(&mut s);
+        let snap =
+            json!({"position": [20, 20, 4], "hook": [1, 0, 0], "length": 15, "thickness": 1.5, "width": 6, "catch_depth": 1, "catch_length": 3});
+        for (key, tiny) in
+            [("thickness", 1e-9), ("thickness", 1e-320), ("length", 1e-5), ("width", 0.005), ("catch_depth", 1e-9), ("catch_length", 1e-9)]
+        {
+            let mut p = snap.clone();
+            p[key] = json!(tiny);
+            let e = s.execute("plastic.snap_fit", &p).unwrap_err().to_string();
+            assert!(e.contains(&format!("snap fit's {key} must be at least 0.01 mm")), "{key}={tiny}: {e}");
+        }
+        let boss = json!({"position": [20, 20, 4], "diameter": 6, "height": 5});
+        for (key, tiny) in [("diameter", 1e-9), ("height", 1e-9), ("hole_diameter", 1e-9), ("rib_thickness", 1e-9)] {
+            let mut p = boss.clone();
+            p[key] = json!(tiny);
+            if key == "rib_thickness" {
+                p["ribs"] = json!(4);
+            }
+            let e = s.execute("plastic.boss", &p).unwrap_err().to_string();
+            assert!(e.contains(&format!("boss's {key} must be at least 0.01 mm")), "{key}={tiny}: {e}");
+        }
+        let e = s.execute("plastic.rest", &json!({"position": [20, 20, 4], "width": 6, "height": 1e-9})).unwrap_err().to_string();
+        assert!(e.contains("rest's height must be at least 0.01 mm"), "{e}");
+        assert!(rel(volume(&mut s), v0) < 1e-9, "the refused features changed nothing");
+        // The minimum itself still builds.
+        let mut p = snap.clone();
+        p["thickness"] = json!(0.01);
+        run(&mut s, "plastic.snap_fit", p);
+    }
+
+    #[test]
     fn enclosure_snap_fit_follows_resized_front_wall() {
         let mut s = Session::default();
         let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/sensor_enclosure.json")).unwrap();

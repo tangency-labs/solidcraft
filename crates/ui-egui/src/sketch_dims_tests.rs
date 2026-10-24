@@ -154,6 +154,24 @@ fn clicking_a_parameter_suggestion_fills_the_length_box() {
     assert!(length.is_some_and(|l| (l - 24.0).abs() < 1e-6), "{length:?}");
 }
 
+/// #3278: after the 2-point circle's first point, a Diameter box takes the keyboard; the typed
+/// diameter sets the second point along the cursor's direction, and Enter draws that circle.
+#[test]
+fn two_point_circle_takes_a_typed_diameter() {
+    let mut h = drawing("sketch.circle.two_point");
+    assert_eq!(h.app.tool.as_ref().unwrap().dims.iter().map(|b| b.label).collect::<Vec<_>>(), ["Diameter"]);
+    type_value(&mut h, "30");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
+    assert!(sk.radius(0).is_some_and(|r| (r - 15.0).abs() < 1e-6), "{:?}", sk.radius(0));
+    let c = sk.center(0).unwrap();
+    // From the first point (the origin) toward the cursor at (20, 10).
+    let dir = solidcraft_engine::geom::Vec2::new(20.0, 10.0).normalized().unwrap();
+    assert!((c - dir * 15.0).len() < 1e-6, "{c:?}");
+}
+
 #[test]
 fn inch_live_lengths_use_design_units_and_typed_four_digits_commit_in_inches() {
     let mut h = Harness::new();

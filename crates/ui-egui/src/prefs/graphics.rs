@@ -127,6 +127,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui_kit::checkbox(ui, app.tr("ui.frame_rate_details"), &mut app.preferences.frame_rate_details)
                         .on_hover_text(app.tr("settings.frame_rate_details_note"));
                 });
+                setting::reference_geometry_through_bodies(app, left).on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
             }
             if let Some(right) = columns.get_mut(1) {
                 ui_kit::checkbox(right, crate::i18n::tr_label("Ground shadow"), &mut app.ui.ground_shadow);

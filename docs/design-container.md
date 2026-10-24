@@ -119,8 +119,9 @@ Engine Save/Save As write the evaluated model with the design by default
 carry it. Saving never forces placement, evaluation or tessellation: the model is
 the session's own evaluation, and only when it is the evaluation of the document
 being saved (`Model::is_current`). An active sketch, uncaptured moves, feature
-errors, mesh bodies or exceeded budgets leave the cache out; the design saves as
-before.
+errors or mesh bodies leave the cache out; the design saves as before. A cache
+over its budgets keeps fewer states (below) and is left out only when not even
+the final state fits.
 
 The model is the whole evaluation: every feature's result (warning, boolean
 diagnostics, whether it was skipped, its fingerprint) and the state after it
@@ -146,7 +147,7 @@ SHA-256 of their encoding), and a placed copy of a repeated part (an instance fr
 a STEP assembly) records the part and its matrix, so it shows that part's display
 again instead of being meshed on its own.
 
-`cache/model.json` records `solidcraft-model-cache/2`, the producer revision
+`cache/model.json` records `solidcraft-model-cache/3`, the producer revision
 `solidcraft-truck-adapter/3`, the application version, the build (source commit,
 CPU architecture and OS), the SHA-256 of the exact `document.json` (whose blob
 references pin every STEP, mesh and image payload) and of `cache/bodies.bin`, the
@@ -159,9 +160,20 @@ The fixed budgets of earlier caches (4,096 bodies, 100,000 faces, 64 MiB) scale
 with the design now: up to 200,000 body records, 100,000 distinct bodies, a 32 MiB
 manifest and a payload within the container's part budget (256 MiB), leaving room
 for the document. Individual bodies keep the codec's own limits. The archive-wide
-budgets (256 MiB per part, 512 MiB expanded, 10,000 entries) are unchanged, and the
-cache is left out when it would push the container near them. Decoding runs under
-`kernel::guard` and is linear in the payload's bytes.
+budgets (256 MiB per part, 512 MiB expanded, 10,000 entries) are unchanged.
+Decoding runs under `kernel::guard` and is linear in the payload's bytes.
+
+A model whose cache would push the container past them keeps fewer states
+(`SavedModel::thinned`, #3220): the final state (what the design shows), then the
+other states, the slowest feature's first (the evaluations opening would otherwise
+repeat for longest), each while what it adds still fits: the bodies no state kept
+so far holds (a body is stored once however many states hold it) and the records
+of the state, those bodies, their names and sketches. When the rest of the
+manifest (the bodies' table, the slices) then leaves too little room, the choice
+is made again within that much less, and the final state alone is always tried.
+A feature whose state is left out records none. The cache is left out (and the
+save logs it) only when not even the final state fits; a thinned cache logs how
+many features kept their state.
 
 ### Opening from the model
 
@@ -174,9 +186,18 @@ evaluates from the first feature it changes, as after any evaluation: a feature
 appended or edited at the end evaluates from the saved final state, an edit to
 feature k from the saved state before k. Moving the timeline marker, undo and redo
 reuse the saved results whose fingerprints come back. `SOLIDCRAFT_NO_MODEL_CACHE`
-set evaluates anyway. Any failure (a key or fingerprint mismatch, a malformed
-record, a body that does not decode) is a miss: the design is evaluated from its
-timeline as before, and only that.
+set evaluates anyway.
+
+A thinned cache is taken the same way, and the features whose state it left out
+are evaluated while opening, each from the state before it (kept or just
+evaluated); the states it kept after them stand. Opening then costs the
+evaluations of those features only, and the model is whole afterwards: nothing
+else in the application sees a missing state. Should one of them fail now, the
+features after it are evaluated too, as a full evaluation would.
+
+Any failure (a key or fingerprint mismatch, a malformed record, a body that does
+not decode) is a miss: the design is evaluated from its timeline as before, and
+only that.
 
 This replaces the earlier rule that a cache never supplies evaluated session
 state. It is safe because the cache is the result of evaluating exactly this

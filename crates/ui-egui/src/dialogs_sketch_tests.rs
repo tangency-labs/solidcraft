@@ -207,3 +207,77 @@ fn apply_keeps_the_panel_open_after_asynchronous_evaluation() {
     assert!(d.inputs.iter().all(|i| i.items.is_empty()));
     assert!(!d.repeat_after_apply);
 }
+
+#[test]
+fn circular_pattern_quantity_arrows_step_the_count_within_its_limits_and_keep_parameters() {
+    let mut h = fixture();
+    h.app.dialog = Some(picked(&h, "sketch.pattern.circular"));
+    h.settle();
+    let count = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        Kind::SketchModify(Mod::PatternCirc { count, .. }) => count.clone(),
+        other => panic!("not a sketch pattern window: {other:?}"),
+    };
+    let set = |h: &mut Harness, text: &str| {
+        if let Some(Kind::SketchModify(Mod::PatternCirc { count, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *count = text.into();
+        }
+        h.frames(2);
+    };
+    let sent = |h: &Harness| apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1["count"].clone();
+    let previewed = |h: &Harness| crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1["count"].clone();
+    assert_eq!(count(&h), "6");
+    h.step(&json!({"click":{"handle":"dialog:Quantity up"}})).unwrap();
+    assert_eq!(count(&h), "7");
+    assert_eq!((sent(&h), previewed(&h)), (json!(7), json!(7)), "the preview follows the arrow as it follows typing");
+    h.step(&json!({"click":{"handle":"dialog:Quantity down"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Quantity down"}})).unwrap();
+    assert_eq!(count(&h), "5");
+    // A circular pattern needs the original and one copy, and makes at most 500.
+    set(&mut h, "2");
+    h.step(&json!({"click":{"handle":"dialog:Quantity down"}})).unwrap();
+    assert_eq!(count(&h), "2");
+    set(&mut h, "500");
+    h.step(&json!({"click":{"handle":"dialog:Quantity up"}})).unwrap();
+    assert_eq!(count(&h), "500");
+    // A count typed past the limit steps back inside it.
+    set(&mut h, "900");
+    h.step(&json!({"click":{"handle":"dialog:Quantity down"}})).unwrap();
+    assert_eq!(count(&h), "500");
+    // An expression keeps its parameter: the arrows adjust a trailing offset.
+    h.app.run("parameters.add", json!({"name":"holes","expression":"4","unit":""})).unwrap();
+    set(&mut h, "holes");
+    h.step(&json!({"click":{"handle":"dialog:Quantity up"}})).unwrap();
+    assert_eq!((count(&h), sent(&h)), ("holes + 1".into(), json!("holes + 1")), "the command keeps the parameter");
+    for _ in 0..2 {
+        h.step(&json!({"click":{"handle":"dialog:Quantity down"}})).unwrap();
+    }
+    assert_eq!((count(&h), sent(&h)), ("holes - 1".into(), json!("holes - 1")));
+    // Text that is not a count leaves the arrows without effect.
+    set(&mut h, "nothing");
+    h.step(&json!({"click":{"handle":"dialog:Quantity up"}})).unwrap();
+    assert_eq!(count(&h), "nothing");
+}
+
+#[test]
+fn rectangular_pattern_quantity_arrows_keep_both_directions_within_the_copy_limit() {
+    let mut h = fixture();
+    h.app.dialog = Some(picked(&h, "sketch.pattern.rectangular"));
+    h.settle();
+    let counts = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        Kind::SketchModify(Mod::PatternRect { count, count2, .. }) => (count.clone(), count2.clone()),
+        other => panic!("not a sketch pattern window: {other:?}"),
+    };
+    let (one, _) = counts(&h);
+    h.step(&json!({"click":{"handle":"dialog:Quantity 2 up"}})).unwrap();
+    assert_eq!(counts(&h), (one.clone(), "2".into()));
+    if let Some(Kind::SketchModify(Mod::PatternRect { count, count2, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        (*count, *count2) = ("250".into(), "2".into());
+    }
+    h.frames(2);
+    // 250 × 2 is the 500 copies a sketch pattern makes at most.
+    h.step(&json!({"click":{"handle":"dialog:Quantity up"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Quantity 2 up"}})).unwrap();
+    assert_eq!(counts(&h), ("250".into(), "2".into()));
+    h.step(&json!({"click":{"handle":"dialog:Quantity down"}})).unwrap();
+    assert_eq!(counts(&h), ("249".into(), "2".into()));
+}

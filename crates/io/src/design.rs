@@ -92,12 +92,17 @@ impl PackageWriter {
     /// Would `entries` more optional parts of `extra` bytes, stored uncompressed, still keep
     /// the file within `budget` and its expanded size within the reader's budget?
     fn room(&self, entries: usize, extra: usize, budget: usize) -> bool {
+        self.names.len().saturating_add(entries) <= MAX_ENTRIES && extra <= self.space(entries, budget)
+    }
+    /// The bytes `entries` more optional parts may hold together ([`PackageWriter::room`]).
+    fn space(&self, entries: usize, budget: usize) -> usize {
+        if self.names.len().saturating_add(entries) > MAX_ENTRIES {
+            return 0;
+        }
         // The bytes written so far, plus what the open compressed part may still hold back.
         let written = self.zip.get_ref().map_or(usize::MAX, |c| c.get_ref().len()).saturating_add(1 << 20);
         let directory = self.names.len().saturating_add(entries).saturating_mul(256).saturating_add(65_536);
-        self.names.len().saturating_add(entries) <= MAX_ENTRIES
-            && written.saturating_add(extra).saturating_add(directory) <= budget
-            && self.expanded.saturating_add(extra) <= MAX_EXPANDED
+        budget.saturating_sub(written.saturating_add(directory)).min(MAX_EXPANDED.saturating_sub(self.expanded))
     }
     fn blob(&mut self, bytes: &[u8], extension: &str, compressed: bool) -> Result<Value> {
         self.resolved =
@@ -269,15 +274,9 @@ fn write_container(
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
     writer.part("container.json", &serde_json::to_vec(&json!({"format": VERSION})).map_err(invalid)?, false)?;
-    // The model cache is optional: one that does not fit the container is left out, never a
-    // failed save.
-    let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata).ok()).filter(|(manifest, data)| {
-        let fits = writer.room(2, manifest.len().saturating_add(data.len()), budget);
-        if !fits {
-            log::info!("the model cache ({} MB) does not fit the design file: saved without it", (manifest.len() + data.len()) >> 20);
-        }
-        fits
-    });
+    // The model cache is optional: one that does not fit the container keeps fewer states, or is
+    // left out, never a failed save.
+    let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
     if let Some((manifest, data)) = cache {
         let [manifest_entry, payload_entry] = native_cache::ENTRIES;
         // Deflated whatever the policy: the encoded bodies shrink about fourfold to tenfold, faster
@@ -883,6 +882,143 @@ mod tests {
         // With room for it, the same model is kept.
         let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, MAX_DESIGN_BYTES).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
+    }
+
+    /// A saved model of four features (5, 50, 20 and 1 ms) whose states each hold the eight
+    /// bodies all of them share and eight of their own (a body each feature replaces). No
+    /// document evaluated it.
+    fn timeline_model() -> solidcraft_doc::SavedModel {
+        let bodies: Vec<_> = (0..40)
+            .map(|i| solidcraft_kernel::box_solid(solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::new(10. + f64::from(i), 20., 30.)).unwrap())
+            .collect();
+        let records: Vec<Value> = (0..40)
+            .map(|i| json!({"name": format!("Body{i}"), "feature": 1 + i / 8, "component": 0, "key": "0000000000000001", "names": 0, "body": i}))
+            .collect();
+        // As runs of consecutive bodies, which the first state's two groups make one of.
+        let states: Vec<Value> = (0..4)
+            .map(|i| {
+                let bodies = if i == 0 { json!([[0, 16]]) } else { json!([[0, 8], [8 * (i + 1), 8]]) };
+                json!({
+                    "bodies": bodies, "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
+                    "sketch_keys": [], "blend_edges": {}, "fitted": {}, "tapered": {},
+                })
+            })
+            .collect();
+        let features: Vec<Value> = [5., 50., 20., 1.]
+            .iter()
+            .enumerate()
+            .map(|(i, ms)| json!({"id": i + 1, "fingerprint": "0000000000000000", "ms": ms, "skipped": false, "state": i}))
+            .collect();
+        solidcraft_doc::SavedModel {
+            records: json!({"features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": []}),
+            bodies,
+        }
+    }
+
+    /// Which features keep their state in `model`.
+    fn kept_states(model: &Value) -> Vec<bool> {
+        model["features"].as_array().unwrap().iter().map(|f| f.get("state").is_some()).collect()
+    }
+
+    /// Every body a megabyte, so the records (a few kilobytes) fit in the room left over.
+    const BODY: usize = 1 << 20;
+
+    /// A thinned model keeps the final state, then the slowest features' states while the bodies
+    /// they add fit, each body counted once however many states hold it (#3220).
+    #[test]
+    fn a_thinned_model_keeps_the_final_state_then_the_slowest_that_fit() {
+        let model = timeline_model();
+        let pieces: Vec<Vec<(usize, usize)>> = (0..40).map(|i| vec![(i, BODY)]).collect();
+        let thinned = |bodies: usize| {
+            let budget = bodies * BODY + BODY / 2;
+            model.thinned(&pieces, budget).map(|(m, kept, counted)| (kept_states(&m.records), kept, m, counted <= budget)).unwrap()
+        };
+        let (states, kept, all, within) = thinned(40);
+        assert_eq!((states, kept.len(), within), (vec![true; 4], 40, true));
+        assert_eq!(all.records, model.records);
+        // The final state and the slowest other (50 ms): the shared bodies count once, else
+        // these two states would need 32 bodies' room.
+        for bodies in [24, 31] {
+            let (states, kept, two, _) = thinned(bodies);
+            assert_eq!(states, vec![false, true, false, true], "room for {bodies} bodies");
+            assert_eq!(kept, (0..8).chain(16..24).chain(32..40).collect::<Vec<_>>());
+            assert_eq!(two.records["model_bodies"].as_array().unwrap().len(), 24);
+            let last = two.final_state().unwrap();
+            assert_eq!(
+                last.bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(),
+                (0..8).chain(32..40).map(|i| format!("Body{i}")).collect::<Vec<_>>()
+            );
+            assert_eq!(last.body_counter, 7);
+        }
+        assert_eq!(thinned(32).0, vec![false, true, true, true]);
+        // The final state only: within the budget, then kept over it (nothing smaller is left).
+        for (bodies, within) in [(16, true), (23, true), (15, false)] {
+            let (states, kept, one, fits) = thinned(bodies);
+            assert_eq!((states, fits), (vec![false, false, false, true], within), "room for {bodies} bodies");
+            assert_eq!(kept, (0..8).chain(32..40).collect::<Vec<_>>());
+            assert_eq!(
+                one.records["states"],
+                json!([{
+                    "bodies": [[0, 16]], "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
+                    "sketch_keys": [], "blend_edges": {}, "fitted": {}, "tapered": {},
+                }])
+            );
+        }
+    }
+
+    /// A model cache too big for the file keeps fewer states rather than none (#3220): the final
+    /// state and as many of the slowest others as fit, then the final state only, and nothing
+    /// only when not even that fits.
+    #[test]
+    fn a_model_cache_too_big_for_the_file_keeps_fewer_states() {
+        let model = timeline_model();
+        let document = b"{}";
+        let states = |space| {
+            let (manifest, payload) = native_cache::encode_model(&model, document, space).ok()?;
+            assert!(manifest.len() + payload.len() <= space);
+            Some(kept_states(&serde_json::from_slice::<Value>(&manifest).unwrap()["model"]))
+        };
+        // The cache of the states room for so many bodies picks, at its own size.
+        let pieces: Vec<Vec<(usize, usize)>> = (0..40).map(|i| vec![(i, BODY)]).collect();
+        let cache = |bodies: usize| {
+            let (thin, _, _) = model.thinned(&pieces, bodies * BODY + BODY / 2).unwrap();
+            let (manifest, payload) = native_cache::encode_model(&thin, document, usize::MAX).unwrap();
+            (manifest.len(), payload.len())
+        };
+        let encoded = |i: usize| solidcraft_kernel::encode_native_body(&model.bodies[i]).unwrap().len();
+        // What a state's own bodies add: more than the records of the caches below, so the sizes
+        // below pick one set of states each.
+        let own = (8..40).step_by(8).map(|s| (s..s + 8).map(encoded).sum::<usize>()).min().unwrap();
+        let (all, two, one) = (cache(40), cache(24), cache(16));
+        assert!(own > two.0, "a state's bodies ({own} bytes) outweigh the records ({} bytes)", two.0);
+        assert_eq!(states(all.0 + all.1), Some(vec![true; 4]));
+        assert_eq!(states(all.0 + all.1 - 1), Some(vec![false, true, true, true]), "the fastest left out first");
+        assert_eq!(states(two.0 + two.1), Some(vec![false, true, false, true]));
+        assert_eq!(states(one.0 + one.1), Some(vec![false, false, false, true]));
+        assert_eq!(states(one.0 + one.1 - 1), None);
+    }
+
+    /// A model whose bodies are all one part stores it once: its records, not its bodies, fill the
+    /// room. When those of every state do not fit, the final state is still kept if it fits.
+    #[test]
+    fn a_model_cache_of_records_too_big_for_the_file_keeps_the_final_state() {
+        let mut model = timeline_model();
+        let part = model.bodies[0].clone();
+        model.bodies.iter_mut().for_each(|b| *b = part.clone());
+        let document = b"{}";
+        let size = |m: &solidcraft_doc::SavedModel| {
+            let (manifest, payload) = native_cache::encode_model(m, document, usize::MAX).unwrap();
+            (manifest.len() + payload.len(), serde_json::from_slice::<Value>(&manifest).unwrap()["slices"].as_array().unwrap().len())
+        };
+        let pieces: Vec<Vec<(usize, usize)>> = (0..40).map(|i| vec![(i, BODY)]).collect();
+        let (last, _, _) = model.thinned(&pieces, 16 * BODY + BODY / 2).unwrap();
+        let ((all, slices), (one, _)) = (size(&model), size(&last));
+        assert_eq!(slices, 1, "the part stored once");
+        // Room for the final state's cache and a little more, not for the records of all.
+        let space = one + 256;
+        assert!(all > space);
+        let (manifest, _) = native_cache::encode_model(&model, document, space).unwrap();
+        assert_eq!(kept_states(&serde_json::from_slice::<Value>(&manifest).unwrap()["model"]), vec![false, false, false, true]);
     }
 
     #[test]

@@ -15,6 +15,12 @@ const MAX_VARIABLES: usize = 400;
 const MAX_STEPS: usize = 96;
 const CORRECTION_ITERS: usize = 16;
 const TOTAL_CORRECTION_ITERS: usize = 256;
+/// Pivot tolerance of the null space, on rows scaled to a largest entry of 1. Redundant
+/// constraints (a parallelogram held both parallel and equal on each pair of sides) are
+/// dependent only at an exact solution; a pose corrected to `TOL` leaves their rows independent
+/// by about that much, and a tighter tolerance counts that as rank and finds no freedom (#4585).
+/// The solver's rank analysis, which reports the sketch's degrees of freedom, uses 1e-7 too.
+const NULL_SPACE_TOL: f64 = 1e-7;
 
 /// Move a point toward `target` using freedom left by the design constraints. `max_step`
 /// bounds the full variable displacement before constraint correction; `valid` can reject
@@ -266,7 +272,7 @@ fn null_space(mut j: Mat) -> Vec<Vec<f64>> {
             }
         }
     }
-    let pivots = rref(&mut j, 1e-9);
+    let pivots = rref(&mut j, NULL_SPACE_TOL);
     let mut z: Vec<Vec<f64>> = Vec::new();
     for free in (0..j.cols).filter(|c| !pivots.contains(c)) {
         let mut v = vec![0.0; j.cols];

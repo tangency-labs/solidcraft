@@ -55,16 +55,16 @@
     "error": "#ff0000",
     "field": "#ffffff",
     "form_accent": "#800080",
-    "form_dim": "#808080",
+    "form_dim": "#404040",
     "form_error": "#800000",
     "form_error_fill": "#ffffc0",
     "form_fill": "#800080",
     "form_ink": "#000000",
     "form_primary": "#000080",
-    "form_soft": "#c0c0c0",
+    "form_soft": "#bbb1bb",
     "form_success": "#008000",
     "form_success_fill": "#c0dcc0",
-    "form_tab_ink": "#800080",
+    "form_tab_ink": "#7d007d",
     "gizmo": [
       "#ff0000",
       "#00ff00",
@@ -75,8 +75,8 @@
     "glyph_text": "#800000",
     "grid": "#40a0a0",
     "grid_major": "#808080",
-    "heading_bg": "#a0a0a0",
-    "hover": "#c0c0c0",
+    "heading_bg": "#c0c0c0",
+    "hover": "#dfdfdf",
     "hover_edge": "#000000",
     "hover_edge_halo": "#ffffff",
     "hover_profile": "#00008030",
@@ -129,10 +129,10 @@
       "#808080"
     ],
     "manipulator": "#000080",
-    "mesh_accent": "#000080",
+    "mesh_accent": "#808000",
     "mesh_fill": "#808000",
-    "mesh_ink": "#808000",
-    "mesh_soft": "#ffffc0",
+    "mesh_ink": "#4c4c00",
+    "mesh_soft": "#bbbbb1",
     "on_accent": "#ffffff",
     "origin_plane": "#ffff005e",
     "origin_plane_edge": "#808000c8",
@@ -146,10 +146,10 @@
     "preview_new": "#ffff00",
     "preview_sketch": "#008000",
     "profile_fill": "#ffff0033",
-    "render_accent": "#000080",
-    "render_fill": "#800080",
-    "render_ink": "#800080",
-    "render_soft": "#c0c0c0",
+    "render_accent": "#590905",
+    "render_fill": "#800000",
+    "render_ink": "#800000",
+    "render_soft": "#bbb1b1",
     "rubber_band": "#000080",
     "section_cap": "#808000",
     "sel_edge": "#0000ff",
@@ -161,25 +161,25 @@
     "selected_bg": "#000080",
     "selected_ink": "#ffffff",
     "sheet_fill": "#008080",
-    "sheet_ink": "#000080",
-    "sheet_soft": "#c0c0c0",
+    "sheet_ink": "#005151",
+    "sheet_soft": "#b1bbbb",
     "sketch": "#000080",
     "sketch_accent": "#008000",
     "sketch_centerline": "#808000",
     "sketch_construction": "#808000",
     "sketch_fixed": "#000000",
-    "sketch_ink": "#008000",
+    "sketch_ink": "#005400",
     "sketch_locked": "#008000",
     "sketch_lost": "#800080",
     "sketch_point": "#000000",
     "sketch_point_free": "#000080",
     "sketch_projected": "#800080",
-    "sketch_soft": "#c0dcc0",
-    "subheading_bg": "#b0b0b0",
-    "surface_accent": "#000080",
-    "surface_fill": "#808000",
-    "surface_ink": "#808000",
-    "surface_soft": "#ffffc0",
+    "sketch_soft": "#b1bbb1",
+    "subheading_bg": "#c0c0c0",
+    "surface_accent": "#804000",
+    "surface_fill": "#804000",
+    "surface_ink": "#713800",
+    "surface_soft": "#bbb6b1",
     "tab_on_fill_dark": "#000000",
     "text": "#000000",
     "text_dim": "#808080",
@@ -198,5 +198,85 @@
     "warning": "#ffff00"
   },
   "format": "solidcraft-theme/1",
-  "name": "SolidCraft 95"
+  "name": "SolidCraft 95",
+  "radii": {
+    "radius_sm": 3,
+    "radius_md": 3,
+    "radius_lg": 4,
+    "radius_xl": 4,
+    "control_radius": 3,
+    "sketch_mode_radius": 3
+  },
+  "icon_palette": {
+    "ink": "#000000",
+    "line": "#000000",
+    "passive-1": "#ffffff",
+    "passive-2": "#c0c0c0",
+    "passive-3": "#808080",
+    "guide": "#696969",
+    "solid": [
+      "#c0c0ff",
+      "#0000ff",
+      "#000080"
+    ],
+    "surface": [
+      "#e0c0a0",
+      "#b07040",
+      "#804000"
+    ],
+    "mesh": [
+      "#ffffc0",
+      "#c0c000",
+      "#808000"
+    ],
+    "form": [
+      "#ffc0ff",
+      "#c000c0",
+      "#800080"
+    ],
+    "sketch": [
+      "#c0ffc0",
+      "#00c000",
+      "#008000"
+    ],
+    "constraint": [
+      "#ffc0c0",
+      "#ff0000",
+      "#800000"
+    ],
+    "construction": [
+      "#ffffc0",
+      "#c0c000",
+      "#808000"
+    ]
+  },
+  "borders": {
+    "primary": {
+      "width": 1,
+      "color": "#404040"
+    },
+    "secondary": {
+      "width": 1,
+      "color": "#808080"
+    },
+    "tertiary": {
+      "width": 1,
+      "color": "#a0a0a0"
+    },
+    "container": {
+      "width": 1,
+      "color": "#808080"
+    },
+    "control": {
+      "width": 1,
+      "color": "#808080"
+    },
+    "bevel": {
+      "width": 0.5,
+      "highlight": "#ffffff",
+      "light": "#dfdfdf",
+      "shadow": "#808080",
+      "dark_shadow": "#000000"
+    }
+  }
 }

@@ -44,11 +44,16 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
         } else {
             t.control_fill
         },
-        Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { t.form_primary } else { t.control_border }),
+        if selected { Stroke::new(2.0, t.form_primary) } else { t.control_border_stroke(t.control_border) },
         egui::StrokeKind::Inside,
     );
     let radio = pos2(rect.left() + t.space_16, rect.top() + t.space_16);
-    ui.painter().circle(radio, t.space_6, t.control_fill, Stroke::new(1.0, if selected { t.form_primary } else { t.control_border }));
+    ui.painter().circle(
+        radio,
+        t.space_6,
+        t.control_fill,
+        if selected { Stroke::new(1.0, t.form_primary) } else { t.control_border_stroke(t.control_border) },
+    );
     if selected {
         ui.painter().circle_filled(radio, t.space_3, t.form_primary);
     }

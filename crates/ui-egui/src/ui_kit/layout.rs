@@ -29,11 +29,11 @@ pub(crate) fn scope<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
         visuals.weak_text_color = Some(t.form_dim);
         visuals.selection.stroke = egui::Stroke::new(1.0, t.form_primary);
         visuals.selection.bg_fill = t.selected_bg;
-        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, t.dialog_rule);
+        visuals.widgets.noninteractive.bg_stroke = t.tertiary_border(t.dialog_rule);
         for state in [&mut visuals.widgets.inactive, &mut visuals.widgets.hovered, &mut visuals.widgets.active, &mut visuals.widgets.open] {
             state.bg_fill = t.control_fill;
             state.weak_bg_fill = t.control_fill;
-            state.bg_stroke = egui::Stroke::new(1.0, t.control_border);
+            state.bg_stroke = t.control_border_stroke(t.control_border);
             state.corner_radius = t.control_radius.into();
             state.expansion = 0.0;
             state.fg_stroke.color = t.form_ink;
@@ -51,6 +51,12 @@ pub(crate) fn label(ui: &Ui) -> &str {
 
 /// Publish accessibility and scenario geometry. Tokens: `none`.
 pub(super) fn publish(ui: &Ui, response: &Response, kind: egui::WidgetType) {
+    let t = Tokens::get();
+    match kind {
+        egui::WidgetType::TextEdit => t.input_bevel(ui, response),
+        egui::WidgetType::ComboBox | egui::WidgetType::Button => t.button_bevel(ui, response, false),
+        _ => {}
+    }
     let label = label(ui);
     response.widget_info(|| egui::WidgetInfo::labeled(kind, ui.is_enabled(), crate::i18n::tr_label(label)));
     publish_geometry(ui, response);
@@ -64,6 +70,11 @@ pub(crate) fn row<R>(ui: &mut Ui, text: &str, control: impl FnOnce(&mut Ui) -> R
 /// Declarative expression row; retains the field's completion and accepted Enter. Tokens: `row, field`.
 pub(crate) fn expr_row(ui: &mut Ui, label: &str, value: &mut String) -> bool {
     row(ui, label, |ui| super::field(ui, value))
+}
+
+/// Whole-number count row with step arrows; retains completion and accepted Enter. Tokens: `row, count_field`.
+pub(crate) fn count_row(ui: &mut Ui, label: &str, value: &mut String, limits: &super::Count<'_>) -> bool {
+    row(ui, label, |ui| super::count_field(ui, value, limits))
 }
 
 /// Expression row with an empty-value hint. Tokens: `row, hint_field`.
@@ -131,10 +142,67 @@ pub(crate) fn caption(ui: &mut Ui, aligned_to: &str, text: &str) {
     scenario::publish_rect(&format!("dialog:caption:{aligned_to}"), text_rect);
 }
 
+/// Where a [`figure_rows`] field went (in the order given): the field's rect, and whether it is
+/// hovered or has the keyboard (its part of the figure lights up).
+pub(crate) struct FigureSlot {
+    pub rect: egui::Rect,
+    pub hot: bool,
+}
+
+/// A figure in the label column beside a stack of expression fields, each under its own caption,
+/// for a picture whose parts the fields size (the Hole dialog's section): the caller paints the
+/// figure where the fields went, with leaders to them. At least four rows tall; the fields keep
+/// their labels' handles and accessible names. Returns whether Enter was accepted in a field.
+/// Tokens: `control_height, form_label_width, font_small, form_dim, space_2/4, label gap`.
+pub(crate) fn figure_rows(
+    ui: &mut Ui,
+    id: &str,
+    fields: &mut [(&str, &mut String)],
+    paint: impl FnOnce(&egui::Painter, egui::Rect, &[FigureSlot]),
+) -> bool {
+    let t = Tokens::get();
+    let width = dimension(ui.available_width());
+    let slot = t.font_small + t.space_2 + row_height();
+    let stack = fields.len() as f32 * slot + fields.len().saturating_sub(1) as f32 * t.space_4;
+    let height = stack.max(row_height() * 4.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
+    let figure = egui::Rect::from_min_size(rect.min, vec2((t.form_label_width * 1.4).min(width * 0.45), height));
+    let left = (figure.right() + label_gap(ui, width)).min(rect.right());
+    let focused = ui.ctx().memory(|m| m.focused()).and_then(|f| ui.ctx().read_response(f)).map(|r| r.rect);
+    let mut enter = false;
+    let mut top = rect.top() + (height - stack) / 2.0;
+    let mut slots = Vec::with_capacity(fields.len());
+    for (label, value) in fields.iter_mut() {
+        let caption = egui::Rect::from_min_max(egui::pos2(left, top), egui::pos2(rect.right(), top + t.font_small));
+        paint_text(ui, caption, crate::i18n::tr_label(label), egui::FontId::proportional(t.font_small), t.form_dim, false);
+        let field = egui::Rect::from_min_max(egui::pos2(left, caption.bottom() + t.space_2), egui::pos2(rect.right(), top + slot));
+        enter |= ui
+            .scope_builder(
+                egui::UiBuilder::new()
+                    .id_salt((id, *label))
+                    .max_rect(field)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center))
+                    .ui_stack_info(egui::UiStackInfo::default().with_tag_value(LABEL, label.to_string())),
+                |ui| {
+                    ui.spacing_mut().text_edit_width = field.width();
+                    super::field(ui, value)
+                },
+            )
+            .inner;
+        let hot = ui.rect_contains_pointer(field) || focused.is_some_and(|f| field.contains_rect(f));
+        slots.push(FigureSlot { rect: field, hot });
+        top += slot + t.space_4;
+    }
+    paint(ui.painter(), figure, &slots);
+    scenario::publish_rect(&format!("dialog:figure:{id}"), rect);
+    scenario::publish_rect(&format!("dialog:figure_picture:{id}"), figure);
+    enter
+}
+
 /// Memory belongs to the enclosing dialog ID; animation is avoided so each row keeps its fixed height.
 /// Persisted disclosure with a rule and uppercase title. Tokens: `control_height, space_2, radius_sm, hover, dialog_rule, form_section_icon_size, form_gap_y, font_caption, font_section_tracking, text_dim`.
 pub(crate) fn section<R>(ui: &mut Ui, id: impl egui::AsIdSalt, title: &str, default_open: bool, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
-    section_count(ui, id, title, default_open, None, add)
+    section_count(ui, id, title, default_open, None::<usize>, add)
 }
 
 /// Section heading with an optional count badge; disclosure state uses the same identity.
@@ -143,7 +211,7 @@ pub(crate) fn section_count<R>(
     id: impl egui::AsIdSalt,
     title: &str,
     default_open: bool,
-    count: Option<usize>,
+    count: Option<impl std::fmt::Display>,
     add: impl FnOnce(&mut Ui) -> R,
 ) -> Option<R> {
     let t = Tokens::get();
@@ -190,7 +258,7 @@ pub(crate) fn section_count<R>(
         rule_left = badge.right() + t.space_12;
     }
     if rule_left < rect.right() {
-        ui.painter().hline(rule_left..=rect.right(), rect.center().y, egui::Stroke::new(1.0, t.dialog_rule));
+        t.secondary_hline(ui.painter(), rule_left..=rect.right(), rect.center().y, t.dialog_rule);
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, ui.is_enabled(), open, crate::i18n::tr_label(title)));
     scenario::publish_handle(&format!("dialog:section:{title}"), response.rect.center());
@@ -221,7 +289,7 @@ pub(crate) fn list_row(ui: &mut Ui, key: &str, text: &str) -> Response {
 /// Full-width rule without extra padding. Tokens: `dialog_rule`.
 pub(crate) fn divider(ui: &mut Ui, key: &str) {
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), 1.0), egui::Sense::hover());
-    ui.painter().hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, Tokens::get().dialog_rule));
+    Tokens::get().secondary_hline(ui.painter(), rect.x_range(), rect.top(), Tokens::get().dialog_rule);
     scenario::publish_rect(&format!("dialog:divider:{key}"), rect);
 }
 
@@ -342,7 +410,7 @@ pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
 pub(crate) fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut bool, actions_width: f32, actions: impl FnOnce(&mut Ui)) -> bool {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height() + t.space_16), egui::Sense::hover());
-    ui.painter().rect(rect, t.radius_lg, t.dialog_body, egui::Stroke::new(1.0, t.dialog_rule), egui::StrokeKind::Inside);
+    t.container_rect(ui.painter(), rect, t.radius_lg, t.dialog_body, t.dialog_rule);
     let check = egui::Rect::from_min_size(rect.min + vec2(t.space_6, 0.0), vec2(t.space_24, rect.height()));
     let changed = ui
         .scope_builder(egui::UiBuilder::new().max_rect(check).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {

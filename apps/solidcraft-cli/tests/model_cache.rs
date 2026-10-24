@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
-use solidcraft_engine::doc::{ModelBody, ModelState};
+use solidcraft_engine::doc::{ModelBody, ModelState, SavedModel};
 
 fn corpus() -> Vec<PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus");
@@ -147,6 +147,87 @@ fn imported_assemblies_open_from_their_model_as_evaluated() {
     s.execute("file.insert_step", &json!({"path": step.to_string_lossy(), "matrix": [1, 0, 0, 200, 0, 1, 0, 0, 0, 0, 1, 0]})).unwrap();
     let _ = std::fs::remove_file(&step);
     check("imported hinge", s);
+}
+
+/// `built` saved with `saved`, a model of it that keeps only some states (as a file without room
+/// for all of them does, #3220), opens as the design evaluated again: evaluating just the
+/// features whose state the file left out, then after suppressing a feature at, before or after
+/// each state it kept, after undoing that, and with the marker moved there and back.
+fn check_thinned(name: &str, built: &Session, saved: &SavedModel) {
+    let design = built.design();
+    let bytes =
+        solidcraft_engine::io::write_design_container_with_cache(&design, solidcraft_engine::io::DesignCompression::Fast, None, Some(saved)).unwrap();
+    assert!(solidcraft_engine::io::read_design_geometry(&bytes).is_some(), "{name}: the file keeps the final state");
+    let path = temp(&name.replace(' ', "-"));
+    std::fs::write(&path, &bytes).unwrap();
+    let mut cached = open(&path);
+    let mut rebuilt = Session::new(solidcraft_engine::io::read_design(&bytes).unwrap());
+    let features = saved.records["features"].as_array().unwrap();
+    let unkept = features.iter().filter(|f| f["skipped"] == false && f.get("state").is_none()).count();
+    assert!(unkept > 0, "{name}: some states left out");
+    assert_eq!(cached.model.recomputed, unkept, "{name}: evaluated just the features whose state the file left out");
+    assert_eq!(model(name, &cached), model(name, &rebuilt), "{name}: opened from the file's model");
+    let n = cached.doc.features.len();
+    let mut at: Vec<usize> = features
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f["skipped"] == false && f.get("state").is_some())
+        .flat_map(|(k, _)| [k.saturating_sub(1), k, k + 1])
+        .filter(|i| *i < n)
+        .collect();
+    at.dedup();
+    for i in at {
+        let edit = json!({"feature": cached.doc.features[i].id, "suppressed": true});
+        let (a, b) = (cached.execute("timeline.suppress", &edit), rebuilt.execute("timeline.suppress", &edit));
+        assert_eq!(a.is_ok(), b.is_ok(), "{name}: suppressing feature {i}");
+        assert_eq!(model(name, &cached), model(name, &rebuilt), "{name}: feature {i} suppressed");
+        if a.is_ok() {
+            cached.execute("edit.undo", &json!({})).unwrap();
+            rebuilt.execute("edit.undo", &json!({})).unwrap();
+            assert_eq!(model(name, &cached), model(name, &rebuilt), "{name}: suppressing feature {i} undone");
+        }
+        for marker in [json!({"position": i}), json!({})] {
+            cached.execute("timeline.rollback", &marker).unwrap();
+            rebuilt.execute("timeline.rollback", &marker).unwrap();
+            assert_eq!(model(name, &cached), model(name, &rebuilt), "{name}: the marker at {marker}, from feature {i}");
+        }
+    }
+    let _ = std::fs::remove_file(&path);
+}
+
+/// A model too big for its file keeps the final state, then the slowest features' states as fit
+/// (#3220). Both the smallest such model (the final state, and states that add no body to it)
+/// and one that keeps more open as the design evaluated again. The placed components' design has
+/// a cut whose fingerprint reads where the bodies before it lie, which a state left out does not
+/// say until it is evaluated.
+#[test]
+fn thinned_models_open_as_evaluated() {
+    let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/components-arm.solidcraft");
+    for sample in ["Sample Plate", "Plastic Enclosure", "components-arm"] {
+        let built = match solidcraft_engine::sample::samples().into_iter().find(|s| s.name == sample) {
+            Some(s) => {
+                let mut built = Session::default();
+                for c in (s.script)()["commands"].as_array().unwrap() {
+                    built.execute(c["command"].as_str().unwrap(), &c["params"]).unwrap();
+                }
+                built
+            }
+            None => open(&corpus),
+        };
+        let saved = built.model.saved(&built.design()).unwrap();
+        // Every body a megabyte (the records fit in the room left over): each budget keeps one more
+        // body's worth of states.
+        let body = 1 << 20;
+        let pieces: Vec<Vec<(usize, usize)>> = (0..saved.bodies.len()).map(|i| vec![(i, body)]).collect();
+        let thinned: Vec<SavedModel> =
+            (0..=saved.bodies.len()).filter_map(|n| saved.thinned(&pieces, n * body + body - 1).map(|(m, _, _)| m)).collect();
+        let kept = |m: &SavedModel| m.records["features"].as_array().unwrap().iter().filter(|f| f.get("state").is_some()).count();
+        let smallest = thinned.first().unwrap();
+        assert!(smallest.records["states"].as_array().unwrap().len() < saved.records["states"].as_array().unwrap().len(), "{sample}");
+        let more = thinned.iter().find(|m| kept(m) > kept(smallest) && kept(m) < built.doc.features.len()).unwrap();
+        check_thinned(&format!("{sample} smallest"), &built, smallest);
+        check_thinned(&format!("{sample} thinned"), &built, more);
+    }
 }
 
 /// Opened from its model, a design evaluates only from the first feature an edit changes: the

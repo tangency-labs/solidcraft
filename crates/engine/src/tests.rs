@@ -822,6 +822,11 @@ fn hostile_params_never_panic() {
         "keep_with",
         "stitch",
         "extend",
+        "profile",
+        "anchor",
+        "density",
+        "names",
+        "references",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
@@ -1254,6 +1259,55 @@ fn body_volume(st: &solidcraft_doc::ModelState) -> f64 {
     st.bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum()
 }
 
+/// Deleting an inserted assembly frees its body names without leaving assembly ownership behind.
+#[test]
+fn step_insert_delete_removes_assembly_and_undo_restores_it() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-step-delete-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("parts.step");
+    let mut source = Session::default();
+    for (name, x) in [("Part", 0), ("Other", 20)] {
+        run(&mut source, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "operation": "new", "body_name": name}));
+    }
+    run(&mut source, "component.from_bodies", json!({"bodies": ["Part", "Other"]}));
+    run(&mut source, "file.export", json!({"path": path.to_string_lossy()}));
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Part"}));
+    let kept = s.doc_mut().add_component(Some("Kept"), 0).unwrap();
+    let kept_occurrence = s.doc.occurrence_of(kept).unwrap().clone();
+    run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy(), "name": "Imported"}));
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert!(reopened.find_feature("Imported").unwrap().inserted, "the insert keeps its mark through save");
+    run(&mut s, "solid.mirror", json!({"bodies": ["Part"], "plane": {"origin": [0, 30, 0], "normal": [0, 1, 0]}}));
+    assert!(s.model.state().body("Part (3)").is_some());
+    assert!(!s.doc.assembly.joints.is_empty());
+    assert!(!s.doc.body_components.is_empty());
+    let before = s.doc.clone();
+    let history = s.undo.len();
+
+    run(&mut s, "timeline.delete", json!({"feature": "Imported"}));
+    assert_eq!(s.undo.len(), history + 1);
+    assert_eq!(s.doc.components.iter().map(|c| c.id).collect::<Vec<_>>(), [kept]);
+    assert_eq!(s.doc.occurrences, [kept_occurrence]);
+    assert!(s.doc.assembly.joints.is_empty());
+    assert!(s.doc.body_components.is_empty());
+    assert!(s.doc.body_offsets.is_empty());
+    let state = s.model.state();
+    let mirrored = state.body("Part (2)").unwrap();
+    assert_eq!(s.doc.model_body_component(mirrored), 0);
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [40, 0, 0], "operation": "new", "body_name": "Other"}));
+    assert_eq!(s.doc.model_body_component(s.model.state().body("Other").unwrap()), 0);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc, before);
+    assert!(s.model.state().body("Part (3)").is_some());
+    run(&mut s, "edit.redo", json!({}));
+    assert!(s.doc.body_components.is_empty());
+    assert!(s.doc.assembly.joints.is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Previews evaluate on a scratch copy: the document, undo history and model are untouched.
 #[test]
 fn preview_has_no_side_effects() {
@@ -1523,9 +1577,15 @@ fn section_analysis() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
     let (doc, undo) = (s.doc.clone(), s.undo.len());
-    run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 15}));
+    let r = run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 15}));
     let (o, n) = s.section.unwrap();
     assert!((o - n * 15.0).len() < 1e-12 && (n.y.abs() - 1.0).abs() < 1e-12);
+    // The cut faces are hatched unless `hatch` says otherwise.
+    assert!(s.section_hatch && r["section"]["hatch"] == true, "{r}");
+    let r = run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 15, "hatch": false}));
+    assert!(!s.section_hatch && r["section"]["hatch"] == false, "{r}");
+    run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 15}));
+    assert!(s.section_hatch);
     run(&mut s, "inspect.section", json!({"plane": {"origin": [0, 0, 5], "normal": [0, 0, 2]}, "flip": true}));
     let (o, n) = s.section.unwrap();
     assert!((o.z - 5.0).abs() < 1e-12 && (n.z + 1.0).abs() < 1e-12);
@@ -1813,7 +1873,7 @@ fn components_occurrences_and_world_placement() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Base"}));
     // A component, active: its box is authored in its frame.
-    let c = run(&mut s, "component.create", json!({"name": "Arm"}));
+    let c = run(&mut s, "component.create", json!({"name": "Arm", "grounded": false}));
     let (cid, occ) = (c["component"].as_u64().unwrap(), c["occurrence"].as_u64().unwrap());
     run(&mut s, "solid.box", json!({"corner": [20, 0, 0], "length": 10, "width": 4, "height": 4, "body_name": "ArmBody"}));
     run(&mut s, "component.activate", json!({"component": 0}));
@@ -3587,6 +3647,36 @@ fn a_pattern_repeats_a_fillet_on_the_edges_it_found() {
     assert!(rel(volume(&mut s), expect) < 1e-5, "{} vs {expect}", volume(&mut s));
 }
 
+/// A body renamed after a join: the next new body does not take the name the rename freed
+/// (#4957). The join changed the body, so the rename is followed by a full evaluation of the
+/// design; the numbers the design handed out must not go back with it, or a script that names
+/// a body finds another one.
+#[test]
+fn a_renamed_body_keeps_its_number_from_the_next_body() {
+    for join in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "new"}));
+        if join {
+            // A second box joined to the first: the join changes the body, so the rename
+            // cannot be followed without evaluating the design again.
+            run(&mut s, "sketch.create", json!({"plane": "XY"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [15, 10]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "join"}));
+        }
+        run(&mut s, "body.rename", json!({"body": "Body1", "name": "First"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, 0], "p1": [30, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "new"}));
+        let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        assert_eq!(names, ["First", "Body2"], "with a join: {join}");
+    }
+}
+
 /// A copy added by raising the count after a rename takes the next number, not the freed one (#372).
 #[test]
 fn raising_a_pattern_count_after_a_rename_numbers_the_new_copy_after_the_others() {
@@ -3982,6 +4072,64 @@ fn renaming_an_imported_assembly_body_reads_nothing_again() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #2467: renaming a body that later features change (a hole patterned over it, then a chamfer)
+/// evaluates nothing, and leaves the bodies, volumes and face names evaluating the renamed
+/// design gives; undo and redo do the same.
+#[test]
+fn renaming_a_body_later_features_change_evaluates_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [80, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10}));
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [15, 12, 10], "diameter": 5, "type": "counterbore", "cb_diameter": 9, "cb_depth": 3, "name": "Hole1"}),
+    );
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 25, "dir2": [0, 1, 0], "count2": 2, "spacing2": 25}),
+    );
+    run(&mut s, "solid.chamfer", json!({"edges": [[40, 0, 10], [80, 25, 10]], "distance": 1}));
+    let looks = |st: &solidcraft_doc::ModelState| {
+        st.bodies.iter().map(|b| (b.name.clone(), (*solidcraft_doc::naming::face_names(b)).clone())).collect::<Vec<_>>()
+    };
+    let before = looks(&s.model.state());
+    let v = body_volume(&s.model.state());
+    let old = before.first().map(|b| b.0.clone()).unwrap();
+    s.evaluations = 0;
+    run(&mut s, "body.rename", json!({"body": old, "name": "Plate"}));
+    assert_eq!(s.evaluations, 0, "a rename evaluates nothing");
+    let after = looks(&s.model.state());
+    assert_eq!(after.first().map(|b| b.0.as_str()), Some("Plate"));
+    let mut fresh = Session::new((*s.doc).clone());
+    fresh.refresh();
+    assert_eq!(looks(&fresh.model.state()), after, "the bodies and face names evaluating the renamed design gives");
+    assert!(rel(body_volume(&fresh.model.state()), v) < 1e-9);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(looks(&s.model.state()), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(looks(&s.model.state()), after);
+    assert_eq!(s.evaluations, 0, "nor do its undo and redo");
+}
+
+/// A body whose name later bodies' names are worked out from (`X` patterned into `X (2)`) is still
+/// renamed by evaluating the design, so the copies follow it as they would on opening it.
+#[test]
+fn renaming_a_body_whose_copies_take_its_name_evaluates_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "X"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["X"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20}));
+    let names = |s: &Session| s.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    assert!(names(&s).iter().any(|n| n.starts_with("X (")), "{:?}", names(&s));
+    run(&mut s, "body.rename", json!({"body": "X", "name": "First"}));
+    let mut fresh = Session::new((*s.doc).clone());
+    fresh.refresh();
+    assert_eq!(names(&fresh), names(&s));
+}
+
 /// #3044: on a design with thousands of bodies the cheap commands stay cheap: showing, hiding,
 /// selecting, colouring and renaming a body or a feature, and undoing them, recompute no feature
 /// (renames don't even look over the timeline) and leave every body's display mesh as it was, so
@@ -4073,5 +4221,25 @@ fn creating_a_component_recomputes_nothing() {
         run(&mut s, "component.create", json!({"name": name}));
         assert_eq!(s.model.last_recomputed, 0, "creating {name} recomputed a feature");
         run(&mut s, "component.activate", json!({"component": "root"}));
+    }
+}
+
+#[test]
+fn parallel_pipe_large_nominals_support_shallow_and_thin_cylindrical_holes() {
+    for designation in ["G 1", "Rp 1"] {
+        for (height, depth) in [(15.0, Some(3.0)), (5.0, None)] {
+            let mut s = crate::Session::default();
+            s.execute("solid.box", &format!(r#"{{"length":80,"width":80,"height":{height},"body_name":"Plate"}}"#).parse().unwrap()).unwrap();
+            let depth_json = depth.map(|d| format!(r#", "depth":{d}"#)).unwrap_or_default();
+            let result =
+                s.execute("solid.hole", &format!(r#"{{"position":[40,40,{height}],"thread":"{designation}"{depth_json}}}"#).parse().unwrap());
+            assert!(result.is_ok(), "{designation}, height={height}, depth={depth:?}: {result:?}");
+            let reopened = crate::Session::new(crate::doc::Document::from_json(&s.doc.to_json()).unwrap());
+            assert!(reopened.model.results.iter().all(|r| r.error.is_none()));
+            let state = reopened.world_state();
+            assert_eq!(state.threads.len(), 1);
+            assert_eq!(state.threads[0].designation, designation);
+            assert!((state.threads[0].end - state.threads[0].start - depth.unwrap_or(height)).abs() < 1e-6);
+        }
     }
 }

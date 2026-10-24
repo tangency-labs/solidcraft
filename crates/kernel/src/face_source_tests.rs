@@ -309,3 +309,36 @@ fn constructed_large_arc_split_and_reversal_preserve_one_source_segment() {
         }
     }
 }
+
+/// A certified block cut by, or joined with, a spherical shell (r 18.5 to 40) through both its
+/// spheres: booleans with a tool that has a void (#451) keep the sources of the block's ends,
+/// which they leave as they were.
+#[test]
+fn hollow_tool_booleans_keep_planar_support_certificates() {
+    use std::f64::consts::{PI, TAU};
+    let ring = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(18.5, 0.), b: Vec2::new(40., 0.) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 40., start: 0., sweep: PI },
+                Seg2::Line { a: Vec2::new(-40., 0.), b: Vec2::new(-18.5, 0.) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 18.5, start: PI, sweep: -PI },
+            ],
+        },
+        holes: vec![],
+    };
+    let shell = crate::revolve(&Plane::XY, &[ring], Vec2::ZERO, Vec2::X, TAU).unwrap().remove(0);
+    assert_eq!(shell.shell_count(), 2, "a solid with a void");
+    let block = crate::box_solid(Vec3::new(8., -4., -4.), Vec3::new(50., 4., 4.)).unwrap().with_box_certificate(42).unwrap();
+    for op in [crate::BoolOp::Cut, crate::BoolOp::Union] {
+        let r = crate::boolean(&block, &shell, op).unwrap().unwrap();
+        let ends: Vec<f64> = (0..r.face_count())
+            .filter(|i| {
+                matches!(r.face_sources().and_then(|s| s.get(*i)).and_then(Option::as_ref), Some(FaceSource::Box { producer: Some(42), axis: 0, .. }))
+            })
+            .map(|i| r.planar_face(i).unwrap().origin.x)
+            .collect();
+        assert!([8., 50.].iter().all(|x| ends.iter().any(|e| (e - x).abs() < 1e-9)), "{op:?}: {ends:?}");
+        assert_exact_planes(&r);
+    }
+}

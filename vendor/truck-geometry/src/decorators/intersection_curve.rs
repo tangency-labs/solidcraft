@@ -169,7 +169,10 @@ where
     // that search ran for every point and made dividing an intersection edge on a large B-spline
     // surface take seconds. A point the hinted projection misses is searched for as before.
     fn parameter_division(&self, range: (f64, f64), tol: f64) -> (Vec<f64>, Vec<Point3>) {
-        nonpositive_tolerance!(tol);
+        // SolidCraft: a tolerance finer than truck's (or not a number) divides at truck's
+        // instead of panicking: the points are only found to within it anyway. truck asserted
+        // the tolerance, and a join whose caller asked for less failed on the panic (#4623).
+        let tol = if tol >= TOLERANCE { tol } else { TOLERANCE };
         let start = self.hinted_triple(range.0, None);
         let end = self.hinted_triple(range.1, None);
         hinted_sub_division(self, range, (start, end), tol, 100)

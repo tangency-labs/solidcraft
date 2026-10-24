@@ -23,16 +23,27 @@ pub(super) fn paint_box(ui: &Ui, square: Rect, response: &Response, on: bool, mi
     let t = Tokens::get();
     let selected = on || mixed;
     let border = if selected || response.hovered() || response.has_focus() { t.form_primary } else { t.control_border };
-    let fill = if selected {
+    let fill = if t.borders.bevel.is_some() {
+        t.input_fill()
+    } else if selected {
         t.form_primary
     } else if response.hovered() {
         t.hover
     } else {
         t.control_fill
     };
-    ui.painter().rect(square, t.radius_sm, fill, egui::Stroke::new(1.0, border), egui::StrokeKind::Inside);
+    ui.painter().rect(
+        square,
+        t.radius_sm,
+        fill,
+        if selected || response.hovered() || response.has_focus() { egui::Stroke::new(1.0, border) } else { t.control_border_stroke(border) },
+        egui::StrokeKind::Inside,
+    );
+    if let Some(bevel) = t.borders.bevel {
+        bevel.paint(ui.painter(), square, t.radius_sm, true, response.enabled());
+    }
     if selected {
-        paint_check_glyph(ui.painter(), square, mixed, t.on_accent);
+        paint_check_glyph(ui.painter(), square, mixed, if t.borders.bevel.is_some() { t.form_ink } else { t.on_accent });
     }
     if response.has_focus() {
         ui.painter().rect_stroke(square.expand(t.space_2), t.radius_sm, egui::Stroke::new(1.0, t.form_primary), egui::StrokeKind::Outside);

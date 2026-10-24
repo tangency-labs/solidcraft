@@ -96,16 +96,16 @@ impl Container {
         match self.surface {
             Surface::Feature | Surface::Palette if !self.floating() => {
                 let edges = self.joined.unwrap_or(DockEdges { left: side == Side::Left, right: side == Side::Right, ..Default::default() });
-                Self::compact_frame(fill, t.dialog_border, edges)
+                Self::compact_frame(fill, t.primary_border(t.dialog_border), edges)
             }
-            Surface::Panel | Surface::Chrome if !self.floating() => Self::compact_frame(fill, t.border, self.joined.unwrap_or(DockEdges::ALL)),
-            Surface::Feature | Surface::Window => {
-                flat.stroke(egui::Stroke::new(1.0, t.dialog_border)).corner_radius(t.radius_xl).shadow(t.shell_shadow())
+            Surface::Panel | Surface::Chrome if !self.floating() => {
+                Self::compact_frame(fill, t.primary_border(t.border), self.joined.unwrap_or(DockEdges::ALL))
             }
-            Surface::Palette => flat.stroke(egui::Stroke::new(1.0, t.border)).corner_radius(t.radius_xl).shadow(t.shell_shadow()),
-            Surface::Panel | Surface::Chrome => flat.stroke(egui::Stroke::new(1.0, t.border)).corner_radius(t.radius_lg).shadow(t.shell_shadow()),
-            Surface::Navigation => flat.stroke(egui::Stroke::new(1.0, t.border)).corner_radius(t.radius_md),
-            Surface::Toast => flat.stroke(egui::Stroke::new(1.0, t.border)).corner_radius(t.radius_md).shadow(t.shell_shadow()),
+            Surface::Feature | Surface::Window => flat.stroke(t.primary_border(t.dialog_border)).corner_radius(t.radius_xl).shadow(t.shell_shadow()),
+            Surface::Palette => flat.stroke(t.primary_border(t.border)).corner_radius(t.radius_xl).shadow(t.shell_shadow()),
+            Surface::Panel | Surface::Chrome => flat.stroke(t.primary_border(t.border)).corner_radius(t.radius_lg).shadow(t.shell_shadow()),
+            Surface::Navigation => flat.stroke(t.primary_border(t.border)).corner_radius(t.radius_md),
+            Surface::Toast => flat.stroke(t.primary_border(t.border)).corner_radius(t.radius_md).shadow(t.shell_shadow()),
             Surface::Popup => Self::popup_frame(&ctx.global_style()).fill(fill),
             Surface::ApplicationBar | Surface::Canvas | Surface::Viewport | Surface::InputShield => flat,
         }
@@ -123,7 +123,7 @@ impl Container {
     /// supplied by `frame`; edge-hosted panes must not acquire outer shadows or card gaps.
     pub fn edge_frame(self, fill: Color32) -> Frame {
         if self.adaptive() && !self.floating() {
-            Self::compact_frame(fill, Tokens::get().border, self.joined.unwrap_or(DockEdges::ALL))
+            Self::compact_frame(fill, Tokens::get().primary_border(Tokens::get().border), self.joined.unwrap_or(DockEdges::ALL))
         } else {
             Frame::NONE.fill(fill)
         }
@@ -143,14 +143,14 @@ impl Container {
         }
     }
 
-    fn compact_frame(fill: Color32, border: Color32, edges: DockEdges) -> Frame {
-        // Collapse adjoining borders onto the same one-point strip. North/west outlines
+    fn compact_frame(fill: Color32, border: Stroke, edges: DockEdges) -> Frame {
+        // Collapse adjoining borders onto the same themed-width strip. North/west outlines
         // sit outside the allocation; south/east outlines sit inside it. Logical panel
         // rectangles still touch exactly, with neither gaps nor doubled strokes.
         Frame::NONE
             .fill(fill)
-            .stroke(Stroke::new(1.0, border))
-            .outer_margin(egui::Margin { left: -1, top: -1, right: 0, bottom: 0 })
+            .stroke(border)
+            .outer_margin(egui::Margin { left: -(border.width.ceil() as i8), top: -(border.width.ceil() as i8), right: 0, bottom: 0 })
             .corner_radius(Self::compact_rounding(edges))
     }
 
@@ -174,7 +174,52 @@ impl Container {
             edges.bottom |= rect.bottom() >= bounds.bottom();
             prepared.frame.corner_radius = Self::compact_rounding(edges);
         }
-        egui::InnerResponse { inner, response: prepared.end(ui) }
+        let frame = prepared.frame;
+        let response = prepared.end(ui);
+        Self::paint_inset(ui.painter(), response.rect - frame.outer_margin, frame);
+        egui::InnerResponse { inner, response }
+    }
+
+    /// Optional companion to a primary outline, painted inside the allocated surface.
+    /// It consumes no layout space or input target. Tiny/collapsed surfaces omit it.
+    pub(crate) fn paint_inset(painter: &egui::Painter, widget: egui::Rect, frame: Frame) {
+        let t = Tokens::get();
+        if let Some(bevel) = t.borders.bevel {
+            let mut chrome = painter.clone();
+            chrome.set_clip_rect(widget.intersect(painter.ctx().content_rect()));
+            bevel.paint(&chrome, widget, frame.corner_radius, false, true);
+        }
+        let Some(inset) = t.borders.primary_inset else {
+            return;
+        };
+        let distance = frame.stroke.width + inset.gap;
+        let rect = widget.shrink(distance);
+        if inset.stroke.width <= 0.0 || !rect.is_finite() || rect.width() <= 2.0 * inset.stroke.width || rect.height() <= 2.0 * inset.stroke.width {
+            return;
+        }
+        let reduce = |r: u8| r.saturating_sub(distance.ceil() as u8);
+        let radius = frame.corner_radius;
+        // A host's content clip excludes its padding. The companion belongs to the whole
+        // host, so clip to that known surface and the viewport instead of the content well.
+        let mut painter = painter.clone();
+        painter.set_clip_rect(widget.intersect(painter.ctx().content_rect()));
+        painter.rect_stroke(
+            rect,
+            egui::CornerRadius { nw: reduce(radius.nw), ne: reduce(radius.ne), sw: reduce(radius.sw), se: reduce(radius.se) },
+            inset.stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    /// Manually painted chrome uses exactly the same outer and inset policy as hosts.
+    pub(crate) fn paint_frame(painter: &egui::Painter, frame: Frame, content: egui::Rect) {
+        painter.add(frame.paint(content));
+        Self::paint_inset(painter, frame.widget_rect(content), frame);
+    }
+
+    /// Decorate the content-hugging frame of a popup or feature sheet after its contents.
+    pub(crate) fn finish_content(ui: &egui::Ui, frame: Frame) {
+        Self::paint_inset(ui.painter(), frame.widget_rect(ui.min_rect()), frame);
     }
 
     pub fn area(self, id: Id) -> egui::Area {
@@ -198,14 +243,16 @@ impl Container {
     /// Anchored editors inherit their containing widget's local style. Their host stays a
     /// popup in both layouts; only the universal module constructs the egui popup frame.
     pub fn popup_frame(style: &egui::Style) -> Frame {
-        Frame::popup(style)
+        let mut frame = Frame::popup(style);
+        frame.stroke = Tokens::get().borders.stroke(crate::theme::BorderRole::Primary, frame.stroke);
+        frame
     }
 
     pub(crate) fn menu_frame() -> Frame {
         let t = Tokens::get();
         egui::Frame::NONE
             .fill(t.dialog_body)
-            .stroke(Stroke::new(1.0, t.dialog_border))
+            .stroke(t.primary_border(t.dialog_border))
             .corner_radius(t.radius_xl)
             .inner_margin(egui::Margin::symmetric(t.space_6 as i8, t.space_6 as i8))
             .shadow(egui::Shadow {
@@ -231,7 +278,7 @@ impl Container {
     pub(crate) fn tooltip_frame(self, ctx: &Context) -> Frame {
         let t = Tokens::get();
         self.frame(ctx, t.dialog_body, crate::frame::Side::Right)
-            .stroke(egui::Stroke::new(1.0, t.dialog_border))
+            .stroke(t.primary_border(t.dialog_border))
             .inner_margin(egui::Margin::symmetric(t.space_8 as i8, t.space_4 as i8))
     }
 

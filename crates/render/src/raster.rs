@@ -195,7 +195,12 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                             }
                             if cut {
                                 // The cut: the body's colour tinted toward the cap colour, hatched
-                                // at 45 degrees (as the viewport draws it).
+                                // at 45 degrees (as the viewport draws it); a plain cap is the
+                                // body's own colour.
+                                if scene.plain_cap {
+                                    c.put(x, y, base, 1.0);
+                                    continue;
+                                }
                                 let tinted: [f64; 3] = std::array::from_fn(|k| base[k] + (cap_tint[k] - base[k]) * 0.35);
                                 let k = if ((x + y) / SS) % 9 < 2 { 0.6 } else { 1.0 };
                                 c.put(x, y, tinted.map(|v| v * k), 1.0);

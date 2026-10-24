@@ -156,6 +156,7 @@ fn capture_question_offers_capture_revert_and_cancel() {
     let body = h.app.session.model.state().bodies[0].name.clone();
     h.app.run("component.from_bodies", json!({"bodies": [body]})).unwrap();
     let occ = h.app.session.doc.occurrences[0].id;
+    h.app.run("occurrence.ground", json!({"occurrence": occ, "grounded": false})).unwrap();
     h.app.run("occurrence.move", json!({"occurrence": occ, "translate": [10, 0, 0], "capture": false})).unwrap();
     h.app.start("sketch.create");
     card_is_drawn(&mut h);
@@ -184,6 +185,7 @@ fn occurrence_move_card_edits_distances_and_captures_or_reverts() {
     let body = h.app.session.model.state().bodies[0].name.clone();
     h.app.run("component.from_bodies", json!({"bodies": [body]})).unwrap();
     let occ = h.app.session.doc.occurrences[0].id;
+    h.app.run("occurrence.ground", json!({"occurrence": occ, "grounded": false})).unwrap();
     h.app.tree.occurrence_move = Some(crate::browser::OccMove::new(occ));
     card_is_drawn(&mut h);
     for k in 0..3 {

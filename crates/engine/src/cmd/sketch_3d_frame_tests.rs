@@ -123,7 +123,7 @@ fn wire_frame_hostile_inputs_rollback_full_session() {
 fn wire_frame_include_other_component_refresh_break_lost_and_reopen() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10}));
-    let component = run(&mut s, "component.create", json!({"name":"Receiver"}));
+    let component = run(&mut s, "component.create", json!({"name":"Receiver","grounded":false}));
     let occurrence = component["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[20,0,0]}));
     run(&mut s, "sketch.create", json!({"plane":"XY","name":"Include target"}));
@@ -235,7 +235,7 @@ fn wire_frame_cross_owner_sweep_follows_world_path_edit_undo_and_reopen() {
     run(&mut s, "sketch.options", json!({"sketch_3d":true}));
     let wire = run(&mut s, "sketch.line3d", json!({"points":[[17,32,45],[17,32,55]]}))["curves"][0].as_str().unwrap().to_string();
     run(&mut s, "sketch.finish", json!({}));
-    let owner = run(&mut s, "component.create", json!({"name":"Sweep owner"}))["occurrence"].as_u64().unwrap();
+    let owner = run(&mut s, "component.create", json!({"name":"Sweep owner","grounded":false}))["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":owner,"axis":[0,0,1],"angle":"90 deg","translate":[20,30,40]}));
     let profile = run(&mut s, "sketch.create", json!({"plane":"XY","offset":5,"name":"Profile"}))["sketch"].as_u64().unwrap();
     run(&mut s, "sketch.circle.center", json!({"center":[2,3],"radius":2}));
@@ -264,7 +264,7 @@ fn wire_frame_cross_owner_sweep_follows_world_path_edit_undo_and_reopen() {
 #[test]
 fn wire_frame_three_owner_sweep_profile_move_invalidates_warm_cache() {
     let mut s = Session::default();
-    let profile_owner = run(&mut s, "component.create", json!({"name":"Profile owner","parent":0}));
+    let profile_owner = run(&mut s, "component.create", json!({"name":"Profile owner","parent":0,"grounded":false}));
     let profile_occurrence = profile_owner["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":profile_occurrence,"translate":[4,7,5]}));
     let profile = run(&mut s, "sketch.create", json!({"plane":"XY","name":"Foreign profile"}))["sketch"].as_u64().unwrap();

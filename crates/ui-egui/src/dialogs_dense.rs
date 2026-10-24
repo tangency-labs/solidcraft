@@ -75,6 +75,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_sheet::Sm::FlatPattern { .. } => Some("sheet.flat_pattern"),
             _ => k.simple_metadata().map(|(command, _)| command),
         },
+        Kind::Frame(_) => Some("frame.member"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
             crate::dialogs_plastic::Pl::Assign { .. } => Some("plastic.assign_rule"),
@@ -104,6 +105,16 @@ const FILLET_TYPES: [(&str, &str); 5] = [
     ("Curvature continuous (G2)", "curvature"),
     ("Spline", "spline"),
 ];
+
+/// The most instances a solid pattern makes in one direction (the document's own limit).
+const MAX_PATTERN_INSTANCES: i64 = 1000;
+
+/// A solid pattern's quantity row, with step arrows from 1 to `MAX_PATTERN_INSTANCES`. The
+/// count goes to the command as typed, so it is evaluated as the document evaluates it.
+fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String) -> bool {
+    let eval = |text: &str| doc.eval(text.trim(), solidcraft_engine::doc::expr::Kind::Unitless).ok();
+    ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max: MAX_PATTERN_INSTANCES, eval: &eval })
+}
 
 fn fillet_type(extra: &serde_json::Map<String, Value>) -> usize {
     let value = extra.get("type").and_then(Value::as_str).unwrap_or("constant");
@@ -172,7 +183,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         ui_kit::text(ui, tr(key), ui_kit::Text::Hint("manage"));
     }
     placement_row(d, ui);
-    input_rows(d, ui, &app.session);
+    if matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple) {
+        // Each reference edge with its distance (#37).
+        enter |= crate::hole_refs::input_rows(d, ui, &app.session);
+    } else {
+        input_rows(d, ui, &app.session);
+    }
     match &mut d.kind {
         Kind::Material { index } => {
             let names = app.session.doc.material_names();
@@ -197,7 +213,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 }
             }
         }
-        Kind::SketchModify(k) => enter |= crate::sketch_modify_ui::rows(ui, k),
+        Kind::SketchModify(k) => enter |= crate::sketch_modify_ui::rows(ui, k, &app.session.doc),
         Kind::Text(k) => enter |= crate::sketch_text::rows(ui, k, &mut d.inputs, &mut d.active),
         Kind::TextMove(k) => enter |= crate::sketch_text_move::rows(ui, k),
         Kind::EditParam { name, expr } => {
@@ -468,23 +484,23 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
         }
         Kind::PatternRect { count, spacing, count2, spacing2 } => {
-            for (l, v) in [("Quantity", count), ("Spacing", spacing), ("Quantity 2", count2), ("Spacing 2", spacing2)] {
-                enter |= expr_row(ui, l, v);
-            }
+            enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
+            enter |= expr_row(ui, "Spacing", spacing);
+            enter |= quantity_row(ui, &app.session.doc, "Quantity 2", count2);
+            enter |= expr_row(ui, "Spacing 2", spacing2);
             if d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
                 feature_pattern_alignment_row(ui, &mut d.extra, 1);
             }
         }
         Kind::PatternCirc { count, angle } => {
-            for (l, v) in [("Quantity", count), ("Total angle", angle)] {
-                enter |= expr_row(ui, l, v);
-            }
+            enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
+            enter |= expr_row(ui, "Total angle", angle);
             if d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
             }
         }
-        Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
+        Kind::Hole { kind, opts, .. } => {
             form_row(ui, "Extents", |ui| {
                 let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(opts.all) * 2 };
                 let mut ext = cur;
@@ -513,30 +529,18 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if opts.tapped {
                 enter |= crate::dialogs_thread::hole_rows(ui, &app.session.doc, &mut opts.thread, &mut opts.custom_thread);
             }
-            if *kind == 0 {
+            // Through all, the tip lies past the part.
+            if *kind == 0 && !opts.all {
                 form_row(ui, "Drill Point", |ui| {
                     let mut tip = usize::from(opts.angled);
                     combo(ui, "hole_tip", &["Flat", "Angle"], &mut tip);
                     opts.angled = tip == 1;
                 });
             }
-            if !opts.all {
-                enter |= expr_row(ui, "Depth", depth);
-            }
-            if *kind == 0 && opts.angled {
-                enter |= expr_row(ui, "Tip Angle", &mut opts.tip_angle);
-            }
-            if !opts.tapped {
-                enter |= expr_row(ui, "Diameter", diameter);
-            }
-            if *kind == 1 {
-                enter |= expr_row(ui, "Counterbore Ø", cb_diameter);
-                enter |= expr_row(ui, "Counterbore depth", cb_depth);
-            }
-            if *kind == 2 {
-                enter |= expr_row(ui, "Countersink Ø", cs_diameter);
-                enter |= expr_row(ui, "Countersink angle", cs_angle);
-            }
+            // The section through the hole, each size beside its dimension (#2171).
+            let to_object = to_object_on(&d.inputs);
+            let doc = &app.session.doc;
+            enter |= crate::dialogs_hole::rows(ui, &mut d.kind, to_object, &|e, k| doc.eval(e, k).ok());
         }
         _ => enter |= additional_rows(app, d, ui),
     }
@@ -700,9 +704,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             extra_options(ui, "boundary_options", &mut d.extra, &[("Remove Tools", "remove_tools")]);
         }
         Kind::PathPattern { count, spacing } => {
-            for (l, v) in [("Quantity", count), ("Spacing", spacing)] {
-                enter |= expr_row(ui, l, v);
-            }
+            enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
+            enter |= expr_row(ui, "Spacing", spacing);
         }
         Kind::Pipe { diameter, wall } => {
             enter |= expr_row(ui, "Diameter", diameter);
@@ -784,11 +787,15 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k),
         Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
+        Kind::Frame(k) => enter |= crate::dialogs_frame::rows(app, ui, k, &d.inputs),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
-        Kind::Section { offset, flip } => {
+        Kind::Section { offset, flip, hatch } => {
             enter |= expr_row(ui, "Distance", offset);
-            ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
+            ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("Hatch", hatch)]);
+            if section_turns_off(&app.session, &d.inputs) {
+                ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));
+            }
         }
         Kind::Rename { name, .. } => {
             form_row(ui, "Name", |ui| {

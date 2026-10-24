@@ -13,7 +13,7 @@
 use std::f64::consts::TAU;
 use std::fmt::Write as _;
 
-use solidcraft_geom::{Loop2, Seg2, Vec2};
+use solidcraft_geom::{Loop2, MAX_BEZIER_DEGREE, Seg2, Vec2};
 
 /// A layer's linetype, defined in the file's LTYPE table so a viewer needs nothing else.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -112,7 +112,8 @@ pub struct DxfEntity {
 }
 
 /// The entity of one profile segment, exactly: a line, an arc (a circle when it is a whole
-/// turn), an elliptical arc for a conic of weight below 1, a spline for a Bézier or any other conic.
+/// turn), an elliptical arc for a conic of weight below 1, a spline for any other conic, and for a
+/// Bézier a spline of its own degree over all its control points.
 pub fn seg_shape(s: &Seg2) -> DxfShape {
     match *s {
         Seg2::Line { a, b } => DxfShape::Line(a, b),
@@ -128,7 +129,7 @@ pub fn seg_shape(s: &Seg2) -> DxfShape {
             None => bezier_spline(&[a, apex, b], ((w - 1.0).abs() > 1e-12).then(|| vec![1.0, w, 1.0])),
         },
         Seg2::Cubic { p0, p1, p2, p3 } => bezier_spline(&[p0, p1, p2, p3], None),
-        Seg2::Bezier { n, p } => bezier_spline(p.get(..=(n as usize).clamp(1, 7)).unwrap_or(&p), None),
+        Seg2::Bezier { n, p } => bezier_spline(p.get(..=(n as usize).clamp(1, MAX_BEZIER_DEGREE)).unwrap_or(&p), None),
     }
 }
 
@@ -677,6 +678,26 @@ mod tests {
     }
 
     #[test]
+    fn a_bezier_is_a_spline_of_its_own_degree_over_all_its_control_points() {
+        let mut q = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
+        for (i, s) in q.iter_mut().enumerate() {
+            *s = Vec2::new(i as f64, (i * i) as f64);
+        }
+        // Every degree a Bézier piece can have, up to a G4 blend's 9: n + 1 control points, all of
+        // them, and 2(n + 1) clamped knots.
+        for n in 4..=solidcraft_geom::MAX_BEZIER_DEGREE as u8 {
+            let k = usize::from(n) + 1;
+            let DxfShape::Spline { degree, knots, ctrl, weights } = seg_shape(&Seg2::Bezier { n, p: q }) else { panic!("degree {n}") };
+            assert_eq!((degree, knots.len(), weights), (n, 2 * k, None), "degree {n}");
+            assert_eq!(ctrl, q[..k], "degree {n}");
+        }
+        // A degree no piece can have (hostile data) is held to what the piece holds, never past it.
+        let shape = |n: u8| seg_shape(&Seg2::Bezier { n, p: q });
+        assert!(matches!(shape(0), DxfShape::Spline { degree: 1, ref ctrl, .. } if ctrl.len() == 2));
+        assert!(matches!(shape(u8::MAX), DxfShape::Spline { degree: 9, ref ctrl, .. } if ctrl[..] == q[..]));
+    }
+
+    #[test]
     fn drawings_carry_version_units_extents_and_handles() {
         let ents = vec![
             DxfEntity { layer: "OUTLINE".into(), shape: DxfShape::Line(Vec2::new(-1.0, 2.0), Vec2::new(10.0, 2.0)) },
@@ -760,6 +781,17 @@ mod tests {
         // The cubic: degree and control points.
         let Geom2::Spline { pts, control: true, degree: 3 } = &back[5] else { panic!("{:?}", back[5]) };
         assert!(pts.iter().zip(&cubic).all(|(a, b)| a.dist(*b) < 1e-9) && pts.len() == 4);
+        // A degree-9 Bézier (a G4 blend) comes back at its own degree over all ten points.
+        let mut q = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
+        for (i, s) in q.iter_mut().enumerate() {
+            *s = Vec2::new(i as f64, (i % 3) as f64);
+        }
+        let nine = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: seg_shape(&Seg2::Bezier { n: 9, p: q }) }]);
+        let back_nine = read_dxf(&nine).unwrap();
+        assert!(
+            matches!(&back_nine[..], [Geom2::Spline { pts, control: true, degree: 9 }] if pts.len() == 10 && pts.iter().zip(&q).all(|(a, b)| a.dist(*b) < 1e-9)),
+            "{back_nine:?}"
+        );
 
         // The numbers in the file itself, which the reader does not keep: the ellipse...
         let file = entities(&dxf);

@@ -45,6 +45,11 @@ fn session(script: &[(&str, serde_json::Value)]) -> Session {
 fn opengl_viewport_pipelines_render_a_model() {
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = wgpu::Backends::GL;
+    // NVIDIA's EGL answers wgpu's request for GL 3.3 with exactly 3.3 yet lists
+    // GL_ARB_compute_shader, so wgpu builds its indirect-call validation pipeline, naga cannot
+    // emit compute GLSL below 4.30, and request_device fails as Device(Lost). The test draws
+    // nothing indirect, so the validation is not needed here.
+    desc.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
     let instance = wgpu::Instance::new(desc);
     let adapter = match pollster::block_on(instance.request_adapter(&Default::default())) {
         Ok(adapter) => adapter,
@@ -165,6 +170,26 @@ fn pictures_show_the_section_and_its_cap() {
         let cap = pixels(&img).filter(|p| i32::from(p[0]) - i32::from(p[2]) > 20).count();
         assert!(cap > 500, "fov {fov}: cap pixels {cap}");
     }
+}
+
+/// With the section's hatch off, the cut shows plain in its body's own colour, as the CPU
+/// rasterizer draws it; hatched, it is tinted and striped.
+#[test]
+fn pictures_show_a_plain_cut_without_the_hatch() {
+    let Some(c) = capturer() else { return };
+    let mut s = session(&[
+        ("solid.box", json!({"length": 40, "width": 30, "height": 20})),
+        ("appearance.assign", json!({"bodies": ["Body1"], "color": [40, 160, 90]})),
+    ]);
+    let cam = view::home_camera(&s);
+    let mut picture = |hatch: bool| {
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}, "hatch": hatch})).unwrap();
+        c.rgba(&view::scene(&s, &cam), &cam, 300, 220).unwrap()
+    };
+    let solid = |img: &[u8]| pixels(img).filter(|p| p[..3].iter().zip([40u8, 160, 90]).all(|(a, b)| a.abs_diff(b) <= 3)).count();
+    let (hatched, plain) = (picture(true), picture(false));
+    assert!(solid(&plain) > 500, "plain cut: {} pixels in the body's colour", solid(&plain));
+    assert!(solid(&hatched) < 50, "the hatched cut is tinted: {}", solid(&hatched));
 }
 
 /// Surface analysis shades headless pictures as it shades the viewport: a box's flat faces in

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Frame Member</title>
+  <path d="M9.25 18.86L17.63 23.7" fill="none" stroke="#ffffff" stroke-width="4.4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M9.25 18.86L17.63 23.7" fill="none" stroke="#236ead" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="9.25" cy="18.86" r="3" fill="#236ead"/>
+  <path d="M11.88 20.39L40.62 36.98L40.62 50.25L11.88 33.66Z" fill="#328bd3"/>
+  <path d="M23.38 13.75L52.12 30.34L40.62 36.98L11.88 20.39Z" fill="#b9ddf8"/>
+  <path d="M52.12 30.34L40.62 36.98L40.62 50.25L52.12 43.61ZM49.8 34.35L42.94 38.31L42.94 46.24L49.8 42.28Z" fill="#8e9faf" fill-rule="evenodd"/>
+  <defs><clipPath id="fm_hole"><path d="M49.8 34.35L42.94 38.31L42.94 46.24L49.8 42.28Z" fill="none"/></clipPath></defs>
+  <g clip-path="url(#fm_hole)">
+  <path d="M49.8 34.35L42.94 38.31L42.94 46.24L49.8 42.28Z" fill="#236ead"/>
+  <path d="M49.8 34.35L49.8 42.28L42.86 38.27L42.86 30.34Z" fill="#328bd3"/>
+  <path d="M49.8 42.28L42.94 46.24L35.99 42.23L42.86 38.27Z" fill="#b9ddf8"/>
+  </g>
+  <path d="M49.8 34.35L42.94 38.31L42.94 46.24L49.8 42.28Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23.38 13.75L52.12 30.34L52.12 43.61L40.62 50.25L11.88 33.66L11.88 20.39Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M11.88 20.39L40.62 36.98L52.12 30.34" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M40.62 36.98L40.62 50.25" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M41.74 37.62L54.75 45.14" fill="none" stroke="#ffffff" stroke-width="4.4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M41.74 37.62L54.75 45.14" fill="none" stroke="#236ead" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="54.75" cy="45.14" r="3" fill="#236ead"/>
+</svg>

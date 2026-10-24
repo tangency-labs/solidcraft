@@ -1600,3 +1600,69 @@ fn budget_limited_cursor_progress_requests_a_frame_with_the_same_target() {
     }
     assert!(exercised, "exercise continuation after budget-limited progress");
 }
+
+// ---------------------------------------------------------------------------------------------
+// Cancel Sketch (#3838)
+
+#[test]
+fn cancel_removes_a_new_sketch_with_its_dimensions_and_undo_brings_it_back() {
+    let mut s = Session::default();
+    let before = s.doc.to_json();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 25}));
+    let drawn = s.doc.to_json();
+    let r = run(&mut s, "sketch.cancel", json!({}));
+    assert_eq!(r["removed"], true);
+    assert_eq!(s.active_sketch, None);
+    assert_eq!(s.doc.to_json(), before, "the sketch and its dimension parameter are gone");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), drawn);
+    assert!(s.active_sketch.is_some(), "undo goes back into the sketch");
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn cancel_puts_an_edited_sketch_back_as_it_was_opened() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    let opened = s.doc.to_json();
+    let volume = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((volume(&mut s) - 1000.0).abs() < 1e-6);
+    run(&mut s, "sketch.edit", json!({"sketch": "Base"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 40}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 30]]}));
+    let r = run(&mut s, "sketch.cancel", json!({}));
+    assert_eq!(r["removed"], false);
+    assert_eq!(s.doc.to_json(), opened);
+    assert!((volume(&mut s) - 1000.0).abs() < 1e-6, "the solid is built from the sketch as it was");
+
+    // Finishing keeps the changes: there is nothing left to cancel.
+    run(&mut s, "sketch.edit", json!({"sketch": "Base"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 40}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert!((volume(&mut s) - 2000.0).abs() < 1e-6);
+    assert!(s.execute("sketch.cancel", &json!({})).is_err(), "not in a sketch");
+}
+
+#[test]
+fn cancel_refuses_once_undo_has_gone_back_past_where_the_sketch_was_opened() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.edit", json!({"sketch": "S"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 5], [10, 5]]}));
+    // Back past the edit: the first line's step is undone too, still inside the sketch.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.active_sketch.is_some());
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.cancel", &json!({})).unwrap_err().to_string();
+    assert!(e.contains("Undo"), "{e}");
+    assert_eq!(s.doc.to_json(), before, "nothing changed");
+}

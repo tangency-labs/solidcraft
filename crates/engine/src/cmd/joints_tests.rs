@@ -49,7 +49,7 @@ fn deleted_joint_ids_are_not_reused_after_reopening() {
 /// at y = 33, z = 4.
 fn leaf(s: &mut Session, name: &str) {
     run(s, "component.activate", json!({"component": "root"}));
-    run(s, "component.create", json!({"name": name}));
+    run(s, "component.create", json!({"name": name, "grounded": false}));
     run(s, "solid.box", json!({"length": 40, "width": 30, "height": 3, "corner": [0, 0, 0]}));
     run(s, "solid.cylinder", json!({"base": [0, 33, 4], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "new"}));
 }
@@ -128,7 +128,7 @@ fn two_cubes() -> Session {
     let mut s = Session::default();
     for (name, x) in [("A", 0), ("B", 20)] {
         run(&mut s, "component.activate", json!({"component": "root"}));
-        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "component.create", json!({"name": name, "grounded": false}));
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
     }
     let o = occ(&s, "A");
@@ -369,7 +369,7 @@ fn interference_box_sweep_matches_every_pair_check() {
 /// A small block in a new component: a part of a linkage, where only its joints matter.
 pub(super) fn part(s: &mut Session, name: &str, corner: [f64; 3]) {
     run(s, "component.activate", json!({"component": "root"}));
-    run(s, "component.create", json!({"name": name}));
+    run(s, "component.create", json!({"name": name, "grounded": false}));
     run(s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": corner}));
 }
 

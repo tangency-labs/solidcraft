@@ -380,7 +380,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         back: cam.back().to_f32(),
         size_px: [width as f32, height as f32],
         clip: scene.clip.map_or([0.0; 4], |(n, d)| [n.x as f32, n.y as f32, n.z as f32, d as f32]),
-        cap: [f32::from(cap.0) / 255.0, f32::from(cap.1) / 255.0, f32::from(cap.2) / 255.0, 1.0],
+        cap: [f32::from(cap.0) / 255.0, f32::from(cap.1) / 255.0, f32::from(cap.2) / 255.0, if scene.plain_cap { 0.0 } else { 1.0 }],
         images: Vec::new(),
         analysis: analysis_uniform(mode, access.as_ref()),
         analysis_colors: scene.analysis.map_or([0.0; 36], |a| analysis_colors(&a.colors)),
@@ -389,6 +389,8 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         eye: [eye[0], eye[1], eye[2], if cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
         ssaa: 1.0,
+        hover_tint: [0.0; 3],
+        selection_tint: [0.0; 3],
     }
 }
 

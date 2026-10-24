@@ -9,7 +9,7 @@ use solidcraft_engine::{Sel, doc, geom::Vec3};
 #[test]
 fn occurrence_gizmo_drag_matches_numeric_input_and_preserves_joints_capture_and_undo() {
     let mut h = Harness::new();
-    let part = h.app.run("component.create", json!({"name":"Block"})).unwrap();
+    let part = h.app.run("component.create", json!({"name":"Block","grounded":false})).unwrap();
     let first = part["occurrence"].as_u64().unwrap();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
     h.app.run("component.activate", json!({"component":0})).unwrap();

@@ -709,3 +709,20 @@ fn centre_circle_clicked_through_a_line_end_stays_on_it() {
         sk.constraints
     );
 }
+
+/// #4691: the Point tool clicked on a line's midpoint makes a point held there (a MidPoint
+/// constraint), not a free point that happens to sit on the middle.
+#[test]
+fn a_point_clicked_on_a_line_midpoint_is_held_there() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"ids":["base"]})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.point"})).unwrap();
+    h.step(&json!({"click":{"world":[10, 0, 0]}})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.model.state();
+    let sk = &state.sketch(sid).unwrap().sketch;
+    let held = sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Midpoint { .. }));
+    assert!(held, "no MidPoint constraint: {:?}", sk.constraints.iter().map(|c| &c.kind).collect::<Vec<_>>());
+}

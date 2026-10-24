@@ -130,3 +130,26 @@ fn formatted_slider_editor_fits_without_shifting_the_track_during_a_scale_drag()
     }
     assert!(widths.windows(2).all(|pair| pair[0] == pair[1]), "dragging must not move the input range: {widths:?}");
 }
+
+/// The value box of a slider takes typed numbers (the per-axis speeds among them): Tab order reaches it
+/// and Enter commits; a number past the range is held to the range.
+#[test]
+fn a_sliders_value_box_takes_typed_numbers_and_clamps_them_to_its_range() {
+    use crate::ui_kit::test_support::*;
+    for (typed, expected) in [("1.5", 1.5), ("9", 3.0), ("-4", 0.0), ("0", 0.0)] {
+        let ctx = crate::fonts::test_context();
+        let mut value = 1.0_f32;
+        let mut draw = |ui: &mut Ui| {
+            slider(ui, &mut value, 0.0..=3.0, Slider { step: Some(0.05), format: |v| format!("{v:.2}×"), ..Default::default() });
+        };
+        frame(&ctx, vec![], &mut draw);
+        let track = scenario::rect_of("dialog:slider_track:").unwrap_or_else(|| scenario::rects("dialog:slider").first().expect("the slider").1);
+        let at = egui::pos2(track.right() + 30.0, track.center().y);
+        frame(&ctx, pointer(at, true), &mut draw);
+        frame(&ctx, pointer(at, false), &mut draw);
+        frame(&ctx, vec![egui::Event::Text(typed.into())], &mut draw);
+        frame(&ctx, key(egui::Key::Enter), &mut draw);
+        frame(&ctx, vec![], &mut draw);
+        assert!((value - expected).abs() < 1e-3, "typed {typed}: {value}");
+    }
+}

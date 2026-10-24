@@ -18,6 +18,7 @@ pub(crate) struct Confirm<'a> {
     ok: &'a str,
     cancel: &'a str,
     left: Option<&'a str>,
+    secondary_left: bool,
     selected: Option<Action>,
     detail: Option<&'a str>,
 }
@@ -32,6 +33,7 @@ impl<'a> Confirm<'a> {
             ok: "OK",
             cancel: "Cancel",
             left: None,
+            secondary_left: false,
             selected: None,
             detail: None,
         }
@@ -44,6 +46,12 @@ impl<'a> Confirm<'a> {
 
     pub(crate) fn actions(mut self, ok: &'a str, cancel: &'a str, left: Option<&'a str>) -> Self {
         (self.ok, self.cancel, self.left) = (ok, cancel, left);
+        self
+    }
+
+    /// Frame the optional left action as a secondary button instead of a low-emphasis action.
+    pub(crate) fn secondary_left(mut self) -> Self {
+        self.secondary_left = true;
         self
     }
 
@@ -126,7 +134,14 @@ impl<'a> Confirm<'a> {
                 self.ok,
                 self.cancel,
                 valid,
-                Footer { apply: self.left, selected: self.selected, danger: matches!(self.tone, Tone::Danger), confirm: true, ..Default::default() },
+                Footer {
+                    apply: self.left,
+                    selected: self.selected,
+                    danger: matches!(self.tone, Tone::Danger),
+                    confirm: true,
+                    secondary_left: self.secondary_left,
+                    ..Default::default()
+                },
                 |_| {},
             );
             let action = if action == Action::Cancel {

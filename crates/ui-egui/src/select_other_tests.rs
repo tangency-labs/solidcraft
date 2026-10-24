@@ -136,6 +136,44 @@ fn overlapping_bodies_list_both_and_the_hidden_one_can_be_picked() {
 }
 
 #[test]
+fn long_names_stay_inside_the_popup_and_remain_available_on_hover() {
+    let mut h = Harness::new();
+    h.app.ui.show_origin = false;
+    h.call("ui.resize", json!({"width":1000,"height":700}));
+    let name = "Long assembly component ".repeat(12);
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":name})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.step(&json!({"hold": {"world": [5, 5, 10]}})).unwrap();
+    let label = format!("Body · {name}");
+    let row = labels(&h).iter().position(|r| r == &label).unwrap();
+    let mut output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(h.ctx.content_rect()), focused: true, ..Default::default() }, |ui| {
+        h.app.logic(ui.ctx());
+        h.app.ui(ui);
+    });
+    output.textures_delta.clear();
+    let text = output
+        .shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.job.text == label => Some(t),
+            _ => None,
+        })
+        .expect("the body label is painted");
+    let popup = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_select_other"))).unwrap();
+    let text_rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+    assert!(popup.contains_rect(text_rect), "{text_rect:?} spills outside {popup:?}");
+    assert!(h.ctx.content_rect().contains_rect(popup));
+    assert!(text.galley.elided, "long names end in an ellipsis");
+
+    h.step(&json!({"move": {"handle": format!("select_other:{row}")}})).unwrap();
+    h.frames(90);
+    assert!(h.widget(&label).is_some(), "the tooltip exposes the full label");
+    h.step(&json!({"click": {"handle": format!("select_other:{row}")}})).unwrap();
+    assert_eq!(h.app.session.selection, [Sel::Body { name }], "the shortened label still selects the original body");
+}
+
+#[test]
 fn a_dialog_selection_input_takes_its_pick_from_the_list() {
     let mut h = Harness::new();
     h.app.ui.show_origin = false;

@@ -6,7 +6,8 @@
 //! hold (one that later features pass through unchanged) is recorded once, as are its face names
 //! and the solved sketches the states share. Face names are kept as worked out, not as the
 //! history they were worked out from: a model taken from a file names every face as the model
-//! that was saved did.
+//! that was saved did. A file without room for every state keeps fewer
+//! ([`SavedModel::thinned`]); opening evaluates the features whose state it left out again.
 
 use super::*;
 use crate::history_names::{FaceInfo, Names};
@@ -181,6 +182,7 @@ impl Writer {
         let sketches = st.sketches.iter().map(|s| self.sketch(s)).collect::<Option<Vec<_>>>()?;
         let r = json!({
             "bodies": runs(&bodies), "sketches": runs(&sketches), "body_counter": st.body_counter,
+            "reserved_body_names": st.reserved_body_names.iter().collect::<Vec<_>>(),
             "sheets": serde_json::to_value(&st.sheets).ok()?, "construct": serde_json::to_value(&st.construct).ok()?,
             "threads": serde_json::to_value(&st.threads).ok()?,
             "sketch_keys": st.sketch_keys.iter().map(|(f, k)| json!([f, hex(*k)])).collect::<Vec<_>>(),
@@ -320,6 +322,11 @@ impl SavedModel {
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
                 body_counter: index(s.get("body_counter"), usize::MAX)?,
+                reserved_body_names: s
+                    .get("reserved_body_names")
+                    .and_then(Json::as_array)
+                    .map(|a| a.iter().filter_map(|n| n.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default(),
                 sheets: serde_json::from_value(field("sheets")?).map_err(invalid)?,
                 construct: serde_json::from_value(field("construct")?).map_err(invalid)?,
                 threads: serde_json::from_value(field("threads")?).map_err(invalid)?,
@@ -353,12 +360,163 @@ impl SavedModel {
             None => Ok(Arc::new(ModelState::default())),
         }
     }
+
+    /// This model with fewer states, for a design file without room for all of them (#3220): the
+    /// final state (what the design shows, kept whatever it costs), then the others, the slowest
+    /// feature's first (the ones opening would take longest to evaluate again; of equal ones the
+    /// later first), each while what it adds still fits in `budget` bytes: the bodies no state kept
+    /// so far holds, and the records of the state, those bodies, their names and sketches.
+    /// `pieces[i]` is what keeping body `i` stores, as ids and bytes: a piece that several bodies
+    /// or states need counts once. A feature whose state is left out keeps none, and opening
+    /// evaluates it again ([`Model::adopt`]). With the model, the index here of each body it keeps,
+    /// and the bytes it counted: over `budget` when the final state alone is. `None` only for
+    /// records it cannot read.
+    pub fn thinned(&self, pieces: &[Vec<(usize, usize)>], budget: usize) -> Option<(SavedModel, Vec<usize>, usize)> {
+        let list = |key: &str| self.records.get(key).and_then(Json::as_array);
+        let (features, states, model_bodies) = (list("features")?, list("states")?, list("model_bodies")?);
+        let (names, sketches) = (list("names")?, list("sketches")?);
+        let at = |v: Option<&Json>, len: usize| v.and_then(Json::as_u64).and_then(|i| usize::try_from(i).ok()).filter(|i| *i < len);
+        // The indices a state's runs list.
+        let held = |s: &Json, key: &str, len: usize| -> Option<Vec<usize>> {
+            let mut out = Vec::new();
+            for run in s.get(key)?.as_array()? {
+                let first = at(run.get(0), len)?;
+                out.extend(first..first.checked_add(at(run.get(1), len.saturating_add(1))?).filter(|end| *end <= len)?);
+            }
+            Some(out)
+        };
+        let state_bodies = states.iter().map(|s| held(s, "bodies", model_bodies.len())).collect::<Option<Vec<_>>>()?;
+        let state_sketches = states.iter().map(|s| held(s, "sketches", sketches.len())).collect::<Option<Vec<_>>>()?;
+        let body_of = model_bodies.iter().map(|r| at(r.get("body"), self.bodies.len())).collect::<Option<Vec<_>>>()?;
+        let names_of = model_bodies.iter().map(|r| at(r.get("names"), names.len())).collect::<Option<Vec<_>>>()?;
+        // What each record takes in the file.
+        let bytes = |list: &[Json]| list.iter().map(|r| serde_json::to_vec(r).map_or(usize::MAX, |b| b.len().saturating_add(1))).collect::<Vec<_>>();
+        let (state_bytes, body_bytes) = (bytes(states.as_slice()), bytes(model_bodies.as_slice()));
+        let (name_bytes, sketch_bytes) = (bytes(names.as_slice()), bytes(sketches.as_slice()));
+        // What each state's feature took to evaluate, and the final state.
+        let mut ms = vec![0.0f64; states.len()];
+        let mut last = None;
+        for f in features.iter().filter(|f| f.get("skipped").and_then(Json::as_bool) == Some(false)) {
+            let s = at(f.get("state"), states.len())?;
+            if let Some(t) = ms.get_mut(s) {
+                *t += f.get("ms").and_then(Json::as_f64).filter(|t| t.is_finite() && *t > 0.0).unwrap_or(0.0);
+            }
+            last = Some(s);
+        }
+        let last = last?;
+        let time = |s: &usize| ms.get(*s).copied().unwrap_or(0.0);
+        let mut order: Vec<usize> = (0..states.len()).filter(|s| *s != last).collect();
+        order.sort_by(|a, b| time(b).total_cmp(&time(a)).then(b.cmp(a)));
+        let mut keep = vec![false; states.len()];
+        // The records and pieces kept so far, and their bytes.
+        let mut kept_bodies = vec![false; model_bodies.len()];
+        let (mut names_used, mut sketches_used) = (vec![false; names.len()], vec![false; sketches.len()]);
+        let mut stored = std::collections::HashSet::new();
+        let mut used = 0usize;
+        for s in std::iter::once(last).chain(order) {
+            let (mut adds, mut new_names, mut new_sketches) = (HashMap::new(), std::collections::HashSet::new(), std::collections::HashSet::new());
+            let mut records = *state_bytes.get(s)?;
+            for &m in state_bodies.get(s)? {
+                if kept_bodies.get(m) == Some(&false) {
+                    records = records.saturating_add(*body_bytes.get(m)?);
+                    let n = *names_of.get(m)?;
+                    if names_used.get(n) == Some(&false) && new_names.insert(n) {
+                        records = records.saturating_add(*name_bytes.get(n)?);
+                    }
+                    for &(piece, bytes) in pieces.get(*body_of.get(m)?)? {
+                        if !stored.contains(&piece) {
+                            adds.insert(piece, bytes);
+                        }
+                    }
+                }
+            }
+            for &k in state_sketches.get(s)? {
+                if sketches_used.get(k) == Some(&false) && new_sketches.insert(k) {
+                    records = records.saturating_add(*sketch_bytes.get(k)?);
+                }
+            }
+            let total = adds.values().fold(used.saturating_add(records), |t, b| t.saturating_add(*b));
+            if total > budget && s != last {
+                continue;
+            }
+            used = total;
+            stored.extend(adds.into_keys());
+            for &m in state_bodies.get(s)? {
+                *kept_bodies.get_mut(m)? = true;
+            }
+            for n in new_names {
+                *names_used.get_mut(n)? = true;
+            }
+            for k in new_sketches {
+                *sketches_used.get_mut(k)? = true;
+            }
+            *keep.get_mut(s)? = true;
+        }
+        // What the states kept refer to, numbered again in the order it had.
+        let mut kernel_used = vec![false; self.bodies.len()];
+        for m in (0..model_bodies.len()).filter(|m| kept_bodies.get(*m) == Some(&true)) {
+            *kernel_used.get_mut(*body_of.get(m)?)? = true;
+        }
+        let renumber = |used: &[bool]| -> Vec<Option<usize>> {
+            let mut next = 0;
+            used.iter()
+                .map(|&u| {
+                    u.then(|| {
+                        next += 1;
+                        next - 1
+                    })
+                })
+                .collect()
+        };
+        let (new_body, new_kernel, new_names) = (renumber(&kept_bodies), renumber(&kernel_used), renumber(&names_used));
+        let (new_sketch, new_state) = (renumber(&sketches_used), renumber(&keep));
+        let new = |map: &[Option<usize>], i: usize| map.get(i).copied().flatten();
+        let kept_of = |list: &[Json], used: &[bool]| list.iter().zip(used).filter(|(_, u)| **u).map(|(v, _)| v.clone()).collect::<Vec<_>>();
+        let mut out_states = Vec::new();
+        for (s, st) in states.iter().enumerate().filter(|(s, _)| keep.get(*s) == Some(&true)) {
+            let bodies = state_bodies.get(s)?.iter().map(|m| new(&new_body, *m)).collect::<Option<Vec<_>>>()?;
+            let sketches = state_sketches.get(s)?.iter().map(|i| new(&new_sketch, *i)).collect::<Option<Vec<_>>>()?;
+            let mut st = st.clone();
+            let o = st.as_object_mut()?;
+            o.insert("bodies".into(), json!(runs(&bodies)));
+            o.insert("sketches".into(), json!(runs(&sketches)));
+            out_states.push(st);
+        }
+        let mut out_bodies = Vec::new();
+        for (m, r) in model_bodies.iter().enumerate().filter(|(m, _)| kept_bodies.get(*m) == Some(&true)) {
+            let (body, named) = (new(&new_kernel, *body_of.get(m)?)?, new(&new_names, at(r.get("names"), names.len())?)?);
+            let mut r = r.clone();
+            let o = r.as_object_mut()?;
+            o.insert("body".into(), json!(body));
+            o.insert("names".into(), json!(named));
+            out_bodies.push(r);
+        }
+        let mut out_features = Vec::with_capacity(features.len());
+        for f in features {
+            let state = new(&new_state, at(f.get("state"), states.len())?);
+            let mut f = f.clone();
+            let o = f.as_object_mut()?;
+            match state {
+                Some(s) => o.insert("state".into(), json!(s)),
+                None => o.remove("state"),
+            };
+            out_features.push(f);
+        }
+        let records = json!({
+            "features": out_features, "states": out_states, "model_bodies": out_bodies, "names": kept_of(names.as_slice(), &names_used),
+            "sketches": kept_of(sketches.as_slice(), &sketches_used),
+        });
+        let kept: Vec<usize> = (0..self.bodies.len()).filter(|i| kernel_used.get(*i) == Some(&true)).collect();
+        let bodies = kept.iter().filter_map(|i| self.bodies.get(*i).cloned()).collect();
+        Some((SavedModel { records, bodies }, kept, used))
+    }
 }
 
 impl Model {
     /// The model a design file kept for `doc` ([`Model::saved`]), taken as `doc`'s evaluation:
-    /// every feature's result as saved, nothing evaluated. Refused (an error) unless every
-    /// feature's fingerprint is the one `doc` gives it now, and every record is well formed.
+    /// every feature's result as saved, nothing evaluated but the features whose state the file
+    /// did not keep ([`SavedModel::thinned`]). Refused (an error) unless every feature's
+    /// fingerprint is the one `doc` gives it now, and every record is well formed.
     pub fn adopt(doc: &Document, saved: &SavedModel) -> Result<Model> {
         let states = saved.states()?;
         let records = &saved.records;
@@ -375,16 +533,24 @@ impl Model {
         let step_digests = StepDigests::of(doc, &StepDigests::default());
         let marker = doc.marker.unwrap_or(usize::MAX);
         let ctx = context_digest(doc, &vals);
-        let mut cache = EvalCache::default();
         let mut before = Arc::new(ModelState::default());
+        // Whether `before` is the state before the feature: one the file left out only stands in.
+        let mut exact = true;
         let mut prev = 0;
         let mut results = Vec::with_capacity(features.len());
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
-            prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &step_digests, Some(&before));
-            if r.get("id").and_then(Json::as_u64) != Some(f.id) || unhex(r.get("fingerprint").unwrap_or(&Json::Null))? != prev {
+            let saved = unhex(r.get("fingerprint").unwrap_or(&Json::Null))?;
+            // A fingerprint reads the state before its feature (where the bodies it takes lie).
+            // After a state the file left out, the saved one is taken: `evaluate` works that state
+            // out, checks the fingerprints after it, and evaluates again from one that differs.
+            prev = if exact { chain_fingerprint(doc, &vals, f, prev, i >= marker, &step_digests, Some(&before)) } else { saved };
+            if r.get("id").and_then(Json::as_u64) != Some(f.id) || saved != prev {
                 return Err(bad("saved model: the document changed"));
             }
             let ms = r.get("ms").and_then(Json::as_f64).filter(|ms| ms.is_finite()).ok_or_else(|| bad("saved model: time"))?;
+            // A file without room for every state keeps some features without one (#3220).
+            let state =
+                r.get("state").map(|s| states.get(index(Some(s), states.len())?).cloned().ok_or_else(|| bad("saved model: state"))).transpose()?;
             let result = FeatureResult {
                 id: f.id,
                 name: f.name.clone(),
@@ -398,27 +564,48 @@ impl Model {
                 skipped: r.get("skipped").and_then(Json::as_bool).ok_or_else(|| bad("saved model: skipped"))?,
                 stale: false,
                 fingerprint: prev,
-                state: states.get(index(r.get("state"), states.len())?).cloned().ok_or_else(|| bad("saved model: state"))?,
+                unkept: state.is_none(),
+                state: state.unwrap_or_else(|| before.clone()),
             };
-            // Each result where an evaluation would have put it, so an edit undone (or set back)
-            // finds it again rather than evaluating the feature anew.
             if !result.skipped {
-                let local = fingerprint(0, f, &vals, false, &step_digests) ^ placement_digest(doc, f, Some(&before));
-                cache.put(
-                    cache_key(f, prev, local, ctx, &before),
-                    CachedEval {
-                        error: None,
-                        warning: result.warning.clone(),
-                        boolean_diagnostics: result.boolean_diagnostics.clone(),
-                        ms,
-                        bytes: result.state.retained_bytes(),
-                        state: result.state.clone(),
-                    },
-                );
+                exact = !result.unkept;
                 before = result.state.clone();
             }
             results.push(result);
         }
-        Ok(Model { results, param_errors, step_digests, cache: Arc::new(std::sync::Mutex::new(cache)), ..Model::default() })
+        let mut model = Model { results, param_errors, step_digests, ..Model::default() };
+        let unkept = model.results.iter().filter(|r| r.unkept).count();
+        if unkept > 0 {
+            // The features whose state the file did not keep, each evaluated again from the state
+            // before it: nothing else in the model is missing then.
+            model.evaluate(doc);
+            log::info!(
+                "the saved model kept the states of {} of {} features: {} evaluated again",
+                model.results.len().saturating_sub(unkept),
+                model.results.len(),
+                model.last_recomputed
+            );
+        }
+        // Each result where an evaluation would have put it, so an edit undone (or set back)
+        // finds it again rather than evaluating the feature anew.
+        let mut before = Arc::new(ModelState::default());
+        if let Ok(mut cache) = model.cache.lock() {
+            for (f, r) in doc.features.iter().zip(&model.results).filter(|(_, r)| !r.skipped && r.error.is_none()) {
+                let local = fingerprint(0, f, &vals, false, &model.step_digests) ^ placement_digest(doc, f, Some(&before));
+                cache.put(
+                    cache_key(f, r.fingerprint, local, ctx, &before),
+                    CachedEval {
+                        error: None,
+                        warning: r.warning.clone(),
+                        boolean_diagnostics: r.boolean_diagnostics.clone(),
+                        ms: r.ms,
+                        bytes: r.state.retained_bytes(),
+                        state: r.state.clone(),
+                    },
+                );
+                before = r.state.clone();
+            }
+        }
+        Ok(model)
     }
 }

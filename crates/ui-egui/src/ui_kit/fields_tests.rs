@@ -240,3 +240,41 @@ fn bounded_name_editor_keeps_unicode_character_cap() {
     frame(&ctx, vec![egui::Event::Text("åβ界d".into())], &mut draw);
     assert_eq!(value, "åβ界");
 }
+
+#[test]
+fn count_steps_stay_within_limits_and_keep_expressions() {
+    let eval = |text: &str| -> Option<f64> {
+        let text = text.trim();
+        match text {
+            "n" => Some(4.0),
+            "n + 2" => Some(6.0),
+            "n + 3" => Some(7.0),
+            "n + 1" => Some(5.0),
+            "n - 1" => Some(3.0),
+            "half" => Some(2.5),
+            _ => text.parse().ok(),
+        }
+    };
+    let limits = Count { min: 2, max: 10, eval: &eval };
+    let step = |text: &str, delta| super::step_count(text, delta, &limits);
+    assert_eq!(step("6", 1).as_deref(), Some("7"));
+    assert_eq!(step(" 6 ", -1).as_deref(), Some("5"));
+    assert_eq!(step("2", -1), None, "the minimum holds");
+    assert_eq!(step("10", 1), None, "the maximum holds");
+    assert_eq!(step("40", -1).as_deref(), Some("10"), "a typed count past the limit steps back inside it");
+    assert_eq!(step("0", 1).as_deref(), Some("2"));
+    assert_eq!(step("3.5", 1).as_deref(), Some("4"), "between whole numbers: the next one up");
+    assert_eq!(step("3.5", -1).as_deref(), Some("3"));
+    assert_eq!(step("n", 1).as_deref(), Some("n + 1"));
+    assert_eq!(step("n", -1).as_deref(), Some("n - 1"));
+    assert_eq!(step("n + 2", 1).as_deref(), Some("n + 3"));
+    assert_eq!(step("n + 1", -1).as_deref(), Some("n"));
+    assert_eq!(step("half", 1), None, "an expression between whole numbers is left alone");
+    for junk in ["", "abc", "1e400", "-1e300", "NaN"] {
+        assert_eq!(step(junk, 1), None, "{junk}");
+    }
+    let wide = Count { min: i64::MIN, max: i64::MAX, eval: &eval };
+    assert_eq!(super::step_count("1e16", 1, &wide), None, "values past what counts can be are refused");
+    assert_eq!(super::step_count("5", i64::MAX, &wide).as_deref(), Some("9223372036854775807"), "steps saturate rather than overflow");
+    assert_eq!(super::step_count("5", i64::MIN, &wide).as_deref(), Some("-9223372036854775803"));
+}

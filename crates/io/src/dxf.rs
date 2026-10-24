@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use solidcraft_geom::Vec2;
+use solidcraft_geom::{MAX_BEZIER_DEGREE, Vec2};
 
 use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES, bulge_arc};
 use crate::{IoError, Result};
@@ -265,7 +265,8 @@ fn convert(ents: &[Ent], k: f64, blocks: &HashMap<String, (Vec2, Vec<Ent>)>, dep
                 }
             }
             "SPLINE" => {
-                let degree = e.get(71).unwrap_or(3.0).clamp(1.0, 7.0) as u8;
+                // The degrees a sketch spline takes (a G4 blend's Bézier is degree 9).
+                let degree = e.get(71).unwrap_or(3.0).clamp(1.0, MAX_BEZIER_DEGREE as f64) as u8;
                 let (fx, fy) = (e.all(11), e.all(21));
                 let (cx, cy) = (e.all(10), e.all(20));
                 if fx.len() >= 2 && fx.len() == fy.len() {
@@ -473,6 +474,10 @@ mod tests {
             "0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n90\n99999999\n0\nENDSEC\n0\nEOF\n".into(),
             "0\nSECTION\n2\nENTITIES\n0\nCIRCLE\n10\nnan\n20\ninf\n40\n-1\n0\nENDSEC\n0\nEOF\n".into(),
             "0\nSECTION\n2\nENTITIES\n0\nCIRCLE\n10\n1e400\n20\n1e400\n40\n1e400\n0\nENDSEC\n0\nEOF\n".into(),
+            // SPLINE degrees past any spline's, below 1, and above its control points' count.
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n255\n10\n0\n20\n0\n10\n1\n20\n1\n0\nENDSEC\n0\nEOF\n".into(),
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n-5\n10\n0\n20\n0\n10\n1\n20\n1\n0\nENDSEC\n0\nEOF\n".into(),
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n1e400\n10\n0\n20\n0\n0\nENDSEC\n0\nEOF\n".into(),
             format!("0\nSECTION\n2\nBLOCKS\n{}0\nENDSEC\n0\nEOF\n", "0\nBLOCK\n2\nb\n0\nENDBLK\n".repeat(300)),
             "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\na\n1\nINSERT\n2\na\n0\nENDBLK\n0\nENDSEC\n0\nEOF\n".into(),
             format!("0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n", "0\nLINE\n10\n0\n20\n0\n11\n1\n21\n1\n".repeat(5000)),
@@ -486,6 +491,24 @@ mod tests {
         for c in &cases {
             let r = std::panic::catch_unwind(|| read_dxf(c));
             assert!(r.is_ok(), "panicked on {:?}", c.get(..c.len().min(200)));
+        }
+    }
+
+    /// A SPLINE keeps its degree up to the 9 a sketch spline (a G4 blend) has (solidcraft#5269); a
+    /// degree past that is held to 9, and one that isn't a finite number (which the reader drops)
+    /// reads as a missing one, 3.
+    #[test]
+    fn a_splines_degree_is_read_up_to_nine() {
+        let spline = |degree: Option<&str>| {
+            let points: String = (0..10).map(|i| format!("10\n{i}\n20\n{}\n", i % 3)).collect();
+            let degree = degree.map(|d| format!("71\n{d}\n")).unwrap_or_default();
+            format!("0\nSECTION\n2\nENTITIES\n0\nSPLINE\n{degree}{points}0\nENDSEC\n0\nEOF\n")
+        };
+        for (given, read) in
+            [(Some("9"), 9), (Some("8"), 8), (Some("7"), 7), (Some("10"), 9), (Some("0"), 1), (Some("nan"), 3), (Some("inf"), 3), (None, 3)]
+        {
+            let back = read_dxf(&spline(given)).unwrap();
+            assert!(matches!(&back[..], [Geom2::Spline { pts, control: true, degree }] if *degree == read && pts.len() == 10), "{given:?}: {back:?}");
         }
     }
 

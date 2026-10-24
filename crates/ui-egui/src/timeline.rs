@@ -114,6 +114,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Remove { .. } => "delete",
         FeatureKind::BoundingSolid { .. } => "bounding_solid",
         FeatureKind::Pipe { .. } => "pipe",
+        FeatureKind::FrameMember { .. } => "frame_member",
         FeatureKind::Emboss { .. } => "emboss",
         FeatureKind::ReplaceFace { .. } => "replace_face",
         FeatureKind::Align { .. } => "align",
@@ -174,12 +175,22 @@ pub(crate) fn delete_features(app: &mut SolveApp, ids: Vec<u64>) {
 
 /// [`delete_features`] once each feature's `timeline.dependents` report is in.
 pub(crate) fn delete_checked_features(app: &mut SolveApp, ids: Vec<u64>, reports: &[Value]) {
+    // Each report is about one feature alone, so it names the others being deleted too: those
+    // go anyway and are left out of the confirmation.
+    let deleting: Vec<&str> = ids.iter().filter_map(|id| app.session.doc.feature(*id)).map(|f| f.name.as_str()).collect();
     let mut with = std::collections::BTreeSet::new();
     let mut fail = std::collections::BTreeSet::new();
     for deps in reports {
         for (key, output) in [("deleted_with_it", &mut with), ("would_fail", &mut fail)] {
-            output
-                .extend(deps.get(key).and_then(|value| value.as_array()).into_iter().flatten().filter_map(|value| value.as_str().map(String::from)));
+            output.extend(
+                deps.get(key)
+                    .and_then(|value| value.as_array())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|value| value.as_str())
+                    .filter(|name| !deleting.contains(name))
+                    .map(String::from),
+            );
         }
     }
     if with.is_empty() && fail.is_empty() {
@@ -202,17 +213,45 @@ pub(crate) fn selected_feature_ids(app: &SolveApp) -> Vec<u64> {
         .collect()
 }
 
-/// What Copy in a feature's menu copies: the selected features when the right-clicked one is
-/// among them, else that feature alone.
-pub(crate) fn copy_targets(app: &SolveApp, id: u64) -> Vec<u64> {
+/// What Copy and Delete in a feature's menu act on: the selected features when the
+/// right-clicked one is among them, else that feature alone.
+pub(crate) fn menu_targets(app: &SolveApp, id: u64) -> Vec<u64> {
     let selected = selected_feature_ids(app);
     if selected.contains(&id) { selected } else { vec![id] }
+}
+
+/// The features from timeline position `from` to the end.
+fn features_from(app: &SolveApp, from: usize) -> Vec<u64> {
+    app.session.doc.features.iter().skip(from).map(|f| f.id).collect()
+}
+
+/// In the menu of a feature after the history marker (feature `id` at timeline position
+/// `index`): delete every feature after the marker, labelled with how many, in one delete
+/// through [`delete_features`] so the confirmation still lists what would fail. Not offered
+/// before the marker, nor when the menu acts on several selected features: an entry that acts
+/// partly on the selection and partly beyond it is hard to read.
+pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, index: usize, marker: usize) {
+    if index < marker || menu_targets(app, id).len() > 1 {
+        return;
+    }
+    let ids = features_from(app, marker);
+    let key = if ids.len() == 1 { "timeline.delete_after_marker_one" } else { "timeline.delete_after_marker_other" };
+    let label = crate::i18n::format(key, &[("count", &ids.len().to_string())]);
+    if crate::context_menu::button(ui, &label, "delete").clicked() {
+        delete_features(app, ids);
+        ui.close();
+    }
+}
+
+/// The timeline anchor of a feature: the last one clicked, where a Shift+click range starts.
+pub(crate) fn anchor_key(id: u64) -> String {
+    format!("f:{id}")
 }
 
 /// Copy and Paste in a feature's timeline menu. Paste puts the copies at the history marker.
 pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
     if crate::context_menu::button(ui, crate::i18n::tr_label("Copy"), "copy").clicked() {
-        let features = copy_targets(app, id);
+        let features = menu_targets(app, id);
         let _ = app.run("timeline.copy", json!({ "features": features }));
         ui.close();
     }
@@ -256,8 +295,32 @@ pub(crate) fn message_button(app: &SolveApp, ui: &mut egui::Ui, id: u64) {
     }
 }
 
+/// Shift+click on a feature: select the features from the anchor (the last feature clicked, or
+/// the last selected one) to this one. `order` is the timeline as drawn this frame, taken before
+/// drawing so the range never mixes two orders. Ctrl as well adds the range to the selection.
+fn select_range(app: &mut SolveApp, order: &[u64], id: u64, add: bool) {
+    let anchor = app.tree.timeline_anchor.clone().or_else(|| selected_feature_ids(app).last().map(|f| anchor_key(*f)));
+    let from = anchor.and_then(|key| order.iter().position(|f| anchor_key(*f) == key));
+    let (Some(from), Some(to)) = (from, order.iter().position(|f| *f == id)) else {
+        select_one(app, id);
+        return;
+    };
+    let range = order.get(from.min(to)..=from.max(to)).unwrap_or_default();
+    let items: Vec<_> = range.iter().map(|f| json!({"type": "feature", "id": f})).collect();
+    let _ = app.run("select.set", json!({ "items": items, "add": add }));
+}
+
+/// A plain click on a feature: select it alone.
+fn select_one(app: &mut SolveApp, id: u64) {
+    app.tree.picked_joints.clear();
+    app.tree.picked_timeline_groups.clear();
+    app.tree.timeline_anchor = Some(anchor_key(id));
+    let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": id}]}));
+}
+
 /// Ctrl+click on a feature: add it to the selection, or take it out.
 fn toggle_feature(app: &mut SolveApp, id: u64) {
+    app.tree.timeline_anchor = Some(anchor_key(id));
     let selected = selected_feature_ids(app);
     if selected.contains(&id) {
         let rest: Vec<_> =
@@ -282,7 +345,7 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.shell.history = Some(rect);
         crate::scenario::publish_rect("history:card", rect);
         let mut child = ui.new_child(UiBuilder::new().id_salt("sc_timeline").max_rect(rect));
-        ui.painter().add(Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), t.timeline, crate::frame::Side::Left).paint(rect));
+        Container::paint_frame(ui.painter(), Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), t.timeline, crate::frame::Side::Left), rect);
         child.set_clip_rect(rect);
         timeline_contents(app, &mut child, true);
     } else {
@@ -293,6 +356,8 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
             .show(ui, |ui| {
                 timeline_contents(app, ui, false);
             });
+        let frame = Container::new(ui.ctx(), Surface::Panel).edge_frame(t.timeline);
+        Container::paint_inset(ui.painter(), response.response.rect - frame.outer_margin, frame);
         app.shell.history = Some(response.response.rect);
         crate::scenario::publish_rect("history:strip", response.response.rect);
     }
@@ -353,6 +418,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 .iter()
                 .map(|f| (f.id, f.name.clone(), icon_of(&f.kind), f.suppressed, f.kind.type_name(), TimelineKind::of(&f.kind)))
                 .collect();
+            let order: Vec<u64> = feats.iter().map(|f| f.0).collect();
             // The feature whose body is under the cursor in the viewport.
             let st = app.session.world_state();
             let from_view = match &app.viewport.hover {
@@ -396,7 +462,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     suppressed: *suppressed,
                     error: err.is_some(),
                     warning: warn.is_some(),
-                    accent,
+                    // A dragged feature takes the colour of its drop bar.
+                    accent: if drag == Some(Drag::Feature(*id)) { crate::theme::TabAccent::for_tab(&t, "SKETCH") } else { accent },
                 }
                 .paint(&p, br, crate::ui_kit::HistoryStyle::Bottom);
                 let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
@@ -416,12 +483,15 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                             d.pick(&app.session, solidcraft_engine::Sel::Feature { id: *id });
                             app.dialog = Some(d);
                         }
-                    } else if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
-                        toggle_feature(app, *id);
                     } else {
-                        app.tree.picked_joints.clear();
-                        app.tree.picked_timeline_groups.clear();
-                        let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": id}]}));
+                        let modifiers = ui.input(|i| i.modifiers);
+                        if modifiers.shift {
+                            select_range(app, &order, *id, modifiers.command || modifiers.ctrl);
+                        } else if modifiers.command || modifiers.ctrl {
+                            toggle_feature(app, *id);
+                        } else {
+                            select_one(app, *id);
+                        }
                     }
                 }
                 if resp.double_clicked() {
@@ -459,10 +529,16 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     clipboard_buttons(app, ui, *id);
                     message_button(app, ui, *id);
                     ui.separator();
-                    if crate::context_menu::button(ui, "Delete", "delete").clicked() {
-                        delete_feature(app, *id);
+                    let targets = menu_targets(app, *id);
+                    let label = match targets.len() {
+                        1 => crate::i18n::tr_label("Delete").to_string(),
+                        n => crate::i18n::format("timeline.delete_many", &[("count", &n.to_string())]),
+                    };
+                    if crate::context_menu::button(ui, &label, "delete").clicked() {
+                        delete_features(app, targets);
                         ui.close();
                     }
+                    delete_after_marker_button(app, ui, *id, i, marker);
                 });
                 x += 32.0;
             }
@@ -477,6 +553,9 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 if resp.drag_started() {
                     drag = Some(Drag::Marker);
                 }
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                }
                 crate::ui_kit::history_marker(&p, mr, false, accent);
                 resp.on_hover_text("History marker: drag to roll the model back; new features go here");
             }
@@ -484,9 +563,31 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             // The scroll range follows the drawn content (the buttons don't take layout space themselves).
             ui.allocate_exact_size(vec2((content_end - origin).max(0.0), r.height()), Sense::hover());
             // Drag feedback, and the drop.
-            if let (Some(dg), Some(pp)) = (drag.as_ref(), pointer) {
-                let slot = slot_at(&xs, end, pp.x);
-                let sx = xs.get(slot).copied().unwrap_or(end) - 4.0;
+            if drag.is_some() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            }
+            let marker_slot = marker.min(n);
+            // At the marker's slot, which side of the marker the pointer is on: before it, a
+            // dropped feature stays in the model; after it, the feature is rolled back.
+            let before_marker = |slot: usize, x: f32| slot < marker_slot || (slot == marker_slot && marker_rect.is_none_or(|mr| x < mr.center().x));
+            // The marker dropped where it already is needs no bar: the marker shows the spot.
+            if let (Some(dg), Some(pp)) = (drag.as_ref(), pointer)
+                && let slot = slot_at(&xs, end, pp.x)
+                && !(matches!(dg, Drag::Marker) && slot == marker_slot)
+            {
+                // Centred in the gap between two chips, or beside the marker at its slot.
+                let sx = match marker_rect {
+                    Some(mr) if slot == marker_slot => {
+                        if before_marker(slot, pp.x) {
+                            mr.left() - 2.0
+                        } else {
+                            mr.right() + 2.0
+                        }
+                    }
+                    _ => xs.get(slot).copied().unwrap_or(end) - 2.0,
+                };
+                // Kept inside the strip so the slot before the first feature stays visible.
+                let sx = sx.max(origin + t.space_2);
                 crate::ui_kit::history_drop_bar(
                     &p,
                     Rect::from_min_max(pos2(sx, r.top() + 3.0), pos2(sx, r.bottom() - 3.0)),
@@ -509,8 +610,10 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                         let from = app.session.doc.feature_index(id).unwrap_or(0);
                         // Dropping after itself means the slot shifts by one.
                         let to = if slot > from { slot - 1 } else { slot };
-                        if to != from {
-                            let _ = app.run_heavy("timeline.reorder", json!({ "feature": id, "position": to }));
+                        // Crossing the marker rolls the feature back or forward, in the same step.
+                        let active = before_marker(slot, pp.x);
+                        if to != from || active != (from < marker_slot) {
+                            let _ = app.run_heavy("timeline.reorder", json!({ "feature": id, "position": to, "active": active }));
                         }
                     }
                 }
@@ -759,6 +862,124 @@ mod tests {
         let first = h.app.session.doc.find_feature("First").map(|f| f.id).unwrap();
         assert_eq!(super::selected_feature_ids(&h.app), [first]);
     }
+    fn three_boxes(left: bool) -> Harness {
+        let mut h = two_boxes(left);
+        h.app
+            .run(
+                "solid.box",
+                json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new_body", "name": "Third", "body_name": "Three"}),
+            )
+            .unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.frames(4);
+        h
+    }
+
+    fn names(h: &Harness) -> Vec<String> {
+        h.app.session.doc.features.iter().map(|f| f.name.clone()).collect()
+    }
+
+    fn ids(h: &Harness, names: &[&str]) -> Vec<u64> {
+        names.iter().map(|name| h.app.session.doc.find_feature(name).map(|f| f.id).unwrap()).collect()
+    }
+
+    /// Shift+click selects the range from the last feature clicked to this one, either way
+    /// round; with nothing clicked yet it starts at the last selected feature (#5005).
+    #[test]
+    fn shift_click_selects_a_range_of_features() {
+        let mut h = three_boxes(false);
+        h.step(&json!({"click": {"handle": "timeline:Third"}})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:First"}, "shift": true})).unwrap();
+        assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["First", "Second", "Third"]));
+        h.step(&json!({"click": {"handle": "timeline:Second"}, "shift": true})).unwrap();
+        assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["Second", "Third"]), "the range starts at the anchor, Third");
+
+        h.app.tree.timeline_anchor = None;
+        h.app.run("select.set", json!({"items": [{"type": "feature", "id": ids(&h, &["First"])[0]}]})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:Second"}, "shift": true})).unwrap();
+        assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["First", "Second"]));
+    }
+
+    /// Delete in the menu of a selected feature deletes the whole selection in one undo step,
+    /// and says how many; on a feature outside the selection it deletes that one (#5005).
+    #[test]
+    fn the_feature_menu_deletes_the_selected_features() {
+        let mut h = three_boxes(false);
+        h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
+        assert!(h.widget("Delete").is_some());
+        h.step(&json!({"key": "Escape"})).unwrap();
+
+        h.step(&json!({"click": {"handle": "timeline:First"}})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "nothing else depends on them");
+        assert_eq!(names(&h), ["Third"]);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(names(&h), ["First", "Second", "Third"]);
+    }
+
+    /// The menu of a feature after the history marker deletes every feature after the marker,
+    /// and says how many; features before the marker, and a selection of several, don't offer
+    /// it. In both timelines (#5005).
+    #[test]
+    fn a_feature_after_the_marker_deletes_everything_after_the_marker() {
+        for left in [false, true] {
+            let mut h = three_boxes(left);
+            h.app.run("timeline.roll_to", json!({"position": 1})).unwrap();
+            h.settle();
+            h.step(&json!({"click": {"handle": "timeline:First"}, "button": "right"})).unwrap();
+            assert!(h.widget("Delete 2 Features After History Marker").is_none(), "left: {left}");
+            h.step(&json!({"key": "Escape"})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Third"}, "ctrl": true})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
+            // (The history beside the browser has its own Delete Selected Features….)
+            assert!(left || h.widget("Delete 2 Selected Features").is_some());
+            assert!(h.widget("Delete 2 Features After History Marker").is_none(), "left: {left}");
+            h.step(&json!({"key": "Escape"})).unwrap();
+            h.app.run("select.clear", json!({})).unwrap();
+            h.frames(2);
+
+            h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
+            h.step(&json!({"widget": "Delete 2 Features After History Marker"})).unwrap();
+            h.settle();
+            assert_eq!(names(&h), ["First"], "left: {left}");
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(names(&h), ["First", "Second", "Third"], "left: {left}");
+        }
+    }
+
+    /// Deleting a sketch together with the extrude that uses it asks nothing: the extrude is
+    /// one of the features deleted, not one that goes with it or fails. The Delete key, with
+    /// the features picked in the timeline, does the same (#5005).
+    #[test]
+    fn deleting_a_feature_with_its_dependents_does_not_ask() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"sketch": "Base", "distance": 10, "operation": "new", "name": "Depth"})).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click": {"handle": "timeline:Base"}})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:Depth"}, "shift": true})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:Depth"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none());
+        assert!(names(&h).is_empty());
+
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click": {"handle": "timeline:Base"}})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:Depth"}, "shift": true})).unwrap();
+        h.step(&json!({"key": "Delete"})).unwrap();
+        h.settle();
+        assert!(names(&h).is_empty());
+    }
+
     #[test]
     fn both_strips_keep_selection_reorder_marker_and_transport() {
         use crate::scenario::{handle_at, rect_of};
@@ -797,6 +1018,33 @@ mod tests {
             assert_eq!(h.app.session.doc.marker, None);
         }
     }
+    /// A feature dropped just past the history marker is rolled back, and dropped just before it
+    /// is active again, in both strips.
+    #[test]
+    fn dragging_a_feature_across_the_marker_rolls_it_back_and_forward() {
+        use crate::scenario::{handle_at, rect_of};
+        for left in [false, true] {
+            let mut h = two_boxes(left);
+            h.settle();
+            let second = handle_at("timeline:Second").unwrap();
+            let marker = rect_of("history:marker").unwrap();
+            let behind = if left { [second.x, marker.bottom() + 3.0] } else { [marker.right() + 4.0, second.y] };
+            let undo = h.app.session.undo.len();
+            h.step(&json!({"drag":[[second.x,second.y],behind]})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, Some(1), "left={left}: dropped behind the marker, Second is rolled back");
+            assert_eq!(h.app.session.undo.len(), undo + 1, "left={left}: crossing the marker is one undo step");
+            let second = handle_at("timeline:Second").unwrap();
+            let marker = rect_of("history:marker").unwrap();
+            let before = if left { [second.x, marker.top() - 2.0] } else { [marker.left() - 3.0, second.y] };
+            h.step(&json!({"drag":[[second.x,second.y],before]})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, None, "left={left}: dropped before the marker, Second is active again");
+            let names: Vec<_> = h.app.session.doc.features.iter().map(|feature| feature.name.as_str()).collect();
+            assert_eq!(names, ["First", "Second"], "left={left}: crossing the marker keeps the order");
+        }
+    }
+
     #[test]
     fn floating_strip_has_only_history_text_and_accents_the_last_done_chip_and_marker() {
         let mut h = two_boxes(false);

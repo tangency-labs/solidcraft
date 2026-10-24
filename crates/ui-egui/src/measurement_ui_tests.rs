@@ -42,6 +42,22 @@ fn component_rects() -> Vec<egui::Rect> {
 }
 
 #[test]
+fn measure_dialog_shows_the_obtuse_corner_of_selected_lines() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[40, 0], [0, 0], [-24, 32]]})).unwrap();
+    h.app.session.selection = ["l1", "l2"].into_iter().map(|id| Sel::SketchCurve { id: id.into() }).collect();
+    h.app.start("inspect.measure");
+    for layout in ["floating", "compact"] {
+        h.call("ui.set", json!({"layout": layout}));
+        let texts = painted_text(&mut h);
+        assert!(texts.contains(&"126.870°".into()), "{layout}: {texts:?}");
+        assert!(!texts.contains(&"53.130°".into()), "the supplementary angle must not replace the corner: {texts:?}");
+    }
+}
+
+#[test]
 fn measurement_axis_distances_follow_the_upstream_centre_min_and_max_choices() {
     let mut h = Harness::new();
     h.app.home.open = false;

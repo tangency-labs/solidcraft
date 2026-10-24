@@ -45,7 +45,9 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
     use crate::joints::{Joint, JointKind, JointOrigin, Snap, XRef};
     let mut doc = Document::new("joint face work");
     let part = doc.add_component(Some("Crank"), 0).unwrap();
-    let occurrence = doc.occurrences.iter().find(|o| o.component == part).unwrap().id;
+    let occurrence = doc.occurrences.iter_mut().find(|o| o.component == part).unwrap();
+    occurrence.grounded = false;
+    let occurrence = occurrence.id;
     let id = doc
         .add_feature(
             FeatureKind::Cylinder {
@@ -256,4 +258,99 @@ fn an_imported_file_is_fingerprinted_by_its_text() {
     assert_ne!(after.last(), before.last());
     assert_eq!(model.last_recomputed, 1);
     assert_eq!(model.state().bodies.len(), 3);
+}
+
+/// A 10 mm square plate per hole along X, 4 mm thick, in component `comp`, with `holes` square
+/// holes cut through it by boxes drawn in component `tools` (the plate's own, usually). The
+/// plate's body name.
+fn plate_with_holes(doc: &mut Document, comp: u64, tools: u64, holes: usize) -> String {
+    let length = format!("{}", 10 * holes.max(1));
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::ZERO),
+        length: length.into(),
+        width: "10".into(),
+        height: "4".into(),
+        operation: Operation::NewBody,
+    };
+    let plate = doc.add_feature(kind, None).unwrap();
+    doc.feature_mut(plate).unwrap().component = comp;
+    let mut model = Model::new();
+    model.evaluate(doc);
+    let body = model.state().bodies.iter().find(|b| b.feature == plate).unwrap().name.clone();
+    for k in 0..holes {
+        let corner = point_expr(Vec3::new(10.0 * k as f64 + 4.0, 4.0, -1.0));
+        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut };
+        let id = doc.add_feature(kind, None).unwrap();
+        let f = doc.feature_mut(id).unwrap();
+        f.component = tools;
+        f.participants = vec![body.clone()];
+    }
+    body
+}
+
+fn place(doc: &mut Document, comp: u64, m: Mat) {
+    doc.occurrences.iter_mut().find(|o| o.component == comp).unwrap().transform = m;
+}
+
+fn volume(model: &Model, body: &str) -> f64 {
+    kernel::measure(&model.state().body(body).unwrap().body).unwrap().volume
+}
+
+#[test]
+fn turning_a_joint_between_parts_cuts_no_hole_again() {
+    let mut doc = Document::new("two parts");
+    let base = doc.add_component(Some("Base"), 0).unwrap();
+    let arm = doc.add_component(Some("Arm"), 0).unwrap();
+    let base_plate = plate_with_holes(&mut doc, base, base, 3);
+    let arm_plate = plate_with_holes(&mut doc, arm, arm, 3);
+    place(&mut doc, arm, rigid(Vec3::new(0.0, 0.0, 10.0), Vec3::ZERO, Vec3::Z, 0.0));
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!((volume(&model, &base_plate) - (1200.0 - 3.0 * 16.0)).abs() < 1e-6);
+    // Turning the arm (as a revolute joint does) moves it and nothing else: each part's holes
+    // stay cut in its own frame, so no hole is cut again.
+    for step in 1..=3 {
+        place(&mut doc, arm, rigid(Vec3::new(0.0, 0.0, 10.0), Vec3::ZERO, Vec3::Z, 0.3 * f64::from(step)));
+        model.evaluate(&doc);
+        assert_eq!(model.last_recomputed, 0, "step {step}");
+        assert!((volume(&model, &arm_plate) - (1200.0 - 3.0 * 16.0)).abs() < 1e-6);
+    }
+    // Moving both parts together changes nothing between them either.
+    for comp in [base, arm] {
+        place(&mut doc, comp, rigid(Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    }
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+}
+
+#[test]
+fn a_tool_cutting_another_part_cuts_again_when_that_part_moves() {
+    let mut doc = Document::new("cross part");
+    let tools = doc.add_component(Some("Tools"), 0).unwrap();
+    let plate = doc.add_component(Some("Plate"), 0).unwrap();
+    let other = doc.add_component(Some("Other"), 0).unwrap();
+    // The other part first, so the cut across parts is the last feature: it alone is evaluated
+    // again when it changes.
+    plate_with_holes(&mut doc, other, other, 1);
+    let body = plate_with_holes(&mut doc, plate, tools, 1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!((volume(&model, &body) - (400.0 - 16.0)).abs() < 1e-6);
+    // An unrelated part moving: the cut keeps its result.
+    place(&mut doc, other, rigid(Vec3::new(0.0, 40.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+    // The plate moving away from the tool by 5 mm: the hole is cut again where the tool now meets
+    // it, half of it on the plate.
+    place(&mut doc, plate, rigid(Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1);
+    assert!((volume(&model, &body) - (400.0 - 8.0)).abs() < 1e-6, "{}", volume(&model, &body));
+    // The tool's part following it: the hole is where it was at first, the first result again.
+    place(&mut doc, tools, rigid(Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+    assert!((volume(&model, &body) - (400.0 - 16.0)).abs() < 1e-6, "{}", volume(&model, &body));
 }

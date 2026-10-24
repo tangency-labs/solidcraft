@@ -229,7 +229,7 @@ One placed copy of a component inside its parent component.
 A component can have several occurrences. Moving an occurrence moves only that copy; editing the
 component changes every copy. The browser names occurrences with a number, such as `Bolt M20:3`.
 
-- **In SolidCraft:** `occurrence.copy`, `occurrence.move`, `occurrence.ground`,
+- **In SolidCraft:** `occurrence.copy`, `occurrence.move`, `occurrence.drag`, `occurrence.ground`,
   `occurrence.properties`; the `occurrences` design-file key; the `path` of occurrence ids.
 - **Don't use:** instance, placement.
 - **Elsewhere:** occurrence, instance, component instance.

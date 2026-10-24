@@ -17,7 +17,9 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
         }
         "sketch.circle.center" | "sketch.circle.two_point" | "sketch.circle.three_point" => &["radius", "diameter"],
         "sketch.arc.center_point" => &["radius", "sweep"],
-        "sketch.slot.center_to_center" | "sketch.slot.overall" => &["length", "width"],
+        "sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point" => &["length", "width"],
+        "sketch.slot.arc_center" => &["radius", "sweep", "width"],
+        "sketch.slot.arc_three_point" => &["width"],
         "sketch.polygon.inscribed" | "sketch.polygon.circumscribed" | "sketch.polygon.edge" => &["radius"],
         _ => return Err(bad(cmd, "unsupported sketch creator")),
     };
@@ -48,6 +50,9 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if role == "sweep" && !(evaluated.abs() > 1e-9 && evaluated.abs() < std::f64::consts::TAU - 1e-9) {
             return Err(bad(cmd, "sweep must be nonzero and less than a full turn"));
+        }
+        if role == "sweep" && create == "sketch.slot.arc_center" && evaluated <= 0.0 {
+            return Err(bad(cmd, "arc slot sweep must be greater than zero and less than a full turn"));
         }
         if role == "sweep" {
             params["sweep"] = json!(evaluated.to_degrees());
@@ -94,9 +99,13 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
             (c, "width" | "height") if c.starts_with("sketch.rectangle.") => (vec![curve(usize::from(role == "height"))?], "length"),
             (c, "radius" | "diameter") if c.starts_with("sketch.circle.") => (vec![curve(0)?], role.as_str()),
             ("sketch.arc.center_point", "radius" | "sweep") => (vec![curve(0)?], role.as_str()),
-            ("sketch.slot.center_to_center", "length") => (vec![curve(0)?], "length"),
+            ("sketch.slot.center_to_center" | "sketch.slot.center_point", "length") => (vec![curve(0)?], "length"),
             ("sketch.slot.overall", "length") => (vec![curve(1)?, curve(3)?], "overall_length"),
-            ("sketch.slot.center_to_center" | "sketch.slot.overall", "width") => (vec![curve(1)?], "diameter"),
+            (c, "width") if c.starts_with("sketch.slot.") => (vec![curve(1)?], "diameter"),
+            ("sketch.slot.arc_center", "radius" | "sweep") => {
+                let centre = out.get("centre_arc").filter(|v| v.is_string()).cloned().ok_or_else(|| bad(cmd, "slot centre arc missing"))?;
+                (vec![centre], role.as_str())
+            }
             (c, "radius") if c.starts_with("sketch.polygon.") => {
                 let support =
                     out.get("support_circle").filter(|v| v.is_string()).cloned().ok_or_else(|| bad(cmd, "polygon support circle missing"))?;

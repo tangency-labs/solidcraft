@@ -44,9 +44,10 @@ fn angle_dimension_both_interactive_workflows() {
             {"call":"ui.view","params":{"view":"top"}}
         ]))
         .unwrap();
+        // Pick the lines away from MID snaps so this remains an angular workflow.
         let picks = json!([
-            {"click":{"sketch":[20,0]}},
-            {"click":{"sketch":[15,15]},"shift":true}
+            {"click":{"sketch":[10,0]}},
+            {"click":{"sketch":[10,10]},"shift":true}
         ]);
         if preselect {
             h.run(&picks).unwrap();

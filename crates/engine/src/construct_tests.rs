@@ -43,6 +43,61 @@ fn plane(s: &Session, name: &str) -> Plane {
     construction_planes(s).into_iter().find(|p| p.1 == name).map(|p| p.2).unwrap_or_else(|| panic!("no plane {name}"))
 }
 
+#[test]
+fn renamed_construction_references_survive_edits_and_reopening() {
+    let mut s = Session::default();
+    run(&mut s, "construct.axis.two_planes", json!({"a": "XZ", "b": "YZ", "name": "Spine"}));
+    run(&mut s, "construct.plane.perpendicular", json!({"plane": "XZ", "line": {"axis": "Spine"}, "name": "Fence"}));
+    run(&mut s, "construct.point.three_planes", json!({"a": "XY", "b": "XZ", "c": "YZ", "name": "Pin"}));
+    run(&mut s, "construct.axis.two_points", json!({"a": {"construct_point": "Pin"}, "b": {"point": [30, 30, 30]}, "name": "Brace"}));
+    run(&mut s, "construct.point.vertex", json!({"point": {"construct_point": "Pin"}, "name": "Copy"}));
+    let before = (*s.doc).clone();
+    run(&mut s, "timeline.rename", json!({"feature": "Spine", "name": "Mast"}));
+    run(&mut s, "timeline.rename", json!({"feature": "Pin", "name": "Peg"}));
+    let fence = run(&mut s, "timeline.inspect", json!({"feature": "Fence"}));
+    assert_eq!(fence["definition"]["plane"]["line"]["name"], "Mast");
+    let brace = run(&mut s, "timeline.inspect", json!({"feature": "Brace"}));
+    assert_eq!(brace["definition"]["def"]["a"]["name"], "Peg");
+    let renamed = (*s.doc).clone();
+    for _ in 0..2 {
+        run(&mut s, "edit.undo", json!({}));
+    }
+    assert_eq!(*s.doc, before);
+    for _ in 0..2 {
+        run(&mut s, "edit.redo", json!({}));
+    }
+    assert_eq!(*s.doc, renamed);
+    run(&mut s, "timeline.edit", json!({"feature": "Mast", "set": {"def.b": {"type": "plane", "plane": {"type": "origin", "name": "XY"}}}}));
+    let saved = serde_json::to_vec(&*s.doc).unwrap();
+    let mut reopened = Session::new(serde_json::from_slice(&saved).unwrap());
+    reopened.refresh();
+    for session in [&s, &reopened] {
+        assert!(session.model.results.iter().all(|r| r.error.is_none()), "{:?}", session.model.results);
+        assert!(parallel(plane(session, "Fence").normal(), Vec3::Z));
+        assert!(parallel(axis(session, "Brace").1, Vec3::new(1.0, 1.0, 1.0)));
+        assert!(near(point(session, "Copy"), Vec3::ZERO));
+    }
+}
+
+#[test]
+fn renamed_hidden_axes_and_points_stay_hidden_through_undo_redo() {
+    let mut s = Session::default();
+    run(&mut s, "construct.axis.two_planes", json!({"a": "XZ", "b": "YZ", "name": "Spine"}));
+    run(&mut s, "construct.point.three_planes", json!({"a": "XY", "b": "XZ", "c": "YZ", "name": "Pin"}));
+    run(&mut s, "browser.visibility", json!({"items": ["Spine", "Pin", "XY"], "visible": false}));
+    for (old, new) in [("Spine", "Mast"), ("Pin", "Peg")] {
+        run(&mut s, "timeline.rename", json!({"feature": old, "name": new}));
+        assert!(!s.construction_visible(new));
+        assert!(!s.visibility.hidden_origin.iter().any(|n| n == old));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(!s.construction_visible(old));
+        assert!(!s.visibility.hidden_origin.iter().any(|n| n == new));
+        run(&mut s, "edit.redo", json!({}));
+        assert!(!s.construction_visible(new));
+    }
+    assert!(!s.construction_visible("XY"));
+}
+
 /// The line through `o` along `d` contains `p`.
 fn on_line(o: Vec3, d: Vec3, p: Vec3) -> bool {
     let d = d.normalized().unwrap_or(Vec3::Z);
@@ -245,7 +300,7 @@ fn construction_on_a_3d_wire_ignores_its_sketch_plane_and_follows_edits() {
 #[test]
 fn plane_on_a_3d_wire_moves_with_its_component() {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name":"Part"}));
+    run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
     let sketch = run(&mut s, "sketch.create", json!({"plane":"XY"}))["sketch"].as_u64().unwrap();
     run(&mut s, "sketch.options", json!({"sketch_3d":true}));
     let wire = run(&mut s, "sketch.line3d", json!({"points":[[0,0,10],[0,0,40]]}))["curves"][0].as_str().unwrap().to_string();
@@ -311,7 +366,7 @@ fn a_plane_through_three_vertices_follows_them() {
 #[test]
 fn construction_lives_in_the_component_frame() {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
     run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 10, "body_name": "Pin"}));
     run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [50, 0, 0]}));
     run(&mut s, "construct.axis.through_cylinder", json!({"face": {"face": [55, 0, 5]}, "name": "PinAxis"}));

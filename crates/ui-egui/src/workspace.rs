@@ -246,7 +246,7 @@ pub const SECTIONS: &[Section] = &[
     },
     // Sketch dimensions are driven by parameters, so they are one click away while sketching.
     Section { tab: "SKETCH", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
-    Section { tab: "SKETCH", panel: "FINISH SKETCH", promoted: 1, ids: &["sketch.finish"] },
+    Section { tab: "SKETCH", panel: "FINISH SKETCH", promoted: 2, ids: &["sketch.finish", "sketch.cancel"] },
     // New Sketch leads the tab, as on MODEL: a sheet part starts from a sketch (#3250).
     Section { tab: "SHEET METAL", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
     Section {
@@ -301,6 +301,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("sheet.export_dxf", "Export DXF"),
     ("sheet.flat_pattern", "Flat Pattern"),
     ("sheet.manage_rules", "Sheet Rules"),
+    ("sketch.cancel", "Cancel"),
     ("sketch.circle.center", "Circle"),
     ("sketch.constraint.coincident", "Coincident"),
     ("sketch.constraint.horizontal_vertical", "Horiz./Vert."),
@@ -465,8 +466,23 @@ pub fn sync_context(app: &mut crate::SolveApp) {
     }
     let context = app.session.active_sketch.map(|id| format!("sketch:{id}")).or_else(|| sheet_body(app).map(|body| format!("sheet:{body}")));
     if app.ui.ribbon_context != context {
+        let was_sketch = app.ui.ribbon_context.as_deref().is_some_and(|c| c.starts_with("sketch:"));
+        let back = if app.session.active_sketch.is_some() {
+            // Remember the tab the sketch was started from (#3250).
+            if !was_sketch && app.ui.tab != "SKETCH" {
+                app.ui.sketch_return_tab = Some(app.ui.tab.clone());
+            }
+            None
+        } else if was_sketch {
+            app.ui.sketch_return_tab.take()
+        } else {
+            None
+        };
         app.ui.tab = if app.session.active_sketch.is_some() {
             "SKETCH"
+        } else if let Some(back) = back.as_deref().filter(|t| *t != "SKETCH" && visible_tabs(app).contains(t)) {
+            // Finishing a sketch goes back to the tab it came from (#3250).
+            visible_tabs(app).into_iter().find(|t| t == &back).unwrap_or("MODEL")
         } else if context.is_some() {
             "SHEET METAL"
         } else {
@@ -641,6 +657,19 @@ mod tests {
         ] {
             assert!(layout(tab, panel, &specs).unwrap().0.iter().any(|c| c.id == id));
         }
+    }
+
+    /// The ribbon redesign (#2176) removed the MESH and UTILITIES tabs. A command that still
+    /// declares one is advertised at a place the ribbon cannot show, because the generated command
+    /// inventory prints the placement a spec declares (#133).
+    #[test]
+    fn no_command_is_advertised_at_a_tab_the_ribbon_removed() {
+        for c in solidcraft_engine::command_specs() {
+            assert!(!matches!(c.tab, "MESH" | "UTILITIES"), "{} declares the removed {} tab", c.id, c.tab);
+        }
+        let spec = solidcraft_engine::find_command("file.save_mesh").expect("file.save_mesh is registered");
+        assert_eq!((spec.tab, spec.panel), ("INSERT", "FILES"), "Save As Mesh declares the panel that shows it");
+        assert_eq!(destination(spec), Some(("INSERT", "FILES")));
     }
 
     #[test]

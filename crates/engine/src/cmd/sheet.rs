@@ -206,6 +206,9 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             if !matches!(position.as_str(), "inside" | "outside" | "middle") {
                 return Err(bad(cmd, "`position` must be inside, outside or middle"));
             }
+            if s.model.state().sheets.is_empty() {
+                return Err(no_sheet_body(cmd));
+            }
             let body = str_(p, "body").map(str::to_string);
             // The corner relief these flanges make, in place of the rule's; null is not given.
             let corner_relief_shape = match p.get("corner_relief_shape").filter(|v| !v.is_null()) {
@@ -402,16 +405,7 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut rule =
         s.doc.sheet.rules.iter().find(|r| r.name == name).cloned().unwrap_or_else(|| SheetRule { name: name.clone(), ..s.doc.sheet_rule(None) });
-    for (k, slot) in [
-        ("thickness", &mut rule.thickness),
-        ("k_factor", &mut rule.k_factor),
-        ("bend_radius", &mut rule.bend_radius),
-        ("relief_width", &mut rule.relief_width),
-        ("relief_depth", &mut rule.relief_depth),
-        ("corner_relief", &mut rule.corner_relief),
-        ("hem_gap", &mut rule.hem_gap),
-        ("gap", &mut rule.gap),
-    ] {
+    for (k, slot) in rule.fields_mut() {
         if let Some(e) = expr(p, k) {
             *slot = e.into();
         }
@@ -451,11 +445,18 @@ fn list_rules(s: &mut Session, _p: &Value) -> Result<Value> {
     Ok(json!({"rules": rules, "active": active}))
 }
 
+fn no_sheet_body(cmd: &str) -> EngineError {
+    bad(
+        cmd,
+        "there is no sheet metal body: start one with Flange > Base, or turn a plate into sheet metal with Convert to Sheet Metal (pick its large flat face)",
+    )
+}
+
 fn sheet_of(s: &Session, p: &Value, cmd: &str) -> Result<SheetBody> {
     let st = s.model.state();
     match str_(p, "body") {
         Some(b) => st.sheets.iter().find(|x| x.body == b).cloned().ok_or_else(|| bad(cmd, format!("`{b}` is not a sheet metal body"))),
-        None => st.sheets.last().cloned().ok_or_else(|| bad(cmd, "there is no sheet metal body")),
+        None => st.sheets.last().cloned().ok_or_else(|| no_sheet_body(cmd)),
     }
 }
 
@@ -816,7 +817,7 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let sheets = &s.model.state().sheets;
         if sheets.is_empty() {
-            return Err(bad(cmd, "there is no sheet metal body"));
+            return Err(no_sheet_body(cmd));
         }
         // Every file is made before the first is written.
         let texts = sheets

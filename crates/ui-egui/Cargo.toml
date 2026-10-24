@@ -31,6 +31,10 @@ zip = { workspace = true }
 # Rasterises the icon SVGs (assets/icons/ui/design/svg) at the size they are drawn.
 tiny-skia = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+# Ends an agent's process group with the system call (MIT; already in the tree through zip).
+nix = { workspace = true }
+
 [target.'cfg(windows)'.dependencies]
 # Updates: the folder the Windows installer recorded, so an install outside Program Files is still
 # updated by its installer (MIT; already in the tree as a build dependency).

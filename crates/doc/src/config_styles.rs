@@ -149,7 +149,10 @@ impl Document {
                     sketch == producer_sketch && extent.taper.is_none() && role == format!("side:{curve}")
                         && self.feature(*sketch).is_some_and(|feature| matches!(&feature.kind, FeatureKind::Sketch { sketch, .. } if sketch.curves.iter().any(|candidate| candidate.id == *curve && !candidate.construction && matches!(candidate.kind, solidcraft_sketch::CurveKind::Line { .. } | solidcraft_sketch::CurveKind::Circle { .. } | solidcraft_sketch::CurveKind::Arc { .. }))))
                 }
-                (super::FaceCertificate::Imported { .. }, FeatureKind::Import { .. }) => role.strip_prefix("face:").is_some_and(|index| index.parse::<usize>().is_ok()),
+                // A linked design's face is named after its name there (`link:…`, see lineage::link_role).
+                (super::FaceCertificate::Imported { .. }, FeatureKind::Import { .. }) => {
+                    role.strip_prefix("face:").is_some_and(|index| index.parse::<usize>().is_ok()) || role.starts_with("link:")
+                }
                 (super::FaceCertificate::Lineage, _) => !role.is_empty(),
                 (super::FaceCertificate::ShellPlanar { source_producer, source, inner }, FeatureKind::Shell { .. }) => {
                     *source_producer != target.origin_feature

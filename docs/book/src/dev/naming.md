@@ -30,7 +30,7 @@ tool built from a sketch, cut from each target, the cut body split into lumps) i
 | a body of the model before the feature | as they were |
 | a moved copy of one (pattern, mirror) | `<name>@F<feature>.<instance>` |
 | the cavity side of a shell grown outward | `F<feature>:inner:<name>` |
-| a body the feature built | by role: `F<feature>:side:<sketch curve>`, `start`/`top`/`bottom`/`end` caps, `+x`… box sides, `face:<k>` imported faces |
+| a body the feature built | by role: `F<feature>:side:<sketch curve>`, `start`/`top`/`bottom`/`end` caps, `+x`… box sides, `face:<k>` imported faces, `link:<digest>` faces of a linked design (see below) |
 | a copied tool of a patterned feature | `F<feature>:<role>@F<pattern>.<instance>` |
 
 `crates/doc/src/history_names.rs` names each face of the result from its origins: a kept or
@@ -55,6 +55,20 @@ curve the profile segment lies on exactly; nothing is sampled.
   [Older designs](#older-designs)).
 
 Names are worked out lazily, on first request, and shared by a body's clones.
+
+### Linked designs
+
+A linked design (Insert Design) comes in as STEP text, which keeps no names: its faces would be
+named by their place in the file (`face:<k>`), and adding a hole to the part can give that place to
+another face. So when the link is made or updated, each face is matched to the face of the part it
+was written from (the same geometry, so a point well inside one lies on the other) and the Import
+feature keeps that face's name in the part (`Feature::link_faces`). The face is named
+`F<import>:link:<digest>`, a digest of that name (which may hold anything: the part's feature
+numbers and `@`, `|` mean something else in the assembly), and a piece keeps its qualifier with the
+faces around it named the same way. A joint or other reference on a linked face therefore stays on
+it across Update Links exactly as it would inside the part, and says so when the part no longer has
+the face. Every linked face still answers to `face:<k>`, so references made before keep finding
+their face by place; Update Links warns about joints that do.
 
 ### Where there is no history
 

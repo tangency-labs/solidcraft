@@ -410,6 +410,20 @@ fn closest(a: &Geo, b: &Geo) -> Option<(Vec3, Vec3)> {
     }
 }
 
+/// Two straight edges sharing exactly one end define rays away from that corner. Their
+/// stored directions are arbitrary, so use the rays to preserve obtuse (and straight) angles.
+/// Separate edges and coincident copies have no unique corner and keep the undirected angle.
+fn corner_cos(a: Shape, b: Shape) -> Option<f64> {
+    let (Shape::Line { a, b }, Shape::Line { a: c, b: d }) = (a, b) else { return None };
+    let tol = a.dist(b).min(c.dist(d)).max(1.0) * 1e-6;
+    let mut corners = [(a, b, c, d), (a, b, d, c), (b, a, c, d), (b, a, d, c)].into_iter().filter(|(p, _, q, _)| p.dist(*q) <= tol);
+    let (p, end_a, q, end_b) = corners.next()?;
+    if corners.next().is_some() {
+        return None;
+    }
+    Some((end_a - p).normalized()?.dot((end_b - q).normalized()?))
+}
+
 /// `inspect.measure` with `items` (one or two selections).
 pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
     let cmd = "inspect.measure";
@@ -509,9 +523,8 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
         out["measure"] = json!(if c.is_some() { "center" } else { "min" });
         if let (Some(da), Some(db)) = (a.dir, b.dir) {
             let both_faces = matches!(sels.as_slice(), [Sel::Face { .. }, Sel::Face { .. }]);
-            let cos = da.dot(db).clamp(-1.0, 1.0);
-            let cos = if both_faces { cos } else { cos.abs() };
-            out["angle_deg"] = json!(cos.acos().to_degrees());
+            let cos = if both_faces { da.dot(db) } else { corner_cos(a.shape, b.shape).unwrap_or_else(|| da.dot(db).abs()) };
+            out["angle_deg"] = json!(cos.clamp(-1.0, 1.0).acos().to_degrees());
         }
     }
     Ok(out)

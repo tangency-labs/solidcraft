@@ -84,7 +84,7 @@ fn internal_capture_does_not_bypass_missing_ambiguous_or_invalid_path_picks() {
 fn generated_profiles_and_press_pull_convert_rotated_occurrence_picks_once() {
     for hole in [false, true] {
         let mut s = Session::default();
-        let component = run(&mut s, "component.create", json!({"name":"Arm"}));
+        let component = run(&mut s, "component.create", json!({"name":"Arm","grounded":false}));
         let cid = component["component"].as_u64().unwrap();
         let occ = component["occurrence"].as_u64().unwrap();
         run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"name":"Base","body_name":"Stock"}));
@@ -147,7 +147,7 @@ fn raised_half(s: &mut Session, body: &str) {
 #[test]
 fn legacy_internal_capture_refuses_an_uncaptured_source_in_another_component() {
     let mut s = Session::default();
-    let component = run(&mut s, "component.create", json!({"name":"Source"}));
+    let component = run(&mut s, "component.create", json!({"name":"Source","grounded":false}));
     let occurrence = component["occurrence"].as_u64().unwrap();
     // A face Offset Face raised has no construction certificate or exact history name yet:
     // the legacy path.

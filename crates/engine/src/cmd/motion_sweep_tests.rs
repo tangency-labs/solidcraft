@@ -11,7 +11,7 @@ use crate::Session;
 /// A part made of one box (`size` from `corner`) in a new component.
 fn block(s: &mut Session, name: &str, corner: [f64; 3], size: [f64; 3]) {
     run(s, "component.activate", json!({"component": "root"}));
-    run(s, "component.create", json!({"name": name}));
+    run(s, "component.create", json!({"name": name, "grounded": false}));
     run(s, "solid.box", json!({"length": size[0], "width": size[1], "height": size[2], "corner": corner}));
 }
 

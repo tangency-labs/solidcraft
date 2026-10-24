@@ -1,7 +1,8 @@
 //! The agents the chat can use: the installed ones it finds by itself (Claude Code, Codex,
 //! Antigravity, OpenCode, …) and the ones the user adds (another ACP command, or an
-//! OpenAI-compatible endpoint such as Ollama, LM Studio or OpenAI). Also the permission modes.
-//! Preferences only: no design data, no keys (those are in the system keychain).
+//! OpenAI-compatible endpoint such as Ollama, LM Studio or OpenAI, or an Anthropic-compatible
+//! one). Also the permission modes. Preferences only: no design data, no keys (those are in the
+//! system keychain).
 
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +48,50 @@ pub enum Kind {
     Acp,
     /// An OpenAI-compatible chat completions endpoint.
     Api,
+    /// An Anthropic-compatible Messages endpoint.
+    Anthropic,
+}
+
+impl Kind {
+    /// The id written in preferences and on the control channel.
+    pub fn id(self) -> &'static str {
+        match self {
+            Kind::Acp => "acp",
+            Kind::Api => "api",
+            Kind::Anthropic => "anthropic",
+        }
+    }
+    /// Whether the agent is an endpoint SolidCraft talks to itself (either protocol).
+    pub fn is_api(self) -> bool {
+        matches!(self, Kind::Api | Kind::Anthropic)
+    }
+    /// The wire protocol of an added endpoint; `None` for an ACP agent.
+    pub fn protocol(self) -> Option<Protocol> {
+        match self {
+            Kind::Acp => None,
+            Kind::Api => Some(Protocol::OpenAi),
+            Kind::Anthropic => Some(Protocol::Anthropic),
+        }
+    }
+}
+
+/// The wire protocol of an endpoint the user added.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Protocol {
+    /// `{base}/chat/completions`, as Ollama, LM Studio, OpenAI and their kin speak.
+    #[default]
+    OpenAi,
+    /// `{base}/v1/messages`, as the Anthropic Messages API and compatible endpoints speak.
+    Anthropic,
+}
+
+impl Protocol {
+    pub fn kind(self) -> Kind {
+        match self {
+            Protocol::OpenAi => Kind::Api,
+            Protocol::Anthropic => Kind::Anthropic,
+        }
+    }
 }
 
 /// An agent the user added.
@@ -101,7 +146,7 @@ impl Entry {
     /// A short line under the name: the version, the model, or the command.
     pub fn detail(&self) -> String {
         match self.kind {
-            Kind::Api => format!("{} · {}", self.model, self.base_url),
+            Kind::Api | Kind::Anthropic => format!("{} · {}", self.model, self.base_url),
             Kind::Acp => match &self.version {
                 Some(v) => v.clone(),
                 None => super::panel::short_command(&self.argv.join(" ")),
@@ -162,12 +207,30 @@ pub fn new_id(p: &crate::prefs::Prefs, prefix: &str) -> String {
     (1..).map(|n| format!("{prefix}-{n}")).find(|id| !p.agents.iter().any(|a| &a.id == id)).unwrap_or_else(|| prefix.to_string())
 }
 
-/// OpenAI-compatible endpoints people use: name, base URL, whether it needs a key.
-pub const API_PRESETS: &[(&str, &str, bool)] = &[
-    ("Ollama", "http://localhost:11434/v1", false),
-    ("LM Studio", "http://localhost:1234/v1", false),
-    ("OpenAI", "https://api.openai.com/v1", true),
+/// An endpoint people commonly add, with the base URL to start from.
+pub struct ApiPreset {
+    pub name: &'static str,
+    pub base_url: &'static str,
+}
+
+/// OpenAI-compatible endpoints people use.
+pub const OPENAI_PRESETS: &[ApiPreset] = &[
+    ApiPreset { name: "Ollama", base_url: "http://localhost:11434/v1" },
+    ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
+    ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
 ];
+
+/// Anthropic-compatible endpoints people use. The base URL is the one their documentation calls
+/// `ANTHROPIC_BASE_URL`: the `/v1` is added where needed.
+pub const ANTHROPIC_PRESETS: &[ApiPreset] = &[ApiPreset { name: "Anthropic", base_url: "https://api.anthropic.com/v1" }];
+
+/// The presets offered for an endpoint protocol.
+pub fn presets(protocol: Protocol) -> &'static [ApiPreset] {
+    match protocol {
+        Protocol::OpenAi => OPENAI_PRESETS,
+        Protocol::Anthropic => ANTHROPIC_PRESETS,
+    }
+}
 
 /// Whether a key may be sent to `url`: only over HTTPS, or to this computer.
 pub fn key_safe_for(url: &str) -> bool {
@@ -230,5 +293,20 @@ mod tests {
         assert_eq!(new_id(&p, "api"), "api-2");
         assert_eq!(normalize_url(" http://localhost:11434/v1/ ").as_deref(), Ok("http://localhost:11434/v1"));
         assert!(normalize_url("localhost:11434").is_err());
+    }
+
+    #[test]
+    fn endpoint_kinds_keep_their_protocol_and_presets() {
+        assert_eq!(serde_json::to_string(&Kind::Api).unwrap(), "\"api\"");
+        assert_eq!(serde_json::to_string(&Kind::Anthropic).unwrap(), "\"anthropic\"");
+        assert_eq!(serde_json::from_str::<Kind>("\"anthropic\"").unwrap(), Kind::Anthropic);
+        assert!(Kind::Anthropic.is_api() && !Kind::Acp.is_api());
+        assert!(Kind::Acp.protocol().is_none());
+        assert_eq!(Kind::Anthropic.protocol(), Some(Protocol::Anthropic));
+        assert_eq!(Protocol::Anthropic.kind(), Kind::Anthropic);
+        assert_eq!(Kind::Api.id(), "api");
+        assert_eq!(Kind::Anthropic.id(), "anthropic");
+        assert!(presets(Protocol::OpenAi).iter().all(|p| !p.name.is_empty() && p.base_url.starts_with("http")));
+        assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
     }
 }

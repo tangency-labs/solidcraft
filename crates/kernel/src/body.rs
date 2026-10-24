@@ -562,6 +562,36 @@ pub(crate) fn shell_volume(shell: &mt::Shell) -> Option<f64> {
     v.is_finite().then_some(v)
 }
 
+/// A solid's volume off a mesh at `tol`, negative when it faces inwards, and how many faces that
+/// mesh left out.
+fn signed_volume(solid: &Solid, tol: f64) -> Result<(f64, usize)> {
+    let orient = |tol: f64| {
+        guard("orient", || {
+            let shells = mesh_shells(solid, tol);
+            let volume = shells.iter().map(|s| s.to_polygon().volume()).sum::<f64>();
+            let missing =
+                shells.iter().flat_map(|s| s.face_iter()).filter(|f| f.surface().is_none_or(|m| m.faces().triangle_iter().next().is_none())).count();
+            Ok((volume, missing))
+        })
+    };
+    let (mut v, missing) = orient(tol)?;
+    // A long thin round part (a through hole's tool: a cylinder whose vertices all lie on
+    // its seam, so they span its length only) meshed that coarsely can come out with a
+    // negative volume when it is outward already: check finely before turning it inside out.
+    let fine = (tol * 0.02).max(1e-4);
+    if v < 0.0 && fine < tol {
+        (v, _) = orient(fine)?;
+    }
+    Ok((v, missing))
+}
+
+/// Whether a closed shell faces inwards (a void), by the check [`Body::new`] orients a solid by.
+/// Unlike [`shell_volume`], a negative coarse volume is checked again on a finer mesh.
+pub(crate) fn faces_inward(shell: &mt::Shell) -> Result<bool> {
+    let solid = guard("shell", || Solid::try_new(vec![shell.clone()]).map_err(|e| KernelError::Failed(format!("shell: {e}"))))?;
+    Ok(signed_volume(&solid, orientation_tolerance(span_of(&solid)))?.0 < 0.0)
+}
+
 /// Deflection the orientation mesh uses: coarse enough for a large solid, fine enough that a
 /// small one still tessellates. `unmeshed_faces` counts at the same value, so the count the
 /// orientation mesh produced is reused instead of meshing the body again.
@@ -616,30 +646,11 @@ impl Body {
         // every face comes out: a face missing from a coarse mesh can flip the sign).
         let span = span_of(&solid);
         let tol = orientation_tolerance(span);
-        let orient = |tol: f64| {
-            guard("orient", || {
-                let shells = mesh_shells(&solid, tol);
-                let volume = shells.iter().map(|s| s.to_polygon().volume()).sum::<f64>();
-                let missing = shells
-                    .iter()
-                    .flat_map(|s| s.face_iter())
-                    .filter(|f| f.surface().is_none_or(|m| m.faces().triangle_iter().next().is_none()))
-                    .count();
-                Ok((volume, missing))
-            })
-        };
         #[cfg(test)]
         ORIENTED.with(|n| n.set(n.get() + 1));
         // The faces missing from the coarse mesh are the same whichever way the solid turns out
         // to face, so the count is kept for `unmeshed_faces` either way.
-        let (mut v, missing) = orient(tol)?;
-        // A long thin round part (a through hole's tool: a cylinder whose vertices all lie on
-        // its seam, so they span its length only) meshed that coarsely can come out with a
-        // negative volume when it is outward already: check finely before turning it inside out.
-        let fine = (tol * 0.02).max(1e-4);
-        if v < 0.0 && fine < tol {
-            (v, _) = orient(fine)?;
-        }
+        let (v, missing) = signed_volume(&solid, tol)?;
         if v < 0.0 {
             solid.not();
         }

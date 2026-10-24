@@ -166,7 +166,7 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
     let shortcut = match id {
         "edit.undo" => "Ctrl+Z".to_string(),
         "edit.redo" => "Ctrl+Y".to_string(),
-        _ => crate::keymap::effective(app, id).unwrap_or_default(),
+        _ => crate::keymap::display_for(app, id).unwrap_or_default(),
     };
     Item {
         id: id.into(),
@@ -214,6 +214,8 @@ pub struct MenuState {
     pub rename: Option<Rename>,
     /// A delete waiting for its confirmation (it takes or breaks other features).
     pub confirm: Option<crate::delete::Pending>,
+    /// Identical copies Extract to File found, waiting to be linked too.
+    pub link_copies: Option<crate::linked_source::Copies>,
     /// The Properties window: title and measurements.
     pub props: Option<(String, Value)>,
     /// The viewport menu opened over something: it offers Select Other.
@@ -344,6 +346,13 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Sketch { id } => sketch_items(app, *id),
         Target::Feature { id } => vec![
             act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(app.session.doc.feature(*id).is_some()),
+            act("ui.rename", "Rename", "rename").with(json!({"feature":id})).on(app.session.doc.feature(*id).is_some()),
+            act("ui.delete", "Delete", "delete").key("Del").with(json!({"items": [{"type": "feature", "id": id}]})).on(app
+                .session
+                .doc
+                .feature(*id)
+                .is_some()),
+            Item::sep(),
             act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(app.session.doc.feature(*id).is_some()),
         ],
         Target::Plane { id } => plane_items(app, *id),
@@ -480,6 +489,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "sketch.offset", "Offset"));
         v.push(Item::sep());
         v.push(act("ui.finishSketch", "Finish Sketch", "finish"));
+        v.push(act("ui.cancelSketch", "Cancel Sketch", "sketch_cancel"));
         v.push(Item::sep());
         v.push(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()));
         v.push(cmd(app, "edit.redo", "Redo").on(!app.session.redo.is_empty()));
@@ -722,6 +732,13 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
                 item.enabled = !placement.grounded && app.session.held_by_rigid_group(placement.occurrence).is_none();
             }
             "ui.properties" => item.params = Some(json!({"occurrence": placement.occurrence, "path": path})),
+            "ui.turnUpAxis" => {
+                for child in &mut item.children {
+                    if let Some(params) = child.params.as_mut() {
+                        params["occurrence"] = json!(placement.occurrence);
+                    }
+                }
+            }
             "occurrence.copy" => item.params = Some(json!({"occurrence": placement.occurrence, "translate": [10,10,0]})),
             "component.create" => item.params = Some(json!({"parent": placement.component, "parent_path": path})),
             "component.paste_new" => {
@@ -748,6 +765,19 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
     entries
 }
 
+/// "Turn Up Axis": a quarter turn about X of a component's occurrence for a file saved with the
+/// other axis up, one `occurrence.move` (one undo step).
+fn turn_up_axis(occurrence: u64, enabled: bool) -> Item {
+    let mut item = act("ui.turnUpAxis", "Turn Up Axis", "move").on(enabled);
+    item.children = [("Y up \u{2192} Z up", "90 deg"), ("Z up \u{2192} Y up", "-90 deg")]
+        .into_iter()
+        .map(|(label, angle)| {
+            act("occurrence.move", label, "move").with(json!({"occurrence": occurrence, "axis": [1, 0, 0], "angle": angle})).on(enabled)
+        })
+        .collect();
+    item
+}
+
 fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let doc = &app.session.doc;
     let occ = doc.occurrence_of(id);
@@ -770,6 +800,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
                 .with(json!({ "occurrence": oid }))
                 .on(!grounded && occ.is_some() && app.session.held_by_rigid_group(oid).is_none()),
         );
+        v.push(turn_up_axis(oid, !grounded && occ.is_some() && app.session.held_by_rigid_group(oid).is_none()));
         v.push(cmd(app, "component.capture_position", "Capture Position").on(!app.session.pending_moves.is_empty()));
         v.push(cmd(app, "component.revert_position", "Revert Position").on(!app.session.pending_moves.is_empty()));
         // An imported assembly moves as one until its rigid group is released.
@@ -797,6 +828,8 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     v.push(act("ui.properties", "Properties", "measure").with(json!({ "component": id })));
     if doc.links.contains_key(&id) {
         v.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
+    } else if id != 0 && app.session.can_extract(id) {
+        v.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
     }
     if id == 0 {
         v.push(act("ui.designProperties", "Design Properties", "settings"));
@@ -904,7 +937,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     if !lines.is_empty() {
         v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": lines })));
     }
-    if curves.len() == 1 && ss.sketch.freeform_offsets.iter().any(|offset| offset.output == curves[0]) {
+    if curves.len() == 1 && ss.sketch.offset_distance(&curves[0]).is_some() {
         v.push(cmd(app, "sketch.offset.break", "Break Offset Association").with(json!({"curve":curves[0]})));
     }
     v.push(act("ui.fix", "Fix/Unfix", "c_fix").with(json!({ "entities": ents })));
@@ -989,9 +1022,15 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.delete" if item.params.is_some() => crate::delete::request(app, p),
         "ui.delete" => delete(app),
         "ui.finishSketch" => app.finish_sketch(),
+        "ui.cancelSketch" => app.cancel_sketch(),
         "ui.relinkSource" => {
             if let Some(component) = id_of(&p, "component") {
                 crate::linked_source::start(app, component);
+            }
+        }
+        "ui.extractComponent" => {
+            if let Some(component) = id_of(&p, "component") {
+                crate::linked_source::extract(app, component);
             }
         }
         "ui.copy" => drop(crate::edit_clipboard::copy(app)),
@@ -1440,15 +1479,7 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) {
         return;
     }
     match &r.what {
-        RenameWhat::Body(old) => {
-            if app.run("body.rename", json!({ "body": old, "name": name })).is_ok() {
-                for list in [&mut app.session.visibility.hidden_bodies, &mut app.ui.locked_bodies] {
-                    for b in list.iter_mut().filter(|b| *b == old) {
-                        *b = name.clone();
-                    }
-                }
-            }
-        }
+        RenameWhat::Body(old) => drop(app.run_heavy("body.rename", json!({ "body": old, "name": name }))),
         RenameWhat::Feature(f) => drop(app.run("timeline.rename", json!({ "feature": f, "name": name }))),
         RenameWhat::Component(c) => drop(app.run("component.rename", json!({ "component": c, "name": name }))),
         RenameWhat::Group(g) => crate::browser::group_action(app, "ui.renameGroup", &json!({ "group": g, "name": name })),
@@ -1464,7 +1495,8 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) {
 // ---------------------------------------------------------------------------------------------
 
 /// Open the viewport menu at a screen position. A right-click on something not selected
-/// selects it first, so the menu is about what is under the cursor.
+/// selects it first, so the menu is about what is under the cursor; a face or edge already in a
+/// multi-selection keeps the whole selection (#3733).
 pub fn open(app: &mut SolveApp, at: Pos2) {
     app.menu.over_geometry = app.viewport.hover.is_some();
     // A right-click leaves a plane unselected, but the menu offers a sketch on it.
@@ -1473,10 +1505,11 @@ pub fn open(app: &mut SolveApp, at: Pos2) {
         _ => None,
     });
     crate::select_other::close(app);
+    let selected = |app: &SolveApp, sel: &Sel| app.session.selection.iter().any(|x| crate::selection::same_item(x, sel));
     if app.session.active_sketch.is_none()
         && let Some(h) = app.viewport.hover.clone()
         && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
-        && !app.session.selection.contains(&sel)
+        && !selected(app, &sel)
         && !matches!(sel, Sel::Plane { .. } | Sel::Axis { .. })
     {
         let _ = app.run("select.set", json!({ "items": [sel] }));
@@ -1484,7 +1517,7 @@ pub fn open(app: &mut SolveApp, at: Pos2) {
         && let Some(h) = app.viewport.hover.clone()
         && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
         && (matches!(sel, Sel::SketchCurve { .. } | Sel::SketchPoint { .. }) || crate::sketch_text::entity_for_selection(app, &sel).is_some())
-        && !app.session.selection.contains(&sel)
+        && !selected(app, &sel)
     {
         let _ = app.run("select.set", json!({ "items": [sel] }));
     }
@@ -1929,6 +1962,48 @@ pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_offset_context_menu_breaks_association_and_allows_trim() {
+        use solidcraft_engine::{geom::Vec2, sketch::Shape};
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let source = h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"connect":false,"infer":false})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let output =
+            h.app.run("sketch.offset", json!({"curves":[source],"distance":2,"chain":false})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+        h.app.run("sketch.line", json!({"points":[[10,-5],[10,5]],"connect":false,"infer":false})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        let state = h.app.session.world_state();
+        let sk = &state.sketch(sid).unwrap().sketch;
+        let Shape::Line { a, b } = sk.shape(sk.curve_index(&output).unwrap()).unwrap() else { panic!("offset must be a line") };
+        let cut = Vec2::new(15.0, a.y);
+        assert!((a.dist(b) - 20.0).abs() < 1e-6);
+        assert!(h.app.run("sketch.trim", json!({"curve":output,"at":[cut.x,cut.y]})).is_err());
+
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 60.0;
+        h.settle();
+        h.step(&json!({"click":{"world":[cut.x,cut.y,0]},"button":"right"})).unwrap();
+        assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: output.clone() }]);
+        let menu = items(&h.app, &Target::Viewport);
+        let item = menu.iter().find(|item| item.id == "sketch.offset.break").expect("offset line must offer Break Offset Association");
+        assert_eq!(item.label, "Break Offset Association");
+        assert!(item.enabled);
+        assert_eq!(item.params, Some(json!({"curve":output})));
+        h.step(&json!({"click":{"handle":"menu:sketch.offset.break"}})).unwrap();
+        assert!(h.app.session.world_state().sketch(sid).unwrap().sketch.offset_distance(&output).is_none());
+        h.app.run("sketch.trim", json!({"curve":output,"at":[cut.x,cut.y]})).unwrap();
+        let state = h.app.session.world_state();
+        let sk = &state.sketch(sid).unwrap().sketch;
+        let remaining = sk.shape(sk.curve_index(&output).unwrap()).unwrap();
+        assert!(matches!(remaining, Shape::Line { a, b } if (a.dist(b) - 10.0).abs() < 1e-6), "{remaining:?}");
+        assert!(remaining.dist(cut) > 1.0);
+    }
 
     #[test]
     fn solidworks_face_menu_runs_normal_to_selection_and_rejects_curved_faces() {

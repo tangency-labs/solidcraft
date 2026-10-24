@@ -330,10 +330,32 @@ struct Chamfer {
 fn chamfer_at(mb: &ModelBody, mesh: &Mesh, p: Vec3, tol: f64, near: f64) -> Option<Chamfer> {
     let b = &mb.body;
     let (d, f) = crate::appearance::nearest_face(mb, p)?;
-    if d <= near
-        && let Some(c) = bend_cylinder(b, mesh, f, tol)
-    {
-        return Some(c);
+    if d <= near {
+        if let Some(c) = bend_cylinder(b, mesh, f, tol) {
+            return Some(c);
+        }
+        // A tangent edge belongs to both the cylinder and a planar panel. The nearest
+        // face can be either: resolve the cylinder from the edge's incident faces too.
+        let edge = mesh
+            .edges
+            .iter()
+            .zip(&mesh.edge_faces)
+            .map(|(line, faces)| {
+                let distance = line
+                    .windows(2)
+                    .filter_map(|w| match w {
+                        [a, b] => Some(p.dist_to_segment(*a, *b)),
+                        _ => None,
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                (distance, faces)
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        if let Some((_, faces)) = edge.filter(|(distance, _)| *distance <= near)
+            && let Some(c) = faces.iter().find_map(|g| bend_cylinder(b, mesh, *g as usize, tol))
+        {
+            return Some(c);
+        }
     }
     if d > tol {
         return None;
@@ -672,8 +694,17 @@ pub fn bend_edge_names(st: &crate::ModelState, body: &str, pts: &[Vec3]) -> Vec<
 /// Convert body `mb` to a sheet under the rule `rule` with values `rv`: `face` is a point on the
 /// fixed face and `bends` are points on the sharp edges that become bends, in the middle of
 /// chamfers or on bend cylinders that do (the body's coordinates, mm). See the module docs.
+/// `body_to_world` places diagnostic points in world coordinates. Geometry and picks stay local.
 /// Returns the sheet and a note for every corner or end of a bend not finished as the rule says.
-pub fn convert_body(mb: &ModelBody, rule: &str, rv: &RuleValues, face: Vec3, bends: &[Vec3]) -> Result<(SheetBody, Vec<String>)> {
+pub fn convert_body(
+    mb: &ModelBody,
+    rule: &str,
+    rv: &RuleValues,
+    face: Vec3,
+    bends: &[Vec3],
+    body_to_world: &crate::Mat,
+) -> Result<(SheetBody, Vec<String>)> {
+    let at = |p| at(apply_point(body_to_world, p));
     if bends.is_empty() || bends.len() > MAX_BENDS {
         return err(format!("pick 1…{MAX_BENDS} bend edges"));
     }

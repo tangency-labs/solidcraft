@@ -25,6 +25,28 @@ fn volume(s: &mut Session) -> f64 {
 }
 
 #[test]
+fn reused_design_insertion_is_free_even_before_a_link_exists() {
+    let dir = folder("reuse-grounding");
+    let file = dir.join("part.solidcraft");
+    part(&file, 30);
+    let mut s = Session::default();
+    for count in 1..=2 {
+        let inserted = run(&mut s, "component.insert_design", json!({"path": file, "reuse": true}));
+        let occurrence = inserted["occurrence"].as_u64().unwrap();
+        assert!(!s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().grounded);
+        assert_eq!(s.doc.links.len(), 1);
+        assert_eq!(s.undo.len(), count, "each paste is one undo step");
+        run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [10, 0, 0]}));
+        run(&mut s, "edit.undo", json!({}));
+    }
+    let mut ordinary = Session::default();
+    let inserted = run(&mut ordinary, "component.insert_design", json!({"path": file}));
+    let occurrence = inserted["occurrence"].as_u64().unwrap();
+    assert!(ordinary.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().grounded);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn relink_repairs_a_moved_source_for_every_instance_in_one_undo_step() {
     let dir = folder("moved");
     let old = dir.join("old.solidcraft");
@@ -117,6 +139,7 @@ fn relink_keeps_joint_definitions_and_reports_solver_diagnostics() {
     let inserted = run(&mut s, "component.insert_design", json!({"path": original}));
     let component = inserted["component"].as_u64().unwrap();
     let occurrence = inserted["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.ground", json!({"occurrence": occurrence, "grounded": false}));
     // Explicit points can keep solving after the source changes, even if the intended
     // connection no longer exists. The source-change warning must still be present.
     run(

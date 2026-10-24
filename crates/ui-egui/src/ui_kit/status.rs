@@ -1,6 +1,6 @@
 //! Status heading and constraint meter; Tokens: font_label, text, text_dim, accent, dialog_rule, sketch_accent, spacing.
 use crate::{fonts::RichTextExt as _, theme::Tokens};
-use egui::{RichText, Stroke, vec2};
+use egui::{RichText, vec2};
 
 /// Status content for a named card. `key` is the scenario namespace, `fraction` is clamped.
 pub(crate) struct StatusHeader<'a> {
@@ -40,7 +40,7 @@ pub(crate) fn status_header(ui: &mut egui::Ui, key: &str, name: &str, status: St
             crate::scenario::publish_count(&format!("{key}:constrained_fraction"), f64::from(fraction));
         })
         .response;
-    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, t.dialog_rule));
+    t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top(), t.dialog_rule);
     crate::scenario::publish_target(&format!("{key}:status_header"), response.rect);
     response
 }

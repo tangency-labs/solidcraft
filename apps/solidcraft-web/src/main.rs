@@ -131,6 +131,7 @@ mod web {
         /// The language the fonts were last set up for (a CJK UI leads with the CJK face).
         font_language: String,
         space_mouse: SpaceMouse,
+        wheel_gestures: solidcraft_ui_egui::WebWheelGestures,
     }
 
     impl Shell {
@@ -509,6 +510,10 @@ mod web {
             UNSAVED.with(|u| u.set(solidcraft_ui_egui::documents::any_dirty(&self.app)));
         }
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+            let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
+            if let Some(delay) = self.wheel_gestures.update(raw, now) {
+                ctx.request_repaint_after(delay);
+            }
             files::take_drops(&self.files, raw);
             // Before the app's own hook, which adds the control channel's events.
             self.space_mouse.raw_input_hook(ctx, self.app.preferences.space_mouse_enabled, raw);
@@ -673,6 +678,7 @@ mod web {
                             cjk_bytes: None,
                             font_language,
                             space_mouse: SpaceMouse::default(),
+                            wheel_gestures: solidcraft_ui_egui::WebWheelGestures::default(),
                         }))
                     }),
                 )

@@ -195,6 +195,65 @@ fn deleting_a_used_parameter_lists_its_users() {
     assert!(g["edges"].as_array().unwrap().iter().any(|e| e[0] == "Feature:Base" && e[1] == dim.as_str()), "{g}");
 }
 
+/// #4420: sheet metal and plastic rules and the plane of a canvas hold expressions too. Renaming a
+/// parameter they use renames it there, and they count as its users (so it can't be deleted).
+#[test]
+fn rules_and_canvases_follow_a_renamed_parameter() {
+    let mut s = Session::default();
+    for (name, expression) in [("gauge", "2 mm"), ("lift", "15 mm"), ("taper", "3 deg")] {
+        run(&mut s, "parameters.add", json!({"name": name, "expression": expression}));
+    }
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "offset": "lift"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "Steel", "thickness": "gauge", "active": true}));
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 2, "body_name": "Tray"}));
+    run(&mut s, "sheet.convert", json!({"body": "Tray", "face": [30, 20, 2], "rule": "Steel"}));
+    run(&mut s, "plastic.manage_rules", json!({"name": "Housing", "draft": "taper", "clearance": "gauge / 10"}));
+    let users = |s: &mut Session, name: &str| -> Vec<String> {
+        let u = run(s, "parameters.users", json!({"name": name}));
+        u["users"].as_array().unwrap().iter().map(|x| x["type"].as_str().unwrap_or_default().to_string()).collect()
+    };
+    assert_eq!(users(&mut s, "gauge"), ["rule", "rule"], "the sheet metal thickness and the plastic clearance");
+    assert_eq!(users(&mut s, "lift"), ["canvas"]);
+    let e = err(&mut s, "parameters.delete", json!({"name": "taper"}));
+    assert!(e.contains("plastic rule Housing (draft)"), "{e}");
+    // The sheet metal features rebuild when a rule's parameter changes, so they are what it drives.
+    let u = run(&mut s, "parameters.users", json!({"name": "gauge"}));
+    assert_eq!(
+        u["drives"].as_array().map(|d| d.iter().map(|x| x["name"].clone()).collect::<Vec<_>>()),
+        Some(vec![json!("ConvertToSheetMetal1")]),
+        "{u}"
+    );
+    let g = run(&mut s, "parameters.graph", json!({}));
+    assert!(g["edges"].as_array().unwrap().iter().any(|e| e[0] == "Feature:ConvertToSheetMetal1" && e[1] == "gauge"), "{g}");
+    assert!(!g["edges"].as_array().unwrap().iter().any(|e| e[0] == "Feature:Box1" && e[1] == "gauge"), "{g}");
+    // Every field of the shared list follows: `gap` was set through `sheet.manage_rules` too.
+    run(&mut s, "parameters.add", json!({"name": "seam", "expression": "0.5 mm"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "Steel", "gap": "seam"}));
+    run(&mut s, "parameters.rename", json!({"name": "seam", "new_name": "joint_gap"}));
+    assert_eq!(s.doc.sheet.rules[0].gap, "joint_gap");
+    for (old, new) in [("gauge", "sheet_t"), ("lift", "raise"), ("taper", "draft_angle")] {
+        run(&mut s, "parameters.rename", json!({"name": old, "new_name": new}));
+    }
+    let failing: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(failing.is_empty(), "{failing:?}");
+    assert_eq!(s.doc.sheet.rules[0].thickness, "sheet_t");
+    let housing = s.doc.plastic.rules.iter().find(|r| r.name == "Housing").unwrap();
+    assert_eq!((housing.draft.as_str(), housing.clearance.as_str()), ("draft_angle", "sheet_t / 10"));
+    assert!(run(&mut s, "plastic.rules", json!({}))["rules"].as_array().unwrap().iter().any(|r| r["name"] == "Housing" && !r["values"].is_null()));
+    match &s.doc.canvases[0].plane {
+        solidcraft_doc::PlaneRef::Offset { distance, .. } => assert_eq!(distance.as_ref(), "raise"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(users(&mut s, "raise"), ["canvas"]);
+    // Undo takes the old names back.
+    for _ in 0..3 {
+        run(&mut s, "edit.undo", json!({}));
+    }
+    assert_eq!(s.doc.sheet.rules[0].thickness, "gauge");
+}
+
 #[test]
 fn favorites_comments_and_completion() {
     let mut s = Session::default();

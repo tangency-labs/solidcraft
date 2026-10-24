@@ -231,7 +231,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let label = s.label();
     if !label.is_empty() {
         let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
-        painter.rect_filled(r, 3.0, tk.accent_soft);
+        painter.rect_filled(r, tk.radius_sm.saturating_sub(1), tk.accent_soft);
         painter.text(r.center(), Align2::CENTER_CENTER, label, FontId::proportional(crate::theme::Tokens::get().font_micro), tk.text);
     }
     crate::scenario::publish_count("drag_guides", s.guides.len() as f64);

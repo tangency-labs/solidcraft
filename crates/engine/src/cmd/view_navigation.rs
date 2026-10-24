@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn normal_to_selection_uses_the_world_normal_of_a_moved_component() {
         let mut s = Session::default();
-        s.execute("component.create", &json!({"name":"Part"})).unwrap();
+        s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
         s.execute("solid.box", &json!({"length":40,"width":30,"height":20})).unwrap();
         s.execute("occurrence.move", &json!({"occurrence":"Part:1","translate":[50,20,10],"axis":[1,2,3],"angle":"37 deg"})).unwrap();
         let state = s.world_state();

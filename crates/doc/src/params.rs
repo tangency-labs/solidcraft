@@ -76,6 +76,9 @@ impl FeatureKind {
             ExprRole::Placement => placement.push(e.as_str()),
         });
         inputs.extend(placement);
+        if let FeatureKind::Sketch { sketch, .. } = self {
+            inputs.extend(sketch.patterns.iter().filter_map(|p| p.count_expression.as_deref()));
+        }
         inputs
     }
 }
@@ -567,6 +570,10 @@ pub enum ParamUser {
     /// A joint's offset, angle or value, or a motion link's gear, rack or screw length (`input`
     /// says which; a link is named by the joint it drives).
     Joint { joint: u64, name: String, input: String },
+    /// A sheet metal or plastic rule's value (`kind` says which, `field` which value).
+    Rule { kind: String, name: String, field: String },
+    /// The plane a canvas lies on (`input` is its label, e.g. `Offset`).
+    Canvas { canvas: u64, name: String, input: String },
 }
 
 impl ParamUser {
@@ -580,6 +587,8 @@ impl ParamUser {
                 None => format!("configuration column {column}"),
             },
             ParamUser::Joint { name, input, .. } => format!("joint {name} ({input})"),
+            ParamUser::Rule { kind, name, field } => format!("{kind} rule {name} ({field})"),
+            ParamUser::Canvas { name, input, .. } => format!("canvas {name} ({input})"),
         }
     }
 }
@@ -694,6 +703,11 @@ impl Document {
                         out.push(ParamUser::Dimension { feature: f.id, name: f.name.clone(), constraint: c.id.clone() });
                     }
                 }
+                for pattern in &sketch.patterns {
+                    if pattern.count_expression.as_ref().is_some_and(|e| expr::references(e).iter().any(|r| r == name)) {
+                        out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: format!("{} Quantity", pattern.id) });
+                    }
+                }
                 for (what, e) in sketch.text_exprs() {
                     if expr::references(e).iter().any(|r| r == name) {
                         out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: what.to_string() });
@@ -706,6 +720,24 @@ impl Document {
                 let jname = self.assembly.joints.iter().find(|j| j.id == joint).map(|j| j.name.clone()).unwrap_or_else(|| joint.to_string());
                 out.push(ParamUser::Joint { joint, name: jname, input });
             }
+        }
+        let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
+        for r in &self.sheet.rules {
+            for (field, _, _) in r.fields().into_iter().filter(|(_, e, _)| uses(e)) {
+                out.push(ParamUser::Rule { kind: "sheet metal".into(), name: r.name.clone(), field: field.into() });
+            }
+        }
+        for r in &self.plastic.rules {
+            for (field, _, _) in r.fields().into_iter().filter(|(_, e, _)| uses(e)) {
+                out.push(ParamUser::Rule { kind: "plastic".into(), name: r.name.clone(), field: field.into() });
+            }
+        }
+        for c in &self.canvases {
+            c.plane.walk_exprs(&mut |(label, e, _, _)| {
+                if uses(e) {
+                    out.push(ParamUser::Canvas { canvas: c.id, name: c.name.clone(), input: label.into() });
+                }
+            });
         }
         out
     }
@@ -783,6 +815,13 @@ impl Document {
                         n += 1;
                     }
                 }
+                for e in sketch.patterns.iter_mut().filter_map(|p| p.count_expression.as_mut()) {
+                    let r = expr::rename_reference(e, old, new);
+                    if r != *e {
+                        *e = r;
+                        n += 1;
+                    }
+                }
                 for e in sketch.text_exprs_mut() {
                     let r = expr::rename_reference(e, old, new);
                     if r != *e {
@@ -817,6 +856,24 @@ impl Document {
                 *e = r;
                 n += 1;
             }
+        }
+        // Sheet metal and plastic rules and canvas planes hold expressions too (#4420).
+        let rules = self.sheet.rules.iter_mut().flat_map(|r| r.fields_mut()).chain(self.plastic.rules.iter_mut().flat_map(|r| r.fields_mut()));
+        for (_, e) in rules {
+            let r = expr::rename_reference(e, old, new);
+            if r != *e {
+                *e = r;
+                n += 1;
+            }
+        }
+        for c in &mut self.canvases {
+            c.plane.walk_exprs_mut(&mut |(_, e, _, _)| {
+                let r = expr::rename_reference(e, old, new);
+                if r != *e {
+                    *e = r.into();
+                    n += 1;
+                }
+            });
         }
         if let Some(c) = self.param_comments.remove(old) {
             self.param_comments.insert(new.to_string(), c);
@@ -853,6 +910,14 @@ impl Document {
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
                 names.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
                 names.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
+                names.extend(sketch.patterns.iter().filter_map(|p| p.count_expression.as_deref()).flat_map(expr::references));
+            }
+            // Sheet metal and plastic features rebuild when their rules' parameters change (#4420).
+            if f.kind.is_sheet() {
+                names.extend(self.sheet.rules.iter().flat_map(|r| r.fields()).flat_map(|(_, e, _)| expr::references(e)));
+            }
+            if f.kind.is_plastic() {
+                names.extend(self.plastic.rules.iter().flat_map(|r| r.fields()).flat_map(|(_, e, _)| expr::references(e)));
             }
             out.extend(names.into_iter().map(|n| (format!("Feature:{}", f.name), n)));
         }
@@ -874,9 +939,15 @@ impl Document {
                 break;
             }
         }
+        // A rule that uses it changes every sheet metal (or plastic) feature: the evaluation
+        // hashes the rules into their fingerprint.
+        let uses = |e: &String| expr::references(e).iter().any(|r| affected.contains(r));
+        let sheet = self.sheet.rules.iter().any(|r| r.fields().iter().any(|(_, e, _)| uses(e)));
+        let plastic = self.plastic.rules.iter().any(|r| r.fields().iter().any(|(_, e, _)| uses(e)));
         let mut out = Vec::new();
         for f in &self.features {
             let mut hit = f.param_names.iter().any(|n| affected.contains(n));
+            hit |= (sheet && f.kind.is_sheet()) || (plastic && f.kind.is_plastic());
             hit |= f.kind.expressions().iter().any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
                 hit |= sketch.constraints.iter().any(|c| c.param.as_ref().is_some_and(|p| affected.contains(p)));

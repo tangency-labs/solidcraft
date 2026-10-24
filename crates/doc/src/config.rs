@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{DocError, Document, Result};
+use crate::{DEFAULT_MATERIAL, DocError, Document, Result};
 
 #[path = "config_rules.rs"]
 mod rules;
@@ -96,7 +96,7 @@ impl Document {
     /// returning None for the default material.
     pub fn material_cell(&self, value: &str) -> Result<Option<String>> {
         let name = self.material_name(value).ok_or_else(|| DocError::Invalid(format!("unknown configuration material `{value}`")))?;
-        Ok((name != "Default").then_some(name))
+        Ok((name != DEFAULT_MATERIAL).then_some(name))
     }
 
     /// Freeze design-unit-sensitive configuration literals when changing display units.
@@ -140,7 +140,7 @@ impl Document {
                 }
             }),
             Column::Suppress(id) => self.feature(*id).map(|f| f.suppressed.to_string()),
-            Column::Material(body) => Some(self.materials.get(body).cloned().unwrap_or_else(|| "Default".into())),
+            Column::Material(body) => Some(self.materials.get(body).cloned().unwrap_or_else(|| DEFAULT_MATERIAL.into())),
             Column::Appearance(body) => Some(self.appearances.bodies.get(body).and_then(|look| serde_json::to_string(look).ok()).unwrap_or_default()),
             Column::ComponentAppearance(id) => {
                 Some(self.appearances.components.get(id).and_then(|look| serde_json::to_string(look).ok()).unwrap_or_default())

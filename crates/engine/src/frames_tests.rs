@@ -37,7 +37,7 @@ fn volume(s: &mut Session) -> f64 {
 /// and a construction plane, moved 50 mm along X.
 fn moved_part() -> Session {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}));
     run(&mut s, "sketch.finish", json!({}));
@@ -211,7 +211,7 @@ fn sketch_world_points(s: &mut Session, sketch: &str) -> Vec<Vec3> {
 /// A block "C" (40 x 30 x 20) in its own component, the root active again.
 fn block_in_component() -> Session {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name": "C"}));
+    run(&mut s, "component.create", json!({"name": "C", "grounded": false}));
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
     run(&mut s, "component.activate", json!({"component": "root"}));
     s

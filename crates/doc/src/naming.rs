@@ -805,6 +805,48 @@ pub fn face_name_at_body(body: &ModelBody, point: Vec3) -> Option<String> {
     face_names(body).get(index).filter(|name| !name.is_empty()).cloned()
 }
 
+/// The names the faces of `imported` have in `part`, by body, then face (empty where not known):
+/// `imported` are the bodies read back from the STEP text `part`'s solid bodies were written to
+/// (a linked design), where they stand in it. Each takes the names of the solid of `part` that
+/// most of its faces lie on, face by face: the same geometry, so a point well inside a face lies
+/// on the face it was written from (and on a face of another solid only where two touch). Of
+/// solids that hold as many (two alike in one place), the one the file names it after.
+pub fn carried_face_names(part: &ModelState, imported: &[solidcraft_kernel::ImportedBody]) -> Vec<Vec<String>> {
+    let solids: Vec<&ModelBody> = part.bodies.iter().filter(|b| !b.body.is_mesh()).collect();
+    let indices: Vec<OnceLock<Option<FaceIndex>>> = solids.iter().map(|_| OnceLock::new()).collect();
+    imported
+        .iter()
+        .map(|read| {
+            let probe = ModelBody::new(String::new(), read.body.clone(), 0);
+            let points: Vec<Option<Vec3>> = face_spots(&probe).into_iter().map(|s| s.map(|s| s.point)).collect();
+            let best = solids
+                .iter()
+                .zip(&indices)
+                .filter_map(|(b, index)| {
+                    let tol = (b.body.size() * 2e-3).max(1e-3);
+                    let near = b.outline_bounds().inflated(tol);
+                    if !points.iter().flatten().any(|p| near.contains(*p)) {
+                        return None;
+                    }
+                    // Like face_name_at_body, a body too large to index is left unnamed.
+                    let index = index
+                        .get_or_init(|| {
+                            let mesh = b.mesh();
+                            (mesh.triangles.len() <= 2_000_000 && face_count(b) <= 50_000).then(|| FaceIndex::new(&mesh, face_count(b)))
+                        })
+                        .as_ref()?;
+                    let hits: Vec<Option<usize>> = points.iter().map(|p| p.and_then(|p| index.face_at(p, tol))).collect();
+                    Some((hits.iter().flatten().count(), *b, hits))
+                })
+                .filter(|(n, ..)| *n > 0)
+                .max_by_key(|(n, b, _)| (*n, b.name == read.name));
+            let Some((_, b, hits)) = best else { return Vec::new() };
+            let names = face_names(b);
+            hits.into_iter().map(|h| h.and_then(|i| names.get(i).cloned()).unwrap_or_default()).collect()
+        })
+        .collect()
+}
+
 /// Where a face is, for a script: a point that lies on it and picks it, and the plane, cylinder,
 /// cone, sphere or torus it is part of (when it is one).
 #[derive(Clone, Copy, Debug)]

@@ -1,4 +1,4 @@
-//! Colour themes as files (#2255): a `solidcraft-theme/1` JSON file names a base palette (the
+//! Colour and shape themes as files (#2255): a `solidcraft-theme/1` JSON file names a base palette (the
 //! built-in Dark or Light) and sets any of its [`Tokens`] by name, so a theme can be a handful of
 //! lines. Built-in themes (Gruvbox and others) are such files under `assets/styles/ui/themes/`;
 //! imported ones are kept in the preferences (`Prefs::custom_themes`), so they also work in the
@@ -68,7 +68,7 @@ impl Base {
     }
 }
 
-/// A theme: its id (the `theme` preference's value), name, base and colour overrides, each a
+/// A theme: its id (the `theme` preference's value), name, base, optional radii and colour overrides, each a
 /// `#rrggbb` / `#rrggbbaa` string or a list of them, keyed by [`keys`].
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ThemeFile {
@@ -76,6 +76,166 @@ pub struct ThemeFile {
     pub name: String,
     pub base: Base,
     pub colors: BTreeMap<String, Value>,
+    /// Optional corner radii in logical UI points. Missing entries keep the base values.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub radii: BTreeMap<String, u8>,
+    /// Optional border roles; absent entries retain the existing surface-specific styling.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub borders: BTreeMap<String, Value>,
+    /// SVG display roles and three-colour semantic ramps; omitted values keep compiled defaults.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub icon_palette: BTreeMap<String, Value>,
+}
+
+/// Maximum imported radius, in logical UI points; widgets clamp to their own bounds.
+const MAX_RADIUS: u8 = 32;
+const RADIUS_KEYS: [&str; 6] = ["radius_sm", "radius_md", "radius_lg", "radius_xl", "control_radius", "sketch_mode_radius"];
+
+fn radius_slot<'a>(t: &'a mut Tokens, key: &str) -> Option<&'a mut u8> {
+    match key {
+        "radius_sm" => Some(&mut t.radius_sm),
+        "radius_md" => Some(&mut t.radius_md),
+        "radius_lg" => Some(&mut t.radius_lg),
+        "radius_xl" => Some(&mut t.radius_xl),
+        "control_radius" => Some(&mut t.control_radius),
+        "sketch_mode_radius" => Some(&mut t.sketch_mode_radius),
+        _ => None,
+    }
+}
+
+impl ThemeFile {
+    /// Validate direct control-channel preference updates as strictly as file imports.
+    pub(crate) fn validate_radii(&self) -> Result<(), String> {
+        for (key, value) in &self.radii {
+            if !RADIUS_KEYS.contains(&key.as_str()) {
+                return Err(format!("`radii.{key}` is not a theme radius"));
+            }
+            if *value > MAX_RADIUS {
+                return Err(format!("`radii.{key}` must be an integer from 0 to {MAX_RADIUS}"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Strictly bounded strokes shared by file imports and direct preference updates.
+pub(crate) fn parse_borders(values: &BTreeMap<String, Value>) -> Result<crate::theme::Borders, String> {
+    use crate::theme::{Bevel, Borders, InsetBorder};
+    if values.len() > 7 {
+        return Err("`borders` has more than seven roles".into());
+    }
+    let mut borders = Borders::default();
+    for (key, value) in values {
+        let obj = value.as_object().ok_or_else(|| format!("`borders.{key}` must be an object"))?;
+        if key == "bevel" {
+            if obj.keys().any(|k| !matches!(k.as_str(), "width" | "highlight" | "light" | "shadow" | "dark_shadow")) {
+                return Err("`borders.bevel` has an unknown setting".into());
+            }
+            let width = obj
+                .get("width")
+                .and_then(Value::as_f64)
+                .filter(|v| v.is_finite() && *v > 0.0 && *v <= 2.0)
+                .ok_or("`borders.bevel.width` must be a finite number greater than 0 and at most 2")? as f32;
+            let color = |name: &str| {
+                obj.get(name)
+                    .and_then(Value::as_str)
+                    .and_then(parse_color)
+                    .ok_or_else(|| format!("`borders.bevel.{name}` must be #rrggbb or #rrggbbaa"))
+            };
+            borders.bevel = Some(Bevel {
+                width,
+                highlight: color("highlight")?,
+                light: color("light")?,
+                shadow: color("shadow")?,
+                dark_shadow: color("dark_shadow")?,
+            });
+            continue;
+        }
+        if obj.keys().any(|k| k != "color" && k != "width" && !(key == "primary_inset" && k == "gap") && !(key == "secondary" && k == "pattern")) {
+            return Err(format!("`borders.{key}` has an unknown setting"));
+        }
+        let number = |name: &str, max: f64| -> Result<f32, String> {
+            obj.get(name)
+                .and_then(Value::as_f64)
+                .filter(|v| v.is_finite() && *v >= 0.0 && *v <= max)
+                .map(|v| v as f32)
+                .ok_or_else(|| format!("`borders.{key}.{name}` must be a finite number from 0 to {max}"))
+        };
+        let width = number("width", 4.0)?;
+        let color = obj
+            .get("color")
+            .and_then(Value::as_str)
+            .and_then(parse_color)
+            .ok_or_else(|| format!("`borders.{key}.color` must be #rrggbb or #rrggbbaa"))?;
+        let stroke = egui::Stroke::new(width, color);
+        match key.as_str() {
+            "primary" => borders.primary = Some(stroke),
+            "secondary" => {
+                borders.secondary = Some(stroke);
+                borders.secondary_dotted = match obj.get("pattern") {
+                    None => false,
+                    Some(Value::String(pattern)) if pattern == "solid" => false,
+                    Some(Value::String(pattern)) if pattern == "dotted" => true,
+                    _ => return Err("`borders.secondary.pattern` must be solid or dotted".into()),
+                };
+            }
+            "tertiary" => borders.tertiary = Some(stroke),
+            "container" => borders.container = Some(stroke),
+            "control" => borders.control = Some(stroke),
+            "primary_inset" => borders.primary_inset = Some(InsetBorder { stroke, gap: number("gap", 12.0)? }),
+            _ => return Err(format!("`borders.{key}` is not a border role")),
+        }
+    }
+    Ok(borders)
+}
+
+/// Import only known, opaque SVG roles and bounded semantic ramps. GAP remains an eraser.
+pub(crate) fn parse_icon_palette(values: &BTreeMap<String, Value>) -> Result<Option<crate::icon_svg::Palette>, String> {
+    use crate::icon_svg::{ACCENT_NAMES, Palette, ROLE_NAMES};
+    if values.is_empty() {
+        return Ok(None);
+    }
+    if values.len() > ROLE_NAMES.len() + ACCENT_NAMES.len() + 1 {
+        return Err("too many icon palette entries".into());
+    }
+    let mut palette = Palette::default();
+    for (name, value) in values {
+        let ramp = if name == "solid" { Some(0) } else { ACCENT_NAMES.iter().position(|a| *a == name).map(|a| a + 1) };
+        let role = ROLE_NAMES.iter().position(|r| *r == name && *r != "gap");
+        if ramp.is_none() && role.is_none() {
+            return Err(format!("`icon_palette.{name}` is not an SVG role or semantic ramp"));
+        }
+        let colors = colors_of(value, if ramp.is_some() { 3 } else { 1 }).map_err(|e| format!("`icon_palette.{name}` {e}"))?;
+        if colors.iter().any(|c| c.a() != 255) {
+            return Err(format!("`icon_palette.{name}` must use opaque colours"));
+        }
+        let rgb = |c: &Color32| [c.r(), c.g(), c.b()];
+        if let Some(slot) = ramp.and_then(|r| palette.accents.get_mut(r)) {
+            if let [a, b, c] = colors.as_slice() {
+                *slot = Some([rgb(a), rgb(b), rgb(c)]);
+            }
+        } else if let Some((slot, color)) = role.and_then(|r| palette.roles.get_mut(r)).zip(colors.first()) {
+            *slot = Some(rgb(color));
+        }
+    }
+    Ok(Some(palette))
+}
+
+fn export_icon_palette(palette: Option<crate::icon_svg::Palette>) -> BTreeMap<String, Value> {
+    let mut out = BTreeMap::new();
+    let Some(palette) = palette else { return out };
+    let hex = |[r, g, b]: [u8; 3]| format!("#{r:02x}{g:02x}{b:02x}");
+    for (name, color) in crate::icon_svg::ROLE_NAMES.iter().zip(palette.roles) {
+        if let Some(rgb) = color {
+            out.insert((*name).into(), json!(hex(rgb)));
+        }
+    }
+    for (name, ramp) in std::iter::once("solid").chain(crate::icon_svg::ACCENT_NAMES.iter().copied()).zip(palette.accents) {
+        if let Some(colors) = ramp {
+            out.insert(name.into(), json!(colors.map(hex)));
+        }
+    }
+    out
 }
 
 /// The settable colours: a key, and where it lives in [`Tokens`]. `one` keys take a colour,
@@ -92,6 +252,17 @@ macro_rules! theme_keys {
             k
         }
 
+        /// Stable identity of resolved colours, including custom themes with the same base/id.
+        /// Share the token inventory with import/export so added colour tokens cannot be missed.
+        pub(crate) fn color_key(t: &Tokens) -> u64 {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            $(t.$one.hash(&mut h);)*
+            $(t.$many.hash(&mut h);)*
+            $(t.icons.$ione.hash(&mut h);)*
+            h.finish()
+        }
+
         fn slot<'a>(t: &'a mut Tokens, key: &str) -> Option<&'a mut [Color32]> {
             match key {
                 $(stringify!($one) => Some(std::slice::from_mut(&mut t.$one)),)*
@@ -106,7 +277,7 @@ macro_rules! theme_keys {
             // Not colours: the hover lift is a grey step, the analysis colours belong to shaders.
             let Tokens {
                 $($one: _,)* $($many: _,)*
-                hover_face_lift: _, analysis: _, icons: _,
+                hover_face_lift: _, analysis: _, icons: _, borders: _, icon_palette: _,
                 file_action_height: _, file_back_height: _, file_recovery_icon: _, file_grid_gap: _,
                 file_nav_width: _, file_nav_height: _, file_tile_height: _, file_tile_icon: _, file_recent_height: _,
                 file_sample_image_height: _, file_content_inset_x: _, file_content_inset_y: _, file_section_gap: _, font_start_title: _,
@@ -175,8 +346,21 @@ fn colors_of(v: &Value, len: usize) -> Result<Vec<Color32>, String> {
     list.into_iter().map(|c| c.as_str().and_then(parse_color).ok_or_else(|| format!("`{c}` is not a colour such as \"#282828\""))).collect()
 }
 
+// The application mark now has three faces and no outline. Older theme exports and
+// saved preferences carry a fourth, retired outline colour; keep their face colours.
+fn colors_for_key(key: &str, value: &Value, len: usize) -> Result<Vec<Color32>, String> {
+    if key == "logo"
+        && len == 3
+        && let Value::Array(colors) = value
+        && colors.len() == 4
+    {
+        return colors_of(&Value::Array(colors.iter().take(len).cloned().collect()), len);
+    }
+    colors_of(value, len)
+}
+
 /// A theme file's text, checked: the format tag, a name, a base and only known keys with valid
-/// colours. Nothing is taken from a file with any error; the message names every bad key.
+/// colours and bounded radii. Nothing is taken from a file with any error; the message names every bad key.
 pub fn parse(text: &str) -> Result<ThemeFile, String> {
     if text.len() > MAX_BYTES {
         return Err(format!("a theme file is at most {} KiB", MAX_BYTES / 1024));
@@ -214,17 +398,49 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
         match slot(&mut probe, k) {
             None => bad.push(format!("`{k}` is not a theme colour")),
             Some(s) => {
-                if let Err(e) = colors_of(c, s.len()) {
+                if let Err(e) = colors_for_key(k, c, s.len()) {
                     bad.push(format!("`{k}` {e}"));
                 }
             }
         }
     }
+    let radii = match v.get("radii") {
+        None => BTreeMap::new(),
+        Some(Value::Object(values)) => {
+            if values.len() > RADIUS_KEYS.len() {
+                return Err(format!("`radii` has more than {} entries", RADIUS_KEYS.len()));
+            }
+            let mut radii = BTreeMap::new();
+            for (key, value) in values {
+                if !RADIUS_KEYS.contains(&key.as_str()) {
+                    bad.push(format!("`radii.{key}` is not a theme radius"));
+                } else if let Some(n) = value.as_u64().filter(|n| *n <= u64::from(MAX_RADIUS)) {
+                    radii.insert(key.clone(), n as u8);
+                } else {
+                    bad.push(format!("`radii.{key}` must be an integer from 0 to {MAX_RADIUS}"));
+                }
+            }
+            radii
+        }
+        Some(_) => return Err("`radii` must be an object of radius names and values".into()),
+    };
     if !bad.is_empty() {
         bad.truncate(8);
         return Err(bad.join("; "));
     }
-    Ok(ThemeFile { id: slug(name), name: name.to_string(), base, colors: src.into_iter().collect() })
+    let borders = match v.get("borders") {
+        None => BTreeMap::new(),
+        Some(Value::Object(values)) => values.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        Some(_) => return Err("`borders` must be an object of border roles".into()),
+    };
+    parse_borders(&borders)?;
+    let icon_palette = match v.get("icon_palette") {
+        None => BTreeMap::new(),
+        Some(Value::Object(values)) => values.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        Some(_) => return Err("`icon_palette` must be an object of SVG roles and ramps".into()),
+    };
+    parse_icon_palette(&icon_palette)?;
+    Ok(ThemeFile { id: slug(name), name: name.to_string(), base, colors: src.into_iter().collect(), radii, borders, icon_palette })
 }
 
 /// An id from a name: lower-case letters, digits and dashes.
@@ -241,17 +457,27 @@ fn slug(name: &str) -> String {
     if s.is_empty() { "theme".into() } else { s }
 }
 
-/// The theme's palette: its base with its colours on top. A colour the saved preferences hold
+/// The theme's tokens: its base with its colours and radii on top. A colour the saved preferences hold
 /// that this version can't read (a hand edit) is skipped, never an error.
 pub fn resolve(theme: &ThemeFile) -> Tokens {
     let mut t = if theme.base.is_dark() { Tokens::dark() } else { Tokens::light() };
     for (k, v) in &theme.colors {
         if let Some(s) = slot(&mut t, k)
-            && let Ok(c) = colors_of(v, s.len())
+            && let Ok(c) = colors_for_key(k, v, s.len())
         {
             s.copy_from_slice(&c);
         }
     }
+    for (key, value) in &theme.radii {
+        if *value <= MAX_RADIUS
+            && let Some(slot) = radius_slot(&mut t, key)
+        {
+            *slot = *value;
+        }
+    }
+    // Malformed hand-edited saved settings cannot introduce non-finite drawing geometry.
+    t.borders = parse_borders(&theme.borders).unwrap_or_default();
+    t.icon_palette = parse_icon_palette(&theme.icon_palette).unwrap_or_default();
     t
 }
 
@@ -265,7 +491,37 @@ pub fn export(name: &str, base: Base, t: &Tokens) -> Value {
             colors.insert(k.to_string(), v);
         }
     }
-    json!({"format": FORMAT, "name": name, "base": base, "colors": colors})
+    let radii: BTreeMap<_, _> = RADIUS_KEYS.into_iter().filter_map(|key| radius_slot(&mut t, key).map(|value| (key, *value))).collect();
+    let mut borders = serde_json::Map::new();
+    for (key, stroke) in [
+        ("primary", t.borders.primary),
+        ("secondary", t.borders.secondary),
+        ("tertiary", t.borders.tertiary),
+        ("container", t.borders.container),
+        ("control", t.borders.control),
+    ] {
+        if let Some(stroke) = stroke {
+            borders.insert(key.into(), json!({"width": stroke.width, "color": format_color(stroke.color)}));
+        }
+    }
+    if t.borders.secondary_dotted
+        && let Some(secondary) = borders.get_mut("secondary").and_then(Value::as_object_mut)
+    {
+        secondary.insert("pattern".into(), json!("dotted"));
+    }
+    if let Some(inset) = t.borders.primary_inset {
+        borders.insert("primary_inset".into(), json!({"width": inset.stroke.width, "color": format_color(inset.stroke.color), "gap": inset.gap}));
+    }
+    if let Some(bevel) = t.borders.bevel {
+        let shadow = format_color(bevel.shadow);
+        borders.insert(
+            "bevel".into(),
+            json!({"width": bevel.width, "highlight": format_color(bevel.highlight),
+            "light": format_color(bevel.light), "shadow": shadow, "dark_shadow": format_color(bevel.dark_shadow)}),
+        );
+    }
+    let icon_palette = export_icon_palette(t.icon_palette);
+    json!({"format": FORMAT, "name": name, "base": base, "colors": colors, "radii": radii, "borders": borders, "icon_palette": icon_palette})
 }
 
 /// The theme files that come with SolidCraft (original files; Gruvbox, Tokyo Night, Solarized, Nord, Nosferatu and Catppuccin map open-source palettes, MIT).
@@ -340,6 +596,134 @@ mod tests {
     use super::*;
 
     #[test]
+    fn border_roles_roundtrip_on_either_base_and_preserve_legacy_defaults() {
+        use crate::theme::{BorderRole, Borders};
+        let settings = json!({
+            "primary":{"width":4,"color":"#ffffff"}, "secondary":{"width":1.5,"color":"#aabbcc","pattern":"dotted"},
+            "container":{"width":1,"color":"#a8c8ed"},
+            "tertiary":{"width":0,"color":"#00000000"}, "control":{"width":0.5,"color":"#123456"},
+            "primary_inset":{"width":0.75,"color":"#ffffff80","gap":12}
+        });
+        for base in ["dark", "light"] {
+            let old = from_value(&json!({"format":FORMAT,"name":"Old","base":base})).unwrap();
+            assert_eq!(resolve(&old).borders, Borders::LEGACY);
+            let legacy = egui::Stroke::new(2.5, Color32::RED);
+            for role in [BorderRole::Primary, BorderRole::Secondary, BorderRole::Tertiary, BorderRole::Container, BorderRole::Control] {
+                assert_eq!(resolve(&old).borders.stroke(role, legacy), legacy);
+            }
+            let file = from_value(&json!({"format":FORMAT,"name":"New","base":base,"borders":settings})).unwrap();
+            let t = resolve(&file);
+            assert_eq!(t.primary_border(Color32::BLACK).width, 4.0);
+            assert!(t.borders.secondary_dotted);
+            assert_eq!(t.tertiary_border(Color32::WHITE).width, 0.0);
+            assert_eq!(t.control_border_stroke(Color32::WHITE).color, Color32::from_rgb(0x12, 0x34, 0x56));
+            assert_eq!(resolve(&from_value(&export("New", file.base, &t)).unwrap()), t);
+            assert_eq!(serde_json::from_value::<ThemeFile>(serde_json::to_value(&file).unwrap()).unwrap(), file);
+        }
+        let saved: ThemeFile = serde_json::from_value(json!({"id":"old","name":"Old","base":"dark","colors":{}})).unwrap();
+        assert!(saved.borders.is_empty());
+        let partial =
+            from_value(&json!({"format":FORMAT,"name":"Partial","base":"dark","borders":{"secondary":{"width":2,"color":"#ffffff"}}})).unwrap();
+        assert_eq!(resolve(&partial).primary_border(Color32::RED), egui::Stroke::new(1.0, Color32::RED));
+    }
+
+    #[test]
+    fn malformed_border_settings_are_refused_and_saved_settings_are_safe() {
+        for settings in [
+            json!([]),
+            json!({"unknown":{"width":1,"color":"#ffffff"}}),
+            json!({"primary":true}),
+            json!({"primary":{"width":-1,"color":"#ffffff"}}),
+            json!({"primary":{"width":4.1,"color":"#ffffff"}}),
+            json!({"primary":{"width":"1","color":"#ffffff"}}),
+            json!({"primary":{"width":1,"color":"white"}}),
+            json!({"primary":{"width":1,"color":"#ffffff","gap":1}}),
+            json!({"primary_inset":{"width":1,"color":"#ffffff","gap":13}}),
+            json!({"primary_inset":{"width":1,"color":"#ffffff"}}),
+        ] {
+            assert!(from_value(&json!({"format":FORMAT,"name":"Bad","base":"dark","borders":settings})).is_err(), "{settings}");
+        }
+        let file = ThemeFile { borders: BTreeMap::from([("primary".into(), json!({"width":1e100,"color":"#ffffff"}))]), ..Default::default() };
+        assert_eq!(resolve(&file).borders, crate::theme::Borders::LEGACY);
+        assert!(parse_borders(&BTreeMap::from([("primary".into(), json!({"width":null,"color":"#ffffff"}))])).is_err());
+        assert_eq!(resolve(find("blueprint", &[]).unwrap()).borders.primary.unwrap().color, Color32::WHITE);
+        for id in ["gruvbox-dark", "gruvbox-light", "gruvbox-dark-soft", "gruvbox-light-soft"] {
+            assert_eq!(resolve(find(id, &[]).unwrap()).borders, crate::theme::Borders::LEGACY);
+        }
+    }
+
+    #[test]
+    fn bevel_settings_roundtrip_and_reject_invalid_values() {
+        let bevel = json!({"width":1,"highlight":"#ffffff","light":"#dfdfdf","shadow":"#808080","dark_shadow":"#000000"});
+        for base in ["light", "dark"] {
+            let source = json!({"format":FORMAT,"name":"Beveled","base":base,"borders":{"bevel":bevel}});
+            let file = from_value(&source).unwrap();
+            let tokens = resolve(&file);
+            assert_eq!(resolve(&from_value(&export("Beveled", file.base, &tokens)).unwrap()), tokens);
+            assert_eq!(tokens.input_fill(), tokens.field);
+            for invalid in [json!(0), json!(-1), json!(2.1), json!("1"), Value::Null] {
+                let mut bad = source.clone();
+                bad["borders"]["bevel"]["width"] = invalid;
+                assert!(from_value(&bad).is_err());
+            }
+            for key in ["highlight", "light", "shadow", "dark_shadow"] {
+                let mut bad = source.clone();
+                bad["borders"]["bevel"][key] = json!("white");
+                assert!(from_value(&bad).is_err());
+            }
+            let mut bad = source;
+            bad["borders"]["bevel"]["extra"] = json!(true);
+            assert!(from_value(&bad).is_err());
+        }
+        for theme in builtin() {
+            assert_eq!(resolve(theme).borders.bevel.is_some(), theme.id == "solidcraft-95", "{}", theme.id);
+        }
+    }
+
+    #[test]
+    fn icon_palette_import_export_is_bounded_and_keeps_legacy_defaults() {
+        let source = json!({"format":FORMAT,"name":"Icons","base":"dark","icon_palette": {
+            "ink":"#123456", "line":"#abcdef", "solid":["#c0d0e0","#456789","#123456"],
+            "sketch":["#c0e0d0","#458967","#125634"] }});
+        let file = from_value(&source).unwrap();
+        let tokens = resolve(&file);
+        assert!(tokens.icon_palette.is_some());
+        assert_eq!(resolve(&from_value(&export("Icons", file.base, &tokens)).unwrap()), tokens);
+        for (key, value) in [
+            ("gap", json!("#ffffff")),
+            ("unknown", json!("#ffffff")),
+            ("ink", json!("#ffffff80")),
+            ("solid", json!(["#ffffff"])),
+            ("surface", json!(["#ffffff", "#ffffff", "no"])),
+        ] {
+            let mut bad = source.clone();
+            bad["icon_palette"][key] = value;
+            assert!(from_value(&bad).is_err(), "{bad}");
+        }
+        let old = from_value(&json!({"format":FORMAT,"name":"Legacy","base":"light"})).unwrap();
+        assert!(resolve(&old).icon_palette.is_none());
+        let damaged = ThemeFile { icon_palette: BTreeMap::from([("gap".into(), json!("#ffffff"))]), ..Default::default() };
+        assert!(resolve(&damaged).icon_palette.is_none());
+    }
+
+    #[test]
+    fn shipped_themes_have_readable_distinct_workspace_colours_and_icon_palettes() {
+        use crate::theme::{TabAccent, contrast_ratio};
+        assert_eq!(builtin().len(), BUILTIN.len(), "all shipped themes must be valid");
+        for file in builtin() {
+            let t = resolve(file);
+            assert!(t.icon_palette.is_some(), "{} has no icon palette", file.id);
+            let mut fills = std::collections::HashSet::new();
+            for tab in ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER", "SKETCH"] {
+                let accent = TabAccent::for_tab(&t, tab);
+                assert!(fills.insert(accent.color), "{} repeats {tab}", file.id);
+                assert!(contrast_ratio(accent.ink, accent.soft) >= 4.5, "{} {tab} soft text", file.id);
+                assert!(contrast_ratio(accent.on_fill(&t), accent.color) >= 4.5, "{} {tab} pill text", file.id);
+            }
+        }
+    }
+
+    #[test]
     fn built_in_themes_read_and_differ_from_their_base() {
         assert_eq!(builtin().len(), BUILTIN.len(), "every built-in theme file reads");
         for t in builtin() {
@@ -366,11 +750,15 @@ mod tests {
         let mut file = export("Older theme", Base::Dark, &Tokens::dark());
         let colors = file.get_mut("colors").and_then(Value::as_object_mut).unwrap();
         colors.insert("panel".into(), json!("#102030"));
+        colors.insert("logo".into(), json!(["#102030", "#405060", "#708090", "#000000"]));
         for key in RETIRED_COLORS {
             colors.insert((*key).into(), json!("#abcdef"));
         }
         let imported = from_value(&file).unwrap();
         assert_eq!(resolve(&imported).panel, Color32::from_rgb(0x10, 0x20, 0x30));
+        let resolved = resolve(&imported);
+        assert_eq!(resolved.logo, [parse_color("#102030").unwrap(), parse_color("#405060").unwrap(), parse_color("#708090").unwrap()]);
+        assert_eq!(export("Current", Base::Dark, &resolved)["colors"]["logo"].as_array().unwrap().len(), 3);
         assert_eq!(imported.colors.len(), keys().len());
         assert!(RETIRED_COLORS.iter().all(|key| !imported.colors.contains_key(*key)));
     }
@@ -437,5 +825,74 @@ mod tests {
         }
         assert!(add(&mut custom, mk("one too many")).is_err());
         assert!(find("gruvbox-dark", &custom).is_some() && find("mine", &custom).is_some() && find("dark", &custom).is_none());
+    }
+
+    fn radius_values(mut tokens: Tokens) -> Vec<u8> {
+        RADIUS_KEYS.iter().map(|key| *radius_slot(&mut tokens, key).unwrap()).collect()
+    }
+
+    #[test]
+    fn optional_radii_preserve_old_files_and_saved_preferences() {
+        for base in [Base::Dark, Base::Light] {
+            let file = json!({"format": FORMAT, "name": "Old", "base": base});
+            let parsed = from_value(&file).unwrap();
+            let defaults = if base.is_dark() { Tokens::dark() } else { Tokens::light() };
+            assert_eq!(resolve(&parsed), defaults);
+            // Preferences serialize ThemeFile directly, without the export format wrapper.
+            let stored = json!({"id": "old", "name": "Old", "base": base, "colors": {}});
+            let old: ThemeFile = serde_json::from_value(stored).unwrap();
+            assert_eq!(resolve(&old), defaults);
+            let partial = from_value(&json!({"format": FORMAT, "name": "Partial", "base": base, "radii": {"control_radius": 0}})).unwrap();
+            assert_eq!(resolve(&partial), Tokens { control_radius: 0, ..defaults });
+        }
+    }
+
+    #[test]
+    fn every_radius_round_trips_through_export_and_preferences_on_either_base() {
+        for values in [[0; 6], [1, 2, 3, 4, 5, 6], [32; 6]] {
+            let mut tokens = Tokens::dark();
+            for (key, value) in RADIUS_KEYS.iter().zip(values) {
+                *radius_slot(&mut tokens, key).unwrap() = value;
+            }
+            for base in [Base::Dark, Base::Light] {
+                let parsed = from_value(&export("Shapes", base, &tokens)).unwrap();
+                let restored: ThemeFile = serde_json::from_value(serde_json::to_value(&parsed).unwrap()).unwrap();
+                assert_eq!(radius_values(resolve(&restored)), values);
+                assert_eq!(restored.radii.len(), RADIUS_KEYS.len());
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_radii_are_refused_and_hand_edited_preferences_resolve_safely() {
+        for value in [json!(-1), json!(33), json!(256), json!(1.5), json!("4"), json!(null), json!(true), json!([4]), json!({})] {
+            let error = from_value(&json!({"format": FORMAT, "name": "Bad", "base": "dark", "radii": {"control_radius": value}})).unwrap_err();
+            assert!(error.contains("radii.control_radius"), "{error}");
+        }
+        assert!(from_value(&json!({"format": FORMAT, "name": "Bad", "base": "dark", "radii": []})).unwrap_err().contains("radii"));
+        let error = from_value(&json!({"format": FORMAT, "name": "Bad", "base": "dark", "radii": {"typo": 4, "radius_sm": -1}})).unwrap_err();
+        assert!(error.contains("radii.typo") && error.contains("radii.radius_sm"));
+        let hand_edited = ThemeFile { radii: BTreeMap::from([("radius_sm".into(), 255), ("typo".into(), 6)]), ..Default::default() };
+        assert_eq!(resolve(&hand_edited), Tokens::dark());
+    }
+
+    #[test]
+    fn built_in_shapes_match_their_character_and_light_dark_families_agree() {
+        let values = |id: &str| radius_values(resolve(find(id, &[]).unwrap()));
+        for id in ["platinum-9", "green-phosphor", "amber-phosphor"] {
+            assert_eq!(values(id), [0; 6], "{id}");
+        }
+        assert_eq!(values("solidcraft-95"), [3, 3, 4, 4, 3, 3]);
+        assert_eq!(values("blueprint"), [4, 6, 8, 10, 6, 7]);
+        assert_eq!(values("cupertino"), [6, 8, 12, 16, 8, 9]);
+        let defaults = radius_values(Tokens::dark());
+        assert_eq!(defaults, radius_values(Tokens::light()));
+        for suffix in ["", "-hard", "-soft"] {
+            assert_eq!(values(&format!("gruvbox-dark{suffix}")), defaults);
+            assert_eq!(values(&format!("gruvbox-light{suffix}")), defaults);
+        }
+        for file in builtin().iter().filter(|file| file.radii.is_empty()) {
+            assert_eq!(radius_values(resolve(file)), defaults, "{}", file.id);
+        }
     }
 }

@@ -16,9 +16,16 @@ fn flag<T: std::str::FromStr>(args: &[String], name: &str, default: T) -> T {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
+/// The options `fuzz` takes, and the ones that stand alone.
+const OPTIONS: &[&str] = &["--from", "--count", "--jobs", "--timeout", "--steps", "--out", "--report"];
+const SWITCHES: &[&str] = &["--minimise"];
+
 /// One seed: a design and a boolean case, as JSON on stdout (progress on stderr).
 pub fn one(args: &[String]) -> Result<(), String> {
     let seed: u64 = args.first().and_then(|s| s.parse().ok()).ok_or("fuzz-one <seed> [--steps N] [--minimise]")?;
+    // The seed is the first argument; the rest are options, and an option `fuzz-one` doesn't
+    // take is refused rather than ignored.
+    crate::known_args("fuzz-one", &args[1..], &["--steps"], SWITCHES, false)?;
     let steps = flag(args, "--steps", 8usize);
     let minimise = args.iter().any(|a| a == "--minimise");
     // Panics caught inside the kernel: harmless natively, fatal in the web build.
@@ -64,6 +71,9 @@ struct Job {
 /// Run seeds `--from`…`--from + --count` in `--jobs` processes, `--timeout` seconds each;
 /// write failing scripts to `--out` and a summary to `--report`.
 pub fn run(args: &[String]) -> Result<(), String> {
+    // An option `fuzz` doesn't take is refused before a seed runs: it would otherwise be
+    // ignored, and the run would go on for minutes with the wrong settings.
+    crate::known_args("fuzz", args, OPTIONS, SWITCHES, false)?;
     let from = flag(args, "--from", 0u64);
     let count = flag(args, "--count", 100u64);
     let last = from.checked_add(count.saturating_sub(1)).ok_or("seed range exceeds u64::MAX: reduce --from or --count")?;

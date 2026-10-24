@@ -3,7 +3,7 @@
 use crate::ui_kit;
 use egui::Key;
 
-use crate::params_dialog::{suggestions_for, word_before};
+use crate::params_dialog::{exact_token, suggestions_for, unit_token, word_before};
 use crate::theme::Tokens;
 
 #[derive(Clone)]
@@ -19,6 +19,13 @@ struct Popup {
     explicit: bool,
     /// Where each suggestion was drawn, for a press on one (see [`complete`]).
     rows: Vec<egui::Rect>,
+    /// A row is selected, so Enter and Tab complete it. A popup opened on a word that is
+    /// itself a complete name (`width`) starts unarmed: it only shows the longer names, Enter
+    /// and Tab reach the editor as if it were not there, and an arrow key arms it (#3663). A
+    /// unit means something only after a number, where no popup opens, so a unit typed anywhere
+    /// else (`rad` on the way to `radius`) is a prefix like any other and the popup is armed.
+    /// A press on a row inserts it whether or not the list is armed.
+    armed: bool,
 }
 
 fn popup_id() -> egui::Id {
@@ -38,6 +45,7 @@ pub(crate) fn begin_frame(ctx: &egui::Context) {
         });
         popup.explicit = true;
         popup.dismissed = false;
+        popup.armed = true;
         ctx.data_mut(|d| d.insert_temp(popup_id(), popup.clone()));
     }
     let escape_blurred = ctx.input(|i| i.key_pressed(Key::Escape)) && ctx.memory(|m| m.focused().is_none() && m.had_focus_last_frame(popup.editor));
@@ -65,8 +73,12 @@ pub(crate) fn begin_frame(ctx: &egui::Context) {
                 && *modifiers == egui::Modifiers::NONE
             {
                 match key {
+                    Key::ArrowDown if !popup.armed => (popup.armed, popup.selected) = (true, 0),
+                    Key::ArrowUp if !popup.armed => (popup.armed, popup.selected) = (true, popup.count - 1),
                     Key::ArrowDown => popup.selected = (popup.selected + 1) % popup.count,
                     Key::ArrowUp => popup.selected = (popup.selected + popup.count - 1) % popup.count,
+                    // Unarmed, the typed word is complete: Enter submits it and Tab moves on.
+                    Key::Enter | Key::Tab if !popup.armed => continue,
                     Key::Enter | Key::Tab => popup.accept = true,
                     Key::Escape => {
                         popup.dismissed = true;
@@ -95,6 +107,13 @@ pub(crate) fn begin_frame(ctx: &egui::Context) {
     ctx.data_mut(|d| d.insert_temp(popup_id(), popup));
 }
 
+/// Whether `editor`'s suggestions were drawn in the last frame.
+#[cfg(test)]
+pub(crate) fn showing(ctx: &egui::Context, editor: egui::Id) -> bool {
+    ctx.data(|d| d.get_temp::<Popup>(popup_id()))
+        .is_some_and(|p| p.editor == editor && p.count > 0 && !p.dismissed && p.frame.saturating_add(1) >= ctx.cumulative_frame_nr())
+}
+
 pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut String) -> bool {
     let ctx = ui.ctx().clone();
     // A press on a suggestion takes the focus from the editor before the list can see it
@@ -117,8 +136,14 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
     let state = egui::TextEdit::load_state(&ctx, resp.id);
     let cursor = state.as_ref().and_then(|s| s.cursor.char_range()).map(|r| r.primary.index.0).unwrap_or_else(|| text.chars().count());
     let (start, word) = word_before(text, cursor);
-    let previous = ctx.data(|d| d.get_temp::<Popup>(popup_id()));
-    let mut popup = previous.filter(|p| p.editor == resp.id && p.word == word && p.cursor == cursor).unwrap_or(Popup {
+    let previous = ctx.data(|d| d.get_temp::<Popup>(popup_id())).filter(|p| p.editor == resp.id);
+    // Dismissed suggestions stay closed until this box is typed in: another control rewriting
+    // its text (a slider dragged while the box keeps the focus) or a moved caret is no reason.
+    let dismissed = previous.as_ref().is_some_and(|p| p.dismissed) && !resp.changed();
+    // A word that is already a complete name opens unarmed: Enter submits it as typed. A unit
+    // without a number before it (`rad`, half-way to `radius`) is a prefix, so it stays armed.
+    let armed = !exact_token(&ctx, &word) || unit_token(&ctx, &word);
+    let mut popup = previous.filter(|p| p.word == word && p.cursor == cursor).unwrap_or(Popup {
         editor: resp.id,
         frame: 0,
         word,
@@ -126,21 +151,35 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
         selected: 0,
         count: 0,
         accept: false,
-        dismissed: false,
+        dismissed,
         explicit: false,
         rows: Vec::new(),
+        armed,
     });
-    let list = suggestions_for(&ctx, &popup.word, popup.explicit);
+    // Never over a control being dragged: the drag dismisses them.
+    if ctx.dragged_id().is_some_and(|id| id != resp.id) {
+        popup.dismissed = true;
+    }
+    // A unit right after a number (`2 in`, `10 mm`, the form every dialog starts its sizes in)
+    // is a unit, not the start of a name: no popup there, so nothing sits over the OK button.
+    let number_before = text.chars().take(start).filter(|c| !c.is_whitespace()).last().is_some_and(|c| c.is_ascii_digit() || c == '.' || c == ')');
+    let list = if !popup.explicit && number_before && unit_token(&ctx, &popup.word) {
+        Vec::new()
+    } else {
+        suggestions_for(&ctx, &popup.word, popup.explicit)
+    };
     popup.frame = ctx.cumulative_frame_nr();
     popup.count = list.len();
     popup.selected = popup.selected.min(list.len().saturating_sub(1));
     if list.is_empty() || popup.dismissed {
+        // Nothing drawn: a press where the rows were is not on one.
+        popup.rows.clear();
         ctx.data_mut(|d| d.insert_temp(popup_id(), popup));
         return false;
     }
     let mut pick = match pressed_row {
         Some(row) => list.get(row).map(|s| s.text.clone()),
-        None if popup.accept => list.get(popup.selected).map(|s| s.text.clone()),
+        None if popup.accept && popup.armed => list.get(popup.selected).map(|s| s.text.clone()),
         None => None,
     };
     popup.accept = false;
@@ -169,9 +208,14 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
         &ctx,
         list_id,
         resp.rect,
-        popup.selected,
+        popup.armed.then_some(popup.selected),
         &options,
-        crate::i18n::tr_label("↑ ↓ choose · Enter / Tab complete · Esc dismiss"),
+        // Unarmed, the typed word is complete and Enter submits it; an arrow key arms the list.
+        crate::i18n::tr_label(if popup.armed {
+            "↑ ↓ choose · Enter / Tab complete · Esc dismiss"
+        } else {
+            "↑ ↓ choose · Enter applies what you typed · Esc dismiss"
+        }),
     ) && pick.is_none()
         && !released_after_press
     {
@@ -196,6 +240,12 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
     true
 }
 
+/// The open popup for tests: (number of rows, armed).
+#[cfg(test)]
+pub(crate) fn popup_state(ctx: &egui::Context) -> Option<(usize, bool)> {
+    ctx.data(|d| d.get_temp::<Popup>(popup_id())).filter(|p| p.count > 0 && !p.dismissed).map(|p| (p.count, p.armed))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,7 +266,7 @@ mod tests {
         fn new(text: &str) -> Self {
             let ctx = crate::fonts::test_context();
             let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-            for (name, value) in [("width", 40), ("width_extra", 50), ("wing", 20), ("wire", 10)] {
+            for (name, value) in [("width", 40), ("width_extra", 50), ("wing", 20), ("wire", 10), ("radius", 10)] {
                 app.run("parameters.add", json!({"name":name,"expression":format!("{value} mm")})).unwrap();
             }
             params_dialog::publish(&mut app, &ctx);
@@ -271,6 +321,11 @@ mod tests {
 
         fn selected(&self) -> usize {
             self.ctx.data(|d| d.get_temp::<Popup>(popup_id())).unwrap().selected
+        }
+
+        /// (rows, armed) of the open popup.
+        fn popup(&self) -> Option<(usize, bool)> {
+            popup_state(&self.ctx)
         }
     }
 
@@ -337,6 +392,23 @@ mod tests {
         assert!(e.leaked.contains(&Key::Enter));
     }
 
+    /// Text another control writes into the box (a slider drag) leaves dismissed suggestions
+    /// closed, though they would offer something for the new word; typing opens them again.
+    #[test]
+    fn dismissed_suggestions_stay_closed_until_the_box_is_typed_in() {
+        let mut e = Editor::new("wid");
+        assert!(showing(&e.ctx, e.id));
+        e.key(Key::Escape);
+        assert!(!showing(&e.ctx, e.id));
+        e.text = "wir".into();
+        e.frame(Vec::new());
+        assert!(!suggestions(&e.ctx, "wir").is_empty());
+        assert!(!showing(&e.ctx, e.id), "a rewritten value does not reopen them");
+        e.key(Key::Backspace);
+        assert_eq!(e.text, "wi");
+        assert!(showing(&e.ctx, e.id), "typing does");
+    }
+
     #[test]
     fn absent_popup_preserves_editor_and_application_keys() {
         let mut e = Editor::new("123");
@@ -354,15 +426,90 @@ mod tests {
         assert_eq!(e.text, "1234");
     }
 
+    /// A word that is itself a complete name submits on Enter and lets Tab move on, whether or
+    /// not longer names share its prefix. Those names stay listed, unarmed, so `width` shows
+    /// `width_extra` instead of nothing (#3663).
     #[test]
     fn exact_tokens_submit_without_completing_longer_names() {
-        for text in ["width", "2 mm"] {
-            let mut e = Editor::new(text);
-            e.key(Key::Enter);
-            assert_eq!(e.text, text);
-            assert!(!e.accepted);
-            assert!(e.leaked.contains(&Key::Enter));
+        for (text, rows) in [("width", true), ("2 mm", false)] {
+            for key in [Key::Enter, Key::Tab] {
+                let mut e = Editor::new(text);
+                let popup = e.popup();
+                assert_eq!(popup.is_some(), rows, "{text:?}: {popup:?}");
+                if let Some((count, armed)) = popup {
+                    assert!(count > 0 && !armed, "{text:?}: {popup:?}");
+                }
+                e.key(key);
+                assert_eq!(e.text, text);
+                assert!(!e.accepted);
+                assert!(e.leaked.contains(&key), "{text:?} {key:?}");
+            }
         }
+    }
+
+    /// From the unarmed popup an arrow key picks a row (Down the first, Up the last); Enter or
+    /// Tab then complete it as usual.
+    #[test]
+    fn arrows_arm_the_popup_on_an_exact_token() {
+        let mut e = Editor::new("width");
+        assert!(suggestions(&e.ctx, "width").iter().any(|s| s.text == "width_extra"));
+        assert_eq!(e.popup().map(|(_, armed)| armed), Some(false));
+        e.key(Key::ArrowDown);
+        assert_eq!(e.popup().map(|(_, armed)| armed), Some(true));
+        assert_eq!(e.selected(), 0);
+        assert!(e.leaked.is_empty());
+        e.key(Key::Enter);
+        assert_eq!(e.text, "width_extra");
+        assert!(e.accepted && e.leaked.is_empty());
+
+        let mut e = Editor::new("2 * width");
+        assert_eq!(e.popup().map(|(_, armed)| armed), Some(false));
+        e.key(Key::ArrowUp);
+        let (count, armed) = e.popup().unwrap();
+        assert!(armed);
+        assert_eq!(e.selected(), count - 1);
+        e.key(Key::Tab);
+        assert!(e.accepted && e.text.starts_with("2 * "));
+        assert_ne!(e.text, "2 * width");
+    }
+
+    /// A unit right after a number is a unit: `10 mm` opens no popup even with a parameter
+    /// `mm_wall` defined (a dialog starting on `2 in` otherwise listed names over its OK button),
+    /// and Enter submits `10 mm`. After an operator the same word is a prefix again: `2 * mm`
+    /// lists `mm_wall`, armed, so Enter completes it.
+    #[test]
+    fn a_unit_after_a_number_opens_no_popup() {
+        let mut e = Editor::new("10 mm");
+        assert!(e.popup().is_none());
+        e.app.run("parameters.add", json!({"name":"mm_wall","expression":"3 mm"})).unwrap();
+        e.frame(Vec::new());
+        assert!(e.popup().is_none(), "{:?}", e.popup());
+        assert!(suggestions(&e.ctx, "mm").iter().any(|s| s.text == "mm_wall"));
+        e.key(Key::Enter);
+        assert_eq!(e.text, "10 mm");
+        assert!(!e.accepted && e.leaked.contains(&Key::Enter));
+
+        let mut e = Editor::new("2 * mm");
+        e.app.run("parameters.add", json!({"name":"mm_wall","expression":"3 mm"})).unwrap();
+        e.frame(Vec::new());
+        assert_eq!(e.popup(), Some((1, true)));
+        e.key(Key::Enter);
+        assert_eq!(e.text, "2 * mm_wall");
+    }
+
+    /// Typing a name letter by letter passes through words that happen to be units: `ra` lists
+    /// `radius` selected, and `rad` must keep it selected, so Enter completes the name instead
+    /// of submitting one radian into a length (found testing #3663).
+    #[test]
+    fn a_unit_typed_on_the_way_to_a_name_stays_armed() {
+        let mut e = Editor::new("ra");
+        assert_eq!(e.popup().map(|(_, armed)| armed), Some(true));
+        e.frame(vec![egui::Event::Text("d".into())]);
+        assert_eq!(e.text, "rad");
+        assert_eq!(e.popup(), Some((1, true)));
+        e.key(Key::Enter);
+        assert_eq!(e.text, "radius");
+        assert!(e.accepted && e.leaked.is_empty());
     }
 
     #[test]

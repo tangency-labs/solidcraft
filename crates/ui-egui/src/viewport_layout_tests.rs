@@ -1,5 +1,6 @@
 use super::*;
 use crate::scenario::Harness;
+use crate::viewport::NavMode;
 use serde_json::json;
 use solidcraft_engine::render::StandardView;
 
@@ -351,4 +352,79 @@ fn floating_fit_uses_the_measured_browser_and_history_cards_at_each_size() {
             }
         }
     }
+}
+
+fn click_nav_mode(h: &mut Harness, mode: NavMode) {
+    let nav = crate::scenario::rect_of("nav:outer").unwrap();
+    let column = match mode {
+        NavMode::Orbit => 0,
+        NavMode::Pan => 2,
+        NavMode::Zoom => 3,
+    };
+    let p = pos2(nav.left() + 5.0 + column as f32 * 30.0 + 13.0, nav.top() + 15.0);
+    h.call("ui.click", json!({"x":p.x,"y":p.y}));
+}
+
+#[test]
+fn escape_ends_nav_bar_modes_and_left_drag_stops_moving_the_camera() {
+    for mode in [NavMode::Pan, NavMode::Orbit, NavMode::Zoom] {
+        let mut h = Harness::new();
+        h.settle();
+        click_nav_mode(&mut h, mode);
+        assert_eq!(h.app.viewport.nav, Some(mode));
+        click_nav_mode(&mut h, mode);
+        assert_eq!(h.app.viewport.nav, None, "clicking the active button still toggles it off");
+        click_nav_mode(&mut h, mode);
+        let p = h.app.viewport.layout.as_ref().unwrap().drawable.center();
+        let drag = json!({"x0":p.x,"y0":p.y,"x1":p.x+40.0,"y1":p.y+25.0,"steps":8});
+        let before = h.app.cam;
+        h.call("ui.drag", drag.clone());
+        assert_ne!(h.app.cam, before, "{mode:?}: the active mode moves the camera");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert_eq!(h.app.viewport.nav, None, "{mode:?}");
+        let stopped = h.app.cam;
+        h.call("ui.drag", drag);
+        assert_eq!(h.app.cam, stopped, "{mode:?}: Escape restores normal left-drag behavior");
+    }
+}
+
+#[test]
+fn escape_ends_navigation_before_cancelling_a_dialog() {
+    let mut h = Harness::new();
+    h.app.start("inspect.measure");
+    h.settle();
+    assert!(h.app.dialog.is_some());
+    click_nav_mode(&mut h, NavMode::Pan);
+    assert_eq!(h.app.viewport.nav, Some(NavMode::Pan));
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert_eq!(h.app.viewport.nav, None);
+    assert!(h.app.dialog.is_some(), "ending navigation keeps the dialog open");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.dialog.is_none(), "Escape without navigation still cancels the dialog");
+}
+
+#[test]
+fn escape_ends_navigation_before_sketch_tools_and_does_not_count_as_a_finish_press() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+    h.app.start("sketch.line");
+    h.settle();
+    let sketch = h.app.session.active_sketch;
+    click_nav_mode(&mut h, NavMode::Pan);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert_eq!(h.app.viewport.nav, None);
+    assert!(h.app.tool.is_some(), "ending navigation leaves the sketch tool active");
+    assert!(h.app.last_escape.is_none());
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.tool.is_none(), "Escape without navigation still cancels the tool");
+    assert_eq!(h.app.session.active_sketch, sketch);
+    // Cancel navigation with no tool: the next Escape must not finish the sketch.
+    click_nav_mode(&mut h, NavMode::Pan);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert_eq!(h.app.session.active_sketch, sketch);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert_eq!(h.app.session.active_sketch, sketch);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.session.active_sketch.is_none(), "two ordinary quick Escapes still finish the sketch");
 }

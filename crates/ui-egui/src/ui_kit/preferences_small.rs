@@ -97,7 +97,7 @@ pub(crate) fn settings_bindings(ui: &mut Ui, bindings: &[(&[&str], &str)]) {
     for (keys, action) in bindings {
         let width = super::metrics::dimension(ui.available_width());
         let (r, _) = ui.allocate_exact_size(vec2(width, t.control_height + t.space_2), Sense::hover());
-        ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(1.0, t.dialog_rule));
+        t.secondary_hline(ui.painter(), r.x_range(), r.bottom(), t.dialog_rule);
         let mut left = r.left();
         for key in *keys {
             let galley = ui.painter().layout_no_wrap((*key).into(), FontId::proportional(t.font_small), t.form_ink);
@@ -105,7 +105,7 @@ pub(crate) fn settings_bindings(ui: &mut Ui, bindings: &[(&[&str], &str)]) {
                 pos2(left + (galley.size().x + t.space_12) * 0.5, r.center().y),
                 vec2(galley.size().x + t.space_12, t.control_height - t.space_8),
             );
-            ui.painter().rect(key_rect, t.radius_sm, t.control_fill, Stroke::new(1.0, t.control_border), egui::StrokeKind::Inside);
+            ui.painter().rect(key_rect, t.radius_sm, t.control_fill, t.container_border(t.control_border), egui::StrokeKind::Inside);
             ui.painter().galley(key_rect.center() - galley.size() * 0.5, galley, t.form_ink);
             left = key_rect.right() + t.space_4;
         }

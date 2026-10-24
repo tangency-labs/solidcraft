@@ -341,6 +341,12 @@ fn lex_spans(s: &str) -> Result<Vec<(Tok, usize, usize)>, DocError> {
     let mut out = Vec::new();
     // Parentheses open at this point: a comma outside them can only be a decimal comma.
     let mut depth = 0usize;
+    // A single leading `=` marks the text as a formula (`=d3`, #4681) and is not part of it.
+    if let Some(k) = cs.iter().position(|(_, c)| !c.is_whitespace())
+        && cs.get(k).is_some_and(|(_, c)| *c == '=')
+    {
+        i = k + 1;
+    }
     while let Some(&(_, c)) = cs.get(i) {
         if c.is_whitespace() {
             i += 1;
@@ -564,7 +570,9 @@ fn is_name_shaped(s: &str) -> bool {
 pub fn definition(s: &str) -> Option<(&str, &str)> {
     let (name, rhs) = s.split_once('=')?;
     let name = name.trim();
-    is_name_shaped(name).then(|| (name, rhs.trim()))
+    let rhs = rhs.trim();
+    // `w == 3` is not a definition: a second `=` would read as a formula marker (#4681).
+    (is_name_shaped(name) && !rhs.starts_with('=')).then_some((name, rhs))
 }
 
 /// The length unit of a design with these units: `mm` unless they name another length unit.
@@ -1252,8 +1260,6 @@ mod tests {
             ("szerokość = 20", "szerokość", "20"),
             // Reserved names split too: the parameter check names the reason.
             ("mm = 5", "mm", "5"),
-            // A second `=` stays in the expression, which then fails to evaluate.
-            ("w == 3", "w", "= 3"),
             ("w = a = 3", "w", "a = 3"),
             // An empty expression is the caller's error to report.
             ("w =", "w", ""),
@@ -1262,7 +1268,7 @@ mod tests {
         for (text, name, rhs) in splits {
             assert_eq!(definition(text), Some((name, rhs)), "{text:?}");
         }
-        for text in ["20", "20 mm", "width / 2", "= 20", "=", "", "2w = 3", "a b = 3", "a-b = 3", "w.x = 3", "(w) = 3", "-w = 3"] {
+        for text in ["20", "20 mm", "width / 2", "= 20", "=", "", "2w = 3", "a b = 3", "a-b = 3", "w.x = 3", "(w) = 3", "-w = 3", "w == 3"] {
             assert_eq!(definition(text), None, "{text:?}");
         }
     }

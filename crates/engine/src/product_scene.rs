@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn product_scene_keeps_placed_appearances_and_meshes_without_design_overlays() {
         let mut s = Session::default();
-        let component = s.execute("component.create", &json!({"name":"Part"})).unwrap();
+        let component = s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
         s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
         s.execute("appearance.assign", &json!({"bodies":["Block"],"color":"#20a080","opacity":0.4})).unwrap();
         s.execute("appearance.assign", &json!({"faces":[[5,5,10]],"color":"#ff0000","opacity":0.7})).unwrap();

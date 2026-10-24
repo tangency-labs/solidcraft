@@ -59,7 +59,7 @@ fn header_impl(ui: &mut Ui, icon: &str, title: &str, collapsed: Option<&mut bool
     let title_response = ui.interact(title_rect, ui.make_persistent_id("title_text"), egui::Sense::hover());
     title_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
     scenario::publish_rect("dialog:header", rect);
-    ui.painter().hline(rect.x_range(), rect.bottom(), egui::Stroke::new(1.0, t.dialog_rule));
+    t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
 }
 
 /// A bounded docked or floating card. Uses form_card_width and the caller's tokenised frame.
@@ -312,6 +312,7 @@ impl<'a> Panel<'a> {
                 ui.interact(rect, ui.id().with("compute_status"), egui::Sense::hover()).on_hover_text(status);
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
             }
+            super::Container::finish_content(ui, self.positioned_frame(ui.ctx()));
             (close, action)
         })
     }
@@ -360,6 +361,7 @@ impl<'a> Panel<'a> {
             } else {
                 contents(ui);
             }
+            super::Container::finish_content(ui, self.positioned_frame(ui.ctx()));
         });
     }
 }
@@ -560,7 +562,9 @@ impl<'a> Window<'a> {
                 .frame(frame)
                 .show(ctx, |ui| {
                     ui.set_width(inner_width);
-                    add(ui)
+                    let result = add(ui);
+                    super::Container::finish_content(ui, frame);
+                    result
                 });
             scenario::publish_rect("dialog:window", shown.response.rect);
             return shown.inner;
@@ -583,7 +587,11 @@ impl<'a> Window<'a> {
             (None, Some((pivot, pos))) => window.pivot(pivot).default_pos(pos),
             (None, None) => window.pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center() - vec2(0.0, row_height() * 2.5)),
         };
-        let shown = window.show(ctx, add);
+        let shown = window.show(ctx, |ui| {
+            let result = add(ui);
+            super::Container::finish_content(ui, frame);
+            result
+        });
         if let Some(shown) = &shown {
             scenario::publish_rect("dialog:window", shown.response.rect);
         }
@@ -614,7 +622,7 @@ fn page_list_sized<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<S>]
     let width = (t.form_label_width * 2.0 + t.space_24 * 2.0).min(body.width());
     let nav = egui::Rect::from_min_size(body.min, vec2(width, body.height()));
     ui.painter().rect_filled(nav, 0.0, t.dialog_footer);
-    ui.painter().vline(nav.right(), nav.y_range(), egui::Stroke::new(1.0, t.dialog_rule));
+    t.secondary_vline(ui.painter(), nav.right(), nav.y_range(), t.dialog_rule);
     scenario::publish_rect("dialog:pages", nav);
     *selected = (*selected).min(pages.len().saturating_sub(1));
     ui.scope_builder(egui::UiBuilder::new().max_rect(nav.shrink2(vec2(t.space_8, t.space_6))), |ui| {

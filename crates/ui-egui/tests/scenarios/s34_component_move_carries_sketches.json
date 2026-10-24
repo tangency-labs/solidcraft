@@ -120,6 +120,26 @@
   }
  },
  {
+  "note": "The design's first part is made grounded (#2804): free it before moving it."
+ },
+ {
+  "call": "ui.menu",
+  "params": {
+   "x": 100,
+   "y": 170,
+   "target": {
+    "type": "component",
+    "id": 1
+   }
+  }
+ },
+ {
+  "call": "ui.menuPick",
+  "params": {
+   "item": "Unground"
+  }
+ },
+ {
   "click": {
    "handle": "row:occurrence:2"
   }

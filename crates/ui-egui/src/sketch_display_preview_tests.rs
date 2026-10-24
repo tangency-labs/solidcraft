@@ -205,9 +205,10 @@ fn slot_preview_matches_every_committed_side_and_cap() {
             .unwrap_or_else(|| panic!("{command}: no slot outline before the width click"));
         let ctx = egui::Context::default();
         let proj = projection(2.0);
-        let output = ctx.run_ui(egui::RawInput { screen_rect: Some(proj.rect), ..Default::default() }, |ui| {
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(proj.rect), ..Default::default() }, |ui| {
             super::paint_preview_curve(preview.clone(), &Plane::XY, ui.painter(), &proj, egui::Stroke::new(1.5, egui::Color32::WHITE), 0);
         });
+        output.textures_delta.clear();
         assert_eq!(
             output.shapes.iter().filter(|shape| matches!(shape.shape, egui::Shape::Path(_))).count(),
             4,
@@ -248,7 +249,8 @@ fn typed_small_slot_width_preview_matches_the_final_click() {
         let ctx = egui::Context::default();
         let proj = projection(2_000_000.0);
         let input = || egui::RawInput { screen_rect: Some(proj.rect), ..Default::default() };
-        let output = ctx.run_ui(input(), |ui| super::preview(&h.app, &t, ui.painter(), &proj));
+        let mut output = ctx.run_ui(input(), |ui| super::preview(&h.app, &t, ui.painter(), &proj));
+        output.textures_delta.clear();
         let paths = |output: egui::FullOutput| {
             output
                 .shapes
@@ -270,9 +272,10 @@ fn typed_small_slot_width_preview_matches_the_final_click() {
         assert_eq!(committed.curves.len(), 4, "{command}: final click commits the typed width");
         let solidcraft_engine::geom::Seg2::Arc { radius, .. } = committed.segs(1)[0] else { panic!("missing slot cap") };
         assert!((radius - 0.00005).abs() < 1e-10, "{command}: the typed width determines the cap radius");
-        let output = ctx.run_ui(input(), |ui| {
+        let mut output = ctx.run_ui(input(), |ui| {
             super::paint_preview_curve(committed.clone(), &Plane::XY, ui.painter(), &proj, egui::Stroke::new(1.5, egui::Color32::WHITE), 0);
         });
+        output.textures_delta.clear();
         let expected = paths(output);
         assert!(!expected.is_empty(), "{command}: the zoomed cap must be visible");
         assert_eq!(preview.len(), expected.len(), "{command}: preview and committed paths");

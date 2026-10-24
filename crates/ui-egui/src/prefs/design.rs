@@ -9,8 +9,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::row(ui, app.tr("ui.units_of_new_designs"), |ui| {
                 let mut selected = UNITS.iter().position(|u| *u == app.preferences.default_units).unwrap_or(0);
                 ui_kit::segmented(ui, &mut selected, &UNITS, ui_kit::Segments { intrinsic: true, ..Default::default() });
-                if let Some(unit) = UNITS.get(selected) {
+                if let Some(unit) = UNITS.get(selected)
+                    && app.preferences.default_units != *unit
+                {
                     app.preferences.default_units = (*unit).into();
+                    default_units_changed(app);
                 }
             });
             ui_kit::row(ui, app.tr("ui.length_decimals"), |ui| {
@@ -46,8 +49,25 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::i18n::tr_label("Which axis points up in the views (axis view, Home, Look At). Designs are unchanged."),
             ui_kit::Text::Hint("orientation"),
         );
-        setting::auto_stand_up(app, ui);
         setting::offer_stand_up(app, ui);
         ui_kit::text(ui, app.tr("prefs.stand_up_note"), ui_kit::Text::Hint("stand_up"));
+        setting::extrude_auto_to_object(app, ui);
+    });
+    // The Hole command's own settings, under its name.
+    ui_kit::settings_section(ui, "create_hole", crate::i18n::tr_label("Create Hole"), |ui| {
+        setting::hole_snaps(app, ui);
+        ui_kit::text(
+            ui,
+            crate::i18n::tr_label("A Single hole snaps to the middle of its face and to the centres of its round edges"),
+            ui_kit::Text::Hint("hole_snaps"),
+        );
+        setting::hole_moves(app, ui);
+        ui_kit::text(
+            ui,
+            crate::i18n::tr_label(
+                "A placed Single hole has a handle to drag it, and picking its face again moves the hole there instead of taking it out",
+            ),
+            ui_kit::Text::Hint("hole_moves"),
+        );
     });
 }

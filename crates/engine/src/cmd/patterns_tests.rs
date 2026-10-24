@@ -42,6 +42,65 @@ fn feature_pattern_plate() -> Session {
 }
 
 #[test]
+fn rectangular_hole_pattern_warns_for_copies_that_miss_and_clears_after_edit() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"}));
+    run(&mut s, "solid.hole", json!({"position":[10,15,10],"diameter":5,"depth":10,"name":"Hole1"}));
+    let before = volume(&mut s);
+    let reply = run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features":["Hole1"],"dir1":[1,0,0],"count1":2,"spacing1":45,
+            "dir2":[0,0,1],"count2":2,"spacing2":5,"name":"Pattern"}),
+    );
+    let id = reply["feature"].as_u64().unwrap();
+    let check = |session: &Session| {
+        let result = session.model.result(id).unwrap();
+        assert!(result.error.is_none(), "{result:?}");
+        assert_eq!(result.warning.as_deref(), Some("3 of 3 cut copies remove no material"));
+    };
+    check(&s);
+    assert_eq!(reply["warning"], "3 of 3 cut copies remove no material");
+    // The remaining copy lands in the existing through hole, so the plate stays intact.
+    assert!(rel(volume(&mut s), before) < 1e-8);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&reopened);
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+            "features":["Hole1"],"dir1":[1,0,0],"count1":2,"spacing1":45,
+            "dir2":[0,1,0],"count2":2,"spacing2":8}}),
+    );
+    assert_eq!(s.model.result(id).unwrap().warning.as_deref(), Some("2 of 3 cut copies remove no material"));
+    assert!(rel(volume(&mut s), 12000.0 - 2.0 * PI * 2.5_f64.powi(2) * 10.0) < 1e-3);
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+            "features":["Hole1"],"dir1":[1,0,0],"count1":2,"spacing1":15,
+            "dir2":[0,1,0],"count2":2,"spacing2":8}}),
+    );
+    assert!(s.model.result(id).unwrap().warning.is_none());
+    assert!(rel(volume(&mut s), 12000.0 - 4.0 * PI * 2.5_f64.powi(2) * 10.0) < 1e-3);
+}
+
+#[test]
+fn rectangular_cut_pattern_counts_only_target_contacts_and_keeps_landing_copies() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"}));
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"corner":[45,0,0],"operation":"new","body_name":"Neighbor"}));
+    run(&mut s, "solid.cylinder", json!({"radius":2,"height":20,"base":[10,15,-5],"operation":"cut","targets":["Plate"],"name":"Cut"}));
+    let reply = run(&mut s, "solid.pattern.rectangular", json!({"features":["Cut"],"dir1":[1,0,0],"count1":4,"spacing1":20}));
+    assert_eq!(reply["warning"], "2 of 3 cut copies remove no material");
+    let state = s.world_state();
+    let plate = &state.body("Plate").unwrap().body;
+    assert!(!plate.contains(solidcraft_geom::Vec3::new(30., 15., 5.)));
+    assert!(state.body("Neighbor").unwrap().body.contains(solidcraft_geom::Vec3::new(50., 15., 5.)));
+    assert!(rel(volume(&mut s), 24000.0 - 2.0 * PI * 4.0 * 10.0) < 1e-3);
+}
+
+#[test]
 fn feature_rectangular_center_flip_and_oblique_direction_keep_source_and_recompute() {
     use solidcraft_geom::Vec3;
     for flipped in [false, true] {
@@ -602,5 +661,145 @@ fn copies_of_a_join_that_merged_its_targets_join_the_merged_body() {
         // Every copy adds what the seed spoke added (curved bodies measure to about 0.02 %; a
         // missing or doubled spoke is about 5 %).
         assert!(rel(volume(&mut s), v0 + n * (v1 - v0)) < 1e-3, "{id}: {} vs {}", volume(&mut s), v0 + n * (v1 - v0));
+    }
+}
+
+/// #4593: a rib is the source of a pattern or mirror. Each copy is built again where it is, its
+/// walls run until they meet the body there. An 80 × 80 × 5 plate with a 16 × 16 × 30 boss in the
+/// middle; the rib's triangle (8, 5)-(8, 25)-(30, 5) in the XZ plane, 4 thick, is 880 mm³.
+#[test]
+fn patterns_and_mirrors_of_a_rib() {
+    use solidcraft_geom::Vec3;
+    let rib = 0.5 * 22.0 * 20.0 * 4.0;
+    let ribbed = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 80, "width": 80, "height": 5, "corner": [-40, -40, 0]}));
+        run(&mut s, "solid.box", json!({"length": 16, "width": 16, "height": 30, "corner": [-8, -8, 0], "operation": "join"}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
+        run(&mut s, "sketch.line", json!({"points": [[8, 25], [30, 5]], "ids": ["l1"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "name": "Rib"}));
+        assert!(rel(volume(&mut s), before + rib) < 1e-6, "the rib itself");
+        (s, before)
+    };
+    // The issue's step: a circular pattern of the rib (here four, a quarter turn apart).
+    let (mut s, before) = ribbed();
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Rib"], "axis": {"origin": [0, 0, -100], "dir": [0, 0, 1]}, "count": 4, "angle": 360}));
+    let ribs = [Vec3::new(12.0, 0.0, 8.0), Vec3::new(0.0, 12.0, 8.0), Vec3::new(-12.0, 0.0, 8.0), Vec3::new(0.0, -12.0, 8.0)];
+    let check = |s: &Session, inside: &[Vec3]| {
+        let st = s.world_state();
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+        assert_eq!(st.bodies.len(), 1);
+        let body = &st.bodies[0].body;
+        for p in inside {
+            assert!(body.contains(*p), "a rib at {p:?}");
+            // Beside it, across its thickness: no material (clear of the boss too).
+            let side = if p.y == 0.0 { Vec3::new(0.0, 3.0, 0.0) } else { Vec3::new(3.0, 0.0, 0.0) };
+            assert!(!body.contains(*p + side), "nothing beside the rib at {p:?}");
+        }
+    };
+    check(&s, &ribs);
+    assert!(rel(volume(&mut s), before + 4.0 * rib) < 1e-6, "four ribs: {} vs {}", volume(&mut s), before + 4.0 * rib);
+    // A mirror of the rib across YZ.
+    let (mut s, before) = ribbed();
+    run(&mut s, "solid.mirror", json!({"features": ["Rib"], "plane": {"origin": [0, 0, 0], "normal": [1, 0, 0]}}));
+    check(&s, &[ribs[0], ribs[2]]);
+    assert!(rel(volume(&mut s), before + 2.0 * rib) < 1e-6, "two ribs: {} vs {}", volume(&mut s), before + 2.0 * rib);
+}
+
+/// #395: a pattern or mirror of features takes a pattern or mirror of features as a source: it
+/// copies what that one made (its copies, not its source). The issue's design: a 40 × 30 × 20
+/// box with a hole `H` at (−15, −10) and `Pat`, two more holes along x at 10 mm steps.
+#[test]
+fn patterns_and_mirrors_of_patterns_and_mirrors() {
+    use solidcraft_geom::Vec3;
+    let hole = PI * 1.5 * 1.5 * 20.0;
+    let design = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "corner": [-20, -15, 0], "name": "Box"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Spot"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [-15, -10], "radius": 1.5}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Spot", "through_all": true, "operation": "cut", "name": "H"}));
+        run(&mut s, "solid.pattern.rectangular", json!({"features": ["H"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 10, "name": "Pat"}));
+        s
+    };
+    let across_xz = json!({"origin": [0, 0, 0], "normal": [0, 1, 0]});
+    let across_yz = json!({"origin": [0, 0, 0], "normal": [1, 0, 0]});
+    // Each case: the steps after `design`, the holes there must be, and the spots that must
+    // stay material.
+    type Case = (Vec<(&'static str, Value)>, Vec<[f64; 2]>, Vec<[f64; 2]>);
+    let cases: Vec<(&str, Case)> = vec![
+        // The issue's step: the mirror of `Pat` is its two copies mirrored.
+        (
+            "mirror of a pattern",
+            (vec![("solid.mirror", json!({"features": ["Pat"], "plane": across_xz}))], vec![[-5.0, 10.0], [5.0, 10.0]], vec![[-15.0, 10.0]]),
+        ),
+        // With its source too: the six holes the issue expects.
+        (
+            "mirror of a hole and its pattern",
+            (
+                vec![("solid.mirror", json!({"features": ["H", "Pat"], "plane": across_xz}))],
+                vec![[-15.0, 10.0], [-5.0, 10.0], [5.0, 10.0]],
+                vec![[15.0, 10.0]],
+            ),
+        ),
+        (
+            "pattern of a pattern",
+            (
+                vec![("solid.pattern.rectangular", json!({"features": ["Pat"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20}))],
+                vec![[-5.0, 10.0], [5.0, 10.0]],
+                vec![[-15.0, 10.0]],
+            ),
+        ),
+        (
+            "mirror of a mirror",
+            (
+                vec![
+                    ("solid.mirror", json!({"features": ["H"], "plane": across_yz, "name": "Mir"})),
+                    ("solid.mirror", json!({"features": ["Mir"], "plane": across_xz})),
+                ],
+                vec![[15.0, -10.0], [15.0, 10.0]],
+                vec![[-15.0, 10.0]],
+            ),
+        ),
+        (
+            "pattern of a mirror",
+            (
+                vec![
+                    ("solid.mirror", json!({"features": ["H"], "plane": across_yz, "name": "Mir"})),
+                    ("solid.pattern.rectangular", json!({"features": ["Mir"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20})),
+                ],
+                vec![[15.0, -10.0], [15.0, 10.0]],
+                vec![[-15.0, 10.0]],
+            ),
+        ),
+    ];
+    for (what, (steps, holes, material)) in cases {
+        let mut s = design();
+        let before = volume(&mut s);
+        for (id, p) in steps {
+            run(&mut s, id, p);
+        }
+        for r in &s.model.results {
+            assert!(r.error.is_none(), "{what}: {}: {:?}", r.name, r.error);
+        }
+        let st = s.world_state();
+        assert_eq!(st.bodies.len(), 1, "{what}");
+        let body = &st.bodies[0].body;
+        for [x, y] in &holes {
+            assert!(!body.contains(Vec3::new(*x, *y, 10.0)), "{what}: a hole at ({x}, {y})");
+            assert!(body.contains(Vec3::new(*x, *y + 2.5, 10.0)), "{what}: material beside ({x}, {y})");
+        }
+        for [x, y] in &material {
+            assert!(body.contains(Vec3::new(*x, *y, 10.0)), "{what}: no hole at ({x}, {y})");
+        }
+        // The listed holes the steps added (in the last two cases `Mir` made the first of them).
+        let added = holes.len();
+        // Measured on the body's mesh, like the other tests here: to 1e-5 of the whole body.
+        let after = volume(&mut s);
+        let want = before - added as f64 * hole;
+        assert!(rel(after, want) < 1e-5, "{what}: {after} mm³, {added} more holes than {before} = {want}");
     }
 }

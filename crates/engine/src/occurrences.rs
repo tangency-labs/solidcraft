@@ -41,6 +41,26 @@ pub(crate) struct RemovedLaterCache {
 }
 
 impl Session {
+    /// Visibility keeps construction names, while undo history keeps feature ids. Follow the
+    /// same axis or point into the new document on rename, undo and redo (#4419).
+    pub(crate) fn follow_axis_point_renames(&mut self, previous: &solidcraft_doc::Document) {
+        if self.visibility.hidden_origin.is_empty() {
+            return;
+        }
+        let names: std::collections::HashMap<_, _> = self.doc.features.iter().map(|f| (f.id, &f.name)).collect();
+        let renamed: std::collections::HashMap<_, _> = previous
+            .features
+            .iter()
+            .filter(|f| matches!(f.kind, FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. }))
+            .filter_map(|f| names.get(&f.id).filter(|name| **name != &f.name).map(|name| (f.name.as_str(), *name)))
+            .collect();
+        for name in &mut self.visibility.hidden_origin {
+            if let Some(new) = renamed.get(name.as_str()) {
+                name.clone_from(new);
+            }
+        }
+    }
+
     /// Document with uncaptured occurrence positions applied, without changing saved geometry.
     pub fn placed_document(&self) -> std::borrow::Cow<'_, solidcraft_doc::Document> {
         if self.pending_moves.is_empty() {

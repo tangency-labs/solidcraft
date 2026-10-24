@@ -31,8 +31,9 @@ and degrees in expressions (internally radians), Z is up. Model like this: `sket
 and dimension (`sketch.dimension {entities, value}`; values may name parameters), `sketch.finish`, then features \
 (`solid.extrude {distance, operation?: new|join|cut|intersect}`, `solid.revolve`, `solid.fillet {edges: [[x,y,z] point on \
 edge], radius}`, `solid.chamfer`, patterns, mirror, primitives). Use `batch` for several steps at once, \
-`list_commands` for ids and parameter docs, `describe_command` for a command's schemas, `inspect_design` / `measure` to verify, `body_topology` to find edge points, \
-`set_parameter` to drive the design and `screenshot` to look at it.";
+`list_commands` for ids and parameter docs, `describe_command` for a command's schemas, `inspect_design` / `measure` to verify, \
+`body_topology` to find edge points, `set_parameter` to drive the design and `screenshot` to look at it. A call whose error \
+starts `still running:` was not cancelled: don't send it again; `pending` waits for its result.";
 
 pub struct Server {
     backend: Box<dyn Backend>,
@@ -65,22 +66,48 @@ impl Server {
     }
 
     /// Serve newline-delimited JSON-RPC until `input` closes. Only protocol messages go to
-    /// `output`; diagnostics belong on stderr.
-    pub fn serve(&mut self, input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
-        for line in input.lines() {
-            let line = match line {
-                Ok(l) => l,
-                // Not UTF-8: answer with a parse error and keep serving.
-                Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
-                    let reply = error(Value::Null, PARSE_ERROR, "parse error: input is not UTF-8").to_string();
-                    output.write_all(reply.as_bytes())?;
-                    output.write_all(b"\n")?;
-                    output.flush()?;
-                    continue;
+    /// `output`; diagnostics belong on stderr. Consume oversized lines in bounded space so an
+    /// agent cannot exhaust memory by sending an arbitrarily long request without a newline.
+    pub fn serve(&mut self, mut input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
+        loop {
+            let mut line = Vec::new();
+            let mut oversized = false;
+            let mut received = false;
+            loop {
+                let chunk = input.fill_buf()?;
+                if chunk.is_empty() {
+                    break;
                 }
-                Err(e) => return Err(e),
+                let count = chunk.iter().position(|&byte| byte == b'\n').map_or(chunk.len(), |i| i + 1);
+                let newline = chunk[count - 1] == b'\n';
+                let content_len = count - usize::from(newline);
+                if !oversized {
+                    if line.len().saturating_add(content_len) > MAX_LINE {
+                        oversized = true;
+                        line.clear();
+                    } else {
+                        line.extend_from_slice(&chunk[..content_len]);
+                    }
+                }
+                input.consume(count);
+                received = true;
+                if newline {
+                    break;
+                }
+            }
+            if !received {
+                break;
+            }
+            let reply = if oversized {
+                Some(error(Value::Null, INVALID_REQUEST, "request too large").to_string())
+            } else {
+                match String::from_utf8(line) {
+                    Ok(line) => self.handle_line(&line),
+                    // Not UTF-8: answer with a parse error and keep serving.
+                    Err(_) => Some(error(Value::Null, PARSE_ERROR, "parse error: input is not UTF-8").to_string()),
+                }
             };
-            if let Some(reply) = self.handle_line(&line) {
+            if let Some(reply) = reply {
                 output.write_all(reply.as_bytes())?;
                 output.write_all(b"\n")?;
                 output.flush()?;
@@ -91,12 +118,13 @@ impl Server {
 
     /// One line in, at most one line out (notifications get no reply).
     pub fn handle_line(&mut self, line: &str) -> Option<String> {
+        // Check the raw input before trimming: a huge whitespace prefix is still a huge line.
+        if line.len() > MAX_LINE {
+            return Some(error(Value::Null, INVALID_REQUEST, "request too large").to_string());
+        }
         let line = line.trim();
         if line.is_empty() {
             return None;
-        }
-        if line.len() > MAX_LINE {
-            return Some(error(Value::Null, INVALID_REQUEST, "request too large").to_string());
         }
         let reply = match serde_json::from_str::<Value>(line) {
             Ok(Value::Array(batch)) if batch.is_empty() => Some(error(Value::Null, INVALID_REQUEST, "empty batch")),

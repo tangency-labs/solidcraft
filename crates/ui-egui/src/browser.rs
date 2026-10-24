@@ -68,7 +68,9 @@ pub struct TreeState {
     pub collapsed: BTreeSet<String>,
     /// Folders opened by the user (folders that start closed).
     pub expanded: BTreeSet<String>,
-    /// Scroll to this body's row and open its folders (Find in Browser).
+    /// Scroll to this body's row (by the name it has in the world, which tells the placements
+    /// of a part apart) and open the components, placements and folders above it: Find in
+    /// Browser, and a body picked in the viewport (#3005).
     pub reveal: Option<String>,
     /// A native feature to reveal in its placed component's Features folder.
     pub(super) reveal_feature: Option<features::Reveal>,
@@ -104,6 +106,9 @@ pub struct TreeState {
     anchor: Option<String>,
     /// Row keys in drawing order this frame (for Shift ranges).
     order: Vec<String>,
+    /// The previous frame's complete row order: a Shift click resolves its range here, since
+    /// this frame's `order` does not yet hold the rows below the clicked one (#4991).
+    order_prev: Vec<String>,
 }
 
 /// Moving an occurrence: the offsets typed so far (pending until Capture Position).
@@ -357,9 +362,9 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let dragged_over = egui::DragAndDrop::has_any_payload(ui.ctx()) && ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p));
     let mut out = RowResp { rect: Some(r), hovered: resp.hovered() || dragged_over, ..Default::default() };
     if row.selected {
-        ui.painter().rect_filled(r, 3.0, crate::theme::TabAccent::current(ui.ctx()).soft);
+        ui.painter().rect_filled(r, t.radius_sm.saturating_sub(1), crate::theme::TabAccent::current(ui.ctx()).soft);
     } else if resp.hovered() || row.mark == Mark::Here {
-        ui.painter().rect_filled(r, 3.0, t.hover);
+        ui.painter().rect_filled(r, t.radius_sm.saturating_sub(1), t.hover);
     }
     // A lit item (selected, or under the pointer in the 3D view): a bar down the left of its row,
     // and a fainter, thinner one on each row leading to it, so the bars trace its branch.
@@ -369,7 +374,7 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         Mark::Here => Some((3.0, t.accent)),
     };
     if let Some((w, colour)) = bar {
-        ui.painter().rect_filled(Rect::from_min_size(r.left_top() + vec2(0.0, 2.0), vec2(w, r.height() - 4.0)), 1.0, colour);
+        ui.painter().rect_filled(Rect::from_min_size(r.left_top() + vec2(0.0, 2.0), vec2(w, r.height() - 4.0)), t.radius_sm / 4, colour);
     }
     let mut x = r.left() + 2.0 + row.depth as f32 * INDENT;
     let cy = r.center().y;
@@ -478,10 +483,8 @@ fn click_select(app: &mut SolveApp, ui: &egui::Ui, key: String, sel: Option<Sel>
     if mods.shift
         && let Some(a) = app.tree.anchor.clone()
     {
-        let order = app.tree.order.clone();
-        if let (Some(i), Some(j)) = (order.iter().position(|k| *k == a), order.iter().position(|k| *k == key)) {
-            let (lo, hi) = (i.min(j), i.max(j));
-            let items: Vec<Sel> = order[lo..=hi].iter().filter_map(|k| sel_of_key(k)).collect();
+        let items = shift_range(&app.tree.order_prev, &a, &key).or_else(|| shift_range(&app.tree.order, &a, &key));
+        if let Some(items) = items {
             let _ = app.run("select.set", json!({ "items": items, "add": mods.command || mods.ctrl }));
             return;
         }
@@ -502,6 +505,15 @@ fn click_select(app: &mut SolveApp, ui: &egui::Ui, key: String, sel: Option<Sel>
     }
 }
 
+/// The selectable rows from `anchor` to `key` (either way round) in a row order, or `None`
+/// when the order lacks either of them.
+fn shift_range(order: &[String], anchor: &str, key: &str) -> Option<Vec<Sel>> {
+    let i = order.iter().position(|k| k == anchor)?;
+    let j = order.iter().position(|k| k == key)?;
+    let rows = order.get(i.min(j)..=i.max(j))?;
+    Some(rows.iter().filter_map(|k| sel_of_key(k)).collect())
+}
+
 fn sel_of_key(k: &str) -> Option<Sel> {
     if let Some((_, id)) = k.rsplit_once("/s:") {
         return id.parse().ok().map(|id| Sel::Feature { id });
@@ -517,6 +529,31 @@ fn sel_of_key(k: &str) -> Option<Sel> {
         return s.parse().ok().map(|id| Sel::Feature { id });
     }
     None
+}
+
+/// The body a selection item is on: a body, or a face or edge of one (by its name in the
+/// world).
+pub(crate) fn picked_body(sel: &Sel) -> Option<&str> {
+    match sel {
+        Sel::Body { name } => Some(name),
+        Sel::Face { body, .. } | Sel::Edge { body, .. } => Some(body),
+        _ => None,
+    }
+}
+
+/// A pick in the viewport: the Browser, when shown, opens down to the picked body's row and
+/// scrolls to it (#3005). The body of the last item picked.
+pub(crate) fn reveal_pick(app: &mut SolveApp) {
+    if app.ui.show_browser
+        && let Some(body) = app.session.selection.last().and_then(picked_body)
+    {
+        app.tree.reveal = Some(body.to_string());
+    }
+}
+
+/// Whether the body being revealed is in this placement or one below it: it opens.
+fn reveals_in_occurrence(app: &SolveApp, path: &[u64]) -> bool {
+    app.tree.reveal.as_ref().is_some_and(|r| app.session.occurrence_bodies(path, true).is_ok_and(|bodies| bodies.contains(r)))
 }
 
 pub(crate) fn is_open(app: &SolveApp, key: &str, default: bool) -> bool {
@@ -693,7 +730,7 @@ pub(crate) fn resize_column(app: &mut SolveApp, ui: &egui::Ui, rect: Rect, width
 pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     let available = ui.available_rect_before_wrap();
     let t = Tokens::get();
-    app.tree.order.clear();
+    app.tree.order_prev = std::mem::take(&mut app.tree.order);
     DRAWN.with(|d| d.borrow_mut().clear());
     OCCURRENCES.with(|d| d.borrow_mut().clear());
     let mut acts = Actions::default();
@@ -809,7 +846,7 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, c
     {
         return;
     }
-    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top() + 1.0, egui::Stroke::new(1.0, t.toolbar.lerp_to_gamma(t.border, 0.5)));
+    t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top() + 1.0, t.toolbar.lerp_to_gamma(t.border, 0.5));
     ui.add_space(t.space_3);
     if collapsible && !stacked {
         browser_rows_hugging(app, ui, acts);
@@ -937,6 +974,9 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
             ui.spacing_mut().item_spacing.y = 0.0;
             component_rows(app, ui, 0, 0, acts);
         });
+    // The row was reached and scrolled to, or isn't in the tree (a body a later feature removes):
+    // either way the reveal is done.
+    app.tree.reveal = None;
 }
 
 fn finish_browser(app: &mut SolveApp, ui: &mut egui::Ui, acts: Actions) {
@@ -967,9 +1007,14 @@ fn component_name(app: &SolveApp, id: u64) -> String {
 fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, acts: &mut Actions) {
     let t = Tokens::get();
     let key = format!("c{id}");
+    let bodies = crate::context_menu::component_bodies(app, id);
+    if let Some(r) = app.tree.reveal.clone()
+        && (bodies.contains(&r) || model_children(app, id).into_iter().any(|o| reveals_in_occurrence(app, &[o])))
+    {
+        app.tree.collapsed.remove(&key);
+    }
     let open = is_open(app, &key, true);
     let active = app.session.active_component == id;
-    let bodies = crate::context_menu::component_bodies(app, id);
     let visible = bodies.is_empty() || bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b));
     let grounded = app.session.doc.occurrence_of(id).is_some_and(|o| o.grounded);
     let faded = app.session.active_component != 0 && !app.session.doc.component_within(id, app.session.active_component) && !active;
@@ -1072,6 +1117,9 @@ fn occurrence_key(path: &[u64]) -> String {
 fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: Vec<u64>, depth: usize, acts: &mut Actions) {
     let Some(placement) = model_placement(app, &path) else { return };
     let key = occurrence_key(&path);
+    if reveals_in_occurrence(app, &path) {
+        app.tree.collapsed.remove(&key);
+    }
     let open = is_open(app, &key, true);
     let active = app.session.active_occurrence_path.as_deref() == Some(path.as_slice())
         || (app.session.active_occurrence_path.is_none()
@@ -1170,6 +1218,8 @@ fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: Vec<u64>, depth:
     }
 }
 
+/// The Document Settings group. A second click on an entry closes the window it opened, the way
+/// that window's own × does (#4150).
 fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     let key = "docsettings";
     let open = is_open(app, key, false);
@@ -1182,8 +1232,12 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     }
     let units = format!("Units: {}", app.session.doc.units);
     let r = draw_row(ui, ui.id().with("units"), &Row { depth: depth + 1, icon: "settings", label: &units, ..Default::default() });
-    if let Some(p) = r.secondary.or(r.clicked.then(|| r.rect.map(|x| x.left_bottom())).flatten()) {
+    if let Some(p) = r.secondary {
         crate::context_menu::open_for(app, p, Target::Units);
+    } else if r.clicked
+        && let Some(rect) = r.rect
+    {
+        crate::context_menu::toggle_for(app, rect, rect.left_bottom(), Target::Units);
     }
     let prec = format!(
         "Precision: {} {}, {}°",
@@ -1192,16 +1246,28 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         format_args!("{:.*}", usize::from(app.preferences.angle_decimals), 0.0)
     );
     if draw_row(ui, ui.id().with("precision"), &Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() }).clicked {
-        app.prefs_window.open = true;
+        if app.prefs_window.open {
+            crate::prefs::close(app, true);
+        } else {
+            app.prefs_window.open = true;
+        }
     }
     let params = format!("Parameters ({})", app.session.doc.params.len());
     if draw_row(ui, ui.id().with("params"), &Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() }).clicked {
-        app.start("parameters.change");
+        if app.params.is_some() {
+            app.params = None;
+        } else {
+            app.start("parameters.change");
+        }
     }
     if draw_row(ui, ui.id().with("design_properties"), &Row { depth: depth + 1, icon: "settings", label: "Design Properties", ..Default::default() })
         .clicked
     {
-        app.start("document.metadata");
+        if app.design_properties.is_some() {
+            app.design_properties = None;
+        } else {
+            app.start("document.metadata");
+        }
     }
 }
 
@@ -1434,7 +1500,7 @@ pub fn set_section_visible(app: &mut SolveApp, visible: bool) {
     if visible {
         if let Some((origin, normal)) = app.tree.hidden_section {
             let plane = json!({"origin": [origin.x, origin.y, origin.z], "normal": [normal.x, normal.y, normal.z]});
-            if app.run("inspect.section", json!({ "plane": plane })).is_ok() {
+            if app.run("inspect.section", json!({"plane": plane, "hatch": app.session.section_hatch})).is_ok() {
                 app.tree.hidden_section = None;
             }
         }
@@ -1570,9 +1636,24 @@ impl CanvasPanel {
     }
 }
 
-/// A browser click on a plane or axis: it goes to the open dialog's input if that takes it,
-/// otherwise it becomes the selection.
+/// Does the open dialog's active input take bodies (Combine's target and tools, #4452)? Then a
+/// body clicked in the Browser goes there, as a click on it in the view does, rather than
+/// replacing the selection: overlapping bodies are often only told apart in the Browser.
+fn dialog_takes_body(app: &SolveApp) -> bool {
+    app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::BODIES != 0)
+}
+
+/// Browser picks go only into compatible active dialog inputs. Outside a dialog, planes and
+/// axes become the selection; body rows use the ordinary Ctrl/Shift-aware selection path.
 fn pick_from_browser(app: &mut SolveApp, x: Sel) {
+    if let Sel::Body { .. } = &x
+        && dialog_takes_body(app)
+        && let Some(mut d) = app.dialog.take()
+    {
+        d.pick(&app.session, x);
+        app.dialog = Some(d);
+        return;
+    }
     let hit = match &x {
         Sel::Plane { name } => crate::viewport::Hit::Plane { name: name.clone(), point: solidcraft_engine::geom::Vec3::ZERO },
         Sel::Axis { name } => crate::viewport::Hit::Axis { name: name.clone() },
@@ -1795,11 +1876,11 @@ fn folder_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, comp: u64, path: Option
     let key = format!("{prefix}/{folder}");
     if let Some(r) = app.tree.reveal.clone()
         && folder == "bodies"
-        && all.iter().any(|e| e.key == r)
+        && let Some(e) = all.iter().find(|e| e.row_key == format!("b:{r}"))
     {
         app.tree.collapsed.remove(&key);
         app.tree.collapsed.remove(&format!("c{comp}"));
-        for g in app.session.doc.browser_groups.iter().filter(|g| g.items.contains(&r)) {
+        for g in app.session.doc.browser_groups.iter().filter(|g| g.items.contains(&e.key)) {
             app.tree.collapsed.remove(&format!("g{}", g.id));
         }
     }
@@ -1947,7 +2028,7 @@ fn entry_row(
         toggle(app, &pattern_key, true);
     }
     if folder == "bodies"
-        && app.tree.reveal.as_deref() == Some(e.key.as_str())
+        && app.tree.reveal.as_ref().is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b.as_str()))
         && let Some(rect) = r.rect
     {
         ui.scroll_to_rect(rect, Some(egui::Align::Center));
@@ -1964,7 +2045,7 @@ fn entry_row(
             app.edit_sketch(id);
         }
     } else if r.clicked {
-        if folder == "construction" {
+        if folder == "construction" || (folder == "bodies" && app.dialog.is_some()) {
             if let Some(s) = e.sel.clone() {
                 pick_from_browser(app, s);
             }
@@ -2030,7 +2111,9 @@ fn drop_target(ui: &egui::Ui, resp: &egui::Response, accept: impl Fn(&Drag) -> b
         let r = resp.rect;
         match mark {
             DropMark::Above => ui.painter().hline(r.x_range(), r.top(), Stroke::new(2.0, t.accent)),
-            DropMark::Box => ui.painter().rect_stroke(r.shrink(0.5), 3.0, Stroke::new(1.5, t.accent), egui::StrokeKind::Inside),
+            DropMark::Box => {
+                ui.painter().rect_stroke(r.shrink(0.5), t.radius_sm.saturating_sub(1), Stroke::new(1.5, t.accent), egui::StrokeKind::Inside)
+            }
         };
     }
     // Taking a payload takes it whatever its type: leave other drags (appearance swatches) be.
@@ -2194,7 +2277,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
             }
             let Some(tc) = to(lay.text) else { continue };
             let r = Rect::from_center_size(tc, size);
-            painter.rect_filled(r, 2.0, tk.viewport_top.gamma_multiply(0.85));
+            painter.rect_filled(r, tk.radius_sm / 2, tk.viewport_top.gamma_multiply(0.85));
             painter.galley(r.min + vec2(3.0, 1.0), galley, col);
         }
     }
@@ -2216,7 +2299,10 @@ pub const SAVE: &str = "__save";
 /// that capture, revert or keep moving.
 pub fn needs_capture(app: &SolveApp, what: &str) -> bool {
     !app.session.pending_moves.is_empty()
-        && !matches!(what, "component.capture_position" | "component.revert_position" | "occurrence.move" | "edit.undo" | "edit.redo")
+        && !matches!(
+            what,
+            "component.capture_position" | "component.revert_position" | "occurrence.move" | "occurrence.drag" | "edit.undo" | "edit.redo"
+        )
         && app.tree.capture_prompt.is_none()
 }
 

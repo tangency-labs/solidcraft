@@ -71,3 +71,17 @@ mod slider_tests;
 mod test_support;
 
 pub(crate) use layout::label as row_label;
+
+/// Whether `need` points fit in `have`, answered so that a scrollbar coming and going (it takes
+/// `ui.spacing().scroll.allocated_width()` of the width) does not flip it: what has fitted keeps
+/// fitting until it misses by more than the scrollbar's width, and what has not fitted must fit
+/// outright. With nothing remembered yet it is the generous answer, so the first frame with a
+/// scrollbar and the first without agree. Keyed by `key` within `ui`.
+pub(crate) fn fits_steadily(ui: &egui::Ui, key: impl std::hash::Hash + std::fmt::Debug, need: f32, have: f32) -> bool {
+    let slack = ui.spacing().scroll.allocated_width();
+    let id = ui.make_persistent_id(("fits_steadily", key));
+    let was = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(true);
+    let fits = need <= have + if was { slack } else { 0.0 };
+    ui.data_mut(|data| data.insert_temp(id, fits));
+    fits
+}

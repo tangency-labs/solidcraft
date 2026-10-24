@@ -16,6 +16,7 @@
   "pattern.alignment_hint": "Counts include the original. Centre balances copies; Flip chooses the extra side for even totals.",
   "render.opaque_preview_help": "Opaque PBR and simple colours; blended transparency. Refraction, HDRI and final rendering are not available yet.",
   "sketch_text.align_center": "Centre",
+  "ui.3d_mouse_step_pull": "Pull the cap towards you, hold it, then let go.",
   "ui.center": "Centre",
   "ui.centerline": "Centreline",
   "ui.customizeToolbar": "Customise Toolbar…",
@@ -24,7 +25,6 @@
   "ui.layout_compact": "Compact",
   "ui.layout_floating": "Floating",
   "ui.ribbon_labels": "Show text under ribbon icons",
-  "ui.space_mouse_step_pull": "Pull the cap towards you, hold it, then let go.",
   "ui.workspace_layout": "Workspace layout",
   "ui.zoom_to_cursor_tip": "The wheel zooms towards the point under the cursor (off: towards the view's centre)",
   "update.prefs_flatpak": "Flatpak updates this copy ({version}): run {command} or use your software centre. SolidCraft doesn't check."

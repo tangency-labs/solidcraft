@@ -26,6 +26,10 @@ pub struct Smart {
     pub manual_dir: bool,
     /// The automatic operation (an index into the operations) and the side it was chosen for.
     pub latch: Option<(usize, i8)>,
+    /// The To Object target the distance was last set from.
+    pub target: Option<Sel>,
+    /// Picks off the profile plane become the To Object target (Preferences › Design).
+    pub auto_to_object: bool,
 }
 
 /// One-side direction for a new pick: 0 (along the normal) or 1 (reversed). `ray` is the view

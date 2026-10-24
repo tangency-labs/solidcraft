@@ -144,7 +144,7 @@ fn paint_icon(ui: &egui::Ui, rect: egui::Rect, tex: Option<egui::TextureId>, nam
         }
         None => {
             let t = Tokens::get();
-            ui.painter().rect_filled(rect, 3.0, t.chip);
+            ui.painter().rect_filled(rect, t.radius_sm.saturating_sub(1), t.chip);
             let letter = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
             ui.painter().text(
                 rect.center(),
@@ -212,7 +212,7 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
             let selected = e.key == k.slicer;
             if resp.hovered() || selected {
                 let fill = if resp.hovered() { Tokens::get().hover } else { Tokens::get().selected_bg };
-                ui.painter().rect_filled(rect, 2.0, fill);
+                ui.painter().rect_filled(rect, Tokens::get().radius_sm / 2, fill);
             }
             paint_icon(ui, egui::Rect::from_min_size(rect.left_center() + vec2(3.0, -ICON / 2.0), vec2(ICON, ICON)), tex, &e.slicer.name);
             ui.painter().text(
@@ -240,7 +240,7 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
         }
         let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
         if resp.hovered() {
-            ui.painter().rect_filled(rect, 2.0, Tokens::get().hover);
+            ui.painter().rect_filled(rect, Tokens::get().radius_sm / 2, Tokens::get().hover);
         }
         ui.painter().text(
             rect.left_center() + vec2(ICON + 9.0, 0.0),

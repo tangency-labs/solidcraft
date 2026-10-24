@@ -99,7 +99,7 @@ fn unique(base: &str, used: &mut BTreeSet<String>) -> String {
 /// name is built as stored, or as `stored (n)` when a body of that name exists already: the solids
 /// of a STEP file that share a label are stored as `X`, `X`, `X` and built as `X`, `X (2)`, `X (3)`,
 /// and a second import of a file builds `Aa (2)` for the stored `Aa`.
-fn named_by(stored: &[String], built: &[String]) -> bool {
+pub(super) fn named_by(stored: &[String], built: &[String]) -> bool {
     !stored.is_empty()
         && stored.len() == built.len()
         && stored.iter().zip(built).all(|(stored, built)| {
@@ -275,7 +275,8 @@ pub(super) fn paste(
     clone_path.push(root_occurrence);
     if let Some(o) = scratch.doc_mut().occurrences.iter_mut().find(|o| o.id == root_occurrence) {
         o.transform = transform;
-        o.grounded = source_occurrence.as_ref().is_some_and(|o| o.grounded);
+        // A copy starts free, even of a grounded part (#2804); the parts inside it keep theirs.
+        o.grounded = false;
     }
     if let Some(o) = &source_occurrence {
         occurrences.insert(o.id, root_occurrence);

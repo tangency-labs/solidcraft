@@ -404,7 +404,7 @@ fn cylinder_emboss_target_face_and_edit_keep_the_anchored_operation() {
 #[test]
 fn cylinder_emboss_edit_retains_second_source_and_author_paths_and_all_profiles() {
     let mut h = crate::scenario::Harness::new();
-    let source = h.app.run("component.create", json!({"name":"Source"})).unwrap()["component"].as_u64().unwrap();
+    let source = h.app.run("component.create", json!({"name":"Source","grounded":false})).unwrap()["component"].as_u64().unwrap();
     h.app.run("solid.cylinder", json!({"radius":10,"height":20,"body_name":"Sleeve"})).unwrap();
     h.app.run("occurrence.move", json!({"occurrence":"Source:1","axis":[0,0,1],"angle":"90 deg","translate":[50,0,0]})).unwrap();
     let source_second = h.app.run("occurrence.copy", json!({"component":source,"translate":[80,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
@@ -499,7 +499,11 @@ fn cylinder_emboss_edit_retains_second_source_and_author_paths_and_all_profiles(
 fn cylinder_emboss_profile_guide_uses_target_or_unique_foreign_sketch_frame() {
     for target_owned in [true, false] {
         let mut h = crate::scenario::Harness::new();
-        let source = if target_owned { h.app.run("component.create", json!({"name":"Source"})).unwrap()["component"].as_u64().unwrap() } else { 0 };
+        let source = if target_owned {
+            h.app.run("component.create", json!({"name":"Source","grounded":false})).unwrap()["component"].as_u64().unwrap()
+        } else {
+            0
+        };
         h.app.run("solid.cylinder", json!({"radius":10,"height":20,"body_name":"Sleeve"})).unwrap();
         let (profile_owner, expected, target, face) = if target_owned {
             h.app.run("occurrence.move", json!({"occurrence":"Source:1","axis":[0,0,1],"angle":"90 deg","translate":[50,0,0]})).unwrap();
@@ -507,7 +511,7 @@ fn cylinder_emboss_profile_guide_uses_target_or_unique_foreign_sketch_frame() {
             let target = h.app.session.occurrence_bodies(&[second], false).unwrap().remove(0);
             (source, Vec3::new(120.0, 0.0, 0.0), target, json!([120, 0, 7.5]))
         } else {
-            let profile = h.app.run("component.create", json!({"name":"Profile"})).unwrap()["component"].as_u64().unwrap();
+            let profile = h.app.run("component.create", json!({"name":"Profile","grounded":false})).unwrap()["component"].as_u64().unwrap();
             h.app.run("occurrence.move", json!({"occurrence":"Profile:1","axis":[0,0,1],"angle":"90 deg","translate":[50,20,0]})).unwrap();
             (profile, Vec3::new(0.0, 10.0, 0.0), "Sleeve".to_string(), json!([0, 10, 7.5]))
         };
@@ -1477,8 +1481,9 @@ fn newer_options_reach_their_commands() {
     app.dialog = None;
     let top = face(&app, Vec3::new(20.0, 15.0, 20.0));
     let mut d = start(&mut app, vec![top], "solid.hole");
-    d.inputs.push(crate::selection::SelInput::new("To Object", crate::selection::FACES | crate::selection::VERTICES, false));
-    d.inputs[1].items = vec![face(&app, Vec3::new(20.0, 15.0, 0.0))];
+    let mut to = crate::selection::SelInput::new("To Object", crate::selection::FACES | crate::selection::VERTICES, false);
+    to.items = vec![face(&app, Vec3::new(20.0, 15.0, 0.0))];
+    d.inputs.push(to);
     let p = apply_commands(&app, &d).unwrap().remove(0).1;
     assert!(p["to"].is_array() && p.get("depth").is_none(), "{p}");
 }
@@ -2271,4 +2276,44 @@ fn hovering_a_large_body_does_not_wait_for_its_pick_index() {
     let hover_ms = t.elapsed().as_secs_f64() * 1000.0;
     assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })), "{:?}", h.app.viewport.hover);
     assert!(hover_ms < index_ms / 3.0, "the first hover took {hover_ms:.1} ms; making the index takes {index_ms:.1} ms");
+}
+
+/// #4452: with Combine open, bodies clicked in the Browser fill its inputs, as clicks on them
+/// in the view do: the first is the target, the next the tools. Overlapping bodies are often
+/// only told apart in the Browser.
+#[test]
+fn combine_takes_bodies_clicked_in_the_browser() {
+    for layout in ["docked", "floating"] {
+        for control in [false, true] {
+            combine_takes_bodies_clicked_in_the_browser_in(layout, control);
+        }
+    }
+}
+
+/// `control`: click the rows as the control channel's `ui.click` does (move, press and release
+/// in one frame), as an agent or a live screenshot run does.
+fn combine_takes_bodies_clicked_in_the_browser_in(layout: &str, control: bool) {
+    let mut h = crate::scenario::Harness::new();
+    h.step(&json!({"call": "ui.set", "params": {"layout": layout}})).unwrap();
+    h.frames(2);
+    h.app.run("solid.box", json!({"corner": [0, 0, 0], "length": 20, "width": 20, "height": 20, "body_name": "Block"})).unwrap();
+    h.app.run("solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 20, "body_name": "Cutter"})).unwrap();
+    h.app.session.selection.clear();
+    h.app.start("solid.combine");
+    h.frames(2);
+    for label in ["Block", "Cutter"] {
+        if control {
+            let rows = h.call("ui.handles", json!({"prefix": "row:"}))["result"].clone();
+            let rows = rows.get("handles").cloned().unwrap_or(rows);
+            let row = rows.as_array().unwrap().iter().find(|r| r["name"] == format!("row:{label}")).cloned().unwrap();
+            h.call("ui.click", json!({"x": row["x"], "y": row["y"]}));
+            h.frames(2);
+        } else {
+            h.step(&json!({"click": {"browser": label}})).unwrap();
+            h.frames(1);
+        }
+    }
+    let d = h.app.dialog.as_ref().expect("Combine stays open");
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Block".into() }], "{layout} control={control} target: {:?}", d.inputs);
+    assert_eq!(d.inputs[1].items, vec![Sel::Body { name: "Cutter".into() }], "{layout} control={control} tools: {:?}", d.inputs);
 }

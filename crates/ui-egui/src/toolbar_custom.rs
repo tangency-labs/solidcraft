@@ -24,13 +24,23 @@ pub struct ToolbarCustom {
     /// `"<workspace>/<tab>/<panel>"` → the panel's buttons, in order (only panels the user
     /// changed).
     pub panels: BTreeMap<String, Vec<String>>,
+    /// `"<workspace>/<tab>"` → gallery commands moved to full-size buttons.
+    pub gallery_buttons: BTreeMap<String, Vec<String>>,
     /// The Customize Toolbar window is open (not kept).
     pub customizing: bool,
 }
 
 impl ToolbarCustom {
+    /// Whether a command still uses a compact gallery cell in this panel.
+    pub fn in_gallery(&self, tab: &str, panel: &str, id: &str) -> bool {
+        tab == "SKETCH"
+            && panel == "CONSTRAIN"
+            && crate::workspace::CONSTRAINT_GALLERY.contains(&id)
+            && !self.gallery_buttons.get(&format!("{WORKSPACE}/{tab}")).is_some_and(|ids| ids.iter().any(|c| c == id))
+    }
+
     pub fn prefs(&self) -> Value {
-        json!({"version": 2, "panels": self.panels})
+        json!({"version": 2, "panels": self.panels, "gallery_buttons": self.gallery_buttons})
     }
     pub fn load(&mut self, v: &Value) {
         let current = v.get("version").and_then(Value::as_u64) == Some(2);
@@ -42,6 +52,19 @@ impl ToolbarCustom {
                     .take(500)
                     .filter_map(|(k, v)| {
                         let ids: Vec<String> = v.as_array()?.iter().take(100).filter_map(|x| x.as_str().map(str::to_string)).collect();
+                        Some((k.clone(), ids))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.gallery_buttons = v
+            .get("gallery_buttons")
+            .and_then(Value::as_object)
+            .map(|o| {
+                o.iter()
+                    .take(500)
+                    .filter_map(|(k, v)| {
+                        let ids = v.as_array()?.iter().take(100).filter_map(|x| x.as_str().map(str::to_string)).collect();
                         Some((k.clone(), ids))
                     })
                     .collect()
@@ -192,6 +215,16 @@ pub fn remove(app: &mut SolveApp, tab: &str, id: &str) {
 
 /// Move a button before another one (`before`: None puts it at the end of `panel`).
 pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Option<&str>) {
+    // A gallery command dropped on a gallery cell goes (back) into the gallery; dropped anywhere
+    // else it becomes a full-size button.
+    if tab == "SKETCH" && crate::workspace::CONSTRAINT_GALLERY.contains(&id) {
+        let into_gallery = before.is_some_and(|b| app.toolbar_custom.in_gallery(tab, panel, b));
+        let ids = app.toolbar_custom.gallery_buttons.entry(format!("{WORKSPACE}/{tab}")).or_default();
+        ids.retain(|c| c != id);
+        if !into_gallery {
+            ids.push(id.to_string());
+        }
+    }
     if let Some(from) = pinned_on(app, tab, id) {
         let mut ids = own(app, tab, from);
         ids.retain(|x| x != id);
@@ -217,6 +250,7 @@ pub fn toggle(app: &mut SolveApp, tab: &str, id: &str) {
 pub fn reset(app: &mut SolveApp, tab: &str) {
     let prefix = format!("{WORKSPACE}/{tab}/");
     app.toolbar_custom.panels.retain(|k, _| !k.starts_with(&prefix));
+    app.toolbar_custom.gallery_buttons.remove(&format!("{WORKSPACE}/{tab}"));
 }
 
 /// The menu of a command (toolbar button, drop-down row, S box row).

@@ -249,7 +249,46 @@ pub fn triad(app: &SolveApp, d: &Dialog) -> Option<gizmo::Triad> {
 }
 
 /// Apply a triad drag to the dialog's values (added to the values when the drag began).
+/// Which value the canvas box shows and types into, for the types that translate: X, Y or Z
+/// (0 to 2), or, in Free Move, the angle about X, Y or Z (3 to 5). Kept in `extra` as
+/// `value_field`; X at first.
+pub fn value_field(d: &Dialog) -> usize {
+    let Kind::Move { mode, .. } = &d.kind else { return 0 };
+    let n = fields(*mode);
+    d.extra.get("value_field").and_then(Value::as_u64).map_or(0, |f| f as usize).min(n.saturating_sub(1))
+}
+
+/// How many values the box can show for a move type (see [`value_field`]).
+fn fields(mode: usize) -> usize {
+    match mode {
+        FREE => 6,
+        TRANSLATE | POINT_TO_POSITION => 3,
+        _ => 1,
+    }
+}
+
+/// Show the next (`step` 1) or previous (`step` -1) value in the box, round the type's values.
+pub fn step_value_field(d: &mut Dialog, step: i64) {
+    let Kind::Move { mode, .. } = &d.kind else { return };
+    let n = fields(*mode) as i64;
+    let next = (value_field(d) as i64 + step).rem_euclid(n.max(1));
+    d.extra.insert("value_field".into(), json!(next));
+}
+
 pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
+    // The box shows the value the handle drives: the distance along a dragged arrow, the angle
+    // of a dragged ring (#4776). A plane square or the ball moves along two or three axes and
+    // leaves it as it is.
+    let field = match g.handle {
+        crate::gizmo::Handle::Axis(i) => Some(i.min(2)),
+        crate::gizmo::Handle::Ring(i) => Some(3 + i.min(2)),
+        _ => None,
+    };
+    if let (Some(f), Kind::Move { mode, .. }) = (field, &d.kind)
+        && f < fields(*mode)
+    {
+        d.extra.insert("value_field".into(), json!(f));
+    }
     let Kind::Move { x, y, z, rx, ry, rz, .. } = &d.kind else { return };
     if g.started || !d.extra.contains_key("drag0") {
         let v = [len(app, x), len(app, y), len(app, z), ang(app, rx), ang(app, ry), ang(app, rz)].map(|r| r.unwrap_or(0.0));

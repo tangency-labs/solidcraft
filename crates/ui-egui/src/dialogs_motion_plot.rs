@@ -142,7 +142,7 @@ fn chart(ui: &mut egui::Ui, xs: &[f64], ys: &[f64], unit: &str, total: u32, now:
     let (r, resp) = ui.allocate_exact_size(vec2(300.0, 120.0), Sense::click_and_drag());
     crate::scenario::publish_rect("motion:chart", r);
     let p = ui.painter_at(r);
-    p.rect(r, 3.0, t.field, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    p.rect(r, t.radius_sm.saturating_sub(1), t.field, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
     let plot = Rect::from_min_max(r.min + vec2(6.0, 16.0), r.max - vec2(6.0, 16.0));
     let total = f64::from(total.max(1));
     let x = |s: f64| plot.left() + plot.width() * (s / total).clamp(0.0, 1.0) as f32;

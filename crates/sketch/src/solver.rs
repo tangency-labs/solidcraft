@@ -1504,7 +1504,7 @@ fn build_blocks<'a>(sk: &'a Sketch, lay: &Layout, on_curve: &[(usize, usize)]) -
         }
     }
     for (i, c) in sk.constraints.iter().enumerate() {
-        if c.driven || matches!(c.kind, ConstraintKind::OffsetDistance { .. }) {
+        if c.driven || matches!(c.kind, ConstraintKind::OffsetDistance { .. }) || sk.follows_its_source(&c.kind) {
             continue;
         }
         raw.push(match touch_point(sk, &c.kind, on_curve) {

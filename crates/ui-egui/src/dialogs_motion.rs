@@ -175,7 +175,7 @@ fn transport(ui: &mut egui::Ui, what: Transport, tip: &str) -> egui::Response {
     let t = Tokens::get();
     let (r, resp) = ui.allocate_exact_size(vec2(26.0, 22.0), Sense::click());
     let fill = if resp.hovered() { t.hover } else { t.field };
-    ui.painter().rect(r, 3.0, fill, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    ui.painter().rect(r, t.radius_sm.saturating_sub(1), fill, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     let c = r.center();
     let ink = if matches!(what, Transport::Play | Transport::Stop) { t.accent } else { t.icon };
     let p = ui.painter();
@@ -740,7 +740,7 @@ fn name_of(v: &Value) -> String {
 fn key_strip(ui: &mut egui::Ui, tr: &Track, total: u32, now: u32, t: &Tokens) {
     let (r, _) = ui.allocate_exact_size(vec2(240.0, 16.0), Sense::hover());
     let p = ui.painter();
-    p.rect_filled(r, 3.0, t.field);
+    p.rect_filled(r, t.radius_sm.saturating_sub(1), t.field);
     let x = |s: u32| r.left() + 6.0 + (r.width() - 12.0) * s as f32 / total.max(1) as f32;
     // Keys joined by a line (the motion between them).
     let pts: Vec<Pos2> = tr.points.iter().map(|(s, _)| pos2(x(*s), r.center().y)).collect();

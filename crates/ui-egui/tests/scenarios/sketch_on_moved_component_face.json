@@ -6,7 +6,9 @@
   "call": "engine.execute",
   "params": {
    "command": "component.create",
-   "params": {}
+   "params": {
+    "grounded": false
+   }
   }
  },
  {

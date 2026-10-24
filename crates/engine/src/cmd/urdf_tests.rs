@@ -383,7 +383,7 @@ fn urdf_names_are_unique_across_links_joints_and_files() {
     let mut s = Session::default();
     for name in ["Arm", "base", "Arm_link1"] {
         run(&mut s, "component.activate", json!({"component": "root"}));
-        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "component.create", json!({"name": name, "grounded": false}));
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]}));
     }
     run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [50, 50, 0]}));

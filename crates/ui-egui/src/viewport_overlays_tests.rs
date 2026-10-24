@@ -357,6 +357,130 @@ fn compass_circle_grabs_on_hover_and_the_home_chip_points() {
     assert_ne!(h.output.cursor_icon, egui::CursorIcon::Grab, "no hand away from the compass");
 }
 
+/// The status and computing toasts keep the size and place they always had: the text's size plus
+/// 40 by 16, centred at the bottom of the free rect.
+#[test]
+fn the_shared_toast_draws_old_callers_exactly_as_before() {
+    let ctx = crate::fonts::test_context();
+    for width in [200.0_f32, 300.0, 500.0, 900.0] {
+        let free = Rect::from_min_size(pos2(10.0, 20.0), vec2(width, 200.0));
+        for (error, computing) in [(false, false), (true, false), (false, true)] {
+            draw(&ctx, |ui| {
+                let t = Tokens::get();
+                let text = "A message that is long enough to wrap in the narrow cases, and not in the wide ones".to_string();
+                let galley = ui.painter().layout(text.clone(), crate::fonts::medium(t.font_label), t.text, (free.width() - 40.0).min(440.0));
+                let size = galley.size() + vec2(40.0, 16.0);
+                let expected = Rect::from_center_size(pos2(free.center().x, free.bottom() - size.y * 0.5), size);
+                let got = paint_toast(ui, free, text, error, computing);
+                if size.x > free.width() || size.y > free.height() {
+                    assert!(got.is_none());
+                } else {
+                    assert_eq!(got, Some(expected), "width {width} error {error} computing {computing}");
+                }
+            });
+        }
+    }
+}
+
+/// The toast's buttons stay inside its card at narrow widths, and do nothing while an issue report
+/// holds CAD input.
+#[test]
+fn toast_buttons_wrap_inside_the_card_and_are_dead_behind_an_issue_report() {
+    let labels = [
+        ("Calibrate…", ToastKind::Primary),
+        ("Swap to Hidraw (Direct Driver)", ToastKind::Secondary),
+        ("Close", ToastKind::Dismiss),
+        ("Never show again", ToastKind::Dismiss),
+    ];
+    for width in [260.0_f32, 360.0, 600.0, 1000.0] {
+        for blocked in [false, true] {
+            crate::issue_report::set_cad_input_blocked_for_test(blocked);
+            let ctx = crate::fonts::test_context();
+            let free = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 300.0));
+            let run = |events: Vec<egui::Event>| {
+                let mut seen = None;
+                let mut output = ctx.run_ui(egui::RawInput { events, screen_rect: Some(free), focused: true, ..Default::default() }, |ui| {
+                    seen = paint_toast_with(ui, free, "Your 3D mouse isn't calibrated.".into(), ToastLead::Dot(false), &labels);
+                });
+                output.textures_delta.clear();
+                seen
+            };
+            run(vec![]);
+            let (card, _) = run(vec![]).unwrap_or_else(|| panic!("width {width}: no card"));
+            assert!(free.contains_rect(card), "width {width}: {card:?}");
+            let mut hits = Vec::new();
+            for step_x in 1..12 {
+                for step_y in 1..16 {
+                    let at = pos2(card.left() + card.width() * step_x as f32 / 12.0, card.top() + card.height() * step_y as f32 / 16.0);
+                    run(vec![egui::Event::PointerMoved(at)]);
+                    run(vec![egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: Default::default(),
+                    }]);
+                    let clicked = run(vec![egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: Default::default(),
+                    }]);
+                    if let Some((_, Some(index))) = clicked {
+                        hits.push(index);
+                    }
+                }
+            }
+            crate::issue_report::set_cad_input_blocked_for_test(false);
+            if blocked {
+                assert!(hits.is_empty(), "width {width}: a button worked behind a report: {hits:?}");
+            } else {
+                hits.sort_unstable();
+                hits.dedup();
+                assert_eq!(hits, [0, 1, 2, 3], "width {width}: every button can be clicked inside the card");
+            }
+        }
+    }
+}
+
+/// The toast's buttons group by purpose and wrap as whole groups: the main action first, then the
+/// alternative, then the dismissals; no button stands alone on a row while its group-mate fits.
+#[test]
+fn toast_buttons_group_by_purpose_and_wrap_as_groups() {
+    use ToastKind::{Dismiss, Primary, Secondary};
+    let four = [(110.0, Primary), (220.0, Secondary), (60.0, Dismiss), (140.0, Dismiss)];
+    let three = [(110.0, Primary), (60.0, Dismiss), (140.0, Dismiss)];
+    for card in [260.0_f32, 360.0, 460.0, 560.0, 700.0, 1000.0] {
+        let row_width = (card - 40.0).min(440.0);
+        for buttons in [&four[..], &three[..]] {
+            let spots = toast_action_spots(buttons, row_width, 8.0, 28.0);
+            let widest = buttons.iter().map(|b| b.0).fold(0.0, f32::max);
+            // Nothing leaves the row (a button wider than the row is cut to it by the painter), and none overlaps.
+            for (i, spot) in spots.iter().enumerate() {
+                assert!(spot.left() >= 0.0 && spot.right() <= row_width.max(widest) + 0.01, "card {card}: {spot:?}");
+                for other in &spots[i + 1..] {
+                    assert!(!spot.intersects(*other), "card {card}: {spot:?} overlaps {other:?}");
+                }
+            }
+            // The primary is first: top left, and no button is above it or left of it on its row.
+            assert!(spots.iter().all(|s| s.top() > spots[0].top() || s.left() >= spots[0].left()), "card {card}: primary first");
+            let mut rows: std::collections::BTreeMap<i32, usize> = Default::default();
+            for spot in &spots {
+                *rows.entry(spot.top() as i32).or_default() += 1;
+            }
+            // Whole groups fit the row: then no row has a button on its own, except the primary of the
+            // three-button set (its group is only itself).
+            let group_fits = if buttons.len() == 4 { 110.0 + 8.0 + 220.0 <= row_width } else { 140.0 + 8.0 + 60.0 <= row_width };
+            if group_fits {
+                let singles = rows.values().filter(|&&n| n == 1).count();
+                assert!(singles <= usize::from(buttons.len() == 3), "card {card}, {} buttons: a button is left alone: {rows:?}", buttons.len());
+            }
+            if row_width >= 110.0 + 8.0 + 220.0 + 8.0 + 60.0 + 8.0 + 140.0 {
+                assert_eq!(rows.len(), 1, "card {card}: one row when everything fits");
+            }
+        }
+    }
+}
+
 #[test]
 fn bottom_readouts_clear_floating_history_on_the_first_frame() {
     let mut h = Harness::new();

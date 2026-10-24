@@ -1,0 +1,295 @@
+//! Placing a Single hole (#2171, #1047). With Snap to face and edge centres on (Preferences, off by
+//! default), a pick near the middle of a face or on a round edge snaps there, and Alt held places
+//! it where it was clicked. With Move holes by clicking or dragging on (also off by default), the
+//! handle drags a placed hole (also one being edited) and a second pick on its face moves it.
+//! Both off, picks behave as before. Either way the dialog shows the hole's sizes beside a
+//! section of it.
+
+use serde_json::json;
+use solidcraft_engine::Sel;
+use solidcraft_engine::doc::FeatureKind;
+use solidcraft_engine::geom::Vec3;
+
+use crate::dialogs::Kind;
+use crate::scenario::{Harness, handle_at, rect_of};
+use crate::viewport::Hit;
+
+/// A 40 × 30 × 20 block seen from the top, with a 10 mm hole through it at (10, 10), and hole
+/// snaps and moves turned on as the Preferences dialog (or `ui.prefs`) turns them on.
+fn block() -> Harness {
+    let mut h = block_as_installed();
+    crate::prefs::set(&mut h.app, &json!({"hole_snaps": true, "hole_moves": true})).unwrap();
+    assert!(h.app.preferences.hole_snaps && h.app.preferences.hole_moves);
+    h
+}
+
+/// The block with the preferences a new installation has.
+fn block_as_installed() -> Harness {
+    let mut h = Harness::new();
+    h.app.ui.show_origin = false;
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("solid.hole", json!({"position": [10, 10, 20], "diameter": 10, "name": "Bore"})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    h.settle();
+    h
+}
+
+/// Where a world point is on screen.
+fn screen(h: &mut Harness, p: Vec3) -> [f64; 2] {
+    h.at(&json!({"world": [p.x, p.y, p.z]})).unwrap()
+}
+
+/// `p` on screen, moved by `dx`, `dy` points.
+fn off(h: &mut Harness, p: Vec3, dx: f64, dy: f64) -> [f64; 2] {
+    let c = screen(h, p);
+    [c[0] + dx, c[1] + dy]
+}
+
+/// The face places the open dialog holds.
+fn places(h: &Harness) -> Vec<Vec3> {
+    h.app.dialog.as_ref().unwrap().inputs[0]
+        .items
+        .iter()
+        .map(|x| match x {
+            Sel::Face { point, .. } => *point,
+            other => panic!("a face place, not {other:?}"),
+        })
+        .collect()
+}
+
+/// The last feature's id and position, when it is a hole.
+fn last_hole(h: &Harness) -> (u64, Vec3) {
+    let f = h.app.session.doc.features.last().unwrap();
+    match &f.kind {
+        FeatureKind::Hole { position, .. } => (f.id, position.0),
+        other => panic!("the last feature is not a hole: {}", other.type_name()),
+    }
+}
+
+fn solid_at(h: &Harness, p: Vec3) -> bool {
+    h.app.session.model.state().bodies.iter().any(|b| b.body.contains(p))
+}
+
+const MIDDLE: Vec3 = Vec3::new(20.0, 15.0, 20.0);
+const BORE: Vec3 = Vec3::new(10.0, 10.0, 20.0);
+
+#[test]
+fn a_pick_near_the_middle_of_a_face_goes_to_the_middle() {
+    let mut h = block();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = off(&mut h, MIDDLE, 5.0, -4.0);
+    h.step(&json!({"move": at})).unwrap();
+    match &h.app.viewport.hover {
+        Some(Hit::Face { point, .. }) => assert!(point.dist(MIDDLE) < 1e-9, "the face lights up at its middle: {point:?}"),
+        other => panic!("the face lights up, not {other:?}"),
+    }
+    h.step(&json!({"click": at})).unwrap();
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(MIDDLE) < 1e-9), "{:?}", places(&h));
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let (_, position) = last_hole(&h);
+    assert!(position.dist(MIDDLE) < 1e-9, "{position:?}");
+    assert!(!solid_at(&h, MIDDLE - Vec3::new(0.0, 0.0, 5.0)), "drilled at the middle");
+}
+
+#[test]
+fn a_pick_away_from_snaps_or_with_alt_held_stays_where_it_was_clicked() {
+    let mut h = block();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    // Well away from the middle and from the bore's rim.
+    let away = Vec3::new(30.0, 8.0, 20.0);
+    let at = screen(&mut h, away);
+    h.step(&json!({"click": at})).unwrap();
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(away) < 1e-3 && p.dist(MIDDLE) > 1.0), "{:?}", places(&h));
+    h.step(&json!({"key": "Escape"})).unwrap();
+    // Alt held: no snap, even beside the middle.
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = off(&mut h, MIDDLE, 5.0, -4.0);
+    h.step(&json!({"move": at, "alt": true})).unwrap();
+    h.step(&json!({"click": at, "alt": true})).unwrap();
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(MIDDLE) > 0.1 && (p.z - 20.0).abs() < 1e-9), "{:?}", places(&h));
+}
+
+#[test]
+fn a_pick_on_a_round_edge_goes_to_its_centre() {
+    let mut h = block();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    // On the bore's rim, and a few points outside it on the top face.
+    for (dx, label) in [(0.0, "on the rim"), (3.0, "beside the rim")] {
+        let rim = off(&mut h, BORE + Vec3::new(5.0, 0.0, 0.0), dx, 0.0);
+        let c = screen(&mut h, BORE);
+        assert!((rim[0] - c[0]).abs() > 2.0 * f64::from(crate::hole_place::POINT_REACH), "the rim is out of the centre's reach");
+        h.step(&json!({"click": rim})).unwrap();
+        assert!(matches!(places(&h).as_slice(), [p] if p.dist(BORE) < 1e-6), "{label}: {:?}", places(&h));
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.step(&json!({"start": "solid.hole"})).unwrap();
+    }
+    // A counterbore round the bore: drilled on its axis.
+    let rim = screen(&mut h, BORE + Vec3::new(5.0, 0.0, 0.0));
+    h.step(&json!({"click": rim})).unwrap();
+    if let Some(Kind::Hole { kind, cb_diameter, cb_depth, diameter, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *kind = 1;
+        *diameter = "12 mm".into();
+        *cb_diameter = "16 mm".into();
+        *cb_depth = "3 mm".into();
+    }
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let (id, position) = last_hole(&h);
+    assert!(position.dist(BORE) < 1e-6, "{position:?}");
+    assert!(h.app.session.model.result(id).is_some_and(|r| r.error.is_none()), "the counterbore cuts");
+    assert!(!solid_at(&h, BORE + Vec3::new(7.5, 0.0, -1.5)) && solid_at(&h, BORE + Vec3::new(8.5, 0.0, -1.5)), "8 mm round the axis");
+    assert!(!solid_at(&h, BORE + Vec3::new(5.5, 0.0, -8.0)) && solid_at(&h, BORE + Vec3::new(6.5, 0.0, -8.0)), "then 6 mm");
+}
+
+#[test]
+fn the_handle_drags_a_placed_hole_and_snaps() {
+    let mut h = block();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let start = Vec3::new(30.0, 8.0, 20.0);
+    let at = screen(&mut h, start);
+    h.step(&json!({"click": at})).unwrap();
+    h.frames(2);
+    assert!(handle_at("hole:0").is_some(), "the placed hole has a handle");
+    // Dragged to beside the middle: it snaps there.
+    let to = off(&mut h, MIDDLE, 4.0, 3.0);
+    h.step(&json!({"drag": [{"handle": "hole:0"}, to]})).unwrap();
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(MIDDLE) < 1e-9), "{:?}", places(&h));
+    // Then onto a free spot: it goes where it is let go.
+    let free = Vec3::new(32.0, 24.0, 20.0);
+    let to = screen(&mut h, free);
+    h.step(&json!({"drag": [{"handle": "hole:0"}, to]})).unwrap();
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(free) < 0.2), "{:?}", places(&h));
+    // A drag is not a pick: still one hole, and nothing was box-selected.
+    assert_eq!(places(&h).len(), 1);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    let (_, position) = last_hole(&h);
+    assert!(position.dist(free) < 0.2, "{position:?}");
+}
+
+#[test]
+fn a_second_pick_on_the_face_moves_the_hole_and_a_pick_on_it_takes_it_out() {
+    let mut h = block();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let first = Vec3::new(30.0, 8.0, 20.0);
+    let at = screen(&mut h, first);
+    h.step(&json!({"click": at})).unwrap();
+    let second = Vec3::new(32.0, 24.0, 20.0);
+    let at2 = screen(&mut h, second);
+    h.step(&json!({"click": at2})).unwrap();
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(second) < 0.2), "moved, not added: {:?}", places(&h));
+    // On the hole itself (inside its 5 mm): taken out.
+    h.step(&json!({"click": at2})).unwrap();
+    assert!(places(&h).is_empty(), "{:?}", places(&h));
+}
+
+#[test]
+fn editing_a_hole_drags_it_to_a_new_place() {
+    // Moving a hole (#1047): Edit Feature, drag its handle, OK.
+    let mut h = block();
+    let (id, _) = last_hole(&h);
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": id}})).unwrap();
+    h.frames(4);
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(BORE) < 1e-6), "{:?}", places(&h));
+    let to = off(&mut h, MIDDLE, -3.0, 4.0);
+    h.step(&json!({"drag": [{"handle": "hole:0"}, to]})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let (again, position) = last_hole(&h);
+    assert_eq!(again, id, "the same feature");
+    assert!(position.dist(MIDDLE) < 1e-9, "{position:?}");
+    let down = Vec3::new(0.0, 0.0, 10.0);
+    assert!(solid_at(&h, BORE - down), "the old place is solid again");
+    assert!(!solid_at(&h, MIDDLE - down), "the hole is at the middle now");
+}
+
+#[test]
+fn snaps_and_moves_are_off_by_default_and_picks_behave_as_before() {
+    let mut h = block_as_installed();
+    assert!(!h.app.preferences.hole_snaps && !h.app.preferences.hole_moves, "a new installation places holes as it always did");
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    // Beside the middle: no snap.
+    let at = off(&mut h, MIDDLE, 5.0, -4.0);
+    h.step(&json!({"move": at})).unwrap();
+    match &h.app.viewport.hover {
+        Some(Hit::Face { point, .. }) => assert!(point.dist(MIDDLE) > 0.1, "{point:?}"),
+        other => panic!("the face lights up, not {other:?}"),
+    }
+    h.step(&json!({"click": at})).unwrap();
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(MIDDLE) > 0.1 && (p.z - 20.0).abs() < 1e-9), "{:?}", places(&h));
+    h.frames(2);
+    assert!(handle_at("hole:0").is_none(), "no drag handle");
+    // A second pick on the face takes the hole out, as it always did.
+    let elsewhere = screen(&mut h, Vec3::new(32.0, 24.0, 20.0));
+    h.step(&json!({"click": elsewhere})).unwrap();
+    assert!(places(&h).is_empty(), "{:?}", places(&h));
+}
+
+#[test]
+fn moving_holes_is_its_own_setting() {
+    // Moves on, snaps off: the handle drags a hole to where it is let go, and a second pick on
+    // its face moves it; neither snaps.
+    let mut h = block_as_installed();
+    crate::prefs::set(&mut h.app, &json!({"hole_moves": true})).unwrap();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let start = screen(&mut h, Vec3::new(30.0, 8.0, 20.0));
+    h.step(&json!({"click": start})).unwrap();
+    h.frames(2);
+    let to = off(&mut h, MIDDLE, 5.0, -4.0);
+    h.step(&json!({"drag": [{"handle": "hole:0"}, to]})).unwrap();
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(MIDDLE) > 0.1 && p.dist(MIDDLE) < 2.0), "dragged, not snapped: {:?}", places(&h));
+    let elsewhere = Vec3::new(32.0, 24.0, 20.0);
+    let at = screen(&mut h, elsewhere);
+    h.step(&json!({"click": at})).unwrap();
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(elsewhere) < 0.2), "moved, not taken out: {:?}", places(&h));
+    // Snaps on, moves off: a pick snaps, and a second pick on the face takes the hole out.
+    h.step(&json!({"key": "Escape"})).unwrap();
+    crate::prefs::set(&mut h.app, &json!({"hole_snaps": true, "hole_moves": false})).unwrap();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = off(&mut h, MIDDLE, 5.0, -4.0);
+    h.step(&json!({"click": at})).unwrap();
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(MIDDLE) < 1e-9), "{:?}", places(&h));
+    h.frames(2);
+    assert!(handle_at("hole:0").is_none(), "no drag handle");
+    let at = screen(&mut h, elsewhere);
+    h.step(&json!({"click": at})).unwrap();
+    assert!(places(&h).is_empty(), "{:?}", places(&h));
+}
+
+#[test]
+fn the_dialog_shows_the_sizes_beside_a_section_of_the_hole() {
+    let mut h = block();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    h.frames(3);
+    let section = rect_of("dialog:figure_picture:hole section").expect("the section is drawn");
+    let at = |name: &str| handle_at(&format!("dialog:{name}")).unwrap_or_else(|| panic!("no field {name}"));
+    // A drilled hole to a depth: depth, diameter and tip angle, top to bottom, right of it.
+    let (depth, dia, tip) = (at("Depth"), at("Diameter"), at("Tip Angle"));
+    assert!(depth.y < dia.y && dia.y < tip.y, "{depth:?} {dia:?} {tip:?}");
+    assert!([depth, dia, tip].iter().all(|p| p.x > section.right() && p.y > section.top() && p.y < section.bottom()));
+    // A counterbore: its diameter and depth come first.
+    if let Some(Kind::Hole { kind, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *kind = 1;
+    }
+    h.frames(3);
+    let (cb, cbd, depth, dia) = (at("Counterbore Ø"), at("Counterbore depth"), at("Depth"), at("Diameter"));
+    assert!(cb.y < cbd.y && cbd.y < depth.y && depth.y < dia.y, "{cb:?} {cbd:?} {depth:?} {dia:?}");
+    assert!(handle_at("dialog:Tip Angle").is_none(), "no tip on a counterbore");
+    // Through all: no depth.
+    if let Some(Kind::Hole { opts, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        opts.all = true;
+    }
+    h.frames(3);
+    assert!(handle_at("dialog:Depth").is_none());
+    // The depth field still takes typing (scenarios click it by its name).
+    if let Some(Kind::Hole { opts, kind, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        opts.all = false;
+        *kind = 0;
+    }
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "dialog:Depth"}})).unwrap();
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": "7 mm"})).unwrap();
+    h.frames(2);
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole { depth, .. } if depth == "7 mm"));
+}

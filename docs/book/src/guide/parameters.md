@@ -25,7 +25,11 @@ editable. In expression fields, type a parameter or dimension name for autocompl
 or press **Ctrl+Space** to open suggestions, including in an empty field.
 **Up/Down** selects an autocomplete suggestion,
 **Enter/Tab** accepts it, and **Escape** dismisses the suggestions. Accepting a suggestion
-does not also submit the parameter.
+does not also submit the parameter. When what you typed is already a complete name
+(`width`), longer names such as `width_extra` stay listed without a selection: **Enter**
+applies what you typed, and **Up/Down** picks one of them first. A unit right after a number
+(`10 mm`) is left alone; anywhere else a unit is a prefix like any other, so `rad` followed by
+**Enter** gives `radius`.
 
 Expressions are unit-aware: `2 * width + 5 mm`, `angle / 2`, `sqrt(area)`, `1 in + 3 mm`, using
 `+ - * / ^`, parentheses, `sin cos tan asin acos atan atan2 sqrt abs min max floor ceil round mod

@@ -166,6 +166,40 @@ fn a_spline_cut_out_is_the_splines_it_was() {
 }
 
 #[test]
+fn a_g4_blend_cut_out_is_one_spline_of_degree_nine_and_closes() {
+    // Three sides of a 20 × 20 square, closed on the right by a G4 blend from (40, 20) to (40, 40):
+    // one Bézier of degree 9 over ten control points (solidcraft#5269).
+    let mut s = plate_with(&[]);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cut"}));
+    let mut line =
+        |a: [i32; 2], b: [i32; 2]| run(&mut s, "sketch.line", json!({"points": [a, b]}))["curves"][0].as_str().unwrap_or_default().to_string();
+    let (bottom, top) = (line([20, 20], [40, 20]), line([40, 40], [20, 40]));
+    line([20, 40], [20, 20]);
+    run(&mut s, "sketch.blend_curve", json!({"a": format!("{bottom}.end"), "b": format!("{top}.start"), "continuity": "g4"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+    let hole: Vec<Seg2> = loops(&s).get(1).map(|l| l.segs.clone()).unwrap_or_default();
+    let blend: Vec<Vec2> = hole.iter().find_map(|g| if let Seg2::Bezier { n: 9, p } = g { Some(p[..10].to_vec()) } else { None }).unwrap_or_default();
+    assert_eq!((blend.len(), hole.len()), (10, 4), "{hole:?}");
+
+    // One SPLINE of degree 9 with all ten control points: its ends are the blend's own.
+    let dxf = export(&mut s, json!({}));
+    let es = entities(&dxf);
+    assert_eq!((count(&es, "LINE"), count(&es, "SPLINE"), es.len()), (7, 1, 8));
+    let spline = es.iter().find(|e| e.0 == "SPLINE").unwrap();
+    assert_eq!((values(spline, 70), values(spline, 71), values(spline, 72), values(spline, 73)), (vec![8.0], vec![9.0], vec![20.0], vec![10.0]));
+    let ctrl: Vec<Vec2> = values(spline, 10).into_iter().zip(values(spline, 20)).map(|(x, y)| Vec2::new(x, y)).collect();
+    assert!(ctrl.len() == 10 && ctrl.iter().zip(&blend).all(|(a, b)| a.dist(*b) < 1e-9), "{ctrl:?} {blend:?}");
+    let ends = [ctrl[0], ctrl[9]];
+    assert!(ends.contains(&Vec2::new(40.0, 20.0)) && ends.contains(&Vec2::new(40.0, 40.0)), "{ends:?}");
+
+    // The cut-out closes, so the same plate and the same cut-out come back.
+    let areas = reimported_areas(&dxf);
+    let plate = s.model.state().sheets[0].flat_regions().unwrap_or_default()[0].area();
+    assert!(areas.len() == 2 && (areas[0] - plate).abs() < 1e-6 && (areas[1] - (6000.0 - plate)).abs() < 1e-6, "{areas:?} {plate}");
+}
+
+#[test]
 fn text_is_splines_and_lines_not_chords() {
     let mut s = plate_with(&[("sketch.text", json!({"text": "AB", "at": [30, 20], "height": 12}))]);
     let dxf = export(&mut s, json!({}));

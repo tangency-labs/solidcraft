@@ -3,7 +3,9 @@
 A sketch lies on a plane: an origin plane, a construction plane or a planar face. Start one with
 **Create Sketch** (`sketch.create`) and click a plane, or pick a face first. Right-clicking a
 plane, in the view or on its browser row, offers **Create Sketch** on that plane too.
-**Finish Sketch** returns to the model.
+**Finish Sketch** returns to the model. **Cancel Sketch** (`sketch.cancel`) returns without
+keeping what changed since the sketch was created or opened for editing: a new sketch is removed,
+an edited one goes back to how it was, as one step that Undo brings back.
 
 In scripts, `XY`, `XZ`, `YZ` and their `Top`, `Front`, `Right` aliases name origin planes.
 These names are reserved: a construction plane cannot be created with or renamed to one

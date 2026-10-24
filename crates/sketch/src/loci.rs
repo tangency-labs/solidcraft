@@ -829,7 +829,7 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     let rounds: Vec<Option<Round>> = (0..m).map(|k| round_of(sk, k)).collect();
     let line = |l: usize| lines.get(l).copied().flatten();
     let round = |k: usize| rounds.get(k).copied().flatten();
-    let cons: Vec<&ConstraintKind> = sk.constraints.iter().filter(|c| !c.driven).map(|c| &c.kind).collect();
+    let cons: Vec<&ConstraintKind> = sk.constraints.iter().filter(|c| !c.driven && !sk.follows_its_source(&c.kind)).map(|c| &c.kind).collect();
     let dim = |v: f64| (v.is_finite() && (0.0..=MAX_COORD).contains(&v)).then_some(v);
 
     // Radii and lengths the dimensions set, also through equal curves.

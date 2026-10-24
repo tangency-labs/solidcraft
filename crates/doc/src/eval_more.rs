@@ -69,27 +69,8 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             apply_op(st, f, tools, if *deboss { Operation::Cut } else { Operation::Join }, &crate::plain(targets))
         }
-        FeatureKind::Rib { sketch, curves, thickness, depth, flip, web, normal } => {
-            let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
-            let t = val(vals, thickness, Kind::Length)?;
-            if !(t > 0.0) {
-                return Err(DocError::Invalid("the rib thickness must be positive".into()));
-            }
-            let depth = match depth {
-                Some(e) => Some(val(vals, e, Kind::Length)?)
-                    .filter(|d| *d > 0.0)
-                    .ok_or_else(|| DocError::Invalid("the rib depth must be positive".into()))
-                    .map(Some)?,
-                None => None,
-            };
-            let groups: Vec<Vec<String>> = if *web { curves.iter().map(|c| vec![c.clone()]).collect() } else { vec![curves.clone()] };
-            if groups.is_empty() || curves.is_empty() || curves.len() > 1000 {
-                return Err(DocError::Invalid("a rib needs 1…1000 sketch curves".into()));
-            }
-            let mut tools = Vec::new();
-            for g in &groups {
-                tools.push(if *normal { rib_tool_normal(st, &ss, g, t, depth, *flip)? } else { rib_tool(st, &ss, g, t, depth, *flip)? });
-            }
+        FeatureKind::Rib { .. } => {
+            let tools = rib_tools(vals, st, f, None)?;
             apply_op(st, f, tools, Operation::Join, &[])
         }
         FeatureKind::ReplaceFace { faces, target, body } => {
@@ -174,6 +155,41 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         }
         _ => Err(DocError::Invalid(format!("{} is not evaluated here", f.name))),
     }
+}
+
+/// The walls of rib `f` (one per curve for a web), each run until it meets the bodies. `at`
+/// moves the rib's sketch first: a pattern's or mirror's copy of the rib is built again where
+/// the copy is, against the bodies there (#4593), as a hole is drilled again at each copy.
+pub(super) fn rib_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, at: Option<&crate::Mat>) -> Result<Vec<Body>> {
+    let FeatureKind::Rib { sketch, curves, thickness, depth, flip, web, normal } = &f.kind else {
+        return Err(DocError::Invalid(format!("{} is not a rib", f.name)));
+    };
+    let mut ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
+    if let Some(m) = at {
+        let p = ss.plane;
+        ss.plane = Plane::new(apply_point(m, p.origin), crate::apply_vector(m, p.x), crate::apply_vector(m, p.y))
+            .ok_or_else(|| DocError::Invalid("the rib's sketch plane at the copy".into()))?;
+    }
+    let t = val(vals, thickness, Kind::Length)?;
+    if !(t > 0.0) {
+        return Err(DocError::Invalid("the rib thickness must be positive".into()));
+    }
+    let depth = match depth {
+        Some(e) => Some(val(vals, e, Kind::Length)?)
+            .filter(|d| *d > 0.0)
+            .ok_or_else(|| DocError::Invalid("the rib depth must be positive".into()))
+            .map(Some)?,
+        None => None,
+    };
+    let groups: Vec<Vec<String>> = if *web { curves.iter().map(|c| vec![c.clone()]).collect() } else { vec![curves.clone()] };
+    if groups.is_empty() || curves.is_empty() || curves.len() > 1000 {
+        return Err(DocError::Invalid("a rib needs 1…1000 sketch curves".into()));
+    }
+    let mut tools = Vec::new();
+    for g in &groups {
+        tools.push(if *normal { rib_tool_normal(st, &ss, g, t, depth, *flip)? } else { rib_tool(st, &ss, g, t, depth, *flip)? });
+    }
+    Ok(tools)
 }
 
 /// Unit outward normal of the planar face through `p`: of the planar faces whose plane runs
@@ -728,7 +744,9 @@ pub(super) fn sheet_eval(
                     None => p.0,
                 });
             }
-            let (mut sh, notes) = sheet::convert_body(&mb, &r.name, &rv, face.0, &picks)?;
+            let placement = doc.component_transform(doc.model_body_component(&mb));
+            let body_to_world = doc.model_body_offset(&mb).map(|offset| crate::mat_mul(&placement, offset)).unwrap_or(placement);
+            let (mut sh, notes) = sheet::convert_body(&mb, &r.name, &rv, face.0, &picks, &body_to_world)?;
             for note in notes {
                 append_warning(warning, note);
             }
@@ -1327,6 +1345,9 @@ fn sheet_prism_cut(
         } else {
             let material = sh.flat_material()?;
             if material.is_empty() {
+                if operation == Operation::Intersect && super::boolean_scope(st, f, targets).0 {
+                    return Err(super::empty_intersection(&[sh.body.as_str()]));
+                }
                 // Empty exact material removes geometry and metadata together. Budget or
                 // topology errors propagate; they are never mistaken for an empty blank.
                 plans.push((sh.body.clone(), None));
@@ -1336,6 +1357,14 @@ fn sheet_prism_cut(
                 let body = sh.solid()?;
                 plans.push((sh.body.clone(), Some((sh, body))));
             }
+        }
+    }
+    if operation == Operation::Intersect {
+        // Flat material is exact: an empty one is a true miss, removed only while some target remains.
+        let (_, scope) = super::boolean_scope(st, f, targets);
+        let emptied: Vec<&str> = plans.iter().filter(|(_, r)| r.is_none()).map(|(name, _)| name.as_str()).collect();
+        if !emptied.is_empty() && scope.iter().all(|b| emptied.contains(&b.as_str())) {
+            return Err(super::empty_intersection(&emptied));
         }
     }
     let handled = plans.iter().map(|(name, _)| name.clone()).collect();
@@ -1714,6 +1743,21 @@ fn offset_left(p: &[Vec2], d: f64) -> Vec<Vec2> {
         .collect()
 }
 
+/// The smallest size a plastic feature's lengths may have, in millimetres. Thinner walls and
+/// shorter arms than this are below what the solid booleans can resolve.
+const PLASTIC_MIN_SIZE: f64 = 0.01;
+
+/// `v`, the feature's `what`, when it is at least [`PLASTIC_MIN_SIZE`].
+fn plastic_size(feature: &str, what: &str, v: f64) -> Result<f64> {
+    if v.is_finite() && v >= PLASTIC_MIN_SIZE {
+        Ok(v)
+    } else {
+        // Tiny values in exponent form: 1e-320 written out is hundreds of zeros.
+        let got = if v != 0.0 && v.abs() < 1e-3 { format!("{v:e}") } else { format!("{v}") };
+        Err(DocError::Invalid(format!("the {feature}'s {what} must be at least {PLASTIC_MIN_SIZE} mm (got {got} mm)")))
+    }
+}
+
 pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
     let len = |e: &str| val(vals, e, Kind::Length);
     // The plastic rule of the body a feature goes on gives its defaults (draft, clearance).
@@ -1738,10 +1782,8 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
             body,
         } => {
             let target = body_under(st, body, position.0)?;
-            let (r0, h) = (len(diameter)? / 2.0, len(height)?);
-            if !(r0 > 0.0 && h > 0.0) {
-                return Err(DocError::Invalid("the boss diameter and height must be positive".into()));
-            }
+            let r0 = plastic_size("boss", "diameter", len(diameter)?)? / 2.0;
+            let h = plastic_size("boss", "height", len(height)?)?;
             let dr = match draft {
                 Some(e) => val(vals, e, Kind::Angle)?,
                 None => rule(&target)?.map_or(0.0, |r| r.draft),
@@ -1784,8 +1826,10 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                     None => 0.0,
                 };
                 let hr = h - off;
-                if n > 0.0 && !(t > 0.0 && l > 0.0 && hr > 0.0) {
-                    return Err(DocError::Invalid("ribs need a positive thickness, length and height".into()));
+                if n > 0.0 {
+                    plastic_size("boss", "rib_thickness", t)?;
+                    plastic_size("boss", "rib_length", l)?;
+                    plastic_size("boss", "rib height (height less rib_offset)", hr)?;
                 }
                 for k in 0..n as usize {
                     let a = std::f64::consts::TAU * k as f64 / n;
@@ -1816,9 +1860,9 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                 }
             }
             if let Some(hd) = hole_diameter {
-                let rh = len(hd)? / 2.0;
+                let rh = plastic_size("boss", "hole_diameter", len(hd)?)? / 2.0;
                 let depth = match hole_depth {
-                    Some(e) => len(e)?,
+                    Some(e) => plastic_size("boss", "hole_depth", len(e)?)?,
                     None => h,
                 };
                 if !(rh > 0.0 && rh < r_top && depth > 0.0) {
@@ -1835,14 +1879,15 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
             let target = body_under(st, body, face.0)?;
             let mb = st.body(&target).cloned().ok_or_else(|| DocError::Invalid("body".into()))?;
             let n = planar_normal_at(&mb.body, face.0).ok_or_else(|| DocError::Invalid("pick the planar rim face".into()))?;
-            let (w, h) = (len(width)?, len(height)?);
+            let what = if *groove { "groove" } else { "lip" };
+            let (w, h) = (plastic_size(what, "width", len(width)?)?, plastic_size(what, "height", len(height)?)?);
             let g = match gap {
                 Some(e) => len(e)?,
                 None if *groove => rule(&target)?.map_or(0.0, |r| r.clearance),
                 None => 0.0,
             };
-            if !(w > 0.0 && h > 0.0 && g >= 0.0) {
-                return Err(DocError::Invalid("the lip width and height must be positive".into()));
+            if !(g >= 0.0) {
+                return Err(DocError::Invalid("the groove's gap must not be negative".into()));
             }
             let plane = Plane::from_normal(face.0, n).ok_or_else(|| DocError::Invalid("rim plane".into()))?;
             let tol = (mb.body.size() * 1e-3).max(1e-3);
@@ -1920,9 +1965,11 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
         }
         FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, body } => {
             let target = body_under(st, body, position.0)?;
-            let (l, t, w, cd, cl) = (len(length)?, len(thickness)?, len(width)?, len(catch_depth)?, len(catch_length)?);
-            if !(l > 0.0 && t > 0.0 && w > 0.0 && cd > 0.0 && cl > 0.0 && cl < l) {
-                return Err(DocError::Invalid("the snap fit's sizes must be positive and the catch shorter than the arm".into()));
+            let size = |what: &str, e: &str| plastic_size("snap fit", what, len(e)?);
+            let (l, t, w) = (size("length", length)?, size("thickness", thickness)?, size("width", width)?);
+            let (cd, cl) = (size("catch_depth", catch_depth)?, size("catch_length", catch_length)?);
+            if !(cl < l) {
+                return Err(DocError::Invalid("the snap fit's catch must be shorter than its arm".into()));
             }
             let (x, y, z) = local_frame(direction.0, Some(hook.0))?;
             let delta = (l * 0.05).clamp(1e-3, 0.5);
@@ -1943,15 +1990,16 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
         }
         FeatureKind::Rest { position, direction, along, width, length, height, draft, thickness, body } => {
             let target = body_under(st, body, position.0)?;
-            let (w, h) = (len(width)?, len(height)?);
-            let l = length.as_deref().map(len).transpose()?;
+            let size = |what: &str, e: &str| plastic_size("rest", what, len(e)?);
+            let (w, h) = (size("width", width)?, size("height", height)?);
+            let l = length.as_deref().map(|e| size("length", e)).transpose()?;
             let dr = match draft {
                 Some(e) => val(vals, e, Kind::Angle)?,
                 None => rule(&target)?.map_or(0.0, |r| r.draft),
             };
-            let t = thickness.as_deref().map(len).transpose()?;
-            if !(w > 0.0 && h > 0.0 && l.is_none_or(|l| l > 0.0) && t.is_none_or(|t| t > 0.0 && 2.0 * t < w.min(l.unwrap_or(w)))) {
-                return Err(DocError::Invalid("the rest's sizes must be positive and its wall thinner than half its width".into()));
+            let t = thickness.as_deref().map(|e| size("thickness", e)).transpose()?;
+            if t.is_some_and(|t| 2.0 * t >= w.min(l.unwrap_or(w))) {
+                return Err(DocError::Invalid("the rest's wall must be thinner than half its width".into()));
             }
             if !(dr.abs() < 1.0) {
                 return Err(DocError::Invalid("the rest's draft must be under 57°".into()));

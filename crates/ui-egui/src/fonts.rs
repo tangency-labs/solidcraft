@@ -555,12 +555,22 @@ fn scan_dir_for_font_where(dir: &std::path::Path, depth_remaining: usize, matche
     None
 }
 
-/// Find a CJK fallback font on the local system or in CRAFT_FONTS_DIR.
+/// The font folders named by `SOLIDCRAFT_FONT_DIRS` (a path list), or else by the single folder
+/// in `CRAFT_FONTS_DIR` (the craft-fonts pack).
+#[cfg(not(target_arch = "wasm32"))]
+fn font_override_dirs(dirs: Option<std::ffi::OsString>, pack: Option<std::ffi::OsString>) -> Vec<std::path::PathBuf> {
+    match (dirs, pack) {
+        (Some(dirs), _) => std::env::split_paths(&dirs).collect(),
+        (None, Some(pack)) => vec![std::path::PathBuf::from(pack)],
+        (None, None) => Vec::new(),
+    }
+}
+
+/// Find a CJK fallback font on the local system or in SOLIDCRAFT_FONT_DIRS / CRAFT_FONTS_DIR.
 #[cfg(not(target_arch = "wasm32"))]
 fn find_system_cjk_font() -> Option<Vec<u8>> {
-    // 1. Check optional craft-fonts pack directory if specified.
-    if let Ok(craft_dir) = std::env::var("CRAFT_FONTS_DIR") {
-        let dir = std::path::Path::new(&craft_dir);
+    // 1. Check the font folders the user named.
+    for dir in font_override_dirs(std::env::var_os("SOLIDCRAFT_FONT_DIRS"), std::env::var_os("CRAFT_FONTS_DIR")) {
         let names = ["BIZUDPGothic-Regular.ttf", "BIZ-UDGothicR.ttc", "NotoSansCJK-Regular.ttc", "NotoSansJP-Regular.ttf"];
         for name in names {
             if let Some(bytes) = try_read_font(&dir.join(name)) {
@@ -615,7 +625,12 @@ fn find_system_cjk_font() -> Option<Vec<u8>> {
 
     #[cfg(target_os = "linux")]
     {
-        let search_dirs = [std::path::PathBuf::from("/usr/share/fonts"), std::path::PathBuf::from("/usr/local/share/fonts")];
+        let search_dirs = [
+            std::path::PathBuf::from("/usr/share/fonts"),
+            std::path::PathBuf::from("/usr/local/share/fonts"),
+            std::path::PathBuf::from("/run/host/fonts"),
+            std::path::PathBuf::from("/run/host/user-fonts"),
+        ];
         for dir in &search_dirs {
             if let Some(bytes) = scan_dir_for_font(dir, 3, is_cjk_font_name) {
                 return Some(bytes);
@@ -809,6 +824,8 @@ fn chinese_font_dirs() -> Vec<std::path::PathBuf> {
     {
         dirs.push(std::path::PathBuf::from("/usr/share/fonts"));
         dirs.push(std::path::PathBuf::from("/usr/local/share/fonts"));
+        dirs.push(std::path::PathBuf::from("/run/host/fonts"));
+        dirs.push(std::path::PathBuf::from("/run/host/user-fonts"));
         if let Ok(home) = std::env::var("HOME") {
             dirs.push(std::path::PathBuf::from(&home).join(".local/share/fonts"));
             dirs.push(std::path::PathBuf::from(home).join(".fonts"));
@@ -883,6 +900,22 @@ pub(crate) fn test_context() -> egui::Context {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `SOLIDCRAFT_FONT_DIRS` wins and may list several folders; `CRAFT_FONTS_DIR` is the fallback.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn cjk_font_folders_from_the_environment() -> Result<(), std::env::JoinPathsError> {
+        use std::path::PathBuf;
+        let list = std::env::join_paths(["/a", "/b"])?;
+        assert_eq!(font_override_dirs(Some(list), Some("/pack".into())), vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+        assert_eq!(font_override_dirs(None, Some("/pack".into())), vec![PathBuf::from("/pack")]);
+        assert!(font_override_dirs(None, None).is_empty());
+        #[cfg(target_os = "linux")]
+        for dir in ["/run/host/fonts", "/run/host/user-fonts"] {
+            assert!(chinese_font_dirs().contains(&PathBuf::from(dir)), "missing {dir}");
+        }
+        Ok(())
+    }
 
     /// The system faces are searched for on a thread; installing fonts before they are found does
     /// not wait for the search and still gives the bundled faces.

@@ -178,6 +178,85 @@ fn references_match_the_golden_record() {
 }
 
 #[test]
+fn construction_names_follow_renames_in_every_definition() {
+    use crate::walk::{Ref, Walk};
+    use serde_json::json;
+
+    let axis = json!({"type": "axis", "name": "Old"});
+    let point = json!({"type": "construct_point", "name": "Old"});
+    let plane = json!({"type": "plane", "plane": {"type": "construction", "name": "Old"}});
+    let definitions = [
+        json!({"type": "construction_axis", "def": {"type": "through_face", "face": axis}}),
+        json!({"type": "construction_axis", "def": {"type": "normal_to_face", "face": plane, "point": point}}),
+        json!({"type": "construction_axis", "def": {"type": "two_planes", "a": plane, "b": plane}}),
+        json!({"type": "construction_axis", "def": {"type": "two_points", "a": point, "b": point}}),
+        json!({"type": "construction_axis", "def": {"type": "edge", "edge": axis}}),
+        json!({"type": "construction_point", "def": {"type": "at", "point": point}}),
+        json!({"type": "construction_point", "def": {"type": "two_edges", "a": axis, "b": axis}}),
+        json!({"type": "construction_point", "def": {"type": "three_planes", "a": plane, "b": plane, "c": plane}}),
+        json!({"type": "construction_point", "def": {"type": "center", "of": axis}}),
+        json!({"type": "construction_point", "def": {"type": "edge_and_plane", "edge": axis, "plane": plane}}),
+        json!({"type": "construction_point", "def": {"type": "along_path", "path": axis, "t": "0.5"}}),
+    ];
+    let planes = [
+        json!({"type": "midplane", "a": plane, "b": plane}),
+        json!({"type": "two_edges", "a": axis, "b": axis}),
+        json!({"type": "three_points", "a": point, "b": point, "c": point}),
+        json!({"type": "tangent", "face": plane, "at": [0, 0, 0]}),
+        json!({"type": "along_path", "path": axis, "t": "0.5"}),
+        json!({"type": "perpendicular", "plane": plane, "line": axis}),
+    ];
+    let wrapped = planes.into_iter().map(|plane| {
+        json!({"type": "construction_plane", "plane": {"type": "flipped", "base": {
+            "type": "offset", "distance": "10", "base": {"type": "at_angle", "angle": "20 deg",
+            "axis_origin": [0, 0, 0], "axis_dir": [1, 0, 0], "base": plane}}}})
+    });
+    let names = BTreeMap::from([("Old".into(), "New".into()), ("New".into(), "Wrong".into())]);
+    for definition in definitions.into_iter().chain(wrapped) {
+        let mut kind: FeatureKind = serde_json::from_value(definition.clone()).unwrap();
+        let expected_count = definition.to_string().matches("\"Old\"").count();
+        let mut seen = Vec::new();
+        kind.walk_refs(&mut |r| {
+            if let Ref::Feature(name) = r {
+                seen.push(name.to_string());
+            }
+        });
+        assert_eq!(seen, vec!["Old"; expected_count], "{definition}");
+        kind.remap_refs(&BTreeMap::new(), &names);
+        let expected: serde_json::Value = serde_json::from_str(&definition.to_string().replace("\"Old\"", "\"New\"")).unwrap();
+        assert_eq!(serde_json::to_value(kind).unwrap(), serde_json::to_value(serde_json::from_value::<FeatureKind>(expected).unwrap()).unwrap());
+    }
+}
+
+#[test]
+fn construction_reference_walk_keeps_its_depth_limit_across_geometry() {
+    use crate::construct::GeoRef;
+    use crate::walk::{Ref, Walk};
+
+    let mut plane = crate::PlaneRef::Construction { name: "TooDeep".into() };
+    for _ in 0..80 {
+        plane = crate::PlaneRef::Perpendicular { plane: Box::new(GeoRef::Plane { plane }), line: Box::new(GeoRef::Axis { name: "Side".into() }) };
+    }
+    let mut seen = Vec::new();
+    plane.walk_refs(&mut |r| {
+        if let Ref::Feature(name) = r {
+            seen.push(name.to_string());
+        }
+    });
+    assert!(!seen.is_empty() && seen.len() < 64);
+    assert!(seen.iter().all(|name| name == "Side"));
+    let mut changed = 0;
+    plane.walk_refs_mut(&mut |r| {
+        if let Ref::Feature(name) = r {
+            assert_eq!(name.as_ref(), "Side");
+            *name = "Renamed".into();
+            changed += 1;
+        }
+    });
+    assert_eq!(changed, seen.len());
+}
+
+#[test]
 fn inputs_and_expressions_match_the_golden_record() {
     check_golden("golden_exprs.txt", GOLDEN_EXPRS, &record());
 }

@@ -11,7 +11,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::sheet::SheetRule;
 use solidcraft_engine::doc::{FeatureKind, ProfileSel};
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::{Vec2, Vec3};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, edge_sel, face_sel, form_row, profile_indices};
@@ -716,11 +716,12 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
 // ---- view ----
 
 /// The direction an edge flange or hem grows from its first edge: out of the sheet's larger
-/// neighbouring face (flipped with Flip).
+/// neighbouring face for a flange, toward it for a hem (flipped with Flip).
 pub fn arrow(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
     let Kind::Sheet(k) = &d.kind else { return None };
     let flip = match k {
-        Sm::Flange { ty: 1, flip, .. } | Sm::Hem { flip, .. } => *flip,
+        Sm::Flange { ty: 1, flip, .. } => *flip,
+        Sm::Hem { flip, .. } => !flip,
         _ => return None,
     };
     let Sel::Edge { body, index, point } = d.inputs.first()?.items.first()? else { return None };
@@ -755,8 +756,8 @@ fn bend_colors() -> (Color32, Color32) {
     (t.bend_up, t.bend_down)
 }
 
-/// The flat pattern view: the outline, cut-outs and bend lines (up and down in their colours)
-/// drawn flat over the viewport, fitted to it. True when the dialog is a flat pattern.
+/// The flat pattern view: outline, cut-outs, perforations and bend lines (up and down in
+/// their colours), fitted over the viewport. True when the dialog is a flat pattern.
 pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dialog) -> bool {
     let Kind::Sheet(Sm::FlatPattern { data, .. }) = &d.kind else { return false };
     let t = Tokens::get();
@@ -816,6 +817,22 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
         let pts: Vec<Pos2> = h.iter().map(|p| to(*p)).collect();
         if pts.len() >= 2 {
             painter.add(egui::Shape::closed_line(pts, Stroke::new(1.4, t.text)));
+        }
+    }
+    if let Some(body) = v["body"].as_str() {
+        app.flat_view.cache_perforations(&app.session, body);
+        let clip = rect.intersect(painter.clip_rect());
+        let pixels_per_point = painter.ctx().pixels_per_point();
+        for &(centre, radius) in &app.flat_view.perforations {
+            let radius = (radius * scale) as f32;
+            // Egui uses logical points; reject holes smaller than one physical pixel.
+            if !radius.is_finite() || radius * 2.0 * pixels_per_point < 1.0 {
+                continue;
+            }
+            let centre = to((centre.x, centre.y));
+            if centre.x.is_finite() && centre.y.is_finite() && clip.intersects(Rect::from_center_size(centre, vec2(radius * 2.0, radius * 2.0))) {
+                painter.circle_stroke(centre, radius, Stroke::new(1.4, t.text));
+            }
         }
     }
     // A pocket retains material below (or above) the cut. Dashed contours and a depth
@@ -893,6 +910,9 @@ pub struct FlatView {
     pub cam: solidcraft_engine::render::Camera,
     /// The camera frames the pattern; cleared by Fit and Home, and whenever the dialog is closed.
     pub fitted: bool,
+    /// Flat centres stay out of the command JSON and are reused while navigating.
+    perforation_key: Option<(std::sync::Weak<solidcraft_engine::doc::ModelState>, String)>,
+    perforations: Vec<(Vec2, f64)>,
 }
 
 impl Default for FlatView {
@@ -901,11 +921,35 @@ impl Default for FlatView {
         cam.set_view(solidcraft_engine::render::StandardView::Top);
         cam.fov = 0.0;
         cam.up = solidcraft_engine::render::UpAxis::Z;
-        FlatView { cam, fitted: false }
+        FlatView { cam, fitted: false, perforation_key: None, perforations: Vec::new() }
     }
 }
 
 impl FlatView {
+    fn cache_perforations(&mut self, session: &solidcraft_engine::Session, body: &str) {
+        let state = session.world_state();
+        let state_key = std::sync::Arc::downgrade(&state);
+        if self.perforation_key.as_ref().is_some_and(|(cached, name)| cached.ptr_eq(&state_key) && name == body) {
+            return;
+        }
+        self.perforation_key = Some((state_key, body.to_owned()));
+        self.perforations.clear();
+        let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body) else { return };
+        // Bound overlay storage and drawing work, including designs with many fields.
+        const MAX_HOLES: usize = 1_000_000;
+        for field in &sheet.perforations {
+            if self.perforations.len() >= MAX_HOLES {
+                break;
+            }
+            if !field.diameter.is_finite() || field.diameter <= 0.0 {
+                continue;
+            }
+            let Ok(centres) = sheet.perforation_holes(field) else { continue };
+            let remaining = MAX_HOLES.saturating_sub(self.perforations.len());
+            self.perforations.extend(centres.into_iter().take(remaining).map(|centre| (centre, field.diameter / 2.0)));
+        }
+    }
+
     /// Frame the pattern's bounds `lo..hi` in `area`, the part of `rect` the command panel leaves.
     fn fit(&mut self, rect: Rect, area: Rect, lo: (f64, f64), hi: (f64, f64)) {
         let scale = (f64::from(area.width()) / (hi.0 - lo.0)).min(f64::from(area.height()) / (hi.1 - lo.1));

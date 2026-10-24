@@ -434,40 +434,9 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
         };
         let given = numbered_region(r)?.map_loops(|l| reseam(snap_loop(l).merged_lines(axis_run)));
         let r = &given.region();
-        // A half disc on the axis revolved fully is a sphere: build it without poles. Every
-        // patch is swept from the half disc's arcs.
         if angle.abs() >= std::f64::consts::TAU - 1e-9
             && r.holes.is_empty()
-            && let Some((c, rad)) = half_disc(&r.outer, axis_origin, d)
-        {
-            let arcs: Vec<usize> = r
-                .outer
-                .segs
-                .iter()
-                .enumerate()
-                .filter(|(_, s)| matches!(s, Seg2::Arc { .. }))
-                .flat_map(|(i, _)| given.outer.numbers(i).to_vec())
-                .collect();
-            out.push(sphere_solid(plane.to_world(c), rad, [Vec3::X, Vec3::Y, Vec3::Z], &arcs)?);
-            continue;
-        }
-        // A full turn of a profile that comes back to the axis along a curve (a half slot about
-        // its centreline, a dome at the far end): truck's cone gives the faces
-        // swept from it the wrong region (their pole is at the end of their curve), and cuts with
-        // such a body failed (#1853). It is built as part turns are, a third of a turn at a time.
-        if angle.abs() >= std::f64::consts::TAU - 1e-9
-            && r.holes.is_empty()
-            && pole_at_end(&r.outer, axis_origin, d)
-            && let Some(b) = revolve_on_axis(plane, &given.outer, axis_origin, d, angle)?
-        {
-            out.push(b);
-            continue;
-        }
-        // A full revolution of a profile with one edge on the axis: sweep the rest of the loop
-        // as a cone-like shell (no zero-area faces, which booleans can't handle).
-        if angle.abs() >= std::f64::consts::TAU - 1e-9
-            && r.holes.is_empty()
-            && let Some(b) = revolve_touching_axis(plane, &given.outer, axis_origin, d)?
+            && let Some(b) = full_turn_on_axis(plane, &given.outer, axis_origin, d, angle)?
         {
             out.push(b);
             continue;
@@ -1405,6 +1374,67 @@ fn half_disc(lp: &Loop2, axis_origin: Vec2, d: Vec2) -> Option<(Vec2, f64)> {
     let total: f64 = arcs.iter().map(|a| a.2.abs()).sum();
     let same = arcs.iter().all(|(c2, r2, _)| c2.dist(c) < 1e-7 * (1.0 + r) && (r2 - r).abs() < 1e-7 * (1.0 + r));
     (same && (total - std::f64::consts::PI).abs() < 1e-6).then_some((c, r))
+}
+
+/// A full turn of a loop with edges on the axis, built without the zero-area faces truck sweeps
+/// from them (booleans can't handle those). `None` when no builder here takes the loop.
+fn full_turn_on_axis(plane: &Plane, nl: &NumberedLoop, axis_origin: Vec2, d: Vec2, angle: f64) -> Result<Option<Body>> {
+    let lp = &nl.lp;
+    // A half disc on the axis revolved fully is a sphere: build it without poles. Every
+    // patch is swept from the half disc's arcs.
+    if let Some((c, rad)) = half_disc(lp, axis_origin, d) {
+        let arcs: Vec<usize> =
+            lp.segs.iter().enumerate().filter(|(_, s)| matches!(s, Seg2::Arc { .. })).flat_map(|(i, _)| nl.numbers(i).to_vec()).collect();
+        return sphere_solid(plane.to_world(c), rad, [Vec3::X, Vec3::Y, Vec3::Z], &arcs).map(Some);
+    }
+    // A full turn of a profile that comes back to the axis along a curve (a half slot about
+    // its centreline, a dome at the far end): truck's cone gives the faces
+    // swept from it the wrong region (their pole is at the end of their curve), and cuts with
+    // such a body failed (#1853). It is built as part turns are, a third of a turn at a time.
+    if pole_at_end(lp, axis_origin, d)
+        && let Some(b) = revolve_on_axis(plane, nl, axis_origin, d, angle)?
+    {
+        return Ok(Some(b));
+    }
+    // A full revolution of a profile with one edge on the axis: sweep the rest of the loop
+    // as a cone-like shell (no zero-area faces, which booleans can't handle).
+    if let Some(b) = revolve_touching_axis(plane, nl, axis_origin, d)? {
+        return Ok(Some(b));
+    }
+    // Several edges on the axis (a spherical shell's two radial lines): each run of the loop
+    // from the axis back to it, closed along the axis, turns into a shell of its own, a solid
+    // where it runs the way the loop does and a void where it runs the other way. Swept whole,
+    // the edges on the axis became zero-area faces joining the shells, and a cut through a pole
+    // there failed (#451).
+    let on_axis = |s: &Seg2| matches!(*s, Seg2::Line { a, b } if d.cross(a - axis_origin).abs() < 1e-9 && d.cross(b - axis_origin).abs() < 1e-9);
+    let n = lp.segs.len();
+    let axis_segs: Vec<usize> = (0..n).filter(|i| lp.segs.get(*i).is_some_and(on_axis)).collect();
+    let [k0, _, ..] = axis_segs[..] else { return Ok(None) };
+    let mut parts = Vec::new();
+    for (i, &k) in axis_segs.iter().enumerate() {
+        let run: Vec<usize> = (k + 1..axis_segs.get(i + 1).copied().unwrap_or(k0 + n)).map(|j| j % n).collect();
+        let mut segs: Vec<Seg2> = run.iter().filter_map(|j| lp.segs.get(*j).copied()).collect();
+        let (Some(first), Some(last)) = (segs.first(), segs.last()) else { return Ok(None) };
+        segs.push(Seg2::Line { a: last.end(), b: first.start() });
+        let sub = NumberedLoop { lp: Loop2 { segs }, from: run.iter().map(|j| nl.numbers(*j).to_vec()).chain([Vec::new()]).collect() };
+        let void = sub.lp.is_ccw() != lp.is_ccw();
+        let Some(b) = full_turn_on_axis(plane, &if void { sub.reversed() } else { sub }, axis_origin, d, angle)? else { return Ok(None) };
+        parts.push((b, void));
+    }
+    let faces: Option<Vec<FaceProv>> =
+        parts.iter().map(|(b, _)| b.history().map(|h| h.faces.clone())).collect::<Option<Vec<_>>>().map(|f| f.concat());
+    let solid = guard("revolve", || {
+        let mut shells = Vec::new();
+        for (b, void) in &parts {
+            let mut s = b.solid.as_ref().clone();
+            if *void {
+                s.not();
+            }
+            shells.extend(s.boundaries().iter().cloned());
+        }
+        Solid::try_new(shells).map_err(|e| KernelError::Failed(format!("revolve: {e}")))
+    })?;
+    record::attach(Body::new(solid)?, &[], faces, Default::default()).map(Some)
 }
 
 /// Whether the loop has one edge on the axis and comes back to it along a curve (the segment

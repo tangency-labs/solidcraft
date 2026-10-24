@@ -51,7 +51,7 @@ pub(crate) fn assistant_header<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -
             ui.set_min_height(t.form_close_size);
             add(ui)
         });
-    ui.painter().hline(output.response.rect.x_range(), output.response.rect.bottom(), egui::Stroke::new(1.0, t.dialog_rule));
+    t.secondary_hline(ui.painter(), output.response.rect.x_range(), output.response.rect.bottom(), t.dialog_rule);
     output
 }
 
@@ -76,7 +76,7 @@ pub(crate) fn assistant_bubble<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -
         ui.add_space(width - bubble_width);
         egui::Frame::NONE
             .fill(t.accent_soft)
-            .corner_radius(egui::CornerRadius { nw: t.radius_xl, ne: t.radius_xl, sw: t.radius_xl, se: t.space_3 as u8 })
+            .corner_radius(egui::CornerRadius { nw: t.radius_xl, ne: t.radius_xl, sw: t.radius_xl, se: t.radius_sm.saturating_sub(1) })
             .inner_margin(egui::Margin::symmetric((t.space_8 + t.space_3) as i8, t.space_8 as i8))
             .show(ui, |ui| {
                 let content_width = (bubble_width - (t.space_8 + t.space_3) * 2.0).max(0.0);
@@ -156,7 +156,7 @@ pub(crate) fn assistant_tool_frame<R>(ui: &mut Ui, failed: bool, add: impl FnOnc
     let t = Tokens::get();
     egui::Frame::NONE
         .fill(if failed { t.form_error_fill } else { t.dialog_body })
-        .stroke(egui::Stroke::new(1.0, t.dialog_rule))
+        .stroke(t.container_border(t.dialog_rule))
         .corner_radius(t.radius_lg)
         .inner_margin(t.space_3)
         .show(ui, |ui| {
@@ -178,7 +178,7 @@ pub(crate) fn assistant_tool_detail<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) ->
     let t = Tokens::get();
     egui::Frame::NONE
         .fill(t.control_fill)
-        .stroke(egui::Stroke::new(1.0, t.dialog_rule))
+        .stroke(t.container_border(t.dialog_rule))
         .corner_radius(t.control_radius)
         .inner_margin(egui::Margin::symmetric((t.space_6 + t.space_3) as i8, t.space_6 as i8))
         .show(ui, add)
@@ -251,7 +251,7 @@ pub(crate) fn assistant_composer<R>(ui: &mut Ui, focused: bool, add: impl FnOnce
     let t = Tokens::get();
     egui::Frame::NONE
         .fill(t.control_fill)
-        .stroke(egui::Stroke::new(1.0, if focused { t.form_primary } else { t.control_border }))
+        .stroke(if focused { egui::Stroke::new(1.0, t.form_primary) } else { t.control_border_stroke(t.control_border) })
         .corner_radius(t.radius_xl)
         .inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_8 as i8))
         .show(ui, |ui| {
@@ -293,7 +293,7 @@ pub(crate) fn assistant_composer_footer<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui
         .corner_radius(egui::CornerRadius { nw: 0, ne: 0, sw: t.radius_xl.saturating_sub(1), se: t.radius_xl.saturating_sub(1) })
         .inner_margin(t.space_10)
         .show(ui, add);
-    ui.painter().hline(output.response.rect.x_range(), output.response.rect.top(), egui::Stroke::new(1.0, t.dialog_rule));
+    t.secondary_hline(ui.painter(), output.response.rect.x_range(), output.response.rect.top(), t.dialog_rule);
     output
 }
 
@@ -321,7 +321,7 @@ pub(crate) fn assistant_empty<R>(ui: &mut Ui, title: &str, body: &str, add: impl
 pub(crate) fn assistant_banner<R>(ui: &mut Ui, tone: AssistantTone, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
     let t = Tokens::get();
     let (_, fill) = tone.colors(&t);
-    egui::Frame::NONE.fill(fill).stroke(egui::Stroke::new(1.0, t.dialog_rule)).corner_radius(t.radius_lg).inner_margin(t.space_10).show(ui, |ui| {
+    egui::Frame::NONE.fill(fill).stroke(t.container_border(t.dialog_rule)).corner_radius(t.radius_lg).inner_margin(t.space_10).show(ui, |ui| {
         ui.set_min_width(ui.available_width().max(0.0));
         ui.spacing_mut().item_spacing.y = t.space_8;
         add(ui)

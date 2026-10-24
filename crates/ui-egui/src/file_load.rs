@@ -43,8 +43,8 @@ pub struct Request {
     pub reply: Option<Sender<ControlResponse>>,
     /// The folders that caller's agent may use: the worker reads the file inside them.
     pub scope: Option<solidcraft_engine::io::vfs::PathScope>,
-    /// What that caller asked of a STEP import besides its path (`up`, `names`): the command
-    /// gets them as given.
+    /// What that caller asked of an open or import besides its path (`up`, `names`, `matrix`,
+    /// `name`, ...): the command gets them as given and checks them as it does run directly.
     pub options: serde_json::Map<String, Value>,
 }
 
@@ -64,7 +64,7 @@ impl Request {
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
             Kind::Open => ("doc.open", self.params()),
-            Kind::Insert if solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", json!({"path": self.path})),
+            Kind::Insert if solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", self.params()),
             Kind::Insert => ("file.insert_step", self.params()),
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
@@ -180,14 +180,22 @@ impl FileLoad {
     pub fn features(&self) -> Option<(usize, usize)> {
         self.running.as_ref().map(|r| r.progress.features())
     }
-    /// Nothing running or queued (a cancelled job may still be finishing in [`Self::busy`]'s eyes).
+    /// No active or queued request; cancelled import workers may still be unwinding.
     pub fn idle(&self) -> bool {
         self.running.is_none() && self.queued.is_empty()
     }
-    /// Stop the running operation at its next feature and drop the queued ones.
+    /// Signal cancellation, release the import slot and drop queued requests.
     pub fn cancel(&mut self) {
         if let Some(r) = &self.running {
             r.progress.cancel();
+        }
+        // Imports only change a scratch session. Disconnect their result and preview channels
+        // so a slow cancellation checkpoint cannot block the next file or apply a late result.
+        // Exports publish a file: keep their reply until the worker reports whether it committed.
+        if self.running.as_ref().is_some_and(|r| r.request.kind != Kind::ExportDxf)
+            && let Some(r) = self.running.take()
+        {
+            r.request.answer(Err("file operation cancelled".into()));
         }
         for q in self.queued.drain(..) {
             q.answer(Err("file operation cancelled".into()));
@@ -277,11 +285,13 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
             return None;
         }
     };
-    let options = if kind == Kind::ExportDxf {
-        params.and_then(Value::as_object).cloned().unwrap_or_default()
-    } else {
-        ["up", "names"].iter().filter_map(|k| Some((k.to_string(), params?.get(*k).filter(|v| !v.is_null())?.clone()))).collect()
-    };
+    // Everything but the path, as given: taking only `up` and `names` dropped an import's
+    // `matrix` and `name`, so it landed at the origin with nothing said (#4676).
+    let mut options = params.and_then(Value::as_object).cloned().unwrap_or_default();
+    if kind != Kind::ExportDxf {
+        options.remove("path");
+        options.retain(|_, v| !v.is_null());
+    }
     let _ = begin_request(app, Request { path: path.into(), kind, reply: Some(req.reply.clone()), scope, options });
     None
 }
@@ -990,9 +1000,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let cancel = closed || action == ui_kit::Action::Cancel;
     if cancel && !cancelled {
-        // Keep the running job until it exits: cancelling must not allow another large
-        // import to overlap it in memory. The rebuild stops at its next feature and the
-        // current design stays as it was.
+        // The worker stops at its next cancellation checkpoint; its scratch design and
+        // result channels are isolated from any file operation started afterwards.
         app.file_load.cancel();
         app.set_status(if export { crate::i18n::tr_label("dxf.cancelled") } else { "file operation cancelled" }, false);
     }
@@ -1169,34 +1178,58 @@ mod tests {
         assert!(app.status.as_ref().unwrap().0.contains("bad STEP"));
     }
     #[test]
-    fn cancelling_discards_a_finished_result_and_keeps_the_worker_slot_until_completion() {
-        let mut app = SolveApp::new(Session::default(), Default::default());
-        let old = app.session.doc.clone();
-        let (tx, rx) = std::sync::mpsc::channel();
-        let progress = Arc::new(Progress::default());
-        progress.cancel();
-        app.file_load.running = Some(Running {
-            request: Request::new("cancelled.step", Kind::Insert),
-            base: old.clone(),
-            base_revision: app.session.revision,
-            before: Vec::new(),
-            rx,
-            phase: Arc::new(AtomicU8::new(0)),
-            progress,
-            preview_rx: None,
-            preview: None,
-            partial_rx: None,
-            built: None,
-            staged: None,
-        });
-        assert!(!app.file_load.busy());
-        assert!(app.file_load.running.is_some());
-        let mut computed = Session::default();
-        computed.execute("solid.box", &serde_json::json!({"length":10,"width":10,"height":10})).unwrap();
-        tx.send(Ok(Made { session: computed, result: Value::Null, thumbnail: false })).unwrap();
-        tick(&mut app, &crate::fonts::test_context());
-        assert!(app.file_load.running.is_none());
-        assert!(Arc::ptr_eq(&old, &app.session.doc));
+    fn cancelling_disconnects_late_results_and_answers_queued_callers() {
+        for finished in [false, true] {
+            let mut app = SolveApp::new(Session::default(), Default::default());
+            let old = app.session.doc.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+            let mut request = Request::new("cancelled.step", Kind::Insert);
+            request.reply = Some(reply_tx);
+            let progress = Arc::new(Progress::default());
+            app.file_load.running = Some(Running {
+                request,
+                base: old.clone(),
+                base_revision: app.session.revision,
+                before: Vec::new(),
+                rx,
+                phase: Arc::new(AtomicU8::new(0)),
+                progress: progress.clone(),
+                preview_rx: None,
+                preview: None,
+                partial_rx: None,
+                built: None,
+                staged: None,
+            });
+            let (queued_tx, queued_rx) = std::sync::mpsc::channel();
+            let mut queued = Request::new("queued.step", Kind::Open);
+            queued.reply = Some(queued_tx);
+            app.file_load.queued.push_back(queued);
+            let mut computed = Session::default();
+            computed.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+            let made = Ok(Made { session: computed, result: Value::Null, thumbnail: false });
+            // Both races: the result was queued before Cancel, or arrives afterwards.
+            let late = if finished {
+                tx.send(made).unwrap();
+                None
+            } else {
+                Some(made)
+            };
+            app.file_load.cancel();
+            assert!(progress.is_cancelled());
+            assert!(app.file_load.idle());
+            for reply in [&reply_rx, &queued_rx] {
+                assert_eq!(reply.try_recv().unwrap(), json!({"ok":false,"error":"file operation cancelled"}));
+                assert!(reply.try_recv().is_err(), "each caller is answered once");
+            }
+            app.session.execute("solid.box", &json!({"length":20,"width":20,"height":20})).unwrap();
+            let newer = app.session.doc.clone();
+            if let Some(late) = late {
+                assert!(tx.send(late).is_err(), "the old worker cannot reach the next operation");
+            }
+            tick(&mut app, &crate::fonts::test_context());
+            assert!(Arc::ptr_eq(&newer, &app.session.doc));
+        }
     }
 
     /// #1376: the web app reads a STEP file a piece per frame. The first frame only shows the

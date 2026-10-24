@@ -59,7 +59,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("arc_slot_center")
         .enabled(in_sketch)
-        .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise), width", created_doc!())),
+        .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width; returns centre_arc", created_doc!())),
     CommandSpec::new("sketch.ellipse", "Ellipse", ellipse).at("SKETCH", "CREATE").icon("ellipse").enabled(in_sketch).params(concat!(
         "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius",
         created_doc!()
@@ -937,6 +937,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
     }
     let t1 = t0 + sweep;
     let at = |t: f64, rr: f64| o + Vec2::from_angle(t) * rr;
+    let mut centre_arc = None;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let oc = sk.add_point(o, None)?;
         let ps = sk.add_point(at(t0, r), None)?;
@@ -950,6 +951,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
         let centre = sk.add_arc(o, at(t0, r), at(t1, r), [Some(oc), Some(ps), Some(pe)], None)?;
         if let Some(c) = sk.curves.get_mut(centre) {
             c.construction = true;
+            centre_arc = Some(c.id.clone());
         }
         let mut cons = Vec::new();
         for (a, b) in [(outer, cap_e), (inner, cap_e), (outer, cap_s), (inner, cap_s)] {
@@ -958,7 +960,9 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
         cons.push(add_c(sk, ConstraintKind::Equal { a: cap_s, b: cap_e })?);
         Ok((ids_of(sk, &[outer, cap_e, inner, cap_s]), cons))
     })?;
-    Ok(result(out, info))
+    let mut out = result(out, info);
+    out["centre_arc"] = json!(centre_arc);
+    Ok(out)
 }
 
 fn arc_slot_three(s: &mut Session, p: &Value) -> Result<Value> {
@@ -975,14 +979,22 @@ fn arc_slot_three(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn arc_slot_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.arc_center";
-    let (o, a, b) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "start")?, req_vec2(cmd, p, "end")?);
+    let (o, a) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "start")?);
     let w = width(p, cmd)?;
     let r = o.dist(a);
-    if r < 1e-9 || o.dist(b) < 1e-9 {
+    if r < 1e-9 {
         return Err(bad(cmd, "the points must differ from the centre"));
     }
     let t0 = (a - o).angle();
-    let sweep = ((b - o).angle() - t0).rem_euclid(std::f64::consts::TAU);
+    let sweep = if p.get("sweep").is_some() {
+        num(p, "sweep").ok_or_else(|| bad(cmd, "`sweep` must be finite degrees"))?.to_radians()
+    } else {
+        let b = req_vec2(cmd, p, "end")?;
+        if o.dist(b) < 1e-9 {
+            return Err(bad(cmd, "the points must differ from the centre"));
+        }
+        ((b - o).angle() - t0).rem_euclid(std::f64::consts::TAU)
+    };
     arc_slot(s, p, cmd, o, r, t0, sweep, w)
 }
 

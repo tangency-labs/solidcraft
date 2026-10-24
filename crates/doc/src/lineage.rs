@@ -412,8 +412,48 @@ pub(crate) fn part_tool(body: Body, part: &str) -> Traced {
 /// Faces named by their place in a body built as a whole (an imported part's faces in the
 /// file's order): `face:<k>`.
 pub(crate) fn numbered_tool(body: Body) -> Traced {
-    let roles = (0..body.face_count()).map(|k| vec![format!("face:{k}")]).collect();
+    linked_tool(body, 0, &[])
+}
+
+/// [`numbered_tool`] for a body of feature `fid` imported from a linked design, whose faces that
+/// design named `carried` (by face, empty where not known): such a face is named after its name
+/// there ([`link_role`]), so a reference to it follows that name, not the face's place in the
+/// file, when the design changes; it still answers to `face:<k>`.
+pub(crate) fn linked_tool(body: Body, fid: u64, carried: &[String]) -> Traced {
+    let roles = (0..body.face_count())
+        .map(|k| {
+            let numbered = format!("face:{k}");
+            match carried.get(k).filter(|n| !n.is_empty()) {
+                Some(name) => vec![link_role(fid, name, 0), numbered],
+                None => vec![numbered],
+            }
+        })
+        .collect();
     Traced::made(body, Some(roles))
+}
+
+/// Nesting of piece qualifiers a carried name is read through (deeper ones are digested whole).
+const MAX_LINK_DEPTH: usize = 32;
+
+/// The role of a face a linked design named `name`: `link:<digest>`, a digest of the name (which
+/// may hold anything: `@`, `|` and feature numbers of that design mean something else here). A
+/// piece keeps its qualifier, with the faces around it named the same way (`F<fid>:link:…`), so
+/// its pieces are told apart and found as they are in that design.
+pub(crate) fn link_role(fid: u64, name: &str, depth: usize) -> String {
+    let Some((stem, around)) = crate::piece_names::piece_parts(name).filter(|_| depth < MAX_LINK_DEPTH) else {
+        // FNV-1a: the same digest on every build and platform.
+        let digest = name.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
+        return format!("link:{digest:016x}");
+    };
+    let mut role = link_role(fid, stem, depth + 1);
+    if name.get(stem.len()..).is_some_and(|rest| rest.starts_with("#[")) {
+        let around: Vec<String> = around.iter().map(|a| format!("F{fid}:{}", link_role(fid, a, depth + 1))).collect();
+        role.push_str(&format!("#[{}]", around.join(",")));
+    }
+    if let Some((_, k)) = name.rsplit_once('#').filter(|(_, k)| !k.is_empty() && k.bytes().all(|b| b.is_ascii_digit())) {
+        role.push_str(&format!("#{k}"));
+    }
+    role
 }
 
 /// The role of an extrude's cap at `height` along the sketch normal: on the sketch plane, above

@@ -214,7 +214,7 @@ fn certified_side_transfer_preserves_geometry_and_unsupported_taper_refuses_atom
     run(&mut s, "sketch.finish", json!({}));
     let source = run(&mut s, "solid.extrude", json!({"distance":10,"body_name":"Round"}))["feature"].as_u64().unwrap();
     paint(&mut s, "Round", json!([10, 0, 5]));
-    let created = run(&mut s, "component.create", json!({"name":"Placed"}));
+    let created = run(&mut s, "component.create", json!({"name":"Placed","grounded":false}));
     let destination = created["component"].as_u64().unwrap();
     let occurrence = created["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,20,0],"angle":90,"axis":[0,0,1],"capture":false}));

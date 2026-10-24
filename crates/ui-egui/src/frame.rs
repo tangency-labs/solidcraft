@@ -37,6 +37,14 @@ pub fn reset_dock_offset(ctx: &egui::Context) {
     ctx.data_mut(|d| d.remove::<(String, egui::Vec2)>(egui::Id::new("sc_dock_offset")));
 }
 
+/// A title drag owns the pointer even when it outruns the dialog's previous position.
+pub(crate) fn dock_dragging(ctx: &egui::Context) -> bool {
+    let frame = ctx.cumulative_frame_nr();
+    // The viewport can draw before the dialog, so retain the preceding frame's marker.
+    ctx.data(|d| d.get_temp::<u64>(egui::Id::new("sc_dock_drag_frame"))).is_some_and(|at| at >= frame.saturating_sub(1))
+        && ctx.input(|i| i.pointer.any_down())
+}
+
 /// A docked dialog's anchor moved by `offset`, kept so its docked corner stays in `vp` with
 /// room for its title band.
 pub fn offset_anchor(docked: Pos2, offset: egui::Vec2, vp: egui::Rect, side: Side) -> Pos2 {
@@ -56,6 +64,10 @@ pub fn offset_anchor(docked: Pos2, offset: egui::Vec2, vp: egui::Rect, side: Sid
 pub fn drag_dock(ui: &Ui, band: egui::Rect, title: &str, moved: egui::Vec2, applied: egui::Vec2) {
     crate::scenario::publish_handle("dialog:title", band.center());
     let response = ui.interact(band, ui.id().with("sc_dock_drag"), egui::Sense::drag());
+    if response.dragged() {
+        let frame = ui.ctx().cumulative_frame_nr();
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_dock_drag_frame"), frame));
+    }
     // The drag runs from where the press started, so no movement is lost while egui decides
     // it is a drag, nor on the frame it ends.
     let base = egui::Id::new("sc_dock_drag_base");
@@ -142,6 +154,57 @@ mod tests {
             }
         }
     }
+
+    /// #5086: while a docked dialog's title is dragged, the pointer can outrun the dialog; the
+    /// model under it must not highlight until the drag ends.
+    #[test]
+    fn dragging_a_docked_dialog_blocks_viewport_hover() {
+        use crate::scenario::Harness;
+        use serde_json::json;
+
+        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+            let mut h = Harness::new();
+            h.call("ui.set", json!({"layout": mode}));
+            h.call("ui.resize", json!({"width": 2400, "height": 900}));
+            h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+            h.call("ui.view", json!({"view": "fit"}));
+            h.app.ui.pick_bodies = true;
+            let p = h.app.viewport.rect.unwrap().center();
+            h.call("ui.move", json!({"x": p.x, "y": p.y}));
+            assert!(h.app.viewport.hover.is_some(), "the uncovered model must highlight");
+            h.step(&json!({"start": "parameters.change"})).unwrap();
+            h.frames(6);
+            let title = crate::scenario::handle_at("dialog:title").unwrap();
+            assert!(!h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_params_dialog"))).unwrap().contains(p));
+            h.call("ui.move", json!({"x": title.x, "y": title.y}));
+            h.app.synthetic.push(egui::Event::PointerButton {
+                pos: title,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Default::default(),
+            });
+            h.frame();
+            h.app.synthetic.push(egui::Event::PointerMoved(p));
+            h.frame();
+            assert!(h.ctx.dragged_id().is_some(), "the title must own the drag");
+            assert!(!h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_params_dialog"))).unwrap().contains(p), "the pointer must outrun the dialog");
+            assert!(h.app.viewport.hover.is_none(), "dragging a dialog must block model highlights");
+            assert!(h.app.viewport.mouse.is_none(), "the viewport must not receive the drag pointer");
+            h.frames(2);
+            assert!(h.app.viewport.hover.is_none(), "a stationary drag must still block highlights");
+            h.app.synthetic.push(egui::Event::PointerButton {
+                pos: p,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            });
+            h.frame();
+            h.app.params = None;
+            h.frames(2);
+            assert!(h.app.viewport.hover.is_some(), "hover must return after the dialog closes");
+        }
+    }
+
     /// #1335: a dialog keeps its size while its Select chip is hovered, and its title band
     /// drags it; it opens docked again after it closes.
     #[test]

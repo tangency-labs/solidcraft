@@ -14,6 +14,14 @@ Properties accepts the leaf occurrence ID and the full path. Move can use world 
 {"occurrence":4,"path":[2,4],"space":"world","translate":[10,0,0],"capture":false}
 ```
 
+A drag in the viewport, or `occurrence.drag`, moves one exact placement and its floating joint chain by a world translation:
+
+```json
+{"path":[2,4],"at":[0,0,10],"point":[20,0,10]}
+```
+
+It captures that placement's position (other pending positions stay pending) and is one undo step. With the design active, the viewport drags the placement on the picked body's path just inside the design; with a component placement active, the one just inside it. Grounded placements and placements that joints hold to something fixed are refused; a free chain of joints moves together, and a chain through a placement used several times is refused. The design's first top-level part is grounded when it is made (not when a design is opened); copies start free.
+
 World movement includes pending parent and child positions. The default space remains parent-local for existing scripts. Capture Position commits pending transforms; Revert Position drops them. Copying an occurrence copies that selected occurrence's effective transform, including its pending position.
 
 An occurrence definition inside a component is shared by every instance of that parent component. Moving, grounding, copying, or deleting that nested definition changes all its parent instances. Selecting its exact path determines the world frame used for movement and Properties; it does not create an independent child definition.
@@ -59,6 +67,14 @@ New face-attached sketches capture the selected body's producer, certified face 
 Use `sketch.redefine` with the sketch ID and a new plane to repair or convert an attachment. Its preview is disposable; Apply records one undo step. An optional `author_path` explicitly repairs a missing author placement. Rebinding a repeated owner from another active component requires that path. Changing the target or converting to a fixed plane detaches only the old automatic face borders, retaining their currently evaluated geometry and entity IDs; unrelated projection links remain live. Pending positions on the involved target and author paths are captured with the edit, while unrelated pending positions remain pending.
 
 Paste New remaps internal certified targets and authoring paths to the copied definitions. Timeline paste reports retained external face targets and refuses translating such attachments until an explicit fixed-plane conversion establishes independent geometry. Rename preserves certified body identity; another producer using the same body name cannot repair a lost attachment.
+
+## Floating joint chains
+
+Dragging any member of a floating joint chain carries the chain together without changing its
+joint values. A chain joined to a grounded part still uses `joint.reach` within its joints.
+Repeated nested definitions are shared: their other instances follow in their respective
+parent frames. The selected exact path determines the local change, which is carried through
+the solver's first-placement frame to jointed peers, including repeated peers.
 
 ## Change the size of a standard component
 

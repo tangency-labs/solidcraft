@@ -24,7 +24,7 @@ pub(crate) fn report_divider(ui: &mut Ui, key: &str) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), 1.0), egui::Sense::hover());
     let rect = rect.expand2(vec2(t.space_10, 0.0));
     let clip = ui.clip_rect().expand2(vec2(t.space_10, 0.0));
-    ui.painter().with_clip_rect(clip).hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, t.dialog_rule));
+    ui.painter().with_clip_rect(clip).hline(rect.x_range(), rect.top(), t.tertiary_border(t.dialog_rule));
     scenario::publish_rect(&format!("dialog:divider:{key}"), rect);
 }
 
@@ -32,7 +32,7 @@ pub(crate) fn report_divider(ui: &mut Ui, key: &str) {
 pub(crate) fn list_frame<R>(ui: &mut Ui, key: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get();
     let response = egui::Frame::NONE
-        .stroke(egui::Stroke::new(1.0, t.dialog_rule))
+        .stroke(t.container_border(t.dialog_rule))
         .corner_radius(t.control_radius)
         .inner_margin(egui::Margin::symmetric(t.space_10 as i8, 0))
         .show(ui, |ui| {
@@ -56,7 +56,7 @@ pub(crate) fn path_chip(ui: &mut Ui, path: &str, add: impl FnOnce(&mut Ui)) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             add(ui);
             let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), t.control_height), egui::Sense::hover());
-            ui.painter().rect(rect, t.control_radius, t.dialog_footer, egui::Stroke::new(1.0, t.dialog_rule), egui::StrokeKind::Inside);
+            ui.painter().rect(rect, t.control_radius, t.dialog_footer, t.tertiary_border(t.dialog_rule), egui::StrokeKind::Inside);
             super::text::paint_text(ui, rect.shrink2(vec2(t.space_8, 0.0)), path, egui::FontId::monospace(t.font_small), t.form_dim, false);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), path));
             response.on_hover_text(path);
@@ -76,7 +76,7 @@ pub(crate) fn empty_box(ui: &mut Ui, key: &str, message: &str) {
     if let Some(first) = points.first().copied() {
         points.push(first);
     }
-    ui.painter().extend(egui::Shape::dashed_line(&points, egui::Stroke::new(1.0, t.control_border), t.space_4, t.space_3));
+    ui.painter().extend(egui::Shape::dashed_line(&points, t.control_border_stroke(t.control_border), t.space_4, t.space_3));
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, message, egui::FontId::proportional(t.font_label), t.form_dim);
     scenario::publish_rect(&format!("dialog:note:{key}"), rect);
 }

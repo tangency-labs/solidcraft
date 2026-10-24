@@ -4,6 +4,9 @@ Skills for AI agents that model in SolidCraft through its [MCP server](../docs/m
 one skill in the [Agent Skills](https://agentskills.io) format: a `SKILL.md` with a name and a
 description that tell the agent when to load it, and an optional supporting reference file.
 
+The same documents are built into SolidCraft: its MCP server's `skill_reference` tool returns them, so an
+agent without file access (such as the one in SolidCraft's own chat) can still read a skill's reference.
+
 | Skill | Loads when the agent |
 |---|---|
 | [`solidcraft-modeling`](solidcraft-modeling/SKILL.md) | builds a new part (enclosure, bracket, plate, flange, …) |

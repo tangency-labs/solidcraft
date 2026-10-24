@@ -379,6 +379,15 @@ const SHADED: [&str; 2] = ["analysis.draft", "analysis.access"];
 /// Tokens no colour vision mode needs to keep apart, and why. A new token fails
 /// `every_token_is_measured_or_carries_no_meaning` until it is in a group above or here.
 const NO_MEANING: &[(&str, &str)] = &[
+    ("borders.primary", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
+    ("borders.secondary", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
+    ("borders.secondary_dotted", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
+    ("borders.tertiary", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
+    ("borders.container", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
+    ("borders.control", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
+    ("borders.primary_inset", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
+    ("borders.bevel", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
+    ("icon_palette", "optional SVG palette; actual roles and theme contrast are guarded in icon and theme tests"),
     ("file_dim", "File view secondary text, WCAG guarded in theme tests"),
     ("file_recovery_well", "decorative recovery icon ground"),
     ("file_action_height", "layout dimension"),

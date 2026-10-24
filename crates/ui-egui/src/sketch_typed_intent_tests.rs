@@ -53,7 +53,7 @@ fn typed_arc_radius_and_signed_sweep_survive_stages_parameter_edit_and_reopen() 
 
 #[test]
 fn slots_keep_typed_length_and_width_as_dimensions_and_start_fresh() {
-    for command in ["sketch.slot.center_to_center", "sketch.slot.overall"] {
+    for command in ["sketch.slot.center_to_center", "sketch.slot.overall", "sketch.slot.center_point"] {
         let mut h = start(command);
         type_value(&mut h, "30");
         enter(&mut h);
@@ -78,6 +78,62 @@ fn slots_keep_typed_length_and_width_as_dimensions_and_start_fresh() {
         assert!(h.app.tool.as_ref().unwrap().dim_history.is_empty());
         assert!(h.app.tool.as_ref().unwrap().pts.is_empty());
     }
+}
+
+#[test]
+fn arc_slots_offer_typed_dimensions_and_keep_them_after_creation() {
+    for command in ["sketch.slot.arc_center", "sketch.slot.arc_three_point"] {
+        let mut h = start(command);
+        if command == "sketch.slot.arc_center" {
+            assert_eq!(h.app.tool.as_ref().unwrap().dims[0].label, "Radius");
+            type_value(&mut h, "20 mm");
+            enter(&mut h);
+            assert_eq!(h.app.tool.as_ref().unwrap().dims[0].label, "Sweep");
+            type_value(&mut h, "90 deg");
+            enter(&mut h);
+        } else {
+            h.step(&json!({"click":{"world":[20,20,0]}})).unwrap();
+            h.step(&json!({"click":{"world":[40,0,0]}})).unwrap();
+        }
+        h.step(&json!({"move":{"world":[40,5,0]}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().unwrap().dims[0].label, "Width");
+        type_value(&mut h, "6 mm");
+        let undo = h.app.session.undo.len();
+        enter(&mut h);
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for {command}");
+        let kinds = constraints(&h);
+        assert!(kinds.iter().any(|k| matches!(k, ConstraintKind::Diameter { value, .. } if (*value - 6.0).abs() < 1e-7)));
+        if command == "sketch.slot.arc_center" {
+            assert!(kinds.iter().any(|k| matches!(k, ConstraintKind::Radius { value, .. } if (*value - 20.0).abs() < 1e-7)));
+            assert!(kinds.iter().any(|k| matches!(k, ConstraintKind::ArcSweep { value, .. } if (*value - std::f64::consts::FRAC_PI_2).abs() < 1e-7)));
+        }
+        assert!(h.app.tool.as_ref().unwrap().pts.is_empty());
+        assert!(h.app.tool.as_ref().unwrap().dim_history.is_empty());
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!(constraints(&h).is_empty());
+    }
+}
+
+#[test]
+fn arc_slot_invalid_width_keeps_inputs_and_click_uses_corrected_value() {
+    let mut h = start("sketch.slot.arc_center");
+    type_value(&mut h, "10 mm");
+    enter(&mut h);
+    type_value(&mut h, "90 deg");
+    enter(&mut h);
+    h.step(&json!({"move":{"world":[0,15,0]}})).unwrap();
+    type_value(&mut h, "25 mm");
+    let undo = h.app.session.undo.len();
+    enter(&mut h);
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 3);
+    assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "25 mm");
+    assert!(constraints(&h).is_empty());
+    type_value(&mut h, "4 mm");
+    h.step(&json!({"click":{"world":[30,10,0]}})).unwrap();
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty());
+    assert!(constraints(&h).iter().any(|k| matches!(k, ConstraintKind::Diameter { value, .. } if (*value - 4.0).abs() < 1e-7)));
 }
 
 #[test]

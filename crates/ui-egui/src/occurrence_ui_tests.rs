@@ -41,6 +41,21 @@ fn click(h: &mut Harness, path: &[u64], control: &str) {
 }
 
 #[test]
+fn save_mesh_browser_pick_uses_the_body_of_the_clicked_placement() {
+    let (mut h, _, first, second) = fixture();
+    h.app.tree.collapsed.insert(super::occurrence_key(&[first]));
+    let expected = h.app.session.occurrence_bodies(&[second], true).unwrap();
+    h.app.start("file.save_mesh");
+    h.settle();
+    h.step(&json!({"click":{"handle":"row:Body1"}})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    let crate::dialogs::Kind::SaveMesh(k) = &d.kind else { panic!("Save as Mesh is open") };
+    let commands = crate::dialogs_save_mesh::commands(k, &d.inputs).unwrap();
+    assert_eq!(commands[0].1["bodies"], json!(expected));
+    assert_ne!(expected, h.app.session.occurrence_bodies(&[first], true).unwrap());
+}
+
+#[test]
 fn occurrence_second_row_selects_exact_path_and_menu_actions() {
     let (mut h, component, first, second) = fixture();
     click(&mut h, &[second], "row");

@@ -4,4 +4,4 @@ Generated size choices use the shared metric catalogue. Its coarse pitch is omit
 
 This changes generated UI text, not the resolved numerical pitch or geometry. Existing authored designation text, including explicit legacy coarse pitches, is retained when a dialog is merely displayed. Custom and fine designations remain editable. Catalogue dimensions are millimetres regardless of the design's display units.
 
-Tapped Hole continues to derive its existing tap-drill diameter from nominal diameter minus pitch: M8 gives 6.75 mm, while M8x1 gives 7 mm. Saving and reopening retains the resolved pitch. Only the currently supported ISO metric family is offered; other thread families and a complete fine-pitch catalogue are not added by this change.
+For ISO metric tapped holes, the existing tap-drill estimate remains nominal diameter minus pitch: M8 gives 6.75 mm, while M8x1 gives 7 mm. Saving and reopening retains the resolved pitch. See the [tapped-hole catalogue](thread-catalogue.md) for the additional metric fine choices and finite UNC/UNF and parallel G/Rp catalogues with their tabulated pilot recommendations. The separate Thread command remains ISO metric only.

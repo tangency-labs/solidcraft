@@ -56,6 +56,9 @@ hole_counterbore
 hole_countersink
   moves: direction[0], direction[2], position[0], position[1], position[2], to[0], to[1], to[2]
   face points: [4, 4.5, 4.25]
+hole_references
+  moves: direction[0], direction[2], position[0], position[1], position[2], references[0].edge[0], references[0].edge[1], references[0].edge[2], references[1].edge[0], references[1].edge[1], references[1].edge[2]
+  face points: [0, 0, 0]
 thread
   moves: face[0], face[1], face[2]
   face points: [0, 0, 0]
@@ -97,6 +100,9 @@ delete_face
   face points: [0, 0, 0]
 bounding_solid
 pipe
+frame_member
+frame_member_sketch
+  profiles: 2 all
 emboss
   face points: [5, 5.5, 5.25]
   profiles: 1 all

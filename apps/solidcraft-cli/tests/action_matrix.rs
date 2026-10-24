@@ -1412,7 +1412,7 @@ fn a_sketch_on_a_patterned_boss_top() {
 fn construction_geometry_and_holes_on_a_moved_component() {
     let moved = || {
         vec![
-            json!({"command": "component.create", "params": {"name": "Arm"}}),
+            json!({"command": "component.create", "params": {"name": "Arm", "grounded": false}}),
             json!({"command": "solid.box", "params": {"corner": [20, 0, 0], "length": 10, "width": 4, "height": 4, "body_name": "ArmBody"}}),
             json!({"command": "component.activate", "params": {"component": 0}}),
             json!({"command": "occurrence.move", "params": {"occurrence": "Arm:1", "translate": [0, 50, 0]}}),

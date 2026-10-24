@@ -30,6 +30,28 @@ impl Sketch {
             .or_else(|| self.freeform_offsets.iter().find(|o| o.output == output).map(|o| o.distance))
     }
 
+    /// A Parallel between an offset line and the source it follows (#4464). The association
+    /// keeps them parallel already, and the output's points are held during a solve, so solving
+    /// it would only pin the source to the output's current direction. It drives again once
+    /// Break releases the output.
+    pub(crate) fn follows_its_source(&self, kind: &ConstraintKind) -> bool {
+        let ConstraintKind::Parallel { a, b } = *kind else {
+            return false;
+        };
+        let (Some(a), Some(b)) = (self.curves.get(a).map(|c| c.id.as_str()), self.curves.get(b).map(|c| c.id.as_str())) else {
+            return false;
+        };
+        self.offsets.iter().any(|o| {
+            o.sources.iter().enumerate().any(|(i, (source, _))| {
+                let output = match &o.topology {
+                    Some(t) => t.roles.get(i).map(|r| r.output.as_str()),
+                    None => o.outputs.get(i).map(String::as_str),
+                };
+                output.is_some_and(|output| (source == a && output == b) || (source == b && output == a))
+            })
+        })
+    }
+
     /// Endpoints of a normal-distance annotation, evaluated from its source curve.
     pub fn offset_dimension_points(&self, output: &str) -> Option<(Vec2, Vec2)> {
         let (source, forward, distance) = self

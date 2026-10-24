@@ -1,4 +1,4 @@
-//! Constraint, assembly snap and dimension marker artwork.
+//! Constraint, assembly snap, hole placement and dimension marker artwork.
 use crate::dialogs_assembly::SnapKind;
 use crate::theme::Tokens;
 use egui::{Color32, Pos2, Stroke, vec2};
@@ -56,6 +56,39 @@ pub(crate) fn snap(painter: &egui::Painter, c: Pos2, tip: Option<Pos2>, kind: Sn
         painter.rect(r, 3.0, t.panel.gamma_multiply(0.92), Stroke::new(1.0, col), egui::StrokeKind::Inside);
         painter.galley(at, g, t.text);
     }
+}
+/// A place a hole can snap to, before the cursor reaches it: a small hollow mark of its kind
+/// (a square for a face's centre, a ring for a round edge's centre).
+pub(crate) fn snap_hint(painter: &egui::Painter, c: Pos2, kind: SnapKind, col: Color32) {
+    let ic = Tokens::get().icons;
+    for stroke in [Stroke::new(3.5, ic.marker_halo), Stroke::new(1.4, col)] {
+        match kind {
+            SnapKind::FaceCenter => {
+                painter.rect_stroke(egui::Rect::from_center_size(c, vec2(8.0, 8.0)), 1.0, stroke, egui::StrokeKind::Middle);
+            }
+            SnapKind::CircleCenter => {
+                painter.circle_stroke(c, 4.5, stroke);
+            }
+            SnapKind::EdgeMid | SnapKind::Vertex => {
+                let r = 5.0;
+                let diamond = vec![c + vec2(0.0, -r), c + vec2(r, 0.0), c + vec2(0.0, r), c + vec2(-r, 0.0)];
+                painter.add(egui::Shape::convex_polygon(diamond, Color32::TRANSPARENT, stroke));
+            }
+        }
+    }
+    painter.circle_filled(c, 1.3, col);
+}
+
+/// A placed hole's drag handle: a ring round the hole's centre with a cross through it, filled
+/// while it is hovered or dragged.
+pub(crate) fn hole_handle(painter: &egui::Painter, c: Pos2, col: Color32, hot: bool) {
+    let ic = Tokens::get().icons;
+    let r = 6.0;
+    painter.circle_filled(c, r + 3.5, ic.marker_halo);
+    painter.circle(c, r, if hot { col } else { col.gamma_multiply(0.35) }, Stroke::new(1.6, col));
+    let ink = Stroke::new(1.3, if hot { ic.highlight } else { col });
+    painter.line_segment([c - vec2(r + 3.0, 0.0), c + vec2(r + 3.0, 0.0)], ink);
+    painter.line_segment([c - vec2(0.0, r + 3.0), c + vec2(0.0, r + 3.0)], ink);
 }
 pub(crate) fn glyph_icon(name: &str) -> Option<&'static str> {
     Some(match name {

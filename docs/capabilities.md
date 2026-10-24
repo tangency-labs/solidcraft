@@ -70,7 +70,7 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
   that later features build on — open a `.step`/`.stp`/`.igs`/`.iges` file, insert one into a
   design, or drop it on the window ([docs/step-import.md](step-import.md)); FreeCAD
   `.FCStd` and Rhino `.3dm` solids import the same way through
-  [cadmpeg](https://github.com/cadmpeg/cadmpeg) in the desktop app and CLI.
+  [cadmpeg](https://github.com/cadmpeg/cadmpeg) in the desktop app, the browser app and the CLI.
 - **Render:** opaque surfaces can use metal fraction, roughness and dielectric IOR in the
   integrated product viewport and CPU preview PNGs. Existing simple colors remain supported.
   Fixed direct lighting is a preview; HDRI, refraction and texture maps are not implemented.

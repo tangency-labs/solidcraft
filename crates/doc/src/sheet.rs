@@ -261,6 +261,37 @@ pub struct SheetRule {
     pub gap: String,
 }
 
+impl SheetRule {
+    /// The expressions, by field name (as commands name them), with the kind each evaluates to.
+    /// (`corner_relief_shape` is a choice, not an expression.)
+    pub fn fields(&self) -> [(&'static str, &String, Kind); 8] {
+        [
+            ("thickness", &self.thickness, Kind::Length),
+            ("k_factor", &self.k_factor, Kind::Unitless),
+            ("bend_radius", &self.bend_radius, Kind::Length),
+            ("relief_width", &self.relief_width, Kind::Length),
+            ("relief_depth", &self.relief_depth, Kind::Length),
+            ("corner_relief", &self.corner_relief, Kind::Length),
+            ("hem_gap", &self.hem_gap, Kind::Length),
+            ("gap", &self.gap, Kind::Length),
+        ]
+    }
+
+    /// The expressions to change, by field name, in the order of [`SheetRule::fields`].
+    pub fn fields_mut(&mut self) -> [(&'static str, &mut String); 8] {
+        [
+            ("thickness", &mut self.thickness),
+            ("k_factor", &mut self.k_factor),
+            ("bend_radius", &mut self.bend_radius),
+            ("relief_width", &mut self.relief_width),
+            ("relief_depth", &mut self.relief_depth),
+            ("corner_relief", &mut self.corner_relief),
+            ("hem_gap", &mut self.hem_gap),
+            ("gap", &mut self.gap),
+        ]
+    }
+}
+
 fn rule_gap() -> String {
     "Thickness".into()
 }

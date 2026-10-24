@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn identity_component_feedback_skips_moved_and_repeated_placements() {
         let mut h = Harness::new();
-        let made = h.app.run("component.create", json!({"name":"Imported part"})).unwrap();
+        let made = h.app.run("component.create", json!({"name":"Imported part","grounded":false})).unwrap();
         h.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
         let world = h.app.session.world_state();
         let face =

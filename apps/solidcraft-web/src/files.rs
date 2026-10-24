@@ -499,8 +499,9 @@ fn input_picker(files: &Rc<Files>, intent: Intent) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
     let Ok(input) = doc.create_element("input").map(|e| e.unchecked_into::<web_sys::HtmlInputElement>()) else { return };
     input.set_type("file");
-    // Everything the browser build imports, from the format registry (no cadmpeg formats here).
-    let accept = solidcraft_engine::io::formats::open_extensions(false).iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(",");
+    // Everything the browser build imports, from the format registry: cadmpeg is pure Rust, so
+    // FreeCAD and Rhino files are part of it.
+    let accept = solidcraft_engine::io::formats::open_extensions(true).iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(",");
     input.set_accept(&accept);
     // Attached (hidden) while it is open: some browsers ignore a click on a detached input.
     let _ = input.set_attribute("style", "display:none");

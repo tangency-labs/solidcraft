@@ -31,7 +31,7 @@ pub(crate) const SHELL_GAP: f32 = 7.0;
 /// The viewport's top corners are rounded concentrically with the cards: the card margin plus the
 /// card radius.
 pub(crate) fn corner_radius() -> f32 {
-    SHELL_GAP + f32::from(Tokens::get().radius_lg)
+    Tokens::outset_radius(f32::from(Tokens::get().radius_lg), SHELL_GAP)
 }
 
 /// Fill the two concave corners where the application bar flows into the viewport's top edge, so

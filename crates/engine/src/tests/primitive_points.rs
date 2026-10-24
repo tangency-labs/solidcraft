@@ -106,7 +106,7 @@ fn point_parameters_rename_and_store() {
 fn point_expressions_in_a_moved_component() {
     let mut s = Session::default();
     run(&mut s, "parameters.change", json!({"name": "x0", "expression": "10 mm"}));
-    let c = run(&mut s, "component.create", json!({"name": "Arm"}));
+    let c = run(&mut s, "component.create", json!({"name": "Arm", "grounded": false}));
     let (cid, occ) = (c["component"].as_u64().unwrap(), c["occurrence"].as_u64().unwrap());
     run(&mut s, "component.activate", json!({"component": 0}));
     run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 50, 0]}));

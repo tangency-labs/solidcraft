@@ -23,6 +23,12 @@ thread_local! {
     static CAD_INPUT_BLOCKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+/// Tests set the barrier by hand to see what ignores it.
+#[cfg(test)]
+pub(crate) fn set_cad_input_blocked_for_test(blocked: bool) {
+    CAD_INPUT_BLOCKED.with(|cell| cell.set(blocked));
+}
+
 pub(crate) fn cad_input_blocked() -> bool {
     CAD_INPUT_BLOCKED.with(std::cell::Cell::get)
 }

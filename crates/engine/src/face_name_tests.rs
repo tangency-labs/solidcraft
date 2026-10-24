@@ -174,7 +174,7 @@ fn a_name_that_finds_no_face_is_refused_and_the_design_is_unchanged() {
 #[test]
 fn names_find_the_faces_of_a_moved_component() {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
     run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 10, "body_name": "Block"}));
     run(&mut s, "solid.cylinder", json!({"base": [15, 10, -1], "radius": 3, "height": 12, "operation": "cut"}));
     run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [50, 0, 0]}));

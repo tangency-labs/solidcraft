@@ -396,7 +396,8 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| part_name(&family, &size, &sh));
     let active = s.active_component;
-    let c = run(s, "component.create", json!({"name": name}))?;
+    // Hardware is fitted to other parts: it starts free even as the design's first part (#2804).
+    let c = run(s, "component.create", json!({"name": name, "grounded": false}))?;
     let (comp, occ) = (c["component"].as_u64().unwrap_or(0), c["occurrence"].as_u64().unwrap_or(0));
     build(s, &sh)?;
     s.doc_mut().parts.insert(comp, solidcraft_doc::StandardPart { family: family.clone(), size: size.clone(), length: shape_len(&sh) });

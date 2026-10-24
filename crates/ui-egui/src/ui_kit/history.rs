@@ -85,7 +85,13 @@ impl HistoryChip<'_> {
         let radius = if style == HistoryStyle::Icons { t.radius_lg } else { t.radius_sm };
         if style != HistoryStyle::Names || self.error {
             let weight = if style == HistoryStyle::Icons && (self.selected || self.error) { 1.5 } else { 1.0 };
-            p.rect(rect, radius, fill, Stroke::new(weight, edge), egui::StrokeKind::Inside);
+            p.rect(
+                rect,
+                radius,
+                fill,
+                if self.error || self.selected || self.hovered { Stroke::new(weight, edge) } else { t.tertiary_border(edge) },
+                egui::StrokeKind::Inside,
+            );
         } else {
             p.rect_filled(rect, radius, fill);
         }

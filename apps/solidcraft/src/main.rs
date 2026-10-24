@@ -10,6 +10,7 @@
 //!
 //! `--control <port>` (or `SOLIDCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control
 //! server: `{"id":1,"method":"engine.execute","params":{"command":"solid.box","params":{…}}}`.
+//! Without them the channel still opens, on the default port, unless Preferences turns it off.
 //! See `solidcraft_ui_egui::control` and docs/control-protocol.md.
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -24,6 +25,8 @@ mod device_lost;
 mod native_crash;
 #[cfg(target_os = "windows")]
 mod native_frame;
+#[cfg(target_os = "macos")]
+mod native_menu;
 #[cfg(target_os = "macos")]
 mod open_documents;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -81,6 +84,8 @@ struct App {
     gpu: Option<LostWatch>,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     space_mouse: space_mouse::SpaceMouse,
+    #[cfg(target_os = "macos")]
+    native_menu: Option<native_menu::NativeMenu>,
 }
 
 impl eframe::App for App {
@@ -123,6 +128,10 @@ impl eframe::App for App {
         for f in if self.solve.file_picker_busy() { Vec::new() } else { open_documents::take() } {
             self.solve.open_path_async(&f);
         }
+        #[cfg(target_os = "macos")]
+        if let Some(menu) = &mut self.native_menu {
+            menu.tick(&mut self.solve, ctx);
+        }
         self.solve.logic(ctx);
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         if !self.solve.file_picker_busy() {
@@ -132,10 +141,17 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        #[cfg(target_os = "macos")]
+        if let Some(menu) = &mut self.native_menu {
+            menu.raw_input_hook(&mut self.solve, ctx, raw);
+        }
         // Before the app's own hook, which adds the control channel's events.
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         self.space_mouse.raw_input_hook(self.solve.preferences.space_mouse_enabled, raw);
+        // The 3D mouse's buttons, before the app reads the frame: Esc and held modifiers join its input.
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+        solidcraft_ui_egui::space_mouse::buttons_hook(&mut self.solve, ctx, self.space_mouse.buttons(), raw);
         self.solve.raw_input_hook(raw);
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -498,6 +514,18 @@ fn backend_preference() -> Option<String> {
     graphics().and_then(|v| v.get("backend").and_then(serde_json::Value::as_str).map(str::to_string))
 }
 
+/// The viewport scene's sample count: the app's anti-aliasing (the window's pass is 1x), clamped
+/// by the backend's policy (OpenGL renders 1x, see `effective_msaa_samples`). A count the device
+/// cannot render with falls back to the supported default.
+fn scene_samples(backend: eframe::wgpu::Backend, samples: u32, supported: &[u32]) -> u32 {
+    let requested = eframe::egui_wgpu::effective_msaa_samples(backend, samples.max(1));
+    if requested <= 1 || supported.is_empty() || supported.contains(&requested) {
+        requested
+    } else {
+        supported.iter().copied().filter(|&n| n <= solidcraft_ui_egui::prefs::Prefs::default().msaa).max().unwrap_or(1)
+    }
+}
+
 /// Anti-aliasing samples from Preferences (4 when unset).
 fn msaa() -> u16 {
     graphics()
@@ -544,6 +572,8 @@ fn app_viewport() -> Result<egui::ViewportBuilder, eframe::Error> {
 const APP_ID: &str = solidcraft_engine::io::APP_ID;
 
 fn main() -> eframe::Result {
+    #[cfg(target_os = "macos")]
+    objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
     adopt_legacy_settings();
     let mut safe_mode = startup::env_on(std::env::var(startup::SAFE_MODE_ENV).ok().as_deref());
@@ -697,16 +727,7 @@ fn main() -> eframe::Result {
                 lost_at: None,
             });
             if let Some(rs) = &cc.wgpu_render_state {
-                // The viewport's scene keeps the app's anti-aliasing; the window's pass is 1x.
-                // A count the device cannot render with falls back to the supported default.
-                let scene_samples = {
-                    let requested = u32::from(samples).max(1);
-                    if requested <= 1 || rs.msaa_supported.is_empty() || rs.msaa_supported.contains(&requested) {
-                        requested
-                    } else {
-                        rs.msaa_supported.iter().copied().filter(|&n| n <= solidcraft_ui_egui::prefs::Prefs::default().msaa).max().unwrap_or(1)
-                    }
-                };
+                let scene_samples = scene_samples(rs.adapter.get_info().backend, u32::from(samples), &rs.msaa_supported);
                 eprintln!("SolidCraft graphics: {:?}, MSAA {scene_samples}x (requested {}x)", rs.adapter.get_info().backend, samples);
                 solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
                 app.set_wgpu_split(rs, depth_bits, STENCIL_BITS, scene_samples);
@@ -724,8 +745,10 @@ fn main() -> eframe::Result {
                 ));
             }
             mark("viewport pipelines");
-            if let Some(port) = control_port {
-                let rx = control_server::start(port, cc.egui_ctx.clone());
+            // `--control`/the environment name a port; otherwise the preference (on by default)
+            // opens the default one (docs/control-protocol.md).
+            if let Some(listen_on) = solidcraft_engine::control_auth::plan(control_port, app.preferences.agent_control) {
+                let rx = control_server::start(listen_on, cc.egui_ctx.clone());
                 app = app.with_control(rx);
             }
             // The agent chat's MCP bridge reaches the app through an endpoint of its own, started
@@ -776,6 +799,18 @@ fn main() -> eframe::Result {
             }
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             let space_mouse = space_mouse::SpaceMouse::start(&cc.egui_ctx);
+            #[cfg(target_os = "macos")]
+            let native_menu = match native_menu::NativeMenu::new(&app, &cc.egui_ctx) {
+                Ok(menu) => Some(menu),
+                Err(error) => {
+                    app.set_status(format!("System menu: {error}"), true);
+                    None
+                }
+            };
+            #[cfg(target_os = "macos")]
+            {
+                app.native_file_menu = native_menu.is_some();
+            }
             mark("app created");
             solidcraft_engine::crash::phase("first frame");
             Ok(Box::new(App {
@@ -786,6 +821,8 @@ fn main() -> eframe::Result {
                 gpu,
                 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
                 space_mouse,
+                #[cfg(target_os = "macos")]
+                native_menu,
             }))
         }),
     );
@@ -946,5 +983,14 @@ mod msaa_tests {
                 assert_eq!(eframe::egui_wgpu::effective_msaa_samples(backend, requested), requested);
             }
         }
+    }
+
+    #[test]
+    fn the_scene_follows_the_backend_policy_too() {
+        use eframe::wgpu::Backend;
+        assert_eq!(super::scene_samples(Backend::Gl, 4, &[1, 4]), 1);
+        assert_eq!(super::scene_samples(Backend::Gl, 4, &[]), 1);
+        assert_eq!(super::scene_samples(Backend::Vulkan, 4, &[1, 4]), 4);
+        assert_eq!(super::scene_samples(Backend::Dx12, 8, &[1, 2, 4]), 4);
     }
 }

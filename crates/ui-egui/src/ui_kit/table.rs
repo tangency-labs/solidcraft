@@ -176,7 +176,7 @@ impl Table<'_> {
             scenario::publish_rect(&format!("dialog:column:{}:{}", self.id, column.label), cell);
             left = cell.right() + t.space_8;
         }
-        ui.painter().hline(rect.x_range(), rect.bottom(), egui::Stroke::new(1.0, t.dialog_rule));
+        ui.painter().hline(rect.x_range(), rect.bottom(), t.tertiary_border(t.dialog_rule));
         ui.advance_cursor_after_rect(rect);
     }
 
@@ -204,7 +204,7 @@ impl Table<'_> {
             self.empty_shown = true;
         }
         let (rect, response) = ui.allocate_exact_size(vec2(self.width(), row_height() - t.space_4), egui::Sense::click());
-        let stroke = egui::Stroke::new(1.0, t.control_border);
+        let stroke = t.control_border_stroke(t.control_border);
         let mut outline = Vec::new();
         egui::epaint::tessellator::path::rounded_rectangle(&mut outline, rect.shrink(stroke.width * 0.5), f32::from(t.control_radius).into());
         if let Some(first) = outline.first().copied() {
@@ -372,7 +372,7 @@ pub(crate) fn active_pill(ui: &mut Ui) {
     let label = crate::i18n::tr_label("Active");
     let width = label_width(ui, label) + t.space_16;
     let (rect, response) = ui.allocate_exact_size(vec2(width, t.font_small + t.space_6), egui::Sense::hover());
-    ui.painter().rect(rect, t.radius_xl, t.control_fill, egui::Stroke::new(1.0, t.control_border), egui::StrokeKind::Inside);
+    ui.painter().rect(rect, t.radius_xl, t.control_fill, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
     super::text::paint_text(ui, rect.shrink2(vec2(t.space_8, 0.0)), label, crate::fonts::semibold(t.font_small), t.form_primary, false);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
     scenario::publish_handle(&format!("dialog:inline:{label}"), rect.center());

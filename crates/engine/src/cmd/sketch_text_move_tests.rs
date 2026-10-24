@@ -116,7 +116,7 @@ fn live_text_edit_rejects_bad_values_and_leaves_the_design_as_it_was() {
 #[test]
 fn text_move_in_a_rotated_component_preserves_font_and_local_coordinates() {
     let mut s = Session::default();
-    let component = run(&mut s, "component.create", json!({"name":"Label"}));
+    let component = run(&mut s, "component.create", json!({"name":"Label","grounded":false}));
     run(&mut s, "occurrence.move", json!({"occurrence":component["occurrence"],"translate":[30,20,10],"axis":[0,0,1],"angle":90}));
     let created = run(&mut s, "sketch.create", json!({"plane":"XY"}));
     let sid = created["sketch"].as_u64().unwrap();

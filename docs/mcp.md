@@ -24,10 +24,26 @@ solidcraft-cli mcp
 # Headless, starting from a design file or a command script.
 solidcraft-cli mcp --in part.solidcraft
 
-# Bridged to the running app, so you can watch the agent model:
+# Bridged to the running app, so you can watch the agent model. The app's control channel is
+# on by default (see below), so no flag is needed on either side:
+solidcraft &
+solidcraft-cli mcp          # finds the running app; headless when none runs (--headless forces that)
+
+# A fixed port, or a second app: name it.
 solidcraft --control 7878 &
 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
+
+### The app listens by default
+
+The desktop app opens its control channel at start-up on `127.0.0.1:27878` (or the next free port
+when that one is taken), unless Preferences > Assistant > "Let AI agents connect (control
+channel / MCP)" is off; the setting takes effect at the next start. It is reachable from this
+computer only, and every connection must show the token made fresh for that launch, readable only
+by your user account ([control-protocol.md](control-protocol.md#token)). The app writes the port to
+`control/current.port` in the same folder as its token file; `solidcraft-cli mcp` with no
+arguments reads it. `--control PORT` and `SOLIDCRAFT_CONTROL_PORT` still choose the port and apply
+even when the setting is off. With the setting off and no flag, the app listens on nothing.
 
 Bridged, the server finds the app's control token in the token file the app wrote for that port
 ([control-protocol.md](control-protocol.md#token)); `--token T` or `SOLIDCRAFT_CONTROL_TOKEN` give
@@ -109,9 +125,9 @@ file dialogs are never limited.
 ### Tool annotations
 
 Each tool says what it may do, for clients that ask before running tools (or auto-approve on
-these hints). `list_commands`, `describe_command`, `inspect_design`, `measure`, `body_topology`
-and `crash_reports` are read-only. `set_parameter`, `undo` and `redo` change the design undoably.
-`new_design` replaces it (destructive). `execute`, `batch`, `open`, `save`, `export` and
+these hints). `list_commands`, `describe_command`, `inspect_design`, `measure`, `body_topology`,
+`skill_reference`, `crash_reports`, `pending` and `running` are read-only. `set_parameter`, `undo` and `redo`
+change the design undoably. `new_design` replaces it (destructive). `execute`, `batch`, `open`, `save`, `export` and
 `screenshot` (whose `path` writes a file) can read, write, overwrite or delete files: they are
 not read-only, `destructiveHint` and `openWorldHint` are true.
 
@@ -138,6 +154,38 @@ Claude Desktop (`claude_desktop_config.json`), bridged to a running app:
 }
 ```
 
+On Windows the installer puts `solidcraft-cli.exe` next to `solidcraft.exe` in
+`C:\Program Files\SolidCraft` (the portable zip has both too). Give the full path, with each
+backslash doubled in JSON. This configuration declares two servers: `solidcraft` models
+headless (no window; steadier for timings), `solidcraft-live` drives the app you have open, so
+you can watch the agent model. `--allow-path` names a folder where the agent may save and
+export; it must already exist.
+
+```json
+{
+  "mcpServers": {
+    "solidcraft": {
+      "command": "C:\\Program Files\\SolidCraft\\solidcraft-cli.exe",
+      "args": ["mcp", "--allow-path", "C:\\Users\\NAME\\SolidCraft-Agent"]
+    },
+    "solidcraft-live": {
+      "command": "C:\\Program Files\\SolidCraft\\solidcraft-cli.exe",
+      "args": ["mcp", "--connect", "127.0.0.1:7878", "--allow-path", "C:\\Users\\NAME\\SolidCraft-Agent"]
+    }
+  }
+}
+```
+
+Start the app with its control channel for `solidcraft-live`, from PowerShell:
+`& "C:\Program Files\SolidCraft\solidcraft.exe" --control 7878`, or once for every launch:
+`setx SOLIDCRAFT_CONTROL_PORT 7878`.
+
+Open `claude_desktop_config.json` with Claude Desktop's **Settings > Developer > Edit Config**
+rather than by its path: the Microsoft Store (MSIX) build of Claude Desktop can keep its data in
+its own package folder (`%LOCALAPPDATA%\Packages\…\LocalCache\Roaming\Claude`) instead of
+`%APPDATA%\Claude`, and Edit Config opens the file the app actually reads. Quit Claude Desktop
+completely (from the notification area) and start it again to load the servers.
+
 ### Agent skills
 
 [`skills/`](https://github.com/bherbruck/solidcraft/tree/main/skills) holds four [Agent Skills](https://agentskills.io) for agents that model through this server:
@@ -148,6 +196,8 @@ Claude Desktop (`claude_desktop_config.json`), bridged to a running app:
 
 They cover the workflow, the command shapes, how to verify with `measure`, and the known traps. With them an agent builds a part in a few `batch` calls and reads far less output. To install them for Claude Code, copy the folders into `~/.claude/skills/`; [skills/README.md](https://github.com/bherbruck/solidcraft/blob/main/skills/README.md) has the details.
 
+The `skill_reference` tool returns these documents from the copies built into SolidCraft, so an agent without file access can follow them: `{"skill": "solidcraft-modeling"}` returns its `reference.md`, the default file. Mechanisms also has `reference.md`, checking has `reference/porting.md`, and every skill has `SKILL.md` (editing uses modeling's reference). It never reads a path from disk, and an unknown skill or file is refused with the available choices. SolidCraft's own chat turns the agent's file tools off, so this is how its agent reads the skills there.
+
 ## Tools
 
 | Tool | Arguments | What it does |
@@ -155,7 +205,7 @@ They cover the workflow, the command shapes, how to verify with `measure`, and t
 | `list_commands` | `filter?` | The command catalog: id, label, tab/panel, shortcut, parameter docs, enabled now. `filter` matches id, label, tab and panel. |
 | `describe_command` | `id` | One command's parameter docs (`params`) and, for commands with a typed contract (`solid.box`, `solid.extrude` and `engine.describe` so far), the JSON Schemas (2020-12) of its parameters (`input`) and of a successful result (`output`); `null` for the others. The same as `execute` `engine.describe {command}`. |
 | `execute` | `command`, `params?`, `verbose?` (default true) | Run any command with JSON parameters (`list_commands` shows them). Failures leave the design unchanged. A feature command replies with the feature (`feature`, `name`), every body (`bodies`) and the bodies it created, changed and removed (`created_bodies`, `changed_bodies`, `removed_bodies`). `verbose: false` uses the same compact reply as `batch`. |
-| `batch` | `commands: [{command, params}]`, `rollback?` (default true), `verbose?` (default true), `timings?`, `profile?` (default false) | Run steps in order, stop at the first error and undo the completed steps. The reply names the failing step (`failed.index`, `failed.command`, `failed.error`) and every result before it. `verbose: false` keeps the reply small in large designs: feature steps leave out the full body list (`created_bodies`, `changed_bodies`, `removed_bodies` stay) and sketch steps the ids they repeat outside `created`. Bridged to an app that has `engine.batch`, the whole batch is one control request (one frame of the app). Older apps, and apps showing the agent cursor, get the steps one by one. `timings: true` adds `timings: [{index, command, ms}]` for every step run, the failing one included, and `total_ms`. `profile: true` also adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`, its time in kernel booleans, in tessellation and the rest. Steps are timed where they run: in the app when bridged. An app without `engine.batch` is timed step by step, without `profile`. |
+| `batch` | `commands: [{command, params}]`, `rollback?` (default true), `verbose?` (default true), `timings?`, `profile?` (default false) | Run steps in order, stop at the first error and undo the completed steps. The reply names the failing step (`failed.index`, `failed.command`, `failed.error`), every result before it, `rolled_back` (true only when the design really went back to where the batch started), `undone`, `applied` (the indices of the steps whose changes are in the design) and `not_run` (the steps never sent). A step may name a tool instead of a command, with that tool's arguments as `params`: `set_parameter` (runs `parameters.change`; `value` or `expression`), `list_commands` (`engine.commands`, filtered by `filter` as the tool filters it), `describe_command` (`engine.describe`), `execute` (`{command, params}`), `measure`, `inspect_design` (`document.inspect`: each sketch as its counts, not its full contents, and no joints), `undo`, `redo`, `export`, `save`, `open`, `new_design` and `crash_reports`. `screenshot`, `body_topology` (use `model.edges` and `model.faces`), `batch`, `pending`, `running` and `skill_reference` can't be steps: such a batch fails before anything is sent. `verbose: false` keeps the reply small in large designs: feature steps leave out the full body list (`created_bodies`, `changed_bodies`, `removed_bodies` stay) and sketch steps the ids they repeat outside `created`. Bridged to an app that has `engine.batch`, the whole batch is one control request (one frame of the app). Older apps, and apps showing the agent cursor, get the steps one by one. `timings: true` adds `timings: [{index, command, ms}]` for every step run, the failing one included, and `total_ms`. `profile: true` also adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`, its time in kernel booleans, in tessellation and the rest. Steps are timed where they run: in the app when bridged. An app without `engine.batch` is timed step by step, without `profile`. |
 | `inspect_design` | `measure?` (default true), `sketches?` (default true), `joints?` (default true) | Design properties (`metadata`: project, author… and other tools' keys; set them with `execute` `document.metadata.set`), parameters, timeline (type, suppressed, rolled back, error, warning, timing), bodies (volume, area, centre of mass, bbox, face/edge/vertex counts, visible; `removed_later: true` while a sketch is being edited on a rolled-back timeline and a later feature deletes the body, which is then not shown), sketches (curves, points, constraints, profiles, DOF, solve status, visible), joints when the design has any (as `joint.inspect` gives them: each origin's occurrence, component and path, the snap as saved, the feature, face, edge or sketch curve (`sketch: {id, name, curve}`) its persistent names refer to, `resolves` and the `error` when it is lost; kind, offset, angle, flip, values, limits, expressions, motion links; `execute` `joint.inspect {joint}` gives one joint), selection, undo depth. Hide helper sketches, bodies or construction planes with `execute` `browser.visibility` (`{items, visible}` or `{folder, visible}`), and joint glyphs with `{joints: [id or name], visible}` or `{folder: "joints", visible}` (a hidden joint still constrains and drives; `joint.list` reports each joint's `visible`). |
 | `measure` | `body?` or `items?` | Volume (mm³), area (mm²), centre of mass, bbox and topology counts per body, with totals. With `items` (one or two selections as `execute` takes them: `face`, `edge`, `vertex`, `sketch_curve`, `profile`), the picked geometry instead: see below. |
 | `body_topology` | `body` | Edges (index, midpoint, length, ends) and faces (index, name, area, centroid, normal, `point`, and for a cylindrical face its `cylinder`: `origin`, `axis`, `radius`). An edge midpoint is the `[x,y,z]` that picks that edge for fillet and chamfer. A face's `point` lies on it and picks it (its centroid may not: that of a face with a hole is in the hole); a face's `name` picks it for the commands that take faces (`face.delete`, `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.split_face`, `solid.replace_face`, and `face` of `sheet.convert`). |
@@ -163,7 +213,9 @@ They cover the workflow, the command shapes, how to verify with `measure`, and t
 | `screenshot` | `view?` (iso, top, front, back, bottom, left, right, home, fit, or a named view saved with `view.save`), `camera?` (`{target, yaw, pitch, distance, fov?}`, as `view.apply`), `path?`, `width?`, `height?`, `source?` (window, model), `grid?`, `axes?` | A PNG image content block. Headless: a render with the viewport's pipelines on a headless GPU device (see `solidcraft-cli gpu`; with no adapter, the CPU rasterizer, without analysis colours), fitted to the model, or from the named view or camera; the reply's `renderer` says which (`gpu`, `gpu-software`, `cpu`, with a `warning` for `cpu`). Bridged: the app window (default) or a model render with the app's camera; a named view or camera moves the app's viewport there first (`execute` `view.apply` does the same without a screenshot). `grid: false` and `axes: false` leave the ground grid (it lies on Z 0 and cuts through a part that straddles it) and the origin's axes out of a model render; axes hidden with `browser.visibility` stay out whatever `axes` says. Bridged, a screenshot that gives `grid` or `axes` is a model render, which follows the app's Grid and Origin switches for what it does not give; `source: "window"` with either is an error. A window that is minimised or on another macOS Space presents no frame: with no `source` the reply is a model render and says so (`fallback`); `source: "window"` is an error saying why, at once. Agents that don't need the app's chrome can ask for `source: "model"`. |
 | `export` | `path`, `format?` (step, 3mf, 3mf-tagged, stl, stla, obj, urdf), `bodies?`, `mesh_prefix?`, `effort?`, `velocity?` | STEP, 3MF or mesh export; URDF writes the whole assembly with its meshes next to it (`docs/urdf.md`). |
 | `undo`, `redo` | — | Undo / redo one change. |
+| `pending` | — | Bridged: the result of a request that was still running when its call returned (an error starting `still running:`), waiting up to 60 s for it; `done: false` while it runs (call again), `pending: null` when nothing runs. See [Long-running requests](#long-running-requests). |
 | `crash_reports` | `id?`, `limit?` | The crash reports on this computer, newest first; with `id`, the whole report (backtrace, command, recent commands, `design_path`/`replay_path`). See [crash-reports.md](crash-reports.md). |
+| `skill_reference` | `skill`, `file?` (default `reference.md`) | Read a bundled skill document. Skills: `solidcraft-modeling`, `solidcraft-mechanisms`, `solidcraft-editing`, `solidcraft-checking`. |
 | `running` | - | What the app is running or has queued, for every client (`control.running`, see [control-protocol.md](control-protocol.md#limits)): each request's connection and id, method, command id or a batch's step count, `running_s` and `queued`, never its parameters. Answers at once while the app is busy: ask it when a call timed out before sending a change again. Headless: always `{"running": []}`. |
 | `new_design` | `name?` | Start an empty design. |
 | `open` | `path` | Open a `.solidcraft` design, a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature), or a 3MF/STL file as mesh bodies. |
@@ -196,8 +248,36 @@ Resources: `solidcraft://design` (inspect JSON with measurements) and `solidcraf
 (the catalog).
 
 Errors: an unknown tool or arguments that don't match the tool's schema are JSON-RPC
-`-32602` errors; an engine failure (bad command parameters, a feature that fails) is a tool
-result with `isError: true` and the engine's message, which the model can read and correct.
+`-32602` errors (an unknown argument's error lists the tool's arguments); an engine failure
+(bad command parameters, a feature that fails) is a tool result with `isError: true` and the
+engine's message, which the model can read and correct.
+
+### Long-running requests
+
+The app answers a control request that runs longer than 60 seconds (a big fillet, say) with
+"still running" ([control-protocol.md](control-protocol.md#limits)); it has not failed, and was
+not cancelled. The bridged server then keeps the connection, where the reply will come, and
+asks the app (`control.pending`) every half second for up to 240 seconds more, saying on stderr
+how long it waits; when the request finishes, the tool call returns its real result. If it still
+runs after that, the tool call fails with an error starting `still running:` that names the
+request and says what it still does: it will still apply when it finishes, or will still write
+the file (an export or a save: the design does not change), or only reads (nothing changes). Don't
+send it again: call the `pending` tool, which waits up to 60 seconds for its result each time.
+Any other tool call first waits up to 60 seconds for it too, and is not sent while it still runs
+(so nothing is queued to apply unseen behind it); a request that finishes in that wait keeps its
+result for `pending`. If the connection to the app is lost meanwhile, the result is lost with it,
+and `pending` says so: inspect the design before sending a change again.
+
+So a single tool call may block for up to 300 seconds (the app's 60 s wait plus 240 s of polling)
+before it returns `still running:`, and a call made while an earlier request still runs for up to
+60 seconds more. An MCP client needs a per-call timeout above that (say 330 s) to see that error;
+a client that gives up sooner only sees its own timeout, though the request goes on running in the
+app: then call `pending` (or `inspect_design`) before sending anything again.
+
+A `batch` step that is still running stops the batch like a failure. Its rollback first waits for
+the step (as above), so a restored checkpoint takes the step back too; if it still runs, the
+reply says `rolled_back: false`, marks the step `still_running` and lists it in `applied`, as it
+will apply when it finishes.
 
 `batch` rollback goes back to an engine checkpoint (`edit.checkpoint`) taken before the first
 step: the design, the active sketch and the undo history are restored exactly as they were,

@@ -6,11 +6,14 @@ use std::sync::Mutex;
 use serde_json::{Value, json};
 use solidcraft_engine::crash;
 
-const USAGE: &str = "usage: solidcraft-cli crashes [list [--json] | show <id> | replay <id> | dir | clear [<id>]]";
+/// The command's usage, from the same lines the top-level usage lists.
+fn usage() -> String {
+    crate::command_usage("crashes")
+}
 
 pub fn run(args: &[String]) -> Result<(), String> {
     let dir = crash::default_dir().ok_or("no crash folder on this system")?;
-    let id = || args.get(1).map(String::as_str).ok_or_else(|| USAGE.to_string());
+    let id = || args.get(1).map(String::as_str).ok_or_else(usage);
     match args.first().map(String::as_str) {
         None | Some("list") => {
             let reports = crash::list(&dir);
@@ -43,7 +46,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             println!("deleted {} report(s)", crash::clear(&dir, args.get(1).map(String::as_str)));
             Ok(())
         }
-        _ => Err(USAGE.to_string()),
+        _ => Err(usage()),
     }
 }
 

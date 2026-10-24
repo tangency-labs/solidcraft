@@ -74,9 +74,14 @@ fn signed_arc_sweep_retains_radius_and_logical_endpoint_identity() {
 
 #[test]
 fn slots_and_polygon_keep_permanent_typed_dimensions() {
-    for command in ["sketch.slot.center_to_center", "sketch.slot.overall"] {
+    for command in ["sketch.slot.center_to_center", "sketch.slot.overall", "sketch.slot.center_point"] {
         let mut s = session();
-        let out = draw(&mut s, command, json!({"p0":[2,3],"p1":[22,3],"width":4,"connect":false}), json!({"length":20,"width":4}));
+        let out = draw(
+            &mut s,
+            command,
+            json!({"p0":[2,3],"p1":[22,3],"center":[12,3],"end":[22,3],"width":4,"connect":false}),
+            json!({"length":20,"width":4}),
+        );
         let length = out["dimensions"]["length"]["param"].as_str().unwrap();
         let result = run(&mut s, "parameters.change", json!({"name":length,"expression":30}));
         assert_eq!(result["errors"], json!([]));
@@ -97,6 +102,28 @@ fn slots_and_polygon_keep_permanent_typed_dimensions() {
         assert_eq!(result["errors"], json!([]));
         close(measure(&s, |k| matches!(k, ConstraintKind::Radius { .. })), 15.0);
     }
+}
+
+#[test]
+fn arc_slot_dimensions_survive_parameter_edits_and_reopening() {
+    let mut s = session();
+    let out = draw(
+        &mut s,
+        "sketch.slot.arc_center",
+        json!({"center":[0,0],"start":[20,0],"end":[0,20],"width":6}),
+        json!({"radius":20,"sweep":90,"width":6}),
+    );
+    for (role, value) in [("radius", 25), ("sweep", 120), ("width", 8)] {
+        let name = out["dimensions"][role]["param"].as_str().unwrap();
+        let result = run(&mut s, "parameters.change", json!({"name":name,"expression":value}));
+        assert_eq!(result["errors"], json!([]), "{role}: {result}");
+    }
+    let doc = serde_json::from_value(serde_json::to_value(s.design()).unwrap()).unwrap();
+    let mut reopened = Session::new(doc);
+    reopened.active_sketch = s.active_sketch;
+    close(measure(&reopened, |k| matches!(k, ConstraintKind::Radius { .. })), 25.0);
+    close(measure(&reopened, |k| matches!(k, ConstraintKind::ArcSweep { .. })), 120f64.to_radians());
+    close(measure(&reopened, |k| matches!(k, ConstraintKind::Diameter { .. })), 8.0);
 }
 
 #[test]

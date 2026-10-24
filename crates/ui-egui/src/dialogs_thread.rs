@@ -1,7 +1,7 @@
-//! Metric thread choices use the document's sizing table and the existing designation
-//! parameter. Browsing choices does not edit the model or freeze an automatic feature.
+//! Tapped-hole catalogues and metric Thread choices share document sizing data.
+//! Browsing choices does not edit the model or freeze an automatic Thread feature.
 
-use solidcraft_engine::doc::{Document, metric_thread_sizes, parse_metric_thread};
+use solidcraft_engine::doc::{Document, TappedThreadFamily, metric_thread_sizes, parse_metric_thread, parse_tapped_thread, tapped_thread_sizes};
 
 use crate::dialogs::{combo, form_row};
 use crate::i18n::tr;
@@ -56,37 +56,70 @@ impl HoleThreadDraft {
     }
 }
 
-/// Tapped holes use the existing metric catalogue; the engine derives the tap drill.
+/// Tapped holes use a shared, finite catalogue; the engine derives the physical drill.
 /// Custom remains a dialog mode even when its current values match a catalogue size.
 pub(crate) fn hole_rows(ui: &mut egui::Ui, doc: &Document, designation: &mut String, custom: &mut Option<HoleThreadDraft>) -> bool {
     let designation_id = ui.make_persistent_id("hole_thread_designation");
-    form_row(ui, "Profile", |ui| {
-        ui.label(tr("thread.iso_metric"));
-    });
-
-    let sizes = metric_thread_sizes();
-    let current = parse_metric_thread(designation);
-    let catalogue = current.and_then(|pair| sizes.iter().position(|s| *s == pair));
-    if custom.as_ref().is_some_and(|draft| draft.source != *designation) || (custom.is_none() && catalogue.is_none()) {
+    let families = [TappedThreadFamily::Metric, TappedThreadFamily::Unc, TappedThreadFamily::Unf, TappedThreadFamily::G, TappedThreadFamily::Rp];
+    let family = parse_tapped_thread(designation).map(|s| s.family).unwrap_or(TappedThreadFamily::Metric);
+    let mut profile = families.iter().position(|f| *f == family).unwrap_or(0);
+    let before_profile = profile;
+    form_row(ui, "Profile", |ui| combo(ui, "hole_thread_profile", &["ISO metric", "UNC", "UNF", "G / BSPP", "Rp"], &mut profile));
+    let family = families.get(profile).copied().unwrap_or(TappedThreadFamily::Metric);
+    let sizes = tapped_thread_sizes(family);
+    if family != TappedThreadFamily::Metric {
+        *custom = None;
+    }
+    if profile != before_profile
+        && let Some(size) = sizes.first()
+    {
+        *designation = size.designation.clone();
+        *custom = None;
+    }
+    let current = parse_tapped_thread(designation);
+    let catalogue = current.as_ref().and_then(|s| sizes.iter().position(|p| p.designation == s.designation));
+    if family == TappedThreadFamily::Metric
+        && (custom.as_ref().is_some_and(|draft| draft.source != *designation) || (custom.is_none() && catalogue.is_none()))
+    {
         *custom = Some(HoleThreadDraft::new(designation));
     }
     form_row(ui, "Size", |ui| {
         let mut selected = if custom.is_some() { sizes.len() } else { catalogue.unwrap_or(sizes.len()) };
         let before = selected;
-        let mut labels: Vec<String> = sizes.iter().map(|(d, p)| self::designation(*d, *p)).collect();
-        labels.push("Custom".to_string());
+        let mut labels: Vec<String> = sizes.iter().map(|s| s.designation.clone()).collect();
+        if family == TappedThreadFamily::Metric {
+            labels.push("Custom".to_string());
+        }
         let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-        combo(ui, "hole_thread_catalogue", &labels, &mut selected);
+        let catalogue_id = match family {
+            TappedThreadFamily::Metric => "hole_thread_catalogue_metric",
+            TappedThreadFamily::Unc => "hole_thread_catalogue_unc",
+            TappedThreadFamily::Unf => "hole_thread_catalogue_unf",
+            TappedThreadFamily::G => "hole_thread_catalogue_g",
+            TappedThreadFamily::Rp => "hole_thread_catalogue_rp",
+        };
+        combo(ui, catalogue_id, &labels, &mut selected);
         if selected != before {
-            if let Some((d, p)) = sizes.get(selected) {
-                *designation = self::designation(*d, *p);
+            if let Some(size) = sizes.get(selected) {
+                *designation = size.designation.clone();
                 *custom = None;
             } else {
                 *custom = Some(HoleThreadDraft::new(designation));
             }
         }
     });
-
+    if matches!(family, TappedThreadFamily::G | TappedThreadFamily::Rp) {
+        form_row(ui, "Thread diameter", |ui| {
+            if let Some(size) = parse_tapped_thread(designation) {
+                ui.label(format!("{:.3} mm, 55°", size.major_diameter));
+            }
+        });
+        form_row(ui, "Pitch", |ui| {
+            if let Some(size) = parse_tapped_thread(designation) {
+                ui.label(format!("{:.4} mm ({} TPI)", size.pitch, (25.4 / size.pitch).round()));
+            }
+        });
+    }
     let mut enter = false;
     if let Some(draft) = custom {
         let (diameter_enter, diameter_changed) = text_row(ui, "Nominal diameter", &mut draft.diameter, "");
@@ -96,15 +129,14 @@ pub(crate) fn hole_rows(ui: &mut egui::Ui, doc: &Document, designation: &mut Str
         }
         enter |= diameter_enter || pitch_enter;
     }
-
-    let response = form_row(ui, "Designation", |ui| crate::ui_kit::cell_editor(ui, designation_id, designation, "M5 or M5x0.5", false));
+    let response = form_row(ui, "Designation", |ui| crate::ui_kit::cell_editor(ui, designation_id, designation, "M5, M5x0.5, 1/4-20 UNC", false));
     if response.changed() && custom.is_some() {
         *custom = Some(HoleThreadDraft::new(designation));
     }
     form_row(ui, "Tap drill diameter", |ui| {
-        match parse_metric_thread(designation).filter(|_| custom.as_ref().is_none_or(|draft| draft.error.is_none())) {
-            Some((d, p)) => {
-                ui.label(format!("{:.3} mm", d - p));
+        match parse_tapped_thread(designation).filter(|_| custom.as_ref().is_none_or(|draft| draft.error.is_none())) {
+            Some(size) => {
+                ui.label(format!("{} mm", size.tap_drill));
             }
             None => {
                 ui.label(tr("thread.select_size"));
@@ -382,7 +414,7 @@ mod contribution_tests {
             assert_eq!(parse_metric_thread(&format!("M{d}x{p}")), Some((*d, *p)));
         }
         let ctx = egui::Context::default();
-        for original in ["M5", "M5x0.5", "M33x1", "invalid"] {
+        for original in ["M5", "M5x0.5", "M33x1", "1/4-20 UNC", "#10-32 UNF", "invalid"] {
             let mut designation = original.to_string();
             let mut custom = None;
             let doc = Document::default();
@@ -393,6 +425,121 @@ mod contribution_tests {
             });
             assert_eq!(designation, original);
         }
+    }
+
+    #[test]
+    fn expanded_catalogue_profiles_select_unified_sizes_and_keep_metric_custom_mode() {
+        let mut h = custom_hole_widget();
+        h.step(&json!({"click":{"handle":"dialog:Profile"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Profile:UNC"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Size"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Size:1/4-20 UNC"}})).unwrap();
+        h.frames(3);
+        assert_eq!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1["thread"], "1/4-20 UNC");
+        assert!(crate::scenario::handle_at("dialog:Nominal diameter").is_none());
+        assert!(h.widget("5.1054 mm").is_some());
+        h.step(&json!({"click":{"handle":"dialog:Profile"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Profile:UNF"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Size"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Size:#10-32 UNF"}})).unwrap();
+        h.frames(3);
+        assert_eq!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1["thread"], "#10-32 UNF");
+        h.step(&json!({"click":{"handle":"dialog:Profile"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Profile:ISO metric"}})).unwrap();
+        if let Some(Dialog { kind: Kind::Hole { opts, .. }, .. }) = h.app.dialog.as_mut() {
+            opts.thread = "M8x1".into();
+        }
+        h.frames(3);
+        assert!(h.widget("M8x1").is_some());
+        assert!(crate::scenario::handle_at("dialog:Nominal diameter").is_none());
+        // Choosing Custom is persistent even at a now-catalogued fine pitch.
+        if let Some(Dialog { kind: Kind::Hole { opts, .. }, .. }) = h.app.dialog.as_mut() {
+            opts.custom_thread = Some(HoleThreadDraft::new(&opts.thread));
+        }
+        h.frames(3);
+        assert!(h.widget("Custom").is_some());
+        assert!(crate::scenario::handle_at("dialog:Nominal diameter").is_some());
+    }
+
+    #[test]
+    fn expanded_catalogue_drills_real_cylinders_and_reopens_without_resizing() {
+        for (name, major, pitch, drill) in [
+            ("1/4-20 UNC", 6.35, 1.27, 5.1054),
+            ("#10-32 UNF", 4.826, 25.4 / 32.0, 4.0386),
+            ("M8", 8.0, 1.25, 6.75),
+            ("M8x1", 8.0, 1.0, 7.0),
+            ("M8.5x1", 8.5, 1.0, 7.5),
+        ] {
+            let (mut app, _) = hole();
+            let out = app.run("solid.hole", json!({"position":[10,10,10], "thread":name})).unwrap();
+            let id = out["feature"].as_u64().unwrap();
+            let saved = app.session.doc.to_json();
+            let reopened = Session::new(Document::from_json(&saved).unwrap());
+            let world = reopened.world_state();
+            let t = &world.threads[0];
+            assert_eq!(t.designation, name);
+            assert!((t.major_diameter - major).abs() < 1e-9 && (t.pitch - pitch).abs() < 1e-9);
+            let body = &world.bodies[0].body;
+            assert!(body.validity().is_empty());
+            let face = solidcraft_engine::kernel::cylinder_face_at(body, Vec3::new(10.0 + drill / 2.0, 10.0, 5.0)).unwrap();
+            assert!(face.internal && (2.0 * face.radius - drill).abs() < 1e-8);
+            let actual = body.tessellate(0.001).unwrap().measure().volume;
+            let expected = 4000.0 - std::f64::consts::PI * (drill / 2.0).powi(2) * 10.0;
+            assert!((actual - expected).abs() < 0.5, "{name}: {actual} versus {expected}");
+            // A saved explicit drill remains authoritative, including a legacy metric bore.
+            let mut doc = Document::from_json(&saved).unwrap();
+            let solidcraft_engine::doc::FeatureKind::Hole { diameter, .. } = &mut doc.feature_mut(id).unwrap().kind else { panic!("not Hole") };
+            *diameter = format!("{} mm", drill + 0.05).as_str().into();
+            let reopened = Session::new(Document::from_json(&doc.to_json()).unwrap());
+            let world = reopened.world_state();
+            let face = solidcraft_engine::kernel::cylinder_face_at(&world.bodies[0].body, Vec3::new(10.0 + (drill + 0.05) / 2.0, 10.0, 5.0)).unwrap();
+            assert!((2.0 * face.radius - drill - 0.05).abs() < 1e-8);
+        }
+    }
+
+    #[test]
+    fn expanded_catalogue_rejects_tapered_holes_and_nonmetric_thread_features() {
+        let (mut app, _) = hole();
+        let before = app.session.doc.to_json();
+        for name in ["1/4-18 NPT", "Rc1/4", "R1/4", "1/4-20 UNF"] {
+            assert!(app.run("solid.hole", json!({"position":[10,10,10],"thread":name})).is_err());
+            assert_eq!(app.session.doc.to_json(), before);
+        }
+        app.run("solid.hole", json!({"position":[10,10,10],"thread":"M8"})).unwrap();
+        let before = app.session.doc.to_json();
+        for designation in ["1/4-20 UNC", "G 1/4", "Rp 1/4"] {
+            for modeled in [false, true] {
+                assert!(app.run("solid.thread", json!({"face":[13.375,10,5],"designation":designation,"modeled":modeled})).is_err());
+                assert_eq!(app.session.doc.to_json(), before);
+            }
+        }
+        assert_eq!(app.session.doc.to_json(), before);
+        let out = app.run("solid.thread", json!({"face":[13.375,10,5],"designation":"M8"})).unwrap();
+        let solidcraft_engine::doc::FeatureKind::Thread { designation, modeled, .. } =
+            &mut app.session.doc_mut().feature_mut(out["feature"].as_u64().unwrap()).unwrap().kind
+        else {
+            panic!("not Thread")
+        };
+        *designation = Some("1/4-20 UNC".into());
+        *modeled = true;
+        let reopened = Session::new(Document::from_json(&app.session.doc.to_json()).unwrap());
+        assert!(reopened.model.results.last().unwrap().error.as_ref().unwrap().contains("ISO metric"));
+    }
+
+    #[test]
+    fn expanded_catalogue_public_plate_evidence_uses_only_headless_model_rendering() {
+        let Some(dir) = std::env::var_os("SOLIDCRAFT_CATALOGUE_EVIDENCE") else { return };
+        crate::gpu::install_cpu_picture_renderer();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":50,"width":25,"height":6,"body_name":"ThreadPlate"})).unwrap();
+        for (x, name) in [(10, "M8x1"), (25, "1/4-20 UNC"), (40, "#10-32 UNF")] {
+            h.app.run("solid.hole", json!({"position":[x,12.5,6],"thread":name})).unwrap();
+        }
+        h.call("ui.view", json!({"view":"iso"}));
+        let path = std::path::Path::new(&dir).join("catalogue-plate.png");
+        let out = h.call("ui.render", json!({"path":path,"width":1000,"height":700,"grid":false,"axes":false}));
+        assert_eq!(out["ok"], true, "{out}");
+        std::fs::write(std::path::Path::new(&dir).join("catalogue-plate.solidcraft"), h.app.session.doc.to_json()).unwrap();
     }
 
     #[test]
@@ -456,6 +603,73 @@ mod contribution_tests {
             let state = reopened.world_state();
             assert_eq!(state.threads.len(), 1);
             assert!((state.threads[0].pitch - pitch).abs() < 1e-9);
+        }
+    }
+    #[test]
+    fn parallel_pipe_profiles_switch_and_cancel_without_changing_the_document() {
+        let mut h = custom_hole_widget();
+        let before = h.app.session.doc.to_json();
+        for (profile, name, drill) in [("G / BSPP", "G 1/4", "11.75 mm"), ("Rp", "Rp 1/4", "11.4 mm")] {
+            h.step(&json!({"click":{"handle":"dialog:Profile"}})).unwrap();
+            h.step(&json!({"click":{"handle":format!("dialog:Profile:{profile}")}})).unwrap();
+            h.step(&json!({"click":{"handle":"dialog:Size"}})).unwrap();
+            h.step(&json!({"click":{"handle":format!("dialog:Size:{name}")}})).unwrap();
+            h.frames(3);
+            let command = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+            assert_eq!(command[0].1["thread"], name);
+            assert!(command[0].1.get("diameter").is_none());
+            assert!(h.widget(drill).is_some());
+            assert!(crate::scenario::handle_at("dialog:Nominal diameter").is_none());
+        }
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(h.app.session.doc.to_json(), before);
+    }
+
+    #[test]
+    fn parallel_pipe_holes_have_the_tabulated_cylinders_depth_and_saved_designations() {
+        use solidcraft_engine::doc::{TappedThreadFamily, tapped_thread_sizes};
+        for family in [TappedThreadFamily::G, TappedThreadFamily::Rp] {
+            for size in tapped_thread_sizes(family) {
+                let mut app = SolveApp::new(Session::default(), Services::default());
+                app.run("solid.box", json!({"length":80,"width":80,"height":15,"body_name":"Plate"})).unwrap();
+                let result = app.run("solid.hole", json!({"position":[40,40,15],"thread":size.designation,"depth":10})).unwrap();
+                let saved = app.session.doc.to_json();
+                let reopened = Session::new(Document::from_json(&saved).unwrap());
+                let state = reopened.world_state();
+                assert_eq!(state.threads.len(), 1);
+                let t = &state.threads[0];
+                assert_eq!(t.designation, size.designation);
+                assert!((t.major_diameter - size.major_diameter).abs() < 1e-9 && (t.pitch - size.pitch).abs() < 1e-9);
+                assert!((t.end - t.start - 10.0).abs() < 1e-6);
+                let body = &state.bodies[0].body;
+                assert!(body.validity().is_empty());
+                for z in [6.0, 10.0, 14.0] {
+                    let c = solidcraft_engine::kernel::cylinder_face_at(body, Vec3::new(40.0 + size.tap_drill / 2.0, 40.0, z)).unwrap();
+                    assert!(c.internal && (2.0 * c.radius - size.tap_drill).abs() < 1e-8);
+                }
+                let actual = body.tessellate(0.001).unwrap().measure().volume;
+                let removed = std::f64::consts::PI * (size.tap_drill / 2.0).powi(2) * 10.0;
+                assert!((actual - (96000.0 - removed)).abs() / removed < 0.002, "{}: {actual}", size.designation);
+                assert_eq!(reopened.doc.to_json(), saved);
+                if size.designation.ends_with(" 1/4") {
+                    let mut doc = Document::from_json(&saved).unwrap();
+                    let solidcraft_engine::doc::FeatureKind::Hole { diameter, .. } =
+                        &mut doc.feature_mut(result["feature"].as_u64().unwrap()).unwrap().kind
+                    else {
+                        panic!("not Hole")
+                    };
+                    *diameter = format!("{} mm", size.tap_drill + 0.03).as_str().into();
+                    let reopened = Session::new(Document::from_json(&doc.to_json()).unwrap());
+                    let state = reopened.world_state();
+                    let c = solidcraft_engine::kernel::cylinder_face_at(
+                        &state.bodies[0].body,
+                        Vec3::new(40.0 + (size.tap_drill + 0.03) / 2.0, 40.0, 10.0),
+                    )
+                    .unwrap();
+                    assert!((2.0 * c.radius - size.tap_drill - 0.03).abs() < 1e-8);
+                }
+            }
         }
     }
 }

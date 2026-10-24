@@ -228,6 +228,44 @@ fn a_scene_in_one_dispatch_matches_each_body_on_the_cpu() {
     }
 }
 
+fn check_empty_tessellation(gpu: &TessGpu, plan: &TessPlan) {
+    let scope = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let evaluated = ok(gpu.evaluate(plan));
+    assert!(evaluated.positions.is_empty());
+    assert!(evaluated.normals.is_empty());
+    assert!(evaluated.triangles.is_empty());
+
+    let mesh = ok(gpu.prepare(plan));
+    assert_eq!(mesh.vertex_count, 0);
+    assert_eq!(mesh.index_count, 0);
+    assert!(mesh._inputs[1].size() >= std::mem::size_of::<[u32; SURFACE_WORDS]>() as u64);
+    assert!(mesh._inputs[2].size() >= std::mem::size_of::<f32>() as u64);
+    assert!(mesh._inputs[3].size() >= std::mem::size_of::<[u32; VERTEX_WORDS]>() as u64);
+    let mut encoder = gpu.device.create_command_encoder(&Default::default());
+    gpu.record(&mut encoder, &mesh);
+    gpu.queue.submit([encoder.finish()]);
+    ok(gpu.device.poll(wgpu::PollType::wait_indefinitely()));
+    let error = pollster::block_on(scope.pop());
+    assert!(error.is_none(), "{error:?}");
+}
+
+#[test]
+fn tessellation_without_vertices_does_not_dispatch() {
+    let Some(gpu) = gpu() else { return };
+    let plan = TessPlan {
+        surfaces: vec![EvalSurface::Plane { origin: Vec3::ZERO, du: Vec3::X, dv: Vec3::Y }],
+        faces: vec![solidcraft_geom::tess::FacePlan { surface: Some(0), ..Default::default() }],
+        ..Default::default()
+    };
+    check_empty_tessellation(&gpu, &plan);
+}
+
+#[test]
+fn tessellation_without_surfaces_does_not_dispatch() {
+    let Some(gpu) = gpu() else { return };
+    check_empty_tessellation(&gpu, &TessPlan::default());
+}
+
 /// Display meshing of a 400-hole plate (#303's benchmark): reference mesher, plan, CPU and GPU
 /// evaluation. `cargo test --release -p solidcraft-gpu bench_plate -- --ignored --nocapture`.
 #[test]

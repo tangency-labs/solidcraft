@@ -3,6 +3,59 @@ use crate::scenario::{Harness, handle_at, rect_of};
 use crate::shell::{LayoutMode, SHELL_GAP};
 
 #[test]
+fn browser_body_clicks_fill_and_toggle_save_mesh_inputs() {
+    for mode in [LayoutMode::Floating, LayoutMode::Docked] {
+        let mut h = Harness::new();
+        h.app.ui.layout = mode;
+        for (name, x) in [("One", 0), ("Two", 20)] {
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
+        }
+        h.app.start("file.save_mesh");
+        h.settle();
+        for (clicked, expected) in [("One", vec!["One"]), ("Two", vec!["One", "Two"]), ("One", vec!["Two"])] {
+            h.step(&json!({"click":{"handle":format!("row:{clicked}")}})).unwrap();
+            let d = h.app.dialog.as_ref().unwrap();
+            let crate::dialogs::Kind::SaveMesh(k) = &d.kind else { panic!("Save as Mesh is open") };
+            let commands = crate::dialogs_save_mesh::commands(k, &d.inputs).unwrap();
+            assert_eq!(commands[0].1["bodies"], json!(expected), "{mode:?}: clicked {clicked}");
+            assert!(crate::dialogs_save_mesh::ready(&d.inputs));
+            assert!(h.app.session.selection.is_empty(), "dialog picks do not change the global selection");
+        }
+        h.step(&json!({"click":{"handle":"row:Two"}})).unwrap();
+        assert!(!crate::dialogs_save_mesh::ready(&h.app.dialog.as_ref().unwrap().inputs));
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
+        assert_eq!(h.app.session.selection, vec![Sel::Body { name: "One".into() }]);
+    }
+}
+
+#[test]
+fn browser_body_clicks_respect_the_active_dialog_input() {
+    let mut h = Harness::new();
+    for (name, x) in [("One", 0), ("Two", 20)] {
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
+    }
+    h.app.start("solid.combine");
+    h.app.dialog.as_mut().unwrap().preview_enabled = false;
+    h.settle();
+    h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "a target pick advances to Tool Bodies");
+    h.step(&json!({"click":{"handle":"row:Two"}})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "One".into() }]);
+    assert_eq!(d.inputs[1].items, vec![Sel::Body { name: "Two".into() }]);
+    h.call("ui.dialogInput", json!({"index":0}));
+    h.step(&json!({"click":{"handle":"row:Two"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Body { name: "Two".into() }], "a single input replaces its pick");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.app.start("solid.fillet");
+    h.settle();
+    h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
+    assert!(h.app.dialog.as_ref().unwrap().inputs.iter().all(|i| i.items.is_empty()), "a body is not an edge");
+    assert!(h.app.session.selection.is_empty(), "an incompatible pick does not leak into the global selection");
+}
+
+#[test]
 fn browser_card_shrinks_and_scrolls_without_covering_history() {
     let mut h = Harness::new();
     h.call("ui.resize", json!({"width":1400,"height":900}));
@@ -96,6 +149,74 @@ fn card_and_column_keep_body_eyes_menus_and_group_drops() {
         h.settle();
         let group = h.app.session.doc.browser_groups.iter().find(|g| g.id == group).unwrap();
         assert!(group.items.iter().any(|name| name == "Two"), "body drop into the folder failed in {mode:?}");
+    }
+}
+
+/// A second click on a Document Settings entry closes the window it opened, the way that
+/// window's own × does, and a third opens it again (#4150): the Units menu, Preferences (a change
+/// made there is put back), Parameters (a value typed but not applied is dropped) and Design
+/// Properties (nothing typed there is saved).
+#[test]
+fn a_second_click_on_a_document_settings_entry_closes_its_window() {
+    for mode in [LayoutMode::Floating, LayoutMode::Docked] {
+        let mut h = Harness::new();
+        h.app.ui.layout = mode;
+        h.app.run("parameters.add", json!({"name":"width","expression":"10 mm"})).unwrap();
+        h.settle();
+        h.step(&json!({"click":{"chevron":"Document Settings"}})).unwrap();
+        h.settle();
+        // The Units, Precision and Parameters labels carry their values.
+        let row = |start: &str| {
+            let (_, rect, _, _) = drawn_rows().into_iter().find(|(label, ..)| label.starts_with(start)).unwrap();
+            json!({"click":[rect.center().x, rect.center().y]})
+        };
+
+        h.step(&row("Units")).unwrap();
+        assert!(h.app.viewport.context_menu.is_some() && h.app.menu.target == Target::Units, "{mode:?}: the first click opens the Units menu");
+        h.step(&row("Units")).unwrap();
+        h.frames(2);
+        assert!(h.app.viewport.context_menu.is_none(), "{mode:?}: the second click closes it instead of reopening it");
+        h.step(&row("Units")).unwrap();
+        assert!(h.app.viewport.context_menu.is_some(), "{mode:?}: and a third opens it again");
+        h.step(&json!({"key":"Escape"})).unwrap();
+
+        h.step(&row("Precision")).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.open, "{mode:?}: the first click opens Preferences");
+        let decimals = h.app.preferences.angle_decimals;
+        h.app.preferences.angle_decimals = decimals + 2;
+        h.step(&row("Precision")).unwrap();
+        h.frames(2);
+        assert!(!h.app.prefs_window.open, "{mode:?}: the second click closes it");
+        assert_eq!(h.app.preferences.angle_decimals, decimals, "{mode:?}: and puts back what changed there, as × does");
+        h.step(&row("Precision")).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.open, "{mode:?}: a third opens it again");
+        h.step(&json!({"key":"Escape"})).unwrap();
+
+        h.step(&row("Parameters")).unwrap();
+        h.frames(2);
+        assert!(h.app.params.is_some(), "{mode:?}: the first click opens Parameters");
+        h.step(&json!({"click":{"handle":"param:width"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"text":"25 mm"})).unwrap();
+        h.step(&row("Parameters")).unwrap();
+        h.frames(2);
+        assert!(h.app.params.is_none(), "{mode:?}: the second click closes it");
+        assert_eq!(h.app.session.doc.param("width").unwrap().expr, "10 mm", "{mode:?}: and drops a value typed but not applied");
+        h.step(&row("Parameters")).unwrap();
+        assert!(h.app.params.is_some(), "{mode:?}: a third opens it again");
+        h.app.params = None;
+
+        h.step(&row("Design Properties")).unwrap();
+        assert!(h.app.design_properties.is_some(), "{mode:?}: the first click opens Design Properties");
+        h.app.design_properties.as_mut().unwrap().fields[0] = "Typed".into();
+        h.frames(2);
+        h.step(&row("Design Properties")).unwrap();
+        assert!(h.app.design_properties.is_none(), "{mode:?}: the second click closes it");
+        assert_eq!(h.app.session.doc.metadata.project(), None, "{mode:?}: and saves nothing typed there");
+        h.step(&row("Design Properties")).unwrap();
+        assert!(h.app.design_properties.is_some(), "{mode:?}: a third opens it again");
     }
 }
 

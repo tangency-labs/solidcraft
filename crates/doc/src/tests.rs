@@ -251,6 +251,45 @@ fn params_and_serialization() {
     assert!(doc.param("d1").is_none(), "unused model parameters are pruned");
 }
 
+/// #4783: a body reads the material its mass is computed with, as the library or the design
+/// spells it. An unknown name, or a design material with an unusable density, reads as the
+/// default material it weighs. `density` agrees in every case, and a configuration keeps the
+/// assignment as stored.
+#[test]
+fn a_body_reads_the_material_its_mass_is_computed_with() {
+    let mut doc = Document::new("materials");
+    let usable = [("Walnut", 0.65), ("Mote", f64::MIN_POSITIVE), ("Limit", MAX_DENSITY)];
+    let unusable = [("Broken", -3.0), ("Weightless", 0.0), ("Beyond", MAX_DENSITY.next_up())];
+    for (name, density) in usable.into_iter().chain(unusable) {
+        doc.user_materials.push(UserMaterial { name: name.into(), density, appearance: None });
+    }
+    // (body, its assignment as stored, the material it reads and weighs, that material's density)
+    let cases = [
+        ("Known", Some("Steel"), "Steel", 7.85),
+        ("Miscased", Some("steel"), "Steel", 7.85),
+        ("Own", Some(" walnut "), "Walnut", 0.65),
+        ("Lightest", Some("Mote"), "Mote", f64::MIN_POSITIVE),
+        ("At the limit", Some("Limit"), "Limit", MAX_DENSITY),
+        ("Unknown", Some("Unobtainium"), DEFAULT_MATERIAL, DEFAULT_DENSITY),
+        ("Unusable", Some("Broken"), DEFAULT_MATERIAL, DEFAULT_DENSITY),
+        ("Zero density", Some("Weightless"), DEFAULT_MATERIAL, DEFAULT_DENSITY),
+        ("Over the limit", Some("Beyond"), DEFAULT_MATERIAL, DEFAULT_DENSITY),
+        ("Unassigned", None, DEFAULT_MATERIAL, DEFAULT_DENSITY),
+    ];
+    for (body, stored, ..) in cases {
+        if let Some(material) = stored {
+            doc.materials.insert(body.into(), material.into());
+        }
+    }
+    for (body, stored, material, density) in cases {
+        assert_eq!(doc.body_material(body), material, "{body}");
+        assert_eq!(doc.density(body), density, "{body}");
+        assert_eq!(doc.material_density(material), Some(density), "{body}: the density is its material's");
+        let cell = doc.config_current(&crate::config::Column::Material(body.into()));
+        assert_eq!(cell.as_deref(), Some(stored.unwrap_or(DEFAULT_MATERIAL)), "{body}: a configuration keeps the assignment as stored");
+    }
+}
+
 #[test]
 fn primitives_and_combine() {
     let mut doc = Document::new("p");

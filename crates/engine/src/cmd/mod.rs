@@ -44,6 +44,7 @@ pub use view_dxf::sketch::exportable as view_dxf_exportable;
 mod component_link;
 mod config;
 mod file;
+mod frame;
 mod inspect;
 mod interference;
 pub(crate) mod joints;
@@ -277,6 +278,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(construct::COMMANDS.iter());
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());
+    v.extend(frame::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());

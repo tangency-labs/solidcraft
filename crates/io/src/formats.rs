@@ -45,7 +45,8 @@ pub struct ImportSpec {
     /// Options offered at import time; each `param` is a parameter of `doc.open` and of the
     /// matching `file.insert_*` command.
     pub options: &'static [OptionSpec],
-    /// Read through cadmpeg, which is not built for wasm (see `crate::native_cad`).
+    /// Read through cadmpeg (FreeCAD `.FCStd`, Rhino `.3dm`). Every current host builds it;
+    /// `native = false` leaves these rows out for a host that cannot.
     pub native_only: bool,
 }
 
@@ -452,9 +453,13 @@ mod tests {
         assert!(for_path("nodot").is_none());
     }
 
+    /// cadmpeg is pure Rust now, so the browser build offers its rows too; `native = false`
+    /// stays for a host that cannot build it.
     #[test]
-    fn wasm_filtering_hides_the_cadmpeg_rows() {
+    fn a_host_without_cadmpeg_leaves_its_rows_out() {
         assert!(importable(true).any(|f| f.id == "fcstd"));
+        assert!(open_extensions(true).contains(&"fcstd"));
+        assert!(open_extensions(true).contains(&"3dm"));
         assert!(importable(false).all(|f| f.id != "fcstd" && f.id != "3dm"));
         assert!(!open_extensions(false).contains(&"fcstd"));
         assert!(open_extensions(false).contains(&"igs"));

@@ -12,7 +12,7 @@ pub static COMMANDS: &[CommandSpec] =
     &[CommandSpec::new("inspect.section", "Section Analysis", section).at("SOLID", "INSPECT").icon("section").noundo().params(
         "plane: XY|XZ|YZ | construction plane name or id | {origin, normal}; offset?: expr along the plane's normal (XY: +Z, XZ: +Y, YZ: +X); \
          at?: expr, the cut's world coordinate on the named plane's axis (XY: Z, XZ: Y, YZ: X), instead of offset; \
-         flip?: bool; or clear: true. Returns the cut's origin and normal, and for a named plane its axis and at",
+         flip?: bool; hatch?: bool (hatch the cut faces, in each body's colour; default true); or clear: true. Returns the cut's origin and normal, and for a named plane its axis and at",
     )];
 
 fn section(s: &mut Session, p: &Value) -> Result<Value> {
@@ -72,8 +72,9 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     let normal = if bool_(p, "flip").unwrap_or(false) { -normal } else { normal };
     let origin = origin + normal * offset * if bool_(p, "flip").unwrap_or(false) { -1.0 } else { 1.0 };
     s.section = Some((origin, normal));
+    s.section_hatch = bool_(p, "hatch").unwrap_or(true);
     s.revision += 1;
-    let mut section = json!({"origin": origin, "normal": normal});
+    let mut section = json!({"origin": origin, "normal": normal, "hatch": s.section_hatch});
     if let Some(i) = axis {
         section["axis"] = json!(["X", "Y", "Z"].get(i).copied().unwrap_or("?"));
         section["at"] = json!(axis_component(origin, i));

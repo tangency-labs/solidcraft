@@ -2,6 +2,7 @@
 //! suppressions) and switching between its rows.
 
 use serde_json::{Value, json};
+use solidcraft_doc::DEFAULT_MATERIAL;
 use solidcraft_doc::config::{Column, ConfigRow, MAX_COLUMNS, MAX_ROWS};
 
 use super::CommandSpec;
@@ -265,7 +266,7 @@ fn row(s: &mut Session, p: &Value) -> Result<Value> {
                 .ok_or_else(|| bad(cmd, format!("`{k}` is not a column (config.column adds one)")))?;
             match s.doc.configs.columns.get(col) {
                 Some(Column::Material(_)) => {
-                    text = s.doc.material_cell(&text).map_err(|e| bad(cmd, e.to_string()))?.unwrap_or_else(|| "Default".into());
+                    text = s.doc.material_cell(&text).map_err(|e| bad(cmd, e.to_string()))?.unwrap_or_else(|| DEFAULT_MATERIAL.into());
                 }
                 Some(Column::Appearance(_) | Column::ComponentAppearance(_) | Column::FaceAppearance(_)) => {
                     text = match solidcraft_doc::config::appearance_cell(&text).map_err(|e| bad(cmd, e.to_string()))? {

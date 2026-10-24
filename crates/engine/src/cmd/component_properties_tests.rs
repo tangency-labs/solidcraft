@@ -8,7 +8,7 @@ fn close(actual: &Value, expected: f64) {
     assert!((actual.as_f64().unwrap() - expected).abs() < 1e-6, "{actual} != {expected}");
 }
 fn box_in(s: &mut Session, name: &str) -> (u64, u64, String) {
-    let c = run(s, "component.create", json!({"name": name}));
+    let c = run(s, "component.create", json!({"name": name, "grounded": false}));
     run(s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     let body = s.model.state().bodies.last().unwrap().name.clone();
     (c["component"].as_u64().unwrap(), c["occurrence"].as_u64().unwrap(), body)
@@ -81,7 +81,7 @@ fn body_reassignment_offsets_preserve_world_properties() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     let body = s.model.state().bodies.first().unwrap().name.clone();
-    let c = run(&mut s, "component.create", json!({"name": "Moved"}));
+    let c = run(&mut s, "component.create", json!({"name": "Moved", "grounded": false}));
     run(&mut s, "occurrence.move", json!({"occurrence": c["occurrence"], "translate": [100, 0, 0]}));
     run(&mut s, "component.move_bodies", json!({"bodies": [body], "component": c["component"]}));
     let r = run(&mut s, "component.properties", json!({"component": c["component"]}));
@@ -256,7 +256,8 @@ fn user_defined_material_survives_save_and_reopen() {
 
 /// #532: designs from before user materials open unchanged: built-in assignments keep their
 /// densities and a design without its own materials saves no `user_materials`. A damaged
-/// file's unusable density falls back to the default instead of producing nonsense masses.
+/// file's unusable density falls back to the default instead of producing nonsense masses, and
+/// the body reads as the default material.
 #[test]
 fn designs_without_user_materials_open_unchanged() {
     let (dir, path) = temp_design("legacy");
@@ -278,7 +279,17 @@ fn designs_without_user_materials_open_unchanged() {
     std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
     run(&mut s, "doc.open", json!({"path": path}));
     close(&mass(&mut s), solidcraft_doc::DEFAULT_DENSITY);
+    // #4783: it reads as the material it weighs; the file's assignment is kept as it is.
+    let props = run(&mut s, "component.properties", json!({"component": "root"}));
+    assert_eq!(props["bodies"][0]["material"], "Default", "{props}");
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(measured["bodies"][0]["material"], "Default", "{measured}");
+    close(&measured["bodies"][0]["density_g_cm3"], solidcraft_doc::DEFAULT_DENSITY);
+    assert_eq!(s.doc.materials.get("Plate").map(String::as_str), Some("Broken"));
     assert_eq!(s.doc.material_look("Broken").map(|l| l.opacity), Some(1.0));
+    // Assigning the default material, in any case, clears the damaged assignment.
+    run(&mut s, "material.assign", json!({"bodies": ["Plate"], "material": "default"}));
+    assert!(!s.doc.materials.contains_key("Plate"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -292,6 +303,10 @@ fn configurations_switch_to_a_user_defined_material() {
     run(&mut s, "config.row", json!({"name": "Walnut", "values": {"material:Slat": "walnut"}}));
     run(&mut s, "config.activate", json!({"row": "Walnut"}));
     close(&mass(&mut s), 0.65);
+    // A row of the default material, in any case, clears the assignment.
+    run(&mut s, "config.row", json!({"name": "Plain", "values": {"material:Slat": "default"}}));
+    run(&mut s, "config.activate", json!({"row": "Plain"}));
+    assert!(!s.doc.materials.contains_key("Slat"));
     run(&mut s, "material.edit", json!({"material": "Walnut", "name": "Black Walnut"}));
     run(&mut s, "config.activate", json!({"row": "Default"}));
     run(&mut s, "config.activate", json!({"row": "Walnut"}));

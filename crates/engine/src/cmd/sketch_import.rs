@@ -239,4 +239,18 @@ mod tests {
             s.execute("sketch.finish", &json!({})).unwrap();
         }
     }
+
+    /// A degree-9 SPLINE (solidcraft#5269) with fewer control points than its degree needs still
+    /// comes in as one spline over all its points, which the sketch draws at the degree they allow.
+    #[test]
+    fn a_degree_nine_spline_with_few_control_points_comes_in_whole() {
+        let mut s = Session::default();
+        for n in 2..=10 {
+            let points: String = (0..n).map(|i| format!("10\n{i}\n20\n{}\n", i % 2)).collect();
+            let dxf = format!("0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n9\n{points}0\nENDSEC\n0\nEOF\n");
+            let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
+            assert_eq!(r["curves"], 1, "{n} points: {r}");
+            s.execute("sketch.finish", &json!({})).unwrap();
+        }
+    }
 }

@@ -86,10 +86,11 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
         .collect();
     // Mass from each body's material.
     for (b, body) in bodies.iter_mut().zip(selected) {
+        let source = body.definition_name();
+        // Every body's material, measured or not: naming it takes no measuring.
+        b["material"] = json!(s.doc.body_material(source));
         if let Some(v) = b["volume_mm3"].as_f64() {
-            let source = body.definition_name();
             let rho = s.doc.density(source);
-            b["material"] = json!(s.doc.materials.get(source).cloned().unwrap_or_else(|| "Default".into()));
             b["density_g_cm3"] = json!(rho);
             b["mass_g"] = json!(v * rho / 1000.0);
         }
@@ -362,7 +363,7 @@ fn physical_material(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`bodies` must list existing bodies"));
     }
     for b in &bodies {
-        if canonical == "Default" {
+        if canonical == solidcraft_doc::DEFAULT_MATERIAL {
             s.doc_mut().materials.remove(b);
         } else {
             s.doc_mut().materials.insert(b.clone(), canonical.clone());

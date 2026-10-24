@@ -2,6 +2,7 @@
 use super::{cell_value, column_parts, configuration_rules_ui, table, unit_of};
 use crate::{SolveApp, ui_kit};
 use serde_json::{Value, json};
+use solidcraft_engine::doc::DEFAULT_MATERIAL;
 /// The Configurations table, its rules and errors.
 pub(super) fn configurations_rows(
     app: &mut SolveApp,
@@ -399,10 +400,12 @@ fn column_menu(app: &mut SolveApp, ui: &mut egui::Ui, error: &mut Option<String>
 }
 
 fn display_cell(kind: &str, value: &str) -> String {
-    if (kind == "material" || matches!(kind, "appearance" | "component_appearance" | "face_appearance")) && value.eq_ignore_ascii_case("Default") {
+    let appearance = matches!(kind, "appearance" | "component_appearance" | "face_appearance");
+    // Empty cells: the default material, and an appearance's own "Default" keyword (it follows).
+    if (kind == "material" && value.eq_ignore_ascii_case(DEFAULT_MATERIAL)) || (appearance && value.eq_ignore_ascii_case("Default")) {
         return String::new();
     }
-    if matches!(kind, "appearance" | "component_appearance" | "face_appearance") {
+    if appearance {
         solidcraft_engine::doc::config::appearance_cell(value)
             .ok()
             .flatten()
@@ -427,11 +430,13 @@ fn value_control(ui: &mut egui::Ui, id: egui::Id, text: &mut String, kind: &str,
         };
         ui_kit::library_cell(ui, id, text, follow, |ui| {
             if ui_kit::button(ui, crate::i18n::tr_label(follow), ui_kit::Button::Normal).clicked() {
-                choice = Some("Default".to_owned());
+                // An appearance's "Default" keyword follows; a material's is the default material.
+                let follow_value = if appearance { "Default" } else { DEFAULT_MATERIAL };
+                choice = Some(follow_value.to_owned());
                 ui.close();
             }
             let choices: Vec<_> = if kind == "material" {
-                material_names.iter().filter(|n| *n != "Default").map(String::as_str).collect()
+                material_names.iter().filter(|n| *n != DEFAULT_MATERIAL).map(String::as_str).collect()
             } else {
                 solidcraft_engine::doc::appearance::LIBRARY.iter().map(|(name, _, _)| *name).collect()
             };

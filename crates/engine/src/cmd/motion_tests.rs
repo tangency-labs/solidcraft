@@ -62,7 +62,7 @@ enum JoinSelection {
 fn joined_motion_part(authoring: PartAuthoring, selection: JoinSelection) -> Session {
     let mut s = Session::default();
     if matches!(authoring, PartAuthoring::InComponent) {
-        run(&mut s, "component.create", json!({"name":"Rotor"}));
+        run(&mut s, "component.create", json!({"name":"Rotor","grounded":false}));
     }
     run(&mut s, "solid.box", json!({"length":10,"width":8,"height":6,"body_name":"Part","name":"Base"}));
     run(&mut s, "select.set", json!({"items":[]}));
@@ -75,12 +75,12 @@ fn joined_motion_part(authoring: PartAuthoring, selection: JoinSelection) -> Ses
     run(&mut s, "solid.box", p);
     if !matches!(authoring, PartAuthoring::InComponent) {
         let parent = if matches!(authoring, PartAuthoring::RootThenNestedTransfer) {
-            run(&mut s, "component.create", json!({"name":"Group","activate":false}));
+            run(&mut s, "component.create", json!({"name":"Group","activate":false,"grounded":false}));
             "Group"
         } else {
             "root"
         };
-        run(&mut s, "component.create", json!({"name":"Rotor","parent":parent,"activate":false}));
+        run(&mut s, "component.create", json!({"name":"Rotor","parent":parent,"activate":false,"grounded":false}));
         run(&mut s, "component.move_bodies", json!({"bodies":["Part"],"component":"Rotor"}));
     }
     let driven = if matches!(authoring, PartAuthoring::RootThenNestedTransfer) { "Group" } else { "Rotor" };
@@ -95,7 +95,7 @@ fn attach_motion_rotor(s: &mut Session, component: &str, joint: &str) {
 
 fn unrelated_motion_rotor(s: &mut Session) {
     run(s, "component.activate", json!({"component":"root"}));
-    run(s, "component.create", json!({"name":"Unrelated"}));
+    run(s, "component.create", json!({"name":"Unrelated","grounded":false}));
     run(s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":[100,100,100],"body_name":"Remote"}));
     attach_motion_rotor(s, "Unrelated", "Other turn");
 }
@@ -179,7 +179,7 @@ fn joint_pose_joined_cylinders_keep_mesh_cells_at_unseen_angles() {
         "solid.cylinder",
         json!({"radius":2.8,"height":30,"base":[0,36,0],"axis":[0.981627183447664,0,0.1908089953765448],"operation":"join","targets":["Crank"]}),
     );
-    run(&mut s, "component.create", json!({"name":"Crank","activate":false}));
+    run(&mut s, "component.create", json!({"name":"Crank","activate":false,"grounded":false}));
     run(&mut s, "component.move_bodies", json!({"bodies":["Crank"],"component":"Crank"}));
     run(&mut s, "joint.as_built", json!({"type":"revolute","name":"Crank","a":0,"b":"Crank","at":{"occurrence":0,"point":[0,0,0],"z":[0,1,0]}}));
     assert_joint_only_moves(&mut s, "Crank");
@@ -258,7 +258,7 @@ fn joint_pose_combine_ignores_unrelated_motion() {
 /// with the target preserves that volume and must preserve the computed definition too.
 fn cross_component_motion_cut(move_tool_with_target: bool, kind: &str) -> Session {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name":"MovingTarget"}));
+    run(&mut s, "component.create", json!({"name":"MovingTarget","grounded":false}));
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Target"}));
     run(&mut s, "component.activate", json!({"component":"root"}));
     if move_tool_with_target {
@@ -280,7 +280,7 @@ fn motion_target_volume(s: &Session) -> f64 {
 
 fn motion_combine_cut(kind: &str, together: bool) -> Session {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name":"MovingTarget"}));
+    run(&mut s, "component.create", json!({"name":"MovingTarget","grounded":false}));
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Target"}));
     run(&mut s, "component.activate", json!({"component":"root"}));
     run(&mut s, "component.create", json!({"name":"Tool"}));
@@ -440,7 +440,7 @@ fn joint_pose_undo_and_redo_match_fresh_geometry() {
 fn joint_pose_geometry_edit_invalidates_the_warm_definition_mesh() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name":"span","expression":"10 mm"}));
-    run(&mut s, "component.create", json!({"name":"Rotor"}));
+    run(&mut s, "component.create", json!({"name":"Rotor","grounded":false}));
     run(&mut s, "solid.box", json!({"length":"span","width":8,"height":6,"body_name":"Part"}));
     attach_motion_rotor(&mut s, "Rotor", "Turn");
     run(&mut s, "joint.drive", json!({"joint":"Turn","value":5}));
@@ -563,7 +563,7 @@ fn contact_check_finds_plates_crossing_face_to_face() {
 fn contact_uses_preserved_body_placements_after_component_reassignment() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Transferred"}));
-    let component = run(&mut s, "component.create", json!({"name": "Carrier"}));
+    let component = run(&mut s, "component.create", json!({"name": "Carrier", "grounded": false}));
     run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "translate": [100, 0, 0]}));
     run(&mut s, "component.move_bodies", json!({"bodies": ["Transferred"], "component": component["component"]}));
     run(&mut s, "component.activate", json!({"component": "root"}));
@@ -581,7 +581,7 @@ fn contact_uses_preserved_body_placements_after_component_reassignment() {
 fn automatic_explode_centres_follow_reassigned_bodies() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Transferred"}));
-    let component = run(&mut s, "component.create", json!({"name": "Carrier"}));
+    let component = run(&mut s, "component.create", json!({"name": "Carrier", "grounded": false}));
     run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "translate": [100, 0, 0]}));
     run(&mut s, "component.move_bodies", json!({"bodies": ["Transferred"], "component": component["component"]}));
     run(&mut s, "component.activate", json!({"component": "root"}));

@@ -26,7 +26,7 @@ fn disc(s: &mut Session, name: &str, x: f64, r: &str) {
 /// The disc alone, on no joint.
 fn loose_disc(s: &mut Session, name: &str, x: f64, r: &str) {
     run(s, "component.activate", json!({"component": "root"}));
-    run(s, "component.create", json!({"name": name}));
+    run(s, "component.create", json!({"name": name, "grounded": false}));
     run(s, "solid.cylinder", json!({"base": [x, 0, 0], "axis": [0, 0, 1], "radius": r, "height": 5}));
 }
 
@@ -123,7 +123,7 @@ fn rack() -> Session {
     disc(&mut s, "Pinion", 0.0, "8 mm");
     for (name, corner, length) in [("Rack", [-20.0, -14.0, 0.0], 40.0), ("Stop", [30.0, -14.0, 0.0], 4.0)] {
         run(&mut s, "component.activate", json!({"component": "root"}));
-        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "component.create", json!({"name": name, "grounded": false}));
         run(&mut s, "solid.box", json!({"length": length, "width": 4, "height": 4, "corner": corner}));
     }
     pin(&mut s, "slider", "Rail", "Base", "Rack", Vec3::new(0.0, -10.0, 0.0), Vec3::X);

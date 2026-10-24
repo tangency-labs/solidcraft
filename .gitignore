@@ -7,6 +7,7 @@
 /.claude/worktrees/
 /target-snapshot
 __pycache__/
+.vscode/
 
 # cargo-mutants output (docs/mutation-testing.md)
 mutants.out*/

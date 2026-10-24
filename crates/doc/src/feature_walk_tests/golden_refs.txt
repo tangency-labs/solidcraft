@@ -58,6 +58,7 @@ hole_counterbore
 hole_countersink
   sketches: [3]
   remap_refs: points.sketch
+hole_references
 thread
 loft
   sketches: [4, 5, 6]
@@ -86,7 +87,9 @@ split_line
   remap_refs: plane.base.base.name, sketch
   remap_bodies: body
 construction_axis
+  remap_refs: def.a.plane.base.base.name, def.b.plane.base.base.name
 construction_point_planes
+  remap_refs: def.a.plane.base.base.name, def.b.plane.base.base.name, def.c.plane.base.base.name
 construction_point_along
 split_face
   sketches: [6]
@@ -104,6 +107,12 @@ pipe
   sketches: [1]
   remap_refs: path_sketch
   remap_bodies: targets[0]
+frame_member
+  sketches: [1]
+  remap_refs: path_sketch
+frame_member_sketch
+  sketches: [1, 2]
+  remap_refs: path_sketch, profile.sketch
 emboss
   sketches: [1]
   remap_refs: sketch

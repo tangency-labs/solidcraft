@@ -29,6 +29,7 @@ ground = "c_fix"
 
 # Same finished drawing, different semantic operation. Colours live only in palette.toml.
 sketch_break = { master = "break", accent = "sketch" }
+sketch_cancel = { master = "close", accent = "sketch" }
 sketch_dxf = { master = "dxf", accent = "sketch" }
 sketch_move = { master = "move", accent = "sketch" }
 sketch_scale = { master = "scale", accent = "sketch" }

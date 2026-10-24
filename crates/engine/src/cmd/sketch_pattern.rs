@@ -7,7 +7,7 @@ use crate::cmd::{alignment_param, reversed_param};
 
 pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
     let cmd = if circular { "sketch.pattern.circular" } else { "sketch.pattern.rectangular" };
-    let (out, info) = edit(s, p, cmd, true, |sk, _| {
+    let (out, info) = edit(s, p, cmd, true, |sk, doc| {
         if sk.patterns.len() >= solidcraft_sketch::MAX_CONSTRAINTS {
             return Err(bad(cmd, "too many sketch patterns"));
         }
@@ -25,7 +25,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             }
             let defaults = match &old.kind {
                 SketchPatternKind::Circular { center, count, angle, alignment, reversed } => {
-                    json!({"entities":old.entities,"center":center,"count":count,"angle":angle,"alignment":alignment,"reversed":reversed})
+                    json!({"entities":old.entities,"center":center,"count":old.count_expression.as_ref().map_or_else(|| json!(count), |e| json!(e)),"angle":angle,"alignment":alignment,"reversed":reversed})
                 }
                 SketchPatternKind::Rectangular {
                     dir,
@@ -75,7 +75,23 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
                 return Err(bad(cmd, "the pattern has deleted geometry or relations; undo the deletion before editing it"));
             }
         }
+        let count_expression = if circular {
+            match params.get("count") {
+                Some(Value::String(expression)) => {
+                    let expression = expression.trim().to_string();
+                    let value = doc.eval(&expression, solidcraft_doc::expr::Kind::Unitless)?;
+                    params["count"] = json!(SketchPattern::circular_quantity(value)?);
+                    Some(expression)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
         let n = count(&params, "count", cmd)?;
+        if count_expression.is_some() && n < 2 {
+            return Err(bad(cmd, "circular pattern Quantity must be 2…500"));
+        }
         let (kind, center, slots) = if circular {
             let total = if params.get("angle").is_some() { num(&params, "angle").ok_or_else(|| bad(cmd, "`angle` must be finite"))? } else { 360.0 };
             if !(total.abs() > 1e-9 && total.abs() <= 360.0) {
@@ -235,7 +251,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             instances.push(instance);
         }
         let center_id = center.and_then(|i| sk.points.get(i)).map(|p| p.id.clone());
-        let pattern = SketchPattern { id: id.clone(), entities: entity_ids, kind, instances };
+        let pattern = SketchPattern { id: id.clone(), entities: entity_ids, kind, count_expression, instances };
         if let Some(i) = old_index {
             sk.patterns.insert(i.min(sk.patterns.len()), pattern);
         } else {

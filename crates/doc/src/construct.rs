@@ -48,9 +48,9 @@ pub enum GeoRef {
     /// World X, Y or Z axis.
     World { axis: String },
     /// A construction axis feature, by name.
-    Axis { name: String },
+    Axis { name: crate::FeatureName },
     /// A construction point feature, by name.
-    ConstructPoint { name: String },
+    ConstructPoint { name: crate::FeatureName },
     /// A sketch point (by sketch feature id and point id).
     SketchPoint { sketch: u64, point: String },
     /// A sketch curve (by sketch feature id and curve id).

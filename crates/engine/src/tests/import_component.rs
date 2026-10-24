@@ -221,6 +221,8 @@ fn an_imported_assembly_moves_as_one_until_it_is_unlocked() {
     for o in &inside {
         assert_eq!(dof.get(o), dof.get(&rig), "occurrence {o} moves only with the import: {r}");
     }
+    // The design's first part is grounded when it comes in; free, it moves.
+    run(&mut s, "occurrence.ground", json!({"occurrence": "rig:1", "grounded": false}));
 
     // Moving the import's component moves everything in it.
     run(&mut s, "occurrence.move", json!({"occurrence": "rig:1", "translate": [0, 0, 50]}));
@@ -322,7 +324,7 @@ fn a_design_with_a_loose_import_rebuilds_unchanged() {
 /// first placement turned and moved), with `Outer` itself turned about X and lifted.
 fn nested_file(dir: &std::path::Path) -> String {
     let mut s = Session::default();
-    let outer = run(&mut s, "component.create", json!({"name": "Outer"}))["occurrence"].clone();
+    let outer = run(&mut s, "component.create", json!({"name": "Outer", "grounded": false}))["occurrence"].clone();
     run(&mut s, "solid.box", json!({"length": 30, "width": 30, "height": 5, "body_name": "Plate"}));
     let inner = run(&mut s, "component.create", json!({"name": "Inner"}))["occurrence"].clone();
     run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "body_name": "Block"}));

@@ -16,6 +16,8 @@ struct U {
     ana_c: array<vec4<f32>, 8>,
     ana_f: vec4<f32>,  // x = 1: stripe the negative draft and blocked faces
     depth: vec4<f32>,  // x = 1: reversed depth (1 near, 0 far); y, z: the faces' push (`FACE_BIAS`)
+    tint: vec4<f32>,   // xyz added to a whole hovered body's colour before lighting
+    sel: vec4<f32>,    // xyz a whole selected body's colour before lighting
 };
 
 fn reversed() -> bool {
@@ -253,7 +255,9 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     if (clipped(i.wp)) { discard; }
     if (!front && length(u.clip.xyz) > 0.5) {
         // The cut face in its body's colour ("from component" colouring), tinted toward the
-        // cap colour so it reads as a cut, hatched at 45 degrees on screen.
+        // cap colour so it reads as a cut, hatched at 45 degrees on screen; with the hatch off
+        // (`u.cap.a` 0), plain in the body's own colour.
+        if (u.cap.a < 0.5) { return out_color(vec4<f32>(i.c.rgb, 1.0)); }
         let base = mix(i.c.rgb, u.cap.rgb, 0.35);
         let h = fract((i.pos.x + i.pos.y) / 9.0);
         return out_color(vec4<f32>(select(base, base * 0.6, h < 0.22), 1.0));
@@ -422,6 +426,20 @@ fn fs_tri(i: TOut) -> @location(0) vec4<f32> {
     return shade(i);
 }
 
+/// A whole hovered body, lit over the model from its own plan triangles in a lifted colour.
+@fragment
+fn fs_hl_hover(i: TOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    return lit_color(i, 1.0, vec4<f32>(i.c.rgb + u.tint.rgb, i.c.a));
+}
+
+/// A whole selected body, lit over the model from its own plan triangles in the selection colour.
+@fragment
+fn fs_hl_selected(i: TOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    return lit_color(i, 1.0, vec4<f32>(u.sel.rgb, i.c.a));
+}
+
 /// Reference planes: shaded like `fs_tri`, but never cut by the section plane.
 @fragment
 fn fs_tri_all(i: TOut) -> @location(0) vec4<f32> {
@@ -433,9 +451,15 @@ fn shade(i: TOut) -> vec4<f32> {
 }
 
 fn lit(i: TOut, visibility: f32) -> vec4<f32> {
+    return lit_color(i, visibility, i.c);
+}
+
+/// [`lit`] in a colour of its own: a whole highlighted body is lit in its colour lifted by the
+/// hover amount, or in the selection colour, from the model's own plan triangles.
+fn lit_color(i: TOut, visibility: f32, base: vec4<f32>) -> vec4<f32> {
     // A zero normal marks flat colour (selection fills, translucent planes).
     if (length(i.n) < 0.5) {
-        return out_color(i.c);
+        return out_color(base);
     }
     let v = normalize(u.back.xyz);
     var n = normalize(i.n);
@@ -446,7 +470,7 @@ fn lit(i: TOut, visibility: f32) -> vec4<f32> {
     let h = normalize(key + v);
     let spec = pow(max(dot(n, h), 0.0), 40.0) * 0.25;
     let k = 0.42 + 0.38 * diff + 0.25 * fill - (0.42 + 0.25 * fill) * (1.0 - visibility);
-    return out_color(vec4<f32>(min(i.c.rgb * k + vec3<f32>(spec), vec3<f32>(1.0)), i.c.a));
+    return out_color(vec4<f32>(min(base.rgb * k + vec3<f32>(spec), vec3<f32>(1.0)), base.a));
 }
 
 // Lines, decals and ghosts are drawn at their own depth: opaque faces are pushed back by their

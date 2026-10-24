@@ -130,6 +130,13 @@ hole_countersink
     Countersink diameter = hole.cs_diameter (Length)
     Countersink angle = hole.cs_angle (Angle)
   expressions: hole.diameter, hole.depth, hole.cs_diameter, hole.cs_angle
+hole_references
+  inputs:
+    Diameter = hole.diameter (Length)
+    Depth = hole.depth (Length)
+    Reference distance = hole.reference1 (Length)
+    Reference distance = hole.reference2 (Length)
+  expressions: hole.diameter, hole.depth, hole.reference1, hole.reference2
 thread
   inputs:
     Length = thread.length (Length)
@@ -212,6 +219,14 @@ pipe
     Diameter = pipe.diameter (Length)
     Wall = pipe.wall (Length)
   expressions: pipe.diameter, pipe.wall
+frame_member
+  inputs:
+    Height = 40 (Length)
+    Wall = 3 (Length)
+    Width = 40 (Length)
+    Rotation = frame_member.angle (Angle)
+  expressions: 40, 3, 40, frame_member.angle
+frame_member_sketch
 emboss
   inputs:
     Depth = emboss.depth (Length)

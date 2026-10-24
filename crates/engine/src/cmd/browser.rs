@@ -4,6 +4,8 @@
 //! Browser items are keyed per component folder (`bodies`, `sketches`, `construction`): a body
 //! by name, a sketch or construction plane by feature id.
 
+use std::collections::BTreeMap;
+
 use serde_json::{Value, json};
 
 use solidcraft_doc::FeatureKind;
@@ -34,7 +36,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("view.delete", "Delete Named View", view_delete).icon("delete").params("view: name"),
     CommandSpec::new("view.list", "List Named Views", view_list).icon("list").noundo().doc_only(),
     CommandSpec::new("view.apply", "Restore Named View", view_apply).icon("camera").noundo().params(
-        "view?: front|back|top|bottom|left|right|iso|home (frames the model) | a named view's name; or camera?: {target: [x,y,z], yaw, pitch, distance, fov?} (radians, mm) → camera. The viewport (and the MCP screenshot) moves there. View state: not saved, not an undo step",
+        "view?: front|back|top|bottom|left|right|iso|home (frames the model) | a named view's name; or camera?: {target: [x,y,z], yaw, pitch, distance, fov?, roll?} (radians, mm; roll defaults to 0, must be finite and is clamped to ±π; up is refused: the up axis comes from the design settings) → camera. The viewport (and the MCP screenshot) moves there. View state: not saved, not an undo step",
     ),
     CommandSpec::new("browser.order", "Order Browser Items", order).icon("reorder").params("folder, component?, order: [keys] (the folder's items in display order)"),
     CommandSpec::new("browser.visibility", "Show/Hide", visibility).icon("eye").noundo().params(
@@ -453,8 +455,17 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
         (Some(_), Some(_)) => return Err(bad(cmd, "give `view` or `camera`, not both")),
         (None, None) => return Err(bad(cmd, "`view` (a name) or `camera` is required")),
         (None, Some(c)) => {
+            if c.get("up").is_some() {
+                return Err(bad(cmd, "camera `up` is not supported: the up axis comes from the design settings"));
+            }
+            let roll = match c.get("roll") {
+                Some(value) => {
+                    value.as_f64().filter(|r| r.is_finite()).ok_or_else(|| bad(cmd, "camera `roll` must be a finite number in radians"))?
+                }
+                None => 0.0,
+            };
             let v: solidcraft_doc::NamedView = serde_json::from_value(c.clone()).map_err(|e| bad(cmd, format!("bad camera: {e}")))?;
-            camera_of(&v)
+            crate::render::Camera { roll: roll.clamp(-std::f64::consts::PI, std::f64::consts::PI), ..camera_of(&v) }
         }
         // Standard view names come first, as in the browser's Named Views folder.
         (Some(name), None) => match crate::render::StandardView::parse(name) {
@@ -530,6 +541,23 @@ fn replace_body_name(v: &mut Value, old: &str, new: &str, names_body: bool, dept
     }
 }
 
+/// A frame member feature's bodies by line id, as its own result made them: what pins each
+/// member's name to its line. `None` for any other feature, or when they don't pair up.
+fn member_pins(s: &Session, fid: u64) -> Option<BTreeMap<String, String>> {
+    let f = s.doc.feature(fid)?;
+    let result = s.model.result(fid)?;
+    let lines = solidcraft_doc::frame::member_line_ids(&result.state, &f.kind).ok()?;
+    let made: Vec<String> = result.state.bodies.iter().filter(|b| b.feature == fid).map(|b| b.name.clone()).collect();
+    (lines.len() == made.len()).then(|| lines.into_iter().zip(made).collect())
+}
+
+/// Whether the `i`-th new body of `f` is numbered by the body counter (`BodyN`): it has no stored
+/// name of its own and is not numbered after the feature's first name (`Ribs (4)`).
+pub(crate) fn counted(f: &solidcraft_doc::Feature, i: usize) -> bool {
+    let first = f.body_names.first().is_some_and(|n| !n.trim().is_empty());
+    f.body_names.get(i).is_none_or(|n| n.trim().is_empty()) && (f.shell_piece_order || i < f.body_names.len() || !first)
+}
+
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
     let old = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must be a body name"))?.to_string();
@@ -548,17 +576,15 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     // includes the siblings whose stored name is shared: the solids of a STEP file with one label
     // are stored as `X`, `X`, `X` and built as `X`, `X (2)`, `X (3)`, so the stored names are set
     // to the numbered ones, or `X (3)` would turn into `X (2)` once the second solid is renamed.
+    // Read the feature's own result so siblings removed by later features keep their names too.
     let fid = b.feature;
-    let siblings: Vec<String> = st.bodies.iter().filter(|x| x.feature == fid).map(|x| x.name.clone()).collect();
+    let made = s.model.result(fid).map_or(&st.bodies, |r| &r.state.bodies);
+    let siblings: Vec<String> = made.iter().filter(|x| x.feature == fid).map(|x| x.name.clone()).collect();
     let k = siblings.iter().position(|n| *n == old).unwrap_or(0);
     // A body numbered by the counter (`BodyN`) gives its number back once it has a name of its
     // own, and every counted body after it would move down one (`Body3` becoming `Body1`) and
     // break what names it. Those later features keep the names they made too (#1109): each one's
     // own result holds them, also for bodies a later feature joins away.
-    let counted = |f: &solidcraft_doc::Feature, i: usize| {
-        let first = f.body_names.first().is_some_and(|n| !n.trim().is_empty());
-        f.body_names.get(i).is_none_or(|n| n.trim().is_empty()) && (f.shell_piece_order || i < f.body_names.len() || !first)
-    };
     // Bodies later features name after this one (`Top (1)`, a split's other piece) keep their
     // names too: they would otherwise follow it, and break what names them (#3510).
     let derived = format!("{old} (");
@@ -578,22 +604,40 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
             .collect(),
         None => Vec::new(),
     };
+    // Frame members are named by their lines (#4003): each keeps the name it has now on its
+    // line, whichever lines come and go later, and the renamed one takes its new name.
+    let later_pins: Vec<Option<BTreeMap<String, String>>> = later.iter().map(|(id, _)| member_pins(s, *id)).collect();
+    let own_pins = member_pins(s, fid).and_then(|mut pins| {
+        let line = pins.iter().find(|(_, n)| **n == old).map(|(line, _)| line.clone())?;
+        pins.insert(line, name.to_string());
+        Some(pins)
+    });
     let d = s.doc_mut();
-    for (id, made) in &later {
+    for ((id, made), pins) in later.iter().zip(later_pins) {
         if let Some(f) = d.feature_mut(*id) {
-            f.body_names.clone_from(made);
+            if let (Some(pins), FeatureKind::FrameMember { names, .. }) = (pins, &mut f.kind) {
+                *names = pins;
+                f.body_names.clear();
+            } else {
+                f.body_names.clone_from(made);
+            }
         }
     }
     let f = d.feature_mut(fid).ok_or_else(|| bad(cmd, "the body's feature is gone"))?;
-    while f.body_names.len() < siblings.len().max(k + 1) {
-        let i = f.body_names.len();
-        f.body_names.push(siblings.get(i).cloned().unwrap_or_default());
-    }
-    for (slot, current) in f.body_names.iter_mut().zip(&siblings) {
-        slot.clone_from(current);
-    }
-    if let Some(slot) = f.body_names.get_mut(k) {
-        *slot = name.to_string();
+    if let (Some(pins), FeatureKind::FrameMember { names, .. }) = (own_pins, &mut f.kind) {
+        *names = pins;
+        f.body_names.clear();
+    } else {
+        while f.body_names.len() < siblings.len().max(k + 1) {
+            let i = f.body_names.len();
+            f.body_names.push(siblings.get(i).cloned().unwrap_or_default());
+        }
+        for (slot, current) in f.body_names.iter_mut().zip(&siblings) {
+            slot.clone_from(current);
+        }
+        if let Some(slot) = f.body_names.get_mut(k) {
+            *slot = name.to_string();
+        }
     }
     // Later features refer to bodies by name.
     let mut failed = None;
@@ -777,6 +821,30 @@ mod tests {
         assert_eq!(names(&s)[1], b);
     }
 
+    #[test]
+    fn renaming_a_body_keeps_a_later_sibling_removal() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        for x in [0, 20, 40] {
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [x, 0], "p1": [x + 10, 10]}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "new", "name": "Extrude1"}));
+        assert_eq!(names(&s), ["Body1", "Body2", "Body3"]);
+        run(&mut s, "solid.remove", json!({"bodies": ["Body3"]}));
+        assert_eq!(names(&s), ["Body1", "Body2"]);
+
+        run(&mut s, "body.rename", json!({"body": "Body1", "name": "Ext"}));
+        assert_eq!(s.doc.find_feature("Extrude1").unwrap().body_names, ["Ext", "Body2", "Body3"]);
+        assert_eq!(names(&s), ["Ext", "Body2"]);
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "the remove still finds Body3");
+
+        let mut fresh = Session::new((*s.doc).clone());
+        fresh.refresh();
+        assert_eq!(names(&fresh), ["Ext", "Body2"]);
+        assert!(fresh.model.results.iter().all(|r| r.error.is_none()), "the remove also works after a full evaluation");
+    }
+
     /// #3510: each piece of a split is renamed on its own. Renaming the split body leaves the
     /// other piece, and the features that use it, as they were.
     #[test]
@@ -795,6 +863,28 @@ mod tests {
         assert!(ok(&s), "the move follows the renamed piece");
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(names(&s), vec!["Upper", "Top (1)"]);
+    }
+
+    /// Renaming one half of a split leaves the other half's name, also once a later feature
+    /// joins that other half away.
+    #[test]
+    fn renaming_one_half_of_a_split_leaves_the_other() {
+        let ok = |s: &Session| s.model.results.iter().all(|r| r.error.is_none());
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, -5]}));
+        run(&mut s, "solid.split_body", json!({"body": "Body1", "plane": "XY"}));
+        assert_eq!(names(&s), ["Body1", "Body1 (1)"]);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [10, 0, -5], "operation": "new", "body_name": "Tab"}));
+        run(&mut s, "solid.combine", json!({"target": "Tab", "tools": ["Body1 (1)"], "operation": "join"}));
+        assert_eq!(names(&s), ["Body1", "Tab"]);
+
+        run(&mut s, "body.rename", json!({"body": "Body1", "name": "Upper"}));
+        assert_eq!(names(&s), ["Upper", "Tab"]);
+        assert!(ok(&s), "the join still finds the other half");
+        let mut fresh = Session::new((*s.doc).clone());
+        fresh.refresh();
+        assert_eq!(names(&fresh), ["Upper", "Tab"]);
+        assert!(ok(&fresh), "the join also works after a full evaluation");
     }
 
     /// #1108: a primitive's `targets` are its participants, kept beside its kind; a rename
@@ -985,8 +1075,14 @@ mod tests {
         run(&mut s, "view.apply", json!({"view": "top"}));
         let c = s.camera.expect("a camera for the top view");
         assert!((c.pitch - std::f64::consts::FRAC_PI_2).abs() < 1e-3 && (c.target.x - 20.0).abs() < 1e-6, "{c:?}");
-        run(&mut s, "view.apply", json!({"camera": {"target": [0, 0, 0], "yaw": 1, "pitch": 0.2, "distance": 80, "fov": 0.5}}));
-        assert_eq!(s.camera.map(|c| (c.yaw, c.distance, c.fov)), Some((1.0, 80.0, 0.5)));
+        let r = run(&mut s, "view.apply", json!({"camera": {"target": [0, 0, 0], "yaw": 1, "pitch": 0.2, "distance": 80, "fov": 0.5, "roll": 1.0}}));
+        assert_eq!(s.camera.map(|c| (c.yaw, c.distance, c.fov, c.roll)), Some((1.0, 80.0, 0.5, 1.0)));
+        assert_eq!(r["camera"]["roll"], 1.0);
+        for (roll, expected) in [(f64::MAX, std::f64::consts::PI), (-f64::MAX, -std::f64::consts::PI)] {
+            let r = run(&mut s, "view.apply", json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 80, "roll": roll}}));
+            assert_eq!(r["camera"]["roll"], expected);
+            assert_eq!(s.camera.map(|c| c.roll), Some(expected));
+        }
         assert_eq!(s.undo.len(), undo, "view state, not an undo step");
         for p in [
             json!({}),
@@ -996,6 +1092,31 @@ mod tests {
             json!({"camera": "x"}),
         ] {
             assert!(s.execute("view.apply", &p).is_err(), "{p}");
+        }
+    }
+
+    #[test]
+    fn applying_a_camera_rejects_up() {
+        let mut s = Session::default();
+        run(&mut s, "view.apply", json!({"view": "front"}));
+        let before = serde_json::to_value(s.camera).unwrap();
+        let err = s.execute("view.apply", &json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 80, "up": "y"}})).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("up") && message.contains("design") && message.contains("settings"), "{message}");
+        assert_eq!(serde_json::to_value(s.camera).unwrap(), before);
+    }
+
+    #[test]
+    fn applying_a_camera_rejects_invalid_roll() {
+        let mut s = Session::default();
+        run(&mut s, "view.apply", json!({"view": "front"}));
+        let before = serde_json::to_value(s.camera).unwrap();
+        // Non-finite floating-point values serialize as null in JSON.
+        for roll in [json!(f64::NAN), json!(f64::INFINITY), json!(f64::NEG_INFINITY), json!("NaN"), json!(true)] {
+            let err =
+                s.execute("view.apply", &json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 80, "roll": roll}})).unwrap_err();
+            assert!(err.to_string().contains("roll"), "{err}");
+            assert_eq!(serde_json::to_value(s.camera).unwrap(), before);
         }
     }
 

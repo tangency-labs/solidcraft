@@ -105,3 +105,30 @@ fn frame_cost_of_a_design_file() {
         h.frame();
     }
 }
+
+/// A whole assembly's hover highlight: the model's own triangles (its display plans on the GPU)
+/// against the copy of every triangle it used to build here. Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "manual scaling measurement"]
+fn whole_body_highlight_cost_from_the_models_own_triangles() {
+    let mut h = Harness::new();
+    let mut names = Vec::new();
+    // Each torus holds some 8k triangles at Normal quality: twenty make a large assembly.
+    for k in 0..20 {
+        let name = format!("Torus{k}");
+        h.app.run("solid.torus", json!({"major": 100, "minor": 10, "center": [k as f64 * 220.0, 0.0, 0.0], "body_name": name.clone()})).unwrap();
+        names.push(name);
+    }
+    let st = h.app.session.world_state();
+    let triangles: usize = st.bodies.iter().map(|b| b.mesh().triangles.len()).sum();
+    st.warm_meshes(|| true);
+    for b in &st.bodies {
+        let _ = b.display_plan();
+    }
+    let bodies = names.len();
+    h.app.viewport.hover_bodies = names;
+    let copied = ms(|| drop(crate::viewport::build_highlight(&h.app)));
+    h.app.viewport.gpu = Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true });
+    let planned = ms(|| drop(crate::viewport::build_highlight(&h.app)));
+    println!("HIGHLIGHT bodies={bodies} triangles={triangles} cpu_copy_ms={copied:.2} model_triangles_ms={planned:.2}");
+}

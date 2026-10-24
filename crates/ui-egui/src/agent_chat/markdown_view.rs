@@ -94,7 +94,7 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str) {
                 ui.add(egui::Label::new(RichText::new(markdown::plain(s)).size(size).semibold().color(t.text)).selectable(true).wrap());
             }
             Block::Code { text, .. } => {
-                egui::Frame::NONE.fill(t.field).corner_radius(4.0).inner_margin(Margin::same(6)).show(ui, |ui| {
+                egui::Frame::NONE.fill(t.field).corner_radius(t.radius_sm).inner_margin(Margin::same(6)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.add(
                         egui::Label::new(RichText::new(text).monospace().size(size - (t.font_button - t.font_body)).color(t.text))
@@ -118,7 +118,7 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str) {
             Block::Quote(s) => {
                 ui.horizontal_top(|ui| {
                     let (bar, _) = ui.allocate_exact_size(vec2(3.0, 16.0), egui::Sense::hover());
-                    ui.painter().rect_filled(bar, 1.0, t.border);
+                    ui.painter().rect_filled(bar, t.radius_sm / 4, t.border);
                     ui.vertical(|ui| spans(ui, s, size, t.text_dim));
                 });
             }

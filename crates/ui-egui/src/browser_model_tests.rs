@@ -81,3 +81,28 @@ fn body_index_and_placements_follow_geometry_undo_and_document_identity() {
     assert!(super::model_children(&h.app, 0).is_empty());
     assert!(super::entries(&h.app, component, "bodies").is_empty());
 }
+
+/// #3005: a face picked in the viewport, on the second placement of a part whose rows are
+/// closed: that placement opens down to its body's row (which the browser lights for the pick,
+/// #3009); the first placement stays closed.
+#[test]
+fn a_face_picked_in_the_viewport_opens_the_browser_to_its_placements_body() {
+    let (mut h, _, occurrence) = fixture();
+    let copy = h.app.run("occurrence.copy", json!({"occurrence":occurrence,"translate":[50,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+    let first = super::model_placement(&mut h.app, &[occurrence]).unwrap().bodies[0].world.clone();
+    let second = super::model_placement(&mut h.app, &[copy]).unwrap().bodies[0].world.clone();
+    h.app.ui.show_browser = true;
+    let (one, two) = (super::occurrence_key(&[occurrence]), super::occurrence_key(&[copy]));
+    h.app.tree.collapsed.extend([one.clone(), two.clone(), format!("{two}/bodies")]);
+    h.frames(2);
+    assert!(!h.app.tree.order.contains(&format!("b:{second}")), "the body's row is closed away");
+    let face = Sel::Face { body: second.clone(), index: 0, point: solidcraft_engine::geom::Vec3::new(55.0, 5.0, 10.0) };
+    crate::viewport::select(&mut h.app, Some(face), false, false);
+    assert_eq!(h.app.tree.reveal.as_deref(), Some(second.as_str()));
+    h.frames(2);
+    assert!(h.app.tree.reveal.is_none(), "revealed");
+    assert!(!h.app.tree.collapsed.contains(&two) && !h.app.tree.collapsed.contains(&format!("{two}/bodies")));
+    assert!(h.app.tree.collapsed.contains(&one), "the other placement stays as it was");
+    assert!(h.app.tree.order.contains(&format!("b:{second}")), "the row is drawn");
+    assert!(!h.app.tree.order.contains(&format!("b:{first}")), "the other placement's row stays closed away");
+}

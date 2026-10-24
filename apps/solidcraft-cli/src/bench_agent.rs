@@ -36,8 +36,9 @@ impl Script {
         );
     }
 
+    /// A part placed after it is built: free, even as the design's first part (#2804).
     fn component(&mut self, name: &str) {
-        self.c("component.create", json!({"name": name}));
+        self.c("component.create", json!({"name": name, "grounded": false}));
     }
 
     fn root(&mut self) {

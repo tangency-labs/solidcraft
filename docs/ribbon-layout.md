@@ -9,7 +9,7 @@ Always shown, in order: MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW,
 | Tab | Section | Command ids, in menu order |
 |---|---|---|
 | MODEL | SKETCH | **`sketch.create`**, `sketch.edit`, `sketch.line3d`, `sketch.spline3d`, `sketch.point3d`, `sketch.move3d` |
-| MODEL | CREATE | **`solid.extrude`**, **`solid.revolve`**, **`solid.hole`**, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss`, `plastic.boss`, `plastic.lip`, `plastic.snap_fit`, `plastic.rest` |
+| MODEL | CREATE | **`solid.extrude`**, **`solid.revolve`**, **`solid.hole`**, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss`, `plastic.boss`, `plastic.lip`, `plastic.snap_fit`, `plastic.rest`, `frame.member` |
 | MODEL | MODIFY | **`solid.fillet`**, **`solid.chamfer`**, **`solid.shell`**, **`solid.press_pull`**, `sheet.convert`, `solid.combine`, `solid.scale`, `solid.offset_face`, `solid.draft`, `solid.split_face`, `solid.split_body`, `solid.replace_face`, `solid.remove`, `timeline.delete`, `face.delete` |
 | MODEL | ARRANGE | **`solid.move`**, **`solid.mirror`**, **`solid.pattern.rectangular`**, `solid.align`, `solid.pattern.circular`, `solid.pattern.path` |
 | MODEL | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
@@ -93,7 +93,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 | SOLID / CONSTRUCT | MODEL / CONSTRUCT | `construct.plane.offset`, `construct.plane.at_angle`, `construct.axis.through_cylinder`, `construct.axis.normal_to_face`, `construct.axis.two_planes`, `construct.axis.two_points`, `construct.axis.edge`, `construct.point.vertex`, `construct.point.two_edges`, `construct.point.three_planes`, `construct.point.center`, `construct.point.edge_plane`, `construct.point.along_path`, `construct.plane.midplane`, `construct.plane.two_edges`, `construct.plane.three_points`, `construct.plane.tangent`, `construct.plane.along_path`, `construct.plane.perpendicular` |
 | SOLID / CREATE | ASSEMBLE / JOINTS | `joint.origin` |
 | SOLID / CREATE | MODEL / ARRANGE | `solid.pattern.rectangular`, `solid.pattern.circular`, `solid.pattern.path`, `solid.mirror` |
-| SOLID / CREATE | MODEL / CREATE | `solid.extrude`, `solid.revolve`, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.hole`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss` |
+| SOLID / CREATE | MODEL / CREATE | `solid.extrude`, `solid.revolve`, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.hole`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss`, `frame.member` |
 | SOLID / CREATE | MODEL / SKETCH | `sketch.create` |
 | SOLID / INSERT | INSERT / FILES | `file.insert_step`, `file.insert_mesh` |
 | SOLID / INSERT | INSERT / LIBRARY | `parts.fastener` |

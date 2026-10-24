@@ -136,7 +136,8 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     let total = &v["total"];
     let bodies = v["bodies"].as_array().cloned().unwrap_or_default();
     if let [b] = bodies.as_slice() {
-        rows.push(("Material", b["material"].as_str().unwrap_or("Default").to_string()));
+        // The engine names every body's material, measured or not: nothing to guess here.
+        rows.push(("Material", b["material"].as_str().unwrap_or_default().to_string()));
         rows.push(("Density", format!("{:.3} g/cm³", number(b, "density_g_cm3"))));
     }
     rows.push(("Mass", format!("{:.3} g", number(total, "mass_g"))));

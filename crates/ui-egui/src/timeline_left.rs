@@ -5,7 +5,9 @@ use egui::{Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
 
 use crate::theme::Tokens;
-use crate::timeline::{TimelineKind, clipboard_buttons, delete_feature, delete_features, icon_of, message_button, selected_feature_ids};
+use crate::timeline::{
+    TimelineKind, clipboard_buttons, delete_after_marker_button, delete_feature, delete_features, icon_of, message_button, selected_feature_ids,
+};
 use crate::{SolveApp, icons};
 
 const FOLDER_INDENT: f32 = 14.0;
@@ -51,7 +53,7 @@ impl TimelineItem {
     fn key(self) -> String {
         match self {
             TimelineItem::Group(id) => format!("g:{id}"),
-            TimelineItem::Feature(id) => format!("f:{id}"),
+            TimelineItem::Feature(id) => crate::timeline::anchor_key(id),
         }
     }
 }
@@ -255,7 +257,7 @@ pub fn left_timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         return;
     }
-    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, t.border));
+    t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top(), t.border);
     ui.add_space(t.space_3);
     egui::ScrollArea::vertical()
         .id_salt("sc_left_timeline_scroll")
@@ -476,7 +478,9 @@ fn vertical_drop_bar_left(panel_left: f32, target: Option<u64>, groups: &[solidc
     target.map(|group| panel_left + DROP_BAR_INSET + (group_depth(groups, group) + 1) as f32 * FOLDER_INDENT).unwrap_or(panel_left + DROP_BAR_INSET)
 }
 
-fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag>) {
+/// Paints the marker row and returns its centre height, which splits the slots at its position
+/// into before and after the marker.
+fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag>) -> f32 {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_12), Sense::drag());
     crate::ui_kit::history_marker(ui.painter(), rect, true, crate::theme::TabAccent::for_tab(&t, &app.ui.tab));
@@ -485,7 +489,11 @@ fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag
     if response.drag_started() {
         *drag = Some(Drag::Marker);
     }
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
     response.on_hover_text(crate::i18n::tr("ui.history_marker_tip"));
+    rect.center().y
 }
 
 fn group_for(groups: &[solidcraft_engine::doc::TimelineGroup], feature: u64) -> Option<u64> {
@@ -849,7 +857,11 @@ fn vertical_group_row(
     drop_zones.push((rect, group.id));
     slots.push(VerticalSlot { y: rect.bottom(), position: if open { position } else { end_position }, group: Some(group.id), indent_group: None });
     if selected || response.hovered() {
-        ui.painter().rect_filled(rect, 3.0, if selected { crate::theme::TabAccent::current(ui.ctx()).soft } else { t.hover });
+        ui.painter().rect_filled(
+            rect,
+            t.radius_sm.saturating_sub(1),
+            if selected { crate::theme::TabAccent::current(ui.ctx()).soft } else { t.hover },
+        );
     }
     let offset = if names { depth as f32 * 14.0 } else { 0.0 };
     let centre = pos2(rect.left() + 9.0 + offset, rect.center().y);
@@ -931,6 +943,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
     let mut previous_visible_group = None;
     let mut hovered = None;
     let mut edit = None;
+    let mut marker_y = f32::INFINITY;
 
     for (index, (id, name, icon, suppressed, ty, kind)) in features.iter().enumerate() {
         let group_id = group_for(&groups, *id);
@@ -941,7 +954,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
             let group = at_index.first().and_then(|group| group.parent);
             let indent_group = previous_visible_group.filter(|previous| Some(*previous) != group);
             slots.push(VerticalSlot { y: ui.cursor().top(), position: index, group, indent_group });
-            vertical_marker(app, ui, &mut drag);
+            marker_y = vertical_marker(app, ui, &mut drag);
         }
         let mut rendered_group_header = false;
         for group in at_index {
@@ -968,7 +981,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         let indent_group = (!rendered_group_header).then_some(previous_visible_group).flatten().filter(|previous| Some(*previous) != group_id);
         if index == marker && !marker_before_group {
             slots.push(VerticalSlot { y: ui.cursor().top(), position: index, group: group_open.then_some(group_id).flatten(), indent_group });
-            vertical_marker(app, ui, &mut drag);
+            marker_y = vertical_marker(app, ui, &mut drag);
         }
         if !group_open {
             continue;
@@ -1009,7 +1022,11 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
             suppressed: *suppressed,
             error: error.is_some(),
             warning: warning.is_some(),
-            accent: crate::theme::TabAccent::for_tab(&t, &app.ui.tab),
+            // Dragged features take the colour of their drop bar.
+            accent: crate::theme::TabAccent::for_tab(
+                &t,
+                if matches!(&drag, Some(Drag::Items(items)) if items.features.contains(id)) { "SKETCH" } else { &app.ui.tab },
+            ),
         }
         .paint(ui.painter(), chip, style);
         if has_patterns {
@@ -1088,6 +1105,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
                 delete_feature(app, *id);
                 ui.close();
             }
+            delete_after_marker_button(app, ui, *id, index, marker);
         });
         if names && has_patterns && patterns_open {
             let depth = group_id.map_or(1, |group| group_depth(&groups, group) + 2);
@@ -1118,12 +1136,19 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
     }
     slots.push(VerticalSlot { y: ui.cursor().top(), position: n, group: None, indent_group: previous_visible_group });
     if marker >= n {
-        vertical_marker(app, ui, &mut drag);
+        marker_y = vertical_marker(app, ui, &mut drag);
+        // Below the marker at the end: a feature dropped here is rolled back.
+        slots.push(VerticalSlot { y: ui.cursor().top(), position: n, group: None, indent_group: previous_visible_group });
     }
     crate::dialogs_assembly::timeline_joints_vertical(app, ui);
 
+    if drag.is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    }
+    // The marker dropped where it already is needs no bar: the marker shows the spot.
     if let (Some(active), Some(pointer)) = (drag.as_ref(), pointer)
         && let Some(slot) = nearest_vertical_slot(&slots, pointer.y)
+        && !(matches!(active, Drag::Marker) && slot.position == marker.min(n))
     {
         let folder_target = match active {
             Drag::Items(items) => {
@@ -1137,7 +1162,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
             folder_drop_zones.iter().find(|(rect, group)| *group == target && rect.shrink2(vec2(0.0, 5.0)).contains(pointer)).map(|(rect, _)| *rect)
         });
         if let Some(rect) = hovered_folder {
-            ui.painter().rect_stroke(rect.shrink(1.0), 3.0, Stroke::new(2.0, t.sketch_accent), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(rect.shrink(1.0), t.radius_sm.saturating_sub(1), Stroke::new(2.0, t.sketch_accent), egui::StrokeKind::Inside);
         } else {
             let left = vertical_drop_bar_left(ui.min_rect().left(), folder_target, &groups);
             crate::ui_kit::history_drop_bar(
@@ -1170,6 +1195,8 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
                     if !items.groups.is_empty() {
                         params["groups"] = json!(items.groups);
                     }
+                    // Crossing the marker rolls the moved features back or forward, in the same step.
+                    params["active"] = json!(slot.y < marker_y);
                     let _ = app.run("timeline.move_many", params);
                     if let Some(group) = folder_target {
                         app.tree.collapsed.remove(&format!("timeline_group:{group}"));

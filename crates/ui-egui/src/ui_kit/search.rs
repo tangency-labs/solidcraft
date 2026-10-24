@@ -97,9 +97,22 @@ impl CommandSearch {
             t.control_border
         };
         if focused {
-            ui.painter().rect_filled(r.expand(t.space_3), radius + t.space_3, if invalid { t.form_error_fill } else { t.accent_soft });
+            ui.painter().rect_filled(
+                r.expand(t.space_3),
+                Tokens::outset_radius(radius, t.space_3),
+                if invalid { t.form_error_fill } else { t.accent_soft },
+            );
         }
-        ui.painter().rect(r, radius, t.control_fill, Stroke::new(1.0, ink), egui::StrokeKind::Inside);
+        ui.painter().rect(
+            r,
+            radius,
+            t.input_fill(),
+            if focused || invalid { Stroke::new(1.0, ink) } else { t.control_border_stroke(ink) },
+            egui::StrokeKind::Inside,
+        );
+        if let Some(bevel) = t.borders.bevel {
+            bevel.paint(ui.painter(), r.shrink(if focused || invalid { 1.0 } else { 0.0 }), radius, true, ui.is_enabled());
+        }
         icons::paint_icon(
             ui.painter(),
             Rect::from_center_size(r.left_center() + vec2((spacing.left + t.space_16 / 2.0).min(r.width() / 2.0), 0.0), vec2(t.space_16, t.space_16)),
@@ -152,7 +165,7 @@ impl CommandSearch {
         let galley = ui.painter().layout_no_wrap(label.to_owned(), FontId::monospace(t.font_small), t.form_dim);
         let size = galley.size() + vec2(padding, t.space_4);
         let r = Rect::from_min_size(pos2(right.x - size.x, right.y - size.y / 2.0), size);
-        ui.painter().rect(r, Self::inner_radius(), t.dialog_footer, Stroke::new(1.0, t.dialog_rule), egui::StrokeKind::Inside);
+        t.container_rect(ui.painter(), r, Self::inner_radius(), t.dialog_footer, t.dialog_rule);
         ui.painter().galley(r.min + vec2(padding / 2.0, t.space_2), galley, t.form_dim);
         size.x
     }
@@ -163,12 +176,14 @@ impl CommandSearch {
 
     pub(crate) fn detail(ui: &mut Ui, text: &str) {
         let t = Tokens::get();
-        egui::Frame::NONE.fill(t.control_fill).stroke(Stroke::new(1.0, t.dialog_rule)).corner_radius(t.control_radius).inner_margin(t.space_8).show(
-            ui,
-            |ui| {
+        egui::Frame::NONE
+            .fill(t.control_fill)
+            .stroke(t.container_border(t.dialog_rule))
+            .corner_radius(t.control_radius)
+            .inner_margin(t.space_8)
+            .show(ui, |ui| {
                 super::text(ui, text, super::Text::MonoNote("command_parameters"));
-            },
-        );
+            });
     }
 
     /// Lay out the full sheet, but allocate and paint only its unfolding height. The
@@ -204,6 +219,7 @@ impl CommandSearch {
         // The edge-to-edge footer shares the card silhouette; keep the outer rule
         // above its fill, as an overflow-clipped footer would in the board.
         ui.painter().rect_stroke(sheet, t.radius_xl, frame.stroke, egui::StrokeKind::Inside);
+        super::Container::paint_inset(ui.painter(), sheet, frame);
         ui.allocate_rect(sheet, Sense::hover());
         crate::scenario::publish_target("ribbon:search_popup", sheet);
         crate::scenario::publish_target("palette:outer", sheet);
@@ -222,7 +238,7 @@ impl CommandSearch {
         let r = Rect::from_min_max(start, pos2(start.x + width, ui.min_rect().bottom()));
         ui.painter()
             .set(background, egui::Shape::rect_filled(r, egui::CornerRadius { nw: 0, ne: 0, sw: t.radius_xl, se: t.radius_xl }, t.dialog_footer));
-        ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0, t.dialog_rule));
+        t.secondary_hline(ui.painter(), r.x_range(), r.top(), t.dialog_rule);
         crate::scenario::publish_rect("ribbon:search_footer", r);
     }
 }
@@ -372,5 +388,31 @@ mod tests {
         assert_eq!(t.radius_xl, 10);
         assert_eq!(CommandSearch::inner_radius(), 4);
         assert_eq!(f32::from(CommandSearch::inner_radius()), f32::from(t.radius_xl) - t.space_6);
+    }
+
+    #[test]
+    fn square_theme_search_and_focus_ring_stay_square_through_expansion() {
+        let tokens = Tokens { radius_sm: 0, radius_md: 0, radius_lg: 0, radius_xl: 0, control_radius: 0, sketch_mode_radius: 0, ..Tokens::dark() };
+        let _theme = crate::theme::scoped_tokens(tokens);
+        let mut radii = Vec::new();
+        for floating in [false, true] {
+            for progress in [0.0, 0.5, 1.0] {
+                let radius = CommandSearch::field_radius(progress, floating);
+                let ctx = crate::fonts::test_context();
+                let mut query = String::new();
+                let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, 4096);
+                });
+                for shape in output.shapes {
+                    if let egui::Shape::Rect(rect) = shape.shape
+                        && (rect.fill == tokens.control_fill || rect.fill == tokens.accent_soft)
+                    {
+                        radii.push(rect.corner_radius);
+                    }
+                }
+            }
+        }
+        assert_eq!(radii.len(), 12, "field and focus ring in both layouts at three expansion stages");
+        assert!(radii.iter().all(|radius| *radius == egui::CornerRadius::ZERO));
     }
 }

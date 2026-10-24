@@ -393,6 +393,11 @@ pub fn font_dirs() -> Vec<PathBuf> {
         }
         dirs.push(PathBuf::from("/usr/local/share/fonts"));
         dirs.push(PathBuf::from("/usr/share/fonts"));
+        #[cfg(target_os = "linux")]
+        {
+            dirs.push(PathBuf::from("/run/host/fonts"));
+            dirs.push(PathBuf::from("/run/host/user-fonts"));
+        }
     }
     dirs
 }
@@ -459,6 +464,15 @@ fn read_font(path: &Path) -> std::result::Result<Arc<Vec<u8>>, String> {
 mod tests {
     use super::*;
     use ttf_parser::name_id;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn font_dirs_include_flatpak_host_fonts() {
+        let dirs = font_dirs();
+        for dir in ["/run/host/fonts", "/run/host/user-fonts"] {
+            assert!(dirs.contains(&PathBuf::from(dir)), "missing {dir}");
+        }
+    }
 
     /// A face of family "Arial" whose full name is `full`.
     fn face(full: &str, bold: bool, italic: bool) -> FaceNames {

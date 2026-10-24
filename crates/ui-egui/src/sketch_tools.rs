@@ -205,7 +205,7 @@ fn continuity_legend(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let size = egui::vec2(pad + swatch + 8.0 + text_width + pad, rows.len() as f32 * row + 2.0 * pad);
     let available = crate::shell::bottom_overlay_rect(app, proj.rect);
     let frame = egui::Rect::from_min_size(available.left_bottom() + egui::vec2(16.0, -(size.y + 16.0)), size);
-    painter.rect_filled(frame, 4.0, tk.panel.gamma_multiply(0.9));
+    painter.rect_filled(frame, tk.radius_sm, tk.panel.gamma_multiply(0.9));
     crate::scenario::publish_rect("continuity_legend", frame);
     for (i, (label, col)) in rows.iter().enumerate() {
         let y = frame.top() + pad + row * (i as f32 + 0.5);
@@ -252,7 +252,7 @@ fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 egui::FontId::proportional(crate::theme::Tokens::get().font_body),
                 tk.text,
             );
-            painter.rect_filled(r.expand(3.0), 3.0, tk.panel.gamma_multiply(0.85));
+            painter.rect_filled(r.expand(3.0), tk.radius_sm.saturating_sub(1), tk.panel.gamma_multiply(0.85));
             painter.text(
                 q + egui::vec2(12.0, -12.0),
                 egui::Align2::LEFT_BOTTOM,
@@ -411,7 +411,8 @@ pub fn refine_snap(
         }
         None => PREV.with(Cell::get),
     };
-    // Line tool: the tangent point of a circle or arc (before plain "on the curve").
+    // Line tool: the tangent point of a circle or arc, then a line through its centre
+    // (before plain "on the curve", which would leave a chord free to miss the centre).
     let line_tool = app.tool.as_ref().is_none_or(|t| t.cmd == "sketch.line");
     if !mid_only
         && best.is_none()
@@ -420,6 +421,15 @@ pub fn refine_snap(
         && let Some(i) = crate::inference::tangent(sk, prev, lp, tol)
     {
         best = Some((i.dist, i.label(), i.at));
+    }
+    if !mid_only
+        && best.is_none()
+        && line_tool
+        && let Some(prev) = prev
+        && let Some(i) = crate::inference::through_center(sk, prev, lp, tol)
+    {
+        best = Some((i.dist, i.label(), i.at));
+        mid_of = i.arg;
     }
     // On a curve (coincident with it).
     if !mid_only && best.is_none() {
@@ -462,6 +472,8 @@ pub fn refine_snap(
         let arg = match l {
             "Mid" => mid_of.map(|m| format!("mid:{m}")),
             "On" => mid_of.map(|m| format!("on:{m}")),
+            // Already a point argument (`<id>.center` or `on:<id>:x,y`), or none for a free point.
+            "Ctr" => mid_of,
             _ => None,
         };
         (p, arg)
@@ -996,16 +1008,22 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
         app.set_status(error, true);
         return;
     }
+    let p = crate::sketch_dims::placed(app, tool, &p);
     tool.pts.push(p);
     if n > 0 && tool.pts.len() >= n {
-        run_points(app, tool);
-        tool.pts.clear();
+        if run_points(app, tool) {
+            tool.pts.clear();
+            crate::sketch_dims::reset(tool);
+        } else {
+            tool.pts.pop();
+        }
     }
 }
 
-fn run_points(app: &mut SolveApp, t: &Tool) {
+fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
     let p = &t.pts;
     let width = |a: Vec2, b: Vec2, c: Vec2| -> f64 { 2.0 * (b - a).normalized().map(|d| d.cross(c - a).abs()).unwrap_or(1.0) };
+    let slot_width = |fallback: f64| crate::sketch_dims::locked_value(app, t, "Width").unwrap_or_else(|| fallback.max(1e-3));
     let params = match (t.cmd, p.as_slice()) {
         ("sketch.line.midpoint", [m, e]) => json!({"mid": arg(m), "end": xy(e.0)}),
         ("sketch.arc.tangent", [s, e]) => json!({"start": arg(s), "end": xy(e.0)}),
@@ -1015,28 +1033,28 @@ fn run_points(app: &mut SolveApp, t: &Tool) {
             let rho = crate::sketch_dims::locked_value(app, t, "Rho").unwrap_or(0.5);
             json!({"start": arg(a), "end": arg(b), "apex": arg(x), "rho": rho})
         }
-        ("sketch.slot.center_point", [c, e, w]) => json!({"center": xy(c.0), "end": xy(e.0), "width": width(c.0, e.0, w.0).max(1e-3)}),
+        ("sketch.slot.center_point", [c, e, w]) => json!({"center": xy(c.0), "end": xy(e.0), "width": slot_width(width(c.0, e.0, w.0))}),
         ("sketch.slot.arc_three_point", [a, th, b, w]) => {
-            json!({"start": xy(a.0), "through": xy(th.0), "end": xy(b.0), "width": (2.0 * w.0.dist(b.0)).max(1e-3)})
+            json!({"start": xy(a.0), "through": xy(th.0), "end": xy(b.0), "width": slot_width(2.0 * w.0.dist(b.0))})
         }
         ("sketch.slot.arc_center", [c, a, b, w]) => {
             let r = c.0.dist(a.0);
-            json!({"center": xy(c.0), "start": xy(a.0), "end": xy(b.0), "width": (2.0 * (w.0.dist(c.0) - r).abs()).max(1e-3)})
+            json!({"center": xy(c.0), "start": xy(a.0), "end": xy(b.0), "width": slot_width(2.0 * (w.0.dist(c.0) - r).abs())})
         }
         ("sketch.spline.fit_point" | "sketch.spline.control_point" | "sketch.spline.control_point_5", pts) if pts.len() >= 2 => {
             json!({"points": pts.iter().map(arg).collect::<Vec<_>>()})
         }
         ("sketch.blend_curve", [a, b]) => match (&a.1, &b.1) {
             (Some(x), Some(y)) => json!({"a": x, "b": y}),
-            _ => return,
+            _ => return false,
         },
         ("sketch.text", [at]) => {
             crate::sketch_text::place(app, at.0, round_nice(app.cam.half_height() * 0.1));
-            return;
+            return true;
         }
-        _ => return,
+        _ => return false,
     };
-    let _ = app.run(t.cmd, params);
+    crate::tools::draw(app, t, params).is_ok()
 }
 
 fn run_entities(app: &mut SolveApp, t: &Tool) {
@@ -1170,8 +1188,14 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
             crate::tools::paint_sketch_path(&[ss.plane.to_world(last.0), hw], mode, painter, proj, stroke);
         }
     }
-    if let Some((h, _)) = t.hover.as_ref()
-        && let Some(curve) = crate::tools::preview_curve(t, *h, None, crate::sketch_dims::locked_value(app, t, "Rho"), None)
+    if let Some(hover) = t.hover.as_ref()
+        && let Some(curve) = crate::tools::preview_curve(
+            t,
+            crate::sketch_dims::shown(app, t, hover),
+            None,
+            crate::sketch_dims::locked_value(app, t, "Rho"),
+            crate::sketch_dims::locked_value(app, t, "Width"),
+        )
     {
         crate::tools::paint_preview_curve(curve, &ss.plane, painter, proj, stroke, crate::sketch_palette::mode(app));
     }
@@ -1305,8 +1329,13 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
             painter.line_segment([*base, *sp], Stroke::new(0.8, tk.text_dim.gamma_multiply(0.6)));
         }
         let r = egui::Rect::from_center_size(*sp, egui::vec2(GLYPH, GLYPH));
-        painter.rect_filled(r, 3.0, if lit { tk.accent_soft } else { tk.glyph_bg });
-        painter.rect_stroke(r, 3.0, Stroke::new(1.0, if failing || lit { col } else { tk.glyph_edge }), egui::StrokeKind::Inside);
+        painter.rect_filled(r, tk.radius_sm.saturating_sub(1), if lit { tk.accent_soft } else { tk.glyph_bg });
+        painter.rect_stroke(
+            r,
+            tk.radius_sm.saturating_sub(1),
+            Stroke::new(1.0, if failing || lit { col } else { tk.glyph_edge }),
+            egui::StrokeKind::Inside,
+        );
         let pattern_icon = ss.sketch.patterns.iter().find(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(id)).map(|p| {
             if matches!(p.kind, solidcraft_engine::sketch::SketchPatternKind::Circular { .. }) {
                 "sketch_circ_pattern"
@@ -1339,7 +1368,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         };
         let at = h + egui::vec2(12.0, 12.0);
         let g = painter.layout_no_wrap(label, egui::FontId::proportional(crate::theme::Tokens::get().font_small), tk.text);
-        painter.rect_filled(egui::Rect::from_min_size(at, g.size()).expand(3.0), 3.0, tk.panel);
+        painter.rect_filled(egui::Rect::from_min_size(at, g.size()).expand(3.0), tk.radius_sm.saturating_sub(1), tk.panel);
         painter.galley(at, g, tk.text);
     }
     GLYPHS.with(|g| *g.borrow_mut() = drawn);
@@ -1419,7 +1448,7 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let Some(sp) = proj.to_screen(ss.plane.to_world(p)) else { return };
     let tk = crate::theme::Tokens::get();
     let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
-    painter.rect_filled(r, 3.0, tk.accent_soft);
+    painter.rect_filled(r, tk.radius_sm.saturating_sub(1), tk.accent_soft);
     painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(crate::theme::Tokens::get().font_micro), tk.text);
 }
 

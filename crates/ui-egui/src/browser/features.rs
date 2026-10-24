@@ -109,7 +109,7 @@ mod tests {
         h.app.tree.expanded.insert("c0/features".into());
         DRAWN.with(|d| d.borrow_mut().clear());
         let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))), ..Default::default() };
-        let _ = h.ctx.run_ui(raw, |ui| rows(&mut h.app, ui, 0, &[], 0, &mut Actions::default()));
+        h.ctx.run_ui(raw, |ui| rows(&mut h.app, ui, 0, &[], 0, &mut Actions::default())).textures_delta.clear();
         drawn_rows().into_iter().map(|(label, ..)| label).collect()
     }
 
@@ -156,6 +156,37 @@ mod tests {
         assert_eq!(at["ok"], true, "{at}");
         assert_eq!(h.app.session.doc.to_json(), saved);
         assert_eq!(h.app.session.undo.len(), undo);
+    }
+
+    #[test]
+    fn browser_feature_shift_click_selects_the_range_up_and_down() {
+        let mut h = Harness::new();
+        let ids: Vec<u64> = (0..5)
+            .map(|i| {
+                h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":format!("B{i}")})).unwrap()["feature"].as_u64().unwrap()
+            })
+            .collect();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(2);
+        let row = |id: u64| json!({"handle": format!("row:browser-feature:c0:{id}")});
+        let all: Vec<Sel> = ids.iter().map(|&id| Sel::Feature { id }).collect();
+        let sorted = |s: &[Sel]| {
+            let mut v = s.to_vec();
+            v.sort_by_key(|x| format!("{x:?}"));
+            v
+        };
+        // Up: anchor on the last row, Shift+click the first.
+        h.step(&json!({"click": row(ids[4])})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": row(ids[0]), "shift": true})).unwrap();
+        h.frames(2);
+        assert_eq!(sorted(&h.app.session.selection), sorted(&all), "Shift+click above the anchor");
+        // Down: anchor on the first row, Shift+click the last.
+        h.step(&json!({"click": row(ids[0])})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": row(ids[4]), "shift": true})).unwrap();
+        h.frames(2);
+        assert_eq!(sorted(&h.app.session.selection), sorted(&all), "Shift+click below the anchor");
     }
 
     fn find(app: &mut SolveApp, feature: u64, body: &str) {

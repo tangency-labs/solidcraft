@@ -88,6 +88,22 @@ impl PlasticRule {
             _ => return None,
         })
     }
+
+    /// The expressions to change, by field name, in the order of [`PlasticRule::fields`].
+    pub fn fields_mut(&mut self) -> [(&'static str, &mut String); 10] {
+        [
+            ("thickness", &mut self.thickness),
+            ("nominal_radius", &mut self.nominal_radius),
+            ("clearance", &mut self.clearance),
+            ("knife_edge", &mut self.knife_edge),
+            ("reveal_height", &mut self.reveal_height),
+            ("thickness_variation", &mut self.thickness_variation),
+            ("draft", &mut self.draft),
+            ("max_thickness", &mut self.max_thickness),
+            ("min_thickness", &mut self.min_thickness),
+            ("min_draft", &mut self.min_draft),
+        ]
+    }
 }
 
 /// The design's own plastic rules, the active one and the rules assigned to bodies.

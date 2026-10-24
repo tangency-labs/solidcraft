@@ -79,3 +79,23 @@ fn hinted_division_matches_the_search_from_nothing_and_is_faster() {
     // loaded runner doesn't trip it, but one a fallback to the search for every point would.
     assert!(hinted_time * 2 < scratch_time, "hinted {hinted_time:?}, from nothing {scratch_time:?}");
 }
+
+/// #4623: dividing an intersection edge at a tolerance finer than truck's 1e-6 (or one that is
+/// not a number) panicked in truck's tolerance assertion, and the join that asked for it failed.
+/// It divides at 1e-6 instead.
+#[test]
+fn dividing_an_intersection_edge_finer_than_truck_allows_divides_at_its_tolerance() {
+    let (_, cut) = holed();
+    let curves = intersection_curves(&cut);
+    assert!(!curves.is_empty());
+    for curve in curves {
+        let mt::Curve::IntersectionCurve(ic) = &curve else { continue };
+        let range = ic.range_tuple();
+        let at_truck = ic.parameter_division(range, 1e-6);
+        for tol in [5e-7, 1e-12, 0.0, -1.0, f64::NAN] {
+            let got = std::panic::catch_unwind(|| ic.parameter_division(range, tol));
+            let Ok(got) = got else { panic!("dividing at {tol:e} panicked") };
+            assert_eq!(got, at_truck, "tolerance {tol:e}");
+        }
+    }
+}

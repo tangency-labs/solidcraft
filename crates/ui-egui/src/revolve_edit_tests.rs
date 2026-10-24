@@ -94,7 +94,7 @@ fn to_object_noop_retains_dormant_secondary_angle_and_downstream_dimension() {
 #[test]
 fn rotated_owner_to_point_remains_exact_on_noop_edit() {
     let mut h = Harness::new();
-    let owner = h.app.run("component.create", json!({"name":"Owner"})).unwrap();
+    let owner = h.app.run("component.create", json!({"name":"Owner","grounded":false})).unwrap();
     let mut h = make_params(h, json!({"origin":[0,0,0],"dir":[0,2,0]}), json!({"to":[0,2,12],"angle":"45 deg"}));
     h.app.run("occurrence.move", json!({"occurrence":owner["occurrence"],"translate":[100,0,20],"axis":[0,0,1],"angle":"17 deg"})).unwrap();
     h.app.run("component.create", json!({"name":"Other","parent":0})).unwrap();
@@ -192,7 +192,7 @@ fn revolve_angle_edit_preserves_axis_downstream_binding_and_one_undo() {
 #[test]
 fn rotated_owner_explicit_axis_is_lossless_with_another_component_active() {
     let mut h = Harness::new();
-    let owner = h.app.run("component.create", json!({"name":"Owner"})).unwrap();
+    let owner = h.app.run("component.create", json!({"name":"Owner","grounded":false})).unwrap();
     let mut h = make(h, json!({"origin":[0,0,0],"dir":[0,2,0]}));
     h.app.run("occurrence.move", json!({"occurrence":owner["occurrence"],"translate":[100,0,20],"axis":[0,0,1],"angle":"17 deg"})).unwrap();
     h.app.run("component.create", json!({"name":"Other","parent":0})).unwrap();
@@ -214,7 +214,7 @@ fn rotated_owner_explicit_axis_is_lossless_with_another_component_active() {
 fn world_and_sketch_axis_handles_follow_authoring_occurrence() {
     for selected in [json!("Y"), json!("y")] {
         let mut h = Harness::new();
-        let owner = h.app.run("component.create", json!({"name":"Owner"})).unwrap();
+        let owner = h.app.run("component.create", json!({"name":"Owner","grounded":false})).unwrap();
         let mut h = make(h, selected);
         h.app.run("occurrence.move", json!({"occurrence":owner["occurrence"],"translate":[100,0,20],"axis":[0,0,1],"angle":"17 deg"})).unwrap();
         let original = axis(&h);

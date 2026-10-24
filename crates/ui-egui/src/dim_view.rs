@@ -155,11 +155,14 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
 
 /// Type-first creation: the picks determine a dimension, so its value takes the keyboard at
 /// once (D, click a line, type). The text follows the pointer; a click pins it, Enter places
-/// it. False when the dimension would only be a driven one: that keeps the place-first flow,
-/// where placing it adds it.
+/// it. Midpoint pairs and dimensions that would only be driven keep the place-first flow:
+/// the pointer chooses the orientation, and a click places the text before entering a value.
 pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos2>) -> Result<bool, String> {
+    // A midpoint pair chooses its orientation and text position before entering a value.
+    // This also permits switching freely between driving and reference spans.
+    let midpoint_pair = entities.len() == 2 && entities.iter().all(|id| id.starts_with("mid:"));
     let (param, expr, draft) = dimension_draft(app, entities, None)?;
-    if draft.driven {
+    if draft.driven || midpoint_pair {
         return Ok(false);
     }
     let live = Some(Live { origin: pointer, moved: false, typed: false });
@@ -572,7 +575,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         }
         let Some(tc) = to(lay.text) else { continue };
         let r = Rect::from_center_size(tc, size);
-        painter.rect_filled(r, 2.0, tk.viewport_top.gamma_multiply(0.85));
+        painter.rect_filled(r, tk.radius_sm / 2, tk.viewport_top.gamma_multiply(0.85));
         painter.galley(r.min + vec2(3.0, 1.0), galley, col);
         if matches!(frame, DimFrame::ArcLength { .. }) {
             // The arc-length mark over the value.
@@ -814,6 +817,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
 fn clear_picks(app: &mut SolveApp) {
     if let Some(tool) = app.tool.as_mut().filter(|t| t.kind == crate::tools::Kind::Dimension) {
         tool.picks.clear();
+        tool.point_picks.clear();
     }
 }
 
@@ -835,6 +839,20 @@ pub fn draft_preview() -> Option<(String, solidcraft_engine::sketch::Constraint,
     })
 }
 
+/// A place-first draft, including a driven dimension, for creation tests.
+#[cfg(test)]
+pub fn placement_dimension_preview(app: &SolveApp) -> Option<solidcraft_engine::sketch::Constraint> {
+    let (id, draft) = placement_preview(app)?;
+    draft
+        .preview
+        .sketch(draft.sketch)?
+        .sketch
+        .constraints
+        .iter()
+        .find(|c| c.param.as_deref() == Some(id.as_str()) || (c.driven && c.id == id))
+        .cloned()
+}
+
 /// Dimensions drawn last frame: (id, text centre on screen), for tests and the control channel.
 pub fn drawn() -> Vec<(String, Pos2)> {
     DRAWN.with(|d| d.borrow().iter().map(|x| (x.id.clone(), x.text.center())).collect())
@@ -854,6 +872,36 @@ mod tests {
         }
     }
 
+    /// Typing `rad` into a new dimension's value lists `radius` although `rad` is itself the
+    /// radians unit; the popup is unarmed, so Down then Enter completes the name and the
+    /// dimension takes it (#3663).
+    #[test]
+    fn a_name_that_extends_a_unit_is_offered_and_completes() {
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("parameters.add", json!({"name":"radius","expression":"10 mm"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[10,10],[40,10]],"infer":false})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.step(&json!({"start":"sketch.dimension"})).unwrap();
+        h.step(&json!({"click":{"sketch":[25,10]}})).unwrap();
+        assert!(editing(), "{:?}", h.app.status);
+        h.step(&json!({"text":"rad"})).unwrap();
+        h.frames(2);
+        assert!(crate::params_dialog::suggestions(&h.ctx, "rad").iter().any(|s| s.text == "radius"));
+        assert_eq!(crate::expression_complete::popup_state(&h.ctx), Some((1, true)), "a unit with no number before it is a prefix: armed");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(editing(), "Enter completed the name, the editor stays open: {:?}", h.app.status);
+        assert_eq!(EDIT.with(|e| e.borrow().as_ref().map(|e| e.expr.clone())), Some("radius".to_string()));
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(!editing(), "{:?}", h.app.status);
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let dim = sk.constraints.iter().find_map(|c| c.param.as_deref()).expect("the dimension was added");
+        assert_eq!(h.app.session.doc.param(dim).map(|p| p.expr.as_str()), Some("radius"));
+        h.step(&json!({"key":"Escape"})).unwrap();
+        cancel();
+    }
+
     #[test]
     fn placement_previews_radial_and_angular_dimensions_and_invalidates_on_document_change() {
         cancel();
@@ -863,7 +911,7 @@ mod tests {
         h.app.run("sketch.line", json!({"points":[[10,10],[20,10]],"infer":false,"connect":false})).unwrap();
         h.app.run("sketch.line", json!({"points":[[10,10],[10,20]],"infer":false,"connect":false})).unwrap();
         h.call("ui.view", json!({"view":"top"}));
-        for (picks, at, angular) in [(vec![[35, 30]], [40, 40], false), (vec![[15, 10], [10, 15]], [18, 18], true)] {
+        for (picks, at, angular) in [(vec![[35, 30]], [40, 40], false), (vec![[13, 10], [10, 13]], [18, 18], true)] {
             h.step(&json!({"start":"sketch.dimension"})).unwrap();
             for pick in picks {
                 h.step(&json!({"click":{"sketch":pick}})).unwrap();

@@ -578,6 +578,7 @@ pub fn read(s: &str) -> Result<Document> {
     validate_body_transfers(&v)?;
     FORMATS.upgrade(&mut v, version, applied.as_deref())?;
     let mut d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
+    check_typed_numbers(&d)?;
     let mut legacy_by_feature = std::collections::BTreeMap::<usize, Vec<usize>>::new();
     for (feature, wire) in legacy_wires {
         legacy_by_feature.entry(feature).or_default().push(wire);
@@ -1044,6 +1045,16 @@ fn check_design_numbers(v: &Value) -> Result<()> {
         Value::Object(m) => m.iter().filter(|(k, _)| k.as_str() != "metadata").try_for_each(|(_, x)| check_numbers(x, 1)),
         v => check_numbers(v, 0),
     }
+}
+
+/// The range check again, on the typed design: an integer such as `9223372036854775808` passes
+/// [`check_numbers`] in the file (ids and counters are integers and may be large), but once it
+/// lands in a coordinate or size it is a float, and floats are written as floats. Integer fields
+/// (ids, counters, indexes) stay integers and are never limited, so the field's type decides
+/// what is checked, not its name.
+fn check_typed_numbers(d: &Document) -> Result<()> {
+    let typed = serde_json::to_value(d).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
+    check_design_numbers(&typed)
 }
 
 /// Every non-integer number in the file is finite and within ±`MAX_REAL` (a damaged or hostile
@@ -2093,6 +2104,38 @@ mod tests {
             let error = read(&json).unwrap_err().to_string();
             assert!(error.contains("damaged design"), "{error}");
         }
+    }
+
+    /// An integer-valued coordinate is range-checked like a float one, while ids and counters
+    /// may still be large integers (solidcraft#5021).
+    #[test]
+    fn integer_valued_coordinates_are_range_checked_and_large_ids_still_load() {
+        let mut sketch = solidcraft_sketch::Sketch::new();
+        sketch.add_point(solidcraft_geom::Vec2::new(40.0, 0.0), None).unwrap();
+        let mut d = Document::new("range");
+        d.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+        let last = |v: &Value| v["features"][0]["sketch"]["points"].as_array().map_or(0, |a| a.len() - 1);
+        for huge in ["9223372036854775808", "4294967295", "2000000000", "-2000000000"] {
+            let json = edited(&d, |v| {
+                let i = last(v);
+                v["features"][0]["sketch"]["points"][i]["pos"][1] = serde_json::from_str(huge).unwrap();
+            });
+            let error = read(&json).unwrap_err().to_string();
+            assert!(error.contains("damaged design") && error.contains("out of range"), "{huge}: {error}");
+        }
+        // In range, an integer-valued coordinate is fine.
+        let json = edited(&d, |v| {
+            let i = last(v);
+            v["features"][0]["sketch"]["points"][i]["pos"][1] = 1_000_000_000u64.into();
+        });
+        assert!(read(&json).is_ok());
+        // Ids and counters are integers and may be past the coordinate limit.
+        let json = edited(&d, |v| {
+            v["features"][0]["id"] = 5_000_000_000u64.into();
+            v["next_id"] = 5_000_000_001u64.into();
+        });
+        let back = read(&json).unwrap();
+        assert_eq!(back.features[0].id, 5_000_000_000);
     }
 
     #[test]

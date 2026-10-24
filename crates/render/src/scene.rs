@@ -79,6 +79,8 @@ pub struct Scene {
     pub clip: Option<(Vec3, f64)>,
     /// The colour the section cap is tinted toward (default: [`SECTION_CAP`]).
     pub cap: Option<Rgb>,
+    /// The section cap without its hatch: plain, in the body's own colour.
+    pub plain_cap: bool,
     /// A surface analysis shading the meshes (zebra, draft, curvature map, ...).
     pub analysis: Option<SceneAnalysis>,
 }

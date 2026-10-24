@@ -30,7 +30,7 @@
     "box_crossing": "#6ee0bb",
     "box_window": "#66ddff",
     "chip": "#1f5278",
-    "construction_geom": "#78b8dc",
+    "construction_geom": "#daaf75",
     "construction_plane": "#b7dcf01c",
     "continuity": [
       "#6ee0bb",
@@ -54,25 +54,25 @@
     "dimension_driven": "#94b2cb",
     "error": "#ff968d",
     "field": "#071d35",
-    "form_accent": "#78c6e8",
+    "form_accent": "#baade8",
     "form_dim": "#94b2cb",
     "form_error": "#ff968d",
     "form_error_fill": "#422d40",
-    "form_fill": "#4386ac",
+    "form_fill": "#d0c5fb",
     "form_ink": "#c3e6f6",
     "form_primary": "#66ddff",
-    "form_soft": "#132f4c",
+    "form_soft": "#203250",
     "form_success": "#6ee0bb",
     "form_success_fill": "#153e47",
-    "form_tab_ink": "#c3e6f6",
+    "form_tab_ink": "#b6a9e4",
     "gizmo": [
       "#ec9e99",
       "#9ddab7",
       "#91c8ff"
     ],
     "glyph_bg": "#0a233e",
-    "glyph_edge": "#e6b3a6",
-    "glyph_text": "#e6b3a6",
+    "glyph_edge": "#ff968d",
+    "glyph_text": "#ff968d",
     "grid": "#214975",
     "grid_major": "#315d89",
     "heading_bg": "#06111e",
@@ -129,10 +129,10 @@
       "#4386ac"
     ],
     "manipulator": "#66ddff",
-    "mesh_accent": "#78c6e8",
-    "mesh_fill": "#4386ac",
-    "mesh_ink": "#c3e6f6",
-    "mesh_soft": "#132f4c",
+    "mesh_accent": "#c7b96a",
+    "mesh_fill": "#decf80",
+    "mesh_ink": "#e7d889",
+    "mesh_soft": "#263845",
     "on_accent": "#07192f",
     "origin_plane": "#b7dcf024",
     "origin_plane_edge": "#a3cce480",
@@ -146,10 +146,10 @@
     "preview_new": "#d2e8f7",
     "preview_sketch": "#6ee0bb",
     "profile_fill": "#c9eaff12",
-    "render_accent": "#78c6e8",
-    "render_fill": "#4386ac",
-    "render_ink": "#c3e6f6",
-    "render_soft": "#132f4c",
+    "render_accent": "#e2a2b9",
+    "render_fill": "#fab8d0",
+    "render_ink": "#e6a6bd",
+    "render_soft": "#26324b",
     "rubber_band": "#66ddff",
     "section_cap": "#e7b374",
     "sel_edge": "#66ddff",
@@ -160,26 +160,26 @@
     "sel_vertex": "#66ddff",
     "selected_bg": "#153c60",
     "selected_ink": "#b6f2ff",
-    "sheet_fill": "#4386ac",
-    "sheet_ink": "#c3e6f6",
-    "sheet_soft": "#132f4c",
+    "sheet_fill": "#a5d9dc",
+    "sheet_ink": "#a4d8db",
+    "sheet_soft": "#1e384f",
     "sketch": "#eaf6ff",
-    "sketch_accent": "#78c6e8",
+    "sketch_accent": "#8bc7a5",
     "sketch_centerline": "#e7b374",
     "sketch_construction": "#78b8dc",
     "sketch_fixed": "#e3f0fa",
-    "sketch_ink": "#c3e6f6",
+    "sketch_ink": "#9ddab7",
     "sketch_locked": "#6ee0bb",
     "sketch_lost": "#ff968d",
     "sketch_point": "#e3f0fa",
     "sketch_point_free": "#66ddff",
     "sketch_projected": "#9cd6ef",
-    "sketch_soft": "#132f4c",
+    "sketch_soft": "#1d384b",
     "subheading_bg": "#091a2d",
-    "surface_accent": "#78c6e8",
-    "surface_fill": "#4386ac",
-    "surface_ink": "#c3e6f6",
-    "surface_soft": "#132f4c",
+    "surface_accent": "#daaf75",
+    "surface_fill": "#f1c58a",
+    "surface_ink": "#f1c58a",
+    "surface_soft": "#273645",
     "tab_on_fill_dark": "#07192f",
     "text": "#e3f0fa",
     "text_dim": "#94b2cb",
@@ -198,5 +198,79 @@
     "warning": "#f0d18c"
   },
   "format": "solidcraft-theme/1",
-  "name": "Blueprint"
+  "name": "Blueprint",
+  "radii": {
+    "radius_sm": 4,
+    "radius_md": 6,
+    "radius_lg": 8,
+    "radius_xl": 10,
+    "control_radius": 6,
+    "sketch_mode_radius": 7
+  },
+  "borders": {
+    "primary": {
+      "width": 1,
+      "color": "#ffffff"
+    },
+    "secondary": {
+      "width": 1,
+      "color": "#e5efff",
+      "pattern": "dotted"
+    },
+    "tertiary": {
+      "width": 1,
+      "color": "#102748"
+    },
+    "container": {
+      "width": 1,
+      "color": "#a8c8ed"
+    },
+    "control": {
+      "width": 1,
+      "color": "#a8c8ed"
+    }
+  },
+  "icon_palette": {
+    "ink": "#07192f",
+    "line": "#e3f0fa",
+    "passive-1": "#b8c2cc",
+    "passive-2": "#8d97a0",
+    "passive-3": "#646d76",
+    "guide": "#94b2cb",
+    "solid": [
+      "#bceefe",
+      "#77defd",
+      "#4fc9ea"
+    ],
+    "surface": [
+      "#fde0b9",
+      "#f1c58a",
+      "#daaf75"
+    ],
+    "mesh": [
+      "#f5e697",
+      "#decf80",
+      "#c7b96a"
+    ],
+    "form": [
+      "#e6e0fe",
+      "#d0c5fb",
+      "#baade8"
+    ],
+    "sketch": [
+      "#b8f5d2",
+      "#a1debb",
+      "#8bc7a5"
+    ],
+    "constraint": [
+      "#ffdbd7",
+      "#fcbbb5",
+      "#ff968d"
+    ],
+    "construction": [
+      "#fde0b9",
+      "#f1c58a",
+      "#daaf75"
+    ]
+  }
 }

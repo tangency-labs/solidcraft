@@ -290,6 +290,7 @@ pub(crate) fn add_in_component(
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.component = top;
         f.body_names = body_names;
+        f.inserted = true;
     }
     let moves: Vec<(usize, u64, Mat)> = plan.bodies.iter().filter_map(|(b, slot, offset)| comps.get(*slot).map(|c| (*b, *c, *offset))).collect();
     put_bodies(s, &names, &moves);

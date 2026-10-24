@@ -101,12 +101,15 @@ fn hostile_native_cad_never_panics() {
 }
 
 /// cadmpeg decodes under its tight `service` caps, with our STEP size limit on the input.
+/// cadmpeg 0.6.3 has no work-unit or collection-item budgets, and its service profile already
+/// admits the 8 million entities a detailed part needed (#1783).
 #[test]
 fn decoding_is_capped() {
     let limits = convert::policy().limits;
     let service = cadmpeg_core::decode::ResourceLimits::service();
     assert_eq!(limits.max_input_bytes, crate::MAX_STEP_BYTES as u64);
-    assert_eq!(cadmpeg_core::decode::ResourceLimits { max_input_bytes: service.max_input_bytes, ..limits }, service);
+    let same = cadmpeg_core::decode::ResourceLimits { max_input_bytes: service.max_input_bytes, ..limits };
+    assert_eq!(same, service);
 }
 
 /// A FreeCAD archive whose Document.xml inflates past the per-entry cap (a ZIP bomb, 300 MB of

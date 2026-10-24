@@ -480,7 +480,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                         let mut item = ui_kit::MenuItem::new(id, label, icon);
                                         item.enabled = enabled.get(index).copied().unwrap_or(false);
                                         item.highlighted = index == app.sbox.index;
-                                        let shortcut = crate::keymap::effective(app, id).unwrap_or_default();
+                                        let shortcut = crate::keymap::display_for(app, id).unwrap_or_default();
                                         item.shortcut = &shortcut;
                                         let path = place.map_or_else(|| id.to_string(), |(tab, panel)| format!("{tab} › {panel}"));
                                         let response = item.search_row(ui, &query, &path, None);

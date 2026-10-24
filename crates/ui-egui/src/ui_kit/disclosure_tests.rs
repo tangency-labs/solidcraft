@@ -16,9 +16,12 @@ fn assert_glyph(
     // at the control's position without the former vertical flip.
     let id = if open { "chevron" } else { "chevron_right" };
     let master = icon_svg::resolve(id).master;
-    let image =
-        icon_svg::render(icon_svg::doc_for(master, px).unwrap(), icon_svg::Look { dark: true, accent: None, vision: crate::theme::vision() }, px)
-            .unwrap();
+    let image = icon_svg::render(
+        icon_svg::doc_for(master, px).unwrap(),
+        icon_svg::Look { dark: true, accent: None, vision: crate::theme::vision(), palette: None },
+        px,
+    )
+    .unwrap();
     let mut expected = ColorImage::from_rgba_premultiplied([px as usize, px as usize], image.data());
     for pixel in &mut expected.pixels {
         *pixel = t.form_dim.gamma_multiply(f32::from(pixel.a()) / 255.0);

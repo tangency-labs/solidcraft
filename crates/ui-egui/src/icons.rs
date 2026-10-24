@@ -1,8 +1,9 @@
 //! Stable UI rendering boundary for the icon artwork. Compiled only at L5.
 //!
 //! Command, menu, browser and timeline icons are the SVG masters in `assets/icons/ui/design/svg`,
-//! rendered by [`crate::icon_svg`]: colours come from `palette.toml` (light and dark, and the
-//! accents), never from the caller. An icon with no master yet draws the placeholder.
+//! rendered by [`crate::icon_svg`]: colours come from the default `palette.toml` roles/accents
+//! and optional active-theme overrides, never arbitrary caller tints. An icon with no master
+//! yet draws the placeholder.
 //! The glyph, marker, navigation and pointer sources below are not command icons.
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -29,7 +30,13 @@ enum Finish {
 
 /// Textures already rasterised: one per (master, look, pixel size, finish).
 #[derive(Clone, Default)]
-struct Cache(Arc<Mutex<HashMap<(&'static str, Look, u32, Finish), TextureHandle>>>);
+struct Cache(Arc<Mutex<CacheEntries>>);
+
+#[derive(Default)]
+struct CacheEntries {
+    palette: Option<icon_svg::Palette>,
+    textures: HashMap<(&'static str, Look, u32, Finish), TextureHandle>,
+}
 
 /// Draw palette-owned icon artwork with an explicit opacity (0 to 1).
 pub fn paint_icon(p: &Painter, r: Rect, name: &str, opacity: f32) {
@@ -72,7 +79,7 @@ enum Mirror {
 fn paint_with_ink(p: &Painter, r: Rect, name: &str, dark: Option<bool>, opacity: f32, ink: Option<Color32>, mirror: Mirror) {
     let ctx = p.ctx();
     let resolved = icon_svg::resolve(name);
-    let look = Look { dark: dark.unwrap_or_else(|| ctx.global_style().visuals.dark_mode), accent: resolved.accent, vision: crate::theme::vision() };
+    let look = Look::themed(dark.unwrap_or_else(|| ctx.global_style().visuals.dark_mode), resolved.accent, crate::theme::vision());
     paint_resolved(p, r, resolved, look, opacity, ink.map_or(Finish::Artwork, Finish::Ink), mirror);
 }
 
@@ -85,7 +92,7 @@ pub fn paint_accented(p: &Painter, r: Rect, name: &str, accent: Option<&str>, op
         Some(name) => icon_svg::accent_index(name).or(resolved.accent),
         None => None,
     };
-    let look = Look { dark: p.ctx().global_style().visuals.dark_mode, accent, vision: crate::theme::vision() };
+    let look = Look::themed(p.ctx().global_style().visuals.dark_mode, accent, crate::theme::vision());
     paint_resolved(p, r, resolved, look, opacity, Finish::Artwork, Mirror::None);
 }
 
@@ -94,7 +101,7 @@ pub fn paint_accented(p: &Painter, r: Rect, name: &str, accent: Option<&str>, op
 /// the constraint ramp without flattening the lid, handle or other details.
 pub(crate) fn paint_danger(p: &Painter, r: Rect, name: &str, opacity: f32) {
     let resolved = icon_svg::resolve(name);
-    let look = Look { dark: p.ctx().global_style().visuals.dark_mode, accent: icon_svg::accent_index("constraint"), vision: crate::theme::vision() };
+    let look = Look::themed(p.ctx().global_style().visuals.dark_mode, icon_svg::accent_index("constraint"), crate::theme::vision());
     paint_resolved(p, r, resolved, look, opacity, Finish::Danger, Mirror::None);
 }
 
@@ -104,7 +111,13 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: icon_svg::Resolved, look: Look
     let side = r.width().min(r.height());
     let px = (side * ppp).round().clamp(8.0, 512.0) as u32;
     let cache = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::new("sc_icon_cache"), Cache::default).clone());
-    let Ok(mut map) = cache.0.lock() else { return };
+    let Ok(mut entries) = cache.0.lock() else { return };
+    let palette = crate::theme::Tokens::get().icon_palette;
+    if entries.palette != palette {
+        entries.textures.clear();
+        entries.palette = palette;
+    }
+    let map = &mut entries.textures;
     let key = (resolved.master, look, px, finish);
     if let std::collections::hash_map::Entry::Vacant(slot) = map.entry(key) {
         let Some(doc) = icon_svg::doc_for(resolved.master, px) else { return };
@@ -135,6 +148,62 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: icon_svg::Resolved, look: Look
 mod tests {
     use super::*;
     use crate::theme::{self, ColorVision};
+
+    #[test]
+    fn theme_icon_palettes_change_uploaded_pixels_and_reuse_only_matching_textures() {
+        use serde_json::json;
+        let ctx = crate::fonts::test_context();
+        let dark = theme::is_dark();
+        ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
+        let mut previous_alpha = None;
+        let mut previous_texture = None;
+        for (stroke, expected) in [
+            ("#994477", Color32::from_rgb(0x99, 0x44, 0x77)),
+            ("#226699", Color32::from_rgb(0x22, 0x66, 0x99)),
+            ("#994477", Color32::from_rgb(0x99, 0x44, 0x77)),
+        ] {
+            let file = crate::theme_files::from_value(&json!({"format":crate::theme_files::FORMAT,
+                "name":"Switch","base":if dark {"dark"} else {"light"},
+                "icon_palette":{"solid":["#c0d0e0","#668899",stroke]}}))
+            .unwrap();
+            let _restore = theme::scoped_tokens(crate::theme_files::resolve(&file));
+            let draw = |ui: &mut egui::Ui| {
+                let r = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(64.0, 64.0));
+                paint_icon(ui.painter(), r, "extrude", 1.0);
+                // A forced-dark monochrome app-bar icon must not evict the theme palette.
+                paint_app_bar(ui.painter(), r.translate(egui::vec2(70.0, 0.0)), "save", 1.0);
+            };
+            let mut out = ctx.run_ui(egui::RawInput::default(), draw);
+            let (id, image) = out
+                .textures_delta
+                .set
+                .iter()
+                .flat_map(|(id, deltas)| deltas.iter().map(move |d| (id, &d.image)))
+                .find_map(|(id, data)| match data {
+                    egui::ImageData::Color(image) if image.size == [64, 64] && image.pixels.contains(&expected) => Some((*id, image)),
+                    _ => None,
+                })
+                .expect("the new theme's actual SVG texture");
+            let alpha: Vec<_> = image.pixels.iter().map(|p| p.a()).collect();
+            if let Some(old) = &previous_alpha {
+                assert_eq!(&alpha, old, "theme colours preserve artwork and cutouts");
+            }
+            if let Some(old) = previous_texture {
+                assert_ne!(id, old, "switching a same-base theme uploads a new texture");
+            }
+            previous_alpha = Some(alpha);
+            previous_texture = Some(id);
+            out.textures_delta.clear();
+            let mut steady = ctx.run_ui(egui::RawInput::default(), draw);
+            assert!(
+                steady.textures_delta.set.values().flatten().all(|d| match &d.image {
+                    egui::ImageData::Color(i) => i.size != [64, 64],
+                }),
+                "unchanged palette reuses cached textures"
+            );
+            steady.textures_delta.clear();
+        }
+    }
 
     #[test]
     fn assistant_pixels_use_the_application_bar_text_token() {
@@ -254,7 +323,7 @@ mod tests {
                         assert!(!output.textures_delta.set.contains_key(&texture));
                     }
                     let image = textures.get(&texture).unwrap();
-                    let look = Look { dark, accent: expected_accent, vision };
+                    let look = Look::themed(dark, expected_accent, vision);
                     for role in ["ink", "passive-2", "passive-3", "active-1", "active-2", "active-3"] {
                         assert!(image.pixels.contains(&icon_svg::role_colour(role, look)), "{accent:?}/{role}, {dark}/{vision:?}");
                     }

@@ -453,6 +453,7 @@ fn build_scene(
         background: Some(p.background),
         clip: section.map(|(o, n)| (n, n.dot(o))),
         cap: Some(p.cap),
+        plain_cap: !s.section_hatch,
         analysis: s.analysis.map(|a| SceneAnalysis { mode: a.mode(), colors: p.analysis }),
         ..Default::default()
     };
@@ -901,6 +902,28 @@ mod tests {
             let cap = px().filter(|p| p[0] as i32 - p[2] as i32 > 20).count();
             assert!(cap > 500, "fov {fov}: cap pixels {cap}");
         }
+    }
+
+    /// The cut faces are hatched (stripes over the body's colour tinted toward the cap colour)
+    /// unless the section's `hatch` is off; then the cut is the body's own solid colour.
+    #[test]
+    fn cpu_picture_section_hatch_is_optional() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        s.execute("appearance.assign", &json!({"bodies": ["Body1"], "color": [40, 160, 90]})).unwrap();
+        let cam = home_camera(&s);
+        let mut picture = |hatch: bool| {
+            let plane = json!({"origin": [0, 15, 0], "normal": [0, -1, 0]});
+            s.execute("inspect.section", &json!({"plane": plane, "hatch": hatch})).unwrap();
+            solidcraft_render::render(&scene(&s, &cam), &cam, 300, 220).rgba
+        };
+        // Pixels in the body's exact colour: only a plain cut has them (lit faces are shaded).
+        let solid = |img: &[u8]| img.chunks(4).filter(|p| p[..3] == [40, 160, 90]).count();
+        let (hatched, plain) = (picture(true), picture(false));
+        assert!(solid(&plain) > 500, "plain cut: {} pixels in the body's colour", solid(&plain));
+        assert_eq!(solid(&hatched), 0, "the hatched cut is tinted");
+        let shades = |img: &[u8]| img.chunks(4).map(|p| [p[0], p[1], p[2]]).collect::<std::collections::BTreeSet<_>>().len();
+        assert!(shades(&hatched) > shades(&plain), "the hatch adds its stripes' shades");
     }
 }
 

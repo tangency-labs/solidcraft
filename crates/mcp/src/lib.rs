@@ -11,6 +11,7 @@
 
 mod backend;
 mod server;
+mod skill_reference;
 mod tools;
 
 pub use backend::{Backend, Headless, Remote};

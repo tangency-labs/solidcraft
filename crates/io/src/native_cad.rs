@@ -9,9 +9,6 @@
 //! This module is the importer seam: the one place cadmpeg is called, returning STEP text plus
 //! warnings. A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
 //! compare with our own STEP reader, without changing that reader.
-//!
-//! cadmpeg is not built for the browser (it compiles the zstd C library); there these formats
-//! return "not supported in the browser yet".
 
 /// File extensions read through cadmpeg (lower case).
 pub const NATIVE_CAD_EXTS: [&str; 2] = ["fcstd", "3dm"];
@@ -23,7 +20,6 @@ pub fn is_native_cad_path(path: &str) -> bool {
 
 /// Restate a FreeCAD or Rhino file (`file` is its name) as STEP text, with the losses
 /// and warnings cadmpeg reported. Panics inside cadmpeg become errors.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn native_cad_to_step(bytes: &[u8], file: &str) -> Result<(String, Vec<String>), String> {
     let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
     solidcraft_kernel::guard("cadmpeg import", || convert::to_step(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
@@ -34,17 +30,10 @@ pub fn native_cad_to_step(bytes: &[u8], file: &str) -> Result<(String, Vec<Strin
     )
 }
 
-/// Restate a FreeCAD or Rhino file as STEP: not available in the browser yet.
-#[cfg(target_arch = "wasm32")]
-pub fn native_cad_to_step(_bytes: &[u8], file: &str) -> Result<(String, Vec<String>), String> {
-    Err(format!("{file}: not supported in the browser yet (FreeCAD and Rhino files open in the desktop app)"))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 mod convert {
     use std::io::Cursor;
 
-    use cadmpeg_core::decode::{DecodeArena, DecodeContext, DecodeMode, DecodePolicy, ResourceLimits, View};
+    use cadmpeg_core::decode::{DecodeArena, DecodeContext, DecodeDepth, DecodeMode, DecodePolicy, ResourceLimits, View};
     use cadmpeg_ir::codec::write::{EncodeInput, target::TargetRequest};
     use cadmpeg_ir::codec::{DecodeFailure, DecodeOptions, DecodeResult};
     use cadmpeg_ir::validate::validate_neutral_for_decode;
@@ -53,7 +42,10 @@ mod convert {
     /// The codecs we accept (cadmpeg codec ids), whatever else the registry recognises.
     const ACCEPTED: [&str; 2] = ["fcstd", "rhino"];
 
-    /// Caps for hostile input: cadmpeg's tight `service` profile, with our STEP size limit.
+    /// Caps for hostile input: cadmpeg's tight `service` profile, with our STEP size limit on
+    /// the input. The service profile already admits a detailed part's 8 million entities:
+    /// cadmpeg 0.6.3 dropped the collection-item budget that refused one at a million (#1783)
+    /// and the work-unit budget that went with it.
     pub(super) fn policy() -> DecodePolicy {
         DecodePolicy {
             mode: DecodeMode::Salvage,
@@ -92,8 +84,9 @@ mod convert {
             return Err(format!("{name}: {format} files are not supported (FreeCAD .FCStd and Rhino .3dm only)"));
         }
 
-        // Decode in memory under the caps.
-        let options = DecodeOptions { container_only: false, policy };
+        // Decode in memory under the caps, as deep as the STEP writer reads: solids and products,
+        // not the design history, which the import does not keep.
+        let options = DecodeOptions { depth: DecodeDepth::Geometry, policy };
         let decoded = codec.decode(&mut Cursor::new(bytes), &options).map_err(|e| match e {
             DecodeFailure::Codec(e) => format!("{name}: could not read this {format} file: {e}"),
             other => format!("{name}: {other}"),
@@ -142,7 +135,6 @@ mod convert {
 
 /// cadmpeg's STEP writer calls a product it has no name for `cadmpeg_model`; name it after the
 /// file instead (as plain STEP text: letters, digits, spaces, `-`, `_` and `.` only).
-#[cfg(not(target_arch = "wasm32"))]
 fn name_unnamed_products(step: String, file: &str) -> String {
     const PLACEHOLDER: &str = "'cadmpeg_model'";
     let stem: String = std::path::Path::new(file)

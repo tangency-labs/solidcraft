@@ -54,3 +54,78 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     assert!(remainder.is_empty());
     assert!(vertices.iter().all(|v| v[27] == 102));
 }
+
+/// Exercise the live GPU scene slots: a fresh headless render always rebuilds and would hide
+/// stale cached geometry. Theme changes must update bytes while retaining the model's mesh.
+#[test]
+fn theme_switches_refresh_cached_viewport_colours_without_remeshing() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.ui.ground_shadow = false;
+    h.app.ui.show_origin = false;
+    h.app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
+    h.app.viewport.gpu = Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false });
+    let body = h.app.session.world_state().bodies[0].name.clone();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: body.clone() }];
+    h.frame();
+    let revision = h.app.session.revision;
+    let mesh = h.app.session.world_state().bodies[0].cached_mesh().unwrap();
+    let mut previous: Option<(u64, u64, u64)> = None;
+    for theme in ["dark", "gruvbox-dark", "blueprint", "dark", "light", "solidcraft-95", "cupertino", "light"] {
+        let result = h.call("ui.prefs", json!({"theme": theme}));
+        assert!(result.get("error").is_none(), "{result}");
+        h.frame();
+        let keys = (h.app.viewport.key, h.app.viewport.sketch_key, h.app.viewport.hl_key);
+        if let Some(old) = previous {
+            assert_ne!(keys.0, old.0, "{theme}: model cache");
+            assert_ne!(keys.1, old.1, "{theme}: sketch cache");
+            assert_ne!(keys.2, old.2, "{theme}: highlight cache");
+        }
+        previous = Some(keys);
+        let scene = h.app.viewport.slot.lock().unwrap().take().expect("new model colours uploaded").merged();
+        let (vertices, remainder) = scene.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>();
+        assert!(remainder.is_empty() && !vertices.is_empty());
+        let colour = super::c4(crate::theme::Tokens::get().body);
+        assert!(vertices.iter().all(|v| v[24..28] == colour), "{theme}: stale body colour");
+        assert_eq!(h.app.session.revision, revision, "theme changes must not edit the design");
+        assert!(std::sync::Arc::ptr_eq(&mesh, &h.app.session.world_state().bodies[0].cached_mesh().unwrap()));
+        h.frame();
+        assert_eq!((h.app.viewport.key, h.app.viewport.sketch_key, h.app.viewport.hl_key), keys);
+        assert!(h.app.viewport.slot.lock().unwrap().is_none(), "an unchanged theme reuses its scene");
+    }
+    h.app.run("appearance.assign", json!({"bodies": [body], "color": "#336699"})).unwrap();
+    for theme in ["gruvbox-dark", "blueprint", "solidcraft-95"] {
+        h.call("ui.prefs", json!({"theme": theme}));
+        h.frame();
+        let scene = h.app.viewport.slot.lock().unwrap().take().unwrap().merged();
+        let (vertices, _) = scene.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>();
+        assert!(!vertices.is_empty());
+        assert!(vertices.iter().all(|v| v[24..28] == [51, 102, 153, 255]), "{theme}: explicit appearance preserved");
+    }
+}
+
+#[test]
+fn cancelling_theme_preview_restores_viewport_palette_keys() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.prefs", json!({"theme": "gruvbox-dark"}));
+    h.frame();
+    let keys = |app: &SolveApp| (super::scene_key(app), super::highlight_geometry_key(app));
+    let before = keys(&h.app);
+    h.call("ui.prefs", json!({"open": "Interface"}));
+    h.call("ui.prefs", json!({"theme": "blueprint"}));
+    h.frame();
+    assert_ne!(keys(&h.app), before);
+    h.call("ui.prefs", json!({"button": "cancel"}));
+    h.frame();
+    assert_eq!(keys(&h.app), before);
+    // Replacing an imported palette keeps its id and base but still changes geometry colours.
+    let custom = |color| json!({"format":"solidcraft-theme/1","name":"Viewport test","base":"dark","colors":{"body":color}});
+    h.call("ui.prefs", json!({"theme_import": custom("#abcdef")}));
+    h.call("ui.prefs", json!({"theme": "viewport-test"}));
+    h.frame();
+    let first = keys(&h.app);
+    h.call("ui.prefs", json!({"theme_import": custom("#fedcba")}));
+    h.frame();
+    assert_ne!(keys(&h.app), first);
+}

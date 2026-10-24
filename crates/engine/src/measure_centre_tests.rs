@@ -75,6 +75,64 @@ fn measure(s: &mut Session, items: Vec<Value>) -> Value {
 }
 
 #[test]
+fn connected_lines_measure_the_corner_regardless_of_endpoint_or_selection_order() {
+    // cos(angle) = -3/5: the corner is 126.869898°, not its 53.130102° supplement.
+    for (end, want) in
+        [([-24.0, 32.0], (-0.6f64).acos().to_degrees()), ([24.0, 32.0], 0.6f64.acos().to_degrees()), ([0.0, 40.0], 90.0), ([-40.0, 0.0], 180.0)]
+    {
+        for reverse_a in [false, true] {
+            for reverse_b in [false, true] {
+                let mut s = Session::default();
+                run(&mut s, "sketch.create", json!({"plane": "XY"}));
+                let mut a = [[0.0, 0.0], [40.0, 0.0]];
+                let mut b = [[0.0, 0.0], end];
+                if reverse_a {
+                    a.reverse();
+                }
+                if reverse_b {
+                    b.reverse();
+                }
+                run(&mut s, "sketch.line", json!({"points": a}));
+                run(&mut s, "sketch.line", json!({"points": b}));
+                let (a, b) = (json!({"type": "sketch_curve", "id": "l1"}), json!({"type": "sketch_curve", "id": "l2"}));
+                for items in [vec![a.clone(), b.clone()], vec![b, a]] {
+                    let r = measure(&mut s, items);
+                    assert!(close(&r["angle_deg"], want, 1e-8), "{reverse_a} {reverse_b}: {r}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn solid_edges_measure_the_obtuse_corner() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[40, 0], [0, 0], [-24, 32]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10}));
+    let a = edge(&s, |p| p.z.abs() < 1e-8 && p.y.abs() < 1e-8);
+    let b = edge(&s, |p| p.z.abs() < 1e-8 && (4.0 * p.x + 3.0 * p.y).abs() < 1e-8);
+    for items in [vec![a.clone(), b.clone()], vec![b, a]] {
+        let r = measure(&mut s, items);
+        assert!(close(&r["angle_deg"], (-0.6f64).acos().to_degrees(), 1e-8), "{r}");
+    }
+}
+
+#[test]
+fn separate_and_duplicate_lines_keep_the_undirected_angle() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 10], [-24, 42]]}));
+    let (a, b) = (json!({"type": "sketch_curve", "id": "l1"}), json!({"type": "sketch_curve", "id": "l2"}));
+    let r = measure(&mut s, vec![a.clone(), b]);
+    assert!(close(&r["angle_deg"], 0.6f64.acos().to_degrees(), 1e-8), "{r}");
+    let r = measure(&mut s, vec![a.clone(), a]);
+    assert!(close(&r["angle_deg"], 0.0, 1e-8), "{r}");
+}
+
+#[test]
 fn two_holes_measure_centre_to_centre_with_min_and_max() {
     let mut s = Session::default();
     plate(&mut s);

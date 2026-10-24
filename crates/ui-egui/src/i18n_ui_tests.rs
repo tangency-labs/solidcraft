@@ -243,8 +243,10 @@ fn finish_exit_label_and_its_button_are_centred() {
     h.app.run("sketch.create", json!({"plane":"xy"})).unwrap();
     h.frames(2);
     let label = scenario::handles("panel:SKETCH:FINISH SKETCH")[0].1;
-    let button = scenario::handles("button:sketch.finish")[0].1;
-    assert!((label.x - button.x).abs() < 1.0, "the only button sits centred over its label: {label:?} {button:?}");
+    // Finish and Cancel Sketch (#3838) sit side by side, the pair centred over the label.
+    let finish = scenario::handles("button:sketch.finish")[0].1;
+    let cancel = scenario::handles("button:sketch.cancel")[0].1;
+    assert!(finish.x < label.x && label.x < cancel.x, "the label is centred under the pair, Finish first: {label:?} {finish:?} {cancel:?}");
 
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
     let mut out =

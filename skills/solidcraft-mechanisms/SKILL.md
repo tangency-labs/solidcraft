@@ -11,7 +11,7 @@ An assembly is components placed by joints. Work the mechanism out as world poin
 Written against SolidCraft `main` after 0.11.1, which counts the degrees of freedom of closed loops, carries motion links through chains made in any order, and answers drives in degrees with `moved` (and a `reason` when nothing could move).
 
 ## Before the first call
-1. Read `reference.md`.
+1. In SolidCraft's own chat or any MCP client, call `skill_reference {"skill":"solidcraft-mechanisms"}`. Elsewhere, read `reference.md`.
 2. **Open:** if the design is not open yet, run `open {path}`. When the server is bridged to the app and the current design is `dirty`, ask before opening anything.
 3. **Map it:** run `inspect_design {"measure":false,"sketches":false}`, then `execute joint.list`. `joint.list` shows `fixed` (the grounded occurrences, always with the root, 0), `dof` per occurrence, `conflicts`, the joints, links and named origins, at about 0.5 KB per joint. `execute motion.list` lists the motion studies.
 4. **Existing design:** take `edit.checkpoint` in its own call before you move bodies into components. `edit.restore_checkpoint {checkpoint}` goes back exactly.
@@ -26,7 +26,7 @@ Written against SolidCraft `main` after 0.11.1, which counts the degrees of free
 1. **Components and grounding.**
    - Bodies made in the root go into components with `component.create {"name":..., "parent":"root", "activate":false}`, then `component.move_bodies {"bodies":[...], "component":...}`.
    - A part that moves in two pieces, such as an actuator's barrel and rod, becomes two components.
-   - Ground the base: `occurrence.ground {"occurrence":"Frame:1", "grounded":true}`. Occurrences are named `<component>:<n>`. Joint commands also take a component name (its first occurrence); `occurrence.ground` does not.
+   - Ground the base: `occurrence.ground {"occurrence":"Frame:1", "grounded":true}`. The design's first top-level part is grounded when it is made; check `joint.list` `fixed`, and unground it (`"grounded":false`) if it is not the base. A grounded part refuses `occurrence.move`. Occurrences are named `<component>:<n>`. Joint commands also take a component name (its first occurrence); `occurrence.ground` does not.
 2. **Open-chain joints in one batch.** Read `occurrence.properties` of each moving occurrence before the batch and after it. If something moved, split the batch to find the joint.
 3. **Each joint that closes a loop, in a call of its own.** Then check `conflicts` in its reply.
 4. **Motion links.**

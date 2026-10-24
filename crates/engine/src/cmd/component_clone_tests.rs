@@ -5,7 +5,7 @@ fn run(s: &mut Session, cmd: &str, p: Value) -> Value {
     s.execute(cmd, &p).unwrap()
 }
 fn component(s: &mut Session, name: &str) -> u64 {
-    run(s, "component.create", json!({"name":name}))["component"].as_u64().unwrap()
+    run(s, "component.create", json!({"name":name,"grounded":false}))["component"].as_u64().unwrap()
 }
 fn volume(s: &mut Session, id: u64) -> f64 {
     run(s, "component.properties", json!({"component":id}))["total"]["volume_mm3"].as_f64().unwrap()
@@ -73,6 +73,25 @@ fn reassigned_body_is_an_independent_base_feature() {
     run(&mut s, "parameters.change", json!({"name":parameter,"expression":"3 mm"}));
     near(volume(&mut s, part), 12.0);
     near(volume(&mut s, new), 8.0);
+}
+
+#[test]
+fn deleting_an_independent_base_keeps_the_copied_component() {
+    let mut s = Session::default();
+    box2(&mut s);
+    let part = component(&mut s, "Part");
+    run(&mut s, "component.move_bodies", json!({"component":part,"bodies":["Cube"]}));
+    let new = copy(&mut s, part)["component"].as_u64().unwrap();
+    let base = s.doc.features.iter().find(|f| f.component == new && matches!(f.kind, solidcraft_doc::FeatureKind::Import { .. })).unwrap();
+    assert!(!base.inserted && !s.doc.feature_owns_component(base));
+    let (base, others) = (base.id, s.doc.features.iter().filter(|f| f.component == new).count() - 1);
+    let (components, occurrences, joints) = (s.doc.components.clone(), s.doc.occurrences.clone(), s.doc.assembly.joints.clone());
+    let reply = run(&mut s, "timeline.delete", json!({"feature": base.to_string()}));
+    assert_eq!(reply["deleted"], json!([base]));
+    assert_eq!(s.doc.components, components);
+    assert_eq!(s.doc.occurrences, occurrences);
+    assert_eq!(s.doc.assembly.joints, joints);
+    assert_eq!(s.doc.features.iter().filter(|f| f.component == new).count(), others);
 }
 
 #[test]

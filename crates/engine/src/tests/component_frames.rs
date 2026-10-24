@@ -14,7 +14,7 @@ use crate::*;
 fn moved_component_picks_and_frames() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Base"}));
-    let c = run(&mut s, "component.create", json!({"name": "Arm"}));
+    let c = run(&mut s, "component.create", json!({"name": "Arm", "grounded": false}));
     let (cid, occ) = (c["component"].as_u64().unwrap(), c["occurrence"].as_u64().unwrap());
     run(&mut s, "solid.box", json!({"corner": [20, 0, 0], "length": 10, "width": 4, "height": 4, "body_name": "ArmBody"}));
     run(&mut s, "component.activate", json!({"component": 0}));
@@ -61,6 +61,7 @@ fn extrude_in_a_moved_component_from_a_root_sketch() {
     run(&mut s, "solid.extrude", json!({"distance": 10, "body_name": "Jaw"}));
     let made = run(&mut s, "component.from_bodies", json!({"bodies": ["Jaw"]}));
     let jaw = made["components"][0]["component"].as_u64().unwrap();
+    run(&mut s, "occurrence.ground", json!({"occurrence": "Jaw:1", "grounded": false}));
     // Turned half a turn about Z: the jaw now lies along +X (x 0..40, y -5..5).
     run(&mut s, "occurrence.move", json!({"occurrence": "Jaw:1", "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0]}));
     run(&mut s, "component.activate", json!({"component": 0}));
@@ -89,6 +90,7 @@ fn extrude_to_a_face_in_a_moved_component() {
     run(&mut s, "solid.extrude", json!({"distance": 10, "body_name": "Jaw"}));
     let made = run(&mut s, "component.from_bodies", json!({"bodies": ["Jaw"]}));
     let jaw = made["components"][0]["component"].as_u64().unwrap();
+    run(&mut s, "occurrence.ground", json!({"occurrence": "Jaw:1", "grounded": false}));
     run(&mut s, "occurrence.move", json!({"occurrence": "Jaw:1", "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0]}));
     // Lifted too, so the jaw's own frame and the world differ in height (x 0..40, z 5..15).
     run(&mut s, "occurrence.move", json!({"occurrence": "Jaw:1", "translate": [0, 0, 5]}));
@@ -113,7 +115,7 @@ fn extrude_to_a_face_in_a_moved_component() {
 /// frame), its occurrence moved by `moves`, then a new component `Post`, active, with a 6 x 6 mm
 /// sketch `Pad` centred at the origin (#928).
 fn ramp_and_pad(s: &mut Session, moves: &[serde_json::Value]) {
-    run(s, "component.create", json!({"name": "Target"}));
+    run(s, "component.create", json!({"name": "Target", "grounded": false}));
     run(s, "sketch.create", json!({"plane": "YZ", "name": "Wedge"}));
     run(s, "sketch.line", json!({"points": [[-20, -30], [20, -30], [20, -10], [-20, -30]]}));
     run(s, "sketch.finish", json!({}));
@@ -202,7 +204,7 @@ fn extrude_to_a_face_in_another_component_follows_it() {
 #[test]
 fn revolve_to_a_cylinder_in_another_moved_component() {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name": "Pin"}));
+    run(&mut s, "component.create", json!({"name": "Pin", "grounded": false}));
     run(&mut s, "solid.cylinder", json!({"base": [0, 14, -5], "radius": 4, "height": 15, "body_name": "PostBody"}));
     run(&mut s, "component.activate", json!({"component": "root"}));
     // From 90° round to 45° about Z: the post's axis is at (14 sin 45°, 14 cos 45°).
@@ -236,7 +238,7 @@ fn revolve_to_a_cylinder_in_another_moved_component() {
 fn extrude_to_names_the_face_it_is_on() {
     for moved in [false, true] {
         let mut s = Session::default();
-        run(&mut s, "component.create", json!({"name": "Other"}));
+        run(&mut s, "component.create", json!({"name": "Other", "grounded": false}));
         let z = if moved { -40.02 + 10.0 } else { -40.02 };
         run(&mut s, "solid.box", json!({"corner": [-50, -50, z], "length": 100, "width": 100, "height": 20, "body_name": "Shim"}));
         run(&mut s, "component.activate", json!({"component": "root"}));
@@ -264,7 +266,7 @@ fn extrude_to_names_the_face_it_is_on() {
 #[test]
 fn extrude_to_a_named_face_keeps_it_when_another_part_touches_it() {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name": "Other"}));
+    run(&mut s, "component.create", json!({"name": "Other", "grounded": false}));
     // A plate whose top face is z = 50, out of the way for now.
     run(&mut s, "solid.box", json!({"corner": [-50, -50, 30], "length": 100, "width": 100, "height": 20, "body_name": "Plate"}));
     run(&mut s, "component.activate", json!({"component": "root"}));

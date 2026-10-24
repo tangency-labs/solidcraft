@@ -26,6 +26,7 @@
 use egui::Pos2;
 use serde_json::{Map, Value, json};
 use solidcraft_engine::Sel;
+use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::{Vec2, Vec3};
 use solidcraft_engine::sketch::PatternAlignment;
@@ -236,7 +237,7 @@ pub fn edit_pattern(app: &mut SolveApp, id: &str) -> bool {
     let Some(pattern) = sk.patterns.iter().find(|p| p.id == id) else { return false };
     let kind = match &pattern.kind {
         SketchPatternKind::Circular { count, angle, alignment, reversed, .. } => Mod::PatternCirc {
-            count: count.to_string(),
+            count: pattern.count_expression.clone().unwrap_or_else(|| count.to_string()),
             angle: format!("{angle} deg"),
             alignment: if *alignment == PatternAlignment::Left { PatternAlignment::Right } else { *alignment },
             reversed: *reversed ^ (*alignment == PatternAlignment::Left),
@@ -330,6 +331,20 @@ fn number(ui: &mut egui::Ui, label: &str, value: &mut String) -> bool {
     ui_kit::row(ui, label, |ui| ui_kit::field(ui, value))
 }
 
+/// A pattern quantity row with step arrows. They keep the count from `min` up to `max`
+/// copies, evaluated against the design's parameters as `whole` evaluates it on OK.
+fn quantity(ui: &mut egui::Ui, doc: &Document, label: &str, value: &mut String, min: i64, max: i64) -> bool {
+    let eval = |text: &str| doc.eval(text.trim(), ValueKind::Unitless).ok();
+    ui_kit::count_row(ui, label, value, &ui_kit::Count { min, max: max.max(min), eval: &eval })
+}
+
+/// How many copies the other direction of a rectangular pattern leaves this one, so that
+/// both together stay within `MAX_COPIES`. All of them while the other count is not a number.
+fn copies_left(doc: &Document, other: &str) -> i64 {
+    let other = doc.eval(other.trim(), ValueKind::Unitless).ok().filter(|v| v.is_finite() && *v >= 1.0).map_or(1.0, f64::round);
+    (MAX_COPIES / other).floor() as i64
+}
+
 fn icons(ui: &mut egui::Ui, label: &str, labels: &[&'static str], icons: &[&'static str], selected: &mut usize) {
     ui_kit::row(ui, label, |ui| {
         let choices: Vec<_> =
@@ -356,7 +371,8 @@ fn pattern_hint(ui: &mut egui::Ui) {
 }
 
 /// Dense rows after the selection inputs; true when an expression field accepts Enter.
-pub fn rows(ui: &mut egui::Ui, k: &mut Mod) -> bool {
+/// `doc` evaluates the pattern counts the step arrows change.
+pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
     let mut enter = false;
     match k {
         Mod::Scale { factor } => enter |= number(ui, "Factor", factor),
@@ -381,12 +397,13 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod) -> bool {
             ui_kit::options(ui, "move_options", &mut [("Create Copy", copy)]);
         }
         Mod::PatternRect { count, spacing, count2, spacing2, alignment: a, alignment2, reversed, reversed2 } => {
-            for (key, title, count, spacing, align, reverse, quantity, distance, align_label) in [
-                ("direction1", "Direction 1", count, spacing, a, reversed, "Quantity", "Spacing", "Alignment"),
-                ("direction2", "Direction 2", count2, spacing2, alignment2, reversed2, "Quantity 2", "Spacing 2", "Alignment 2"),
+            let (left1, left2) = (copies_left(doc, count2), copies_left(doc, count));
+            for (key, title, count, spacing, align, reverse, label, distance, align_label, left) in [
+                ("direction1", "Direction 1", count, spacing, a, reversed, "Quantity", "Spacing", "Alignment", left1),
+                ("direction2", "Direction 2", count2, spacing2, alignment2, reversed2, "Quantity 2", "Spacing 2", "Alignment 2", left2),
             ] {
                 ui_kit::section(ui, key, title, true, |ui| {
-                    enter |= number(ui, quantity, count);
+                    enter |= quantity(ui, doc, label, count, 1, left);
                     enter |= number(ui, distance, spacing);
                     alignment(ui, align_label, align, reverse);
                 });
@@ -394,7 +411,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod) -> bool {
             pattern_hint(ui);
         }
         Mod::PatternCirc { count, angle, alignment: a, reversed } => {
-            enter |= number(ui, "Quantity", count);
+            enter |= quantity(ui, doc, "Quantity", count, 2, MAX_COPIES as i64);
             enter |= number(ui, "Total angle", angle);
             alignment(ui, "Alignment", a, reversed);
             pattern_hint(ui);
@@ -665,7 +682,8 @@ fn picked_point(session: &solidcraft_engine::Session, inputs: &[SelInput], i: us
 }
 
 /// The command a sketch modify dialog makes. Scale, Move, and patterns send evaluated
-/// numbers. Offset and Fillet retain expressions in persistent driving dimensions.
+/// numbers, except circular Quantity, which keeps its authored expression. Offset and Fillet
+/// retain expressions in persistent driving dimensions.
 pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     if inputs.iter().flat_map(|input| &input.items).any(|sel| matches!(sel, Sel::SketchPoint { .. }) && point_id(&app.session, sel).is_none()) {
         return Err("Select points of the sketch being edited".into());
@@ -792,7 +810,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             let a = total_angle(app, "Total angle", angle)?;
             (
                 "sketch.pattern.circular",
-                json!({"entities": entities, "center": center, "count": n, "angle": a, "alignment": alignment, "reversed": reversed}),
+                json!({"entities": entities, "center": center, "count": count.trim().parse::<u64>().map_or_else(|_| json!(count.trim()), |_| json!(n)), "angle": a, "alignment": alignment, "reversed": reversed}),
             )
         }
         Mod::Corner { chamfer: false, size, .. } => {

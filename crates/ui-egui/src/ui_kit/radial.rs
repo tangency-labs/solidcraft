@@ -6,7 +6,6 @@ use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 pub(crate) const RADIAL_RADIUS: f32 = 150.0;
 const INNER: f32 = 56.0;
 const GAP: f32 = 4.0;
-const CORNER: f32 = 9.0;
 const STEPS: usize = 16;
 
 fn unit(a: f32) -> Vec2 {
@@ -14,14 +13,17 @@ fn unit(a: f32) -> Vec2 {
 }
 
 /// Two equally sampled boundaries; their ends are joined by parallel straight sides.
-/// The four joins are circular arcs of radius CORNER, tangent to both adjacent edges.
+/// The four joins are circular arcs of the theme radius, tangent to both adjacent edges.
 fn boundaries(k: usize) -> (Vec<Pos2>, Vec<Pos2>) {
+    // The outer and inner circles are functional geometry; only the corner joins vary.
+    // Bound the radius so the inner arc remains ordered, even for hostile theme data.
+    let corner = f32::from(Tokens::get().radius_xl.saturating_sub(1)).min(12.0);
     let am = -FRAC_PI_2 + (k % 8) as f32 * FRAC_PI_4;
     let a0 = am - FRAC_PI_4 / 2.0;
     let a1 = am + FRAC_PI_4 / 2.0;
-    let d = GAP / 2.0 + CORNER;
-    let ro = RADIAL_RADIUS - CORNER;
-    let ri = INNER + CORNER;
+    let d = GAP / 2.0 + corner;
+    let ro = RADIAL_RADIUS - corner;
+    let ri = INNER + corner;
     let outer0 = a0 + (d / ro).asin();
     let outer1 = a1 - (d / ro).asin();
     let inner0 = a0 + (d / ri).asin();
@@ -36,13 +38,13 @@ fn boundaries(k: usize) -> (Vec<Pos2>, Vec<Pos2>) {
         }
     };
     let mut outer = Vec::new();
-    arc(&mut outer, po0, CORNER, a0 - FRAC_PI_2, outer0);
+    arc(&mut outer, po0, corner, a0 - FRAC_PI_2, outer0);
     arc(&mut outer, Pos2::ZERO, RADIAL_RADIUS, outer0, outer1);
-    arc(&mut outer, po1, CORNER, outer1, a1 + FRAC_PI_2);
+    arc(&mut outer, po1, corner, outer1, a1 + FRAC_PI_2);
     let mut inner = Vec::new();
-    arc(&mut inner, pi0, CORNER, a0 - FRAC_PI_2, inner0 - PI);
+    arc(&mut inner, pi0, corner, a0 - FRAC_PI_2, inner0 - PI);
     arc(&mut inner, Pos2::ZERO, INNER, inner0, inner1);
-    arc(&mut inner, pi1, CORNER, inner1 - PI, a1 + FRAC_PI_2 - TAU);
+    arc(&mut inner, pi1, corner, inner1 - PI, a1 + FRAC_PI_2 - TAU);
     (outer, inner)
 }
 
@@ -189,6 +191,21 @@ mod tests {
                     }
                     assert!(turning > 1.0, "corner must be a curved arc");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn theme_corner_extremes_keep_radial_geometry_finite_and_clicks_in_their_sectors() {
+        for radius in [0, 1, 2, 16, 32] {
+            let _theme = crate::theme::scoped_tokens(Tokens { radius_xl: radius, ..Tokens::dark() });
+            for k in 0..8 {
+                let (outer, inner) = boundaries(k);
+                assert_eq!(outer.len(), inner.len());
+                assert!(outer.iter().chain(&inner).all(|p| p.is_finite()));
+                let a = -FRAC_PI_2 + k as f32 * FRAC_PI_4;
+                assert!(contains(k, unit(a) * 104.0));
+                assert!(!contains(k, unit(a + FRAC_PI_4 / 2.0) * 104.0));
             }
         }
     }
