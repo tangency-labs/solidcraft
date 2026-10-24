@@ -65,6 +65,7 @@ impl NativeMenu {
         {
             add(&file, app.tr_label(label), FileAction::Command(command), None)?;
         }
+        add(&file, app.tr_label("Import FreeCAD Sketches\u{2026}"), FileAction::ImportFreeCadSketches, None)?;
         file.append(&PredefinedMenuItem::separator())?;
         add(&file, app.tr("ui.save"), FileAction::Save, Some(Accelerator::new(Modifiers::META, Code::KeyS)))?;
         add(

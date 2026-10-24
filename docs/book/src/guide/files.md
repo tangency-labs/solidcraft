@@ -6,7 +6,8 @@
 | `.json` (self-contained plain JSON design) | yes | yes |
 | STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
-| FreeCAD `.FCStd`, Rhino `.3dm` | solids, through cadmpeg | |
+| FreeCAD `.FCStd` | solids through cadmpeg; selectively imported editable sketches | Sketch support/origin is not retained |
+| Rhino `.3dm` | solids, through cadmpeg | |
 | 3MF, STL, OBJ | mesh bodies | yes |
 | glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | |
 | 3MF with face tags | as 3MF | each triangle tagged with its B-rep face, exact coordinates |
@@ -17,6 +18,11 @@
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
 inserting one adds them to the current design. Later features build on them. Mesh bodies render,
 measure, move and export, but solid features need B-rep bodies.
+
+To bring editable FreeCAD sketches into an existing design, choose **File > Import FreeCAD Sketches…**.
+SolidCraft lists the Parts, Bodies and Sketches found in the project so you can select the sketches to add.
+Supported geometry, dimensions and constraints are retained on a best-effort basis. Each imported sketch
+is placed on the XY origin plane; reassign its sketch plane as needed.
 
 Every imported file (STEP, IGES, 3MF, STL, OBJ or glTF) comes in as a new component named after the
 file, so its bodies never mix with yours. A STEP assembly keeps its structure: its parts and

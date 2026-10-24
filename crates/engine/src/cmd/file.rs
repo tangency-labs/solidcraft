@@ -29,6 +29,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "INSERT")
         .icon("import")
         .params("path: .3mf, .stl, .obj, .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept)"),
+    CommandSpec::new("file.inspect_freecad_sketches", "Inspect FreeCAD Sketches", inspect_freecad_sketches)
+        .icon("import")
+        .noundo()
+        .params("path: FreeCAD .FCStd file → {project, nodes, sketches}; reads its Part/Body/Sketch hierarchy without changing the design"),
+    CommandSpec::new("file.import_freecad_sketches", "Import FreeCAD Sketches", import_freecad_sketches)
+        .icon("import")
+        .params("path: FreeCAD .FCStd file; sketches?: [source object names] (default: all). Adds ordinary editable sketches on the active component's XY origin plane in one undo step; unsupported geometry and constraints are skipped and reported in warnings"),
     CommandSpec::new("file.save", "Save", save)
         .icon("save")
         .key("Ctrl+S")
@@ -250,6 +257,73 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
         s.refresh();
     }
     Ok(out)
+}
+
+fn freecad_project(path: &str, cmd: &str) -> Result<solidcraft_io::FreeCadProject> {
+    let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str());
+    if !extension.is_some_and(|e| e.eq_ignore_ascii_case("fcstd")) {
+        return Err(bad(cmd, "only FreeCAD .FCStd files contain importable sketches"));
+    }
+    let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_STEP_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    solidcraft_io::read_freecad_sketches(&bytes, path).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn inspect_freecad_sketches(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.inspect_freecad_sketches";
+    let path = path_arg(p, cmd)?;
+    let project = freecad_project(path, cmd)?;
+    Ok(json!({
+        "path": path,
+        "project": project.label,
+        "nodes": project.nodes,
+        "sketches": project.sketches.len(),
+    }))
+}
+
+fn import_freecad_sketches(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.import_freecad_sketches";
+    let path = path_arg(p, cmd)?;
+    let project = freecad_project(path, cmd)?;
+    let requested = p.get("sketches").filter(|v| !v.is_null()).map(|_| string_list(p, "sketches"));
+    if requested.as_ref().is_some_and(Vec::is_empty) {
+        return Err(bad(cmd, "`sketches` must contain at least one source sketch name"));
+    }
+    let selected: std::collections::BTreeSet<String> = requested
+        .as_ref()
+        .map(|names| names.iter().cloned().collect())
+        .unwrap_or_else(|| project.sketches.iter().map(|sketch| sketch.source_name.clone()).collect());
+    if let Some(missing) = selected.iter().find(|name| !project.sketches.iter().any(|sketch| sketch.source_name == **name)) {
+        return Err(bad(cmd, format!("unknown source sketch `{missing}`")));
+    }
+    let mut imported = Vec::new();
+    let mut warnings = Vec::new();
+    for source in project.sketches.into_iter().filter(|sketch| selected.contains(sketch.source_name.as_str())) {
+        let kind = solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() }, sketch: source.sketch };
+        let id = s.doc_mut().add_feature(kind, Some(&source.label))?;
+        let component = s.active_component;
+        if let Some(feature) = s.doc_mut().feature_mut(id) {
+            feature.component = component;
+        }
+        let name = s.doc.feature(id).map(|feature| feature.name.clone()).unwrap_or_else(|| source.label.clone());
+        for warning in &source.warnings {
+            warnings.push(format!("{name}: {warning}"));
+        }
+        imported.push(json!({
+            "source": source.source_name,
+            "path": source.path,
+            "feature": id,
+            "name": name,
+            "geometry": s.doc.sketch(id).map(|sketch| sketch.curves.len()).unwrap_or(0),
+            "constraints": s.doc.sketch(id).map(|sketch| sketch.constraints.len()).unwrap_or(0),
+            "warnings": source.warnings,
+        }));
+    }
+    if imported.is_empty() {
+        return Err(bad(cmd, "the file contains no selected sketches"));
+    }
+    s.active_sketch = None;
+    s.refresh();
+    Ok(json!({"path": path, "project": project.label, "imported": imported, "warnings": warnings}))
 }
 
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
