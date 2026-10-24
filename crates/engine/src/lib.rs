@@ -24,6 +24,7 @@ pub mod sample;
 pub mod schema;
 mod slicer_icon;
 pub mod slicers;
+pub mod snap;
 pub mod timing;
 pub mod view;
 
@@ -1288,6 +1289,8 @@ mod profile_fallback_tests;
 mod profile_refs_tests;
 #[cfg(test)]
 mod sketch_edit_removed_tests;
+#[cfg(test)]
+mod snap_tests;
 #[cfg(test)]
 mod split_face_tests;
 #[cfg(test)]
