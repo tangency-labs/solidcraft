@@ -72,7 +72,10 @@
 //!   ignored, keeping [`SolidError::Unported`]; a failed `SER` returns its error.
 //! - **`HasSeamProblem`** returns [`SeamCheck`]. Its stage-2 face properties branch
 //!   returns `SM_SUCCESS` (`1000`) as its `SmBoolean`, so `has_problem` is `true` there
-//!   whatever the properties found, as upstream (WR-176).
+//!   whatever the properties found, as upstream (WR-176). A seam curve
+//!   `CreateSeamCurve` does not make is [`SolidError::InvalidInput`] before any use,
+//!   where upstream classifies the NULL curve (UB-253, #519); its periodicity flags are
+//!   `bool`, so the port always builds the seam, as upstream does for `TRUE`.
 //! - **Face tolerance.** `SmTol::GetZoneTol3d` of a face-owned surface is the face's
 //!   `GetTolerance`, which the surface layer cannot reach (`topology.face_p2` stubs
 //!   there). `FindVertexSector` passes the face's tolerance explicitly to `IsOnSeam`
