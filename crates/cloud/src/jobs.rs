@@ -15,15 +15,29 @@ static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 pub enum Operation {
     LoadSettings,
     Configure(Settings),
+    /// Verify provider access and prepare a checkout; settings apply separately.
+    Setup(Connection),
     Test(Connection),
     List(Connection),
-    Open { connection: Connection, destination: Destination },
-    Save { connection: Connection, save: Box<StagedSave>, synchronize: bool },
+    Open {
+        connection: Connection,
+        destination: Destination,
+    },
+    Save {
+        connection: Connection,
+        save: Box<StagedSave>,
+        synchronize: bool,
+    },
     Synchronize(Connection),
 }
 
 pub trait Host: Send + Sync {
     fn submit(&self, operation: Operation, git_executable: String) -> Result<Job>;
+
+    /// Secret input is deliberately separate from serializable engine commands and logs.
+    fn store_credential(&self, _id: String, _token: String) -> Result<Job> {
+        Err(Error::Storage("credential storage is unavailable in this host".into()))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

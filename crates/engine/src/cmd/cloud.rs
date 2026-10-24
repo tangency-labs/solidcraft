@@ -10,6 +10,11 @@ use crate::{
 };
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("cloud.connect", "Connect GitHub", connect)
+        .icon("settings")
+        .noundo()
+        .doc_only()
+        .params("connection: proposed connection with opaque credential id; verify provider and prepare checkout asynchronously; configure returned connection separately"),
     CommandSpec::new("cloud.configure", "Configure Cloud Saves", configure)
         .icon("settings")
         .noundo()
@@ -61,6 +66,25 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .params("operation: operation id; pending local saves are retained"),
 ];
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Connect {
+    connection: solidcraft_cloud::Connection,
+}
+
+fn connect(session: &mut Session, params: &Value) -> Result<Value> {
+    let input: Connect = serde_json::from_value(params.clone()).map_err(|e| bad("cloud.connect", e.to_string()))?;
+    input.connection.validate().map_err(error)?;
+    if input.connection.provider != "github" {
+        return Err(bad("cloud.connect", "unsupported setup provider"));
+    }
+    session.poll_cloud()?;
+    if session.cloud_configuring() {
+        return Err(bad("cloud.connect", "connection settings are still being stored or loaded"));
+    }
+    submit(session, Operation::Setup(input.connection))
+}
 
 fn settings(session: &mut Session, params: &Value) -> Result<Value> {
     session.poll_cloud()?;

@@ -17,7 +17,8 @@ impl Host for Worker {
     fn submit(&self, operation: Operation, _: String) -> solidcraft_cloud::Result<Job> {
         let connection = match &operation {
             Operation::LoadSettings | Operation::Configure(_) => String::new(),
-            Operation::Test(c)
+            Operation::Setup(c)
+            | Operation::Test(c)
             | Operation::List(c)
             | Operation::Synchronize(c)
             | Operation::Open { connection: c, .. }

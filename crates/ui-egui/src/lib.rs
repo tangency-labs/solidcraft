@@ -30,6 +30,7 @@ pub mod canvas;
 mod card_resize;
 pub mod cli_link;
 mod cloud;
+mod cloud_setup;
 #[cfg(test)]
 mod colour_tokens_tests;
 #[cfg(test)]
@@ -1747,6 +1748,17 @@ impl SolveApp {
             return Ok(reply);
         }
         let params = if id == "drawing.create" { prefs::new_drawing_params(self, params) } else { params };
+        // Global cloud operations can outlive the tab from which they were started.
+        if matches!(id, "cloud.cancel" | "cloud.status")
+            && let Some(operation) = params.get("operation").and_then(Value::as_str)
+            && !self.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation)
+        {
+            for slot in self.docs.background_mut() {
+                if slot.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation) {
+                    return slot.session.execute(id, &params).map_err(|e| e.to_string());
+                }
+            }
+        }
         let t0 = now_ms();
         let revision = self.session.revision;
         if matches!(id, "render.lights.solo" | "render.lights.mute") {
@@ -2468,6 +2480,10 @@ impl SolveApp {
             if agent_chat::shown(self) {
                 agent_chat::toggle(self);
             }
+            return;
+        }
+        if id == "cloud.connect" {
+            cloud_setup::open(self);
             return;
         }
         if id == "ui.palette" {
@@ -4629,6 +4645,7 @@ impl SolveApp {
         issue_report::CadInput::block(self, ui, &mut report_input);
         semantic_content::begin(self, ui.ctx());
         self.cad_ui(ui, &mut report_input);
+        cloud_setup::show(self, ui.ctx());
         semantic_content::finalize(self, ui.ctx());
         #[cfg(not(target_arch = "wasm32"))]
         if !self.view_windows.is_child() {

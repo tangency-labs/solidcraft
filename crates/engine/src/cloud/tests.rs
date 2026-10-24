@@ -18,7 +18,8 @@ impl Host for MockHost {
                 return Ok(job);
             }
             Operation::LoadSettings => return Err(solidcraft_cloud::Error::Storage("no stored settings".into())),
-            Operation::Test(connection)
+            Operation::Setup(connection)
+            | Operation::Test(connection)
             | Operation::List(connection)
             | Operation::Synchronize(connection)
             | Operation::Open { connection, .. }
