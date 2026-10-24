@@ -20,6 +20,7 @@
 #[cfg(not(target_os = "macos"))]
 #[path = "../../../assets/icons/app/shared/source/app_icon.rs"]
 mod app_icon;
+mod cloud;
 mod control_server;
 mod device_lost;
 #[cfg(target_os = "windows")]
@@ -237,7 +238,13 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
     let open_parent = parent.clone();
     let program_parent = parent.clone();
     let file_parent = parent.clone();
-    Services {
+    let folder_parent = parent.clone();
+    let mut services = Services {
+        cloud_host: None,
+        pick_folder: Some(Box::new(move || {
+            let future = folder_parent.clone().pick_folder();
+            Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
+        })),
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The file type the command reads comes first, so the picker opens on it (#1801).
             let mut dialog = open_parent.clone();
@@ -318,7 +325,9 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
             }
             let _ = command.spawn();
         })),
-    }
+    };
+    cloud::install(&mut services);
+    services
 }
 
 /// HTTPS GET for the update check (docs/updates.md): certificates from the operating system, a
@@ -575,6 +584,9 @@ fn app_viewport() -> Result<egui::ViewportBuilder, eframe::Error> {
 const APP_ID: &str = solidcraft_engine::io::APP_ID;
 
 fn main() -> eframe::Result {
+    if let Some(code) = cloud::askpass() {
+        std::process::exit(code);
+    }
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");

@@ -209,7 +209,8 @@ pub fn nav_preset(id: &str) -> &'static NavPreset {
     NAV_PRESETS.iter().find(|p| p.id == id).unwrap_or(&NAV_PRESETS[0])
 }
 /// Stable control-channel names; presentation labels may be shorter.
-pub const PAGES: [&str; 9] = ["General", "Interface", "Design", "Navigation", "Keyboard Shortcuts", "Sketch", "Graphics", "AI", "Plugins"];
+pub const PAGES: [&str; 10] =
+    ["General", "Interface", "Design", "Navigation", "Keyboard Shortcuts", "Sketch", "Graphics", "AI", "Plugins", "Cloud Saves"];
 pub const PAGE_GENERAL: usize = 0;
 pub const PAGE_INTERFACE: usize = 1;
 pub const PAGE_DESIGN: usize = 2;
@@ -219,7 +220,8 @@ pub const PAGE_SKETCH: usize = 5;
 pub const PAGE_GRAPHICS: usize = 6;
 pub const PAGE_AI: usize = 7;
 pub const PAGE_PLUGINS: usize = 8;
-const WINDOW_PAGES: [ui_kit::WindowPage<SolveApp>; 9] = [
+pub const PAGE_CLOUD: usize = 9;
+const WINDOW_PAGES: [ui_kit::WindowPage<SolveApp>; 10] = [
     ui_kit::WindowPage { icon: "settings", label: "ui.general", group: None, handle: "prefs:page:General", scroll: true, draw: window_page::<0> },
     ui_kit::WindowPage {
         icon: "settings_palette",
@@ -277,6 +279,14 @@ const WINDOW_PAGES: [ui_kit::WindowPage<SolveApp>; 9] = [
         handle: "prefs:page:Plugins",
         scroll: true,
         draw: window_page::<8>,
+    },
+    ui_kit::WindowPage {
+        icon: "settings",
+        label: "cloud.title",
+        group: None,
+        handle: "prefs:page:Cloud Saves",
+        scroll: true,
+        draw: window_page::<9>,
     },
 ];
 
@@ -702,6 +712,8 @@ pub struct PrefsWindow {
     pub section: usize,
     /// Everything as it was when the dialog opened (or at the last Apply), for Cancel.
     snapshot: Option<Snapshot>,
+    /// The ordinary settings at the instant an asynchronous cloud Apply was requested.
+    applying_snapshot: Option<Snapshot>,
     /// The up axis preference the view follows now (applied when it changes, and at startup).
     applied_up: Option<String>,
     /// The search text of the interface font list.
@@ -932,6 +944,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
         default_units_changed(app);
     }
     match page {
+        PAGE_CLOUD => crate::cloud_settings::defaults(app),
         0 => {
             app.autosave_minutes = 5.0;
             set_autosave(app);
@@ -1245,13 +1258,21 @@ fn unfold(ctx: &egui::Context) {
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    if let Some(close_after_apply) = crate::cloud_settings::advance(app) {
+        app.prefs_window.snapshot = Some(app.prefs_window.applying_snapshot.take().unwrap_or_else(|| Snapshot::take(app)));
+        if close_after_apply {
+            close(app, false);
+        }
+    }
     // File › Keyboard Shortcuts and Help › Keyboard Shortcuts open this dialog at that page.
     if app.keymap.open {
         app.keymap.open = false;
         open_at(app, PAGE_SHORTCUTS);
     }
     if !app.prefs_window.open {
+        crate::cloud_settings::cancel(app);
         app.prefs_window.snapshot = None;
+        app.prefs_window.applying_snapshot = None;
         // A question left up when the dialog closed is not still asked when it opens again.
         app.space_mouse.restore_pending = false;
         // Calibration opens from here and ends with it, so the cap moves the view again.
@@ -1308,7 +1329,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     match button {
         Some("defaults") => defaults(app, app.prefs_window.section),
-        Some("apply") => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") => {
+            if apply_cloud(app, false) {
+                app.prefs_window.snapshot = Some(Snapshot::take(app));
+            }
+        }
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
         _ if closed => close(app, true),
@@ -1316,8 +1341,23 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+fn apply_cloud(app: &mut SolveApp, close: bool) -> bool {
+    let pending = crate::cloud_settings::busy(app);
+    let snapshot = Snapshot::take(app);
+    let done = crate::cloud_settings::apply(app, close);
+    if !pending && crate::cloud_settings::busy(app) {
+        app.prefs_window.applying_snapshot = Some(snapshot);
+    }
+    done
+}
+
 /// Close the dialog; `revert`: put back what was there when it opened (Cancel, Esc, ×).
 pub(crate) fn close(app: &mut SolveApp, revert: bool) {
+    if crate::cloud_settings::busy(app) || (!revert && !apply_cloud(app, true)) {
+        return;
+    }
+    crate::cloud_settings::cancel(app);
+    app.prefs_window.applying_snapshot = None;
     if let Some(s) = app.prefs_window.snapshot.take()
         && revert
     {
@@ -1357,6 +1397,7 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         return;
     }
     match app.prefs_window.section {
+        PAGE_CLOUD => crate::cloud_settings::show(app, ui),
         PAGE_GENERAL => general::show(app, ui),
         PAGE_INTERFACE => interface::interface(app, ui, t),
         PAGE_DESIGN => design::show(app, ui),
@@ -1925,7 +1966,11 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     match button.as_ref().and_then(|b| b.as_str()) {
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
-        Some("apply") => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") => {
+            if apply_cloud(app, false) {
+                app.prefs_window.snapshot = Some(Snapshot::take(app));
+            }
+        }
         Some("defaults") => defaults(app, app.prefs_window.section),
         Some(b) => return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults)")),
         None => {}

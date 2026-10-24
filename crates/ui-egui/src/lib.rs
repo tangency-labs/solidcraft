@@ -17,6 +17,10 @@ pub mod browser;
 pub mod browser_canvas;
 pub mod browser_prompts;
 pub mod canvas;
+mod cloud;
+mod cloud_browser;
+mod cloud_settings;
+mod cloud_setup;
 #[cfg(test)]
 mod colour_tokens_tests;
 #[cfg(test)]
@@ -331,6 +335,8 @@ impl Default for UiState {
 /// Host services injected by the app so this crate stays portable.
 #[derive(Default)]
 pub struct Services {
+    /// Asynchronous repository storage, injected by the desktop or browser app.
+    pub cloud_host: Option<std::sync::Arc<dyn solidcraft_cloud::jobs::Host>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
@@ -341,6 +347,8 @@ pub struct Services {
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Choose an existing directory; absent on browser hosts.
+    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
     /// Where the host reads the anti-aliasing preference at start (a small JSON file).
     pub graphics_path: Option<String>,
@@ -382,6 +390,7 @@ pub struct SolveApp {
     /// restores it.
     pub pre_sketch_marker: Option<Option<usize>>,
     pub services: Services,
+    pub(crate) cloud: cloud::State,
     file_picker: Option<file_picker::Pending>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
@@ -534,6 +543,12 @@ pub struct SolveApp {
 
 impl SolveApp {
     pub fn new(mut session: Session, services: Services) -> Self {
+        if let Some(host) = &services.cloud_host {
+            session.set_cloud_host(Some(host.clone()));
+            if let Err(error) = session.execute("cloud.settings", &serde_json::json!({"reload":true})) {
+                log::error!("cloud settings: {error}");
+            }
+        }
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]
@@ -552,6 +567,7 @@ impl SolveApp {
             now: 0.0,
             pre_sketch_marker: None,
             services,
+            cloud: Default::default(),
             file_picker: None,
             saving: None,
             viewport: viewport::ViewportState::default(),
@@ -802,6 +818,22 @@ impl SolveApp {
         if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
         }
+        if (id == "cloud.configure" || (id == "cloud.settings" && params.get("reload").and_then(Value::as_bool) == Some(true)))
+            && self.docs.background_mut().any(|slot| slot.session.cloud_configuring())
+        {
+            return Err("connection settings are still being stored or loaded".into());
+        }
+        // Global cloud operations can outlive the tab from which they were started.
+        if matches!(id, "cloud.cancel" | "cloud.status")
+            && let Some(operation) = params.get("operation").and_then(Value::as_str)
+            && !self.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation)
+        {
+            for slot in self.docs.background_mut() {
+                if slot.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation) {
+                    return slot.session.execute(id, &params).map_err(|e| e.to_string());
+                }
+            }
+        }
         let t0 = now_ms();
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
@@ -874,7 +906,7 @@ impl SolveApp {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
                 }
-                if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                if matches!(id, "file.new" | "doc.open" | "doc.recover" | "cloud.open.finish") {
                     render_workspace::reset_document(self);
                     dim_view::cancel();
                     self.menu.props = None;
@@ -919,6 +951,23 @@ impl SolveApp {
     /// Start a command the way a toolbar click does: interactive tools and dialogs for commands
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if id == "cloud.configure" {
+            cloud_settings::git::open(self);
+            return;
+        }
+        if id == "cloud.settings" {
+            prefs::open_at(self, prefs::PAGE_CLOUD);
+            return;
+        }
+        if id == "cloud.connect" {
+            cloud_setup::open(self);
+            return;
+        }
+        if matches!(id, "cloud.list" | "cloud.save") {
+            cloud_browser::start(self, id);
+            return;
+        }
         if id == "ui.palette" {
             shortcut_box::open(self, None);
             return;
@@ -1563,6 +1612,7 @@ impl SolveApp {
         render_workspace::tick(self, ctx);
         file_load::tick(self, ctx);
         save_job::tick(self, false);
+        cloud::tick(self, ctx);
         if self.saving.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
@@ -1680,6 +1730,10 @@ impl SolveApp {
         let mut report_input = None;
         issue_report::CadInput::block(self, ui, &mut report_input);
         self.cad_ui(ui, &mut report_input);
+        cloud_setup::show(self, ui.ctx());
+        #[cfg(not(target_arch = "wasm32"))]
+        cloud_settings::git::show(self, ui.ctx());
+        cloud_browser::show(self, ui.ctx());
         drop(report_input);
         // After everything else, on every page (the start page too, which returns early from
         // `cad_ui`): the window's edges resize it (#1381).

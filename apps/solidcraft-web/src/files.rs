@@ -162,7 +162,7 @@ fn has(sm: &web_sys::StorageManager, method: &str) -> bool {
     Reflect::get(sm, &method.into()).is_ok_and(|f| f.is_function())
 }
 
-async fn root() -> Result<FileSystemDirectoryHandle, String> {
+pub(crate) async fn root() -> Result<FileSystemDirectoryHandle, String> {
     let sm = storage_manager().filter(|sm| has(sm, "getDirectory")).ok_or("this page has no private file storage (it needs https or localhost)")?;
     let dir = JsFuture::from(sm.get_directory()).await.map_err(err)?;
     dir.dyn_into::<FileSystemDirectoryHandle>().map_err(|_| "this browser has no private file storage (OPFS)".to_string())
@@ -171,6 +171,20 @@ async fn root() -> Result<FileSystemDirectoryHandle, String> {
 pub(crate) async fn read_handle(h: &FileSystemFileHandle) -> Result<Vec<u8>, String> {
     let file: web_sys::File = JsFuture::from(h.get_file()).await.map_err(err)?.dyn_into().map_err(|_| "not a file".to_string())?;
     blob_bytes(&file).await
+}
+
+/// Cloud chunks and metadata must be bounded before allocating an ArrayBuffer.
+pub(crate) async fn read_handle_bounded(h: &FileSystemFileHandle, max: usize) -> Result<Vec<u8>, String> {
+    let file: web_sys::File = JsFuture::from(h.get_file()).await.map_err(err)?.dyn_into().map_err(|_| "not a file".to_string())?;
+    let size = file.size();
+    if !size.is_finite() || size < 0.0 || size > max as f64 {
+        return Err("browser file exceeds its safety limit".into());
+    }
+    let bytes = blob_bytes(&file).await?;
+    if bytes.len() > max {
+        return Err("browser file exceeds its safety limit".into());
+    }
+    Ok(bytes)
 }
 
 async fn blob_bytes(b: &web_sys::Blob) -> Result<Vec<u8>, String> {
@@ -192,11 +206,27 @@ async fn write_file(name: &str, bytes: &[u8]) -> Result<(), String> {
     }
     let dir = root().await?;
     let h = file_handle(&dir, name, true).await?;
+    write_handle(&h, bytes).await
+}
+
+/// Shared OPFS writer. Use owned browser bytes so an asynchronous write cannot retain a
+/// view into growing WASM memory. Closing is part of a successful write.
+pub(crate) async fn write_handle(h: &FileSystemFileHandle, bytes: &[u8]) -> Result<(), String> {
+    let parts = Array::new();
+    parts.push(&Uint8Array::from(bytes));
+    let blob = web_sys::Blob::new_with_u8_array_sequence(&parts).map_err(err)?;
     let w: FileSystemWritableFileStream =
         JsFuture::from(h.create_writable()).await.map_err(err)?.dyn_into().map_err(|_| "no writable stream".to_string())?;
-    JsFuture::from(w.write_with_u8_array(bytes).map_err(err)?).await.map_err(err)?;
-    JsFuture::from(w.close()).await.map_err(err)?;
-    Ok(())
+    let result = async {
+        JsFuture::from(w.write_with_blob(&blob).map_err(err)?).await.map_err(err)?;
+        JsFuture::from(w.close()).await.map_err(err)?;
+        Ok(())
+    }
+    .await;
+    if result.is_err() {
+        let _ = JsFuture::from(w.abort()).await;
+    }
+    result
 }
 
 async fn remove_file(name: &str) -> Result<(), String> {

@@ -9,6 +9,8 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+zeroize = { version = "1", features = ["alloc"] }
+solidcraft-cloud = { workspace = true }
 solidcraft-engine = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }

@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod catalog;
+pub mod cloud;
 mod design;
 mod design_metadata;
 mod dxf;

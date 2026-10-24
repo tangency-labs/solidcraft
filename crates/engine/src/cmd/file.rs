@@ -324,7 +324,7 @@ fn saved_name(name: &str, old_path: Option<&str>, path: &str) -> Option<String> 
 
 /// Rename the design, and the undo and redo states that still carry the old name, so undo
 /// does not bring the default name back and leave the design looking changed.
-fn rename_design(s: &mut Session, from: &str, to: &str) {
+pub(super) fn rename_design(s: &mut Session, from: &str, to: &str) {
     // A prepared world is keyed by the document's Arc. Changing only its name
     // must not make an opted-in save lose warm geometry and display caches.
     // Retag only a cache that already matches: cold or stale placements stay so.
@@ -395,6 +395,8 @@ fn write_bytes(
     // Atomic, keeping the version being replaced as `<file>.bak`.
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, true).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     s.path = Some(path.to_string());
+    s.cloud.binding = None;
+    s.cloud.captures.clear();
     s.mark_saved();
     Ok(json!({"path": path, "bytes": bytes.len(), "name": s.doc.name}))
 }
@@ -413,6 +415,8 @@ impl Session {
             self.doc_mut().links.clone_from(&done.doc.links);
         }
         self.path.clone_from(&done.path);
+        self.cloud.binding.clone_from(&done.cloud.binding);
+        self.cloud.captures.clear();
         self.mark_saved();
     }
 
@@ -467,6 +471,9 @@ fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
 }
 
 fn save(s: &mut Session, p: &Value) -> Result<Value> {
+    if s.cloud_binding().is_some() && str_(p, "path").is_none() {
+        return super::cloud::save(s, &json!({}));
+    }
     let path = match str_(p, "path") {
         Some(x) if !x.trim().is_empty() => x.to_string(),
         _ => s.path.clone().ok_or_else(|| bad("file.save", "the design has no file yet: give a `path`"))?,

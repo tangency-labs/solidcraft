@@ -763,6 +763,7 @@ fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<File
         });
     });
     ui.add_space(t.file_section_gap);
+    crate::cloud_browser::home(app, ui);
     FileView::section(ui, app.tr("home.recent"), t.space_10, |ui| {
         if app.home.recent.is_empty() {
             FileView::detail(ui, app.tr("home.recent_empty"));
