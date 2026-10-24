@@ -3,7 +3,8 @@
 //! SolidCraft reads a few well-known, unprefixed text keys from it (project, part number,
 //! revision, author, organization, description, licence) and keeps every other key exactly as
 //! it was through open, edit and save. Other tools keep their own data under one reverse-DNS
-//! key each (`com.example.tool`), holding an object.
+//! key each (`com.example.tool`), holding an object. A component's part properties follow the
+//! same rules, with one more key: its bill of materials type (`bom_type`).
 //!
 //! Reading never validates: a well-known key holding something other than text is kept as it
 //! is and reads as absent, so a file another tool wrote always opens. Writing through
@@ -17,7 +18,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::{DocError, Result};
+use crate::{BomType, DocError, Result};
 
 pub const PROJECT: &str = "project";
 pub const PART_NUMBER: &str = "part_number";
@@ -30,6 +31,11 @@ pub const LICENSE: &str = "license";
 /// SolidCraft's own keys, in the order the Design Properties dialog shows them. Every other
 /// unprefixed key is reserved for SolidCraft too.
 pub const WELL_KNOWN: [&str; 7] = [PROJECT, PART_NUMBER, REVISION, AUTHOR, ORGANIZATION, DESCRIPTION, LICENSE];
+
+/// A component's [`BomType`] in the bill of materials (one of [`BomType::as_str`]'s words). It is
+/// a part property of a component, not of the design, so the Design Properties dialog (which
+/// shows [`WELL_KNOWN`]) doesn't list it.
+pub const BOM_TYPE: &str = "bom_type";
 
 /// Longest key, in bytes.
 pub const MAX_KEY_BYTES: usize = 128;
@@ -48,9 +54,9 @@ pub const MAX_TOTAL_BYTES: usize = 256 * 1024;
 #[serde(transparent)]
 pub struct Metadata(pub Map<String, Value>);
 
-/// A key SolidCraft reads as a design property.
+/// A key SolidCraft reads as a design or part property.
 pub fn is_well_known(key: &str) -> bool {
-    WELL_KNOWN.contains(&key)
+    WELL_KNOWN.contains(&key) || key == BOM_TYPE
 }
 
 /// A reverse-DNS key another tool keeps its data under: two or more dot-separated labels of
@@ -122,6 +128,11 @@ impl Metadata {
     pub fn license(&self) -> Option<&str> {
         self.text(LICENSE)
     }
+    /// The component's bill of materials type: normal when the key is missing, or holds a word
+    /// this build doesn't know (a newer SolidCraft's type reads as normal and is kept as it is).
+    pub fn bom_type(&self) -> BomType {
+        self.text(BOM_TYPE).and_then(BomType::parse).unwrap_or_default()
+    }
 
     /// The keys SolidCraft doesn't read (other tools' data, or keys a newer SolidCraft added),
     /// kept as they are.
@@ -169,6 +180,11 @@ fn check(key: &str, value: Value) -> Result<Option<Value>> {
                 }
                 if s.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\t' | '\r')) {
                     return Err(invalid(format!("`{key}` has a control character")));
+                }
+                if key == BOM_TYPE && BomType::parse(&s).is_none() {
+                    let shown: String = s.chars().take(64).collect();
+                    let words: Vec<&str> = BomType::ALL.iter().map(|t| t.as_str()).collect();
+                    return Err(invalid(format!("`{BOM_TYPE}` is one of {}, not `{shown}`", words.join(", "))));
                 }
                 Ok(Some(Value::String(s)))
             }
@@ -241,6 +257,29 @@ mod tests {
         assert!(m.set("com.acme.tool", Value::Null).unwrap());
         assert!(!m.set("com.acme.tool", Value::Null).unwrap());
         assert_eq!(m.0.keys().collect::<Vec<_>>(), ["description"]);
+    }
+
+    #[test]
+    fn a_bom_type_takes_one_of_its_words_and_reads_as_normal_otherwise() {
+        let mut m = Metadata::default();
+        assert_eq!(m.bom_type(), BomType::Normal, "no key: normal");
+        for t in BomType::ALL {
+            assert!(m.set(BOM_TYPE, json!(t.as_str())).is_ok(), "{t:?}");
+            assert_eq!(m.bom_type(), t);
+            assert_eq!(BomType::parse(t.as_str()), Some(t));
+        }
+        for bad in [json!("Phantom"), json!("kit"), json!(" phantom"), json!(1), json!({"type": "phantom"}), json!("a\u{7}")] {
+            assert!(m.set(BOM_TYPE, bad.clone()).is_err(), "{bad}");
+        }
+        assert_eq!(m.bom_type(), BomType::Inseparable, "a refused value leaves the old one");
+        assert!(m.set(BOM_TYPE, json!("")).unwrap(), "empty text removes it");
+        assert_eq!(m.bom_type(), BomType::Normal);
+        assert!(m.others().next().is_none(), "SolidCraft reads it, so it isn't another tool's key");
+        // A word a newer build wrote is kept as it is and reads as normal here.
+        let newer: Metadata = serde_json::from_value(json!({"bom_type": "kit"})).unwrap();
+        assert_eq!(newer.bom_type(), BomType::Normal);
+        assert_eq!(newer.get(BOM_TYPE), Some(&json!("kit")));
+        assert!(!WELL_KNOWN.contains(&BOM_TYPE), "the Design Properties dialog doesn't list it");
     }
 
     #[test]

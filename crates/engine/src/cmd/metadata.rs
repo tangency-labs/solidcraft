@@ -5,7 +5,7 @@
 //! agents all go through these commands.
 
 use serde_json::{Map, Value, json};
-use solidcraft_doc::metadata::{MAX_KEYS, WELL_KNOWN};
+use solidcraft_doc::metadata::{BOM_TYPE, MAX_KEYS, WELL_KNOWN};
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
@@ -48,6 +48,9 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let mut next = s.doc.metadata.clone();
     let mut changed = Vec::new();
     for (key, value) in entries {
+        if key == BOM_TYPE {
+            return Err(bad(cmd, "`bom_type` is a component's part property: set it with component.metadata.set"));
+        }
         if next.set(key, value.clone()).map_err(|e| bad(cmd, e.to_string()))? {
             changed.push(key.to_string());
         }

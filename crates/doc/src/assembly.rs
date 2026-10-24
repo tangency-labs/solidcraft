@@ -124,6 +124,48 @@ fn identity() -> Mat {
     IDENTITY
 }
 
+/// How a component counts in the bill of materials of an assembly it is placed in. It is a part
+/// property (the `bom_type` key of the component's [`Metadata`](crate::Metadata)); a component
+/// without one is [`BomType::Normal`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BomType {
+    /// A row of its own; every occurrence adds to its quantity.
+    #[default]
+    Normal,
+    /// No row of its own: what it holds counts as if placed directly in its parent.
+    Phantom,
+    /// Shown, but counted nowhere, and nothing inside it is counted either.
+    Reference,
+    /// Bought: one row, with nothing inside it counted or listed.
+    Purchased,
+    /// Made as one item that doesn't come apart (a welded frame): one row in the assembly it is
+    /// placed in. What it holds is listed in its own bill of materials, and its purchased parts
+    /// also in the parts-only list of the assembly it is placed in.
+    Inseparable,
+}
+
+impl BomType {
+    /// Every type, in the order commands and documentation list them.
+    pub const ALL: [BomType; 5] = [BomType::Normal, BomType::Phantom, BomType::Reference, BomType::Purchased, BomType::Inseparable];
+
+    /// The word the design file and commands use.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BomType::Normal => "normal",
+            BomType::Phantom => "phantom",
+            BomType::Reference => "reference",
+            BomType::Purchased => "purchased",
+            BomType::Inseparable => "inseparable",
+        }
+    }
+
+    /// The type a word names, if it names one.
+    pub fn parse(word: &str) -> Option<BomType> {
+        BomType::ALL.into_iter().find(|t| t.as_str() == word)
+    }
+}
+
 /// How deep and how many placements [`Document::placements`] walks.
 pub const MAX_PLACEMENT_DEPTH: usize = 64;
 pub const MAX_PLACEMENTS: usize = 100_000;
