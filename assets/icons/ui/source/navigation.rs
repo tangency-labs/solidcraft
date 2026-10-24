@@ -47,7 +47,15 @@ pub(crate) fn face_text(painter: &egui::Painter, face: &Facet, ink: Color32, fon
         return;
     }
     let ink = ink.gamma_multiply(opacity);
-    let galley = painter.layout_no_wrap(face.label.clone(), FontId::proportional(font_size), ink);
+    let mut galley = painter.layout_no_wrap(face.label.clone(), FontId::proportional(font_size), ink);
+    // Long names (other languages) shrink to 70% of the face's width along the text.
+    let rows = down * 1.35;
+    let across = r.x * rows.y - r.y * rows.x;
+    let half_width =
+        face.points.iter().map(|p| ((p.x - face.centre.x) * rows.y - (p.y - face.centre.y) * rows.x) / across).fold(0.0, |w, x| x.abs().max(w));
+    if across.abs() > 1e-6 && galley.rect.width() > 1.4 * half_width {
+        galley = painter.layout_no_wrap(face.label.clone(), FontId::proportional(font_size * 1.4 * half_width / galley.rect.width()), ink);
+    }
     let centre = galley.rect.center();
     // Keep atlas-pixel UVs until the frame is complete: another label or widget
     // can grow the atlas after this mesh is created, invalidating early UVs.
