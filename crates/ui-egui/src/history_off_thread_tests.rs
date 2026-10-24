@@ -126,6 +126,65 @@ fn a_design_changed_while_a_move_computes_is_computed_again() {
     assert_eq!(marker(&h), Some(2));
 }
 
+fn sketches_with_later_bodies() -> (Harness, Vec<u64>) {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    let mut sketches = Vec::new();
+    for x in [0, 20] {
+        let sketch = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+        sketches.push(sketch);
+        h.app.run("sketch.line", json!({"points": [[x, 0], [x + 10, 0]]})).unwrap();
+        h.app.finish_sketch();
+        h.app.run("solid.box", json!({"corner": [x, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    }
+    h.app.run("solid.box", json!({"corner": [40, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    (h, sketches)
+}
+
+/// #5435: switching editors must not leave a background restore from the first sketch that
+/// moves the second editor's marker, or make Finish restore to the first sketch's rollback.
+#[test]
+fn switching_sketches_keeps_the_original_marker_with_background_rebuilds() {
+    for original_marker in [None, Some(4)] {
+        for cancel in [false, true] {
+            let (mut h, sketches) = sketches_with_later_bodies();
+            h.app.run("timeline.roll_to", json!({"position": original_marker})).unwrap();
+            let bodies = h.app.session.model.state().bodies.len();
+            h.app.edit_sketch(sketches[0]);
+            h.app.edit_sketch(sketches[1]);
+            until_settled(&mut h);
+            assert_eq!(h.app.session.active_sketch, Some(sketches[1]));
+            assert_eq!(marker(&h), Some(3), "stay at the sketch being edited");
+            if cancel {
+                h.app.cancel_sketch();
+            } else {
+                h.app.finish_sketch();
+            }
+            until_settled(&mut h);
+            assert_eq!(marker(&h), original_marker, "restore the marker from before either edit");
+            assert_eq!(h.app.session.model.state().bodies.len(), bodies, "all later bodies return");
+        }
+    }
+}
+
+#[test]
+fn switching_from_a_sketch_to_a_feature_keeps_the_original_marker_with_background_rebuilds() {
+    let (mut h, sketches) = sketches_with_later_bodies();
+    let feature = h.app.session.doc.features[3].id;
+    let bodies = h.app.session.model.state().bodies.len();
+    h.app.edit_sketch(sketches[0]);
+    h.app.edit_feature(feature);
+    until_settled(&mut h);
+    assert_eq!(h.app.session.active_sketch, None);
+    assert_eq!(marker(&h), Some(3), "stay just before the feature being edited");
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.editing), Some((feature, None)));
+    crate::dialogs::cancel(&mut h.app);
+    until_settled(&mut h);
+    assert_eq!(marker(&h), None);
+    assert_eq!(h.app.session.model.state().bodies.len(), bodies, "all later bodies return");
+}
+
 /// A control request for the app, and where its reply lands.
 fn ask(tx: &std::sync::mpsc::Sender<crate::ControlRequest>, method: &str, params: serde_json::Value) -> std::sync::mpsc::Receiver<serde_json::Value> {
     let (req, reply) = crate::ControlRequest::new(method, params);
