@@ -953,3 +953,47 @@ fn flat_perforations_cull_offscreen_and_subpixel_holes() {
     app.flat_view.cam.distance = fitted_distance * 1000.0;
     assert!(flat_circles(&mut app, &dialog, rect).is_empty());
 }
+
+/// The Flange dialog's Start and End Set-back rows make an edge flange that stops short of the
+/// ends of its edge (#3516): nothing is sent while they are empty, the typed lengths are, the
+/// bend is that much shorter, and Edit Feature brings them back.
+#[test]
+fn flange_set_back_rows_make_a_flange_shorter_than_its_edge() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    // The edge along y = 0, 100 mm long.
+    h.app.session.selection = vec![edge_sel(&h.app.session, Vec3::new(50.0, 0.0, 2.5)).expect("an edge")];
+    h.step(&json!({"start": "sheet.flange"})).unwrap();
+    h.frames(3);
+    let d = h.app.dialog.clone().unwrap();
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert!(c[0].1.get("start_setback").is_none() && c[0].1.get("end_setback").is_none(), "{}", c[0].1);
+    h.step(&json!({"click": {"handle": "dialog:Start Set-back"}})).unwrap();
+    h.step(&json!({"text": "10 mm"})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:End Set-back"}})).unwrap();
+    h.step(&json!({"text": "15 mm"})).unwrap();
+    let d = h.app.dialog.clone().unwrap();
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!((&c[0].1["start_setback"], &c[0].1["end_setback"]), (&json!("10 mm"), &json!("15 mm")), "{}", c[0].1);
+    h.step(&json!({"widget": "OK"})).unwrap();
+    h.frames(3);
+    let flat = h.app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+    let length = flat["bends"][0]["length"].as_f64().unwrap_or(0.0);
+    assert!((length - 75.0).abs() < 1e-6, "100 mm less 10 and 15: {flat}");
+    // The edge along y = 0 runs from x = 0 to x = 100: its start is at x = 0.
+    let bend = &flat["bends"][0];
+    assert!((bend["start"][0].as_f64().unwrap_or(0.0) - 10.0).abs() < 1e-6 && (bend["end"][0].as_f64().unwrap_or(0.0) - 85.0).abs() < 1e-6, "{bend}");
+    let f = h.app.session.doc.features.last().cloned().unwrap();
+    assert!(
+        matches!(&f.kind, FeatureKind::SheetFlange { start_setback: Some(a), end_setback: Some(b), .. } if a == "10 mm" && b == "15 mm"),
+        "{:?}",
+        f.kind
+    );
+    let e = edit_dialog(&h.app, f.id, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Flange { start, end, .. }) if start == "10 mm" && end == "15 mm"));
+    let c = apply_commands(&h.app, &e).unwrap();
+    assert_eq!((&c[0].1["params"]["start_setback"], &c[0].1["params"]["end_setback"]), (&json!("10 mm"), &json!("15 mm")));
+}

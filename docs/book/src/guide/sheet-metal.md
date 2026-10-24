@@ -41,6 +41,23 @@ side of a notch keeps its edge, and a pick there, in the same feature or a later
 a flange of its own. Where the base is still left beside the bend's end at such a cut-out, it
 gets the bend relief as above. An edge that cut-outs have taken whole is refused.
 
+An edge flange can also stop short of the ends of its edge: `start_setback` and `end_setback`
+(lengths, so parameters work) say how far it stops from each end, and the feature's inputs are
+**Start set-back** and **End set-back**, after the corner relief. In the Flange dialog they are
+the two rows under Bend Position, empty for none. The edge runs the way its panel's outline
+does, counter-clockwise seen from the top face, so the start is the end you meet first walking
+along it with the sheet on your left. The set-backs shorten the stretch the cut-outs leave of the
+edge (above), from either end, and apply to every edge of the feature. The base, or the panel of
+the flange it stands on (a tab on a wall's end edge), loses its setback strip only along the
+flange and keeps its edge beyond; there the rule's bend relief is cut beside the bend's end, as
+at an inside corner. The bend is as long as the flange, in the flat pattern and the bend table.
+Set-backs that are negative, or leave nothing of the edge, are refused.
+
+```json
+{"command":"sheet.flange","params":{"edges":[[0,50,2]],"height":40,
+ "start_setback":"10 mm","end_setback":"20 mm"}}
+```
+
 The setback is cut out of the base's outline as it was drawn: where the bend line crosses an
 arc of the outline (a plate with rounded corners, bent inside or in the middle), the arc stays
 an arc and ends there, in the flat pattern and the DXF. A free-form curve (an ellipse, a

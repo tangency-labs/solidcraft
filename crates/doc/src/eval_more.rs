@@ -561,8 +561,26 @@ pub(super) fn sheet_eval(
             st.sheets.push(sh);
             Ok(())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief } => {
+        FeatureKind::SheetFlange {
+            edges,
+            height,
+            angle,
+            radius,
+            position,
+            flip,
+            body,
+            corner_relief_shape,
+            corner_relief,
+            start_setback,
+            end_setback,
+        } => {
             let i = sheet_for(st, body, edges.first().map(|e| e.point.0))?;
+            // How far each flange stops short of the ends of its edge.
+            let setback = |e: &Option<crate::Expr>| match e {
+                Some(x) => val(vals, x, Kind::Length),
+                None => Ok(0.0),
+            };
+            let (start, end) = (setback(start_setback)?, setback(end_setback)?);
             let (h, a) = (val(vals, height, Kind::Length)?, val(vals, angle, Kind::Angle)?);
             // Each edge's own height and angle, else the feature's.
             let mut own = Vec::with_capacity(edges.len());
@@ -606,7 +624,7 @@ pub(super) fn sheet_eval(
             let each: Vec<sheet::EdgeFlange> = sheet_picks(sh, f, &points, warning)
                 .into_iter()
                 .zip(own)
-                .map(|(pick, (height, angle))| sheet::EdgeFlange { pick, height, angle })
+                .map(|(pick, (height, angle))| sheet::EdgeFlange { pick, height, angle, start, end })
                 .collect();
             let n0 = sh.flanges.len();
             let (_, notes) = sh.add_flanges_each(&each, rr, position, *flip, relief)?;

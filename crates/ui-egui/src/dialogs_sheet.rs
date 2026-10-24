@@ -76,6 +76,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// 0 is the rule's) and its size (empty: the rule's).
                 relief: usize,
                 relief_size: String,
+                /// Edge flanges: how far they stop short of the start and of the end of each edge
+                /// (empty: not at all), the command's `start_setback` and `end_setback`.
+                start: String,
+                end: String,
             },
             Unfold {
                 refold: bool,
@@ -149,6 +153,8 @@ fn new_flange(ty: usize) -> Sm {
         own: Vec::new(),
         relief: 0,
         relief_size: String::new(),
+        start: String::new(),
+        end: String::new(),
     }
 }
 
@@ -207,7 +213,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
     let t = Tokens::get();
     let mut enter = false;
     match k {
-        Sm::Flange { ty, height, angle, radius, position, flip, distance, reverse, rule, own, relief, relief_size } => {
+        Sm::Flange { ty, height, angle, radius, position, flip, distance, reverse, rule, own, relief, relief_size, start, end } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
                 ui.label(FLANGE_TYPES.get(*ty).copied().unwrap_or(""));
@@ -217,6 +223,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     enter |= expr_row(ui, "Height", height);
                     enter |= expr_row(ui, "Angle", angle);
                     choice_row(ui, "Bend Position", "sm_pos", position, &POSITION_LABELS);
+                    // A flange shorter than its edge: how far it stops short of each end.
+                    let none = crate::i18n::tr_label("none");
+                    enter |= hint_row(ui, "Start Set-back", start, none);
+                    enter |= hint_row(ui, "End Set-back", end, none);
+                    if edge_point_list(inputs).len() > 1 {
+                        crate::ui_kit::caption(ui, "End Set-back", crate::i18n::tr_label("the same on every edge"));
+                    }
                     crate::ui_kit::section(ui, "flange_advanced", "Advanced", false, |ui| {
                         enter |= hint_row(ui, "Bend Radius", radius, crate::i18n::tr_label("from the rule"));
                         // The relief at the corners these flanges make: the rule's unless set here.
@@ -476,7 +489,7 @@ fn flange_edges(inputs: &[SelInput], own: &[(Vec3, String, String)]) -> Vec<Valu
 pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
     let (cmd, mut p): (&str, Value) = match k {
-        Sm::Flange { height, angle, radius, position, flip, distance, reverse, rule, own, relief, relief_size, .. } => {
+        Sm::Flange { height, angle, radius, position, flip, distance, reverse, rule, own, relief, relief_size, start, end, .. } => {
             let mut p = match flange_type(inputs) {
                 1 => {
                     let mut p = json!({"type": "edge", "edges": flange_edges(inputs, own), "height": height, "angle": angle,
@@ -486,6 +499,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                         p["corner_relief_shape"] = json!(shape);
                     }
                     put(&mut p, &[("corner_relief", relief_size)]);
+                    put(&mut p, &[("start_setback", start), ("end_setback", end)]);
                     p
                 }
                 2 => {
@@ -613,7 +627,19 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (f, curves.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief } => {
+        FeatureKind::SheetFlange {
+            edges,
+            height,
+            angle,
+            radius,
+            position,
+            flip,
+            body,
+            corner_relief_shape,
+            corner_relief,
+            start_setback,
+            end_setback,
+        } => {
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
             }
@@ -647,6 +673,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     .and_then(|name| RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(name.trim())))
                     .map_or(0, |i| i + 1),
                 relief_size: corner_relief.as_deref().map(str::to_string).unwrap_or_default(),
+                start: start_setback.as_deref().map(str::to_string).unwrap_or_default(),
+                end: end_setback.as_deref().map(str::to_string).unwrap_or_default(),
             };
             (f, picked)
         }
