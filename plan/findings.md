@@ -18439,3 +18439,23 @@ probe still hold no objects, so nothing before the post-move check changes.
   `BrepSeamObjects`-made handles against the B-rep's own objects, and the imprinting
   `MergeInterval` still needs a mutable B-rep context. Both hinge on `BrepSeamObjects`
   taking a mutable B-rep (planned separately), so this change stays in the runner.
+
+## Skin annular caps: CreateFacesFromSurface resets its output list (2026-10-24)
+
+Root cause of the two cases in "IsInnerShell on the B-rep with the kept trimmed caches"
+above (primitive.primitive_creation_p2 `skin_concentric_loops`, record[7] cpp 1 rust 2;
+sweep.api_surfaces `skin_primitive_annular`, faces[1] cpp 1 rust 2). It was not region
+nesting. `SmPrimitiveCreation::CreateSkinFromFaces` reuses one `sNewFaces` list for every
+loop layer and appends it to `rNewFaces` after each `CreateFacesFromSurface`, which
+starts with `rNewFaces.ReSet()`. The port's `PrimitiveAccess::surface_faces` appended to
+the caller's list instead, so the second layer (the inner tube) also re-reported the
+outer tube's faces: 6 side faces instead of 4, with the outer tube's 2 listed twice.
+`sm_CreateSkinPrimitiveInternal` takes one iso curve per side face at the skin's start
+and end, so each cap got 3 loops (the outer circle twice). The duplicate circle lies on
+the edge of the first copy (`Point3DClassify` gives `SM_PC_VERTEX` in both faces, and
+the big face is used), and the start cap came out as 2 faces.
+
+- **Fix.** `surface_faces` clears its output first, as `ReSet()`. The side face lists of
+  every other caller were already fresh or unused (the swung-surface loop drops its list).
+- **Result.** Both known-mismatch entries are removed and both cases match C++ bit for
+  bit. sweep.api_surfaces is green (882/882).

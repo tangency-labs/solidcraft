@@ -40,13 +40,3 @@ why = "TurnToNURBS tracker: upstream curves/surfaces notify their own SM_NO_PRE_
 unit = "topology.brep_p3"
 case = "gen0241"
 why = "TurnToNURBS tracker: upstream curves/surfaces notify their own SM_NO_PRE_EDIT/SM_NO_POST_EDIT edits, the port's geometry sends none (plan/findings.md: topology.face_p1 SetSurface SM_NO_CHANGE_GEOMETRY wired (PR #637), 'Still deferred: geometry edit notifications')"
-
-[[mismatch]]
-unit = "primitive.primitive_creation_p2"
-case = "skin_concentric_loops"
-why = "the annular cap between two concentric loops comes out as two faces (record[7] cpp 1, rust 2): region nesting still differs once IsInnerShell runs on the B-rep with the face surfaces' kept trimmed caches (plan/findings.md: IsInnerShell on the B-rep with the kept trimmed caches)"
-
-[[mismatch]]
-unit = "sweep.api_surfaces"
-case = "skin_primitive_annular"
-why = "the annular cap between two concentric loops comes out as two faces (faces[1] cpp 1, rust 2): region nesting still differs once IsInnerShell runs on the B-rep with the face surfaces' kept trimmed caches (plan/findings.md: IsInnerShell on the B-rep with the kept trimmed caches)"

@@ -101,8 +101,10 @@ pub trait PrimitiveAccess: SweepAccess {
         *curve = None;
         Ok(edge)
     }
-    /// Split a surface at G1 discontinuities and append its faces
+    /// Split a surface at G1 discontinuities and return its faces in `faces`
     /// (`SmBrep::CreateFacesFromSurface` with `SM_CT_G1`, as at every call site).
+    /// `faces` is reset first, as upstream's `rNewFaces.ReSet()`, so a caller reusing
+    /// one list across calls gets only this surface's faces.
     fn surface_faces(
         &mut self,
         brep: BrepId,
@@ -110,6 +112,7 @@ pub trait PrimitiveAccess: SweepAccess {
         domain: Extent2d,
         faces: &mut Vec<FaceId>,
     ) -> Result<()> {
+        faces.clear();
         let made = with_face_env(self, brep, |kernel, model, fenv| {
             crate::topology::brep::p8::create_faces_from_surface(
                 kernel,
