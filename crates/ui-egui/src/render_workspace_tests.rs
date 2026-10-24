@@ -672,3 +672,66 @@ fn four_and_five_k_viewports_preview_downscaled_within_the_limits() {
     }
     assert_eq!(preview_size(None, (5120, 2880)), (5120, 2880), "no executor: resolution reports it");
 }
+
+/// The preview draws where the image will be: the largest rectangle of the image's aspect
+/// centred in the viewport (pillarboxed in a wide viewport, letterboxed in a tall one), never
+/// the viewport's own aspect, so what it shows is what Export PNG writes.
+#[test]
+fn preview_frame_has_the_image_aspect_centred_in_the_viewport() {
+    let setup = |width, height| RenderSetup { width, height, ..Default::default() };
+    let wide = egui::Rect::from_min_size(egui::pos2(10.0, 40.0), egui::vec2(1600.0, 900.0));
+    let frame = image_frame(wide, &setup(1024, 768));
+    assert!((frame.width() / frame.height() - 4.0 / 3.0).abs() < 1e-3, "{frame:?} has the image's aspect");
+    assert!((frame.height() - 900.0).abs() < 1e-3 && frame.center() == wide.center(), "{frame:?}: full height, centred");
+    assert!(wide.contains_rect(frame));
+    let tall = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 1200.0));
+    let frame = image_frame(tall, &setup(1920, 1080));
+    assert!((frame.width() / frame.height() - 16.0 / 9.0).abs() < 1e-3, "{frame:?} has the image's aspect");
+    assert!((frame.width() - 600.0).abs() < 1e-3 && frame.center() == tall.center(), "{frame:?}: full width, centred");
+    assert!(tall.contains_rect(frame));
+    // The same aspect as the viewport: the whole viewport.
+    assert_eq!(image_frame(wide, &setup(1600, 900)), wide);
+    // Hostile sizes still give a frame.
+    let frame = image_frame(wide, &setup(0, 0));
+    assert!(frame.is_positive() && frame.is_finite(), "{frame:?}");
+}
+
+/// Fit Product keeps the whole product inside the image, whatever its aspect: a picture
+/// taller than wide moves the camera back so the sides hold it too.
+#[test]
+fn fit_product_keeps_the_product_inside_a_tall_image() {
+    use solidcraft_engine::geom::{Aabb3, Vec3};
+    let bounds = Aabb3 { min: Vec3::new(-30.0, -30.0, -30.0), max: Vec3::new(30.0, 30.0, 30.0) };
+    let radius = bounds.diagonal();
+    for fov in [0.0, std::f64::consts::FRAC_PI_4] {
+        let mut landscape = Camera { fov, ..Default::default() };
+        fit_product(&mut landscape, &bounds, 2.0);
+        let mut plain = Camera { fov, ..Default::default() };
+        plain.fit(&bounds);
+        assert_eq!(landscape, plain, "a wide picture keeps the standard fit");
+        for aspect in [0.5, 0.25] {
+            let mut cam = Camera { fov, ..Default::default() };
+            fit_product(&mut cam, &bounds, aspect);
+            let vp = cam.view_proj(aspect, radius);
+            for corner in [
+                [-1.0, -1.0, -1.0],
+                [1.0, -1.0, -1.0],
+                [-1.0, 1.0, -1.0],
+                [1.0, 1.0, -1.0],
+                [-1.0, -1.0, 1.0],
+                [1.0, -1.0, 1.0],
+                [-1.0, 1.0, 1.0],
+                [1.0, 1.0, 1.0],
+            ] {
+                let p = Vec3::new(corner[0] * 30.0, corner[1] * 30.0, corner[2] * 30.0);
+                let q = vp.apply(p);
+                let (x, y) = (q[0] / q[3], q[1] / q[3]);
+                assert!(x.abs() <= 1.0 && y.abs() <= 1.0, "fov {fov}, aspect {aspect}: corner {p:?} projects to ({x}, {y}), outside the picture");
+            }
+        }
+        // Nothing to fit leaves the camera alone.
+        let mut cam = Camera { fov, distance: 123.0, ..Default::default() };
+        fit_product(&mut cam, &Aabb3::EMPTY, 0.5);
+        assert_eq!(cam.distance, 123.0);
+    }
+}

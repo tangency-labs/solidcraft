@@ -48,6 +48,15 @@ Orbit around, zoom to the cursor, the SpaceMouse, the middle double-click, F6 an
 view or navigation cube all work (nothing is picked or selected here), and
 **Fit Product** frames visible product bodies without including sketches or selection.
 
+The preview draws inside the image's frame: the largest rectangle of the setup's
+width × height aspect centred in the viewport, pillarboxed or letterboxed, with the
+viewport around it as a plain matte. The picture inside the frame is what Export PNG
+writes for the current camera, so framing a shot is done by eye; changing the image
+size moves the frame at once. Camera input maps the pointer through the frame (zoom to
+the cursor lands where it points); the navigator sits in the frame's corner.
+**Fit Product**, and the fit on entering Render, fit the product to the image's aspect:
+a picture taller than wide moves the camera back so the sides hold the product too.
+
 Preview drafts do not make the document dirty until saved. Unknown backend preferences
 and unsupported modes remain saved intent: the strict resolver reports the unsupported
 viewport request. **Use Integrated Preview** is an explicit draft change, never an
