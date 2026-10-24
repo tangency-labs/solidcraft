@@ -1674,7 +1674,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::assistant_bubble(ui, |ui| {
                     if !text.is_empty() {
                         let gone = app.agent_chat.gone.sent.get(&n).map_or(&[][..], Vec::as_slice);
-                        if let Some(sels) = user_text(ui, text, context, gone, &format!("agent_chat:sent:{n}")) {
+                        if let Some(sels) = user_text(ui, &app.session, text, context, gone, &format!("agent_chat:sent:{n}")) {
                             hover_sels = Some(sels);
                         }
                     }
@@ -1690,7 +1690,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let flags = app.agent_chat.gone.sent.get(&n).map(Vec::as_slice).unwrap_or_default();
                     let (rest, rest_flags) = unplaced(context, flags);
                     if let Some(at) = context_chips(ui, &rest, &rest_flags, &format!("agent_chat:sent:{n}")).hovered {
-                        hover_sels = rest.items.get(at).map(|i| i.sels.clone());
+                        hover_sels = rest.items.get(at).map(|i| lit(&app.session, std::iter::once(i)));
                     }
                     files_line(ui, files.iter().map(String::as_str));
                     if copyable {
@@ -1894,7 +1894,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     _ => {
                         if !p.text.is_empty()
-                            && let Some(sels) = user_text(ui, &p.text, &p.context, &[], "agent_chat:queued")
+                            && let Some(sels) = user_text(ui, &app.session, &p.text, &p.context, &[], "agent_chat:queued")
                         {
                             hover_sels = Some(sels);
                         }
@@ -1987,6 +1987,12 @@ fn files_line<'a>(ui: &mut egui::Ui, names: impl Iterator<Item = &'a str>) {
 /// The widest a file chip gets; a narrower chat makes them narrower.
 const CHIP_W: f32 = 170.0;
 
+/// What the entries stand for in the design as it is now, to light up (see `context::current_sels`).
+fn lit<'a>(session: &solidcraft_engine::Session, entries: impl Iterator<Item = &'a context::Entry>) -> Vec<solidcraft_engine::Sel> {
+    let mut names = context::NameCache::new();
+    entries.flat_map(|e| context::current_sels(session, e, &mut names)).collect()
+}
+
 /// The items of a message that are not pills in its text (those of Attach selection, or all of them
 /// when the message has no pills), with their "gone" flags: the chips below the message.
 fn unplaced(context: &Context, gone: &[bool]) -> (Context, Vec<bool>) {
@@ -2005,7 +2011,14 @@ fn unplaced(context: &Context, gone: &[bool]) -> (Context, Vec<bool>) {
 /// A sent message's text, its pills drawn as pills: `gone` flags the context's items that have left
 /// the design, which strikes through the pills they are in. Returns what the pill under the pointer
 /// stands for, to light up in the model.
-fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool], handle: &str) -> Option<Vec<solidcraft_engine::Sel>> {
+fn user_text(
+    ui: &mut egui::Ui,
+    session: &solidcraft_engine::Session,
+    text: &str,
+    context: &Context,
+    gone: &[bool],
+    handle: &str,
+) -> Option<Vec<solidcraft_engine::Sel>> {
     let t = Tokens::get();
     if context.groups.is_empty() {
         ui.add(egui::Label::new(RichText::new(text).color(t.text)).selectable(true).wrap());
@@ -2030,7 +2043,7 @@ fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool], ha
     let pos = ui.input(|i| i.pointer.hover_pos()).filter(|p| response.rect.contains(*p))?;
     let at = galley.cursor_from_pos(pos - response.rect.min).index.0;
     let id = pills::spans(text).into_iter().find(|s| s.start <= at && at < s.end).map(|s| s.id)?;
-    Some(context.items.iter().filter(|i| i.group == id).flat_map(|i| i.sels.iter().cloned()).collect())
+    Some(lit(session, context.items.iter().filter(|i| i.group == id)))
 }
 
 /// The id of the message box.
@@ -2131,7 +2144,7 @@ fn pill_input(app: &mut SolveApp, ui: &mut egui::Ui, focused: bool, hint: &str) 
         let at = out.galley.cursor_from_pos(pos - out.galley_pos).index.0;
         let over = pills::spans(&app.agent_chat.input).into_iter().find(|s| s.start <= at && at < s.end);
         if let Some(pill) = over.and_then(|s| app.agent_chat.pills.iter().find(|p| p.id == s.id)) {
-            app.agent_chat.hover = pill.context.items.iter().flat_map(|i| i.sels.iter().cloned()).collect();
+            app.agent_chat.hover = lit(&app.session, pill.context.items.iter());
             let tip = pill.context.items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>().join("\n");
             return out.response.response.on_hover_text(tip);
         }

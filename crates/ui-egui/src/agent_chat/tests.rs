@@ -4601,3 +4601,35 @@ fn enter_and_the_control_channel_send_the_box_with_its_pills() {
     assert!(matches!(last_user(&h), Some(Item::User { context, .. }) if context.groups.len() == 1), "the control channel sent it");
     assert!(h.app.agent_chat.input.is_empty());
 }
+
+/// A pill (or chip) lights the face it was made for even after an edit has renumbered the faces:
+/// the face is found by its persistent name, not by the number it had; one that has gone lights
+/// nothing.
+#[test]
+fn a_chip_lights_its_face_by_name_after_the_faces_are_renumbered() {
+    use solidcraft_engine::Sel;
+    let (mut app, _script, _ctx) = app_with_script();
+    app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).expect("a box");
+    let faces = app.session.execute("model.faces", &json!({"body": "Body1"})).expect("faces")["faces"].as_array().cloned().unwrap_or_default();
+    let at = |v: &Value| solidcraft_engine::geom::Vec3::new(v[0].as_f64().unwrap_or(0.0), v[1].as_f64().unwrap_or(0.0), v[2].as_f64().unwrap_or(0.0));
+    let pick = |f: &Value| Sel::Face { body: "Body1".into(), index: f["index"].as_u64().unwrap_or(0) as usize, point: at(&f["point"]) };
+    let (first, last) = (faces.first().expect("faces").clone(), faces.last().expect("faces").clone());
+    assert_ne!(first["index"], last["index"]);
+    let sel = pick(&last);
+    let mut entry = context::describe(&mut app.session, std::slice::from_ref(&sel)).items[0].clone();
+    let mut names = context::NameCache::new();
+    assert_eq!(context::current_sels(&app.session, &entry, &mut names), vec![sel.clone()], "untouched: as picked");
+    // An edit renumbers the faces: what was picked as number 5 is now number 0 (the chip keeps the
+    // number it was made with, and its name).
+    let was = entry.sels.clone();
+    entry.sels = vec![pick(&first)];
+    entry.names = context::describe(&mut app.session, &was).items[0].names.clone();
+    let lit = context::current_sels(&app.session, &entry, &mut names);
+    assert!(
+        matches!(lit.as_slice(), [Sel::Face { index, .. }] if Some(*index as u64) == last["index"].as_u64()),
+        "the face of the name is lit, not the one of the stale number: {lit:?}"
+    );
+    // A name no face has any more: gone, lights nothing.
+    entry.names = vec!["F99:nowhere".into()];
+    assert!(context::current_sels(&app.session, &entry, &mut names).is_empty());
+}

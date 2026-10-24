@@ -269,6 +269,43 @@ pub fn is_gone(session: &Session, entry: &Entry, names: &mut NameCache) -> bool 
     }
 }
 
+/// What `entry` stands for in the design as it is now. A face or edge is looked up by its persistent
+/// name: its number shifts when the design is edited, and the number it was picked with would light
+/// another face. What has gone from the design (see [`is_gone`]) stands for nothing.
+pub fn current_sels(session: &Session, entry: &Entry, names: &mut NameCache) -> Vec<Sel> {
+    if is_gone(session, entry, names) {
+        return Vec::new();
+    }
+    let Some(first) = entry.sels.first() else { return Vec::new() };
+    let (body, is_face) = match first {
+        Sel::Face { body, .. } => (body, true),
+        Sel::Edge { body, .. } => (body, false),
+        _ => return entry.sels.clone(),
+    };
+    if entry.names.is_empty() {
+        return entry.sels.clone();
+    }
+    let state = session.world_state();
+    let Some(model_body) = state.body(body) else { return Vec::new() };
+    let (faces, edges) = names
+        .entry(body.clone())
+        .or_insert_with(|| (solidcraft_engine::doc::naming::face_names(model_body).to_vec(), solidcraft_engine::doc::naming::edge_names(model_body)));
+    let current = if is_face { faces } else { edges };
+    // The names go with the pieces in order; the point to look at stays the piece's.
+    let paired = entry.names.len() == entry.sels.len();
+    let mut lit = Vec::new();
+    for (at, name) in entry.names.iter().enumerate() {
+        let Some(index) = current.iter().position(|n| n == name) else { continue };
+        let piece = if paired { entry.sels.get(at) } else { entry.sels.first() };
+        match piece {
+            Some(Sel::Face { point, .. }) => lit.push(Sel::Face { body: body.clone(), index, point: *point }),
+            Some(Sel::Edge { point, .. }) => lit.push(Sel::Edge { body: body.clone(), index, point: *point }),
+            _ => {}
+        }
+    }
+    lit
+}
+
 /// The message as the agent gets it: the text, then what was selected.
 pub fn with_context(text: &str, context: &Context) -> String {
     let block = context.prompt_block();
