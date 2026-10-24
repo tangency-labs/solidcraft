@@ -803,6 +803,78 @@ fn the_remembered_model_is_set_on_the_next_session() {
     assert_eq!(script.calls().len(), 1);
 }
 
+fn provider_models() -> Vec<acp::ModelInfo> {
+    let m = |id: &str, name: &str, description: &str| acp::ModelInfo { id: id.into(), name: name.into(), description: description.into() };
+    vec![
+        m("nous:anthropic/opus", "Nous Portal · anthropic/opus", "Provider: Nous Portal"),
+        m("nous:deepseek/v4", "Nous Portal · deepseek/v4", "Provider: Nous Portal"),
+        m("custom:host:deepseek-v4.1-flash", "deepseek-v4.1-flash", "Provider: Host • current"),
+        m("custom:host:haiku", "haiku", "Provider: Host"),
+        m("plain", "plain", ""),
+    ]
+}
+
+/// Models from several providers: the header picks a provider, then one of its models, listed
+/// without the provider in front. Picking a provider alone leaves the agent's model as it is.
+#[test]
+fn models_from_several_providers_are_picked_by_provider_first() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "hermes".into();
+    script.report(Event::Models { current: "custom:host:deepseek-v4.1-flash".into(), available: provider_models() });
+    poll(&mut app, &ctx);
+    let providers = model_providers(&app);
+    assert_eq!(providers, [("Nous Portal".to_string(), 2), ("Host".to_string(), 2), ("Other".to_string(), 1)]);
+    assert_eq!(shown_provider(&app).as_deref(), Some("Host"), "the current model's provider");
+    let names = |app: &SolveApp| listed_models(app).into_iter().map(|(_, n)| n).collect::<Vec<_>>();
+    assert_eq!(names(&app), ["deepseek-v4.1-flash", "haiku"]);
+    set_model_provider(&mut app, "Nous Portal");
+    set_model_provider(&mut app, "nonsense");
+    assert_eq!(names(&app), ["anthropic/opus", "deepseek/v4"]);
+    assert!(script.calls().is_empty(), "picking a provider sends nothing");
+    assert_eq!(app.agent_chat.model, "custom:host:deepseek-v4.1-flash");
+    let s = status(&app);
+    assert_eq!(s["provider"], "Nous Portal");
+    assert_eq!(s["providers"][0], json!({"name": "Nous Portal", "count": 2}));
+    set_model(&mut app, "nous:deepseek/v4");
+    assert_eq!(script.calls(), ["set_model: nous:deepseek/v4"]);
+    assert_eq!(shown_provider(&app).as_deref(), Some("Nous Portal"));
+    // The agent switching to another provider's model shows that provider.
+    set_model_provider(&mut app, "Host");
+    script.report(Event::Models { current: "plain".into(), available: vec![] });
+    poll(&mut app, &ctx);
+    assert_eq!(shown_provider(&app).as_deref(), Some("Other"));
+    assert_eq!(names(&app), ["plain"]);
+}
+
+/// Models from one provider, or with none named: one list, every model as the agent names it.
+#[test]
+fn models_from_one_provider_keep_one_list() {
+    let (mut app, script, ctx) = app_with_script();
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    assert!(model_providers(&app).is_empty());
+    assert_eq!(shown_provider(&app), None);
+    assert_eq!(listed_models(&app).into_iter().map(|(_, n)| n).collect::<Vec<_>>(), ["FAST", "SMART"]);
+    assert_eq!(status(&app)["provider"], Value::Null);
+    let one = |name: &str| acp::ModelInfo { id: name.into(), name: format!("Only · {name}"), description: String::new() };
+    script.report(Event::Models { current: "a".into(), available: vec![one("a"), one("b")] });
+    poll(&mut app, &ctx);
+    assert!(model_providers(&app).is_empty(), "a single provider needs no provider picker");
+    assert_eq!(listed_models(&app)[0].1, "Only · a");
+}
+
+/// A provider name from the agent is bounded, and `·` or `Provider:` without a name is no provider.
+#[test]
+fn hostile_provider_names_are_bounded() {
+    let m = |name: String, description: &str| acp::ModelInfo { id: "x".into(), name, description: description.into() };
+    let long = "p".repeat(10_000);
+    let (provider, name) = model_provider(&m(format!("{long} · model"), "")).unwrap();
+    assert_eq!((provider.chars().count(), name.as_str()), (128, "model"));
+    assert_eq!(model_provider(&m(" · model".into(), "")), None);
+    assert_eq!(model_provider(&m("model".into(), "Provider:  ")), None);
+    assert_eq!(model_provider(&m("model".into(), "Provider: A\nsecond line • current")).map(|p| p.0), Some("A".into()));
+}
+
 /// An agent that reports no models gets no picker; another agent's choice is not applied to it.
 #[test]
 fn an_agent_without_models_shows_no_picker() {

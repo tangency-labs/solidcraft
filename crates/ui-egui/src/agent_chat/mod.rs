@@ -379,6 +379,9 @@ pub struct AgentChat {
     /// The models the agent offers (none: no picker), and the current one.
     pub models: Vec<acp::ModelInfo>,
     pub model: String,
+    /// The provider picked in the header when the models come from several providers (`None`: the
+    /// current model's). It only narrows the model list; the agent keeps its model until one is chosen.
+    pub model_provider: Option<String>,
     /// An API endpoint's models, kept per endpoint (its base URL) for the next connection.
     models_cache: std::collections::HashMap<String, Vec<acp::ModelInfo>>,
     /// The running API agent's endpoint (empty for other agents).
@@ -596,6 +599,9 @@ impl AgentChat {
                         self.models_cache.insert(self.running_endpoint.clone(), available.clone());
                     }
                     self.models = available;
+                }
+                if current != self.model {
+                    self.model_provider = None;
                 }
                 self.model = current;
             }
@@ -1574,6 +1580,7 @@ pub fn set_model(app: &mut SolveApp, model: &str) {
         b.set_model(model);
     }
     app.agent_chat.model = model.to_string();
+    app.agent_chat.model_provider = None;
     let agent = app.agent_chat.running_id.clone();
     if let Some(a) = app.preferences.agents.iter_mut().find(|a| a.id == agent && a.kind.is_api()) {
         a.model = model.to_string();
@@ -1593,6 +1600,83 @@ fn apply_saved_model(app: &mut SolveApp) {
 /// Whether the model picker shows: only for an agent that reports models.
 pub fn models_shown(app: &SolveApp) -> bool {
     !app.agent_chat.models.is_empty() && app.agent_chat.state().running()
+}
+
+/// Longest provider name kept from an agent's model list.
+const PROVIDER_NAME_CAP: usize = 128;
+
+/// A model's provider and its name at that provider, when the agent says which provider serves it:
+/// a name `Provider · model` (Hermes, OpenCode) or a description `Provider: …` (up to a ` • `).
+/// `None`: the agent names no provider.
+pub fn model_provider(m: &acp::ModelInfo) -> Option<(String, String)> {
+    let cap = |s: &str| s.trim().chars().take(PROVIDER_NAME_CAP).collect::<String>();
+    if let Some((provider, name)) = m.name.split_once(" · ")
+        && !provider.trim().is_empty()
+        && !name.trim().is_empty()
+    {
+        return Some((cap(provider), name.trim().to_string()));
+    }
+    let rest = m.description.strip_prefix("Provider:")?;
+    let provider = rest.lines().next().unwrap_or("").split(" • ").next().unwrap_or("");
+    (!provider.trim().is_empty()).then(|| (cap(provider), m.name.clone()))
+}
+
+/// The provider a model is listed under: its own, or "Other" when the agent names none.
+fn provider_of(m: &acp::ModelInfo) -> String {
+    model_provider(m).map_or_else(|| tr("ui.agent_chat_provider_other").to_string(), |(p, _)| p)
+}
+
+/// The providers of the agent's models in the order the agent lists them, each with how many
+/// models it serves. Empty when the models come from fewer than two providers: one list is enough.
+pub fn model_providers(app: &SolveApp) -> Vec<(String, usize)> {
+    let mut out: Vec<(String, usize)> = Vec::new();
+    for m in &app.agent_chat.models {
+        let p = provider_of(m);
+        match out.iter_mut().find(|(n, _)| *n == p) {
+            Some(e) => e.1 += 1,
+            None => out.push((p, 1)),
+        }
+    }
+    if out.len() < 2 {
+        out.clear();
+    }
+    out
+}
+
+/// The provider whose models the header lists: the one picked while the agent still offers it,
+/// else the current model's, else the first. `None` when there is no provider picker.
+pub fn shown_provider(app: &SolveApp) -> Option<String> {
+    let providers = model_providers(app);
+    if let Some(p) = &app.agent_chat.model_provider
+        && providers.iter().any(|(n, _)| n == p)
+    {
+        return Some(p.clone());
+    }
+    let current = app.agent_chat.models.iter().find(|m| m.id == app.agent_chat.model).map(provider_of);
+    current.filter(|p| providers.iter().any(|(n, _)| n == p)).or_else(|| providers.first().map(|(n, _)| n.clone()))
+}
+
+/// The models the header's model picker lists, each with the name it shows: with a provider picker,
+/// the shown provider's models without the provider in front; otherwise every model as it is named.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub fn listed_models(app: &SolveApp) -> Vec<(acp::ModelInfo, String)> {
+    let Some(provider) = shown_provider(app) else {
+        return app.agent_chat.models.iter().map(|m| (m.clone(), m.name.clone())).collect();
+    };
+    app.agent_chat
+        .models
+        .iter()
+        .filter(|m| provider_of(m) == provider)
+        .map(|m| (m.clone(), model_provider(m).map_or_else(|| m.name.clone(), |(_, n)| n)))
+        .collect()
+}
+
+/// Show one provider's models in the model picker (the header's provider picker). The agent keeps
+/// its model until one of them is chosen. A provider the agent does not offer is ignored.
+pub fn set_model_provider(app: &mut SolveApp, provider: &str) {
+    if model_providers(app).iter().any(|(n, _)| n == provider) {
+        app.agent_chat.model_provider = Some(provider.to_string());
+    }
 }
 
 /// Switch the agent to one of its own modes (the header's mode picker).
@@ -1671,6 +1755,9 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
     }
     if let Some(m) = p.get("mode").and_then(Value::as_str) {
         set_mode(app, m);
+    }
+    if let Some(m) = p.get("provider").and_then(Value::as_str) {
+        set_model_provider(app, m);
     }
     if let Some(m) = p.get("model").and_then(Value::as_str) {
         set_model(app, m);
@@ -1803,6 +1890,8 @@ pub fn status(app: &SolveApp) -> Value {
         "currentAgent": agents::current(app).map(|e| e.id),
         "models": c.models.iter().map(|m| json!({"id": m.id, "name": m.name, "description": m.description})).collect::<Vec<_>>(),
         "model": c.model,
+        "providers": model_providers(app).iter().map(|(name, count)| json!({"name": name, "count": count})).collect::<Vec<_>>(),
+        "provider": shown_provider(app),
         "modes": c.modes.iter().map(|(id, name)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
         "mode": c.mode,
         "open": c.open,
