@@ -3,7 +3,7 @@
 //! built on) and the bodies it works on (by name). The walk (`crate::walk`) is behind
 //! `input_sketches`, `remap_refs` and `remap_bodies`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::walk::Walk;
 use crate::{BodyName, FeatureKind, FeatureName, SketchId};
@@ -93,5 +93,61 @@ impl crate::Document {
                 }
             });
         }
+    }
+}
+
+impl crate::Document {
+    /// The features that affect component `component` (#5854): its own and its sub-components',
+    /// what they are built from, followed back (the sketches, the features they name, the
+    /// features that made the bodies they work on, targets and participants alike), and every
+    /// feature that works on one of its bodies. `None` for the root, where every feature does. A walk of the design's references
+    /// and of which feature made each body in `st` and whose it is: nothing is evaluated.
+    pub fn features_affecting(&self, st: &crate::ModelState, component: u64) -> Option<BTreeSet<u64>> {
+        if component == 0 {
+            return None;
+        }
+        let inside = |mut c: u64| {
+            for _ in 0..64 {
+                if c == component {
+                    return true;
+                }
+                if c == 0 {
+                    return false;
+                }
+                c = self.components.iter().find(|k| k.id == c).map_or(0, |k| k.parent);
+            }
+            false
+        };
+        let made_by: BTreeMap<&str, u64> = st.bodies.iter().map(|b| (b.name.as_str(), b.feature)).collect();
+        let own_bodies: BTreeSet<&str> = st.bodies.iter().filter(|b| inside(self.model_body_component(b))).map(|b| b.name.as_str()).collect();
+        let mut affecting: BTreeSet<u64> = self.features.iter().filter(|f| inside(f.component)).map(|f| f.id).collect();
+        // A feature elsewhere that works on one of the component's bodies (a cut from the root).
+        for f in &self.features {
+            let mut on_own = f.participants.iter().any(|b| own_bodies.contains(b.as_str()));
+            f.kind.walk_refs(&mut |r| {
+                if let Ref::Body(b) = r {
+                    on_own |= own_bodies.contains(b.as_ref());
+                }
+            });
+            if on_own {
+                affecting.insert(f.id);
+            }
+        }
+        let mut queue: Vec<u64> = affecting.iter().copied().collect();
+        while let Some(id) = queue.pop() {
+            let Some(f) = self.feature(id) else { continue };
+            let mut inputs: Vec<u64> = f.participants.iter().filter_map(|b| made_by.get(b.as_str()).copied()).collect();
+            f.kind.walk_refs(&mut |r| match r {
+                Ref::Sketch(s) => inputs.push(s.0),
+                Ref::Feature(n) => inputs.extend(self.find_feature(n.as_ref()).map(|g| g.id)),
+                Ref::Body(b) => inputs.extend(made_by.get(b.as_ref()).copied()),
+            });
+            for i in inputs {
+                if self.feature(i).is_some() && affecting.insert(i) {
+                    queue.push(i);
+                }
+            }
+        }
+        Some(affecting)
     }
 }

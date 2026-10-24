@@ -945,6 +945,8 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
     let mut edit = None;
     let mut marker_y = f32::INFINITY;
 
+    // With a component active, the features that don't affect it are dimmed (#5854).
+    let affecting = app.session.doc.features_affecting(&app.session.model.state(), app.session.active_component);
     for (index, (id, name, icon, suppressed, ty, kind)) in features.iter().enumerate() {
         let group_id = group_for(&groups, *id);
         let mut at_index: Vec<_> = groups.iter().filter(|group| first_indices.get(&group.id).copied().flatten() == Some(index)).collect();
@@ -1018,7 +1020,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
             kind: ty,
             selected,
             hovered: response.hovered() || from_view == Some(*id),
-            dim: rolled,
+            dim: rolled || affecting.as_ref().is_some_and(|a| !a.contains(id)),
             suppressed: *suppressed,
             error: error.is_some(),
             warning: warning.is_some(),

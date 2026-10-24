@@ -972,3 +972,35 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
     assert_eq!(s.visibility.hidden_origin, ["Rail"]);
     assert_eq!(plane_link(&s), "Ledge");
 }
+
+/// #5854: the features that affect an active component are its own, what they are built from
+/// (a construction plane in the root its sketch lies on) and a later cut from the root on its
+/// body; not the other components' features. With the root active, all of them do.
+#[test]
+fn features_affecting_a_component_are_its_own_their_inputs_and_what_works_on_its_bodies() {
+    let mut s = Session::default();
+    let id_of = |s: &Session, name: &str| s.doc.find_feature(name).map(|f| f.id).unwrap();
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 2, "name": "Lift"}));
+    for (name, x) in [("Base", 0), ("Bracket", 20), ("Pin", 40)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        if name == "Bracket" {
+            run(&mut s, "sketch.create", json!({"plane": "Lift", "name": "BracketSketch"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, 0], "p1": [30, 10]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "BracketSketch", "distance": 10, "name": "BracketBlock"}));
+        } else {
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "name": format!("{name}Block")}));
+        }
+    }
+    let bracket = s.doc.components.iter().find(|c| c.name == "Bracket").map(|c| c.id).unwrap();
+    let st = s.model.state();
+    let body = st.bodies.iter().find(|b| s.doc.model_body_component(b) == bracket).map(|b| b.name.clone()).unwrap();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.cylinder", json!({"base": [25, 5, 0], "radius": 2, "height": 20, "operation": "cut", "targets": [body], "name": "Drill"}));
+    let st = s.model.state();
+    let got = s.doc.features_affecting(&st, bracket).unwrap();
+    let want: std::collections::BTreeSet<u64> = ["Lift", "BracketSketch", "BracketBlock", "Drill"].iter().map(|n| id_of(&s, n)).collect();
+    assert_eq!(got, want, "{:?}", got.iter().filter_map(|i| s.doc.feature(*i)).map(|f| &f.name).collect::<Vec<_>>());
+    assert!(s.doc.features_affecting(&st, 0).is_none(), "the root: every feature");
+}
