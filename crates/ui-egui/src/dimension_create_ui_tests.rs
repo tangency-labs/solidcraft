@@ -462,7 +462,7 @@ fn inch_dimension_entry_survives_unit_changes_undo_and_reopen() {
     let before = h.app.session.world_state().sketch(sketch).unwrap().sketch.clone();
     let c = before.constraints.iter().find(|c| c.param.is_some()).unwrap();
     let p = h.app.session.doc.param(c.param.as_deref().unwrap()).unwrap();
-    assert_eq!(crate::dim_view::label(&c.kind, Some(&p.expr), false, "in", 2), "1.2345");
+    assert_eq!(crate::dim_view::label(&c.kind, Some(&p.expr), false, "in", 2), "1.2345 in");
     assert!((c.kind.value().unwrap() - 31.3563).abs() < 1e-6);
     h.app.run("document.units", json!({"units":"mm"})).unwrap();
     assert_eq!(h.app.session.world_state().sketch(sketch).unwrap().sketch, before);
