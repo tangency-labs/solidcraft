@@ -106,6 +106,17 @@ and other Chromium browsers it shows the browser's install prompt, and once Soli
 installed the item is gone. Safari has no such prompt, so the item shows its steps instead:
 Share › Add to Home Screen on iPhone and iPad, File › Add to Dock on a Mac (Safari 17 or later).
 
+### Shift+right-click in Firefox
+
+Firefox always opens its own context menu on Shift+right-click, and a page can't stop it. So in
+Firefox, Shift+right-click on a face opens Firefox's menu instead of selecting the face and
+opening SolidCraft's (on Windows both menus can open), and the Shift+right drags (snap to a view;
+pan and zoom in the Tinkercad and OpenSCAD presets) don't reach SolidCraft. Chrome and Edge pass
+them on. To give them back in Firefox, open `about:config` and set
+`dom.event.contextmenu.shift_suppresses_event` to `false`. It takes effect at once, but for every
+site: pages that block right-click can then no longer be bypassed with Shift. Firefox Sync doesn't
+carry the setting, so set it on each computer.
+
 To build it yourself:
 
 ```sh

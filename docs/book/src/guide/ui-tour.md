@@ -38,6 +38,8 @@
   in the default and Inventor presets. In every preset, Ctrl+left drag (Cmd on macOS) that starts
   on empty space orbits; a Ctrl+click still adds to the selection. Shift+right-drag snaps to the nearest standard or
   diagonal view; Shift does not request snapping when the preset already requires it to orbit.
+  In the web app in Firefox, Shift+right-click opens Firefox's own menu unless you turn that off
+  ([Shift+right-click in Firefox](getting-started.md#shiftright-click-in-firefox)).
 
   Enable **Preferences → Navigation → Free orbit** to rotate the mouse and 3D mouse continuously
   through both poles, preserving roll without axis snapping. It defaults to off for every mouse
