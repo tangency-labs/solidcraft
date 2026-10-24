@@ -39,9 +39,15 @@ enum Op3 : int32_t
     OP_BINORMAL = 2,
     OP_NORMALIZED = 3,
     OP_GET_OR_CREATE = 4,
+    OP_EXPORT_GAPS = 5,
 };
 
 const double ST_NULL_DEREF = -2.0;
+
+struct GapPeek : SmEdgeuse
+{
+    static SmEdgeFaceGap SmEdgeuse::*cached() { return &GapPeek::m_sMaxEdgeFaceGap3d; }
+};
 
 // GetMate/GetRadial/GetUVTrimCurve need the edge's primary edgeuse (loop edgeuses).
 bool has_prim(SmEdgeuse* p)
@@ -90,6 +96,20 @@ int32_t run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     o.push_back(0.0);
     Graph g;
     walk(b.brep, g);
+    if (op == OP_EXPORT_GAPS)
+    {
+        o.push_back((double)g.edgeuses.size());
+        for (SmEdgeuse* eu : g.edgeuses)
+        {
+            const SmEdgeFaceGap& gap = eu->*GapPeek::cached();
+            o.push_back((double)g.find(6, gap.GetEdgeuse()));
+            o.push_back(gap.GetLength());
+            o.push_back(gap.GetEdgeT());
+            o.push_back(gap.GetFaceUV().x);
+            o.push_back(gap.GetFaceUV().y);
+        }
+        return SC_OK;
+    }
     const int64_t selected = rd.idx();
     // A file fixture can change after the validating export. Refuse a stale
     // selector instead of indexing beyond the freshly rebuilt graph. Ordinary
@@ -164,12 +184,9 @@ int32_t run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         SmEdgeuse* mate = p->GetMate();
         SmCurve* uv = nullptr;
         double dist = 0.0, dev = 0.0;
-        // An existing curve reports the cached maximum edge/face gap, whose length the graph
-        // export does not carry (only whether it is set): not compared (plan/findings.md).
-        bool gap_hidden = want_dist && p->GetUVTrimCurve() != nullptr && p->IsMaxEdgeFaceGapInit();
         SmStatus s = p->GetOrCreateUVTrimCurve(uv, want_dist ? &dist : NULL, want_dev ? &dev : NULL, ok_make);
         o.push_back(st(s));
-        o.push_back(want_dist && !gap_hidden ? dist : -2.0);
+        o.push_back(want_dist ? dist : -2.0);
         o.push_back(want_dev ? dev : -2.0);
         o.push_back(uv ? 1.0 : 0.0);
         put_eu_state(o, g, p);
