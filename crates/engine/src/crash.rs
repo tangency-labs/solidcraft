@@ -420,18 +420,31 @@ fn hook(info: &std::panic::PanicHookInfo<'_>) -> bool {
     let sig = signature(&location, &message);
     let recovered = solidcraft_kernel::guarded();
     let in_command = IN_COMMAND.with(Cell::get) > 0;
-    // Already reported (this run or before): count it, nothing else.
-    let repeat = match state.known.lock() {
-        Ok(mut k) => match k.get_mut(&sig) {
-            Some(e) => {
+    let quiet = recovered || in_command;
+    // Already reported (this run or before): count it, nothing else. A panic outside commands
+    // can end the app before `end_session` writes the counts, so its count goes to the report
+    // now, and the journal says it was reported (or the next start reports an unclean exit).
+    let known = state.known.lock().map(|mut k| {
+        k.get_mut(&sig).map(|e| {
+            if quiet {
                 e.0 += 1;
-                true
             }
-            None => false,
-        },
+            e.1.clone()
+        })
+    });
+    let repeat = match known {
+        Ok(Some(id)) => {
+            if !quiet {
+                bump(&state.dir, &id, 1);
+                if let Ok(mut j) = state.journal.try_lock() {
+                    j.record(&json!({ "reported": id }));
+                }
+            }
+            true
+        }
+        Ok(None) => false,
         Err(_) => true,
     };
-    let quiet = recovered || in_command;
     if repeat {
         IN_HOOK.store(false, Ordering::SeqCst);
         return quiet;

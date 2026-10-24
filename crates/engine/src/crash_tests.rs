@@ -64,13 +64,17 @@ fn child() {
         "kernel" => {
             assert!(s.execute("diagnostics.crash_test", &json!({"mode": "kernel"})).is_err());
         }
-        "thread" => {
+        // `thread_dies`: the panic ends the app, as one on the window's thread does.
+        "thread" | "thread_dies" => {
             let r = std::thread::Builder::new()
                 .name("worker".into())
                 .spawn(|| std::panic::panic_any(String::from("worker thread 42 failed")))
                 .unwrap()
                 .join();
             assert!(r.is_err());
+            if mode == "thread_dies" {
+                std::process::abort();
+            }
         }
         "abort" => {
             let _ = s.execute("diagnostics.crash_test", &json!({"mode": "abort"}));
@@ -163,6 +167,21 @@ fn a_panic_outside_commands_is_reported() {
     // What the journal knew: a new design and the box.
     assert_eq!(v["base"], "new");
     assert_eq!(v["recent_commands"][0]["command"], "solid.box");
+    let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
+fn a_known_panic_that_ends_the_app_is_counted_not_reported_again_as_an_unclean_exit() {
+    let d = fresh_dir("repeat");
+    assert!(run_child(&d, "thread").1);
+    assert!(!run_child(&d, "thread_dies").1, "the child aborted");
+    assert!(run_child(&d, "none").1);
+    let (s, _) = only_report(&d);
+    assert_eq!(s.kind, "panic");
+    assert_eq!(s.count, 2);
+    // A repeat the app survives is counted once, though it then ends cleanly.
+    assert!(run_child(&d, "thread").1);
+    assert_eq!(only_report(&d).0.count, 3);
     let _ = fs::remove_dir_all(&d);
 }
 
