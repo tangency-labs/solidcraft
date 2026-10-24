@@ -1089,6 +1089,10 @@ pub(crate) fn pivot_under(app: &SolveApp, proj: &crate::viewport::Proj, at: Pos2
             _ => {}
         }
     }
+    // Over empty space: the middle of the bodies in view, not of everything shown (#2616).
+    if let Some(c) = crate::viewport::in_view_centre(app, proj) {
+        return c;
+    }
     let b = crate::viewport::view_bounds(app);
     if b.is_empty() { app.cam.target } else { b.center() }
 }
