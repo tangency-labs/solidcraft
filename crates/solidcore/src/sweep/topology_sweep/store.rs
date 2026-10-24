@@ -502,6 +502,9 @@ impl<'a> SweepStore<'a> {
             if let Some(s) = &mut b.face_mut(f)?.surface {
                 s.set_owner(Some(self.identities.object(namespace, EntityRef::Face(f))));
             }
+            // the owned surface carries its face's tolerance, as wherever a face gets its
+            // surface (`SmFace::GetTolerance` through `SmSurface::GetFace`)
+            b.sync_face_surface_tolerance(f)?;
         }
         let entities = std::iter::once(EntityRef::Brep(id))
             .chain(b.regions().ids().map(EntityRef::Region))
@@ -1626,6 +1629,25 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+    }
+
+    #[test]
+    fn inserted_breps_record_face_tolerances_on_their_surfaces() {
+        use crate::surface::plane::Plane;
+        use crate::surface::surface::Surface;
+        let mut raw = Brep::new_with_infinite_region().unwrap();
+        let shell = raw.add_shell().unwrap();
+        let face = raw.add_face(shell).unwrap();
+        let record = raw.face_mut(face).unwrap();
+        record.surface = Some(Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z)));
+        record.tolerance = 2.5e-4;
+        let mut store = SweepStore::owned();
+        let c = store.insert_kernel(Kernel::default()).unwrap();
+        let b = store.insert_brep(c, raw).unwrap();
+        let brep = store.brep(b).unwrap();
+        let surface = brep.face(face).unwrap().surface.as_ref().unwrap();
+        // the store owns the surface under the face: SmSurface::GetFace()->GetTolerance()
+        assert_eq!(surface.face_zone_tol_3d().unwrap(), Some(2.5e-4));
     }
 
     #[test]
