@@ -764,9 +764,9 @@ fn main() -> eframe::Result {
                 let scene_samples = scene_samples(info.backend, u32::from(samples), &supported);
                 eprintln!("SolidCraft graphics: {:?}, MSAA {scene_samples}x (requested {}x)", rs.adapter.get_info().backend, samples);
                 solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
-                app.set_wgpu_split(rs, depth_bits, STENCIL_BITS, scene_samples);
+                let scene_samples = app.set_wgpu_split(rs, depth_bits, STENCIL_BITS, scene_samples);
                 app.msaa_supported = supported;
-                app.msaa_compatibility = compatibility;
+                app.msaa_compatibility |= compatibility;
                 app.preferences.msaa = u32::from(samples);
                 solidcraft_ui_egui::gpu::install_picture_renderer(rs);
                 // The graphics driver is loaded now; it may have put its own exception filter

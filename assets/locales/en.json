@@ -1296,7 +1296,7 @@
   "pick one or two vertices, edges or faces": "pick one or two vertices, edges or faces",
   "prefs.add_item": "Add the item",
   "prefs.alt_frees_manipulators": "Alt / Option also frees manipulator arrows",
-  "prefs.anti_aliasing_amd_dx12": "Anti-aliasing defaults to 1× on AMD graphics with Direct3D 12 because multisampling can hide origin planes or the scene. You can turn it back on above; restart to apply.",
+  "prefs.anti_aliasing_amd_dx12": "Anti-aliasing uses 1× because the anti-aliasing check failed on this graphics card, or because AMD graphics with Direct3D 12 defaults to 1× to keep origin planes and the scene visible. You can choose another setting above; restart to apply it if the check passes.",
   "prefs.anti_aliasing_note": "Smooths jagged edges.",
   "prefs.applies_on_restart": "Applies on restart",
   "prefs.assistant": "Assistant",
