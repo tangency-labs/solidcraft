@@ -435,6 +435,10 @@ mod tests {
         assert!(h.widget("Units of new designs").is_none());
         assert!(h.widget("Grid").is_none(), "a checkbox on another page stays hidden");
         assert!(h.widget("Interface language").is_none(), "the page around a match stays hidden");
+        assert!(h.widget("Advanced").is_none(), "a folded heading is not a match");
+        h.step(&serde_json::json!({"click": {"handle": "prefs:search:clear"}})).expect("clear");
+        h.frames(2);
+        assert!(h.app.prefs_window.filter.is_empty(), "the search X clears the field");
         h.app.prefs_window.filter = "fusion".into();
         h.frames(3);
         assert!(h.widget("Mouse mapping").is_some(), "the dropdown's current value counts");

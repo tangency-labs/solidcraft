@@ -236,10 +236,16 @@ pub(crate) fn section_count<R>(
     count: Option<impl std::fmt::Display>,
     add: impl FnOnce(&mut Ui) -> R,
 ) -> Option<R> {
+    // A search still walks the body, so a setting inside a folded section can match, without
+    // leaving the folded heading on screen for every query.
+    if crate::prefs_search::querying(ui) && crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[title]) {
+        return Some(add(ui));
+    }
+    let searching = crate::prefs_search::querying(ui);
     let t = Tokens::get();
     ui.add_space(t.space_2);
     let id = ui.make_persistent_id(id);
-    let mut open = ui.ctx().data_mut(|data| data.get_persisted::<bool>(id)).unwrap_or(default_open);
+    let mut open = searching || ui.ctx().data_mut(|data| data.get_persisted::<bool>(id)).unwrap_or(default_open);
     let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::click());
     if response.hovered() || response.has_focus() {
         ui.painter().rect_filled(rect.shrink2(vec2(0.0, 1.0)), t.radius_sm, t.hover);
@@ -285,10 +291,12 @@ pub(crate) fn section_count<R>(
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, ui.is_enabled(), open, crate::i18n::tr_label(title)));
     scenario::publish_handle(&format!("dialog:section:{title}"), response.rect.center());
     scenario::publish_rect(&format!("dialog:section:{title}"), rect);
-    if response.clicked() {
+    if response.clicked() && !searching {
         open = !open;
     }
-    ui.ctx().data_mut(|data| data.insert_persisted(id, open));
+    if !searching {
+        ui.ctx().data_mut(|data| data.insert_persisted(id, open));
+    }
     open.then(|| ui.push_id(id, add).inner)
 }
 
