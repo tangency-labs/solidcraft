@@ -131,6 +131,36 @@ mod tests {
     }
 
     #[test]
+    fn pinned_sketch_variants_leave_the_family_choice_to_its_menu() {
+        use serde_json::json;
+
+        for (main, pinned, menu_choice) in [
+            ("sketch.rectangle.two_point", "sketch.rectangle.center", "sketch.rectangle.three_point"),
+            ("sketch.circle.center", "sketch.circle.two_point", "sketch.circle.three_point"),
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            crate::toolbar_custom::pin(&mut h.app, "SKETCH", pinned).unwrap();
+            h.settle();
+            let f = family(main).unwrap();
+
+            for expected in [main, menu_choice] {
+                if expected == menu_choice {
+                    h.step(&json!({"click":{"handle":format!("family:{}", f.label)}})).unwrap();
+                    h.step(&json!({"click":{"handle":format!("dropdown:{menu_choice}")}})).unwrap();
+                    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(menu_choice));
+                }
+                h.step(&json!({"click":{"handle":format!("button:{pinned}")}})).unwrap();
+                assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(pinned), "the pin starts its exact tool");
+                assert_eq!(h.app.preferences.sketch_variants.resolve(main), expected, "the pin leaves the family choice alone");
+
+                h.step(&json!({"click":{"handle":format!("button:{main}")}})).unwrap();
+                assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(expected), "the main button still starts the chosen variant");
+            }
+        }
+    }
+
+    #[test]
     fn old_or_damaged_prefs_fall_back_to_each_familys_first_variant() {
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
         app.load_prefs(r#"{"preferences":{"save_mesh_format":"3mf"}}"#);

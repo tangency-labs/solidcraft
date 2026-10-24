@@ -1277,7 +1277,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && info.enabled, &tr_label));
                 if ribbon_tooltip(app, resp, selected, info.disabled_reason.as_deref()).clicked() && info.enabled {
                     let id = selected.id;
-                    app.start(id);
+                    app.start_pinned(id);
                 }
                 if let Some(f) = family {
                     let ar = if labels {

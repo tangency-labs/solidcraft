@@ -927,6 +927,16 @@ impl SolveApp {
     /// Start a command the way a toolbar click does: interactive tools and dialogs for commands
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
+        self.start_with_variant_memory(id, true);
+    }
+
+    /// A dedicated toolbar button starts its exact tool without replacing the sketch family's
+    /// main button. Choosing a variant from a menu still uses `start` and remembers that choice.
+    pub(crate) fn start_pinned(&mut self, id: &str) {
+        self.start_with_variant_memory(id, false);
+    }
+
+    fn start_with_variant_memory(&mut self, id: &str, remember_variant: bool) {
         if id == "ui.palette" {
             shortcut_box::open(self, None);
             return;
@@ -1036,7 +1046,7 @@ impl SolveApp {
         if !sketch_tools::start_hook(self, id) {
             return;
         }
-        if solidcraft_engine::find_command(id).is_some_and(|c| c.info(&self.session).enabled) {
+        if remember_variant && solidcraft_engine::find_command(id).is_some_and(|c| c.info(&self.session).enabled) {
             self.preferences.sketch_variants.remember(id);
         }
         if id == "parameters.change" {
