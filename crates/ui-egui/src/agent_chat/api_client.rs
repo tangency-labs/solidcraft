@@ -1975,10 +1975,7 @@ mod tests {
         assert_eq!(go_protocol("gemini-4-argon-contributor"), GoProtocol::Gemini);
         let gemini = go_url("gemini-4-argon-contributor", GoProtocol::Gemini);
         assert!(gemini.starts_with("https://opencode.ai/inference/go/") && gemini.contains("gemini-4-argon-contributor"), "{gemini}");
-        assert_eq!(
-            go_url("muse-spark-1.3-contributor", GoProtocol::Responses),
-            "https://opencode.ai/inference/go/openai/v1/responses"
-        );
+        assert_eq!(go_url("muse-spark-1.3-contributor", GoProtocol::Responses), "https://opencode.ai/inference/go/openai/v1/responses");
     }
 
     fn go_cfg(model: &str, http: HttpFn) -> ApiConfig {
