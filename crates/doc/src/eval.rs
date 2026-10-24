@@ -1060,7 +1060,10 @@ impl ModelState {
     /// each keeps its own mesh, so the meshes are those `ModelBody::mesh` makes one by one).
     /// Stops starting bodies once `go_on` says no.
     pub fn warm_meshes(&self, go_on: impl Fn() -> bool + Sync) {
-        kernel::for_each_on_threads(&self.bodies, 16, |b| {
+        // Only bodies without a mesh: starting threads just to find every mesh made costs more
+        // than looking (most bodies are unchanged from one command to the next).
+        let cold: Vec<_> = self.bodies.iter().filter(|b| b.mesh.get().is_none()).collect();
+        kernel::for_each_on_threads(&cold, 16, |b| {
             if go_on() {
                 let _ = b.mesh();
             }
@@ -1069,7 +1072,10 @@ impl ModelState {
     /// [`ModelState::warm_meshes`], and every body's display plan at the current display quality
     /// (what a GPU viewport draws).
     pub fn warm_display(&self) {
-        kernel::for_each_on_threads(&self.bodies, 16, |b| {
+        let q = crate::display_quality::current();
+        let planned = |b: &ModelBody| b.plan.get(q.index()).is_none_or(|cell| cell.get().is_some());
+        let cold: Vec<_> = self.bodies.iter().filter(|b| b.mesh.get().is_none() || !planned(b)).collect();
+        kernel::for_each_on_threads(&cold, 16, |b| {
             let _ = b.mesh();
             let _ = b.display_plan();
         });
@@ -7793,25 +7799,30 @@ impl PlacedBodies {
 
     /// The body `b` placed by `m`, from an earlier call when `b` is the same body as then.
     fn placed(&self, b: &ModelBody, m: &crate::Mat, name: String) -> ModelBody {
-        match self.reused(b, m) {
-            Some(placed) => {
-                let mut fresh = ModelBody::new(name, placed.body.clone(), b.feature);
-                fresh.mesh = placed.mesh.clone();
-                fresh.measured = placed.measured.clone();
-                fresh.mesh_placement = placed.mesh_placement.clone();
-                fresh.plan = placed.plan.clone();
-                fresh.plan_mesh = placed.plan_mesh.clone();
+        if let Some(placed) = self.taken(b, m, &name) {
+            return placed;
+        }
+        match kernel::place_matrix(&b.body, *m) {
+            Ok(body) => {
+                let mut fresh = ModelBody::new(name, body, b.feature);
+                fresh.mesh_placement = placed_mesh::PlacedMesh::new(b, m).map(Arc::new);
                 fresh
             }
-            None => match kernel::place_matrix(&b.body, *m) {
-                Ok(body) => {
-                    let mut fresh = ModelBody::new(name, body, b.feature);
-                    fresh.mesh_placement = placed_mesh::PlacedMesh::new(b, m).map(Arc::new);
-                    fresh
-                }
-                Err(_) => ModelBody::new(name, b.body.clone(), b.feature),
-            },
+            Err(_) => ModelBody::new(name, b.body.clone(), b.feature),
         }
+    }
+
+    /// The body `b` placed by `m` as an earlier call placed it, when `b` is the same body as then.
+    fn taken(&self, b: &ModelBody, m: &crate::Mat, name: &str) -> Option<ModelBody> {
+        self.reused(b, m).map(|placed| {
+            let mut fresh = ModelBody::new(name.to_string(), placed.body.clone(), b.feature);
+            fresh.mesh = placed.mesh.clone();
+            fresh.measured = placed.measured.clone();
+            fresh.mesh_placement = placed.mesh_placement.clone();
+            fresh.plan = placed.plan.clone();
+            fresh.plan_mesh = placed.plan_mesh.clone();
+            fresh
+        })
     }
 }
 
@@ -7921,7 +7932,12 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
             }
         }
     }
-    let mut moved = kernel::map_on_threads(&jobs, 16, |(b, bm, name)| placed_before.placed(b, bm, name.clone())).into_iter().zip(&jobs);
+    // Bodies placed as before are taken here: starting threads only to copy them cost every
+    // command in a design with placed components more than the copies.
+    let reused: Vec<_> = jobs.iter().map(|(b, bm, name)| placed_before.taken(b, bm, name)).collect();
+    let fresh: Vec<_> = jobs.iter().zip(&reused).filter(|(_, r)| r.is_none()).map(|(job, _)| job).collect();
+    let mut placed_fresh = kernel::map_on_threads(&fresh, 16, |(b, bm, name)| placed_before.placed(b, bm, name.clone())).into_iter();
+    let mut moved = reused.into_iter().map(|r| r.or_else(|| placed_fresh.next().flatten())).zip(&jobs);
     for (comp, path, m) in placements {
         let primary = path == first_path(comp);
         let ident = crate::is_identity(&m);

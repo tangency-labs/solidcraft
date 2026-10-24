@@ -297,6 +297,33 @@ mod tests {
         assert_ne!(new.bounds(), moved.bodies[0].mesh().bounds());
         assert!(Arc::ptr_eq(&old, &before.bodies[0].mesh()), "editing does not mutate older snapshots");
     }
+
+    #[test]
+    fn placements_taken_as_before_and_placed_again_keep_their_order() {
+        let mut doc = crate::Document::new("instances");
+        let component = doc.add_component(Some("Part"), 0).unwrap();
+        doc.body_components.insert("Pin".into(), component);
+        doc.occurrences[0].transform = crate::rigid(Vec3::new(10., 0., 0.), Vec3::ZERO, Vec3::Y, 0.3);
+        let second = doc.add_occurrence(component, 0, crate::rigid(Vec3::new(0., 20., 0.), Vec3::ZERO, Vec3::X, 0.6)).unwrap();
+        doc.add_occurrence(component, 0, crate::rigid(Vec3::new(0., -20., 5.), Vec3::ZERO, Vec3::Z, 1.1)).unwrap();
+        let mut state = crate::ModelState::default();
+        state.bodies.push(ModelBody::new("Pin".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2., 8.).unwrap(), 1));
+        let mut cache = super::super::PlacedBodies::default();
+        let before = super::super::world_state_reusing(&doc, &state, &mut cache);
+        let meshes: Vec<_> = before.bodies.iter().map(|b| b.mesh()).collect();
+        // The middle placement moves: the other two are taken as they were, it is placed again.
+        doc.occurrences.iter_mut().find(|o| o.id == second).unwrap().transform = crate::rigid(Vec3::new(0., 40., 0.), Vec3::ZERO, Vec3::X, 0.2);
+        let after = super::super::world_state_reusing(&doc, &state, &mut cache);
+        let fresh = super::super::world_state_reusing(&doc, &state, &mut super::super::PlacedBodies::default());
+        let names = |st: &crate::ModelState| st.bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&after), names(&fresh));
+        assert_eq!(names(&after), names(&before));
+        for (i, (a, f)) in after.bodies.iter().zip(&fresh.bodies).enumerate() {
+            assert_eq!(a.mesh().bounds(), f.mesh().bounds(), "body {i} is where a fresh placement puts it");
+        }
+        assert!(Arc::ptr_eq(&after.bodies[0].mesh(), &meshes[0]) && Arc::ptr_eq(&after.bodies[2].mesh(), &meshes[2]));
+        assert!(!Arc::ptr_eq(&after.bodies[1].mesh(), &meshes[1]), "the moved placement is placed again");
+    }
     #[test]
     fn only_proper_rigid_affine_matrices_reuse_reference_meshes() {
         let source = ModelBody::new("Part".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(2., 3., 4.)).unwrap(), 1);
