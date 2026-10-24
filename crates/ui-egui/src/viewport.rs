@@ -1218,26 +1218,64 @@ pub fn construction_axis_segments(app: &SolveApp) -> Vec<(String, Vec3, Vec3)> {
     if axes.is_empty() {
         return Vec::new();
     }
-    let h = origin_size(app.cam.half_height()) * AXIS_LEN;
     let bb = view_bounds(app);
     axes.into_iter()
         .map(|(_, name, o, d)| {
-            let (mut lo, mut hi) = (-h, h);
-            if !bb.is_empty() {
-                for i in 0..8 {
-                    let c = Vec3::new(
-                        if i & 1 == 0 { bb.min.x } else { bb.max.x },
-                        if i & 2 == 0 { bb.min.y } else { bb.max.y },
-                        if i & 4 == 0 { bb.min.z } else { bb.max.z },
-                    );
-                    let t = (c - o).dot(d);
-                    lo = lo.min(t - h * 0.3);
-                    hi = hi.max(t + h * 0.3);
-                }
-            }
-            (name, o + d * lo, o + d * hi)
+            let (a, b) = axis_span(app, &bb, o, d);
+            (name, a, b)
         })
         .collect()
+}
+
+/// How far an axis through `o` along `d` is drawn: across the model's box `bb` where it passes
+/// it (a little past it either side), at least the origin axes' length around `o`.
+fn axis_span(app: &SolveApp, bb: &solidcraft_engine::geom::Aabb3, o: Vec3, d: Vec3) -> (Vec3, Vec3) {
+    let h = origin_size(app.cam.half_height()) * AXIS_LEN;
+    let (mut lo, mut hi) = (-h, h);
+    if !bb.is_empty() {
+        for i in 0..8 {
+            let c = Vec3::new(
+                if i & 1 == 0 { bb.min.x } else { bb.max.x },
+                if i & 2 == 0 { bb.min.y } else { bb.max.y },
+                if i & 4 == 0 { bb.min.z } else { bb.max.z },
+            );
+            let t = (c - o).dot(d);
+            lo = lo.min(t - h * 0.3);
+            hi = hi.max(t + h * 0.3);
+        }
+    }
+    (o + d * lo, o + d * hi)
+}
+
+/// What a round edge or face stands for in the open dialog's active input, drawn as construction
+/// geometry while it is under the cursor or picked: the axis an axis input takes (a dashed line
+/// through a circle's centre along its normal, or along a cylinder's, cone's or torus's axis),
+/// or the centre a point input takes from a circular edge (a small star).
+pub(crate) fn round_pick_feedback(app: &SolveApp) -> (Vec<(Vec3, Vec3)>, Vec<Vec3>) {
+    let (mut lines, mut centres): (Vec<(Vec3, Vec3, Vec3, Vec3)>, Vec<Vec3>) = (Vec::new(), Vec::new());
+    let Some(d) = app.dialog.as_ref() else { return (Vec::new(), centres) };
+    let Some(inp) = d.active_input() else { return (Vec::new(), centres) };
+    let s = &app.session;
+    let hovered = app.viewport.hover.as_ref().and_then(|h| d.candidate(s, h));
+    if inp.accept == crate::selection::AXIS_PICKS {
+        let bb = view_bounds(app);
+        for sel in hovered.iter().chain(inp.items.iter()) {
+            if let Some((o, dir)) = crate::dialogs::round_axis(s, sel)
+                && !lines.iter().any(|(_, _, q, e)| q.dist(o) < 1e-9 && e.cross(dir).len() < 1e-9)
+            {
+                let (a, b) = axis_span(app, &bb, o, dir);
+                lines.push((a, b, o, dir));
+            }
+        }
+    } else if let (Some(Hit::Edge { body, index, .. }), Some(sel)) = (app.viewport.hover.as_ref(), hovered.as_ref()) {
+        // Where the round edge is taken as its centre (`Dialog::circle_centre_pick`, Move's points).
+        if (matches!(sel, Sel::Vertex { .. }) || d.edge_is_centre(inp))
+            && let Some((c, ..)) = crate::dialogs::edge_circle(s, body, *index)
+        {
+            centres.push(c);
+        }
+    }
+    (lines.into_iter().map(|(a, b, ..)| (a, b)).collect(), centres)
 }
 
 /// Construction points shown: (name, position).
@@ -2222,6 +2260,8 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.ui.pick_bodies.hash(&mut h);
     app.session.active_sketch.hash(&mut h);
     (app.dialog.is_some(), app.tool.is_some()).hash(&mut h);
+    // Which input is active decides what a round edge or face under the cursor stands for.
+    app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).hash(&mut h);
     crate::theme::is_dark().hash(&mut h);
     crate::theme::vision().hash(&mut h);
     // Two themes may share a light/dark base while drawing different geometry colours.
@@ -2442,6 +2482,26 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         }
     }
     for (_, p) in construction_points(app) {
+        let r = size * 0.04;
+        for d in [Vec3::X, Vec3::Y, Vec3::Z] {
+            sc.line((p - d * r).to_f32(), (p + d * r).to_f32(), c4(t.construction_geom), 2.0, true);
+        }
+    }
+    // A round edge or face under the cursor (or picked) in an axis input shows its axis, and a
+    // circle in a point input its centre, as construction geometry. The axis runs through the
+    // solid it belongs to, so it is drawn over the model.
+    let (round_axes, round_centres) = round_pick_feedback(app);
+    for (a, b) in round_axes {
+        let len = a.dist(b);
+        let dash = size * 0.08;
+        let mut s = 0.0;
+        while s < len {
+            let e = (s + dash).min(len);
+            sc.line(a.lerp(b, s / len).to_f32(), a.lerp(b, e / len).to_f32(), c4(t.construction_geom), 2.0, true);
+            s += dash * 1.6;
+        }
+    }
+    for p in round_centres {
         let r = size * 0.04;
         for d in [Vec3::X, Vec3::Y, Vec3::Z] {
             sc.line((p - d * r).to_f32(), (p + d * r).to_f32(), c4(t.construction_geom), 2.0, true);

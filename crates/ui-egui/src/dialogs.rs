@@ -15,7 +15,8 @@ use solidcraft_engine::geom::{Aabb3, Vec3};
 
 use crate::SolveApp;
 use crate::selection::{
-    self, AXES, Accept, BODIES, CURVES, EDGES, FACES, PLANAR_FACES, PLANES, PROFILES, SelInput, SelectionExt as _, point_value as pt, polyline_mid,
+    self, AXES, AXIS_PICKS, Accept, BODIES, CURVES, EDGES, FACES, PLANAR_FACES, PLANES, PROFILES, SelInput, SelectionExt as _, point_value as pt,
+    polyline_mid,
 };
 use crate::theme::Tokens;
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
@@ -109,7 +110,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { distance, .. } }) {
             offset: String = "0 mm".into() => distance.to_string(),
         } => json!({"offset": offset});
-        AnglePlane("construct.plane.at_angle", "PLANE AT ANGLE", [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXES, false)],
+        AnglePlane("construct.plane.at_angle", "PLANE AT ANGLE", [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXIS_PICKS, false)],
             FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, .. } }) {
             angle: String = "45 deg".into() => angle.to_string(),
         } => json!({"angle": angle});
@@ -659,7 +660,7 @@ impl Dialog {
             ),
             "solid.revolve" => Dialog::new(
                 Kind::Revolve { angle: "360 deg".into(), operation: 0, axis: None },
-                vec![SelInput::new("Profile", PROFILES, true), SelInput::new("Axis", AXES, false)],
+                vec![SelInput::new("Profile", PROFILES, true), SelInput::new("Axis", AXIS_PICKS, false)],
             ),
             "solid.fillet" => Dialog::new(fillet_kind("2 mm", false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.chamfer" => Dialog::new(fillet_kind("1 mm", true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
@@ -740,7 +741,7 @@ impl Dialog {
             ),
             "solid.pattern.circular" => Dialog::new(
                 Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
-                vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXES, false)],
+                vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXIS_PICKS, false)],
             ),
             "solid.loft" => Dialog::new(Kind::Loft { operation: usize::from(has_bodies), rail_fit: 0 }, {
                 let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
@@ -857,7 +858,10 @@ impl Dialog {
                 _ => true,
             };
             let takes = |i: &SelInput| {
-                fits(i.accept, sel) && (i.multi || i.items.is_empty()) && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
+                fits(i.accept, sel)
+                    && (i.multi || i.items.is_empty())
+                    && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
+                    && (i.accept != AXIS_PICKS || takes_as_axis(s, sel))
             };
             if let Some(inp) = d.inputs.iter_mut().find(|i| takes(i)) {
                 if matches!(d.kind, Kind::Fillet { .. }) {
@@ -1067,6 +1071,14 @@ impl Dialog {
         self.inputs.get(self.active)
     }
 
+    /// Whether a round edge kept in `inp` stands for its centre: a construction point's input,
+    /// or Move's pivot and points (`dialogs_move::sel_point`). Other point inputs take the
+    /// centre as a vertex (`circle_centre_pick`).
+    pub(crate) fn edge_is_centre(&self, inp: &SelInput) -> bool {
+        inp.accept != selection::AXIS_PICKS
+            && (matches!(self.kind, Kind::Move { .. }) || (matches!(self.kind, Kind::Construct { .. }) && inp.accept & selection::VERTICES != 0))
+    }
+
     /// Everything the inputs hold (for highlighting).
     pub fn items(&self) -> Vec<Sel> {
         self.inputs.iter().flat_map(|i| i.items.iter().cloned()).collect()
@@ -1126,8 +1138,8 @@ impl Dialog {
     }
 
     /// The face under the cursor (the nearest face the pick ray meets, first among `hits`), looked
-    /// up once for all the sketch points among `hits` when the active input snaps face places to
-    /// them (the Single hole's); `None` otherwise.
+    /// up once for all the sketch points and round edges' centres among `hits` when the active
+    /// input snaps face places to them (the Single hole's); `None` otherwise.
     pub(crate) fn face_snap(&self, s: &Session, hits: &[Hit]) -> Option<FaceSnap> {
         if !self.active_input().is_some_and(|i| snaps_to_points(i.accept)) {
             return None;
@@ -1138,6 +1150,7 @@ impl Dialog {
             .iter()
             .filter_map(|h| match h {
                 Hit::SketchPoint { sketch, at, .. } => st.sketch(*sketch).map(|ss| ss.plane.to_world(*at)),
+                Hit::Edge { body, index, .. } => edge_circle_in(&st, body, *index).map(|(c, ..)| c),
                 _ => None,
             })
             .collect();
@@ -1171,8 +1184,35 @@ impl Dialog {
             let snap = snap?;
             return snap.place_at(s.world_state().sketch(*sketch)?.plane.to_world(*at));
         }
+        if let Some(sel) = self.circle_centre_pick(s, inp, h, snap) {
+            return Some(sel);
+        }
         // The snap looked the face under the cursor up already, planar or not.
-        inp.accepts(h, |body, face| snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some()))
+        let sel = inp.accepts(h, |body, face| snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some()))?;
+        (inp.accept != AXIS_PICKS || takes_as_axis(s, &sel)).then_some(sel)
+    }
+
+    /// A round edge where a 3D point is wanted stands for its centre: a construction point's
+    /// input keeps the edge (its centre is found again as the model changes), a face place
+    /// (a hole's) is taken at the centre when it lies on the face under the cursor, and any other
+    /// point input takes the centre as a point. Inputs that take edges themselves keep the edge
+    /// (Move's points find its centre, `dialogs_move::sel_point`).
+    fn circle_centre_pick(&self, s: &Session, inp: &SelInput, h: &Hit, snap: Option<&FaceSnap>) -> Option<Sel> {
+        let Hit::Edge { body, index, mid } = h else { return None };
+        let a = inp.accept;
+        let places = snaps_to_points(a);
+        if a & EDGES != 0 || (a & selection::VERTICES == 0 && !places) {
+            return None;
+        }
+        let (centre, ..) = edge_circle(s, body, *index)?;
+        if places {
+            return snap?.place_at(centre);
+        }
+        Some(if matches!(self.kind, Kind::Construct { .. }) {
+            Sel::Edge { body: body.clone(), index: *index, point: *mid }
+        } else {
+            Sel::Vertex { body: body.clone(), point: centre }
+        })
     }
 
     /// Extrude's automatic To Object: with profiles picked, a face or vertex off their plane, or
@@ -1810,6 +1850,8 @@ fn hint(inp: &SelInput) -> &'static str {
     let a = inp.accept;
     if a & PROFILES != 0 {
         "click profiles in the view"
+    } else if a == AXIS_PICKS {
+        "click an axis, a sketch line, a straight or circular edge, or a cylinder face"
     } else if a & EDGES != 0 {
         "click edges or faces"
     } else if a & PLANES != 0 {
@@ -1948,7 +1990,7 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui) {
                 ),
                 1 => (
                     Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
-                    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXES, false)],
+                    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXIS_PICKS, false)],
                 ),
                 _ => (
                     Kind::PathPattern { count: "4".into(), spacing: "20 mm".into() },
@@ -1980,13 +2022,23 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui) {
     }
 }
 
-fn selection_label(s: &Session, item: &Sel) -> String {
+/// A picked item as its chip shows it. A round edge or face says what it stands for in `inp`:
+/// its axis in an axis input, a circle's centre in a point input.
+pub(crate) fn selection_label(s: &Session, d: &Dialog, inp: &SelInput, item: &Sel) -> String {
+    let axis = inp.accept == selection::AXIS_PICKS && round_axis(s, item).is_some();
     match item {
         Sel::SketchCurve { id } => id.clone(),
         Sel::SketchPoint { id } => crate::sketch_modify_ui::point_id(s, item).unwrap_or(id).to_string(),
         Sel::Plane { name } | Sel::Axis { name } | Sel::Body { name } => name.clone(),
+        Sel::Face { body, index, .. } if axis => format!("{body} · face {index} axis"),
         Sel::Face { body, index, .. } => format!("{body} · face {index}"),
+        Sel::Edge { body, .. } if axis => format!("{body} · circle axis"),
+        Sel::Edge { body, index, .. } if d.edge_is_centre(inp) && edge_circle(s, body, *index).is_some() => {
+            format!("{body} · circle centre")
+        }
         Sel::Edge { body, index, .. } => format!("{body} · edge {index}"),
+        // A point of the model: a vertex, or the centre a round edge stands for.
+        Sel::Vertex { body, .. } if !body.is_empty() => format!("{body} · point"),
         Sel::Feature { id } => s.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
         Sel::Vertex { body, point } if body.is_empty() => {
             let state = s.world_state();
@@ -2045,7 +2097,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, r
                     RichText::new(if custom_axis || stored_reference.is_some() {
                         crate::i18n::tr("dialog.custom_axis").into()
                     } else if !inp.multi {
-                        inp.items.first().map(|item| selection_label(s, item)).unwrap_or_default()
+                        inp.items.first().map(|item| selection_label(s, d, inp, item)).unwrap_or_default()
                     } else {
                         let count = if i == 0 { shell_count.unwrap_or(inp.items.len()) } else { inp.items.len() };
                         crate::i18n::format("dialog.selected_count", &[("count", &count.to_string())])
@@ -2069,11 +2121,15 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, r
                     reference.to_string()
                 } else if custom_axis {
                     if let Some(axis) = stored_revolve_axis(&d.kind) {
-                        format!(
-                            "Custom axis\nOrigin: {}\nDirection: {}\nClick to select a replacement axis",
-                            axis.get("origin").map(ToString::to_string).unwrap_or_default(),
-                            axis.get("dir").map(ToString::to_string).unwrap_or_default()
-                        )
+                        match axis.get("at") {
+                            // A kept edge or face of the model (one no longer found).
+                            Some(at) => format!("Custom axis\nThe edge or face at {at}\nClick to select a replacement axis"),
+                            None => format!(
+                                "Custom axis\nOrigin: {}\nDirection: {}\nClick to select a replacement axis",
+                                axis.get("origin").map(ToString::to_string).unwrap_or_default(),
+                                axis.get("dir").map(ToString::to_string).unwrap_or_default()
+                            ),
+                        }
                     } else {
                         hint(inp).to_string()
                     }
@@ -2098,7 +2154,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, r
         });
         if matches!(d.kind, Kind::SketchModify(_)) && inp.multi {
             for (index, item) in inp.items.iter().enumerate() {
-                if crate::ui_kit::list_row(ui, &format!("{}:{index}", inp.label), &selection_label(s, item)).clicked() {
+                if crate::ui_kit::list_row(ui, &format!("{}:{index}", inp.label), &selection_label(s, d, inp, item)).clicked() {
                     remove = Some((i, index));
                 }
             }
@@ -3389,7 +3445,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let axis = match sels(d, 1).first() {
                 Some(Sel::Axis { name }) => json!(name),
                 Some(Sel::SketchCurve { id }) => json!(id),
-                _ => stored_axis.clone().ok_or("select an axis")?,
+                Some(x) => axis_param(app, x)?,
+                None => stored_axis.clone().ok_or("select an axis")?,
             };
             let (sketch, idx) = profiles();
             let mut p =
@@ -3510,11 +3567,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "objects")?;
             let axis = match sels(d, 1).first() {
                 None if d.extra.contains_key("axis") => d.extra.get("axis").cloned().unwrap_or(Value::Null),
-                Some(Sel::Axis { name }) => json!(name),
-                Some(x) => {
-                    let (o, dir) = axis_of(app, x).ok_or("the axis must be an origin axis or a sketch line")?;
-                    json!({"origin": pt(o), "dir": pt(dir)})
-                }
+                Some(x) => axis_param(app, x)?,
                 None => return Err("select an axis".into()),
             };
             let mut p = json!({"axis": axis, "count": count, "angle": angle});
@@ -3610,11 +3663,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "a plane")?;
             let base = plane_arg(app, sels(d, 0).first())?;
             let axis = match sels(d, 1).first() {
-                Some(Sel::Axis { name }) => json!(name),
-                Some(x) => {
-                    let (o, dir) = axis_of(app, x).ok_or("the axis must be an origin axis or a sketch line")?;
-                    json!({"origin": pt(o), "dir": pt(dir)})
-                }
+                Some(x) => axis_param(app, x)?,
                 None => d.extra.get("axis").cloned().ok_or("pick an axis")?,
             };
             ("construct.plane.at_angle", json!({"base": base, "axis": axis}))
@@ -4078,24 +4127,114 @@ pub fn axis_of(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
             let (pa, pb) = (ss.plane.to_world(ss.sketch.point(a)?), ss.plane.to_world(ss.sketch.point(b)?));
             Some((pa, (pb - pa).normalized()?))
         }
-        // A straight model edge, along it.
+        // A straight model edge, along it; a circular one, about its axis.
         Sel::Edge { body, index, .. } => {
             let b = app.session.world_state().body(body).cloned()?;
             let m = b.mesh();
             let e = m.edges.get(*index)?;
             let (a, z) = (*e.first()?, *e.last()?);
-            let dir = (z - a).normalized()?;
+            let Some(dir) = (z - a).normalized() else { return round_axis(&app.session, sel) };
             let tol = 1e-6 * a.dist(z).max(1.0);
             if !e.iter().all(|p| (*p - a).cross(dir).len() < tol) {
-                return None;
+                return round_axis(&app.session, sel);
             }
             // An edge along an origin axis points the way the axis does (as picking the axis).
             let axis = [Vec3::X, Vec3::Y, Vec3::Z].into_iter().find(|x| dir.dot(*x).abs() > 1.0 - 1e-9);
             Some((a, axis.unwrap_or(dir)))
         }
+        // A cylinder, cone or torus face: its axis.
+        Sel::Face { .. } => round_axis(&app.session, sel),
         _ => None,
     }
 }
+
+/// The circle a picked edge lies on, from its exact curve, when the drawn edge lies on it:
+/// (centre, unit normal, radius). A round edge stands for its circle wherever a 3D pick wants
+/// an axis (through the centre, along the normal) or a point (the centre).
+pub(crate) fn edge_circle(s: &Session, body: &str, index: usize) -> Option<(Vec3, Vec3, f64)> {
+    edge_circle_in(&s.world_state(), body, index)
+}
+
+/// [`edge_circle`] in a given model state (a dialog editing a feature looks at the model before it).
+pub(crate) fn edge_circle_in(st: &solidcraft_engine::doc::ModelState, body: &str, index: usize) -> Option<(Vec3, Vec3, f64)> {
+    let b = st.body(body)?;
+    let c = solidcraft_engine::kernel::edge_circle(&b.body, index)?;
+    let tol = (b.body.size() * 1e-6).max(1e-9) * 10.0;
+    let on = |p: &Vec3| (p.dist(c.center) - c.radius).abs() <= tol && (*p - c.center).dot(*c.axis).abs() <= tol;
+    b.mesh().edges.get(index)?.iter().all(on).then_some((c.center, *c.axis, c.radius))
+}
+
+/// The axis of a circular edge (through its centre, along its normal) or of a cylinder, cone or
+/// torus face, pointing the way the command will find it (`construct::canonical_dir`). `None`
+/// for any other pick: those have no axis of their own.
+pub(crate) fn round_axis(s: &Session, sel: &Sel) -> Option<(Vec3, Vec3)> {
+    use solidcraft_engine::kernel::{self, FaceSurface};
+    let (o, d) = match sel {
+        Sel::Edge { body, index, .. } => edge_circle(s, body, *index).map(|(c, n, _)| (c, n))?,
+        Sel::Face { body, index, .. } => {
+            let st = s.world_state();
+            let b = st.body(body)?;
+            match kernel::guard("axis of a face", || Ok(kernel::face_surface(&b.body, *index))).ok().flatten()? {
+                FaceSurface::Cylinder { origin, axis, .. } => (origin, *axis),
+                FaceSurface::Cone { apex, axis, .. } => (apex, *axis),
+                FaceSurface::Torus { center, axis, .. } => (center, *axis),
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    o.is_finite().then(|| (o, solidcraft_engine::doc::construct::canonical_dir(d)))
+}
+
+/// An axis pick that the command keeps as a reference to the model (`{edge|face: [x,y,z]}`), so
+/// the feature follows the edge or face: a circular edge, or a cylinder, cone or torus face.
+/// Straight edges stay a fixed line, as they always have.
+fn round_axis_ref(app: &SolveApp, sel: &Sel) -> Option<Value> {
+    round_axis(&app.session, sel)?;
+    match sel {
+        Sel::Edge { .. } if !is_straight_edge(&app.session, sel) => construct_ref(app, sel).ok(),
+        Sel::Face { .. } => construct_ref(app, sel).ok(),
+        _ => None,
+    }
+}
+
+fn is_straight_edge(s: &Session, sel: &Sel) -> bool {
+    let Sel::Edge { body, index, .. } = sel else { return false };
+    let Some(b) = s.world_state().body(body).cloned() else { return false };
+    let m = b.mesh();
+    let Some(e) = m.edges.get(*index) else { return false };
+    let (Some(a), Some(z)) = (e.first().copied(), e.last().copied()) else { return false };
+    let Some(dir) = (z - a).normalized() else { return false };
+    let tol = 1e-6 * a.dist(z).max(1.0);
+    e.iter().all(|p| (*p - a).cross(dir).len() < tol)
+}
+
+/// Whether an axis input (`selection::AXIS_PICKS`) takes this pick: an edge or face only where
+/// it has an axis (a straight or circular edge, a cylinder, cone or torus face).
+pub(crate) fn takes_as_axis(s: &Session, sel: &Sel) -> bool {
+    match sel {
+        Sel::Edge { .. } => is_straight_edge(s, sel) || round_axis(s, sel).is_some(),
+        Sel::Face { .. } => round_axis(s, sel).is_some(),
+        _ => true,
+    }
+}
+
+/// An axis input's pick as a command's `axis`: a world axis or construction axis by name, a
+/// circular edge or round face by reference, anything else (a sketch line, a straight edge) as
+/// its line.
+pub(crate) fn axis_param(app: &SolveApp, sel: &Sel) -> Result<Value, String> {
+    if let Sel::Axis { name } = sel {
+        return Ok(json!(name));
+    }
+    if let Some(r) = round_axis_ref(app, sel) {
+        return Ok(r);
+    }
+    let (o, dir) = axis_of(app, sel).ok_or(AXIS_PICK)?;
+    Ok(json!({"origin": pt(o), "dir": pt(dir)}))
+}
+
+const AXIS_PICK: &str =
+    "the axis must be an origin or construction axis, a sketch line, a straight or circular edge, or a cylinder, cone or torus face";
 
 /// Which profiles of a sketch a profile selection means.
 pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &ProfileSel) -> Vec<usize> {
@@ -4341,6 +4480,18 @@ fn plane_arg(app: &SolveApp, sel: Option<&Sel>) -> Result<Value, String> {
     }
 }
 
+/// A feature's axis on an edge or round face of the model back into a dialog pick: the edge or
+/// face where it is now.
+pub(crate) fn model_axis_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
+    use solidcraft_engine::doc::construct::GeoRef;
+    let at = g.picked_point(&s.world_state())?;
+    match g {
+        GeoRef::Edge { .. } => edge_sel(s, at),
+        GeoRef::Face { .. } => face_sel(s, at),
+        _ => None,
+    }
+}
+
 /// A stored construction reference back into a dialog pick.
 fn geo_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
     match g {
@@ -4458,6 +4609,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     "origin": pt(solidcraft_engine::doc::apply_point(&frame, origin.0)),
                     "dir": pt(solidcraft_engine::doc::apply_vector(&frame, dir.0))
                 })),
+                // An edge or face that is gone stays the reference until another is picked.
+                AxisRef::Model { geo } if model_axis_sel(s, geo).is_none() => serde_json::to_value(geo).ok(),
                 _ => None,
             };
             d.kind = Kind::Revolve { angle: angle.to_string(), operation: op_index(operation), axis: stored_axis };
@@ -4482,8 +4635,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 AxisRef::World { axis } => Some(Sel::Axis { name: axis.to_ascii_uppercase() }),
                 AxisRef::SketchAxis { axis } => Some(Sel::Axis { name: axis.to_ascii_lowercase() }),
                 AxisRef::SketchLine { curve } => Some(Sel::SketchCurve { id: curve.clone() }),
+                AxisRef::Model { geo } => model_axis_sel(s, geo),
                 AxisRef::Construction { name } => Some(Sel::Axis { name: name.to_string() }),
-                _ => None,
+                AxisRef::Line { .. } => None,
             };
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = ax.into_iter().collect();
@@ -4829,20 +4983,29 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     }
                     d
                 }
-                PatternKind::Circular { origin, axis, count, angle, alignment, reversed, axis_feature } => {
+                PatternKind::Circular { origin, axis, count, angle, alignment, reversed, axis_ref, axis_feature } => {
                     let mut d = start("solid.pattern.circular")?;
                     d.extra.insert("alignment".into(), json!(alignment));
                     d.extra.insert("reversed".into(), json!(reversed));
                     d.kind = Kind::PatternCirc { count: count.to_string(), angle: angle.to_string() };
-                    // The construction axis it turns about, else an origin axis or its line.
-                    let named = axis_feature.as_ref().map(|n| n.to_string());
-                    match named.or_else(|| world_axis(axis.0).filter(|_| origin.len() < 1e-9)) {
-                        Some(name) => {
+                    // The edge or face it turns about, else its construction axis, else an origin
+                    // axis or its line.
+                    let pick = match (axis_ref, axis_feature) {
+                        (Some(g), _) => model_axis_sel(s, g),
+                        (None, Some(name)) => Some(Sel::Axis { name: name.to_string() }),
+                        (None, None) => world_axis(axis.0).filter(|_| origin.len() < 1e-9).map(|name| Sel::Axis { name }),
+                    };
+                    match (pick, axis_ref) {
+                        (Some(pick), _) => {
                             if let Some(inp) = d.inputs.get_mut(1) {
-                                inp.items = vec![Sel::Axis { name }];
+                                inp.items = vec![pick];
                             }
                         }
-                        None => {
+                        // An edge or face that is gone stays the reference until another is picked.
+                        (None, Some(g)) => {
+                            d.extra.insert("axis".into(), serde_json::to_value(g).unwrap_or(Value::Null));
+                        }
+                        (None, None) => {
                             d.extra.insert("axis".into(), json!({"origin": pt3(origin.0), "dir": pt3(axis.0)}));
                         }
                     }
@@ -4941,19 +5104,26 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { base, axis_origin, axis_dir, .. } } => {
+        FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { base, axis_origin, axis_dir, line, .. } } => {
             let mut d = start("construct.plane.at_angle")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = plane_sel(s, base).into_iter().collect();
             }
-            match world_axis(*axis_dir).filter(|_| axis_origin.len() < 1e-9) {
-                Some(name) => {
+            let pick = match line {
+                Some(g) => model_axis_sel(s, g),
+                None => world_axis(*axis_dir).filter(|_| axis_origin.len() < 1e-9).map(|name| Sel::Axis { name }),
+            };
+            match (pick, line) {
+                (Some(pick), _) => {
                     if let Some(inp) = d.inputs.get_mut(1) {
-                        inp.items = vec![Sel::Axis { name }];
+                        inp.items = vec![pick];
                     }
                 }
-                None => {
+                (None, Some(g)) => {
+                    d.extra.insert("axis".into(), serde_json::to_value(g).unwrap_or(Value::Null));
+                }
+                (None, None) => {
                     d.extra.insert("axis".into(), json!({"origin": pt3(*axis_origin), "dir": pt3(*axis_dir)}));
                 }
             }

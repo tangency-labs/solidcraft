@@ -146,10 +146,13 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
             *at = apply_point(m, *at);
         }
         PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => map_plane_ref(m, base),
-        PlaneRef::AtAngle { base, axis_origin, axis_dir, .. } => {
+        PlaneRef::AtAngle { base, axis_origin, axis_dir, line, .. } => {
             map_plane_ref(m, base);
             *axis_origin = apply_point(m, *axis_origin);
             *axis_dir = apply_vector(m, *axis_dir);
+            if let Some(g) = line {
+                map_geo_ref(m, g);
+            }
         }
         // Named origin planes and construction planes are the component's own.
         PlaneRef::Origin { .. } | PlaneRef::Construction { .. } => {}

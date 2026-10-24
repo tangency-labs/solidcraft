@@ -3531,17 +3531,15 @@ fn blend_target(state: &ModelState, body: &Option<crate::BodyName>, edges: &[Vec
     })
 }
 
-/// The revolve axis in the sketch's 2D coordinates (a point on it, its direction). `construct`
-/// gives a construction axis, by name, in the sketch's 3D frame.
-pub(crate) fn revolve_axis(ss: &SolvedSketch, axis: &AxisRef, construct: &dyn Fn(&str) -> Result<(Vec3, Vec3)>) -> Result<(Vec2, Vec2)> {
-    let in_plane = |origin: Vec3, dir: Vec3| {
-        let pl = &ss.plane;
-        let d = dir.normalized().ok_or_else(|| DocError::Invalid("revolve axis has no direction".into()))?;
-        if d.dot(pl.normal()).abs() > 1e-9 || pl.height(origin).abs() > 1e-6 {
-            return Err(DocError::Invalid("the revolve axis does not lie in the sketch plane".into()));
-        }
-        Ok((pl.to_local(origin), Vec2::new(d.dot(pl.x), d.dot(pl.y))))
-    };
+/// The revolve axis in the sketch's plane coordinates (a point and a direction). `st` is the model
+/// an axis on an edge or face of it is found in; `construct` gives a construction axis, by name, in
+/// the sketch's 3D frame.
+pub(crate) fn revolve_axis(
+    ss: &SolvedSketch,
+    axis: &AxisRef,
+    st: &ModelState,
+    construct: &dyn Fn(&str) -> Result<(Vec3, Vec3)>,
+) -> Result<(Vec2, Vec2)> {
     match axis {
         AxisRef::SketchLine { curve } => {
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("sketch line `{curve}`")))?;
@@ -3571,12 +3569,36 @@ pub(crate) fn revolve_axis(ss: &SolvedSketch, axis: &AxisRef, construct: &dyn Fn
             }
             Ok((pl.to_local(Vec3::ZERO), Vec2::new(d.dot(pl.x), d.dot(pl.y))))
         }
-        AxisRef::Line { origin, dir } => in_plane(origin.0, dir.0),
+        AxisRef::Line { origin, dir } => line_in_sketch_plane(ss, origin.0, dir.0),
+        AxisRef::Model { geo } => {
+            let (o, d) = crate::construct::model_axis(st, geo)?;
+            line_in_sketch_plane(ss, o, d)
+        }
         AxisRef::Construction { name } => {
-            let (origin, dir) = construct(name)?;
-            in_plane(origin, dir)
+            let (o, d) = construct(name)?;
+            line_in_sketch_plane(ss, o, d)
         }
     }
+}
+
+/// The model a revolve axis is found in: what construction geometry of component `comp` is built
+/// on when the axis is an edge or face of it (only then is it worth placing).
+pub(super) fn axis_state<'a>(doc: &Document, st: &'a ModelState, comp: u64, axis: &AxisRef) -> std::borrow::Cow<'a, ModelState> {
+    match axis {
+        AxisRef::Model { .. } => construction_state(doc, st, comp),
+        _ => std::borrow::Cow::Borrowed(st),
+    }
+}
+
+/// A world line through `origin` along `dir` in the sketch's plane coordinates, or an error when it
+/// does not lie in the sketch plane.
+fn line_in_sketch_plane(ss: &SolvedSketch, origin: Vec3, dir: Vec3) -> Result<(Vec2, Vec2)> {
+    let pl = &ss.plane;
+    let d = dir.normalized().ok_or_else(|| DocError::Invalid("revolve axis has no direction".into()))?;
+    if d.dot(pl.normal()).abs() > 1e-9 || pl.height(origin).abs() > 1e-6 {
+        return Err(DocError::Invalid("the revolve axis does not lie in the sketch plane".into()));
+    }
+    Ok((pl.to_local(origin), Vec2::new(d.dot(pl.x), d.dot(pl.y))))
 }
 
 /// A construction axis `name` of the timeline so far, as evaluated, in the frame of component
@@ -4697,7 +4719,8 @@ fn feature_tools_with_constructor(
                 f.component,
             )?;
             let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
-            let (o, d) = revolve_axis(&ss, axis, &|name| construction_axis_in(Some(doc), st, name, f.component))?;
+            let (o, d) =
+                revolve_axis(&ss, axis, &axis_state(doc, st, f.component, axis), &|name| construction_axis_in(Some(doc), st, name, f.component))?;
             // To Object is in this feature's component frame: the model as seen from there.
             let tst = if to.is_some() { state_in_frame(doc, st, f.component) } else { std::borrow::Cow::Borrowed(st) };
             // Where the tool meets its targets is measured where they are shown (#3383).
@@ -5482,10 +5505,12 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 out.push(m);
             }
         }
-        crate::PatternKind::Circular { origin, axis, count: c, angle, alignment, reversed, axis_feature } => {
-            let (origin, axis) = match axis_feature {
-                Some(name) => construction_axis_in(Some(doc), st, name, component)?,
-                None => (origin.0, axis.0),
+        crate::PatternKind::Circular { origin, axis, count: c, angle, alignment, reversed, axis_ref, axis_feature } => {
+            // On an edge or round face: about it as it is now; on a construction axis: where it is.
+            let (origin, axis) = match (axis_ref, axis_feature) {
+                (Some(g), _) => crate::construct::model_axis(&construction_state(doc, st, component), g)?,
+                (None, Some(name)) => construction_axis_in(Some(doc), st, name, component)?,
+                (None, None) => (origin.0, axis.0),
             };
             let n = count(c)?;
             let total = val(vals, angle, Kind::Angle)?;
@@ -6059,11 +6084,12 @@ pub(crate) fn sheet_face_plane_in_frame(doc: &Document, st: &ModelState, comp: u
         PlaneRef::Offset { base, distance } => {
             PlaneRef::Offset { base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?), distance: distance.clone() }
         }
-        PlaneRef::AtAngle { base, axis_origin, axis_dir, angle } => PlaneRef::AtAngle {
+        PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line } => PlaneRef::AtAngle {
             base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?),
             axis_origin: *axis_origin,
             axis_dir: *axis_dir,
             angle: angle.clone(),
+            line: line.clone(),
         },
         PlaneRef::Flipped { base, about_y } => {
             PlaneRef::Flipped { base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?), about_y: *about_y }
@@ -7071,6 +7097,7 @@ fn construction_state<'a>(doc: &Document, st: &'a ModelState, comp: u64) -> std:
 fn plane_is_fixed(plane: &PlaneRef) -> bool {
     match plane {
         PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } => true,
+        PlaneRef::AtAngle { line: Some(_), .. } => false,
         PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => plane_is_fixed(base),
         _ => false,
     }
@@ -7081,6 +7108,7 @@ fn plane_is_fixed(plane: &PlaneRef) -> bool {
 fn plane_reads_geometry(plane: &PlaneRef) -> bool {
     match plane {
         PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } | PlaneRef::Construction { .. } => false,
+        PlaneRef::AtAngle { line: Some(_), .. } => true,
         PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => plane_reads_geometry(base),
         PlaneRef::Midplane { .. }
         | PlaneRef::TwoEdges { .. }
