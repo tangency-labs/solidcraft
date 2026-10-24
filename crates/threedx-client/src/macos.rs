@@ -51,11 +51,20 @@ type DeviceHandler = extern "C" fn(u32);
 type InstallHandlers = unsafe extern "C" fn(Option<MessageHandler>, Option<DeviceHandler>, Option<DeviceHandler>) -> i16;
 type RegisterClient = unsafe extern "C" fn(u32, *const u8, u16, u32) -> u16;
 type SetMask = unsafe extern "C" fn(u16, u32);
+type UnregisterClient = unsafe extern "C" fn(u16);
+type CleanupHandlers = unsafe extern "C" fn();
 
 type Sink = Box<dyn Fn(Event) + Send + Sync>;
 type Connected = Box<dyn FnOnce(Result<(), Error>) + Send>;
 
+/// What [`stop`] calls: the framework's `UnregisterConnexionClient` and `CleanupConnexionHandlers`.
+struct Shutdown {
+    unregister: UnregisterClient,
+    cleanup: CleanupHandlers,
+}
+
 static SINK: OnceLock<Sink> = OnceLock::new();
+static SHUTDOWN: OnceLock<Shutdown> = OnceLock::new();
 /// The id the driver gave this client: it broadcasts every message to every client.
 static CLIENT: AtomicU16 = AtomicU16::new(0);
 
@@ -146,6 +155,16 @@ fn connect(name: &str) -> Result<(), Error> {
         return Err(Error::Register);
     }
     CLIENT.store(id, Ordering::Relaxed);
+    if let (Ok(unregister), Ok(cleanup)) = (symbol(handle, "UnregisterConnexionClient"), symbol(handle, "CleanupConnexionHandlers")) {
+        // SAFETY: the framework declares these functions with exactly these signatures.
+        let shutdown = unsafe {
+            Shutdown {
+                unregister: std::mem::transmute::<*mut c_void, UnregisterClient>(unregister),
+                cleanup: std::mem::transmute::<*mut c_void, CleanupHandlers>(cleanup),
+            }
+        };
+        let _ = SHUTDOWN.set(shutdown);
+    }
     // Newer drivers want the masks again once the client has an id. Both are optional.
     for (name, mask) in [("SetConnexionClientMask", MASK_ALL), ("SetConnexionClientButtonMask", u32::MAX)] {
         if let Ok(set) = symbol(handle, name) {
@@ -184,6 +203,21 @@ pub fn start(name: &str, sink: Sink, connected: Connected) -> Result<(), Error> 
         .map_err(|error| Error::Thread(error.to_string()))
 }
 
+/// Unregisters the client and removes the handlers, once; nothing when the client never registered.
+pub fn stop() {
+    let id = CLIENT.swap(0, Ordering::Relaxed);
+    if id == 0 {
+        return;
+    }
+    if let Some(shutdown) = SHUTDOWN.get() {
+        // SAFETY: `id` is the id the driver gave this client, and the handlers were installed.
+        unsafe {
+            (shutdown.unregister)(id);
+            (shutdown.cleanup)();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +253,12 @@ mod tests {
     #[test]
     fn a_short_message_is_ignored() {
         assert_eq!(decode(&[0; 10], 0), None);
+    }
+
+    #[test]
+    fn stopping_without_a_client_does_nothing() {
+        stop();
+        stop();
+        assert_eq!(CLIENT.load(Ordering::Relaxed), 0);
     }
 }

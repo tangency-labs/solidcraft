@@ -67,7 +67,7 @@ impl std::error::Error for Error {}
 
 /// Connects to the driver and calls `sink` (on the client's own thread) for everything it reports.
 /// `name` is how the driver lists this app. Only one client per process; the connection lasts
-/// until the process ends. Returns once the client thread runs, without waiting for the driver
+/// until [`stop`]. Returns once the client thread runs, without waiting for the driver
 /// (which needs the main thread to register the client); `connected` gets that outcome later, on
 /// the client's thread.
 pub fn start(
@@ -84,4 +84,13 @@ pub fn start(
         let _ = (name, sink, connected);
         Err(Error::Unsupported)
     }
+}
+
+/// Disconnects from the driver; call it as the app ends. The driver keeps a client registered
+/// after its process is gone, and while it does, a client registered later gets nothing until
+/// the device is unplugged and plugged in again. Does nothing when no client was started, and on
+/// other platforms.
+pub fn stop() {
+    #[cfg(target_os = "macos")]
+    macos::stop();
 }

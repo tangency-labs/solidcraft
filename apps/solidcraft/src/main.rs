@@ -166,6 +166,10 @@ impl eframe::App for App {
         // A save still being written ends before the app does.
         solidcraft_ui_egui::save_job::tick(&mut self.solve, true);
         solidcraft_ui_egui::recovery_ui::close(&mut self.solve);
+        // Before a restart below starts the next instance, which would otherwise get nothing from
+        // the 3D mouse driver (`solidcraft_3dx_client::stop`).
+        #[cfg(target_os = "macos")]
+        solidcraft_3dx_client::stop();
         solidcraft_engine::crash::end_session();
         if let Some(lost_at) = self.gpu.as_ref().and_then(|g| g.lost_at) {
             device_lost::restart(self.gpu.as_ref().is_some_and(|g| g.restart_on_software), lost_at);
@@ -572,6 +576,18 @@ fn app_viewport() -> Result<egui::ViewportBuilder, eframe::Error> {
 /// The window's app id: it names the desktop entry, so it is the packages' reverse-DNS id.
 const APP_ID: &str = solidcraft_engine::io::APP_ID;
 
+/// Disconnects from the 3D mouse driver when dropped, as `main` returns or a panic unwinds out
+/// of it (`solidcraft_3dx_client::stop`).
+#[cfg(target_os = "macos")]
+struct DriverClient;
+
+#[cfg(target_os = "macos")]
+impl Drop for DriverClient {
+    fn drop(&mut self) {
+        solidcraft_3dx_client::stop();
+    }
+}
+
 fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
@@ -705,6 +721,10 @@ fn main() -> eframe::Result {
     let created = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let created_in_app = created.clone();
     let starting = settings.clone();
+    // A panic on the window's thread ends the app without `on_exit`; this disconnects from the
+    // 3D mouse driver then too.
+    #[cfg(target_os = "macos")]
+    let _driver_client = DriverClient;
     mark("run_native");
     let result = eframe::run_native(
         "SolidCraft",
