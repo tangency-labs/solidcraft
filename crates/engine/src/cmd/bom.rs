@@ -1,6 +1,7 @@
 //! Part properties and the bill of materials. `component.metadata` and
 //! `component.metadata.set` read and change a component definition's part number, description,
-//! revision and free properties (shared by every occurrence, saved with the component);
+//! revision and free properties (shared by every occurrence, saved with the component; the keys
+//! and their checks are `solidcraft_doc::metadata`'s `KEYS`, the rows a component takes);
 //! `assembly.bom` counts the placed components of the design, or of one component, and lists
 //! them as rows, optionally written to a CSV or JSON file. With `group_children`, a part with a
 //! part number keeps the parts placed inside it (a bolt's washers and nut) in its own row.
@@ -8,7 +9,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use serde_json::{Map, Value, json};
-use solidcraft_doc::metadata::{DESCRIPTION, MAX_KEYS, MAX_TEXT_BYTES, PART_NUMBER, REVISION, WELL_KNOWN};
+use solidcraft_doc::metadata::{BOM_KEYS, MAX_KEYS, Owner, check_text, key_list};
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
@@ -21,9 +22,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("component.metadata.set", "Change Part Properties", set).icon("settings").doc_only().params(
         "component: id or name (not the root: use document.metadata.set); part_number?, description?, revision?: text (empty or null \
-         removes); values?: {key: value} (SolidCraft's keys project, part_number, revision, author, organization, description, \
-         license, or a reverse-DNS key holding an object); properties?: {name: text, …} (free properties; empty or null removes). \
-         All or nothing, one undo step → component, metadata, properties, changed: [keys]",
+         removes); values?: {key: value} (SolidCraft's keys, as document.metadata's properties lists them, or a reverse-DNS key \
+         holding an object); properties?: {name: text, …} (free properties; empty or null removes). All or nothing, one undo step \
+         → component, metadata, properties, changed: [keys]",
     ),
     CommandSpec::new("assembly.bom", "Bill of Materials", bom).at("SOLID", "INSPECT").icon("bom").noundo().params(
         "component?: id or name (default the design); levels?: flat (default: every part at any depth, counted through its \
@@ -58,15 +59,22 @@ fn component_id(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
 fn read(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.metadata";
     let id = component_id(s, p, cmd)?;
-    if id == 0 {
-        let m = &s.doc.metadata;
-        return Ok(json!({"component": 0, "name": s.doc.name, "part_number": m.part_number(), "description": m.description(),
-            "revision": m.revision(), "metadata": m, "properties": {}}));
+    // The root is the design: its own properties, and no free ones.
+    let (name, m, properties) = if id == 0 {
+        (&s.doc.name, &s.doc.metadata, json!({}))
+    } else {
+        let c = s.doc.components.iter().find(|c| c.id == id).ok_or_else(|| bad(cmd, format!("no component `{id}`")))?;
+        (&c.name, &c.metadata, json!(c.properties))
+    };
+    let mut out = Map::new();
+    out.insert("component".into(), json!(id));
+    out.insert("name".into(), json!(name));
+    for k in BOM_KEYS {
+        out.insert(k.to_string(), json!(m.text(k)));
     }
-    let c = s.doc.components.iter().find(|c| c.id == id).ok_or_else(|| bad(cmd, format!("no component `{id}`")))?;
-    let m = &c.metadata;
-    Ok(json!({"component": id, "name": c.name, "part_number": m.part_number(), "description": m.description(),
-        "revision": m.revision(), "metadata": m, "properties": c.properties}))
+    out.insert("metadata".into(), json!(m));
+    out.insert("properties".into(), properties);
+    Ok(Value::Object(out))
 }
 
 /// A free property as it may be saved (`None`: remove it), or why not.
@@ -83,12 +91,8 @@ fn property(name: &str, value: &Value, cmd: &str) -> Result<Option<String>> {
         Value::Bool(b) => b.to_string(),
         _ => return Err(bad(cmd, format!("property `{shown}` takes text"))),
     };
-    if text.len() > MAX_TEXT_BYTES {
-        return Err(bad(cmd, format!("property `{shown}` is longer than {MAX_TEXT_BYTES} bytes")));
-    }
-    if text.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\t' | '\r')) {
-        return Err(bad(cmd, format!("property `{shown}` has a control character")));
-    }
+    // The same text rule as SolidCraft's keys.
+    check_text(&format!("property `{shown}`"), &text).map_err(|e| bad(cmd, e.to_string()))?;
     Ok(Some(text))
 }
 
@@ -107,8 +111,8 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Object(_)) => return Err(bad(cmd, format!("`values` can hold at most {MAX_KEYS} keys"))),
         Some(_) => return Err(bad(cmd, "`values` must be an object: {key: value, …}")),
     }
-    for k in [PART_NUMBER, DESCRIPTION, REVISION] {
-        if let Some(v) = p.get(k) {
+    for k in BOM_KEYS {
+        if let Some(v) = p.get(*k) {
             entries.push((k.to_string(), v.clone()));
         }
     }
@@ -119,11 +123,11 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, "`properties` must be an object: {name: text, …}")),
     };
     if entries.is_empty() && props.is_empty() {
-        return Err(bad(cmd, format!("give part_number, description, revision, values or properties ({})", WELL_KNOWN.join(", "))));
+        return Err(bad(cmd, format!("give {}, values or properties ({})", BOM_KEYS.join(", "), key_list(Owner::Component))));
     }
     let mut changed: Vec<String> = Vec::new();
     for (k, v) in entries {
-        if metadata.set(&k, v).map_err(|e| bad(cmd, e.to_string()))? && !changed.contains(&k) {
+        if metadata.set(Owner::Component, &k, v).map_err(|e| bad(cmd, e.to_string()))? && !changed.contains(&k) {
             changed.push(k);
         }
     }

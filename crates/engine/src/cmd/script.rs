@@ -163,7 +163,7 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
     let mut properties = solidcraft_doc::Metadata::default();
     let mut odd = Vec::new();
     for (key, value) in &doc.metadata.0 {
-        if properties.set(key, value.clone()).is_err() {
+        if properties.set(solidcraft_doc::metadata::Owner::Design, key, value.clone()).is_err() {
             odd.push(key.as_str());
         }
     }

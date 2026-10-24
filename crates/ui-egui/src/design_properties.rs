@@ -8,7 +8,7 @@
 //! `ui_kit::Window` cards.
 
 use serde_json::{Map, Value};
-use solidcraft_engine::doc::metadata::{DESCRIPTION, WELL_KNOWN};
+use solidcraft_engine::doc::metadata::{DESCRIPTION, Owner, keys};
 
 use crate::SolveApp;
 use crate::ui_kit;
@@ -20,10 +20,11 @@ const OTHERS_ROWS: f32 = 6.0;
 
 /// What is being typed; the properties themselves live in the document.
 pub struct DesignProperties {
-    /// Each well-known key's text when the window opened, in [`WELL_KNOWN`] order.
-    pub opened: [String; WELL_KNOWN.len()],
+    /// Each of SolidCraft's design properties' text when the window opened, in
+    /// `keys(Owner::Design)` order.
+    pub opened: Vec<String>,
     /// The fields as edited.
-    pub fields: [String; WELL_KNOWN.len()],
+    pub fields: Vec<String>,
     /// The last refusal from `document.metadata.set`.
     pub error: Option<String>,
 }
@@ -31,18 +32,17 @@ pub struct DesignProperties {
 impl DesignProperties {
     pub fn new(app: &SolveApp) -> Self {
         let m = &app.session.doc.metadata;
-        let opened = WELL_KNOWN.map(|k| m.text(k).unwrap_or_default().to_string());
+        let opened: Vec<String> = keys(Owner::Design).map(|k| m.text(k.name).unwrap_or_default().to_string()).collect();
         DesignProperties { fields: opened.clone(), opened, error: None }
     }
 
     /// The fields that differ from what the window opened with, as `document.metadata.set`
     /// takes them (empty text removes the key).
     pub fn changes(&self) -> Map<String, Value> {
-        WELL_KNOWN
-            .iter()
+        keys(Owner::Design)
             .zip(self.opened.iter().zip(&self.fields))
             .filter(|(_, (was, now))| was != now)
-            .map(|(k, (_, now))| (k.to_string(), Value::String(now.clone())))
+            .map(|(k, (_, now))| (k.name.to_string(), Value::String(now.clone())))
             .collect()
     }
 }
@@ -67,18 +67,6 @@ fn apply(app: &mut SolveApp, d: &mut DesignProperties) -> bool {
     }
 }
 
-fn label(key: &str) -> &'static str {
-    match key {
-        "project" => crate::i18n::tr("ui.design_properties.project"),
-        "part_number" => crate::i18n::tr("ui.design_properties.part_number"),
-        "revision" => crate::i18n::tr("ui.design_properties.revision"),
-        "author" => crate::i18n::tr("ui.design_properties.author"),
-        "organization" => crate::i18n::tr("ui.design_properties.organization"),
-        "description" => crate::i18n::tr("ui.design_properties.description"),
-        _ => crate::i18n::tr("ui.design_properties.license"),
-    }
-}
-
 /// A short one-line view of a value another tool keeps.
 fn preview(v: &Value) -> String {
     let text = serde_json::to_string(v).unwrap_or_default();
@@ -91,10 +79,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let metadata = app.session.doc.metadata.clone();
     let title = crate::i18n::tr_label("Design Properties");
     let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_design_properties"), "settings", title).fields().show(ctx, true, |ui| {
-        for (i, key) in WELL_KNOWN.iter().enumerate() {
-            let label = label(key);
+        for (i, k) in keys(Owner::Design).enumerate() {
+            let (key, label) = (k.name, crate::i18n::tr(k.label));
             let Some(field) = d.fields.get_mut(i) else { continue };
-            if *key == DESCRIPTION {
+            if key == DESCRIPTION {
                 ui_kit::multiline_text_field(ui, label, egui::Id::new(("sc_design_properties", key)), field);
             } else {
                 ui_kit::row(ui, label, |ui| ui_kit::text_field(ui, field, ""));
@@ -214,6 +202,28 @@ mod tests {
         let d = h.app.design_properties.as_ref().expect("still open");
         assert!(d.error.as_deref().is_some_and(|e| e.contains("control character")), "{:?}", d.error);
         assert_eq!(h.app.session.undo.len(), undo + 1);
+    }
+
+    #[test]
+    fn each_field_is_labelled_from_the_table_of_keys() {
+        use solidcraft_engine::doc::metadata::{KEYS, Owner, keys};
+        let english = crate::i18n::Locale::for_language("en");
+        for k in KEYS {
+            assert_ne!(english.text(k.label), k.label, "`{}`'s label is in the English catalog", k.name);
+        }
+        let mut h = Harness::new();
+        // A key a newer SolidCraft might read: kept as another tool's data, never labelled as one of ours.
+        h.app.session.doc_mut().metadata.0.insert("future_key".into(), json!("kept"));
+        h.step(&json!({"start": "document.metadata"})).unwrap();
+        h.frames(2);
+        let labels: Vec<&str> = keys(Owner::Design).map(|k| english.text(k.label)).collect();
+        assert_eq!(labels, ["Project", "Part number", "Revision", "Author", "Organization", "Description", "License"]);
+        for label in &labels {
+            assert!(h.widget(label).is_some(), "{label}");
+        }
+        let d = h.app.design_properties.as_ref().unwrap();
+        assert_eq!((d.opened.len(), d.fields.len()), (labels.len(), labels.len()), "a field for each key, none for others");
+        assert!(h.widget("Other tools' data (1)").is_some(), "the unknown key is listed with other tools' data");
     }
 
     #[test]

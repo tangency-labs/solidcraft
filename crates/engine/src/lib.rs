@@ -318,6 +318,10 @@ pub struct Session {
     /// commands are undone however long the undo history is.
     pub(crate) checkpoints: Vec<Checkpoint>,
     next_checkpoint: u64,
+    /// How many times [`Session::replace_design`] gave this session another design. A command
+    /// that did is no edit of the design before it, so [`Session::execute`] never takes it for a
+    /// change of render intent or part properties alone.
+    replacements: u64,
     /// Record this session's top-level commands in the crash journal (the app's own design;
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
@@ -457,6 +461,7 @@ impl Session {
             continuity: Vec::new(),
             checkpoints: Vec::new(),
             next_checkpoint: 1,
+            replacements: 0,
             saved_visibility: visibility.clone(),
             visibility,
             camera: None,
@@ -482,6 +487,7 @@ impl Session {
         let render_jobs = self.render_jobs.scratch();
         let checkpoints = std::mem::take(&mut self.checkpoints);
         let next_checkpoint = self.next_checkpoint;
+        let replacements = self.replacements.wrapping_add(1);
         *self = fresh;
         self.auto_project = auto_project;
         self.param_check = param_check;
@@ -489,6 +495,7 @@ impl Session {
         self.render_jobs = render_jobs;
         self.checkpoints = checkpoints;
         self.next_checkpoint = next_checkpoint;
+        self.replacements = replacements;
     }
 
     /// The design has changes not in its file: in the document, or in what is hidden.
@@ -864,6 +871,7 @@ impl Session {
         };
         // Where new geometry goes: not in the design, but a replay needs it (component.activate).
         let active_before = (self.active_component, self.active_occurrence_path.clone());
+        let replacements = self.replacements;
         let null = Value::Object(Default::default());
         let params = if params.is_null() { &null } else { params };
         let given = params;
@@ -912,7 +920,10 @@ impl Session {
             Ok((v, live_edit)) => {
                 let v = if changed { self.with_created(spec.id, params, &before, v) } else { v };
                 if changed {
-                    let render_only = self.render_only_change(&before);
+                    // Another design opened, started or recovered is refreshed in full, however
+                    // little it differs from the one before: the shortcut proves a session's own
+                    // edit kept its model and joints valid, and a new session has had none.
+                    let render_only = self.replacements == replacements && self.render_only_change(&before);
                     let previous_doc = before.doc.clone();
                     if spec.undoable {
                         self.undo.push(before);
@@ -1043,6 +1054,7 @@ impl Session {
             continuity: Vec::new(),
             checkpoints: Vec::new(),
             next_checkpoint: 1,
+            replacements: 0,
             visibility: self.visibility.clone(),
             camera: self.camera,
             render_viewport: self.render_viewport.clone(),

@@ -2867,21 +2867,30 @@ impl Document {
         *self == normalized
     }
 
-    /// Only components' part properties (metadata and free properties) changed: nothing to
+    /// Only part properties changed (the fields `with_part_properties_of` names): nothing to
     /// evaluate. The same whole-Document proof as [`Document::differs_only_in_render`].
     pub fn differs_only_in_part_properties(&self, previous: &Document) -> bool {
-        if self.components.len() != previous.components.len()
-            || self.components.iter().zip(&previous.components).any(|(a, b)| a.id != b.id)
-            || self.components == previous.components
-        {
-            return false;
+        previous.with_part_properties_of(self).is_some_and(|normalized| normalized == *self)
+    }
+
+    /// This design with `other`'s part properties, or `None` when they are this design's
+    /// already (then nothing is copied). The part properties are the fields that change no
+    /// geometry: the design's metadata, and each component's metadata and free properties. A
+    /// field that joins them is compared and copied here, and nowhere else.
+    fn with_part_properties_of(&self, other: &Document) -> Option<Document> {
+        let same = self.metadata == other.metadata
+            && self.components.iter().zip(&other.components).all(|(c, o)| c.metadata == o.metadata && c.properties == o.properties);
+        if same {
+            return None;
         }
-        let mut normalized = previous.clone();
-        for (n, c) in normalized.components.iter_mut().zip(&self.components) {
-            n.metadata = c.metadata.clone();
-            n.properties = c.properties.clone();
+        let mut out = self.clone();
+        out.metadata.clone_from(&other.metadata);
+        // Paired by position: if the components themselves differ, so do the designs.
+        for (c, o) in out.components.iter_mut().zip(&other.components) {
+            c.metadata.clone_from(&o.metadata);
+            c.properties.clone_from(&o.properties);
         }
-        *self == normalized
+        Some(out)
     }
 
     /// The colour a body is shown and exported in (sRGB as 0–1 fractions): its appearance,
