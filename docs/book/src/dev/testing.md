@@ -64,7 +64,9 @@ them while building faster than `--release`. If a test fails only in a plain deb
 so in the PR.
 
 Run `cargo xtask test` to build with this profile and run the test binaries concurrently,
-with doc tests alongside. Arguments after `--` go to each test binary, for example
+with doc tests alongside. The binaries run a pool at a time (a quarter of the cores, or what
+`SOLIDCRAFT_TEST_JOBS` says), each with `RUST_TEST_THREADS` set, so the suite keeps the machine
+busy without oversubscribing it. Arguments after `--` go to each test binary, for example
 `cargo xtask test -- shell`. To run the test binaries sequentially instead, use
 `cargo test --workspace --profile ci`.
 
