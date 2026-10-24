@@ -2049,6 +2049,7 @@ fn own_geometry(b: &mut Brep, slot: usize) {
         if let Some(surface) = b.face_mut(f).ok().and_then(|x| x.surface.as_mut()) {
             let _ = surface.set_owner(Some(query_key(slot, CacheObject::Face(f))));
         }
+        let _ = b.sync_face_surface_tolerance(f);
     }
 }
 

@@ -608,6 +608,130 @@ pub struct NewFace {
     pub face: Option<FaceId>,
 }
 
+/// What [`make_face_attempt`] returns.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MakeFaceAttempt {
+    /// The status of the build: `Ok(())` on success, or the upstream failure.
+    pub status: Result<()>,
+    /// `rpNewRegion`: the region split off, if the face split one.
+    pub region: Option<RegionId>,
+    /// `rpNewShell`: the new shell, if any.
+    pub shell: Option<ShellId>,
+    /// `rpNewFace`: the new face.
+    pub face: Option<FaceId>,
+}
+
+/// `MakeFace` attempt variant preserving partial outputs (such as `region` on split).
+#[allow(clippy::too_many_arguments)]
+pub fn make_face_attempt(
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    loops: &[usize],
+    edgeuses: &[EdgeuseId],
+    loop_vertices: &[VertexId],
+    surface: Option<Surface>,
+    uv_domain: &Extent2d,
+    orientation: OrientType,
+    opts: &MakeFaceOptions<'_>,
+    this_face: &dyn Fn(FaceId) -> ObjectRef,
+    env: &mut ed::NotifyEnv<'_>,
+) -> Result<MakeFaceAttempt> {
+    make_face_attempt_with_state(
+        k,
+        b,
+        region,
+        loops,
+        edgeuses,
+        loop_vertices,
+        surface,
+        uv_domain,
+        orientation,
+        opts,
+        this_face,
+        &mut ed::NotifyState::from_env(env),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn make_face_attempt_with_state(
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    loops: &[usize],
+    edgeuses: &[EdgeuseId],
+    loop_vertices: &[VertexId],
+    surface: Option<Surface>,
+    uv_domain: &Extent2d,
+    orientation: OrientType,
+    opts: &MakeFaceOptions<'_>,
+    this_face: &dyn Fn(FaceId) -> ObjectRef,
+    env: &mut ed::NotifyState<'_>,
+) -> Result<MakeFaceAttempt> {
+    let Some(mut surface) = surface else {
+        return Err(SolidError::null_pointer(OP));
+    };
+    // GetInfiniteRegion() (an inline field read; NULL when unset)
+    let region = region.or(b.infinite_region());
+
+    // get preexisting surface owner
+    let old_owner = surface.owner();
+    // MakeFaceTopology claims a new mark: a fresh mark record serves (see p10)
+    let attempt = p6::make_face_topology_attempt_with_state(
+        k,
+        b,
+        &mut Marks::default(),
+        env,
+        Some(surface.clone()),
+        orientation,
+        &p6::FaceTopologyOptions {
+            region,
+            edge_loops: loops,
+            edgeuses,
+            loop_vertices,
+            verify_radial_sectors: opts.verify_radial_sectors,
+            calculate_trims: opts.calculate_trims,
+            uv_curves: opts.uv_curves,
+            surface_key: None,
+        },
+    )?;
+    // restore the preexisting surface owner, whether the build fails or succeeds
+    surface.set_owner(old_owner);
+    if let Err(err) = attempt.status {
+        return Ok(MakeFaceAttempt {
+            status: Err(err),
+            region: attempt.region,
+            shell: attempt.shell,
+            face: attempt.face,
+        });
+    }
+    let new_region = attempt.region;
+    let new_shell = attempt.shell;
+    let new_face = attempt.face.ok_or_else(|| null("MakeFace made no face"))?;
+
+    b.face_mut(new_face)?.uv_domain = *uv_domain;
+
+    // default face tolerance to Brep tolerance
+    let tol = b.tolerance();
+    // SetTolerance(GetTolerance()) = (tol, TRUE, TRUE): grow only, cascade
+    face_set_tolerance(b, new_face, tol, true, true)?;
+
+    // make the face->surface connections
+    let owner = this_face(new_face);
+    surface.set_owner(Some(owner));
+    b.face_mut(new_face)?.surface = Some(surface);
+    b.geometry_owner_keys
+        .insert(EntityRef::Face(new_face), owner);
+    b.sync_face_surface_tolerance(new_face)?;
+
+    Ok(MakeFaceAttempt {
+        status: Ok(()),
+        region: new_region,
+        shell: new_shell,
+        face: Some(new_face),
+    })
+}
+
 /// `MakeFace`: makes a face on `surface` (over `uv_domain`) in `region` (the infinite
 /// region for `None`) from existing edge uses, `loops` giving the number of edge uses of
 /// each loop (outer loop first, counter-clockwise when `orientation` is
@@ -664,57 +788,25 @@ fn make_face_with_state(
     this_face: &dyn Fn(FaceId) -> ObjectRef,
     env: &mut ed::NotifyState<'_>,
 ) -> Result<NewFace> {
-    let Some(mut surface) = surface else {
-        return Err(SolidError::null_pointer(OP));
-    };
-    // GetInfiniteRegion() (an inline field read; NULL when unset)
-    let region = region.or(b.infinite_region());
-
-    // get preexisting surface owner
-    let old_owner = surface.owner();
-    // MakeFaceTopology claims a new mark: a fresh mark record serves (see p10)
-    let built = p6::make_face_topology_with_state(
+    let attempt = make_face_attempt_with_state(
         k,
         b,
-        &mut Marks::default(),
-        env,
-        Some(surface.clone()),
+        region,
+        loops,
+        edgeuses,
+        loop_vertices,
+        surface,
+        uv_domain,
         orientation,
-        &p6::FaceTopologyOptions {
-            region,
-            edge_loops: loops,
-            edgeuses,
-            loop_vertices,
-            verify_radial_sectors: opts.verify_radial_sectors,
-            calculate_trims: opts.calculate_trims,
-            uv_curves: opts.uv_curves,
-            surface_key: None,
-        },
-    );
-    // restore the preexisting surface owner, whether the build fails or succeeds
-    surface.set_owner(old_owner);
-    let built = built?;
-    let (new_region, new_shell, new_face) = (built.region, built.shell, built.face);
-
-    b.face_mut(new_face)?.uv_domain = *uv_domain;
-
-    // default face tolerance to Brep tolerance
-    let tol = b.tolerance();
-    // SetTolerance(GetTolerance()) = (tol, TRUE, TRUE): grow only, cascade
-    face_set_tolerance(b, new_face, tol, true, true)?;
-
-    // make the face->surface connections
-    let owner = this_face(new_face);
-    surface.set_owner(Some(owner));
-    b.face_mut(new_face)?.surface = Some(surface);
-    b.geometry_owner_keys
-        .insert(EntityRef::Face(new_face), owner);
-    b.sync_face_surface_tolerance(new_face)?;
-
+        opts,
+        this_face,
+        env,
+    )?;
+    attempt.status?;
     Ok(NewFace {
-        region: new_region,
-        shell: new_shell,
-        face: Some(new_face),
+        region: attempt.region,
+        shell: attempt.shell,
+        face: attempt.face,
     })
 }
 

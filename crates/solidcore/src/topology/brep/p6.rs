@@ -354,13 +354,15 @@ pub fn make_face_topology(
     orientation: OrientType,
     options: &FaceTopologyOptions<'_>,
 ) -> Result<FaceTopology> {
-    let attempt = make_face_topology_attempt(k, brep, marks, env, surface, orientation, options)?;
-    attempt.status?;
-    Ok(FaceTopology {
-        face: deref(attempt.face)?,
-        shell: attempt.shell,
-        region: attempt.region,
-    })
+    make_face_topology_with_state(
+        k,
+        brep,
+        marks,
+        &mut NotifyState::from_env(env),
+        surface,
+        orientation,
+        options,
+    )
 }
 
 /// [`make_face_topology`], retaining the native status and the outputs written before
@@ -419,7 +421,7 @@ pub(crate) fn make_face_topology_with_state(
     })
 }
 
-fn make_face_topology_attempt_with_state(
+pub(crate) fn make_face_topology_attempt_with_state(
     k: &mut Kernel,
     brep: &mut Brep,
     marks: &mut Marks,

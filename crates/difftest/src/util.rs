@@ -218,5 +218,6 @@ pub fn own_face_surfaces(b: &mut Brep, face_key: &dyn Fn(FaceId) -> ObjectRef) {
         if let Some(surface) = b.face_mut(id).ok().and_then(|f| f.surface.as_mut()) {
             let _ = surface.set_owner(Some(face_key(id)));
         }
+        let _ = b.sync_face_surface_tolerance(id);
     }
 }

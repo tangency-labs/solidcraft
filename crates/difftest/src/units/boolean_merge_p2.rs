@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use solidcore::boolean::merge::p1::{MergeOptions, MergeState, VertexCopy};
 use solidcore::boolean::merge::p2::{
-    make_faceuse, merge_edge, MergeAddedOptions, MergeBrep, SplitEdges, StitchSettings,
-    StitchedEdges, StitchedVertices, TopologyCopy,
+    make_faceuse_attempt, merge_edge, MergeAddedOptions, MergeBrep, SplitEdges,
+    StitchSettings, StitchedEdges, StitchedVertices, TopologyCopy,
 };
 use solidcore::boolean::topology_intersector::p1::{Relations, TopologyIntersector};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -683,7 +683,7 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
                     new_faces,
                 } => {
                     let mut made = Vec::new();
-                    match make_faceuse(
+                    match make_faceuse_attempt(
                         &mut k,
                         &mut a,
                         b,
@@ -695,8 +695,17 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
                         new_faces.then_some(&mut made),
                     ) {
                         Ok(r) => {
-                            ids.extend([0, id(r.old_region), id(r.new_region), made.len() as i64]);
-                            ids.extend(made.iter().map(|f| i64::from(f.index())));
+                            let stat = match &r.status {
+                                Ok(()) => 0,
+                                Err(e) if e.is_unported() => {
+                                    return Output::unported(e).ok_or_else(|| err(e))
+                                }
+                                Err(e) => status(e),
+                            };
+                            ids.extend([stat, id(r.old_region), id(r.new_region), made.len() as i64]);
+                            if r.status.is_ok() {
+                                ids.extend(made.iter().map(|f| i64::from(f.index())));
+                            }
                         }
                         Err(e) if e.is_unported() => {
                             return Output::unported(&e).ok_or_else(|| err(&e))
