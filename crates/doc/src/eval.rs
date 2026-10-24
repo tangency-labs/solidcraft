@@ -5678,6 +5678,24 @@ fn replay(
             }
             continue;
         }
+        // A moved copy is copied again as a body: each instance is the copy the Move made,
+        // placed by the pattern (#5931).
+        if let FeatureKind::Move { copy: true, .. } = &src.kind {
+            let made: Vec<ModelBody> = st.bodies.iter().filter(|b| b.feature == src.id).cloned().collect();
+            if made.is_empty() {
+                return Err(DocError::Invalid(format!("{} made no copy to repeat", src.name)));
+            }
+            let mut output = 0;
+            for (k, m) in mats.iter().enumerate() {
+                for mb in &made {
+                    let moved = moved_copy(mb, kernel::transform_matrix(&mb.body, *m)?, first + k + 1);
+                    let name = copy_body_name(st, f, output, &mb.name);
+                    st.bodies.push(ModelBody::traced_new(name, moved, f.id));
+                    output += 1;
+                }
+            }
+            continue;
+        }
         let (op, targets) = feature_op(src);
         // A primitive's or a hole's targets are its participants (#1108): the copies change
         // those bodies only, like the feature itself (#2755).
