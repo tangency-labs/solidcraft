@@ -571,6 +571,12 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     if st.body(name).is_some() {
         return Err(bad(cmd, format!("another body is called `{name}`")));
     }
+    // Remove keeps a name even after its body leaves the current state. Reusing it would
+    // redirect that feature to this body on rebuild (#6042). Inactive removals must keep
+    // their targets too, for when the history marker advances or they are unsuppressed.
+    if let Some(f) = s.doc.features.iter().find(|f| matches!(&f.kind, FeatureKind::Remove { bodies } if bodies.iter().any(|b| b == name))) {
+        return Err(bad(cmd, format!("`{name}` is still used by Remove feature `{}`; choose a different body name", f.name)));
+    }
     // The body is the k-th new body of its feature; its siblings keep the names they have now
     // (unpinned pattern copies would otherwise be renumbered into the freed name, #265). That
     // includes the siblings whose stored name is shared: the solids of a STEP file with one label
@@ -819,6 +825,83 @@ mod tests {
         assert!(s.execute("body.rename", &json!({"body": "Lid", "name": " "})).is_err());
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(names(&s)[1], b);
+    }
+
+    #[test]
+    fn renaming_a_body_to_a_removed_name_preserves_the_design() {
+        for removed_name in ["Base", "Body1"] {
+            for remove_first in [false, true] {
+                let mut s = Session::default();
+                let plate = json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"});
+                if !remove_first {
+                    run(&mut s, "solid.box", plate.clone());
+                }
+                let mut cube = json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0], "operation": "new"});
+                if removed_name == "Base" {
+                    cube["body_name"] = json!(removed_name);
+                }
+                run(&mut s, "solid.box", cube);
+                run(&mut s, "solid.remove", json!({"bodies": [removed_name], "name": "RemoveCube"}));
+                if remove_first {
+                    run(&mut s, "solid.box", plate);
+                }
+                assert_eq!(names(&s), ["Plate"]);
+                let before = serde_json::to_value(&*s.doc).unwrap();
+                let undo = s.undo.len();
+                let revision = s.revision;
+                let result = s.execute("body.rename", &json!({"body": "Plate", "name": removed_name}));
+                assert!(result.is_err(), "rename must not steal {removed_name} from RemoveCube: {result:?}; bodies: {:?}", names(&s));
+                let error = result.unwrap_err().to_string();
+                assert!(error.contains(removed_name) && error.contains("RemoveCube"), "{error}");
+                assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before);
+                assert_eq!(s.undo.len(), undo, "a refused rename adds no undo entry");
+                assert_eq!(s.revision, revision);
+                assert_eq!(names(&s), ["Plate"]);
+                let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+                assert!((volume - 12000.0).abs() < 1e-6);
+
+                // A fresh name still works, including after a full rebuild from saved data.
+                run(&mut s, "body.rename", json!({"body": "Plate", "name": "Lid"}));
+                run(&mut s, "edit.undo", json!({}));
+                assert_eq!(names(&s), ["Plate"]);
+                run(&mut s, "edit.redo", json!({}));
+                let mut fresh = Session::new(serde_json::from_value(serde_json::to_value(&*s.doc).unwrap()).unwrap());
+                fresh.refresh();
+                assert_eq!(names(&fresh), ["Lid"]);
+                assert!(fresh.model.results.iter().all(|r| r.error.is_none()));
+            }
+        }
+    }
+
+    #[test]
+    fn renaming_a_body_cannot_take_an_inactive_removals_name() {
+        for rollback in [false, true] {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+            run(
+                &mut s,
+                "solid.box",
+                json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0], "operation": "new", "body_name": "Base", "name": "Cube"}),
+            );
+            run(&mut s, "solid.remove", json!({"bodies": ["Base"], "name": "RemoveCube"}));
+            if rollback {
+                run(&mut s, "timeline.rollback", json!({"position": 1}));
+            } else {
+                run(&mut s, "timeline.suppress", json!({"features": ["Cube", "RemoveCube"], "suppressed": true}));
+            }
+            assert_eq!(names(&s), ["Plate"]);
+            let before = serde_json::to_value(&*s.doc).unwrap();
+            let error = s.execute("body.rename", &json!({"body": "Plate", "name": "Base"})).unwrap_err().to_string();
+            assert!(error.contains("RemoveCube"), "{error}");
+            assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before);
+            if rollback {
+                run(&mut s, "timeline.rollback", json!({"position": "end"}));
+            } else {
+                run(&mut s, "timeline.suppress", json!({"features": ["Cube", "RemoveCube"], "suppressed": false}));
+            }
+            assert_eq!(names(&s), ["Plate"]);
+            assert!(s.model.results.iter().all(|r| r.error.is_none()));
+        }
     }
 
     #[test]
