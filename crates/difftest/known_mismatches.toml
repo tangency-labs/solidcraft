@@ -250,3 +250,48 @@ why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-
 unit = "topology.brep_p10"
 case = "gen0117"
 why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-rep upstream (CurveOnClassify -> IntersectTSBound -> ComputeUVPoint(bOKToMakeUVTrimCurve=TRUE); SetUVTrimCurve resets vertex/face gaps), the port runs it on a copy (plan/findings.md: ClassifyLoops' loop bisector builds UV trim curves upstream, on a copy in the port) [ints.ints[166] cpp 1 rust 0]"
+
+[[mismatch]]
+unit = "heal.heal_data_p1"
+case = "file_plane_circ"
+why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-rep upstream (CurveOnClassify -> IntersectTSBound -> ComputeUVPoint(bOKToMakeUVTrimCurve=TRUE); SetUVTrimCurve resets vertex/face gaps), the port runs it on a copy (plan/findings.md: ClassifyLoops' loop bisector builds UV trim curves upstream, on a copy in the port) [values.out[215] cpp -1.23456e-61 rust 0e0]"
+
+[[mismatch]]
+unit = "heal.heal_data_p1"
+case = "file_plane_circ_rebuild_reverse"
+why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-rep upstream (CurveOnClassify -> IntersectTSBound -> ComputeUVPoint(bOKToMakeUVTrimCurve=TRUE); SetUVTrimCurve resets vertex/face gaps), the port runs it on a copy (plan/findings.md: ClassifyLoops' loop bisector builds UV trim curves upstream, on a copy in the port) [values.out[215] cpp -1.23456e-61 rust 0e0]"
+
+[[mismatch]]
+unit = "topology.brep_p1"
+case = "plane_circ_heal"
+why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-rep upstream (CurveOnClassify -> IntersectTSBound -> ComputeUVPoint(bOKToMakeUVTrimCurve=TRUE); SetUVTrimCurve resets vertex/face gaps), the port runs it on a copy (plan/findings.md: ClassifyLoops' loop bisector builds UV trim curves upstream, on a copy in the port) [values.out[134] cpp 1e0 rust 0e0]"
+
+[[mismatch]]
+unit = "topology.brep_p10"
+case = "read_Fillet_bottle"
+why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-rep upstream (CurveOnClassify -> IntersectTSBound -> ComputeUVPoint(bOKToMakeUVTrimCurve=TRUE); SetUVTrimCurve resets vertex/face gaps), the port runs it on a copy (plan/findings.md: ClassifyLoops' loop bisector builds UV trim curves upstream, on a copy in the port) [ints.dbl_bits[2437] cpp 4533227276183232325 rust 4533227276183193973]"
+
+[[mismatch]]
+unit = "topology.brep_p10"
+case = "read_Fillet_cyl_cyl_shell"
+why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-rep upstream (CurveOnClassify -> IntersectTSBound -> ComputeUVPoint(bOKToMakeUVTrimCurve=TRUE); SetUVTrimCurve resets vertex/face gaps), the port runs it on a copy (plan/findings.md: ClassifyLoops' loop bisector builds UV trim curves upstream, on a copy in the port) [ints.dbl_bits[351] cpp 4541087340294538906 rust 4541087340294541262]"
+
+[[mismatch]]
+unit = "topology.brep_p10"
+case = "read_Fillet_fillet0227"
+why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-rep upstream (CurveOnClassify -> IntersectTSBound -> ComputeUVPoint(bOKToMakeUVTrimCurve=TRUE); SetUVTrimCurve resets vertex/face gaps), the port runs it on a copy (plan/findings.md: ClassifyLoops' loop bisector builds UV trim curves upstream, on a copy in the port) [ints.dbl_bits[587] cpp 4584643767240576693 rust 4584643767240344909]"
+
+[[mismatch]]
+unit = "topology.brep_p10"
+case = "read_Solids_extrusion2"
+why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-rep upstream (CurveOnClassify -> IntersectTSBound -> ComputeUVPoint(bOKToMakeUVTrimCurve=TRUE); SetUVTrimCurve resets vertex/face gaps), the port runs it on a copy (plan/findings.md: ClassifyLoops' loop bisector builds UV trim curves upstream, on a copy in the port) [ints.dbl_bits[3949] cpp 4566519071875143604 rust 4566519071875138963]"
+
+[[mismatch]]
+unit = "topology.brep_p10"
+case = "gen0040"
+why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-rep upstream (CurveOnClassify -> IntersectTSBound -> ComputeUVPoint(bOKToMakeUVTrimCurve=TRUE); SetUVTrimCurve resets vertex/face gaps), the port runs it on a copy (plan/findings.md: ClassifyLoops' loop bisector builds UV trim curves upstream, on a copy in the port) [values.dbls.len cpp 1921 rust 1785]"
+
+[[mismatch]]
+unit = "topology.brep_p10"
+case = "gen0165"
+why = "ClassifyLoops' loop bisector builds missing UV trim curves on the real B-rep upstream (CurveOnClassify -> IntersectTSBound -> ComputeUVPoint(bOKToMakeUVTrimCurve=TRUE); SetUVTrimCurve resets vertex/face gaps), the port runs it on a copy (plan/findings.md: ClassifyLoops' loop bisector builds UV trim curves upstream, on a copy in the port) [ints.ints[170] cpp 1 rust 0]"
