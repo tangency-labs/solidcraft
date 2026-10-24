@@ -479,8 +479,14 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     // A dialog input that takes features (pattern objects) gets the click.
                     let takes = app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::FEATURES != 0);
                     if takes {
+                        // A click adds the feature and keeps one already picked (it shows as
+                        // selected); Ctrl+click takes it out, as Ctrl+click toggles outside a dialog.
+                        let toggle = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
                         if let Some(mut d) = app.dialog.take() {
-                            d.pick(&app.session, solidcraft_engine::Sel::Feature { id: *id });
+                            let feature = solidcraft_engine::Sel::Feature { id: *id };
+                            if toggle || !d.active_input().is_some_and(|i| i.items.contains(&feature)) {
+                                d.pick(&app.session, feature);
+                            }
                             app.dialog = Some(d);
                         }
                     } else {

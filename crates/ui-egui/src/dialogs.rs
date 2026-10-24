@@ -452,6 +452,8 @@ pub struct Dialog {
     pub(crate) picked_edges: Vec<Sel>,
     /// Whether `inputs[0]` currently includes the tangent chains of `picked_edges`.
     pub(crate) chain_applied: bool,
+    /// A pattern's objects of the Object Type not shown now, restored when it is chosen again.
+    pub(crate) other_objects: Vec<Sel>,
     /// Shell feedback is derived from the picks, never saved as additional face references.
     shell_chain: std::cell::RefCell<Option<ShellChain>>,
     /// An extrude Press Pull opened with nothing selected: its first pick may be a curved face or
@@ -634,6 +636,7 @@ impl Dialog {
             then_start: None,
             picked_edges: Vec::new(),
             chain_applied,
+            other_objects: Vec::new(),
             shell_chain: Default::default(),
             press_pull: false,
         }
@@ -1934,7 +1937,10 @@ fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
     if ty != cur {
         inp.accept = if ty == 1 { selection::FEATURES } else { BODIES };
         inp.label = objects_label(inp.accept);
-        inp.items.clear();
+        // The pre-selection moved into this input when the dialog opened, so switching back
+        // restores what the other type held instead of losing it.
+        let back = std::mem::take(&mut d.other_objects);
+        d.other_objects = std::mem::replace(&mut inp.items, back);
         d.active = 0;
     }
 }
