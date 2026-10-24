@@ -8,13 +8,14 @@ use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use solidcore::boolean::merge::p1 as port;
+use solidcore::boolean::merge::p4::{BooleanKernels, KernelManifoldIntersector, ManifoldIntersector};
 use solidcore::boolean::topology_intersector::p1::Relations;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{ids, Attribute, AttributeStore, Behavior, ObjectKey};
 use solidcore::geom::context::{Context, NotifyCallback};
 use solidcore::geom::object::{NotifyOperation, ObjectRef};
 use solidcore::kernel::Kernel;
-use solidcore::math::Vec3;
+use solidcore::math::{Vec3, EFF_ZERO_SQ, PI};
 use solidcore::topology::shell::ShellMembers;
 use solidcore::topology::topology::Topology;
 use solidcore::topology::{
@@ -27,6 +28,84 @@ use std::collections::BTreeMap;
 
 /// The op of `find_brep_region_of_other_face` (`SmMerge::FindBrepRegionOfOtherFace`).
 const OP_FIND_REGION: u8 = 5;
+/// The op of `SmMerge::FixFoundFaceCoincidence`, which can edit both operands.
+const OP_FACE_COINCIDENCE: u8 = 2;
+
+/// Takes the other operand's graph off the end of op 2's C++ record. The record is:
+/// changed flag; the count and faces of each side; the count and mates of the primary's
+/// edges and of the other's ([`face_coincidence_record`]); then the length of the other
+/// operand's raw export, and the export.
+fn split_other_graph(record: &mut Vec<f64>) -> Result<Brep, HarnessError> {
+    let short = || harness("short face coincidence record");
+    let at = |record: &[f64], i: usize| -> Result<usize, HarnessError> {
+        let v = *record.get(i).ok_or_else(short)?;
+        if v.is_finite() && v >= 0.0 && v.fract() == 0.0 {
+            Ok(v as usize)
+        } else {
+            Err(short())
+        }
+    };
+    // the position after a count at `i` and the values it counts
+    let skip = |record: &[f64], i: usize| -> Result<usize, HarnessError> {
+        at(record, i)?
+            .checked_add(i)
+            .and_then(|n| n.checked_add(1))
+            .ok_or_else(short)
+    };
+    let second = skip(record, 1)?; // the other side's face count
+    let primary_edges = skip(record, second)?;
+    let other_edges = skip(record, primary_edges)?;
+    let len_at = skip(record, other_edges)?;
+    let len = at(record, len_at)?;
+    let start = len_at.checked_add(1).ok_or_else(short)?;
+    let end = start.checked_add(len).ok_or_else(short)?;
+    if end != record.len() {
+        return Err(harness("face coincidence record has trailing values"));
+    }
+    let (other, _) = import_raw(record.get(start..end).ok_or_else(short)?)?;
+    record.truncate(len_at);
+    Ok(other)
+}
+
+/// The values of op 2's record that follow the changed flag: the faces of each side and
+/// the edge mates (the primary edges' other mates, then the other edges' B-rep mates, as
+/// numbers of `edges`' side's edges, -1 for none), all in the numbering of the B-reps
+/// after the call, as the shim writes them.
+fn face_coincidence_record(
+    changed: bool,
+    faces: &[FaceId],
+    other_faces: &[FaceId],
+    b: &Brep,
+    other: &Brep,
+    mates: &solidcore::boolean::topology_intersector::p1::MateMap<EdgeId>,
+) -> Vec<f64> {
+    let (cb, co) = (Canon::reachable(b), Canon::reachable(other));
+    let mut out = vec![f64::from(u8::from(changed)), faces.len() as f64];
+    out.extend(faces.iter().map(|&f| cb.faces.of(Some(f)) as f64));
+    out.push(other_faces.len() as f64);
+    out.extend(other_faces.iter().map(|&f| co.faces.of(Some(f)) as f64));
+    out.push(cb.edges.items.len() as f64);
+    out.extend(cb.edges.items.iter().map(|&e| {
+        co.edges
+            .of(mates.primary_to_other().get(&e).copied()) as f64
+    }));
+    out.push(co.edges.items.len() as f64);
+    out.extend(co.edges.items.iter().map(|&e| {
+        cb.edges
+            .of(mates.other_to_primary().get(&e).copied()) as f64
+    }));
+    out
+}
+
+/// Adds the other operand's records and links (op 2 only), compared like the primary's.
+fn with_other_graph(mut out: Output, other: Option<&Brep>) -> Output {
+    if let Some(other) = other {
+        let mut g = graph(other, Vec::new());
+        out.values.extend(g.values.remove("geometry").map(|v| ("other_geometry".to_owned(), v)));
+        out.ints.extend(g.ints.remove("graph").map(|v| ("other_graph".to_owned(), v)));
+    }
+    out
+}
 
 /// Differential runner for `boolean.merge_p1`.
 pub struct Runner;
@@ -701,10 +780,8 @@ fn append_events(context: &Context, out: &mut Vec<f64>) -> solidcore::Result<()>
     out.extend(recorder.events.iter().flatten().map(|&v| v as f64));
     Ok(())
 }
-fn run_rust(i: &Inputs, b: &mut Brep, other: &Brep) -> Result<Vec<f64>, SolidError> {
+fn run_rust(i: &Inputs, b: &mut Brep, other: &mut Brep) -> Result<Vec<f64>, SolidError> {
     let [a, c, d] = i.args;
-    let mut other = other.clone();
-    let other = &mut other;
     let mut k = Kernel::default();
     let mut out = Vec::new();
     let mut context = Context::default();
@@ -742,15 +819,33 @@ fn run_rust(i: &Inputs, b: &mut Brep, other: &Brep) -> Result<Vec<f64>, SolidErr
             } else {
                 BTreeMap::new()
             };
-            let reverse = maps.iter().map(|(&x, &y)| (y, x)).collect();
             let f = FaceId::from_index(u32::from(a) % b.faces().len() as u32);
             let g = FaceId::from_index(u32::from(d) % other.faces().len() as u32);
-            let (x, y, changed) =
-                port::fix_found_face_coincidence(b, &mut other.clone(), f, g, &maps, &reverse)?;
-            out.extend([f64::from(u8::from(changed)), x.len() as f64]);
-            out.extend(x.iter().map(|f| f64::from(f.index())));
-            out.push(y.len() as f64);
-            out.extend(y.iter().map(|f| f64::from(f.index())));
+            // `SmMerge(context)`'s intersector: `SM_EFF_ZERO_SQ` and 30 degrees
+            let mut merge = KernelManifoldIntersector::new(0)?;
+            merge.set_intersection_tolerances(EFF_ZERO_SQ, 30.0 * (PI / 180.0));
+            for (&x, &y) in &maps {
+                merge.merge.intersector.edges.record(x, y)?;
+            }
+            let (x, y, changed) = merge.fix_face_coincidence(
+                &mut BooleanKernels {
+                    primary: &mut k,
+                    other: None,
+                },
+                b,
+                other,
+                &mut AttributeStore::new(),
+                f,
+                g,
+            )?;
+            out.extend(face_coincidence_record(
+                changed,
+                &x,
+                &y,
+                b,
+                other,
+                &merge.merge.intersector.edges,
+            ));
         }
         3 => {
             let source = (a != 0)
@@ -1010,8 +1105,16 @@ impl UnitDiff for Runner {
             .ok_or_else(|| harness("record count overflow"))?;
         let raw = v.get(end..).ok_or_else(|| harness("short graph"))?;
         let (b, _) = import_raw(raw)?;
-        let record = v.get(2..end).ok_or_else(|| harness("short record"))?;
-        Ok(graph(&b, record.to_vec()))
+        let mut record = v
+            .get(2..end)
+            .ok_or_else(|| harness("short record"))?
+            .to_vec();
+        let other = if i.op == OP_FACE_COINCIDENCE {
+            Some(split_other_graph(&mut record)?)
+        } else {
+            None
+        };
+        Ok(with_other_graph(graph(&b, record), other.as_ref()))
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
@@ -1051,14 +1154,17 @@ impl UnitDiff for Runner {
                 fixture::eval(fixture::Op::Export, &other_path, &other_block)
             })
             .map_err(|e| harness(e.to_string()))?;
-        let (other, _) = import(&other_raw)?;
+        let (mut other, _) = import(&other_raw)?;
         // the FFI's selection guard: the selectors are taken modulo these counts
         let counts = |raw: &[f64]| fixture::counts(raw).ok_or_else(|| harness("fixture rejected"));
         if !ffi::selection_valid(i.op, &counts(&raw)?, &counts(&other_raw)?) {
             return Err(harness("fixture lacks selected entity"));
         }
-        match run_rust(&i, &mut b, &other) {
-            Ok(v) => Ok(graph(&b, v)),
+        match run_rust(&i, &mut b, &mut other) {
+            Ok(v) => Ok(with_other_graph(
+                graph(&b, v),
+                (i.op == OP_FACE_COINCIDENCE).then_some(&other),
+            )),
             Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| {
                 Output::err(format!(
                     "status_{}",
@@ -1088,10 +1194,32 @@ impl UnitDiff for Runner {
         } else {
             json!({"kind":"face","surface":{"plane":{"o":p,"n":[0,0,1]}},"dom":[-2,-1,3,4]})
         };
-        Some(
-            json!({"op":op,"args":[rng.below(2),rng.below(3),rng.below(2)],"brep":brep,
-          "tolerances":[*[1e-5,1e-3,1e-1].get(rng.below(3) as usize)?,*[1e-5,1e-3,1e-1].get(rng.below(3) as usize)?]}),
-        )
+        let mut case = json!({"op":op,"args":[rng.below(2),rng.below(3),rng.below(2)],"brep":brep,
+          "tolerances":[*[1e-5,1e-3,1e-1].get(rng.below(3) as usize)?,*[1e-5,1e-3,1e-1].get(rng.below(3) as usize)?]});
+        if op == 2 && !wire && rng.below(3) != 0 {
+            // The same plane with another rectangle (the face's is [-2, -1, 3, 4]): the edges
+            // do not mate, so `MergeCoincidentSurfaces` runs on rectangles that overlap, are
+            // contained, enclose it, touch it, share edges with it, or do not meet it (the
+            // merge then stops at its disjoint-boxes return). The touching and disjoint
+            // ones compare the B-reps; the others end in an error status that C++ and Rust
+            // agree on (`both_errored`; see plan/findings.md, boolean.merge_p1).
+            let doms: [[f64; 4]; 8] = [
+                [0.0, 0.0, 5.0, 5.0],
+                [0.0, 0.0, 1.0, 1.0],
+                [-4.0, -3.0, 6.0, 7.0],
+                [3.0, 4.0, 6.0, 8.0],
+                [-2.0, -1.0, 3.0, 1.5],
+                [10.0, 10.0, 12.0, 12.0],
+                [-20.0, -20.0, -18.0, -18.0],
+                [6.0, 0.0, 9.0, 3.0],
+            ];
+            let dom = *doms.get(rng.below(doms.len() as u64) as usize)?;
+            case.as_object_mut()?.insert(
+                "other".to_owned(),
+                json!({"kind":"face","surface":{"plane":{"o":p,"n":[0,0,1]}},"dom":dom}),
+            );
+        }
+        Some(case)
     }
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
         let ctx = CaseContext {

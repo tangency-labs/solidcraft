@@ -9,7 +9,7 @@
 //! | [`MergeOptions::default`]    | `SmMergeOptions()` (all default arguments)       |
 //! | `Clone`                      | `SmMergeOptions(const SmMergeOptions&)`          |
 //! | [`MergeState`] | `SmMerge(context)`, `SetMergeOptions`, setters, `GetTopologyIntersector` |
-//! | [`fix_found_face_coincidence`] | `SmMerge::FixFoundFaceCoincidence` |
+//! | [`check_face_coincidence`], [`finish_face_coincidence`] | `SmMerge::FixFoundFaceCoincidence` (the checks before and after `MergeCoincidentSurfaces`, which the caller runs between them) |
 //! | [`find_brep_region_of_other_face`] | `sm_FindBrepRegionOfOtherFace` |
 //! | [`edge_borders_solid`] | `sm_EdgeBordersSolid` |
 //! | [`merge_vertex`] | `SmMerge::MergeVertex` |
@@ -150,10 +150,6 @@ impl<T> MergeState<T> {
     }
 }
 
-fn unavailable<T>(symbol: &'static str, unit: &'static str) -> Result<T> {
-    Err(SolidError::unported(symbol, unit))
-}
-
 fn ignore_failure<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
@@ -162,18 +158,43 @@ fn ignore_failure<T>(r: Result<T>) -> Result<Option<T>> {
     }
 }
 
-/// Return matched coincident face lists and whether topology was modified.
-/// The fast path tests existence of mates, as upstream; it deliberately does not
-/// require the mates to belong to the supplied opposite face's boundary.
-/// A mismatch reaches the unported coincident-surface merger.
-pub fn fix_found_face_coincidence(
-    brep: &mut Brep,
-    other: &mut Brep,
+/// What `SmMerge::FixFoundFaceCoincidence` does before it merges coincident surfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaceCoincidenceCheck {
+    /// Every edge around both faces has a mate: the faces are taken as coincident
+    /// and `FixFoundFaceCoincidence` returns them without merging anything.
+    Matched,
+    /// A mismatch: the caller merges the coincident surfaces
+    /// (`SmTopologyIntersector::MergeCoincidentSurfaces`, unit
+    /// `boolean.topology_intersector_p3`) and finishes with
+    /// [`finish_face_coincidence`], passing these edge counts of the B-reps (the
+    /// primary's, then the other's) from before the merge.
+    NeedsMerge {
+        /// `pBrep->GetEdges` and `pOther->GetEdges` sizes before the merge.
+        edge_counts: (usize, usize),
+    },
+}
+
+/// The first half of `SmMerge::FixFoundFaceCoincidence`: whether all edges around
+/// `face` and `other_face` are mated (`other_mates`: the primary's edges to their
+/// other mates, `brep_mates`: the reverse). The test is the existence of mates, as
+/// upstream; it deliberately does not require the mates to belong to the supplied
+/// opposite face's boundary.
+///
+/// The split exists because the merge between the halves edits the mate store
+/// the maps belong to; [`FaceCoincidenceCheck::NeedsMerge`] hands that step back.
+///
+/// # Errors
+///
+/// Those of the face and B-rep edge walks.
+pub fn check_face_coincidence(
+    brep: &Brep,
+    other: &Brep,
     face: FaceId,
     other_face: FaceId,
     other_mates: &BTreeMap<EdgeId, EdgeId>,
     brep_mates: &BTreeMap<EdgeId, EdgeId>,
-) -> Result<(Vec<FaceId>, Vec<FaceId>, bool)> {
+) -> Result<FaceCoincidenceCheck> {
     let edges = face_edges(brep, face)?;
     let other_edges = face_edges(other, other_face)?;
     if edges.len() == other_edges.len()
@@ -182,25 +203,27 @@ pub fn fix_found_face_coincidence(
             .zip(&other_edges)
             .all(|(a, b)| other_mates.contains_key(a) && brep_mates.contains_key(b))
     {
-        return Ok((vec![face], vec![other_face], false));
+        return Ok(FaceCoincidenceCheck::Matched);
     }
-    let counts = (brep_edges(brep)?.len(), brep_edges(other)?.len());
-    let (faces, other_faces) = merge_coincident_surfaces(brep, other, face, other_face)?;
-    let changed = brep_edges(brep)?.len() != counts.0 || brep_edges(other)?.len() != counts.1;
-    Ok((faces, other_faces, changed))
+    Ok(FaceCoincidenceCheck::NeedsMerge {
+        edge_counts: (brep_edges(brep)?.len(), brep_edges(other)?.len()),
+    })
 }
 
-fn merge_coincident_surfaces(
-    _brep: &mut Brep,
-    _other: &mut Brep,
-    _face: FaceId,
-    _other_face: FaceId,
-) -> Result<(Vec<FaceId>, Vec<FaceId>)> {
-    // UNPORTED(boolean.topology_intersector_p3): SmTopologyIntersector::MergeCoincidentSurfaces
-    unavailable(
-        "SmTopologyIntersector::MergeCoincidentSurfaces",
-        "boolean.topology_intersector_p3",
-    )
+/// The second half of `SmMerge::FixFoundFaceCoincidence`, after
+/// `MergeCoincidentSurfaces` returned `faces` / `other_faces`: whether either B-rep's
+/// edge count differs from `edge_counts` ([`FaceCoincidenceCheck::NeedsMerge`]), that
+/// is `rbModifiedTopology`.
+///
+/// # Errors
+///
+/// Those of the B-rep edge walks.
+pub fn finish_face_coincidence(
+    brep: &Brep,
+    other: &Brep,
+    edge_counts: (usize, usize),
+) -> Result<bool> {
+    Ok(brep_edges(brep)?.len() != edge_counts.0 || brep_edges(other)?.len() != edge_counts.1)
 }
 
 /// Classify an other-operand face use into a primary region. A single primary

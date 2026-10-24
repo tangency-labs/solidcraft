@@ -72,7 +72,10 @@ pub fn selection_valid(op: u8, a: &[usize; 10], b: &[usize; 10]) -> bool {
 }
 
 /// Call a merge helper. Result: status, record length, record, then a raw graph
-/// export in the `topology_vertexuse` format. Op 0 returns only control flags.
+/// export in the `topology_vertexuse` format (the primary B-rep's, after the call).
+/// Op 0 returns only control flags. Op 2 (`FixFoundFaceCoincidence`, which can edit
+/// both B-reps) ends its record with the other B-rep's graph after the call: the
+/// export's length, then the export itself in the same format.
 pub fn eval(request: Request<'_>) -> Result<Vec<f64>, FfiError> {
     let Request {
         op,

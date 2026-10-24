@@ -216,11 +216,15 @@ pub trait ManifoldIntersector {
         other: &mut Brep,
         other_face: FaceId,
     ) -> Result<()>;
-    /// `FixFoundFaceCoincidence`: adapter target is `merge_p1` with the live edge maps.
+    /// `FixFoundFaceCoincidence`: adapter target is `merge_p1` with the live edge maps;
+    /// a mismatch runs `MergeCoincidentSurfaces` on the operands with these kernels and
+    /// the attributes its edits notify.
     fn fix_face_coincidence(
         &mut self,
+        kernels: &mut BooleanKernels<'_>,
         primary: &mut Brep,
         other: &mut Brep,
+        attributes: &mut AttributeStore,
         face: FaceId,
         other_face: FaceId,
     ) -> Result<(Vec<FaceId>, Vec<FaceId>, bool)>;
@@ -552,6 +556,7 @@ fn classify_edge_faces(
     kernels: &mut BooleanKernels<'_>,
     primary: &mut Brep,
     other: &mut Brep,
+    attributes: &mut AttributeStore,
     state: &mut ManifoldState,
     intersector: &mut impl ManifoldIntersector,
     operation: BooleanOperation,
@@ -651,7 +656,7 @@ fn classify_edge_faces(
                 continue;
             }
             let (compatible, other_compatible, modified) =
-                intersector.fix_face_coincidence(primary, other, pf, of)?;
+                intersector.fix_face_coincidence(kernels, primary, other, attributes, pf, of)?;
             if modified {
                 return Ok(false);
             }
@@ -1265,6 +1270,7 @@ fn editing_stages(
                 kernels,
                 primary,
                 other,
+                attributes,
                 state,
                 intersector,
                 operation,
@@ -1277,6 +1283,7 @@ fn editing_stages(
                 kernels,
                 primary,
                 other,
+                attributes,
                 state,
                 intersector,
                 operation,

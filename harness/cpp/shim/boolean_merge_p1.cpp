@@ -123,9 +123,25 @@ SC_EXPORT int32_t sc_boolean_merge_p1_eval(int32_t op, int32_t a, int32_t b, int
             if (b != 2 || i != 0) merge.GetTopologyIntersector().Relate(g.edges[i],h.edges[i]);
         SmTArray<SmFace*> aa,bb; SmBoolean changed = TRUE;
         status = merge.FixFoundFaceCoincidence(g.faces[a%g.faces.size()],h.faces[c%h.faces.size()],aa,bb,changed);
+        // MergeCoincidentSurfaces edits both B-reps (it can split faces and edges): the
+        // returned faces and the edge mates are numbered by walks after the call.
+        Graph after_primary, after_other; walk(primary.brep,after_primary); walk(other.brep,after_other);
         record.push_back(flg(changed)); record.push_back(aa.GetSize());
-        for (ULONG i=0;i<aa.GetSize();++i) record.push_back(g.find(3,aa[i]));
-        record.push_back(bb.GetSize()); for (ULONG i=0;i<bb.GetSize();++i) record.push_back(h.find(3,bb[i]));
+        for (ULONG i=0;i<aa.GetSize();++i) record.push_back(after_primary.find(3,aa[i]));
+        record.push_back(bb.GetSize()); for (ULONG i=0;i<bb.GetSize();++i) record.push_back(after_other.find(3,bb[i]));
+        // m_vTI's edge mates, per edge in walk order: the primary edges' other mates, then
+        // the other edges' B-rep mates (-1 for none)
+        auto& ti = merge.GetTopologyIntersector();
+        auto mate = [](SmObject* m) -> SmEdge* { return m && m->IsKindOf(SmEdge_TYPE) ? (SmEdge*)m : nullptr; };
+        record.push_back(after_primary.edges.size());
+        for (SmEdge* e : after_primary.edges) record.push_back(after_other.find(7,mate(ti.GetOtherMate(e))));
+        record.push_back(after_other.edges.size());
+        for (SmEdge* e : after_other.edges) record.push_back(after_primary.find(7,mate(ti.GetBrepMate(e))));
+        // the other operand's graph after the call follows as a length-prefixed raw
+        // export (the primary's ends the result)
+        std::vector<double> blob;
+        blob.push_back(0.0); export_graph(other.brep,after_other,blob);
+        record.push_back((double)blob.size()); record.insert(record.end(),blob.begin(),blob.end());
     } else if (op == 3) {
         if (g.vertices.empty() || h.vertices.empty() || g.regions.empty()) return SC_ERR_ARG;
         SmVertex* src = a == 0 ? nullptr : h.vertices[c%h.vertices.size()];
