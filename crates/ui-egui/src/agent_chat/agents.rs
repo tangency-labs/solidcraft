@@ -267,6 +267,7 @@ mod tests {
     #[test]
     fn keys_go_only_over_https_or_to_this_computer() {
         assert!(key_safe_for("https://api.openai.com/v1"));
+        assert!(key_safe_for("https://api.mammouth.ai/v1"));
         assert!(key_safe_for("http://localhost:11434/v1"));
         assert!(key_safe_for("http://127.0.0.1:1234/v1"));
         assert!(key_safe_for("http://[::1]:8080/v1"));
