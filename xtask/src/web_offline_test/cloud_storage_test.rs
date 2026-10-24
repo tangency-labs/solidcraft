@@ -3,7 +3,7 @@ use super::{Cdp, Chrome, Mode, PREFIX, Server, TempDir, find_chrome, wait_for};
 use serde_json::{Value, json};
 use std::path::Path;
 
-fn phase(cdp: &mut Cdp, name: &str, identity: &str) -> Result<Value, String> {
+pub(super) fn phase(cdp: &mut Cdp, name: &str, identity: &str) -> Result<Value, String> {
     cdp.eval(&format!("(async()=>JSON.parse(await window.runPhase({},{})))()", json!(name), json!(identity)))
 }
 
@@ -15,14 +15,14 @@ fn rejects(cdp: &mut Cdp, name: &str, identity: &str, expected: &str) -> Result<
     }
 }
 
-fn open(browser: &Chrome, url: &str) -> Result<Cdp, String> {
+pub(super) fn open(browser: &Chrome, url: &str) -> Result<Cdp, String> {
     let mut cdp = browser.connect()?;
     cdp.call("Page.navigate", json!({"url":url}))?;
     wait_for(&mut cdp, "!!window.runPhase", "the cloud storage WASM fixture is ready", |value| value == true)?;
     Ok(cdp)
 }
 
-fn restart(browser: Chrome, cdp: Cdp, executable: &Path, profile: &Path, url: &str) -> Result<(Chrome, Cdp), String> {
+pub(super) fn restart(browser: Chrome, cdp: Cdp, executable: &Path, profile: &Path, url: &str) -> Result<(Chrome, Cdp), String> {
     drop(cdp);
     // The shared harness kills and waits for Chrome, simulating an unclean browser exit.
     drop(browser);
@@ -163,7 +163,7 @@ pub fn run(site: &str) -> Result<(), String> {
     Ok(())
 }
 
-const OFFLINE: &str = "window.savedFixtureFetch = window.fetch; window.fetch = () => Promise.reject(new TypeError('test offline')); true";
+pub(super) const OFFLINE: &str = "window.savedFixtureFetch = window.fetch; window.fetch = () => Promise.reject(new TypeError('test offline')); true";
 const RESTORE_FETCH: &str = "window.fetch = window.savedFixtureFetch; true";
 const HOLD_FETCH: &str = r#"(() => {
  window.fixtureRequestStarted = false; window.fixtureRequestAborted = false;

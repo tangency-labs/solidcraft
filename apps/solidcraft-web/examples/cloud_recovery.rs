@@ -5,6 +5,9 @@
 #![forbid(unsafe_code)]
 
 #[cfg(target_arch = "wasm32")]
+#[path = "../src/channel.rs"]
+mod channel;
+#[cfg(target_arch = "wasm32")]
 #[path = "../src/cloud_client.rs"]
 pub mod cloud_client;
 #[cfg(target_arch = "wasm32")]
@@ -28,6 +31,9 @@ pub mod keep;
 #[cfg(target_arch = "wasm32")]
 #[path = "cloud_recovery/lineage.rs"]
 mod lineage;
+#[cfg(target_arch = "wasm32")]
+#[path = "cloud_recovery/live.rs"]
+mod live;
 #[cfg(target_arch = "wasm32")]
 #[path = "cloud_recovery/previews.rs"]
 mod previews;
