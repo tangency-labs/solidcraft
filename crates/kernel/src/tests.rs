@@ -1509,8 +1509,9 @@ fn rounded_corners_rounded_again_make_spheres() {
     let bx = box_solid(Vec3::ZERO, Vec3::new(a, b, c)).unwrap();
     let vert: Vec<Vec3> = [(0.0, 0.0), (a, 0.0), (a, b), (0.0, b)].iter().map(|(x, y)| Vec3::new(*x, *y, c / 2.0)).collect();
     let f = fillet(&bx, &vert, r).unwrap();
-    let f = fillet(&f, &[Vec3::new(a / 2.0, 0.0, c)], r).unwrap();
-    let f = fillet(&f, &[Vec3::new(a / 2.0, 0.0, 0.0)], r).unwrap();
+    // Each loop by one pick and its tangent chain, as the Fillet feature asks for it.
+    let f = fillet(&f, &crate::tangent_chain(&f, &[Vec3::new(a / 2.0, 0.0, c)]).unwrap(), r).unwrap();
+    let f = fillet(&f, &crate::tangent_chain(&f, &[Vec3::new(a / 2.0, 0.0, 0.0)]).unwrap(), r).unwrap();
     let (ai, bi, ci) = (a - 2.0 * r, b - 2.0 * r, c - 2.0 * r);
     let area = 2.0 * (ai * bi + bi * ci + ai * ci) + PI * r * (ai + bi + ci) * 2.0 + 4.0 * PI * r * r;
     let vol = ai * bi * ci + 2.0 * r * (ai * bi + bi * ci + ai * ci) + PI * r * r * (ai + bi + ci) + 4.0 / 3.0 * PI * r * r * r;
@@ -1719,7 +1720,7 @@ fn fillet_rounded_rectangle_with_tiny_end_edges() {
     let initial = fine(&body);
     // Every rim edge, the tiny end alone (tangent chain), and the opposite selection order.
     for selection in [picks.to_vec(), vec![picks[3]], picks.into_iter().rev().collect()] {
-        let blended = fillet(&body, &selection, radius).unwrap();
+        let blended = fillet(&body, &crate::tangent_chain(&body, &selection).unwrap(), radius).unwrap();
         assert!(blended.validity().is_empty(), "{:?}", blended.validity());
         assert_eq!(blended.crossed_face_loops().unwrap(), 0);
         assert_eq!((blended.face_count(), blended.edge_count(), blended.vertex_count()), (18, 40, 24));

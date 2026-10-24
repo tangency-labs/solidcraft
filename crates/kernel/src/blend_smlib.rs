@@ -4,8 +4,9 @@
 //! unchanged: the body goes into SMLib as its schema 4 record (healed where SMLib's check refuses
 //! it as given), tagged as operand 0; each point picks the body's nearest edge in its own edge
 //! order, and SMLib is given that edge's midpoint, which no other edge is as near to (a point at
-//! a vertex between two edges would leave SMLib to choose); SMLib blends those edges with their
-//! tangent chains and the corners where they meet, its check must pass, and the result comes
+//! a vertex between two edges would leave SMLib to choose); SMLib blends exactly those edges and
+//! the corners where they meet (a pick's tangent chain is the caller's to ask for,
+//! [`crate::tangent_chain`]), its check must pass, and the result comes
 //! back decoded with its geometry checked. An option SMLib has no construction for is refused as
 //! "not supported yet".
 //!
@@ -267,7 +268,7 @@ mod imp {
     }
 
     /// The operand's edges the blend replaced: each picked edge, and every edge no result edge
-    /// comes from (the rest of the tangent chains), in the operand's edge order.
+    /// comes from (one the blend's corners took up), in the operand's edge order.
     fn blended(body: &Body, picked: &[usize], h: &History) -> Vec<usize> {
         let mut out: BTreeSet<usize> = picked.iter().copied().collect();
         let kept: BTreeSet<usize> = h
