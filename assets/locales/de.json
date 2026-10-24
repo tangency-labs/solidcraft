@@ -1812,6 +1812,8 @@
   "ui.history_first": "Zum Anfang",
   "ui.history_forward": "Einen Schritt vor",
   "ui.history_last": "Zum Ende",
+  "ui.history_play": "Bis zum Ende abspielen",
+  "ui.history_stop": "Wiedergabe stoppen",
   "ui.history_title": "Verlauf",
   "ui.hole": "Bohrung",
   "ui.hole_tap_type": "Gewindetyp",

@@ -444,6 +444,7 @@ pub struct SolveApp {
     /// thread, and those asked for meanwhile ([`deferred`]).
     pub deferred: Option<deferred::Deferred>,
     pub deferred_queue: Vec<(String, Value)>,
+    pub(crate) timeline_playback: Option<timeline::Playback>,
     /// A delete's check of what it takes with it or breaks, computing off the window thread
     /// ([`deferred::DeleteCheck`], #2678).
     pub delete_check: Option<deferred::DeleteCheck>,
@@ -592,6 +593,7 @@ impl SolveApp {
             applying: None,
             deferred: None,
             deferred_queue: Vec::new(),
+            timeline_playback: None,
             delete_check: None,
             apply_off_thread: None,
             #[cfg(test)]
@@ -803,7 +805,11 @@ impl SolveApp {
             return Err("a file operation is in progress".into());
         }
         let t0 = now_ms();
+        let revision = self.session.revision;
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
+        if self.session.revision != revision {
+            timeline::stop_playback(self);
+        }
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
         if let Ok(v) = &r {
             if id == "view.layout" {
@@ -883,6 +889,7 @@ impl SolveApp {
                     prefs::apply_new_design(self);
                 }
                 if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                    timeline::stop_playback(self);
                     render_workspace::reset_document(self);
                     dim_view::cancel();
                     self.menu.props = None;
@@ -927,6 +934,7 @@ impl SolveApp {
     /// Start a command the way a toolbar click does: interactive tools and dialogs for commands
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
+        timeline::stop_playback(self);
         if id == "ui.palette" {
             shortcut_box::open(self, None);
             return;
@@ -1671,6 +1679,7 @@ impl SolveApp {
         scenario::clear_handles();
         self.poll_deferred(ui.ctx());
         self.poll_delete_check(ui.ctx());
+        timeline::tick_playback(self, ui.ctx());
         toolbar::app_bar(self, ui);
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());

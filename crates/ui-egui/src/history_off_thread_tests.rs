@@ -86,6 +86,78 @@ fn a_command_computed_off_the_thread_is_not_evaluated_again() {
 }
 
 #[test]
+fn playback_waits_for_each_background_rebuild_before_timing_the_next_step() {
+    let mut h = block_boss_hole();
+    h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+    crate::timeline::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Play);
+    h.frames(1);
+    for position in 1..=3 {
+        assert!(h.app.deferred.is_some(), "step {position} is computed in the background");
+        assert!(h.app.deferred_queue.is_empty(), "playback must not queue steps that supersede each other");
+        for _ in 0..500 {
+            if h.app.deferred.as_mut().is_some_and(crate::deferred::Deferred::finished) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // A large design can evict these states before the UI receives the completed step.
+        // Playback must consume the worker's evaluated features, not rebuild them again.
+        h.app.session.model.cache = Default::default();
+        until_settled(&mut h);
+        assert_eq!(h.app.session.model.last_recomputed, 0, "playback step {position} uses the background evaluation");
+        assert_eq!(marker(&h).unwrap_or(3), position);
+        h.frames(10);
+        assert_eq!(marker(&h).unwrap_or(3), position, "step {position} stays visible after computation");
+        if position < 3 {
+            // Advance only until the next step starts; never sleep through a whole playback.
+            for _ in 0..40 {
+                if h.app.deferred.is_some() {
+                    break;
+                }
+                h.frames(1);
+            }
+        }
+    }
+    assert!(h.app.timeline_playback.is_none());
+    assert!(h.app.deferred_queue.is_empty());
+}
+
+#[test]
+fn interrupted_playback_never_applies_its_pending_background_step() {
+    for action in ["stop", "last", "edit", "marker", "tool", "palette", "new"] {
+        let mut h = block_boss_hole();
+        h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+        crate::timeline::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Play);
+        h.frames(1);
+        assert!(h.app.deferred.is_some());
+        match action {
+            "stop" => crate::timeline::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Play),
+            "last" => {
+                crate::timeline::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Last);
+                until_settled(&mut h);
+                assert_eq!(marker(&h), None, "Go to end supersedes the pending playback step");
+            }
+            "edit" => {
+                h.app.run("timeline.rename", json!({"feature": 1, "name": "Renamed"})).unwrap();
+            }
+            "marker" => {
+                h.app.run("timeline.roll_to", json!({"position": 2})).unwrap();
+            }
+            "tool" => h.app.start("solid.box"),
+            "palette" => h.app.start("ui.palette"),
+            _ => {
+                h.app.run("file.new", json!({})).unwrap();
+            }
+        }
+        assert!(h.app.timeline_playback.is_none(), "{action}");
+        assert!(h.app.deferred.is_none(), "{action}: the worker cannot apply the old marker");
+        let marker = marker(&h);
+        h.frames(90);
+        assert_eq!(h.app.session.doc.marker, marker, "{action}");
+    }
+}
+
+#[test]
 fn a_marker_moved_again_replaces_the_move_still_waiting() {
     let mut h = block_boss_hole();
     h.app.run_heavy("timeline.roll_to", json!({"position": 1})).unwrap();

@@ -324,8 +324,9 @@ fn timeline_transport(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         } else {
             Rect::from_min_size(pos2(header.center().x - side / 2.0, header.top() + i as f32 * (side + t.space_2)), vec2(side, side))
         };
-        if control.show(ui, rect).clicked() {
-            crate::timeline::run_transport(app, control);
+        let playing = app.timeline_playback.as_ref().map(|_| crate::theme::TabAccent::for_tab(&t, &app.ui.tab));
+        if control.show(ui, rect, playing).clicked() {
+            crate::timeline::run_transport(app, ui.ctx(), control);
         }
     }
 }
@@ -1389,6 +1390,7 @@ mod tests {
                     ("last", None),
                 ] {
                     h.step(&json!({"click":{"handle":format!("history:{control}")}})).unwrap();
+                    assert!(h.app.timeline_playback.is_none(), "navigation never starts playback");
                     h.settle();
                     assert_eq!(h.app.session.doc.marker, position, "{mode:?} {dock} {width}: {control}");
                     assert_eq!(h.app.session.model.state().bodies.len(), position.unwrap_or(3));
@@ -1400,8 +1402,12 @@ mod tests {
 
     #[test]
     fn seam_snaps_only_between_thin_and_medium_and_persists_free_widths() {
+        let thin = crate::ui_kit::history_width(false);
         let medium = crate::ui_kit::history_width(true);
-        for (width, delta, expected) in [(56.0, 40.0, medium), (medium, -40.0, 56.0), (medium, 63.0, medium + 63.0), (320.0, -41.0, 279.0)] {
+        let across_snap = (medium - thin) * 0.6;
+        for (width, delta, expected) in
+            [(thin, across_snap, medium), (medium, -across_snap, thin), (medium, 63.0, medium + 63.0), (320.0, -41.0, 279.0)]
+        {
             let mut h = Harness::new();
             h.app.preferences.timeline_left = true;
             h.app.preferences.timeline_left_width = width;

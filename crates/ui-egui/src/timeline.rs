@@ -13,7 +13,7 @@ use crate::theme::Tokens;
 
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
 /// empty design. All orientations reach the same rollback command.
-pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport) {
+pub(crate) fn run_transport(app: &mut SolveApp, ctx: &egui::Context, control: crate::ui_kit::HistoryTransport) {
     let n = app.session.doc.features.len();
     let marker = app.session.doc.marker.unwrap_or(n);
     let position = match control {
@@ -21,6 +21,10 @@ pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryT
         crate::ui_kit::HistoryTransport::Back => marker.saturating_sub(1),
         crate::ui_kit::HistoryTransport::Forward => marker.saturating_add(1).min(n),
         crate::ui_kit::HistoryTransport::Last => n,
+        crate::ui_kit::HistoryTransport::Play => {
+            toggle_playback(app, ctx);
+            return;
+        }
     };
     let params = if position < n { json!({"position":position}) } else { json!({}) };
     let _ = app.run_heavy("timeline.roll_to", params);
@@ -331,6 +335,98 @@ fn toggle_feature(app: &mut SolveApp, id: u64) {
     }
 }
 
+/// One history step at a time. The delay starts when the computed step is displayed, so a
+/// slow rebuild cannot consume the pause or make queued marker moves skip intermediate steps.
+pub(crate) struct Playback {
+    revision: u64,
+    position: usize,
+    waiting: bool,
+    next_at: f64,
+}
+
+const PLAYBACK_STEP_SECONDS: f64 = 0.5;
+
+pub(crate) fn stop_playback(app: &mut SolveApp) {
+    if app.timeline_playback.take().is_some_and(|p| p.waiting) {
+        // The worker only fills the evaluation cache. Dropping its reply prevents an
+        // interrupted playback step from later moving the marker in an edited/new design.
+        app.deferred = None;
+    }
+}
+
+fn toggle_playback(app: &mut SolveApp, ctx: &egui::Context) {
+    if app.timeline_playback.is_some() {
+        stop_playback(app);
+        return;
+    }
+    let n = app.session.doc.features.len();
+    let position = app.session.doc.marker.unwrap_or(n);
+    if position < n && app.computing_since().is_none() {
+        app.timeline_playback = Some(Playback { revision: app.session.revision, position, waiting: false, next_at: ctx.input(|i| i.time) });
+        ctx.request_repaint();
+    }
+}
+
+pub(crate) fn tick_playback(app: &mut SolveApp, ctx: &egui::Context) {
+    if app.timeline_playback.is_none() {
+        return;
+    }
+    if app.home.open
+        || !app.ui.show_timeline
+        || crate::render_workspace::active(app)
+        || app.session.active_sketch.is_some()
+        || app.dialog.is_some()
+        || app.tool.is_some()
+        || app.file_load.busy()
+        || app.file_picker.is_some()
+        || app.saving.is_some()
+        || app.applying.is_some()
+        || app.delete_check.is_some()
+        || !app.deferred_queue.is_empty()
+        || ctx.input(|i| i.key_pressed(egui::Key::Escape))
+    {
+        stop_playback(app);
+        return;
+    }
+    let Some(mut playback) = app.timeline_playback.take() else { return };
+    let now = ctx.input(|i| i.time);
+    let n = app.session.doc.features.len();
+    let position = app.session.doc.marker.unwrap_or(n);
+    if playback.waiting {
+        if app.deferred.is_some() {
+            if app.session.revision == playback.revision {
+                app.timeline_playback = Some(playback);
+            } else {
+                app.deferred = None;
+            }
+            return;
+        }
+        // A failed step, another edit, or a different marker move stops the sequence.
+        if app.session.revision != playback.revision.saturating_add(1) || position != playback.position {
+            return;
+        }
+        playback.waiting = false;
+        playback.revision = app.session.revision;
+        playback.next_at = now + PLAYBACK_STEP_SECONDS;
+    } else if app.session.revision != playback.revision || position != playback.position || app.deferred.is_some() {
+        return;
+    }
+    if position >= n {
+        return;
+    }
+    if now >= playback.next_at {
+        playback.position = position.saturating_add(1).min(n);
+        if app.run_heavy("timeline.roll_to", json!({"position": playback.position})).is_err() {
+            return;
+        }
+        // Observe completion on the next frame even for a synchronous rebuild (the web).
+        // This frame's input time predates that work and cannot time the visible pause.
+        playback.waiting = true;
+    }
+    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    app.timeline_playback = Some(playback);
+}
+
 pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     app.shell.history_dock_space = Some(ui.available_rect_before_wrap());
@@ -396,8 +492,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     crate::timeline_left::dock_drag(app, ui, &response);
     for control in crate::ui_kit::HistoryTransport::ALL {
         let br = Rect::from_center_size(pos2(x + t.space_24 / 2.0, r.center().y), vec2(t.space_24, t.space_24));
-        if control.show(ui, br).clicked() {
-            run_transport(app, control);
+        if control.show(ui, br, app.timeline_playback.as_ref().map(|_| accent)).clicked() {
+            run_transport(app, ui.ctx(), control);
         }
         x += t.space_24 + t.space_2;
     }
@@ -747,6 +843,93 @@ mod tests {
         h.app.run("select.clear", json!({})).unwrap();
         h.frames(4);
         h
+    }
+
+    #[test]
+    fn playback_shows_each_feature_in_every_history_layout() {
+        for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+            for (dock, width) in
+                [("bottom", 130.0), ("left", 56.0), ("left", crate::ui_kit::history_width(true)), ("left", 320.0), ("under_browser", 170.0)]
+            {
+                let mut h = two_boxes(dock != "bottom");
+                h.app.ui.layout = layout;
+                h.app.preferences.browser_width = 170.0;
+                h.app.run("view.history_layout", json!({"dock":dock,"width":width})).unwrap();
+                h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+                h.frames(2);
+                h.step(&json!({"click": {"handle": "history:play"}})).unwrap();
+                assert_eq!(h.app.session.doc.marker, Some(1), "the first feature must be shown before the end; {layout:?} {dock} {width}");
+                assert_eq!(h.app.session.model.state().bodies.len(), 1);
+                h.frames(10);
+                assert_eq!(h.app.session.doc.marker, Some(1), "leave time to see each step");
+                h.frames(60);
+                assert_eq!(h.app.session.doc.marker, None);
+                assert_eq!(h.app.session.model.state().bodies.len(), 2);
+            }
+        }
+    }
+
+    #[test]
+    fn playback_can_be_stopped_or_interrupted() {
+        for action in ["stop", "back", "last", "escape", "edit", "tool", "palette", "new"] {
+            let mut h = two_boxes(false);
+            h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": {"handle": "history:play"}})).unwrap();
+            assert_eq!(h.app.session.doc.marker, Some(1));
+            match action {
+                "stop" => h.step(&json!({"click": {"handle": "history:play"}})).unwrap(),
+                "back" => h.step(&json!({"click": {"handle": "history:back"}})).unwrap(),
+                "last" => {
+                    h.step(&json!({"click": {"handle": "history:last"}})).unwrap();
+                    assert_eq!(h.app.session.doc.marker, None, "Go to end jumps immediately, even during playback");
+                    assert_eq!(h.app.session.model.state().bodies.len(), 2);
+                }
+                "escape" => h.step(&json!({"key": "Escape"})).unwrap(),
+                "edit" => {
+                    h.app.run("timeline.rename", json!({"feature": "First", "name": "Renamed"})).unwrap();
+                }
+                "tool" => h.app.start("solid.box"),
+                "palette" => h.app.start("ui.palette"),
+                _ => {
+                    h.call("ui.documents", json!({"action": "new"}));
+                }
+            }
+            h.frames(1);
+            let marker = h.app.session.doc.marker;
+            h.frames(90);
+            assert!(h.app.timeline_playback.is_none(), "{action}");
+            assert_eq!(h.app.session.doc.marker, marker, "no later step after {action}");
+        }
+    }
+
+    #[test]
+    fn playback_keeps_a_visible_pause_after_a_synchronous_rebuild() {
+        let mut h = two_boxes(false);
+        h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+        super::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Play);
+        super::tick_playback(&mut h.app, &h.ctx);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        // Model a rebuild that held the window thread for ten seconds. Its first visible
+        // frame must still show the first feature; elapsed compute time is not playback.
+        let time = h.ctx.input(|i| i.time) + 10.0;
+        let _ = h.ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+            super::tick_playback(&mut h.app, ui.ctx());
+        });
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+    }
+
+    #[test]
+    fn playback_at_the_end_or_in_an_empty_design_leaves_history_unchanged() {
+        for mut h in [Harness::new(), two_boxes(false)] {
+            h.frames(2);
+            let revision = h.app.session.revision;
+            h.step(&json!({"click": {"handle": "history:play"}})).unwrap();
+            h.frames(60);
+            assert_eq!(h.app.session.revision, revision);
+            assert!(h.app.timeline_playback.is_none());
+        }
     }
 
     /// A timeline wider than the window scrolls with a plain mouse wheel (#3356).

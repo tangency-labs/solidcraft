@@ -238,7 +238,7 @@ const ELEMENTS: &[Element] = &[
             let side = Tokens::get().space_24;
             for control in HistoryTransport::ALL {
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), egui::Sense::hover());
-                control.show(ui, rect);
+                control.show(ui, rect, None);
             }
         });
     }),

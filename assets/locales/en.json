@@ -2049,6 +2049,7 @@
   "ui.history_names": "Names",
   "ui.history_play": "Play to the end",
   "ui.history_show_names": "Show names",
+  "ui.history_stop": "Stop playback",
   "ui.history_title": "History",
   "ui.history_toggle_names": "Show or hide feature names",
   "ui.hole": "Hole",

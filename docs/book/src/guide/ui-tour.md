@@ -79,7 +79,9 @@
   back, and drag features to reorder them. Preferences can put the timeline vertically at the
   far left of the viewport, beside the browser. Its seam handle switches between icon
   chips and compact feature names; the browser can collapse to a rail beside either width.
-  Previous, Play and Next sit at the top. Double-click Previous to roll to the start.
+  Navigation buttons jump to the beginning or end, or step one feature at a time. The separate
+  Play button advances through the remaining features, pausing half a second after each rebuilt
+  step appears. Click Stop or press Escape to stop playback; navigation and editing stop it too.
 - **Command search (S).** Click the ribbon search field or press S to open the search popup
   below it. Results group commands by their ribbon path and show matching features and user
   parameters from this design. With an empty query, recent commands appear first, followed by

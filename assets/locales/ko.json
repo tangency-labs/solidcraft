@@ -1692,6 +1692,8 @@
   "ui.history_first": "처음으로 이동",
   "ui.history_forward": "한 단계 앞으로",
   "ui.history_last": "끝으로 이동",
+  "ui.history_play": "끝까지 재생",
+  "ui.history_stop": "재생 중지",
   "ui.history_title": "기록",
   "ui.hole": "구멍",
   "ui.hole_tap_type": "탭 유형",

@@ -226,6 +226,12 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         history.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":name})).unwrap();
     }
     history.frames(3);
+    history.app.run("timeline.roll_to", json!({"position":0})).unwrap();
+    click(&mut history, "history:play");
+    history.frames(1);
+    collect(&mut history, "history playback stop", &mut requested);
+    click(&mut history, "history:play");
+    history.app.run("timeline.roll_to", json!({})).unwrap();
     // Named feature history has independent menus in both layout preferences.
     for left in [false, true] {
         history.app.preferences.timeline_left = left;

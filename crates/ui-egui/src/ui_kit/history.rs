@@ -151,17 +151,18 @@ pub(crate) fn history_marker(p: &Painter, rect: Rect, vertical: bool, accent: Ta
     p.circle(centre, outer_radius - t.space_2 / 2.0, if vertical { t.panel } else { t.timeline }, Stroke::new(t.space_2, accent.color));
 }
 
-/// The same four rollback controls are used in every History orientation.
+/// Navigation and playback controls shared by every History orientation.
 #[derive(Clone, Copy)]
 pub(crate) enum HistoryTransport {
     First,
     Back,
     Forward,
     Last,
+    Play,
 }
 
 impl HistoryTransport {
-    pub const ALL: [Self; 4] = [Self::First, Self::Back, Self::Forward, Self::Last];
+    pub const ALL: [Self; 5] = [Self::First, Self::Back, Self::Forward, Self::Last, Self::Play];
 
     pub fn id(self) -> &'static str {
         match self {
@@ -169,6 +170,7 @@ impl HistoryTransport {
             Self::Back => "back",
             Self::Forward => "forward",
             Self::Last => "last",
+            Self::Play => "play",
         }
     }
 
@@ -178,19 +180,27 @@ impl HistoryTransport {
             Self::Back => "ui.history_back",
             Self::Forward => "ui.history_forward",
             Self::Last => "ui.history_last",
+            Self::Play => "ui.history_play",
         })
     }
 
-    pub fn show(self, ui: &mut egui::Ui, rect: Rect) -> egui::Response {
+    pub fn show(self, ui: &mut egui::Ui, rect: Rect, playing: Option<TabAccent>) -> egui::Response {
         let t = Tokens::get();
+        let playing = playing.filter(|_| matches!(self, Self::Play));
+        let label = if playing.is_some() { crate::i18n::tr("ui.history_stop") } else { self.label() };
         let response = ui.interact(rect, ui.id().with(("history_transport", self.id())), egui::Sense::click());
         crate::scenario::publish_target(&format!("history:{}", self.id()), rect);
-        if response.hovered() {
-            ui.painter().rect_filled(rect, t.radius_sm, t.hover);
+        if playing.is_some() || response.hovered() {
+            ui.painter().rect_filled(rect, t.radius_sm, playing.map_or(t.hover, |accent| accent.soft));
         }
-        icons::glyphs::transport_glyph(ui.painter(), rect.center(), self.id(), t.icon);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), self.label()));
-        response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(self.label())
+        if matches!(self, Self::Play) {
+            let icon = Rect::from_center_size(rect.center(), vec2(t.space_10 * 2.0, t.space_10 * 2.0));
+            icons::paint_icon(ui.painter(), icon, if playing.is_some() { "stop" } else { "play" }, 1.0);
+        } else {
+            icons::glyphs::transport_glyph(ui.painter(), rect.center(), self.id(), t.icon);
+        }
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+        response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(label)
     }
 }
 
@@ -493,7 +503,12 @@ mod tests {
     #[test]
     fn seam_drag_resizes_continuously_and_snaps_both_directions() {
         use crate::test_support::pointer;
-        for (names, delta, expected) in [(false, 40.0, true), (false, 20.0, false), (true, -40.0, false), (true, -20.0, true)] {
+        let width_gap = history_width(true) - history_width(false);
+        let across_snap = width_gap * 0.6;
+        let before_snap = width_gap * 0.2;
+        for (names, delta, expected) in
+            [(false, across_snap, true), (false, before_snap, false), (true, -across_snap, false), (true, -before_snap, true)]
+        {
             for pill in [false, true] {
                 let mut h = SeamHarness::new(names);
                 let start = if pill { h.card().right_center() } else { pos2(h.card().right() - 4.0, h.card().top() + 30.0) };
