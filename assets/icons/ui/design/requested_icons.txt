@@ -151,6 +151,7 @@ paste	false
 pattern_circ	false
 pattern_path	false
 pattern_rect	false
+pause	false
 perforate	false
 perspective	false
 pipe	false
@@ -181,6 +182,7 @@ project	false
 project_surface	false
 rack_pinion	false
 reach	false
+record	false
 rect	false
 rect3	false
 rect_center	false
@@ -242,6 +244,7 @@ spun	false
 star	false
 status_error	false
 status_recovery	false
+stop	false
 style	false
 suppress	false
 surface_blend	false
