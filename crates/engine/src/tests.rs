@@ -3482,6 +3482,77 @@ fn default_extrude_profiles_keep_even_depth_islands_and_separate_outlines() {
     assert!(rel(actual, expected) < 1e-6, "{actual} vs {expected}");
 }
 
+/// The face of `body` whose normal points along +x, as a plane pick.
+fn side_face_pick(s: &Session, body: &str) -> Value {
+    let world = s.world_state();
+    let b = world.body(body).unwrap();
+    let face = b
+        .body
+        .faces(0.01)
+        .unwrap()
+        .into_iter()
+        .filter(|f| f.plane_normal.is_some_and(|n| n.dot(solidcraft_geom::Vec3::X) > 0.999))
+        .max_by(|a, b| a.centroid.x.total_cmp(&b.centroid.x))
+        .unwrap();
+    json!({"body": b.name, "index": face.index, "face": [face.centroid.x, face.centroid.y, face.centroid.z]})
+}
+
+#[test]
+fn extruding_a_sketch_on_a_side_face_takes_the_whole_drawn_profile() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Base"}));
+    let pick = side_face_pick(&s, "Base");
+    let id = run(&mut s, "sketch.create", json!({"plane": pick, "name": "Side"}))["sketch"].as_u64().unwrap();
+    // The rectangle straddles the top edge of the face, so the projected outline cuts it in two.
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 15], "p1": [20, 25]}));
+    run(&mut s, "sketch.finish", json!({}));
+    for selection in [json!([1]), json!([2]), json!([{"point": [15, 17]}]), json!([{"point": [15, 22]}])] {
+        let mut s2 = Session::new((*s.doc).clone());
+        run(&mut s2, "solid.extrude", json!({"sketch": id, "distance": 5, "operation": "new", "body_name": "Rib", "profiles": selection.clone()}));
+        let state = s2.model.state();
+        let rib = state.bodies.iter().find(|b| b.name == "Rib").unwrap();
+        let v = rib.body.tessellate(1e-2).unwrap().measure().volume;
+        assert!(rel(v, 500.0) < 1e-6, "{selection}: {v}");
+    }
+}
+
+/// A pick on a region of a drawn profile that reference geometry bounds from inside (the rim of
+/// a hole in the face) takes only that region: the rim is a real boundary of the material, and
+/// the drawn outline around it is not cut by it (#5302).
+#[test]
+fn a_pick_bounded_by_a_projected_rim_takes_only_that_region() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Base"}));
+    run(&mut s, "solid.hole", json!({"position": [20, 15, 20], "diameter": 10}));
+    let id = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 5, 20]}}))["sketch"].as_u64().unwrap();
+    // The square around the hole: the hole's rim is projected into the sketch and bounds an
+    // inner region of it, but does not cut the square.
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 5], "p1": [30, 25]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let mut s2 = Session::new((*s.doc).clone());
+    run(&mut s2, "solid.extrude", json!({"sketch": id, "distance": 5, "operation": "new", "body_name": "Pad", "profiles": [{"point": [12, 7]}]}));
+    let state = s2.model.state();
+    let pad = state.bodies.iter().find(|b| b.name == "Pad").unwrap();
+    let v = pad.body.tessellate(1e-2).unwrap().measure().volume;
+    // The square with the hole's rim cut out of it, not the whole square. The mesh measures the
+    // round rim as a polygon, so the volume is a little under the analytic one.
+    let want = (400.0 - PI * 25.0) * 5.0;
+    assert!(rel(v, want) < 5e-3, "{v} vs {want}");
+}
+
+/// An explicit pick of a drawn hole still fills only that hole (#5176).
+#[test]
+fn an_explicit_pick_of_a_drawn_hole_fills_only_that_hole() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [60, 40]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 20], "radius": 5, "id": "ring"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let ring = s.model.state().sketches[0].profiles.iter().position(|p| p.outer_curves == ["ring"]).unwrap();
+    run(&mut s, "solid.extrude", json!({"distance": 5, "profiles": [ring]}));
+    assert!(rel(volume(&mut s), 25.0 * PI * 5.0) < 1e-4, "the hole alone: {}", volume(&mut s));
+}
+
 /// Every body a multi-profile `new` extrude creates carries its `body_name`, not a generic BodyN (#266).
 #[test]
 fn multi_profile_extrude_names_every_body_after_body_name() {

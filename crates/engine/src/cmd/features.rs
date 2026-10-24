@@ -365,7 +365,7 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind) -> Result<()>
             }
             ProfileSel::All => continue,
         };
-        let captured = solidcraft_doc::capture_profile_selection(ss, &indices)?;
+        let captured = solidcraft_doc::capture_profile_selection(ss, &drawn_profile_regions(ss, &indices))?;
         *sel = match captured {
             ProfileSel::OffsetBoundaries { associations }
                 if associations.iter().any(|id| {
@@ -394,6 +394,82 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind) -> Result<()>
         };
     }
     Ok(())
+}
+
+/// The regions a picked profile stands for.
+///
+/// A drawn profile cut by reference geometry that crosses it (the projected outline of the face
+/// a sketch is on) is several regions of the sketch's graph, and picking one of them takes the
+/// whole drawn profile (#5302): the regions that share a drawn curve with the picked one are
+/// the parts of that outline, split by the reference geometry crossing it. Reference geometry
+/// that stays inside the drawn profile (the rim of a counterbored hole) bounds an inner region
+/// of it, a real boundary of the material, so the pick keeps its own region. The drawn profiles
+/// are the disjoint faces of the drawn graph, so a drawn hole keeps filling only itself
+/// (#5176).
+fn drawn_profile_regions(ss: &solidcraft_doc::SolvedSketch, indices: &[usize]) -> Vec<usize> {
+    const MAX_PROFILES: usize = 10_000;
+    if indices.is_empty() || indices.len() > MAX_PROFILES || ss.profiles.len() > MAX_PROFILES {
+        return indices.to_vec();
+    }
+    let drawn = solidcraft_sketch::find_drawn_profiles(&ss.sketch);
+    if drawn.is_empty() || drawn.len() >= ss.profiles.len() {
+        return indices.to_vec();
+    }
+    // The curves the user drew: the drawn profiles are made of them, the reference geometry is
+    // not part of them.
+    let drawn_curves: std::collections::BTreeSet<&str> = ss
+        .sketch
+        .curves
+        .iter()
+        .enumerate()
+        .filter(|(index, curve)| {
+            !curve.construction && !curve.centerline && !curve.infinite && (!ss.sketch.is_linked_curve(*index) || ss.sketch.is_text_curve(*index))
+        })
+        .map(|(_, curve)| curve.id.as_str())
+        .collect();
+    let mut out: Vec<usize> = Vec::with_capacity(indices.len());
+    for index in indices {
+        let Some(picked) = ss.profiles.get(*index) else { continue };
+        // The drawn profile the picked region belongs to: the region around it that the drawn
+        // geometry alone bounds.
+        let probe = picked.region.interior_point();
+        let Some(owner) = drawn.iter().find(|profile| profile.region.contains(probe)) else {
+            out.push(*index);
+            continue;
+        };
+        // The drawn curves the picked region is bounded by.
+        let picked_curves: std::collections::BTreeSet<&str> = picked
+            .outer_curves
+            .iter()
+            .chain(picked.hole_curves.iter().flatten())
+            .map(String::as_str)
+            .filter(|id| drawn_curves.contains(id))
+            .collect();
+        if picked_curves.is_empty() {
+            out.push(*index);
+            continue;
+        }
+        // The regions of the drawn profile that share a drawn curve with the picked one: the
+        // parts of the same outline, cut apart by reference geometry crossing it.
+        let pieces: Vec<usize> = ss
+            .profiles
+            .iter()
+            .enumerate()
+            .filter(|(_, profile)| owner.region.contains(profile.region.interior_point()))
+            .filter(|(_, profile)| {
+                profile.outer_curves.iter().chain(profile.hole_curves.iter().flatten()).any(|id| picked_curves.contains(id.as_str()))
+            })
+            .map(|(index, _)| index)
+            .collect();
+        if pieces.is_empty() {
+            out.push(*index);
+        } else {
+            out.extend(pieces);
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 pub(crate) fn profiles(p: &Value, cmd: &str) -> Result<ProfileSel> {
