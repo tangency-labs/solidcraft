@@ -331,9 +331,15 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
             Some(Item { geo: Geo::Tris(tris), dir: planar.map(Vec3::from), json, shape, slot })
         }
         Sel::Body { name } => {
-            let m = st.body(name)?.mesh();
+            let body = st.body(name)?;
+            let m = body.mesh();
             let tris: Vec<[Vec3; 3]> = m.triangles.iter().filter_map(|t| m.tri(t)).collect();
-            let v = m.measure().volume;
+            let definitions = s.model.state();
+            let v = if definitions.sheets.iter().any(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
+                super::inspect::measure_body(body, Some(&definitions)).ok()?.volume
+            } else {
+                m.measure().volume
+            };
             plain(Geo::Tris(tris), None, json!({"type": "body", "name": name, "volume_mm3": v}))
         }
         Sel::SketchCurve { id } => sketch_curve(sketch_of(s, &st, None, |sk| sk.curve_index(id).is_some())?, id),

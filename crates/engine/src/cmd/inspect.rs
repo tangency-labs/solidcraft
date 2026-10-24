@@ -54,8 +54,33 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 pub fn measure_json(b: &solidcraft_doc::ModelBody) -> Value {
-    match solidcraft_kernel::measure(&b.body) {
-        Ok(m) => json!({
+    measure_sheet_json(b, None)
+}
+
+pub(super) fn measure_body(
+    b: &solidcraft_doc::ModelBody,
+    definitions: Option<&solidcraft_doc::ModelState>,
+) -> Result<solidcraft_kernel::BodyMeasure> {
+    let mut measured = solidcraft_kernel::measure(&b.body)?;
+    if let Some(state) = definitions
+        && let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty())
+    {
+        let definition = state.body(b.definition_name()).ok_or_else(|| EngineError::Other(format!("missing sheet body `{}`", sheet.body)))?;
+        // A recorded body transfer already moved both the definition's geometry and
+        // sheet metadata. Only the placement relative to that current definition
+        // belongs here; applying its original source transform again moves holes twice.
+        let inverse = solidcraft_doc::mat_inverse(&definition.source_transform)
+            .ok_or_else(|| EngineError::Other(format!("invalid sheet placement for `{}`", sheet.body)))?;
+        let placement = solidcraft_doc::mat_mul(&b.source_transform, &inverse);
+        sheet.correct_perforation_properties(&mut measured, &placement)?;
+    }
+    Ok(measured)
+}
+
+fn measure_sheet_json(b: &solidcraft_doc::ModelBody, definitions: Option<&solidcraft_doc::ModelState>) -> Value {
+    match measure_body(b, definitions) {
+        Ok(m) => {
+            let mut out = json!({
             "name": b.name,
             "volume_mm3": m.volume,
             "area_mm2": m.area,
@@ -66,7 +91,17 @@ pub fn measure_json(b: &solidcraft_doc::ModelBody) -> Value {
             "vertices": m.merged.vertices,
             "face_types": m.merged.face_types,
             "kernel": {"faces": m.faces, "edges": m.edges, "vertices": m.vertices, "shells": m.shells},
-        }),
+            });
+            if let Some(sheet) = definitions.and_then(|state| state.sheets.iter().find(|sheet| sheet.body == b.definition_name())) {
+                // Keep the bends' visible boundaries instead of merging coplanar faces.
+                let (df, de, dv) = sheet.round_hole_correction();
+                for (key, delta) in [("faces", df), ("edges", de), ("vertices", dv)] {
+                    out[key] = json!(out["kernel"][key].as_i64().unwrap_or(0) + delta);
+                }
+                out["sheet_metal"] = json!(true);
+            }
+            out
+        }
         Err(e) => json!({"name": b.name, "error": e.to_string()}),
     }
 }
@@ -76,10 +111,11 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
         return super::measure_sel::measure_items(s, items);
     }
     let want = string_list(p, "bodies");
+    let definitions = s.model.state();
     let st = s.world_state();
     let selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
     // Each body is measured on its own: on all cores, in body order.
-    let mut bodies: Vec<Value> = solidcraft_kernel::map_on_threads(&selected, 16, |b| measure_json(b))
+    let mut bodies: Vec<Value> = solidcraft_kernel::map_on_threads(&selected, 16, |b| measure_sheet_json(b, Some(&definitions)))
         .into_iter()
         .zip(&selected)
         .map(|(m, b)| m.unwrap_or_else(|| json!({"name": b.name, "error": "measuring this body failed"})))
@@ -97,35 +133,6 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if !want.is_empty() && bodies.len() != want.len() {
         return Err(bad("inspect.measure", "unknown body name"));
-    }
-    // Sheet metal keeps the edges where bends meet flat faces (so bends stay visible): count its
-    // B-rep faces as they are, without merging coplanar neighbours.
-    let sheets = s.model.state().sheets.clone();
-    for b in &mut bodies {
-        if let Some(sh) = sheets.iter().find(|x| b["name"].as_str() == Some(x.body.as_str())) {
-            let (df, de, dv) = sh.round_hole_correction();
-            for (k, d) in [("faces", df), ("edges", de), ("vertices", dv)] {
-                b[k] = json!(b["kernel"][k].as_i64().unwrap_or(0) + d);
-            }
-            b["sheet_metal"] = json!(true);
-            // A perforation field (#732) is not cut into the B-rep: take its open area out of the volume, the mass
-            // and the area (both faces minus the holes, plus the bores).
-            let open = sh.perforated_area();
-            if open > 0.0 {
-                let v = b["volume_mm3"].as_f64().unwrap_or(0.0);
-                let nv = v - open * sh.t;
-                if let Some(m) = b["mass_g"].as_f64().filter(|_| v > 0.0) {
-                    b["mass_g"] = json!(m * nv / v);
-                }
-                b["volume_mm3"] = json!(nv);
-                let bores: f64 = sh
-                    .perforations
-                    .iter()
-                    .map(|p| sh.perforation_holes(p).map_or(0.0, |h| h.len() as f64) * std::f64::consts::PI * p.diameter * sh.t)
-                    .sum();
-                b["area_mm2"] = json!(b["area_mm2"].as_f64().unwrap_or(0.0) - 2.0 * open + bores);
-            }
-        }
     }
     let tv: f64 = bodies.iter().filter_map(|b| b["volume_mm3"].as_f64()).sum();
     let ta: f64 = bodies.iter().filter_map(|b| b["area_mm2"].as_f64()).sum();
@@ -252,7 +259,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         .bodies
         .iter()
         .map(|b| {
-            let mut v = if with_measure { measure_json(b) } else { json!({"name": b.name, "feature": b.feature}) };
+            let mut v = if with_measure { measure_sheet_json(b, Some(&st)) } else { json!({"name": b.name, "feature": b.feature}) };
             if let Some(o) = v.as_object_mut() {
                 o.insert("visible".into(), json!(s.body_visible(&b.name)));
                 if s.body_removed_later(&b.name) {
