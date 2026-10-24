@@ -2990,6 +2990,42 @@ fn a_failing_or_panicking_worker_stops_the_work_without_escaping() {
 }
 
 #[test]
+fn a_panicking_worker_stops_the_other_workers() {
+    // The worker that takes item 1 waits until the one that panicked on item 0 has exited
+    // (its thread-local is dropped last), so by then the panic is known: no further item runs.
+    struct OnExit(Option<std::sync::mpsc::Sender<()>>);
+    impl Drop for OnExit {
+        fn drop(&mut self) {
+            if let Some(tx) = self.0.take() {
+                let _ = tx.send(());
+            }
+        }
+    }
+    thread_local!(static EXIT: std::cell::RefCell<OnExit> = const { std::cell::RefCell::new(OnExit(None)) });
+    let (tx, rx) = std::sync::mpsc::channel();
+    let rx = std::sync::Mutex::new(rx);
+    let view = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let ctx = context(&[], &[], &view, &Options { threads: 2, ..Options::default() }, &never).unwrap();
+    let ran = AtomicUsize::new(0);
+    let items: Vec<usize> = (0..200).collect();
+    let out = ctx.map(&items, 1, |i| {
+        ran.fetch_add(1, Ordering::Relaxed);
+        if *i == 0 {
+            EXIT.with(|exit| exit.borrow_mut().0 = Some(tx.clone()));
+            panic!("item 0 panics");
+        }
+        if *i == 1 {
+            let _ = rx.lock().map(|rx| rx.recv());
+        }
+        Ok(*i)
+    });
+    assert!(matches!(out, Err(HlrError::Internal(_))), "{out:?}");
+    // Item 1 runs only if the other worker took it before the panic; without the stop, all 200 would.
+    let ran = ran.load(Ordering::Relaxed);
+    assert!(ran <= 2, "{ran} items ran");
+}
+
+#[test]
 fn scenes_and_trims_beyond_the_shared_limits_are_refused() {
     let def = prepare(&cuboid([0.; 3], [1.; 3]), &Options::default()).unwrap();
     let view = View::new(Vec3::new(-1., -1., -1.), Vec3::new(0., 0., 1.)).unwrap();

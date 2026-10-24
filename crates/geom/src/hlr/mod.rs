@@ -584,7 +584,7 @@ struct Ctx<'a> {
     /// Most worker threads, and whether that number was chosen automatically (`threads: 0`).
     workers: usize,
     auto_workers: bool,
-    /// Set by the first worker that fails: the others stop as if cancelled.
+    /// Set by the first worker that fails or panics: the others stop as if cancelled.
     stop: AtomicBool,
     cancel: &'a (dyn Fn() -> bool + Sync),
 }
@@ -612,8 +612,8 @@ impl Ctx<'_> {
     }
 
     /// [`Ctx::map`] on worker threads. Every item runs on a spawned worker while the calling
-    /// thread waits, so a worker's panic is caught when it is joined. `None` when one thread
-    /// is enough or none could be started.
+    /// thread waits, so a worker's panic is caught when it is joined; it also stops the other
+    /// workers, like a failure. `None` when one thread is enough or none could be started.
     #[cfg(not(target_arch = "wasm32"))]
     fn map_on_threads<T: Sync, R: Send>(
         &self,
@@ -629,7 +629,17 @@ impl Ctx<'_> {
         }
         let next = AtomicUsize::new(0);
         let first = std::sync::Mutex::new(None);
+        // Dropped while a worker unwinds: the call fails anyway, so the others stop too.
+        struct StopOnPanic<'s>(&'s AtomicBool);
+        impl Drop for StopOnPanic<'_> {
+            fn drop(&mut self) {
+                if std::thread::panicking() {
+                    self.0.store(true, Ordering::Relaxed);
+                }
+            }
+        }
         let work = || {
+            let _stop = StopOnPanic(&self.stop);
             let mut done = Vec::new();
             while !self.stop.load(Ordering::Relaxed) {
                 let i = next.fetch_add(1, Ordering::Relaxed);

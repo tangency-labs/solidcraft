@@ -127,8 +127,8 @@ pieces in the same order and the same statistics apart from the phase timings.
   a budget is exceeded), the error returned may differ from a run on one thread; a successful
   result never does.
 - **Panics.** Every parallel item runs on a spawned worker that the calling thread joins. A
-  worker that panics loses its item: the call returns `HlrError::Internal` and no drawing, and
-  the panic does not reach the caller. Work on the calling thread (one thread, or the browser
+  worker that panics loses its item and stops the other workers: the call returns
+  `HlrError::Internal` and no drawing, and the panic does not reach the caller. Work on the calling thread (one thread, or the browser
   build) lets a panic propagate to the caller as before.
 
 Measured on a 32-thread desktop (release build, isometric view of boxes, cylinders, spheres
@@ -178,8 +178,10 @@ applies, and the body limit of `file.export_view_dxf`. It bounds the placements 
 supplies and, by default, the number of curves, which is the number of lines in the drawing;
 a caller drawing a large assembly may raise `max_tracks`. A body's own records have the
 larger limit of `geom::brep`, which stores whole evaluated models.
-The default ray budget is the occlusion work budget of `file.export_view_dxf`. Every piece
-costs at least one ray, so the ray budget also bounds the pieces. The remaining caps bound
+The ray budget is HLR's own: it counts visibility classifications, one per ray. The 200 million
+work steps of `file.export_view_dxf` count other work (placements, tree nodes and triangles of
+its occlusion test), so the two numbers are not comparable. Every piece costs at least one
+ray, so the ray budget also bounds the pieces. The remaining caps bound
 the steps in between.
 
 Other limits:
