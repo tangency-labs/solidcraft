@@ -2020,6 +2020,13 @@ impl SolveApp {
         self.picking_sketch_plane() || self.dialog.as_ref().is_some_and(|d| d.inputs.get(d.active).is_some_and(|i| i.accept & selection::PLANES != 0))
     }
 
+    /// The field of view the view is drawn with: the `perspective_fov` preference while the view is
+    /// in perspective ([`Self::perspective_view`]), and 0 (parallel) otherwise. The one place the
+    /// drawn angle is decided.
+    pub fn view_fov(&self) -> f64 {
+        if self.perspective_view() { prefs::perspective_fov(&self.preferences) } else { 0.0 }
+    }
+
     /// Is the view drawn in perspective? The perspective preference, except while a sketch is
     /// open (always orthographic) or when the #2682 mode is on: then the view is orthographic
     /// exactly when the camera faces a standard axis view, and perspective otherwise.
@@ -2152,10 +2159,13 @@ impl SolveApp {
             if render_workspace::active(self) {
                 return viewport_layout::fit_product_bounds(cam, bounds, layout).unwrap_or(cam);
             }
-            return viewport_layout::fit_bounds(cam, bounds, layout, self.perspective_view()).unwrap_or(cam);
+            return viewport_layout::fit_bounds(cam, bounds, layout, self.view_fov()).unwrap_or(cam);
         }
+        // Framed at the angle the view draws with, keeping the camera's own.
         let previous = cam;
+        cam.fov = self.view_fov();
         cam.fit(bounds);
+        cam.fov = previous.fov;
         if cam.is_valid() { cam } else { previous }
     }
 

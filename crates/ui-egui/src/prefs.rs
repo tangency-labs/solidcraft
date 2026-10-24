@@ -746,6 +746,36 @@ pub fn apply_file_limits(p: &Prefs) {
     }
 }
 
+/// Perspective view's default field of view (about 34°), in radians.
+const PERSPECTIVE_FOV: f64 = 0.6;
+
+/// The field of view Perspective view draws with: the preference, or the default when a saved
+/// value is outside the accepted range (a hand edit).
+pub fn perspective_fov(p: &Prefs) -> f64 {
+    if accepted::perspective_fov(p) { p.perspective_fov } else { PERSPECTIVE_FOV }
+}
+
+/// Perspective view keeps the target's size when its angle changes (#5364): the distance scales by
+/// tan(old/2) / tan(new/2), so the angle changes the depth, not the zoom. Called every frame and
+/// after `ui.prefs`, so every way the angle changes (the slider, Cancel, Restore Defaults, a script)
+/// goes through it. A parallel view keeps the last perspective angle, and while Render is open the
+/// camera is Render's own, so the change waits until the design view is back.
+pub(crate) fn follow_view_fov(app: &mut SolveApp) {
+    let fov = app.view_fov();
+    if fov <= 0.0 || crate::render_workspace::active(app) {
+        return;
+    }
+    let old = std::mem::replace(&mut app.prefs_window.drawn_fov, fov);
+    if old > 0.0 && old != fov {
+        let k = (old * 0.5).tan() / (fov * 0.5).tan();
+        app.cam.distance *= k;
+        if let Some(anim) = &mut app.cam_anim {
+            anim.from.distance *= k;
+            anim.to.distance *= k;
+        }
+    }
+}
+
 /// The browser sidebar's first width, and the width [`Prefs::default`] restores; the panel
 /// itself clamps what the user drags to its own range.
 pub const DEFAULT_BROWSER_WIDTH: f32 = 250.0;
@@ -959,6 +989,9 @@ preference_settings! {
     show_view_angles: bool = false, PAGE_GRAPHICS;
     /// Show world X/Y/Z component dimensions beside the total distance in Measure.
     measure_axis_distances: bool = true, PAGE_GRAPHICS => check_id("settings.measure_axis_distances");
+    /// Perspective view's vertical field of view in radians (#5364), 15° to 90°. The view reads a
+    /// saved value outside that range as the default ([`perspective_fov`]).
+    perspective_fov: f64 = PERSPECTIVE_FOV, PAGE_GRAPHICS, accept(15f64.to_radians()..=90f64.to_radians());
     /// Decimals shown for lengths and angles.
     length_decimals: u8 = 2, PAGE_DESIGN;
     angle_decimals: u8 = 1, PAGE_DESIGN;
@@ -1308,6 +1341,8 @@ pub struct PrefsWindow {
     snapshot: Option<Snapshot>,
     /// The up axis preference the view follows now (applied when it changes, and at startup).
     applied_up: Option<String>,
+    /// The perspective angle the view was last drawn with ([`follow_view_fov`]); 0 before the first.
+    drawn_fov: f64,
     /// The search text of the interface font list.
     font_filter: String,
     /// Search text on the Plugins page.
@@ -1787,6 +1822,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     if app.prefs_window.applied_up.as_deref() != Some(app.preferences.up_axis.as_str()) {
         up_axis_changed(app);
     }
+    follow_view_fov(app);
     if app.preferences.theme == "system"
         && let Some(t) = ctx.system_theme()
     {
@@ -2860,6 +2896,8 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         None => {}
     }
     if button.is_some() {
+        // Cancel and Restore Defaults can change the angle too.
+        follow_view_fov(app);
         out = serde_json::to_value(&app.preferences).map_err(|e| e.to_string())?;
     }
     if let Some(o) = out.as_object_mut() {
@@ -3277,6 +3315,9 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     if !accepted::ui_scale(&new) || !accepted::look_at_speed(&new) {
         return Err("`ui_scale` must be 0.5…2.5 and `look_at_speed` 0.25…4".into());
     }
+    if !accepted::perspective_fov(&new) {
+        return Err("`perspective_fov` must be 15°…90° in radians (0.2618…1.5708)".into());
+    }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());
     }
@@ -3308,6 +3349,7 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     if up_changed {
         up_axis_changed(app);
     }
+    follow_view_fov(app);
     serde_json::to_value(&app.preferences).map_err(|e| e.to_string())
 }
 
@@ -6766,5 +6808,202 @@ mod graphics_preset_tests {
         assert_eq!(h.app.cam, camera);
         assert_eq!(h.app.session.doc.to_json(), design);
         assert!(h.app.session.undo.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod perspective_fov_tests {
+    use super::*;
+    use egui::{Event, Key, Modifiers, PointerButton, pos2};
+
+    fn press(h: &mut crate::scenario::Harness, at: egui::Pos2, pressed: bool) {
+        h.app.synthetic.push(Event::PointerMoved(at));
+        h.app.synthetic.push(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        h.frames(3);
+    }
+
+    fn graphics_slider(h: &mut crate::scenario::Harness) -> egui::Rect {
+        h.call("ui.prefs", json!({"open": "Graphics"}));
+        let label = crate::i18n::tr("prefs.perspective_fov");
+        reveal_preference(h, &format!("dialog:slider:{label}"));
+        crate::scenario::rect_of(&format!("dialog:slider_track:{label}")).expect("the Field of view slider")
+    }
+
+    /// Graphics › Field of view (#5364): the kit slider in whole degrees, dragged or typed, written
+    /// back in radians. While the view can't draw in perspective (Perspective view off, and no
+    /// perspective-while-orbiting mode, #2682) it changes nothing, and Cancel puts it back.
+    #[test]
+    fn the_field_of_view_slider_drags_and_types_whole_degrees() {
+        let mut h = crate::scenario::Harness::new();
+        for (perspective, auto_ortho) in [(false, false), (true, false), (false, true)] {
+            h.call("ui.set", json!({"perspective": perspective}));
+            h.app.ui.auto_ortho_faces = auto_ortho;
+            let track = graphics_slider(&mut h);
+            press(&mut h, pos2(track.left() + 4.0, track.center().y), true);
+            h.app.synthetic.push(Event::PointerMoved(pos2(track.left() + track.width() * 0.75, track.center().y)));
+            h.frames(3);
+            press(&mut h, pos2(track.left() + track.width() * 0.75, track.center().y), false);
+            let degrees = h.app.preferences.perspective_fov.to_degrees();
+            if perspective || auto_ortho {
+                assert!((degrees - degrees.round()).abs() < 1e-9 && (35.0..=90.0).contains(&degrees), "{degrees}");
+            } else {
+                assert_eq!(h.app.preferences.perspective_fov, PERSPECTIVE_FOV, "disabled while Perspective view is off");
+            }
+            h.call("ui.prefs", json!({"button": "cancel"}));
+            assert_eq!(h.app.preferences.perspective_fov, PERSPECTIVE_FOV, "Cancel restores the angle");
+        }
+        let track = graphics_slider(&mut h);
+        press(&mut h, pos2(track.right() + 30.0, track.center().y), true);
+        press(&mut h, pos2(track.right() + 30.0, track.center().y), false);
+        h.app.synthetic.push(Event::Text("40.4".into()));
+        h.app.synthetic.push(Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
+        h.frames(3);
+        assert!(
+            (h.app.preferences.perspective_fov - 40f64.to_radians()).abs() < 1e-9,
+            "typed 40.4 keeps to 40°: {}",
+            h.app.preferences.perspective_fov
+        );
+        h.call("ui.prefs", json!({"button": "ok"}));
+    }
+
+    /// `ui.prefs {perspective_fov}` takes 15° to 90° in radians and refuses anything else, changing
+    /// nothing; a saved value the view can't use (a hand edit) draws at the default, never a broken view.
+    #[test]
+    fn hostile_angles_are_refused_or_drawn_at_the_default() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"perspective": true}));
+        for fine in [15f64.to_radians(), 90f64.to_radians(), 1.0] {
+            assert_eq!(h.call("ui.prefs", json!({"perspective_fov": fine}))["ok"], true, "{fine}");
+            assert_eq!(h.app.view_fov(), fine);
+        }
+        let before = (h.app.preferences.clone(), h.app.cam);
+        for bad in [
+            json!(-1.0),
+            json!(0.0),
+            json!(14.9f64.to_radians()),
+            json!(90.1f64.to_radians()),
+            json!(std::f64::consts::PI),
+            json!(1e308),
+            json!(-1e308),
+            json!("x"),
+            json!(null),
+            json!([1]),
+        ] {
+            let r = h.call("ui.prefs", json!({"perspective_fov": bad}));
+            assert_eq!(r["ok"], false, "{bad}: {r}");
+            assert_eq!((h.app.preferences.clone(), h.app.cam), before, "{bad} changes nothing");
+        }
+        for saved in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, 0.1, 2.0, std::f64::consts::PI, 1e308] {
+            h.app.preferences.perspective_fov = saved;
+            h.frames(2);
+            assert_eq!(h.app.view_fov(), PERSPECTIVE_FOV, "{saved} draws at the default");
+            assert!(h.app.cam.is_valid(), "{saved}: {:?}", h.app.cam);
+        }
+        // A fuzz pass: any bit pattern, and values spread over -1…3 rad, through `ui.prefs` and saved.
+        let range = 15f64.to_radians()..=90f64.to_radians();
+        let mut x: u64 = 0x5364;
+        for i in 0..2000 {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let v = if i % 2 == 0 { f64::from_bits(x) } else { (x >> 11) as f64 / (1u64 << 53) as f64 * 4.0 - 1.0 };
+            let accepted = set(&mut h.app, &json!({"perspective_fov": v})).is_ok();
+            assert_eq!(accepted, range.contains(&v), "{v}");
+            h.app.preferences.perspective_fov = v;
+            follow_view_fov(&mut h.app);
+            assert!(range.contains(&h.app.view_fov()) && h.app.cam.is_valid(), "{v}: {:?}", h.app.cam);
+        }
+        let read = lenient(&json!({"perspective_fov": "wide", "ui_scale": 1.5}));
+        assert_eq!((read.perspective_fov, read.ui_scale), (PERSPECTIVE_FOV, 1.5), "an unreadable angle costs that setting only");
+    }
+
+    /// The target keeps its size when the angle changes, by every path (`ui.prefs`, Cancel, Restore
+    /// Defaults), and a parallel view or a sketch keeps the last perspective angle until it's back.
+    #[test]
+    fn the_view_keeps_its_size_when_the_angle_changes() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.call("ui.set", json!({"perspective": true}));
+        h.frames(3);
+        let half = |h: &crate::scenario::Harness| {
+            let mut cam = h.app.cam;
+            cam.fov = h.app.view_fov();
+            cam.half_height()
+        };
+        let (size, distance) = (half(&h), h.app.cam.distance);
+        h.call("ui.prefs", json!({"open": "Graphics"}));
+        for fov in [15f64.to_radians(), 1.0, 90f64.to_radians()] {
+            h.call("ui.prefs", json!({"perspective_fov": fov}));
+            assert!((half(&h) / size - 1.0).abs() < 1e-9, "{fov}: {} vs {size}", half(&h));
+        }
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert!((h.app.cam.distance / distance - 1.0).abs() < 1e-9, "Cancel restores the angle and the size");
+        h.call("ui.prefs", json!({"perspective_fov": 1.2}));
+        h.call("ui.prefs", json!({"open": "Graphics", "button": "defaults"}));
+        h.call("ui.prefs", json!({"button": "ok"}));
+        assert_eq!(h.app.preferences.perspective_fov, PERSPECTIVE_FOV);
+        assert!(!h.app.ui.perspective, "the page's Restore Defaults turns Perspective view off too");
+        // A parallel view keeps the last perspective angle: back in perspective, the default angle
+        // draws at the first size, and an angle changed while it's off is followed once it's on.
+        h.call("ui.set", json!({"perspective": true}));
+        h.frames(2);
+        assert!((h.app.cam.distance / distance - 1.0).abs() < 1e-9, "Restore Defaults restores the size");
+        h.call("ui.set", json!({"perspective": false}));
+        h.frames(2);
+        let parallel = h.app.cam.distance;
+        h.call("ui.prefs", json!({"perspective_fov": 1.2}));
+        assert_eq!(h.app.cam.distance, parallel, "parallel: nothing to rescale yet");
+        h.call("ui.set", json!({"perspective": true}));
+        h.frames(2);
+        assert!((half(&h) / size - 1.0).abs() < 1e-9);
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.call("ui.prefs", json!({"perspective_fov": 0.6}));
+        h.app.finish_sketch();
+        h.frames(2);
+        assert!((half(&h) / size - 1.0).abs() < 1e-9);
+    }
+
+    /// A view change that is animating when the angle changes ends at the same size too: both its
+    /// ends are rescaled with the camera.
+    #[test]
+    fn an_animating_view_change_is_rescaled_too() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"perspective": true}));
+        h.frames(2);
+        let to = solidcraft_engine::render::Camera { distance: 300.0, ..h.app.cam };
+        h.app.cam_anim = Some(solidcraft_engine::render::CameraAnim::new(h.app.cam, to, h.app.now));
+        let from = h.app.cam;
+        set(&mut h.app, &json!({"perspective_fov": 1.0})).unwrap();
+        let k = (0.6f64 * 0.5).tan() / 0.5f64.tan();
+        let anim = h.app.cam_anim.as_ref().expect("still animating");
+        assert!((anim.to.distance - 300.0 * k).abs() < 1e-9 && (anim.from.distance - from.distance * k).abs() < 1e-9, "{:?}", (anim.from, anim.to));
+    }
+
+    /// A script's Cancel puts the view's size back at once, before any frame runs, so a `ui.camera`
+    /// read straight after it gives the restored view.
+    #[test]
+    fn cancel_restores_the_size_before_the_next_frame() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"perspective": true}));
+        h.frames(2);
+        let distance = h.app.cam.distance;
+        let mut raw = |method: &str, params: serde_json::Value| {
+            let (req, _rx) = crate::control::ControlRequest::new(method, params);
+            match crate::control::handle(&mut h.app, &h.ctx, &req) {
+                crate::control::Outcome::Done(v) => v,
+                _ => serde_json::Value::Null,
+            }
+        };
+        raw("ui.prefs", json!({"open": "Graphics", "perspective_fov": 1.2}));
+        raw("ui.prefs", json!({"button": "cancel"}));
+        let cam = raw("ui.camera", serde_json::Value::Null);
+        assert!((cam["result"]["distance"].as_f64().unwrap() / distance - 1.0).abs() < 1e-9, "{cam}");
+    }
+
+    /// The angle is kept between runs.
+    #[test]
+    fn the_angle_is_kept_across_a_restart() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"perspective_fov": 1.1}));
+        h.step(&json!({"restart": "close"})).unwrap();
+        assert_eq!(h.app.preferences.perspective_fov, 1.1);
     }
 }

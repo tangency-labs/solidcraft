@@ -64,16 +64,17 @@ fn thin_rotated_bounds_fit_using_the_original_full_projection() {
         assert!(layout.axis_view.is_positive() && layout.navigation.is_positive(), "{layout:?}");
         assert!(!layout.drawable.intersect(dock).is_positive());
         assert!(!layout.axis_view.intersect(layout.navigation).is_positive());
-        for perspective in [false, true] {
+        // Parallel, the default angle, and the ends of the Field of view preference (#5364).
+        for fov in [0.0, 0.6, 15f64.to_radians(), 90f64.to_radians()] {
             for view in [StandardView::Top, StandardView::Iso, StandardView::Right] {
                 let mut cam = Camera::default();
                 cam.set_view(view);
                 let bounds = Aabb3 { min: Vec3::new(-30.0, -1.0, -2.0), max: Vec3::new(70.0, 2.0, 3.0) };
-                let fit = fit_bounds(cam, &bounds, &layout, perspective).unwrap();
+                let fit = fit_bounds(cam, &bounds, &layout, fov).unwrap();
                 assert_eq!((cam.yaw, cam.pitch, cam.up), (fit.yaw, fit.pitch, fit.up));
-                assert_eq!(fit_bounds(fit, &bounds, &layout, perspective).unwrap(), fit);
+                assert_eq!(fit_bounds(fit, &bounds, &layout, fov).unwrap(), fit);
                 let mut effective = fit;
-                effective.fov = if perspective { 0.6 } else { 0.0 };
+                effective.fov = fov;
                 let radius = (bounds.diagonal() * 0.5 + bounds.center().dist(fit.target)).max(effective.half_height() * 2.0).max(10.0);
                 for x in [bounds.min.x, bounds.max.x] {
                     for y in [bounds.min.y, bounds.max.y] {
@@ -148,9 +149,9 @@ fn measured_palette_fit_exposes_endpoints_and_layout_changes_preserve_manual_vie
 fn hostile_or_empty_fit_keeps_the_existing_camera_valid() {
     let cam = Camera::default();
     let measured = layout(Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0)), &[], 1.0, crate::prefs::NavigatorStyle::Axes, true);
-    assert!(fit_bounds(cam, &Aabb3::EMPTY, &measured, false).is_none());
+    assert!(fit_bounds(cam, &Aabb3::EMPTY, &measured, 0.0).is_none());
     let bad = Aabb3 { min: Vec3::new(f64::NAN, 0.0, 0.0), max: Vec3::new(1.0, 1.0, 1.0) };
-    assert!(fit_bounds(cam, &bad, &measured, true).is_none());
+    assert!(fit_bounds(cam, &bad, &measured, 0.6).is_none());
     let mut app = crate::SolveApp::new(Default::default(), Default::default());
     let tiny = layout(Rect::from_min_size(pos2(0.0, 0.0), vec2(5.0, 5.0)), &[], 1.0, crate::prefs::NavigatorStyle::Axes, true);
     app.viewport.layout = Some(tiny);

@@ -171,16 +171,12 @@ impl Layout {
     }
 }
 
-pub(crate) fn fit_bounds(cam: Camera, bounds: &Aabb3, layout: &Layout, perspective: bool) -> Option<Camera> {
-    fit_with_fov(cam, bounds, layout, if perspective { 0.6 } else { 0.0 })
-}
-
 /// Product cameras keep the authored lens while framing the free canvas.
 pub(crate) fn fit_product_bounds(cam: Camera, bounds: &Aabb3, layout: &Layout) -> Option<Camera> {
-    fit_with_fov(cam, bounds, layout, cam.fov)
+    fit_bounds(cam, bounds, layout, cam.fov)
 }
 
-fn fit_with_fov(mut cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64) -> Option<Camera> {
+pub(crate) fn fit_bounds(mut cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64) -> Option<Camera> {
     let perspective = fov > 0.0;
     if !fov.is_finite() || !(0.0..std::f64::consts::PI).contains(&fov) {
         return None;

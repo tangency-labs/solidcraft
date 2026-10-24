@@ -160,6 +160,10 @@ Preferences (File › Preferences) hold the theme, workspace layout, the units o
 visual style and autosave. Graphics › Colour vision gives the colours that carry a meaning (sketch
 states, axes, bends, analyses, icons) values for a weak red, green or blue sense: Protan, Deutan or
 Tritan. In a mode, the faces Draft and Accessibility Analysis mark as failing are striped too.
+Graphics › Viewport › **Perspective view** draws the view with perspective, and its **Field of view**
+(15° to 90°, about 34° by default) sets how strong the perspective is. The model keeps its size in the
+view when the angle changes: a wider angle brings the camera closer. A sketch you are editing is always
+drawn without perspective.
 Command messages and errors show for a few seconds in the status chip at the bottom left of the view. Click the chip, or choose Help › **Messages…**, for every message of the session: newest first, errors in red, each line selectable, with **Copy all** for a bug report.
 Help › Keyboard Shortcuts lists every key, and File › Keyboard
 Shortcuts changes them.

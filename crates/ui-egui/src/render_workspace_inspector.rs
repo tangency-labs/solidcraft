@@ -712,7 +712,8 @@ fn camera_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut camera = before;
     let mut perspective = camera.fov > 0.0;
     if ui_kit::checkbox(ui, app.tr("render.perspective"), &mut perspective).changed() {
-        camera.fov = if perspective { std::f64::consts::FRAC_PI_4 } else { 0.0 };
+        // On at the Field of view preference's angle (#5364); a saved setup keeps its own.
+        camera.fov = if perspective { crate::prefs::perspective_fov(&app.preferences) } else { 0.0 };
     }
     if perspective {
         let mut fov = camera.fov.to_degrees();
