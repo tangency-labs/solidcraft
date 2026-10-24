@@ -365,14 +365,23 @@ impl On {
             candidates.push(line([m[0], a[1]], [m[0], b[1]]));
             candidates.push(line([a[0], m[1]], [b[0], m[1]]));
         }
-        // u or v the edge's own parameter, either way along and offset (forms on one frame's
-        // quarter grid, or on the same grid turned over), the other fixed.
-        if let Some([u, v]) = self.project_in(pm, exact) {
+        // u or v moving at a steady pace in the edge's own parameter, the other fixed (or both
+        // moving): a rim on the face's quarter grid, its knots scaled or turned over (a closed
+        // rim's two ends are one point on the seam, so its pace is read inside it, from a quarter
+        // to three quarters along, unwrapped from the middle).
+        if let Some(m) = self.project_in(pm, exact) {
             let tm = 0.5 * (t0 + t1);
-            for sign in [1.0, -1.0] {
-                let (cu, cv) = (u - sign * tm, v - sign * tm);
-                candidates.push(line([cu + sign * t0, v], [cu + sign * t1, v]));
-                candidates.push(line([u, cv + sign * t0], [u, cv + sign * t1]));
+            let (ta, tb) = (t0 + 0.25 * (t1 - t0), t0 + 0.75 * (t1 - t0));
+            let near = |t: f64| curve.point(t).and_then(|p| self.project(p, Some(m), exact));
+            if let (Some(a), Some(b)) = (near(ta), near(tb)) {
+                let pace = [(b[0] - a[0]) / (tb - ta), (b[1] - a[1]) / (tb - ta)];
+                let at = |t: f64, moving: [bool; 2]| {
+                    let d = t - tm;
+                    [m[0] + if moving[0] { pace[0] * d } else { 0.0 }, m[1] + if moving[1] { pace[1] * d } else { 0.0 }]
+                };
+                for moving in [[true, false], [false, true], [true, true]] {
+                    candidates.push(line(at(t0, moving), at(t1, moving)));
+                }
             }
         }
         candidates.into_iter().find(|pc| self.lifts(pc, curve, [t0, t1], exact))
