@@ -545,6 +545,10 @@ preference_settings! {
     layout: crate::shell::LayoutMode = Default::default(), PAGE_INTERFACE;
     /// Show command names beneath ribbon icons, independently of workspace layout.
     ribbon_labels: bool = true, PAGE_INTERFACE;
+    /// Ribbon panels add more commands as grids of small icons beside their large buttons.
+    ribbon_compact: bool = false, PAGE_INTERFACE;
+    /// Ribbon tooltips show a tool's description where it has one.
+    ribbon_help: bool = true, PAGE_INTERFACE;
     /// Interface scale (1 = 100 %).
     ui_scale: f32 = 1.0, PAGE_INTERFACE, accept(0.5..=2.5);
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
@@ -3231,6 +3235,8 @@ mod tests {
             ("ui_font", json!("test font"), PAGE_INTERFACE),
             ("layout", json!("compact"), PAGE_INTERFACE),
             ("ribbon_labels", json!(false), PAGE_INTERFACE),
+            ("ribbon_compact", json!(true), PAGE_INTERFACE),
+            ("ribbon_help", json!(false), PAGE_INTERFACE),
             ("timeline_left", json!(true), PAGE_INTERFACE),
             ("timeline_under_browser", json!(true), PAGE_INTERFACE),
             ("browser_float", json!(true), PAGE_INTERFACE),
