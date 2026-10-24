@@ -2292,6 +2292,8 @@
   "ui.start": "Start",
   "ui.start_over": "Start over",
   "ui.start_page": "Start page",
+  "ui.step_values": "Step values with the arrow keys and the wheel",
+  "ui.step_values_tip": "In a value field you are typing in, Up/Down change a plain number by 1 (Shift: 10, Alt: 0.1), and so does the mouse wheel over the field. Expressions are left as typed.",
   "ui.stretch": "Stretch",
   "ui.supersampling": "Supersampling (SSAA)",
   "ui.supersampling_adaptive": "Only when the view is still",

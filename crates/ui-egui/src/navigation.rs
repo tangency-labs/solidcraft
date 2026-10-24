@@ -186,6 +186,15 @@ pub(crate) fn pinch_factor(input: &egui::InputState) -> f32 {
         .fold(1.0, |acc, f| acc * f)
 }
 
+/// Give this frame's wheel to the widget under the pointer that uses it itself (a value field
+/// stepping its number, `value_step`): no scroll area or camera under it moves as well.
+pub(crate) fn claim_wheel(ctx: &egui::Context) {
+    ctx.input_mut(|i| {
+        i.smooth_scroll_delta = egui::Vec2::ZERO;
+        i.events.retain(|e| !matches!(e, egui::Event::MouseWheel { .. }));
+    });
+}
+
 /// Zoom anchor: the model point under the cursor, else the target's depth.
 /// Preferences › Navigation › Zoom to the cursor (off: toward the view's centre).
 pub(crate) fn zoom_anchor(app: &mut SolveApp, rect: egui::Rect, hover: Option<egui::Pos2>, surface: bool) -> Option<Vec3> {

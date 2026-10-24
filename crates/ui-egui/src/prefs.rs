@@ -534,6 +534,9 @@ preference_settings! {
     /// Decimals shown for lengths and angles.
     length_decimals: u8 = 2, PAGE_DESIGN;
     angle_decimals: u8 = 1, PAGE_DESIGN;
+    /// Up/Down and the wheel over a focused value field step its plain number (`value_step`,
+    /// #2320). Off by default: the keys move the text cursor and the wheel scrolls, as before.
+    step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
     /// `dark`, `light` or `system` (follow the operating system), or a theme file's id: a
     /// built-in one (`gruvbox-dark`, …) or one of `custom_themes` (#2255).
     theme: String = "dark".into(), PAGE_INTERFACE;

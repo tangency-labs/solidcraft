@@ -583,7 +583,10 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
 /// top-left corner. `select_all` re-selects the whole field, both right after a pick and on every
 /// frame a drag is changing the value underneath it: without the latter, a drag that grows the
 /// text (e.g. "4 mm" -> "15 mm") would leave the stale, shorter selection from the pick in place,
-/// covering only part of the new text.
+/// covering only part of the new text. With value stepping on, the box stays where it is while
+/// the pointer is over it: the wheel steps its value (`value_step`), which moves the arrow tip
+/// the box follows, and a box sliding out from under the pointer would hand the next notch to
+/// the camera.
 fn value_box(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool) {
     value_box_with(ui, label, value, at, select_all, false);
 }
@@ -608,6 +611,14 @@ pub(crate) fn value_box_in(
     keep_tab: bool,
 ) -> Option<egui::Rect> {
     let t = Tokens::get();
+    // Held in place while the pointer is over it and value stepping is on (see `value_box`): by
+    // its pivot, the point of the box that sits at `at`, which is not always its top-left corner.
+    let pointer = ui.ctx().pointer_hover_pos();
+    let at = ui
+        .ctx()
+        .memory(|m| m.area_rect(area))
+        .filter(|r| crate::value_step::enabled(ui.ctx()) && pointer.is_some_and(|p| r.contains(p)))
+        .map_or(at, |r| pivot.pos_in_rect(&r));
     let mut field = None;
     Container::new(ui.ctx(), Surface::Canvas).area(area).fixed_pos(at).pivot(pivot).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
         Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {

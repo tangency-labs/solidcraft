@@ -2292,6 +2292,8 @@
   "ui.start": "开始",
   "ui.start_over": "重新开始",
   "ui.start_page": "起始页",
+  "ui.step_values": "使用方向键和滚轮调整数值",
+  "ui.step_values_tip": "在正在输入的数值框中，上下方向键和框上的鼠标滚轮可将数字增减 1（Shift：10，Alt：0.1）。表达式保持不变。",
   "ui.stretch": "伸展",
   "ui.supersampling": "超级采样 (SSAA)",
   "ui.supersampling_adaptive": "仅在视图静止时",

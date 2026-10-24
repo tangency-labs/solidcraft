@@ -58,7 +58,9 @@ Keys handled by the window itself:
 While a value box has the keyboard (a dimension being added, a dialog field), keys type into
 it and single-letter shortcuts don't fire. With Sketch Dimension (D), the box opens as soon as
 you click a line, circle or arc (or the second point or line), so D, click, type the value,
-Enter.
+Enter. With Preferences › Design › Step values with the arrow keys and the wheel on, ↑ ↓ in a
+value box, or the wheel over it, step a plain number by 1 (with Shift by 10, with Alt by 0.1);
+see [Parameters and expressions](parameters.md).
 
 Mouse and touch:
 

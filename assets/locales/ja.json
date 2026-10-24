@@ -2292,6 +2292,8 @@
   "ui.start": "開始",
   "ui.start_over": "最初からやり直す",
   "ui.start_page": "スタートページ",
+  "ui.step_values": "矢印キーとホイールで数値を増減",
+  "ui.step_values_tip": "入力中の値フィールドでは、上下矢印キーとフィールド上のマウスホイールで数値を 1 ずつ増減します（Shift: 10、Alt: 0.1）。式はそのまま残ります。",
   "ui.stretch": "伸縮",
   "ui.supersampling": "スーパーサンプリング (SSAA)",
   "ui.supersampling_adaptive": "ビューが静止しているときのみ",

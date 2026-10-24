@@ -32,6 +32,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::settings_precision_sample(ui, &format!("{:.*}°", usize::from(app.preferences.angle_decimals.min(6)), 45.0));
             });
         });
+        let tip = app.tr("ui.step_values_tip").to_string();
+        let step = setting::step_values(app, ui).on_hover_text(tip);
+        crate::scenario::publish_handle("prefs:step_values", step.rect.center());
     });
     ui_kit::settings_section(ui, "orientation", app.tr("prefs.orientation"), |ui| {
         ui.horizontal_wrapped(|ui| {
