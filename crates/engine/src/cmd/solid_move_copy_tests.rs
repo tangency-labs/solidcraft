@@ -16,12 +16,7 @@ fn volume(body: &solidcraft_doc::ModelBody) -> f64 {
 
 /// The name of the body a command made, as the command reported it.
 fn created(reply: &Value) -> String {
-    reply["created_bodies"]
-        .as_array()
-        .and_then(|a| a.first())
-        .and_then(Value::as_str)
-        .expect("the command must report the body it made")
-        .to_string()
+    reply["created_bodies"].as_array().and_then(|a| a.first()).and_then(Value::as_str).expect("the command must report the body it made").to_string()
 }
 
 #[test]
@@ -72,11 +67,7 @@ fn a_copied_body_keeps_the_appearance_of_the_body_it_came_from() {
     let reply = run(&mut s, "solid.move", json!({"bodies": ["Cube"], "translate": [30, 0, 0], "copy": true}));
     let copy = created(&reply);
     let source = s.doc.appearances.bodies.get("Cube").expect("the source body keeps its look").clone();
-    assert_eq!(
-        s.doc.appearances.bodies.get(&copy),
-        Some(&source),
-        "the copy must keep the appearance of the body it came from"
-    );
+    assert_eq!(s.doc.appearances.bodies.get(&copy), Some(&source), "the copy must keep the appearance of the body it came from");
 }
 
 #[test]

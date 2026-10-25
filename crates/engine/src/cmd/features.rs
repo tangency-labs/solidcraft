@@ -1556,17 +1556,41 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(a) = &angle {
         check_expr(s, a, Kind::Angle, cmd, "angle")?;
     }
-    add_feature(
+    let copy = bool_(p, "copy").unwrap_or(false);
+    let reply = add_feature(
         s,
         p,
         FeatureKind::Move {
-            bodies: bodies.into_iter().map(BodyName).collect(),
+            bodies: bodies.iter().cloned().map(BodyName).collect(),
             translate: t,
             rotate_axis: p.get("axis").and_then(vec3).map(Dir),
             angle,
-            copy: bool_(p, "copy").unwrap_or(false),
+            copy,
         },
-    )
+    )?;
+    if copy {
+        copy_keeps_appearance(s, &reply, &bodies, cmd)?;
+    }
+    Ok(reply)
+}
+
+/// A copy keeps the look and the material of the body it came from (#6423): the copy is the same
+/// part in another place, so it looks the same.
+fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd: &str) -> Result<()> {
+    let id = reply.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "the copy has no feature id"))?;
+    let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
+    if copies.len() != sources.len() {
+        return Err(bad(cmd, "the copy did not make one body per body it copied"));
+    }
+    for (source, copy) in sources.iter().zip(copies.iter()) {
+        if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
+            s.doc_mut().appearances.bodies.insert(copy.clone(), look);
+        }
+        if let Some(material) = s.doc.materials.get(source).cloned() {
+            s.doc_mut().materials.insert(copy.clone(), material);
+        }
+    }
+    Ok(())
 }
 
 fn source_features(s: &Session, p: &Value, cmd: &str) -> Result<Vec<String>> {
