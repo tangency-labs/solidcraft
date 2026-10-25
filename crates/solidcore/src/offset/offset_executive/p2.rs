@@ -11,7 +11,7 @@
 //! | [`OffsetExecutive::shell_brep`], [`ShellOutcome`] | both `SmOffsetExecutive::ShellBrep` overloads, including input ownership |
 //! | [`OffsetExecutive::do_solid_offset`] | `SmOffsetExecutive::DoSolidOffset` |
 //! | [`OffsetExecutive::do_extended_offset`] | `SmOffsetExecutive::DoExtendedOffset` |
-//! | [`api_shell_brep_full`] | `SmApiShellBrepFull` |
+//! | [`api_shell_brep_full`], [`ShellCopyIdentities`] | `SmApiShellBrepFull` (and its working copy's identities) |
 //! | [`api_offset_brep_full`] | `SmApiOffsetBrepFull` |
 //!
 //! Deviations: original B-reps and the kernel are explicit arguments, not retained
@@ -19,6 +19,8 @@
 //! A shell outcome returns any separately retained input even on failure; dropping it
 //! is the caller's choice. The pure shell API uses existing origin-qualified
 //! `FaceKey`/`BrepRef` handles, with caller-unique `BrepId`s, not local face ids alone.
+//! Its private working copy is notified under caller-supplied [`ShellCopyIdentities`]
+//! (upstream allocates fresh objects in the API context).
 //! Static entry points take non-null references/owned values (null is undefined
 //! upstream); member null is native 1006, API null/invalid selection is native 1007.
 //! Offset/member inputs are mutable so existing queries can populate lazy UV trim
@@ -60,8 +62,10 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::api_queries::{brep_is_manifold_solid, BrepRef};
 
 use crate::topology::brep::p1 as bp1;
-use crate::topology::brep::p4::shrink_geometry;
+use crate::topology::brep::p3 as bp3;
+use crate::topology::brep::p4::{shrink_geometry, stitch_faces};
 use crate::topology::brep::p7::{make_face_with_curves_with_kernel_context, FaceCurvesInput};
+use crate::topology::proto_topology::p1::CopyBrepMap;
 
 use crate::sweep::topology_sweep::store::SweepIdentities;
 use crate::topology::edge::{NotificationStores, NotifyState};
@@ -230,7 +234,16 @@ impl OffsetExecutive {
             if !brep_is_manifold_solid(&shell)? && !options.create_offset_solid {
                 return Ok(shell);
             }
-            OffsetExecutive::replace_implicit_offsets(kernel, &mut shell, tolerance)?;
+            OffsetExecutive::replace_implicit_offsets(
+                kernel,
+                &mut shell,
+                tolerance,
+                &mut NotificationStores {
+                    records: &mut *notifications.records,
+                    attributes: &mut *notifications.attributes,
+                    key_of: notifications.result_key_of,
+                },
+            )?;
 
             if options.create_offset_solid && !input_is_manifold {
                 // Continuation cpp:300–325: only after MergeBrep succeeds is the
@@ -239,11 +252,50 @@ impl OffsetExecutive {
                 // stop when no lamina edges remain or the next tolerance exceeds
                 // abs(distance) / 2.0. Preserve retained input on MergeBrep error,
                 // but report ownership transferred on a later stitch error.
-                // UNPORTED(topology.brep_p3): SmBrep::MergeBrep
-                return Err(SolidError::unported(
-                    "SmBrep::MergeBrep",
-                    "topology.brep_p3",
-                ));
+                {
+                    let source = required(input.as_ref(), OP_SHELL)?;
+                    let original_key_of = notifications.original_key_of;
+                    let mut stores = NotificationStores {
+                        records: &mut *notifications.records,
+                        attributes: &mut *notifications.attributes,
+                        key_of: notifications.result_key_of,
+                    };
+                    // SER(pBrepShell->MergeBrep(*pBrepToShell)): default maps (NULL)
+                    // and bAddAnalytics = TRUE
+                    NotifyState::from_kernel_stores(&mut stores).with_kernel_env(
+                        kernel,
+                        |kernel, env| {
+                            bp3::merge_brep(
+                                kernel,
+                                env,
+                                &mut shell,
+                                source,
+                                original_key_of,
+                                None,
+                                None,
+                                true,
+                            )
+                        },
+                    )?;
+                }
+                // delete pBrepToShell; rbInputOwnershipTransferred = TRUE
+                input = None;
+
+                // Stitch lamina edges, for 4 progressively larger tolerances (or up
+                // to half the offset distance). SER_DELETE drops the shell.
+                let mut lamina = 1;
+                let mut stitch_tol_3d = tolerance / 10.0;
+                let mut ii = 0;
+                while ii < 4 && lamina > 0 {
+                    lamina =
+                        stitch_faces(kernel, &mut shell, stitch_tol_3d, None, false)?.lamina_edges;
+                    stitch_tol_3d *= 10.0;
+                    if stitch_tol_3d > options.offset.distance.abs() / 2.0 {
+                        break;
+                    }
+                    ii += 1;
+                }
+                return Ok(shell);
             }
 
             shell_difference(
@@ -922,32 +974,119 @@ fn select_offset_faceuse(
     Ok(faceuse)
 }
 
-/// Pure full-shell API over a caller-identified original arena.
+/// The identities of the private working copy [`api_shell_brep_full`] makes of its
+/// source (`new SmBrep(*pBrep, NULL, &sOriginalToCopyMap)`), which the shell then
+/// runs on as its original. They must be disjoint from the source, result and every
+/// other identity in the shared stores.
+pub struct ShellCopyIdentities<'a> {
+    /// Object identities in the working copy's arena (its B-rep is
+    /// `EntityRef::Brep(BrepId::from_index(0))`).
+    pub key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
+    /// Identities of the working copy's edge curves (the second argument is the
+    /// curve type), as [`OffsetNotifications::original_curve_ref`].
+    pub curve_ref: &'a dyn Fn(EdgeId, i64) -> ObjectRef,
+    /// Region source-list handles of the working copy's arena, as the original-arena
+    /// half of [`OffsetNotifications::boolean_source_lists`].
+    pub boolean_source_lists: &'a dyn Fn(RegionId) -> [ObjectRef; 2],
+}
+
+impl core::fmt::Debug for ShellCopyIdentities<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ShellCopyIdentities")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Pure shell API: NER, then validate each selected face before copying.
 ///
 /// Each selection is `Some((origin_brep_id, face_id))`; `None` represents native
-/// null. The caller must assign distinct `BrepId`s to distinct live B-reps. Every
-/// selection is validated against the original before attempting its real copy,
-/// including when distance is too small. Duplicates/order are not normalized.
-/// Source data is immutable and no working copy is faked with `Brep::clone`.
+/// null. The caller must assign distinct `BrepId`s to distinct live B-reps, and
+/// selections must be faces of the identified source (native 1007 otherwise, checked
+/// before the copy, including when the distance is too small). Duplicates and order
+/// are kept.
+/// The source is copied with the real `SmBrep` copy constructor (attributes copied,
+/// analytics added, as its defaults) under `copy`'s identities, each selection is
+/// mapped to its copy through the original-to-copy map (`SM_ERR` for a missing or
+/// non-face mapping), and [`OffsetExecutive::shell_brep`] runs on the copy with the
+/// options unchanged. The working copy is dropped unless the shell consumed or
+/// returned it; the source is never modified.
+///
+/// # Errors
+///
+/// Native 1007 for a null source or an invalid selection; those of the copy and of
+/// the shell, unchanged (`SER`).
 pub fn api_shell_brep_full(
-    _kernel: &mut Kernel,
+    kernel: &mut Kernel,
     original: Option<BrepRef<'_, BrepId>>,
-    _options: ShellOptions,
+    options: ShellOptions,
     faces: &[Option<FaceKey>],
-    _notifications: &mut OffsetNotifications<'_>,
+    copy: &ShellCopyIdentities<'_>,
+    notifications: &mut OffsetNotifications<'_>,
 ) -> Result<Brep> {
     let original = original.ok_or_else(|| invalid_input(OP_API_SHELL))?;
     validate_shell_faces(original, faces)?;
 
-    // cpp:2389–2419: the real SmBrep copy constructor and SmCopyBrepMap precede
-    // ShellBrep (and hence its distance guard/manifold query). On success, map
-    // every selection in order, returning SM_ERR for a missing/non-face mapping;
-    // run shell_brep on the private copy with options unchanged. Retained working
-    // input is dropped by RAII on both success and failure. A transferred input
-    // must never also be cleaned up, and a null successful result is SM_ERR.
-    // `_options` is forwarded only after the unavailable copy above succeeds.
-    // UNPORTED(topology.brep_p3): SmBrep::SmBrep
-    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
+    // cpp:2389–2393: SmCopyBrepMap sOriginalToCopyMap; new SmBrep(*pBrep, NULL,
+    // &sOriginalToCopyMap) with bCopyAttributes = bAddAnalytics = TRUE.
+    let mut original_to_copy = CopyBrepMap::new();
+    let working = {
+        let source_key = notifications.original_key_of;
+        let mut stores = NotificationStores {
+            records: &mut *notifications.records,
+            attributes: &mut *notifications.attributes,
+            key_of: copy.key_of,
+        };
+        NotifyState::from_kernel_stores(&mut stores).with_kernel_env(kernel, |kernel, env| {
+            bp3::copy_brep(
+                kernel,
+                env,
+                original.brep,
+                source_key,
+                None,
+                Some(&mut original_to_copy),
+                true,
+                true,
+            )
+        })?
+    };
+
+    // cpp:2395–2404: map every selection in order.
+    let mut working_faces = Vec::with_capacity(faces.len());
+    for (_, face) in faces.iter().flatten() {
+        match original_to_copy.get_at(Some(EntityRef::Face(*face)))? {
+            Some(EntityRef::Face(mapped)) => working_faces.push(mapped),
+            _ => return Err(SolidError::sm_err(OP_API_SHELL)),
+        }
+    }
+
+    // cpp:2406–2420: the working copy is the shell's original. A copy the shell
+    // neither consumed nor returned is dropped with the outcome's retained input.
+    let source_lists = |result: bool, region: RegionId| {
+        if result {
+            (notifications.boolean_source_lists)(true, region)
+        } else {
+            (copy.boolean_source_lists)(region)
+        }
+    };
+    let mut working_notifications = OffsetNotifications {
+        records: &mut *notifications.records,
+        attributes: &mut *notifications.attributes,
+        original_key_of: copy.key_of,
+        result_key_of: notifications.result_key_of,
+        original_curve_ref: copy.curve_ref,
+        result_curve_ref: notifications.result_curve_ref,
+        boolean_source_lists: &source_lists,
+        result_brep: notifications.result_brep,
+        merge_identities: notifications.merge_identities,
+    };
+    let outcome = OffsetExecutive::shell_brep(
+        kernel,
+        working,
+        options,
+        &working_faces,
+        &mut working_notifications,
+    );
+    outcome.result
 }
 
 /// Full-offset API: guard native null with 1007, then call the static executive.
@@ -1240,7 +1379,7 @@ mod tests {
             EntityRef::Vertexuse(id) => (id.index(), crate::topology::vertexuse::TYPE),
             EntityRef::Loopuse(id) => (id.index(), crate::topology::loopuse::TYPE),
             EntityRef::Region(id) => (id.index(), Region::type_code()),
-            EntityRef::Loop(_) => panic!("fixture has no loop records"),
+            EntityRef::Loop(id) => (id.index(), crate::topology::topology::TYPE),
         };
         ObjectRef {
             key: ObjectKey(
@@ -1248,6 +1387,37 @@ mod tests {
             ),
             type_code,
         }
+    }
+
+    const COPY_IDS: ShellCopyIdentities<'static> = ShellCopyIdentities {
+        key_of: &copy_key,
+        curve_ref: &|edge, type_code| ObjectRef {
+            key: ObjectKey(
+                3_000_000_000_000
+                    + u64::try_from(type_code).unwrap() * 1_000_000
+                    + u64::from(edge.index()),
+            ),
+            type_code,
+        },
+        boolean_source_lists: &|region| {
+            [0_u64, 1].map(|list| ObjectRef {
+                key: ObjectKey(4_000_000_000_000 + list * 1_000_000 + u64::from(region.index())),
+                type_code: 0,
+            })
+        },
+    };
+
+    /// The API copied its source and ran the shell on the copy (the copy no longer
+    /// defers; the shell's own status is whatever the fixture reaches).
+    fn assert_copied(result: &Result<Brep>) {
+        assert!(
+            !matches!(result, Err(SolidError::Unported { .. })),
+            "{result:?}"
+        );
+    }
+
+    fn copy_key(entity: EntityRef) -> ObjectRef {
+        fixture_key(entity, 2_000_000_000_000)
     }
 
     fn original_key(entity: EntityRef) -> ObjectRef {
@@ -2436,6 +2606,7 @@ mod tests {
                     None,
                     ShellOptions::default(),
                     &[None],
+                    &COPY_IDS,
                     &mut notifications,
                 ),
                 1007,
@@ -2451,6 +2622,7 @@ mod tests {
                         Some(source(&original, 7)),
                         ShellOptions::default(),
                         &faces,
+                        &COPY_IDS,
                         &mut notifications,
                     ),
                     1007,
@@ -2507,6 +2679,7 @@ mod tests {
                     None,
                     ShellOptions::default(),
                     &[None],
+                    &COPY_IDS,
                     &mut notifications.context(),
                 )
             },
@@ -3373,23 +3546,25 @@ mod tests {
                     &mut notifications.context(),
                 )
             };
-            assert!(!outcome.input_ownership_transferred());
-            assert_eq!(outcome.retained_input.as_ref().unwrap().tolerance(), 1.0e-5);
             if distance.abs() < 2.0e-5 {
+                assert!(!outcome.input_ownership_transferred());
                 assert_status(outcome.result, 1007);
                 assert_eq!(kernel.context.current_mark(MarkType::Mark), 1);
+                let retained = outcome.retained_input.as_ref().unwrap();
+                assert_eq!(retained.tolerance(), 1.0e-5);
+                assert_eq!(retained.key(), source_brep().key());
+                assert!(retained.faces().is_empty());
+                assert!(retained.edges().is_empty());
+                assert!(retained.vertices().is_empty());
+                assert!(retained.regions().is_empty());
             } else {
-                // the empty offset merges; a solid shell of a non-manifold input goes
-                // on to MergeBrep
-                assert_dependency(outcome.result, "SmBrep::MergeBrep", "topology.brep_p3");
+                // the empty offset merges; a solid shell of a non-manifold input
+                // merges the (empty) input in, consuming it, and stitches
+                assert!(outcome.input_ownership_transferred());
+                let shell = outcome.result.unwrap();
+                assert!(shell.faces().is_empty());
                 assert_eq!(kernel.context.current_mark(MarkType::Mark), 3);
             }
-            let retained = outcome.retained_input.as_ref().unwrap();
-            assert_eq!(retained.key(), source_brep().key());
-            assert!(retained.faces().is_empty());
-            assert!(retained.edges().is_empty());
-            assert!(retained.vertices().is_empty());
-            assert!(retained.regions().is_empty());
             assert!(!kernel.context.is_mark_locked(MarkType::Mark));
             assert!(!kernel.context.doing_boolean());
         }
@@ -3436,6 +3611,7 @@ mod tests {
                         Some(source(&original, 7)),
                         ShellOptions::default(),
                         &faces,
+                        &COPY_IDS,
                         &mut notifications.context(),
                     )
                 },
@@ -3462,25 +3638,23 @@ mod tests {
                     Some(source(&original, 7)),
                     ShellOptions::default(),
                     &[Some((source(&foreign, 8).handle, foreign_face))],
+                    &COPY_IDS,
                     &mut notifications.context(),
                 )
             },
             1007,
         );
-        assert_dependency(
-            {
-                let mut notifications = NotificationFixture::new(&original);
-                api_shell_brep_full(
-                    &mut kernel,
-                    Some(source(&original, 7)),
-                    ShellOptions::default(),
-                    &[Some((BrepId::from_index(7), original_face))],
-                    &mut notifications.context(),
-                )
-            },
-            "SmBrep::SmBrep",
-            "topology.brep_p3",
-        );
+        assert_copied(&{
+            let mut notifications = NotificationFixture::new(&original);
+            api_shell_brep_full(
+                &mut kernel,
+                Some(source(&original, 7)),
+                ShellOptions::default(),
+                &[Some((BrepId::from_index(7), original_face))],
+                &COPY_IDS,
+                &mut notifications.context(),
+            )
+        });
     }
 
     #[test]
@@ -3493,44 +3667,38 @@ mod tests {
         );
         let mut kernel = Kernel::default();
         for distance in [0.0, -0.0, -0.5, 0.5] {
-            assert_dependency(
-                {
-                    let mut notifications = NotificationFixture::new(&original);
-                    api_shell_brep_full(
-                        &mut kernel,
-                        Some(source(&original, 3)),
-                        ShellOptions {
-                            offset: OffsetOptions {
-                                distance,
-                                extend_convex_edges: true,
-                                merge_results: true,
-                            },
-                            create_offset_solid: true,
-                        },
-                        &[good, good],
-                        &mut notifications.context(),
-                    )
-                },
-                "SmBrep::SmBrep",
-                "topology.brep_p3",
-            );
-        }
-        // An empty list still copies; it does not jump to IsManifoldSolid or the
-        // shell distance check. No source arena or geometry is changed.
-        assert_dependency(
-            {
+            assert_copied(&{
                 let mut notifications = NotificationFixture::new(&original);
                 api_shell_brep_full(
                     &mut kernel,
                     Some(source(&original, 3)),
-                    ShellOptions::default(),
-                    &[],
+                    ShellOptions {
+                        offset: OffsetOptions {
+                            distance,
+                            extend_convex_edges: true,
+                            merge_results: true,
+                        },
+                        create_offset_solid: true,
+                    },
+                    &[good, good],
+                    &COPY_IDS,
                     &mut notifications.context(),
                 )
-            },
-            "SmBrep::SmBrep",
-            "topology.brep_p3",
-        );
+            });
+        }
+        // An empty list still copies; it does not jump to IsManifoldSolid or the
+        // shell distance check. No source arena or geometry is changed.
+        assert_copied(&{
+            let mut notifications = NotificationFixture::new(&original);
+            api_shell_brep_full(
+                &mut kernel,
+                Some(source(&original, 3)),
+                ShellOptions::default(),
+                &[],
+                &COPY_IDS,
+                &mut notifications.context(),
+            )
+        });
         assert_eq!(original.faces().len(), 1);
         assert_eq!(
             original.face(face).unwrap().uv_domain,

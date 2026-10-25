@@ -87,6 +87,7 @@ use crate::intersect::topology_solver::p1::TopologySolver;
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
 use crate::math::{Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
+use crate::nurbs::b_spline_surface_n_lib::p1::OffsetParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::offset::offset_geometry_creation::{OffsetGeometryCreation, SsiData};
@@ -523,32 +524,93 @@ impl OffsetExecutive {
 
     /// Replaces implicit offset surfaces with approximations (`ReplaceImplicitOffsets`).
     /// The unconditional initial shrink is `topology.brep_p4`'s `ShrinkGeometry`.
+    ///
+    /// Every face with an `SmOffsetSurface` gets a cubic approximation of the offset of
+    /// its extended (else its own) base, which must be a B-spline surface, within
+    /// `approximation_tol_3d`. All approximations are built before any face is
+    /// changed; each face is then notified (`PRE_EDIT`), given the new surface's
+    /// natural domain and the surface (`SmBrep::ReplaceSurface`, old surface to the
+    /// deleted list, UV trim curves rebuilt) and notified again (`POST_EDIT`), in
+    /// face order. `notifications` must be keyed by `brep`'s identities.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for a base that is not a B-spline surface; those of the approximation
+    /// and of `ReplaceSurface` (`SER`). The notifications' statuses are not checked.
     pub fn replace_implicit_offsets(
-        kernel: &Kernel,
+        kernel: &mut Kernel,
         brep: &mut Brep,
-        _approximation_tol_3d: f64,
+        approximation_tol_3d: f64,
+        notifications: &mut NotificationStores<'_>,
     ) -> Result<()> {
         // remove curve and surface portions not used by edges and faces (status
         // ignored upstream)
         ignore_status(shrink_geometry(kernel, brep))?;
-        // Continuation cpp:1978–2035: enumerate offset surfaces, approximate their
-        // extended-or-original B-spline bases, then notify/replace each surface.
-        // A B-rep without offset surfaces leaves both loops empty (SM_SUCCESS); with
-        // one, the replacement loop's SmBrep::ReplaceSurface is not ported, so the
-        // continuation defers before building any approximation.
+
+        // for every face
+        let mut fix = Vec::new();
         for f in bp1::faces(brep, None)? {
-            let is_offset = brep
-                .face(f)?
-                .surface
-                .as_ref()
-                .is_some_and(|s| matches!(s.kind(), SurfaceKind::OffsetSurface(_)));
-            if is_offset {
-                // UNPORTED(topology.brep_p2): SmBrep::ReplaceSurface
-                return Err(SolidError::unported(
-                    "SmBrep::ReplaceSurface",
-                    "topology.brep_p2",
-                ));
-            }
+            // skip non SmOffsetSurfaces
+            let Some(SurfaceKind::OffsetSurface(offset)) =
+                brep.face(f)?.surface.as_ref().map(Surface::kind)
+            else {
+                continue;
+            };
+            // get SmOffsetSurface base (use extended surface if there is one)
+            let base = offset
+                .extended_base_surface()
+                .unwrap_or_else(|| offset.base_surface());
+            // make sure base surface is an SmBSplineSurface
+            let SurfaceKind::BSpline(nurb) = base.kind() else {
+                return Err(SolidError::sm_err(OP));
+            };
+            // use NLIB function to build offset surface approximation
+            let approximation = nurb.approximate_offset_surface(
+                offset.offset_distance(),
+                approximation_tol_3d,
+                OffsetParamType::Inherited,
+            )?;
+            // remember face/surface pair
+            fix.push((f, Surface::from(approximation)));
+        }
+
+        // for every face that had an approximate surface built for an exact offset
+        // surface
+        let mut state = NotifyState::from_kernel_stores(notifications);
+        for (f, new_surface) in fix {
+            state.with_kernel_env(kernel, |kernel, env| {
+                let face_ref = (env.key_of)(EntityRef::Face(f));
+                // SM_NO_GET_BREP is NULL in the pinned reference
+                ignore_status(face3::notify(
+                    brep,
+                    f,
+                    env,
+                    None,
+                    NotifyOperation::PreEdit,
+                    [Some(face_ref), None, None],
+                ))?;
+                let domain = new_surface.natural_uv_domain();
+                crate::topology::face::p2::set_uv_domain(brep, f, &domain)?;
+                // swap the approx surface for the exact offset surface
+                crate::topology::brep::p2::replace_surface(
+                    kernel,
+                    brep,
+                    env,
+                    f,
+                    new_surface,
+                    face_ref,
+                    crate::topology::brep::p2::OldSurface::AddToDeletedList,
+                    true,
+                )?;
+                ignore_status(face3::notify(
+                    brep,
+                    f,
+                    env,
+                    None,
+                    NotifyOperation::PostEdit,
+                    [Some(face_ref), None, None],
+                ))
+            })?;
         }
         Ok(())
     }
@@ -567,7 +629,7 @@ impl OffsetExecutive {
     pub fn remove_excess_faces(
         &self,
         kernel: &Kernel,
-        original: &Brep,
+        original: &mut Brep,
         result: &mut Brep,
     ) -> Result<()> {
         if self.excess_faces(kernel, original, result)?.is_none() {
@@ -585,7 +647,7 @@ impl OffsetExecutive {
     pub fn remove_excess_faces_with_kernel_context(
         &self,
         kernel: &mut Kernel,
-        original: &Brep,
+        original: &mut Brep,
         result: &mut Brep,
     ) -> Result<()> {
         let Some(delete_faces) = self.excess_faces(kernel, original, result)? else {
@@ -605,7 +667,7 @@ impl OffsetExecutive {
     fn excess_faces(
         &self,
         kernel: &Kernel,
-        original: &Brep,
+        original: &mut Brep,
         result: &mut Brep,
     ) -> Result<Option<Vec<FaceId>>> {
         if !self.merge_results || !self.shell_faces.is_empty() {
@@ -623,11 +685,15 @@ impl OffsetExecutive {
                 kernel, result, primary, 0.5, false, false, true,
             ))?
             .map_or(Vec3::UNDEF, |eval| eval.point);
+            // cpp:2069–2072: the solve runs with the original's editing disabled and
+            // leaves it enabled afterwards (still disabled when the solve fails)
+            original.set_editing_enabled(false);
             if original_cache.is_none() {
                 original_cache = Some(make_original_brep_cache(kernel, original)?);
             }
             let (cache, keys) = required(original_cache.as_ref())?;
             let solutions = solve_original_brep_point(kernel, original, cache, keys, point)?;
+            original.set_editing_enabled(true);
             collect_excess_faces(
                 result,
                 id,
@@ -3247,19 +3313,21 @@ mod tests {
     fn excess_face_early_returns_and_actual_dependencies() {
         let kernel = Kernel::default();
         let mut executive = executive();
-        let original = Brep::new();
+        let mut original = Brep::new();
         let mut result = Brep::new();
         executive
-            .remove_excess_faces(&kernel, &original, &mut result)
+            .remove_excess_faces(&kernel, &mut original, &mut result)
             .unwrap();
         executive.set_merge_results(true);
         executive.set_shell_faces(&[FaceId::from_index(1)]);
         executive
-            .remove_excess_faces(&kernel, &original, &mut result)
+            .remove_excess_faces(&kernel, &mut original, &mut result)
             .unwrap();
         executive.set_shell_faces(&[]);
+        // No result edge: the original's editing flag is not touched.
+        assert!(!original.editing_enabled());
         assert_dependency(
-            executive.remove_excess_faces(&kernel, &original, &mut result),
+            executive.remove_excess_faces(&kernel, &mut original, &mut result),
             "SmOffsetExecutive::RemoveExcessFaces (mutable Kernel adapter)",
             "offset.offset_executive_p1",
         );
@@ -3268,29 +3336,107 @@ mod tests {
         // The edges evaluate and solve against the empty original; the legacy entry
         // still defers at its removal step without removing any result faces.
         assert_dependency(
-            executive.remove_excess_faces(&kernel, &original, &mut result),
+            executive.remove_excess_faces(&kernel, &mut original, &mut result),
             "SmOffsetExecutive::RemoveExcessFaces (mutable Kernel adapter)",
             "offset.offset_executive_p1",
         );
         assert_eq!(result.edges().len(), 2);
         assert_eq!(result.edgeuses().len(), 2);
         assert!(result.faces().is_empty());
+        // Each edge's solve leaves the original's editing enabled (cpp:2069–2072).
+        assert!(original.editing_enabled());
         // ShrinkGeometry trims the two edge curves; without offset surfaces the
         // continuation's loops are empty (SM_SUCCESS)
-        OffsetExecutive::replace_implicit_offsets(&kernel, &mut result, 1.0e-6).unwrap();
+        let (mut records, mut attributes) = (BTreeMap::new(), AttributeStore::default());
+        OffsetExecutive::replace_implicit_offsets(
+            &mut Kernel::default(),
+            &mut result,
+            1.0e-6,
+            &mut NotificationStores {
+                records: &mut records,
+                attributes: &mut attributes,
+                key_of: &loopuse::notify_ref,
+            },
+        )
+        .unwrap();
         assert_eq!(result.edges().len(), 2);
+    }
+
+    #[test]
+    fn implicit_offsets_are_replaced_by_approximations_of_their_base() {
+        use crate::surface::offset_surface::OffsetSurface;
+        let patch = || {
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap()
+        };
+        let kernel = Kernel::default();
+        let offset = OffsetSurface::new(&kernel, 0.25, patch().into(), true, 0).unwrap();
+        let mut brep = Brep::new();
+        let (plain, _) = add_face(&mut brep, plane(0.0));
+        let (offset_face, _) = add_face(&mut brep, Surface::from(offset));
+        let (mut records, mut attributes) = (BTreeMap::new(), AttributeStore::default());
+        let mut kernel = kernel;
+        OffsetExecutive::replace_implicit_offsets(
+            &mut kernel,
+            &mut brep,
+            1.0e-6,
+            &mut NotificationStores {
+                records: &mut records,
+                attributes: &mut attributes,
+                key_of: &loopuse::notify_ref,
+            },
+        )
+        .unwrap();
+        // the plane is untouched; the offset face gets the approximation of its base
+        // offset (the bilinear patch at z = 0.25) and that surface's natural domain
+        assert!(matches!(
+            brep.face(plain).unwrap().surface.as_ref().unwrap().kind(),
+            SurfaceKind::Plane(_)
+        ));
+        let face = brep.face(offset_face).unwrap();
+        let surface = face.surface.as_ref().unwrap();
+        assert!(matches!(surface.kind(), SurfaceKind::BSpline(_)));
+        assert_eq!(face.uv_domain, surface.natural_uv_domain());
+        let p = surface
+            .evaluate_point(&kernel, Vec2::new(0.5, 0.5))
+            .unwrap();
+        assert!((p.z - 0.25).abs() < 1.0e-6, "{p:?}");
+
+        // a base that is not a B-spline surface is SM_ERR
+        let offset = OffsetSurface::new(&kernel, 0.25, plane(0.0), true, 0).unwrap();
+        let mut brep = Brep::new();
+        add_face(&mut brep, Surface::from(offset));
+        let status = OffsetExecutive::replace_implicit_offsets(
+            &mut kernel,
+            &mut brep,
+            1.0e-6,
+            &mut NotificationStores {
+                records: &mut records,
+                attributes: &mut attributes,
+                key_of: &loopuse::notify_ref,
+            },
+        );
+        assert!(
+            matches!(status, Err(SolidError::Upstream { code: 1001, .. })),
+            "{status:?}"
+        );
     }
 
     #[test]
     fn kernel_context_removal_uses_actual_editing_flag_and_releases_nested_mark() {
         let mut kernel = Kernel::default();
-        let original = Brep::new();
+        let mut original = Brep::new();
         let mut result = Brep::new_with_infinite_region().unwrap();
         let mut exec = executive();
         exec.set_merge_results(true);
         // Native RemoveExcessFaces ignores the editing-disabled refusal from
         // RemoveFaces. No traversal mark is acquired by that refused inner call.
-        exec.remove_excess_faces_with_kernel_context(&mut kernel, &original, &mut result)
+        exec.remove_excess_faces_with_kernel_context(&mut kernel, &mut original, &mut result)
             .unwrap();
         assert!(!result.editing_enabled());
         assert_eq!(kernel.context.current_mark(MarkType::Mark), 1);
@@ -3300,7 +3446,7 @@ mod tests {
             crate::geom::context::ALL_MARKS,
             |kernel, mark| {
                 assert_eq!(mark, MarkType::Mark);
-                exec.remove_excess_faces_with_kernel_context(kernel, &original, &mut result)
+                exec.remove_excess_faces_with_kernel_context(kernel, &mut original, &mut result)
                     .unwrap();
                 assert!(kernel.context.is_mark_locked(mark));
                 assert!(!kernel.context.is_mark_locked(MarkType::Mark2));
