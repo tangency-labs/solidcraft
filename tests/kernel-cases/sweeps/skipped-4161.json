@@ -110,5 +110,57 @@
  {
   "source": "tangency-labs/solidcraft#4828",
   "why": "needs the author's real duct part (STEP operands of a user design); a performance case"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4830",
+  "why": "UI only: lofting to a point from the dialog (the command already takes an apex)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4855",
+  "why": "needs the user design: a parametric bearing revolve-cut through ten sketch regions"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4868",
+  "why": "UI only: home view theme colours"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4889",
+  "why": "no reproduction: a screenshot and a video link, no message"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4900",
+  "why": "no reproduction: surface loft between splines refused, no message or design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4942",
+  "why": "no reproduction: a loft join between annuli of a user's part, screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4946",
+  "why": "no reproduction: last command only (a 15 deg symmetric revolve join), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4961",
+  "why": "no geometry: Revolve about a construction axis (dup of #4506)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5023",
+  "why": "no geometry: duplicate profile indexes accepted (command validation)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5035",
+  "why": "no reproduction: a slow revolve cut of a polygon profile on an unknown part (0.18.4)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5054",
+  "why": "no geometry: sketches on a patch body's flat face (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5077",
+  "why": "no geometry: Revolve taking a body face as its profile (feature request, PR #5170)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5192",
+  "why": "no geometry: \"unknown sketch line\" for the axis (command parameters), no design"
  }
 ]

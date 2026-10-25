@@ -30,5 +30,9 @@
  {
   "source": "tangency-labs/solidcraft#4720",
   "why": "no geometry: two sheet-metal bodies combined lose their flat pattern, as warned (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4968",
+  "why": "no geometry: included bend angles in sheet-metal exports (feature request)"
  }
 ]

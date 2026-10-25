@@ -390,5 +390,193 @@
  {
   "source": "tangency-labs/solidcraft#4827",
   "why": "UI only: draft corner rules in the dialog (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4831",
+  "why": "no geometry: sketch Mirror about an origin axis (dup of #4193)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4852",
+  "why": "no reproduction: a screw-hole cut in a user's part shown by screenshot; the design is off GitHub"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4853",
+  "why": "no geometry: sketch edits on a turned component are slow (evaluation frames)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4856",
+  "why": "no geometry: an M2 thread in a 2 mm hole is refused by design (tap drill 1.6)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4862",
+  "why": "UI only: sketch-on-face contrast"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4865",
+  "why": "no geometry: sketch Mirror about an origin axis (dup of #4193)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4881",
+  "why": "no reproduction: an extrude to an imported STEP made from a mesh in another CAD program, no file"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4883",
+  "why": "no reproduction: \"couldn't extrude after a loft and patch\", no message or design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4885",
+  "why": "UI only: positioning a hole while placing it (dup of #4384)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4910",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4911",
+  "why": "no geometry: a join to-object where a cut was meant (\"nothing lies between\"), user error"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4917",
+  "why": "no reproduction: an extrude to a curved face on an unknown part, screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4921",
+  "why": "no reproduction: a 0.6 mm join on a 44-feature user part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4922",
+  "why": "UI only: theme corner radii"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4928",
+  "why": "no geometry: plugin commands (RFC)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4937",
+  "why": "no geometry: a Mirror feature can't itself be mirrored yet (a stated limit, dup of #395)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4943",
+  "why": "no reproduction: last command only (a 4 mm cut of two profiles), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4945",
+  "why": "no reproduction: last command only (a 10 mm join), no message or design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4955",
+  "why": "UI only: moving a placed hole (dup of #5399)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4957",
+  "why": "no geometry: body auto-names reused after a rename (document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4967",
+  "why": "UI only: sketch snap to curve intersections"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4974",
+  "why": "UI only: a construction plane can't be picked as an extrude's To Object (the command takes it)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5002",
+  "why": "no reproduction: Split Body by an offset plane leaving touching lumps, a user's roof part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5032",
+  "why": "no geometry: sketch mirror lines not offered after the sketch is finished (UI)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5039",
+  "why": "no reproduction: a cylinder joined on a user's swept body; the design was mailed, not attached"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5040",
+  "why": "no geometry: an offset plane can't attach to a face after a draft and a shell (document, dup of #4325)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5044",
+  "why": "no reproduction: Draft pick point misses the face on a user's 3-body part"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5066",
+  "why": "no geometry: sketch pattern counts lose their parameter (sketch, dup of #5231)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5072",
+  "why": "no reproduction: last command only (a 2 mm cut on 0.16.2), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5073",
+  "why": "no reproduction: a slow join of two bodies of a user's part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5075",
+  "why": "no geometry: a cut into a mesh body is refused by design (the part was opened from STL)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5078",
+  "why": "UI only: the Parameters window's size"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5080",
+  "why": "UI only: reordering ribbon drop-downs"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5082",
+  "why": "UI only: Combine's body inputs not filling (screenshot)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5089",
+  "why": "no geometry: render settings validation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5106",
+  "why": "no reproduction: four circles cut into a user's cylinder at once compute for long, no sizes"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5111",
+  "why": "render: Direct3D 12 glitches on a GTX 1060"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5123",
+  "why": "no reproduction: a 5 mm join that never finishes on a user's part, screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5135",
+  "why": "no geometry: a construction axis as the pattern axis (command parameters, fixed in 0.20.0)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5136",
+  "why": "no reproduction: Split Body of a user's profile part by a plane, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5142",
+  "why": "UI only: Combine doesn't take bodies picked in the browser (dup of #4452)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5156",
+  "why": "no reproduction: a screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5171",
+  "why": "no reproduction: last command only (a 26 mm cut on a 56-feature part), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5172",
+  "why": "no kernel geometry: extrude without profiles takes every region, islands included (command default)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5175",
+  "why": "no geometry: a joint origin's name given as a face (document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5180",
+  "why": "no reproduction: a cut on a user's 20 m model never finishes, screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5185",
+  "why": "no geometry: joint solver work while dragging (performance)"
  }
 ]

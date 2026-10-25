@@ -146,5 +146,57 @@
  {
   "source": "tangency-labs/solidcraft#4806",
   "why": "no reproduction: a 0.2 mm chamfer chain on an unknown part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4842",
+  "why": "no geometry: variable chamfers (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4848",
+  "why": "no reproduction: a 1 mm chamfer of a curved chain on an unknown part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4861",
+  "why": "UI only: hovered edge contrast"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4871",
+  "why": "no reproduction: a join that only touched, fixed on 0.20.0 per the reporter"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4926",
+  "why": "no reproduction: two edges on a 14-feature unknown part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4986",
+  "why": "no geometry: Press Pull on chamfers and holes (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5000",
+  "why": "needs the user design: a 0.02 mm fillet beside a sliver on a key-ring part; the zip holds only a screenshot"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5001",
+  "why": "no reproduction: one edge on an unknown part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5033",
+  "why": "no geometry: the tangent chain adds edges the user didn't want (UI; dup of #5328's request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5061",
+  "why": "needs the user design: a revolved bumper with patterned ribs, chamfers and cuts; no small stand-in"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5134",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5141",
+  "why": "needs the user design: a plate with a triangular rib in a component, a two-distance chamfer cutting too much"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5173",
+  "why": "no kernel geometry: an edge pick at a corner point picks one edge silently (command validation)"
  }
 ]

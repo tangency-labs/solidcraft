@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5182",
+  "tangency-labs/solidcraft#5368"
+ ],
+ "what": "a chamfered O6 through hole in a block (synthetic: the report's part was an imported STEP), its wall and chamfer deleted: refused ('face 8 borders face 7, which is curved; only planar neighbours can extend')",
+ "source": "analytic",
+ "method": "the hole's wall and chamfer are all its faces; deleting them heals the block's top and bottom across the hole: a plain 40x40x20 block, V = 32000, 6 faces",
+ "body_count": 1,
+ "faces": 6,
+ "volume_mm3": 32000.0
+}

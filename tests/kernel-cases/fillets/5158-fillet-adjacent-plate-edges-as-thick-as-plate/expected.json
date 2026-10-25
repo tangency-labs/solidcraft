@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5158"
+ ],
+ "what": "two adjacent top edges of a 2 mm plate (30x31, two O6.35 holes) filleted r2, the plate's own thickness; one hole comes within 1 mm of an edge: refused ('a fillet larger than the faces next to it; the largest radius that fits is 0.963 mm')",
+ "source": "analytic",
+ "method": "each round (r = t = 2) removes the corner region (1-pi/4) r^2 along its edge (30 and 31) and uses up the side face; at the corner the two mitred rounds overlap by Int_0^r L(b)^2 db, L(b) = r - sqrt(r^2-(b-r)^2); the round at x = -15 reaches the hole at (-10.8, 8.2), which already took out Int over the hole's part at x < -13 of 2 - sqrt(4 - (x+13)^2) (python quadrature). V = 1860 - 2 pi 3.175^2 2 - removed. Graded to 1e-5",
+ "body_count": 1,
+ "volume_mm3": 1681.90376,
+ "tolerance": {
+  "rel": 1e-05
+ }
+}

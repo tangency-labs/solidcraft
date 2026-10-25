@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5195"
+ ],
+ "what": "a cylinder whose 5 mm chamfered rim is revolve-cut to a concave cove: a quarter-circle arc through the chamfer's two ends, centred on the old corner, the region between it and the old corner (the chamfer's triangle and the lens) cut round 360 deg: 'boolean Cut: no result'",
+ "source": "analytic",
+ "method": "cylinder r20 x 30; chamfer and cove together remove the quarter disc r5 at the corner (r 15..20, z 25..30, centred at (20,30)). Pappus: area 25 pi/4, centroid at radius 20 - 4*5/(3 pi): V = pi 400 30 - 2 pi (20 - 20/(3 pi)) 25 pi/4. Faces: side, bottom, top disc r15 and the cove (a torus) = 4",
+ "body_count": 1,
+ "faces": 4,
+ "volume_mm3": 35493.5101
+}

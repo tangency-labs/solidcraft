@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5181"
+ ],
+ "what": "a 220 x 11 two-distance chamfer along the bottom edge of a 23 mm plate 100 wide whose sides run straight for 85 mm and then taper to 61.4 at 222.5: refused ('runs past the faces beside the edge into other geometry; the largest size that fits is 85 mm')",
+ "source": "analytic",
+ "method": "the plate (profile 100x85 + the trapezoid to 61.351 at 222.5) x 23. The first face is the big face (it faces up most: horizontal, the bottom faces down): 220 up it, 11 into the bottom face. The chamfer plane cuts the wedge 11 (1 - z/220) deep across the full width w(z) (100, then tapering past z = 85): Int_0^220 w(z) 11 (1 - z/220) dz, the tapered sides simply trimmed",
+ "body_count": 1,
+ "volume_mm3": 335399.749
+}

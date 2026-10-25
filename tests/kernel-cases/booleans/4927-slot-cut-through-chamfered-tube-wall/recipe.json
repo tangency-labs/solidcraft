@@ -1,0 +1,114 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Tube"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 30
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 20
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Tube",
+    "distance": 100,
+    "profiles": [
+     {
+      "point": [
+       25,
+       0
+      ]
+     }
+    ],
+    "body_name": "Clamp"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      30,
+      0,
+      100
+     ]
+    ],
+    "distance": 2.5
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      20,
+      0,
+      100
+     ]
+    ],
+    "distance": 4
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Slot",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     15,
+     -2.3
+    ],
+    "p1": [
+     35,
+     2.7
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Slot",
+    "distance": 100,
+    "through_all": true,
+    "operation": "cut",
+    "targets": [
+     "Clamp"
+    ]
+   }
+  }
+ ]
+}

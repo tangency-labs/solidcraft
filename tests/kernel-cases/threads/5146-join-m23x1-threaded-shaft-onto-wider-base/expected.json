@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5146"
+ ],
+ "what": "a O23 shaft with a modelled M23x1 thread joined onto the O26 cylinder it stands on: SolidCraft ended without a clean exit during the combine",
+ "source": "invariants",
+ "method": "the shaft's end face lies on the base's top face, so the join is one solid: one valid closed body, within the case's timeout (modelled threads are slow: 600 s)",
+ "body_count": 1,
+ "timeout_s": 600
+}

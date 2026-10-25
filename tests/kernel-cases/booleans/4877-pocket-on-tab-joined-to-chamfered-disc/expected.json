@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4877",
+  "tangency-labs/solidcraft#5413"
+ ],
+ "what": "a 0.6 mm pocket cut from the top of a tab joined to a disc with a chamfered bottom edge (the join fell back to truck's tool nudge, which lifted the tab's top by 5e-5 mm): the pocket never opened, it left a sealed void under a 0.00005 mm skin",
+ "source": "analytic",
+ "method": "disc r25 h10 less its 1 mm bottom chamfer ring (Pappus: pi*(25-1/3)) plus the tab 20x12x4 less their overlap: Int_0^4 of the tab rectangle's area inside the disc's radius at z (24+z below z = 1, 25 above) (python quadrature); minus the pocket 10x4x0.6 = 24, wholly in the tab outside the disc. One shell: the pocket opens through the tab's top",
+ "body_count": 1,
+ "shells": 1,
+ "volume_mm3": 20403.0482
+}

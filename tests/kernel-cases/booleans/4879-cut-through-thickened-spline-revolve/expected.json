@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4879",
+  "tangency-labs/solidcraft#4484"
+ ],
+ "what": "a symmetric through-all cut of a window across a thickened (2 mm) surface revolve of a control-point spline (100 deg about X): truck ran ~20 s to 'boolean Cut: no result' (or never finished)",
+ "source": "invariants",
+ "method": "the window (x -2..6, z 6..20, through all y) crosses the shell where it is near the XZ plane and leaves it joined round the rest of its 100 deg, so the result is one valid closed body. The spline shell has no closed-form volume",
+ "body_count": 1
+}

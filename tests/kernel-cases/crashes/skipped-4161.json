@@ -126,5 +126,93 @@
  {
   "source": "tangency-labs/solidcraft#4791",
   "why": "render: capture buffer and GPU hang on Intel/Mesa, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4840",
+  "why": "no geometry: unclean exit on 0.15.0, gone on 0.19.0"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4845",
+  "why": "no reproduction: inspect.clearance between two user bodies, the design is not given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4892",
+  "why": "no geometry: drawing references and updates (feature plan)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4931",
+  "why": "no geometry: unclean exit on 0.12.0 after selections"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4944",
+  "why": "no reproduction: timeline.edit of a bore in a user's design, the design is not given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4951",
+  "why": "no geometry: an empty crash report"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4958",
+  "why": "render: lost GPU device (wgpu), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4975",
+  "why": "no geometry: an empty crash report (inspect.interference)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4981",
+  "why": "render: startup on the software fallback renderer, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4993",
+  "why": "no geometry: unclean exit between commands, no replay"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5018",
+  "why": "no reproduction: unclean exit during a fillet on 0.16.2, nothing recorded"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5021",
+  "why": "no geometry: a design file's integer coordinates skip the load range check (document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5049",
+  "why": "render: GPU tessellation buffer padding (an empty vertex list), not the kernel; the STEP file can't be shared"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5065",
+  "why": "no geometry: unclean exit after a timeline delete, nothing running"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5068",
+  "why": "no reproduction: the display triangulation library's assertion, title only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5069",
+  "why": "no reproduction: the display triangulation library's collinear-edge assertion, title only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5079",
+  "why": "no geometry: the crash journal leaves out component.activate (document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5102",
+  "why": "no geometry: an empty crash report during startup (surface configure)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5122",
+  "why": "no reproduction: an access violation between commands, title only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5125",
+  "why": "no geometry: unclean exit with no command and no replay"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5144",
+  "why": "render: lost GPU device (wgpu), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5189",
+  "why": "render: lost GPU device (wgpu) in Preferences and the viewport"
  }
 ]
