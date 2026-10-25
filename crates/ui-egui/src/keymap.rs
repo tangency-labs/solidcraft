@@ -27,6 +27,7 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+Z",
     "Ctrl+Y",
     "Ctrl+S",
+    "Ctrl+Shift+S",
     "Ctrl+N",
     "Ctrl+O",
     "Ctrl+Comma",
