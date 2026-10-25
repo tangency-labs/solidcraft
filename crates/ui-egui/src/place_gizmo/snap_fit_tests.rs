@@ -13,7 +13,7 @@ use crate::scenario::Harness;
 /// An 80 × 50 × 10 plate seen from the top,.
 fn plate() -> Harness {
     let mut h = Harness::new();
-    h.app.ui.show_origin = false;
+    h.app.set_origin_shown(false);
     h.app.preferences.placement_handles = true;
     h.app.run("solid.box", json!({"length": 80, "width": 50, "height": 10})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
