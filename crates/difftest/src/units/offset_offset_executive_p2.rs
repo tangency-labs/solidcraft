@@ -299,8 +299,8 @@ struct Inputs {
     /// depend on heap addresses: `DoSolidOffset` walks `SmRelation`s whose
     /// `std::unordered_map` buckets are keyed by object address, so the order of the
     /// tolerance-merge averaging of degenerate side-wall vertices follows the heap
-    /// layout of the process (plan/findings.md, "offset.offset_executive_p2:
-    /// exact-2tol shell vertex bounds follow native heap layout").
+    /// layout of the process (finding
+    /// `plan/findings/offset.offset_executive_p2--exact-2tol-shell-heap-layout.md`).
     #[serde(default)]
     heap_ordered_vertices: bool,
 }
