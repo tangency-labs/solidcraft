@@ -24,6 +24,16 @@ cargo run --release -p solidcraft -- --sample   # opens with a sample part
 
 Open the release `.dmg` and drag `SolidCraft.app` onto Applications.
 
+The macOS build is signed ad-hoc and not notarized, so macOS blocks the first launch with
+"SolidCraft can't be opened, because Apple can't verify if the app is vulnerable". Open
+**System Settings › Privacy & Security**, scroll down to the message about SolidCraft, click
+**Open Anyway** and confirm: the app opens normally from then on. From a terminal, remove the
+quarantine flag instead:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/SolidCraft.app
+```
+
 When updating from a build released under the previous product name, follow the
 [macOS upgrade notes](https://github.com/bherbruck/solidcraft/blob/main/docs/compatibility.md#macos) so you replace it rather than install a second copy.
 
