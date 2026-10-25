@@ -6728,6 +6728,34 @@ mod right_click_tests {
     }
 
     #[test]
+    fn a_typed_value_is_taken_by_the_right_click_ok() {
+        // Extrude a rectangle: the value box has the keyboard, "25 mm" is typed without Enter,
+        // and a right-click in the view runs OK with it.
+        let mut h = Harness::new();
+        for s in [
+            json!({"call": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}}}),
+            json!({"call": "engine.execute", "params": {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [40, 20]}}}),
+            json!({"call": "engine.execute", "params": {"command": "sketch.finish", "params": {}}}),
+            json!({"call": "ui.view", "params": {"view": "iso"}}),
+            json!({"start": "solid.extrude"}),
+        ] {
+            h.step(&s).unwrap();
+        }
+        h.frames(2);
+        assert!(h.app.dialog.as_ref().is_some_and(|d| d.inputs.first().is_some_and(|i| !i.items.is_empty())), "the profile is picked");
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        h.step(&json!({"text": "25 mm"})).unwrap();
+        right_click(&mut h, json!({"world": [-30, -30, 0]}));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while h.app.dialog.is_some() {
+            assert!(std::time::Instant::now() < deadline, "OK did not finish: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+            h.frames(1);
+        }
+        let bounds = h.app.session.world_state().bodies.first().map(|b| b.mesh().bounds());
+        assert_eq!(bounds.map(|b| b.max.z - b.min.z), Some(25.0), "extruded by the typed value");
+    }
+
+    #[test]
     fn with_the_preference_off_a_right_click_leaves_the_dialog_alone() {
         let mut h = mirror();
         h.app.preferences.right_click_confirms = false;
