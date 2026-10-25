@@ -396,16 +396,19 @@ fn fillet_max_each_reduces_only_where_the_radius_does_not_fit() {
     .unwrap()
     .unwrap();
     let edges = [Vec3::new(21.0, 15.0, 30.0), Vec3::new(40.0, 0.0, 10.0)];
-    assert!(matches!(fillet(&body, &edges, 4.0), Err(KernelError::TooLarge(_))));
-    let (one, _) = fillet_max(&body, &edges, 4.0).unwrap();
+    // R4 on the fin's top edge runs over the fin's 2 mm top, past its far edge (a cliff): it is
+    // cut as if the top went on, so both edges take 4. The fin's section loses the 4 x 4 square
+    // at its edge less the quarter disc about (17, 26), inside the fin (x >= 19): 2 x 4 less the
+    // disc's part, in closed form; the corner's round (1 − π/4)·16 along 20.
+    let both = fillet(&body, &edges, 4.0).unwrap();
     let (radii, b) = fillet_max_each(&body, &edges, 4.0).unwrap();
-    assert_eq!(radii.get(1), Some(&4.0), "{radii:?}");
-    let fin_r = radii.first().copied().unwrap();
-    assert!(fin_r < 4.0 && (fin_r - one).abs() < 1e-9, "{radii:?}, one radius {one}");
+    assert_eq!(radii, vec![4.0, 4.0], "{radii:?}");
     assert!(b.validity().is_empty(), "{:?}", b.validity());
-    // Each round takes (1 − π/4)·r² along its edge: the fin's 30 long, the corner's 20.
-    let removed = (1.0 - PI / 4.0) * (fin_r * fin_r * 30.0 + 16.0 * 20.0);
-    assert!(rel(measure(&b).unwrap().volume, block + fin - removed) < 2e-4);
+    let disc = |a: f64| 0.5 * (a * (16.0 - a * a).max(0.0).sqrt() + 16.0 * (a / 4.0).asin());
+    let fin_section = 2.0 * 4.0 - (disc(4.0) - disc(2.0));
+    let removed = fin_section * 30.0 + (1.0 - PI / 4.0) * 16.0 * 20.0;
+    assert!(rel(measure(&both).unwrap().volume, block + fin - removed) < 1e-6, "{}", measure(&both).unwrap().volume);
+    assert!(rel(measure(&b).unwrap().volume, block + fin - removed) < 1e-6);
     // The post's four edges limit each other: one radius, as `fillet_max`.
     let post = box_solid(Vec3::new(14.0, 0.0, 0.0), Vec3::new(28.0, 6.0, 10.0)).unwrap();
     let mids = [Vec3::new(14.0, 0.0, 5.0), Vec3::new(28.0, 0.0, 5.0), Vec3::new(14.0, 6.0, 5.0), Vec3::new(28.0, 6.0, 5.0)];

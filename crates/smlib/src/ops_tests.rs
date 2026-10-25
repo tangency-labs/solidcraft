@@ -207,17 +207,38 @@ fn hostile_inputs_are_errors() {
         assert_eq!(c.shell(&[[10.0, 10.0, 20.0]], 0.1, t).unwrap_err(), Error::Argument, "thickness {t}");
     }
     // Sizes SMLib cannot build fail as errors, whatever SMLib says.
-    for (what, r) in [("radius larger than the cube", c.fillet(&mid, 0.1, 50.0)), ("chamfer past the faces", c.chamfer(&mid, 0.1, 30.0))] {
-        match r {
-            Ok(b) => panic!("{what}: SMLib built a body of volume {:?}, counts {:?}", b.volume(ACC), b.counts()),
-            Err(e) => eprintln!("{what}: {e:?}"),
-        }
+    match c.fillet(&mid, 0.1, 50.0) {
+        Ok(b) => panic!("radius larger than the cube: SMLib built a body of volume {:?}, counts {:?}", b.volume(ACC), b.counts()),
+        Err(e) => eprintln!("radius larger than the cube: {e:?}"),
     }
+    // A chamfer past the faces runs over their far edges, cliffs: it is cut as if the faces went
+    // on (the plane y + z = 10 through the setbacks 30 back from the edge y = z = 20), leaving the
+    // triangle y + z <= 10 of the cube's section along x: 50 x 20.
+    let past = c.chamfer(&mid, 0.1, 30.0).unwrap();
+    assert!((volume(&past) - 1000.0).abs() < 1e-6 * 1000.0, "{}", volume(&past));
     // A wall with no room inside it never reaches SMLib's offset.
     assert_eq!(c.shell(&[[10.0, 10.0, 20.0]], 0.1, -15.0).unwrap_err(), Error::NoRoom);
     assert_eq!(c.offset_faces(&[[10.0, 10.0, 20.0]], 0.1, -20.0).unwrap_err(), Error::NoRoom);
     assert_eq!(c.thicken(1.0, false).unwrap_err(), Error::Argument, "a solid is no sheet");
     assert_untouched(&c, 8000.0, [6, 12, 8]);
+}
+
+/// Rig case shell/4711: a 60 x 40 x 10 block with an r3 through hole at (22.5, 7), 4 from the
+/// front face, and a 10 x 10 notch on that edge, shelled 2 inward open at the bottom: the hole's
+/// offset (r5) is tangent to the front's (y = 2), so the walls meet along a line and the offset
+/// bounds no solid there. Refused as such; 1.5 (the walls apart) and 2.5 (crossing, merged)
+/// build.
+#[test]
+fn a_shell_whose_walls_would_meet_is_refused_as_such() {
+    let block = Brep::make_box([0.0; 3], [60.0, 40.0, 10.0]).unwrap();
+    let pin = Brep::make_cylinder([22.5, 7.0, -5.0], 3.0, 20.0).unwrap();
+    let notch = Brep::make_box([25.0, -5.0, -5.0], [10.0, 10.0, 20.0]).unwrap();
+    let part = block.boolean(&pin, BooleanOp::Subtract).unwrap().unwrap().boolean(&notch, BooleanOp::Subtract).unwrap().unwrap();
+    let bottom = [[50.0, 30.0, 0.0]];
+    assert_eq!(part.shell(&bottom, 0.1, -2.0).unwrap_err(), Error::WallsTouch);
+    for t in [1.5, 2.5] {
+        shot(&part.shell(&bottom, 0.1, -t).unwrap(), &format!("shell-4711-{t}"));
+    }
 }
 
 #[test]

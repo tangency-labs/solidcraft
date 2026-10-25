@@ -26,10 +26,19 @@ fn failed(op: &str, what: &str, e: impl std::fmt::Display) -> KernelError {
     KernelError::Failed(format!("SMLib {op}: {what}: {e}"))
 }
 
-/// The error for SMLib's refusal of `op`, in the words of the operation.
-fn refused(op: &str, e: SmError) -> KernelError {
+/// The error for SMLib's refusal of `op`, in the words of the operation; `wall` is its wall's
+/// thickness, where it has one.
+fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
     match e {
         SmError::NoRoom => KernelError::Invalid(format!("{op}: the wall is too thick: it leaves no room inside the body")),
+        // The walls just meet: thinner they stay apart, thicker they cross and merge.
+        SmError::WallsTouch => {
+            let wall = wall.map(|t| format!(" {t} mm")).unwrap_or_default();
+            KernelError::Invalid(format!(
+                "{op}: the{wall} walls would meet along a line (between a hole and the side, for example), which leaves no solid there; \
+                 use a thinner or thicker wall, or move the feature"
+            ))
+        }
         SmError::NoMatch { point } => KernelError::Invalid(format!("{op}: no face at selection point {}", point + 1)),
         SmError::Ambiguous { point } => KernelError::Invalid(format!("{op}: selection point {} is as near to two faces", point + 1)),
         SmError::Unsupported => KernelError::Failed(format!("not supported yet: SMLib {op} for this geometry")),
@@ -48,12 +57,18 @@ fn points(p: &[Vec3]) -> Vec<[f64; 3]> {
 }
 
 /// Runs `op` on `b` in SMLib, tagged as operand 0, and brings the result back with SMLib's
-/// history over `[b]` (none where an order cannot be matched).
-pub(crate) fn run(name: &str, b: &Body, op: impl FnOnce(&Brep) -> std::result::Result<Brep, SmError>) -> Result<(Body, Option<History>)> {
+/// history over `[b]` (none where an order cannot be matched). `wall`: the operation's wall
+/// thickness, for its refusals.
+pub(crate) fn run(
+    name: &str,
+    b: &Body,
+    wall: Option<f64>,
+    op: impl FnOnce(&Brep) -> std::result::Result<Brep, SmError>,
+) -> Result<(Body, Option<History>)> {
     b.require_brep(name)?;
     let (sb, ob) = smlib_body_ordered(b)?;
     let tagged = sb.tagged(0).map_err(|e| failed(name, "tag", e))?;
-    let r = op(&tagged).map_err(|e| refused(name, e))?;
+    let r = op(&tagged).map_err(|e| refused(name, wall, e))?;
     let check = r.check(CheckLevel::All).map_err(|e| failed(name, "check", e))?;
     if !check.is_valid() {
         let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
@@ -84,7 +99,7 @@ pub(crate) fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     let opened = crate::offset::with_same_surface(b, &picked);
     let tol = pick_tolerance(b);
     let pts = points(&face_points(b, &opened)?);
-    let (r, h) = run("shell", b, |s| s.shell(&pts, tol, -thickness))?;
+    let (r, h) = run("shell", b, Some(thickness), |s| s.shell(&pts, tol, -thickness))?;
     let h = h.and_then(|h| with_offsets(&r, b, h, thickness));
     Ok(r.with_checked_history(h, &record::counts(&[b])))
 }
@@ -96,7 +111,7 @@ pub(crate) fn offset_faces(b: &Body, chosen: &[usize], distance: f64) -> Result<
     let at = face_points(b, chosen)?;
     let tol = pick_tolerance(b);
     let pts = points(&at);
-    let (r, h) = run("offset faces", b, |s| s.offset_faces(&pts, tol, distance))?;
+    let (r, h) = run("offset faces", b, None, |s| s.offset_faces(&pts, tol, distance))?;
     let h = h.map(|mut h| {
         for f in &mut h.faces {
             if f.change == Change::Kept && f.origins.iter().any(|o| matches!(o, FaceOrigin::Face { face, .. } if chosen.contains(face))) {
@@ -114,7 +129,7 @@ pub(crate) fn thicken(b: &Body, thickness: f64, symmetric: bool) -> Result<Body>
     if !(thickness.is_finite() && thickness.abs() > 1e-9) {
         return Err(KernelError::Invalid("thickness must be non-zero".into()));
     }
-    let (r, h) = run("thicken", b, |s| s.thicken(thickness, symmetric))?;
+    let (r, h) = run("thicken", b, Some(thickness.abs()), |s| s.thicken(thickness, symmetric))?;
     let step = if symmetric { thickness.abs() / 2.0 } else { thickness.abs() };
     // The walls first, while the sheet's edges still carry their tags on both copies.
     let h = h.map(with_edge_walls).and_then(|h| with_offsets(&r, b, h, step));
@@ -138,7 +153,7 @@ pub(crate) fn draft(b: &Body, at: &[Vec3], neutral: &solidcraft_geom::Plane, pul
     let tol = pick_tolerance(b);
     let pts = points(&face_points(b, &chosen)?);
     let o = neutral.origin;
-    let (r, h) = run("draft", b, |s| s.draft(&pts, tol, [o.x, o.y, o.z], [normal.x, normal.y, normal.z], [pull.x, pull.y, pull.z], angle))?;
+    let (r, h) = run("draft", b, None, |s| s.draft(&pts, tol, [o.x, o.y, o.z], [normal.x, normal.y, normal.z], [pull.x, pull.y, pull.z], angle))?;
     let h = h.map(|mut h| {
         for f in &mut h.faces {
             if f.change == Change::Kept && f.origins.iter().any(|o| matches!(o, FaceOrigin::Face { face, .. } if chosen.contains(face))) {

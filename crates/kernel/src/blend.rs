@@ -388,7 +388,10 @@ pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, fl
 /// tangentially (within 0.5° at a shared vertex), until no more do. Each pick takes its edge as a
 /// blend does (a pick at a vertex where a seam meets a rim takes the rim). An edge only one face
 /// uses ends a chain, and so do a seam and a smooth edge (its two faces meet tangentially, within
-/// 0.5°): they have no corner to round. Picks that find no edge are refused.
+/// 0.5°): they have no corner to round. A chain does not run on into an edge of the other
+/// convexity (a boss's concave base running on tangentially as the convex rim of its overhang):
+/// a round cannot pass from one side of the faces to the other, so it ends at that vertex.
+/// Picks that find no edge are refused.
 pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
     /// Edges meeting at an angle below this continue one another.
     const TANGENT_DEGREES: f64 = 0.5;
@@ -423,6 +426,23 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
             _ => false,
         }
     };
+    // Whether edge `e` is convex at its end `v` (its faces meet at less than 180° inside the
+    // body): the direction into its second face, square to it, points against its first face's
+    // outward normal. A face lies to the left of its loop seen from its surface's natural normal.
+    // None for an edge without exactly two uses, or where a normal cannot be found.
+    let convex = |e: usize, v: u32| -> Option<bool> {
+        let edge = rec.rec.edges.get(e)?;
+        let [ua, ub] = edge.uses.as_slice() else { return None };
+        let forward_b = match rec.rec.faces.get(ub.face as usize)?.loops.get(ub.r#loop as usize)? {
+            Loop::Edges { edges } => edges.get(ub.position as usize)?.forward,
+            Loop::Vertex { .. } => return None,
+        };
+        let p = rec.point(v)?;
+        let along = rec.tangent(e, edge.vertices[0] != v)?;
+        let natural_b = rec.normal_at(ub.face as usize, p, accept)? * rec.side(ub.face as usize)?;
+        let into_b = natural_b.cross(if forward_b { along } else { along * -1.0 });
+        Some(into_b.dot(rec.normal_at(ua.face as usize, p, accept)?) < 0.0)
+    };
     let mut k = 0;
     while k < chain.len() {
         let Some(&e) = chain.get(k) else { break };
@@ -435,7 +455,8 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
                 if passed_over || chain.contains(&f) || other.uses.len() < 2 || !other.vertices.contains(&v) || smooth(f) {
                     continue;
                 }
-                if leaving(f, v).is_some_and(|g| d.dot(g) < -cos) {
+                let turns_over = matches!((convex(e, v), convex(f, v)), (Some(a), Some(b)) if a != b);
+                if !turns_over && leaving(f, v).is_some_and(|g| d.dot(g) < -cos) {
                     chain.push(f);
                 }
             }
@@ -610,7 +631,14 @@ mod tests {
         assert!(fillet_g2(&body, &[], 2.0).is_err());
         assert!(fillet_g2(&body, &[Vec3::new(f64::NAN, 0.0, 0.0)], 2.0).is_err());
         assert!(fillet_g2(&body, &[Vec3::new(1000.0, 0.0, 0.0)], 2.0).is_err());
-        assert!(fillet_g2(&body, &edge, 25.0).is_err());
+        // Wider than the faces (20), over their far edges, cliffs: cut as if they went on. The
+        // section is the quintic from 25 out on each face, its inner control points a third and
+        // two thirds of the way to the corner; it takes the region between it and the corner
+        // inside the 20 x 20 section (clipped polygon of the curve, 2e5 pieces), along 20.
+        let wide = fillet_g2(&body, &edge, 25.0).unwrap();
+        let v = crate::measure(&wide).unwrap().volume;
+        assert!((v - 6138.1606889014).abs() < 1e-6 * 6138.1606889014, "{v}");
+        assert!(wide.validity().is_empty());
     }
 
     /// A box with a cylinder joined across one side (#556): the bottom edge of that side runs
@@ -813,7 +841,15 @@ mod tests {
             for point in [Vec3::new(slope * 2.0, 2.0, 20.0), Vec3::new(40.0 - slope * 2.0, 2.0, 20.0)] {
                 assert!(has_vertex(&result, point, 1e-8));
             }
-            assert!(chamfer(&body, &pick, 25.0).is_err());
+            // Past the faces (20 deep, 20 high), over their far edges, cliffs: cut as if the
+            // faces and the sloped end planes went on. The plane 25 back on each face takes, of
+            // the section, z >= y - 5 (y, z in [0, 20]), each line of it 40 - 2 slope y long
+            // between the end planes: 11500 - 4625 slope.
+            let past = chamfer(&body, &pick, 25.0).unwrap();
+            let removed = 11500.0 - 4625.0 * slope;
+            let actual = crate::measure(&body).unwrap().volume - crate::measure(&past).unwrap().volume;
+            assert!((actual - removed).abs() < 1e-6 * removed, "{actual} vs {removed}");
+            assert!(past.validity().is_empty());
             // A fillet ends in each sloped end plane along an ellipse: the removed section's
             // length is taken at its centroid, c from the edge.
             let rounded = fillet(&body, &pick, 2.0).unwrap();
