@@ -178,6 +178,17 @@ impl ExecutiveAccess<Handle> for Access {
     fn corner_tangent_solver(&self, _: Handle, _: Handle) -> SolidResult<Option<Handle>> {
         missing()
     }
+    /// `SmFilletExecutive::CreateFilletCorners`, the ported
+    /// `FilletExecutive::create_fillet_corners`. The fixture names no vertices, so
+    /// its corner factory (`SmFilletCorner::Create`) rejects any it is asked for.
+    fn create_corners(
+        &mut self,
+        k: &mut Kernel,
+        executive: &mut FilletExecutive<Handle>,
+        error: Option<&mut ErrorInfo<Handle>>,
+    ) -> SolidResult<()> {
+        executive.create_fillet_corners(k, |_, _, _, _| missing(), error)
+    }
     // This empty-B-rep fixture has no face handles or intersector world. These
     // required adapters reject nonexistent objects; they are not UNPORTED calls
     // to the now-ported face p3, topology intersector p2, stitch p2, fillet geom p4
