@@ -1288,8 +1288,6 @@
   "dialog.dimension_insert_hint": "Doppelklicken Sie auf eine andere steuernde Bemaßung, um ihren Namen einzufügen",
   "dialog.dimension_name": "Bemaßung: {name}",
   "dialog.edit_title": "{title} bearbeiten",
-  "dialog.new_sketch_hint": "Eine neue Skizze für dieses Feature zeichnen: Ebene oder ebene Fläche wählen. „Skizze beenden“ kehrt hierher zurück, mit ihren Profilen ausgewählt.",
-  "dialog.new_sketch_return": "Skizze beenden, um zu {command} zurückzukehren",
   "dialog.select": "↖ Auswählen",
   "dialog.selected_count": "↖ {count} ausgewählt",
   "dialog.selection_guidance": "Wählen Sie eine Eingabe aus, um sie zu ändern. Klicken Sie auf ausgewählte Objekte, um sie zu entfernen; Strg/Cmd-Klick schaltet sie ebenfalls um. Prüfen Sie die Vorschau und drücken Sie dann OK.",

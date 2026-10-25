@@ -1,0 +1,18 @@
+{
+  "en": {
+    "dialog.new_sketch_hint": "Draw a new sketch for this feature: pick a plane or a planar face. Finish Sketch comes back here with its profiles picked.",
+    "dialog.new_sketch_return": "Finish the sketch to go back to {command}"
+  },
+  "de": {
+    "dialog.new_sketch_hint": "Eine neue Skizze für dieses Feature zeichnen: Ebene oder ebene Fläche wählen. „Skizze beenden“ kehrt hierher zurück, mit ihren Profilen ausgewählt.",
+    "dialog.new_sketch_return": "Skizze beenden, um zu {command} zurückzukehren"
+  },
+  "ja": {
+    "dialog.new_sketch_hint": "このフィーチャー用に新しいスケッチを描きます。平面または平らな面を選択してください。「スケッチを終了」でここに戻り、そのプロファイルが選択されます。",
+    "dialog.new_sketch_return": "スケッチを終了すると {command} に戻ります"
+  },
+  "zh": {
+    "dialog.new_sketch_hint": "为此特征绘制新草图：选择一个平面或平整的面。“完成草图”后返回此处，并选中其轮廓。",
+    "dialog.new_sketch_return": "完成草图以返回 {command}"
+  }
+}

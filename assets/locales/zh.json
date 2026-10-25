@@ -1301,8 +1301,6 @@
   "dialog.dimension_insert_hint": "单击其他驱动尺寸以插入其名称",
   "dialog.dimension_name": "尺寸：{name}",
   "dialog.edit_title": "编辑 {title}",
-  "dialog.new_sketch_hint": "为此特征绘制新草图：选择一个平面或平整的面。“完成草图”后返回此处，并选中其轮廓。",
-  "dialog.new_sketch_return": "完成草图以返回 {command}",
   "dialog.no_shown_body": "没有可更改的显示实体：请显示一个实体，或选择新建实体",
   "dialog.select": "↖ 选择",
   "dialog.selected_count": "↖ 已选择 {count} 个",
