@@ -54,6 +54,7 @@ impl PlacedMesh {
     /// The definition's display plan at quality `q` (made once, in its own cell), moved here.
     pub(super) fn plan(&self, q: crate::display_quality::DisplayQuality, name: &str) -> Option<Arc<TessPlan>> {
         let source = definition_plan(&self.body, self.plans.get(q.index())?, q, name)?;
+        solidcraft_work::record(solidcraft_work::Counter::DisplayPlanTransforms, 1);
         Some(Arc::new(source.transformed(&self.transform)))
     }
 
@@ -75,6 +76,7 @@ impl PlacedMesh {
         let source = cell
             .get_or_init(|| {
                 let plan = definition_plan(&self.body, self.plans.get(q.index())?, q, name)?;
+                solidcraft_work::record(solidcraft_work::Counter::DisplayMeshBuilds, 1);
                 self.body.display_mesh_of(&plan).ok().map(Arc::new)
             })
             .clone()?;
@@ -83,6 +85,7 @@ impl PlacedMesh {
 
     /// `source` (in the definition's place) moved by this placement.
     fn moved(&self, source: &Mesh) -> Mesh {
+        solidcraft_work::record(solidcraft_work::Counter::MeshTransforms, 1);
         Mesh {
             positions: source.positions.iter().map(|p| crate::apply_point(&self.transform, *p)).collect(),
             normals: source.normals.iter().map(|n| crate::apply_vector(&self.transform, *n)).collect(),
@@ -104,18 +107,25 @@ pub(super) fn definition_plan(
     q: crate::display_quality::DisplayQuality,
     name: &str,
 ) -> Option<Arc<TessPlan>> {
-    cell.get_or_init(|| match body.display_plan_angular(q.chord(body.size()), q.angle()) {
-        Ok(plan) => Some(Arc::new(plan)),
-        Err(e) => {
-            log::debug!("{name}: no display plan ({e})");
-            None
+    cell.get_or_init(|| {
+        solidcraft_work::record(solidcraft_work::Counter::DisplayPlanBuilds, 1);
+        match body.display_plan_angular(q.chord(body.size()), q.angle()) {
+            Ok(plan) => Some(Arc::new(plan)),
+            Err(e) => {
+                log::debug!("{name}: no display plan ({e})");
+                None
+            }
         }
     })
     .clone()
 }
 
 pub(super) fn reference_mesh(body: &Body, mesh: &OnceLock<Arc<Mesh>>, tolerance: f64) -> Arc<Mesh> {
-    mesh.get_or_init(|| Arc::new(body.reference_display_mesh_angular(tolerance, kernel::DISPLAY_ANGLE).unwrap_or_default())).clone()
+    mesh.get_or_init(|| {
+        solidcraft_work::record(solidcraft_work::Counter::ReferenceMeshBuilds, 1);
+        Arc::new(body.reference_display_mesh_angular(tolerance, kernel::DISPLAY_ANGLE).unwrap_or_default())
+    })
+    .clone()
 }
 
 /// Only proper rotations and translations preserve triangle winding, normal lengths and the

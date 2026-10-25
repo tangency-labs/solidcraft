@@ -1432,20 +1432,27 @@ fn chebyshev_demo_regenerates_its_analytic_trajectory_without_resampling_playbac
 
 #[test]
 fn associative_trace_reuses_pose_and_unrelated_edits_but_follows_drive_expressions() {
+    use solidcraft_work::{Counter, capture};
     let (mut s, p0, q0) = four_bar();
     let mid = (p0 + q0) * 0.5;
     run(&mut s, "parameters.add", json!({"name":"swing","expression":"90 deg"}));
-    let r = run(
-        &mut s,
-        "motion.trace.keep",
-        json!({"occurrence":"Coupler","point":[mid.x,mid.y,mid.z],
+    let (r, sampled) = capture(|| {
+        run(
+            &mut s,
+            "motion.trace.keep",
+            json!({"occurrence":"Coupler","point":[mid.x,mid.y,mid.z],
         "joint":"Crank","from":0,"to":"swing","samples":19}),
-    );
+        )
+    });
+    assert!(sampled.complete(), "{sampled:?}");
+    assert_eq!(sampled.get(Counter::MotionTraceSamples), 19, "{sampled:?}");
     let id = r["sketch"].as_u64().unwrap();
     let original = kept_trace_fit(&s, id);
     let count = s.motion_traces.recomputations;
     for angle in [20, 45, 75, 10] {
-        run(&mut s, "joint.drive", json!({"joint":"Crank","value":angle,"quiet":true}));
+        let (_, work) = capture(|| run(&mut s, "joint.drive", json!({"joint":"Crank","value":angle,"quiet":true})));
+        assert!(work.complete(), "{work:?}");
+        assert_eq!(work.get(Counter::MotionTraceSamples), 0, "pose playback must not resample: {work:?}");
         assert_eq!(kept_trace_fit(&s, id), original);
     }
     run(&mut s, "parameters.add", json!({"name":"unrelated","expression":"123 mm"}));
@@ -1454,13 +1461,19 @@ fn associative_trace_reuses_pose_and_unrelated_edits_but_follows_drive_expressio
     let mut preview = s.scratch();
     run(&mut preview, "joint.drive", json!({"joint":"Crank","value":80,"quiet":true}));
     assert_eq!(preview.motion_traces.recomputations, count, "scratch previews reuse the same valid inputs");
-    run(&mut s, "parameters.change", json!({"name":"swing","expression":"180 deg"}));
+    let (_, changed) = capture(|| run(&mut s, "parameters.change", json!({"name":"swing","expression":"180 deg"})));
+    assert!(changed.complete(), "{changed:?}");
+    assert_eq!(changed.get(Counter::MotionTraceSamples), 19, "changed input must sample once: {changed:?}");
     let updated = kept_trace_fit(&s, id);
     assert_ne!(updated, original);
     assert_eq!(s.motion_traces.recomputations, count + 1, "a parameter command may refresh twice; sample once");
-    run(&mut s, "edit.undo", json!({}));
+    let (_, undo_work) = capture(|| run(&mut s, "edit.undo", json!({})));
+    assert!(undo_work.complete(), "{undo_work:?}");
+    assert_eq!(undo_work.get(Counter::MotionTraceSamples), 0, "{undo_work:?}");
     assert_eq!(kept_trace_fit(&s, id), original);
-    run(&mut s, "edit.redo", json!({}));
+    let (_, redo_work) = capture(|| run(&mut s, "edit.redo", json!({})));
+    assert!(redo_work.complete(), "{redo_work:?}");
+    assert_eq!(redo_work.get(Counter::MotionTraceSamples), 0, "{redo_work:?}");
     assert_eq!(kept_trace_fit(&s, id), updated);
     assert_eq!(s.motion_traces.recomputations, count + 1, "undo and redo reuse the retained input results");
     run(&mut s, "parameters.rename", json!({"name":"swing","new_name":"travel"}));
@@ -2053,19 +2066,26 @@ fn placement_analysis_preserves_held_loop_constraints_and_diagnostics() {
 /// Counts are deterministic work assertions, not timing thresholds tied to a test machine.
 #[test]
 fn joint_drive_and_refresh_do_not_repeat_dof_analysis() {
+    use solidcraft_work::{Counter, capture};
     let (mut s, _, _) = four_bar();
     for (angle, quiet) in [(17, false), (58, true), (105, false)] {
         super::solve_counts::take();
-        let r = run(&mut s, "joint.drive", json!({"joint":"Crank", "value":angle, "quiet":quiet}));
+        let (r, work) = capture(|| run(&mut s, "joint.drive", json!({"joint":"Crank", "value":angle, "quiet":quiet})));
         let (all, full) = super::solve_counts::take();
         assert!(all > full, "placement trials must still run");
         assert_eq!(full, usize::from(!quiet), "only a published DOF report needs full analysis");
+        assert!(work.complete(), "{work:?}");
+        assert_eq!(work.get(Counter::JointMobilityAnalyses), full as u64, "{work:?}");
+        assert!(work.get(Counter::JointSolves) >= all as u64, "{work:?}");
+        assert!(work.get(Counter::JointPlacementSteps) > 0, "placement work must be observed: {work:?}");
         let expected = super::sol_json(&solidcraft_doc::joints::solve(&s.doc, &s.model.state()), &json!({"quiet":quiet}));
         for key in ["dof", "fixed", "errors", "conflicts"] {
             assert_eq!(r.get(key), expected.get(key), "{key}: {r}");
         }
         let before = s.doc.clone();
-        s.refresh();
+        let ((), refresh) = capture(|| s.refresh());
+        assert!(refresh.complete(), "{refresh:?}");
+        assert_eq!(refresh.get(Counter::JointMobilityAnalyses), 0, "{refresh:?}");
         assert_eq!(super::solve_counts::take().1, 0, "refresh discards the DOF report");
         assert_eq!(*s.doc, *before);
     }

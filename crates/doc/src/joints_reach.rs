@@ -464,8 +464,9 @@ fn approach(
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{PLACEMENT_INSERTS, PLACEMENT_STEPS, chain, placement_tree};
+    use super::super::tests::{chain, placement_tree};
     use super::*;
+    use solidcraft_work::{Counter, capture};
 
     /// Exercise the IK callback itself: removing sharing at this call site must fail even if
     /// the reusable placement helper still passes its own tests.
@@ -492,24 +493,24 @@ mod tests {
                 }
                 let mut work = base.clone();
                 let spent = Cell::new(0);
-                PLACEMENT_STEPS.with(|steps| steps.set(0));
-                PLACEMENT_INSERTS.with(|inserts| inserts.set(0));
-                let actual = misses(&mut workspace, &asm, &r, 37.0, &[(1, 0)], &[6], &[x], &mut work, &spent);
+                let (actual, measured) = capture(|| misses(&mut workspace, &asm, &r, 37.0, &[(1, 0)], &[6], &[x], &mut work, &spent));
+                assert!(measured.complete(), "{measured:?}");
                 assert_eq!(actual, Some(expected));
-                assert_eq!(
-                    PLACEMENT_INSERTS.with(|inserts| inserts.get()),
-                    if cold { 4 } else { 0 },
-                    "IK must retain cache storage across evaluations"
-                );
+                assert_eq!(measured.get(Counter::JointPlacementInserts), if cold { 4 } else { 0 }, "IK must retain cache storage across evaluations");
                 cold = false;
                 assert_eq!(spent.get(), 1, "reuse must not skip a finite-difference evaluation or bypass its work cap");
-                assert_eq!(PLACEMENT_STEPS.with(|steps| steps.get()), 5, "four tree placements shared by the target and loop, plus the closing step");
+                assert_eq!(
+                    measured.get(Counter::JointPlacementSteps),
+                    5,
+                    "four tree placements shared by the target and loop, plus the closing step"
+                );
             }
             let mut work = base.clone();
             let spent = Cell::new(MAX_LOOP_WORK);
-            PLACEMENT_STEPS.with(|steps| steps.set(0));
-            assert!(misses(&mut workspace, &asm, &r, 37.0, &[(1, 0)], &[6], &[0.2], &mut work, &spent).is_none());
-            assert_eq!(PLACEMENT_STEPS.with(|steps| steps.get()), 0);
+            let (actual, measured) = capture(|| misses(&mut workspace, &asm, &r, 37.0, &[(1, 0)], &[6], &[0.2], &mut work, &spent));
+            assert!(measured.complete(), "{measured:?}");
+            assert!(actual.is_none());
+            assert_eq!(measured.get(Counter::JointPlacementSteps), 0);
         }
     }
 }

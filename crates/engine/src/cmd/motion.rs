@@ -820,6 +820,7 @@ fn sample_trace(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<Vec3>, Value)>
     let mut points = Vec::new();
     let mut stop = (Value::Null, Value::Null, Value::Null);
     for k in 0..n {
+        solidcraft_work::record(solidcraft_work::Counter::MotionTraceSamples, 1);
         let want = plan(&t, k, n);
         let (r, _) = drive_with_contact(&mut t, &want, &given)?;
         points.push(solidcraft_doc::apply_point(&world(&t)?, local));

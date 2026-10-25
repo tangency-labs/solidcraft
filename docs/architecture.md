@@ -11,3 +11,6 @@
 | L5 | `gpu`, `ui-egui`, `mcp` | compute-shader evaluation of display tessellation plans; the swappable desktop front end; the MCP server (headless or bridged to the app) |
 | apps | `solidcraft`, `solidcraft-cli` | desktop app, headless CLI |
 <!-- ANCHOR_END: architecture -->
+
+`work` is a standalone L0 crate with no dependencies. Its opt-in operation counters let the
+document, solver, engine and viewport share regression budgets without depending on each other.

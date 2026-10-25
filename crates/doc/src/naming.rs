@@ -293,6 +293,7 @@ pub fn face_name_exact(b: &ModelBody, index: usize) -> bool {
 /// shared by snapshots and poses: dispatching threads just to read it costs more than a lookup.
 pub(crate) fn warm_names<'a>(bodies: impl Iterator<Item = &'a ModelBody>) {
     let bodies: Vec<_> = bodies.filter(|b| b.names.names.get().is_none()).collect();
+    solidcraft_work::record(solidcraft_work::Counter::NamePreparationJobs, bodies.len() as u64);
     #[cfg(test)]
     tests::record_warm_jobs(bodies.len());
     match bodies.as_slice() {
@@ -300,9 +301,14 @@ pub(crate) fn warm_names<'a>(bodies: impl Iterator<Item = &'a ModelBody>) {
         [body] => {
             let _ = names(body);
         }
-        _ => solidcraft_kernel::for_each_on_threads(&bodies, 16, |b| {
-            let _ = names(b);
-        }),
+        _ => {
+            let work = solidcraft_work::Context::current();
+            solidcraft_kernel::for_each_on_threads(&bodies, 16, |b| {
+                work.run(|| {
+                    let _ = names(b);
+                })
+            });
+        }
     }
 }
 
@@ -316,6 +322,7 @@ pub(crate) fn names(b: &ModelBody) -> Arc<Names> {
     b.names
         .names
         .get_or_init(|| {
+            solidcraft_work::record(solidcraft_work::Counter::NamePreparations, 1);
             // Exact history needs no mesh; geometry does (its face count is the mesh's).
             let names = match b.names.origin.as_ref() {
                 Some(o) if o.depth < MAX_DEPTH => b.names.lineage.as_ref().and_then(|l| crate::history_names::derive(b, o, l)).unwrap_or_else(|| {
@@ -1044,6 +1051,25 @@ mod tests {
         let mut st = ModelState::default();
         st.bodies = (0..13).map(|i| ModelBody::new(format!("Part{i}"), body.clone(), i + 1)).collect();
         st
+    }
+
+    #[test]
+    fn common_work_capture_counts_joined_name_workers_and_reuses_ready_cells() {
+        use solidcraft_work::{Counter, capture};
+
+        let st = lookup_bodies();
+        let ((), cold) = capture(|| warm_names(st.bodies.iter()));
+        assert!(cold.complete(), "{cold:?}");
+        assert_eq!(cold.get(Counter::NamePreparationJobs), st.bodies.len() as u64, "{cold:?}");
+        assert_eq!(cold.get(Counter::NamePreparations), st.bodies.len() as u64, "worker work must not disappear: {cold:?}");
+        let names: Vec<_> = st.bodies.iter().map(face_names).collect();
+        let ((), warm) = capture(|| warm_names(st.bodies.iter()));
+        assert!(warm.complete(), "{warm:?}");
+        assert_eq!(warm.get(Counter::NamePreparationJobs), 0, "{warm:?}");
+        assert_eq!(warm.get(Counter::NamePreparations), 0, "{warm:?}");
+        for (body, before) in st.bodies.iter().zip(names) {
+            assert!(std::sync::Arc::ptr_eq(&before, &face_names(body)));
+        }
     }
 
     fn same_hit(a: &FaceHit, b: &FaceHit) {

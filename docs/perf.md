@@ -1,5 +1,134 @@
 # Design loading
 
+## Operation work contracts
+
+`solidcraft-work` records deterministic work units across a command or frame. It has no clocks
+or third-party dependencies. Its default build has no collector or thread-local state; `record`
+and worker `Context` handoffs are no-ops. Tests enable its `capture` feature through development
+dependencies, so the contracts run in ordinary CI. Existing solver timing/trial profiles remain
+available independently.
+
+Run a small public-safe command/mesh report with:
+
+```sh
+cargo run --profile ci -p solidcraft-engine --example work_profile --features work-profiling
+```
+
+The example captures each command and synchronous reference-mesh preparation. It reports work,
+not GPU time, frame rate or input latency. For a regression, wrap the same entry point a caller
+uses and assert the measured units only after checking completeness:
+
+```rust,ignore
+let (result, work) = solidcraft_work::capture(|| session.execute("select.clear", &json!({})));
+assert!(result.is_ok());
+assert!(work.complete(), "{work:?}");
+assert_eq!(work.get(solidcraft_work::Counter::FeatureEvaluations), 0);
+```
+
+Units are deliberately separate:
+
+| Counters | Recorded work |
+|---|---|
+| `model_evaluations`, `feature_evaluations` | Actual evaluator entries, including work that subsequently fails |
+| `feature_fingerprints`, `fingerprint_bytes_hashed` | Fingerprint visits and definition-text bytes read by their hash |
+| `feature_json_bytes` | Definition JSON bytes actually produced, excluding reused cached text |
+| `import_digests`, `imported_bytes_hashed` | Embedded STEP digest computations and input text bytes read |
+| `body_transforms` | Document frame/world placement-cache misses; not every transform performed inside the kernel |
+| `reference_mesh_builds` | Definition reference-mesh cells initialized; not every internal kernel tessellation |
+| `display_plan_builds`, `display_mesh_builds` | Definition display-plan generation and CPU evaluation of a display mesh |
+| `mesh_transforms`, `display_plan_transforms` | Placed mesh copies and display plans transformed in the document layer |
+| `joint_solves`, `joint_mobility_analyses` | Joint solves and complete mobility-report passes |
+| `joint_placement_steps`, `joint_placement_inserts` | Joint-tree steps and newly filled residual-placement entries |
+| `joint_face_measurements` | Joint-origin face-measurement calls on a new/replaced body |
+| `motion_trace_samples` | Attempted motion-trace samples, including those that stop a trace |
+| `sketch_solves`, `sketch_analyses` | Solver entries and dependency/redundancy classifications, at the existing profiler's sites |
+| `model_scene_builds` | Model-scene preparation calls |
+| `display_triangle_bytes` | Packed model-block/shared-mesh/highlight triangle data and indices produced; not GPU transfers |
+| `name_preparation_jobs`, `name_preparations` | Cold naming entries dispatched and definition-name cells initialized |
+
+Zero evaluated features does not imply zero work: a warm evaluation may still visit every
+fingerprint, serialize its definition or hash text. The document contract intentionally reports
+that residual work. Current budgets preserve established reuse guarantees; future changes may
+tighten the scan and serialization budgets without changing the recorder.
+Budgets are upper bounds: skipping recorded work after an optimization remains valid. Positive
+controls belong to cold or invalidated inputs, so a contract does not require warm waste to persist.
+
+The initial contracts exercise existing reuse guarantees:
+
+| Operation | Budget and positive control |
+|---|---|
+| Warm body selection in 1- and 12-body designs | Zero model/feature evaluation, fingerprinting, imported-byte hashing, reference meshing, placement, joint or naming preparation; a geometry edit must evaluate and mesh |
+| Camera-only frame after preparation | Zero model/feature evaluation, reference meshing, model-scene rebuilding and packed triangle bytes; the cold frame must build and pack |
+| Joint drive and refresh | One full mobility analysis for a published report, zero for quiet drives and discarded refresh reports; placement steps must still be observed |
+| Open-chain rigid drive | At most one model evaluation, one fingerprint per feature and four solves; zero feature evaluations, with actual transformed triangles checked |
+| Retained trace playback and Undo/Redo | Zero samples; changing the driving expression must sample exactly the requested 19 points once |
+| Sketch auto-constraint | The common solve/analysis totals match the existing detailed solver profile; only the published report performs redundancy analysis |
+| Joined mesh/name preparation | Cold work includes workers; ready cells retain their identity and perform zero new preparation |
+| Joined world placement | All 33 cold transforms, zero warm transforms, then all 33 after a placement change; bounds and reused bodies must agree |
+
+These tests also assert the operation's results. A zero counter without an observed cold or
+invalidated case is insufficient evidence that the hook measures the work.
+
+Captures are inclusive and nest at most 16 levels. A worker explicitly takes
+`Context::current()` before dispatch and calls `context.run(...)`; joining the workers before
+finishing the capture includes their work. Existing scope identities are not counted twice.
+Outstanding contexts, excessive nesting, saturated totals, poisoned collection or unavailable
+thread-local state mark a report incomplete. A default/missing report is also incomplete and
+cannot certify a zero budget. Unwinding restores the enclosing context. No event log grows with
+the model: each active capture retains one fixed-size counter set.
+
+Completeness describes collection for these recorded sites, not coverage of every CPU/GPU
+instruction. Work started elsewhere without inheriting the context is outside the report.
+Every new contract needs a positive control that observes cold or invalidated work, plus checks
+of geometry/results and retained snapshots. The tests cover warmed selection at different
+design sizes, camera-only frames, rigid/reference-mesh reuse, unchanged traces, changed trace
+inputs, Undo/Redo, joint residual storage and sketch diagnostic publication. Numerical solver
+work limits and geometry/display algorithms are unchanged. GPU upload accounting, more granular
+change revisions and consolidated refresh scheduling remain separate work.
+
+### Residual work verified with the recorder (2026-10-25)
+
+Verification on the work-profile branch rebased onto `bda32419` includes the JSON-cache,
+parameter-pass and owner-lookup improvements already merged there. Windows x64, Intel Core
+i9-14900K, release profile with work profiling compiled but no active capture during timed
+samples. Each condition starts a fresh process, warms eight operations and times 64 alternating
+poses. Three interleaved rounds rotate the order of baseline, evaluation omitted, final refresh
+solve omitted and both omitted. Separate captures measure work; separate clocked runs attribute
+time. These are engine/placement measurements, without UI-scene packing, GPU work or presentation.
+
+The omissions were temporary ablations to estimate headroom, not production changes:
+
+| Fixture / operation | Baseline command | Evaluation omitted | Final solve omitted | Both omitted |
+|---|---:|---:|---:|---:|
+| 1 independent box / drive | 0.0274 ms | 0.0253 ms | 0.0252 ms | 0.0220 ms |
+| 256 independent boxes / drive | 0.8821 ms | 0.5366 ms | 0.7923 ms | 0.4560 ms |
+| SO-101, 13 bodies / drive | 2.8230 ms | 0.1331 ms | 2.8176 ms | 0.1096 ms |
+| SO-101, 13 bodies / reach | 2.8317 ms | 0.1384 ms | 2.8385 ms | 0.1177 ms |
+
+Medians of three per-run medians. Including world placement and canonical mesh preparation,
+SO-101 reach is 4.0061 -> 1.1348 ms with evaluation omitted; the 256-box drive is
+2.7263 -> 2.2780 ms with both omissions. The final solve alone is close to measurement spread
+for SO-101; fewer calls are not automatically a meaningful latency improvement.
+
+The captures explain the difference. SO-101 generates zero JSON bytes on the warmed base, but
+still hashes 17,457,378 definition-text bytes in one fingerprint. A separate clocked run averages
+2.658 ms in evaluation, 2.649 ms of that in fingerprinting. This overlaps the imported-payload
+fingerprint work in #5480. The 256-box drive instead visits 256 unchanged fingerprints and hashes
+56,071 bytes, with zero JSON bytes and zero evaluated features. Evaluation averages 0.340 ms,
+including 0.113 ms of fingerprinting. The final refresh accounts for one additional placement
+solve: four -> three for drive, two -> one for reach. Trial/response solves remain necessary.
+
+All 64 command responses and occurrence matrices, final world-space mesh hashes (positions,
+normals and triangle/face indices), body/triangle counts and Undo/Redo agree in the independent
+box and SO-101 comparisons. The SO-101 selection control records zero in every work unit.
+
+Skipping evaluation for every pose is nevertheless incorrect. A 10 x 10 x 4 mm plate cut by a
+2 x 2 x 6 mm box in another component must rebuild its cut when a slider moves it 5 mm relative
+to that tool. The correct volume is 392 mm³; omitting evaluation keeps the old cut at 384 mm³,
+changes the mesh hash and fails Undo/Redo equivalence. These figures therefore bound conditional
+headroom: a follow-up must preserve cross-component geometry dependencies. They are not a gain
+already delivered by instrumentation or a prediction for the complete desktop frame.
+
 ## Edges made by booleans: each point evaluated once (2026-10-16)
 
 A boolean meshes both operands with truck-meshalgo, which first divides every edge into a

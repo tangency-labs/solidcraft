@@ -1041,8 +1041,7 @@ struct Tree<'a> {
 
 impl Tree<'_> {
     fn step(&self, joint: u64, from_a: bool, t: &Mat, vals: &Values) -> Option<Mat> {
-        #[cfg(test)]
-        tests::PLACEMENT_STEPS.with(|steps| steps.set(steps.get() + 1));
+        solidcraft_work::record(solidcraft_work::Counter::JointPlacementSteps, 1);
         let q = vals.get(&joint).map(Vec::as_slice).unwrap_or(&[]);
         self.frames.get(&joint)?.through(self.joints.get(&joint)?, q, from_a, t)
     }
@@ -1127,11 +1126,9 @@ impl Placements<'_, '_, '_> {
         };
         while let Some((occurrence, joint, from_a)) = self.workspace.path.pop() {
             t = self.workspace.tree.step(joint, from_a, &t, self.values)?;
-            #[cfg(test)]
-            if !self.workspace.placed.contains_key(&occurrence) {
-                tests::PLACEMENT_INSERTS.with(|inserts| inserts.set(inserts.get() + 1));
+            if self.workspace.placed.insert(occurrence, Some(t)).is_none() {
+                solidcraft_work::record(solidcraft_work::Counter::JointPlacementInserts, 1);
             }
-            self.workspace.placed.insert(occurrence, Some(t));
         }
         Some(t)
     }
@@ -1835,6 +1832,7 @@ pub fn solve_holding(doc: &Document, st: &ModelState, held: &Held) -> Solution {
 /// solves still close and check every loop, respect held values and limits, and report errors;
 /// they leave `Solution::dof` empty rather than returning the spanning tree's approximate count.
 pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis) -> Solution {
+    solidcraft_work::record(solidcraft_work::Counter::JointSolves, 1);
     let asm = &doc.assembly;
     let mut sol = Solution::default();
     let mut vals = joint_values(asm);
@@ -1865,6 +1863,7 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
         }
     }
     if analysis == Analysis::DegreesOfFreedom {
+        solidcraft_work::record(solidcraft_work::Counter::JointMobilityAnalyses, 1);
         if !closing.is_empty() {
             loop_dof(&tree, &closing, asm, &vals, &mut dof);
         }
@@ -2103,11 +2102,6 @@ pub fn frame_of(o: Vec3, z: Vec3, x: Option<Vec3>) -> Option<Mat> {
 mod tests {
     use super::*;
 
-    thread_local! {
-        pub(super) static PLACEMENT_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-        pub(super) static PLACEMENT_INSERTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    }
-
     pub(super) fn placement_tree(asm: &Assembly) -> Tree<'_> {
         Tree {
             joints: asm.joints.iter().map(|j| (j.id, j)).collect(),
@@ -2127,16 +2121,16 @@ mod tests {
         let mut values = joint_values(&asm);
         let expected: BTreeMap<u64, Mat> = [1, 2, 3, 4].into_iter().map(|id| (id, tree.world(id, &values).unwrap())).collect();
         let mut workspace = PlacementWorkspace::new(&tree);
-        PLACEMENT_STEPS.with(|steps| steps.set(0));
-        {
+        let ((), work) = solidcraft_work::capture(|| {
             let mut placed = workspace.at(&values);
             for id in [3, 4, 3, 2, 4] {
                 assert_eq!(placed.world(id), expected.get(&id).copied());
             }
             assert_eq!(placed.world(0), Some(IDENTITY));
             assert_eq!(placed.world(1234), None);
-        }
-        assert_eq!(PLACEMENT_STEPS.with(|steps| steps.get()), 4, "one step per needed occurrence; no unrelated branch");
+        });
+        assert!(work.complete(), "{work:?}");
+        assert_eq!(work.get(solidcraft_work::Counter::JointPlacementSteps), 4, "one step per needed occurrence; no unrelated branch");
         values.get_mut(&1).unwrap()[0] += 0.1;
         apply_links(&asm, &mut values);
         let changed = tree.world(3, &values).unwrap();
@@ -2222,14 +2216,18 @@ mod tests {
                     expected.extend([d.x, d.y, d.z]);
                 }
             }
-            PLACEMENT_STEPS.with(|steps| steps.set(0));
-            PLACEMENT_INSERTS.with(|inserts| inserts.set(0));
             let mut actual = vec![42.0];
-            assert_eq!(closure_gaps(&mut workspace, &[6, 6], &values, 37.0, &mut actual), Some(()));
+            let (result, work) = solidcraft_work::capture(|| closure_gaps(&mut workspace, &[6, 6], &values, 37.0, &mut actual));
+            assert!(work.complete(), "{work:?}");
+            assert_eq!(result, Some(()));
             assert_eq!(actual, expected);
-            assert_eq!(PLACEMENT_INSERTS.with(|inserts| inserts.get()), if cold { 4 } else { 0 }, "reuse cache storage between perturbations");
+            assert_eq!(
+                work.get(solidcraft_work::Counter::JointPlacementInserts),
+                if cold { 4 } else { 0 },
+                "reuse cache storage between perturbations"
+            );
             cold = false;
-            assert_eq!(PLACEMENT_STEPS.with(|steps| steps.get()), 6, "four tree placements and two closing-joint steps");
+            assert_eq!(work.get(solidcraft_work::Counter::JointPlacementSteps), 6, "four tree placements and two closing-joint steps");
             assert_eq!(closure_gaps(&mut workspace, &[u64::MAX], &values, 37.0, &mut actual), None);
             assert_eq!(actual, expected, "an unresolved joint does not insert a zero residual");
         }

@@ -8,6 +8,59 @@ fn run(session: &mut Session, command: &str, params: Value) -> Value {
 }
 
 #[test]
+fn warmed_selection_has_no_evaluation_or_geometry_preparation_budget() {
+    use solidcraft_work::{Counter, capture};
+
+    for count in [1, 12] {
+        let mut session = Session::default();
+        run(&mut session, "component.create", json!({"name":"Parts"}));
+        for i in 0..count {
+            run(
+                &mut session,
+                "solid.box",
+                json!({"body_name":format!("Part {i}"),"corner":[i * 5,0,0],"length":2,"width":3,"height":4,"operation":"new"}),
+            );
+        }
+        let world = session.world_state();
+        for body in &world.bodies {
+            let _ = body.mesh();
+            let _ = crate::doc::naming::face_names(body);
+        }
+        let selected = world.bodies.first().unwrap().name.clone();
+        let ((), work) = capture(|| {
+            run(&mut session, "select.set", json!({"items":[{"type":"body","name":selected}]}));
+            let selected_world = session.world_state();
+            assert!(Arc::ptr_eq(&world, &selected_world));
+            for body in &selected_world.bodies {
+                let _ = body.mesh();
+                let _ = crate::doc::naming::face_names(body);
+            }
+        });
+        assert!(work.complete(), "{work:?}");
+        for (counter, value) in work.iter() {
+            assert_eq!(value, 0, "{count} bodies, {counter:?}: {work:?}");
+        }
+
+        // A real geometry edit must be visible to the same recorder, while old snapshots stay valid.
+        let (_, edited) = capture(|| {
+            run(&mut session, "solid.box", json!({"body_name":"Added","corner":[100,0,0],"length":7,"width":8,"height":9,"operation":"new"}));
+            for body in &session.world_state().bodies {
+                let _ = body.mesh();
+            }
+        });
+        assert!(edited.complete(), "{edited:?}");
+        assert!(edited.get(Counter::ModelEvaluations) > 0 && edited.get(Counter::FeatureEvaluations) > 0, "{edited:?}");
+        assert!(edited.get(Counter::ReferenceMeshBuilds) > 0, "missing mesh accounting: {edited:?}");
+        assert_eq!(world.bodies.len(), count as usize);
+        assert_eq!(session.world_state().bodies.len(), count as usize + 1);
+        run(&mut session, "edit.undo", json!({}));
+        assert_eq!(session.world_state().bodies.len(), count as usize);
+        run(&mut session, "edit.redo", json!({}));
+        assert_eq!(session.world_state().bodies.len(), count as usize + 1);
+    }
+}
+
+#[test]
 fn world_placement_cache_preserves_pending_picks_materials_scratch_and_named_joint_frames() {
     let mut session = Session::default();
     let created = run(&mut session, "component.create", json!({"name":"Part"}));
@@ -218,6 +271,7 @@ fn moved_component_bodies_are_not_placed_again_when_something_else_changes() {
 /// the placed B-rep on the first mesh read of every new pose (viewport bounds does that read).
 #[test]
 fn joint_drive_reuses_reference_tessellation_across_rigid_poses() {
+    use solidcraft_work::{Counter, capture};
     let mut session = Session::default();
     run(&mut session, "solid.cylinder", json!({"radius":3,"height":8,"base":[4,0,0],"body_name":"Crank"}));
     run(&mut session, "component.create", json!({"name":"Crank","parent":"root","activate":false,"grounded":false}));
@@ -231,13 +285,31 @@ fn joint_drive_reuses_reference_tessellation_across_rigid_poses() {
     let original = session.world_state();
     let local = original.body("Crank").unwrap().mesh();
     let bounds = local.bounds();
-    for angle in [37., 91., 37., 0.] {
-        let driven = run(&mut session, "joint.drive", json!({"joint":"Crank","value":angle}));
+    for (pose, angle) in [37., 91., 37., 0.].into_iter().enumerate() {
+        let (driven, operation) = capture(|| run(&mut session, "joint.drive", json!({"joint":"Crank","value":angle})));
+        assert!(operation.complete(), "{operation:?}");
+        assert!(operation.get(Counter::ModelEvaluations) <= 1, "one pose must not refresh the model twice: {operation:?}");
+        assert!(operation.get(Counter::FeatureFingerprints) <= session.doc.features.len() as u64, "one visit per definition: {operation:?}");
+        assert_eq!(operation.get(Counter::FeatureEvaluations), 0, "rigid motion keeps its definition: {operation:?}");
+        // This open chain needs at most the trial, placement, response and final refresh solves.
+        // Upper bounds allow follow-ups to remove the redundant final refresh work.
+        assert!(operation.get(Counter::JointSolves) <= 4, "a pose must not repeat additional solves: {operation:?}");
         assert_eq!(driven["moved"], true);
         assert!(Arc::ptr_eq(&definitions, &session.model.state()));
         let world = session.world_state();
         let body = world.body("Crank").unwrap();
-        let (mesh, work) = crate::kernel::profile::capture(|| body.mesh());
+        let ((mesh, work), common) = capture(|| crate::kernel::profile::capture(|| body.mesh()));
+        assert!(common.complete(), "{common:?}");
+        assert_eq!(common.get(Counter::ReferenceMeshBuilds), 0, "{common:?}");
+        assert!(common.get(Counter::MeshTransforms) <= 1, "{common:?}");
+        if pose == 0 {
+            assert_eq!(common.get(Counter::MeshTransforms), 1, "moved mesh work must be observed: {common:?}");
+            let (plan, planned) = capture(|| body.display_plan());
+            assert!(plan.is_some());
+            assert!(planned.complete(), "{planned:?}");
+            assert_eq!(planned.get(Counter::DisplayPlanBuilds), 1, "{planned:?}");
+            assert_eq!(planned.get(Counter::DisplayPlanTransforms), 1, "{planned:?}");
+        }
         assert_eq!(work.tessellate_ms, 0., "a warm definition must not enter the kernel mesher at a new pose: {work:?}");
         assert_eq!(mesh.positions.len(), local.positions.len());
         assert_eq!(mesh.normals.len(), local.normals.len());

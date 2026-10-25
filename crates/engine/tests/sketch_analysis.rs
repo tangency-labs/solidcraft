@@ -28,7 +28,10 @@ fn session(horizontal: bool) -> (Session, u64, String) {
 fn auto_constrain_computes_redundancy_once_and_publishes_full_diagnostics() {
     let (mut s, id, redundant) = session(true);
     let before = s.doc.sketch(id).unwrap().clone();
-    let (response, profile) = capture(|| s.execute("sketch.auto_constrain", &json!({"dimensions": false})));
+    let ((response, profile), work) = solidcraft_work::capture(|| capture(|| s.execute("sketch.auto_constrain", &json!({"dimensions": false}))));
+    assert!(work.complete(), "{work:?}");
+    assert_eq!(work.get(solidcraft_work::Counter::SketchSolves), profile.counters.solve_calls);
+    assert_eq!(work.get(solidcraft_work::Counter::SketchAnalyses), profile.counters.redundancy_checks);
     let response = response.unwrap();
     assert_eq!(response["added"], json!([]));
     assert_eq!(response["sketch"], json!({"solved": true, "dof": 0}));
@@ -46,7 +49,10 @@ fn auto_constrain_computes_redundancy_once_and_publishes_full_diagnostics() {
 #[test]
 fn auto_constrain_reuses_real_freedom_and_keeps_accepted_trial_diagnostics() {
     let (mut s, id, redundant) = session(false);
-    let (response, profile) = capture(|| s.execute("sketch.auto_constrain", &json!({"dimensions": false})));
+    let ((response, profile), work) = solidcraft_work::capture(|| capture(|| s.execute("sketch.auto_constrain", &json!({"dimensions": false}))));
+    assert!(work.complete(), "{work:?}");
+    assert_eq!(work.get(solidcraft_work::Counter::SketchSolves), profile.counters.solve_calls);
+    assert_eq!(work.get(solidcraft_work::Counter::SketchAnalyses), profile.counters.redundancy_checks);
     let response = response.unwrap();
     assert_eq!(response["added"].as_array().unwrap().len(), 1, "one angular degree of freedom must be removed");
     assert_eq!(response["dof"], 0);

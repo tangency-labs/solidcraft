@@ -12,6 +12,7 @@ use solidcraft_geom::tess::TessPlan;
 use solidcraft_geom::{Mesh, Plane, Region2, UnitVec3, Vec2, Vec3, regions_apart};
 use solidcraft_kernel::{self as kernel, Body, BoolOp};
 use solidcraft_sketch::{CurveKind, Profile, SolveReport, find_profiles};
+use solidcraft_work::{Counter as WorkCounter, record as record_work};
 
 use crate::expr::{self, Kind, Value};
 use crate::lineage::Traced;
@@ -100,8 +101,7 @@ impl ModelBody {
     /// and scratch copies share them; a geometry edit makes a new body and cache.
     pub(crate) fn joint_faces(&self) -> Result<Arc<[kernel::FaceInfo]>> {
         let measure = || {
-            #[cfg(test)]
-            cost_tests::count(|c| c.joint_faces += 1);
+            record_work(WorkCounter::JointFaceMeasurements, 1);
             let tol = (self.body.size() * 2e-3).max(1e-3);
             self.body.faces(tol).map(Arc::from)
         };
@@ -197,7 +197,10 @@ impl ModelBody {
             .get(q.index())?
             .get_or_init(|| match self.mesh_placement.as_deref() {
                 Some(placed) => placed.plan_mesh(q, &self.name),
-                None => self.display_plan_at(q).and_then(|plan| self.body.display_mesh_of(&plan).ok()).map(Arc::new),
+                None => self.display_plan_at(q).and_then(|plan| {
+                    record_work(WorkCounter::DisplayMeshBuilds, 1);
+                    self.body.display_mesh_of(&plan).ok().map(Arc::new)
+                }),
             })
             .clone()
     }
@@ -266,11 +269,14 @@ impl ModelBody {
                 return None;
             }
             let body = self.clone();
+            let work = solidcraft_work::Context::current();
             let started = std::thread::Builder::new().name("plan-mesh".into()).spawn(move || {
-                let _ = body.plan_mesh_at(q);
-                if let Ok(mut warming) = WARMING.lock() {
-                    warming.retain(|k| *k != key);
-                }
+                work.run(|| {
+                    let _ = body.plan_mesh_at(q);
+                    if let Ok(mut warming) = WARMING.lock() {
+                        warming.retain(|k| *k != key);
+                    }
+                })
             });
             if started.is_ok() {
                 warming.push(key);
@@ -800,9 +806,8 @@ impl ModelState {
         let placed = match reused {
             Some(placed) => placed,
             None => {
+                record_work(WorkCounter::BodyTransforms, 1);
                 let placed = ModelBody::new(body.name.clone(), kernel::transform_matrix(&body.body, *matrix)?, body.feature);
-                #[cfg(test)]
-                cost_tests::count(|c| c.moved += 1);
                 if let Some(c) = &cache {
                     c.lock().unwrap_or_else(|e| e.into_inner()).keep(body, matrix, &placed);
                 }
@@ -1060,18 +1065,24 @@ impl ModelState {
     /// each keeps its own mesh, so the meshes are those `ModelBody::mesh` makes one by one).
     /// Stops starting bodies once `go_on` says no.
     pub fn warm_meshes(&self, go_on: impl Fn() -> bool + Sync) {
+        let work = solidcraft_work::Context::current();
         kernel::for_each_on_threads(&self.bodies, 16, |b| {
-            if go_on() {
-                let _ = b.mesh();
-            }
+            work.run(|| {
+                if go_on() {
+                    let _ = b.mesh();
+                }
+            });
         });
     }
     /// [`ModelState::warm_meshes`], and every body's display plan at the current display quality
     /// (what a GPU viewport draws).
     pub fn warm_display(&self) {
+        let work = solidcraft_work::Context::current();
         kernel::for_each_on_threads(&self.bodies, 16, |b| {
-            let _ = b.mesh();
-            let _ = b.display_plan();
+            work.run(|| {
+                let _ = b.mesh();
+                let _ = b.display_plan();
+            });
         });
     }
     pub fn sketch(&self, feature: u64) -> Option<&SolvedSketch> {
@@ -1151,6 +1162,7 @@ fn param_names(f: &Feature) -> Vec<String> {
 }
 
 fn fingerprint(prev: u64, f: &Feature, vals: &BTreeMap<String, Value>, rolled_back: bool, steps: &StepDigests) -> u64 {
+    record_work(WorkCounter::FeatureFingerprints, 1);
     let mut h = std::collections::hash_map::DefaultHasher::new();
     prev.hash(&mut h);
     rolled_back.hash(&mut h);
@@ -1201,8 +1213,8 @@ impl StepDigests {
 }
 
 fn step_text_digest(text: &str) -> u64 {
-    #[cfg(test)]
-    cost_tests::count(|c| c.digested += 1);
+    record_work(WorkCounter::ImportDigests, 1);
+    record_work(WorkCounter::ImportedBytesHashed, text.len() as u64);
     let mut h = std::collections::hash_map::DefaultHasher::new();
     text.hash(&mut h);
     h.finish()
@@ -1241,7 +1253,9 @@ fn quantize(sk: &mut solidcraft_sketch::Sketch) {
 /// written each time as before.
 fn hash_feature_json(f: &Feature, steps: &StepDigests, h: &mut impl Hasher) {
     if matches!(f.kind, FeatureKind::Import { .. }) {
-        feature_json(f, steps).hash(h);
+        let definition = feature_json(f, steps);
+        record_work(WorkCounter::FingerprintBytesHashed, definition.len() as u64);
+        definition.hash(h);
         return;
     }
     thread_local! {
@@ -1252,10 +1266,12 @@ fn hash_feature_json(f: &Feature, steps: &StepDigests, h: &mut impl Hasher) {
         if let Some((seen, json)) = written.get(&f.id)
             && seen == f
         {
+            record_work(WorkCounter::FingerprintBytesHashed, json.len() as u64);
             json.hash(h);
             return;
         }
         let json = feature_json(f, steps);
+        record_work(WorkCounter::FingerprintBytesHashed, json.len() as u64);
         json.hash(h);
         if written.len() >= 1 << 15 {
             written.clear();
@@ -1271,16 +1287,22 @@ fn feature_json(f: &Feature, steps: &StepDigests) -> String {
             let digest = steps.get(f.id, step).unwrap_or_else(|| step_text_digest(step));
             *text = Arc::from(format!("{digest:016x}:{}", step.len()));
         }
-        return serde_json::to_string(&g).unwrap_or_default();
+        return fingerprint_json(&g);
     }
     if let FeatureKind::Sketch { .. } = &f.kind {
         let mut g = f.clone();
         if let FeatureKind::Sketch { sketch, .. } = &mut g.kind {
             quantize(sketch);
         }
-        return serde_json::to_string(&g).unwrap_or_default();
+        return fingerprint_json(&g);
     }
-    serde_json::to_string(f).unwrap_or_default()
+    fingerprint_json(f)
+}
+
+fn fingerprint_json(value: &impl Serialize) -> String {
+    let text = serde_json::to_string(value).unwrap_or_default();
+    record_work(WorkCounter::FeatureJsonBytes, text.len() as u64);
+    text
 }
 
 /// Store in `stored` the solution `solved` holds for it: the positions, the circle and ellipse
@@ -1879,6 +1901,7 @@ impl Model {
 
     /// Re-evaluate the document, reusing results up to the first changed feature.
     pub fn evaluate(&mut self, doc: &Document) {
+        record_work(WorkCounter::ModelEvaluations, 1);
         let (vals, perr) = evaluation_values(doc);
         self.param_errors = perr;
         self.frame_bodies.lock().unwrap_or_else(|e| e.into_inner()).next_generation();
@@ -6635,6 +6658,7 @@ fn chamfer_with(
 }
 
 fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
+    record_work(WorkCounter::FeatureEvaluations, 1);
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
     match &f.kind {
@@ -7773,14 +7797,17 @@ impl PlacedBodies {
                 fresh.plan_mesh = placed.plan_mesh.clone();
                 fresh
             }
-            None => match kernel::place_matrix(&b.body, *m) {
-                Ok(body) => {
-                    let mut fresh = ModelBody::new(name, body, b.feature);
-                    fresh.mesh_placement = placed_mesh::PlacedMesh::new(b, m).map(Arc::new);
-                    fresh
+            None => {
+                record_work(WorkCounter::BodyTransforms, 1);
+                match kernel::place_matrix(&b.body, *m) {
+                    Ok(body) => {
+                        let mut fresh = ModelBody::new(name, body, b.feature);
+                        fresh.mesh_placement = placed_mesh::PlacedMesh::new(b, m).map(Arc::new);
+                        fresh
+                    }
+                    Err(_) => ModelBody::new(name, b.body.clone(), b.feature),
                 }
-                Err(_) => ModelBody::new(name, b.body.clone(), b.feature),
-            },
+            }
         }
     }
 }
@@ -7891,7 +7918,8 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
             }
         }
     }
-    let mut moved = kernel::map_on_threads(&jobs, 16, |(b, bm, name)| placed_before.placed(b, bm, name.clone())).into_iter().zip(&jobs);
+    let work = solidcraft_work::Context::current();
+    let mut moved = kernel::map_on_threads(&jobs, 16, |(b, bm, name)| work.run(|| placed_before.placed(b, bm, name.clone()))).into_iter().zip(&jobs);
     for (comp, path, m) in placements {
         let primary = path == first_path(comp);
         let ident = crate::is_identity(&m);

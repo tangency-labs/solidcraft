@@ -167,6 +167,10 @@ impl SharedTris {
             }
         }
         out.bounds = [lo, hi];
+        solidcraft_work::record(
+            solidcraft_work::Counter::DisplayTriangleBytes,
+            out.vertices.len().saturating_add(out.indices.len().saturating_mul(std::mem::size_of::<u32>())) as u64,
+        );
         out
     }
 
@@ -190,6 +194,10 @@ impl SharedTris {
         let n = u32::try_from(level.positions.len()).unwrap_or(u32::MAX);
         out.indices = level.triangles.iter().filter(|t| t.iter().all(|i| *i < n)).flatten().copied().collect();
         out.bounds = [lo, hi];
+        solidcraft_work::record(
+            solidcraft_work::Counter::DisplayTriangleBytes,
+            out.vertices.len().saturating_add(out.indices.len().saturating_mul(std::mem::size_of::<u32>())) as u64,
+        );
         out
     }
 
@@ -2858,7 +2866,14 @@ mod tests {
             flat.normals.extend([Vec3::Z; 3]);
             flat.triangles.push([base, base + 1, base + 2]);
         }
-        let shared = SharedTris::new(&flat);
+        let (shared, work) = solidcraft_work::capture(|| SharedTris::new(&flat));
+        assert!(work.complete(), "{work:?}");
+        assert_eq!(
+            work.get(solidcraft_work::Counter::DisplayTriangleBytes),
+            (shared.vertices.len() + shared.indices.len() * std::mem::size_of::<u32>()) as u64,
+            "{work:?}",
+        );
+        assert!(work.get(solidcraft_work::Counter::DisplayTriangleBytes) > 0, "{work:?}");
         assert!(shared.flat);
         assert_eq!(shared.vertices.len() / SHARED_SIZE, 4, "the diagonal's ends are shared");
         assert_eq!(shared.indices.len(), 6);

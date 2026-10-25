@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 solidcraft-engine = { workspace = true }
+solidcraft-work = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
 solidcraft-gpu = { workspace = true }
@@ -41,6 +42,7 @@ nix = { workspace = true }
 winreg = "0.56"
 
 [dev-dependencies]
+solidcraft-work = { workspace = true, features = ["capture"] }
 solidcraft-engine = { workspace = true, features = ["bundled-render-library"] }
 # Parse the source guard structurally, including code after inline test modules.
 syn = { workspace = true, features = ["visit"] }

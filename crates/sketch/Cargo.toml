@@ -18,9 +18,11 @@ required-features = ["solver-profiling"]
 
 [dependencies]
 solidcraft-geom = { workspace = true }
+solidcraft-work = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 ttf-parser = { workspace = true }
 
 [dev-dependencies]
+solidcraft-work = { workspace = true, features = ["capture"] }
 serde_json = { workspace = true }

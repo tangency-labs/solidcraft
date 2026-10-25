@@ -17,6 +17,11 @@ raytrace-cpu = ["solidcraft-render/raytrace-cpu"]
 # `src/schema/record.rs`), for checking a new contract against the whole test suite.
 param-audit = []
 solver-profiling = ["solidcraft-sketch/solver-profiling"]
+work-profiling = ["solidcraft-work/capture"]
+
+[[example]]
+name = "work_profile"
+required-features = ["work-profiling"]
 
 [[example]]
 name = "sketch_analysis_bench"
@@ -32,6 +37,7 @@ required-features = ["solver-profiling"]
 
 [dependencies]
 solidcraft-geom = { workspace = true }
+solidcraft-work = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
@@ -46,6 +52,7 @@ log = { workspace = true }
 web-time = { workspace = true }
 
 [dev-dependencies]
+solidcraft-work = { workspace = true, features = ["capture"] }
 # Model-cache tests also run in a source tarball build (no git commit).
 solidcraft-io = { workspace = true, features = ["trust-unknown-source"] }
 # Normal CI exercises profiling assertions without enabling the production feature.

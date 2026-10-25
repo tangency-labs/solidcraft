@@ -4276,6 +4276,7 @@ dependencies = [
  "solidcraft-kernel",
  "solidcraft-render",
  "solidcraft-sketch",
+ "solidcraft-work",
  "thiserror 2.0.21",
  "web-time",
 ]
@@ -4295,6 +4296,7 @@ dependencies = [
  "solidcraft-kernel",
  "solidcraft-render",
  "solidcraft-sketch",
+ "solidcraft-work",
  "thiserror 2.0.21",
  "web-time",
 ]
@@ -4324,6 +4326,7 @@ dependencies = [
  "solidcraft-io",
  "solidcraft-kernel",
  "solidcraft-render",
+ "solidcraft-work",
  "thiserror 2.0.21",
  "wgpu",
 ]
@@ -4401,6 +4404,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcraft-geom",
+ "solidcraft-work",
  "thiserror 2.0.21",
  "ttf-parser",
 ]
@@ -4432,6 +4436,7 @@ dependencies = [
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",
+ "solidcraft-work",
  "syn 2.0.119",
  "tiny-skia",
  "toml",
@@ -4456,6 +4461,10 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
 ]
+
+[[package]]
+name = "solidcraft-work"
+version = "0.22.0"
 
 [[package]]
 name = "spade"

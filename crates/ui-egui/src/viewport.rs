@@ -803,6 +803,10 @@ fn push_block(
                 let end = u32::try_from(bytes.tris.len() / crate::gpu::TRI_SIZE).unwrap_or(u32::MAX);
                 ranges.push((d.name.clone(), start..end));
             }
+            solidcraft_work::record(
+                solidcraft_work::Counter::DisplayTriangleBytes,
+                bytes.tris.len().saturating_add(bytes.glass.len()).saturating_add(bytes.trans.len()) as u64,
+            );
             CachedBlock { bytes: std::sync::Arc::new(bytes), meshes: draws.iter().map(|d| d.mesh.clone()).collect(), ranges }
         }
     };
@@ -915,6 +919,7 @@ fn shared_mesh(
 }
 
 pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
+    solidcraft_work::record(solidcraft_work::Counter::ModelSceneBuilds, 1);
     let tk = Tokens::get();
     let mut sc = GpuScene::default();
     let s = &app.session;
@@ -2263,6 +2268,7 @@ fn face_tris(sc: &mut GpuScene, m: &solidcraft_engine::geom::Mesh, face: usize, 
 /// Emit a set of faces in one mesh pass. Whole-body feedback must not scan every triangle
 /// again for each face of a detailed imported part.
 fn mesh_tris(sc: &mut GpuScene, m: &solidcraft_engine::geom::Mesh, col: [u8; 4], lit: bool, takes: impl Fn(u32) -> bool) {
+    let before = sc.tris.len();
     for (t, f) in m.triangles.iter().zip(&m.tri_face) {
         if !takes(*f) {
             continue;
@@ -2274,6 +2280,7 @@ fn mesh_tris(sc: &mut GpuScene, m: &solidcraft_engine::geom::Mesh, col: [u8; 4],
             }
         }
     }
+    solidcraft_work::record(solidcraft_work::Counter::DisplayTriangleBytes, sc.tris.len().saturating_sub(before) as u64);
 }
 
 /// A highlighted edge: a halo and a core, and where the model hides it, the core dimmed (so a
@@ -4861,6 +4868,38 @@ fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn warmed_camera_frame_reuses_geometry_and_packed_model_triangles() {
+        use solidcraft_work::{Counter, capture};
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_grid = false;
+        h.app.ui.ground_shadow = false;
+        h.app.ui.visual_style = 1;
+        h.app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false });
+        h.app.run("solid.box", json!({"body_name":"Part","length":2,"width":3,"height":4})).unwrap();
+        let world = h.app.session.world_state();
+        for body in &world.bodies {
+            let _ = body.mesh();
+            let _ = body.plan_mesh();
+        }
+        let ((), cold) = capture(|| h.frame());
+        assert!(cold.complete(), "{cold:?}");
+        assert!(cold.get(Counter::ModelSceneBuilds) > 0, "missing frame accounting: {cold:?}");
+        assert!(cold.get(Counter::DisplayTriangleBytes) > 0, "missing display accounting: {cold:?}");
+        h.frame();
+        let ((), warm) = capture(|| {
+            h.app.cam.yaw += 0.05;
+            h.frame();
+        });
+        assert!(warm.complete(), "{warm:?}");
+        for (counter, value) in warm.iter() {
+            assert_eq!(value, 0, "{counter:?}: {warm:?}");
+        }
+        assert!(std::sync::Arc::ptr_eq(&world, &h.app.session.world_state()));
+    }
     use crate::navigation::*;
 
     #[test]

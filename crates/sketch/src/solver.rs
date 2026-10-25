@@ -2140,6 +2140,7 @@ fn solve_inner(
 ) -> SolveReport {
     #[cfg(feature = "solver-profiling")]
     let _timer = profiling::timer(Phase::Solve);
+    solidcraft_work::record(solidcraft_work::Counter::SketchSolves, 1);
     #[cfg(feature = "solver-profiling")]
     profiling::count(|c| c.solve_calls = c.solve_calls.saturating_add(1));
     sk.prune_patterns();

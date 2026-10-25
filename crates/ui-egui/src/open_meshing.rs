@@ -66,29 +66,32 @@ impl Meshing {
         }
         first.extend(rest);
         let job = (world.clone(), ready.clone(), done.clone(), stop.clone());
+        let work = solidcraft_work::Context::current();
         let spawned = std::thread::Builder::new().name("open-meshing".into()).spawn(move || {
             let (world, ready, done, stop) = job;
             solidcraft_engine::kernel::for_each_on_threads(&first, 16, |&i| {
-                if stop.load(Ordering::Relaxed) {
-                    return;
-                }
-                if let Some(b) = world.bodies.get(i) {
-                    // What the viewport draws and picks: a placed part's shared mesh, not a
-                    // moved copy of it (its placements are drawn as instances of it).
-                    let (mesh, _) = b.mesh_in_place();
-                    // A large mesh's shared vertices too, so its first frame does not weld them.
-                    if shared {
-                        crate::viewport::warm_shared_tris(&mesh);
+                work.run(|| {
+                    if stop.load(Ordering::Relaxed) {
+                        return;
                     }
-                    if plans {
-                        let _ = b.display_plan();
-                        let _ = b.plan_mesh_in_place_at(solidcraft_engine::doc::display_quality::current());
+                    if let Some(b) = world.bodies.get(i) {
+                        // What the viewport draws and picks: a placed part's shared mesh, not a
+                        // moved copy of it (its placements are drawn as instances of it).
+                        let (mesh, _) = b.mesh_in_place();
+                        // A large mesh's shared vertices too, so its first frame does not weld them.
+                        if shared {
+                            crate::viewport::warm_shared_tris(&mesh);
+                        }
+                        if plans {
+                            let _ = b.display_plan();
+                            let _ = b.plan_mesh_in_place_at(solidcraft_engine::doc::display_quality::current());
+                        }
                     }
-                }
-                if let Ok(mut r) = ready.lock() {
-                    r.push(i);
-                }
-                done.fetch_add(1, Ordering::Release);
+                    if let Ok(mut r) = ready.lock() {
+                        r.push(i);
+                    }
+                    done.fetch_add(1, Ordering::Release);
+                });
             });
         });
         if spawned.is_err() {
