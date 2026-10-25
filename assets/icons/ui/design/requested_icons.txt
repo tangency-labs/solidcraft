@@ -245,6 +245,7 @@ status_error	false
 status_recovery	false
 style	false
 suppress	false
+surface	false
 surface_blend	false
 surface_boundary	false
 surface_extend	false
