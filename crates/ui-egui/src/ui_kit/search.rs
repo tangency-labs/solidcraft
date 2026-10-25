@@ -62,6 +62,11 @@ impl CommandSearch {
         (spacing.left + t.space_16 + spacing.icon_gap + hint + spacing.key_gap + key + spacing.key_padding + spacing.right + t.space_2).ceil()
     }
 
+    /// The closed field as just its magnifier, for a bar short of room: a square button.
+    pub(crate) fn compact_width(height: f32) -> f32 {
+        height + Tokens::get().space_4 * 2.0
+    }
+
     pub(crate) fn field_radius(progress: f32, floating: bool) -> f32 {
         let t = Tokens::get();
         // Preserve the original ribbon inset and rounding in both layouts.
@@ -112,6 +117,14 @@ impl CommandSearch {
         );
         if let Some(bevel) = t.borders.bevel {
             bevel.paint(ui.painter(), r.shrink(if focused || invalid { 1.0 } else { 0.0 }), radius, true, ui.is_enabled());
+        }
+        // Closed with less room than its hint takes (a narrow bar): just the magnifier.
+        if !open && progress == 0.0 && r.width() + 0.5 < Self::closed_width(ui.ctx()) {
+            icons::paint_icon(ui.painter(), Rect::from_center_size(r.center(), vec2(t.space_16, t.space_16)), "zoom", 1.0);
+            crate::scenario::publish_target("ribbon:search", r);
+            crate::scenario::publish_target("shortcut:search", r);
+            crate::scenario::publish_target("palette:search", r);
+            return ui.interact(r, egui::Id::new("sc_sbox_compact"), Sense::click()).on_hover_text(crate::i18n::tr_label("Search commands"));
         }
         icons::paint_icon(
             ui.painter(),

@@ -1,0 +1,14 @@
+{
+  "en": {
+    "help.version": "Version {version}"
+  },
+  "ja": {
+    "help.version": "バージョン {version}"
+  },
+  "zh": {
+    "help.version": "版本 {version}"
+  },
+  "zh-TW": {
+    "help.version": "版本 {version}"
+  }
+}
