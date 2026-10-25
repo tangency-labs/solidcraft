@@ -18,6 +18,8 @@
 //! This foundation supports solver construction/loading; it does not substitute a
 //! result for the remaining fillet execution stages. No recursion.
 
+pub mod insertion;
+
 use std::collections::BTreeMap;
 
 use super::p1::{ExecutiveObjects, SolverLoadingAccess};
@@ -49,6 +51,9 @@ use crate::surface::surface::Surface;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 mod classification;
+mod original_merge;
+mod original_trim;
+pub use original_trim::{OriginalSurfaceDeletion, OriginalSurfaceSelection};
 
 const OP: &str = "blend::fillet_executive::session";
 
@@ -72,6 +77,18 @@ pub enum FilletObject {
     Topology(FilletBody, EntityRef),
     /// The retained curve of an edge; separate from its topology identity.
     Curve(FilletBody, EdgeId),
+    /// Actual curve retained by an intermediate edge.
+    IntermediateCurve(EdgeId),
+    /// An actual operation-owned curve copy with checked issued identity.
+    InsertionCurve(insertion::curves::CurveBinding),
+    /// Actual trim curve retained by an edge use.
+    UvCurve(FilletBody, EdgeuseId),
+    /// Actual intermediate edge-use trim curve.
+    IntermediateUvCurve(EdgeuseId),
+    /// Original Surface instance with checked body and geometry identity.
+    Surface(insertion::geometry::SurfaceBinding),
+    /// The current actual Surface of a body-qualified Face getter.
+    FaceSurface(insertion::geometry::InsertionBody, FaceId),
     /// The actual intermediate B-rep allocated during face construction.
     IntermediateBrep,
     /// Actual topology in the separately allocated intermediate body.
@@ -82,6 +99,8 @@ pub enum FilletObject {
     Solver(FilletSolverId),
     /// A concrete corner in the session's corner slots.
     Corner(FilletCornerId),
+    /// The actual retained executive topology intersector.
+    Intersector,
     /// An actual retained cross-section generator.
     Generator(u32),
     /// An attribute owned by the session's actual attribute store.
@@ -91,7 +110,12 @@ pub enum FilletObject {
 impl ClassObject for FilletObject {
     fn class_kind(&self) -> ClassObjectKind {
         match self {
-            Self::Curve(..) => ClassObjectKind::Curve,
+            Self::Curve(..)
+            | Self::IntermediateCurve(_)
+            | Self::InsertionCurve(_)
+            | Self::UvCurve(..)
+            | Self::IntermediateUvCurve(_) => ClassObjectKind::Curve,
+            Self::Surface(_) | Self::FaceSurface(..) => ClassObjectKind::Surface,
             Self::Topology(_, entity) | Self::IntermediateTopology(entity) => match entity {
                 EntityRef::Vertex(_) => ClassObjectKind::Vertex,
                 EntityRef::Edge(_) => ClassObjectKind::Edge,
@@ -112,7 +136,12 @@ impl ClassObject for FilletObject {
 impl SolutionObject for FilletObject {
     fn kind(&self) -> ObjectKind {
         match self {
-            Self::Curve(..) => ObjectKind::Curve,
+            Self::Curve(..)
+            | Self::IntermediateCurve(_)
+            | Self::InsertionCurve(_)
+            | Self::UvCurve(..)
+            | Self::IntermediateUvCurve(_) => ObjectKind::Curve,
+            Self::Surface(_) | Self::FaceSurface(..) => ObjectKind::Surface,
             Self::Topology(_, EntityRef::Vertex(_))
             | Self::IntermediateTopology(EntityRef::Vertex(_)) => ObjectKind::Vertex,
             Self::Topology(_, EntityRef::Edge(_))
@@ -166,12 +195,14 @@ struct SessionObjects<'target> {
     target: &'target mut Brep,
     pseudo: FilletBrep,
     intermediate: Option<Brep>,
+    insertion_curves: insertion::curves::InsertionCurves,
     notification_records:
         BTreeMap<crate::geom::attribute::ObjectKey, crate::topology::topology::Topology>,
     solvers: Vec<Option<SolverObject>>,
     corners: Vec<FilletCorner>,
     generators: Vec<FilletSurfaceGenerator>,
     attributes: AttributeStore,
+    merge_attributes: Option<Vec<AttributeHandle>>,
     extended_surfaces: BTreeMap<FaceId, Surface>,
     edge_caches: BTreeMap<EdgeId, CurveCache<FilletObject>>,
     target_serial: u64,
@@ -402,11 +433,13 @@ impl<'target> FilletSession<'target> {
                 target,
                 pseudo,
                 intermediate: None,
+                insertion_curves: insertion::curves::InsertionCurves::default(),
                 notification_records: BTreeMap::new(),
                 solvers: Vec::new(),
                 corners: Vec::new(),
                 generators: Vec::new(),
                 attributes,
+                merge_attributes: None,
                 extended_surfaces: BTreeMap::new(),
                 edge_caches: BTreeMap::new(),
                 target_serial,

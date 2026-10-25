@@ -425,6 +425,218 @@ fn update_topology_changes(solver: &FilletSolver, attr: u32, face: FaceId) -> Re
     )
 }
 
+/// Native lifetime of a face marker during geometry insertion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntersectionFaceRole {
+    /// Rail merge: temporarily enable editing and retain marker 777.
+    Rail,
+    /// Side merge: retain marker 778 without changing editing.
+    Side,
+}
+
+/// Retained objects and scoped edits used by `InsertIntersectionTopology`.
+/// Surface bindings must identify the original object; resolving a replacement
+/// surface as though it were that object is an error.
+pub trait IntersectionTopologyContext {
+    /// The actual face marker owned for one native scope.
+    type FaceMarker;
+    /// Authority for the original fillet surface, not a copied surface.
+    type SurfaceBinding;
+
+    /// The caller's kernel.
+    fn kernel(&self) -> &Kernel;
+    /// Resolve the executive's intersector at the native getter position.
+    /// # Errors
+    /// Missing live intersector context.
+    fn begin_intersection(&mut self, solver: &FilletSolver) -> Result<()>;
+    /// Capture the original surface at the native getter position.
+    /// # Errors
+    /// Unresolvable geometry or surface authority.
+    fn surface_binding(
+        &mut self,
+        pseudo: &FilletBrep,
+        geometry: FilletGeomId,
+    ) -> Result<Option<Self::SurfaceBinding>>;
+    /// Read the current users of the executive's actual edge attribute.
+    /// # Errors
+    /// Missing attribute or unresolvable users.
+    fn attribute_edges(&self) -> Result<Vec<EdgeId>>;
+    /// Attach the marker, run the body, and clean up on every return. Rail scopes
+    /// also restore the previous editing flag after the body.
+    /// # Errors
+    /// Marker setup or the body fails.
+    fn with_face_scope<T>(
+        &mut self,
+        target: &mut Brep,
+        face: FaceId,
+        role: IntersectionFaceRole,
+        body: impl FnOnce(&mut Self, &mut Brep, &Self::FaceMarker) -> Result<T>,
+    ) -> Result<T>;
+    /// Read the current tolerance through a short borrow of the managed edge.
+    /// # Errors
+    /// The managed edge is no longer live or belongs to another body.
+    fn managed_edge_tolerance(&self, edge: EdgeId) -> Result<f64>;
+    /// Merge the actual curve into its target face and associated managed edge.
+    /// # Errors
+    /// The native merge fails or lacks a required capability. Deleted edges are
+    /// appended even on ordinary failure; the existing list is never cleared.
+    #[allow(clippy::too_many_arguments)]
+    fn merge_curve(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        face: FaceId,
+        tolerance: f64,
+        pseudo_edge: EdgeId,
+        managed_edge: EdgeId,
+        deleted_edges: &mut Vec<EdgeId>,
+    ) -> Result<()>;
+    /// Process users of the still-live marker after a merge.
+    /// # Errors
+    /// Topology bookkeeping fails.
+    fn update_topology(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        marker: &Self::FaceMarker,
+        face: FaceId,
+    ) -> Result<()>;
+    /// Register the native empty intersection against the original surface.
+    /// # Errors
+    /// Registration fails, or the original surface is no longer resolvable.
+    fn register_intersection(
+        &mut self,
+        pseudo: &FilletBrep,
+        target: &mut Brep,
+        face: FaceId,
+        surface: &Option<Self::SurfaceBinding>,
+    ) -> Result<()>;
+    /// Record the ordinary rail-merge failure at its native position.
+    /// # Errors
+    /// Error recording fails or lacks actual context.
+    #[allow(clippy::too_many_arguments)]
+    fn record_bad_merge(
+        &mut self,
+        pseudo: &FilletBrep,
+        geometry: FilletGeomId,
+        filleted_edge: Option<EdgeId>,
+        target: &Brep,
+        face: FaceId,
+        rail: EdgeId,
+        surface: &Option<Self::SurfaceBinding>,
+    ) -> Result<()>;
+}
+
+// Compatibility for the indexed entrypoint. Its old intersector getter remains
+// a genuine missing capability, so it never invents a live marker or intersector.
+struct IndexedInsertionContext<'a> {
+    kernel: &'a Kernel,
+    fillet_brep: &'a Brep,
+    solvers: &'a [FilletSolver],
+    solver: &'a FilletSolver,
+    intersector: Option<TopologyIntersectorRef>,
+}
+impl IntersectionTopologyContext for IndexedInsertionContext<'_> {
+    type FaceMarker = u32;
+    type SurfaceBinding = Surface;
+    fn kernel(&self) -> &Kernel {
+        self.kernel
+    }
+    fn begin_intersection(&mut self, solver: &FilletSolver) -> Result<()> {
+        self.intersector = Some(executive_topology_intersector(solver)?);
+        Ok(())
+    }
+    fn surface_binding(&mut self, pseudo: &FilletBrep, g: FilletGeomId) -> Result<Option<Surface>> {
+        Ok(pseudo.geom(g)?.fillet_surface()?.cloned())
+    }
+    fn attribute_edges(&self) -> Result<Vec<EdgeId>> {
+        executive_attribute_e_users(self.solver)
+    }
+    fn with_face_scope<T>(
+        &mut self,
+        target: &mut Brep,
+        _face: FaceId,
+        role: IntersectionFaceRole,
+        body: impl FnOnce(&mut Self, &mut Brep, &u32) -> Result<T>,
+    ) -> Result<T> {
+        let legacy_marker = match role {
+            IntersectionFaceRole::Rail => 777,
+            IntersectionFaceRole::Side => 778,
+        };
+        body(self, target, &legacy_marker)
+    }
+    fn managed_edge_tolerance(&self, edge: EdgeId) -> Result<f64> {
+        Ok(self.fillet_brep.edge(edge)?.tolerance)
+    }
+    fn merge_curve(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        face: FaceId,
+        tolerance: f64,
+        pseudo_edge: EdgeId,
+        managed_edge: EdgeId,
+        deleted_edges: &mut Vec<EdgeId>,
+    ) -> Result<()> {
+        let curve = pseudo
+            .brep()
+            .edge(pseudo_edge)?
+            .curve
+            .as_ref()
+            .ok_or_else(|| SolidError::null_pointer(OP_INSERT))?;
+        let uv_curve = pseudo.original_uv_curve(pseudo_edge)?;
+        let (_, deleted) = merge_curve_on_surfaces(
+            self.intersector
+                .ok_or_else(|| SolidError::null_pointer(OP_INSERT))?,
+            target,
+            face,
+            tolerance,
+            curve,
+            uv_curve,
+            managed_edge,
+        )?;
+        deleted_edges.extend(deleted);
+        Ok(())
+    }
+    fn update_topology(
+        &mut self,
+        _pseudo: &mut FilletBrep,
+        _target: &mut Brep,
+        marker: &u32,
+        face: FaceId,
+    ) -> Result<()> {
+        update_topology_changes(self.solver, *marker, face)
+    }
+    fn register_intersection(
+        &mut self,
+        _pseudo: &FilletBrep,
+        _target: &mut Brep,
+        face: FaceId,
+        surface: &Option<Surface>,
+    ) -> Result<()> {
+        register_existing_ssi(
+            self.intersector
+                .ok_or_else(|| SolidError::null_pointer(OP_INSERT))?,
+            face,
+            surface.as_ref(),
+        )
+    }
+    fn record_bad_merge(
+        &mut self,
+        pseudo: &FilletBrep,
+        g: FilletGeomId,
+        filleted_edge: Option<EdgeId>,
+        _target: &Brep,
+        face: FaceId,
+        rail: EdgeId,
+        _surface: &Option<Surface>,
+    ) -> Result<()> {
+        let surface = pseudo.geom(g)?.fillet_surface()?;
+        pseudo.record_fillet_error(g, FilletErrorType::BadMerge, filleted_edge, Some(face), Some(rail), surface,
+            Some("SmFilletGeom::InsertIntersectionTopology(): Failure to merge fillet rail curve into side face of Target Brep"), self.solvers)
+    }
+}
+
 // ---- sm_CreateUVCurve -----------------------------------------------------------------
 
 /// The curves [`create_uv_curve`] builds: `rp3DCurve` (only when the UV curve is not
@@ -2031,153 +2243,155 @@ impl FilletBrep {
         target: &mut Brep,
         fillet_brep: &Brep,
     ) -> Result<()> {
+        let solver_id = self
+            .geom(g)?
+            .fillet_solver()
+            .ok_or_else(|| SolidError::null_pointer(OP_INSERT))?;
+        let solver = solver_of(solvers, solver_id, OP_INSERT)?;
+        let mut context = IndexedInsertionContext {
+            kernel: k,
+            fillet_brep,
+            solvers,
+            solver,
+            intersector: None,
+        };
+        self.insert_intersection_topology_with_context(g, solver, target, &mut context)
+    }
+
+    /// Insert geometry using the actual retained solver and caller-owned merge
+    /// context. The context preserves surface identity and scoped marker lifetimes.
+    ///
+    /// # Errors
+    /// Native insertion failures and missing live capabilities, with preceding
+    /// topology and marker/error mutations retained.
+    #[allow(clippy::too_many_lines)] // native ordered insertion routine
+    pub fn insert_intersection_topology_with_context(
+        &mut self,
+        g: FilletGeomId,
+        solver: &FilletSolver,
+        target: &mut Brep,
+        context: &mut impl IntersectionTopologyContext,
+    ) -> Result<()> {
         let nul = || SolidError::null_pointer(OP_INSERT);
-        let geom = self.geom(g)?.clone();
-        let fs = solver_of(solvers, geom.fillet_solver().ok_or_else(nul)?, OP_INSERT)?;
-        if fs.executive.is_none() {
+        if self.geom(g)?.fillet_solver().is_none() || solver.executive.is_none() {
             return Err(nul());
         }
-        let ti = executive_topology_intersector(fs)?;
-        // GetFilletSurface() is not checked upstream: a NULL surface goes to
-        // RegisterExistingSSI as is
-        let fillet_surface = geom.fillet_surface()?;
+        context.begin_intersection(solver)?;
+        let fillet_surface = context.surface_binding(self, g)?;
+        let mut deleted_edges = Vec::new();
 
-        // aDeletedEdges: one array for the whole routine; MergeCurveOnSurfaces appends
-        // to it, so every ClearFilletBrepEdges sees the edges deleted by all the merges
-        // so far
-        let mut deleted_edges: Vec<EdgeId> = Vec::new();
-
-        // Merge each rail into originating face
         for ii in 0..2 {
-            // Collect all extra rails for case ii
-            let mut all_rails = vec![geom.rail(ii).ok_or_else(nul)?];
-            all_rails.extend_from_slice(if ii == 0 {
+            let geom = self.geom(g)?;
+            let mut rails = vec![geom.rail(ii).ok_or_else(nul)?];
+            rails.extend_from_slice(if ii == 0 {
                 &geom.other_rails1
             } else {
                 &geom.other_rails2
             });
-
-            for &this_rail in &all_rails {
-                let base_face = self.fillet_edge(this_rail)?.original_face();
-                let fill_edge = self.fillet_edge(this_rail)?.fillet_brep_edge();
-                let all_edges = executive_attribute_e_users(fs)?;
-                let rail_curve = self
-                    .brep()
-                    .edge(this_rail)?
-                    .curve
-                    .as_ref()
-                    .ok_or_else(nul)?;
-
-                // skip degenerate rails and cases with bad model consistency
-                let (Some(base_face), Some(fill_edge)) = (base_face, fill_edge) else {
+            for rail in rails {
+                let face = self.fillet_edge(rail)?.original_face();
+                let managed_edge = self.fillet_edge(rail)?.fillet_brep_edge();
+                let users = context.attribute_edges()?;
+                let curve = self.brep().edge(rail)?.curve.as_ref().ok_or_else(nul)?;
+                // Native evaluates degeneracy before the nullable face/edge checks.
+                if curve.is_degenerate(context.kernel(), EFF_ZERO, None)? {
+                    continue;
+                }
+                let (Some(face), Some(managed_edge)) = (face, managed_edge) else {
                     continue;
                 };
-                if rail_curve.is_degenerate(k, EFF_ZERO, None)? || !all_edges.contains(&fill_edge) {
+                if !users.contains(&managed_edge) {
                     continue;
                 }
-
-                // merge rail curve into original Brep
-                let orig_uv = self.original_uv_curve(this_rail)?;
-                let merged = merge_curve_on_surfaces(
-                    ti,
+                context.with_face_scope(
                     target,
-                    base_face,
-                    fillet_brep.edge(fill_edge)?.tolerance,
-                    rail_curve,
-                    orig_uv,
-                    fill_edge,
-                );
-
-                // If MergeCurveOnSurface deleted an edge that rThisRail points to,
-                // clear out that pointer.
-                if let Ok((_, deleted)) = &merged {
-                    deleted_edges.extend_from_slice(deleted);
-                }
-                self.fillet_edge_mut(this_rail)?
-                    .clear_fillet_brep_edges(&deleted_edges);
-
-                // If any Faces were split, check the objects sitting on the face
-                update_topology_changes(fs, 777, base_face)?;
-
-                if let Err(e) = merged {
-                    if e.is_unported() {
-                        return Err(e);
-                    }
-                    if let Some(eu) = fs.edgeuse(0)? {
-                        let fillet_surface = self.geom(g)?.fillet_surface()?.cloned();
-                        self.record_fillet_error(
-                            g,
-                            FilletErrorType::BadMerge,
-                            eu1::edge(target, eu)?, // filleted edge
-                            Some(base_face),
-                            Some(this_rail),
-                            fillet_surface.as_ref(),
-                            Some("SmFilletGeom::InsertIntersectionTopology(): Failure to merge fillet rail curve into side face of Target Brep"),
-                            solvers,
-                        )?;
-                    }
-                    return Err(e);
-                }
-
-                // Right now Just register no intersections
-                register_existing_ssi(ti, base_face, fillet_surface)?;
+                    face,
+                    IntersectionFaceRole::Rail,
+                    |context, target, marker| {
+                        let tolerance = context.managed_edge_tolerance(managed_edge)?;
+                        let merged = context.merge_curve(
+                            self,
+                            target,
+                            face,
+                            tolerance,
+                            rail,
+                            managed_edge,
+                            &mut deleted_edges,
+                        );
+                        self.fillet_edge_mut(rail)?
+                            .clear_fillet_brep_edges(&deleted_edges);
+                        context.update_topology(self, target, marker, face)?;
+                        if let Err(error) = merged {
+                            if error.is_unported() {
+                                return Err(error);
+                            }
+                            if let Some(edgeuse) = solver.edgeuse(0)? {
+                                context.record_bad_merge(
+                                    self,
+                                    g,
+                                    eu1::edge(target, edgeuse)?,
+                                    target,
+                                    face,
+                                    rail,
+                                    &fillet_surface,
+                                )?;
+                            }
+                            return Err(error);
+                        }
+                        context.register_intersection(self, target, face, &fillet_surface)
+                    },
+                )?;
             }
         }
-
-        // Merge every SideEU into the original model
-        for &side_eu in &geom.side_eus {
-            let fe = eu1::edge(self.brep(), side_eu)?.ok_or_else(nul)?;
-            let face = self.fillet_edge(fe)?.original_face();
-            let fill_edge = self.fillet_edge(fe)?.fillet_brep_edge();
-            let all_edges = executive_attribute_e_users(fs)?;
-
-            // skip cases where the bounding edge is not on an originalFace
+        let side_eus = self.geom(g)?.side_eus.clone();
+        for side_eu in side_eus {
+            let edge = eu1::edge(self.brep(), side_eu)?.ok_or_else(nul)?;
+            let face = self.fillet_edge(edge)?.original_face();
+            let managed_edge = self.fillet_edge(edge)?.fillet_brep_edge();
+            let users = context.attribute_edges()?;
             let Some(face) = face else {
                 continue;
             };
-            let Some(fill_edge) = fill_edge.filter(|e| all_edges.contains(e)) else {
+            let Some(managed_edge) = managed_edge.filter(|edge| users.contains(edge)) else {
                 continue;
             };
-
-            let curve = self.brep().edge(fe)?.curve.as_ref().ok_or_else(nul)?;
-            let orig_uv = self.original_uv_curve(fe)?;
-            let (_, deleted) = merge_curve_on_surfaces(
-                ti,
+            context.with_face_scope(
                 target,
                 face,
-                fillet_brep.edge(fill_edge)?.tolerance,
-                curve,
-                orig_uv,
-                fill_edge,
+                IntersectionFaceRole::Side,
+                |context, target, marker| {
+                    let tolerance = context.managed_edge_tolerance(managed_edge)?;
+                    context.merge_curve(
+                        self,
+                        target,
+                        face,
+                        tolerance,
+                        edge,
+                        managed_edge,
+                        &mut deleted_edges,
+                    )?;
+                    self.fillet_edge_mut(edge)?
+                        .clear_fillet_brep_edges(&deleted_edges);
+                    context.update_topology(self, target, marker, face)?;
+                    context.register_intersection(self, target, face, &fillet_surface)
+                },
             )?;
-            deleted_edges.extend(deleted);
-            self.fillet_edge_mut(fe)?
-                .clear_fillet_brep_edges(&deleted_edges);
-            update_topology_changes(fs, 778, face)?;
-            register_existing_ssi(ti, face, fillet_surface)?;
         }
-
-        // Register FilletSurface/OrigBrepSurface intersections around both
-        // to-be-filleted-edge vertices when those vertexCorners are not being capped.
-        let mut v = None;
+        let mut vertex = None;
         for ii in 0..2 {
-            let v0 = v;
-            v = fs.vertex(target, ii)?;
-
-            // skip closed fillet edge 2nd vertices - its already done
-            if v == v0 {
+            let previous = vertex;
+            vertex = solver.vertex(target, ii)?;
+            if vertex == previous {
                 continue;
             }
-
-            if let Some(vv) = v {
-                if !geom.capped.get(ii).copied().unwrap_or(false) {
-                    for vf in vertex::faces(target, vv)? {
-                        register_existing_ssi(ti, vf, fillet_surface)?;
+            if let Some(vertex) = vertex {
+                if !self.geom(g)?.capped.get(ii).copied().unwrap_or(false) {
+                    for face in vertex::faces(target, vertex)? {
+                        context.register_intersection(self, target, face, &fillet_surface)?;
                     }
                 }
             }
         }
-        let _ = k;
         Ok(())
     }
 

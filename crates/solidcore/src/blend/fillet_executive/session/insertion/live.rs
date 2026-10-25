@@ -1,0 +1,714 @@
+//! Production insertion context borrowing the executive's actual retained stores.
+
+use super::super::{
+    invalid, AttributeHandle, AttributeStore, Brep, EdgeId, EntityRef, ErrorInfo, FaceId,
+    FilletBody, FilletBrep, FilletCorner, FilletObject, FilletSession, Kernel, Result,
+    SessionObjects, SolidError, SolverObject,
+};
+use super::geometry::{InsertionBody, InsertionGeometry, InsertionNotifications, SurfaceBinding};
+use super::{
+    begin_face_marker, edge_attribute_users, end_face_marker, FaceMarker, TargetTopologyChanges,
+};
+use crate::blend::fillet_executive::p3::{FilletExecutive, TopologyInsertionAccess};
+use crate::blend::fillet_geom::p1::FilletErrorType;
+use crate::blend::fillet_geom::p1::{FilletGeomId, FilletSurfaceStorage};
+use crate::blend::fillet_geom::p4::{IntersectionFaceRole, IntersectionTopologyContext};
+use crate::blend::fillet_solver::p1::FilletSolver;
+use crate::boolean::topology_intersector::{p1::TopologyIntersector, p3::CurveOnSurfaces};
+use crate::geom::{attribute::ObjectKey, context::Context, object::ObjectRef};
+use crate::topology::{brep::p3::topology_ref, edgeuse, topology::Topology, BrepId};
+use std::collections::BTreeMap;
+
+/// Captured actual Curve slot and its issued identity in this Session.
+/// A replacement or relocation is an explicit capability boundary.
+#[derive(Debug)]
+pub(super) struct LiveCurveBinding {
+    object: FilletObject,
+    identity: ObjectRef,
+}
+
+pub(super) struct LiveGeometryInsertion<'a> {
+    pub(super) k: &'a mut Kernel,
+    pub(super) context: &'a mut Context,
+    pub(super) ti: &'a mut TopologyIntersector<FilletObject>,
+    pub(super) intermediate: &'a mut Brep,
+    pub(super) curves: &'a mut super::curves::InsertionCurves,
+    pub(super) attributes: &'a mut AttributeStore,
+    pub(super) records: &'a mut BTreeMap<ObjectKey, Topology>,
+    pub(super) solvers: &'a [Option<SolverObject>],
+    pub(super) corners: &'a [FilletCorner],
+    pub(super) solver_order: &'a [FilletObject],
+    pub(super) corner_order: &'a [FilletObject],
+    pub(super) error: &'a mut ErrorInfo<FilletObject>,
+    pub(super) edge_attribute: AttributeHandle,
+    pub(super) target_serial: u64,
+}
+impl LiveGeometryInsertion<'_> {
+    pub(super) fn capture_managed_surface(
+        &mut self,
+        face: FaceId,
+    ) -> Result<Option<SurfaceBinding>> {
+        if self.intermediate.face(face)?.surface.is_none() {
+            return Ok(None);
+        }
+        SurfaceBinding::capture_in_body(
+            self.context,
+            self.intermediate,
+            InsertionBody::Intermediate,
+            face,
+        )
+        .map(Some)
+    }
+    pub(super) fn capture_managed_curve(
+        &mut self,
+        edge: EdgeId,
+    ) -> Result<Option<LiveCurveBinding>> {
+        let Some(curve) = self.intermediate.edge_mut(edge)?.curve.as_mut() else {
+            return Ok(None);
+        };
+        let identity = ObjectRef {
+            type_code: curve.type_code(),
+            key: self.context.geometry_key(curve.notify_identity_slot())?,
+        };
+        Ok(Some(LiveCurveBinding {
+            object: FilletObject::IntermediateCurve(edge),
+            identity,
+        }))
+    }
+    pub(super) fn capture_pseudo_curve(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        edge: EdgeId,
+    ) -> Result<Option<LiveCurveBinding>> {
+        let Some(curve) = pseudo.brep_mut().edge_mut(edge)?.curve.as_mut() else {
+            return Ok(None);
+        };
+        let identity = ObjectRef {
+            type_code: curve.type_code(),
+            key: self.context.geometry_key(curve.notify_identity_slot())?,
+        };
+        Ok(Some(LiveCurveBinding {
+            object: FilletObject::Curve(FilletBody::Pseudo, edge),
+            identity,
+        }))
+    }
+    fn with_geometry<T>(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        call: impl FnOnce(
+            &mut Kernel,
+            &mut TopologyIntersector<FilletObject>,
+            &mut InsertionGeometry<'_>,
+        ) -> Result<T>,
+    ) -> Result<T> {
+        let mut geometry = InsertionGeometry::new(target, pseudo, self.intermediate)?
+            .with_notifications(
+                self.curves,
+                InsertionNotifications {
+                    records: self.records,
+                    attributes: self.attributes,
+                    context: self.context,
+                },
+            )?;
+        call(self.k, self.ti, &mut geometry)
+    }
+    pub(super) fn marker_scope<T>(
+        &mut self,
+        target: &mut Brep,
+        face: FaceId,
+        id: u64,
+        editing: bool,
+        body: impl FnOnce(&mut Self, &mut Brep, &FaceMarker) -> Result<T>,
+    ) -> Result<T> {
+        let marker = begin_face_marker(self.attributes, target, face, id, editing)?;
+        let result = body(self, target, &marker);
+        let cleanup = end_face_marker(self.attributes, target, marker);
+        match result {
+            Err(error) => Err(error),
+            Ok(value) => cleanup.map(|()| value),
+        }
+    }
+    pub(super) fn update_changes(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        marker: &FaceMarker,
+        face: FaceId,
+    ) -> Result<()> {
+        let mut access = TargetTopologyChanges::new(
+            self.target_serial,
+            target,
+            pseudo,
+            self.attributes,
+            self.solvers,
+            self.corners,
+        )?;
+        crate::blend::fillet_executive::topology_changes::update_topology_changes(
+            self.k,
+            self.solver_order,
+            self.corner_order,
+            &mut access,
+            FilletObject::Attribute(marker.attribute()),
+            FilletObject::Topology(FilletBody::Target, EntityRef::Face(face)),
+        )
+    }
+    pub(super) fn register_bound_intersection(
+        &mut self,
+        target: &mut Brep,
+        face: FaceId,
+        surface: Option<&SurfaceBinding>,
+    ) -> Result<()> {
+        if let Some(binding) = surface {
+            binding.resolve_in_body(self.intermediate)?;
+        }
+        let actual = if target.face(face)?.surface.is_some() {
+            Some(FilletObject::Surface(SurfaceBinding::capture_in_body(
+                self.context,
+                target,
+                InsertionBody::Target,
+                face,
+            )?))
+        } else {
+            None
+        };
+        self.ti
+            .register_empty_ssi(actual, surface.copied().map(FilletObject::Surface));
+        Ok(())
+    }
+    fn merge_actual_curve(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        face: FaceId,
+        tolerance: f64,
+        curve: FilletObject,
+        uv: Option<FilletObject>,
+        managed: EdgeId,
+        deleted: &mut Vec<EdgeId>,
+    ) -> Result<()> {
+        self.with_geometry(pseudo, target, |k, ti, geometry| {
+            let input = CurveOnSurfaces {
+                surface: geometry
+                    .face_surface(FilletObject::Topology(
+                        FilletBody::Target,
+                        EntityRef::Face(face),
+                    ))
+                    .ok_or_else(|| invalid("original target Face missing"))?,
+                other_surface: None,
+                curve_tolerance: tolerance,
+                curve,
+                uv_curve1: uv,
+                uv_curve2: None,
+                brep_edge: None,
+                other_edge: Some(FilletObject::IntermediateTopology(EntityRef::Edge(managed))),
+                ti: Some(FilletObject::Intersector),
+                classifications: None,
+            };
+            let attempt = ti.merge_curve_on_surfaces_linked_attempt(k, geometry, &input);
+            if let Some(edges) = attempt.output.deleted_edges {
+                for edge in edges {
+                    match edge {
+                        FilletObject::IntermediateTopology(EntityRef::Edge(edge)) => {
+                            deleted.push(edge);
+                        }
+                        FilletObject::Topology(FilletBody::Target, EntityRef::Edge(_)) => {}
+                        _ => return Err(invalid("deleted edge outside actual merge operands")),
+                    }
+                }
+            }
+            if !attempt.output.deleted_curves.is_empty() {
+                return Err(SolidError::unported(
+                    "SmTopologyIntersector temporary Curve destruction",
+                    "blend.fillet_executive_p1",
+                ));
+            }
+            attempt.status
+        })
+    }
+    pub(super) fn merge_corner_curve(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        face: FaceId,
+        curve: Option<&LiveCurveBinding>,
+        managed: EdgeId,
+    ) -> Result<()> {
+        let binding = curve.ok_or_else(|| {
+            SolidError::null_pointer("SmTopologyIntersector::MergeCurveOnSurfaces")
+        })?;
+        let actual = match binding.object {
+            FilletObject::IntermediateCurve(e) => self.intermediate.edge(e)?.curve.as_ref(),
+            FilletObject::Curve(FilletBody::Pseudo, e) => pseudo.brep().edge(e)?.curve.as_ref(),
+            _ => return Err(invalid("corner curve not in actual retained bodies")),
+        }
+        .ok_or_else(|| invalid("captured corner Curve removed"))?;
+        if actual.notify_key() != Some(binding.identity.key)
+            || actual.type_code() != binding.identity.type_code
+        {
+            return Err(invalid("captured corner Curve replaced"));
+        }
+        let tolerance = self.intermediate.edge(managed)?.tolerance;
+        self.merge_actual_curve(
+            pseudo,
+            target,
+            face,
+            tolerance,
+            binding.object,
+            None,
+            managed,
+            &mut Vec::new(),
+        )
+    }
+}
+impl IntersectionTopologyContext for LiveGeometryInsertion<'_> {
+    type FaceMarker = FaceMarker;
+    type SurfaceBinding = SurfaceBinding;
+    fn kernel(&self) -> &Kernel {
+        self.k
+    }
+    fn begin_intersection(&mut self, _solver: &FilletSolver) -> Result<()> {
+        Ok(())
+    }
+    fn surface_binding(
+        &mut self,
+        pseudo: &FilletBrep,
+        g: FilletGeomId,
+    ) -> Result<Option<SurfaceBinding>> {
+        let Some(storage) = pseudo.geom(g)?.fillet_surface.as_ref() else {
+            return Ok(None);
+        };
+        let (body, face) = match storage {
+            FilletSurfaceStorage::ManagedFace { body, face } => (*body, *face),
+            FilletSurfaceStorage::Owned(_) => {
+                return Err(SolidError::unported(
+                    "SmFilletGeom owned insertion Surface",
+                    "blend.fillet_executive_p1",
+                ))
+            }
+        };
+        let serial = self
+            .intermediate
+            .notify_serial()
+            .ok_or_else(|| invalid("intermediate identity missing"))?;
+        if body != topology_ref(serial, EntityRef::Brep(BrepId::from_index(0))) {
+            return Err(invalid("fillet Surface belongs to foreign body"));
+        }
+        self.capture_managed_surface(face)
+    }
+    fn attribute_edges(&self) -> Result<Vec<EdgeId>> {
+        edge_attribute_users(self.attributes, self.edge_attribute, self.intermediate)
+    }
+    fn with_face_scope<T>(
+        &mut self,
+        target: &mut Brep,
+        face: FaceId,
+        role: IntersectionFaceRole,
+        body: impl FnOnce(&mut Self, &mut Brep, &FaceMarker) -> Result<T>,
+    ) -> Result<T> {
+        self.marker_scope(
+            target,
+            face,
+            match role {
+                IntersectionFaceRole::Rail => 777,
+                IntersectionFaceRole::Side => 778,
+            },
+            role == IntersectionFaceRole::Rail,
+            body,
+        )
+    }
+    fn managed_edge_tolerance(&self, edge: EdgeId) -> Result<f64> {
+        Ok(self.intermediate.edge(edge)?.tolerance)
+    }
+    fn merge_curve(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        face: FaceId,
+        tol: f64,
+        edge: EdgeId,
+        managed: EdgeId,
+        deleted: &mut Vec<EdgeId>,
+    ) -> Result<()> {
+        let primary = edgeuse::p1::primary_edgeuse(pseudo.brep(), edge)?
+            .ok_or_else(|| SolidError::null_pointer("SmFilletEdge::GetOriginalUVCurve"))?;
+        let mate = edgeuse::p1::mate(pseudo.brep(), primary)?
+            .ok_or_else(|| SolidError::null_pointer("SmFilletEdge::GetOriginalUVCurve"))?;
+        let uv = pseudo
+            .original_uv_curve(edge)?
+            .map(|_| FilletObject::UvCurve(FilletBody::Pseudo, mate));
+        self.merge_actual_curve(
+            pseudo,
+            target,
+            face,
+            tol,
+            FilletObject::Curve(FilletBody::Pseudo, edge),
+            uv,
+            managed,
+            deleted,
+        )
+    }
+    fn update_topology(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        marker: &FaceMarker,
+        face: FaceId,
+    ) -> Result<()> {
+        self.update_changes(pseudo, target, marker, face)
+    }
+    fn register_intersection(
+        &mut self,
+        _pseudo: &FilletBrep,
+        target: &mut Brep,
+        face: FaceId,
+        surface: &Option<SurfaceBinding>,
+    ) -> Result<()> {
+        self.register_bound_intersection(target, face, surface.as_ref())
+    }
+    fn record_bad_merge(
+        &mut self,
+        pseudo: &FilletBrep,
+        g: FilletGeomId,
+        filleted: Option<EdgeId>,
+        _target: &Brep,
+        face: FaceId,
+        rail: EdgeId,
+        surface: &Option<SurfaceBinding>,
+    ) -> Result<()> {
+        if let Some(binding) = surface {
+            binding.resolve_in_body(self.intermediate)?;
+        }
+        self.error.note_merge_error(FilletErrorType::BadMerge,pseudo.geom(g)?.status(),filleted.map(|e|FilletObject::Topology(FilletBody::Target,EntityRef::Edge(e))),
+            Some(FilletObject::Topology(FilletBody::Target,EntityRef::Face(face))),Some(FilletObject::Topology(FilletBody::Pseudo,EntityRef::Edge(rail))),surface.map(FilletObject::Surface),
+            Some("SmFilletGeom::InsertIntersectionTopology(): Failure to merge fillet rail curve into side face of Target Brep"));
+        Ok(())
+    }
+}
+
+struct LiveInsertionAccess<'a, 'target> {
+    objects: &'a mut SessionObjects<'target>,
+    context: &'a mut Context,
+}
+impl LiveInsertionAccess<'_, '_> {
+    fn with_context<T>(
+        &mut self,
+        k: &mut Kernel,
+        executive: &mut FilletExecutive<FilletObject>,
+        body: impl FnOnce(&mut LiveGeometryInsertion<'_>, &mut FilletBrep, &mut Brep) -> Result<T>,
+    ) -> Result<T> {
+        let Some(FilletObject::Attribute(edge_attribute)) = executive.edge_attribute else {
+            return Err(invalid("actual edge attribute missing"));
+        };
+        self.objects
+            .attributes
+            .get(edge_attribute)
+            .ok_or_else(|| invalid("actual edge attribute not live"))?;
+        let intermediate = self
+            .objects
+            .intermediate
+            .as_mut()
+            .ok_or_else(|| invalid("actual intermediate body missing"))?;
+        let mut context = LiveGeometryInsertion {
+            k,
+            context: self.context,
+            ti: &mut executive.intersector,
+            intermediate,
+            curves: &mut self.objects.insertion_curves,
+            attributes: &mut self.objects.attributes,
+            records: &mut self.objects.notification_records,
+            solvers: &self.objects.solvers,
+            corners: &self.objects.corners,
+            solver_order: &executive.solvers,
+            corner_order: &executive.corners,
+            error: &mut executive.error,
+            edge_attribute,
+            target_serial: self.objects.target_serial,
+        };
+        body(&mut context, &mut self.objects.pseudo, self.objects.target)
+    }
+}
+impl TopologyInsertionAccess<FilletObject> for LiveInsertionAccess<'_, '_> {
+    fn insertion_solver_geoms(&self, solver: FilletObject) -> Result<Vec<FilletObject>> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("insertion solver is not retained"));
+        };
+        let solver = self
+            .objects
+            .solvers
+            .get(id.0 as usize)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| invalid("actual insertion solver absent"))?;
+        Ok(solver
+            .base()
+            .fillet_geoms
+            .iter()
+            .copied()
+            .map(FilletObject::Geometry)
+            .collect())
+    }
+    fn insertion_geom_topology(
+        &mut self,
+        k: &mut Kernel,
+        geom: FilletObject,
+        executive: &mut FilletExecutive<FilletObject>,
+    ) -> Result<()> {
+        let FilletObject::Geometry(g) = geom else {
+            return Err(invalid("insertion geometry is not retained"));
+        };
+        self.with_context(k, executive, |context, pseudo, target| {
+            let id = pseudo
+                .geom(g)?
+                .fillet_solver()
+                .ok_or_else(|| invalid("actual geometry solver missing"))?;
+            let solvers = context.solvers;
+            let solver = solvers
+                .get(id.0 as usize)
+                .and_then(Option::as_ref)
+                .ok_or_else(|| invalid("actual geometry solver absent"))?;
+            pseudo.insert_intersection_topology_with_context(g, solver.base(), target, context)
+        })
+    }
+    fn insertion_corner_topology(
+        &mut self,
+        k: &mut Kernel,
+        corner: FilletObject,
+        executive: &mut FilletExecutive<FilletObject>,
+    ) -> Result<()> {
+        let FilletObject::Corner(id) = corner else {
+            return Err(invalid("insertion corner is not retained"));
+        };
+        self.with_context(k, executive, |context, pseudo, target| {
+            context.insert_corner(pseudo, target, id)
+        })
+    }
+}
+impl FilletSession<'_> {
+    /// Run component stages under the real native filleting flags. The Boolean
+    /// flag is restored on every result; native retains the TI filleting flag.
+    /// # Errors
+    /// The component's original error, with its mutations retained.
+    pub fn with_filleting_context<T>(
+        &mut self,
+        k: &mut Kernel,
+        body: impl FnOnce(&mut Self, &mut Kernel) -> Result<T>,
+    ) -> Result<T> {
+        let prior = k.context.doing_boolean();
+        k.context.set_doing_boolean(true);
+        self.executive.intersector.doing_fillets = true;
+        let result = body(self, k);
+        k.context.set_doing_boolean(prior);
+        result
+    }
+    /// Insert all retained geometry and corner topology through the shared native
+    /// order. Target editing is restored on every result.
+    /// # Errors
+    /// Original mapping/insertion errors or a genuine missing live capability.
+    pub fn insert_fillet_intersection_topology(&mut self, k: &mut Kernel) -> Result<()> {
+        let editing = self.objects.target.editing_enabled();
+        self.objects.target.set_editing_enabled(true);
+        let result = (|| {
+            self.executive
+                .intersector
+                .set_primary_brep(Some(FilletObject::Body(FilletBody::Target)));
+            self.executive
+                .intersector
+                .set_other_brep(Some(FilletObject::IntermediateBrep));
+            self.set_fillet_brep_edge_map(k)?;
+            Context::with_notification_context(k, |k, context| {
+                self.executive.insert_intersection_topology(
+                    k,
+                    &mut LiveInsertionAccess {
+                        objects: &mut self.objects,
+                        context,
+                    },
+                )
+            })?
+        })();
+        self.objects.target.set_editing_enabled(editing);
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::Point3;
+    #[test]
+    fn filleting_context_restores_boolean_on_component_error() {
+        let mut k = Kernel::default();
+        let mut target = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            20.0,
+            30.0,
+        )
+        .unwrap();
+        let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+        let result: Result<()> = session.with_filleting_context(&mut k, |session, k| {
+            assert!(k.context.doing_boolean());
+            assert!(session.executive.intersector.doing_fillets);
+            Err(SolidError::sm_err("actual component control"))
+        });
+        assert!(result.is_err());
+        assert!(!k.context.doing_boolean());
+        assert!(session.executive.intersector.doing_fillets);
+    }
+    #[test]
+    fn actual_edit_loan_preserves_boolean_metadata_callbacks_and_failure_prefix() {
+        use crate::geom::context::{with_mark_lock, MarkType, NotifyCallback, ALL_MARKS};
+        use crate::geom::object::NotifyOperation;
+        use std::sync::{Arc, Mutex};
+        #[derive(Debug)]
+        struct Capture(Arc<Mutex<Vec<(NotifyOperation, ObjectRef)>>>);
+        impl NotifyCallback for Capture {
+            fn execute(
+                &mut self,
+                op: NotifyOperation,
+                caller: ObjectRef,
+                _one: Option<ObjectRef>,
+                _two: Option<ObjectRef>,
+                _three: Option<ObjectRef>,
+            ) -> Result<()> {
+                self.0.lock().unwrap().push((op, caller));
+                Ok(())
+            }
+        }
+        let mut k = Kernel::default();
+        let mut target = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            20.0,
+            30.0,
+        )
+        .unwrap();
+        let edge = target.edges().ids().next().unwrap();
+        let vertex = target.vertices().ids().next().unwrap();
+        let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &[edge], 0.5, 1, 1, 1.0)
+            .unwrap();
+        session.create_corners(&k, None).unwrap();
+        session.create_fillet_brep(&mut k, None).unwrap();
+        k.context.set_this_model_size_estimate(1234.5);
+        k.context.set_this_large_small_size_ratio(37.0);
+        with_mark_lock(&mut k, ALL_MARKS, |_k, _mark| {}).unwrap();
+        let mark = k.context.current_mark(MarkType::Mark);
+        let zone = k.context.this_zone_tol_3d();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        k.context
+            .set_user_notify_callback(Some(Box::new(Capture(events.clone()))));
+        let caller = session.target_identity(EntityRef::Vertex(vertex));
+        let changed = Point3::new(17.0, 18.0, 19.0);
+        let result: Result<()> = session.with_filleting_context(&mut k, |session, k| {
+            session.with_insertion_geometry(k, |_k, _ti, geometry| {
+                geometry.with_edit(InsertionBody::Target, |body, env| {
+                    let context = env.context.as_deref().unwrap();
+                    assert!(context.doing_boolean());
+                    assert_eq!(context.stored_model_size_estimate(), 1234.5);
+                    assert_eq!(context.stored_large_small_size_ratio(), 37.0);
+                    assert_eq!(context.this_zone_tol_3d(), zone);
+                    assert_eq!(context.current_mark(MarkType::Mark), mark);
+                    let key_of = env.key_of;
+                    crate::topology::vertex::set_point(
+                        body,
+                        vertex,
+                        changed,
+                        env.records,
+                        env.attributes,
+                        env.context.as_deref_mut(),
+                        caller,
+                        &|vu| key_of(EntityRef::Vertexuse(vu)),
+                    )?;
+                    Err(SolidError::sm_err("ordinary failure after actual edit"))
+                })
+            })
+        });
+        assert!(result.is_err());
+        assert_eq!(session.target().vertex(vertex).unwrap().point, changed);
+        assert!(!k.context.doing_boolean());
+        assert_eq!(k.context.stored_model_size_estimate(), 1234.5);
+        assert_eq!(k.context.stored_large_small_size_ratio(), 37.0);
+        assert_eq!(k.context.current_mark(MarkType::Mark), mark);
+        assert!(events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|&(op, object)| op == NotifyOperation::ChangeGeometry && object == caller));
+        assert!(k.context.user_notify_callback().is_some());
+        let mut later = crate::curve::curve::Curve::from(crate::curve::line::Line::from_points(
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            3,
+        ));
+        assert!(k.context.geometry_key(later.notify_identity_slot()).is_ok());
+    }
+
+    #[test]
+    fn actual_box_insertion_runs_the_shared_geometry_and_corner_stage() {
+        let mut k = Kernel::default();
+        let mut target = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            20.0,
+            30.0,
+        )
+        .unwrap();
+        let edge = target.edges().ids().next().unwrap();
+        let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &[edge], 0.5, 1, 1, 1.0)
+            .unwrap();
+        session.create_corners(&k, None).unwrap();
+        let result = session.with_filleting_context(&mut k, |session, k| {
+            session.create_fillet_brep(k, None)?;
+            session.shrink_fillet_faces(k)?;
+            let editing = session.target().editing_enabled();
+            let result = session.insert_fillet_intersection_topology(k);
+            assert_eq!(session.target().editing_enabled(), editing);
+            result
+        });
+        assert!(result.is_ok(), "{result:?}");
+        assert!(!k.context.doing_boolean());
+        assert!(session.executive.intersector.doing_fillets);
+        assert_eq!(
+            crate::topology::brep::p1::vertices(session.target(), None)
+                .unwrap()
+                .len(),
+            12
+        );
+        assert_eq!(
+            crate::topology::brep::p1::edges(session.target(), None)
+                .unwrap()
+                .len(),
+            20
+        );
+        assert_eq!(
+            crate::topology::brep::p1::faces(session.target(), None)
+                .unwrap()
+                .len(),
+            10
+        );
+        let owned_edges = crate::topology::brep::p1::edges(session.target(), None).unwrap();
+        for edge in owned_edges.iter().skip(18) {
+            assert!(
+                session
+                    .target()
+                    .edge(*edge)
+                    .unwrap()
+                    .edgeuses
+                    .iter()
+                    .all(|&eu| session
+                        .target()
+                        .edgeuse(eu)
+                        .unwrap()
+                        .uv_trim_curve
+                        .is_none()),
+                "native endrib edge has no owned UV trims: {edge:?}"
+            );
+        }
+    }
+}

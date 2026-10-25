@@ -186,6 +186,120 @@ pub enum VertexEntry<O> {
     Corner(O),
 }
 
+/// Actual face-selection capabilities, sharing the executive's ordered loop.
+pub trait OriginalSurfaceTrimAccess<O: Copy + Ord, F> {
+    /// Retained geometries of the actual solver, in order.
+    fn original_trim_geometries(&self, solver: O) -> Result<Vec<O>>;
+    /// Execute one geometry's selection with the caller's existing marks and outputs.
+    fn original_trim_geometry(
+        &mut self,
+        k: &mut Kernel,
+        geom: O,
+        kept: &mut Vec<F>,
+        deleted: &mut Vec<F>,
+        executive: &mut FilletExecutive<O>,
+    ) -> Result<()>;
+}
+
+struct IndexedOriginalTrim<'a, A> {
+    access: &'a mut A,
+    marks: &'a [ContextMark],
+}
+
+impl<O: ClassObject + SolutionObject + Ord, A: ExecutiveAccess<O>> OriginalSurfaceTrimAccess<O, O>
+    for IndexedOriginalTrim<'_, A>
+{
+    fn original_trim_geometries(&self, solver: O) -> Result<Vec<O>> {
+        self.access.solver_geoms(solver)
+    }
+    fn original_trim_geometry(
+        &mut self,
+        k: &mut Kernel,
+        geom: O,
+        kept: &mut Vec<O>,
+        deleted: &mut Vec<O>,
+        executive: &mut FilletExecutive<O>,
+    ) -> Result<()> {
+        self.access
+            .trim_original_surfaces(k, geom, kept, deleted, self.marks, executive)
+    }
+}
+
+/// Attribute tagging and merge capabilities for the surviving intermediate body.
+pub trait FilletTagMergeAccess<O: Copy + Ord> {
+    /// Re-walk the intermediate body's current owning edges.
+    ///
+    /// # Errors
+    /// Returns body lookup or traversal failures.
+    fn tag_merge_edges(&self, body: O) -> Result<Vec<O>>;
+    /// Read the recorded pseudo edge's native eligibility and mapped edge.
+    ///
+    /// # Errors
+    /// Returns pseudo-edge lookup failures.
+    fn tag_merge_edge(&self, edge: O) -> Result<TopoEdgeView<O>>;
+    /// Allocate one `FILLET_EDGES` standalone-reference attribute.
+    ///
+    /// # Errors
+    /// Returns allocation or store failures.
+    fn tag_merge_attribute(&mut self, k: &Kernel) -> Result<O>;
+    /// Attach the allocated attribute to the actual surviving edge.
+    ///
+    /// # Errors
+    /// Returns attachment failures; the executive ignores ordinary native status.
+    fn tag_merge_attach(&mut self, edge: O, attribute: O) -> Result<()>;
+    /// Merge the intermediate body into the target, adding analytics.
+    ///
+    /// # Errors
+    /// Returns the underlying merge failure without discarding partial edits.
+    fn tag_merge_bodies(&mut self, k: &mut Kernel, target: O, fillet: O) -> Result<()>;
+}
+
+impl<O: ClassObject + SolutionObject + Ord, A: ExecutiveAccess<O>> FilletTagMergeAccess<O> for A {
+    fn tag_merge_edges(&self, body: O) -> Result<Vec<O>> {
+        self.edges(body)
+    }
+    fn tag_merge_edge(&self, edge: O) -> Result<TopoEdgeView<O>> {
+        self.topo_edge(edge)
+    }
+    fn tag_merge_attribute(&mut self, k: &Kernel) -> Result<O> {
+        self.new_keep_attribute(k)
+    }
+    fn tag_merge_attach(&mut self, edge: O, attribute: O) -> Result<()> {
+        self.add_attribute(edge, Some(attribute))
+    }
+    fn tag_merge_bodies(&mut self, k: &mut Kernel, target: O, fillet: O) -> Result<()> {
+        self.merge_brep(k, target, fillet, None, None, true)
+    }
+}
+
+/// Native face-list completion and deletion through the retained intersector.
+pub trait OriginalSurfaceDeletionAccess<O: ClassObject + SolutionObject + Ord> {
+    /// Current owning faces of the actual fillet body, in traversal order.
+    fn original_managed_faces(&self, body: O) -> Result<Vec<O>>;
+    /// Delete the qualified list through the actual intersector and body provider.
+    fn original_delete_faces(
+        &mut self,
+        k: &mut Kernel,
+        intersector: &mut TopologyIntersector<O>,
+        faces: &[O],
+    ) -> Result<()>;
+}
+impl<O: ClassObject + SolutionObject + Ord, A: ExecutiveAccess<O>> OriginalSurfaceDeletionAccess<O>
+    for A
+{
+    fn original_managed_faces(&self, body: O) -> Result<Vec<O>> {
+        self.faces(body)
+    }
+    fn original_delete_faces(
+        &mut self,
+        k: &mut Kernel,
+        intersector: &mut TopologyIntersector<O>,
+        faces: &[O],
+    ) -> Result<()> {
+        self.delete_faces(k, intersector, faces, None)
+    }
+}
+
 /// Executive member state consumed by p3, co-ported from p1. This is not the
 /// constructor: p1 must supply its constructor/setup defaults and intersector.
 #[derive(Debug, Clone)]
@@ -301,6 +415,57 @@ impl StitchAttempt {
                 max_edge_gap: 0.0,
             }),
         }
+    }
+}
+
+/// Retained operations for the native ordered geometry/corner insertion component.
+pub trait TopologyInsertionAccess<O: ClassObject + SolutionObject + Ord> {
+    /// Copy the current solver's geometry list at its native traversal position.
+    /// # Errors
+    /// Missing actual solver context.
+    fn insertion_solver_geoms(&self, solver: O) -> Result<Vec<O>>;
+    /// Insert one actual geometry through the retained intersector.
+    /// # Errors
+    /// The original geometry insertion error.
+    fn insertion_geom_topology(
+        &mut self,
+        k: &mut Kernel,
+        geom: O,
+        executive: &mut FilletExecutive<O>,
+    ) -> Result<()>;
+    /// Insert one actual corner after all solver geometries.
+    /// # Errors
+    /// The original corner insertion error.
+    fn insertion_corner_topology(
+        &mut self,
+        k: &mut Kernel,
+        corner: O,
+        executive: &mut FilletExecutive<O>,
+    ) -> Result<()>;
+}
+impl<O, A> TopologyInsertionAccess<O> for A
+where
+    O: ClassObject + SolutionObject + Ord,
+    A: ExecutiveAccess<O> + ?Sized,
+{
+    fn insertion_solver_geoms(&self, solver: O) -> Result<Vec<O>> {
+        ExecutiveAccess::solver_geoms(self, solver)
+    }
+    fn insertion_geom_topology(
+        &mut self,
+        k: &mut Kernel,
+        geom: O,
+        executive: &mut FilletExecutive<O>,
+    ) -> Result<()> {
+        ExecutiveAccess::insert_geom_topology(self, k, geom, executive)
+    }
+    fn insertion_corner_topology(
+        &mut self,
+        k: &mut Kernel,
+        corner: O,
+        executive: &mut FilletExecutive<O>,
+    ) -> Result<()> {
+        ExecutiveAccess::insert_corner_topology(self, k, corner, executive)
     }
 }
 
@@ -2004,6 +2169,33 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         result
     }
 
+    /// Insert solver geometries, then corners, in the native retained-list order.
+    /// The caller establishes the actual intersector bodies and edge map first.
+    /// # Errors
+    /// The first geometry/corner insertion error, retaining all earlier mutations.
+    pub fn insert_intersection_topology(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl TopologyInsertionAccess<O>,
+    ) -> Result<()> {
+        if self.options.topology_insertion {
+            let mut index = 0;
+            while let Some(solver) = self.solvers.get(index).copied() {
+                // GetFilletGeoms copies the array before its inner loop.
+                for geom in access.insertion_solver_geoms(solver)? {
+                    access.insertion_geom_topology(k, geom, self)?;
+                }
+                index += 1;
+            }
+            let mut index = 0;
+            while let Some(corner) = self.corners.get(index).copied() {
+                access.insertion_corner_topology(k, corner, self)?;
+                index += 1;
+            }
+        }
+        Ok(())
+    }
+
     fn merge_fillet(
         &mut self,
         k: &mut Kernel,
@@ -2022,21 +2214,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return Ok(());
         }
         access.set_fillet_brep_edge_map(k, self)?;
-        if self.options.topology_insertion {
-            let mut index = 0;
-            while let Some(solver) = self.solvers.get(index).copied() {
-                // GetFilletGeoms copies the array before its inner loop.
-                for geom in access.solver_geoms(solver)? {
-                    access.insert_geom_topology(k, geom, self)?;
-                }
-                index += 1;
-            }
-            let mut index = 0;
-            while let Some(corner) = self.corners.get(index).copied() {
-                access.insert_corner_topology(k, corner, self)?;
-                index += 1;
-            }
-        }
+        self.insert_intersection_topology(k, access)?;
         // Upstream cbi_MAP_TOPO_EDGES=0: do not collect mapped intersections.
         if self.options.global_merge {
             self.intersector
@@ -2067,6 +2245,81 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
+    /// Select faces in native solver and geometry order under the caller's live mark scope.
+    ///
+    /// # Errors
+    /// The first geometry failure; previously accumulated faces and marks remain.
+    pub fn select_original_surfaces<F>(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl OriginalSurfaceTrimAccess<O, F>,
+        kept: &mut Vec<F>,
+        deleted: &mut Vec<F>,
+    ) -> Result<()> {
+        let mut index = 0;
+        while let Some(solver) = self.solvers.get(index).copied() {
+            for geom in access.original_trim_geometries(solver)? {
+                access.original_trim_geometry(k, geom, kept, deleted, self)?;
+            }
+            index += 1;
+        }
+        Ok(())
+    }
+
+    /// Append unkept fillet faces and delete the combined qualified list.
+    /// The caller keeps its original mark scope alive across this operation.
+    ///
+    /// # Errors
+    /// The original face traversal or deletion error; list and topology prefixes remain.
+    pub fn delete_original_surface_faces(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl OriginalSurfaceDeletionAccess<O>,
+        fillet: O,
+        kept: &[O],
+        deleted: &mut Vec<O>,
+    ) -> Result<()> {
+        for face in access.original_managed_faces(fillet)? {
+            if !kept.contains(&face) && !deleted.contains(&face) {
+                deleted.push(face);
+            }
+        }
+        access.original_delete_faces(k, &mut self.intersector, deleted)
+    }
+
+    /// Tag eligible surviving `OnEdge` edges, then merge the intermediate body.
+    ///
+    /// `attributes` owns every allocated marker even if attachment or merge fails.
+    /// The caller retains them through subsequent stitching and orientation, then
+    /// releases them on every exit. This component does not delete either body.
+    ///
+    /// # Errors
+    /// Returns traversal, allocation, genuine missing-capability, or merge errors;
+    /// already appended attributes and partial body edits remain available.
+    pub fn tag_and_merge_fillet_faces(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl FilletTagMergeAccess<O>,
+        target: O,
+        fillet: O,
+        attributes: &mut Vec<O>,
+    ) -> Result<()> {
+        let edges = access.tag_merge_edges(fillet)?;
+        for edge in self.topo_edges.iter().flatten().copied() {
+            let view = access.tag_merge_edge(edge)?;
+            if !view.on_edge || !view.has_curve {
+                continue;
+            }
+            if let Some(edge) = view.brep_edge.filter(|edge| edges.contains(edge)) {
+                let attribute = access.tag_merge_attribute(k)?;
+                attributes.push(attribute);
+                ignore(access.tag_merge_attach(edge, attribute))?;
+            }
+        }
+        // Upstream cbi_MAP_TOPO_EDGES=0: no attributes on extra mated edges.
+        access.tag_merge_bodies(k, target, fillet)
+    }
+
     fn trim_and_merge(
         &mut self,
         k: &mut Kernel,
@@ -2077,35 +2330,16 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ) -> Result<()> {
         let mut deleted = Vec::new();
         let mut kept = Vec::new();
-        let mut index = 0;
-        while let Some(solver) = self.solvers.get(index).copied() {
-            for geom in access.solver_geoms(solver)? {
-                access.trim_original_surfaces(k, geom, &mut kept, &mut deleted, marks, self)?;
-            }
-            index += 1;
-        }
-        for face in access.faces(fillet)? {
-            if !kept.contains(&face) && !deleted.contains(&face) {
-                deleted.push(face);
-            }
-        }
-        access.delete_faces(k, &mut self.intersector, &deleted, None)?;
+        self.select_original_surfaces(
+            k,
+            &mut IndexedOriginalTrim { access, marks },
+            &mut kept,
+            &mut deleted,
+        )?;
+        self.delete_original_surface_faces(k, access, fillet, &kept, &mut deleted)?;
         let mut attributes = Vec::new();
         let result = (|| {
-            let edges = access.edges(fillet)?; // re-walk after DeleteFaces
-            for edge in self.topo_edges.iter().flatten().copied() {
-                let view = access.topo_edge(edge)?;
-                if !view.on_edge || !view.has_curve {
-                    continue;
-                }
-                if let Some(edge) = view.brep_edge.filter(|edge| edges.contains(edge)) {
-                    let attribute = access.new_keep_attribute(k)?;
-                    attributes.push(attribute);
-                    ignore(access.add_attribute(edge, Some(attribute)))?;
-                }
-            }
-            // Upstream cbi_MAP_TOPO_EDGES=0: no attributes on extra mated edges.
-            access.merge_brep(k, target, fillet, None, None, true)?;
+            self.tag_and_merge_fillet_faces(k, access, target, fillet, &mut attributes)?;
             if self.intersector.other_brep() == Some(fillet) {
                 self.intersector.set_other_brep(None);
             }

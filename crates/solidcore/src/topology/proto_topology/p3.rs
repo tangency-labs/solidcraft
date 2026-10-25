@@ -1544,8 +1544,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         // Classify the coincident curves against their faces
                         let face1 = f1.ok_or(dangling("face is null"))?;
                         let face2 = f2.ok_or(dangling("face is null"))?;
-                        ignore_soft(geometry.face_curve_on_classify(k, face1, true, &mut cc1))?;
-                        ignore_soft(geometry.face_curve_on_classify(k, face2, true, &mut cc2))?;
+                        ignore_soft(geometry.face_curve_on_classify_mut(k, face1, true, &mut cc1))?;
+                        ignore_soft(geometry.face_curve_on_classify_mut(k, face2, true, &mut cc2))?;
 
                         // a curve for every common interval classified in both
                         let _ = cc1.extract_geometry(
@@ -1586,13 +1586,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 }
 
                 // Classify Edge->Curve against both SrcFaces
-                ignore_soft(geometry.face_curve_on_classify(
+                ignore_soft(geometry.face_curve_on_classify_mut(
                     k,
                     f1.ok_or(dangling("face is null"))?,
                     true,
                     &mut cc1,
                 ))?;
-                ignore_soft(geometry.face_curve_on_classify(
+                ignore_soft(geometry.face_curve_on_classify_mut(
                     k,
                     f2.ok_or(dangling("face is null"))?,
                     true,

@@ -218,6 +218,20 @@ pub trait ProtoBrep<O>: ProtoGeometry<O> + ProtoTopology<O> {
         do_point_classify: bool,
         cc: &mut CurveClassification<O>,
     ) -> Result<bool>;
+    /// Mutable owning-query successor. Legacy providers retain their read-only behavior;
+    /// actual providers can retain lazy UV/gap updates on both success and failure.
+    /// # Errors
+    /// The original face classification error.
+    fn face_curve_on_classify_mut(
+        &mut self,
+        k: &Kernel,
+        face: O,
+        do_point_classify: bool,
+        cc: &mut CurveClassification<O>,
+    ) -> Result<bool> {
+        self.face_curve_on_classify(k, face, do_point_classify, cc)
+    }
+
     /// `SmBrep::Point3DClassify(point, tolerance, bDoBoundaryIntersections, sPC)` of the
     /// B-rep `brep` names, read by `topology.proto_topology_p3`: the B-rep owner
     /// implements it with `query::brep::BrepQuery::point_3d_classify` on its B-rep and

@@ -1428,3 +1428,27 @@ fn do_filleting_alone_does_not_check_the_result() {
     executive.do_filleting(&mut k, &mut access, None).unwrap();
     assert_eq!(executive.error.code, 0);
 }
+
+#[test]
+fn tag_merge_component_retains_allocated_markers_when_merge_fails() {
+    let mut executive = state();
+    executive.topo_edges.push(Some(Handle(20)));
+    let mut access = Access {
+        mapped_edges: true,
+        merge_error: Some(failure()),
+        ..Access::default()
+    };
+    let mut attributes = Vec::new();
+    let result = executive.tag_and_merge_fillet_faces(
+        &mut Kernel::default(),
+        &mut access,
+        Handle(0),
+        Handle(1),
+        &mut attributes,
+    );
+    assert!(result.is_err());
+    assert_eq!(attributes, [Handle(30)]);
+    assert_eq!(access.attributes.get(&Handle(30)), Some(&vec![Handle(11)]));
+    assert_eq!(access.events, ["new_attr", "merge"]);
+    assert_eq!(executive.topo_edges, [Some(Handle(20))]);
+}

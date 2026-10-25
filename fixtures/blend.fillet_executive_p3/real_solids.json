@@ -355,6 +355,90 @@
           "checkpoint": "mapped_fillet_edges"
         }
       }
+    },
+    {
+      "name": "real-box-insert-intersection-true-context",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:2920,3048,3074 (actual true-context constructor, shrink, map, all geometry then corner insertion; prefix only)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "inserted_intersection_topology"
+        }
+      }
+    },
+    {
+      "name": "real-box-select-original-surfaces-true-context",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:3243-3386 (actual common mate marking, real lock, all-FG original face selection; stops before deletion)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "selected_original_surfaces"
+        }
+      }
+    },
+    {
+      "name": "real-box-delete-original-faces-true-context",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:3243-3455 (actual same-lock selection, unkept managed append, real TI.DeleteFaces; stops before attribute tagging/merge)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "deleted_original_faces"
+        }
+      }
+    },
+    {
+      "name": "real-box-merge-fillet-faces-true-context",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:3243-3530 (same original mark scope, actual selection/DeleteFaces, temporary edge tagging and MergeBrep; stops before TI clear, managed deletion and final Stitch)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "merged_fillet_faces"
+        }
+      }
     }
   ]
 }

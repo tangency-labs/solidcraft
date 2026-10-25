@@ -9,8 +9,20 @@ mod edge_geometry;
 mod edge_map_state;
 #[path = "generated_geometry.rs"]
 mod generated_geometry;
+#[path = "insertion_checkpoint.rs"]
+mod insertion_checkpoint;
+#[path = "insertion_state.rs"]
+mod insertion_state;
 #[path = "intermediate_faces.rs"]
 mod intermediate_faces;
+#[path = "merge_attributes.rs"]
+mod merge_attributes;
+#[path = "original_deletion.rs"]
+mod original_deletion;
+#[path = "original_merge.rs"]
+mod original_merge;
+#[path = "original_selection.rs"]
+mod original_selection;
 #[path = "rail_classification.rs"]
 mod rail_classification;
 #[path = "rail_metadata.rs"]
@@ -236,6 +248,15 @@ pub(super) fn run(
     input: &RealSolid,
     before: &[f64],
 ) -> SolidResult<Vec<f64>> {
+    if matches!(
+        input.checkpoint,
+        Checkpoint::InsertedIntersectionTopology
+            | Checkpoint::SelectedOriginalSurfaces
+            | Checkpoint::DeletedOriginalFaces
+            | Checkpoint::MergedFilletFaces
+    ) {
+        return insertion_checkpoint::run(k, body, selected, input, before);
+    }
     let mut session = FilletSession::new(k, body)?;
     let mut statuses = [-1.0; 12];
     let prepare = session.prepare_constant_radius_edges(
@@ -622,6 +643,16 @@ pub(super) fn run(
 
 pub(super) fn output(mut values: &[f64], checkpoint: Checkpoint) -> Result<Output, HarnessError> {
     let mut out = Output::new();
+    if matches!(
+        checkpoint,
+        Checkpoint::InsertedIntersectionTopology
+            | Checkpoint::SelectedOriginalSurfaces
+            | Checkpoint::DeletedOriginalFaces
+            | Checkpoint::MergedFilletFaces
+    ) {
+        return insertion_output(values, checkpoint);
+    }
+
     out.values.insert(
         "selected_edge_before".into(),
         take_section(&mut values)?.to_vec(),
@@ -892,4 +923,109 @@ pub(super) fn cpp(input: &RealSolid) -> Result<Output, HarnessError> {
     let values = ffi::real_prefix(&input.wire(), input.checkpoint.code())
         .map_err(|e| HarnessError::new(e.to_string()))?;
     output(&values, input.checkpoint)
+}
+
+fn insertion_output(mut values: &[f64], checkpoint: Checkpoint) -> Result<Output, HarnessError> {
+    let mut out = Output::new();
+    out.values.insert(
+        "selected_edge_before".into(),
+        take_section(&mut values)?.to_vec(),
+    );
+    for (name, exact) in [
+        ("insertion_statuses", true),
+        ("insertion_passive_before", true),
+        ("insertion_raw_intervals_before", false),
+        ("insertion_passive_after", true),
+        ("insertion_raw_intervals_after", false),
+    ] {
+        let section = take_section(&mut values)?;
+        if exact {
+            if section.iter().any(|v| !v.is_finite() || v.fract() != 0.0) {
+                return Err(HarnessError::new("invalid insertion integer state"));
+            }
+            out.ints
+                .insert(name.into(), section.iter().map(|v| *v as i64).collect());
+        } else {
+            out.values.insert(name.into(), section.to_vec());
+        }
+    }
+    let (&complete, tail) = values
+        .split_first()
+        .ok_or_else(|| HarnessError::new("missing insertion completion"))?;
+    if complete != 0.0 && complete != 1.0 {
+        return Err(HarnessError::new("invalid insertion completion"));
+    }
+    values = tail;
+    let geometry_kind = if checkpoint == Checkpoint::MergedFilletFaces {
+        "merge"
+    } else if checkpoint == Checkpoint::DeletedOriginalFaces {
+        "deletion"
+    } else {
+        "insertion"
+    };
+    out.ints.insert(
+        format!("{geometry_kind}_geometry_present"),
+        vec![i64::from(complete == 1.0)],
+    );
+    if complete == 1.0 {
+        for body in ["target", "intermediate"] {
+            let state = take_section(&mut values)?;
+            if state.iter().any(|v| !v.is_finite() || v.fract() != 0.0) {
+                return Err(HarnessError::new("invalid insertion topology"));
+            }
+            out.ints.insert(
+                format!("{geometry_kind}_{body}_topology"),
+                state.iter().map(|v| *v as i64).collect(),
+            );
+            out.values.insert(
+                format!("{geometry_kind}_{body}_geometry"),
+                take_section(&mut values)?.to_vec(),
+            );
+        }
+    }
+    if checkpoint == Checkpoint::SelectedOriginalSurfaces {
+        let state = take_section(&mut values)?;
+        if state.iter().any(|v| !v.is_finite() || v.fract() != 0.0) {
+            return Err(HarnessError::new("invalid original selection state"));
+        }
+        out.ints.insert(
+            "original_surface_selection".into(),
+            state.iter().map(|v| *v as i64).collect(),
+        );
+    }
+    if checkpoint == Checkpoint::DeletedOriginalFaces {
+        let state = take_section(&mut values)?;
+        if state.iter().any(|v| !v.is_finite() || v.fract() != 0.0) {
+            return Err(HarnessError::new("invalid original deletion state"));
+        }
+        out.ints.insert(
+            "original_surface_deletion".into(),
+            state.iter().map(|v| *v as i64).collect(),
+        );
+        out.values.insert(
+            "original_surface_deletion_raw_intervals".into(),
+            take_section(&mut values)?.to_vec(),
+        );
+    }
+    if checkpoint == Checkpoint::MergedFilletFaces {
+        let state = take_section(&mut values)?;
+        if state
+            .iter()
+            .any(|value| !value.is_finite() || value.fract() != 0.0)
+        {
+            return Err(HarnessError::new("invalid retained merge state"));
+        }
+        out.ints.insert(
+            "original_faces_merge".into(),
+            state.iter().map(|value| *value as i64).collect(),
+        );
+        out.values.insert(
+            "original_faces_merge_raw_intervals".into(),
+            take_section(&mut values)?.to_vec(),
+        );
+    }
+    if !values.is_empty() {
+        return Err(HarnessError::new("trailing insertion data"));
+    }
+    Ok(out)
 }

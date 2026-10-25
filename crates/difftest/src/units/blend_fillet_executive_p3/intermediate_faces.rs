@@ -11,6 +11,13 @@ pub(super) fn snapshot(
     let Some(body) = session.intermediate_brep() else {
         return Ok((vec![0.0], Vec::new()));
     };
+    body_snapshot(k, body)
+}
+
+pub(super) fn body_snapshot(
+    k: &mut Kernel,
+    body: &solidcore::topology::Brep,
+) -> SolidResult<(Vec<f64>, Vec<f64>)> {
     let vertices = p1::vertices(body, None)?;
     let edges = p1::edges(body, None)?;
     let faces = p1::faces(body, None)?;

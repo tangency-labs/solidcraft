@@ -384,7 +384,7 @@ pub fn faceuse_shell_replacement(
 fn shell_connectivity(
     k: &Kernel,
     b: &Brep,
-    marks: &mut Marks,
+    marks: &mut (impl FaceTraversalMarks + ?Sized),
     start: VertexuseId,
     shell: ShellId,
     mark: MarkType,
@@ -467,6 +467,24 @@ pub fn shell_traversal(
     k: &mut Kernel,
     b: &Brep,
     marks: &mut Marks,
+    start: VertexId,
+    shell: ShellId,
+    edgeuses: Option<&mut Vec<EdgeuseId>>,
+    faceuses: Option<&mut Vec<FaceuseId>>,
+    lock: &MarkLock,
+) -> Result<()> {
+    shell_traversal_with_marks(k, b, marks, start, shell, edgeuses, faceuses, lock)
+}
+
+/// Traverse shell connectivity through borrowed retained topology marks.
+///
+/// # Errors
+/// Those of [`shell_traversal`]; successful mark writes remain on failure.
+#[allow(clippy::too_many_arguments)]
+pub fn shell_traversal_with_marks(
+    k: &mut Kernel,
+    b: &Brep,
+    marks: &mut (impl FaceTraversalMarks + ?Sized),
     start: VertexId,
     shell: ShellId,
     mut edgeuses: Option<&mut Vec<EdgeuseId>>,

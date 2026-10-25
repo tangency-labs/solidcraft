@@ -66,8 +66,8 @@ use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::ObjectRef;
 use crate::geom::tol::{xsect_tol_3d_from_zones, zone_tol3d, ScaledZero};
 use crate::intersect::point_class::{
-    object_zone_tol_3d, BrepMerge, ClassGeometry, ClassObject, ClassObjectKind, MergeOutputs,
-    PointClassType as Pc, PointClassification, Precedence,
+    object_zone_tol_3d, BrepMergeWithIdentity, ClassGeometry, ClassObject, ClassObjectKind,
+    MergeOutputs, PointClassType as Pc, PointClassification, Precedence,
 };
 use crate::kernel::Kernel;
 use crate::math::{Point3, BIG_DOUBLE};
@@ -115,6 +115,13 @@ fn combine_in<O: ClassObject>(
         *target = *other;
     }
     Ok(())
+}
+
+/// Peer supplied through legacy handle metadata or an explicitly linked local pair.
+#[derive(Clone, Copy)]
+pub(super) enum FilletPeer<'a, O> {
+    Metadata(Option<&'a CurveClassification<O>>),
+    Linked(&'a CurveClassification<O>),
 }
 
 impl<O: ClassObject> CurveClassification<O> {
@@ -462,13 +469,23 @@ impl<O: ClassObject> CurveClassification<O> {
         self.merge_interval_in(&mut Mutable { k, g: geometry }, index, vertices_only, other)
     }
 
-    #[allow(clippy::too_many_lines)] // upstream's MergeInterval, in one piece
     pub(super) fn merge_interval_in(
         &mut self,
         a: &mut impl Imprint<O>,
         index: usize,
         vertices_only: bool,
         other: Option<&CurveClassification<O>>,
+    ) -> Result<MergeIntervalOutput<O>> {
+        self.merge_interval_using_peer(a, index, vertices_only, FilletPeer::Metadata(other))
+    }
+
+    #[allow(clippy::too_many_lines)] // upstream's MergeInterval, in one piece
+    pub(super) fn merge_interval_using_peer(
+        &mut self,
+        a: &mut impl Imprint<O>,
+        index: usize,
+        vertices_only: bool,
+        peer: FilletPeer<'_, O>,
     ) -> Result<MergeIntervalOutput<O>> {
         // init outputs
         let mut out = MergeIntervalOutput::default();
@@ -490,7 +507,7 @@ impl<O: ClassObject> CurveClassification<O> {
             // When DoingFillets with FilletData: make sure to use the FilletGeometry and
             // not the OriginalBrep Geometry (1 | 2 | 4: start vertex, end vertex and mid
             // edge)
-            self.fillet_geometry(a, index, other, 7)?;
+            self.fillet_geometry(a, index, peer, 7)?;
             return Ok(out);
         }
 
@@ -643,7 +660,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
 
                 // When DoingFillets with FilletData (1: start vertex)
-                self.fillet_geometry(a, index, other, 1)?;
+                self.fillet_geometry(a, index, peer, 1)?;
 
                 // make nextPointClassification = thisPointClassification (cleans up
                 // tolerances)
@@ -685,7 +702,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
                 // When doing a fillet - use FilletGeometry and not OriginalBrep Geometry
                 // for tighter tols (1 | 2: start and end vertices)
-                self.fillet_geometry(a, index, other, 3)?;
+                self.fillet_geometry(a, index, peer, 3)?;
             }
         }
 
@@ -744,18 +761,18 @@ impl<O: ClassObject> CurveClassification<O> {
                 .set_class_object(Pc::Edge, Some(new_e));
 
             // When DoingFillets with FilletData (4: mid edge)
-            self.fillet_geometry(a, index, other, 4)?;
+            self.fillet_geometry(a, index, peer, 4)?;
             return Ok(out);
         }
 
         // when merging an interval that classifies to a face
         if ivl.mid.point_class() == Pc::Face {
-            return self.merge_face_interval(a, index, start_v, end_v, other, out);
+            return self.merge_face_interval(a, index, start_v, end_v, peer, out);
         }
 
         // when merging an interval that classifies to a coincident edge
         if ivl.mid.point_class() == Pc::Edge {
-            self.merge_edge_interval(a, index, other)?;
+            self.merge_edge_interval(a, index, peer)?;
             return Ok(out);
         }
 
@@ -772,7 +789,7 @@ impl<O: ClassObject> CurveClassification<O> {
         index: usize,
         start_v: O,
         end_v: O,
-        other: Option<&CurveClassification<O>>,
+        peer: FilletPeer<'_, O>,
         mut out: MergeIntervalOutput<O>,
     ) -> Result<MergeIntervalOutput<O>> {
         let src_zone_tol_3d = src_zone_tol_3d_of(a.kernel(), Some(&*self));
@@ -973,7 +990,7 @@ impl<O: ClassObject> CurveClassification<O> {
             .set_class_object(Pc::Edge, Some(new_e));
 
         // When DoingFillets with FilletData (4: mid edge)
-        self.fillet_geometry(a, index, other, 4)?;
+        self.fillet_geometry(a, index, peer, 4)?;
 
         // Update interval Mids that classify to pFace to see if they now classify to
         // pNewF
@@ -998,10 +1015,10 @@ impl<O: ClassObject> CurveClassification<O> {
         &mut self,
         a: &mut impl Imprint<O>,
         index: usize,
-        other: Option<&CurveClassification<O>>,
+        peer: FilletPeer<'_, O>,
     ) -> Result<()> {
         // When DoingFillets with FilletData (4: mid edge)
-        self.fillet_geometry(a, index, other, 4)?;
+        self.fillet_geometry(a, index, peer, 4)?;
 
         // edge locals
         let ivl = *self.at(index)?;
@@ -1094,20 +1111,29 @@ impl<O: ClassObject> CurveClassification<O> {
         &self,
         a: &mut impl Imprint<O>,
         index: usize,
-        other: Option<&CurveClassification<O>>,
+        peer: FilletPeer<'_, O>,
         todo: u64,
     ) -> Result<()> {
-        if !(self.doing_fillets() && self.other_classification().is_some()) {
+        if !self.doing_fillets() {
             return Ok(());
         }
-        let Some(other) = other else {
-            // the caller did not supply the classification the handle names
-            return Err(SolidError::unported(
-                "SmCurveClassification::GetOtherClassification",
-                "intersect.curve_class_p7",
-            ));
-        };
-        ignore_status(a.set_do_filleting_geometry(self, index, Some(other), todo))
+        match peer {
+            FilletPeer::Linked(other) => {
+                ignore_status(a.set_do_filleting_geometry_linked(self, index, other, todo))
+            }
+            FilletPeer::Metadata(other) => {
+                if self.other_classification().is_none() {
+                    return Ok(());
+                }
+                let Some(other) = other else {
+                    return Err(SolidError::unported(
+                        "SmCurveClassification::GetOtherClassification",
+                        "intersect.curve_class_p7",
+                    ));
+                };
+                ignore_status(a.set_do_filleting_geometry(self, index, Some(other), todo))
+            }
+        }
     }
 
     /// `SmTol::IsDegenerate(m_cpCurve, rIvl.m_vInterval, &tol)`.
@@ -1155,6 +1181,31 @@ pub struct MergeContext<'a, O> {
     pub curve_ref: &'a dyn Fn(EdgeId, i64) -> ObjectRef,
 }
 
+/// The actual mutable merge view with checked curve-construction identity.
+pub struct MergeContextWithIdentity<'a, O> {
+    /// Actual arena.
+    pub brep: &'a mut Brep,
+    /// Target in that arena.
+    pub target: EntityRef,
+    /// Caller handle for each arena entity.
+    pub handle: Box<dyn Fn(EntityRef) -> O + 'a>,
+    /// Retained notification records, attributes and context.
+    pub notifications: edge::NotifyEnv<'a>,
+    /// Authority for the actual original or newly constructed Curve.
+    pub curve_identity: crate::topology::brep::p9::CurveIdentity<'a>,
+}
+impl<'a, O> From<MergeContext<'a, O>> for MergeContextWithIdentity<'a, O> {
+    fn from(context: MergeContext<'a, O>) -> Self {
+        Self {
+            brep: context.brep,
+            target: context.target,
+            handle: context.handle,
+            notifications: context.notifications,
+            curve_identity: crate::topology::brep::p9::CurveIdentity::Legacy(context.curve_ref),
+        }
+    }
+}
+
 /// Mutable access to the B-reps of a classification's topology handles, for the
 /// edits of [`CurveClassification::merge_interval_mut`] and
 /// [`CurveClassification::merge_point_class_mut`] (upstream edits the objects behind
@@ -1164,6 +1215,14 @@ pub trait MergeIntervalBrep<O>: ClassGeometryMut<O> {
     /// region); `None` for a handle the adapter cannot resolve (an invalid-input error
     /// for the caller).
     fn merge_context(&mut self, object: O) -> Option<MergeContext<'_, O>>;
+    /// Actual-curve identity successor. Existing providers keep their old context;
+    /// actual issuers override this method without manufacturing a legacy callback.
+    fn merge_context_with_curve_identity(
+        &mut self,
+        object: O,
+    ) -> Option<MergeContextWithIdentity<'_, O>> {
+        self.merge_context(object).map(Into::into)
+    }
 }
 
 /// `pc.MergeIntoObject(srcPoint)` on the B-rep a [`MergeIntervalBrep`] hands out for the
@@ -1223,6 +1282,19 @@ pub(super) trait Imprint<O: ClassObject> {
         other: Option<&CurveClassification<O>>,
         todo: u64,
     ) -> Result<()>;
+    /// Explicitly linked actual local peer, without an opaque classification handle.
+    fn set_do_filleting_geometry_linked(
+        &mut self,
+        _this: &CurveClassification<O>,
+        _index: usize,
+        _other: &CurveClassification<O>,
+        _todo: u64,
+    ) -> Result<()> {
+        Err(SolidError::unported(
+            "sm_SetDoFilletingGeometry (linked peer context)",
+            "intersect.curve_class_p7",
+        ))
+    }
     /// `ClassifyFaceInterval(index, TRUE, pNewF, pFace)` (other arguments at their
     /// defaults).
     fn classify_face_interval(
@@ -1321,6 +1393,15 @@ impl<O: ClassObject, G: ClassGeometry<O>> Imprint<O> for ReadOnly<'_, G> {
     ) -> Result<()> {
         super::p7::set_do_filleting_geometry(self.k, self.g, index, this, other, todo)
     }
+    fn set_do_filleting_geometry_linked(
+        &mut self,
+        this: &CurveClassification<O>,
+        index: usize,
+        other: &CurveClassification<O>,
+        todo: u64,
+    ) -> Result<()> {
+        super::p7::set_do_filleting_geometry_linked(self.k, self.g, index, this, other, todo)
+    }
     fn classify_face_interval(
         &mut self,
         cc: &mut CurveClassification<O>,
@@ -1418,13 +1499,15 @@ fn context_with<'g, O: ClassObject, G: MergeIntervalBrep<O>>(
     g: &'g mut G,
     object: O,
     members: &[O],
-) -> Result<(MergeContext<'g, O>, Vec<Option<EntityRef>>)> {
+) -> Result<(MergeContextWithIdentity<'g, O>, Vec<Option<EntityRef>>)> {
     let mut ids = Vec::new();
     for &m in members {
         let (_, e) = g.topology_entity(m).ok_or_else(unresolved_mut)?;
         ids.push(e);
     }
-    let ctx = g.merge_context(object).ok_or_else(unresolved_mut)?;
+    let ctx = g
+        .merge_context_with_curve_identity(object)
+        .ok_or_else(unresolved_mut)?;
     let ids = members
         .iter()
         .zip(ids)
@@ -1478,22 +1561,25 @@ impl<O: ClassObject, G: MergeIntervalBrep<O>> Imprint<O> for Mutable<'_, G> {
             // no object, or not topology: upstream's error returns, before any edit
             return pc.merge_into_object(self.k, src_point);
         };
-        let MergeContext {
+        let MergeContextWithIdentity {
             brep,
             target,
             handle,
             mut notifications,
-            curve_ref,
-        } = self.g.merge_context(object).ok_or_else(unresolved_mut)?;
-        pc.merge_into_brep(
+            curve_identity,
+        } = self
+            .g
+            .merge_context_with_curve_identity(object)
+            .ok_or_else(unresolved_mut)?;
+        pc.merge_into_brep_with_curve_identity(
             self.k,
             src_point,
-            BrepMerge {
+            BrepMergeWithIdentity {
                 brep,
                 target,
                 handle: &*handle,
                 notifications: &mut notifications,
-                curve_ref,
+                curve_identity,
             },
         )
     }
@@ -1526,6 +1612,15 @@ impl<O: ClassObject, G: MergeIntervalBrep<O>> Imprint<O> for Mutable<'_, G> {
         todo: u64,
     ) -> Result<()> {
         super::p7::set_do_filleting_geometry_mut(self.k, self.g, index, this, other, todo)
+    }
+    fn set_do_filleting_geometry_linked(
+        &mut self,
+        this: &CurveClassification<O>,
+        index: usize,
+        other: &CurveClassification<O>,
+        todo: u64,
+    ) -> Result<()> {
+        super::p7::set_do_filleting_geometry_mut_linked(self.k, self.g, index, this, other, todo)
     }
     fn classify_face_interval(
         &mut self,
@@ -1627,7 +1722,7 @@ impl<O: ClassObject, G: MergeIntervalBrep<O>> Imprint<O> for Mutable<'_, G> {
             return Err(wrong_target("handle does not name a face"));
         };
         let [start, end] = vertexuses;
-        let made = crate::topology::brep::p9::make_edge_in_face_with_vu(
+        let made = crate::topology::brep::p9::make_edge_in_face_with_vu_with_curve_identity(
             self.k,
             ctx.brep,
             EdgeInFaceInput {
@@ -1641,7 +1736,7 @@ impl<O: ClassObject, G: MergeIntervalBrep<O>> Imprint<O> for Mutable<'_, G> {
                 curve_zone_tol_3d,
             },
             &mut ctx.notifications,
-            ctx.curve_ref,
+            ctx.curve_identity,
         )?;
         Ok((
             (ctx.handle)(EntityRef::Edge(made.edge)),

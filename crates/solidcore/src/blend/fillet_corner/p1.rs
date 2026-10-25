@@ -2254,84 +2254,255 @@ impl FilletCorner {
     /// for the executive's topology intersector and edge attribute
     /// (`blend.fillet_executive_p1`).
     pub fn insert_intersection_topology(&self, env: &mut CornerEnv<'_>) -> Result<()> {
-        const OP: &str = OP_INSERT;
-        let deref = || SolidError::invalid_input(OP, NULL_DEREF);
-        let ti = TopologyIntersectorRef;
+        let mut context = IndexedCornerInsertion {
+            fillet: env.fillet.as_ref().map(|fillet| &*fillet.brep),
+        };
+        self.insert_intersection_topology_with_context(env.pseudo, env.target, &mut context)
+    }
 
-        // when asked
+    /// Insert this corner through actual retained curve, marker and surface authorities.
+    /// # Errors
+    /// The first native insertion dependency error, preserving earlier mutations.
+    pub fn insert_intersection_topology_with_context(
+        &self,
+        pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        context: &mut impl CornerInsertionContext,
+    ) -> Result<()> {
+        context.begin_corner()?;
         if self.blending {
-            let vertex = self.vertex.ok_or_else(deref)?;
-            for vf in vertex::faces(env.target, vertex)? {
-                let vf_surface = env.target.face(vf)?.surface.clone();
-                for fb_surface in &self.surfaces {
-                    register_existing_ssi(ti, vf_surface.as_ref(), Some(fb_surface))?;
+            let vertex = self
+                .vertex
+                .ok_or_else(|| SolidError::invalid_input(OP_INSERT, NULL_DEREF))?;
+            for face in vertex::faces(target, vertex)? {
+                for surface in &self.surfaces {
+                    context.register_blending_intersection(target, face, surface)?;
                 }
             }
-        } // end m_bBlending == TRUE check
-
-        // for every corner FilletEdge - Merge corner edge into originating face (ony
-        // edges with orig m_pTargetBrep Faces get merged here)
-        for &fe in &self.edges {
-            // skip faces not on OrigFaces
-            let fillet_edge = env.pseudo.fillet_edge(fe)?;
-            let Some(face) = fillet_edge.original_face() else {
+        }
+        for &rail in &self.edges {
+            let record = pseudo.fillet_edge(rail)?;
+            let Some(face) = record.original_face() else {
                 continue;
             };
-
-            // get associated FilletEdge->BrepEdges (destined for m_pFilletBrep) that
-            // coincide with this m_pPseudoBrep->Edges (usually 1, can be 2 for split
-            // cases, Setbacks, etc.)
-            let edges = fillet_edge.fillet_brep_edges();
-
-            // For every FilletEdge->m_pFilletBrep->Edge
-            for &e in &edges {
-                let fillet = env.fillet.as_ref().ok_or_else(deref)?;
-                let mut curve_3d = fillet.brep.edge(e)?.curve.clone();
-
-                // skip pEdge that can't be found on the m_pAttributeE->Users list
-                if !attribute_e_users(ti)?.contains(&e) {
+            let mapped = record.fillet_brep_edges();
+            for &edge in &mapped {
+                let mut curve = context.capture_managed_curve(edge)?;
+                if !context.attribute_edges()?.contains(&edge) {
                     continue;
                 }
-
-                // skip Edges that don't have just one face
-                let fe_faces = edge::faces(fillet.brep, e, None)?;
-                let [fillet_brep_face] = fe_faces.as_slice() else {
+                let faces = context.managed_edge_faces(edge)?;
+                let [managed_face] = faces.as_slice() else {
                     continue;
                 };
-                let fillet_brep_surface = fillet.brep.face(*fillet_brep_face)?.surface.clone();
-                let tolerance = fillet.brep.edge(e)?.tolerance;
-
-                // Don't intersect the blending corner with the adjacent faces of the
-                // vertex which is being blended.
-                if edges.len() == 1 {
-                    curve_3d.clone_from(&env.pseudo.brep().edge(fe)?.curve);
+                if mapped.len() == 1 {
+                    curve = context.capture_pseudo_curve(pseudo, rail)?;
                 }
-
-                // Put an attribute on the base Face, to check whether it gets split.
-                // Merge a curve which is on two surfaces belonging to two faces of two
-                // different Breps.
-                let surface = env.target.face(face)?.surface.clone();
-                merge_curve_on_surfaces(
-                    ti,
-                    env.target,
-                    surface.as_ref(),
-                    tolerance,
-                    curve_3d.as_ref(),
-                    e,
-                )?;
-
-                // If any Faces were split, check whether objects sitting on the
-                // original Face are now in the new split Face.
-                update_topology_changes(ti, 780, face)?;
-
-                // Right now Just register no intersections
-                let surface = env.target.face(face)?.surface.clone();
-                register_existing_ssi(ti, surface.as_ref(), fillet_brep_surface.as_ref())?;
-            } // end iter every FilletEdge->m_pFilletBrep->Edge
-        } // end iter every corner FilletEdge
-
-        // all done
+                context.with_corner_face_scope(target, face, |context, target, marker| {
+                    context.merge_corner_curve(pseudo, target, face, &curve, edge)?;
+                    context.update_corner_topology(pseudo, target, marker, face)?;
+                    let surface = context.capture_managed_surface(*managed_face)?;
+                    context.register_bound_intersection(target, face, &surface)
+                })?;
+            }
+        }
         Ok(())
+    }
+}
+
+/// Retained dependencies of the native corner topology-insertion loop.
+pub trait CornerInsertionContext {
+    /// Actual curve authority captured before topology edits.
+    type CurveBinding;
+    /// Actual surface authority captured at its native getter position.
+    type SurfaceBinding;
+    /// Marker owned for one native face scope.
+    type FaceMarker;
+    /// Resolve the retained executive intersector.
+    /// # Errors
+    /// Missing actual insertion context.
+    fn begin_corner(&mut self) -> Result<()>;
+    /// Capture the managed edge's current curve before attribute filtering.
+    /// # Errors
+    /// Missing actual edge or curve authority.
+    fn capture_managed_curve(&mut self, edge: EdgeId) -> Result<Option<Self::CurveBinding>>;
+    /// Capture the source pseudo curve for a singleton mapped edge list.
+    /// # Errors
+    /// Missing actual curve authority.
+    fn capture_pseudo_curve(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        edge: EdgeId,
+    ) -> Result<Option<Self::CurveBinding>>;
+    /// Read the actual current edge-attribute users.
+    /// # Errors
+    /// Missing attribute lifecycle state.
+    fn attribute_edges(&self) -> Result<Vec<EdgeId>>;
+    /// Read the managed edge's faces in owning traversal order.
+    /// # Errors
+    /// Missing actual topology.
+    fn managed_edge_faces(&self, edge: EdgeId) -> Result<Vec<FaceId>>;
+    /// Hold marker 780 through merge, topology updates and SSI registration.
+    /// # Errors
+    /// Marker setup or the enclosed operation fails.
+    fn with_corner_face_scope<T>(
+        &mut self,
+        target: &mut Brep,
+        face: FaceId,
+        body: impl FnOnce(&mut Self, &mut Brep, &Self::FaceMarker) -> Result<T>,
+    ) -> Result<T>;
+    /// Resolve the edge tolerance and merge at the native call position.
+    /// # Errors
+    /// The actual merge fails; all partial writes remain visible.
+    fn merge_corner_curve(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        face: FaceId,
+        curve: &Option<Self::CurveBinding>,
+        managed_edge: EdgeId,
+    ) -> Result<()>;
+    /// Update records while the actual marker is still attached.
+    /// # Errors
+    /// The actual topology bookkeeping fails.
+    fn update_corner_topology(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        marker: &Self::FaceMarker,
+        face: FaceId,
+    ) -> Result<()>;
+    /// Read the managed face's surface after merge and topology updates.
+    /// # Errors
+    /// Missing actual surface authority.
+    fn capture_managed_surface(&mut self, face: FaceId) -> Result<Option<Self::SurfaceBinding>>;
+    /// Register the native empty surface intersection.
+    /// # Errors
+    /// Missing surface authority or the original registration error.
+    fn register_bound_intersection(
+        &mut self,
+        target: &mut Brep,
+        face: FaceId,
+        surface: &Option<Self::SurfaceBinding>,
+    ) -> Result<()>;
+    /// Register a blending corner's actual retained patch surface.
+    /// # Errors
+    /// Missing patch context or the original registration error.
+    fn register_blending_intersection(
+        &mut self,
+        target: &mut Brep,
+        face: FaceId,
+        surface: &Surface,
+    ) -> Result<()>;
+}
+
+struct IndexedCornerInsertion<'a> {
+    fillet: Option<&'a Brep>,
+}
+impl CornerInsertionContext for IndexedCornerInsertion<'_> {
+    type CurveBinding = Curve;
+    type SurfaceBinding = Surface;
+    type FaceMarker = u32;
+    fn begin_corner(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn capture_managed_curve(&mut self, edge: EdgeId) -> Result<Option<Curve>> {
+        Ok(self
+            .fillet
+            .ok_or_else(|| SolidError::invalid_input(OP_INSERT, NULL_DEREF))?
+            .edge(edge)?
+            .curve
+            .clone())
+    }
+    fn capture_pseudo_curve(
+        &mut self,
+        pseudo: &mut FilletBrep,
+        edge: EdgeId,
+    ) -> Result<Option<Curve>> {
+        Ok(pseudo.brep().edge(edge)?.curve.clone())
+    }
+    fn attribute_edges(&self) -> Result<Vec<EdgeId>> {
+        attribute_e_users(TopologyIntersectorRef)
+    }
+    fn managed_edge_faces(&self, edge: EdgeId) -> Result<Vec<FaceId>> {
+        edge::faces(
+            self.fillet
+                .ok_or_else(|| SolidError::invalid_input(OP_INSERT, NULL_DEREF))?,
+            edge,
+            None,
+        )
+    }
+    fn with_corner_face_scope<T>(
+        &mut self,
+        target: &mut Brep,
+        _face: FaceId,
+        body: impl FnOnce(&mut Self, &mut Brep, &u32) -> Result<T>,
+    ) -> Result<T> {
+        body(self, target, &780)
+    }
+    fn merge_corner_curve(
+        &mut self,
+        _pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        face: FaceId,
+        curve: &Option<Curve>,
+        managed_edge: EdgeId,
+    ) -> Result<()> {
+        let tolerance = self
+            .fillet
+            .ok_or_else(|| SolidError::invalid_input(OP_INSERT, NULL_DEREF))?
+            .edge(managed_edge)?
+            .tolerance;
+        let surface = target.face(face)?.surface.clone();
+        merge_curve_on_surfaces(
+            TopologyIntersectorRef,
+            target,
+            surface.as_ref(),
+            tolerance,
+            curve.as_ref(),
+            managed_edge,
+        )
+    }
+    fn update_corner_topology(
+        &mut self,
+        _pseudo: &mut FilletBrep,
+        _target: &mut Brep,
+        marker: &u32,
+        face: FaceId,
+    ) -> Result<()> {
+        update_topology_changes(TopologyIntersectorRef, *marker, face)
+    }
+    fn capture_managed_surface(&mut self, face: FaceId) -> Result<Option<Surface>> {
+        Ok(self
+            .fillet
+            .ok_or_else(|| SolidError::invalid_input(OP_INSERT, NULL_DEREF))?
+            .face(face)?
+            .surface
+            .clone())
+    }
+    fn register_bound_intersection(
+        &mut self,
+        target: &mut Brep,
+        face: FaceId,
+        surface: &Option<Surface>,
+    ) -> Result<()> {
+        register_existing_ssi(
+            TopologyIntersectorRef,
+            target.face(face)?.surface.as_ref(),
+            surface.as_ref(),
+        )
+    }
+    fn register_blending_intersection(
+        &mut self,
+        target: &mut Brep,
+        face: FaceId,
+        surface: &Surface,
+    ) -> Result<()> {
+        register_existing_ssi(
+            TopologyIntersectorRef,
+            target.face(face)?.surface.as_ref(),
+            Some(surface),
+        )
     }
 }
 

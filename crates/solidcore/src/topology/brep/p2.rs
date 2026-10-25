@@ -595,6 +595,22 @@ pub fn notify(
     operation: NotifyOperation,
     data: [Option<NotifyArg>; 3],
 ) -> Result<()> {
+    notify_with_body_identity(b, env, cache, operation, data, brep_ref(b))
+}
+
+/// Notify using the caller's authoritative identity for this actual body.
+/// Cache edits and region propagation share [`notify`]'s implementation.
+///
+/// # Errors
+/// The same cache and notification errors as [`notify`].
+pub fn notify_with_body_identity(
+    b: &Brep,
+    env: &mut NotifyEnv<'_>,
+    cache: Option<&mut BrepCacheSlot<'_>>,
+    operation: NotifyOperation,
+    data: [Option<NotifyArg>; 3],
+    body: ObjectRef,
+) -> Result<()> {
     use NotifyOperation as N;
     let [d1, d2, d3] = data;
     let mut slot = cache;
@@ -633,7 +649,7 @@ pub fn notify(
         &mut *env.attributes,
         env.context.as_deref_mut(),
         operation,
-        brep_ref(b),
+        body,
         r1,
         r2,
         r3,

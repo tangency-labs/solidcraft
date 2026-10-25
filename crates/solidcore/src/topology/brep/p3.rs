@@ -129,7 +129,7 @@ use crate::topology::loopuse as lu1;
 use crate::topology::proto_topology::p1::CopyBrepMap;
 use crate::topology::shell::{self, ShellMembers, ShellType};
 use crate::topology::topology as topo;
-use crate::topology::topology_traverser::{self as tt, Entity, Marks};
+use crate::topology::topology_traverser::{self as tt, Entity, FaceTraversalMarks, Marks};
 use crate::topology::trimming_tools;
 use crate::topology::{
     vertex, vertexuse, Brep, EdgeId, EdgeuseId, EdgeuseOwner, FaceId, FaceuseId, LoopuseId,
@@ -384,6 +384,58 @@ fn normalized_evaluate(
     Ok((eval.point, eval.first_deriv.unwrap_or(Vec3::UNDEF)))
 }
 
+/// The mark authority used by a deletion's shared traversal body.
+pub(super) enum DeletionMarks<'a> {
+    Indexed(&'a mut Marks),
+    Retained,
+}
+
+struct RecordMarks<'a> {
+    records: &'a mut BTreeMap<ObjectKey, topo::Topology>,
+    key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
+}
+
+impl RecordMarks<'_> {
+    fn key(&self, entity: Entity) -> ObjectKey {
+        let entity = match entity {
+            Entity::Face(id) => EntityRef::Face(id),
+            Entity::Edge(id) => EntityRef::Edge(id),
+            Entity::Vertex(id) => EntityRef::Vertex(id),
+            Entity::Faceuse(id) => EntityRef::Faceuse(id),
+            Entity::Vertexuse(id) => EntityRef::Vertexuse(id),
+            Entity::Shell(id) => EntityRef::Shell(id),
+        };
+        (self.key_of)(entity).key
+    }
+}
+impl FaceTraversalMarks for RecordMarks<'_> {
+    fn is_marked(&self, k: &Kernel, entity: Entity, mark: MarkType) -> bool {
+        self.records
+            .get(&self.key(entity))
+            .is_some_and(|record| record.is_marked(&k.context, mark))
+    }
+    fn mark(&mut self, k: &Kernel, entity: Entity, mark: MarkType) {
+        let key = self.key(entity);
+        self.records
+            .entry(key)
+            .or_default()
+            .mark(Some(&k.context), mark);
+    }
+}
+impl DeletionMarks<'_> {
+    pub(super) fn with_marks<T>(
+        &mut self,
+        records: &mut BTreeMap<ObjectKey, topo::Topology>,
+        key_of: &dyn Fn(EntityRef) -> ObjectRef,
+        body: impl FnOnce(&mut dyn FaceTraversalMarks) -> T,
+    ) -> T {
+        match self {
+            Self::Indexed(marks) => body(*marks),
+            Self::Retained => body(&mut RecordMarks { records, key_of }),
+        }
+    }
+}
+
 // ---- helpers --------------------------------------------------------------------------------
 
 /// `pRegion` or, for `None`, `GetInfiniteRegion()`.
@@ -398,6 +450,16 @@ fn brep_notify(
     operation: NotifyOperation,
     data: [Option<NotifyArg>; 3],
 ) -> Result<()> {
+    brep_notify_with_identity(b, env, operation, data, None)
+}
+
+fn brep_notify_with_identity(
+    b: &Brep,
+    env: &mut NotifyEnv<'_>,
+    operation: NotifyOperation,
+    data: [Option<NotifyArg>; 3],
+    body: Option<ObjectRef>,
+) -> Result<()> {
     // an object made by the edit has its (default) SmTopology record from its
     // constructor upstream; the arena's live in the caller's map, so one is added the
     // first time the edit names the object (seed_records covers the rest)
@@ -407,8 +469,12 @@ fn brep_notify(
             env.records.entry(key).or_default();
         }
     }
-    env.records.entry(p2::brep_ref(b).key).or_default();
-    p2::notify(b, env, None, operation, data)
+    let identity = body.unwrap_or_else(|| p2::brep_ref(b));
+    env.records.entry(identity.key).or_default();
+    match body {
+        Some(body) => p2::notify_with_body_identity(b, env, None, operation, data, body),
+        None => p2::notify(b, env, None, operation, data),
+    }
 }
 
 /// The topology entity `e` as a notification argument.
@@ -1898,7 +1964,41 @@ pub fn delete_face(
     options: DeleteFaceOptions,
 ) -> Result<Vec<EntityRef>> {
     with_caller_identities(k, b, env, None, |k, b, env| {
-        delete_face_in(k, b, env, marks, f, options)
+        delete_face_in(
+            k,
+            b,
+            env,
+            &mut DeletionMarks::Indexed(marks),
+            f,
+            options,
+            None,
+        )
+    })
+}
+
+/// Delete a face using the actual notification records for traversal marks and
+/// an explicitly issued B-rep notification identity.
+///
+/// # Errors
+/// Those of [`delete_face`]. Earlier edits and retained marks remain on failure.
+pub fn delete_face_with_body_identity(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    f: FaceId,
+    options: DeleteFaceOptions,
+    body: ObjectRef,
+) -> Result<Vec<EntityRef>> {
+    with_caller_identities(k, b, env, None, |k, b, env| {
+        delete_face_in(
+            k,
+            b,
+            env,
+            &mut DeletionMarks::Retained,
+            f,
+            options,
+            Some(body),
+        )
     })
 }
 
@@ -1908,9 +2008,10 @@ fn delete_face_in(
     k: &mut Kernel,
     b: &mut Brep,
     env: &mut NotifyEnv<'_>,
-    marks: &mut Marks,
+    marks: &mut DeletionMarks<'_>,
     f: FaceId,
     options: DeleteFaceOptions,
+    body: Option<ObjectRef>,
 ) -> Result<Vec<EntityRef>> {
     let DeleteFaceOptions {
         delete_edges_vertices,
@@ -1931,11 +2032,16 @@ fn delete_face_in(
     }
 
     // tell Brep it's about to change
-    ignore_soft(brep_notify(
+    ignore_soft(brep_notify_with_identity(
         b,
         env,
         NotifyOperation::PreEdit,
-        [brep_arg(b), None, None],
+        [
+            body.map(NotifyArg::Object).or_else(|| brep_arg(b)),
+            None,
+            None,
+        ],
+        body,
     ))?;
     ignore_soft(face_notify(
         b,
@@ -1944,11 +2050,16 @@ fn delete_face_in(
         NotifyOperation::PreEdit,
         [arg(EntityRef::Face(f)), None, None],
     ))?;
-    ignore_soft(brep_notify(
+    ignore_soft(brep_notify_with_identity(
         b,
         env,
         NotifyOperation::RmFromBrep,
-        [arg(EntityRef::Face(f)), brep_arg(b), None],
+        [
+            arg(EntityRef::Face(f)),
+            body.map(NotifyArg::Object).or_else(|| brep_arg(b)),
+            None,
+        ],
+        body,
     ))?;
 
     // Get all vertices for later new shell detection
@@ -2007,15 +2118,16 @@ fn delete_face_in(
         }
 
         // allow attributes to propagate and inform the public of Region merges
-        ignore_soft(brep_notify(
+        ignore_soft(brep_notify_with_identity(
             b,
             env,
             NotifyOperation::MergeInBrep,
             [
                 arg(EntityRef::Region(surviving)),
                 arg(EntityRef::Region(del_region)),
-                brep_arg(b),
+                body.map(NotifyArg::Object).or_else(|| brep_arg(b)),
             ],
+            body,
         ))?;
 
         // Remove and Delete the DelRegion
@@ -2162,14 +2274,33 @@ fn delete_face_in(
         // delete every edge converted into a wire
         for e in new_wire_edges {
             deleted.push(EntityRef::Edge(e));
-            ignore_soft(delete_edge(k, b, env, e, None))?;
+            ignore_soft(match body {
+                Some(body) => super::p4::delete_edge_with_body_identity(
+                    k,
+                    b,
+                    &mut super::p4::DeleteEnv::from_notify(env),
+                    e,
+                    None,
+                    body,
+                ),
+                None => delete_edge(k, b, env, e, None),
+            })?;
         }
 
         // remove vertices that have become shell vertices
         for v in orig_vertices {
             if vertex::is_shell_vertex(b, v)? {
                 deleted.push(EntityRef::Vertex(v));
-                ignore_soft(delete_vertex(k, b, env, v))?;
+                ignore_soft(match body {
+                    Some(body) => super::p4::delete_vertex_with_body_identity(
+                        k,
+                        b,
+                        &mut super::p4::DeleteEnv::from_notify(env),
+                        v,
+                        body,
+                    ),
+                    None => delete_vertex(k, b, env, v),
+                })?;
             }
         }
     }
@@ -2184,7 +2315,7 @@ fn delete_face_nesting(
     k: &mut Kernel,
     b: &mut Brep,
     env: &mut NotifyEnv<'_>,
-    marks: &mut Marks,
+    marks: &mut DeletionMarks<'_>,
     lock: &mut MarkLock,
     shell: ShellId,
     any_edgeuse: Option<EdgeuseId>,
@@ -2218,11 +2349,15 @@ fn delete_face_nesting(
                 continue;
             }
             if need_traversal {
-                tt::shell_traversal(k, b, marks, v, shell, None, None, lock)?;
+                marks.with_marks(env.records, env.key_of, |marks| {
+                    tt::shell_traversal_with_marks(k, b, marks, v, shell, None, None, lock)
+                })?;
                 need_traversal = false;
             }
             // subtract marked vertices - they have a home in the original Shell
-            if marks.is_marked(k, Entity::Vertex(v), lock.mark_type()) {
+            if marks.with_marks(env.records, env.key_of, |marks| {
+                marks.is_marked(k, Entity::Vertex(v), lock.mark_type())
+            }) {
                 *vertex_count = vertex_count.wrapping_sub(1);
             }
         }
@@ -2239,8 +2374,9 @@ fn delete_face_nesting(
         // Now remove all vertices which have been touched by previous traversal.
         for slot in verts.iter_mut() {
             let Some(v) = *slot else { continue };
-            if marks.is_marked(k, Entity::Vertex(v), lock.mark_type())
-                || vertex::is_shell_vertex(b, v)?
+            if marks.with_marks(env.records, env.key_of, |marks| {
+                marks.is_marked(k, Entity::Vertex(v), lock.mark_type())
+            }) || vertex::is_shell_vertex(b, v)?
             {
                 *slot = None;
                 count -= 1;
@@ -2263,16 +2399,18 @@ fn delete_face_nesting(
         shell::region_post_insert_shell(b, r, new_shell)?;
         let mut faceuses = Vec::new();
         let mut edgeuses = Vec::new();
-        tt::shell_traversal(
-            k,
-            b,
-            marks,
-            v,
-            shell,
-            Some(&mut edgeuses),
-            Some(&mut faceuses),
-            lock,
-        )?;
+        marks.with_marks(env.records, env.key_of, |marks| {
+            tt::shell_traversal_with_marks(
+                k,
+                b,
+                marks,
+                v,
+                shell,
+                Some(&mut edgeuses),
+                Some(&mut faceuses),
+                lock,
+            )
+        })?;
 
         if faceuses.is_empty() && !edgeuses.is_empty() {
             // Wire shell
@@ -3687,6 +3825,124 @@ mod tests {
     /// and its offset arm's `ApproximateOffsetSurface` read the NURB through
     /// `GetOrCreateGwNurbPointer`: a bounded plane built without `MakeNurb` gets its
     /// NURB and domain, not the empty B-spline part.
+    #[test]
+    fn retained_face_deletion_uses_real_marks_body_callbacks_and_failure_prefix() {
+        use crate::geom::attribute::{ids, Attribute, AttributeStore, Behavior};
+        use crate::topology::edge::notification_test_support as callbacks;
+
+        for fail_after_notifications in [false, true] {
+            let mut k = Kernel::default();
+            let mut b = crate::primitive::api_primitives::create_box(
+                &mut k,
+                Point3::ZERO,
+                10.0,
+                20.0,
+                30.0,
+            )
+            .unwrap();
+            b.set_editing_enabled(true);
+            let legacy_key = b.key();
+            let serial = b.notify_serial().unwrap();
+            let key_of = |entity| topology_ref(serial, entity);
+            let body = key_of(EntityRef::Brep(crate::topology::BrepId::from_index(0)));
+            assert_ne!(legacy_key, body.key);
+            let face = b.face_list()[0];
+            let face_ref = key_of(EntityRef::Face(face));
+            if fail_after_notifications {
+                // Defined NER after the actual public-edit notification prefix.
+                b.face_mut(face).unwrap().faceuse = None;
+            }
+            let mut records = BTreeMap::new();
+            seed_records(&mut records, &b, &key_of);
+            records.get_mut(&face_ref.key).unwrap().set_user_index1(73);
+            let mut attributes = AttributeStore::default();
+            let marker = attributes
+                .insert(Attribute::long(ids::USER_1, 917, Behavior::Reference))
+                .unwrap();
+            attributes.add_attribute(body.key, marker).unwrap();
+            let events = callbacks::install(&mut k.context);
+            k.context.set_doing_boolean(true);
+            let mut outer =
+                MarkLock::new(core::slice::from_mut(&mut k.context), 0, ALL_MARKS).unwrap();
+            let outer_type = outer.mark_type();
+            let outer_value = k.context.current_mark(outer_type);
+            let nested_before = k.context.current_mark(MarkType::Mark2);
+            let result = Context::with_notification_context(&mut k, |k, context| {
+                let mut env = NotifyEnv {
+                    records: &mut records,
+                    attributes: &mut attributes,
+                    context: Some(context),
+                    key_of: &key_of,
+                };
+                delete_face_with_body_identity(
+                    k,
+                    &mut b,
+                    &mut env,
+                    face,
+                    DeleteFaceOptions::default(),
+                    body,
+                )
+            })
+            .unwrap();
+            assert!(k.context.is_mark_locked(outer_type));
+            assert_eq!(k.context.current_mark(outer_type), outer_value);
+            assert!(!k.context.is_mark_locked(MarkType::Mark2));
+            assert!(!k.context.is_mark_locked(MarkType::Mark3));
+            if fail_after_notifications {
+                assert!(
+                    matches!(result, Err(SolidError::Upstream { code, .. }) if code == crate::error::SM_ERR_NULL_POINTER)
+                );
+                assert!(b.face(face).is_ok());
+                assert_eq!(records[&face_ref.key].user_index1(), 73);
+                assert_eq!(k.context.current_mark(MarkType::Mark2), nested_before);
+            } else {
+                result.unwrap();
+                assert!(!b.face_list().contains(&face));
+                assert!(k.context.current_mark(MarkType::Mark2) > nested_before);
+                assert!(records
+                    .values()
+                    .any(|record| record.get_mark(MarkType::Mark2) > 0));
+            }
+            outer
+                .release(core::slice::from_mut(&mut k.context))
+                .unwrap();
+            assert_eq!(b.key(), legacy_key);
+            assert_eq!(attributes.users(marker).unwrap(), &[body.key]);
+            assert!(k.context.doing_boolean());
+            callbacks::assert_installed(&k.context, &events);
+            let events = events.lock().unwrap();
+            assert!(events.len() >= 6);
+            for pair in events.chunks_exact(2) {
+                assert_eq!(pair[0].callback, "user");
+                assert_eq!(pair[1].callback, "system");
+                assert_eq!(pair[0].caller, pair[1].caller);
+                assert_eq!(pair[0].operation, pair[1].operation);
+                assert_eq!(pair[0].data, pair[1].data);
+            }
+            assert_eq!(events[0].caller, body);
+            assert_eq!(events[0].operation, NotifyOperation::PreEdit);
+            assert_eq!(events[0].data, [Some(body), None, None]);
+            assert_eq!(events[2].caller, face_ref);
+            assert_eq!(events[2].operation, NotifyOperation::PreEdit);
+            assert_eq!(events[4].caller, body);
+            assert_eq!(events[4].operation, NotifyOperation::RmFromBrep);
+            assert_eq!(events[4].data, [Some(face_ref), Some(body), None]);
+            for event in events
+                .iter()
+                .filter(|event| event.caller.type_code == body.type_code)
+            {
+                assert_eq!(event.caller, body);
+                match event.operation {
+                    NotifyOperation::PreEdit => assert_eq!(event.data[0], Some(body)),
+                    NotifyOperation::RmFromBrep => assert_eq!(event.data[1], Some(body)),
+                    NotifyOperation::MergeInBrep => assert_eq!(event.data[2], Some(body)),
+                    _ => (),
+                }
+            }
+            assert!(!events.iter().any(|event| event.caller.key == legacy_key));
+        }
+    }
+
     #[test]
     fn lazy_plane_gets_its_nurb_before_the_copy() {
         use crate::geom::extent2d::Extent2d;

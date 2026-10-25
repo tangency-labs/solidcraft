@@ -276,17 +276,33 @@ impl FilletCorner {
         split_face: FaceId,
         corners: &[FilletCorner],
     ) -> Result<()> {
+        self.update_split_face_with_breps(
+            env.k, env.pseudo, env.target, orig_face, split_face, corners,
+        )
+    }
+
+    /// Shared split-face update with the actual topology borrows, without a solver table.
+    /// # Errors
+    /// Those of the existing vertex and edge split-face updates.
+    pub fn update_split_face_with_breps(
+        &self,
+        k: &Kernel,
+        pseudo: &mut FilletBrep,
+        target: &mut Brep,
+        orig_face: FaceId,
+        split_face: FaceId,
+        corners: &[FilletCorner],
+    ) -> Result<()> {
         for &v in &self.vertices {
-            env.pseudo
-                .update_split_face(env.k, v, env.target, orig_face, split_face)?;
+            pseudo.update_split_face(k, v, target, orig_face, split_face)?;
         }
         for &e in &self.edges {
-            env.pseudo.update_edge_split_face(
-                env.k,
+            pseudo.update_edge_split_face(
+                k,
                 e,
                 Some(orig_face),
                 Some(split_face),
-                env.target,
+                target,
                 corners,
             )?;
         }

@@ -186,6 +186,31 @@ pub struct BrepMerge<'a, 'env, O> {
     pub curve_ref: &'a dyn Fn(EdgeId, i64) -> ObjectRef,
 }
 
+/// Actual merge context with checked identity access to newly constructed curves.
+pub struct BrepMergeWithIdentity<'a, 'env, O> {
+    /// Actual arena containing the classified object.
+    pub brep: &'a mut Brep,
+    /// Target in that arena.
+    pub target: EntityRef,
+    /// Caller handle for each arena entity.
+    pub handle: &'a dyn Fn(EntityRef) -> O,
+    /// Retained records, attributes and notification context.
+    pub notifications: &'a mut edge::NotifyEnv<'env>,
+    /// Legacy or actual-curve identity authority at construction.
+    pub curve_identity: crate::topology::brep::p9::CurveIdentity<'a>,
+}
+impl<'a, 'env, O> From<BrepMerge<'a, 'env, O>> for BrepMergeWithIdentity<'a, 'env, O> {
+    fn from(context: BrepMerge<'a, 'env, O>) -> Self {
+        Self {
+            brep: context.brep,
+            target: context.target,
+            handle: context.handle,
+            notifications: context.notifications,
+            curve_identity: crate::topology::brep::p9::CurveIdentity::Legacy(context.curve_ref),
+        }
+    }
+}
+
 /// The arena [`PointClassification::combine_in_brep`] writes a propagated surf/surf/surf
 /// point to.
 pub struct CombineBrep<'a, 'env, O> {
@@ -1528,15 +1553,27 @@ impl<O: ClassObject> PointClassification<O> {
         src_point: Point3,
         context: BrepMerge<'_, '_, O>,
     ) -> Result<MergeOutputs<O>> {
+        self.merge_into_brep_with_curve_identity(k, src_point, context.into())
+    }
+
+    /// The same merge with checked identity issuance for actual copied curves.
+    /// # Errors
+    /// Original merge errors and identity failures, retaining prior edits.
+    pub fn merge_into_brep_with_curve_identity(
+        &mut self,
+        k: &mut Kernel,
+        src_point: Point3,
+        context: BrepMergeWithIdentity<'_, '_, O>,
+    ) -> Result<MergeOutputs<O>> {
         use crate::error::EntityRef;
         use crate::geom::tol::ScaledZero;
         use crate::topology::{brep::p9, vertex};
-        let BrepMerge {
+        let BrepMergeWithIdentity {
             brep: b,
             target,
             handle,
             notifications: env,
-            curve_ref,
+            curve_identity,
         } = context;
         let object = self.object.ok_or_else(|| null_object(OP_MERGE))?;
         let kind = match target {
@@ -1574,7 +1611,14 @@ impl<O: ClassObject> PointClassification<O> {
                 v
             }
             EntityRef::Edge(e) => {
-                let split = p9::make_vertex_split_edge(k, b, e, self.t_param(), env, curve_ref)?;
+                let split = p9::make_vertex_split_edge_with_curve_identity(
+                    k,
+                    b,
+                    e,
+                    self.t_param(),
+                    env,
+                    curve_identity,
+                )?;
                 let v = split.vertex.ok_or_else(|| SolidError::sm_err(OP_MERGE))?;
                 if !split.split {
                     // Native assigns these two fields directly; in particular an

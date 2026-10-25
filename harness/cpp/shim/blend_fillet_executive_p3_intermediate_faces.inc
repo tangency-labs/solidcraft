@@ -6,6 +6,20 @@ namespace fillet_real_solid {
 namespace {
 struct FaceExecutive : Executive {
     using Executive::Executive;
+    SmTArray<SmAttribute*> retained_keep_attributes;
+    ~FaceExecutive(){clear_keep_attributes();}
+    void clear_keep_attributes(){for(ULONG i=0;i<retained_keep_attributes.GetSize();++i)delete retained_keep_attributes[i];retained_keep_attributes.ReSet();}
+    SmAttribute* edge_attribute_pointer()const{return m_pAttributeE;}
+    SmStatus tag_merge_faces_component(){
+        SmTArray<SmEdge*> edges;m_pFilletBrep->GetEdges(edges);
+        for(ULONG i=0;i<m_vTopoEdges.GetSize();++i){auto* fe=static_cast<SmFilletEdge*>(m_vTopoEdges[i]);
+            if(!fe||fe->GetFilletEdgeType()!=SM_FE_ON_EDGE||!fe->GetCurve())continue;
+            auto* edge=fe->m_pFilletBrepEdge1;if(!edge)continue;ULONG index;if(!edges.FindElement(edge,index))continue;
+            auto* attribute=new(m_crContext)SmAttribute(SM_AI_FILLET_EDGES,SM_AB_STANDALONE_REFERENCE);
+            edge->AddAttribute(attribute);retained_keep_attributes.Add(attribute);
+        }
+        return m_pTargetBrep->MergeBrep(*m_pFilletBrep);
+    }
     std::vector<double> attribute_state() {
         if(!m_pFilletBrep)return {0};
         SmTArray<SmEdge*> edges;m_pFilletBrep->GetEdges(edges);SmTArray<SmAObject*> users;if(m_pAttributeE)m_pAttributeE->GetUsers(users);

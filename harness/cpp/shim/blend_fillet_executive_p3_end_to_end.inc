@@ -279,10 +279,15 @@ std::pair<std::vector<double>,std::vector<double>> rail_metadata(SmFilletExecuti
 #include <SmCurveClass.h>
 #include "blend_fillet_executive_p3_rail_classification.inc"
 #include "blend_fillet_executive_p3_intermediate_faces.inc"
+#include "blend_fillet_executive_p3_original_selection.inc"
+#include "blend_fillet_executive_p3_original_deletion.inc"
+#include "blend_fillet_executive_p3_merge_attributes.inc"
+#include "blend_fillet_executive_p3_original_merge.inc"
+#include "blend_fillet_executive_p3_insertion.inc"
 
 SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_prefix(
     const double* input,int64_t n,int32_t checkpoint,double* out,int64_t cap,int64_t* out_len) {
-    if(checkpoint<1 || checkpoint>15 || !input || n<9) return SC_ERR_ARG;
+    if(checkpoint<1 || checkpoint>19 || !input || n<9) return SC_ERR_ARG;
     for(int64_t i=0;i<n;++i) if(!std::isfinite(input[i])) return SC_ERR_ARG;
     for(int i=0;i<3;++i) if(input[i]<=SM_EFF_ZERO) return SC_ERR_ARG;
     const double ulong_limit=std::ldexp(1.0,std::numeric_limits<ULONG>::digits);
@@ -308,6 +313,7 @@ SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_prefix(
     fillet_real_solid::FaceExecutive exec(*body->GetContext(),body.get());exec.SetDoGlobalMerge(TRUE);
     const auto xsect=input[4]==0?SM_FSG_LINEAR:input[4]==2?SM_FSG_BLEND_CURVE:SM_FSG_CIRCULAR;
     const auto prepare=exec.SetFilletParameters(body.get(),selected,xsect,SM_FS_CONST_RADIUS,input[3],nullptr,-1,-1,-1,-1,ULONG(input[5]),input[6]);
+    if(checkpoint==16 || checkpoint==17 || checkpoint==18 || checkpoint==19){auto values=fillet_real_solid::insertion_checkpoint(exec,body.get(),prepare,before,checkpoint==17,checkpoint==18,checkpoint==19);return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);}
     if(checkpoint==14 || checkpoint==15) {
         double corner_status=-1,constructor_status=-1,shrink_status=-1,map_status=-1;
         std::pair<std::vector<double>,std::vector<double>> maps_before{{0},{}},maps_after{{0},{}};
