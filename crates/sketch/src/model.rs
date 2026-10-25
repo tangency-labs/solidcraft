@@ -1883,8 +1883,8 @@ impl Sketch {
         Ok(self.curves.len() - 1)
     }
 
-    /// Give a fit spline one editable tangent handle at each fit point. The handles begin at the
-    /// natural interpolant, so enabling them preserves its exact curve.
+    /// Give a fit spline one editable tangent handle at each fit point. The handles begin at
+    /// three times the natural cubic control offsets, preserving its exact curve.
     pub fn add_spline_handles(&mut self, curve: usize) -> Result<()> {
         let mut candidate = self.clone();
         candidate.add_spline_handles_in_place(curve)?;

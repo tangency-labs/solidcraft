@@ -198,8 +198,9 @@ pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, 
         return nurbs.point(p, degree, t).unwrap_or_else(|| p.first().copied().unwrap_or_default());
     }
 
-/// Control-point positions for one editable tangent handle at each fit point. The natural
-/// interpolant's derivatives are retained, so showing handles does not change an existing curve.
+/// Tangent endpoints for one editable handle at each fit point. Each handle stores the full
+/// derivative vector, three times the cubic control-point offset, so the tangent line has a
+/// useful visible length without changing the natural interpolant.
 pub fn fit_tangent_handles(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<Vec2>> {
     let mut derivatives = Vec::new();
     if periodic {
@@ -213,7 +214,7 @@ pub fn fit_tangent_handles(p: &[Vec2], periodic: bool) -> crate::model::Result<V
             };
             derivatives.push((piece[1] - piece[0]) * (3.0 / chord));
         }
-        let mut handles: Vec<Vec2> = p.iter().take(count).enumerate().map(|(i, point)| *point + derivatives[i] / 3.0).collect();
+        let mut handles: Vec<Vec2> = p.iter().take(count).enumerate().map(|(i, point)| *point + derivatives[i]).collect();
         for i in 0..count {
             if handles[i].dist(p[i]) <= 1e-9 {
                 let next = p.get(i + 1).copied().unwrap_or(p[0]);
@@ -238,7 +239,7 @@ pub fn fit_tangent_handles(p: &[Vec2], periodic: bool) -> crate::model::Result<V
         derivatives.push(derivative);
     }
     let mut handles: Vec<Vec2> =
-        p.iter().enumerate().map(|(i, point)| if i + 1 == p.len() { *point - derivatives[i] / 3.0 } else { *point + derivatives[i] / 3.0 }).collect();
+        p.iter().enumerate().map(|(i, point)| if i + 1 == p.len() { *point - derivatives[i] } else { *point + derivatives[i] }).collect();
     for i in 0..handles.len() {
         if handles[i].dist(p[i]) <= 1e-9 {
             let direction = if i + 1 < p.len() { (p[i + 1] - p[i]).normalized() } else { (p[i] - p[i - 1]).normalized() };
@@ -249,8 +250,8 @@ pub fn fit_tangent_handles(p: &[Vec2], periodic: bool) -> crate::model::Result<V
     Ok(handles)
 }
 
-/// Cubic pieces using tangent-handle positions. Each handle stores one third of the derivative
-/// per unit chord length; adjacent spans scale it by their chord so the tangent remains smooth.
+/// Cubic pieces using tangent-handle positions. Each handle stores the derivative per unit chord
+/// length; adjacent spans scale it by their chord so the tangent remains smooth.
 pub fn fit_beziers_with_handles(p: &[Vec2], handles: &[Vec2], periodic: bool) -> crate::model::Result<Vec<[Vec2; 4]>> {
     if handles.is_empty() {
         return fit_beziers_mode(p, periodic);
@@ -268,7 +269,7 @@ pub fn fit_beziers_with_handles(p: &[Vec2], handles: &[Vec2], periodic: bool) ->
         .map(|(i, handle)| {
             let point = p[i];
             let vector = if periodic || i + 1 < p.len() { *handle - point } else { point - *handle };
-            vector * 3.0
+            vector
         })
         .collect();
     let spans = if periodic { count } else { p.len() - 1 };
