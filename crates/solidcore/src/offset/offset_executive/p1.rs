@@ -2533,36 +2533,49 @@ fn make_original_brep_cache(kernel: &Kernel, original: &Brep) -> Result<(BrepCac
     Ok((cache, keys))
 }
 
+/// `pOriginal->BrepPointSolve(..)`. The face surfaces reach their faces' caches
+/// (`smsurf_GetSurfaceCache`, which may create UV trim curves on `original`): the
+/// read-only solve requests each missing cache or trim, which is prepared on
+/// `original` before the solve runs again from its start.
 fn solve_original_brep_point(
     kernel: &Kernel,
-    original: &Brep,
+    original: &mut Brep,
     cache: &BrepCache,
     keys: &OriginalKeys,
     point: Vec3,
 ) -> Result<SolutionArray<CacheObject>> {
-    let objects = BrepObjects {
-        preparation: None,
-        brep: original,
-        // There is exactly one B-rep in this query adapter's local namespace.
-        brep_id: crate::topology::BrepId::from_index(0),
-        cache: Some(cache),
-        keys: &|object| keys.key(object),
-        // OriginalKeys identifies every edge and face by its geometry's own owner.
-        owner_of: &|_| None,
-    };
-    TopologySolver::brep_point_solve(
-        kernel,
-        &objects,
-        Some(CacheObject::Brep),
-        point,
-        TopologySolveOptions {
-            operation: SolverOperation::Minimize,
-            requested: SolutionRequested::Single,
-            tolerance_3d: original.tolerance(),
-            best_answer_so_far_sq: BIG_DOUBLE,
-            opt_vectors: &[],
-        },
-    )
+    let mut preparation = crate::query::brep::RayPreparation::default();
+    loop {
+        let objects = BrepObjects {
+            preparation: Some(&preparation),
+            brep: original,
+            // There is exactly one B-rep in this query adapter's local namespace.
+            brep_id: crate::topology::BrepId::from_index(0),
+            cache: Some(cache),
+            keys: &|object| keys.key(object),
+            // OriginalKeys identifies every edge and face by its geometry's own owner.
+            owner_of: &|_| None,
+        };
+        let result = TopologySolver::brep_point_solve(
+            kernel,
+            &objects,
+            Some(CacheObject::Brep),
+            point,
+            TopologySolveOptions {
+                operation: SolverOperation::Minimize,
+                requested: SolutionRequested::Single,
+                tolerance_3d: original.tolerance(),
+                best_answer_so_far_sq: BIG_DOUBLE,
+                opt_vectors: &[],
+            },
+        );
+        match (result, preparation.take_request()) {
+            (Err(SolidError::PreparationRequired { .. }), Some(request)) => {
+                preparation.prepare(kernel, original, request)?;
+            }
+            (result, _) => return result,
+        }
+    }
 }
 
 fn collect_excess_faces(
@@ -3673,11 +3686,11 @@ mod tests {
     #[test]
     fn original_brep_query_calls_live_solver_and_propagates_its_status() {
         let kernel = Kernel::default();
-        let original = Brep::new();
+        let mut original = Brep::new();
         let cache = BrepCache::new(crate::geom::a_object::BREP_TYPE).unwrap();
         let keys = OriginalKeys::new(&original).unwrap();
         assert!(matches!(
-            solve_original_brep_point(&kernel, &original, &cache, &keys, Vec3::ZERO),
+            solve_original_brep_point(&kernel, &mut original, &cache, &keys, Vec3::ZERO),
             Err(SolidError::Upstream {
                 operation: "intersect::topology_solver::p1::TopologyObjects::brep_trees",
                 code: crate::error::SM_ERR_NULL_POINTER,

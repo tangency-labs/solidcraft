@@ -2639,16 +2639,13 @@ mod tests {
                 "",
                 RESULT,
             ),
+            // (their face solves reach the faces' surface caches)
             (
                 "member_sheet_extended_dispatch_ignores_skip",
-                "topology.face_p2",
-                "SmFace handle of a surface's face",
+                "",
+                RESULT,
             ),
-            (
-                "extended_sheet_direct_independent_flags",
-                "topology.face_p2",
-                "SmFace handle of a surface's face",
-            ),
+            ("extended_sheet_direct_independent_flags", "", RESULT),
         ] {
             let case = fixtures.iter().find(|case| case.name == name).unwrap();
             let output = Runner.run_rust(case).unwrap();

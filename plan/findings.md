@@ -20427,6 +20427,52 @@ branch culling of the point query against the curve tree (`BranchMayContainAnswe
 the face-cache wiring, which only made the cases reach this point. The cases are known
 mismatches until that culling is compared with the C++.
 
+## offset.offset_geometry_creation: drops onto a seeded extended surface through a freshly built face cache (2026-10-25)
+
+`gen0248`, `gen0346`, `gen0350`, `gen0508` (generated, `offset.offset_geometry_creation`)
+were deferred on main where `TrimExtendedEdge`'s `pOtherExtSurf->DropAndTrimCurve`
+traced on the surface's cache: the runner seeds every base with itself
+(`m_vSurfExtSurf.Insert(s, s)`), so the "extended" surface is the face's own surface
+and `smsurf_GetSurfaceCache` returns the face's trimmed cache. The drop now gets that
+cache (`OffsetBrep::prepare_surface_solve_cache`, built fresh at the drop) and 33 of
+the 45 deferred cases pass; these four disagree in the recorded state:
+`values.state.len` C++ 168 vs Rust 188 (`gen0248`), 547 vs 615 (`gen0346`), 14190 vs
+14210 (`gen0508`); `gen0350` keeps the length but `values.state[311]` is C++
+`2.9631480111470525e-2` vs Rust `4.1052170113668345e-2` (12 values differ, max rel err
+0.278). Suspected cause: upstream's face cache is the one the face has held since an
+earlier op of the script (its tree and `m_bFaceWasModified` / point-test state carry
+over the script's edits), while the port builds a new cache with point testing on at
+each drop, so the trace trims the dropped curve differently. The trimmed-cache
+history work (`smsurf_GetSurfaceCache` keeping a surface's cache across operations) is
+the likely fix; until then the cases are known mismatches.
+
+## offset.offset_executive_p2 gen0235: imprint edge definition without its source topology (2026-10-25)
+
+`gen0235` (solid offset, `offset_distance = -2e-5`, merge results, extend convex) was
+deferred on main in `RemoveExcessFaces`' `pOriginal->BrepPointSolve` (the face solve's
+`smsurf_GetSurfaceCache`). That solve now reaches the original's face caches (built
+on the original between attempts, `RayPreparation`), and the case runs further: C++
+returns `SM_SUCCESS` with a result B-rep, Rust fails with `SM_ERR_NULL_POINTER` from
+`ProtoTopologyManager::imprint_edge_definition` (one of the edge definition's source
+faces/edges is missing) during the merge Boolean, so `ints.status` is 1000 vs 1006 and
+the result projections are missing on the Rust side. The excess-face solves themselves
+succeed (one solution each). Suspected cause: a divergence in the Boolean's
+intersection classification upstream of the imprint, not the face-cache wiring; not
+analysed further here.
+
+## offset.offset_executive_p2 shell_boundary_negative_exactly_two_tol after PR #849 (2026-10-25)
+
+Deferred on main in `RemoveExcessFaces`' `BrepPointSolve` (the face solve's
+`smsurf_GetSurfaceCache`). With that solve reaching the original's face caches, the
+case passes on the offset B-rep copy/merge stack (#856) alone; after merging main at
+`6ad48dd70` (PR #849: `intersect/curve_class/p5.rs` merges paired intervals through
+their actual peers) it disagrees in one value: `values.result.geometry[6]` C++
+`9.999985000000001e-1`, Rust `9.99999e-1` (rel err 5.0e-7). The case puts the shell
+boundary at exactly twice the tolerance, so a classification-interval merge at that
+boundary picks a different end point. Suspected cause: #849's peer forwarding in the
+interval merge differs from upstream at an exact-tolerance boundary; not analysed here.
+
+Update (2026-10-25): with main merged at the state after #851, #856 and #861, `offset.offset_executive_p2` `shell_boundary_negative_exactly_two_tol` passes again; its known-mismatch entry is removed.
 ## boolean.merge_p3: shell vertex on a box edge finds no edge solution: resolved (2026-10-25)
 
 Root cause of the entry above: a difftest runner input defect, not branch culling. The

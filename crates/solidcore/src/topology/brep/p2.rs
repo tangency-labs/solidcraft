@@ -2622,15 +2622,7 @@ pub fn mate_lamina_edge_to_surface(
             let tol = b.edge(e_side)?.tolerance / 4.0;
             let face_domain = b.face(face)?.uv_domain;
             let side_curve = Curve::from(side_ext);
-            let lifted = {
-                let surface = match replaced.as_ref() {
-                    Some(s) => s,
-                    None => b
-                        .face(face)?
-                        .surface
-                        .as_ref()
-                        .ok_or(null_deref("face without surface"))?,
-                };
+            let lifted = if let Some(surface) = replaced.as_ref() {
                 surface.lift_curve(
                     k,
                     &face_domain,
@@ -2638,6 +2630,25 @@ pub fn mate_lamina_edge_to_surface(
                     &side_curve.natural_interval(),
                     tol,
                     true,
+                )?
+            } else {
+                // the face's surface reaches its face's cache (smsurf_GetSurfaceCache),
+                // made on the B-rep: an exact evaluation copy of the surface meanwhile
+                let surface = b
+                    .face(face)?
+                    .surface
+                    .as_ref()
+                    .ok_or(null_deref("face without surface"))?
+                    .clone_for_evaluation()?;
+                surface.lift_curve_with_context(
+                    k,
+                    &face_domain,
+                    &side_curve,
+                    &side_curve.natural_interval(),
+                    tol,
+                    true,
+                    &mut crate::query::brep::BrepFaceServices::new(b),
+                    Some(CacheObject::Surface(face)),
                 )?
             };
             let new_3d = lifted.curve;

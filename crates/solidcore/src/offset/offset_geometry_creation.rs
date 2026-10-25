@@ -2532,8 +2532,17 @@ impl OffsetGeometryCreation {
             let off_tol = brep.edge_tolerance(off_edge)?;
 
             // Drop Lifted Curve onto other extended surface to make 2nd UVTrimCurve
-            let dropped = surface_of(brep, other_ext_h)?.drop_and_trim_curve::<O>(
+            // (the drop's trace gets the surface's cache, `smsurf_GetSurfaceCache`: the
+            // face's trimmed cache when a face owns the extended surface)
+            let other_ext = surface_of(brep, other_ext_h)?.clone_for_evaluation()?;
+            let mut face_cache = if other_ext.face()?.is_some() {
+                Some(brep.prepare_surface_solve_cache(k, &other_ext, Some(other_ext_h))?)
+            } else {
+                None
+            };
+            let dropped = other_ext.drop_and_trim_curve_in::<O, O>(
                 k,
+                face_cache.as_mut(),
                 &other_ext_domain,
                 &lifted_curve,
                 &lifted_curve.natural_interval(),

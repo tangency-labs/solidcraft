@@ -3515,15 +3515,23 @@ fn orient_ray_votes(
 
             // Get Surface Normal for this point.
             let dom = b.face(face)?.uv_domain;
-            let sols = surface.global_point_solve::<CacheObject>(
+            // the face's surface reaches its face's cache (smsurf_GetSurfaceCache),
+            // made on the B-rep: an exact evaluation copy of the surface meanwhile
+            let surface = surface.clone_for_evaluation()?;
+            let tolerance_3d = b.tolerance();
+            let mut sols = crate::geom::solution_array::SolutionArray::new();
+            surface.global_point_solve_into_with_context::<CacheObject>(
                 k,
+                Some(CacheObject::Surface(face)),
                 None,
+                &mut crate::query::brep::BrepFaceServices::new(b),
                 &dom,
                 crate::geom::global_solver::SolverOperation::Minimize,
                 point_in_face,
-                b.tolerance(),
+                tolerance_3d,
                 None,
                 crate::geom::global_solver::SolutionRequested::Single,
+                &mut sols,
             )?;
             let sol = *sols.get(0).ok_or_else(ser)?;
             let uv = crate::math::Point2::new(sol.start.param(0)?, sol.start.param(1)?);
