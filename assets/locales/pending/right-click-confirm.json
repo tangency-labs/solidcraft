@@ -1,0 +1,122 @@
+{
+  "en": {
+    "dialog.right_click_pick": "Select {input} first",
+    "ui.right_click_confirms": "Right-click confirms dialog inputs",
+    "ui.right_click_confirms_tip": "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK"
+  },
+  "cs": {
+    "dialog.right_click_pick": "Nejprve vyberte {input}",
+    "ui.right_click_confirms": "Pravé kliknutí potvrzuje vstupy dialogu",
+    "ui.right_click_confirms_tip": "Při otevřeném dialogu přejde pravé kliknutí v zobrazení na další prázdný vstup a u posledního provede OK"
+  },
+  "da": {
+    "dialog.right_click_pick": "Vælg først {input}",
+    "ui.right_click_confirms": "Højreklik bekræfter dialogens input",
+    "ui.right_click_confirms_tip": "Med en dialog åben går et højreklik i visningen videre til næste tomme input, og ved det sidste udføres OK"
+  },
+  "de": {
+    "dialog.right_click_pick": "Zuerst {input} auswählen",
+    "ui.right_click_confirms": "Rechtsklick bestätigt Dialogeingaben",
+    "ui.right_click_confirms_tip": "Bei offenem Dialog springt ein Rechtsklick in der Ansicht zur nächsten leeren Eingabe und führt bei der letzten OK aus"
+  },
+  "es": {
+    "dialog.right_click_pick": "Selecciona primero {input}",
+    "ui.right_click_confirms": "El clic derecho confirma las entradas del diálogo",
+    "ui.right_click_confirms_tip": "Con un diálogo abierto, un clic derecho en la vista pasa a la siguiente entrada vacía y, en la última, ejecuta OK"
+  },
+  "fr": {
+    "dialog.right_click_pick": "Sélectionner d’abord {input}",
+    "ui.right_click_confirms": "Le clic droit valide les entrées du dialogue",
+    "ui.right_click_confirms_tip": "Avec un dialogue ouvert, un clic droit dans la vue passe à l’entrée vide suivante et, sur la dernière, exécute OK"
+  },
+  "gl": {
+    "dialog.right_click_pick": "Selecciona primeiro {input}",
+    "ui.right_click_confirms": "O clic dereito confirma as entradas do diálogo",
+    "ui.right_click_confirms_tip": "Cun diálogo aberto, un clic dereito na vista pasa á seguinte entrada baleira e, na última, executa OK"
+  },
+  "hu": {
+    "dialog.right_click_pick": "Előbb jelölje ki ezt: {input}",
+    "ui.right_click_confirms": "A jobb kattintás jóváhagyja a párbeszédablak bemeneteit",
+    "ui.right_click_confirms_tip": "Nyitott párbeszédablaknál a nézetben a jobb kattintás a következő üres bemenetre lép, az utolsónál pedig OK-t nyom"
+  },
+  "id": {
+    "dialog.right_click_pick": "Pilih {input} terlebih dahulu",
+    "ui.right_click_confirms": "Klik kanan mengonfirmasi input dialog",
+    "ui.right_click_confirms_tip": "Saat dialog terbuka, klik kanan di tampilan berpindah ke input kosong berikutnya, dan pada input terakhir menjalankan OK"
+  },
+  "it": {
+    "dialog.right_click_pick": "Seleziona prima {input}",
+    "ui.right_click_confirms": "Il clic destro conferma gli input della finestra di dialogo",
+    "ui.right_click_confirms_tip": "Con una finestra di dialogo aperta, un clic destro nella vista passa al successivo input vuoto e, sull’ultimo, esegue OK"
+  },
+  "ja": {
+    "dialog.right_click_pick": "先に {input} を選択",
+    "ui.right_click_confirms": "右クリックでダイアログの入力を確定",
+    "ui.right_click_confirms_tip": "ダイアログが開いているとき、ビューで右クリックすると次の空の入力へ進み、最後の入力では OK を実行します"
+  },
+  "ko": {
+    "dialog.right_click_pick": "먼저 {input} 선택",
+    "ui.right_click_confirms": "오른쪽 클릭으로 대화 상자 입력 확인",
+    "ui.right_click_confirms_tip": "대화 상자가 열려 있을 때 뷰에서 오른쪽 클릭하면 다음 빈 입력으로 이동하고, 마지막 입력에서는 OK를 실행합니다"
+  },
+  "ms": {
+    "dialog.right_click_pick": "Pilih {input} dahulu",
+    "ui.right_click_confirms": "Klik kanan mengesahkan input dialog",
+    "ui.right_click_confirms_tip": "Apabila dialog dibuka, klik kanan dalam paparan beralih ke input kosong seterusnya, dan pada input terakhir menjalankan OK"
+  },
+  "nl": {
+    "dialog.right_click_pick": "Eerst {input} selecteren",
+    "ui.right_click_confirms": "Rechtsklik bevestigt dialooginvoer",
+    "ui.right_click_confirms_tip": "Met een dialoog open gaat een rechtsklik in de weergave naar de volgende lege invoer, en bij de laatste voert hij OK uit"
+  },
+  "pl": {
+    "dialog.right_click_pick": "Najpierw zaznacz {input}",
+    "ui.right_click_confirms": "Prawy klik zatwierdza pola okna dialogowego",
+    "ui.right_click_confirms_tip": "Przy otwartym oknie dialogowym prawy klik w widoku przechodzi do następnego pustego pola, a przy ostatnim wykonuje OK"
+  },
+  "pt-BR": {
+    "dialog.right_click_pick": "Selecione {input} primeiro",
+    "ui.right_click_confirms": "O clique direito confirma as entradas da caixa de diálogo",
+    "ui.right_click_confirms_tip": "Com uma caixa de diálogo aberta, um clique direito na vista passa para a próxima entrada vazia e, na última, executa OK"
+  },
+  "ro": {
+    "dialog.right_click_pick": "Selectați mai întâi {input}",
+    "ui.right_click_confirms": "Clicul dreapta confirmă intrările dialogului",
+    "ui.right_click_confirms_tip": "Cu un dialog deschis, un clic dreapta în vedere trece la următoarea intrare goală, iar la ultima rulează OK"
+  },
+  "ru": {
+    "dialog.right_click_pick": "Сначала выберите {input}",
+    "ui.right_click_confirms": "Правый щелчок подтверждает поля диалога",
+    "ui.right_click_confirms_tip": "При открытом диалоге правый щелчок в виде переходит к следующему пустому полю, а на последнем выполняет OK"
+  },
+  "sv": {
+    "dialog.right_click_pick": "Markera {input} först",
+    "ui.right_click_confirms": "Högerklick bekräftar dialogens indata",
+    "ui.right_click_confirms_tip": "Med en dialog öppen går ett högerklick i vyn vidare till nästa tomma indata, och vid den sista körs OK"
+  },
+  "tr": {
+    "dialog.right_click_pick": "Önce {input} seçin",
+    "ui.right_click_confirms": "Sağ tıklama iletişim kutusu girişlerini onaylar",
+    "ui.right_click_confirms_tip": "Bir iletişim kutusu açıkken görünümde sağ tıklama bir sonraki boş girişe geçer, sonuncusunda ise OK çalıştırır"
+  },
+  "uk": {
+    "dialog.right_click_pick": "Спочатку виберіть {input}",
+    "ui.right_click_confirms": "Правий клік підтверджує поля діалогу",
+    "ui.right_click_confirms_tip": "Коли діалог відкрито, правий клік у вигляді переходить до наступного порожнього поля, а на останньому виконує OK"
+  },
+  "vi": {
+    "dialog.right_click_pick": "Chọn {input} trước",
+    "ui.right_click_confirms": "Nhấp chuột phải xác nhận đầu vào của hộp thoại",
+    "ui.right_click_confirms_tip": "Khi hộp thoại đang mở, nhấp chuột phải trong khung nhìn chuyển sang đầu vào trống tiếp theo, và ở đầu vào cuối cùng sẽ chạy OK"
+  },
+  "zh": {
+    "dialog.right_click_pick": "请先选择{input}",
+    "ui.right_click_confirms": "右键确认对话框输入",
+    "ui.right_click_confirms_tip": "对话框打开时，在视图中右键单击会转到下一个空输入，在最后一个输入上执行 OK"
+  },
+  "zh-TW": {
+    "dialog.right_click_pick": "請先選擇{input}",
+    "ui.right_click_confirms": "右鍵確認對話方塊輸入",
+    "ui.right_click_confirms_tip": "對話方塊開啟時，在視圖中按右鍵會轉到下一個空白輸入，在最後一個輸入上執行 OK"
+  }
+}
