@@ -421,8 +421,9 @@ impl<O: ClassObject> CurveClassification<O> {
         a: &mut impl Imprint<O>,
         index: usize,
         vertices_only: bool,
+        other: Option<&Self>,
     ) -> Result<MergedTopology<O>> {
-        let merged = classification.merge_interval_in(a, index, vertices_only, None)?;
+        let merged = classification.merge_interval_in(a, index, vertices_only, other)?;
         Ok(MergedTopology {
             faces: merged.new_faces,
             edges: merged.new_edges,
@@ -1168,11 +1169,11 @@ impl<O: ClassObject> CurveClassification<O> {
             {
                 continue;
             }
-            scratch = Self::p5_merge_interval_in(self, a, i, false)?;
+            scratch = Self::p5_merge_interval_in(self, a, i, false, Some(other))?;
             append_unique(&mut out.faces, scratch.faces.iter().copied());
             append_unique(&mut out.edges, scratch.edges.iter().copied());
             append_unique(&mut out.vertices, scratch.vertices.iter().copied());
-            scratch_other = Self::p5_merge_interval_in(other, a, i, false)?;
+            scratch_other = Self::p5_merge_interval_in(other, a, i, false, Some(self))?;
             append_unique(&mut out_other.faces, scratch_other.faces.iter().copied());
             append_unique(&mut out_other.edges, scratch_other.edges.iter().copied());
             append_unique(
@@ -1257,7 +1258,7 @@ impl<O: ClassObject> CurveClassification<O> {
     ) -> Result<MergedTopology<O>> {
         let mut a = MutableImprint { k, g: geometry };
         self.merge_intervals_using(vertices_only, |c, j, v| {
-            Self::p5_merge_interval_in(c, &mut a, j, v)
+            Self::p5_merge_interval_in(c, &mut a, j, v, None)
         })
         .map_err(|e| e.error)
     }
