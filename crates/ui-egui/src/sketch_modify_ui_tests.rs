@@ -472,7 +472,7 @@ fn two_sided_offset_shows_a_dimension_for_each_distance() {
     let (mut h, id) = open("sketch.offset");
     {
         let d = h.app.dialog.as_mut().unwrap();
-        d.inputs[0].items = vec![Sel::SketchCurve { id }];
+        d.inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     }
     h.frames(2);
     assert!(crate::scenario::handle_at("arrow").is_some(), "Distance has its dimension");

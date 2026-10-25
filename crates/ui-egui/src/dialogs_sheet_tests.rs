@@ -772,6 +772,12 @@ fn path_flange_dialog_follows_the_path() {
         app.run("sketch.create", json!({"plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Path"})).unwrap();
         app.run("sketch.line", json!({"points": [[0, 0], [a, -a], [a + 30.0, -a]], "ids": ["p1", "p2"]})).unwrap();
         app.run("sketch.finish", json!({})).unwrap();
+        let path = app.session.world_state().sketches.last().map(|ss| ss.feature);
+        // A newer sketch with the same line ids: the picks name the path's sketch (#3726).
+        app.run("sketch.create", json!({"plane": {"origin": [0, 0, 60], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Other"})).unwrap();
+        app.run("sketch.line", json!({"points": [[50, 50], [60, 50], [60, 60]], "ids": ["p1", "p2"]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let pick = |id: &str| Sel::SketchCurve { id: id.into(), sketch: path };
         let features = app.session.doc.features.len();
         app.start("sheet.path_flange");
         let mut d = app.dialog.clone().unwrap();
@@ -779,16 +785,17 @@ fn path_flange_dialog_follows_the_path() {
         d.inputs[0].items = vec![edge_sel(&app.session, Vec3::new(1.25, 0.0, 15.0)).expect("the wall's end edge")];
         assert!(apply_commands(&app, &d).is_err(), "no path picked yet");
         // One line picked takes the whole path, and the dialog shows the flanges it makes.
-        d.inputs[1].items = vec![Sel::SketchCurve { id: "p2".into() }];
+        d.inputs[1].items = vec![pick("p2")];
         path_chain(&app, &mut d.inputs);
-        assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { id: "p1".into() }, Sel::SketchCurve { id: "p2".into() }], "in order along the path");
+        assert_eq!(d.inputs[1].items, vec![pick("p1"), pick("p2")], "in order along the path");
         let lengths = path_lengths(&app, &d.inputs);
         assert!(lengths.len() == 2 && lengths.iter().all(|l| (l - 30.0).abs() < 1e-6), "{lengths:?}");
-        d.inputs[1].items = vec![Sel::SketchCurve { id: "p1".into() }, Sel::SketchCurve { id: "p2".into() }];
+        d.inputs[1].items = vec![pick("p1"), pick("p2")];
         let c = apply_commands(&app, &d).unwrap();
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].0, "sheet.path_flange");
         assert_eq!(c[0].1["curves"], json!(["p1", "p2"]));
+        assert_eq!(c[0].1["sketch"], json!(path));
         run_all(&mut app, c);
         assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
         assert_eq!(app.session.doc.features.len(), features + 1, "one feature");
@@ -797,6 +804,7 @@ fn path_flange_dialog_follows_the_path() {
         let e = edit_dialog(&app, f.id, None).unwrap();
         assert!(matches!(&e.kind, Kind::Sheet(Sm::Path { .. })));
         assert_eq!((e.inputs[0].items.len(), e.inputs[1].items.len()), (1, 2));
+        assert_eq!(e.inputs[1].items, vec![pick("p1"), pick("p2")], "the path's own sketch");
         assert!(apply_commands(&app, &e).is_ok());
     }
 }

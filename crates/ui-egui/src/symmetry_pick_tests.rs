@@ -87,7 +87,7 @@ fn three_selected_lines_take_the_construction_line_as_the_symmetry_line() {
     let h = between_two_lines();
     let state = h.app.session.world_state();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
-    let sel = |ids: [&str; 3]| ids.map(|id| SketchCurve { id: id.into() });
+    let sel = |ids: [&str; 3]| ids.map(|id| SketchCurve { id: id.into(), sketch: None });
     for ids in [["mid", "left", "right"], ["right", "mid", "left"]] {
         let params = crate::tools::constraint_preselection("sketch.constraint.symmetry", &sel(ids), Some(sk)).unwrap();
         assert_eq!(params["line"], "mid", "{ids:?}");

@@ -49,7 +49,7 @@ fn two_lines_apart() -> (Harness, Value, Value) {
 fn row_of(h: &Harness, id: &str) -> usize {
     let rows = crate::select_other::describe(&h.app)["rows"].clone();
     let sels: Vec<Sel> = rows.as_array().into_iter().flatten().filter_map(|r| serde_json::from_value(r["sel"].clone()).ok()).collect();
-    sels.iter().position(|s| matches!(s, Sel::SketchCurve { id: x } if x == id)).unwrap_or_else(|| panic!("no row for {id}: {rows}"))
+    sels.iter().position(|s| matches!(s, Sel::SketchCurve { id: x, .. } if x == id)).unwrap_or_else(|| panic!("no row for {id}: {rows}"))
 }
 
 fn sorted(mut v: Vec<String>) -> Vec<String> {

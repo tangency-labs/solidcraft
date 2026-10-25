@@ -500,38 +500,24 @@ fn path_chain(app: &SolveApp, inputs: &mut [SelInput]) {
     let edge = inputs.first().and_then(|i| i.items.edge_points().first().copied());
     let Some(input) = inputs.get_mut(1) else { return };
     let st = app.session.world_state();
-    let mut chained: Vec<Sel> = Vec::new();
-    for sel in &input.items {
-        let Sel::SketchCurve { id } = sel else { continue };
-        let ids = st
-            .sketches
-            .iter()
-            .rev()
-            .find_map(|ss| {
-                let ci = ss.sketch.curve_index(id)?;
-                Some(
-                    ss.sketch
-                        .chain(ci)
-                        .into_iter()
-                        .filter_map(|c| ss.sketch.curves.get(c))
-                        .filter(|c| !c.construction)
-                        .map(|c| c.id.clone())
-                        .collect(),
-                )
-            })
-            .unwrap_or_else(|| vec![id.clone()]);
-        for id in ids {
-            let sel = Sel::SketchCurve { id };
-            if !chained.contains(&sel) {
-                chained.push(sel);
+    // The path is in the sketch its picks name (#3726).
+    let Some(ss) = crate::dialogs::picks_sketch(app, &input.items, None).and_then(|k| st.sketch(k)) else { return };
+    let mut ids: Vec<String> = Vec::new();
+    for id in input.items.curve_ids() {
+        let chain = match ss.sketch.curve_index(&id) {
+            Some(ci) => {
+                ss.sketch.chain(ci).into_iter().filter_map(|c| ss.sketch.curves.get(c)).filter(|c| !c.construction).map(|c| c.id.clone()).collect()
+            }
+            None => vec![id],
+        };
+        for id in chain {
+            if !ids.contains(&id) {
+                ids.push(id);
             }
         }
     }
     // In order along the path, so the flanges read from the edge out.
-    let ids: Vec<String> = chained.iter().filter_map(|sel| if let Sel::SketchCurve { id } = sel { Some(id.clone()) } else { None }).collect();
-    if let Some(ss) = ids.first().and_then(|first| st.sketches.iter().rev().find(|ss| ss.sketch.curve_index(first).is_some()))
-        && let Ok(mut order) = ss.chain_order(&ids)
-    {
+    if let Ok(mut order) = ss.chain_order(&ids) {
         // From the end nearer the picked edge.
         let near = |id: Option<&String>| {
             let segs = id.and_then(|id| ss.sketch.curve_index(id)).map(|ci| ss.sketch.segs(ci)).unwrap_or_default();
@@ -541,8 +527,9 @@ fn path_chain(app: &SolveApp, inputs: &mut [SelInput]) {
         if near(order.last()) < near(order.first()) {
             order.reverse();
         }
-        chained = order.into_iter().map(|id| Sel::SketchCurve { id }).collect();
+        ids = order;
     }
+    let chained: Vec<Sel> = ids.iter().map(|id| crate::selection::curve_pick(id, ss.feature, app.session.active_sketch)).collect();
     if chained != input.items {
         input.items = chained;
     }
@@ -551,14 +538,14 @@ fn path_chain(app: &SolveApp, inputs: &mut [SelInput]) {
 /// The lengths of the path's lines, in the order picked (mm).
 fn path_lengths(app: &SolveApp, inputs: &[SelInput]) -> Vec<f64> {
     let st = app.session.world_state();
-    items(inputs, 1)
+    let picks = items(inputs, 1);
+    let Some(ss) = crate::dialogs::picks_sketch(app, picks, None).and_then(|k| st.sketch(k)) else { return Vec::new() };
+    picks
+        .curve_ids()
         .iter()
-        .filter_map(|sel| match sel {
-            Sel::SketchCurve { id } => st.sketches.iter().rev().find_map(|ss| {
-                let ci = ss.sketch.curve_index(id)?;
-                Some(ss.sketch.segs(ci).iter().map(|s| s.start().dist(s.end())).sum())
-            }),
-            _ => None,
+        .filter_map(|id| {
+            let ci = ss.sketch.curve_index(id)?;
+            Some(ss.sketch.segs(ci).iter().map(|s| s.start().dist(s.end())).sum())
         })
         .collect()
 }
@@ -687,17 +674,12 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
         }
         Sm::Path { radius } => {
             let edge = edge_points(inputs).into_iter().next().ok_or("select the sheet edge first")?;
-            let curves: Vec<String> = items(inputs, 1)
-                .iter()
-                .filter_map(|sel| match sel {
-                    Sel::SketchCurve { id } => Some(id.clone()),
-                    _ => None,
-                })
-                .collect();
-            let first = curves.first().ok_or("select the path (sketch lines across the edge)")?;
-            let st = s.world_state();
-            let sketch =
-                st.sketches.iter().rev().find(|ss| ss.sketch.curve_index(first).is_some()).map(|ss| ss.feature).ok_or("the path's sketch is gone")?;
+            let picks = items(inputs, 1);
+            let curves = picks.curve_ids();
+            if curves.is_empty() {
+                return Err("select the path (sketch lines across the edge)".into());
+            }
+            let sketch = crate::dialogs::picks_sketch(app, picks, None).ok_or("the path's sketch is gone")?;
             let mut p = json!({"edge": edge, "sketch": sketch, "curves": curves});
             put(&mut p, &[("radius", radius)]);
             ("sheet.path_flange", p)
@@ -838,7 +820,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             return Some((Kind::Sheet(k), ins, extra));
         }
-        FeatureKind::SheetPath { edge, curves, body, .. } => {
+        FeatureKind::SheetPath { edge, sketch, curves, body, .. } => {
             if let Some(bd) = body {
                 extra.insert("body".into(), json!(bd));
             }
@@ -848,7 +830,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 i.items = edge_sel(s, edge.0).into_iter().collect();
             }
             if let Some(i) = ins.get_mut(1) {
-                i.items = curves.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+                i.items = curves.iter().map(|id| crate::selection::curve_pick(id, sketch.0, app.session.active_sketch)).collect();
             }
             return Some((Kind::Sheet(k), ins, extra));
         }

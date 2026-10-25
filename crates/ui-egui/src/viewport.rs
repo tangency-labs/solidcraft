@@ -4954,8 +4954,8 @@ mod tests {
             let hits = pick_all(&app, &proj, proj.to_screen(at).unwrap());
             let hit = hits.iter().find(|h| matches!(h, Hit::SketchCurve { id: picked, .. } if picked == &id)).unwrap();
             let axis = crate::selection::SelInput::new("Axis", crate::selection::AXES, false);
-            assert_eq!(axis.accepts(hit, |_, _| false).is_some(), straight, "{hit:?}");
-            let selected = Sel::SketchCurve { id };
+            assert_eq!(axis.accepts(hit, None, |_, _| false).is_some(), straight, "{hit:?}");
+            let selected = Sel::SketchCurve { id, sketch: None };
             assert_eq!(crate::dialogs::axis_of(&app, &selected).is_some(), straight);
         }
     }
@@ -4968,7 +4968,7 @@ mod tests {
         let id = s.execute("sketch.line3d", &json!({"points":[[10,20,30],[30,20,30]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
         s.execute("sketch.finish", &json!({})).unwrap();
         let mut app = SolveApp::new(s, crate::Services::default());
-        let selected = Sel::SketchCurve { id };
+        let selected = Sel::SketchCurve { id, sketch: None };
         let (origin, dir) = crate::dialogs::axis_of(&app, &selected).unwrap();
         assert!(origin.dist(Vec3::new(10., 20., 30.)) < 1e-9);
         assert!(dir.dist(Vec3::X) < 1e-9);
