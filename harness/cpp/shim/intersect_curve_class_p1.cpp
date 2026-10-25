@@ -2900,10 +2900,11 @@ int32_t run(Rd& rd, std::vector<double>& o)
             double tol = rd.num();
             if (!ok || f == NULL || f->GetSurface() == NULL)
                 return SC_ERR_ARG;
-            // a face whose UV domain is a single point crashes this (a heal.face_props domain
-            // of size 1e-300 collapses to one; 1e-100 and up run; cause not located, a NULL
-            // surface cache at the unchecked pSC->m_bPointTestEnabled is a candidate): reject
-            // zero size on either axis as undefined. A bare face's empty domain (min above
+            // a face whose UV domain has zero size on EITHER axis crashes this (SIGSEGV, measured
+            // with this guard removed: a heal.face_props domain collapsing to sizes (0,1), (1,0)
+            // and (0,0); sizes down to 1e-100 on the other axis still run; cause not located, a
+            // NULL surface cache at the unchecked pSC->m_bPointTestEnabled is a candidate), so
+            // either-axis zero is rejected as undefined. A bare face's empty domain (min above
             // max, negative size) is fine: nothing is inside it.
             SmPoint2d dsz = f->GetUVDomain().GetSize();
             if (dsz.x == 0.0 || dsz.y == 0.0)

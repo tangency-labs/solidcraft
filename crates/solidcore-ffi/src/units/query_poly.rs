@@ -324,6 +324,13 @@ pub struct Section {
     pub values: Vec<f64>,
 }
 
+/// Shim status: the shim declined an input that is undefined in upstream C++. An
+/// `IsDegenerate` call on an edge whose poly face has an original-face label that is not
+/// a real `SmFace`, while the back pointers hold, reaches `SmFace::GetSurface` through
+/// the label (`SmPoly.cpp:21281-21283`). Decided by the shim from the built model before
+/// any call; no result is inspected.
+pub const STATUS_UNDEFINED_INPUT: i32 = -1101;
+
 /// Largest shell count of one region the wrapper accepts. The shim converts each count
 /// with `(int64_t)` and allocates that many shells, so a fuzzed `2^63 - 1` wraps to a
 /// negative count (no shells, later shell indices read past the shim's array: SIGSEGV)

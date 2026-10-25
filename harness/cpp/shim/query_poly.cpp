@@ -13,6 +13,9 @@
 // so upstream only touches valid memory. Output: sections `key kind len values...`.
 #include "sc_shim.h"
 
+// Shim status: the input is undefined in upstream C++ (see op_degen); difftest rejects it.
+#define SC_QP_UNDEFINED_INPUT (-1101)
+
 #include "StdAfx.h"
 #include <SmAxis2Placement.h>
 #include <SmBSplineSurface.h>
@@ -732,27 +735,35 @@ void op_contains(Rd& rd, Model& m, Out& out)
     out.ints(K_RESULTS, o);
 }
 
-void op_degen(Rd& rd, Model& m, Out& out)
+// Returns false, without calling IsDegenerate, when any call would reach upstream
+// SmPoly.cpp:21281-21283 (`pFace = GetOriginalFace(); pSurface = (pFace && GetOKBackPtrs()) ?
+// pFace->GetSurface() : NULL`) with a labelled (fake) SmFace: undefined in C++. The test
+// reads the built model only, never a result.
+bool op_degen(Rd& rd, Model& m, Out& out)
 {
     int64_t n = rd.idx();
-    std::vector<double> o;
+    struct Call { int64_t e; bool has; double t; };
+    std::vector<Call> calls;
     for (int64_t i = 0; i < n; ++i)
     {
-        int64_t e = rd.idx();
-        bool has = rd.flag();
-        double t = rd.num();
-        SmPolyEdge* pe = m.edges[e];
+        Call c;
+        c.e = rd.idx();
+        c.has = rd.flag();
+        c.t = rd.num();
+        SmPolyEdge* pe = m.edges[c.e];
         SmPolyFace* pf = pe->GetPolyFace();
         if (pf && pf->GetOriginalFace() && pe->GetOKBackPtrs())
-        {
-            // would dereference the labelled (fake) SmFace: the Rust side defers this
-            o.push_back(-9.0);
-            continue;
-        }
-        SmXSectTol3d xs(t);
-        o.push_back(pe->IsDegenerate(has ? &xs : NULL) ? 1.0 : 0.0);
+            return false;
+        calls.push_back(c);
+    }
+    std::vector<double> o;
+    for (const Call& c : calls)
+    {
+        SmXSectTol3d xs(c.t);
+        o.push_back(m.edges[c.e]->IsDegenerate(c.has ? &xs : NULL) ? 1.0 : 0.0);
     }
     out.ints(K_RESULTS, o);
+    return true;
 }
 
 // Only OP_OWNER_DEGEN consumes these records. Legacy labels remain opaque and
@@ -801,7 +812,11 @@ void read_owners(Rd& rd, const SmContext& ctx, Model& m)
     }
 }
 
-bool op_owner_degen(Rd& rd, Model& m, Out& out)
+// `undefined` is set (and false returned) when an edge's original face is a legacy label
+// no explicit owner resolves while the back pointers are valid: IsDegenerate would then
+// call GetSurface on a fake SmFace (SmPoly.cpp:21281-21283), undefined in C++. Decided
+// from the built model before any call, never from a result.
+bool op_owner_degen(Rd& rd, Model& m, Out& out, bool& undefined)
 {
     int64_t n = rd.idx();
     std::vector<double> results, topo, points;
@@ -817,6 +832,11 @@ bool op_owner_degen(Rd& rd, Model& m, Out& out)
         SmFace* face = m.owner(label);
         SmSurface* surface = face ? face->GetSurface() : NULL;
         bool back = pe->GetOKBackPtrs() != FALSE;
+        if (original && back && face == NULL)
+        {
+            undefined = true;
+            return false;
+        }
         bool mapping = back && surface && pe->Is2dOrZero();
         topo.insert(topo.end(), {(double)e, (double)label, face ? 1.0 : 0.0,
                                  surface ? 1.0 : 0.0, back ? 1.0 : 0.0, mapping ? 1.0 : 0.0});
@@ -845,9 +865,6 @@ bool op_owner_degen(Rd& rd, Model& m, Out& out)
         }
         else
             topo.insert(topo.end(), 4, -1.0);
-        if (original && back && face == NULL)
-            results.push_back(-9.0); // unresolved, never dereference a legacy label
-        else
         {
             SmXSectTol3d xs(t);
             results.push_back(pe->IsDegenerate(has ? &xs : NULL) ? 1.0 : 0.0);
@@ -985,14 +1002,21 @@ SC_EXPORT int32_t sc_query_poly_eval(const double* in, int64_t n_in, double* out
         op_contains(rd, m, o);
         break;
     case OP_DEGEN:
-        op_degen(rd, m, o);
-        break;
-    case OP_OWNER_DEGEN:
-        if (!op_owner_degen(rd, m, o))
+        if (!op_degen(rd, m, o))
         {
             delete m.brep;
-            return SC_ERR_ARG;
+            return SC_QP_UNDEFINED_INPUT;
         }
+        break;
+    case OP_OWNER_DEGEN:
+    {
+        bool undefined = false;
+        if (!op_owner_degen(rd, m, o, undefined))
+        {
+            delete m.brep;
+            return undefined ? SC_QP_UNDEFINED_INPUT : SC_ERR_ARG;
+        }
+    }
         break;
     case OP_TRANSFORM:
         op_transform(rd, m, o);

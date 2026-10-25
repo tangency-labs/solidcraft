@@ -15,9 +15,11 @@
 //! Rejected cases: `IsDegenerate` of an edge whose face has a label for an original
 //! face while the back pointers are valid. Upstream then calls `SmFace::GetSurface`
 //! on that face (to map UV points), and a label is not an `SmFace`: the call is
-//! undefined in C++ (AGENTS.md section 4, step 5.6), so the shim does not make it,
-//! `run_cpp` rejects the case and the Rust side, which would defer it at
-//! `SmFace::GetSurface` (`topology.face_p2`) for lack of the face, is not run.
+//! undefined in C++ (AGENTS.md section 4, step 5.6). The shim decides this from the
+//! built model (label plus back pointers), before any call, and returns
+//! `STATUS_UNDEFINED_INPUT`; `run_cpp` maps that status to `rejected`, no C++ result is
+//! inspected, and the Rust side, which would defer it at `SmFace::GetSurface`
+//! (`topology.face_p2`) for lack of the face, is not run.
 //! `owner_degenerate` is a separate opt-in operation that does compare these calls:
 //! explicit face records resolve only their own labels, and it compares real native
 //! `IsDegenerate` calls and independent surface samples.
@@ -346,10 +348,6 @@ const K_SPHERES: i32 = 25;
 const K_RESULTS: i32 = 26;
 const K_OWNER_POINTS: i32 = 27;
 const K_OWNER_TOPO: i32 = 28;
-
-/// The shim's `results` entry for an `IsDegenerate` call it did not run: the edge's
-/// face has a valid original face that is only a label, not an `SmFace` to call.
-const UNRESOLVED_FACE: i64 = -9;
 
 fn key_name(key: i32) -> &'static str {
     match key {
@@ -1157,24 +1155,15 @@ impl UnitDiff for Runner {
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
         match ffi::run(&to_ffi(&i.brep), &op_to_ffi(&i.op)) {
-            Ok(secs) => {
-                let out = to_output(&secs)?;
-                let degenerate = matches!(
-                    i.op,
-                    OpIn::Degenerate { .. } | OpIn::OwnerDegenerate { .. }
-                );
-                if degenerate
-                    && out
-                        .ints
-                        .get("results")
-                        .is_some_and(|r| r.contains(&UNRESOLVED_FACE))
-                {
-                    return Ok(Output::rejected(
-                        "SmPolyEdge::IsDegenerate would dereference a labelled fake SmFace \
-                         (undefined in C++; real original faces: owner_degenerate)",
-                    ));
-                }
-                Ok(out)
+            Ok(secs) => to_output(&secs),
+            // The shim declined the input before calling anything (decided from the built
+            // model, not from a result): upstream would call `SmFace::GetSurface` on a
+            // label that is not an `SmFace`.
+            Err(solidcore_ffi::FfiError::Status(ffi::STATUS_UNDEFINED_INPUT)) => {
+                Ok(Output::rejected(
+                    "SmPolyEdge::IsDegenerate would call GetSurface on a labelled fake SmFace \
+                     (undefined in C++; real original faces: owner_degenerate)",
+                ))
             }
             Err(solidcore_ffi::FfiError::Status(s)) => Ok(Output::err(format!("status_{s}"))),
             Err(e) => Err(harness(e.to_string())),
