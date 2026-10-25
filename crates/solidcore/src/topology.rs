@@ -56,6 +56,7 @@ pub mod vertex;
 pub mod vertexuse;
 
 use core::marker::PhantomData;
+use std::sync::Arc;
 
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
@@ -163,6 +164,56 @@ typed_id!(
     /// Identifies a [`Vertexuse`] within its [`Brep`].
     VertexuseId => Vertexuse
 );
+
+/// A copy-on-write handle to a big arena of a [`Brep`]: `Clone` is a deep copy (as for
+/// a plain `Arena`), [`Shared::share`] is a refcount bump, and the first write through
+/// `DerefMut` of a shared handle copies the arena, so every writer behaves as on an
+/// unshared one. Used by [`Brep::clone_sharing_surface_caches`] for the arenas a query's
+/// snapshot only reads.
+#[derive(Debug)]
+struct Shared<T>(Arc<T>);
+
+impl<T> Shared<T> {
+    fn share(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+
+    fn copy(&self, share: bool) -> Self
+    where
+        T: Clone,
+    {
+        if share {
+            self.share()
+        } else {
+            self.clone()
+        }
+    }
+}
+
+impl<T: Default> Default for Shared<T> {
+    fn default() -> Self {
+        Self(Arc::default())
+    }
+}
+
+impl<T: Clone> Clone for Shared<T> {
+    fn clone(&self) -> Self {
+        Self(Arc::new((*self.0).clone()))
+    }
+}
+
+impl<T> core::ops::Deref for Shared<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: Clone> core::ops::DerefMut for Shared<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        Arc::make_mut(&mut self.0)
+    }
+}
 
 /// A dense store of `T` addressed by typed id `I`. Items are appended; an item can
 /// be removed (upstream's `delete` of a topology object, unit `topology.brep_p4`),
@@ -619,18 +670,18 @@ pub enum NamingScheme {
 
 /// A boundary representation (`SmBrep`): arenas of shells, faces, loops, edges and
 /// vertices linked by typed ids.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Brep {
     shells: Arena<ShellId, Shell>,
     faces: Arena<FaceId, Face>,
     loops: Arena<LoopId, Loop>,
-    edges: Arena<EdgeId, Edge>,
+    edges: Shared<Arena<EdgeId, Edge>>,
     vertices: Arena<VertexId, Vertex>,
     regions: Arena<RegionId, Region>,
     infinite_region: Option<RegionId>,
     faceuses: Arena<FaceuseId, Faceuse>,
     loopuses: Arena<LoopuseId, Loopuse>,
-    edgeuses: Arena<EdgeuseId, Edgeuse>,
+    edgeuses: Shared<Arena<EdgeuseId, Edgeuse>>,
     vertexuses: Arena<VertexuseId, Vertexuse>,
     /// `m_bValidateOnly`.
     validate_only: bool,
@@ -686,19 +737,62 @@ pub struct Brep {
     geometry_owner_keys: std::collections::BTreeMap<EntityRef, crate::geom::object::ObjectRef>,
 }
 
+impl Clone for Brep {
+    fn clone(&self) -> Self {
+        self.copy(false)
+    }
+}
+
+impl Brep {
+    /// The copy constructor; with `share` the edge and edge use arenas (the bulk of a
+    /// clone: their curves) are shared copy-on-write instead of copied, so their curves
+    /// keep their owners until a write copies the arena.
+    fn copy(&self, share: bool) -> Self {
+        Self {
+            shells: self.shells.clone(),
+            faces: self.faces.clone(),
+            loops: self.loops.clone(),
+            edges: self.edges.copy(share),
+            vertices: self.vertices.clone(),
+            regions: self.regions.clone(),
+            infinite_region: self.infinite_region,
+            faceuses: self.faceuses.clone(),
+            loopuses: self.loopuses.clone(),
+            edgeuses: self.edgeuses.copy(share),
+            vertexuses: self.vertexuses.clone(),
+            validate_only: self.validate_only,
+            tolerance: self.tolerance,
+            key: self.key,
+            region_list_head: self.region_list_head,
+            face_list: self.face_list.clone(),
+            edge_list: self.edge_list.clone(),
+            vertex_list: self.vertex_list.clone(),
+            editing_enabled: self.editing_enabled,
+            model_size_estimate: self.model_size_estimate,
+            large_small_size_ratio: self.large_small_size_ratio,
+            deleted_surfaces: self.deleted_surfaces.clone(),
+            surface_owner_cleared: self.surface_owner_cleared.clone(),
+            naming: self.naming,
+            locked_bounding_box: self.locked_bounding_box,
+            notify_identity: self.notify_identity.clone(),
+            geometry_owner_keys: self.geometry_owner_keys.clone(),
+        }
+    }
+}
+
 impl Default for Brep {
     fn default() -> Self {
         Self {
             shells: Arena::default(),
             faces: Arena::default(),
             loops: Arena::default(),
-            edges: Arena::default(),
+            edges: Shared::default(),
             vertices: Arena::default(),
             regions: Arena::default(),
             infinite_region: None,
             faceuses: Arena::default(),
             loopuses: Arena::default(),
-            edgeuses: Arena::default(),
+            edgeuses: Shared::default(),
             vertexuses: Arena::default(),
             validate_only: false,
             tolerance: ZONE_TOL_3D,
@@ -910,7 +1004,7 @@ impl Brep {
     /// `clone` (the copy constructor) starts every surface without cache or owner.
     #[must_use]
     pub fn clone_sharing_surface_caches(&self) -> Self {
-        let mut copy = self.clone();
+        let mut copy = self.copy(true);
         for (id, face) in self.faces.iter() {
             if let (Some(original), Ok(face_copy)) = (face.surface.as_ref(), copy.face_mut(id)) {
                 if let Some(surface) = face_copy.surface.as_mut() {
