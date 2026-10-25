@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4468"
+ ],
+ "what": "a 20x15x5 box minus an r3 through bore: truck's measure read 1.66e-4 of the removed volume too much (1358.6518 for 1358.6283) while the geometry was exact",
+ "source": "analytic",
+ "method": "V = 20*15*5 - pi*3^2*5 = 1358.628331; A = 2*(300 - 9 pi) + 2*(20+15)*5 + 2*pi*3*5 = 993.226. Graded to 1e-6 relative, below the reported error (1.7e-5 of the result)",
+ "body_count": 1,
+ "volume_mm3": 1358.628331,
+ "area_mm2": 987.699112,
+ "tolerance": {
+  "rel": 1e-06
+ }
+}

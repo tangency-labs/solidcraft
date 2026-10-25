@@ -1,0 +1,93 @@
+solid box_degenerate
+  facet normal 0 0 -1
+    outer loop
+      vertex 0 0 0
+      vertex 20 10 0
+      vertex 20 0 0
+    endloop
+  endfacet
+  facet normal 0 0 -1
+    outer loop
+      vertex 0 0 0
+      vertex 0 10 0
+      vertex 20 10 0
+    endloop
+  endfacet
+  facet normal 0 0 1
+    outer loop
+      vertex 0 0 5
+      vertex 20 0 5
+      vertex 20 10 5
+    endloop
+  endfacet
+  facet normal 0 0 1
+    outer loop
+      vertex 0 0 5
+      vertex 20 10 5
+      vertex 0 10 5
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex 0 0 0
+      vertex 20 0 0
+      vertex 20 0 5
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex 0 0 0
+      vertex 20 0 5
+      vertex 0 0 5
+    endloop
+  endfacet
+  facet normal 1 0 0
+    outer loop
+      vertex 20 0 0
+      vertex 20 10 0
+      vertex 20 10 5
+    endloop
+  endfacet
+  facet normal 1 0 0
+    outer loop
+      vertex 20 0 0
+      vertex 20 10 5
+      vertex 20 0 5
+    endloop
+  endfacet
+  facet normal 0 1 0
+    outer loop
+      vertex 20 10 0
+      vertex 0 10 0
+      vertex 0 10 5
+    endloop
+  endfacet
+  facet normal 0 1 0
+    outer loop
+      vertex 20 10 0
+      vertex 0 10 5
+      vertex 20 10 5
+    endloop
+  endfacet
+  facet normal -1 0 0
+    outer loop
+      vertex 0 10 0
+      vertex 0 0 0
+      vertex 0 0 5
+    endloop
+  endfacet
+  facet normal -1 0 0
+    outer loop
+      vertex 0 10 0
+      vertex 0 0 5
+      vertex 0 10 5
+    endloop
+  endfacet
+  facet normal 0 0 0
+    outer loop
+      vertex 0 0 0
+      vertex 10 0 0
+      vertex 20 0 0
+    endloop
+  endfacet
+endsolid box_degenerate

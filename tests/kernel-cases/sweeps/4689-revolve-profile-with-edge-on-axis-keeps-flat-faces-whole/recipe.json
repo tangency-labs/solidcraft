@@ -1,0 +1,71 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Profile"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      20,
+      0
+     ],
+     [
+      20,
+      5
+     ],
+     [
+      5,
+      5
+     ],
+     [
+      5,
+      30
+     ],
+     [
+      0,
+      30
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "Profile",
+    "axis": "l6",
+    "angle": "360 deg"
+   }
+  }
+ ]
+}

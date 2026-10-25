@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4567",
+  "tangency-labs/solidcraft#5076",
+  "tangency-labs/solidcraft#5050",
+  "tangency-labs/solidcraft#4743"
+ ],
+ "what": "a vase revolved from a fit-point spline wall, shelled 2 mm from its flat top: truck refused any free-form wall ('offset: only bodies with planes, cylinders, cones, spheres and tori')",
+ "source": "invariants",
+ "method": "the spline wall's curvature radius stays well above 2 mm, so the inward 2 mm offset exists: one valid closed body, open at the top. The offset of a spline surface has no closed-form volume, so only the outcome is graded (the reporter's 7-command repro; the removed face is the flat top at y = 46)",
+ "body_count": 1
+}

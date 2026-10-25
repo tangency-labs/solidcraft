@@ -54,5 +54,97 @@
  {
   "source": "tangency-labs/solidcraft#4429",
   "why": "needs the user design: a damper of joined extrudes with six chamfers; the failing chain is not reproducible from the report"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4444",
+  "why": "no reproduction: a variable-radius fillet on an unknown part with curved faces, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4472",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4474",
+  "why": "no geometry: a sketch fillet at a zero-length line (sketch command)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4495",
+  "why": "needs the user design: a drafted boss whose corner runs onto a 17 deg face; not reproducible from the screenshot"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4496",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4498",
+  "why": "no geometry: distance-and-angle chamfer exists (UI question)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4499",
+  "why": "needs the user design: a battery caddy with 40 features; the 8-edge outline is not reproducible alone"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4518",
+  "why": "no single right answer: a second concave fillet ending on an earlier one's round (how they meet is the method's choice)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4543",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4550",
+  "why": "no reproduction: one edge on an unknown large part, screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4569",
+  "why": "no reproduction: an unequal chamfer round a loop on an unknown part (a stated limit)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4575",
+  "why": "no geometry: the reporter withdrew it (chamfer preview works)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4661",
+  "why": "no reproduction: vertical-edge fillets meeting earlier top fillets on an unknown part, no message or design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4681",
+  "why": "no geometry: sketch fillet radius rejects an expression (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4690",
+  "why": "needs the user design: a 19-feature, 2-body mount; the two edges are not reproducible from the report"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4703",
+  "why": "UI only: a hole edge counts as \"2 selected\" (a seam-split circle)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4716",
+  "why": "no reproduction: a 10 mm chamfer beside a circle cuts the far side too, unknown part (0.18.3), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4744",
+  "why": "no reproduction: a curved 8-edge chain on an unknown part (0.18.4), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4772",
+  "why": "needs the user design: a 26-feature handle (poignee.json) with a fillet along a curve; no small stand-in"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4782",
+  "why": "no geometry: a fillet rolling over onto the next face (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4793",
+  "why": "no reproduction: a 9 mm chamfer of one curved edge on an unknown part (0.18.4)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4795",
+  "why": "needs the user design: a hook of filleted extrudes; the refusal depends on one earlier distance (11+3 vs 12.7+3)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4806",
+  "why": "no reproduction: a 0.2 mm chamfer chain on an unknown part, no design"
  }
 ]

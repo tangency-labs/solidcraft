@@ -1,0 +1,119 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 16,
+    "height": 5,
+    "body_name": "Adapter"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "face": [
+      0,
+      0,
+      5
+     ]
+    },
+    "name": "Slot",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      4.226183,
+      9.063078
+     ],
+     [
+      8.452365,
+      18.126156
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     8.452365,
+     18.126156
+    ],
+    "through": [
+     0.0,
+     20.0
+    ],
+    "end": [
+     -8.452365,
+     18.126156
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -8.452365,
+      18.126156
+     ],
+     [
+      -4.226183,
+      9.063078
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     -4.226183,
+     9.063078
+    ],
+    "through": [
+     0.0,
+     10.0
+    ],
+    "end": [
+     4.226183,
+     9.063078
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Slot",
+    "distance": 3.2,
+    "direction": "negative",
+    "operation": "cut",
+    "targets": [
+     "Adapter"
+    ]
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      6.761892,
+      14.500925,
+      3.4
+     ]
+    ],
+    "distance": 0.4
+   }
+  }
+ ]
+}
