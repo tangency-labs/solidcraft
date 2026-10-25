@@ -57,7 +57,9 @@
 //!   Upstream's `IntersectInsertRelate` reports a failure of `ImprintIntersections`
 //!   and then overwrites its status with that of `SetRelationships`, so the boolean
 //!   goes on with both B-reps half imprinted (upstream: reads of freed vertex uses).
-//!   The port deletes the manager and returns the imprint's error.
+//!   The port deletes the manager and returns the imprint's error, unless every
+//!   failing imprint stopped before editing a B-rep (an edge definition without a
+//!   final vertex): the B-reps are then consistent and the port goes on as upstream.
 //! - **Statuses upstream ignores** (`SmBrep` edits whose status is unchecked,
 //!   `RemoveRelationship` in `DeleteFaces` / `FixGaps`, bounding boxes, `DropPoint`,
 //!   `SimpleCoincidenceChecker`, `CalculateUVDomainFromUVTrimCurves`, `Relate` in
@@ -1133,9 +1135,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     ///
     /// Those of the manager's construction, `IntersectTopology` and
     /// `ResolveIntersections` (the manager then stays installed, as upstream leaks
-    /// it); every error of the imprint, after deleting the manager (SolidCraft fix
-    /// af8db37: upstream goes on with the half-imprinted B-reps, UB-242, which
-    /// [`Kernel::note_upstream_ub`] records);
+    /// it); every error of the imprint that may have edited a B-rep, after deleting
+    /// the manager (SolidCraft fix af8db37: upstream goes on with the half-imprinted
+    /// B-reps, UB-242, which [`Kernel::note_upstream_ub`] records); an imprint failure
+    /// that edited nothing only warns, as upstream;
     /// [`SolidError::InvalidInput`] without both B-reps. Where the manager's
     /// destructor would read a freed proto edge upstream (UB-175) the port's defined
     /// teardown goes on and [`Kernel::note_upstream_ub`] records `"UB-175"`.
@@ -1178,11 +1181,25 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // Resolve Intersections; if that didn't work, quit before we mess up the Breps.
         deleted.extend(self.resolve_intersections(k, brep)?);
 
-        // Imprint Intersections, now we'll modify the Breps. If that didn't work, the
-        // Breps are partly imprinted and no longer consistent: stop here, so that no
-        // caller goes on to relate, classify or measure them (SolidCraft change,
-        // tangency-labs/smlib af8db37; upstream only warns and overwrites the status).
-        match self.imprint_intersections(k, brep) {
+        // Imprint Intersections, now we'll modify the Breps. If that didn't work and a
+        // failing imprint edited a Brep, the Breps are partly imprinted and no longer
+        // consistent: stop here, so that no caller goes on to relate, classify or
+        // measure them (SolidCraft change, tangency-labs/smlib af8db37; upstream only
+        // warns and overwrites the status). A failure that edited nothing (an edge
+        // definition without a final vertex) leaves the Breps consistent, and upstream
+        // goes on.
+        let outcome = self
+            .imprint_intersections_reporting_edits(k, brep)
+            .and_then(|o| {
+                if o.failure_edited {
+                    o.status.map(|()| o.deleted)
+                } else {
+                    // If that didn't work, inform the public (SE_MSG: the status is
+                    // overwritten below).
+                    Ok(o.deleted)
+                }
+            });
+        match outcome {
             Ok(d) => deleted.extend(d),
             Err(e) => {
                 if let Some(mut mgr) = self.proto_topo_mgr.take() {

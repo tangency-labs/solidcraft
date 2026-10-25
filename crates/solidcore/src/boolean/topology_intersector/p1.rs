@@ -29,6 +29,7 @@
 //! | [`intersect_wire_lamina_edges`]                        | `sm_IntersectWireLaminaEdges`                        |
 //! | [`TopologyIntersector::resolve_intersections`]         | `ResolveIntersections`                               |
 //! | [`TopologyIntersector::imprint_intersections`]         | `ImprintIntersections`                               |
+//! | [`TopologyIntersector::imprint_intersections_reporting_edits`] | `ImprintIntersections`                     |
 //! | [`set_edge_class`]                                     | `sm_SetEdgeClass`                                    |
 //! | [`TopologyIntersector::relate`]                        | `Relate`                                             |
 //! | [`TopologyIntersector::fixup_end_point_class_mates`]   | `FixupEndPointClassMates`                            |
@@ -1137,6 +1138,19 @@ pub struct ImprintFace<O> {
     pub new_vertex: Option<O>,
 }
 
+/// What [`TopologyIntersector::imprint_intersections_reporting_edits`] returns.
+#[derive(Debug)]
+pub struct ImprintOutcome<O> {
+    /// The curve handles deleted.
+    pub deleted: Vec<O>,
+    /// `eRetStat`: the first failing imprint or glue status.
+    pub status: Result<()>,
+    /// Whether a failing imprint or glue may have edited a B-rep. False when every
+    /// failure was an edge definition that stopped before its first `MakeEdgeInFace`
+    /// (e.g. no final vertex), which leaves the B-reps as they were.
+    pub failure_edited: bool,
+}
+
 /// What [`TopologyIntersector::vertex_face_intersect`] returns.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VertexFaceIntersect<O> {
@@ -1827,9 +1841,27 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         k: &mut Kernel,
         brep: &mut impl IntersectorBrep<O>,
     ) -> Result<Vec<O>> {
+        let outcome = self.imprint_intersections_reporting_edits(k, brep)?;
+        outcome.status.map(|()| outcome.deleted)
+    }
+
+    /// [`TopologyIntersector::imprint_intersections`], answering its status
+    /// (`eRetStat`) beside the curve handles deleted and whether any failing imprint
+    /// may have edited a B-rep ([`ImprintOutcome`]).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] without a manager or B-reps;
+    /// [`SolidError::Unported`] / [`SolidError::InvalidInput`] from the imprints.
+    pub fn imprint_intersections_reporting_edits(
+        &mut self,
+        k: &mut Kernel,
+        brep: &mut impl IntersectorBrep<O>,
+    ) -> Result<ImprintOutcome<O>> {
         // Don't SER on each imprint: if one fails, keep pushing on.
         let mut ret: Result<()> = Ok(());
         let mut deleted = Vec::new();
+        let mut failure_edited = false;
 
         let this_brep = self.brep.ok_or(dangling("no B-rep"))?;
         let other_brep = self.other.ok_or(dangling("no other B-rep"))?;
@@ -1838,7 +1870,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let old_doing_boolean = k.context.doing_boolean();
         k.context.set_doing_boolean(true);
 
-        let result = self.imprint_body(k, brep, &mut ret, &mut deleted);
+        let result = self.imprint_body(k, brep, &mut ret, &mut deleted, &mut failure_edited);
 
         // SmTemporaryChangeValue destructors
         k.context.set_doing_boolean(old_doing_boolean);
@@ -1846,7 +1878,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         brep.set_editing_enabled(this_brep, old_edit1)?;
 
         result?;
-        ret.map(|()| deleted)
+        Ok(ImprintOutcome {
+            deleted,
+            status: ret,
+            failure_edited,
+        })
     }
 
     /// The body of [`TopologyIntersector::imprint_intersections`] between the temporary
@@ -1857,6 +1893,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         brep: &mut impl IntersectorBrep<O>,
         ret: &mut Result<()>,
         deleted: &mut Vec<O>,
+        failure_edited: &mut bool,
     ) -> Result<()> {
         let mgr = self
             .proto_topo_mgr
@@ -1888,7 +1925,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 .vertex_definitions()
                 .to_vec();
             for vd in vds {
-                record(mgr.imprint_vertex_definition(k, brep, vd), ret)?;
+                // (a vertex definition's first step is a B-rep merge)
+                if !record(mgr.imprint_vertex_definition(k, brep, vd), ret)? {
+                    *failure_edited = true;
+                }
             }
         }
 
@@ -1901,9 +1941,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 .edge_definitions()
                 .get(jj)
             {
-                if record(mgr.imprint_edge_definition(k, brep, ed), ret)? {
+                let (result, edited) = mgr.imprint_edge_definition_reporting_edits(k, brep, ed);
+                if record(result, ret)? {
                     jj += 1;
                 } else {
+                    *failure_edited |= edited;
                     // Delete its curves, which would have been consumed if Imprint() had worked.
                     ignore_soft(
                         mgr.proto_edge_mut(pe)
@@ -1932,6 +1974,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             Ok(d) => deleted.extend(d),
             Err(e) => {
                 record(Err(e), ret)?;
+                *failure_edited = true;
             }
         }
 

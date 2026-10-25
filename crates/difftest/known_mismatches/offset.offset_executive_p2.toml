@@ -1,4 +1,0 @@
-[[mismatch]]
-unit = "offset.offset_executive_p2"
-case = "gen0235"
-why = "deferred on main at RemoveExcessFaces' BrepPointSolve (SmFace handle of a surface's face); compared since that solve reaches its faces' caches: Rust stops with SM_ERR_NULL_POINTER in ProtoTopologyManager::imprint_edge_definition, C++ succeeds (plan/findings.md: 'offset.offset_executive_p2 gen0235: imprint edge definition without its source topology')"

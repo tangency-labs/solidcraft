@@ -730,6 +730,33 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         brep: &mut impl ProtoBrep<O>,
         ed: EdgeDefId,
     ) -> Result<()> {
+        self.imprint_edge_definition_reporting_edits(k, brep, ed).0
+    }
+
+    /// [`ProtoTopologyManager::imprint_edge_definition`], also answering whether the
+    /// imprint reached a B-rep edit (`MakeEdgeInFace`). A failure without one (no final
+    /// vertex, or a check before the first `MakeEdgeInFace`) leaves both B-reps as
+    /// they were.
+    pub fn imprint_edge_definition_reporting_edits(
+        &mut self,
+        k: &Kernel,
+        brep: &mut impl ProtoBrep<O>,
+        ed: EdgeDefId,
+    ) -> (Result<()>, bool) {
+        let mut edited = false;
+        let result = self.imprint_edge_definition_inner(k, brep, ed, &mut edited);
+        (result, edited)
+    }
+
+    /// The body of [`ProtoTopologyManager::imprint_edge_definition`]; `edited` is set
+    /// before the first B-rep edit.
+    fn imprint_edge_definition_inner(
+        &mut self,
+        k: &Kernel,
+        brep: &mut impl ProtoBrep<O>,
+        ed: EdgeDefId,
+        edited: &mut bool,
+    ) -> Result<()> {
         // Make sure both SmVertices are in place before proceeding.
         let start_pv = self.edge_def_start_proto_vertex(ed)?;
         let end_pv = self.edge_def_end_proto_vertex(ed)?;
@@ -773,6 +800,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let interval = d.xsect_interval();
 
             // Note, input curves are consumed:
+            *edited = true;
             match brep.brep_make_edge_in_face(
                 k,
                 brep1,
@@ -820,6 +848,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let interval = d.xsect_interval();
             // a failed copy is a null curve, dereferenced in MakeEdgeInFace
             let copy = copy.ok_or(dangling("copy of the 3D curve failed"))?;
+            *edited = true;
             let made = brep.brep_make_edge_in_face(
                 k,
                 brep2,

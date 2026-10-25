@@ -221,14 +221,106 @@ bool set_rels_maps_ok(SmProtoTopologyManager* mgr, int64_t ctor_kind)
     return true;
 }
 
+// ImprintIntersections (SmTopologyIntersector.cpp:2302-2413, upstream commit c9c5979)
+// VERBATIM, apart from the SM_DEBUG_CODE blocks and the members reached through accessors,
+// plus one addition: `edited` answers whether a failing imprint may have edited a B-rep,
+// as the port's ImprintOutcome::failure_edited does. A vertex definition's imprint and the
+// glue edit first; an edge definition's imprint edits nothing when it stops before its
+// first MakeEdgeInFace (a NULL final vertex or source face, SmProtoTopology.cpp:1375-1445),
+// which the addition tests with the same const lookups beforehand.
+bool ed_stops_before_edit(SmEdgeDefinition* pED)
+{
+  SmProtoVertex *pStartPV = pED->GetStartProtoVertex();
+  SmProtoVertex *pEndPV   = pED->GetEndProtoVertex();
+  if ( pStartPV->GetFinalVertex( 1, pED, TRUE ) == NULL || pEndPV->GetFinalVertex( 1, pED, FALSE ) == NULL
+    || pStartPV->GetFinalVertex( 2, pED, TRUE ) == NULL || pEndPV->GetFinalVertex( 2, pED, FALSE ) == NULL )
+    { return true; }
+  SmPointClassificationType eType1 = pED->GetSrcTopo_TYPE( 1 );
+  SmPointClassificationType eType2 = pED->GetSrcTopo_TYPE( 2 );
+  if ( eType1 == SM_PC_FACE )
+    { return SM_CAST_PTR( SmFace, pED->GetSrcTopo( 1 ) ) == NULL; }
+  if ( eType2 == SM_PC_FACE )
+    { return SM_CAST_PTR( SmFace, pED->GetSrcTopo( 2 ) ) == NULL; }
+  return true;
+}
+
+SmStatus ii_verbatim(SmTopologyIntersector* ti, bool& edited)
+{
+  SmProtoTopologyManager*& m_pProtoTopoMgr = ti->*ti_get(TiMgr());
+  SmBrep* m_pBrep = ti->GetPrimaryBrep();
+  SmBrep* m_pOther = ti->GetOtherBrep();
+  edited = false;
+
+  SmStatus eStat, eRetStat = SM_SUCCESS;
+
+  SmTemporaryChangeValue <SmBoolean> sTempChange1( m_pBrep ->m_bEditingEnabled, TRUE );
+  SmTemporaryChangeValue <SmBoolean> sTempChange2( m_pOther->m_bEditingEnabled, TRUE );
+  const SmContext *cpContext = m_pBrep->GetContext();
+  SmTemporaryChangeValue <SmBoolean> sTempChangeDB( ((SmContext*)cpContext)->GetDoingBooleanRef(),   TRUE );
+
+  SmTArray< SmProtoVertex* > rPVs = m_pProtoTopoMgr->GetProtoVertices();
+
+  ULONG ii, jj, lNumObjs = rPVs.GetSize();
+  for(ii=0;ii<lNumObjs;ii++)
+    {
+      SmProtoVertex *pPV = rPVs[ii];
+      SmTArray< SmVertexDefinition* > & rVDs = pPV->GetVertexDefinitions();
+
+      for(jj=0;jj<rVDs.GetSize();jj++)
+        {
+          SmVertexDefinition *pVD = rVDs[jj];
+          eStat = pVD->Imprint();
+
+          if ( eStat != SM_SUCCESS ) { edited = true; } // (addition)
+          if ( eStat != SM_SUCCESS && eRetStat == SM_SUCCESS ) // Record the first problem.
+            { eRetStat = eStat; }
+        }
+    }
+
+  SmTArray< SmProtoEdge* > rPEs = m_pProtoTopoMgr->GetProtoEdges();
+  lNumObjs = rPEs.GetSize();
+  for(ii=0;ii<lNumObjs;ii++)
+    {
+      SmProtoEdge *pPE = rPEs[ii];
+      SmTArray< SmEdgeDefinition* > & rEDs = pPE->GetEdgeDefinitions();
+      for(jj=0;jj<rEDs.GetSize();jj++)
+        {
+          SmEdgeDefinition *pED = rEDs[jj];
+          bool bStopsBeforeEdit = ed_stops_before_edit( pED ); // (addition)
+          eStat = pED->Imprint();
+
+          if(eStat != SM_SUCCESS)
+            {
+              if ( !bStopsBeforeEdit ) { edited = true; } // (addition)
+              if(eRetStat == SM_SUCCESS) // Record the first problem.
+                { eRetStat = eStat; }
+
+              pPE->RemoveEdgeDefinition( pED );
+              pED->Destruct();
+              delete pED; pED = NULL;
+              jj--;
+            }
+        }
+    }
+
+  eStat = m_pProtoTopoMgr->GlueCoincidentBrepVertices();
+
+  if ( eStat != SM_SUCCESS ) { edited = true; } // (addition)
+  if(eStat != SM_SUCCESS && eRetStat == SM_SUCCESS) // Record the first problem.
+    { eRetStat = eStat; }
+
+  return eRetStat;
+}
+
 // IntersectInsertRelate (SmTopologyIntersector.cpp:1092-1270, upstream commit c9c5979)
 // VERBATIM, apart from the
 // SM_VALIDATE_TOPOLOGY, SM_DEBUG_CODE and SM_USE_TBB blocks (not defined in the reference
 // build) and the members reached through accessors, plus one addition: before the delete,
 // whether ~SmProtoTopologyManager would read a freed proto edge (UB-175); if so the stale
 // entries are unlinked first, so the run stays defined, and `ub` is set (the port answers
-// InvalidInput there). A second addition stops after a failed ImprintIntersections (UB-242),
-// where upstream goes on with half-imprinted B-reps: `ub` is set there too. The real IntersectInsertRelate is no longer exercised by this
+// InvalidInput there). A second addition stops after a failed ImprintIntersections (UB-242)
+// whose failure may have edited a B-rep (ii_verbatim above), where upstream goes on with
+// half-imprinted B-reps: `ub` is set there too. The real IntersectInsertRelate is no longer exercised by this
 // difftest, so re-diff this copy against upstream whenever the pinned commit moves.
 SmStatus iir_verbatim(SmTopologyIntersector* ti, bool& ub)
 {
@@ -255,14 +347,15 @@ SmStatus iir_verbatim(SmTopologyIntersector* ti, bool& ub)
   SER_MSG( eStat, _T("\nSmProtoExecutive: Failure returned from ResolveProtoTopology().\n") );
 
   // Imprint Intersections, now we'll modify the Breps.
-  eStat = ti->ImprintIntersections();
+  bool bEdited = false;
+  eStat = ii_verbatim( ti, bEdited );
 
   // If that didn't work, inform the public
   SE_MSG( eStat, _T("\nSmProtoExecutive: Error returned from ImprintIntersections().\n") );
 
   // (addition, UB-242: upstream goes on to SetRelationships with the half-imprinted
   // B-reps; stop here as the port does, deleting the manager as below, and answer -2)
-  if (eStat != SM_SUCCESS)
+  if (eStat != SM_SUCCESS && bEdited)
     {
       if(m_pProtoTopoMgr) { mgr_teardown_stale(m_pProtoTopoMgr, true); delete m_pProtoTopoMgr ; m_pProtoTopoMgr = NULL; }
       ub = true;
