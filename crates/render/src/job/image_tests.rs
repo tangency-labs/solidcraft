@@ -258,3 +258,78 @@ fn pixel_work_ignores_invisible_triangles_and_respects_the_last_face_override() 
     Arc::make_mut(&mut degenerate.mesh).triangles = vec![[0, 0, 0]];
     assert_eq!(admit(&scene(vec![degenerate]), &request).unwrap().projected_pixel_tests, Some(0));
 }
+
+/// A box with a flat normal per face, so each of its six faces shades in one tone.
+fn block(name: &str, colour: [u8; 3], centre: Vec3, half: Vec3) -> ProductMesh {
+    let mut mesh = Mesh::default();
+    for (n, u, v) in [(Vec3::X, Vec3::Y, Vec3::Z), (Vec3::Y, Vec3::Z, Vec3::X), (Vec3::Z, Vec3::X, Vec3::Y)] {
+        for side in [1.0, -1.0] {
+            let n = n * side;
+            let (u, v) = if side > 0.0 { (u, v) } else { (v, u) };
+            let base = mesh.positions.len() as u32;
+            let face = mesh.triangles.len() as u32 / 2;
+            for (a, b) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                let p = n + u * a + v * b;
+                mesh.positions.push(centre + Vec3::new(p.x * half.x, p.y * half.y, p.z * half.z));
+                mesh.normals.push(n);
+            }
+            mesh.triangles.extend([[base, base + 1, base + 2], [base, base + 2, base + 3]]);
+            mesh.tri_face.extend([face, face]);
+        }
+    }
+    ProductMesh { name: name.into(), mesh: Arc::new(mesh), color: colour, opacity: 1.0, surface: None, transmission: None, faces: Vec::new() }
+}
+
+/// The product render's output, pinned before W17b S1 reshaped it into prepare, tile and sink
+/// stages (#5624): the decoded rows of each scene, a change in which is a change in what is drawn.
+/// Not the PNG bytes: their compression depends on the deflate backend the build unifies (`flate2`
+/// with zlib-rs when the UI crate is built alongside, miniz_oxide without), not on this code.
+#[test]
+fn product_render_output_is_pinned() {
+    use sha2::{Digest, Sha256};
+    let mut iso = Camera { distance: 120.0, ..Default::default() };
+    iso.set_view(StandardView::Iso);
+    let perspective = Camera { fov: 0.6, ..iso };
+    let opaque = || {
+        scene(vec![
+            block("Block", [180, 120, 60], Vec3::ZERO, Vec3::new(20.0, 12.0, 8.0)),
+            block("Post", [60, 140, 200], Vec3::new(0.0, 0.0, 16.0), Vec3::new(4.0, 4.0, 8.0)),
+        ])
+    };
+    let mut glossy = opaque();
+    glossy.meshes[0].surface = Some(crate::surface::OpaqueSurface::new(Vec3::new(0.6, 0.3, 0.1), 1.0, 0.3, 1.5).unwrap());
+    let front = request().camera;
+    let glass = scene(vec![square("Far", [240, 20, 20], 0.5, front.back() * -5.0), square("Near", [20, 20, 240], 0.5, front.back() * 5.0)]);
+    // Larger than the view: triangles cross every edge of the picture.
+    let crossing = scene(vec![block("Wall", [90, 160, 90], Vec3::ZERO, Vec3::new(80.0, 3.0, 80.0))]);
+    let with = |camera: Camera, width: u32, height: u32, transparent: bool| ImageRequest {
+        camera,
+        width,
+        height,
+        transparent_background: transparent,
+        ..request()
+    };
+    let cases = [
+        ("orthographic, transparent", opaque(), with(iso, 96, 64, true)),
+        ("perspective, solid background", opaque(), with(perspective, 96, 64, false)),
+        ("PBR surface", glossy, with(iso, 80, 60, true)),
+        ("two glass layers", glass, with(front, 64, 64, true)),
+        ("crossing the picture's edges", crossing, with(perspective, 72, 40, false)),
+    ];
+    let mut rows = Vec::new();
+    for (name, scene, request) in cases {
+        let png = finish(ImageTask::new(scene, request, CancelToken::default()).unwrap());
+        let rgba = image::load_from_memory(&png).unwrap().to_rgba8();
+        rows.push((name, format!("{:x}", Sha256::digest(rgba.as_raw()))));
+    }
+    const ROWS: [&str; 5] = [
+        "1677d1d51ff34f35993c9235933bb1e3770230ac6b419909b3c92d7aff7670aa",
+        "41b29088a0e538394731bfef48428d64fff670d79108107b8624f5e109252242",
+        "9c839ffab7945eb49cb5285401a46c6542ea1d8c0cbd21b5c040b9a536cd29a2",
+        "7029581e13f0953175421a069fa459d18ceec61b2864870f0da70200e320ef55",
+        "56fa250228f06a3fd4f300b3f31fcdc1d6d88b85549699cf9380601f48c2cdeb",
+    ];
+    for ((name, got), want) in rows.iter().zip(ROWS) {
+        assert_eq!(got, want, "{name}: the rows changed");
+    }
+}
