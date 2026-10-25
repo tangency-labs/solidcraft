@@ -629,6 +629,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     });
     let before = value.clone();
     let mut box_at = bs + vec2(16.0, -30.0);
+    // Where the box hangs from: the arrow's tip, or the base when there is no arrow.
+    let mut anchor = bs;
     if let (Some(n), Some(l)) = (dir, len.filter(|_| kind == ValueKind::Length)) {
         let n = n * sign;
         let baseline = to_span.map(f64::abs).unwrap_or(0.0);
@@ -664,10 +666,13 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             if clear == 0.0 {
                 painter.circle(bs, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
             }
-            box_at = crate::place_gizmo::yield_box(ui, ts, ts + vec2(14.0, -12.0));
+            box_at = ts + vec2(14.0, -12.0);
+            anchor = ts;
         }
     }
     let note = crate::drag_extrude::step_note(app);
+    // Also without an arrow (the value does not evaluate yet): the box still keeps off the handles.
+    let box_at = crate::place_gizmo::yield_box(ui, anchor, box_at);
     value_box_noted(ui, label, value, box_at, focus || *value != before, note.as_deref());
     if *value != before
         && let Kind::Extrude { all, .. } = &mut d.kind

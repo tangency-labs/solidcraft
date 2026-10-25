@@ -26,7 +26,7 @@ fn casing() -> Color32 {
 }
 
 /// How much wider than its core a casing is (both sides together).
-const CASE: f32 = 1.6;
+const CASE: f32 = 0.8;
 
 /// The feature's footprint on the face while the marker drags it: a filled shape in the preview's
 /// own blue with a thin darker edge, so white stays reserved for the handles. It shows where the
@@ -52,89 +52,122 @@ pub(super) const DIM: f32 = 0.25;
 /// How long a handle takes to step back and to come forward again (seconds).
 pub(super) const DIM_S: f32 = 0.16;
 
-/// How long the marker's states take to grow into each other (seconds).
+/// How long the marker takes to answer the pointer arriving or leaving (seconds), and how long
+/// the switch into and out of a drag takes.
+pub(super) const HOT_S: f32 = 0.22;
 pub(super) const GROW_S: f32 = 0.36;
-/// The marker's line width.
+/// The marker's line width (a dash's and the shaft's).
 const LINE: f32 = 2.0;
-/// The dot's radius at rest and while dragging.
-const DOT_REST: f32 = 3.9;
-const DOT_DRAG: f32 = 4.3;
+/// The dot's radius.
+const DOT_R: f32 = 3.9;
 /// Where an arm starts, from the centre.
 const ARM_FROM: f32 = 6.0;
-/// How far an arm reaches at rest, pointed at and while dragging (the arrowhead's tip).
-const REACH_REST: f32 = 27.0;
-const REACH_HOT: f32 = 34.0;
-const REACH_DRAG: f32 = 42.0;
-/// A dotted arm's dash and gap.
+/// A dotted arm's dash and gap. At rest an arm is two dashes; the outer one is the shape that
+/// becomes the arrowhead.
 const DASH: f32 = 5.5;
 const GAP: f32 = 2.3;
+/// The arrowhead: a filled triangle this long, this wide either side of the arm, its base where
+/// the outer dash began.
+const HEAD_LEN: f32 = 8.7;
+const HEAD_HALF: f32 = 3.55;
+/// Where the outer dash, and so the head, begins.
+const HEAD_BASE: f32 = ARM_FROM + DASH + GAP;
 /// What the marker needs around its centre when fully grown, plus a gap, so another manipulator
 /// (the dialog's drag arrow) can keep clear of it.
-pub(super) const MARKER_CLEAR: f32 = REACH_DRAG + 6.0;
-/// The arrowhead: an open chevron this long, this wide either side of the arm.
-const HEAD_LEN: f32 = 12.6;
-const HEAD_HALF: f32 = 7.3;
+pub(super) const MARKER_CLEAR: f32 = HEAD_BASE + HEAD_LEN + 6.0;
 
-/// The move marker: a dot with four arms to the screen cardinals. At rest the arms are short and
-/// dotted, a place that can be grabbed and nothing more. Pointed at, they grow and end in
-/// arrowheads: the feature moves straight in any direction along the face. While it drags, the
-/// arms turn solid. Each state grows out of the previous one (`GROW_S`); the dotted-to-solid
-/// switch is the one step that cannot tween, so it flips halfway into the drag.
+/// The move marker: a dot with four arms to the screen cardinals. At rest each arm is two dashes,
+/// a place that can be grabbed and nothing more. Pointed at, the outer dash becomes an arrowhead,
+/// its far end narrowing to a point and its near end widening while it grows a little: the
+/// feature moves straight in any direction along the face. While it drags, the inner dash runs
+/// on into the head as a solid shaft. The dotted-to-solid switch is the one step that cannot
+/// tween, so it flips halfway into the drag.
 pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, _t: &Tokens) {
-    let reach = REACH_REST + (REACH_HOT - REACH_REST) * s.hot + (REACH_DRAG - REACH_HOT) * s.active;
     let solid = s.active > 0.5;
     let (core, case) = (core(s.hot > 0.5).gamma_multiply(s.alpha), casing().gamma_multiply(s.alpha));
-    let (core_w, case_w) = (LINE, LINE + CASE);
-    // The arrowhead grows with the arm it ends: scaled and faded in by `hot`.
-    let head = (HEAD_LEN * s.hot, HEAD_HALF * s.hot, s.hot);
-    let mut shapes: Vec<(Vec<Pos2>, f32, Color32)> = Vec::new();
+    // The outer dash on its way to being the head.
+    let len = DASH + (HEAD_LEN - DASH) * s.hot;
+    let near = LINE / 2.0 + (HEAD_HALF - LINE / 2.0) * s.hot;
+    let far = LINE / 2.0 * (1.0 - s.hot);
+    let mut lines: Vec<Vec<Pos2>> = Vec::new();
+    let mut heads: Vec<Vec<Pos2>> = Vec::new();
     for d in [vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0)] {
-        let tip = c + d * reach;
-        // The shaft: solid to the tip, or dotted up to the head's base.
-        let to = if solid { reach } else { reach - head.0 };
-        if solid {
-            shapes.push((vec![c + d * ARM_FROM, tip], 1.0, core));
-        } else {
-            let mut at = ARM_FROM;
-            while at < to {
-                let end = (at + DASH).min(to);
-                shapes.push((vec![c + d * at, c + d * end], 1.0, core));
-                at += DASH + GAP;
-            }
+        // The inner dash, or the shaft up to the head's base.
+        lines.push(vec![c + d * ARM_FROM, c + d * if solid { HEAD_BASE } else { ARM_FROM + DASH }]);
+        let n: Vec2 = vec2(-d.y, d.x);
+        let (base, tip) = (c + d * HEAD_BASE, c + d * (HEAD_BASE + len));
+        let mut h = vec![base + n * near, tip + n * far, tip - n * far, base - n * near];
+        if far < 0.05 {
+            h.remove(2);
         }
-        if head.2 > 0.01 {
-            let n: Vec2 = vec2(-d.y, d.x);
-            let base = tip - d * head.0;
-            shapes.push((vec![base + n * head.1, tip, base - n * head.1], head.2, core));
-        }
+        heads.push(h);
     }
-    // Casings first, then every core over them, so a core never sits under a neighbour's casing.
-    for (pts, alpha, _) in &shapes {
-        painter.add(egui::Shape::line(pts.clone(), Stroke::new(case_w, case.gamma_multiply(*alpha))));
+    // Casings first, then every core over them, so a core never sits under a neighbour's casing;
+    // a head's casing is the same shape grown by the casing's reach, as a line's is.
+    for pts in &lines {
+        painter.add(egui::Shape::line(pts.clone(), Stroke::new(LINE + CASE, case)));
     }
-    for (pts, alpha, col) in &shapes {
-        painter.add(egui::Shape::line(pts.clone(), Stroke::new(core_w, col.gamma_multiply(*alpha))));
+    for h in &heads {
+        painter.add(egui::Shape::convex_polygon(grown(h, CASE / 2.0), case, Stroke::NONE));
     }
-    let r = DOT_REST + (DOT_DRAG - DOT_REST) * s.active;
-    painter.circle_filled(c, r + CASE / 2.0, case);
-    painter.circle_filled(c, r, core);
+    for pts in &lines {
+        painter.add(egui::Shape::line(pts.clone(), Stroke::new(LINE, core)));
+    }
+    for h in &heads {
+        painter.add(egui::Shape::convex_polygon(h.clone(), core, Stroke::NONE));
+    }
+    painter.circle_filled(c, DOT_R + CASE / 2.0, case);
+    painter.circle_filled(c, DOT_R, core);
+}
+
+/// A convex polygon with every edge moved outwards by `d` (mitred corners).
+fn grown(pts: &[Pos2], d: f32) -> Vec<Pos2> {
+    let n = pts.len();
+    if n < 3 {
+        return pts.to_vec();
+    }
+    let centre = pts.iter().fold(Vec2::ZERO, |a, p| a + p.to_vec2()) / n as f32;
+    // Outward unit normal of the edge from pts[i] to pts[i + 1].
+    let normal = |i: usize| {
+        let (a, b) = (pts[i], pts[(i + 1) % n]);
+        let e = (b - a).normalized();
+        let m = vec2(-e.y, e.x);
+        let mid = (a.to_vec2() + b.to_vec2()) / 2.0;
+        if m.dot(mid - centre) < 0.0 { -m } else { m }
+    };
+    (0..n)
+        .map(|i| {
+            let (n1, n2) = (normal((i + n - 1) % n), normal(i));
+            let b = (n1 + n2).normalized();
+            let cos = b.dot(n1).max(0.2);
+            pts[i] + b * (d / cos)
+        })
+        .collect()
 }
 
 /// The turn ring's look for a frame. `hot` eases 0 (resting) to 1 (pointer over the grip or
-/// turning), `active` 0 to 1 while turning.
+/// turning), `active` 0 to 1 while turning. While `fading`, the pointer has left: the open ring
+/// no longer folds back but fades out over the resting one (`hot` is then its opacity).
 pub(super) struct RingStyle {
     pub(super) hot: f32,
     pub(super) active: f32,
+    pub(super) fading: bool,
     /// 1 normally, [`DIM`] while the marker is dragged.
     pub(super) alpha: f32,
+    /// The grip filled in this colour instead of white: the axis the feature is aligned with.
+    pub(super) tint: Option<Color32>,
 }
 
 /// The ring's size on screen (radius, pixels): fixed, like the move triad's arrows, whatever the
 /// zoom or the feature. It is a control of something on the screen, not a measure of the model.
 pub(super) const RING_PX: f32 = 65.0;
-/// How long the ring takes to open from its grip round the circle, and to fold back (seconds).
-pub(super) const SWEEP_S: f32 = 0.6;
-/// Half of the arc shown at rest and while turning, either side of the grip (degrees).
+/// How long the ring takes to open from its grip round the circle (seconds), and how long the
+/// open ring takes to fade once the pointer has left.
+pub(super) const SWEEP_S: f32 = 0.3;
+pub(super) const FADE_S: f32 = 0.15;
+/// How long the solid arc and the compass take to come up when a turn starts, and to go.
+pub(super) const RING_ACTIVE_S: f32 = 0.2;
+/// Half of the arc shown at rest and of the solid arc while turning, either side of the grip (degrees).
 const ARC_HALF_DEG: f64 = 50.0;
 /// The ring's line width, its dash and gap along the arc.
 const RING_LINE: f32 = 1.6;
@@ -145,21 +178,87 @@ const RING_GAP: f32 = 4.5;
 const GRIP_LEN: f32 = 12.0;
 const GRIP_HALF: f32 = 6.0;
 const GRIP_OUT: f32 = 8.0;
+/// The chevron's leg thickness across the base, and how far from the tip its hole's apex sits at
+/// rest (the thickness along the legs' bisector).
+const GRIP_LEG: f32 = 1.8;
+const GRIP_APEX_IN: f32 = 3.8;
 /// Angular step of the arc's polyline (degrees).
 const ARC_STEP_DEG: f64 = 1.5;
 
 /// The turn ring: a circle lying on the face about the move marker's centre, drawn in
 /// perspective. At rest a short dotted arc with the grip, enough to say that something here
-/// turns; pointed at, the full dotted circle opens from the grip both ways round; while turning,
-/// a solid arc around the grip. `at` gives the screen point on the circle at an angle about the
-/// face normal (none when behind the eye); `grip` is the feature's turn, where the grip sits;
-/// `centre` is the marker's screen point, which the grip points at.
-pub(super) fn ring(painter: &egui::Painter, at: &dyn Fn(f64) -> Option<Pos2>, grip: f64, centre: Pos2, s: &RingStyle) {
-    let half = ARC_HALF_DEG + (180.0 - ARC_HALF_DEG) * f64::from(s.hot) * f64::from(1.0 - s.active);
-    let solid = s.active > 0.5;
+/// turns; pointed at, the dotted circle opens from the grip both ways round and the grip slides
+/// in onto it and fills; while turning, a solid arc around the grip is laid over the circle. `on`
+/// gives the screen point of the ring's plane at an angle about the face normal and offsets from
+/// the circle (outwards, along the tangent) in screen points (none when behind the eye), so the
+/// grip lies on the face like the ring; `grip` is the feature's turn, where the grip sits.
+pub(super) fn ring(painter: &egui::Painter, on: &dyn Fn(f64, f32, f32) -> Option<Pos2>, grip: f64, s: &RingStyle) {
+    if s.fading {
+        // The resting ring underneath, the open one fading out over it.
+        arc(painter, on, grip, ARC_HALF_DEG, false, 0.0, (1.0 - s.hot) * s.alpha, s.tint);
+        arc(painter, on, grip, 180.0, false, 1.0, s.hot * s.alpha, s.tint);
+    } else {
+        let open = ARC_HALF_DEG + (180.0 - ARC_HALF_DEG) * f64::from(s.hot);
+        arc(painter, on, grip, open, false, s.hot, s.alpha, s.tint);
+    }
+    if s.active > 0.01 {
+        arc_only(painter, on, grip, ARC_HALF_DEG, true, s.active * s.alpha);
+    }
+}
+
+/// One layer of the ring: the arc `half` degrees either side of the grip, dotted or solid, and the
+/// grip `slid` of the way from its resting chevron outside the ring to the filled half-diamond on it.
+#[allow(clippy::too_many_arguments)]
+fn arc(
+    painter: &egui::Painter,
+    on: &dyn Fn(f64, f32, f32) -> Option<Pos2>,
+    grip: f64,
+    half: f64,
+    solid: bool,
+    slid: f32,
+    alpha: f32,
+    tint: Option<Color32>,
+) {
+    arc_only(painter, on, grip, half, solid, alpha);
+    let (core, case) = (tint.unwrap_or_else(|| core(slid > 0.5)).gamma_multiply(alpha), casing().gamma_multiply(alpha));
+    // The grip is a thick white chevron: a triangle with a triangular hole, cased along its outer
+    // and its inner edge. As it slides in onto the ring the hole flattens, its apex sinking to the
+    // base, until the inner edge is the base line of a full half-diamond and fades away.
+    let out = GRIP_OUT * (1.0 - slid);
+    let apex_in = GRIP_APEX_IN + (GRIP_LEN - GRIP_APEX_IN) * slid;
+    let (Some(tip), Some(c1), Some(c2), Some(i1), Some(i2), Some(apex)) = (
+        on(grip, out, 0.0),
+        on(grip, out + GRIP_LEN, GRIP_HALF),
+        on(grip, out + GRIP_LEN, -GRIP_HALF),
+        on(grip, out + GRIP_LEN, GRIP_HALF - GRIP_LEG),
+        on(grip, out + GRIP_LEN, -(GRIP_HALF - GRIP_LEG)),
+        on(grip, out + apex_in, 0.0),
+    ) else {
+        return;
+    };
+    // Casing first, the white over it, so the casing shows by half its width outside every edge,
+    // as a line's does: the outer edge and the legs' ends always; the inner edge gives way to the
+    // base line as the hole closes.
+    let closing = ((slid - 0.85) / 0.15).clamp(0.0, 1.0);
+    let lines: Vec<(Vec<Pos2>, f32)> =
+        vec![(vec![c1, tip, c2], 1.0), (vec![c1, i1], 1.0), (vec![c2, i2], 1.0), (vec![i1, apex, i2], 1.0 - closing), (vec![i1, i2], closing)];
+    for (l, a) in &lines {
+        if *a > 0.01 {
+            painter.add(egui::Shape::line(l.clone(), Stroke::new(CASE, case.gamma_multiply(*a))));
+        }
+    }
+    // The two legs, convex quads that meet at the tip; as the apex sinks they fill the triangle.
+    for leg in [vec![c1, tip, apex, i1], vec![c2, tip, apex, i2]] {
+        painter.add(egui::Shape::convex_polygon(leg, core, Stroke::NONE));
+    }
+}
+
+/// The arc alone, `half` degrees either side of the grip, dotted or solid.
+fn arc_only(painter: &egui::Painter, on: &dyn Fn(f64, f32, f32) -> Option<Pos2>, grip: f64, half: f64, solid: bool, alpha: f32) {
     let steps = (2.0 * half / ARC_STEP_DEG).ceil().max(2.0) as usize;
-    let pts: Vec<Pos2> = (0..=steps).filter_map(|i| at(grip - half.to_radians() + 2.0 * half.to_radians() * i as f64 / steps as f64)).collect();
-    let (core, case) = (core(s.hot > 0.5).gamma_multiply(s.alpha), casing().gamma_multiply(s.alpha));
+    let pts: Vec<Pos2> =
+        (0..=steps).filter_map(|i| on(grip - half.to_radians() + 2.0 * half.to_radians() * i as f64 / steps as f64, 0.0, 0.0)).collect();
+    let (core, case) = (core(true).gamma_multiply(alpha), casing().gamma_multiply(alpha));
     let pieces: Vec<Vec<Pos2>> = if solid { vec![pts] } else { dashed(&pts, RING_DASH, RING_GAP) };
     for piece in &pieces {
         painter.add(egui::Shape::line(piece.clone(), Stroke::new(RING_LINE + CASE, case)));
@@ -167,20 +266,6 @@ pub(super) fn ring(painter: &egui::Painter, at: &dyn Fn(f64) -> Option<Pos2>, gr
     for piece in &pieces {
         painter.add(egui::Shape::line(piece.clone(), Stroke::new(RING_LINE, core)));
     }
-    // The grip: an open chevron outside the ring at rest, a filled half-diamond on it when hot.
-    let Some(g) = at(grip) else { return };
-    let inward = (centre - g).normalized();
-    if !inward.is_finite() {
-        return;
-    }
-    let n = vec2(-inward.y, inward.x);
-    let tip = g - inward * (GRIP_OUT * (1.0 - s.hot));
-    let (c1, c2) = (tip - inward * GRIP_LEN + n * GRIP_HALF, tip - inward * GRIP_LEN - n * GRIP_HALF);
-    if s.hot > 0.01 {
-        painter.add(egui::Shape::convex_polygon(vec![c1, tip, c2], core.gamma_multiply(s.hot), Stroke::NONE));
-    }
-    painter.add(egui::Shape::line(vec![c1, tip, c2], Stroke::new(RING_LINE + CASE, case)));
-    painter.add(egui::Shape::line(vec![c1, tip, c2], Stroke::new(RING_LINE, core)));
 }
 
 /// `pts` cut into dashes of `dash` screen length with `gap` between them, measured along the line.
@@ -222,18 +307,14 @@ fn dashed(pts: &[Pos2], dash: f32, gap: f32) -> Vec<Vec<Pos2>> {
 }
 
 /// The compass: a short tick just outside the ring at each of the face's compass points, in the
-/// unturned frame, so it stays put while the ring turns. Faded in by `alpha`.
-pub(super) fn compass(painter: &egui::Painter, at: &dyn Fn(f64) -> Option<Pos2>, centre: Pos2, dirs: &[f64], alpha: f32) {
-    let (core, case) = (core(true).gamma_multiply(alpha), casing().gamma_multiply(alpha));
-    for &a in dirs {
-        let Some(g) = at(a) else { continue };
-        let out = (g - centre).normalized();
-        if !out.is_finite() {
-            continue;
-        }
-        let (p, q) = (g + out * TICK_FROM, g + out * (TICK_FROM + TICK_LEN));
+/// ring's plane and the unturned frame, so it stays put while the ring turns, each in the colour
+/// of the world axis it points along (the move triad's). Faded in by `alpha`.
+pub(super) fn compass(painter: &egui::Painter, on: &dyn Fn(f64, f32, f32) -> Option<Pos2>, dirs: &[(f64, Color32)], alpha: f32) {
+    let case = casing().gamma_multiply(alpha);
+    for &(a, col) in dirs {
+        let (Some(p), Some(q)) = (on(a, TICK_FROM, 0.0), on(a, TICK_FROM + TICK_LEN, 0.0)) else { continue };
         painter.line_segment([p, q], Stroke::new(RING_LINE + CASE, case));
-        painter.line_segment([p, q], Stroke::new(RING_LINE, core));
+        painter.line_segment([p, q], Stroke::new(RING_LINE, col.gamma_multiply(alpha)));
     }
 }
 
@@ -243,17 +324,20 @@ const TICK_LEN: f32 = 7.0;
 
 /// The turn ring's readout while turning, beside the grip at `at`, away from the ring's `centre`:
 /// the angle, and the compass point it was pulled onto ("90° · +X").
-pub(super) fn angle_label(painter: &egui::Painter, at: Pos2, centre: Pos2, angle: f64, on: Option<&str>, t: &Tokens) {
-    let text = match on {
-        Some(name) => format!("{:.0}° · {name}", angle.to_degrees()),
-        None => format!("{:.0}°", angle.to_degrees()),
-    };
+pub(super) fn angle_label(painter: &egui::Painter, at: Pos2, centre: Pos2, angle: f64, on: Option<(&str, Color32)>, t: &Tokens) {
+    // The point's name in its axis colour, so the eye finds the axis before it reads the letter.
+    let font = egui::FontId::proportional(t.font_body);
+    let mut job = egui::text::LayoutJob::default();
+    job.append(&format!("{:.0}°", angle.to_degrees()), 0.0, egui::TextFormat::simple(font.clone(), t.text));
+    if let Some((name, col)) = on {
+        job.append(" · ", 0.0, egui::TextFormat::simple(font.clone(), t.text));
+        job.append(name, 0.0, egui::TextFormat::simple(font, col));
+    }
     let out = (at - centre).normalized();
     let out = if out.is_finite() { out } else { vec2(1.0, 0.0) };
     let anchor = at + out * (GRIP_LEN + GRIP_OUT + 6.0);
     let align = if out.x >= 0.0 { egui::Align2::LEFT_CENTER } else { egui::Align2::RIGHT_CENTER };
-    let font = egui::FontId::proportional(t.font_body);
-    let galley = painter.layout_no_wrap(text, font, t.text);
+    let galley = painter.layout_job(job);
     let rect = align.anchor_size(anchor, galley.size()).expand2(vec2(5.0, 2.0));
     painter.rect(rect, 4.0, t.panel.gamma_multiply(0.92), Stroke::new(1.0, t.manipulator), egui::StrokeKind::Inside);
     painter.galley(rect.shrink2(vec2(5.0, 2.0)).min, galley, t.text);
