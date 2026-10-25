@@ -13,6 +13,9 @@
 // The Rust wrapper (crates/solidcore-ffi/src/units/nlib_knots.rs) validates
 // every argument first; the checks here are a second line of defence against
 // inputs on which upstream would read or write out of bounds.
+// Deviations: span/basis degrees are bounded to 1000. Only span/full-basis routines
+// require 2*p+2 knots; single-basis routines accept any nonempty vector and
+// leave parameter/index errors (in that order) to upstream and nl_status.
 #include "sc_shim.h"
 
 #include <nurbs.h>
@@ -41,6 +44,12 @@ bool valid_flag(int32_t flag) { return flag == NL_LEFT || flag == NL_RIGHT; }
 bool basis_domain(int64_t n_knots, int32_t degree)
 {
     return degree >= 0 && degree <= 1000 && n_knots >= 2 * (int64_t)degree + 2;
+}
+
+// Upstream checks the parameter, then i <= m-p-1, before reading basis knots.
+bool single_basis_domain(int64_t n_knots, int32_t degree, int32_t flag)
+{
+    return n_knots >= 1 && degree >= 0 && degree <= 1000 && valid_flag(flag);
 }
 } // namespace
 
@@ -162,7 +171,7 @@ SC_EXPORT int32_t sc_nlib_knots_basis_eval(const double* knots, int64_t n_knots,
 SC_EXPORT int32_t sc_nlib_knots_basis_i_eval(const double* knots, int64_t n_knots, int64_t index,
                                              int32_t degree, double u, int32_t flag, double* out_value)
 {
-    if (!basis_domain(n_knots, degree) || !valid_flag(flag) || index < 0)
+    if (!single_basis_domain(n_knots, degree, flag) || index < 0)
         return SC_ERR_ARG;
     SC_TRY
     NL_KNOTVECTOR knt = make_knt(knots, n_knots);
@@ -179,7 +188,7 @@ SC_EXPORT int32_t sc_nlib_knots_basis_i_derivs(const double* knots, int64_t n_kn
                                                int32_t degree, double u, int32_t flag, int64_t der,
                                                double* out_derivs, int64_t cap)
 {
-    if (!basis_domain(n_knots, degree) || !valid_flag(flag) || index < 0 || der < 0 || cap < der + 1)
+    if (!single_basis_domain(n_knots, degree, flag) || index < 0 || der < 0 || cap < der + 1)
         return SC_ERR_ARG;
     SC_TRY
     NL_KNOTVECTOR knt = make_knt(knots, n_knots);

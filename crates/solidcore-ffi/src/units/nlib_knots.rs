@@ -19,10 +19,13 @@
 //! when the upstream routine returned its error flag.
 //!
 //! Argument domain (checked here, before any call): at least one knot; for the
-//! span and basis routines `0 <= degree <= MAX_SPAN_DEGREE` and at least
-//! `2*degree + 2` knots (so every index upstream touches is in `0..=m`), flag
+//! span and basis routines `0 <= degree <= MAX_SPAN_DEGREE`, flag
 //! `NL_LEFT = 1` or `NL_RIGHT = 2`; `basis_eval` also needs
 //! `degree <= NL_MAXDEG + 1` (upstream's stack scratch arrays).
+//! Span/full-basis routines additionally require `2*degree + 2` knots.
+//! Deviations: bounded degrees/derivative orders protect allocation sizes;
+//! single-basis routines accept any nonempty vector, leaving parameter errors
+//! before index errors to upstream (returned unchanged as NLib statuses).
 
 use crate::{check, FfiError};
 
@@ -121,6 +124,15 @@ fn knot_count(knots: &[f64]) -> Result<i64, FfiError> {
 
 /// Checks the span/basis domain; returns `(n_knots, p)`.
 fn basis_domain(knots: &[f64], degree: i32, flag: i32) -> Result<(i64, usize), FfiError> {
+    let (n, p) = single_basis_domain(knots, degree, flag)?;
+    if knots.len() < 2 * p + 2 {
+        return Err(bad(format!("{} knots for degree {degree}", knots.len())));
+    }
+    Ok((n, p))
+}
+
+/// Checks single-basis well-formedness, without the span routines' length bound.
+fn single_basis_domain(knots: &[f64], degree: i32, flag: i32) -> Result<(i64, usize), FfiError> {
     let n = knot_count(knots)?;
     if flag != 1 && flag != 2 {
         return Err(bad(format!("flag {flag}")));
@@ -129,9 +141,6 @@ fn basis_domain(knots: &[f64], degree: i32, flag: i32) -> Result<(i64, usize), F
         return Err(bad(format!("degree {degree}")));
     }
     let p = usize::try_from(degree).map_err(|_| bad(format!("degree {degree}")))?;
-    if knots.len() < 2 * p + 2 {
-        return Err(bad(format!("{} knots for degree {degree}", knots.len())));
-    }
     Ok((n, p))
 }
 
@@ -277,12 +286,13 @@ pub fn basis_i_eval(
     u: f64,
     flag: i32,
 ) -> Result<f64, FfiError> {
-    let (n, _) = basis_domain(knots, degree, flag)?;
+    let (n, _) = single_basis_domain(knots, degree, flag)?;
     if index < 0 {
         return Err(bad(format!("index {index}")));
     }
     let mut value = 0.0;
-    // SAFETY: domain checked; upstream rejects index > m-p-1 (NL_IND_ERR) before
+    // SAFETY: nonempty vector, bounded degree and valid flag; upstream checks
+    // the parameter first, then rejects index > m-p-1 (NL_IND_ERR) before
     // reading U[index..=index+p+1]; `value` is a valid f64.
     let st = unsafe {
         sys::sc_nlib_knots_basis_i_eval(knots.as_ptr(), n, index, degree, u, flag, &raw mut value)
@@ -300,7 +310,7 @@ pub fn basis_i_derivs(
     flag: i32,
     der: i64,
 ) -> Result<Vec<f64>, FfiError> {
-    let (n, _) = basis_domain(knots, degree, flag)?;
+    let (n, _) = single_basis_domain(knots, degree, flag)?;
     if index < 0 {
         return Err(bad(format!("index {index}")));
     }
@@ -309,7 +319,8 @@ pub fn basis_i_derivs(
     }
     let len = usize::try_from(der + 1).map_err(|_| bad("der".into()))?;
     let mut out = vec![0.0; len];
-    // SAFETY: domain checked; upstream rejects index > m-p-1 before indexing and
+    // SAFETY: nonempty vector, bounded degree and valid flag; upstream checks
+    // the parameter first, then rejects index > m-p-1 before indexing and
     // writes ND[0..=der]; `out` has der+1 writable slots.
     let st = unsafe {
         sys::sc_nlib_knots_basis_i_derivs(

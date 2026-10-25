@@ -1,6 +1,36 @@
 {
  "cases": [
   {
+   "name": "short_ieval_index_error",
+   "inputs": {"op": "basis_i_eval", "knots": [0, 1], "degree": 1, "index": 0, "u": 0.5, "flag": "right"},
+   "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3206-3256 (native index error on short vector)"
+  },
+  {
+   "name": "short_iderivs_index_error",
+   "inputs": {"op": "basis_i_derivs", "knots": [0, 1], "degree": 1, "index": 0, "u": 0.5, "flag": "right", "der": 2},
+   "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3394-3435 (native index error on short vector)"
+  },
+  {
+   "name": "short_ieval_parameter_before_index_error",
+   "inputs": {"op": "basis_i_eval", "knots": [0, 1], "degree": 1, "index": 0, "u": -0.5, "flag": "right"},
+   "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3206-3256 (parameter error precedes index error)"
+  },
+  {
+   "name": "short_iderivs_parameter_before_index_error",
+   "inputs": {"op": "basis_i_derivs", "knots": [0, 1], "degree": 1, "index": 0, "u": -0.5, "flag": "right", "der": 2},
+   "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3394-3435 (parameter error precedes index error)"
+  },
+  {
+   "name": "short_ieval_success",
+   "inputs": {"op": "basis_i_eval", "knots": [0, 1, 2], "degree": 1, "index": 0, "u": 0.5, "flag": "right"},
+   "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3206-3256 (single basis needs no span-domain length)"
+  },
+  {
+   "name": "short_iderivs_success",
+   "inputs": {"op": "basis_i_derivs", "knots": [0, 1, 2], "degree": 1, "index": 0, "u": 0.5, "flag": "right", "der": 2},
+   "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3523-3558 (short-vector single-basis recurrence)"
+  },
+  {
    "name": "topo_u_valid",
    "inputs": {
     "op": "is_valid",
