@@ -692,10 +692,11 @@ mod tests {
         h.app.run("sketch.finish", json!({})).unwrap();
         let pad = h.app.run("solid.extrude", json!({"distance":10,"name":"Pad","body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
         h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":"Block","body_name":"Block"})).unwrap();
-        h.app.tree.collapsed.insert("c0/sketches".into());
         h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
         assert!(h.app.preferences.history_in_browser && !h.app.preferences.timeline_left);
         h.frames(3);
+        let elsewhere = count("Profile");
+        assert_eq!(elsewhere, 0, "the Sketches folder starts closed with the history in the browser");
         assert!(h.app.shell.history.is_none(), "no timeline beside the browser history");
         assert_eq!(fold_of("Pad"), None, "in creation order nothing is listed under the extrusion");
         assert_eq!(count("Profile"), 1);
@@ -744,7 +745,6 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XZ","name":"Unused"})).unwrap();
         h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":3})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
-        h.app.tree.collapsed.insert("c0/sketches".into());
         h.app.preferences.history_sketches = crate::prefs::HistorySketches::UnderFeature;
         h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
         h.frames(3);
