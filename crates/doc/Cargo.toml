@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
+solidcraft-work = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-profile = { workspace = true }
@@ -22,3 +23,7 @@ thiserror = { workspace = true }
 log = { workspace = true }
 sha2 = { workspace = true }
 web-time = { workspace = true }
+
+[dev-dependencies]
+# Operation contracts are collected in ordinary tests, not in normal production builds.
+solidcraft-work = { workspace = true, features = ["capture"] }
