@@ -213,21 +213,8 @@ fn int(path: &str, v: f64) -> Result<usize, HarnessError> {
 /// validity check and pruning): `n`, `p`, rational flag, dimension, `n+1` points
 /// (`x y [z]`, or `wx wy [wz] w` when rational), `n+p+2` knots.
 fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
-    let v = numbers(path)?;
-    let mut it = v.into_iter();
-    let mut num = || it.next().ok_or_else(|| harness(format!("{path}: truncated")));
-    let n = int(path, num()?)?;
-    let p = int(path, num()?)?;
-    let rat = num()? != 0.0;
-    let dim = int(path, num()?)?;
-    let mut cpts = Vec::with_capacity(n + 1);
-    for _ in 0..=n {
-        let (x, y) = (num()?, num()?);
-        let z = if dim == 3 { num()? } else { NOZ };
-        let w = if rat { num()? } else { NOW };
-        cpts.push([x, y, z, w]);
-    }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let text = std::fs::read_to_string(path).map_err(|e| harness(format!("{path}: {e}")))?;
+    let smc::SmcCurve { cpts, p, u } = smc::decode(&text, path)?;
     Ok(InlineCrv {
         cpts,
         p,
@@ -235,6 +222,9 @@ fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
         used: None,
     })
 }
+
+#[path = "fixtures/nlib_crv_basic_smc.rs"]
+mod smc;
 
 /// Reads an upstream `.sms` text file: `n m`, `p q`, rational flag, `(n+1)(m+1)`
 /// points (`x y z`, or `wx wy wz w` when rational, v index fastest), `n+p+2` u knots,
