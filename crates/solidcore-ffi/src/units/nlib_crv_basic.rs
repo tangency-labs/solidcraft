@@ -186,7 +186,8 @@ fn check_well_formed(input: &[f64], sh: &CrvShape) -> Result<(), FfiError> {
         if !x.is_finite() || !y.is_finite() || !z.is_finite() || !w.is_finite() {
             return Err(bad("coincident: non-finite control point"));
         }
-        if w != -f64::MAX && (w.is_nan() || w <= 1e-3 || w >= 100.0) {
+        // Upstream accepts both weight bounds; NaN remains rejected by the finite check above.
+        if w != -f64::MAX && (w.is_nan() || w < 1e-3 || w > 100.0) {
             return Err(bad("coincident: bad weight"));
         }
     }
