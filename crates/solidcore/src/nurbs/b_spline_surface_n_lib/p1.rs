@@ -30,7 +30,7 @@
 //! | [`check_trim_boundaries`]                             | `sm_CheckTrimBoundaries` (static)                |
 //! | [`BSplineSurface::expand_boundary_span`]              | `ExpandBoundarySpan`                             |
 //! | [`check_zero_surface_derivs`]                         | `sm_check_zero_surface_derivs` (static)          |
-//! | [`BSplineSurface::evaluate_simple`]                   | `EvaluateSimple`                                 |
+//! | [`BSplineSurface::evaluate_simple`], [`BSplineSurface::evaluate_simple_first_into`] | `EvaluateSimple` |
 //! | [`BSplineSurface::evaluate_point`]                    | `EvaluatePoint`                                  |
 //!
 //! The other functions of the file (`CreateSkinnedSurface`, `CreateCornerBlend`,
@@ -1823,6 +1823,47 @@ impl BSplineSurface {
         }
         .map_err(SolidError::nl_ser(OP))?;
         Ok(sd)
+    }
+
+    /// [`BSplineSurface::evaluate_simple`] with first derivatives
+    /// (`highest_u_deriv = highest_v_deriv = 1`) into the caller's 2x2 block `d`
+    /// (every entry written), without a heap allocation per call for a non-rational,
+    /// non-polynomial surface ([`Surface::first_derivs_into`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`BSplineSurface::evaluate_simple`].
+    pub fn evaluate_simple_first_into(
+        &self,
+        uv: Point2,
+        u_from_left: bool,
+        v_from_left: bool,
+        only_upper_half: bool,
+        d: &mut [[Vec3; 2]; 2],
+    ) -> Result<()> {
+        const OP: &str = OP_EVAL_SIMPLE;
+        if self.form == BSplineSurfaceForm::Polynomial {
+            let full = self.evaluate_simple(uv, 1, 1, u_from_left, v_from_left, only_upper_half)?;
+            *d = [[Vec3::ZERO; 2]; 2];
+            for (out, row) in d.iter_mut().zip(&full) {
+                for (o, x) in out.iter_mut().zip(row) {
+                    *o = *x;
+                }
+            }
+            return Ok(());
+        }
+
+        let mut s_uv = uv;
+        let natural_uv_domain = self.natural_uv_domain();
+        if !natural_uv_domain.contains_point(s_uv, 0.0) {
+            s_uv = natural_uv_domain.clamp_point(s_uv);
+        }
+
+        let uflg = if u_from_left { Side::Left } else { Side::Right };
+        let vflg = if v_from_left { Side::Left } else { Side::Right };
+        let sur = surface_nurb(self, OP)?;
+        sur.first_derivs_into(s_uv.x, s_uv.y, uflg, vflg, only_upper_half, d)
+            .map_err(SolidError::nl_ser(OP))
     }
 
     /// The point at `uv` (`EvaluatePoint`): `N_SrfEvalPt` from the left at knots, or the

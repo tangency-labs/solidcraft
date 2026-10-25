@@ -16,6 +16,7 @@
 //! | `blend_spec`, `to_euclid_spec` (private)     | `NI_VectorBlendCPt_specialized`, `NI_CPtToPtEuclid_specialized` |
 //! | `derivative_matrix` (private)                | `N_ComputeDerivativeMatrix`, `N_ComputeDerivativeMatrixSpec` |
 //! | [`Surface::derivs`]                          | `N_SrfDerivs`                         |
+//! | [`Surface::first_derivs_into`]               | `N_SrfDerivs` with `udr = vdr = 1`    |
 //! | [`Surface::bbox`]                            | `N_SrfGetBBox`                        |
 //! | [`Surface::transform`]                       | `N_SrfTransform`                      |
 //! | [`Surface::min_max_weight_pos_vectors`], [`MinMaxWeightPos`] | `N_SrfMinMaxWeightPosVectors` |
@@ -40,11 +41,14 @@
 //!   [`BasisDerivs`], sized `[udr+1][vdr+1][p+1][q+1]`; the derivative matrix of
 //!   [`Surface::derivs`] is a `Vec` of `udr + 1` rows of `vdr + 1` points. Entries
 //!   upstream leaves unwritten (the lower half with `mfl`) are zero.
+//!   [`Surface::first_derivs_into`] writes the first-derivative matrix into the
+//!   caller's 2x2 array instead, and reads a non-rational basis derivative as the
+//!   product of the two univariate tables (the value `N_SrfBasisDerivs` stores).
 //! - Every array access is bounds checked: degrees above `NL_MAXDEG` (upstream's
 //!   scratch array size) and nets or knot vectors that do not match the degrees are
 //!   [`SolidError::InvalidInput`] where upstream would index outside its arrays.
-//!   The fixed scratch arrays are `SMALL_NP` (8) wide when both degrees are below 8
-//!   and `NL_MAXDEG + 1` otherwise (every index used is at most the degree, so the
+//!   The fixed scratch arrays are `TINY_NP` (4) wide when both degrees are below 4,
+//!   `SMALL_NP` (8) wide when both are below 8 and `NL_MAXDEG + 1` otherwise (every index used is at most the degree, so the
 //!   values and errors are the same; this only avoids zeroing large stack arrays).
 //! - `N_SrfIsClosedSmooth`: a degree whose span index `+ 1` overflows (near
 //!   `isize::MAX`, upstream's signed overflow) is `InvalidInput`, as an index
@@ -100,10 +104,13 @@ const NP: usize = MAX_DEGREE + 1;
 /// values and errors as `NP` while zeroing far less stack per call).
 const SMALL_NP: usize = 8;
 
-/// `NL_BASISFUNCTIONS` (`N = NP`, or `SMALL_NP` for small degrees).
+/// [`SMALL_NP`] for degrees up to cubic.
+const TINY_NP: usize = 4;
+
+/// `NL_BASISFUNCTIONS` (`N = NP`, or `SMALL_NP` / `TINY_NP` for small degrees).
 type BasisFunctions<const N: usize> = [[f64; N]; N];
 
-/// `NL_DERIVATIVES` (`N = NP`, or `SMALL_NP` for small degrees).
+/// `NL_DERIVATIVES` (`N = NP`, or `SMALL_NP` / `TINY_NP` for small degrees).
 type Derivatives<const N: usize> = [[f64; N]; MAX_DERIVATIVE + 1];
 
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
@@ -413,8 +420,11 @@ fn compute_derivatives<const N: usize>(
     Ok(())
 }
 
-/// One direction of `N_SrfBasisDerivs`: span index and `D[k][j]`, `k <= dr`.
+/// One direction of `N_SrfBasisDerivs`: the span index, with `D[k][j]`, `k <= dr`,
+/// written into `du` (the caller's zeroed array, as upstream's stack array; filled in
+/// place so the array is not moved out through the `Result`).
 #[allow(clippy::range_plus_one)] // exclusive ranges: `RangeInclusive` is measurably slower here
+#[allow(clippy::too_many_arguments)] // upstream's arguments plus the output array
 fn univariate_derivs<const N: usize>(
     uk: &[f64],
     m: usize,
@@ -422,10 +432,10 @@ fn univariate_derivs<const N: usize>(
     t: f64,
     side: Side,
     dr: isize,
+    du: &mut Derivatives<N>,
     op: &'static str,
-) -> Result<(isize, Derivatives<N>)> {
+) -> Result<isize> {
     let p = sx(pu, op)?;
-    let mut du: Derivatives<N> = [[0.0; N]; MAX_DERIVATIVE + 1];
     let mut ndu: BasisFunctions<N> = [[0.0; N]; N];
 
     // Compute all non-vanishing basis functions.
@@ -436,7 +446,7 @@ fn univariate_derivs<const N: usize>(
     let mder = p.min(dr);
     for k in p + 1..dr + 1 {
         for j in 0..p + 1 {
-            set2(&mut du, k, j, 0.0, op)?;
+            set2(du, k, j, 0.0, op)?;
         }
     }
 
@@ -445,22 +455,22 @@ fn univariate_derivs<const N: usize>(
 
     // Load the basis functions.
     for j in 0..p + 1 {
-        set2(&mut du, 0, j, get2(&ndu, j, p, op)?, op)?;
+        set2(du, 0, j, get2(&ndu, j, p, op)?, op)?;
     }
 
     // Compute derivatives.
-    compute_derivatives(p, mder, &ndu, &mut du, op)?;
+    compute_derivatives(p, mder, &ndu, du, op)?;
 
     // Multiply through by the correct factors.
     let mut r = p;
     for k in 1..mder + 1 {
         for j in 0..p + 1 {
-            let v = get2(&du, k, j, op)? * r as f64;
-            set2(&mut du, k, j, v, op)?;
+            let v = get2(du, k, j, op)? * r as f64;
+            set2(du, k, j, v, op)?;
         }
         r *= p - k;
     }
-    Ok((ku, du))
+    Ok(ku)
 }
 
 // ---- specialised point helpers ----------------------------------------------------
@@ -494,10 +504,13 @@ fn to_euclid_spec(noz: bool, now: bool, pw: CPoint) -> Vec3 {
     }
 }
 
-/// `N_ComputeDerivativeMatrix` / `N_ComputeDerivativeMatrixSpec`; `N` is the scratch
-/// width (above both degrees).
+/// `N_ComputeDerivativeMatrix` / `N_ComputeDerivativeMatrixSpec` into the caller's
+/// matrix `sd` (rows `0..=udr` of at least `vdr + 1` points, zeroed); `N` is the
+/// scratch width (above both degrees). `alpha(k, l, i, j)` is the basis derivative
+/// `BD[k][l][i][j]`.
 #[allow(clippy::range_plus_one)] // exclusive ranges: `RangeInclusive` is measurably slower here
-fn derivative_matrix<const N: usize>(
+#[allow(clippy::too_many_arguments)] // upstream's arguments plus the output matrix
+fn derivative_matrix<const N: usize, R: AsMut<[Vec3]>>(
     sur: &Surface,
     no_w: bool,
     no_z: bool,
@@ -508,9 +521,10 @@ fn derivative_matrix<const N: usize>(
     vdr: isize,
     l2: isize,
     l3: isize,
-    bd: &BasisDerivs,
+    alpha: impl Fn(usize, usize, usize, usize) -> Result<f64>,
+    sd: &mut [R],
     op: &'static str,
-) -> Result<Vec<Vec<Vec3>>> {
+) -> Result<()> {
     let mut pwl = [[Vec3::ZERO; N]; N];
     for i in 0..p + 1 {
         for j in 0..q + 1 {
@@ -519,7 +533,6 @@ fn derivative_matrix<const N: usize>(
         }
     }
 
-    let mut sd = vec![vec![Vec3::ZERO; ux(vdr, op)? + 1]; ux(udr, op)? + 1];
     // (`p`, `q` are below `N`, so the scratch rows hold every `i <= p`, `j <= q`)
     let (pu, qu) = (ux(p, op)?, ux(q, op)?);
     for k in 0..udr + 1 {
@@ -532,7 +545,7 @@ fn derivative_matrix<const N: usize>(
                 let row = pwl.get(i).ok_or_else(|| oob(op))?;
                 for j in 0..qu + 1 {
                     let pt = row.get(j).copied().ok_or_else(|| oob(op))?;
-                    let alpha = bd.at_u(ku, lu, i, j, op)?;
+                    let alpha = alpha(ku, lu, i, j)?;
                     s.x += alpha * pt.x; // upstream: alpha * P.x + sd.x
                     s.y += alpha * pt.y; // upstream: alpha * P.y + sd.y
                     if !no_z {
@@ -541,10 +554,10 @@ fn derivative_matrix<const N: usize>(
                 }
             }
             let row = sd.get_mut(ux(k, op)?).ok_or_else(|| oob(op))?;
-            set(row, l, s, op)?;
+            set(row.as_mut(), l, s, op)?;
         }
     }
-    Ok(sd)
+    Ok(())
 }
 
 impl Surface {
@@ -580,7 +593,9 @@ impl Surface {
                 "degree above NL_MAXDEG (upstream scratch array size)",
             ));
         }
-        if pu < SMALL_NP && qu < SMALL_NP {
+        if pu < TINY_NP && qu < TINY_NP {
+            self.basis_derivs_n::<TINY_NP>(u, v, ufl, vfl, upper, udr, vdr)
+        } else if pu < SMALL_NP && qu < SMALL_NP {
             self.basis_derivs_n::<SMALL_NP>(u, v, ufl, vfl, upper, udr, vdr)
         } else {
             self.basis_derivs_n::<NP>(u, v, ufl, vfl, upper, udr, vdr)
@@ -607,8 +622,10 @@ impl Surface {
         let (udri, vdri) = (sx(udr, OP)?, sx(vdr, OP)?);
 
         // u- then v-direction.
-        let (ku, du) = univariate_derivs::<N>(self.u_knots(), s1u, pu, u, ufl, udri, OP)?;
-        let (kv, dv) = univariate_derivs::<N>(self.v_knots(), s2u, qu, v, vfl, vdri, OP)?;
+        let mut du: Derivatives<N> = [[0.0; N]; MAX_DERIVATIVE + 1];
+        let mut dv: Derivatives<N> = [[0.0; N]; MAX_DERIVATIVE + 1];
+        let ku = univariate_derivs::<N>(self.u_knots(), s1u, pu, u, ufl, udri, &mut du, OP)?;
+        let kv = univariate_derivs::<N>(self.v_knots(), s2u, qu, v, vfl, vdri, &mut dv, OP)?;
 
         let mut bd = BasisDerivs::zeros(udr, vdr, pu, qu, OP)?;
         bd.usp = ux(ku, OP)?;
@@ -786,25 +803,105 @@ impl Surface {
         let p00 = self.cpt(0, 0)?;
         let no_w = p00.w == NOW;
         let no_z = p00.z == NOZ;
-        let dm = if pu < SMALL_NP && qu < SMALL_NP {
-            derivative_matrix::<SMALL_NP>
+        let mut sd = vec![vec![Vec3::ZERO; vdr + 1]; udr + 1];
+        let alpha = |k, l, i, j| bd.at_u(k, l, i, j, OP);
+        let (upper, udr, vdr) = (upper && udr == vdr, sx(udr, OP)?, sx(vdr, OP)?);
+        if pu < TINY_NP && qu < TINY_NP {
+            derivative_matrix::<TINY_NP, _>(
+                self, no_w, no_z, upper, p, q, udr, vdr, l2, l3, alpha, &mut sd, OP,
+            )?;
+        } else if pu < SMALL_NP && qu < SMALL_NP {
+            derivative_matrix::<SMALL_NP, _>(
+                self, no_w, no_z, upper, p, q, udr, vdr, l2, l3, alpha, &mut sd, OP,
+            )?;
         } else {
-            derivative_matrix::<NP>
+            derivative_matrix::<NP, _>(
+                self, no_w, no_z, upper, p, q, udr, vdr, l2, l3, alpha, &mut sd, OP,
+            )?;
+        }
+        Ok(sd)
+    }
+
+    /// [`Surface::derivs`] with `udr = vdr = 1` into the caller's 2x2 block `sd`
+    /// (`SD[k][l]`, every entry written; the entry `[1][1]` is zero with `upper`), with
+    /// no heap allocation for a polynomial (non-rational) surface: the basis
+    /// derivatives `Du[k][i] * Dv[l][j]` are read straight from the two univariate
+    /// tables instead of being stored in a [`BasisDerivs`] first (the same products,
+    /// so the same bits). A rational surface goes through [`Surface::basis_derivs`].
+    ///
+    /// Errors as [`Surface::derivs`].
+    pub fn first_derivs_into(
+        &self,
+        u: f64,
+        v: f64,
+        ufl: Side,
+        vfl: Side,
+        upper: bool,
+        sd: &mut [[Vec3; 2]; 2],
+    ) -> Result<()> {
+        const OP: &str = "nurbs::srf_nurb::Surface::derivs";
+        const BD_OP: &str = "nurbs::srf_nurb::Surface::basis_derivs";
+        let (pu, qu) = self.degrees();
+        *sd = [[Vec3::ZERO; 2]; 2];
+        if self.is_rational() || pu > MAX_DEGREE || qu > MAX_DEGREE {
+            // (the rational basis, and the degree error of `basis_derivs`)
+            let full = self.derivs(u, v, ufl, vfl, upper, 1, 1)?;
+            for (out, row) in sd.iter_mut().zip(&full) {
+                for (o, x) in out.iter_mut().zip(row) {
+                    *o = *x;
+                }
+            }
+            return Ok(());
+        }
+        if pu < TINY_NP && qu < TINY_NP {
+            self.first_derivs_n::<TINY_NP>(u, v, ufl, vfl, upper, sd, OP, BD_OP)
+        } else if pu < SMALL_NP && qu < SMALL_NP {
+            self.first_derivs_n::<SMALL_NP>(u, v, ufl, vfl, upper, sd, OP, BD_OP)
+        } else {
+            self.first_derivs_n::<NP>(u, v, ufl, vfl, upper, sd, OP, BD_OP)
+        }
+    }
+
+    /// [`Surface::first_derivs_into`] for a non-rational surface, scratch width `N`:
+    /// the steps of [`Surface::basis_derivs_n`] and [`Surface::derivs`] in their order.
+    #[allow(clippy::too_many_arguments)] // the evaluation arguments plus both names
+    fn first_derivs_n<const N: usize>(
+        &self,
+        u: f64,
+        v: f64,
+        ufl: Side,
+        vfl: Side,
+        upper: bool,
+        sd: &mut [[Vec3; 2]; 2],
+        op: &'static str,
+        bd_op: &'static str,
+    ) -> Result<()> {
+        let (pu, qu) = self.degrees();
+        let (_, _, s1u, s2u) = self.array_sizes();
+        let mut du: Derivatives<N> = [[0.0; N]; MAX_DERIVATIVE + 1];
+        let mut dv: Derivatives<N> = [[0.0; N]; MAX_DERIVATIVE + 1];
+        let ku = univariate_derivs::<N>(self.u_knots(), s1u, pu, u, ufl, 1, &mut du, bd_op)?;
+        let kv = univariate_derivs::<N>(self.v_knots(), s2u, qu, v, vfl, 1, &mut dv, bd_op)?;
+        let at2u = |a: &Derivatives<N>, i: usize, j: usize| -> Result<f64> {
+            a.get(i)
+                .and_then(|r| r.get(j))
+                .copied()
+                .ok_or_else(|| oob(bd_op))
         };
-        dm(
-            self,
-            no_w,
-            no_z,
-            upper && udr == vdr,
-            p,
-            q,
-            sx(udr, OP)?,
-            sx(vdr, OP)?,
-            l2,
-            l3,
-            &bd,
-            OP,
-        )
+        let alpha = |k: usize, l: usize, i: usize, j: usize| -> Result<f64> {
+            if i > pu || j > qu {
+                return Err(oob(op));
+            }
+            Ok(at2u(&du, k, i)? * at2u(&dv, l, j)?)
+        };
+
+        let (p, q) = (sx(pu, op)?, sx(qu, op)?);
+        let l2 = ku - p;
+        let l3 = kv - q;
+        let p00 = self.cpt(0, 0)?;
+        let no_w = p00.w == NOW;
+        let no_z = p00.z == NOZ;
+        derivative_matrix::<N, _>(self, no_w, no_z, upper, p, q, 1, 1, l2, l3, alpha, sd, op)
     }
 
     /// Min-max box of the Euclidean control net (`N_SrfGetBBox`).
@@ -2116,6 +2213,81 @@ mod tests {
         assert!(s
             .basis_derivs(0.5, 0.5, Side::Left, Side::Left, false, 5, 1)
             .is_err());
+    }
+
+    /// A clamped surface of degrees `(p, q)` over `(n+1) x (m+1)` points with one
+    /// interior knot run in each direction; weights `1 + 0.1 * ..` when `rational`.
+    fn spline(p: usize, q: usize, n: usize, m: usize, rational: bool) -> Surface {
+        let knots = |deg: usize, last: usize| -> Vec<f64> {
+            let inner = last - deg;
+            let mut k = vec![0.0; deg + 1];
+            k.extend((1..=inner).map(|i| i as f64 / (inner + 1) as f64));
+            k.extend(vec![1.0; deg + 1]);
+            k
+        };
+        let net = (0..=n)
+            .map(|i| {
+                (0..=m)
+                    .map(|j| {
+                        let (x, y) = (i as f64, j as f64);
+                        let z = (x * 0.7 + y * 1.3).sin();
+                        let w = if rational {
+                            1.0 + 0.1 * ((i + 2 * j) % 3) as f64
+                        } else {
+                            NOW
+                        };
+                        let f = if rational { w } else { 1.0 };
+                        CPoint::new(x * f, y * f, z * f, w)
+                    })
+                    .collect()
+            })
+            .collect();
+        Surface::new(net, p, q, knots(p, n), knots(q, m)).unwrap()
+    }
+
+    #[test]
+    fn first_derivs_into_matches_derivs_bit_for_bit() {
+        let surfaces = [
+            spline(3, 1, 6, 4, false),
+            spline(1, 1, 3, 3, false),
+            spline(3, 2, 5, 5, true),
+            spline(8, 1, 9, 2, false),
+            spline(5, 2, 7, 4, true),
+            spline(4, 3, 6, 5, false),
+            bilinear(),
+        ];
+        let params = [-0.2, 0.0, 0.25, 1.0 / 3.0, 0.5, 0.75, 1.0, 1.3];
+        let sides = [Side::Left, Side::Right];
+        for s in &surfaces {
+            for &u in &params {
+                for &v in &params {
+                    for &ufl in &sides {
+                        for &vfl in &sides {
+                            for upper in [false, true] {
+                                let full = s.derivs(u, v, ufl, vfl, upper, 1, 1);
+                                let mut block = [[Vec3::new(9.0, 9.0, 9.0); 2]; 2];
+                                let r = s.first_derivs_into(u, v, ufl, vfl, upper, &mut block);
+                                match full {
+                                    Ok(full) => {
+                                        assert!(r.is_ok());
+                                        for k in 0..2 {
+                                            for l in 0..2 {
+                                                let (a, b) = (full[k][l], block[k][l]);
+                                                assert_eq!(
+                                                    [a.x.to_bits(), a.y.to_bits(), a.z.to_bits()],
+                                                    [b.x.to_bits(), b.y.to_bits(), b.z.to_bits()],
+                                                );
+                                            }
+                                        }
+                                    }
+                                    Err(e) => assert_eq!(r.err(), Some(e)),
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

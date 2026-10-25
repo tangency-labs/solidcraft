@@ -1618,6 +1618,54 @@ impl Surface {
         }
     }
 
+    /// [`Surface::evaluate_simple`] with first derivatives (`1, 1`) into the caller's
+    /// 2x2 block `d`: the entries the evaluation has are written, the others keep
+    /// their values. The B-spline based kinds evaluate without a heap allocation per
+    /// call
+    /// ([`crate::nurbs::b_spline_surface::BSplineSurface::evaluate_simple_first_into`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::evaluate_simple`].
+    pub fn evaluate_simple_first_into(
+        &self,
+        k: &Kernel,
+        uv: Point2,
+        flags: EvaluateFlags,
+        d: &mut [[Vec3; 2]; 2],
+    ) -> Result<()> {
+        let base = match self.kind() {
+            SurfaceKind::BSpline(s) => Some(s),
+            SurfaceKind::Cone(s) => Some(s.rev().base()),
+            SurfaceKind::SurfOfRevolution(s) => Some(s.base()),
+            SurfaceKind::SurfOfExtrusion(s) => Some(s.base()),
+            SurfaceKind::Sphere(s) => Some(s.base().base()),
+            SurfaceKind::Torus(s) => Some(s.base().base()),
+            SurfaceKind::Plane(_)
+            | SurfaceKind::CurveBounded(_)
+            | SurfaceKind::OffsetSurface(_)
+            | SurfaceKind::SrfInVolume(_)
+            | SurfaceKind::Step(_) => None,
+        };
+        if let Some(b) = base {
+            self.check_evaluation_copy_depth(0)?;
+            return b.evaluate_simple_first_into(
+                uv,
+                flags.u_side == Side::Left,
+                flags.v_side == Side::Left,
+                flags.only_upper_half,
+                d,
+            );
+        }
+        let r = self.evaluate_simple(k, uv, 1, 1, flags)?;
+        for (row, src) in d.iter_mut().zip(&r) {
+            for (slot, v) in row.iter_mut().zip(src) {
+                *slot = *v;
+            }
+        }
+        Ok(())
+    }
+
     /// The UV direction that the tangent plane maps onto `vec` (its projection) at
     /// `uv` (`ComputeParamDirection`; not unitised). Outside the domain the point is
     /// clamped for the check unless out-of-bounds evaluation is enabled, but the

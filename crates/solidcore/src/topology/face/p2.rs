@@ -1842,10 +1842,12 @@ impl<'a> OdeIsoCurveLength<'a> {
             let uv = Point2::new(self.u_iso_value, t);
 
             if self.face_thickness < EFF_ZERO {
-                let r = self
-                    .surface
-                    .evaluate_simple(self.kernel, uv, 1, 1, simple_flags())?;
-                copy_block(&mut pv, &r);
+                self.surface.evaluate_simple_first_into(
+                    self.kernel,
+                    uv,
+                    simple_flags(),
+                    &mut pv,
+                )?;
             } else if i == 0 {
                 let r = offset_evaluate_simple(
                     self.kernel,
