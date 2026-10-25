@@ -163,7 +163,7 @@ fn prepared_trim(
     }
     if eu1::uv_trim_curve(b, eu)?.0.is_none() {
         if let Some(preparation) = preparation {
-            preparation.request_trim(eu);
+            preparation.request_trim(b, eu);
             return Err(SolidError::PreparationRequired {
                 operation: "topology::loopuse::prepared_trim",
             });

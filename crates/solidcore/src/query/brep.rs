@@ -82,7 +82,6 @@
 mod ray;
 
 pub(crate) use ray::solve_mutable_brep_point;
-#[cfg(test)]
 pub(crate) use ray::PreparationRequest;
 pub use ray::RayPreparation;
 pub(crate) use ray::RaySurfaceContext;

@@ -43,6 +43,8 @@ const OP: &str = "query::brep::ray";
 #[derive(Debug, Default)]
 pub struct RayPreparation {
     pending: Cell<Option<PreparationRequest>>,
+    /// The B-rep the pending trim request was made on (compared, never dereferenced).
+    trim_brep: Cell<usize>,
     attempted: BTreeSet<PreparationRequest>,
     failed_trims: BTreeSet<EdgeuseId>,
     surface_caches: BTreeMap<FaceId, SurfaceCache<CacheObject>>,
@@ -55,8 +57,14 @@ pub(crate) enum PreparationRequest {
 }
 
 impl RayPreparation {
-    pub(crate) fn request_trim(&self, edgeuse: EdgeuseId) {
+    pub(crate) fn request_trim(&self, b: &Brep, edgeuse: EdgeuseId) {
+        self.trim_brep.set(core::ptr::from_ref(b) as usize);
         self.pending.set(Some(PreparationRequest::UvTrim(edgeuse)));
+    }
+
+    /// Whether the last trim request was made on `b` (identity, not equality).
+    pub(crate) fn trim_requested_on(&self, b: &Brep) -> bool {
+        self.trim_brep.get() == core::ptr::from_ref(b) as usize
     }
 
     pub(crate) fn trim_failed(&self, edgeuse: EdgeuseId) -> bool {
