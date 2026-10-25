@@ -166,3 +166,29 @@ fn join_of_a_profile_sketched_on_a_face_leaves_a_neighbour_it_lies_on() {
         assert_eq!(targets, &["Bracket"]);
     }
 }
+
+/// #6424: an extrude that runs to another body and joins it makes one body of the tool, the
+/// body it was sketched on and the body it runs to.
+#[test]
+fn join_extrude_to_another_body_joins_that_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":40,"height":10,"body_name":"Base"}));
+    run(&mut s, "solid.box", json!({"corner":[0,0,40],"length":40,"width":40,"height":20,"body_name":"Target"}));
+    // A profile on the base's top face, extruded up to the target's bottom face.
+    let sketch = run(&mut s, "sketch.create", json!({"plane":{"face":[20,20,10]}}))["sketch"].as_u64().unwrap();
+    let plane = s.model.state().sketch(sketch).unwrap().plane;
+    let at = |x: f64, y: f64| {
+        let p = plane.to_local(Vec3::new(x, y, 10.0));
+        json!([p.x, p.y])
+    };
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": at(10.0,10.0), "p1": at(30.0,30.0)}));
+    run(&mut s, "sketch.finish", json!({}));
+    // The join names the body the profile was sketched on; the body it runs to joins too.
+    run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    let volume = |name: &str| solidcraft_kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
+    assert_eq!(state.bodies.len(), 1, "the tool, the base and the target are one body");
+    assert!((volume("Base") - 60_000.0).abs() < 1e-6, "the target took the tool: {}", volume("Base"));
+    assert_eq!(state.body("Base").unwrap().body.lumps().map_or(1, |l| l.len()), 1, "one piece");
+}
