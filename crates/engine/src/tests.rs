@@ -1259,7 +1259,8 @@ fn body_volume(st: &solidcraft_doc::ModelState) -> f64 {
     st.bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum()
 }
 
-/// Deleting an inserted assembly frees its body names without leaving assembly ownership behind.
+/// Deleting an inserted assembly keeps the names of the bodies that remain, and leaves no assembly
+/// ownership behind.
 #[test]
 fn step_insert_delete_removes_assembly_and_undo_restores_it() {
     let dir = std::env::temp_dir().join(format!("solidcraft-step-delete-{}", std::process::id()));
@@ -1294,7 +1295,7 @@ fn step_insert_delete_removes_assembly_and_undo_restores_it() {
     assert!(s.doc.body_components.is_empty());
     assert!(s.doc.body_offsets.is_empty());
     let state = s.model.state();
-    let mirrored = state.body("Part (2)").unwrap();
+    let mirrored = state.body("Part (3)").unwrap();
     assert_eq!(s.doc.model_body_component(mirrored), 0);
     run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [40, 0, 0], "operation": "new", "body_name": "Other"}));
     assert_eq!(s.doc.model_body_component(s.model.state().body("Other").unwrap()), 0);
