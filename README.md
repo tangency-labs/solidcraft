@@ -128,8 +128,9 @@ cases, adding operation regressions and fixing bugs.
    merge gate; passing cases must retain the existing tolerances and coverage.
 
 To keep parallel PRs from conflicting: edit only your unit's `plan/units/<unit id>.toml`,
-never commit `reports/difftest/` (CI generates them), and only append to
-`plan/findings.md` and `plan/upstream-issues.md`. A branch started before the per-unit
+never commit `reports/difftest/` (CI generates them), and put each finding or upstream issue
+in its own new file under `plan/findings/` or `plan/upstream-issues/` (never append to a
+shared file). A branch started before the per-unit
 split migrates with `git fetch origin && git merge origin/main;
 scripts/units-migrate-branch.sh && git commit --no-edit`.
 

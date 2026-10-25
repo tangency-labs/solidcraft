@@ -1,5 +1,9 @@
 # Upstream SMLib issues
 
+> **Frozen archive (2026-10-25).** Do not add entries here: every new issue is its own
+> file under [`plan/upstream-issues/`](upstream-issues/README.md), so parallel PRs never
+> conflict. The site renders both.
+
 Defects and hazards in the upstream C++ (`source/SMLib`, `source/SM_API`) found while
 porting it to Rust. Problems only: porting notes, harness details and Rust-side choices
 stay in `plan/findings.md`. Behaviour that is odd but plausibly intended is left out.

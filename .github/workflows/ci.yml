@@ -50,6 +50,10 @@ jobs:
       - uses: actions/checkout@v4
       - run: rustup show active-toolchain || rustup toolchain install
       - run: cargo fmt --all --check
+      - name: No new entries in frozen archives (one file per finding / upstream issue)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: scripts/ci/check-frozen-archives.sh "$BASE"
 
   clippy:
     runs-on: blacksmith-8vcpu-ubuntu-2404

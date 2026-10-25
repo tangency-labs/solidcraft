@@ -477,7 +477,42 @@ def parse_issues():
         e["confirmed"] = "yes" if conf.startswith("yes") else ("no" if conf.startswith("no") else "unknown")
         e["how_found"] = fields.get("How found", "")
         e["psirt"] = "[PSIRT]" in e["title"]
-    return "\n".join(intro).strip(), entries
+    return "\n".join(intro).strip(), entries + parse_issue_files()
+
+
+def parse_issue_files():
+    """New entries: one file each under plan/upstream-issues/ (plan/upstream-issues/README.md).
+
+    A file is a `#### <ID>. <title>` heading followed by the usual field bullets, with
+    `- **Severity:**` and `- **Area:**` standing in for the frozen file's section headings.
+    Files are read in name order so the page is deterministic.
+    """
+    entries = []
+    for path in sorted((ROOT / "plan/upstream-issues").glob("*.md")):
+        if path.name == "README.md":
+            continue
+        lines = path.read_text().splitlines()
+        head = next((i for i, l in enumerate(lines) if l.startswith("#### ")), None)
+        if head is None:
+            continue
+        title = lines[head][5:].strip()
+        m = re.match(r"([A-Z]+)-(\d+)\.\s*(.*)$", title)
+        body = "\n".join(lines[head + 1:]).strip()
+        fields = dict(re.findall(r"^- \*\*([^*]+?):\*\*\s*(.*)$", body, re.M))
+        body = "\n".join(l for l in body.splitlines()
+                         if not re.match(r"^- \*\*(Severity|Area):\*\*", l)).strip()
+        conf = fields.get("Confirmed", "").strip().lower()
+        entries.append({
+            "series": m.group(1) if m else "OTHER", "num": int(m.group(2)) if m else 0,
+            "id": f"{m.group(1)}-{m.group(2)}" if m else title,
+            "title": m.group(3) if m else title,
+            "severity": fields.get("Severity", "").strip(), "area": fields.get("Area", "").strip(),
+            "body": body,
+            "confirmed": "yes" if conf.startswith("yes") else ("no" if conf.startswith("no") else "unknown"),
+            "how_found": fields.get("How found", ""),
+            "psirt": "[PSIRT]" in title,
+        })
+    return entries
 
 
 # ---------------------------------------------------------------- page shell
@@ -1123,7 +1158,8 @@ counts). Click a column heading to sort.</p>
     ser_opts += "".join(f'<option value="{esc(k)}">{esc(k)} ({sc[k]})</option>' for k in sorted(set(sc) - set(SERIES)))
     body = f"""
 <h1>Upstream issues</h1>
-<p class="muted">{len(issues)} entries from <a href="{REPO_URL}/blob/main/plan/upstream-issues.md"><code>plan/upstream-issues.md</code></a>,
+<p class="muted">{len(issues)} entries from <a href="{REPO_URL}/blob/main/plan/upstream-issues.md"><code>plan/upstream-issues.md</code></a>
+and <a href="{REPO_URL}/tree/main/plan/upstream-issues"><code>plan/upstream-issues/</code></a>,
 rendered as written: {', '.join(f'{sc[k]} {k}' for k in SERIES if sc[k])}; {cc['yes']} confirmed by a C++ run.</p>
 {('<p class="warn">Duplicate IDs in the source file: ' + ', '.join(esc(d) for d in dups) + '. Both entries are shown; the later one is linked as <code>#&lt;id&gt;-dup2</code>.</p>') if dups else ''}
 <details class="intro"><summary>About this list</summary>{markdown(intro_md)}</details>

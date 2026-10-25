@@ -1,5 +1,8 @@
 # Findings
 
+> **Frozen archive (2026-10-25).** Do not add entries here: every new finding is its own
+> file under [`plan/findings/`](findings/README.md), so parallel PRs never conflict.
+
 Rust-vs-C++ disagreements, upstream bugs, nondeterminism and other facts later agents
 need. Add entries under a heading per unit (or "General"); keep the newest at the end
 of each section.
