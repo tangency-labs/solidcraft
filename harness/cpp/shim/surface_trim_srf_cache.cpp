@@ -22,6 +22,7 @@
 #include <SmFace.h>
 #include <SmNurbsCrv.h>
 #include <SmNurbsSrf.h>
+#include <SmPoly.h>
 #include <SmSurface.h>
 #include <SmSurfaceCache.h>
 #include <SmTArray.h>
@@ -30,6 +31,7 @@
 #include <nurbs.h>
 
 #include <vector>
+#include <stdexcept>
 
 #include "sc_sm.h"
 
@@ -46,6 +48,7 @@ enum : int32_t
     OP_POINT_TEST = 1,
     OP_IMPLANT_EU = 2,
     OP_FACE = 3,
+    OP_IMPLANT_POLY = 4,
 };
 
 struct TreePeek : SmTree
@@ -65,6 +68,7 @@ struct TrimPeek : SmTrimSrfCache
     SmMemBlockMgr& bez() { return m_sBezMgr; }
     SmMemBlockMgr& aux() { return m_sAuxMgr; }
     SmMemBlockMgr& eu_mgr() { return m_sEdgeuseListMgr; }
+    SmMemBlockMgr& poly_mgr() { return m_sPolyEdgeListMgr; }
     SmExtent2d& domain() { return m_sUVDomain; }
     double& factor() { return m_dTrimSubdivisionFactor; }
     double chord() const { return m_dChordHeightTolerance; }
@@ -306,6 +310,8 @@ void op_implant_eu(Rd& rd, SmBSplineSurface* s, const SmContext& ctx, std::vecto
         delete eu;
 }
 
+#include "surface_trim_srf_cache_poly.inc"
+
 // The cache of a face made from the surface (consumed by the brep).
 void op_face(Rd& rd, SmBSplineSurface* s, const SmContext& ctx, std::vector<double>& o)
 {
@@ -374,6 +380,7 @@ SC_EXPORT int32_t sc_surface_trim_srf_cache_eval(int32_t op, const double* in, i
     case OP_NEW: op_new(rd, s, ctx, o); break;
     case OP_POINT_TEST: op_point_test(rd, s, ctx, o); break;
     case OP_IMPLANT_EU: op_implant_eu(rd, s, ctx, o); break;
+    case OP_IMPLANT_POLY: op_implant_poly(rd, s, ctx, o); break;
     case OP_FACE:
         op_face(rd, s, ctx, o);
         s = NULL; // consumed by the brep

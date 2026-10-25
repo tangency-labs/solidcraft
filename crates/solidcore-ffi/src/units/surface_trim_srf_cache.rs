@@ -14,6 +14,7 @@
 //! | `New`         | constructor, `GetType`, `IsKindOf`, state    | `S ch ang ar max min ratio k type..` |
 //! | `PointTest`   | `PointTest` without face (testing off or face modified) | `S enabled modified u v has_tol tol` |
 //! | `ImplantEu`   | `ImplantEdgeuse` on a hand-built tree        | `S D factor T init D k` then `k` x `C subdiv node` |
+//! | `ImplantPoly` | `ImplantPolyEdge`, then `ImplantEdgeuse` / `SubdivideNode` | `S D factor T S k` then `k` x `start(x y z) end(x y z) tolerance node`, `remap m` then `m` x `C subdiv node` |
 //! | `Face`        | `BuildTree`, `PointTest`, `PointClassify` on a face's cache | `S build k` then `k` x `u v has_tol tol` |
 //!
 //! Outputs (first entry the status `0` / `SmStatus`):
@@ -23,7 +24,10 @@
 //! tree (the input nodes, then the children subdivisions made, in allocation order) `marked
 //! class k eu..` (edge use indices = call indices). `Face`: (with `build`) `build_status boundary point_test have_t
 //! containment D node_count`, then per point `test_status ok object_type classify_status class
-//! object_type`.
+//! object_type`. `ImplantPoly`: polygon-call statuses, edge-use-call statuses, face extent,
+//! node count, then per node `parent c1 c2 D split marked class eu_count eu.. poly_count poly..`.
+//! Polygon handles are input indices; parent polygon lists and mixed edge-use lists are retained
+//! as upstream. `remap` exercises Rust handle mapping without changing native input handles.
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: well-formed clamped
 //! surfaces and curves, domains inside the surface domain, valid enumerators, bounded counts,
@@ -51,6 +55,8 @@ pub enum Op {
     PointTest,
     /// `ImplantEdgeuse`.
     ImplantEu,
+    /// Polygon edges followed by edge-use-driven subdivision, with full node lists.
+    ImplantPoly,
     /// The cache of a face: `BuildTree`, `PointTest`, `PointClassify`.
     Face,
 }
@@ -64,6 +70,7 @@ impl Op {
             Op::PointTest => 1,
             Op::ImplantEu => 2,
             Op::Face => 3,
+            Op::ImplantPoly => 4,
         }
     }
 }
@@ -315,6 +322,29 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
                 rd.opt_index(n as i64)?;
             }
         }
+        Op::ImplantPoly => {
+            rd.domain_in(&srf, true)?;
+            let factor = rd.finite()?;
+            if !(1.0..=32.0).contains(&factor) {
+                return Err(bad("polygon subdivision factor outside 1..=32"));
+            }
+            let n = tree(rd, &srf)?;
+            bspline_block(rd)?;
+            let count = rd.index(8)?;
+            for _ in 0..count {
+                rd.finites(6)?;
+                // SmZoneTol3d accepts zero and stores abs(value) for negatives.
+                rd.finite()?;
+                rd.index(n - 1)?;
+            }
+            rd.flag()?;
+            let count = rd.index(8)?;
+            for _ in 0..count {
+                curve_2d(rd)?;
+                rd.flag()?;
+                rd.opt_index(n as i64)?;
+            }
+        }
         Op::Face => {
             rd.flag()?;
             let k = rd.index(16)?;
@@ -415,5 +445,33 @@ mod tests {
         }
         input[8] = f64::NAN;
         assert!(validate(Op::New, &input).is_err());
+    }
+
+    #[test]
+    fn validates_polygon_context_and_rejects_truncation_before_cpp() {
+        let mut input = surface();
+        input.extend([0.0, 0.0, 1.0, 1.0, 4.0]); // domain and factor
+        input.extend([1.0, -1.0, -1.0, -1.0, 3.0, 2.0, 0.0, 0.0]);
+        input.extend([0.0, 0.0, 1.0, 1.0]); // root domain
+        input.extend(surface()); // polygon's original face surface
+        input.extend([1.0, 0.1, 0.2, 0.0, 0.9, 0.8, 0.0, 0.001, 0.0]);
+        input.extend([0.0, 0.0]); // no mapping, no edge-use calls
+        assert!(validate(Op::ImplantPoly, &input).is_ok());
+        for end in 0..input.len() {
+            assert!(
+                validate(Op::ImplantPoly, &input[..end]).is_err(),
+                "prefix {end}"
+            );
+        }
+        let node = input.len() - 3;
+        input[node] = 1.0; // one past the final node
+        assert!(validate(Op::ImplantPoly, &input).is_err());
+        input[node] = 0.0;
+        input[node - 1] = 0.0;
+        assert!(validate(Op::ImplantPoly, &input).is_ok());
+        input[node - 1] = -0.001;
+        assert!(validate(Op::ImplantPoly, &input).is_ok());
+        input[node - 1] = f64::NAN;
+        assert!(validate(Op::ImplantPoly, &input).is_err());
     }
 }

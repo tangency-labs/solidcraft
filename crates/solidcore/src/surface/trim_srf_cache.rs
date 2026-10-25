@@ -46,7 +46,9 @@
 //!   An explicit [`TrimSrfCache::bind_face`] validates the source owner key and
 //!   records its caller handle without decoding the key as a topology id.
 //!   `SubdivideNode` re-implants a moved edge use with the curve it was implanted with
-//!   (its `GetUVTrimCurve`, retained as an exact B-spline copy).
+//!   (its `GetUVTrimCurve`, retained as an exact B-spline copy). Poly edges retain
+//!   their endpoints, tolerance and an evaluation copy of their original face surface;
+//!   callers must reimplant an edited edge before subdividing, as for edge-use curves.
 //! - **Node lists.** `SmTList::Prepend` onto a node's edge use, vertex and poly edge
 //!   lists inserts at the front of the [`BezierAux2d`] `Vec`s (list order, head first).
 //!   The list memory managers (`m_sVLMgr`, `m_sEdgeuseListMgr`) have no counterpart.
@@ -58,8 +60,8 @@
 //!   [`sc::FaceContainmentClassifier`], with the face as classifier. Point tests on
 //!   an unwrapped base retain trimmed dispatch and require an operation-scoped
 //!   [`FaceQueries`] service. A base fallback wrapped by [`TrimSrfCache::from_base`]
-//!   keeps its untrimmed dispatch. Poly-edge reimplantation still requires its
-//!   separate poly-topology context.
+//!   keeps its untrimmed dispatch. Poly-edge reimplantation reads the retained
+//!   geometry, visits the parent list head first and leaves that list intact, as native.
 //! - **Recursion.** Edge implantation uses an explicit subdivision stack. Its
 //!   nested reimplantation always disables subdivision, so that call chain has
 //!   at most one nested implantation. Geometric subdivision retains the base
@@ -67,8 +69,7 @@
 //! - **Unported callees** (all return [`SolidError::Unported`]): `SmSurface::GetFace`
 //!   without a [`CacheFace`] (through [`SurfaceCache::face`]); `SmTol::GetZoneTol3d`
 //!   and `SmFace::PointClassify` of [`TrimSrfCache::point_test`] /
-//!   [`TrimSrfCache::point_classify`] without a [`CacheFace`]; `SmFace::GetSurface` of
-//!   a moved poly edge's original face.
+//!   [`TrimSrfCache::point_classify`] without a [`CacheFace`].
 //! - **Undefined behaviour.** Upstream dereferences a null face in `PointTest` /
 //!   `PointClassify` of a cache whose surface has no face; the port returns
 //!   `SM_ERR_NULL_POINTER`. A node without surface data in this cache gives
@@ -311,6 +312,28 @@ fn classify_in_face<O>(
     Ok((class, object))
 }
 
+/// Geometry read again when `SubdivideNode` reimplants a polygon edge. The surface
+/// is an exact evaluation copy, independent of the cache's surface and handle space.
+#[derive(Debug, Clone)]
+struct PolyEdgeGeometry {
+    start: Point3,
+    end: Point3,
+    tolerance: f64,
+    surface: Surface,
+}
+
+impl PolyEdgeGeometry {
+    fn input<O>(&self, poly_edge: O) -> PolyEdgeInput<'_, O> {
+        PolyEdgeInput {
+            poly_edge,
+            start: self.start,
+            end: self.end,
+            tolerance: self.tolerance,
+            surface: &self.surface,
+        }
+    }
+}
+
 /// The trimmed surface cache (`SmTrimSrfCache`): a [`SurfaceCache`] whose tree
 /// knows the face boundary.
 #[derive(Debug, Clone)]
@@ -320,6 +343,8 @@ pub struct TrimSrfCache<O> {
     /// The UV trim curve of every edge use implanted (`GetUVTrimCurve`, read again
     /// when a subdivision moves the edge use into the new children).
     edgeuse_curves: Vec<(O, BSplineCurve)>,
+    /// Geometry of implanted polygon edges, keyed by their opaque handles.
+    poly_edge_geometry: Vec<(O, PolyEdgeGeometry)>,
 }
 
 impl<O: Copy + PartialEq> TrimSrfCache<O> {
@@ -343,6 +368,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         Self {
             base,
             edgeuse_curves: Vec::new(),
+            poly_edge_geometry: Vec::new(),
         }
     }
 
@@ -352,6 +378,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         Self {
             base,
             edgeuse_curves: Vec::new(),
+            poly_edge_geometry: Vec::new(),
         }
     }
 
@@ -367,7 +394,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     }
 
     /// The same cache with every handle mapped by `map` (the base's
-    /// [`SurfaceCache::map_handles`] and the implanted edge uses' curves).
+    /// [`SurfaceCache::map_handles`] and the implanted edge-use and polygon-edge geometry).
     ///
     /// # Errors
     ///
@@ -384,6 +411,21 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         Ok(TrimSrfCache {
             base: self.base.map_handles(&map)?,
             edgeuse_curves,
+            poly_edge_geometry: self
+                .poly_edge_geometry
+                .iter()
+                .map(|(o, g)| {
+                    Ok((
+                        map(*o)?,
+                        PolyEdgeGeometry {
+                            start: g.start,
+                            end: g.end,
+                            tolerance: g.tolerance,
+                            surface: g.surface.clone_for_evaluation()?,
+                        },
+                    ))
+                })
+                .collect::<Result<_>>()?,
         })
     }
 
@@ -1104,9 +1146,9 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     ///
     /// # Errors
     ///
-    /// Those of [`SurfaceCache::subdivide_node_split`]; [`SolidError::Unported`]:
-    /// `SmFace::GetSurface` (`topology.face_p2`) for a poly edge to move. An edge use's
-    /// `GetUVTrimCurve` is the curve it was implanted with.
+    /// Those of [`SurfaceCache::subdivide_node_split`]. `InvalidInput` for a polygon
+    /// edge handle inserted directly into the base lists without its geometry. An
+    /// edge use's `GetUVTrimCurve` is the curve it was implanted with.
     fn subdivide_node(
         &mut self,
         k: &Kernel,
@@ -1144,14 +1186,30 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
                     self.base.aux_mut(node)?.edgeuse_list.pop();
                 }
             } else {
-                // UNPORTED(topology.face_p2): SmFace::GetSurface of the poly edge's
-                // original face (the PolyEdgeInput of ImplantPolyEdge; the poly edge
-                // points and tolerance are query::poly, but the cache keeps opaque
-                // handles with no poly B-rep to read them from)
-                return Err(SolidError::unported(
-                    "SmFace::GetSurface",
-                    "topology.face_p2",
-                ));
+                // Native GetAllNodes visits head first and leaves the parent's list
+                // intact. Each child's Prepend reverses that order independently.
+                let poly_edges = self.base.aux(node)?.poly_edge_list.clone();
+                for pe in poly_edges {
+                    for child in [node1, node2] {
+                        let geometry = self
+                            .poly_edge_geometry
+                            .iter()
+                            .find(|(handle, _)| *handle == pe)
+                            .map(|(_, geometry)| geometry)
+                            .ok_or_else(|| invalid(OP, "polygon edge has no retained geometry"))?;
+                        let domain = self.base.aux(child)?.uv_domain;
+                        // The native caller ignores ordinary implantation errors.
+                        let embed = match poly_edge_in_domain(k, &geometry.input(pe), domain) {
+                            Ok(embed) => embed,
+                            Err(e) if e.is_unported() => return Err(e),
+                            Err(_) => continue,
+                        };
+                        if embed {
+                            self.set_on_boundary(child, false)?;
+                            self.aux_mut(child)?.poly_edge_list.insert(0, pe);
+                        }
+                    }
+                }
             }
         }
         let n = self
@@ -1178,54 +1236,41 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for a node without surface data; [`SolidError::Unported`]:
-    /// `SmTol::MapTo2d` over a surface (`surface.surface_p1`).
+    /// `InvalidInput` for a node without surface data; errors from tolerance mapping
+    /// or from making the bounded evaluation copy of the original surface.
     pub fn implant_poly_edge(
         &mut self,
         k: &Kernel,
         input: PolyEdgeInput<'_, O>,
         node: NodeId,
     ) -> Result<()> {
-        // get segment endpoints
-        let start = Point2::new(input.start.x, input.start.y);
-        let end = Point2::new(input.end.x, input.end.y);
-
-        // Tolerance: get uv space tols, expand the uv domain of the node by tols
-        let tol_3d = input.tolerance;
-        let mid_uv = (start + end) / 2.0;
-        let tol_u = map_to_2d(k, tol_3d, mid_uv, Vec2::new(1.0, 0.0), input.surface)?;
-        let tol_v = map_to_2d(k, tol_3d, mid_uv, Vec2::new(0.0, 1.0), input.surface)?;
-        let tol_expansion = Vec2::new(tol_u, tol_v);
-
         let domain = self.base.aux(node)?.uv_domain;
-        let mut domain_exp = domain;
-        domain_exp.expand_absolute_vec(tol_expansion * 10.0);
-
-        // locals for intersection test with node domain
-        let line_vec = end - start;
-        let is_degenerate = line_vec.x.abs() <= tol_u && line_vec.y.abs() <= tol_v;
-        let unit = Extent1d::from_min_max(0.0, 1.0);
-
-        // testing to see if node contains the start/end points of PolyEdge or
-        // PolyEdge intersects the domain
-        let mut embed = true;
-        if !domain_exp.contains_point(start, 0.0) && !domain_exp.contains_point(end, 0.0) {
-            if is_degenerate {
-                embed = false;
+        let embed = poly_edge_in_domain(k, &input, domain)?;
+        // An existing handle can occur in other nodes even when this particular
+        // implantation misses. Those nodes must also see the caller's latest input.
+        if embed
+            || self
+                .poly_edge_geometry
+                .iter()
+                .any(|(handle, _)| *handle == input.poly_edge)
+        {
+            let geometry = PolyEdgeGeometry {
+                start: input.start,
+                end: input.end,
+                tolerance: input.tolerance,
+                surface: input.surface.clone_for_evaluation()?,
+            };
+            if let Some((_, retained)) = self
+                .poly_edge_geometry
+                .iter_mut()
+                .find(|(handle, _)| *handle == input.poly_edge)
+            {
+                *retained = geometry;
             } else {
-                match domain.intersect_with_infinite_line(start, line_vec, None, None) {
-                    None => embed = false,
-                    Some(ivl) => {
-                        if ivl.intersect(&unit).is_err() {
-                            embed = false;
-                        }
-                    }
-                }
+                self.poly_edge_geometry.push((input.poly_edge, geometry));
             }
         }
-
         if embed {
-            // Add segment to this node's m_sPolyEdgeList
             self.set_on_boundary(node, false)?;
             self.aux_mut(node)?
                 .poly_edge_list
@@ -1400,6 +1445,52 @@ fn evaluate_1st_derivatives(
         crate::nurbs::knots::Side::Left,
         crate::nurbs::knots::Side::Left,
     )
+}
+
+/// The geometric test shared by initial polygon-edge implantation and subdivision.
+fn poly_edge_in_domain<O>(
+    k: &Kernel,
+    input: &PolyEdgeInput<'_, O>,
+    domain: Extent2d,
+) -> Result<bool> {
+    // get segment endpoints
+    let start = Point2::new(input.start.x, input.start.y);
+    let end = Point2::new(input.end.x, input.end.y);
+
+    // Tolerance: get uv space tols, expand the uv domain of the node by tols
+    let tol_3d = input.tolerance;
+    let mid_uv = (start + end) / 2.0;
+    let tol_u = map_to_2d(k, tol_3d, mid_uv, Vec2::new(1.0, 0.0), input.surface)?;
+    let tol_v = map_to_2d(k, tol_3d, mid_uv, Vec2::new(0.0, 1.0), input.surface)?;
+    let tol_expansion = Vec2::new(tol_u, tol_v);
+
+    let mut domain_exp = domain;
+    domain_exp.expand_absolute_vec(tol_expansion * 10.0);
+
+    // locals for intersection test with node domain
+    let line_vec = end - start;
+    let is_degenerate = line_vec.x.abs() <= tol_u && line_vec.y.abs() <= tol_v;
+    let unit = Extent1d::from_min_max(0.0, 1.0);
+
+    // testing to see if node contains the start/end points of PolyEdge or
+    // PolyEdge intersects the domain
+    let mut embed = true;
+    if !domain_exp.contains_point(start, 0.0) && !domain_exp.contains_point(end, 0.0) {
+        if is_degenerate {
+            embed = false;
+        } else {
+            match domain.intersect_with_infinite_line(start, line_vec, None, None) {
+                None => embed = false,
+                Some(ivl) => {
+                    if ivl.intersect(&unit).is_err() {
+                        embed = false;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(embed)
 }
 
 /// `SmTol::MapTo2d(tol, uv, dir, surface)`.
@@ -1593,6 +1684,63 @@ mod tests {
         c.implant_poly_edge(k, edge, NodeId(1)).unwrap();
         let aux = c.base().aux(NodeId(1)).unwrap();
         assert_eq!((aux.poly_edge_list.len(), aux.vertex_list.len()), (1, 0));
+    }
+
+    #[test]
+    fn subdivision_preserves_parent_polygons_and_reverses_child_list_order() {
+        let k = Kernel::default();
+        let mut c = cache();
+        let surface = plane();
+        for poly_edge in [7, 8] {
+            c.implant_poly_edge(
+                &k,
+                PolyEdgeInput {
+                    poly_edge,
+                    start: Point3::new(0.21, 0.4, 0.0),
+                    end: Point3::new(0.49, 0.4, 0.0),
+                    tolerance: 0.001,
+                    surface: &surface,
+                },
+                NodeId(1),
+            )
+            .unwrap();
+        }
+        // Map the retained geometry as well as the node lists, then drop the input
+        // surface. Subdivision must still resolve every polygon's original surface.
+        let mut c = c.map_handles(|h| Ok(h + 100)).unwrap();
+        drop(surface);
+        let (left, right) = c.subdivide_node(&k, NodeId(1), SurfParamType::U).unwrap();
+        assert_eq!(c.base().aux(NodeId(1)).unwrap().poly_edge_list, [108, 107]);
+        for child in [left, right] {
+            assert_eq!(c.base().aux(child).unwrap().poly_edge_list, [107, 108]);
+        }
+        let (lower, upper) = c.subdivide_node(&k, left, SurfParamType::V).unwrap();
+        assert_eq!(c.base().aux(lower).unwrap().poly_edge_list, [108, 107]);
+        assert!(c.base().aux(upper).unwrap().poly_edge_list.is_empty());
+    }
+
+    #[test]
+    fn reimplanting_an_edited_polygon_updates_the_retained_geometry() {
+        let k = Kernel::default();
+        let mut c = cache();
+        let surface = plane();
+        for (x, node) in [(0.22, NodeId(1)), (0.48, NodeId(2))] {
+            c.implant_poly_edge(
+                &k,
+                PolyEdgeInput {
+                    poly_edge: 8,
+                    start: Point3::new(x, 0.3, 0.0),
+                    end: Point3::new(x, 0.7, 0.0),
+                    tolerance: 0.001,
+                    surface: &surface,
+                },
+                node,
+            )
+            .unwrap();
+        }
+        let (left, right) = c.subdivide_node(&k, NodeId(1), SurfParamType::U).unwrap();
+        assert!(c.base().aux(left).unwrap().poly_edge_list.is_empty());
+        assert_eq!(c.base().aux(right).unwrap().poly_edge_list, [8]);
     }
 
     #[test]

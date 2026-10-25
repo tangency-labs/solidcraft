@@ -60,6 +60,9 @@ mod constructed_face;
 #[path = "surface_trim_srf_cache/native_face.rs"]
 mod native_face;
 
+#[path = "surface_trim_srf_cache/poly_edges.rs"]
+mod poly_edges;
+
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 600;
 
@@ -1053,12 +1056,17 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut cases = default_cases(self, &ctx)?;
+        cases.extend(poly_edges::cases()?);
+        Ok(cases)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         if let Some(input) = case.inputs.get("native_face") {
             return native_face::run_cpp(input);
+        }
+        if let Some(input) = case.inputs.get("poly_edges") {
+            return poly_edges::run_cpp(input);
         }
         cpp(&case.parse()?)
     }
@@ -1066,6 +1074,9 @@ impl UnitDiff for Runner {
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         if let Some(input) = case.inputs.get("native_face") {
             return native_face::run_rust(input);
+        }
+        if let Some(input) = case.inputs.get("poly_edges") {
+            return poly_edges::run_rust(input);
         }
         rust(&case.parse()?)
     }
