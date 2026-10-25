@@ -202,6 +202,23 @@ fn a_pattern_before_the_feature_it_copies_follows_that_features_parameter() {
     assert!(got.len() == 2 && got.iter().all(|(_, l)| (l - 25.0).abs() < 1e-9), "the box and its copy, 25 mm: {got:?}");
 }
 
+/// A pattern whose source was deleted copies nothing. A feature made later under the freed name
+/// is found by that name, after the pattern in the timeline: the model is what a fresh evaluation
+/// makes of the design, where the pattern's empty result had been kept.
+#[test]
+fn a_pattern_finds_a_later_feature_that_takes_its_deleted_sources_name() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 15, "axis": "Y", "base": [-16, 6, -5]}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Cylinder1"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 19}));
+    run(&mut s, "timeline.delete", json!({"feature": "Cylinder1"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 19, "base": [-3, -7, -1]}));
+    let bodies = |st: &solidcraft_doc::ModelState| st.bodies.iter().map(|b| (b.name.clone(), b.body.outline_bounds().min.x)).collect::<Vec<_>>();
+    let mut fresh = solidcraft_doc::Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(&s.doc);
+    assert_eq!(bodies(&s.model.state()), bodies(&fresh.state()));
+}
+
 #[test]
 fn feature_pattern_rejects_malformed_alignment_and_flip_atomically() {
     let mut s = feature_pattern_plate();
