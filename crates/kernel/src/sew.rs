@@ -731,9 +731,11 @@ pub fn sew(faces: &[FaceSpec]) -> Result<Body> {
 }
 
 /// Sew the faces into a closed solid that may touch itself: where four faces meet along a
-/// straight edge (a cut-out's corner on the outline of a plate), each two of them get an edge of
-/// their own (see [`touching_sheets`]), and where faces meet at a point in fans joined by no edge
-/// (a hole's corner on its face's outline), each fan gets a vertex of its own.
+/// straight edge (a cut-out's corner on the outline of a plate), each two of them that bound one
+/// wedge of material get an edge of their own (see [`touching_sheets`]); where faces meet at a
+/// point in fans joined by no edge (two caps touching at a corner), each fan gets a vertex of its
+/// own; and a face whose loops meet at a vertex (a hole's corner on its face's outline) has them
+/// as one loop through it (see [`join_touching_loops`]).
 pub fn sew_touching(faces: &[FaceSpec]) -> Result<Body> {
     sew_impl(faces, true, None).map(|(body, _)| body)
 }
@@ -761,12 +763,10 @@ const SAME_WAY: f64 = 1e-6;
 /// of extruded arcs and on ruled walls are looked at.
 ///
 /// Each sheet bounds a wedge of material, so that pieces of material meeting along an edge stay
-/// apart, except where that would make a face touch itself: a hole touching the outline from
-/// inside (tangent, or at a corner) leaves its caps an outline and a hole meeting at the edge's
-/// end, which with the material kept apart would share a vertex, and a face can't have that.
-/// The material there goes round the hole, and the edges ending at such points get sheets that
-/// bound the empty wedges instead: the hole's wall on either side is one sheet, the outline's
-/// the other.
+/// apart, as SMLib keeps a solid touching itself along a line: an edge for each wedge of
+/// material, the two edges sharing their end vertices. A hole touching the outline from inside
+/// (tangent, or at a corner) leaves its caps an outline and a hole meeting at the edge's end, at
+/// one vertex: [`join_touching_loops`] makes them one loop through it.
 fn touching_sheets(faces: &[FaceSpec]) -> Result<(HashMap<EdgeUse, usize>, HashMap<Corner, usize>)> {
     let mut uses: HashMap<(Key, Key), Vec<(EdgeUse, Vec3, Vec3)>> = HashMap::new();
     for (fi, face) in faces.iter().enumerate() {
@@ -783,69 +783,27 @@ fn touching_sheets(faces: &[FaceSpec]) -> Result<(HashMap<EdgeUse, usize>, HashM
             }
         }
     }
-    // Each contact edge: its ends, both ways of pairing its faces, and whether the second is used.
-    let mut contacts = Vec::new();
-    for (ends, group) in uses.iter().filter(|(_, g)| g.len() > 2) {
-        let [material, empty] = edge_sheets(faces, group)?;
-        contacts.push((*ends, material, empty, false));
-    }
-    if contacts.is_empty() {
-        return Ok((HashMap::new(), corner_fans(faces, &HashMap::new())));
-    }
-    let sheets_of = |contacts: &[((Key, Key), [[EdgeUse; 2]; 2], [[EdgeUse; 2]; 2], bool)]| -> HashMap<EdgeUse, usize> {
-        let mut sheets = HashMap::new();
-        for (_, material, empty, round) in contacts {
-            for (sheet, pair) in (if *round { empty } else { material }).iter().enumerate() {
-                for u in pair {
-                    sheets.insert(*u, sheet);
-                }
+    // Each contact edge's sheets: its faces in the pairs that bound a wedge of material.
+    let mut sheets = HashMap::new();
+    for group in uses.values().filter(|g| g.len() > 2) {
+        for (sheet, pair) in edge_sheets(faces, group)?.iter().enumerate() {
+            for u in pair {
+                sheets.insert(*u, sheet);
             }
         }
-        sheets
-    };
-    // Each pass turns at least one edge round, and none back.
-    loop {
-        let sheets = sheets_of(&contacts);
-        let fans = corner_fans(faces, &sheets);
-        let touching = self_touching(faces, &fans);
-        let mut turned = false;
-        for (ends, _, _, round) in &mut contacts {
-            if !*round && (touching.contains(&ends.0) || touching.contains(&ends.1)) {
-                *round = true;
-                turned = true;
-            }
-        }
-        if !turned {
-            return Ok((sheets, fans));
-        }
     }
+    let fans = corner_fans(faces, &sheets);
+    Ok((sheets, fans))
 }
 
-/// The points where a face has two corners at one vertex (its loops would touch there).
-fn self_touching(faces: &[FaceSpec], fans: &HashMap<Corner, usize>) -> std::collections::HashSet<Key> {
-    let mut seen = std::collections::HashSet::new();
-    let mut out = std::collections::HashSet::new();
-    for (fi, f) in faces.iter().enumerate() {
-        for (li, l) in f.loops.iter().enumerate() {
-            for (ei, e) in l.iter().enumerate() {
-                let at = key(e.ends().0);
-                if !seen.insert((at, fans.get(&(fi, li, ei)).copied().unwrap_or(0), fi)) {
-                    out.insert(at);
-                }
-            }
-        }
-    }
-    out
-}
-
-/// The two ways of making sheets of an edge four faces meet along, as the pairs of faces
-/// bounding each: around the wedges of material between them, and around the empty ones.
+/// The sheets of an edge four faces meet along, as the pairs of faces bounding each: around the
+/// wedges of material between them.
 ///
 /// Seen along the edge, each face leaves it as a curve; going round the edge, material and empty
 /// wedges between them alternate. Faces are ordered by the way they leave the edge and, where
 /// they leave it the same way (tangent faces), by how fast they turn from it: the order of
 /// points a short way into each face, as in 2D loop chaining (`prism::tightest_left`).
-fn edge_sheets(faces: &[FaceSpec], group: &[(EdgeUse, Vec3, Vec3)]) -> Result<[[[EdgeUse; 2]; 2]; 2]> {
+fn edge_sheets(faces: &[FaceSpec], group: &[(EdgeUse, Vec3, Vec3)]) -> Result<[[EdgeUse; 2]; 2]> {
     let fail = |s: &str| KernelError::Invalid(format!("sew: {s}"));
     let (Some((_, a0, b0)), 4) = (group.first(), group.len()) else { return Err(fail("unsupported edge contact")) };
     let t = (if key(*a0) < key(*b0) { *b0 - *a0 } else { *a0 - *b0 }).normalized().ok_or_else(|| fail("a degenerate contact"))?;
@@ -885,14 +843,11 @@ fn edge_sheets(faces: &[FaceSpec], group: &[(EdgeUse, Vec3, Vec3)]) -> Result<[[
     if wedges.iter().any(|(p, q)| p.3 == q.3 || p.1 == q.1 || (same_way(p.4, q.4) && alike(p.2, q.2))) {
         return Err(fail("ambiguous edge contact"));
     }
-    let pairs = |material: bool| -> Result<[[EdgeUse; 2]; 2]> {
-        let mut it = wedges.iter().filter(|(p, _)| p.3 == material).map(|(p, q)| [p.0, q.0]);
-        match (it.next(), it.next()) {
-            (Some(x), Some(y)) => Ok([x, y]),
-            _ => Err(fail("ambiguous edge contact")),
-        }
-    };
-    Ok([pairs(true)?, pairs(false)?])
+    let mut it = wedges.iter().filter(|(p, _)| p.3).map(|(p, q)| [p.0, q.0]);
+    match (it.next(), it.next()) {
+        (Some(x), Some(y)) => Ok([x, y]),
+        _ => Err(fail("ambiguous edge contact")),
+    }
 }
 
 /// How a face leaves the straight edge `a`→`b` it bounds (its use `u`), seen along the edge's
@@ -968,11 +923,10 @@ fn circumcentre(a: Vec3, b: Vec3, c: Vec3) -> Option<Vec3> {
 /// A loop corner: face, loop, and the edge of the loop that starts there.
 type Corner = (usize, usize, usize);
 
-/// Where the faces meeting at a point form several fans, joined to each other by no edge (a hole
-/// touching its face's outline at one point; two caps touching at a corner), the fan each corner
-/// there is in, from 1 for every fan past the first (corners not listed are in fan 0). Each fan
-/// gets its own vertex, so that a face's loops share no vertex and
-/// every vertex of the solid is a manifold one.
+/// Where the faces meeting at a point form several fans, joined to each other by no edge (two
+/// caps touching at a corner), the fan each corner there is in, from 1 for every fan past the
+/// first (corners not listed are in fan 0). Each fan gets its own vertex, so that pieces of
+/// material touching at a point share no vertex.
 fn corner_fans(faces: &[FaceSpec], sheets: &HashMap<EdgeUse, usize>) -> HashMap<Corner, usize> {
     type EdgeId = (Key, Key, Option<Key>, usize);
     let id = |fi: usize, li: usize, ei: usize, e: &EdgeSpec| -> EdgeId {
@@ -1236,6 +1190,7 @@ fn sew_impl(faces: &[FaceSpec], touching: bool, sources: Option<&[Option<crate::
         if !sheets.is_empty() {
             split_vertex_fans(&mut vertices, &mut edges, &out)?;
         }
+        join_touching_loops(&mut out, &edges)?;
         // Each edge bounds two faces, and separate bodies share no vertex.
         if users.iter().any(|u| u.len() > 2) {
             return Err(KernelError::Invalid("sew: nonmanifold edge contact".into()));
@@ -1280,6 +1235,51 @@ fn sew_impl(faces: &[FaceSpec], touching: bool, sources: Option<&[Option<crate::
         });
         Ok((body.with_face_sources(mapped), from))
     })
+}
+
+/// Each face's loops that meet at a vertex as one loop through it twice: the first loop up to the
+/// vertex, the other from the vertex round to it again, then the rest of the first. That is how
+/// SMLib keeps a face whose hole touches its outline, or whose holes touch each other, at a
+/// corner: a face's loops share no vertex (SMLib's face tests 38 and 39), and two vertices at
+/// one point are one (test 32). Each loop keeps its direction, so the joined loop keeps the face
+/// on its left, and the outer loop stays first.
+fn join_touching_loops(faces: &mut [PartFace], edges: &[PartEdge]) -> Result<()> {
+    let start = |u: &PartUse| -> Result<u32> {
+        let e = edges.get(u.edge as usize).ok_or_else(|| KernelError::Failed("sew: edge reference".into()))?;
+        Ok(if u.forward { e.vertices[0] } else { e.vertices[1] })
+    };
+    for f in faces {
+        // Each join takes one loop away.
+        'join: while f.loops.len() > 1 {
+            for a in 0..f.loops.len() {
+                for b in a + 1..f.loops.len() {
+                    let (Some(la), Some(lb)) = (f.loops.get(a), f.loops.get(b)) else { continue };
+                    let mut at = None;
+                    'find: for (ia, ua) in la.iter().enumerate() {
+                        let v = start(ua)?;
+                        for (ib, ub) in lb.iter().enumerate() {
+                            if start(ub)? == v {
+                                at = Some((ia, ib));
+                                break 'find;
+                            }
+                        }
+                    }
+                    let Some((ia, ib)) = at else { continue };
+                    let mut lb = f.loops.remove(b);
+                    if let Some(la) = f.loops.get_mut(a) {
+                        let rest = la.split_off(ia);
+                        let head: Vec<PartUse> = lb.drain(..ib).collect();
+                        la.extend(lb);
+                        la.extend(head);
+                        la.extend(rest);
+                    }
+                    continue 'join;
+                }
+            }
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// One face to [`assemble`].
@@ -1805,6 +1805,45 @@ mod tests {
             let got = crate::measure(&body).unwrap().volume;
             assert!((got - want).abs() < 1e-4 * want, "{o:?} {bow}: {got} vs {want}");
         }
+    }
+
+    /// A 10 x 6 x 2 plate with a triangular cut-out whose corner touches the plate's edge x = 0
+    /// at (0, 3): the plate touches itself along the line of that corner, where four walls meet.
+    /// As SMLib keeps such a solid, each cap is one loop through the corner twice, the line two
+    /// edges (one per wedge of material) between the corner's two vertices: SMLib finds it valid.
+    /// The caps had been an outline and a hole, each with its own vertex at the corner, which
+    /// SMLib refuses (a face with coincident vertices, loops touching).
+    #[test]
+    fn a_cut_out_touching_the_outline_at_a_corner_caps_with_one_loop() {
+        let at = |x: f64, y: f64, z: f64| Vec3::new(x, y, z);
+        let outline = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0), (0.0, 3.0)];
+        // Clockwise: a hole.
+        let hole = [(0.0, 3.0), (2.0, 3.5), (2.0, 2.5)];
+        let ring = |pts: &[(f64, f64)], z: f64| -> Vec<EdgeSpec> {
+            (0..pts.len())
+                .map(|i| EdgeSpec::Line { a: at(pts[i].0, pts[i].1, z), b: at(pts[(i + 1) % pts.len()].0, pts[(i + 1) % pts.len()].1, z) })
+                .collect()
+        };
+        let down = |l: Vec<EdgeSpec>| -> Vec<EdgeSpec> { l.into_iter().rev().map(|e| e.reversed()).collect() };
+        let mut faces = vec![
+            FaceSpec { loops: vec![ring(&outline, 2.0), ring(&hole, 2.0)], surface: SurfSpec::Plane, probe: None },
+            FaceSpec { loops: vec![down(ring(&outline, 0.0)), down(ring(&hole, 0.0))], surface: SurfSpec::Plane, probe: None },
+        ];
+        for pts in [&outline[..], &hole[..]] {
+            for i in 0..pts.len() {
+                let ((ax, ay), (bx, by)) = (pts[i], pts[(i + 1) % pts.len()]);
+                faces.push(quad(at(ax, ay, 0.0), at(bx, by, 0.0), at(bx, by, 2.0), at(ax, ay, 2.0)));
+            }
+        }
+        let body = sew_touching(&faces).unwrap();
+        assert!((crate::measure(&body).unwrap().volume - 118.0).abs() < 1e-9);
+        let record = crate::brep_record(&body).unwrap();
+        let caps: Vec<&b::Face> =
+            record.faces.iter().filter(|f| f.loops.len() == 1 && matches!(&f.loops[0], b::Loop::Edges { edges } if edges.len() == 8)).collect();
+        assert_eq!(caps.len(), 2, "each cap one loop of the outline's five edges and the cut-out's three");
+        assert_eq!(record.vertices.len(), 14, "the corner one vertex on each cap");
+        let v = crate::validity(&body);
+        assert!(v.ok(), "{v:?}");
     }
 
     #[test]
