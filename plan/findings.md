@@ -20326,6 +20326,29 @@ All 8 known mismatches in `offset.offset_executive_p2` (`gen0000`, `gen0003`, `g
 - **Constructed/imported geometry owner records in `BrepQuery`, `ArenaPair`, and `transform_with_notifications`.** `BrepIdentity::of_brep` keyed attached face surfaces and edge curves unconditionally without `Kernel::geometry_owners`, so `BrepQuery::new` rejected those keys against an empty `proven_owners` map unless the caller went through `BrepIdentity::of_brep_in(kernel, brep)`. `Brep::geometry_owner_keys` already records proven topology ownership at `Brep` construction, topological mutation (`set_surface_owner`, `set_curve_owner`, `make_wire_edge`, `make_edge_in_face`, `turn_to_nurbs`, `make_topology_from_data`, `rebind_owners`), and Boolean/offset assembly (`edge_set_curve`, `adopt_namespace_owners`, `boolean_post_process`). Consulting `Brep::geometry_owner_key` in `BrepQuery::of_brep` / `of_brep_with_id`, `ArenaPair::brep_cache`, and `topology::brep::p5::transform_owner_key` lets `FindAndSetInfiniteRegion`, `ManifoldBoolean` point classification, and `SmTemporaryBrepTransform` include owned geometry on `create_box` and `MakeShellFromFaces` shapes while still filtering unowned or foreign-owned geometry (`tests/constructed_transforms.rs`).
 - **Live topology projection in `crates/difftest/src/units/offset_offset_executive_p2.rs`.** After Boolean/stitch post-processing (`gen0054`, `gen0134`, `gen0177`, `gen0195`, `gen0210`), arena tombstones and `Face::loops` skeleton lists diverge from the live doubly linked lists walked by `SmBrep::GetRegions`, `SmBrep::GetFaces`, `SmFace::GetLoops`, `SmBrep::GetEdges`, and `SmBrep::GetVertices`, and `SmOffsetExecutive::ShellBrep` returns the mutated input `Brep` in place (`result == source`), where the C++ shim passes `source = nullptr` to `observe_selections`. Matching the live topology walkers (`topology::brep::p1::{regions, faces, edges, vertices}` and `topology::face::p2::loops`) and nulling `live_source` when `source` was consumed in place aligns all 8 cases with C++.
 
+## surface.cone_p3 — parallel-cylinder line tested at its bottom end (WR-259, root cause of FAIL-3665)
+
+`fixtures/solidcraft/3665-column-in-channel.json` failed in all four cases at the cut of
+the r 3.04 cylinder centred at (0, 20) (`boolean::merge::p2::make_faceuse` or
+`topology::brep::p6`, status 1001), and so does the C++ reference (FAIL-3665).
+
+Cause: `SmCone::IntersectWithCone` (`SmCone.cpp:2950`-`2971`) tests the line of two
+parallel cylinders only at its bottom end, v = 0 of the full cylinder. The column's
+cylinder face has a domain trimmed by an earlier Boolean to v in [0.8, 10.5], so the
+point falls outside it and the crossing line is dropped with `SM_SUCCESS`. The imprint
+chain stays open and `FindRadialSector` finds no edge use. Reproduced on the C++
+reference with the six `parallel_cylinders_*` cases in
+`crates/difftest/src/units/surface_cone_p3.rs`: 2 lines on the natural domains, 0 when a
+domain's v minimum is above 0, the same in Rust.
+
+Change: the Boolean opts into testing the line at its middle
+(`Kernel::cone_parallel_midpoint_test`, set and restored by
+`boolean::merge::p4::manifold_boolean`); the default stays upstream, so `surface.cone_p3`
+still matches the C++ bit for bit. SolidCraft cases on main 70146d6fc: PASS 28 -> 32,
+ERROR 4 -> 0, FAIL 0, DEFERRED 29 unchanged; the four 3665 cases pass against their
+closed-form volumes. Ceiling: a line that overlaps both domains only away from its middle
+is still dropped (upgrade: clip `[dMin, dMax]` to both domains' v ranges). Ruled out:
+WR-214 (`split_self_loops_on_vertices` is already off on this path).
 ## trimmed surface cache history after the loop bisector fix (2026-10-25)
 
 Follow-up to "trimmed surface cache history: tolerance-growth deferral removed", re-run

@@ -240,6 +240,50 @@ fn input(op: i32, cone: Vec<f64>, other: Vec<f64>) -> Inputs {
         same: false,
     }
 }
+/// Cylinder record: origin, +x, +y, radius, (unused), height, 0..360 deg, flags, cylinder.
+fn cylinder(origin: [f64; 3], radius: f64, height: f64) -> Vec<f64> {
+    let [x, y, z] = origin;
+    vec![
+        x, y, z, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, radius, 0.0, height, 0.0, 360.0, 0.0, 0.0, 1.0,
+    ]
+}
+
+/// Parallel-axis cylinders (SolidCraft boolean: R=20 at z 2..13 vs r=3.04 through
+/// (0,20,2)) with full and v-trimmed face domains. Domains are fractions of the natural
+/// uv domain, which for a cylinder is v in [0, height] (height 11 here).
+fn parallel_cylinder_cases() -> Vec<Case> {
+    let h = 11.0;
+    let (lo, hi) = (0.8 / h, 10.5 / h);
+    let full = [0.0, 0.0, 1.0, 1.0];
+    let trimmed = [0.0, lo, 1.0, hi];
+    let min_only = [0.0, lo, 1.0, 1.0];
+    let max_only = [0.0, 0.0, 1.0, hi];
+    [
+        ("full", full, full),
+        ("a_vtrim", trimmed, full),
+        ("b_vtrim", full, trimmed),
+        ("both_vtrim", trimmed, trimmed),
+        ("a_vmin_only", min_only, full),
+        ("a_vmax_only", max_only, full),
+    ]
+    .into_iter()
+    .map(|(name, a, b)| {
+        let mut i = input(
+            0,
+            cylinder([0.0, 0.0, 2.0], 20.0, h),
+            cylinder([0.0, 20.0, 2.0], 3.04, h),
+        );
+        i.domains = [a, b].concat().try_into().unwrap_or(i.domains);
+        Case {
+            unit: "surface.cone_p3".into(),
+            name: format!("parallel_cyl_{name}"),
+            source: crate::case::CaseSource::Inline,
+            inputs: serde_json::to_value(i).unwrap_or(Value::Null),
+        }
+    })
+    .collect()
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "surface.cone_p3"
@@ -249,7 +293,9 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(1200),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &ctx)?;
+        v.extend(parallel_cylinder_cases());
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
@@ -384,5 +430,44 @@ impl UnitDiff for Runner {
         }
         i.tolerance = Some(1e-7 * scale);
         serde_json::to_value(i).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Prints curve count and line records (point, vector, interval) of both sides for
+    /// the parallel-cylinder cases; run with `--nocapture`.
+    fn lines(v: &[f64]) -> String {
+        use std::fmt::Write as _;
+        let n = at(v, 2) as usize;
+        let mut s = format!("status={} more={} curves={n}", at(v, 0), at(v, 1));
+        // the first curve only: later offsets depend on NURB sizes
+        if n > 0 {
+            // [1, type, dim, point3, vector3, ivl2, ...] for line curves
+            let p = 3;
+            let f = |a: usize| v.get(p + a..p + a + 3).map(<[f64]>::to_vec);
+            let _ = write!(
+                s,
+                "\n    type={} pt={:?} vec={:?} ivl={:?}",
+                at(v, p + 1),
+                f(3),
+                f(6),
+                v.get(p + 9..p + 11)
+            );
+        }
+        s
+    }
+
+    #[test]
+    fn parallel_cylinders_report() {
+        for c in parallel_cylinder_cases() {
+            let i: Inputs = c.parse().unwrap();
+            let cpp = ffi::intersect(i.op, &i.cone, &i.other, &i.domains, i.tolerance, i.same);
+            let rs = rust(&i);
+            println!("{}\n  C++ : {}", c.name, cpp.map_or_else(|e| format!("{e}"), |v| lines(&v)));
+            println!("  Rust: {}", rs.map_or_else(|e| format!("{e}"), |v| lines(&v)));
+        }
     }
 }

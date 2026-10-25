@@ -186,6 +186,13 @@ pub struct Kernel {
     /// result for such an input is undefined, so a comparison against the C++ (the
     /// difftest) reads this to classify the case; no operation reads it.
     pub upstream_ub_passed: Vec<&'static str>,
+    /// Not upstream (WR-259, `plan/upstream-issues.md`): whether
+    /// `Cone::intersect_with_cone` tests the lines of two parallel cylinders at their
+    /// middle (`true`) instead of their bottom end (`false`, upstream and the default),
+    /// which skips a line crossing a face domain trimmed above the surface's bottom. The
+    /// Boolean sets it for its duration (`boolean::merge::p4::manifold_boolean`). A
+    /// [`Cell`] because the intersectors take `&Kernel`.
+    pub cone_parallel_midpoint_test: Cell<bool>,
 }
 
 impl Default for Kernel {
@@ -205,6 +212,7 @@ impl Kernel {
             context: Context::default(),
             fillet_point_step: Cell::new(None),
             upstream_ub_passed: Vec::new(),
+            cone_parallel_midpoint_test: Cell::new(false),
         }
     }
 

@@ -1415,6 +1415,45 @@ pub fn manifold_boolean(
     operation: BooleanOperation,
     caller_lock: Option<&mut MarkLock>,
 ) -> Result<bool> {
+    // Not upstream (WR-259): the cone intersection tests parallel-cylinder lines at their
+    // middle for the whole Boolean, restored on every exit.
+    let previous = kernels.primary.cone_parallel_midpoint_test.replace(true);
+    let previous_other = kernels
+        .other
+        .as_deref()
+        .map(|k| k.cone_parallel_midpoint_test.replace(true));
+    let result = manifold_boolean_transformed(
+        kernels,
+        primary,
+        other,
+        intersector,
+        state,
+        attributes,
+        options,
+        manifold,
+        operation,
+        caller_lock,
+    );
+    kernels.primary.cone_parallel_midpoint_test.set(previous);
+    if let (Some(k), Some(previous)) = (kernels.other.as_deref(), previous_other) {
+        k.cone_parallel_midpoint_test.set(previous);
+    }
+    result
+}
+
+/// [`manifold_boolean`] after the flags are set.
+fn manifold_boolean_transformed(
+    kernels: &mut BooleanKernels<'_>,
+    primary: &mut Option<Brep>,
+    other: &mut Option<Brep>,
+    intersector: &mut impl ManifoldIntersector,
+    state: &mut ManifoldState,
+    attributes: &mut AttributeStore,
+    options: MergeOptions,
+    manifold: bool,
+    operation: BooleanOperation,
+    caller_lock: Option<&mut MarkLock>,
+) -> Result<bool> {
     let a = required(primary.as_mut())?;
     let b = required(other.as_mut())?;
     let transform = p1::temporary_brep_transform(kernels.primary, kernels.other(), a, b)?.apply(
