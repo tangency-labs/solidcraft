@@ -153,6 +153,8 @@ fn parameter_rename_arrow_keys_move_cursor_and_keep_editing() {
 fn invalid_parameter_name_stays_editable_after_leaving_it() {
     let mut h = open();
     fill(&mut h, "name", "bad name");
+    // A new row's expression starts blank. Type one, then leave it and come back to the name.
+    fill(&mut h, "expression", "10 mm");
     h.run(&json!([
         {"click":{"handle":"param:new:expression"}},
         {"click":{"handle":"param:new:name"}},
