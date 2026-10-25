@@ -2800,7 +2800,8 @@ fn irregular_closed_spline_offset_certificate_edits_undoes_and_reopens() {
     let result = run(&mut s, "sketch.offset", json!({"curves":["s1"],"distance":2.0,"chain":true}));
     let output = result["curves"][0].as_str().unwrap().to_string();
     let parameter = result["param"].as_str().unwrap().to_string();
-    let point_ids = sketch(&s).curves[1].kind.point_ids();
+    let output_index = sketch(&s).curve_index(&output).unwrap();
+    let point_ids = sketch(&s).curves[output_index].kind.point_ids();
     let verify = |s: &Session, distance: f64| {
         let state = s.world_state().unwrap();
         let sk = &state.sketch(1).unwrap().sketch;
@@ -4438,12 +4439,13 @@ fn freeform_offsets_trim_folds_and_round_chain_corners_into_an_extrudable_wall()
     ]);
     let mut s = new_sketch();
     run(&mut s, "sketch.spline.fit_point", json!({"points": cookie, "periodic": true}));
+    let source_dof = run(&mut s, "sketch.inspect", json!({}))["dof"].as_u64().unwrap();
     let (before, params) = (s.doc.to_json(), s.doc.params.len());
     let out = run(&mut s, "sketch.offset", json!({"curves": ["s1"], "distance": 1.26}));
     let curves = ids(&out["curves"]);
     assert!(!curves.is_empty(), "{out}");
     assert_eq!(out["param"], Value::Null, "a trimmed offset has no distance to drive: {out}");
-    assert_eq!(out["sketch"]["dof"], 30, "the offset adds no freedom (only the source's fit points move): {out}");
+    assert_eq!(out["sketch"]["dof"], source_dof, "the offset adds no freedom: {out}");
     assert_eq!(s.doc.params.len(), params, "no orphan distance parameter");
     let sk = sketch(&s);
     assert!(sk.freeform_offsets.is_empty() && !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::OffsetDistance { .. })));

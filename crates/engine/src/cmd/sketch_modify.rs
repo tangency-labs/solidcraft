@@ -126,6 +126,9 @@ fn curve_arg(sk: &Sketch, p: &Value, cmd: &str) -> Result<usize> {
 
 fn curve_by_id(sk: &Sketch, id: &str, cmd: &str) -> Result<usize> {
     let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+    if sk.curves.get(c).is_some_and(|curve| curve.spline_handle_of.is_some()) {
+        return Err(bad(cmd, "spline tangent construction lines cannot be trimmed, split, or extended"));
+    }
     if sk.is_linked_curve(c) {
         let action = match cmd {
             "sketch.trim" => "Trim",
@@ -247,7 +250,17 @@ fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64], cmd: &str) -> Result<(Vec<us
     let mut pieces = vec![ci];
     let mut push = |sk: &mut Sketch, kind: CurveKind, prefix: &str| -> Result<()> {
         let id = sk.fresh(prefix)?;
-        sk.curves.push(Curve { id, kind, construction, reversed: false, link: None, centerline: false, fixed: false, infinite: false });
+        sk.curves.push(Curve {
+            id,
+            kind,
+            construction,
+            reversed: false,
+            link: None,
+            centerline: false,
+            fixed: false,
+            infinite: false,
+            spline_handle_of: None,
+        });
         pieces.push(sk.curves.len() - 1);
         Ok(())
     };
@@ -1060,7 +1073,7 @@ fn line_end(sk: &Sketch, ci: usize, toward: Vec2) -> Result<Option<LineEnd>> {
 
     // A neighbour running on the same way as the extension has it nowhere to go.
     for (oi, c) in sk.curves.iter().enumerate() {
-        if oi == ci || !uses(c, end) {
+        if oi == ci || c.spline_handle_of.is_some() || !uses(c, end) {
             continue;
         }
         // Arcs do not block a line: the line runs past the point they share.
@@ -1087,7 +1100,7 @@ fn line_aim(sk: &Sketch, ci: usize, at: Vec2) -> Result<Option<LineAim>> {
     let mut budget = 1_000_000usize;
     let mut segment_count = 0usize;
     for (oi, other) in sk.curves.iter().enumerate() {
-        if oi == ci {
+        if oi == ci || other.spline_handle_of.is_some() {
             continue;
         }
         let mut pieces = sk.exact_segs(oi).unwrap_or_else(|| sk.segs(oi));
@@ -1221,7 +1234,7 @@ fn arc_aim(sk: &Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<Option<ArcAim>
     let mut budget = 1_000_000usize;
     let mut segment_count = 0usize;
     for (oi, curve) in sk.curves.iter().enumerate() {
-        if oi == ci {
+        if oi == ci || curve.spline_handle_of.is_some() {
             continue;
         }
         // A circle passes over arcs lying on it, so no intersection reports them: an arc on the
@@ -1331,7 +1344,7 @@ fn stop_point(sk: &Sketch, ci: usize, q: Vec2) -> Option<usize> {
     sk.curves
         .iter()
         .enumerate()
-        .filter(|(i, _)| *i != ci)
+        .filter(|(i, c)| *i != ci && c.spline_handle_of.is_none())
         .find_map(|(_, c)| {
             let (a, b) = c.kind.ends()?;
             [a, b].into_iter().find(|p| sk.point(*p).is_some_and(|pt| pt.dist(q) <= TOL * 10.0))
@@ -1473,7 +1486,7 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
 fn grow_line(sk: &mut Sketch, ci: usize, aim: LineAim) -> Result<String> {
     let end = aim.end;
     let (q, cutter, stop) = (aim.hit, aim.cutter, aim.stop);
-    let neighbors: Vec<_> = sk.curves.iter().enumerate().filter(|(i, c)| *i != ci && uses(c, end)).collect();
+    let neighbors: Vec<_> = sk.curves.iter().enumerate().filter(|(i, c)| *i != ci && c.spline_handle_of.is_none() && uses(c, end)).collect();
 
     // The end joined to other geometry stays where it is: add a line from it.
     if !neighbors.is_empty() {
@@ -2744,7 +2757,10 @@ fn offset_side(sk: &mut Sketch, cmd: &str, order: &[(usize, bool)], sources: &[(
                 idx.push(pb);
                 idx.dedup();
                 if idx.len() >= 2 {
-                    made.push(sk.add_curve(CurveKind::Spline { pts: idx, control: false, degree: 3, periodic: false, nurbs: None }, None)?);
+                    let spline =
+                        sk.add_curve(CurveKind::Spline { pts: idx, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None)?;
+                    sk.add_spline_handles(spline)?;
+                    made.push(spline);
                 }
             }
             Piece::Line(..) => {
@@ -3409,10 +3425,25 @@ fn copy_through(
     keep: &dyn Fn(Vec2) -> bool,
     scale_r: f64,
 ) -> Result<(Vec<usize>, Vec<(usize, usize)>)> {
-    if sk.curves.len().saturating_add(cs.len()) > solidcraft_sketch::MAX_CURVES {
+    let mut sources = cs.to_vec();
+    let spline_ids: std::collections::BTreeSet<String> = cs
+        .iter()
+        .filter_map(|index| sk.curves.get(*index))
+        .filter(|curve| matches!(curve.kind, CurveKind::Spline { .. }))
+        .map(|curve| curve.id.clone())
+        .collect();
+    sources.extend(
+        sk.curves
+            .iter()
+            .enumerate()
+            .filter_map(|(index, curve)| curve.spline_handle_of.as_ref().is_some_and(|parent| spline_ids.contains(parent)).then_some(index)),
+    );
+    let mut seen = std::collections::BTreeSet::new();
+    sources.retain(|source| seen.insert(*source));
+    if sk.curves.len().saturating_add(sources.len()) > solidcraft_sketch::MAX_CURVES {
         return Err(solidcraft_sketch::SketchError::TooLarge.into());
     }
-    let pts = involved_points(sk, cs, ps);
+    let pts = involved_points(sk, &sources, ps);
     let mut map: Vec<(usize, usize)> = Vec::new();
     for q in &pts {
         let pos = sk.point(*q).unwrap_or_default();
@@ -3421,10 +3452,13 @@ fn copy_through(
     }
     let m = |q: usize| map.iter().find(|x| x.0 == q).map(|x| x.1).unwrap_or(q);
     let mut made = Vec::new();
-    for c in cs {
+    let mut clones = Vec::with_capacity(sources.len());
+    let mut curve_map = std::collections::BTreeMap::new();
+    for c in &sources {
         let Some(cu) = sk.curves.get(*c).cloned() else { continue };
         let mut kind = cu.kind.clone();
         kind.map_points(&m);
+        let helper_line = cu.spline_handle_of.is_some();
         let (kind, prefix) = match cu.kind {
             CurveKind::Ellipse { r, .. } => {
                 if let CurveKind::Ellipse { r: slot, .. } = &mut kind {
@@ -3434,7 +3468,7 @@ fn copy_through(
             }
             CurveKind::Spline { .. } => (kind, "s"),
             CurveKind::Conic { .. } => (kind, "n"),
-            CurveKind::Line { a, b } => (CurveKind::Line { a: m(a), b: m(b) }, "l"),
+            CurveKind::Line { a, b } => (CurveKind::Line { a: m(a), b: m(b) }, if helper_line { "h" } else { "l" }),
             CurveKind::Circle { c, r } => (CurveKind::Circle { c: m(c), r: r * scale_r }, "c"),
             CurveKind::Arc { c, a, b } => {
                 if flip {
@@ -3447,7 +3481,7 @@ fn copy_through(
         let id = sk.fresh(prefix)?;
         // A mirrored or patterned infinite line is an infinite line too (#1359).
         let infinite = cu.infinite && matches!(kind, CurveKind::Line { .. });
-        sk.curves.push(Curve {
+        let clone = Curve {
             id,
             kind,
             construction: cu.construction,
@@ -3456,7 +3490,14 @@ fn copy_through(
             centerline: false,
             fixed: false,
             infinite,
-        });
+            spline_handle_of: cu.spline_handle_of.clone(),
+        };
+        curve_map.insert(cu.id, clone.id.clone());
+        clones.push(clone);
+    }
+    for clone in &mut clones {
+        clone.spline_handle_of = clone.spline_handle_of.as_ref().and_then(|parent| curve_map.get(parent).cloned());
+        sk.curves.push(clone.clone());
         made.push(sk.curves.len() - 1);
     }
     Ok((made, map))
@@ -3514,7 +3555,10 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
                 cons.push(add_c(sk, ConstraintKind::Equal { a: *o, b: *n })?);
             }
         }
-        Ok((ids_of(sk, &made), cons))
+        let mut selected = std::collections::BTreeSet::new();
+        let selected_count = cs.iter().filter(|source| selected.insert(**source)).count();
+        let reported = made.get(..selected_count).ok_or_else(|| bad(cmd, "copied curves changed while mirroring"))?;
+        Ok((ids_of(sk, reported), cons))
     })?;
     Ok(json!({"curves": out.0, "constraints": out.1, "sketch": info}))
 }

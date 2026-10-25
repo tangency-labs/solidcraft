@@ -710,7 +710,7 @@ fn near_overlaps_that_are_not_one_path_keep_their_regions() {
         .iter()
         .map(|p| sk.add_point(*p, None).unwrap())
         .collect();
-    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     sk.add_line_pts(ids[3], ids[0], None).unwrap();
     let ps = find_profiles(&sk);
     assert_eq!(ps.len(), 1, "{:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
@@ -1029,7 +1029,7 @@ fn exact_profiles_for_high_degree_and_cut_free_form_curves() {
         .iter()
         .map(|p| sk.add_point(*p, None).unwrap())
         .collect();
-    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 5, periodic: false, nurbs: None }, None).unwrap();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 5, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     sk.add_line_pts(ids[5], ids[0], None).unwrap();
     let pr = find_profiles(&sk);
     assert_eq!(pr.len(), 1);
@@ -1038,7 +1038,7 @@ fn exact_profiles_for_high_degree_and_cut_free_form_curves() {
     // A fit spline arch over a base line, cut by a vertical line at x = 10.
     let mut sk = Sketch::default();
     let ids: Vec<usize> = [v(0.0, 0.0), v(6.0, 9.0), v(14.0, 9.0), v(20.0, 0.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
-    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: false, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     sk.add_line_pts(ids[3], ids[0], None).unwrap();
     let (a, b) = (sk.add_point(v(10.0, -5.0), None).unwrap(), sk.add_point(v(10.0, 20.0), None).unwrap());
     sk.add_line_pts(a, b, None).unwrap();
@@ -1109,7 +1109,7 @@ fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     let bump =
         [v(0.0, 0.0), v(1.5, 4.0), v(3.0, 7.0), v(5.0, 9.5), v(7.5, 11.0), v(12.5, 11.0), v(15.0, 9.5), v(17.0, 7.0), v(18.5, 4.0), v(20.0, 0.0)];
     let pts: Vec<usize> = bump.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
-    let s = sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 9, periodic: false, nurbs: None }, None).unwrap();
+    let s = sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 9, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     let pieces = sk.exact_pieces(s);
     assert_eq!(pieces.len(), 1, "{pieces:?}");
     let Seg2::Bezier { n, p } = pieces[0] else { panic!("{:?}", pieces[0]) };
@@ -1144,7 +1144,7 @@ fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     // A degree above the cap is still refused.
     let mut high: Vec<usize> = pts.clone();
     high.push(sk.add_point(v(21.0, -2.0), None).unwrap());
-    assert!(sk.add_curve(CurveKind::Spline { pts: high, control: true, degree: 10, periodic: false, nurbs: None }, None).is_err());
+    assert!(sk.add_curve(CurveKind::Spline { pts: high, control: true, degree: 10, periodic: false, nurbs: None, handles: Vec::new() }, None).is_err());
 }
 
 /// How far apart two curves run: the largest distance from a sample of either to the other.

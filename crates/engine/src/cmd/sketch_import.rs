@@ -116,7 +116,8 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
                         idx.push(i);
                     }
                 }
-                (idx.len() >= 2).then_some(CurveKind::Spline { pts: idx, control: *control, degree: *degree, periodic: false, nurbs: None })
+                (idx.len() >= 2)
+                    .then_some(CurveKind::Spline { pts: idx, control: *control, degree: *degree, periodic: false, nurbs: None, handles: Vec::new() })
             }
             Geom2::Conic { a, apex, b, rho } => {
                 let (a, x, b) = (pt(sk, *a)?, pt(sk, *apex)?, pt(sk, *b)?);

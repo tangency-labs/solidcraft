@@ -750,7 +750,7 @@ impl Sketch {
                         pts.push(point(self, i)?);
                     }
                     pts.push(point(self, b)?);
-                    (CurveKind::Spline { pts, control, degree, periodic, nurbs: nurbs.clone() }, "s")
+                    (CurveKind::Spline { pts, control, degree, periodic, nurbs: nurbs.clone(), handles: Vec::new() }, "s")
                 }
             };
             let cid = self.fresh(prefix)?;
@@ -763,6 +763,7 @@ impl Sketch {
                 centerline: false,
                 fixed: false,
                 infinite: false,
+                spline_handle_of: None,
             });
         }
         for li in &lay.lone {
@@ -803,7 +804,7 @@ impl Sketch {
                 Some(CurveKind::Arc { c, a, b }) => Some(LCurve::Arc(local(*c)?, local(*a)?, local(*b)?)),
                 Some(CurveKind::Conic { a, b, apex, rho }) => Some(LCurve::Conic(local(*a)?, local(*b)?, local(*apex)?, *rho)),
                 Some(CurveKind::Ellipse { c, m, r }) => Some(LCurve::Ellipse(local(*c)?, local(*m)?, *r)),
-                Some(CurveKind::Spline { pts, control, degree, periodic, nurbs }) => {
+                Some(CurveKind::Spline { pts, control, degree, periodic, nurbs, handles }) if handles.is_empty() => {
                     let (a, b) = (local(*pts.first()?)?, local(*pts.last()?)?);
                     let inner: Vec<usize> =
                         pts.get(1..pts.len().saturating_sub(1)).unwrap_or_default().iter().map(|q| local(*q)).collect::<Option<_>>()?;

@@ -1106,6 +1106,7 @@ pub(crate) fn preview_curve(
                     degree: if t.cmd == "sketch.spline.control_point_5" { 5 } else { 3 },
                     periodic,
                     nurbs: None,
+                    handles: Vec::new(),
                 },
                 None,
             )
