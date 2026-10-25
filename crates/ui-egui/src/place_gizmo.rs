@@ -24,7 +24,7 @@ mod rest;
 mod snap_fit;
 
 use egui::{Pos2, vec2};
-use look::{CrossStyle, HANDLE, HOT, angle_label, ball, cased_closed, cased_line, crosshair};
+use look::{CrossStyle, GROW_S, angle_label, ball, cased_closed, cased_line, core, crosshair};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::Vec3;
 
@@ -179,7 +179,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let id = |what: &str| egui::Id::new(("sc_place", sp.name, what));
 
     // The crosshair that moves the feature.
-    let r = ui.interact(area(bs), id("position"), egui::Sense::drag()).on_hover_text(crate::i18n::tr_label(sp.move_tip));
+    let r = ui.interact(area(bs), id("position"), egui::Sense::drag());
     // Grab offset: the press lands where the finger is, not always the centre. Remember how far
     // the press was from the centre and keep that gap for the whole drag, so the feature follows
     // the pointer from where it was grabbed instead of jumping its centre under the first move.
@@ -201,15 +201,19 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     crate::scenario::publish_handle(&format!("{}:position", sp.name), bs);
     DRAWN.with(|h| h.borrow_mut().push(bs));
     let (hovered, dragging) = (r.hovered(), r.dragged());
+    // The tip while pointing, not while dragging: the hand is busy and the footprint says it all.
+    if hovered && !dragging {
+        r.clone().on_hover_text(crate::i18n::tr_label(sp.move_tip));
+    }
     // Ease the two state factors; animate_bool_with_time repaints only while they are moving.
     let style = CrossStyle {
-        hot: ui.ctx().animate_bool_with_time(id("hot"), hovered || dragging, 0.12),
-        active: ui.ctx().animate_bool_with_time(id("active"), dragging, 0.12),
+        hot: ui.ctx().animate_bool_with_time(id("hot"), hovered || dragging, GROW_S),
+        active: ui.ctx().animate_bool_with_time(id("active"), dragging, GROW_S),
     };
     if dragging {
         let pts: Option<Vec<Pos2>> = (sp.footprint)(app, d, base, n).into_iter().map(|p| proj.to_screen(p)).collect();
         if let Some(pts) = pts.filter(|p| p.len() >= 3) {
-            cased_closed(painter, &pts, 1.5, HANDLE);
+            cased_closed(painter, &pts, 1.5, core(false));
         }
     }
     crosshair(painter, bs, &style, &t);
@@ -259,7 +263,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     crate::scenario::publish_handle(&format!("{}:rotate", sp.name), ks);
     DRAWN.with(|h| h.borrow_mut().push(ks));
     let hot = r.hovered() || r.dragged();
-    cased_line(painter, bs, ks, 1.5, if hot { HOT } else { HANDLE });
+    cased_line(painter, bs, ks, 1.5, core(hot));
     ball(painter, ks, hot, &t);
     if hot {
         ui.ctx().set_cursor_icon(if r.dragged() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });

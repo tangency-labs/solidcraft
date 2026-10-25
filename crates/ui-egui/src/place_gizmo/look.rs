@@ -1,81 +1,132 @@
 //! The handles' appearance and nothing else: colours, line widths, sizes, easing and the shapes
 //! they are drawn as. A restyle touches only this file; `place_gizmo.rs` decides where handles
 //! are and what a drag does.
+//!
+//! The rules the handles are drawn by (worked out in a browser prototype first, see the notes on
+//! #4384): white with a dark casing marks what can be grabbed, and only handles are drawn so; a
+//! dotted line is a proposal (what a drag would do), a solid line a drag under way; at rest a handle
+//! shows only enough to be noticed and pointing at it shows the whole action; the shape of a tip
+//! names the motion (an arrowhead for a straight move). The sizes below are the prototype's, in
+//! screen points.
 
-use egui::{Color32, Pos2, Stroke, vec2};
+use egui::{Color32, Pos2, Stroke, Vec2, vec2};
 
 use super::REACH;
 use crate::theme::Tokens;
 
 /// Radius of a drawn ball handle (pixels).
 const DOT_PX: f32 = 6.0;
-/// The handles are near-white, so the blue preview they sit on does not hide them; `EDGE` is the
-/// darker casing drawn under every line and around every ball, so they also carry on a light body.
-/// Hot (under the pointer or dragged) the core goes to `HOT`. Neutral in every theme and colour
-/// vision mode: they carry no meaning, only contrast (listed in `colour_tokens_tests`).
-pub(super) const HANDLE: Color32 = Color32::from_rgb(237, 240, 245);
-const EDGE: Color32 = Color32::from_rgb(60, 68, 84);
-pub(super) const HOT: Color32 = Color32::WHITE;
 
-/// A line in `core`, cased in `EDGE` under it so it reads on the preview and on the body alike.
+/// The handles' core: the icon highlight (white in every theme), so the blue preview they sit on
+/// does not hide them. They carry no meaning, only contrast, so it is the same hot or not.
+pub(super) fn core(_hot: bool) -> Color32 {
+    Tokens::get().icons.highlight
+}
+
+/// The casing drawn under every line and around every dot: the marker halo (dark, translucent,
+/// per theme), so the white core also carries on a light body.
+fn casing() -> Color32 {
+    Tokens::get().icons.marker_halo
+}
+
+/// How much wider than its core a casing is (both sides together).
+const CASE: f32 = 1.6;
+
+/// A line in `core`, cased under it so it reads on the preview and on the body alike.
 pub(super) fn cased_line(painter: &egui::Painter, a: Pos2, b: Pos2, w: f32, core: Color32) {
-    painter.line_segment([a, b], Stroke::new(w + 2.5, EDGE));
+    painter.line_segment([a, b], Stroke::new(w + CASE, casing()));
     painter.line_segment([a, b], Stroke::new(w, core));
 }
 
-/// A closed outline in `core`, cased in `EDGE` under it.
+/// A closed outline in `core`, cased under it.
 pub(super) fn cased_closed(painter: &egui::Painter, pts: &[Pos2], w: f32, core: Color32) {
-    for s in [Stroke::new(w + 2.0, EDGE), Stroke::new(w, core)] {
+    for s in [Stroke::new(w + CASE, casing()), Stroke::new(w, core)] {
         painter.add(egui::Shape::closed_line(pts.to_vec(), s));
     }
 }
 
-/// A ball handle: near-white with the contrast edge. Hot (under the pointer or dragged) it
-/// brightens to pure white, grows a little, gets a soft halo and an accent edge to say it is live.
+/// A ball handle: white with the casing. Hot (under the pointer or dragged) it grows a little,
+/// gets a soft halo and an accent edge to say it is live.
 pub(super) fn ball(painter: &egui::Painter, c: Pos2, hot: bool, t: &Tokens) {
     if hot {
         painter.circle_filled(c, REACH, t.accent.gamma_multiply(0.14));
     }
     let r = if hot { DOT_PX + 1.5 } else { DOT_PX };
-    let fill = if hot { HOT } else { HANDLE };
-    let edge = if hot { t.accent } else { EDGE };
-    painter.circle(c, r, fill, Stroke::new(1.5, edge));
+    let edge = if hot { t.accent } else { casing() };
+    painter.circle(c, r, core(hot), Stroke::new(1.5, edge));
 }
 
 /// The move marker's look for a frame, interpolated between its three states so hover and drag
-/// ease in and out rather than snap. `hot` eases 0 (resting) to 1 (pointer over or dragging);
+/// grow in and out rather than snap. `hot` eases 0 (resting) to 1 (pointer over or dragging);
 /// `active` eases 0 to 1 while dragging.
 pub(super) struct CrossStyle {
     pub(super) hot: f32,
     pub(super) active: f32,
 }
 
-/// The move marker: a small dot with four lines to the screen cardinals, a gap between the dot
-/// and each line, a common way to mark a point you can drag. Near-white and cased in the contrast
-/// edge, so it reads on the feature's blue preview and on a light body alike. Three states, eased:
-/// resting (quiet, short dashes), hover (brighter, longer dashes) and active while dragging (solid
-/// lines, a bigger dot with an accent edge and a soft halo, so it stays legible over the moving
-/// ghost). The dash-to-solid switch is the one step that cannot tween, so it flips at drag start.
-pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, t: &Tokens) {
-    let reach = 15.0 + 7.0 * s.hot + 2.0 * s.active;
-    let gap = 7.0;
-    let core = HANDLE.lerp_to_gamma(HOT, s.hot);
+/// How long the marker's states take to grow into each other (seconds).
+pub(super) const GROW_S: f32 = 0.36;
+/// The marker's line width.
+const LINE: f32 = 2.0;
+/// The dot's radius at rest and while dragging.
+const DOT_REST: f32 = 3.9;
+const DOT_DRAG: f32 = 4.3;
+/// Where an arm starts, from the centre.
+const ARM_FROM: f32 = 6.0;
+/// How far an arm reaches at rest, pointed at and while dragging (the arrowhead's tip).
+const REACH_REST: f32 = 27.0;
+const REACH_HOT: f32 = 34.0;
+const REACH_DRAG: f32 = 42.0;
+/// A dotted arm's dash and gap.
+const DASH: f32 = 5.5;
+const GAP: f32 = 2.3;
+/// The arrowhead: an open chevron this long, this wide either side of the arm.
+const HEAD_LEN: f32 = 12.6;
+const HEAD_HALF: f32 = 7.3;
+
+/// The move marker: a dot with four arms to the screen cardinals. At rest the arms are short and
+/// dotted, a place that can be grabbed and nothing more. Pointed at, they grow and end in
+/// arrowheads: the feature moves straight in any direction along the face. While it drags, the
+/// arms turn solid. Each state grows out of the previous one (`GROW_S`); the dotted-to-solid
+/// switch is the one step that cannot tween, so it flips halfway into the drag.
+pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, _t: &Tokens) {
+    let reach = REACH_REST + (REACH_HOT - REACH_REST) * s.hot + (REACH_DRAG - REACH_HOT) * s.active;
     let solid = s.active > 0.5;
-    if s.active > 0.01 {
-        painter.circle_filled(c, REACH + 4.0, t.accent.gamma_multiply(0.16 * s.active));
-    }
+    let (core, case) = (core(s.hot > 0.5), casing());
+    let (core_w, case_w) = (LINE, LINE + CASE);
+    // The arrowhead grows with the arm it ends: scaled and faded in by `hot`.
+    let head = (HEAD_LEN * s.hot, HEAD_HALF * s.hot, s.hot);
+    let mut shapes: Vec<(Vec<Pos2>, f32, Color32)> = Vec::new();
     for d in [vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0)] {
-        let (a, b) = (c + d * gap, c + d * reach);
+        let tip = c + d * reach;
+        // The shaft: solid to the tip, or dotted up to the head's base.
+        let to = if solid { reach } else { reach - head.0 };
         if solid {
-            cased_line(painter, a, b, 1.8, core);
+            shapes.push((vec![c + d * ARM_FROM, tip], 1.0, core));
         } else {
-            painter.add(egui::Shape::dashed_line(&[a, b], Stroke::new(3.5, EDGE), 3.0, 3.0));
-            painter.add(egui::Shape::dashed_line(&[a, b], Stroke::new(1.5, core), 3.0, 3.0));
+            let mut at = ARM_FROM;
+            while at < to {
+                let end = (at + DASH).min(to);
+                shapes.push((vec![c + d * at, c + d * end], 1.0, core));
+                at += DASH + GAP;
+            }
+        }
+        if head.2 > 0.01 {
+            let n: Vec2 = vec2(-d.y, d.x);
+            let base = tip - d * head.0;
+            shapes.push((vec![base + n * head.1, tip, base - n * head.1], head.2, core));
         }
     }
-    let r = 3.0 + 0.5 * s.hot + 1.5 * s.active;
-    let edge = EDGE.lerp_to_gamma(t.accent, s.active);
-    painter.circle(c, r, core, Stroke::new(1.2 + 0.4 * s.active, edge));
+    // Casings first, then every core over them, so a core never sits under a neighbour's casing.
+    for (pts, alpha, _) in &shapes {
+        painter.add(egui::Shape::line(pts.clone(), Stroke::new(case_w, case.gamma_multiply(*alpha))));
+    }
+    for (pts, alpha, col) in &shapes {
+        painter.add(egui::Shape::line(pts.clone(), Stroke::new(core_w, col.gamma_multiply(*alpha))));
+    }
+    let r = DOT_REST + (DOT_DRAG - DOT_REST) * s.active;
+    painter.circle_filled(c, r + CASE / 2.0, case);
+    painter.circle_filled(c, r, core);
 }
 
 /// The turn knob's angle readout beside the knob at `at`.
