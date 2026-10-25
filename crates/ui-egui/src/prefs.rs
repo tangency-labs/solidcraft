@@ -752,6 +752,9 @@ preference_settings! {
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
     /// Where the view goes when a sketch ends (#7038). Keep (the default) leaves it as it is.
     sketch_exit_view: SketchExitView = SketchExitView::default(), PAGE_SKETCH;
+    /// The first length dimension of a sketch with nothing sized yet scales the whole drawing to
+    /// its value (#1365). Off: it sizes only what it measures (#4109).
+    first_dimension_scales: bool = true, PAGE_SKETCH;
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;

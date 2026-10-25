@@ -1,0 +1,6 @@
+{
+  "en": {
+    "ui.first_dimension_scales": "The first dimension scales the drawing",
+    "ui.first_dimension_scales_tip": "On: a sketch's first length dimension scales the drawing it measures, so its shape stays the same. Off: the dimension sizes only what it measures."
+  }
+}

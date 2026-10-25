@@ -90,6 +90,9 @@ struct DimensionDraft {
     /// A dimension that would over-constrain the sketch, placed as a driven (reference) one:
     /// it has no parameter and no value to edit (#320).
     driven: bool,
+    /// The first dimension of a sketch scales it rather than distorting it (#1365), unless the
+    /// Sketch preference is off (#4109).
+    scale_sketch: bool,
 }
 
 impl DimensionDraft {
@@ -101,8 +104,7 @@ impl DimensionDraft {
             && app.session.pending_moves == self.pending
     }
     fn params(&self, expr: &str) -> serde_json::Value {
-        // The first dimension of a sketch scales it rather than distorting it (#1365).
-        let mut params = json!({"entities": self.entities, "value": expr, "scale_sketch": true});
+        let mut params = json!({"entities": self.entities, "value": expr, "scale_sketch": self.scale_sketch});
         if let Some(at) = self.at {
             params["text_at"] = json!([at.x, at.y]);
         }
@@ -278,6 +280,7 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
         preview_doc: scratch.doc.clone(),
         error: None,
         driven,
+        scale_sketch: app.preferences.first_dimension_scales,
     };
     if !draft.preview.sketch(sketch).is_some_and(|solved| solved.report.ok()) {
         return Err("That dimension conflicts with the sketch constraints".into());

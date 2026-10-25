@@ -13,6 +13,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             .on_hover_text(crate::i18n::tr_label(
                 "Before the first point, pressing a sketch tool's shortcut again steps through its creation modes. Off: it starts the tool again.",
             ));
+        ui_kit::checkbox(ui, app.tr("ui.first_dimension_scales"), &mut app.preferences.first_dimension_scales)
+            .on_hover_text(app.tr("ui.first_dimension_scales_tip"));
         ui_kit::settings_block_hint(ui, app.tr("prefs.hold_stop_snapping"), app.tr("prefs.snap_drawing_note"), t.space_24 * 8.0 + t.space_8, |ui| {
             let combo = &mut app.preferences.suppress_sketch_snap;
             ui_kit::settings_control_width(ui, t.space_24 * 7.0 + t.space_12, |ui| {
