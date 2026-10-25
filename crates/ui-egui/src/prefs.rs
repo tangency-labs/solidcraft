@@ -1669,6 +1669,9 @@ preference_settings! {
     /// converted to the unit the value is written in) and to an angle (degrees).
     dimension_step_mm: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_MM);
     dimension_step_deg: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_DEG);
+    /// The first length dimension of a sketch with nothing sized yet scales the whole drawing to
+    /// its value (#1365). Off: it sizes only what it measures (#4109).
+    first_dimension_scales: bool = true, PAGE_SKETCH;
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
