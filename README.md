@@ -26,12 +26,17 @@ C++ to `1e-9` relative with identical topology, verified unit by unit.
 
 ## Status
 
-About a third ported and verified against the C++: the math, NURBS and curve layers,
-with surfaces and topology under way. **Checklist: [`plan/PROGRESS.md`](plan/PROGRESS.md)**
-(updated automatically). Notes and handoff: [`plan/STATUS.md`](plan/STATUS.md).
-The same data, browsable, is on the progress site built by
+The planned kernel modules have Rust ports, and primitive construction is exercised
+end to end. Integration remains in progress: partial units, deferred paths and known
+mismatches still limit coverage. The API is experimental (0.0.x).
+
+Use the [live unit results](https://tangency-labs.github.io/solidcore/units/index.html)
+for current differential coverage and blockers, and the
+[primitive checks](https://tangency-labs.github.io/solidcore/solids.html) for whole-solid
+results. Per-unit plans and notes live in [`plan/units/`](plan/units/); the generated
+checklist is [`plan/PROGRESS.md`](plan/PROGRESS.md), with handoff notes in
+[`plan/STATUS.md`](plan/STATUS.md). The progress site is built by
 [`site/build.py`](site/README.md) (`python3 site/build.py` -> `bin/site/`).
-Nothing is usable end to end yet (no primitives, booleans or fillets).
 
 ## Layout
 
@@ -96,8 +101,8 @@ Rust-only builds do not need these C++ build tools.
 git clone https://github.com/NVIDIA-Omniverse/usd-brep upstream
 git -C upstream checkout c9c5979
 scripts/fetch-cpp.sh                                  # C++ reference -> bin/cpp (prebuilt, or built)
-cargo run -p difftest --features cpp -- --green       # all units marked green
-cargo run -p difftest --features cpp -- --unit <unit id>   # one unit
+cargo run --profile difftest -p difftest --features cpp -- --green   # all green and partial units
+cargo run --profile difftest -p difftest --features cpp -- --unit <unit id>   # one unit
 ```
 
 `solidcore-ffi` and `difftest` compile without the C++ build; only the `cpp` feature
@@ -107,12 +112,20 @@ so they are cached like the Rust crates.
 
 ## Contributing
 
-Contributions are pull requests, one per port unit, and AI agents are welcome:
+Contributions go through pull requests, and AI agents are welcome. Current work
+includes connecting calls between ported units, resolving deferred differential
+cases, adding operation regressions and fixing bugs.
 
-1. Pick any unclaimed unit in [`plan/PROGRESS.md`](plan/PROGRESS.md). "Ready" ones are
-   easiest; the others need stubs or co-porting of missing dependencies.
-2. Claim it by opening a draft PR titled `port: <unit id>` (lowest-numbered PR wins).
-3. Port it, prove it with difftest against the C++ reference, mark the PR ready.
+1. Check the [live unit results](https://tangency-labs.github.io/solidcore/units/index.html),
+   [open issues](https://github.com/tangency-labs/solidcore/issues) and
+   [open PRs](https://github.com/tangency-labs/solidcore/pulls) before choosing work.
+   Many remaining paths already have an active contributor.
+2. Follow [AGENTS.md](AGENTS.md) for branching, coordination and validation. For a
+   new port unit, claim it with a draft PR titled `port: <unit id>`; the
+   lowest-numbered open PR for that unit wins.
+3. Verify changed behavior against the C++ reference, rerun the differential units
+   affected by the change, and include their summary lines in the PR. CI is the
+   merge gate; passing cases must retain the existing tolerances and coverage.
 
 To keep parallel PRs from conflicting: edit only your unit's `plan/units/<unit id>.toml`,
 never commit `reports/difftest/` (CI generates them), and only append to
