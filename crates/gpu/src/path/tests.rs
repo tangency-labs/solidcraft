@@ -531,6 +531,48 @@ fn shader_validates_without_a_device() {
     naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
 }
 
+/// #6705: native compilers inline every call. With 33 inlined BVH walks in `main` (three path
+/// samples, a shadow walk per light source family) NVIDIA's Vulkan compiler crashed or ran out
+/// of memory and never built the pipeline. Count the walks `main` inlines, so another call site
+/// is a deliberate choice, checked on such a driver.
+#[test]
+fn main_inlines_few_bvh_walks() {
+    fn callees(block: &naga::Block, out: &mut Vec<naga::Handle<naga::Function>>) {
+        for statement in block.iter() {
+            match statement {
+                naga::Statement::Call { function, .. } => out.push(*function),
+                naga::Statement::Block(inner) => callees(inner, out),
+                naga::Statement::If { accept, reject, .. } => {
+                    callees(accept, out);
+                    callees(reject, out);
+                }
+                naga::Statement::Switch { cases, .. } => cases.iter().for_each(|case| callees(&case.body, out)),
+                naga::Statement::Loop { body, continuing, .. } => {
+                    callees(body, out);
+                    callees(continuing, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    fn walks(module: &naga::Module, function: &naga::Function) -> usize {
+        let mut called = Vec::new();
+        callees(&function.body, &mut called);
+        called
+            .into_iter()
+            .map(|handle| {
+                let callee = &module.functions[handle];
+                let walk = matches!(callee.name.as_deref(), Some("trace_precise_within" | "trace_ordered_within"));
+                usize::from(walk) + walks(module, callee)
+            })
+            .sum()
+    }
+    let module = naga::front::wgsl::parse_str(SHADER).unwrap();
+    let main = module.entry_points.iter().find(|entry| entry.name == "main").unwrap();
+    let inlined = walks(&module, &main.function);
+    assert!(inlined <= 5, "`main` inlines {inlined} BVH walks");
+}
+
 #[test]
 fn render_lights_path_visibility_uniform_keeps_the_shader_contract() {
     shader_validates_without_a_device();
