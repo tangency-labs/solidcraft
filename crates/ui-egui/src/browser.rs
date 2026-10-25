@@ -1278,7 +1278,7 @@ fn occurrence_rows_inner(
             dim: faded || !visible,
             radio: Some(active),
             badges,
-            mark: acts.lit.placement(&app.session.doc, &path, placement.component),
+            mark: acts.lit.placement(&app.session.doc, path, placement.component),
             ..Default::default()
         },
     );
@@ -2009,11 +2009,11 @@ fn folder_rows_at(
     let prefix = key.rsplit_once('/').map_or(key.as_str(), |(prefix, _)| prefix);
     if let Some(r) = app.tree.reveal.as_deref()
         && folder == "bodies"
-        && data.entries().any(|e| e.key == r)
+        && let Some(e) = data.entries().find(|e| e.row_key.strip_prefix("b:") == Some(r))
     {
         app.tree.collapsed.remove(key);
         app.tree.collapsed.remove(&format!("c{comp}"));
-        for g in app.session.doc.browser_groups.iter().filter(|g| g.items.iter().any(|item| item == r)) {
+        for g in app.session.doc.browser_groups.iter().filter(|g| g.items.contains(&e.key)) {
             app.tree.collapsed.remove(&format!("g{}", g.id));
         }
     }
