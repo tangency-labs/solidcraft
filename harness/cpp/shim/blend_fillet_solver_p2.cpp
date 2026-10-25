@@ -2,8 +2,7 @@
 // difftest shim for unit `blend.fillet_solver_p2`.
 // Wraps source/SMLib/src/SmFilletSolver.cpp: PointOnPlaneSolve, RailEdgeuseIntersect,
 // RailRailIntersect, CalcCylinderFilletGeom, CalcConeFilletGeom, CalcTorusFilletGeom,
-// GetFilletCorner (index > 1) and RecordFilletError (always skipped: it reaches the NULL
-// executive).
+// GetFilletCorner (index > 1) and RecordFilletError.
 //
 // One entry point, sc_blend_fillet_solver_p2_eval(op, path, in, n_in, out, cap, out_len).
 // Layouts are documented in crates/solidcore-ffi/src/units/blend_fillet_solver_p2.rs, which
@@ -37,15 +36,18 @@
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
 #include <SmExtentNd.h>
+#include <SmFilletExecutive.h>
 #include <SmFilletGeom.h>
 #include <SmFilletSolver.h>
 #include <SmFilletStandardSolver.h>
 #include <SmMatrix.h>
 #include <SmOffsetSurface.h>
+#include <SmPlane.h>
 #include <SmSurfaceIntersector.h>
 #include <SmTArray.h>
 
 #include <cmath>
+#include <string>
 #include <vector>
 
 #include "sc_edgeuse_graph.h"
@@ -539,9 +541,28 @@ void run_geom(Rd& rd, const char* path, const SmContext& ctx, std::vector<double
     delete brep;
 }
 
-// `0 cfg index` -> GetFilletCorner(index > 1): `null`; `1 cfg block eu0` -> `0 -2`:
-// RecordFilletError is skipped (upstream dereferences the constructor's rail-less fillet
-// geometry and the NULL executive).
+// The private SmFilletErrorInfo::m_eFilletStatus (no getter), via explicit instantiation.
+template <typename Tag, typename Tag::type M> struct Rob
+{
+    friend typename Tag::type get(Tag) { return M; }
+};
+struct StatusTag
+{
+    typedef SmFilStatus SmFilletErrorInfo::*type;
+    friend type get(StatusTag);
+};
+template struct Rob<StatusTag, &SmFilletErrorInfo::m_eFilletStatus>;
+
+void put_text(std::vector<double>& o, const char* text)
+{
+    std::string t(text);
+    o.push_back((double)t.size());
+    for (unsigned char ch : t)
+        o.push_back((double)ch);
+}
+
+// `0 cfg index` -> GetFilletCorner(index > 1): `null jacobian_size`;
+// `1 cfg block eu0` -> RecordFilletError into a live SmFilletExecutive's error info.
 void run_misc(Rd& rd, const char* path, const SmContext& ctx, std::vector<double>& o)
 {
     int64_t which = rd.idx();
@@ -563,9 +584,85 @@ void run_misc(Rd& rd, const char* path, const SmContext& ctx, std::vector<double
         delete fs;
         return;
     }
+    Graph g;
+    walk(brep, g);
     o.push_back(0.0);
-    (void)rd.idx();
-    o.push_back(-2.0);
+    int64_t eu0_idx = rd.idx();
+    SmEdgeuse* eu0 = at(g.edgeuses, eu0_idx);
+    fs->set_edgeuses(eu0, NULL);
+    fs->SetStatus((eu0_idx % 2 == 0) ? SM_FS_SURF_TRACING_FAILURE : SM_FIL_UNPROCESSED);
+    SmFilletErrorType err_code = (eu0_idx % 3 == 0) ? SM_FILERR_EDGE_PROBLEM : SM_FILERR_BAD_INT;
+
+    SmPlane* fillet_surface = NULL;
+    {
+        SmFilletExecutive exec(ctx, brep);
+        SmFilletBrep* pb = exec.GetPseudoBrep();
+        SmFilletGeom* fg = fs->GetFirstFilletGeom();
+        SmFilletEdge* rails[2] = {NULL, NULL};
+        fg->MakeRailEdge(pb, 0, rails[0]);
+        fg->MakeRailEdge(pb, 1, rails[1]);
+
+        SmTsectPnt t;
+        SmTArray<SmTsectPnt*> arr;
+        if (fs->target < -1.5)
+        {
+            SmBSplineCurve* r0 = NULL;
+            SmBSplineCurve::CreateLineSegment(ctx, 3, SmPoint3d(0.0, 0.0, 0.0), SmPoint3d(1.0, 0.0, 0.0), r0);
+            rails[0]->SetCurve(r0, TRUE);
+            t.CrvPos() = SmPoint3d(fs->target, fs->radius, fs->GetThisApproxTol3d());
+            arr.Add(&t);
+        }
+        else if (fs->target < 0.0)
+        {
+            SmBSplineCurve* r1 = NULL;
+            SmBSplineCurve::CreateLineSegment(ctx, 3, SmPoint3d(0.0, 0.0, 0.0), SmPoint3d(0.0, 1.0, 0.0), r1);
+            rails[1]->SetCurve(r1, TRUE);
+            fillet_surface = new (ctx) SmPlane(SmPoint3d(0.0, 0.0, 0.0), SmVector3d(0.0, 0.0, 1.0));
+            fillet_surface->MakeNurb();
+            fg->SetFilletSurface(fillet_surface);
+            SmBSplineCurve* cl = NULL;
+            SmBSplineCurve::CreateLineSegment(ctx, 3, SmPoint3d(0.0, 0.0, 0.0), SmPoint3d(2.0, 0.0, 0.0), cl);
+            fg->SetCenterLineCurve(cl);
+            t.CrvPos() = SmPoint3d(fs->target, -fs->radius, fs->GetThisApproxTol3d());
+            arr.Add(&t);
+        }
+        else if (fs->target < 1.5)
+        {
+            SmBSplineCurve* r0 = NULL;
+            SmBSplineCurve* r1 = NULL;
+            SmBSplineCurve::CreateLineSegment(ctx, 3, SmPoint3d(0.0, 0.0, 0.0), SmPoint3d(1.0, 0.0, 0.0), r0);
+            SmBSplineCurve::CreateLineSegment(ctx, 3, SmPoint3d(0.0, 0.0, 0.0), SmPoint3d(0.0, 1.0, 0.0), r1);
+            rails[0]->SetCurve(r0, TRUE);
+            rails[1]->SetCurve(r1, TRUE);
+            arr.Add(&t); // CrvPos left uninitialized
+        }
+
+        fs->SetFilletExecutive(&exec);
+        fs->RecordFilletError(err_code, arr, _T("difftest"));
+
+        SmFilletErrorInfo* ei = exec.GetFilletErrorInfo();
+        o.push_back((double)ei->GetErrorCode());
+        o.push_back((double)(*ei.*get(StatusTag())));
+        o.push_back((double)ei->m_eEdgeType);
+        o.push_back(flg(ei->m_pFilletedEdge == eu0->GetEdge()));
+        o.push_back((double)ei->m_pFilletSurfaces.GetSize());
+        o.push_back(flg(ei->m_pFilletSurfaces.GetSize() == 1 && ei->m_pFilletSurfaces[0] == fg->GetFilletSurface()));
+        o.push_back((double)ei->m_pFilletCurves.GetSize());
+        o.push_back(flg(ei->m_pFilletCurves.GetSize() == 1 && ei->m_pFilletCurves[0] == fg->GetCenterLineCurve()));
+        o.push_back((double)ei->m_pFilletEdges.GetSize());
+        o.push_back(flg(ei->m_pFilletEdges.GetSize() == 1 && ei->m_pFilletEdges[0] == rails[0]));
+        o.push_back(flg(ei->m_vLocation.IsInitialized()));
+        if (ei->m_vLocation.IsInitialized())
+        {
+            o.push_back(ei->m_vLocation.x);
+            o.push_back(ei->m_vLocation.y);
+            o.push_back(ei->m_vLocation.z);
+        }
+        put_text(o, ei->m_cComment);
+
+        fs->SetFilletExecutive(NULL);
+    }
+    delete fillet_surface;
     delete fs;
     delete brep;
 }

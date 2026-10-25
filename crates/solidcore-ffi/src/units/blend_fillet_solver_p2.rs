@@ -19,7 +19,7 @@
 //! `found` is reported only on success: upstream sets it before its last `SER` (the
 //! user-double overflow), where callers do not read it.
 //! | `Geom`      | `CalcCylinderFilletGeom` / `CalcConeFilletGeom` / `CalcTorusFilletGeom` (`which` 0/1/2) | `which cfg surfs fsg before after factor rails edge eu0 eu1 n` then `n` x `uv0[2] uv1[2] cparam` (`fsg` 0 linear, 1 circular; `rails` `0`, or `1 p[4][3]`: the rail end vertices typed `SM_FV_RAIL_X_EDGEUSE`, processed, at `p`; `edge` `0 block`, `1 a[3] b[3]` (an `SmLine` segment) or `2 radius span_deg` (an `SmCircle` about the z axis through `span_deg`)) | `0 status`, on success `surface rail0 rail1 [ivl0[2] ivl1[2]] center` (intervals for the cone and torus) |
-//! | `Misc`      | `GetFilletCorner` (`0 cfg index`), `RecordFilletError` (`1 cfg block eu0`) | | `null jacobian_size`; `0 -2` (skipped) |
+//! | `Misc`      | `GetFilletCorner` (`0 cfg index`), `RecordFilletError` (`1 cfg block eu0`) | | `null jacobian_size`; `0 code status edge_type filleted_ok ns surf0_ok nc curv0_ok ne rail0_ok loc_init [loc[3]] comment` |
 //!
 //! A curve is `1 t0 t1 P(t0) P(mid) P(t1)` or `-1`; a surface `1 u0 v0 u1 v1` and the
 //! 3 x 3 grid of points or `-1`; a B-rep that cannot be built gives `-1 status`.
