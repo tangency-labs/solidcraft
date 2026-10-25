@@ -1623,20 +1623,7 @@ impl Surface {
                         }
                     } else {
                         get_surface_cache(k, self, None::<NoObject>)?;
-                        // UNPORTED(query.face_p2): SmFace::PointClassify
-                        // NOTE for the face_p2 porter: upstream callers disable the surface
-                        // cache's point test (`m_bPointTestEnabled`, SmTemporaryChangeValue)
-                        // around GlobalPointSolve so every solution is kept unclassified:
-                        // SmCurveClass.cpp:1040, SmTopologySolver.cpp:1665,
-                        // SmVertexUse.cpp:471-480, SmBrep.cpp:11098, SmFilletGeom.cpp:149-150,
-                        // 446-447, SmFace.cpp:12801 and SmOffsetExecutive.cpp:3725-3734 (Rust:
-                        // `intersect::curve_class::p1`, `intersect::topology_solver::p2`,
-                        // `topology::vertexuse`, `topology::brep::p1::find_sector_of_face`,
-                        // `blend::fillet_geom::p1`, `query::face::p1::point_3d_classify`, and
-                        // the lamina test in
-                        // `offset::offset_executive::p1::build_contained_offset_faces`).
-                        // The Rust cache has no such switch yet; add it when this stub is
-                        // wired.
+                        // DISPATCH GAP: SmFace::PointClassify (bare face-owned surface without FaceQueries)
                         return Err(SolidError::unported(
                             "SmFace::PointClassify",
                             "query.face_p2",

@@ -236,7 +236,7 @@ fn is_point_valid(
         Some(_face) => match faces {
             Some(faces) => faces.is_point_valid(k, index, uv, src_zone_tol),
             None => {
-                // UNPORTED(query.face_p2): SmFace::PointClassify
+                // DISPATCH GAP: SmFace::PointClassify (bare surface ray trace without a B-rep)
                 Err(SolidError::unported(
                     "SmFace::PointClassify",
                     "query.face_p2",
