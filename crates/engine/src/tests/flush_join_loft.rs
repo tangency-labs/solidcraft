@@ -97,3 +97,48 @@ fn a_flange_flush_with_the_end_of_a_bent_tapered_tube_joins() {
     let beyond = mesh.positions.iter().map(|p| (*p - origin).dot(normal)).fold(f64::MIN, f64::max);
     assert!(beyond < 1e-3, "the join reaches {beyond} mm past the end plane");
 }
+
+/// A pen holder (#5797): a tube with a 1 mm wall lofted from a Ø`lower` ring on XY to a Ø67 ring 90 mm up, and a 1 mm disc
+/// under it, as wide as the tube's foot, joined to it. The disc's top face takes the tube's ring and its bore circle. Copied in,
+/// the bore's arcs run round the disc's face both ways; the hole they make was given to the region inside the bore whenever the
+/// point asked lay inside it, which depended on the diameter (Ø52 joined, Ø45 did not). The join then went through every
+/// fallback of the boolean, a hundred seconds that ended in "Union: no result", and the app was closed while it worked.
+#[test]
+fn a_disc_joined_flush_under_a_lofted_tube_follows_its_diameter() {
+    // A circle and its offset 1 mm in; returns the circle's id.
+    let ring = |s: &mut Session, name: &str, plane: &str, dimension: &str| -> String {
+        run(s, "sketch.create", json!({"plane": plane, "name": name}));
+        let circle = run(s, "sketch.circle.center", json!({"center": [0, 0], "diameter": 10}));
+        let c = circle["created"]["curves"][0].as_str().unwrap_or_default().to_string();
+        run(s, "sketch.dimension", json!({"entities": [c], "type": "diameter", "value": dimension}));
+        run(s, "sketch.offset", json!({"curves": [c], "distance": 1, "side": [0, 0]}));
+        run(s, "sketch.finish", json!({}));
+        c
+    };
+    let mut s = Session::default();
+    let lower = ring(&mut s, "Lower", "XY", "lowerDia = 52");
+    run(&mut s, "solid.extrude", json!({"distance": 1, "direction": "negative", "profiles": "all", "operation": "new", "body_name": "Base"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 90, "name": "Rim"}));
+    let upper = ring(&mut s, "Upper", "Rim", "upperDia = 67");
+    // Each section the ring inside the circle (the offset its hole); the disc is both of the base sketch's profiles.
+    let section = |sketch: &str, c: &str| json!({"sketch": sketch, "profiles": [{"curves": [c]}]});
+    run(&mut s, "solid.loft", json!({"sections": [section("Lower", &lower), section("Upper", &upper)], "operation": "new", "body_name": "Tube"}));
+    run(&mut s, "solid.combine", json!({"target": "Tube", "tools": ["Base"], "operation": "join"}));
+    // The disc, and the tube: the frustum of its outside less the frustum of its bore.
+    let expected = |lower: f64| {
+        let (r0, r1, h) = (lower / 2.0, 33.5, 90.0);
+        let frustum = |a: f64, b: f64| PI * h / 3.0 * (a * a + a * b + b * b);
+        PI * r0 * r0 + frustum(r0, r1) - frustum(r0 - 1.0, r1 - 1.0)
+    };
+    for lower in [52.0, 45.0, 30.0] {
+        let r = run(&mut s, "parameters.change", json!({"name": "lowerDia", "expression": format!("{lower}")}));
+        assert_eq!(r["errors"].as_array().map(Vec::len), Some(0), "Ø{lower}: {r}");
+        let state = s.model.state();
+        assert_eq!(state.bodies.len(), 1, "Ø{lower}");
+        let body = &state.bodies[0].body;
+        assert!(body.validity().is_empty(), "Ø{lower}: {:?}", body.validity());
+        assert_eq!(body.lumps().unwrap().len(), 1, "Ø{lower}");
+        let v = volume(&mut s);
+        assert!(rel(v, expected(lower)) < 1e-3, "Ø{lower}: {v} against {}", expected(lower));
+    }
+}
