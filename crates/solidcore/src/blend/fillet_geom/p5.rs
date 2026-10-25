@@ -40,8 +40,8 @@
 //!   `blend.fillet_corner_p1`) whose corner type, flags, filleted vertex and tolerance
 //!   the calculators read; the lookup also holds the executive's extended surfaces
 //!   (`GetExtendedSurface`). The corner's error log (`RecordFilletError`, unit
-//!   `blend.fillet_corner_p2`) needs the executive and its object identities and stays
-//!   an `UNPORTED(blend.fillet_corner_p2)` stub. A `NULL` corner that upstream
+//!   `blend.fillet_corner_p2`) records into the caller's [`ErrorInfo`] when supplied
+//!   (`UNPORTED(blend.fillet_executive_p1)` when omitted). A `NULL` corner that upstream
 //!   dereferences (`CalcFilletIntSideFace`, `MakeRailEdgeuse`) is
 //!   `SM_ERR_NULL_POINTER`.
 //! - **Topology links.** `SmOwningTopology::PreInsert` / `PostInsert` of a vertex use
@@ -88,7 +88,8 @@
 //! - **Arguments.** Out-params become return values; `iDebugLevel` and debug drawing
 //!   are dropped. No recursion.
 
-use crate::blend::fillet_corner::p3::FilletCorner;
+use crate::blend::fillet_corner::p3::{ExecutiveErrorObject, FilletCorner};
+use crate::blend::fillet_executive::p3::ErrorInfo;
 use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::curve::curve::p1::{ApproximateCurveOptions, GlobalPointSolveOptions};
 use crate::curve::curve::{Curve, CurveKind};
@@ -114,8 +115,8 @@ use crate::topology::{
 
 use super::p1::{
     clean_up_noise, BoundaryTrimmingType, CornerLookup, CurveObjectHandle, FilStatus, FilletBrep,
-    FilletCornerId, FilletCornerType, FilletEdgeType, FilletGeom, FilletGeomId, FilletGeomType,
-    FilletSolverId, FilletVertex, FilletVertexType, FilletVertexuse,
+    FilletCornerId, FilletCornerType, FilletEdgeType, FilletErrorType, FilletGeom, FilletGeomId,
+    FilletGeomType, FilletSolverId, FilletVertex, FilletVertexType, FilletVertexuse,
 };
 use super::p4::{srf_srf_intersection, SrfSrfCurves};
 
@@ -327,27 +328,41 @@ fn eu_vertex(brep: &Brep, eu: EdgeuseId, op: &'static str) -> Result<VertexId> {
 
 // ---- unported callees -------------------------------------------------------------
 
-/// `SmFilletCorner::RecordFilletError(eType, pSurf1, pSurf2, pFV1, pFV2, pcMessage)`
-/// (unit `blend.fillet_corner_p2`).
-///
-/// For the porter wiring this stub: upstream's call (SmFilletGeom.cpp:6290-6294) also
-/// passes the error type `SM_FILERR_BAD_INT` and a message, which the arguments below do
-/// not carry (add them when wiring); `RecordFilletError` returns `void`
-/// (SmFilletCorner.h:212), so the wired call must swallow every non-Unported error
-/// (`ignore_non_unported`), never propagate it with `?`.
+/// `SmFilletCorner::RecordFilletError(SM_FILERR_BAD_INT, pFilletSurface1, pSurface,
+/// pStartFV, pEndFV, ..)` (unit `blend.fillet_corner_p2`) into the executive's
+/// [`ErrorInfo`].
 fn corner_record_fillet_error(
-    corner: FilletCornerId,
-    surface1: &Surface,
-    surface2: Option<&Surface>,
+    corner: &FilletCorner,
+    error_info: Option<&mut ErrorInfo<ExecutiveErrorObject>>,
+    surface1: ExecutiveErrorObject,
+    surface2: Option<ExecutiveErrorObject>,
     fv1: VertexId,
     fv2: VertexId,
 ) -> Result<()> {
-    // UNPORTED(blend.fillet_corner_p2): SmFilletCorner::RecordFilletError (justified: findings.md "blend.fillet_corner_p2: RecordFilletError call sites")
-    unported_on(
-        (corner, surface1, surface2, fv1, fv2),
-        "SmFilletCorner::RecordFilletError",
-        "blend.fillet_corner_p2",
-    )
+    let Some(error_info) = error_info else {
+        // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::NoteFilletError (caller holds no ErrorInfo)
+        return unported_on(
+            (corner, surface1, surface2, fv1, fv2),
+            "SmFilletExecutive::NoteFilletError",
+            "blend.fillet_executive_p1",
+        );
+    };
+    corner.record_fillet_error_in(
+        error_info,
+        FilletErrorType::BadInt,
+        corner
+            .filleted_vertex()
+            .map(ExecutiveErrorObject::TargetVertex),
+        [Some(surface1), surface2],
+        [
+            Some(ExecutiveErrorObject::FilletVertex(fv1)),
+            Some(ExecutiveErrorObject::FilletVertex(fv2)),
+        ],
+        Some(
+            "SmFilletEdge::CalcFilletIntSideFace(): failure to calculate intersection of fillet surface with side face",
+        ),
+    );
+    Ok(())
 }
 
 /// `SmFilletEdge::UpdateSplitFace(pOrigFace, pNewFace)` (unit `blend.fillet_geom_p2`,
@@ -879,8 +894,8 @@ impl FilletBrep {
     /// `SM_ERR` when a vertex is not processed or the intersection fails (the edge gets
     /// `SM_FIL_SURF_INT_FAILURE`); `SM_ERR_NULL_POINTER` without uses, fillet
     /// geometry, solver, surface or corner; those of [`CornerLookup::corner`] (`corners` resolves the corner) and of
-    /// [`CornerLookup::extended_surface`]; [`SolidError::Unported`] for the corner's
-    /// error log (`blend.fillet_corner_p2`) and the intersection
+    /// [`CornerLookup::extended_surface`]; [`SolidError::Unported`] when the caller
+    /// omits [`ErrorInfo`] (`blend.fillet_executive_p1`) or from the intersection
     /// (`sm_SrfSrfIntersection`).
     pub fn calc_fillet_int_side_face(
         &mut self,
@@ -891,13 +906,33 @@ impl FilletBrep {
         solvers: &[FilletSolver],
         target: &Brep,
     ) -> Result<()> {
-        self.calc_fillet_int_side_face_with_context(
+        self.calc_fillet_int_side_face_with_error_info(k, e, corner, corners, solvers, target, None)
+    }
+
+    /// [`Self::calc_fillet_int_side_face`] with an optional [`ErrorInfo`] sink for
+    /// `SmFilletCorner::RecordFilletError`.
+    ///
+    /// # Errors
+    /// As [`Self::calc_fillet_int_side_face`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn calc_fillet_int_side_face_with_error_info(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        corner: Option<FilletCornerId>,
+        corners: CornerLookup<'_>,
+        solvers: &[FilletSolver],
+        target: &Brep,
+        error_info: Option<&mut ErrorInfo<ExecutiveErrorObject>>,
+    ) -> Result<()> {
+        self.calc_fillet_int_side_face_with_context_and_error_info(
             k,
             e,
             corner,
             corners,
             &IndexedEdgeContext { solvers, corners },
             target,
+            error_info,
         )
     }
 
@@ -913,6 +948,27 @@ impl FilletBrep {
         corners: CornerLookup<'_>,
         context: &impl FilletEdgeContext,
         target: &Brep,
+    ) -> Result<()> {
+        self.calc_fillet_int_side_face_with_context_and_error_info(
+            k, e, corner, corners, context, target, None,
+        )
+    }
+
+    /// [`Self::calc_fillet_int_side_face_with_context`] with an optional [`ErrorInfo`]
+    /// sink for `SmFilletCorner::RecordFilletError`.
+    ///
+    /// # Errors
+    /// As [`Self::calc_fillet_int_side_face_with_context`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn calc_fillet_int_side_face_with_context_and_error_info(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        corner: Option<FilletCornerId>,
+        corners: CornerLookup<'_>,
+        context: &impl FilletEdgeContext,
+        target: &Brep,
+        error_info: Option<&mut ErrorInfo<ExecutiveErrorObject>>,
     ) -> Result<()> {
         // get filletEdge->vertices
         let (start_fv, end_fv) = self.edge_ends(e, OP_SIDE)?;
@@ -960,36 +1016,54 @@ impl FilletBrep {
             // the `NULL` on to `sm_SrfSrfIntersection`, whose `NER(pSurf2)` takes the
             // failure branch below
             let the_corner = corners.corner(corner)?;
-            let surface: Option<Surface> = if the_corner.is_extended_surface_patch() {
-                let face = self
-                    .fillet_edge(e)?
-                    .original_face()
-                    .ok_or_else(|| SolidError::null_pointer(OP_SIDE))?;
-                match context.extended_surface(the_corner, face)? {
-                    Some(s) => Some(s.clone()),
-                    None => target.face(face)?.surface.clone(),
-                }
-            } else {
-                // endFace->Surface = plane through corner->OriginalVertex,
-                // edge->EndPoints
-                let fv = the_corner
-                    .filleted_vertex()
-                    .ok_or_else(|| SolidError::null_pointer(OP_SIDE))?;
-                let origin = target.vertex(fv)?.point;
-                let mut x_vector = self.vertex_point(start_fv)? - origin;
-                let mut y_vector = self.vertex_point(end_fv)? - origin;
-                let x_len = x_vector.length();
-                let y_len = y_vector.length();
-                let uv_scale = Vec2::new(1.0, 1.0);
-                x_vector /= x_len;
-                y_vector /= y_len;
-                y_vector = x_vector.cross(y_vector).cross(x_vector);
-                y_vector = y_vector.unitize_or_z();
-                let uv_domain = Extent2d::from_bounds(-x_len, -y_len, 2.0 * x_len, 2.0 * y_len);
-                let mut plane = Plane::new(origin, x_vector, y_vector, uv_scale, &uv_domain);
-                ignore_non_unported(plane.make_nurb())?;
-                Some(Surface::from(plane))
-            };
+            let (surface, surface2_id): (Option<Surface>, Option<ExecutiveErrorObject>) =
+                if the_corner.is_extended_surface_patch() {
+                    let face = self
+                        .fillet_edge(e)?
+                        .original_face()
+                        .ok_or_else(|| SolidError::null_pointer(OP_SIDE))?;
+                    if let Some(s) = context.extended_surface(the_corner, face)? {
+                        (
+                            Some(s.clone()),
+                            Some(ExecutiveErrorObject::TargetFaceSurface {
+                                face,
+                                extended: true,
+                            }),
+                        )
+                    } else {
+                        let orig = target.face(face)?.surface.clone();
+                        let id = orig
+                            .as_ref()
+                            .map(|_| ExecutiveErrorObject::TargetFaceSurface {
+                                face,
+                                extended: false,
+                            });
+                        (orig, id)
+                    }
+                } else {
+                    // endFace->Surface = plane through corner->OriginalVertex,
+                    // edge->EndPoints
+                    let fv = the_corner
+                        .filleted_vertex()
+                        .ok_or_else(|| SolidError::null_pointer(OP_SIDE))?;
+                    let origin = target.vertex(fv)?.point;
+                    let mut x_vector = self.vertex_point(start_fv)? - origin;
+                    let mut y_vector = self.vertex_point(end_fv)? - origin;
+                    let x_len = x_vector.length();
+                    let y_len = y_vector.length();
+                    let uv_scale = Vec2::new(1.0, 1.0);
+                    x_vector /= x_len;
+                    y_vector /= y_len;
+                    y_vector = x_vector.cross(y_vector).cross(x_vector);
+                    y_vector = y_vector.unitize_or_z();
+                    let uv_domain = Extent2d::from_bounds(-x_len, -y_len, 2.0 * x_len, 2.0 * y_len);
+                    let mut plane = Plane::new(origin, x_vector, y_vector, uv_scale, &uv_domain);
+                    ignore_non_unported(plane.make_nurb())?;
+                    (
+                        Some(Surface::from(plane)),
+                        Some(ExecutiveErrorObject::TempEndPlane(e)),
+                    )
+                };
 
             // do Surface/surface xSect
             let ang_tol = fs1.ang_tol_rad;
@@ -1019,9 +1093,10 @@ impl FilletBrep {
                     self.fillet_edge_mut(e)?
                         .set_status(FilStatus::SurfIntFailure);
                     corner_record_fillet_error(
-                        corner,
-                        &fillet_surface1,
-                        surface.as_ref(),
+                        the_corner,
+                        error_info,
+                        ExecutiveErrorObject::FilletGeomSurface(g1),
+                        surface2_id,
                         start_fv,
                         end_fv,
                     )?;

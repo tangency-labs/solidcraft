@@ -81,6 +81,7 @@ use std::collections::BTreeMap;
 
 use crate::blend::fillet_corner::p1;
 use crate::blend::fillet_corner::p2::{find_concave_edgeuses, make_fillet_edge};
+use crate::blend::fillet_executive::p3::ErrorInfo;
 use crate::blend::fillet_geom::p1::{
     FilStatus, FilletBrep, FilletCornerId, FilletCornerType, FilletEdgeType, FilletGeomId,
     FilletGeomType, FilletSolverId, FilletVertex, FilletVertexType,
@@ -178,7 +179,29 @@ impl FilletCornerKind {
     }
 }
 
-/// The members of `SmFilletExecutive` read by the corner code (CO-PORTED from
+/// An object identity recorded in [`FilletExecutiveData::error`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ExecutiveErrorObject {
+    /// A vertex of the B-rep being filleted (`m_cpVertex`).
+    TargetVertex(VertexId),
+    /// A fillet vertex of the pseudo B-rep (`SmFilletVertex*`).
+    FilletVertex(VertexId),
+    /// The fillet surface of a [`FilletGeomId`] (`pFilletGeom->GetFilletSurface()`).
+    FilletGeomSurface(FilletGeomId),
+    /// A target face's surface (`extended = false`) or registered extended surface
+    /// (`extended = true`, `m_vExtendedSurfacesMap`).
+    TargetFaceSurface {
+        /// Target face id.
+        face: FaceId,
+        /// Whether the surface came from `extended_surfaces_map`.
+        extended: bool,
+    },
+    /// The temporary planar end-face surface constructed by `CalcFilletIntSideFace`
+    /// when `!corner.is_extended_surface_patch()`.
+    TempEndPlane(EdgeId),
+}
+
+/// The members of `SmFilletExecutive` read and written by the corner code (CO-PORTED from
 /// `blend.fillet_executive_p1`).
 #[derive(Debug, Clone, Default)]
 pub struct FilletExecutiveData {
@@ -193,6 +216,9 @@ pub struct FilletExecutiveData {
     /// `m_vTopoEdges`: the fillet edges recorded for the topology insertion, in order
     /// (`None` keeps a null entry).
     pub topo_edges: Vec<Option<EdgeId>>,
+    /// `m_sErrorInfo`: fillet error state recorded by `NoteFilletError` /
+    /// `RecordFilletError`.
+    pub error: ErrorInfo<ExecutiveErrorObject>,
 }
 
 impl FilletExecutiveData {

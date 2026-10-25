@@ -93,7 +93,7 @@ use crate::blend::fillet_corner::p3::{
     unchecked_point, CornerEnv, FilletCorner, FilletExecutiveData,
 };
 use crate::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
-use crate::blend::fillet_executive::p3::FilletExecutive;
+use crate::blend::fillet_executive::p3::{ErrorInfo, FilletExecutive};
 use crate::blend::fillet_geom::p1::FilletErrorType;
 use crate::blend::fillet_geom::p1::{
     check_seam_out, set_surface_closure, FilStatus, FilletBrep, FilletCornerType, FilletEdgeType,
@@ -2026,6 +2026,30 @@ impl FilletCorner {
 
 impl FilletCorner {
     /// `SmFilletCorner::RecordFilletError(eErrorType, pFilletSurface1, pFilletSurface2,
+    /// pStartFV, pEndFV, cComment)` into a standalone [`ErrorInfo`] (`NoteFilletError`
+    /// -> `GetFilletErrorInfo()->NoteError`).
+    pub fn record_fillet_error_in<O: Copy + PartialEq>(
+        &self,
+        error: &mut ErrorInfo<O>,
+        error_type: FilletErrorType,
+        filleted_vertex: Option<O>,
+        surfaces: [Option<O>; 2],
+        fillet_vertices: [Option<O>; 2],
+        comment: Option<&str>,
+    ) {
+        error.note_corner_error(
+            error_type,
+            self.corner_type(),
+            self.status,
+            Some(self.kind.name()),
+            filleted_vertex,
+            surfaces,
+            fillet_vertices,
+            comment,
+        );
+    }
+
+    /// `SmFilletCorner::RecordFilletError(eErrorType, pFilletSurface1, pFilletSurface2,
     /// pStartFV, pEndFV, cComment)`: tells the fillet executive about a corner error
     /// (`NoteFilletError` with this corner's type, status and name and its filleted
     /// vertex). The objects are the executive's identities: `filleted_vertex` is the
@@ -2041,11 +2065,9 @@ impl FilletCorner {
         comment: Option<&str>,
     ) {
         // Pass the call along to the FilletExectutive
-        executive.note_fillet_corner_error(
+        self.record_fillet_error_in(
+            &mut executive.error,
             error_type,
-            self.corner_type(),
-            self.status,
-            Some(self.kind.name()),
             filleted_vertex,
             surfaces,
             fillet_vertices,

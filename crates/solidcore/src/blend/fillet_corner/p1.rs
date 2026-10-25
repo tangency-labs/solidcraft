@@ -96,8 +96,10 @@
 //!   of `m_vEdges` so a squeeze in the loop sees the same slots as upstream's `NULL`
 //!   entries, compressed at the end. `m_pExecutive->m_bDoGlobalMerge` and
 //!   `m_vTopoEdges` (`RemoveFromTopoEdges`, CO-PORTED from `blend.fillet_executive_p1`)
-//!   are fields of [`FilletExecutiveData`]. `m_pBrep->DeleteEdge` (`topology.brep_p4`)
-//!   and `NoteFilletError` (`blend.fillet_executive_p1`) are `Unported` stubs.
+//!   and `m_sErrorInfo` ([`FilletExecutiveData::error`]) are fields of
+//!   [`FilletExecutiveData`]. `m_pBrep->DeleteEdge` (`topology.brep_p4`) and
+//!   `CreateEndPatch`'s `NoteFilletError` (`blend.fillet_executive_p1`) are `Unported`
+//!   stubs.
 //! - **`MakeFaceBrep`** builds into [`CornerEnv::fillet`] (`m_pExecutive->m_pFilletBrep`;
 //!   `None` is the `NULL` upstream dereferences) through `SmBrep::MakeFaceWithCurves`
 //!   with that B-rep's notification environment; the face gets a clone of the corner
@@ -1447,13 +1449,17 @@ impl FilletCorner {
         self.calc_corner_edge_geom_with(
             env,
             |env, corner, edge| {
-                env.pseudo.calc_corner_edge_geom(
+                let mut local_error = std::mem::take(&mut env.exec.error);
+                let res = env.pseudo.calc_corner_edge_geom_with_error_info(
                     env.k,
                     edge,
                     CornerLookup::of_corner(env.corner, corner, env.exec),
                     env.solvers,
                     env.target,
-                )
+                    Some(&mut local_error),
+                );
+                env.exec.error = local_error;
+                res
             },
             |env| env.exec.do_global_merge,
             |env| &mut *env.pseudo,

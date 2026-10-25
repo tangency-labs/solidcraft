@@ -29,8 +29,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use solidcore::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
 use solidcore::blend::fillet_corner::p3::{FilletCorner, FilletCornerKind};
+use solidcore::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
+use solidcore::blend::fillet_executive::p3::ErrorInfo;
 use solidcore::blend::fillet_geom::p1::{
     CornerLookup, FilStatus, FilletBrep, FilletCornerId, FilletEdgeType, FilletEdgeuse, FilletGeomId,
     FilletGeomType, FilletSolverId, FilletVertex, FilletVertexType, FilletVertexuse,
@@ -987,6 +988,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut bases: Vec<FilletSolver> = m.solvers.iter().map(|s| s.base.clone()).collect();
     let corners = shim_corners(&m)?;
     let corners = CornerLookup::table(&corners);
+    let mut error_info = ErrorInfo::default();
     let res = match &i.op {
         OpIn::Export => Ok(()),
         OpIn::CornerVert { v } => {
@@ -1000,12 +1002,27 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         OpIn::CornerEdge { e } => {
             let e = *m.edges.get(*e).ok_or_else(|| harness("edge"))?;
             // the shim refuses the part 6 calculators (its corners carry no data)
-            m.fb.calc_corner_edge_geom(&k, e, corners, &mut bases, &mut tg.brep)
+            m.fb.calc_corner_edge_geom_with_error_info(
+                &k,
+                e,
+                corners,
+                &mut bases,
+                &mut tg.brep,
+                Some(&mut error_info),
+            )
         }
         OpIn::FilletIntFillet { e } => {
             let e = *m.edges.get(*e).ok_or_else(|| harness("edge"))?;
             let corner = m.fb.fillet_edge(e).map_err(h)?.fillet_corner();
-            m.fb.calc_edge_fillet_int_fillet(&k, e, corner, corners, &bases, &tg.brep)
+            m.fb.calc_edge_fillet_int_fillet_with_error_info(
+                &k,
+                e,
+                corner,
+                corners,
+                &bases,
+                &tg.brep,
+                Some(&mut error_info),
+            )
         }
         OpIn::ReCalc {
             g,
