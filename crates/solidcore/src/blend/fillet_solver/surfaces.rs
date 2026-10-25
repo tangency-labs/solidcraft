@@ -181,6 +181,79 @@ pub(crate) fn rail_edgeuse_intersect(
     )
 }
 
+struct BaseGeometrySolver<'a> {
+    solver: &'a mut FilletSolver,
+    geometry: &'a mut FilletGeom,
+}
+
+impl FilletSolverOps for BaseGeometrySolver<'_> {
+    fn solver(&self) -> &FilletSolver {
+        self.solver
+    }
+
+    fn solver_mut(&mut self) -> &mut FilletSolver {
+        self.solver
+    }
+
+    fn solver_surface(&self, rail: usize) -> Result<Option<&OffsetSurface>> {
+        let own = self.geometry.off_surfs.get(rail).ok_or_else(|| {
+            SolidError::invalid_input("blend::fillet_solver::surfaces", "rail index past 1")
+        })?;
+        if let Some(surface) = own {
+            return Ok(Some(surface));
+        }
+        if self.solver.fillet_geom_for_surfaces().is_some()
+            && self.geometry.fillet_solver().is_some()
+        {
+            return Err(SolidError::invalid_input(
+                "blend::fillet_solver::surfaces",
+                "geometry set for surfaces has no offset surface for rail (UB-204)",
+            ));
+        }
+        Ok(self.solver.surface(rail)?.map(|slot| &slot.surface))
+    }
+
+    fn solver_surface_mut(&mut self, rail: usize) -> Result<Option<&mut OffsetSurface>> {
+        let has_solver = self.geometry.fillet_solver().is_some();
+        let own = self.geometry.off_surfs.get_mut(rail).ok_or_else(|| {
+            SolidError::invalid_input("blend::fillet_solver::surfaces", "rail index past 1")
+        })?;
+        if let Some(surface) = own {
+            return Ok(Some(surface));
+        }
+        if self.solver.fillet_geom_for_surfaces().is_some() && has_solver {
+            return Err(SolidError::invalid_input(
+                "blend::fillet_solver::surfaces",
+                "geometry set for surfaces has no offset surface for rail (UB-204)",
+            ));
+        }
+        Ok(self.solver.surface_mut(rail)?.map(|slot| &mut slot.surface))
+    }
+}
+
+/// Run with a base [`FilletSolver`] and its selected geometry; no offset object moves.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn base_rail_edgeuse_intersect(
+    solver: &mut FilletSolver,
+    k: &Kernel,
+    geometry: &mut FilletGeom,
+    target: &mut Brep,
+    rail_index: usize,
+    edgeuse: EdgeuseId,
+    guess: f64,
+    tsect: &mut TsectPnt,
+) -> Result<Option<f64>> {
+    FilletSolver::rail_edgeuse_intersect(
+        &mut BaseGeometrySolver { solver, geometry },
+        k,
+        target,
+        rail_index,
+        edgeuse,
+        guess,
+        tsect,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,5 +431,46 @@ mod tests {
                 .unwrap(),
             Point3::new(0.25, 0.75, 7.0)
         );
+    }
+
+    #[test]
+    fn base_solver_geometry_context_resolves_offsets_and_guards_ub_204() {
+        let k = Kernel::default();
+        let mut solver = FilletSolver::new(1e-5, 1e-3, 0.01);
+        let saved = Some(FilletGeomId(91));
+        solver.set_fillet_geom_for_surfaces(saved);
+
+        let mut pseudo = FilletBrep::new();
+        let g = pseudo.add_geom(geometry(&k));
+        let err = pseudo
+            .rail_edgeuse_intersect_with_geometry(
+                &k,
+                g,
+                &mut solver,
+                &mut Brep::new(),
+                0,
+                EdgeuseId::from_index(0),
+                0.5,
+                &mut TsectPnt::default(),
+            )
+            .unwrap_err();
+        assert!(!err.is_unported(), "{err:?}");
+        assert_eq!(solver.fillet_geom_for_surfaces(), saved);
+
+        pseudo.geom_mut(g).unwrap().off_surfs[1] = None;
+        let ub = pseudo
+            .rail_edgeuse_intersect_with_geometry(
+                &k,
+                g,
+                &mut solver,
+                &mut Brep::new(),
+                0,
+                EdgeuseId::from_index(0),
+                0.5,
+                &mut TsectPnt::default(),
+            )
+            .unwrap_err();
+        assert!(matches!(ub, SolidError::InvalidInput { .. }), "{ub:?}");
+        assert_eq!(solver.fillet_geom_for_surfaces(), saved);
     }
 }

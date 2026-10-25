@@ -56,7 +56,8 @@
 //! the op's results (`ShouldSwap`: the flag; `Join`: `made n (curve uvcurve orient)..`;
 //! `FindTangent`: `found tan[3]`; `RailIndex*`: the index (`99` on an error status);
 //! `RailVertex`: the vertex index; `MoveTsp`: `n` and the new order; `RailEuIntersect`:
-//! `found param`), then the export: `nv` then per vertex `x y z type status u v pc_class
+//! `found param`; `RecordError`: `code status edge_type filleted_edge side_face ne e..
+//! ns has_s.. comment_len`), then the export: `nv` then per vertex `x y z type status u v pc_class
 //! t`; `ne` then per edge `type status curve t0 t1 orig_edge orig_face` and per edge use
 //! `uvcurve geom u v`; `ng` then per geometry `status nsides (edge which).. nrefs (edge
 //! which).. surface centre_line dev0 dev1` and per rail `has [dist base_surface]`. A

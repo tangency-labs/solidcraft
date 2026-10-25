@@ -33,6 +33,7 @@ use serde_json::Value;
 
 use solidcore::blend::fillet_corner::p3::{FilletCorner, FilletCornerKind};
 use solidcore::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
+use solidcore::blend::fillet_executive::p3::ErrorInfo;
 use solidcore::blend::fillet_geom::p1::{
     FilStatus, FilletBrep, FilletCornerId, FilletEdgeType, FilletEdgeuse,
     FilletErrorType, FilletGeom, FilletGeomId, FilletGeomType, FilletSolverId, FilletVertex,
@@ -40,7 +41,7 @@ use solidcore::blend::fillet_geom::p1::{
 };
 use solidcore::blend::fillet_geom::p3::new_solver_fillet_geom;
 use solidcore::blend::fillet_geom::p6::{
-    join_two_fillet_verts_by_curves, move_tsp,
+    join_two_fillet_verts_by_curves, move_tsp, GeomErrorObject,
 };
 use solidcore::blend::fillet_solver::p1::{
     FilletExecutiveRef, FilletSolver, OffsetSurfaceSlot,
@@ -1437,6 +1438,15 @@ fn inexact(i: &Inputs, tg: &Target) -> Result<Option<Output>, HarnessError> {
             }
             ok
         }
+        OpIn::RailEuIntersect { eu, .. } => {
+            if let Some(eu) = tg.edgeuse(*eu) {
+                let e = teu::edge(&tg.brep, eu).map_err(h)?;
+                let f = teu::face(&tg.brep, eu).map_err(h)?;
+                tg.exact_edge(e) && tg.exact_face(f)
+            } else {
+                true
+            }
+        }
         _ => true,
     };
     Ok((!exact).then(|| {
@@ -1646,7 +1656,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             };
             // the shim's SmTsectPnt t
             let mut tsect = TsectPnt::default();
-            let r = m.fb.rail_edgeuse_intersect(
+            let r = m.fb.rail_edgeuse_intersect_with_geometry(
                 &k,
                 g,
                 &mut solver,
@@ -1667,7 +1677,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::RecordError { g, etype } => {
             let g = geom(&m, *g)?;
-            let etype = match etype {
+            let code = *etype;
+            let etype = match code {
                 0 => FilletErrorType::Ok,
                 1 => FilletErrorType::ExecUninitialized,
                 2 => FilletErrorType::InvalidInput,
@@ -1677,7 +1688,64 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 6 => FilletErrorType::BadTrim,
                 _ => FilletErrorType::BadMerge,
             };
-            m.fb.record_fillet_error(g, etype, None, None, None, None, None, &m.solvers)
+            let filleted_edge = (tg.n_e() > 0 && (code & 1) != 0).then(|| EdgeId::from_index(0));
+            let target_face = (tg.n_f() > 0 && (code & 2) != 0).then(|| FaceId::from_index(0));
+            let rail = if (code & 4) != 0 {
+                m.fb.geom(g).map_err(h)?.rail(0)
+            } else {
+                None
+            };
+            let fillet_surface = m
+                .fb
+                .geom(g)
+                .map_err(h)?
+                .fillet_surface()
+                .map_err(h)?
+                .map(|_| GeomErrorObject::FilletSurface(g));
+            let comment = ((code & 1) != 0).then_some("SmFilletGeom::RecordFilletError");
+            let mut info = ErrorInfo::default();
+            let r = m.fb.record_fillet_error_in(
+                g,
+                etype,
+                filleted_edge,
+                target_face,
+                rail,
+                fillet_surface,
+                comment,
+                &m.solvers,
+                Some(&mut info),
+            );
+            if r.is_ok() {
+                results.push(f64::from(info.code));
+                results.push(f64::from(info.status));
+                results.push(f64::from(info.edge_type));
+                results.push(match info.edge {
+                    Some(GeomErrorObject::FilletedEdge(e)) => f64::from(e.index()),
+                    _ => -1.0,
+                });
+                results.push(match info.side_face {
+                    Some(GeomErrorObject::SideFace(f)) => f64::from(f.index()),
+                    _ => -1.0,
+                });
+                results.push(info.edges.len() as f64);
+                for item in &info.edges {
+                    let idx = match item {
+                        Some(GeomErrorObject::FilletEdge(e)) => m
+                            .edges
+                            .iter()
+                            .position(|&x| x == *e)
+                            .map_or(-1.0, |i| i as f64),
+                        _ => -1.0,
+                    };
+                    results.push(idx);
+                }
+                results.push(info.surfaces.len() as f64);
+                for item in &info.surfaces {
+                    results.push(b(matches!(item, Some(GeomErrorObject::FilletSurface(_)))));
+                }
+                results.push(info.comment.len() as f64);
+            }
+            r
         }
     };
     if let Err(e) = &res {
@@ -2540,7 +2608,7 @@ fn gen_move_tsp(rng: &mut Rng) -> Inputs {
     }
 }
 
-/// `RailEdgeuseIntersect` and `RecordFilletError` (both reach unported callees).
+/// `RailEdgeuseIntersect` and `RecordFilletError`.
 fn gen_deferred(rng: &mut Rng) -> Inputs {
     let mut vertices = Vec::new();
     let mut edges = Vec::new();

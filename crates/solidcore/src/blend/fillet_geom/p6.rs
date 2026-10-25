@@ -24,7 +24,7 @@
 //! | [`move_tsp`]                                 | `sm_MoveTSP`                              |
 //! | [`FilletBrep::rail_edgeuse_intersect`]       | `SmFilletGeom::RailEdgeuseIntersect`      |
 //! | [`FilletBrep::trim_original_surfaces`]       | `SmFilletGeom::TrimOriginalSurfaces`      |
-//! | [`FilletBrep::record_fillet_error`]          | `SmFilletGeom::RecordFilletError`         |
+//! | [`FilletBrep::record_fillet_error`], [`FilletBrep::record_fillet_error_in`] | `SmFilletGeom::RecordFilletError` |
 //! | [`FilletBrep::new`](super::p1::FilletBrep::new) (in part 1) | `SmFilletBrep::SmFilletBrep` (CO-PORTED in `blend.fillet_geom_p1`) |
 //!
 //! Deviations:
@@ -73,14 +73,12 @@
 //!   `CreateCanonical` for degree 2 with the four Bezier points and end multiplicities
 //!   4, as upstream; the quadratic it makes drops the start-tangent point
 //!   (`plan/upstream-issues.md` WR-190).
-//! - **Unported callees.** `SmFilletExecutive::NoteFilletError`
-//!   (`blend.fillet_executive_p1`). Each stub replaces only its call; the code behind
-//!   it is ported.
 //! - **Iteration.** No recursion; `JoinTwoFilletVertsByCurves` removes a side edge use
 //!   per step, so it runs at most once per side edge use.
 
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_custom_solver::OffsetSurface;
+use crate::blend::fillet_executive::p3::ErrorInfo;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps};
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::Curve;
@@ -138,9 +136,18 @@ const OP_RAIL_EU: &str = "blend::fillet_geom::p6::FilletBrep::rail_edgeuse_inter
 const OP_TRIM: &str = "blend::fillet_geom::p6::FilletBrep::trim_original_surfaces";
 const OP_ERROR: &str = "blend::fillet_geom::p6::FilletBrep::record_fillet_error";
 
-/// A call into a unit that is not ported yet; `_args` are upstream's arguments.
-fn unported_on<A, T>(_args: A, upstream: &'static str, unit: &'static str) -> Result<T> {
-    Err(SolidError::unported(upstream, unit))
+/// Object handle recorded by [`FilletBrep::record_fillet_error_in`] into the
+/// executive's [`ErrorInfo`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeomErrorObject {
+    /// Target B-rep filleted edge (`pFilletedEdge`).
+    FilletedEdge(EdgeId),
+    /// Target B-rep side face (`pTargetFace`).
+    SideFace(FaceId),
+    /// Pseudo-B-rep fillet rail edge (`pRail`).
+    FilletEdge(EdgeId),
+    /// Fillet surface of geometry `g` (`pFilletSurface`).
+    FilletSurface(FilletGeomId),
 }
 
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
@@ -2089,8 +2096,7 @@ impl FilletBrep {
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] without solver or executive (upstream dereferences
-    /// `NULL`) or a solver missing from `solvers`; [`SolidError::Unported`]:
-    /// `SmFilletExecutive::NoteFilletError` (unit `blend.fillet_executive_p1`).
+    /// `NULL`) or a solver missing from `solvers`.
     #[allow(clippy::too_many_arguments)]
     pub fn record_fillet_error(
         &self,
@@ -2103,30 +2109,59 @@ impl FilletBrep {
         comment: Option<&str>,
         solvers: &[FilletSolver],
     ) -> Result<()> {
+        self.record_fillet_error_in(
+            g,
+            error_type,
+            filleted_edge,
+            target_face,
+            rail,
+            fillet_surface.map(|_| GeomErrorObject::FilletSurface(g)),
+            comment,
+            solvers,
+            None,
+        )
+    }
+
+    /// [`Self::record_fillet_error`] writing into the executive's [`ErrorInfo`]
+    /// (`SmFilletExecutive::NoteFilletError` -> `SmFilletErrorInfo::NoteError`).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::record_fillet_error`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_fillet_error_in(
+        &self,
+        g: FilletGeomId,
+        error_type: FilletErrorType,
+        filleted_edge: Option<EdgeId>,
+        target_face: Option<FaceId>,
+        rail: Option<EdgeId>,
+        fillet_surface: Option<GeomErrorObject>,
+        comment: Option<&str>,
+        solvers: &[FilletSolver],
+        error_info: Option<&mut ErrorInfo<GeomErrorObject>>,
+    ) -> Result<()> {
         let geom = self.geom(g)?;
         let solver_id = geom
             .fillet_solver()
             .ok_or_else(|| invalid(OP_ERROR, "fillet geometry without solver"))?;
-        let executive = solver_of(solvers, solver_id, OP_ERROR)?
+        let _executive = solver_of(solvers, solver_id, OP_ERROR)?
             .executive
             .ok_or_else(|| invalid(OP_ERROR, "solver without fillet executive"))?;
 
         // pass the call along to the FilletExecutive
-        // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::NoteFilletError
-        unported_on(
-            (
-                executive,
+        if let Some(info) = error_info {
+            info.note_merge_error(
                 error_type,
                 geom.status(),
-                filleted_edge,
-                target_face,
-                rail,
+                filleted_edge.map(GeomErrorObject::FilletedEdge),
+                target_face.map(GeomErrorObject::SideFace),
+                rail.map(GeomErrorObject::FilletEdge),
                 fillet_surface,
                 comment,
-            ),
-            "SmFilletExecutive::NoteFilletError",
-            "blend.fillet_executive_p1",
-        )
+            );
+        }
+        Ok(())
     }
 }
 
@@ -2607,7 +2642,8 @@ mod tests {
     fn record_fillet_error_needs_an_executive() {
         let k = Kernel::default();
         let mut fb = FilletBrep::new();
-        let (g, _) = two_rail_geom(&mut fb, &k);
+        let (g, rails) = two_rail_geom(&mut fb, &k);
+        fb.geom_mut(g).unwrap().status = FilStatus::Processed;
         let none = fb
             .record_fillet_error(
                 g,
@@ -2621,19 +2657,32 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(none, SolidError::InvalidInput { .. }), "{none:?}");
-        let err = fb
-            .record_fillet_error(
-                g,
-                FilletErrorType::BadTrim,
-                None,
-                None,
-                None,
-                None,
-                None,
-                &[solver(true)],
-            )
-            .unwrap_err();
-        assert_eq!(unit_of(&err), Some("blend.fillet_executive_p1"));
+
+        let fe = EdgeId::from_index(4);
+        let tf = FaceId::from_index(7);
+        let mut info = ErrorInfo::default();
+        fb.record_fillet_error_in(
+            g,
+            FilletErrorType::BadMerge,
+            Some(fe),
+            Some(tf),
+            Some(rails[0]),
+            Some(GeomErrorObject::FilletSurface(g)),
+            Some("merge failed"),
+            &[solver(true)],
+            Some(&mut info),
+        )
+        .unwrap();
+        assert_eq!(info.code, FilletErrorType::BadMerge as i32);
+        assert_eq!(info.status, FilStatus::Processed as i32);
+        assert_eq!(info.edge, Some(GeomErrorObject::FilletedEdge(fe)));
+        assert_eq!(info.side_face, Some(GeomErrorObject::SideFace(tf)));
+        assert_eq!(
+            info.edges,
+            vec![Some(GeomErrorObject::FilletEdge(rails[0]))]
+        );
+        assert_eq!(info.surfaces, vec![Some(GeomErrorObject::FilletSurface(g))]);
+        assert_eq!(info.comment, "merge failed");
     }
 
     #[test]

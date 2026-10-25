@@ -41,6 +41,7 @@
 #include <nurbs.h>
 
 #include <cstdint>
+#include <cstring>
 #include <set>
 #include <vector>
 
@@ -123,6 +124,17 @@ struct GeomPeek : SmFilletGeom
     static SmOffsetSurface* (SmFilletGeom::*offs())[2] { return &GeomPeek::m_pOffSurfs; }
     static SmSurface* SmFilletGeom::*surface() { return &GeomPeek::m_pFilletSurface; }
 };
+
+template <typename Tag, typename Tag::type M> struct Rob
+{
+    friend typename Tag::type get(Tag) { return M; }
+};
+struct StatusTag
+{
+    typedef SmFilStatus SmFilletErrorInfo::*type;
+    friend type get(StatusTag);
+};
+template struct Rob<StatusTag, &SmFilletErrorInfo::m_eFilletStatus>;
 
 double ix(int64_t i) { return (double)i; }
 
@@ -945,9 +957,11 @@ int32_t run(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             return SC_ERR_ARG;
         SmFilletSolver* fs = geom->GetFilletSolver();
         // without a solver: NER(pFS); else the base solver reads both of its surfaces
-        // (through the geometry), the side edge use's edge and its UV trim curve (made on
-        // demand)
-        if (fs != NULL && (eu->GetEdge() == NULL || eu->GetFace() == NULL))
+        // (through the geometry: missing offset surfaces recurse without bound, UB-204),
+        // the side edge use's edge and its UV trim curve (made on demand)
+        if (fs != NULL &&
+            (eu->GetEdge() == NULL || eu->GetFace() == NULL ||
+             (geom->*GeomPeek::offs())[0] == NULL || (geom->*GeomPeek::offs())[1] == NULL))
             return SC_ERR_ARG;
         SmBoolean found = FALSE;
         SmTsectPnt t;
@@ -963,7 +977,25 @@ int32_t run(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         int64_t type = rd.idx();
         if (geom == NULL || geom->GetFilletSolver() == NULL || geom->GetFilletSolver()->GetFilletExecutive() == NULL)
             return SC_ERR_ARG;
-        geom->RecordFilletError((SmFilletErrorType)type, NULL, NULL, NULL, NULL, NULL);
+        SmEdge* filleted_edge = (!m.g.edges.empty() && (type & 1) != 0) ? m.g.edges[0] : NULL;
+        SmFace* target_face = (!m.g.faces.empty() && (type & 2) != 0) ? m.g.faces[0] : NULL;
+        SmFilletEdge* rail = ((type & 4) != 0) ? geom->GetRail(0) : NULL;
+        SmSurface* surf = geom->*GeomPeek::surface();
+        const TCHAR* comment = (type & 1) != 0 ? _T("SmFilletGeom::RecordFilletError") : NULL;
+        geom->RecordFilletError((SmFilletErrorType)type, filleted_edge, target_face, rail, surf, comment);
+        SmFilletErrorInfo* info = m.exec->GetFilletErrorInfo();
+        r.push_back((double)info->GetErrorCode());
+        r.push_back((double)(info->*get(StatusTag())));
+        r.push_back((double)info->m_eEdgeType);
+        r.push_back(ix(info->m_pFilletedEdge == NULL ? -1 : index_of(m.g.edges, (SmEdge*)info->m_pFilletedEdge)));
+        r.push_back(ix(info->m_pSideFace == NULL ? -1 : index_of(m.g.faces, (SmFace*)info->m_pSideFace)));
+        r.push_back((double)info->m_pFilletEdges.GetSize());
+        for (ULONG k = 0; k < info->m_pFilletEdges.GetSize(); ++k)
+            r.push_back(ix(info->m_pFilletEdges[k] == NULL ? -1 : index_of(m.edges, info->m_pFilletEdges[k])));
+        r.push_back((double)info->m_pFilletSurfaces.GetSize());
+        for (ULONG k = 0; k < info->m_pFilletSurfaces.GetSize(); ++k)
+            r.push_back(flg(info->m_pFilletSurfaces[k] != NULL));
+        r.push_back((double)std::strlen(info->m_cComment));
         break;
     }
     default: return SC_ERR_ARG;
