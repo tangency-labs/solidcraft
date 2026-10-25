@@ -11,11 +11,7 @@
 
 use egui::{Color32, Pos2, Stroke, Vec2, vec2};
 
-use super::REACH;
 use crate::theme::Tokens;
-
-/// Radius of a drawn ball handle (pixels).
-const DOT_PX: f32 = 6.0;
 
 /// The handles' core: the icon highlight (white in every theme), so the blue preview they sit on
 /// does not hide them. They carry no meaning, only contrast, so it is the same hot or not.
@@ -32,28 +28,11 @@ fn casing() -> Color32 {
 /// How much wider than its core a casing is (both sides together).
 const CASE: f32 = 1.6;
 
-/// A line in `core`, cased under it so it reads on the preview and on the body alike.
-pub(super) fn cased_line(painter: &egui::Painter, a: Pos2, b: Pos2, w: f32, core: Color32) {
-    painter.line_segment([a, b], Stroke::new(w + CASE, casing()));
-    painter.line_segment([a, b], Stroke::new(w, core));
-}
-
 /// A closed outline in `core`, cased under it.
 pub(super) fn cased_closed(painter: &egui::Painter, pts: &[Pos2], w: f32, core: Color32) {
     for s in [Stroke::new(w + CASE, casing()), Stroke::new(w, core)] {
         painter.add(egui::Shape::closed_line(pts.to_vec(), s));
     }
-}
-
-/// A ball handle: white with the casing. Hot (under the pointer or dragged) it grows a little,
-/// gets a soft halo and an accent edge to say it is live.
-pub(super) fn ball(painter: &egui::Painter, c: Pos2, hot: bool, t: &Tokens) {
-    if hot {
-        painter.circle_filled(c, REACH, t.accent.gamma_multiply(0.14));
-    }
-    let r = if hot { DOT_PX + 1.5 } else { DOT_PX };
-    let edge = if hot { t.accent } else { casing() };
-    painter.circle(c, r, core(hot), Stroke::new(1.5, edge));
 }
 
 /// The move marker's look for a frame, interpolated between its three states so hover and drag
@@ -132,7 +111,106 @@ pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, _t: &T
     painter.circle_filled(c, r, core);
 }
 
-/// The turn knob's angle readout beside the knob at `at`.
+/// The turn ring's look for a frame. `hot` eases 0 (resting) to 1 (pointer over the grip or
+/// turning), `active` 0 to 1 while turning.
+pub(super) struct RingStyle {
+    pub(super) hot: f32,
+    pub(super) active: f32,
+}
+
+/// The ring's size on screen (radius, pixels): fixed, like the move triad's arrows, whatever the
+/// zoom or the feature. It is a control of something on the screen, not a measure of the model.
+pub(super) const RING_PX: f32 = 65.0;
+/// How long the ring takes to open from its grip round the circle, and to fold back (seconds).
+pub(super) const SWEEP_S: f32 = 0.6;
+/// Half of the arc shown at rest and while turning, either side of the grip (degrees).
+const ARC_HALF_DEG: f64 = 50.0;
+/// The ring's line width, its dash and gap along the arc.
+const RING_LINE: f32 = 1.6;
+const RING_DASH: f32 = 4.5;
+const RING_GAP: f32 = 4.5;
+/// The grip: a half-diamond pointing in at the centre, this long and this wide either side; at
+/// rest an open chevron this far outside the ring, sliding in onto it as the ring opens.
+const GRIP_LEN: f32 = 12.0;
+const GRIP_HALF: f32 = 6.0;
+const GRIP_OUT: f32 = 8.0;
+/// Angular step of the arc's polyline (degrees).
+const ARC_STEP_DEG: f64 = 1.5;
+
+/// The turn ring: a circle lying on the face about the move marker's centre, drawn in
+/// perspective. At rest a short dotted arc with the grip, enough to say that something here
+/// turns; pointed at, the full dotted circle opens from the grip both ways round; while turning,
+/// a solid arc around the grip. `at` gives the screen point on the circle at an angle about the
+/// face normal (none when behind the eye); `grip` is the feature's turn, where the grip sits;
+/// `centre` is the marker's screen point, which the grip points at.
+pub(super) fn ring(painter: &egui::Painter, at: &dyn Fn(f64) -> Option<Pos2>, grip: f64, centre: Pos2, s: &RingStyle) {
+    let half = ARC_HALF_DEG + (180.0 - ARC_HALF_DEG) * f64::from(s.hot) * f64::from(1.0 - s.active);
+    let solid = s.active > 0.5;
+    let steps = (2.0 * half / ARC_STEP_DEG).ceil().max(2.0) as usize;
+    let pts: Vec<Pos2> = (0..=steps).filter_map(|i| at(grip - half.to_radians() + 2.0 * half.to_radians() * i as f64 / steps as f64)).collect();
+    let (core, case) = (core(s.hot > 0.5), casing());
+    let pieces: Vec<Vec<Pos2>> = if solid { vec![pts] } else { dashed(&pts, RING_DASH, RING_GAP) };
+    for piece in &pieces {
+        painter.add(egui::Shape::line(piece.clone(), Stroke::new(RING_LINE + CASE, case)));
+    }
+    for piece in &pieces {
+        painter.add(egui::Shape::line(piece.clone(), Stroke::new(RING_LINE, core)));
+    }
+    // The grip: an open chevron outside the ring at rest, a filled half-diamond on it when hot.
+    let Some(g) = at(grip) else { return };
+    let inward = (centre - g).normalized();
+    if !inward.is_finite() {
+        return;
+    }
+    let n = vec2(-inward.y, inward.x);
+    let tip = g - inward * (GRIP_OUT * (1.0 - s.hot));
+    let (c1, c2) = (tip - inward * GRIP_LEN + n * GRIP_HALF, tip - inward * GRIP_LEN - n * GRIP_HALF);
+    if s.hot > 0.01 {
+        painter.add(egui::Shape::convex_polygon(vec![c1, tip, c2], core.gamma_multiply(s.hot), Stroke::NONE));
+    }
+    painter.add(egui::Shape::line(vec![c1, tip, c2], Stroke::new(RING_LINE + CASE, case)));
+    painter.add(egui::Shape::line(vec![c1, tip, c2], Stroke::new(RING_LINE, core)));
+}
+
+/// `pts` cut into dashes of `dash` screen length with `gap` between them, measured along the line.
+fn dashed(pts: &[Pos2], dash: f32, gap: f32) -> Vec<Vec<Pos2>> {
+    let mut out: Vec<Vec<Pos2>> = Vec::new();
+    let mut cur: Vec<Pos2> = Vec::new();
+    // Where we are in the dash cycle: on for `dash`, off for `gap`.
+    let (mut phase, mut on) = (0.0f32, true);
+    for w in pts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let len = (b - a).length();
+        let mut t0 = 0.0f32;
+        while t0 < len {
+            let span = (if on { dash } else { gap }) - phase;
+            let t1 = (t0 + span).min(len);
+            if on {
+                if cur.is_empty() {
+                    cur.push(a + (b - a) * (t0 / len));
+                }
+                cur.push(a + (b - a) * (t1 / len));
+            }
+            if t1 < len || (t1 - t0) >= span {
+                // the piece ended inside this segment (or exactly at its end): switch
+                if on && !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+                on = !on;
+                phase = 0.0;
+            } else {
+                phase += t1 - t0;
+            }
+            t0 = t1;
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// The turn ring's angle readout beside the grip at `at`.
 pub(super) fn angle_label(painter: &egui::Painter, at: Pos2, angle: f64, t: &Tokens) {
     let text = format!("{:.0}°", angle.to_degrees());
     painter.text(at + vec2(12.0, -12.0), egui::Align2::LEFT_CENTER, text, egui::FontId::proportional(t.font_body), t.text);

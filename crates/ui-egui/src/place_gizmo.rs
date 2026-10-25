@@ -5,9 +5,10 @@
 //! Under the pointer its lines grow, it shows the move cursor and a tooltip. While it drags, the
 //! feature's footprint is outlined where the marker is: the solid preview is recomputed off the
 //! window thread and trails the pointer by its boolean, the outline does not. A feature that can
-//! turn in its face also gets a knob past its end; dragging it turns the feature about the face
-//! normal. Nothing runs until OK: the handles edit the open dialog, which the live preview
-//! follows, so a new feature and an Edit Feature behave alike.
+//! turn in its face also gets a ring lying on the face about the same centre, a fixed size on
+//! screen like the move triad's arrows; dragging its grip turns the feature about the face normal.
+//! Nothing runs until OK: the handles edit the open dialog, which the live preview follows, so a
+//! new feature and an Edit Feature behave alike.
 //!
 //! The mechanics live here; each tool that uses them is one file under `place_gizmo/` that gives a
 //! [`Spec`]: where the place is, how a pointer re-places it, the footprint, and the turn if any.
@@ -24,7 +25,7 @@ mod rest;
 mod snap_fit;
 
 use egui::{Pos2, vec2};
-use look::{CrossStyle, GROW_S, angle_label, ball, cased_closed, cased_line, core, crosshair};
+use look::{CrossStyle, GROW_S, RING_PX, RingStyle, SWEEP_S, angle_label, cased_closed, core, crosshair, ring};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::Vec3;
 
@@ -56,11 +57,11 @@ pub(crate) struct Spec {
     pub turn: Option<Turn>,
 }
 
-/// A knob that turns the feature about its face normal.
+/// A ring whose grip turns the feature about its face normal.
 pub(crate) struct Turn {
     pub tip: &'static str,
-    /// How far the feature reaches from its place towards the knob (world): the knob sits a fixed
-    /// screen gap past it. `None` hides the knob (a round Rest has nothing to turn).
+    /// How far the feature reaches from its place along its turn (world); `None` hides the ring
+    /// (a round Rest has nothing to turn). The ring's size does not follow it.
     pub reach: fn(&SolveApp, &Dialog) -> Option<f64>,
     /// The current turn about `n`, from [`axes`]'s x towards its y.
     pub angle: fn(&SolveApp, &Dialog, Vec3) -> f64,
@@ -85,7 +86,13 @@ thread_local! {
 
 /// Is `p` on a placement handle of the open dialog (as drawn last frame)?
 pub(crate) fn contains_pointer(app: &SolveApp, p: Pos2) -> bool {
-    app.dialog.as_ref().is_some_and(|d| spec(app, d).is_some()) && DRAWN.with(|h| h.borrow().iter().any(|c| c.distance(p) <= REACH))
+    app.dialog.as_ref().is_some_and(|d| spec(app, d).is_some()) && drawn_at(p)
+}
+
+/// Is `p` within reach of a handle drawn last frame? For the dialog's own manipulators, which run
+/// before the handles and would otherwise take a press meant for a handle their stem crosses.
+pub(crate) fn drawn_at(p: Pos2) -> bool {
+    DRAWN.with(|h| h.borrow().iter().any(|c| c.distance(p) <= REACH))
 }
 
 /// The tool whose dialog this is, if it has handles.
@@ -110,11 +117,6 @@ pub(crate) fn snaps_to_points(app: &SolveApp, id: &str) -> bool {
 
 /// Reach of a handle around its centre (pixels): wide, so a finger finds it.
 const REACH: f32 = 18.0;
-/// The knob sits this far past the feature's end (pixels).
-const KNOB_GAP_PX: f64 = 28.0;
-/// How far, and how many times at most, the knob slides out from under the value box (pixels).
-const KNOB_SLIDE_PX: f64 = 8.0;
-const KNOB_SLIDE_STEPS: usize = 40;
 /// Points on a round footprint's outline.
 const FOOTPRINT_SEGS: usize = 48;
 
@@ -227,29 +229,20 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         ui.ctx().set_cursor_icon(if dragging { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Move });
     }
 
-    // The knob that turns it.
+    // The ring that turns it: on the face about the same centre, a fixed size on screen.
     let Some(turn) = &sp.turn else { return };
-    let Some(reach) = (turn.reach)(app, d) else { return };
-    // World length of one pixel at this zoom (orthographic views; near enough in perspective).
-    let per_px = 2.0 * app.cam.half_height() / f64::from(proj.rect.height().max(1.0));
+    if (turn.reach)(app, d).is_none() {
+        return;
+    }
     let mut angle = (turn.angle)(app, d, n);
     let (x, y) = axes(n);
-    let at = |a: f64, radius: f64| proj.to_screen(base + (x * a.cos() + y * a.sin()) * radius);
-    // The dialog's value box floats over the view beside the place (seen straight down, its arrow
-    // collapses onto the place and the box sits just right of it) and takes the pointer first, so
-    // a knob under it could not be grabbed. Slide the knob out along its ray until it is clear of
-    // where the box was last frame.
-    let value_box = ui.ctx().memory(|m| m.area_rect(egui::Id::new("sc_canvas_area")));
-    let mut radius = reach + KNOB_GAP_PX * per_px;
-    for _ in 0..KNOB_SLIDE_STEPS {
-        match (value_box, at(angle, radius)) {
-            (Some(b), Some(k)) if b.expand(REACH).contains(k) => radius += KNOB_SLIDE_PX * per_px,
-            _ => break,
-        }
-    }
-    let knob_at = |a: f64| at(a, radius);
-    let Some(mut ks) = knob_at(angle) else { return };
-    let r = ui.interact(area(ks), id("rotate"), egui::Sense::drag()).on_hover_text(crate::i18n::tr_label(turn.tip));
+    // The world radius that makes the ring RING_PX across its least foreshortened face direction
+    // (the larger singular value of the projected x, y pair), so it keeps its size as the view
+    // turns and does not change while the feature turns.
+    let Some(radius) = ring_radius(proj, base, x, y) else { return };
+    let at = |a: f64| proj.to_screen(base + (x * a.cos() + y * a.sin()) * radius);
+    let Some(mut gs) = at(angle) else { return };
+    let r = ui.interact(area(gs), id("rotate"), egui::Sense::drag());
     if r.dragged()
         && let Some(p) = r.interact_pointer_pos()
     {
@@ -261,18 +254,51 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         if let Some(raw) = raw.filter(|a| a.is_finite()) {
             angle = (turn.set)(app, d, n, raw, crate::tool_modifiers::manipulator_free());
             d.error = None;
-            if let Some(k) = knob_at(angle) {
-                ks = k;
+            if let Some(g) = at(angle) {
+                gs = g;
             }
         }
     }
-    crate::scenario::publish_handle(&format!("{}:rotate", sp.name), ks);
-    DRAWN.with(|h| h.borrow_mut().push(ks));
-    let hot = r.hovered() || r.dragged();
-    cased_line(painter, bs, ks, 1.5, core(hot));
-    ball(painter, ks, hot, &t);
-    if hot {
-        ui.ctx().set_cursor_icon(if r.dragged() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
-        angle_label(painter, ks, angle, &t);
+    crate::scenario::publish_handle(&format!("{}:rotate", sp.name), gs);
+    DRAWN.with(|h| h.borrow_mut().push(gs));
+    let (hovered, dragging) = (r.hovered(), r.dragged());
+    let style = RingStyle {
+        hot: ui.ctx().animate_bool_with_time(id("ring_hot"), hovered || dragging, SWEEP_S),
+        active: ui.ctx().animate_bool_with_time(id("ring_active"), dragging, GROW_S),
+    };
+    ring(painter, &at, angle, bs, &style);
+    if hovered && !dragging {
+        r.clone().on_hover_text(crate::i18n::tr_label(turn.tip));
     }
+    if hovered || dragging {
+        ui.ctx().set_cursor_icon(if dragging { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
+    }
+    if dragging {
+        angle_label(painter, gs, angle, &t);
+    }
+}
+
+/// The world radius of a circle about `base` across the face spanned by `x` and `y` that is
+/// [`RING_PX`] on screen along the face direction the view foreshortens least.
+fn ring_radius(proj: &Proj, base: Vec3, x: Vec3, y: Vec3) -> Option<f64> {
+    let o = proj.to_screen(base)?;
+    let (a, b) = (proj.to_screen(base + x)? - o, proj.to_screen(base + y)? - o);
+    let (p, q, r) = (f64::from(a.length_sq()), f64::from(b.length_sq()), f64::from(a.dot(b)));
+    let px_per_mm = ((p + q + ((p - q).powi(2) + 4.0 * r * r).sqrt()) / 2.0).sqrt();
+    (px_per_mm > 1e-6).then(|| f64::from(RING_PX) / px_per_mm)
+}
+
+/// Where the floating value box goes so it does not cover a placement handle: `at` as the caller
+/// wants it, or, with a handle's centre drawn under it last frame, the same box to the left of
+/// `anchor` (the arrow's tip) or above it, whichever is clear first. Seen straight down the arrow
+/// collapses onto the place and the box sits just right of it, where the ring's grip often is.
+pub(crate) fn yield_box(ui: &egui::Ui, anchor: Pos2, at: Pos2) -> Pos2 {
+    let Some(size) = ui.ctx().memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).map(|r| r.size()) else { return at };
+    let covers = |p: Pos2| DRAWN.with(|h| h.borrow().iter().any(|c| egui::Rect::from_min_size(p, size).expand(4.0).contains(*c)));
+    if !covers(at) {
+        return at;
+    }
+    let left = Pos2::new(anchor.x - (at.x - anchor.x) - size.x, at.y);
+    let above = Pos2::new(at.x, anchor.y - 14.0 - size.y);
+    [left, above].into_iter().find(|p| !covers(*p)).unwrap_or(at)
 }

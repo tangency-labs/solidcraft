@@ -664,7 +664,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             if clear == 0.0 {
                 painter.circle(bs, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
             }
-            box_at = ts + vec2(14.0, -12.0);
+            box_at = crate::place_gizmo::yield_box(ui, ts, ts + vec2(14.0, -12.0));
         }
     }
     let note = crate::drag_extrude::step_note(app);
@@ -802,9 +802,16 @@ fn drag_arrow(
     // Where the drawn arrow starts: the base, or past the cleared marker.
     let start = |ts: Pos2| if clear_px > 0.0 && (ts - bs).length() > clear_px { bs + (ts - bs).normalized() * clear_px } else { bs };
     let at_tip = egui::Rect::from_center_size(ts, vec2(20.0, 20.0));
-    // Over the stem, the arrow answers where the pointer is.
-    let on_stem = ui.input(|i| i.pointer.hover_pos()).filter(|p| !at_tip.contains(*p) && to_segment(*p, start(ts), ts) <= ARROW_STEM_REACH);
-    let area = on_stem.map_or(at_tip, |p| egui::Rect::from_center_size(p, vec2(2.0 * ARROW_STEM_REACH, 2.0 * ARROW_STEM_REACH)));
+    // Over the stem, the arrow answers where the pointer is. A placement handle the arrow crosses
+    // (the turn ring's grip) keeps the pointer: the arrow then answers nowhere.
+    let hover = ui.input(|i| i.pointer.hover_pos());
+    let on_handle = hover.is_some_and(crate::place_gizmo::drawn_at);
+    let on_stem = hover.filter(|p| !on_handle && !at_tip.contains(*p) && to_segment(*p, start(ts), ts) <= ARROW_STEM_REACH);
+    let area = if on_handle {
+        egui::Rect::NOTHING
+    } else {
+        on_stem.map_or(at_tip, |p| egui::Rect::from_center_size(p, vec2(2.0 * ARROW_STEM_REACH, 2.0 * ARROW_STEM_REACH)))
+    };
     let r = ui.interact(area, id, egui::Sense::drag());
     // How far along the arrow the press was short of its end: the drag keeps that gap.
     let grab = id.with("stem grab");
