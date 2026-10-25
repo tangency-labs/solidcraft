@@ -176,28 +176,6 @@ const API_TEST: &str = r#"(async () => {
     check((await app.inspect()).bodies.length === 1, 'API still works after rejected requests');
     const ui = await app.request('ui.inspect');
     check(ui.home === false && ui.viewport[2] > 600, 'model viewport is visible');
-    // #3431: a native Instant compiles for wasm but panics when exporting in the browser.
-    // Exercise both the command timer and the projection/occlusion timers on the real target.
-    // A wasm abort stops the frame loop before it can settle the command's reply.
-    const crashed = new Promise((_, reject) => {
-        window.addEventListener('error', event => reject(event.error || new Error(event.message)), {once: true});
-    });
-    for (const hidden of ['omit', 'dashed']) {
-        const drawing = await Promise.race([app.execute('file.export_view_dxf', {camera: ui.camera, hidden}), crashed]);
-        check(drawing.units === 'mm' && drawing.visible > 0, 'view export contains visible edges in mm');
-        check(drawing.dxf.includes('ENTITIES') && drawing.dxf.includes('VISIBLE'), 'view export returns a DXF drawing');
-        check(drawing.dxf.includes('HIDDEN') === (hidden === 'dashed'), 'view export respects the hidden-edge option');
-        for (const stage of ['prepare_ms', 'projection_ms', 'occlusion_ms']) {
-            check(Number.isFinite(drawing.stats[stage]) && drawing.stats[stage] >= 0, stage + ' is a valid browser timing');
-        }
-    }
-    check((await app.inspect()).bodies.length === 1, 'view export preserves the document');
-    await app.request('ui.start', {command: 'file.export_view_dxf'});
-    // Let the new dialog finish its initial layout before taking the button's position.
-    await app.request('ui.inspect');
-    await app.request('ui.inspect');
-    const [x, y] = await app.request('ui.at', {handle: 'dialog:Export DXF…'});
-    await app.request('ui.click', {x, y});
     // Browser files exist only in the VFS: native filesystem metadata cannot find them.
     await app.execute('file.save', {path: '/upload/linked-part.solidcraft'});
     await app.execute('file.new');
@@ -220,6 +198,34 @@ const API_TEST: &str = r#"(async () => {
     check((await app.inspect()).bodies[0].name === 'Browser API box', 'source design is active');
     await app.request('ui.documents', {action: 'switch', index: 0});
     check((await app.execute('component.links')).links[0].component === linked.component, 'assembly remains in its tab');
+    // Keep the export click last: switching designs before its UI event finishes can cancel
+    // the export or change its download name. Restore the original standalone-box fixture.
+    await app.execute('file.new', {name: 'Untitled'});
+    await app.execute('solid.box', {length: 30, width: 20, height: 10, body_name: 'Browser API box'});
+    await app.request('ui.camera', {fit: true});
+    const exportUi = await app.request('ui.inspect');
+    // #3431: a native Instant compiles for wasm but panics when exporting in the browser.
+    // Exercise both the command timer and the projection/occlusion timers on the real target.
+    // A wasm abort stops the frame loop before it can settle the command's reply.
+    const crashed = new Promise((_, reject) => {
+        window.addEventListener('error', event => reject(event.error || new Error(event.message)), {once: true});
+    });
+    for (const hidden of ['omit', 'dashed']) {
+        const drawing = await Promise.race([app.execute('file.export_view_dxf', {camera: exportUi.camera, hidden}), crashed]);
+        check(drawing.units === 'mm' && drawing.visible > 0, 'view export contains visible edges in mm');
+        check(drawing.dxf.includes('ENTITIES') && drawing.dxf.includes('VISIBLE'), 'view export returns a DXF drawing');
+        check(drawing.dxf.includes('HIDDEN') === (hidden === 'dashed'), 'view export respects the hidden-edge option');
+        for (const stage of ['prepare_ms', 'projection_ms', 'occlusion_ms']) {
+            check(Number.isFinite(drawing.stats[stage]) && drawing.stats[stage] >= 0, stage + ' is a valid browser timing');
+        }
+    }
+    check((await app.inspect()).bodies.length === 1, 'view export preserves the document');
+    await app.request('ui.start', {command: 'file.export_view_dxf'});
+    // Let the new dialog finish its initial layout before taking the button's position.
+    await app.request('ui.inspect');
+    await app.request('ui.inspect');
+    const [x, y] = await app.request('ui.at', {handle: 'dialog:Export DXF…'});
+    await app.request('ui.click', {x, y});
     return {commands: 'discovered', bodies: [0, 1, 0, 1], errors: 'rejected', queue: '256 completed, 1 rejected',
         dxf: 'omit and dashed exported; dialog download checked', linked: 'source opened from browser storage'};
 })()"#;
