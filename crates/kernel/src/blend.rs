@@ -388,7 +388,10 @@ pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, fl
 /// tangentially (within 0.5° at a shared vertex), until no more do. Each pick takes its edge as a
 /// blend does (a pick at a vertex where a seam meets a rim takes the rim). An edge only one face
 /// uses ends a chain, and so do a seam and a smooth edge (its two faces meet tangentially, within
-/// 0.5°): they have no corner to round. Picks that find no edge are refused.
+/// 0.5°): they have no corner to round. A chain does not run on into an edge of the other
+/// convexity (a boss's concave base running on tangentially as the convex rim of its overhang):
+/// a round cannot pass from one side of the faces to the other, so it ends at that vertex.
+/// Picks that find no edge are refused.
 pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
     /// Edges meeting at an angle below this continue one another.
     const TANGENT_DEGREES: f64 = 0.5;
@@ -423,6 +426,23 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
             _ => false,
         }
     };
+    // Whether edge `e` is convex at its end `v` (its faces meet at less than 180° inside the
+    // body): the direction into its second face, square to it, points against its first face's
+    // outward normal. A face lies to the left of its loop seen from its surface's natural normal.
+    // None for an edge without exactly two uses, or where a normal cannot be found.
+    let convex = |e: usize, v: u32| -> Option<bool> {
+        let edge = rec.rec.edges.get(e)?;
+        let [ua, ub] = edge.uses.as_slice() else { return None };
+        let forward_b = match rec.rec.faces.get(ub.face as usize)?.loops.get(ub.r#loop as usize)? {
+            Loop::Edges { edges } => edges.get(ub.position as usize)?.forward,
+            Loop::Vertex { .. } => return None,
+        };
+        let p = rec.point(v)?;
+        let along = rec.tangent(e, edge.vertices[0] != v)?;
+        let natural_b = rec.normal_at(ub.face as usize, p, accept)? * rec.side(ub.face as usize)?;
+        let into_b = natural_b.cross(if forward_b { along } else { along * -1.0 });
+        Some(into_b.dot(rec.normal_at(ua.face as usize, p, accept)?) < 0.0)
+    };
     let mut k = 0;
     while k < chain.len() {
         let Some(&e) = chain.get(k) else { break };
@@ -435,7 +455,8 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
                 if passed_over || chain.contains(&f) || other.uses.len() < 2 || !other.vertices.contains(&v) || smooth(f) {
                     continue;
                 }
-                if leaving(f, v).is_some_and(|g| d.dot(g) < -cos) {
+                let turns_over = matches!((convex(e, v), convex(f, v)), (Some(a), Some(b)) if a != b);
+                if !turns_over && leaving(f, v).is_some_and(|g| d.dot(g) < -cos) {
                     chain.push(f);
                 }
             }
