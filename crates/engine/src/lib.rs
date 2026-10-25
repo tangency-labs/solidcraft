@@ -20,6 +20,7 @@ pub mod easyprint;
 pub mod frames;
 pub mod fuzz;
 pub mod licences;
+mod mesh_lines;
 pub mod occurrences;
 pub mod panels;
 pub mod params;
