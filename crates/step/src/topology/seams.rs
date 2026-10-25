@@ -167,6 +167,7 @@ impl Builder<'_, '_> {
             if periods.iter().all(Option::is_none) {
                 continue;
             }
+            let found = axis(&surface).or_else(|| spline_axis(&surface, &eval));
             let mut up = Vec::new();
             let mut down = Vec::new();
             for (li, l) in face.loops.iter().enumerate() {
@@ -174,6 +175,12 @@ impl Builder<'_, '_> {
                 let w = self.winding(&eval, es, periods)?;
                 if w[1] != 0 || w[0].abs() > 1 {
                     return Err(format!("face #{}: {}", face.step, unsupported("a loop winding around a surface more than once or in v")));
+                }
+                // A loop through a pole turns once round the axis and closes there, where every
+                // angle is one point: a cone's base circle with its seam out to the apex and
+                // back. It has its seam; another one doubled it, a sliver the face crossed.
+                if w[0] != 0 && found.as_ref().is_some_and(|ax| self.through_pole(es, ax)) {
+                    continue;
                 }
                 match w[0] {
                     1 => up.push(li),
@@ -185,7 +192,7 @@ impl Builder<'_, '_> {
                 continue;
             }
             let step = face.step;
-            let Some(ax) = axis(&surface).or_else(|| spline_axis(&surface, &eval)) else {
+            let Some(ax) = found else {
                 return Err(format!("face #{step}: {}", unsupported("a face winding around a torus or a spline closed in v without a seam edge")));
             };
             match (up.as_slice(), down.as_slice()) {
@@ -224,6 +231,15 @@ impl Builder<'_, '_> {
             }
         }
         Ok(total.map(|x| x.round() as i64))
+    }
+
+    /// A vertex of the loop is on one of the axis's poles (within its tolerance).
+    fn through_pole(&self, es: &[(u32, bool)], ax: &Axis) -> bool {
+        es.iter().any(|&u| {
+            self.start(u).ok().and_then(|v| self.vertices.get(v as usize)).is_some_and(|x| {
+                ax.poles.iter().flatten().any(|p| Vec3::from(x.point).dist(*p) <= self.tol.max(x.tolerance))
+            })
+        })
     }
 
     /// The vertex where use `k` of a loop starts.
