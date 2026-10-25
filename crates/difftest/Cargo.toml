@@ -19,6 +19,8 @@ solidcore-ffi = { path = "../solidcore-ffi" }
 ssi = { path = "../ssi" }
 # The `solidcore-ssi` engine of --ssi-corpus (`ssi` behind the port's inputs and output).
 solidcore-ssi = { path = "../solidcore-ssi" }
+# The clean-room STEP importer of --step-corpus.
+step-import = { path = "../step-import" }
 serde = { version = "1", features = ["derive"] }
 # float_roundtrip: parse decimals exactly (correctly rounded, as C strtod), not to within 1 ULP
 serde_json = { version = "1", features = ["float_roundtrip"] }

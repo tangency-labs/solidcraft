@@ -25,6 +25,7 @@ pub mod rng;
 pub mod runner;
 pub mod solidcraft;
 pub mod ssi;
+pub mod step;
 pub mod util;
 
 pub use case::{Case, CaseContext, CaseSource};

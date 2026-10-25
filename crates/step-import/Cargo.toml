@@ -1,0 +1,12 @@
+[package]
+name = "step-import"
+description = "Clean-room ISO 10303-21 (STEP) reader mapping the AP203/AP214 B-rep subset to a neutral plain-data model"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

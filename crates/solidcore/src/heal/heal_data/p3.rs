@@ -1282,13 +1282,36 @@ fn move_seam<O: LoopObject>(
     });
     (res.map(|_| ()), changes)
 }
+/// Classification geometry that resolves topology handles to the healed B-rep and
+/// nothing else: `HasDeadTopologyPointObject` only asks where a vertex, edge or face
+/// point classification's object lives (`SmBrep::IsLiveTopologyMember`).
+struct BrepTopology<'a>(&'a Brep);
+
+impl<O: LoopObject> ClassGeometry<O> for BrepTopology<'_> {
+    fn curve(&self, _: O) -> Option<&Curve> {
+        None
+    }
+    fn surface(&self, _: O) -> Option<&Surface> {
+        None
+    }
+    fn volume(&self, _: O) -> Option<&Volume> {
+        None
+    }
+    fn point(&self, _: O) -> Option<Point3> {
+        None
+    }
+    fn topology_entity(&self, o: O) -> Option<(&Brep, EntityRef)> {
+        o.as_topology().map(|e| (self.0, e))
+    }
+}
+
 fn classification_has_dead_topology<O: LoopObject>(
     b: &Brep,
     class: Option<&CurveClassification<O>>,
 ) -> Result<bool> {
     match class {
         None => Ok(false),
-        Some(class) => class.has_dead_topology_point_object(&NoGeometry, Some(b)),
+        Some(class) => class.has_dead_topology_point_object(&BrepTopology(b), Some(b)),
     }
 }
 fn classified_edges<O: LoopObject>(class: Option<&CurveClassification<O>>) -> Result<Vec<EdgeId>> {

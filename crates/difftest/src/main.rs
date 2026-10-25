@@ -33,7 +33,8 @@ const USAGE: &str = "usage: difftest [--unit <id>]... [--green] [--all] [--list]
        [--baseline <dir>] [--compare-reports <dir>] [--digest-dir <dir> [--digest-debug]]
        difftest --unit <id>... --fuzz N [--fuzz-out <dir>] [--seeds N] [--filter <substr>]
        difftest --ssi-corpus [--tol 1e-6|default] [--jobs N] [--report-dir <dir>] [--no-report] [case-glob]
-       difftest --solidcraft-cases [--report-dir <dir>] [--no-report] [case-glob]";
+       difftest --solidcraft-cases [--report-dir <dir>] [--no-report] [case-glob]
+       difftest --step-corpus [--jobs N] [--report-dir <dir>] [--no-report] [file-glob]";
 
 /// Default child processes of `--ssi-corpus`.
 const DEFAULT_SSI_JOBS: usize = 2;
@@ -65,6 +66,7 @@ struct Args {
     compare_reports: Option<PathBuf>,
     ssi_corpus: bool,
     solidcraft_cases: bool,
+    step_corpus: bool,
     tol: Option<String>,
     jobs: Option<usize>,
     glob: Option<String>,
@@ -100,6 +102,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "--ssi-corpus" => a.ssi_corpus = true,
             "--solidcraft-cases" => a.solidcraft_cases = true,
+            "--step-corpus" => a.step_corpus = true,
             "--tol" => a.tol = Some(val("--tol")?),
             "--jobs" | "-j" => {
                 let v = val("--jobs")?;
@@ -118,7 +121,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "-h" | "--help" => return Err(String::new()),
             other
-                if (a.ssi_corpus || a.solidcraft_cases)
+                if (a.ssi_corpus || a.solidcraft_cases || a.step_corpus)
                     && !other.starts_with('-')
                     && a.glob.is_none() =>
             {
@@ -138,6 +141,10 @@ fn main() -> ExitCode {
     }
     if raw.first().map(String::as_str) == Some("--ssi-case") {
         return difftest::ssi::run_child(raw.get(1..).unwrap_or(&[]));
+    }
+    // Child of `--step-corpus`: one kernel on one body (see `difftest::step::run_child`).
+    if raw.first().map(String::as_str) == Some("--step-case") {
+        return difftest::step::run_child(raw.get(1..).unwrap_or(&[]));
     }
     // Child of `--fuzz`: one batch of fuzz cases (see `difftest::fuzz::run_child`).
     if raw.first().map(String::as_str) == Some("--fuzz-exec") {
@@ -169,10 +176,22 @@ fn main() -> ExitCode {
             || args.digest_dir.is_some()
             || args.fuzz.is_some()
             || args.ssi_corpus
-            || args.solidcraft_cases)
+            || args.solidcraft_cases
+            || args.step_corpus)
     {
         eprintln!("difftest: --baseline requires an unfiltered comparison run");
         return ExitCode::from(2);
+    }
+
+    // Without the C++ kernel it builds the Rust side alone.
+    if args.step_corpus {
+        let opts = difftest::step::CorpusOptions {
+            glob: args.glob.clone(),
+            jobs: args.jobs.unwrap_or(DEFAULT_SSI_JOBS).max(1),
+            report_dir: args.report_dir.clone(),
+            no_report: args.no_report,
+        };
+        return difftest::step::run_corpus(&root, &opts);
     }
 
     if args.solidcraft_cases {
