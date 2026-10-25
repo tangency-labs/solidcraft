@@ -257,11 +257,17 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "Ollama", base_url: "http://localhost:11434/v1" },
     ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
     ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
+    ApiPreset { name: "DeepSeek", base_url: "https://api.deepseek.com" },
+    ApiPreset { name: "Qwen", base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" },
 ];
 
 /// Anthropic-compatible endpoints people use. The base URL is the one their documentation calls
 /// `ANTHROPIC_BASE_URL`: the `/v1` is added where needed.
-pub const ANTHROPIC_PRESETS: &[ApiPreset] = &[ApiPreset { name: "Anthropic", base_url: "https://api.anthropic.com/v1" }];
+pub const ANTHROPIC_PRESETS: &[ApiPreset] = &[
+    ApiPreset { name: "Anthropic", base_url: "https://api.anthropic.com/v1" },
+    ApiPreset { name: "DeepSeek", base_url: "https://api.deepseek.com/anthropic" },
+    ApiPreset { name: "Qwen", base_url: "https://dashscope-intl.aliyuncs.com/apps/anthropic" },
+];
 
 /// The presets offered for an endpoint protocol.
 pub fn presets(protocol: Protocol) -> &'static [ApiPreset] {
@@ -347,6 +353,12 @@ mod tests {
         assert_eq!(Kind::Anthropic.id(), "anthropic");
         assert!(presets(Protocol::OpenAi).iter().all(|p| !p.name.is_empty() && p.base_url.starts_with("http")));
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
+        for name in ["DeepSeek", "Qwen"] {
+            assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == name), "OpenAI-compatible preset for {name}");
+            assert!(presets(Protocol::Anthropic).iter().any(|p| p.name == name), "Anthropic-compatible preset for {name}");
+        }
+        assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.deepseek.com/anthropic"));
+        assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://dashscope-intl.aliyuncs.com/apps/anthropic"));
     }
 
     #[test]
