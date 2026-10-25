@@ -65,8 +65,10 @@
 //!   interval before storing its classification point.
 //! - **Lazy NURB.** Upstream's `const` methods make a missing NURB through
 //!   `GetOrCreateGwNurbPointer`; the `&self` methods here cannot. The parameter
-//!   conversions and `DropPointFast` return `SM_ERR` without a NURB (call
+//!   conversions return `SM_ERR` without a NURB (call
 //!   [`SurfOfExtrusion::make_nurb`] first) instead of reading a `(0, 0, 0, 0)` domain;
+//!   `DropPointFast` solves on an evaluation copy with the NURB made, as upstream's
+//!   lazy `GetNaturalUVDomain` would;
 //!   [`SurfOfExtrusion::gen_dir_param_extent`] reads the NURB as it is (an empty
 //!   interval without one). `Reparameterize` and a non-identity `Transform` make it.
 //!   Inherited `Surface` evaluation and iso-curve queries use a temporary, bounded
@@ -1390,9 +1392,10 @@ impl SurfOfExtrusion {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for any other orientation (the caller then drops generally) and
-    /// without NURB (upstream makes it); `SM_ERR_NULL_POINTER` without generator; those
-    /// of the generator's solve and the evaluations.
+    /// `SM_ERR` for any other orientation (the caller then drops generally);
+    /// `SM_ERR_NULL_POINTER` without generator; those of [`Self::make_nurb`] (on an
+    /// evaluation copy when the NURB is missing), the generator's solve and the
+    /// evaluations.
     #[allow(clippy::too_many_arguments)] // upstream's DropPointFast signature
     pub fn drop_point_fast<O: SolutionObject>(
         &self,
@@ -1409,6 +1412,27 @@ impl SurfOfExtrusion {
         // return SM_ERR when this function can't compute a solution.
         if self.orientation != CurveOrientType::Perpendicular {
             return Err(SolidError::sm_err(OP_DROP));
+        }
+
+        // upstream's GetNaturalUVDomain makes a missing NURB (GetOrCreateGwNurbPointer);
+        // solve on an evaluation copy that has it, as the inherited queries do
+        if self.base.gw_nurb().is_none() {
+            let mut copy = self.clone_for_evaluation(0)?;
+            copy.make_nurb(k)?;
+            if copy.base.gw_nurb().is_none() {
+                return Err(SolidError::sm_err(OP_DROP));
+            }
+            return copy.drop_point_fast(
+                k,
+                uv_domain,
+                op,
+                test_point,
+                in_pointing_vector,
+                dist_tol,
+                target_distance,
+                requested,
+                this,
+            );
         }
 
         // init output
