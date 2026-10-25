@@ -1,0 +1,1 @@
+| docs/book/src/guide/images/cloud-saves-settings.png | SolidCraft contributors | actual SolidCraft 0.40.0 desktop screenshot of the repository table with two independent local repositories; isolated profile and public-safe examples | MIT OR Apache-2.0 |

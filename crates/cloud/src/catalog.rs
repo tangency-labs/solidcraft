@@ -16,6 +16,9 @@ pub struct CachedEntry {
     /// does not establish publication.
     #[serde(default)]
     pub confirmed: bool,
+    /// A newer repository head was observed; retain this copy until it is pulled.
+    #[serde(default)]
+    pub outdated: bool,
     #[serde(default)]
     pub conflict: bool,
     #[serde(flatten)]
@@ -24,9 +27,21 @@ pub struct CachedEntry {
 
 impl CachedEntry {
     pub fn new(save: PendingSave, destination: Destination, revision: Option<String>, confirmed: bool) -> Result<Self> {
-        let entry = Self { format: FORMAT.into(), save, destination, revision, confirmed, conflict: false, extra: BTreeMap::new() };
+        let entry = Self { format: FORMAT.into(), save, destination, revision, confirmed, outdated: false, conflict: false, extra: BTreeMap::new() };
         entry.write()?;
         Ok(entry)
+    }
+    /// Mark only the head that was actually compared, preserving a concurrent save/pull.
+    pub fn mark_outdated(&mut self, observed: &StoredDesign) -> Result<bool> {
+        if self.destination != observed.destination
+            || self.revision != observed.revision
+            || self.save.manifest.document_hash != observed.document_hash
+            || manifest_digest(&self.save.manifest)? != observed.manifest_hash
+        {
+            return Ok(false);
+        }
+        self.outdated = true;
+        Ok(true)
     }
     pub fn read(text: &str) -> Result<Self> {
         if text.len() > crate::MAX_MANIFEST_BYTES {
@@ -81,17 +96,26 @@ pub struct StoredDesign {
     pub manifest_hash: String,
     pub phase: Phase,
     pub conflict: bool,
+    #[serde(default)]
+    pub outdated: bool,
     /// Competing queued tips. The caller may open one explicitly without discarding any.
     #[serde(default)]
     pub local_revisions: Vec<LocalRevision>,
 }
 impl StoredDesign {
+    pub fn matches_manifest(&self, manifest: &Manifest) -> Result<bool> {
+        Ok(self.document_hash == manifest.document_hash
+            && self.manifest_hash == manifest_digest(manifest)?
+            && self.revision.as_deref() == crate::revision(manifest))
+    }
+
     pub fn validate(&self, connection: &str) -> Result<()> {
         self.destination.validate()?;
         if self.destination.connection != connection
             || !hash(&self.document_hash)
             || !hash(&self.manifest_hash)
             || !matches!(self.phase, Phase::Ready | Phase::SavedLocally | Phase::Synced | Phase::Failed)
+            || (self.outdated && self.phase != Phase::Ready)
             || invalid_revision(&self.revision)
             || self.local_revisions.len() > 10_000
             || self
@@ -123,7 +147,8 @@ pub fn stored_designs(cached: Vec<CachedEntry>, pending: Vec<PendingSave>) -> Re
                 revision: entry.revision,
                 document_hash: entry.save.manifest.document_hash,
                 manifest_hash,
-                phase: if entry.confirmed { Phase::Synced } else { Phase::Ready },
+                phase: if entry.confirmed && !entry.outdated { Phase::Synced } else { Phase::Ready },
+                outdated: entry.outdated,
                 conflict: entry.conflict,
                 local_revisions: Vec::new(),
             },
@@ -155,6 +180,7 @@ pub fn stored_designs(cached: Vec<CachedEntry>, pending: Vec<PendingSave>) -> Re
                 manifest_hash: manifest_digest(&save.manifest)?,
                 phase: if *count == 1 { Phase::SavedLocally } else { Phase::Failed },
                 conflict: false,
+                outdated: false,
                 local_revisions,
             },
         );
@@ -209,6 +235,29 @@ mod tests {
         value["save"] = serde_json::Value::Null;
         assert!(matches!(CachedEntry::read(&value.to_string()), Err(Error::UpgradeRequired(_))));
     }
+    #[test]
+    fn outdated_heads_survive_restart_without_hiding_local_work_or_newer_pulls() {
+        let first = save("one", None);
+        let mut cache = CachedEntry::new(first.clone(), first.destination.clone(), Some(first.id.clone()), true).unwrap();
+        let observed = stored_designs(vec![cache.clone()], vec![]).unwrap().remove(0);
+        assert!(cache.mark_outdated(&observed).unwrap());
+        let cache = CachedEntry::read(&cache.write().unwrap()).unwrap();
+        let stale = stored_designs(vec![cache.clone()], vec![]).unwrap();
+        assert!(stale[0].outdated);
+        assert_eq!(stale[0].phase, Phase::Ready);
+        stale[0].validate(&first.connection.id).unwrap();
+        let child = save("local work", Some(first.id.clone()));
+        let local = stored_designs(vec![cache], vec![child.clone()]).unwrap();
+        assert!(!local[0].outdated);
+        assert_eq!(local[0].phase, Phase::SavedLocally);
+        let mut newer = CachedEntry::new(child.clone(), child.destination.clone(), Some(child.id), true).unwrap();
+        assert!(!newer.mark_outdated(&observed).unwrap());
+        assert!(!newer.outdated);
+        let mut legacy = serde_json::to_value(newer).unwrap();
+        legacy.as_object_mut().unwrap().remove("outdated");
+        assert!(!CachedEntry::read(&legacy.to_string()).unwrap().outdated);
+    }
+
     #[test]
     fn durable_heads_distinguish_read_only_confirmed_queued_and_competing_captures() {
         let first = save("one", None);

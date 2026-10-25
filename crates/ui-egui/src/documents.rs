@@ -3002,6 +3002,17 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let child = app.view_windows.is_child();
     let info = if child { vec![(app.session.doc.name.clone(), app.session.is_dirty())] } else { tabs_info(app) };
     let paths = if child { vec![app.session.path.clone()] } else { tab_paths(app) };
+    // A design saved to a cloud project shows its synchronization state in place of the file's.
+    let cloud: Vec<_> = if child {
+        vec![crate::cloud_browser::tabs::indicator(app, &app.session)]
+    } else {
+        (0..info.len())
+            .map(|index| {
+                let session = app.docs.slots.get(index).and_then(Option::as_ref).map_or(&app.session, |slot| &slot.session);
+                crate::cloud_browser::tabs::indicator(app, session)
+            })
+            .collect()
+    };
     let n = info.len();
     let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     let names: Vec<String> = info.iter().map(|(name, _)| locale.given_name(name)).collect();
@@ -3011,7 +3022,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .iter()
         .zip(&paths)
         .zip(&security)
-        .map(|(((_, dirty), path), security)| tab_place(path.as_deref(), *dirty, security.as_deref()))
+        .enumerate()
+        .map(|(index, (((_, dirty), path), security))| {
+            cloud
+                .get(index)
+                .and_then(Option::as_ref)
+                .map_or_else(|| tab_place(path.as_deref(), *dirty, security.as_deref()), |indicator| indicator.tooltip.clone())
+        })
         .collect();
     let selected = if child || app.docs.slots.is_empty() { 0 } else { app.docs.active };
     let mut rename = app.menu.rename.take();
@@ -3129,11 +3146,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .zip(&places)
                 .zip(&badges)
                 .zip(&view_tabs)
-                .map(|(((((list_name, dirty), name), place), security), views)| crate::app_bar::DocTab {
+                .enumerate()
+                .map(|(index, (((((list_name, dirty), name), place), security), views))| crate::app_bar::DocTab {
                     name,
                     list_name,
                     dirty: *dirty,
                     place,
+                    status: cloud.get(index).and_then(Option::as_ref).map(|indicator| indicator.status),
                     security: *security,
                     views,
                 })

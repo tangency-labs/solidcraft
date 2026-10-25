@@ -9,6 +9,7 @@ use solidcraft_cloud::{
 #[derive(Default)]
 pub(crate) struct Wizard {
     staged: bool,
+    adding: bool,
     repository: String,
     token: String,
     candidate: Option<Connection>,
@@ -24,14 +25,30 @@ enum Pending {
 
 pub(crate) fn open(app: &mut SolveApp) {
     if app.cloud.setup.is_none() {
-        app.cloud.setup =
-            Some(Wizard { staged: app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_CLOUD, ..Default::default() });
+        let connections = &app.session.cloud_settings().connections;
+        let repository = connections
+            .iter()
+            .find(|c| c.provider == "github")
+            .and_then(|c| c.repository.split_once('/'))
+            .and_then(|(owner, _)| {
+                (2..=130)
+                    .map(|i| format!("{owner}/solidcraft-designs-{i}"))
+                    .find(|name| !connections.iter().any(|c| c.repository.eq_ignore_ascii_case(name)))
+            })
+            .unwrap_or_default();
+        app.cloud.setup = Some(Wizard {
+            staged: app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_CLOUD,
+            adding: !connections.is_empty(),
+            repository,
+            ..Default::default()
+        });
     }
 }
 
 pub(crate) fn prefill(app: &mut SolveApp, connection: Connection) {
     if let Some(wizard) = &mut app.cloud.setup {
         wizard.repository = connection.repository.clone();
+        wizard.adding = false;
         wizard.candidate = Some(connection);
     }
 }
@@ -78,9 +95,13 @@ fn poll(app: &mut SolveApp, wizard: &mut Wizard) -> Result<bool, String> {
             match status.phase {
                 Phase::Ready | Phase::Synced => {
                     if applying {
+                        if let Some(connection) = &wizard.candidate {
+                            crate::cloud_browser::select(app, &connection.id);
+                        }
                         return Ok(true);
                     }
                     let connection: Connection = serde_json::from_value(status.result.ok_or("setup result missing")?).map_err(|e| e.to_string())?;
+                    wizard.candidate = Some(connection.clone());
                     if wizard.staged {
                         crate::cloud_settings::stage(app, connection)?;
                         return Ok(true);
@@ -128,20 +149,31 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .show(ctx, valid, |ui| {
             ui_kit::text(ui, tr("cloud.setup_hint"), ui_kit::Text::Inline);
             ui.add_enabled_ui(!busy, |ui| {
-                ui.hyperlink_to(tr("cloud.create_repo"), solidcraft_cloud::github_setup().create_repository_url());
-                if wizard.repository.trim().is_empty() {
-                    ui_kit::text(ui, tr("cloud.repository_automatic"), ui_kit::Text::Hint("cloud_repository_automatic"));
-                } else {
-                    ui_kit::row(ui, tr("cloud.repository"), |ui| {
-                        ui.label(&wizard.repository);
-                    });
-                }
-                ui_kit::section(ui, "cloud_advanced", "Advanced", !wizard.repository.is_empty(), |ui| {
+                if wizard.adding {
                     ui_kit::row(ui, tr("cloud.repository"), |ui| {
                         let r = ui_kit::bounded_cell_editor(ui, egui::Id::new("cloud_repository"), &mut wizard.repository, "", false, 512);
                         crate::scenario::publish_target("cloud:repository", r.rect);
                     });
-                });
+                    ui_kit::text(ui, tr("cloud.additional_repository"), ui_kit::Text::Hint("cloud_additional_repository"));
+                }
+                let url = solidcraft_cloud::setup::github_create_repository_url(&wizard.repository)
+                    .unwrap_or_else(|_| solidcraft_cloud::github_setup().create_repository_url().into());
+                ui.hyperlink_to(tr("cloud.create_repo"), url);
+                if wizard.repository.trim().is_empty() && !wizard.adding {
+                    ui_kit::text(ui, tr("cloud.repository_automatic"), ui_kit::Text::Hint("cloud_repository_automatic"));
+                } else if !wizard.adding {
+                    ui_kit::row(ui, tr("cloud.repository"), |ui| {
+                        ui.label(&wizard.repository);
+                    });
+                }
+                if !wizard.adding {
+                    ui_kit::section(ui, "cloud_advanced", "Advanced", !wizard.repository.is_empty(), |ui| {
+                        ui_kit::row(ui, tr("cloud.repository"), |ui| {
+                            let r = ui_kit::bounded_cell_editor(ui, egui::Id::new("cloud_repository"), &mut wizard.repository, "", false, 512);
+                            crate::scenario::publish_target("cloud:repository", r.rect);
+                        });
+                    });
+                }
                 let url = solidcraft_cloud::setup::github_token_url(&wizard.repository)
                     .unwrap_or_else(|_| solidcraft_cloud::github_setup().create_token_url().into());
                 let response = ui.hyperlink_to(tr("cloud.create_token"), url);
@@ -319,7 +351,8 @@ mod tests {
                 crate::scenario::rect_of("cloud:create_token").is_some(),
                 "token creation is visible immediately, before entering any repository"
             );
-            assert!(crate::scenario::rect_of("cloud:repository").is_none(), "the account and default repository are automatic");
+            assert!(crate::scenario::rect_of("cloud:repository").is_some(), "adding storage exposes the independent repository");
+            assert_eq!(h.app.cloud.setup.as_ref().unwrap().repository, "work/solidcraft-designs-2");
             {
                 let wizard = h.app.cloud.setup.as_mut().unwrap();
                 wizard.repository = "owner/designs".into();

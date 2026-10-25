@@ -1,0 +1,227 @@
+{
+  "en": {
+    "cloud.status_available": "Available",
+    "cloud.status_conflict": "Conflict",
+    "cloud.status_error": "Error",
+    "cloud.status_outdated": "Outdated",
+    "cloud.status_pulling": "Pulling",
+    "cloud.status_pushing": "Pushing",
+    "cloud.status_saving": "Saving"
+  },
+  "cs": {
+    "cloud.status_available": "Dostupné",
+    "cloud.status_conflict": "Konflikt",
+    "cloud.status_error": "Chyba",
+    "cloud.status_outdated": "Zastaralé",
+    "cloud.status_pulling": "Stahování",
+    "cloud.status_pushing": "Odesílání",
+    "cloud.status_saving": "Ukládání"
+  },
+  "da": {
+    "cloud.status_available": "Tilgængelig",
+    "cloud.status_conflict": "Konflikt",
+    "cloud.status_error": "Fejl",
+    "cloud.status_outdated": "Forældet",
+    "cloud.status_pulling": "Henter",
+    "cloud.status_pushing": "Uploader",
+    "cloud.status_saving": "Gemmer"
+  },
+  "de": {
+    "cloud.status_available": "Verfügbar",
+    "cloud.status_conflict": "Konflikt",
+    "cloud.status_error": "Fehler",
+    "cloud.status_outdated": "Veraltet",
+    "cloud.status_pulling": "Herunterladen",
+    "cloud.status_pushing": "Hochladen",
+    "cloud.status_saving": "Speichern"
+  },
+  "en-GB": {
+    "cloud.status_available": "Available",
+    "cloud.status_conflict": "Conflict",
+    "cloud.status_error": "Error",
+    "cloud.status_outdated": "Outdated",
+    "cloud.status_pulling": "Pulling",
+    "cloud.status_pushing": "Pushing",
+    "cloud.status_saving": "Saving"
+  },
+  "es": {
+    "cloud.status_available": "Disponible",
+    "cloud.status_conflict": "Conflicto",
+    "cloud.status_error": "Error",
+    "cloud.status_outdated": "Desactualizado",
+    "cloud.status_pulling": "Descargando",
+    "cloud.status_pushing": "Subiendo",
+    "cloud.status_saving": "Guardando"
+  },
+  "fr": {
+    "cloud.status_available": "Disponible",
+    "cloud.status_conflict": "Conflit",
+    "cloud.status_error": "Erreur",
+    "cloud.status_outdated": "Obsolète",
+    "cloud.status_pulling": "Réception",
+    "cloud.status_pushing": "Envoi",
+    "cloud.status_saving": "Enregistrement"
+  },
+  "gl": {
+    "cloud.status_available": "Dispoñible",
+    "cloud.status_conflict": "Conflito",
+    "cloud.status_error": "Erro",
+    "cloud.status_outdated": "Desactualizado",
+    "cloud.status_pulling": "Descargando",
+    "cloud.status_pushing": "Enviando",
+    "cloud.status_saving": "Gardando"
+  },
+  "hu": {
+    "cloud.status_available": "Elérhető",
+    "cloud.status_conflict": "Ütközés",
+    "cloud.status_error": "Hiba",
+    "cloud.status_outdated": "Elavult",
+    "cloud.status_pulling": "Letöltés",
+    "cloud.status_pushing": "Feltöltés",
+    "cloud.status_saving": "Mentés"
+  },
+  "id": {
+    "cloud.status_available": "Tersedia",
+    "cloud.status_conflict": "Konflik",
+    "cloud.status_error": "Galat",
+    "cloud.status_outdated": "Usang",
+    "cloud.status_pulling": "Mengunduh",
+    "cloud.status_pushing": "Mengunggah",
+    "cloud.status_saving": "Menyimpan"
+  },
+  "it": {
+    "cloud.status_available": "Disponibile",
+    "cloud.status_conflict": "Conflitto",
+    "cloud.status_error": "Errore",
+    "cloud.status_outdated": "Obsoleto",
+    "cloud.status_pulling": "Scaricamento",
+    "cloud.status_pushing": "Caricamento",
+    "cloud.status_saving": "Salvataggio"
+  },
+  "ja": {
+    "cloud.status_available": "利用可能",
+    "cloud.status_conflict": "競合",
+    "cloud.status_error": "エラー",
+    "cloud.status_outdated": "要更新",
+    "cloud.status_pulling": "受信中",
+    "cloud.status_pushing": "送信中",
+    "cloud.status_saving": "保存中"
+  },
+  "ko": {
+    "cloud.status_available": "준비됨",
+    "cloud.status_conflict": "충돌",
+    "cloud.status_error": "오류",
+    "cloud.status_outdated": "오래됨",
+    "cloud.status_pulling": "다운로드",
+    "cloud.status_pushing": "업로드",
+    "cloud.status_saving": "저장중"
+  },
+  "ms": {
+    "cloud.status_available": "Tersedia",
+    "cloud.status_conflict": "Konflik",
+    "cloud.status_error": "Ralat",
+    "cloud.status_outdated": "Lapuk",
+    "cloud.status_pulling": "Memuat turun",
+    "cloud.status_pushing": "Memuat naik",
+    "cloud.status_saving": "Menyimpan"
+  },
+  "nl": {
+    "cloud.status_available": "Beschikbaar",
+    "cloud.status_conflict": "Conflict",
+    "cloud.status_error": "Fout",
+    "cloud.status_outdated": "Verouderd",
+    "cloud.status_pulling": "Downloaden",
+    "cloud.status_pushing": "Uploaden",
+    "cloud.status_saving": "Opslaan"
+  },
+  "pl": {
+    "cloud.status_available": "Dostępne",
+    "cloud.status_conflict": "Konflikt",
+    "cloud.status_error": "Błąd",
+    "cloud.status_outdated": "Nieaktualne",
+    "cloud.status_pulling": "Pobieranie",
+    "cloud.status_pushing": "Wysyłanie",
+    "cloud.status_saving": "Zapisywanie"
+  },
+  "pt-BR": {
+    "cloud.status_available": "Disponível",
+    "cloud.status_conflict": "Conflito",
+    "cloud.status_error": "Erro",
+    "cloud.status_outdated": "Desatualizado",
+    "cloud.status_pulling": "Baixando",
+    "cloud.status_pushing": "Enviando",
+    "cloud.status_saving": "Salvando"
+  },
+  "ro": {
+    "cloud.status_available": "Disponibil",
+    "cloud.status_conflict": "Conflict",
+    "cloud.status_error": "Eroare",
+    "cloud.status_outdated": "Învechit",
+    "cloud.status_pulling": "Descărcare",
+    "cloud.status_pushing": "Încărcare",
+    "cloud.status_saving": "Salvare"
+  },
+  "ru": {
+    "cloud.status_available": "Доступно",
+    "cloud.status_conflict": "Конфликт",
+    "cloud.status_error": "Ошибка",
+    "cloud.status_outdated": "Устарело",
+    "cloud.status_pulling": "Получение",
+    "cloud.status_pushing": "Отправка",
+    "cloud.status_saving": "Сохранение"
+  },
+  "sv": {
+    "cloud.status_available": "Tillgänglig",
+    "cloud.status_conflict": "Konflikt",
+    "cloud.status_error": "Fel",
+    "cloud.status_outdated": "Inaktuell",
+    "cloud.status_pulling": "Hämtning",
+    "cloud.status_pushing": "Uppladdning",
+    "cloud.status_saving": "Sparar"
+  },
+  "tr": {
+    "cloud.status_available": "Kullanılabilir",
+    "cloud.status_conflict": "Çakışma",
+    "cloud.status_error": "Hata",
+    "cloud.status_outdated": "Eskimiş",
+    "cloud.status_pulling": "İndiriliyor",
+    "cloud.status_pushing": "Yükleniyor",
+    "cloud.status_saving": "Kaydediliyor"
+  },
+  "uk": {
+    "cloud.status_available": "Доступно",
+    "cloud.status_conflict": "Конфлікт",
+    "cloud.status_error": "Помилка",
+    "cloud.status_outdated": "Застаріле",
+    "cloud.status_pulling": "Отримання",
+    "cloud.status_pushing": "Надсилання",
+    "cloud.status_saving": "Збереження"
+  },
+  "vi": {
+    "cloud.status_available": "Sẵn sàng",
+    "cloud.status_conflict": "Xung đột",
+    "cloud.status_error": "Lỗi",
+    "cloud.status_outdated": "Lỗi thời",
+    "cloud.status_pulling": "Tải xuống",
+    "cloud.status_pushing": "Tải lên",
+    "cloud.status_saving": "Lưu"
+  },
+  "zh": {
+    "cloud.status_available": "可用",
+    "cloud.status_conflict": "冲突",
+    "cloud.status_error": "错误",
+    "cloud.status_outdated": "待更新",
+    "cloud.status_pulling": "下载中",
+    "cloud.status_pushing": "上传中",
+    "cloud.status_saving": "保存中"
+  },
+  "zh-TW": {
+    "cloud.status_available": "可用",
+    "cloud.status_conflict": "衝突",
+    "cloud.status_error": "錯誤",
+    "cloud.status_outdated": "待更新",
+    "cloud.status_pulling": "下載中",
+    "cloud.status_pushing": "上傳中",
+    "cloud.status_saving": "儲存中"
+  }
+}

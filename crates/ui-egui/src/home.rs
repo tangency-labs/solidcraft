@@ -884,7 +884,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         interactive,
         back: Some(start_page::Back {
             template: app.tr("home.back").into(),
-            document: app.session.doc.name.as_str().into(),
+            document: app.session.doc.name.clone().into(),
             shortcut: "Esc".into(),
             chosen: FileAction::Back,
             // The File view handles Escape above, after its own windows and questions.
@@ -903,14 +903,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 Section::Export => "home.export_hint",
             })
             .into(),
-        error: app.status.as_ref().filter(|(_, _, error)| *error).map(|(message, _, _)| message.as_str().into()),
+        error: app.status.as_ref().filter(|(_, _, error)| *error).map(|(message, _, _)| message.clone().into()),
         body: match app.home.section {
             Section::Start => start_page::Body::Start(Box::new(start_body(app))),
             Section::Recovery => start_page::Body::Reviews(recovery_body(app)),
             Section::Export => start_page::Body::Tiles(export_tiles(app)),
         },
     };
-    if let Some(action) = start_page::show(ui, page) {
+    if let Some(action) = start_page::show_with_start_extension(ui, page, |ui| crate::cloud_browser::home(app, ui)) {
         dispatch(app, ui.ctx(), action);
     }
     // The first start usually opens on Home: the usage statistics notice shows here as in the view.
@@ -922,17 +922,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 /// SolidCraft's rail: Start, New, Open, Recover; the design's own entries; the app's.
-fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
+fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'static, FileAction>> {
     let busy = app.file_picker_busy();
     let design = !crate::documents::active_is_blank(app);
     let primary = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl+" };
     let shift = if cfg!(target_os = "macos") { "⇧" } else { "Shift+" };
-    let recover: start_page::Label<'_> = if app.recoverable.is_empty() {
+    let recover: start_page::Label<'static> = if app.recoverable.is_empty() {
         app.tr_label("Recover").into()
     } else {
         format!("{} ({})", app.tr_label("Recover"), app.recoverable.len()).into()
     };
-    let nav: [(&str, start_page::Label<'_>, String, Option<Section>, bool, FileAction); 13] = [
+    let nav: [(&str, start_page::Label<'static>, String, Option<Section>, bool, FileAction); 13] = [
         ("home:start", app.tr_label("Start").into(), String::new(), Some(Section::Start), true, FileAction::Section(Section::Start)),
         ("home:new", app.tr_label("New").into(), format!("{primary}N"), None, true, FileAction::New("preferred")),
         ("home:open", app.tr("ui.open").into(), format!("{primary}O"), None, true, FileAction::Open),
@@ -979,7 +979,7 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
     rail
 }
 
-fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
+fn start_body(app: &SolveApp) -> start_page::Start<'static, FileAction> {
     let banner = app.recoverable.first().map(|entry| {
         let filename = entry
             .path
@@ -991,7 +991,7 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
         start_page::Banner {
             title: solidcraft_ui_text::format("home.recovery_count", &[("count", &app.recoverable.len().to_string())]).into(),
             before_filename: " · ".into(),
-            filename,
+            filename: filename.into_owned().into(),
             after_filename: format!(" · {}", crate::recovery_ui::ago(entry.saved_at)).into(),
             recover: (app.tr_label("Recover").into(), if single { FileAction::Recovery(0, true) } else { FileAction::Section(Section::Recovery) }),
             discard: single.then(|| (app.tr_label("Discard").into(), FileAction::Recovery(0, false))),
@@ -1039,12 +1039,12 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
     }
 }
 
-fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_page::Recent<'a, FileAction> {
+fn recent_entry(app: &SolveApp, index: usize, path: &str) -> start_page::Recent<'static, FileAction> {
     // Keep the extension so plate.step and plate.stl are not both "plate" (#9081).
     let title = std::path::Path::new(path).file_name().map_or_else(|| path.into(), |name| name.to_string_lossy());
     let missing = !available(app, path);
     let when = if app.session.path.as_deref() == Some(path) { app.tr("home.open_now").to_string() } else { recent_time(app, path) };
-    let shown_path: start_page::Label<'a> = if missing {
+    let shown_path: start_page::Label<'static> = if missing {
         format!("{} · {}", app.tr("home.missing"), friendly_path(path)).into()
     } else if path.starts_with("/disk/") {
         app.tr_label("On your computer").into()
@@ -1080,7 +1080,7 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
         });
     }
     start_page::Recent {
-        title,
+        title: title.into_owned().into(),
         path: shown_path,
         when: when.into(),
         kind: kind.into(),
@@ -1162,14 +1162,14 @@ pub(crate) fn recent_time_at(app: &SolveApp, time: u64, now: u64) -> String {
     solidcraft_ui_text::format(key, &[("count", &count.to_string())])
 }
 
-fn recovery_body(app: &SolveApp) -> start_page::Reviews<'_, FileAction> {
+fn recovery_body(app: &SolveApp) -> start_page::Reviews<'static, FileAction> {
     let items = app
         .recoverable
         .iter()
         .take(20)
         .enumerate()
         .map(|(index, entry)| start_page::Review {
-            title: entry.name.as_str().into(),
+            title: entry.name.clone().into(),
             detail: solidcraft_ui_text::format(
                 "recovery.detail",
                 &[
@@ -1186,7 +1186,7 @@ fn recovery_body(app: &SolveApp) -> start_page::Reviews<'_, FileAction> {
     start_page::Reviews { empty: app.tr("home.recovery_empty").into(), items }
 }
 
-fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
+fn export_tiles(app: &SolveApp) -> start_page::Tiles<'static, FileAction> {
     let formats = [
         ("step", "STEP", Some("home.export_step_hint"), FileAction::Export("step")),
         ("mesh", "Mesh", Some("home.export_mesh_hint"), FileAction::Mesh),

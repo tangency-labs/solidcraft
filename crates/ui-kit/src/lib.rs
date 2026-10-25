@@ -129,6 +129,8 @@ pub use fields::cell_editor;
 pub use fields::install_expressions;
 pub use fields::wide_cell_editor;
 pub use fields::*;
+pub use file_view::FileStatus;
+pub use file_view::FileStatusTone;
 pub use file_view::FileView;
 pub use file_view::Icon;
 pub use file_view::RecentRow;

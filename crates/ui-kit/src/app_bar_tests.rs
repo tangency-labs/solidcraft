@@ -1224,7 +1224,8 @@ impl TabsRig {
             focused: true,
             ..Default::default()
         };
-        let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None, views: &[] };
+        let tab =
+            |name: &'static str| DocTab { name, list_name: name, dirty: false, status: None, place: "Not saved yet", security: None, views: &[] };
         let mut views = VIEWS;
         if self.detached {
             views[1].to_window = Some(1);

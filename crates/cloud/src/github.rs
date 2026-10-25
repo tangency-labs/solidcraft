@@ -175,6 +175,16 @@ impl GitHub {
     }
 
     pub async fn list(&self) -> Result<Vec<Destination>> {
+        self.list_with_status(&mut []).await
+    }
+
+    pub async fn list_with_status(&self, stored: &mut [crate::StoredDesign]) -> Result<Vec<Destination>> {
+        if stored.len() > 10_000 {
+            return Err(invalid("stored catalog is too large"));
+        }
+        for entry in stored.iter() {
+            entry.validate(&self.connection)?;
+        }
         let tree = self.tree().await?;
         let mut projects = Vec::new();
         for path in tree.files.keys() {
@@ -193,6 +203,16 @@ impl GitHub {
                 let destination = Destination { connection: self.connection.clone(), project: project.clone(), file: file.into() };
                 destination.validate()?;
                 designs.push(destination);
+            }
+        }
+        for entry in
+            stored.iter_mut().filter(|entry| matches!(entry.phase, crate::jobs::Phase::Ready | crate::jobs::Phase::Synced) && !entry.outdated)
+        {
+            let path = format!("{}/manifest.json", entry.destination.design_path()?);
+            let manifest = self.read(&tree, &path, crate::MAX_MANIFEST_BYTES).await?.and_then(|bytes| Manifest::read(&bytes).ok());
+            if !manifest.as_ref().map(|manifest| entry.matches_manifest(manifest)).transpose()?.unwrap_or(false) {
+                entry.phase = crate::jobs::Phase::Ready;
+                entry.outdated = true;
             }
         }
         Ok(designs)
