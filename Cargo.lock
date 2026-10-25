@@ -216,6 +216,13 @@ name = "ssi"
 version = "0.1.0"
 
 [[package]]
+name = "step-export"
+version = "0.1.0"
+dependencies = [
+ "step-import",
+]
+
+[[package]]
 name = "step-import"
 version = "0.1.0"
 

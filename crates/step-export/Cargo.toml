@@ -1,0 +1,13 @@
+[package]
+name = "step-export"
+description = "ISO 10303-21 writer for the neutral STEP B-rep model"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+step-import = { path = "../step-import" }
+
+[lints]
+workspace = true
