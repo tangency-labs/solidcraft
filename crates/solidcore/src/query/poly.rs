@@ -1145,10 +1145,13 @@ impl PolyBrep {
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] for unknown ids.
+    /// [`SolidError::InvalidInput`] for unknown ids, without modifying the B-rep.
     pub fn edge_set_aux_data(&mut self, edge: PolyEdgeId, aux: Option<PolyAuxId>) -> Result<()> {
         const OP: &str = "query::poly::PolyBrep::edge_set_aux_data";
         let old = slot(&self.edge_slots, edge.0, OP)?.aux;
+        if let Some(a) = aux {
+            slot(&self.aux_slots, a.0, OP)?;
+        }
         if old == aux {
             return Ok(());
         }
@@ -3391,6 +3394,86 @@ mod tests {
         assert!(b
             .face_point_in_polygon(&k, f, Vec3::new(0.2, 0.2, 0.0), false)
             .unwrap());
+    }
+
+    #[test]
+    fn edge_set_aux_data_rejects_invalid_replacement_without_mutation() {
+        let k = Kernel::default();
+        for has_old in [false, true] {
+            for deleted in [false, true] {
+                let (mut b, _, l, es) = square(&k);
+                let old = if has_old {
+                    let a = b.add_aux_data(Vec3::ZERO, Vec2::new(0.0, 0.0)).unwrap();
+                    b.edge_set_aux_data(es[0], Some(a)).unwrap();
+                    Some(a)
+                } else {
+                    None
+                };
+                let invalid = if deleted {
+                    let a = b.add_aux_data(Vec3::ZERO, Vec2::new(0.0, 0.0)).unwrap();
+                    b.aux_delete_if_no_users(a).unwrap();
+                    a
+                } else {
+                    PolyAuxId::from_index(u32::MAX)
+                };
+                let before = b.clone();
+                assert!(matches!(
+                    b.edge_set_aux_data(es[0], Some(invalid)),
+                    Err(SolidError::InvalidInput { .. })
+                ));
+                assert_eq!(b, before);
+
+                b.delete_edge(es[0]).unwrap();
+                assert_eq!(b.loop_poly_edges(l).unwrap(), es[1..]);
+                assert!(b.edge_aux_data(es[0]).is_err());
+                if let Some(a) = old {
+                    assert!(b.aux_data(a).is_err());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn edge_set_aux_data_same_live_id_preserves_counts() {
+        let k = Kernel::default();
+        let (mut b, _, _, es) = square(&k);
+        let a = b.add_aux_data(Vec3::ZERO, Vec2::new(0.0, 0.0)).unwrap();
+        b.edge_set_aux_data(es[0], Some(a)).unwrap();
+        assert_eq!(b.aux_data(a).unwrap().num_users(), 1);
+        let before = b.clone();
+        b.edge_set_aux_data(es[0], Some(a)).unwrap();
+        assert_eq!(b, before);
+        assert_eq!(b.aux_data(a).unwrap().num_users(), 1);
+    }
+
+    #[test]
+    fn edge_set_aux_data_replacement_deletes_exclusively_owned_record() {
+        let k = Kernel::default();
+        let (mut b, _, _, es) = square(&k);
+        let old = b.add_aux_data(Vec3::ZERO, Vec2::new(0.0, 0.0)).unwrap();
+        let new = b.add_aux_data(Vec3::ZERO, Vec2::new(1.0, 1.0)).unwrap();
+        b.edge_set_aux_data(es[0], Some(old)).unwrap();
+        b.edge_set_aux_data(es[0], Some(new)).unwrap();
+        assert_eq!(b.edge_aux_data(es[0]).unwrap(), Some(new));
+        assert!(b.aux_data(old).is_err());
+        assert_eq!(b.aux_data(new).unwrap().num_users(), 1);
+    }
+
+    #[test]
+    fn edge_set_aux_data_shared_record_survives_until_last_user_clears() {
+        let k = Kernel::default();
+        let (mut b, _, _, es) = square(&k);
+        let a = b.add_aux_data(Vec3::ZERO, Vec2::new(0.0, 0.0)).unwrap();
+        b.edge_set_aux_data(es[0], Some(a)).unwrap();
+        b.edge_set_aux_data(es[1], Some(a)).unwrap();
+        assert_eq!(b.aux_data(a).unwrap().num_users(), 2);
+        b.edge_set_aux_data(es[0], None).unwrap();
+        assert_eq!(b.edge_aux_data(es[0]).unwrap(), None);
+        assert_eq!(b.edge_aux_data(es[1]).unwrap(), Some(a));
+        assert_eq!(b.aux_data(a).unwrap().num_users(), 1);
+        b.edge_set_aux_data(es[1], None).unwrap();
+        assert_eq!(b.edge_aux_data(es[1]).unwrap(), None);
+        assert!(b.aux_data(a).is_err());
     }
 
     #[test]
