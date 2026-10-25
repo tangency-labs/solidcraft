@@ -26,7 +26,7 @@ mod snap_fit;
 
 use egui::{Pos2, vec2};
 use look::{
-    CrossStyle, DIM, DIM_S, FADE_S, GROW_S, HOT_S, RING_ACTIVE_S, RING_PX, RingStyle, SWEEP_S, angle_label, compass, crosshair, footprint, ring,
+    CrossStyle, DIM, DIM_S, MARKER_ACTIVE, MARKER_HOT, RING_ACTIVE, RING_OPEN, RING_PX, RingStyle, angle_label, compass, crosshair, footprint, ring,
 };
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::Vec3;
@@ -34,6 +34,7 @@ use solidcraft_engine::geom::Vec3;
 use crate::SolveApp;
 use crate::dialogs::Dialog;
 pub(crate) use crate::dialogs::vec3_of;
+use crate::motion;
 pub(crate) use crate::selection::point_value as pt;
 use crate::theme::Tokens;
 use crate::viewport::Proj;
@@ -230,21 +231,14 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let area = |c: Pos2| egui::Rect::from_center_size(c, vec2(2.0 * REACH, 2.0 * REACH));
     let id = |what: &str| egui::Id::new(("sc_place", sp.name, what));
 
-    // The crosshair that moves the feature.
+    // The crosshair that moves the feature. The press lands where the finger is, not always the
+    // centre: the drag keeps that gap.
     let r = ui.interact(area(bs), id("position"), egui::Sense::drag());
-    // Grab offset: the press lands where the finger is, not always the centre. Remember how far
-    // the press was from the centre and keep that gap for the whole drag, so the feature follows
-    // the pointer from where it was grabbed instead of jumping its centre under the first move.
-    if r.drag_started()
-        && let Some(p) = r.interact_pointer_pos()
-    {
-        ui.data_mut(|m| m.insert_temp(id("grab"), p - bs));
-    }
+    let off = motion::grab(ui, id("grab"), &r, |p| Some(p - bs));
     if r.dragged() {
         crate::tool_modifiers::set_manipulator_dragging(true);
         if let Some(p) = r.interact_pointer_pos() {
-            let off = ui.data(|m| m.get_temp::<egui::Vec2>(id("grab"))).unwrap_or_default();
-            (sp.move_to)(app, d, proj, p - off);
+            (sp.move_to)(app, d, proj, p - off.unwrap_or_default());
         }
     }
     // Read the frame again: a drag moved it this frame.
@@ -259,12 +253,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     }
     // The handle not in use steps back while the other one works (the ring's drag is last frame's).
     let turning = ui.data(|m| m.get_temp::<bool>(id("turning"))).unwrap_or(false);
-    let dim = |ui: &egui::Ui, what: &str, on: bool| 1.0 - (1.0 - DIM) * ui.ctx().animate_bool_with_time(id(what), on, DIM_S);
-    // Ease the state factors; animate_bool_with_time repaints only while they are moving.
+    let ctx = ui.ctx().clone();
     let style = CrossStyle {
-        hot: ui.ctx().animate_bool_with_time(id("hot"), hovered || dragging, HOT_S),
-        active: ui.ctx().animate_bool_with_time(id("active"), dragging, GROW_S),
-        alpha: dim(ui, "marker_dim", turning),
+        hot: MARKER_HOT.run(&ctx, id("hot"), hovered || dragging).t,
+        active: MARKER_ACTIVE.run(&ctx, id("active"), dragging).t,
+        alpha: motion::step_back(&ctx, id("marker_dim"), turning, DIM, DIM_S),
     };
     if dragging {
         let pts: Option<Vec<Pos2>> = (sp.footprint)(app, d, base, n).into_iter().map(|p| proj.to_screen(p)).collect();
@@ -304,21 +297,14 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         Some(q) => Some((q - base).dot(y).atan2((q - base).dot(x))),
         None => crate::canvas::projected_rotation_angle(proj, p, base, x, y, radius, angle, (-std::f64::consts::PI, std::f64::consts::PI)),
     };
-    // Grab offset, as for the marker: the press lands somewhere on the grip, not on its exact
-    // angle. Keep that angular gap for the whole drag so the grip follows the pointer from where
-    // it was grabbed instead of jumping onto it at the first move.
-    if r.drag_started()
-        && let Some(p) = r.interact_pointer_pos()
-        && let Some(a) = pointer_angle(p).filter(|a| a.is_finite())
-    {
-        ui.data_mut(|m| m.insert_temp(id("rotate_grab"), a - angle));
-    }
+    // As for the marker, the press lands somewhere on the grip, not on its exact angle: the drag
+    // keeps that angular gap.
+    let grab = motion::grab(ui, id("rotate_grab"), &r, |p| pointer_angle(p).filter(|a| a.is_finite()).map(|a| a - angle));
     if r.dragged()
         && let Some(p) = r.interact_pointer_pos()
     {
         crate::tool_modifiers::set_manipulator_dragging(true);
-        let grab = ui.data(|m| m.get_temp::<f64>(id("rotate_grab"))).unwrap_or(0.0);
-        if let Some(raw) = pointer_angle(p).filter(|a| a.is_finite()).map(|a| a - grab) {
+        if let Some(raw) = pointer_angle(p).filter(|a| a.is_finite()).map(|a| a - grab.unwrap_or(0.0)) {
             angle = (turn.set)(app, d, n, raw, crate::tool_modifiers::manipulator_free());
             d.error = None;
             if let Some(g) = at(angle) {
@@ -331,28 +317,16 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let (hovered, dragging) = (r.hovered(), r.dragged());
     ui.data_mut(|m| m.insert_temp(id("turning"), dragging));
     RING_ABOUT.with(|c| c.set(Some(bs)));
-    // Opening takes the sweep; leaving is a quick fade, not the sweep played backwards.
-    let hot_on = hovered || dragging;
-    // Opening eases in: slow off the grip, closing fast at the far side.
-    let (time, ease): (f32, fn(f32) -> f32) =
-        if hot_on { (SWEEP_S, egui::emath::easing::quadratic_in) } else { (FADE_S, egui::emath::easing::linear) };
-    let hot = ui.ctx().animate_bool_with_time_and_easing(id("ring_hot"), hot_on, time, ease);
+    let open = RING_OPEN.run(&ctx, id("ring_hot"), hovered || dragging);
     let on_point = at_cardinal(n, angle);
-    // Aligned with a world axis, the grip takes that axis's colour, eased in and out; the colour
-    // it fades out from is the last axis it was on.
+    // Aligned with a world axis, the grip takes that axis's colour.
     let axis = on_point.as_deref().map(|name| axis_colour(name, &t));
-    if let Some(c) = axis {
-        ui.data_mut(|m| m.insert_temp(id("ring_tint_col"), c));
-    }
-    let tinted = ui.ctx().animate_bool_with_time(id("ring_tint"), axis.is_some(), DIM_S);
-    let tint =
-        ui.data(|m| m.get_temp::<egui::Color32>(id("ring_tint_col"))).filter(|_| tinted > 0.01).map(|c| look::core(true).lerp_to_gamma(c, tinted));
     let style = RingStyle {
-        hot,
-        active: ui.ctx().animate_bool_with_time(id("ring_active"), dragging, RING_ACTIVE_S),
-        fading: !hot_on && hot > 0.0,
-        alpha: dim(ui, "ring_dim", moving),
-        tint,
+        hot: open.t,
+        active: RING_ACTIVE.run(&ctx, id("ring_active"), dragging).t,
+        fading: open.fading(),
+        alpha: motion::step_back(&ctx, id("ring_dim"), moving, DIM, DIM_S),
+        tint: motion::tint(&ctx, id("ring_tint"), axis, look::core(true), DIM_S),
     };
     ring(painter, &on, angle, &style);
     // The compass stays put while the feature turns, so you can see how far you have gone.
@@ -412,15 +386,9 @@ pub(crate) fn yield_box(ui: &egui::Ui, anchor: Pos2, at: Pos2) -> Pos2 {
             }
         }
     };
-    // The step aside is eased, as an offset from where the box would be, so the box still follows
+    // The step aside slides, as an offset from where the box would be, so the box still follows
     // the arrow's tip at once when the view moves.
-    let off = target - at;
-    let ctx = ui.ctx();
-    let eased = vec2(
-        ctx.animate_value_with_time(egui::Id::new("sc_place_box_x"), off.x, DIM_S),
-        ctx.animate_value_with_time(egui::Id::new("sc_place_box_y"), off.y, DIM_S),
-    );
-    at + eased
+    at + motion::slide(ui.ctx(), egui::Id::new("sc_place_box"), target - at, DIM_S)
 }
 
 /// What the ring needs around it beyond its radius (pixels): the grip, the compass and the

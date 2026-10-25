@@ -11,6 +11,7 @@
 
 use egui::{Color32, Pos2, Stroke, Vec2, vec2};
 
+use crate::motion::Transition;
 use crate::theme::Tokens;
 
 /// The handles' core: the icon highlight (white in every theme), so the blue preview they sit on
@@ -49,13 +50,13 @@ pub(super) struct CrossStyle {
 
 /// How much of itself the handle not in use keeps while the other one is dragged.
 pub(super) const DIM: f32 = 0.25;
-/// How long a handle takes to step back and to come forward again (seconds).
+/// How long a handle takes to step back and to come forward again, and how long the grip's axis
+/// colour takes to come and go (seconds).
 pub(super) const DIM_S: f32 = 0.16;
 
-/// How long the marker takes to answer the pointer arriving or leaving (seconds), and how long
-/// the switch into and out of a drag takes.
-pub(super) const HOT_S: f32 = 0.22;
-pub(super) const GROW_S: f32 = 0.36;
+/// The marker answering the pointer arriving or leaving, and switching into and out of a drag.
+pub(super) const MARKER_HOT: Transition = Transition::symmetric(0.22);
+pub(super) const MARKER_ACTIVE: Transition = Transition::symmetric(0.36);
 /// The marker's line width (a dash's and the shaft's).
 const LINE: f32 = 2.0;
 /// The dot's radius.
@@ -161,12 +162,12 @@ pub(super) struct RingStyle {
 /// The ring's size on screen (radius, pixels): fixed, like the move triad's arrows, whatever the
 /// zoom or the feature. It is a control of something on the screen, not a measure of the model.
 pub(super) const RING_PX: f32 = 65.0;
-/// How long the ring takes to open from its grip round the circle (seconds), and how long the
-/// open ring takes to fade once the pointer has left.
-pub(super) const SWEEP_S: f32 = 0.3;
-pub(super) const FADE_S: f32 = 0.15;
-/// How long the solid arc and the compass take to come up when a turn starts, and to go.
-pub(super) const RING_ACTIVE_S: f32 = 0.2;
+/// The ring opening from its grip round the circle: eased in, slow off the grip and closing fast
+/// at the far side; once the pointer has left, a quick fade, not the sweep played backwards.
+pub(super) const RING_OPEN: Transition =
+    Transition { on_s: 0.3, off_s: 0.15, ease_on: egui::emath::easing::quadratic_in, ease_off: egui::emath::easing::linear };
+/// The solid arc and the compass coming up when a turn starts, and going.
+pub(super) const RING_ACTIVE: Transition = Transition::symmetric(0.2);
 /// Half of the arc shown at rest and of the solid arc while turning, either side of the grip (degrees).
 const ARC_HALF_DEG: f64 = 50.0;
 /// The ring's line width, its dash and gap along the arc.

@@ -107,6 +107,7 @@ mod measurement_ui_tests;
 mod menu_tests;
 pub(crate) mod mesh_lod;
 pub mod messages;
+pub(crate) mod motion;
 pub mod occurrence_drag;
 #[cfg(test)]
 mod pattern_arrow_tests;
