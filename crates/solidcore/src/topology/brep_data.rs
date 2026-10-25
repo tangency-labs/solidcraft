@@ -33,7 +33,9 @@
 //!   list are an [`AttributeSink`]: the [`AttributeStore`] owning the attributes, the
 //!   index table, and a counter that hands each curve and surface read an
 //!   [`ObjectKey`] (upstream: the object's address) under which its attributes are
-//!   listed. The key is kept beside the object ([`Keyed`]).
+//!   listed. The key is kept beside the object ([`Keyed`]). A counter that reaches
+//!   `u64::MAX` fails with [`SolidError::InvalidInput`] instead of wrapping onto keys
+//!   already handed out (upstream addresses never repeat).
 //! - **Tolerance model.** The reference build uses `SM_USE_OLDTOL`: the zone
 //!   tolerances are read for `version <= 43` and the `SM_USE_NEWTOL` lines (model size
 //!   estimate, small-topology flags) are compiled out, so they are never read. The
@@ -117,6 +119,7 @@ const OP_READ: &str = "topology::brep_data::BrepData::read_from_db";
 const OP_CURVE: &str = "topology::brep_data::read_curve_from_db";
 const OP_SURFACE: &str = "topology::brep_data::read_surface_from_db";
 const OP_STREAM: &str = "topology::brep_data::stream";
+const OP_KEY: &str = "topology::brep_data::new_key";
 
 /// Where a B-rep's data came from (upstream `SmDataSourceType`); the discriminant is
 /// the upstream value.
@@ -229,10 +232,21 @@ impl<'a> AttributeSink<'a> {
         self.next_key
     }
 
-    fn new_key(&mut self) -> ObjectKey {
+    /// The key the next geometry object gets, advancing the counter.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] once the key domain is exhausted (`self.next_key`
+    /// is `u64::MAX`, so no higher key could follow this one); the counter is then
+    /// left unchanged and no key is handed out. Upstream identifies the objects by
+    /// their address and has no such bound.
+    fn new_key(&mut self) -> Result<ObjectKey> {
         let key = ObjectKey(self.next_key);
-        self.next_key = self.next_key.wrapping_add(1);
-        key
+        self.next_key = self
+            .next_key
+            .checked_add(1)
+            .ok_or(SolidError::invalid_input(OP_KEY, "object keys exhausted"))?;
+        Ok(key)
     }
 
     /// `SmAttributeData::ReadIndexedAttributesFromDB` with its status ignored, as every
@@ -1724,8 +1738,9 @@ fn read_composite_list(
 ///
 /// `SM_ERR` for another type up to version 32; `SM_ERR_NULL_POINTER` for an
 /// attribute index whose table slot is empty; [`SolidError::InvalidInput`] for an
-/// index past the table (upstream reads past the array) or an ASCII type header that
-/// could not be read; those of the curve readers.
+/// index past the table (upstream reads past the array), an ASCII type header that
+/// could not be read, or an exhausted [`AttributeSink`] key domain; those of the
+/// curve readers.
 pub fn read_curve_from_db(
     k: &Kernel,
     dim: u64,
@@ -1734,7 +1749,7 @@ pub fn read_curve_from_db(
     db: &mut DatabaseReader,
     persist_attribs: bool,
 ) -> Result<Keyed<Curve>> {
-    let key = attrs.new_key();
+    let key = attrs.new_key()?;
     let bad_type = || SolidError::InvalidInput {
         operation: OP_CURVE,
         reason: "curve type header could not be read",
@@ -1863,8 +1878,8 @@ fn read_old_composite(
 ///
 /// `SM_ERR` for another type up to version 32; those of
 /// [`OffsetSurface::new`] for an offset surface; [`SolidError::InvalidInput`] for an attribute index past the table (upstream reads
-/// past the array) or an ASCII type header that could not be read; those of the
-/// surface readers.
+/// past the array), an ASCII type header that could not be read, or an exhausted
+/// [`AttributeSink`] key domain; those of the surface readers.
 pub fn read_surface_from_db(
     k: &Kernel,
     version: u64,
@@ -1872,7 +1887,7 @@ pub fn read_surface_from_db(
     db: &mut DatabaseReader,
     persist_attribs: bool,
 ) -> Result<Keyed<Surface>> {
-    let key = attrs.new_key();
+    let key = attrs.new_key()?;
 
     // read surface type
     let ty = db
@@ -2248,6 +2263,58 @@ mod tests {
         bytes.extend(std::iter::repeat_n(0u8, pad));
         let mut db = binary_reader(bytes);
         assert!(BrepData::read_from_db(&k, 30, &mut attrs, &mut db, false).is_err());
+    }
+
+    #[test]
+    fn key_counter_exhaustion_is_rejected() {
+        let mut store = AttributeStore::new();
+        let mut all = Vec::new();
+        // The counter starts at `AttributeSink::new`'s `first_key`, which the
+        // `BrepData` readers pass in, so a sink created there has no key to hand out:
+        // the last `u64` key would have no successor.
+        let mut attrs = AttributeSink::new(&mut store, &mut all, u64::MAX);
+        let r = attrs.new_key();
+        assert!(
+            matches!(
+                r,
+                Err(SolidError::InvalidInput { operation, reason })
+                    if operation == "topology::brep_data::new_key"
+                        && reason == "object keys exhausted"
+            ),
+            "{r:?}"
+        );
+        // a rejected allocation leaves the counter where it was
+        assert_eq!(attrs.next_key(), u64::MAX);
+        assert!(attrs.new_key().is_err());
+        assert_eq!(attrs.next_key(), u64::MAX);
+
+        // one key before the boundary is still handed out, without wrapping the counter
+        let mut attrs = AttributeSink::new(&mut store, &mut all, u64::MAX - 1);
+        assert_eq!(attrs.new_key().unwrap(), ObjectKey(u64::MAX - 1));
+        assert_eq!(attrs.next_key(), u64::MAX);
+        assert!(attrs.new_key().is_err());
+        assert_eq!(attrs.next_key(), u64::MAX);
+
+        // normal allocation control
+        let mut attrs = AttributeSink::new(&mut store, &mut all, 5);
+        assert_eq!(attrs.new_key().unwrap(), ObjectKey(5));
+        assert_eq!(attrs.next_key(), 6);
+        assert_eq!(attrs.new_key().unwrap(), ObjectKey(6));
+
+        // the readers propagate the sink's failure instead of reusing a key
+        let k = Kernel::default();
+        let mut db = ascii_reader("Object Type 14033\n1\n1\n0\n3\n0 0 0\n1 1 1\n0\n0\n1\n1\n1 0\n");
+        let mut attrs = AttributeSink::new(&mut store, &mut all, u64::MAX);
+        let r = read_curve_from_db(&k, 3, 31, &mut attrs, &mut db, true);
+        assert!(
+            matches!(
+                r,
+                Err(SolidError::InvalidInput { operation, .. })
+                    if operation == "topology::brep_data::new_key"
+            ),
+            "{r:?}"
+        );
+        assert_eq!(attrs.next_key(), u64::MAX);
     }
 
     #[test]
