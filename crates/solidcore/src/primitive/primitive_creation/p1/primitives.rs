@@ -717,47 +717,38 @@ impl PrimitiveCreation {
                     }
                 }
             }
-            // Move the first surface out temporarily so Rust can borrow the
-            // remaining faces independently. Restore it on every exit.
-            let mut first_surface = a
-                .face_mut(first)?
+            // extend the first surface's domain to cover all other face domains
+            for (in_a, faces) in [
+                (true, faces_a.get(1..).unwrap_or_default()),
+                (false, faces_b.as_slice()),
+            ] {
+                for face in faces {
+                    let brep: &Brep = if in_a { &*a } else { &*b };
+                    let record = brep.face(*face)?;
+                    let other_domain = record.uv_domain;
+                    let other = record
+                        .surface
+                        .as_ref()
+                        .ok_or_else(|| SolidError::null_pointer(op))?
+                        .clone_for_evaluation()?;
+                    cover_face_surface(k, a, first, &other, tolerance * 2.0, Some(&other_domain))?;
+                }
+            }
+            // extend the rest of the surface domains to cover the first surface's domain
+            let first_surface = a
+                .face(first)?
                 .surface
-                .take()
-                .ok_or_else(|| SolidError::null_pointer(op))?;
-            let covered = (|| {
-                for (brep, faces) in [
-                    (&*a, faces_a.get(1..).unwrap_or_default()),
-                    (&*b, faces_b.as_slice()),
-                ] {
-                    for face in faces {
-                        let record = brep.face(*face)?;
-                        first_surface.cover_coincident_surface(
-                            k,
-                            record
-                                .surface
-                                .as_ref()
-                                .ok_or_else(|| SolidError::null_pointer(op))?,
-                            tolerance * 2.0,
-                            Some(&record.uv_domain),
-                        )?;
-                    }
+                .as_ref()
+                .ok_or_else(|| SolidError::null_pointer(op))?
+                .clone_for_evaluation()?;
+            for (brep, faces) in [
+                (&mut *a, faces_a.get(1..).unwrap_or_default()),
+                (&mut *b, faces_b.as_slice()),
+            ] {
+                for face in faces {
+                    cover_face_surface(k, brep, *face, &first_surface, tolerance * 2.0, None)?;
                 }
-                for (brep, faces) in [
-                    (&mut *a, faces_a.get(1..).unwrap_or_default()),
-                    (&mut *b, faces_b.as_slice()),
-                ] {
-                    for face in faces {
-                        brep.face_mut(*face)?
-                            .surface
-                            .as_mut()
-                            .ok_or_else(|| SolidError::null_pointer(op))?
-                            .cover_coincident_surface(k, &first_surface, tolerance * 2.0, None)?;
-                    }
-                }
-                Ok(())
-            })();
-            a.face_mut(first)?.surface = Some(first_surface);
-            covered?;
+            }
             super::boolean::finish(k, a, b, first, operation, output, marks, notifications)?;
             selected_result = true;
             Ok(())
@@ -772,6 +763,58 @@ impl PrimitiveCreation {
         }
         result
     }
+}
+
+/// `pFace->GetSurface()->CoverCoincidentSurface(pOther, tol, ..)` of `Boolean2D` on the
+/// surface of face `face` of `brep`, followed by the `SmFace::RemoveUVTrimCurves`
+/// (status ignored) a successful cover of a face-owned surface ends with.
+///
+/// Upstream's `STEPInversion` solves inside run on the face's own surface, whose
+/// `GlobalPointSolve` classifies drops against the face (`GetFace()->PointClassify`).
+/// The surface is moved out of its face for the call (keeping its owner, so the cache
+/// it builds is its own) and lent with the B-rep through a face solve context; while it
+/// is out, the face holds an evaluation copy of it for the B-rep reads of that cache
+/// build. The real surface, possibly expanded, replaces the copy afterwards on every
+/// exit, and the face tolerance a solve raised on the copy is synced back.
+fn cover_face_surface(
+    k: &Kernel,
+    brep: &mut Brep,
+    face: FaceId,
+    other: &Surface,
+    tol: f64,
+    other_domain: Option<&Extent2d>,
+) -> Result<()> {
+    use crate::query::brep::BrepFaceServices;
+    use crate::topology::brep_cache::CacheObject;
+
+    let op = "primitive::primitive_creation::p1::boolean_2d";
+    let stand_in = brep
+        .face(face)?
+        .surface
+        .as_ref()
+        .ok_or_else(|| SolidError::null_pointer(op))?
+        .clone_for_evaluation()?;
+    let mut surface = brep
+        .face_mut(face)?
+        .surface
+        .replace(stand_in)
+        .ok_or_else(|| SolidError::null_pointer(op))?;
+    let r = surface.cover_coincident_surface_deferring_trims_with_context(
+        k,
+        other,
+        tol,
+        other_domain,
+        (
+            &mut BrepFaceServices::new(&mut *brep),
+            Some(CacheObject::Surface(face)),
+        ),
+    );
+    brep.face_mut(face)?.surface = Some(surface);
+    brep.sync_face_surface_tolerance(face)?;
+    if r?.remove_uv_trim_curves_of.is_some() {
+        ignore_status(crate::topology::face::p1::remove_uv_trim_curves(brep, face))?;
+    }
+    Ok(())
 }
 
 impl PrimitiveCreation {
