@@ -5,12 +5,14 @@ use solidcraft_cloud::jobs::{JobStatus, Phase};
 
 use crate::SolveApp;
 pub(crate) mod configuration;
+pub(crate) mod operations;
 
 #[derive(Default)]
 pub(crate) struct State {
     pub setup: Option<crate::cloud_setup::Wizard>,
     pub browser: crate::cloud_browser::Browser,
     pub editor: Option<crate::cloud_settings::Editor>,
+    pub operations: operations::Operations,
     retry_at: f64,
     messages: BTreeMap<String, String>,
 }
@@ -26,7 +28,9 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
             return;
         }
     };
+    app.cloud.operations.update(&statuses);
     crate::cloud_browser::tick(app, &statuses);
+    crate::cloud_browser::tabs::request_timeout(app, ctx);
     let live: BTreeSet<_> = statuses.iter().map(|status| status.operation.as_str()).collect();
     app.cloud.messages.retain(|id, _| live.contains(id.as_str()));
     for status in &statuses {

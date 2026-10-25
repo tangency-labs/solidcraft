@@ -52,8 +52,8 @@ file again.
 
 1. On **Start → Cloud Saves**, choose **Save to Cloud Project**. For a new design,
    normal **Save** opens the same picker when a default cloud repository is connected.
-2. Choose a repository, enter a project folder (or choose an existing one), and name
-   the design. For example, project `Robot` and name `bracket` create
+2. Choose a repository and a project from the **Project** list. Choose **New…**
+   to enter a new project folder, then name the design. For example, project `Robot` and name `bracket` create
    `Robot/parts/bracket` inside the repository. Parts and assemblies use the same
    design representation; you can also store ordinary documents in the project.
 3. Choose **Save**. Future saves use this destination even if you change the default
@@ -64,8 +64,11 @@ On **Start**, use the repository selector to browse connected repositories and
 click a design to open it. Other open designs and unsaved edits are preserved.
 **Refresh** reloads the list; **Synchronize Repository** retries pending saves for
 the selected repository. A failed refresh keeps the last displayed list; availability
-offline depends on the designs retained by local storage. Connect another repository
-with **Connect GitHub**; each connection has independent credentials and queues.
+offline depends on the designs retained by local storage. **Add new repository** connects
+another GitHub repository or desktop Git checkout. Additional GitHub setup shows
+the repository field and suggests an unused name; you can enter an existing
+repository instead. The repository selector switches between all connected
+repositories, each with independent credentials and queues.
 
 The picker refuses names already shown in that project. If another device creates
 the same name after listing, synchronization preserves a conflict copy. Further
@@ -80,12 +83,31 @@ preview if its earlier save did not include one.
 Saving first records the captured design on this device, then synchronizes it.
 If that repository is already synchronizing, your new save is stored locally
 immediately and uploads when the current synchronization finishes.
-**Saved on this device** means it is recoverable here and still needs publication.
-**Syncing** means synchronization is running. **Synchronize Repository** also
-receives changes from other devices, even when there are no saves waiting to upload. **Synced** means the remote accepted it.
+The Start list shows a colored dot and a short status. Pushing and Outdated dots
+gently fade in and out:
+
+- **Pushing** (yellow): saved on this device and waiting to upload, or uploading now.
+- **Synced** (green): publication is confirmed.
+- **Outdated** (red): the repository has changed since the retained copy. Choose
+  **Synchronize Repository** before opening it; **Pulling** (yellow) appears while it updates.
+- **Available** (blue): a listed design or retained copy whose publication has not been confirmed.
+- **Conflict** or **Error** (red): inspect the reported details before continuing.
+
+**Synchronize Repository** uploads queued saves and receives changes to previously
+opened designs, including when no saves are waiting. Loading indicators keep the
+buttons aligned. Each action stays disabled until its operation finishes.
+Opening a cloud design enters the workspace before showing progress, just like
+opening a local file. Its parts appear as display meshes become ready.
+
+Cloud-backed document tabs use the usual unsaved-marker position after the name.
+Unsaved edits show a white dot; pushing makes it pulse white. A push still waiting
+after 30 seconds pulses orange, and a failed save or push shows red. Saved cloud tabs
+have no dot, just like saved local files. Hover over a status dot for the repository,
+project and status.
+Local file tabs retain their usual white unsaved marker.
 Edits made while an upload runs remain unsaved until you save again.
 
-[![Start lists the mesh assembly in its project with a preview and Saved on this device status.](images/cloud-saves-home.png)](images/cloud-saves-home.png)
+[![Start lists designs in a project with previews and colored synchronization statuses.](images/cloud-saves-home.png)](images/cloud-saves-home.png)
 
 If two offline tabs save competing versions, open the design from Home and choose
 a local version to inspect. Each choice uses its displayed revision identifier.
@@ -99,12 +121,14 @@ site data or deleting the browser profile also removes local recovery data and
 credentials. Storage errors are reported instead of claiming the save succeeded.
 Desktop retains its recovery queue separately from the checkout. Opening a design
 from an ordinary checkout also retains a validated local snapshot. That snapshot
-can be opened if the checkout is later unavailable. **Available locally** identifies
+can be opened if the checkout is later unavailable. **Available** identifies
 a retained checkout copy whose publication has not been confirmed.
 
 The Start list restores these statuses from local records after a restart and
 refreshes them after synchronization. A desktop checkout changed by another Git
-client is not labelled **Synced** merely because an older revision was published.
+client is marked **Outdated** when its retained copy differs. That observation survives
+restarts and failed refreshes; synchronization must update the copy before the row
+can be opened. Queued local work remains accessible offline.
 
 Cancelling synchronization keeps queued designs. When a conflicting design edit
 is found, SolidCraft preserves a conflict copy rather than replacing either edit.
@@ -113,18 +137,24 @@ Newer storage formats ask you to upgrade before opening or saving.
 ## Manage connections
 
 Open **Cloud Saves Settings** from Start, or choose **Settings → Cloud Saves**.
-Select a repository to rename it, make it the default for new cloud saves, test
-its connection, synchronize it, or reconnect with a replacement token.
+The repository table shows a label derived from each remote, such as
+`github.com/owner/solidcraft-designs`. Select a row to test or synchronize it,
+reconnect with a replacement token, or open its Git settings. Use the **Default**
+checkbox to choose the destination for new cloud saves. **Add new repository**
+connects another GitHub repository; **Checkout Git repository** configures a desktop
+checkout. Progress and cancellation stay in a fixed footer below the actions.
 
 Connection changes take effect when you choose **Apply** or **OK** and local
 storage confirms them. A failed Apply keeps the page open so you can retry.
 **Cancel** discards changes made since the last successful Apply. Connecting or
 reconnecting from this page verifies the repository first, then waits for Apply.
 
-Choose **Disconnect**, then Apply to remove a connection from the app. Its queued
+Use the remove button in a repository row, then Apply to disconnect it. Its queued
 saves remain on this device; reconnecting the same repository restores access to
 them. Existing designs keep their destinations when you change the default.
 **Restore Defaults** resets synchronization preferences and preserves connections.
+
+[![Cloud Saves settings lists connected repositories in a table with default checkboxes and remove buttons.](images/cloud-saves-settings.png)](images/cloud-saves-settings.png)
 
 **Synchronize after saving** publishes each locally recorded save in the background.
 **Retry pending saves automatically** retries after startup and at regular intervals.
@@ -145,7 +175,7 @@ the app uses `SolidCraft <cloud@solidcraft.invalid>` for that save only.
 
 ### Connect an existing checkout
 
-1. Open **Settings → Cloud Saves → Open Git checkout…**.
+1. Open **Settings → Cloud Saves → Checkout Git repository…**.
 2. Name the connection and choose the checkout's top-level folder with **Browse…**.
    Enter the branch currently checked out in that folder.
 3. Enter a remote name such as `origin`, an HTTPS or SSH URL, a `file://` URL,

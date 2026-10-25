@@ -71,7 +71,7 @@ fn complete_configuration(worker: &Worker, fail: bool) {
 fn apply_waits_for_durability_across_tabs_and_cancel_keeps_the_last_apply() {
     for dark in [false, true] {
         let (mut h, worker) = setup(dark);
-        assert!(crate::scenario::rect_of("cloud_settings:repositories").is_some());
+        assert!(crate::scenario::rect_of("dialog:table:cloud_repositories:viewport").is_some());
         let mut changed = worker.settings.clone();
         changed.default_connection = Some(changed.connections[1].id.clone());
         changed.retry_pending = true;
@@ -204,4 +204,44 @@ fn test_sync_and_cancel_use_the_selected_applied_connection() {
     let jobs = worker.jobs.lock().unwrap();
     let (_, Operation::Synchronize(c)) = jobs.last().unwrap() else { panic!("synchronization") };
     assert_eq!(c.id, worker.settings.connections[0].id);
+}
+
+#[test]
+fn repository_rows_select_remove_and_keep_test_progress_in_place() {
+    for dark in [false, true] {
+        let (mut h, worker) = setup(dark);
+        assert!(crate::scenario::rect_of("cloud_settings:name").is_none());
+        let second = worker.settings.connections[1].id.clone();
+        h.step(&json!({"click":{"handle":format!("cloud_settings:row:{second}")}})).unwrap();
+        assert_eq!(h.app.cloud.editor.as_ref().unwrap().selected.as_deref(), Some(second.as_str()));
+        let controls = [
+            "cloud_settings:test",
+            "cloud_settings:sync",
+            "cloud_settings:reconnect",
+            "cloud_settings:advanced",
+            "cloud_settings:add_git",
+            "cloud_settings:status",
+            "cloud_settings:sync_after_save",
+        ];
+        let before: Vec<_> = controls.iter().map(|id| crate::scenario::rect_of(id).unwrap()).collect();
+        h.step(&json!({"click":{"handle":"cloud_settings:test"}})).unwrap();
+        let jobs = worker.jobs.lock().unwrap();
+        let (job, Operation::Test(connection)) = jobs.last().unwrap() else { panic!("test") };
+        assert_eq!(connection.id, second);
+        let job = job.clone();
+        drop(jobs);
+        h.frames(3);
+        for (id, rect) in controls.iter().zip(&before) {
+            assert_eq!(crate::scenario::rect_of(id).unwrap(), *rect, "{id} moved while testing");
+        }
+        job.update(|s| s.phase = Phase::Ready).unwrap();
+        h.frames(3);
+        for (id, rect) in controls.iter().zip(&before) {
+            assert_eq!(crate::scenario::rect_of(id).unwrap(), *rect, "{id} moved after testing");
+        }
+        h.step(&json!({"click":{"handle":format!("cloud_settings:remove:{second}")}})).unwrap();
+        assert_eq!(h.app.cloud.editor.as_ref().unwrap().draft.connections.len(), 1);
+        assert_eq!(h.app.session.cloud_settings().connections.len(), 2, "removal waits for Apply");
+        assert_eq!(h.app.cloud.editor.as_ref().unwrap().draft.default_connection, worker.settings.default_connection);
+    }
 }

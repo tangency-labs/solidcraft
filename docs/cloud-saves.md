@@ -281,6 +281,10 @@ from Start continues to apply the connection directly. Disconnect changes settin
 only; durable queues and credential storage retain their data. Restore Defaults
 uses `Settings::restore_behavior_defaults`, preserving connections and defaults.
 Testing and synchronization use the applied connection through existing commands.
+The shared UI kit table in `cloud_settings/repositories.rs` owns row selection,
+default destination and removal controls. Labels use `Connection::repository_label()`
+from remote metadata. Operation feedback has a fixed footer, and busy buttons
+replace their leading icon without changing dimensions.
 
 ## Verified native remotes
 
@@ -368,7 +372,7 @@ Existing future cache/document formats block replacement. Queues and cached list
 have a 256 MiB aggregate metadata bound on both platforms.
 
 `cloud.list` keeps its destination-array result and includes optional `JobStatus.catalog`
-details. `stored_designs` reconstructs **Saved on this device**, **Synced**, **Available locally**,
+details. `stored_designs` reconstructs queued, confirmed and unconfirmed local states,
 and competing-tip attention from durable metadata. Only verified publications or remote
 reads establish confirmation. Native listings compare revision, document hash and payload
 manifest identity against the checkout before retaining **Synced**. Compatible optional
@@ -464,3 +468,26 @@ credential adapter, browser opening and publication through GitHub, offline brow
 restart with retained settings/credentials, and desktop Sync/Open of the browser
 revision with both editable Box features intact. Test data used a disposable orphan
 branch; all such refs were removed with exact leases after checking their contents.
+
+### Observed repository changes and action lifetimes
+
+`StoredDesign::outdated` distinguishes an observed stale cache from a listing that
+has not yet been confirmed. Listing compares revision, document hash and manifest
+identity. An atomic compare-and-set marks the observed cache head outdated without
+changing a newer save or pull; the optional flag survives restart. Pending local
+captures retain priority. Home renders shared `FileStatus` tones and short localized
+labels, and disables an outdated row until synchronization replaces its cache.
+
+Repository synchronization refreshes previously cached designs. Browser listing
+checks their manifests before downloading changed snapshots. Native refresh keeps
+unrelated staged and working files, and confirms the received design's owned paths
+against committed and published content before marking the cache current. Downloads
+use the existing compatibility checks and bounded asset readers. Failed or interrupted
+refreshes retain the outdated flag and the recoverable copy.
+
+`cloud/operations.rs` tracks command operation IDs across tabs. Cloud action buttons
+use the shared kit's `busy_button`, whose leading action icon becomes a spinner
+without changing the button width or text position.
+Working and syncing operations keep their action disabled; terminal acknowledgements
+(including failure, cancellation and worker timeout) release it. Local durability
+alone does not release an action while its upload continues.

@@ -687,6 +687,41 @@ fn externally_published_checkouts_are_cached_without_receipts_and_survive_lost_c
 }
 
 #[test]
+fn synchronization_pulls_outdated_caches_and_preserves_unrelated_git_work() {
+    let fixture = Fixture::new();
+    let connection = fixture.checkout("pull-cached");
+    let host = fixture.host();
+    let first = save(&connection, "parts/bracket", "First version", None);
+    let record = first.record.clone();
+    assert_eq!(
+        published(&host.submit(Operation::Save { connection: connection.clone(), save: Box::new(first), synchronize: true }, String::new()).unwrap())
+            .phase,
+        Phase::Synced
+    );
+    let changed = save(&connection, "parts/bracket", "New repository version", Some(record.id));
+    GitRepository::open(connection.clone(), "")
+        .unwrap()
+        .publish(&changed.record, changed.record.recover(|p| Ok(changed.objects[p].clone())).unwrap())
+        .unwrap();
+    let listing = complete(&host.submit(Operation::List(connection.clone()), String::new()).unwrap());
+    assert!(listing.catalog[0].outdated);
+    let offline = complete(&fixture.host().submit(Operation::List(connection.clone()), "missing-git".into()).unwrap());
+    assert!(offline.catalog[0].outdated, "observed staleness survives restart and offline listing");
+    let checkout = Path::new(&connection.checkout);
+    fs::write(checkout.join("notes.txt"), b"unrelated staged").unwrap();
+    Fixture::git(checkout, &["add", "notes.txt"]);
+    fs::write(checkout.join("scratch.txt"), b"unrelated unstaged").unwrap();
+    let sync = host.submit(Operation::Synchronize(connection.clone()), String::new()).unwrap();
+    assert_eq!(published(&sync).phase, Phase::Synced);
+    let listing = complete(&host.submit(Operation::List(connection.clone()), String::new()).unwrap());
+    assert!(!listing.catalog[0].outdated);
+    assert_eq!(listing.catalog[0].phase, Phase::Synced);
+    assert_eq!(listing.catalog[0].revision.as_deref(), Some(changed.record.id.as_str()));
+    assert_eq!(Fixture::git(checkout, &["diff", "--cached", "--name-only"]), b"notes.txt\n");
+    assert_eq!(fs::read(checkout.join("scratch.txt")).unwrap(), b"unrelated unstaged");
+}
+
+#[test]
 fn changed_checkout_is_not_marked_synced_and_cache_failures_never_open_an_older_head() {
     let fixture = Fixture::new();
     let connection = fixture.checkout("observed");

@@ -12,6 +12,9 @@ use crate::{
     cloud_storage::{Store, with_lock},
 };
 
+#[path = "cloud_host/receive.rs"]
+mod receive;
+
 pub struct BrowserHost;
 
 fn storage(error: impl std::fmt::Display) -> Error {
@@ -102,6 +105,7 @@ async fn synchronize(connection: Connection, store: Store, job: Job, target: Opt
             pending = PendingSave::ordered(pending)?;
         }
         if pending.is_empty() {
+            receive::refresh(&connection, &store, &job).await?;
             return job.update(|status| {
                 status.result = Some(serde_json::json!([]));
                 status.phase = Phase::Synced;
@@ -176,6 +180,7 @@ async fn synchronize(connection: Connection, store: Store, job: Job, target: Opt
         if let Some(error) = first_error {
             return Err(error);
         }
+        receive::refresh(&connection, &store, &job).await?;
         job.update(|status| status.phase = Phase::Synced)
     })
     .await
@@ -262,12 +267,12 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
                     pending.push(save);
                 }
             }
-            let catalog = solidcraft_cloud::stored_designs(cached, pending)?;
+            let mut catalog = solidcraft_cloud::stored_designs(cached, pending)?;
             let mut destinations = BTreeMap::new();
             for entry in &catalog {
                 destinations.insert(entry.destination.design_path()?, entry.destination.clone());
             }
-            match async { repository(&connection, job).await?.list().await }.await {
+            match async { repository(&connection, job).await?.list_with_status(&mut catalog).await }.await {
                 Ok(entries) => {
                     for destination in entries {
                         destinations.insert(destination.design_path()?, destination);
@@ -275,6 +280,9 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
                 }
                 Err(error @ Error::Storage(_)) if !destinations.is_empty() => job.update(|status| status.message = Some(error.to_string()))?,
                 Err(error) => return Err(error),
+            }
+            for entry in catalog.iter().filter(|entry| entry.outdated) {
+                store.mark_outdated(entry).await?;
             }
             check_cancelled(job)?;
             job.update(|status| {

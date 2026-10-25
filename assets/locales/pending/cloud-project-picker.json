@@ -1,0 +1,80 @@
+{
+  "en": {
+    "cloud.project_new": "New…"
+  },
+  "en-GB": {
+    "cloud.project_new": "New…"
+  },
+  "cs": {
+    "cloud.project_new": "Nový…"
+  },
+  "da": {
+    "cloud.project_new": "Nyt…"
+  },
+  "de": {
+    "cloud.project_new": "Neu…"
+  },
+  "es": {
+    "cloud.project_new": "Nuevo…"
+  },
+  "fr": {
+    "cloud.project_new": "Nouveau…"
+  },
+  "gl": {
+    "cloud.project_new": "Novo…"
+  },
+  "hu": {
+    "cloud.project_new": "Új…"
+  },
+  "id": {
+    "cloud.project_new": "Baru…"
+  },
+  "it": {
+    "cloud.project_new": "Nuovo…"
+  },
+  "ja": {
+    "cloud.project_new": "新規…"
+  },
+  "ko": {
+    "cloud.project_new": "새로 만들기…"
+  },
+  "ms": {
+    "cloud.project_new": "Baharu…"
+  },
+  "nb": {
+    "cloud.project_new": "Nytt…"
+  },
+  "nl": {
+    "cloud.project_new": "Nieuw…"
+  },
+  "pl": {
+    "cloud.project_new": "Nowy…"
+  },
+  "pt-BR": {
+    "cloud.project_new": "Novo…"
+  },
+  "ro": {
+    "cloud.project_new": "Nou…"
+  },
+  "ru": {
+    "cloud.project_new": "Новый…"
+  },
+  "sv": {
+    "cloud.project_new": "Nytt…"
+  },
+  "tr": {
+    "cloud.project_new": "Yeni…"
+  },
+  "uk": {
+    "cloud.project_new": "Новий…"
+  },
+  "vi": {
+    "cloud.project_new": "Mới…"
+  },
+  "zh-TW": {
+    "cloud.project_new": "新增…"
+  },
+  "zh": {
+    "cloud.project_new": "新建…"
+  }
+}

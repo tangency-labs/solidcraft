@@ -340,6 +340,30 @@ impl Store {
         Ok(destinations)
     }
 
+    pub async fn mark_outdated(&self, observed: &solidcraft_cloud::StoredDesign) -> Result<()> {
+        let store = self.clone();
+        let observed = observed.clone();
+        with_lock(&self.lock, async move {
+            if let Some(mut current) = store.cached(&observed.destination).await?
+                && current.mark_outdated(&observed)?
+            {
+                let text = current.write()?;
+                let key = cache_key(&current.destination)?;
+                let transaction = store
+                    .database
+                    .transaction("cached")
+                    .with_mode(TransactionMode::Readwrite)
+                    .with_options(TransactionOptions::new().with_durability(TransactionDurability::Strict))
+                    .build()
+                    .map_err(storage)?;
+                transaction.object_store("cached").map_err(storage)?.put(text).with_key(key.as_str()).await.map_err(storage)?;
+                transaction.commit().await.map_err(storage)?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn cache_remote(&self, destination: Destination, snapshot: Snapshot) -> Result<()> {
         destination.validate()?;
         if destination.connection != self.connection.id {

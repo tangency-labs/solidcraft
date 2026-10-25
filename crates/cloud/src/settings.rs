@@ -89,6 +89,33 @@ impl Default for Connection {
 }
 
 impl Connection {
+    /// Repository identity for display, derived from the verified remote rather than a user label.
+    pub fn repository_label(&self) -> String {
+        let remote = self.git_remote.as_ref().map(|r| r.fetch.as_str()).unwrap_or(&self.remote);
+        if self.provider == "github" && !self.repository.is_empty() {
+            return format!("github.com/{}", self.repository);
+        }
+        if let Some(path) = remote.strip_prefix("file://") {
+            return path.into();
+        }
+        if let Some((_, address)) = remote.split_once("://") {
+            let (host, path) = address.split_once('/').unwrap_or((address, ""));
+            let host = host.rsplit('@').next().unwrap_or(host);
+            let path = path.split(['?', '#']).next().unwrap_or_default().trim_end_matches('/').trim_end_matches(".git");
+            return if path.is_empty() { host.into() } else { format!("{host}/{path}") };
+        }
+        if let Some((host, path)) = remote.split_once(':')
+            && host.len() > 1
+            && !host.contains(['/', '\\'])
+        {
+            return format!("{}/{}", host.rsplit('@').next().unwrap_or(host), path.trim_end_matches('/').trim_end_matches(".git"));
+        }
+        if remote.is_empty() || (remote == "origin" && self.git_remote.is_none()) {
+            return self.checkout.clone();
+        }
+        remote.into()
+    }
+
     /// Credentials may be renewed without redirecting captured saves to another repository.
     /// Legacy unpinned captures can acquire verified endpoints; captured pins stay immutable.
     pub fn same_repository(&self, other: &Self) -> bool {
@@ -283,5 +310,27 @@ mod tests {
         settings.connections[1].credential = "cloud:work".into();
         settings.connections[1].id = "github".into();
         assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn repository_labels_derive_from_remote_urls_and_local_paths() {
+        assert_eq!(
+            crate::setup::github_connection("fpoussin/solidcraft-designs").unwrap().repository_label(),
+            "github.com/fpoussin/solidcraft-designs"
+        );
+        for (remote, expected) in [
+            ("https://gitlab.com/team/designs.git", "gitlab.com/team/designs"),
+            ("git@github.com:owner/designs.git", "github.com/owner/designs"),
+            ("ssh://git@host.test:2222/team/designs.git", "host.test:2222/team/designs"),
+            ("file:///path with spaces/designs.git", "/path with spaces/designs.git"),
+            ("../designs.git", "../designs.git"),
+            ("C:\\designs.git", "C:\\designs.git"),
+        ] {
+            let connection = Connection { name: "Old custom name".into(), provider: String::new(), remote: remote.into(), ..Default::default() };
+            assert_eq!(connection.repository_label(), expected);
+            let pinned =
+                Connection { remote: "origin".into(), git_remote: Some(GitRemote { fetch: remote.into(), push: vec![remote.into()] }), ..connection };
+            assert_eq!(pinned.repository_label(), expected);
+        }
     }
 }

@@ -194,10 +194,17 @@ pub async fn phase(name: &str, identity: String) -> Result<Value> {
         "worker-cached-read" => {
             require(Store::open(connection.clone()).await?.pending().await?.is_empty(), "receipt survived restart")?;
             open_and_list(connection.clone(), destination, Phase::Synced).await?;
-            require(operation(Operation::Synchronize(connection)).await?.phase == Phase::Synced, "empty queue needs no connectivity")?;
+            let synchronization = operation(Operation::Synchronize(connection.clone())).await?;
+            require(synchronization.phase == Phase::Failed, "an offline refresh reports missing connectivity")?;
+            let store = Store::open(connection).await?;
+            let observed = solidcraft_cloud::stored_designs(store.cached_entries().await?, vec![])?;
+            store.mark_outdated(observed.first().ok_or_else(|| Error::Storage("cached design missing".into()))?).await?;
+            require(store.pending().await?.is_empty(), "failed refresh does not invent uploads")?;
             Ok(json!({"phase":name,"cached_open":true}))
         }
         "worker-future-settings" => {
+            let observed = solidcraft_cloud::stored_designs(Store::open(connection).await?.cached_entries().await?, vec![])?;
+            require(observed.first().is_some_and(|entry| entry.outdated && entry.phase == Phase::Ready), "outdated state survived browser restart")?;
             let loaded = operation(Operation::LoadSettings).await?;
             require(
                 loaded.phase == Phase::Failed && loaded.message.as_deref().is_some_and(|message| message.contains("Upgrade SolidCraft")),

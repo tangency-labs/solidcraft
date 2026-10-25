@@ -67,8 +67,7 @@ fn cancel_test(app: &mut SolveApp, wizard: &Wizard) {
 
 impl Wizard {
     fn valid(&self) -> bool {
-        !self.connection.name.trim().is_empty()
-            && !self.connection.checkout.trim().is_empty()
+        !self.connection.checkout.trim().is_empty()
             && !self.connection.branch.is_empty()
             && self.connection.validate().is_ok()
             && Settings { git_executable: self.executable.clone(), ..Default::default() }.validate().is_ok()
@@ -83,9 +82,10 @@ impl Wizard {
         let status = all.iter().find(|s| s.operation == *id).ok_or_else(|| tr("cloud.setup_failed").to_owned())?;
         match status.phase {
             Phase::Ready => {
-                let connection: Connection =
+                let mut connection: Connection =
                     serde_json::from_value(status.result.clone().ok_or_else(|| tr("cloud.setup_failed").to_owned())?).map_err(|e| e.to_string())?;
                 connection.validate().map_err(|e| e.to_string())?;
+                connection.name = connection.repository_label();
                 self.connection = connection.clone();
                 self.verified = Some((connection, self.executable.clone()));
                 self.pending = None;
@@ -157,6 +157,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         wizard.error = Some(error);
     }
     key::poll(app, &mut wizard);
+    wizard.connection.name = wizard.connection.repository_label();
     let busy = wizard.pending.is_some() || wizard.key.as_ref().is_some_and(key::Editor::busy);
     let enabled = !busy && !app.file_picker_busy() && !app.session.cloud_configuring();
     let mut browse = None;
@@ -170,7 +171,6 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let choice_label_width = ui_kit::ContentWidth::label(ui, tr("cloud.git_auth")).max(crate::theme::Tokens::get().form_label_width)
                 + crate::theme::Tokens::get().space_8;
             ui.add_enabled_ui(enabled, |ui| {
-                field(ui, "cloud.connection_name", &mut wizard.connection.name, false);
                 if field(ui, "cloud.git_checkout", &mut wizard.connection.checkout, true) {
                     browse = Some(Pick::Checkout);
                 }

@@ -8,6 +8,7 @@ use std::process::Command;
 pub use solidcraft_cloud::Published;
 use solidcraft_cloud::{Connection, Destination, Error, Manifest, PROJECT_MARKER, PendingSave, Publication, Result, Snapshot, SshIdentity};
 
+mod receive;
 mod remotes;
 
 fn storage(error: impl std::fmt::Display) -> Error {
@@ -238,10 +239,7 @@ impl GitRepository {
         let Some(bytes) = self.read(&format!("{prefix}/manifest.json"))? else { return Ok(false) };
         // An unsupported design remains listed so Open can show its upgrade message.
         let Ok(manifest) = Manifest::read(&bytes) else { return Ok(false) };
-        if manifest.document_hash != entry.document_hash
-            || solidcraft_cloud::manifest_digest(&manifest)? != entry.manifest_hash
-            || solidcraft_cloud::revision(&manifest) != entry.revision.as_deref()
-        {
+        if !entry.matches_manifest(&manifest)? {
             return Ok(false);
         }
         Ok(self.read(&format!("{prefix}/document.json"))?.is_some_and(|bytes| solidcraft_cloud::digest(&bytes) == entry.document_hash))

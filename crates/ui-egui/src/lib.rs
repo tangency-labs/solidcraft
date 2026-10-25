@@ -1193,7 +1193,11 @@ impl SolveApp {
         {
             for slot in self.docs.background_mut() {
                 if slot.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation) {
-                    return slot.session.execute(id, &params).map_err(|e| e.to_string());
+                    let result = slot.session.execute(id, &params).map_err(|e| e.to_string());
+                    if result.is_ok() && id == "cloud.cancel" {
+                        self.cloud.operations.cancel_requested(operation);
+                    }
+                    return result;
                 }
             }
         }
@@ -1213,6 +1217,9 @@ impl SolveApp {
         if self.status_undo && revision != self.session.revision {
             self.status_undo = false;
             self.status = None;
+        }
+        if let Ok(value) = &r {
+            cloud::operations::submitted(self, id, &params, value);
         }
         let done = self.command_completed(id, r);
         if self.session.revision != revision {

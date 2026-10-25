@@ -6,6 +6,8 @@ use solidcraft_cloud::{
     jobs::{JobStatus, Phase},
 };
 
+mod repositories;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod git;
 
@@ -80,7 +82,8 @@ impl Editor {
         }
     }
 
-    fn stage(&mut self, connection: Connection) -> Result<(), String> {
+    fn stage(&mut self, mut connection: Connection) -> Result<(), String> {
+        connection.name = connection.repository_label();
         let editor = self;
         if editor.pending.is_some() {
             return Err(tr("cloud.apply_pending").into());
@@ -193,36 +196,18 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if editor.draft.connection(editor.selected.as_deref().unwrap_or("")).is_none() {
                 editor.selected = editor.draft.connections.first().map(|c| c.id.clone());
             }
-            let selected = editor.selected.as_deref().and_then(|id| editor.draft.connection(id));
-            let r = ui_kit::dropdown_menu(
-                ui,
-                "cloud_settings_repositories",
-                selected.map(|c| c.name.as_str()).unwrap_or(tr("cloud.connections")),
-                |ui| {
-                    for c in &editor.draft.connections {
-                        if ui_kit::list_picker(ui, &c.id, &c.name, editor.selected.as_deref() == Some(&c.id)).clicked() {
-                            editor.selected = Some(c.id.clone());
-                        }
-                    }
-                },
-            );
-            crate::scenario::publish_target("cloud_settings:repositories", r.rect);
+            connect = repositories::table(ui, &mut editor, &all);
             if let Some(c) = editor.selected.as_deref().and_then(|id| editor.draft.connections.iter_mut().find(|c| c.id == id)) {
-                ui_kit::row(ui, tr("cloud.connection_name"), |ui| {
-                    let r = ui_kit::bounded_cell_editor(ui, egui::Id::new("cloud_connection_name"), &mut c.name, "", false, 4096);
-                    crate::scenario::publish_target("cloud_settings:name", r.rect);
-                });
-                ui.label(if c.repository.is_empty() { &c.checkout } else { &c.repository });
-                let mut default = editor.draft.default_connection.as_deref() == Some(&c.id);
-                let r = ui_kit::checkbox(ui, tr("cloud.default_repository"), &mut default);
-                crate::scenario::publish_target("cloud_settings:default", r.rect);
-                if r.changed() {
-                    editor.draft.default_connection = default.then(|| c.id.clone());
-                }
                 let applied = app.session.cloud_settings().connection(&c.id) == Some(c);
                 let active = all.iter().any(|s| s.connection == c.id && matches!(s.phase, Phase::Working | Phase::Syncing));
                 ui.horizontal_wrapped(|ui| {
-                    if button(ui, "cloud_settings:test", tr("cmd.cloud.test"), applied && !active) {
+                    if busy_button(
+                        ui,
+                        "cloud_settings:test",
+                        tr("cmd.cloud.test"),
+                        applied && !active,
+                        app.cloud.operations.busy("cloud.test", &c.id),
+                    ) {
                         match app.run("cloud.test", json!({"connection":c.id})) {
                             Ok(reply) => {
                                 editor.test = reply.get("operation").and_then(|v| v.as_str()).map(str::to_owned);
@@ -231,12 +216,17 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             Err(error) => editor.error = Some(error),
                         }
                     }
-                    if button(ui, "cloud_settings:sync", tr("cmd.cloud.sync"), applied && !active)
-                        && let Err(error) = app.run("cloud.sync", json!({"connection":c.id}))
+                    if busy_button(
+                        ui,
+                        "cloud_settings:sync",
+                        tr("cmd.cloud.sync"),
+                        applied && !active,
+                        app.cloud.operations.busy("cloud.sync", &c.id),
+                    ) && let Err(error) = app.run("cloud.sync", json!({"connection":c.id}))
                     {
                         editor.error = Some(error);
                     }
-                    if c.provider == "github" && button(ui, "cloud_settings:reconnect", tr("cloud.reconnect"), true) {
+                    if c.provider == "github" && button(ui, "cloud_settings:reconnect", tr("cloud.reconnect"), !active) {
                         reconnect = Some(c.clone());
                     }
                     #[cfg(not(target_arch = "wasm32"))]
@@ -247,38 +237,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if !applied {
                     ui_kit::text(ui, tr("cloud.apply_first"), ui_kit::Text::Hint("cloud_apply_first"));
                 }
-                for status in all.iter().filter(|s| s.connection == c.id && matches!(s.phase, Phase::Working | Phase::Syncing)) {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(tr("cloud.syncing"));
-                        if button(ui, &format!("cloud_settings:cancel:{}", status.operation), tr("cmd.cloud.cancel"), true)
-                            && let Err(error) = app.run("cloud.cancel", json!({"operation":status.operation}))
-                        {
-                            editor.error = Some(error);
-                        }
-                    });
-                }
-                if let Some(status) = all.iter().find(|s| Some(&s.operation) == editor.test.as_ref()) {
-                    if let Some(message) = &status.message {
-                        ui_kit::text(ui, message, ui_kit::Text::Report("cloud_test_result", true));
-                    } else if matches!(status.phase, Phase::Ready | Phase::Synced) {
-                        ui.label(tr("cloud.test_ok"));
-                    }
-                }
+                repositories::status(app, ui, c, &all, editor.test.as_deref(), &mut editor.error);
                 if all.iter().any(|s| s.connection == c.id && s.storage_persistent == Some(false)) {
                     ui_kit::text(ui, tr("cloud.storage_temporary"), ui_kit::Text::Report("cloud_storage_persistence", true));
                 }
-                let id = c.id.clone();
-                if button(ui, "cloud_settings:disconnect", tr("cloud.disconnect"), !active) {
-                    editor.draft.connections.retain(|c| c.id != id);
-                    if editor.draft.default_connection.as_ref() == Some(&id) {
-                        editor.draft.default_connection = None;
-                    }
-                    editor.selected = None;
-                }
-                ui_kit::text(ui, tr("cloud.disconnect_hint"), ui_kit::Text::Hint("cloud_disconnect_hint"));
             }
-            connect = button(ui, "cloud_settings:connect", tr("cmd.cloud.connect"), editor.draft.connections.len() < 128);
             #[cfg(not(target_arch = "wasm32"))]
             {
                 advanced = button(ui, "cloud_settings:add_git", tr("cloud.git_add"), editor.draft.connections.len() < 128);
@@ -323,3 +286,16 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 #[cfg(test)]
 mod tests;
+
+fn busy_button(ui: &mut egui::Ui, id: &str, label: &str, enabled: bool, busy: bool) -> bool {
+    let icon = if id.starts_with("cloud_settings:cancel") {
+        "stop"
+    } else if id == "cloud_settings:sync" {
+        "send"
+    } else {
+        "inspect"
+    };
+    let response = ui_kit::busy_button(ui, label, icon, enabled, busy);
+    crate::scenario::publish_target(id, response.rect);
+    response.clicked()
+}

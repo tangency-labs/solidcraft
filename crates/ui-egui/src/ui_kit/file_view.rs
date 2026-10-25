@@ -24,6 +24,51 @@ pub(crate) struct RecentRow<'a> {
     pub thumbnail_failed: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FileStatusTone {
+    Unsaved,
+    Pending,
+    Current,
+    Attention,
+    Available,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct FileStatus<'a> {
+    pub label: &'a str,
+    pub tone: FileStatusTone,
+    pub pulse: bool,
+}
+
+impl FileStatus<'_> {
+    pub(crate) fn paint_dot(self, ui: &Ui, rect: Rect) {
+        let mut painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
+        // Attention remains clear on disabled rows and inactive tabs.
+        painter.set_opacity(1.0);
+        let mut color = self.tone.color();
+        if self.pulse && ui.ctx().global_style().animation_time > 0.0 && ui.is_rect_visible(rect) {
+            let time = ui.input(|input| input.time);
+            let fade = if time.is_finite() { 0.625 + 0.375 * (time.rem_euclid(2.0) * std::f64::consts::PI).cos() as f32 } else { 1.0 };
+            color = color.gamma_multiply(fade);
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        }
+        painter.circle_filled(rect.center(), rect.width().min(rect.height()) / 2.0, color);
+    }
+}
+
+impl FileStatusTone {
+    pub(crate) fn color(self) -> egui::Color32 {
+        let t = Tokens::get();
+        match self {
+            Self::Unsaved => t.app_bar_text,
+            Self::Pending => t.warning,
+            Self::Current => t.form_success,
+            Self::Attention => t.error,
+            Self::Available => t.form_primary,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct SampleCard<'a> {
     pub title: &'a str,
@@ -271,8 +316,17 @@ impl FileView {
     }
 
     pub(crate) fn recent_row(ui: &mut Ui, id: &str, row: RecentRow<'_>) -> Response {
+        Self::recent_row_content(ui, id, row, None)
+    }
+
+    pub(crate) fn recent_row_with_status(ui: &mut Ui, id: &str, row: RecentRow<'_>, status: FileStatus<'_>) -> Response {
+        Self::recent_row_content(ui, id, row, Some(status))
+    }
+
+    fn recent_row_content(ui: &mut Ui, id: &str, row: RecentRow<'_>, status: Option<FileStatus<'_>>) -> Response {
         let t = Tokens::get();
-        let (rect, response) = allocate(ui, id, ui.available_width(), t.file_recent_height, row.title);
+        let accessible = status.map(|status| format!("{}\n{}\n{}", row.title, status.label, row.path));
+        let (rect, response) = allocate(ui, id, ui.available_width(), t.file_recent_height, accessible.as_deref().unwrap_or(row.title));
         if response.hovered() || response.has_focus() {
             ui.painter().rect_filled(rect, t.radius_lg, t.hover);
         }
@@ -306,9 +360,24 @@ impl FileView {
         // At narrow widths the same row keeps title and path, leaving optional metadata out.
         if content.width() < t.form_card_width * 2.0 {
             let half = content.center().y;
+            let status_width = status.map_or(0.0, |status| {
+                (ui.painter().layout_no_wrap(status.label.to_owned(), FontId::proportional(t.font_label), t.file_dim).size().x
+                    + t.space_8
+                    + t.space_6)
+                    .min(dimension(content.width()) * 0.6)
+            });
+            let title_right = if status.is_some() { (content.right() - status_width - t.space_8).max(left) } else { content.right() };
+            if let Some(status) = status {
+                paint_file_status(
+                    ui,
+                    id,
+                    Rect::from_min_max(pos2(content.right() - status_width, content.top()), pos2(content.right(), half)),
+                    status,
+                );
+            }
             paint_text(
                 ui,
-                Rect::from_min_max(content.min, pos2(content.right(), half)),
+                Rect::from_min_max(content.min, pos2(title_right, half)),
                 row.title,
                 crate::fonts::medium(t.font_button),
                 t.form_ink,
@@ -348,14 +417,12 @@ impl FileView {
                 false,
                 true,
             );
-            paint_text(
-                ui,
-                Rect::from_min_max(pos2(when_left, content.top()), pos2(when_left + when_width, content.bottom())),
-                row.when,
-                FontId::proportional(t.font_label),
-                t.file_dim,
-                false,
-            );
+            let when = Rect::from_min_max(pos2(when_left, content.top()), pos2(when_left + when_width, content.bottom()));
+            if let Some(status) = status {
+                paint_file_status(ui, id, when, status);
+            } else {
+                paint_text(ui, when, row.when, FontId::proportional(t.font_label), t.file_dim, false);
+            }
             ui.painter().circle_filled(pos2(workspace_left + t.space_4, content.center().y), t.space_4, t.file_rail);
             paint_text(
                 ui,
@@ -404,6 +471,16 @@ impl FileView {
             false,
         )
     }
+}
+
+fn paint_file_status(ui: &Ui, id: &str, rect: Rect, status: FileStatus<'_>) {
+    let t = Tokens::get();
+    let dot = Rect::from_center_size(pos2(rect.left() + t.space_3, rect.center().y), Vec2::splat(t.space_6));
+    status.paint_dot(ui, dot);
+    let text = Rect::from_min_max(pos2((rect.left() + t.space_8 + t.space_6).min(rect.right()), rect.top()), rect.max);
+    paint_text(ui, text, status.label, FontId::proportional(t.font_label), t.file_dim, false);
+    crate::scenario::publish_rect(&format!("{id}:status"), rect);
+    crate::scenario::publish_rect(&format!("{id}:status-dot"), dot);
 }
 
 fn allocate(ui: &mut Ui, id: &str, width: f32, height: f32, label: &str) -> (Rect, Response) {

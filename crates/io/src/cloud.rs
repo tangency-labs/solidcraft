@@ -21,6 +21,8 @@ mod process;
 #[cfg(not(target_arch = "wasm32"))]
 mod provision;
 #[cfg(not(target_arch = "wasm32"))]
+mod receive;
+#[cfg(not(target_arch = "wasm32"))]
 mod ssh;
 #[cfg(not(target_arch = "wasm32"))]
 pub use git::{GitRepository, Published};

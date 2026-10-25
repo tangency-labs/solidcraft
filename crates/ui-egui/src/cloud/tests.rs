@@ -290,3 +290,38 @@ fn actual_native_storage_recovers_an_offline_design_through_application_commands
     assert!(!h.app.session.is_dirty());
     assert_eq!(h.app.session.cloud_binding().unwrap().destination, destination);
 }
+
+#[test]
+fn cloud_action_lifetimes_include_uploads_background_tabs_and_cancellation() {
+    let (mut h, worker, destination) = setup(false);
+    h.app.run("cloud.save", json!({"destination":destination})).unwrap();
+    let save = worker.jobs.lock().unwrap()[0].0.clone();
+    worker.saved(0);
+    save.update(|s| {
+        s.saved_locally = true;
+        s.phase = Phase::Syncing;
+    })
+    .unwrap();
+    h.frames(2);
+    assert!(h.app.cloud.operations.busy("cloud.save", "github"), "durability alone does not finish upload");
+    assert!(!h.app.cloud.operations.busy("cloud.save", "another"), "connections stay independent");
+    h.app.run("cloud.status", json!({"operation":save.status().unwrap().operation})).unwrap();
+    documents::open_tab(&mut h.app, Default::default()).unwrap();
+    h.frames(2);
+    assert!(h.app.cloud.operations.busy("cloud.save", "github"), "switching tabs does not release a running action");
+    h.app.run("cloud.cancel", json!({"operation":save.status().unwrap().operation})).unwrap();
+    assert!(h.app.cloud.operations.cancelling(&save.status().unwrap().operation));
+    save.update(|s| s.phase = Phase::Cancelled).unwrap();
+    h.frames(2);
+    assert!(!h.app.cloud.operations.busy("cloud.save", "github"));
+    assert!(!h.app.cloud.operations.cancelling(&save.status().unwrap().operation));
+    h.app.run("cloud.save", json!({"destination":destination})).unwrap();
+    let next = worker.jobs.lock().unwrap().last().unwrap().0.clone();
+    next.update(|s| {
+        s.saved_locally = true;
+        s.phase = Phase::SavedLocally;
+    })
+    .unwrap();
+    h.frames(2);
+    assert!(!h.app.cloud.operations.busy("cloud.save", "github"), "an offline save finishes after its durable acknowledgement");
+}
