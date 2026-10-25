@@ -1,0 +1,82 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4172",
+  "why": "render: lost GPU device (wgpu), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4180",
+  "why": "no reproduction: a chamfer's edge points only, the design stays on the reporter's computer (truck intersection-curve tolerance panic)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4181",
+  "why": "no geometry: unclean exit after a body rename, nothing running"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4186",
+  "why": "no geometry: viewport speed on a 2,146-body STEP assembly (render)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4188",
+  "why": "render: lost GPU device (wgpu), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4215",
+  "why": "render: lost GPU device (wgpu), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4237",
+  "why": "no geometry: unclean exit with no command and no replay"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4243",
+  "why": "no geometry: unclean exit after a selection, nothing running"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4244",
+  "why": "no geometry: unclean exit after a selection, nothing running"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4246",
+  "why": "no geometry: unclean exit while sketching, nothing running"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4254",
+  "why": "no geometry: unclean exit with no command and no replay"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4255",
+  "why": "UI only: a selection-mode switch (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4275",
+  "why": "no geometry: viewport speed on a 662-body STEP import (render)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4290",
+  "why": "no geometry: unclean exit after selections, nothing running"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4293",
+  "why": "no reproduction: the display triangulation library's assertion, title only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4319",
+  "why": "duplicate of #2470: modelled M8 thread groove crash on Windows; the part is not given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4329",
+  "why": "render: lost GPU device (wgpu), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4406",
+  "why": "no geometry: unclean exit with no command and no replay"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4416",
+  "why": "no geometry: unclean exit while dragging sketch geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4422",
+  "why": "render: wgpu surface not configured, no geometry"
+ }
+]

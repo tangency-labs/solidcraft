@@ -1,0 +1,127 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 60,
+    "width": 40,
+    "height": 5,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 10,
+    "base": [
+     30,
+     20,
+     5
+    ],
+    "operation": "join",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 4,
+    "height": 17,
+    "base": [
+     30,
+     20,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "file.export",
+   "params": {
+    "path": "$OUT/kernel-case-4238.step",
+    "format": "step"
+   }
+  },
+  {
+   "command": "file.new",
+   "params": {
+    "name": "Reimported"
+   }
+  },
+  {
+   "command": "file.insert_step",
+   "params": {
+    "path": "$OUT/kernel-case-4238.step"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "face": [
+      37,
+      20,
+      15
+     ]
+    },
+    "name": "Ring",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     30,
+     20
+    ],
+    "radius": 6
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     30,
+     20
+    ],
+    "radius": 4
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Ring",
+    "profiles": [
+     {
+      "point": [
+       35,
+       20
+      ]
+     }
+    ],
+    "distance": 15,
+    "direction": "negative",
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  }
+ ]
+}

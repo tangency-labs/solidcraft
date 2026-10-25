@@ -1,0 +1,78 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 60,
+    "width": 40,
+    "height": 20,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 6,
+    "height": 22,
+    "base": [
+     30,
+     28,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Block"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 6,
+    "height": 10,
+    "base": [
+     30,
+     10,
+     20
+    ],
+    "operation": "join",
+    "targets": [
+     "Block"
+    ]
+   }
+  },
+  {
+   "command": "solid.split_body",
+   "params": {
+    "body": "Block",
+    "plane": {
+     "origin": [
+      30,
+      0,
+      0
+     ],
+     "normal": [
+      1,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Block",
+    "tools": [
+     "Block (1)"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

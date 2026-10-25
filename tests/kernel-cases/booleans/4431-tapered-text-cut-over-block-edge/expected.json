@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4431"
+ ],
+ "what": "a line of text (22 letters, 7.81 mm high) on a block's top face, running over the block's edge, cut 1 mm deep with a -5 deg taper: 145 s in truck (the untapered cut takes 1 s)",
+ "source": "invariants",
+ "method": "a 1 mm cut of glyphs into a 40 mm block leaves one valid closed body; the glyph areas are not closed-form, so only the outcome is graded, within the run's timeout (truck took 145 s; over the edge with a join it never finished)",
+ "body_count": 1
+}

@@ -1,0 +1,34 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4194",
+  "why": "no geometry: the report arrived empty, and the error didn't come back"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4279",
+  "why": "no reproduction: shell of a user's part with a free-form face (dup of #2432), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4285",
+  "why": "UI only: sketch offset's second distance has no drag handle"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4300",
+  "why": "UI only: sketch offset's drag handle goes one way"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4306",
+  "why": "no reproduction: shell of a user's part with a free-form face (dup of #2432), screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4331",
+  "why": "no reproduction: the report arrived empty (a screenshot)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4345",
+  "why": "no kernel geometry: an offset plane's origin placed at the world origin's foot (construction)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4385",
+  "why": "UI only: sketch offset's second distance dimension"
+ }
+]

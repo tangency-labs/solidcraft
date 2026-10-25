@@ -1,0 +1,146 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4163",
+  "why": "UI only: keyboard shortcut editor"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4164",
+  "why": "no geometry: the settings file damaged by two windows saving (app)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4184",
+  "why": "no reproduction: Split Body of a user's part by a plane (0.16.2, 88 bodies), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4190",
+  "why": "UI only: a request to look like another CAD program"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4193",
+  "why": "no geometry: sketch Mirror about an origin axis (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4195",
+  "why": "no reproduction: a join of four flush profiles on a user's part with 26 cylinder faces, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4210",
+  "why": "duplicate of booleans/831-tapered-extrude-d-shape-arc-meets-line: a tapered cut whose arcs meet lines at corners (0.16.2)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4211",
+  "why": "no reproduction: last command only (a 10 mm join), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4213",
+  "why": "no reproduction: last command only, the unexpected result not described"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4214",
+  "why": "UI only: the viewport grid fade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4218",
+  "why": "no reproduction: Combine of columns with a wall shown by screenshot, no message"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4224",
+  "why": "no kernel geometry: a cut reaching a hidden body (target choice, dup of #3961)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4240",
+  "why": "no geometry: sketch Mirror about an origin axis (dup of #4193)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4249",
+  "why": "no reproduction: last command and a screenshot of an unknown part"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4259",
+  "why": "no geometry: an offset plane can't attach to a face whose history is ambiguous (document, dup of #4325)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4262",
+  "why": "no reproduction: last command only, the unexpected result not described"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4273",
+  "why": "no geometry: posted by mistake, empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4278",
+  "why": "no reproduction: last command only (a face cut on an unknown 3-feature part)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4287",
+  "why": "UI only: a selection size readout (dup of #2314)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4289",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4316",
+  "why": "no reproduction: a screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4317",
+  "why": "no reproduction: a ring cut by two inner parts, no sizes or design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4348",
+  "why": "no reproduction: no message, no command and no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4355",
+  "why": "no geometry: a cut in a component other than the active one (document, dup of #4639)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4361",
+  "why": "needs the user design: a revolved and lofted leaf-blower body with 25 features; no small stand-in shows the same geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4383",
+  "why": "no reproduction: last command only (a cut leaving touching lumps, 0.17.0), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4384",
+  "why": "UI only: one position input for features placed on a face (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4388",
+  "why": "UI only: a selection size readout (dup of #2314)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4394",
+  "why": "no geometry: the macOS disk image freezes Finder"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4401",
+  "why": "no reproduction: last command only, and the reporter says it no longer fails that way"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4408",
+  "why": "no reproduction: last command only (a 38 mm join), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4412",
+  "why": "UI only: no preview while dragging a sketch pattern's spacing"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4413",
+  "why": "no geometry: a cut in a component other than the active one (document, dup of #4639)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4417",
+  "why": "UI only: browser hover highlight"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4421",
+  "why": "no geometry: renames lose plastic rules and hidden state (document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4424",
+  "why": "no geometry: a cut in a component other than the active one (document, dup of #4639)"
+ }
+]

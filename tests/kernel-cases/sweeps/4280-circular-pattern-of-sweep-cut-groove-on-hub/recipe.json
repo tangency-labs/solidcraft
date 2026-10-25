@@ -1,0 +1,198 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Hub"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      30,
+      0
+     ],
+     [
+      30,
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     30,
+     5
+    ],
+    "through": [
+     18,
+     11
+    ],
+    "end": [
+     10,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      10,
+      20
+     ],
+     [
+      0,
+      20
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "Hub",
+    "axis": "y",
+    "body_name": "Hub"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Path",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     30,
+     5
+    ],
+    "through": [
+     18,
+     11
+    ],
+    "end": [
+     10,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "construct.plane.along_path",
+   "params": {
+    "path": {
+     "sketch": "Path",
+     "curve": "a1"
+    },
+    "t": 0,
+    "name": "P0"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "P0",
+    "name": "Groove",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 2
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.sweep",
+   "params": {
+    "sketch": "Groove",
+    "path_sketch": "Path",
+    "path": [
+     "a1"
+    ],
+    "operation": "cut",
+    "targets": [
+     "Hub"
+    ],
+    "name": "Sweep1"
+   }
+  },
+  {
+   "command": "solid.pattern.circular",
+   "params": {
+    "features": [
+     "Sweep1"
+    ],
+    "axis": "Z",
+    "count": 6,
+    "angle": "360 deg"
+   }
+  }
+ ]
+}

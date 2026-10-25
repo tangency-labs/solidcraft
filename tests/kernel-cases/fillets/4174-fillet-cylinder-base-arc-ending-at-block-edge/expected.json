@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4174"
+ ],
+ "what": "the concave arc where a cylinder (r10.5) stands on a block's top, its centre on the block's front edge so the arc runs out at the front face, filleted r2: refused ('each end of the edge must touch exactly one more face')",
+ "source": "analytic",
+ "method": "block 40x30x5 + cylinder pi 10.5^2 30 (half of it overhanging the front). The concave round runs round the half of the base circle over the block and ends flush with the front face y = 0: Pappus over 180 deg, pi (10.5 + c)(1 - pi/4) 2^2 with c = 2 - (2/6)/(1-pi/4) the corner region's centroid from the wall",
+ "body_count": 1,
+ "volume_mm3": 16420.3385
+}

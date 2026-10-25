@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4347"
+ ],
+ "what": "a 60x60 slab sketched on the base of a tapered square pyramid frustum and extruded 10 mm away from it as a join: 'join cannot preserve the original faces; check for zero-thickness edge contact'",
+ "source": "analytic",
+ "method": "frustum from 40x40 at z 0 to (40 - 2*20 tan20)^2 at z 20: V = 20/3 (A0 + A1 + sqrt(A0 A1)); the slab 60x60x10 under it (z -10..0; the sketch on the base faces down) shares the whole base face: one body. V = frustum + 36000. Faces: frustum 4 sloped + top, slab 4 sides + bottom + the ring of its top left round the base = 11",
+ "body_count": 1,
+ "faces": 11,
+ "volume_mm3": 57766.012
+}

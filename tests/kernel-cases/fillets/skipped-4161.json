@@ -1,0 +1,58 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4187",
+  "why": "no geometry: the fillet guard refusing radii that overlap (largest that fits 0.38 mm), as designed"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4222",
+  "why": "no reproduction: a fillet chain on an unknown part, screenshots only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4235",
+  "why": "no reproduction: a 0.5 mm chamfer of a curved chain on an unknown part (0.18.2)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4241",
+  "why": "no reproduction: a screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4261",
+  "why": "no reproduction: four bottom edges of an unknown part (a stated limit, the blend uses up a face)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4269",
+  "why": "no reproduction: a 3-edge chain on an unknown part (0.18.2), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4276",
+  "why": "no reproduction: three curved edges of an unknown part (0.18.2), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4336",
+  "why": "no geometry: a sketch fillet between a circle and a line (sketch command)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4341",
+  "why": "no kernel geometry: fillet and chamfer edges found again by position jump to another body (feature references)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4346",
+  "why": "no reproduction: a long curved edge chain on an unknown part (0.18.2), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4366",
+  "why": "no reproduction: a 0.2 mm chamfer chain on an unknown part (0.11.1)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4373",
+  "why": "no reproduction: one edge on an unknown part ending at a face parallel to it, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4428",
+  "why": "no reproduction: three edges ending at a face parallel to them on an unknown part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4429",
+  "why": "needs the user design: a damper of joined extrudes with six chamfers; the failing chain is not reproducible from the report"
+ }
+]

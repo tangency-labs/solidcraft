@@ -1,0 +1,282 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 20,
+    "height": 5,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "body_name": "Ring00"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 7,
+    "base": [
+     0,
+     0,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Ring00"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 20,
+    "height": 5,
+    "base": [
+     0,
+     38,
+     0
+    ],
+    "body_name": "Ring01"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 7,
+    "base": [
+     0,
+     38,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Ring01"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 20,
+    "height": 5,
+    "base": [
+     0,
+     76,
+     0
+    ],
+    "body_name": "Ring02"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 7,
+    "base": [
+     0,
+     76,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Ring02"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 20,
+    "height": 5,
+    "base": [
+     38,
+     0,
+     0
+    ],
+    "body_name": "Ring10"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 7,
+    "base": [
+     38,
+     0,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Ring10"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 20,
+    "height": 5,
+    "base": [
+     38,
+     38,
+     0
+    ],
+    "body_name": "Ring11"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 7,
+    "base": [
+     38,
+     38,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Ring11"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 20,
+    "height": 5,
+    "base": [
+     38,
+     76,
+     0
+    ],
+    "body_name": "Ring12"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 7,
+    "base": [
+     38,
+     76,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Ring12"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 20,
+    "height": 5,
+    "base": [
+     76,
+     0,
+     0
+    ],
+    "body_name": "Ring20"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 7,
+    "base": [
+     76,
+     0,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Ring20"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 20,
+    "height": 5,
+    "base": [
+     76,
+     38,
+     0
+    ],
+    "body_name": "Ring21"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 7,
+    "base": [
+     76,
+     38,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Ring21"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 20,
+    "height": 5,
+    "base": [
+     76,
+     76,
+     0
+    ],
+    "body_name": "Ring22"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 7,
+    "base": [
+     76,
+     76,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Ring22"
+    ]
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Ring00",
+    "tools": [
+     "Ring01",
+     "Ring02",
+     "Ring10",
+     "Ring11",
+     "Ring12",
+     "Ring20",
+     "Ring21",
+     "Ring22"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

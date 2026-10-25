@@ -1,0 +1,18 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4183",
+  "why": "no reproduction: a thread failure shown by screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4281",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a modelled thread facets the body; no sizes"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4378",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a modelled M12 thread facets the body; no steps"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4414",
+  "why": "no geometry: left-handed threads (feature request)"
+ }
+]

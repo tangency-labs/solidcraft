@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4280"
+ ],
+ "what": "a round groove (r2) swept as a cut along the curved profile of a revolved hub, then circular-patterned 6 times about the hub's axis: 'boolean Cut: no result' in the pattern",
+ "source": "invariants",
+ "method": "the six grooves run down the hub's curved face 60 deg apart and don't meet, so the hub stays one valid closed body. The groove follows the surface (its centre on it), which has no closed-form removed volume",
+ "body_count": 1
+}

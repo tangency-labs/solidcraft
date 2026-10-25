@@ -1,0 +1,71 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     20,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 20,
+    "taper": "-20 deg"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "face": [
+      0,
+      0,
+      0
+     ]
+    },
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     30,
+     30
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10,
+    "operation": "join"
+   }
+  }
+ ]
+}
