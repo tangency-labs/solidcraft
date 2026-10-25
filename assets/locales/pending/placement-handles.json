@@ -7,7 +7,7 @@
     "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.": "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.",
     "prefs.placement": "Placement",
     "ui.placement_handles": "Placement handles",
-    "ui.placement_handles_tip": "Handles on the preview of a Rest, Boss or Snap Fit: drag the marker to move it across the model, turn it by its knob"
+    "ui.placement_handles_tip": "Handles on the preview of a Rest, Boss or Snap Fit: drag the marker to move it across the model, turn it by its ring"
   },
   "ja": {
     "Drag to move the boss across the model. It snaps to sketch points on the face.": "ドラッグしてボスをモデル上で移動します。面上のスケッチ点にスナップします。",
@@ -17,7 +17,7 @@
     "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.": "ドラッグしてレストを 5° 刻みで回転します。Alt または Ctrl を押したままにすると自由に回転します。",
     "prefs.placement": "配置",
     "ui.placement_handles": "配置ハンドル",
-    "ui.placement_handles_tip": "レスト、ボス、スナップ フィットのプレビューに表示されるハンドル: マーカーをドラッグしてモデル上を移動し、ノブで回転します"
+    "ui.placement_handles_tip": "レスト、ボス、スナップ フィットのプレビューに表示されるハンドル: マーカーをドラッグしてモデル上を移動し、リングで回転します"
   },
   "pl": {
     "Drag to move the boss across the model. It snaps to sketch points on the face.": "Przeciągnij, aby przesunąć występ po modelu. Przyciąga się do punktów szkicu na ścianie.",
@@ -27,7 +27,7 @@
     "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.": "Przeciągnij, aby obrócić podparcie co 5°. Przytrzymaj Alt lub Ctrl, aby obracać swobodnie.",
     "prefs.placement": "Umieszczanie",
     "ui.placement_handles": "Uchwyty umieszczania",
-    "ui.placement_handles_tip": "Uchwyty na podglądzie podparcia, występu lub zatrzasku: przeciągnij znacznik, aby przesunąć element po modelu, obróć go gałką"
+    "ui.placement_handles_tip": "Uchwyty na podglądzie podparcia, występu lub zatrzasku: przeciągnij znacznik, aby przesunąć element po modelu, obróć go pierścieniem"
   },
   "zh": {
     "Drag to move the boss across the model. It snaps to sketch points on the face.": "拖动以在模型上移动凸台。它会吸附到面上的草图点。",
@@ -37,6 +37,6 @@
     "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.": "拖动以 5° 为步长旋转垫块。按住 Alt 或 Ctrl 可自由旋转。",
     "prefs.placement": "放置",
     "ui.placement_handles": "放置手柄",
-    "ui.placement_handles_tip": "垫块、凸台或卡扣预览上的手柄：拖动标记在模型上移动，用旋钮旋转"
+    "ui.placement_handles_tip": "垫块、凸台或卡扣预览上的手柄：拖动标记在模型上移动，用转环旋转"
   }
 }

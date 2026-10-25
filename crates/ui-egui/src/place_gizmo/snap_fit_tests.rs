@@ -1,5 +1,5 @@
 //! The Snap Fit handles: the marker drags the arm onto a sketch
-//! point (#3423), the knob points the catch and the Catch Direction combo follows.
+//! point (#3423), the grip points the catch and the Catch Direction combo follows.
 
 use serde_json::json;
 use solidcraft_engine::Sel;
@@ -37,7 +37,7 @@ fn hook(h: &Harness) -> usize {
 }
 
 #[test]
-fn marker_drags_the_snap_fit_onto_a_sketch_point_and_the_knob_points_the_catch() {
+fn marker_drags_the_snap_fit_onto_a_sketch_point_and_the_grip_points_the_catch() {
     let mut h = plate();
     h.app.run("sketch.create", json!({"plane": {"face": [40, 25, 10]}})).unwrap();
     h.app.run("sketch.point", json!({"point": [50, 30]})).unwrap();
@@ -50,13 +50,13 @@ fn marker_drags_the_snap_fit_onto_a_sketch_point_and_the_knob_points_the_catch()
     h.settle();
     assert!(position(&h).dist(Vec3::new(50.0, 30.0, 10.0)) < 1e-6, "snapped to the sketch point: {:?}", position(&h));
 
-    // Turn the knob a quarter about the marker on screen: the catch takes the next direction.
+    // Turn the grip a quarter about the marker on screen: the catch takes the next direction.
     let before = hook(&h);
     let ball = h.at(&json!({"handle": "snap_fit:position"})).unwrap();
-    let knob = h.at(&json!({"handle": "snap_fit:rotate"})).unwrap();
-    let (dx, dy) = (knob[0] - ball[0], knob[1] - ball[1]);
-    assert!(dx.hypot(dy) > 20.0, "the knob stands off the marker: {knob:?} {ball:?}");
-    h.step(&json!({"drag": [knob, [ball[0] - dy, ball[1] + dx]], "steps": 16})).unwrap();
+    let grip = h.at(&json!({"handle": "snap_fit:rotate"})).unwrap();
+    let (dx, dy) = (grip[0] - ball[0], grip[1] - ball[1]);
+    assert!(dx.hypot(dy) > 20.0, "the grip stands off the marker: {grip:?} {ball:?}");
+    h.step(&json!({"drag": [grip, [ball[0] - dy, ball[1] + dx]], "steps": 16})).unwrap();
     h.settle();
     let after = hook(&h);
     assert_ne!(after, before, "the catch turned");

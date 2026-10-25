@@ -1,6 +1,6 @@
 //! Snap Fit: the marker moves the arm and snaps to sketch points (#3423 asks to put it where a
-//! sketch says); the knob points the catch, in the four directions the Catch Direction combo
-//! offers for the face, so the knob and the combo always agree.
+//! sketch says); the ring's grip points the catch, in the four directions the Catch Direction
+//! combo offers for the face, so the ring and the combo always agree.
 
 use solidcraft_engine::geom::Vec3;
 

@@ -45,7 +45,7 @@ fn marker_drags_a_new_boss_onto_a_sketch_point() {
     h.settle();
     assert!(position(&h).dist(Vec3::new(15.0, 12.0, 10.0)) < 0.5, "placed where clicked: {:?}", position(&h));
     assert!(h.at(&json!({"handle": "boss:position"})).is_ok(), "the marker is published");
-    assert!(h.at(&json!({"handle": "boss:rotate"})).is_err(), "a round boss has no knob");
+    assert!(h.at(&json!({"handle": "boss:rotate"})).is_err(), "a round boss has no grip");
 
     h.step(&json!({"drag": [{"handle": "boss:position"}, {"world": [60, 35, 10]}], "steps": 12})).unwrap();
     h.settle();

@@ -1,5 +1,5 @@
 //! The Rest handles: the marker drags the pad across the model and snaps to
-//! a sketch point as a click would; the knob turns a rectangular pad, also from Edit Feature.
+//! a sketch point as a click would; the grip turns a rectangular pad, also from Edit Feature.
 
 use serde_json::json;
 use solidcraft_engine::Sel;
@@ -63,7 +63,7 @@ fn ball_drags_the_rest_across_the_face_and_snaps_to_a_sketch_point() {
 }
 
 #[test]
-fn knob_turns_a_rectangular_rest_from_edit_feature() {
+fn grip_turns_a_rectangular_rest_from_edit_feature() {
     let mut h = plate();
     let made = h.app.run("plastic.rest", json!({"position": [40, 25, 10], "width": 6, "length": 16, "height": 2})).unwrap();
     let name = made["name"].as_str().unwrap().to_string();
@@ -71,12 +71,12 @@ fn knob_turns_a_rectangular_rest_from_edit_feature() {
     h.step(&json!({"call": "ui.editFeature", "params": {"feature": name}})).unwrap();
     h.settle();
     let ball = h.at(&json!({"handle": "rest:position"})).unwrap();
-    let knob = h.at(&json!({"handle": "rest:rotate"})).unwrap();
-    assert!((knob[0] - ball[0]).hypot(knob[1] - ball[1]) > 20.0, "the knob stands off the ball: {knob:?} {ball:?}");
-    // A quarter turn of the knob about the ball on screen (the top view looks straight down).
-    let (dx, dy) = (knob[0] - ball[0], knob[1] - ball[1]);
+    let grip = h.at(&json!({"handle": "rest:rotate"})).unwrap();
+    assert!((grip[0] - ball[0]).hypot(grip[1] - ball[1]) > 20.0, "the grip stands off the ball: {grip:?} {ball:?}");
+    // A quarter turn of the grip about the ball on screen (the top view looks straight down).
+    let (dx, dy) = (grip[0] - ball[0], grip[1] - ball[1]);
     let to = [ball[0] - dy, ball[1] + dx];
-    h.step(&json!({"drag": [knob, to], "steps": 16})).unwrap();
+    h.step(&json!({"drag": [grip, to], "steps": 16})).unwrap();
     h.settle();
     let along = h.app.dialog.as_ref().and_then(|d| d.extra.get("along")).cloned().expect("the dialog keeps `along`");
     let a: Vec<f64> = along.as_array().unwrap().iter().filter_map(|v| v.as_f64()).collect();
@@ -173,6 +173,6 @@ fn with_the_preference_off_a_rest_is_placed_by_its_click_alone() {
     let accept = h.app.dialog.as_ref().expect("a dialog").inputs.first().expect("a Position input").accept;
     assert_eq!(accept & crate::selection::POINTS, 0, "the Position input takes faces only");
     assert!(h.at(&json!({"handle": "rest:position"})).is_err(), "no marker is published");
-    assert!(h.at(&json!({"handle": "rest:rotate"})).is_err(), "no knob is published");
+    assert!(h.at(&json!({"handle": "rest:rotate"})).is_err(), "no grip is published");
     assert!(position(&h).dist(Vec3::new(15.0, 12.0, 10.0)) < 0.5, "placed where clicked: {:?}", position(&h));
 }

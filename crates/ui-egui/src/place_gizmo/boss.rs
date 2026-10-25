@@ -1,5 +1,5 @@
 //! Boss: the marker moves the boss across the model and snaps to sketch points, so a screw boss
-//! lands on the centre of a circle drawn for it. A boss is round: no knob.
+//! lands on the centre of a circle drawn for it. A boss is round: no ring.
 
 use solidcraft_engine::geom::Vec3;
 
