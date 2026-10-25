@@ -415,6 +415,10 @@ mod tests {
         h.frames(2);
         // Only a feature with a profile sketch gets the button.
         assert!(crate::scenario::handle_at(&format!("action:{block_name}")).is_none());
+        // The button sits right after the name, not at the far edge of a wide browser.
+        let name = crate::scenario::rect_of(&format!("row_label:{pad_name}")).unwrap();
+        let button = crate::scenario::handle_at(&format!("action:{pad_name}")).unwrap();
+        assert!(button.x > name.right() && button.x < name.right() + 20.0, "{name:?} {button:?}");
         h.step(&json!({"click": {"handle": format!("action:{pad_name}")}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.session.active_sketch, Some(sketch), "the button opens the profile sketch");
