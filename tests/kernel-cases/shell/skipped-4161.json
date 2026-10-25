@@ -30,5 +30,61 @@
  {
   "source": "tangency-labs/solidcraft#4385",
   "why": "UI only: sketch offset's second distance dimension"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4464",
+  "why": "no geometry: sketch offset removes degrees of freedom (sketch solver)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4467",
+  "why": "no reproduction: shell removing six faces of a user's 4-feature part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4484",
+  "why": "duplicate of #4879: the thicken now builds; the cut into it is #4879's case"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4503",
+  "why": "no reproduction: shell of a user's twisted swept slot (free-form, dup of #2432), screenshots only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4510",
+  "why": "no geometry: delete face in the surface workspace heals instead of opening (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4522",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4555",
+  "why": "no kernel geometry: a face given by a point resolves to the other body's coplanar face (engine face lookup)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4573",
+  "why": "no kernel geometry: \"select at least one face to remove\" on a picked face (dup of #4555, engine face lookup)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4574",
+  "why": "no reproduction: shell beside a tangent face of an unknown part, screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4583",
+  "why": "no geometry: sketch offset with unsolved constraints (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4742",
+  "why": "no reproduction: a 0.1 mm shell after a draft and fillets on an unknown part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4743",
+  "why": "duplicate of the free-form shell case from #4567 (a loft's walls instead of a revolve's)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4775",
+  "why": "no geometry: Offset Face run with no faces picked (user error)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4822",
+  "why": "no reproduction: a screenshot only"
  }
 ]

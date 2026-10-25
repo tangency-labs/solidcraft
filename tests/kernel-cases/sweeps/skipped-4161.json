@@ -18,5 +18,97 @@
  {
   "source": "tangency-labs/solidcraft#4358",
   "why": "no kernel geometry: surface loft picks lost between copied sketches with the same curve ids (selection)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4454",
+  "why": "no geometry: a profile that crosses the revolve axis is refused by design (bisecting it at the axis works)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4465",
+  "why": "no kernel geometry: a surface pick kept by curve id resolves to the newest sketch (selection, dup of #4579)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4506",
+  "why": "no geometry: Revolve about a construction axis is not looked up (\"unknown sketch line\", command parameters)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4521",
+  "why": "duplicate of #4689: a profile edge on the revolve axis splits the flat faces"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4524",
+  "why": "no reproduction: last command only (a loft join, 0.18.3), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4525",
+  "why": "no kernel geometry: boundary surface picks a curve by id from the wrong place (selection)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4528",
+  "why": "no reproduction: a join of two user lofts, no message or design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4576",
+  "why": "no geometry: Revolve about a construction axis (dup of #4506)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4579",
+  "why": "no kernel geometry: surface loft picks by curve id resolve to the wrong sketch (selection; the loft itself builds)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4606",
+  "why": "needs the user design: a swept body of 594 faces (512 cones, 64 spheres) revolve-cut"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4631",
+  "why": "duplicate of tessellation/466-revolved-cone-tip-stays-smooth: a cone revolved from a triangle drawn wrong at its tip"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4644",
+  "why": "UI only: Fair and Match Surface open no dialog"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4694",
+  "why": "no reproduction: last command only (a revolve join), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4696",
+  "why": "no reproduction: a revolve join between cone and sphere faces of an unknown part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4697",
+  "why": "no reproduction: last command only (a revolve join), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4699",
+  "why": "no reproduction: last command only (a revolve join), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4704",
+  "why": "no reproduction: a revolve join between cone and sphere faces of an unknown part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4715",
+  "why": "no single right answer: a railed loft's shape between sections follows the rails' fitted spline (3D sketch fitting)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4729",
+  "why": "no geometry: surface extrude has no To Object extent (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4730",
+  "why": "no reproduction: a loft join hangs on a user's part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4737",
+  "why": "no kernel geometry: surface extrude takes the newest sketch's curve of the same id (selection, dup of #4465)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4738",
+  "why": "no geometry: Revolve about a construction axis (dup of #4506)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4828",
+  "why": "needs the author's real duct part (STEP operands of a user design); a performance case"
  }
 ]

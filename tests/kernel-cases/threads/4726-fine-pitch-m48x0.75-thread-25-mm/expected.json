@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4726"
+ ],
+ "what": "a modelled M48x0.75 thread over the whole 25 mm of a O48 bolt (33 turns): the browser build froze; coarse pitches and 4 mm of it worked, slowly",
+ "source": "invariants",
+ "method": "a modelled external thread on its own nominal shaft: one valid closed body within the case's timeout (slow by nature: 600 s); the helical faces have no closed-form volume",
+ "body_count": 1,
+ "timeout_s": 600
+}

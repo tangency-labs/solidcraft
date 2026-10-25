@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4505",
+  "tangency-labs/solidcraft#3636"
+ ],
+ "what": "a coil (diameter 151, pitch 10, 80 high, 5 mm round section) whose section runs through a diameter-152 cylinder's wall, joined to it: truck ground for 125-296 s, then 'boolean Union: no result'",
+ "source": "invariants",
+ "method": "the coil's section crosses the wall along its whole length, so the union is one connected solid: one valid closed body. The helical sweep's part outside r 76 has no closed-form volume (the triage's script)",
+ "body_count": 1
+}

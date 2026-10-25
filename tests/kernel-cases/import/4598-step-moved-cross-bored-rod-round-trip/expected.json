@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4598"
+ ],
+ "what": "an O40 x 60 rod with a blind O8 cross bore from its side (x 10..25 at mid height), moved 100 mm, exported to STEP and read back: the body came in empty with no warning (truck's exported edges had 1399 control points)",
+ "source": "analytic",
+ "method": "the bore runs from the wall (x = sqrt(400 - y^2)) in to its flat end at x = 10: removed = Int_-4^4 2 sqrt(16-y^2) (sqrt(400-y^2) - 10) dy (python quadrature) = 497.6028. V = pi*20^2*60 - removed. Faces: top, bottom, side, bore wall, bore end = 5. Moved 100 in x: bbox x 80..120",
+ "body_count": 1,
+ "faces": 5,
+ "volume_mm3": 74900.6209,
+ "bbox": {
+  "min": [
+   80.0,
+   -20.0,
+   0.0
+  ],
+  "max": [
+   120.0,
+   20.0,
+   60.0
+  ]
+ }
+}

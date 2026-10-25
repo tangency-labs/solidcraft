@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4492"
+ ],
+ "what": "the top face of a 40x30x10 block whose four top edges are rounded r3, offset 19 mm up: truck refused it ('a corner whose faces don't meet the same way after the move')",
+ "source": "invariants",
+ "method": "the top face's neighbours are the rounds, tangent to it, which cannot extend to meet a plane 19 mm higher; how the gap closes (the rounds carried up with the face, or walls standing on the old face) is the method's choice, so only the outcome is graded: the offset succeeds with one valid closed body",
+ "body_count": 1
+}

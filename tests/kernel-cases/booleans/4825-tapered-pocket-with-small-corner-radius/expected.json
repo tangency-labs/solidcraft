@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4825"
+ ],
+ "what": "a 5 mm pocket cut from a hull's top face with a 30 deg taper (growing with depth) from a 282x176 outline with r2 corners: truck refused it ('the taper closes the profile'), as its run-on behind the start face narrowed past the corner radius",
+ "source": "analytic",
+ "method": "hull 318x212 r8 corners, z 46..156: (318*212 - (4-pi)*64)*110. The pocket at depth t is the outline offset by s = t*tan30: area (282+2s)(176+2s) - (4-pi)(2+s)^2, integrated over t 0..5 = 254772.3456. Faces: hull 4 sides + 4 corner cylinders + top + bottom, pocket 4 sloped planes + 4 cones + floor = 19",
+ "body_count": 1,
+ "faces": 19,
+ "volume_mm3": 7154944.467
+}

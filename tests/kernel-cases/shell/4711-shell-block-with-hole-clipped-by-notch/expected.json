@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4711"
+ ],
+ "what": "a 2 mm shell, open at the bottom, of a 60x40x10 block whose r3 through hole breaks out into a 10x10 notch at its edge: truck took 75 s and failed ('boolean Cut: no result')",
+ "source": "invariants",
+ "method": "every wall has room for 2 mm (the thinnest, between the hole and the block's side, is 4 mm), so the shell exists: one valid closed body with one shell, open at the bottom. The cavity's corners at the hole's break-out follow the offset surfaces, so the volume is not closed-form (the reporter's script)",
+ "body_count": 1,
+ "shells": 1
+}

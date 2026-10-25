@@ -78,5 +78,53 @@
  {
   "source": "tangency-labs/solidcraft#4422",
   "why": "render: wgpu surface not configured, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4469",
+  "why": "the recipe needs sketch.offset of a free-form chain (PR #4156), refused on this branch before the kernel is reached; the two-distance chamfer of a spline rim is fillets/4332-two-distance-chamfer-of-spline-rim"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4476",
+  "why": "no geometry: unclean exit in timeline.dependents (document), the design is not given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4478",
+  "why": "no reproduction: the display triangulation library's assertion, title only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4491",
+  "why": "render: blank or corrupted offscreen captures, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4559",
+  "why": "no geometry: unclean exit with no command running (an agent driving the app)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4599",
+  "why": "render: a GPU hang (Intel/Mesa); the replay rebuilds cleanly"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4604",
+  "why": "no geometry: measuring a large assembly runs on the window thread (document/UI)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4605",
+  "why": "render: startup failure creating the graphics device on macOS"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4627",
+  "why": "render: crash inside the NVIDIA driver, no command"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4709",
+  "why": "no reproduction: a slow extrude shown by screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4777",
+  "why": "no geometry: unclean exit with no command and no replay"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4791",
+  "why": "render: capture buffer and GPU hang on Intel/Mesa, no geometry"
  }
 ]

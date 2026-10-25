@@ -1,0 +1,49 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 40,
+    "width": 20,
+    "height": 10,
+    "body_name": "L"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     10
+    ],
+    "length": 15,
+    "width": 20,
+    "height": 20,
+    "operation": "join",
+    "targets": [
+     "L"
+    ]
+   }
+  },
+  {
+   "command": "solid.split_body",
+   "params": {
+    "body": "L",
+    "tool": {
+     "body": "L",
+     "point": [
+      15,
+      10,
+      20
+     ]
+    }
+   }
+  }
+ ]
+}

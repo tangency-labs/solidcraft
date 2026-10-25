@@ -1,0 +1,31 @@
+{
+ "commands": [
+  {
+   "command": "solid.torus",
+   "params": {
+    "major": 15,
+    "minor": 5,
+    "body_name": "Torus"
+   }
+  },
+  {
+   "command": "file.export",
+   "params": {
+    "path": "$OUT/kernel-case-4438.step",
+    "format": "step"
+   }
+  },
+  {
+   "command": "file.new",
+   "params": {
+    "name": "Reimported"
+   }
+  },
+  {
+   "command": "file.insert_step",
+   "params": {
+    "path": "$OUT/kernel-case-4438.step"
+   }
+  }
+ ]
+}

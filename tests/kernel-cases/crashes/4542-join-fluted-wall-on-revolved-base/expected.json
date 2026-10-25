@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4542"
+ ],
+ "what": "a fluted cup wall (a 72-point periodic fit spline round r 31.5..32.5 outside, a circle r 25 inside) extruded 90 mm as a join onto the top face of a revolved base disc of r 32: the app hung in the boolean",
+ "source": "invariants",
+ "method": "the wall's ring stands on the base's top face (z = 7), overlapping it between r 25 and the disc's rim and overhanging it where the flutes pass r 32, so the join is one connected solid: one valid closed body. The spline's area is not closed-form, so the volume is not graded",
+ "body_count": 1
+}

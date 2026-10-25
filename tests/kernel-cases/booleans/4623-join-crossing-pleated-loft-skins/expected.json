@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4623",
+  "tangency-labs/solidcraft#4180",
+  "tangency-labs/solidcraft#4881"
+ ],
+ "what": "a join of two pleated skins (lofts between 24-pleat star outlines, less the same loft moved in 1.1 mm) that cross along a ring near their bottoms: truck panicked ('tolerance must be no less than 1e-6') or gave no result",
+ "source": "invariants",
+ "method": "the narrowing cone skin and the flaring lip skin cross at z = -0.3, so their union is one connected solid: one valid closed body, no panic. The reporter's own script (pleated_union.py, 24 pleats)",
+ "body_count": 1
+}

@@ -1,0 +1,64 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "diameter": 40,
+    "height": 60,
+    "body_name": "Rod"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "diameter": 8,
+    "height": 15,
+    "base": [
+     10,
+     0,
+     30
+    ],
+    "axis": "X",
+    "operation": "cut",
+    "targets": [
+     "Rod"
+    ]
+   }
+  },
+  {
+   "command": "solid.move",
+   "params": {
+    "bodies": [
+     "Rod"
+    ],
+    "translate": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "command": "file.export",
+   "params": {
+    "path": "$OUT/kernel-case-4598.step",
+    "format": "step",
+    "bodies": [
+     "Rod"
+    ]
+   }
+  },
+  {
+   "command": "file.new",
+   "params": {
+    "name": "Reimported"
+   }
+  },
+  {
+   "command": "file.insert_step",
+   "params": {
+    "path": "$OUT/kernel-case-4598.step"
+   }
+  }
+ ]
+}
