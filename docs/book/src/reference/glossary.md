@@ -348,6 +348,8 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Normal | a sketch entity that isn't a construction entity | normal (line type) | the sketch palette's line type |
 | | the direction perpendicular to a surface | normal (direction) | the ruled surface's Normal mode |
 | | the middle display quality | normal (quality) | `ui.display_quality_normal` |
+| Quantity | the number of pattern instances | count | the pattern dialogs' Quantity rows, `ui.quantity` |
+| | what the motion plot shows: value, velocity or acceleration | plotted quantity | the motion study's Quantity row, `motion.plot_quantity` |
 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the

@@ -356,7 +356,7 @@ fn plot_rows(
     let what = list.get(a.what).map_or(Plotted::Nothing, |(_, w)| *w);
     let bands = a.collisions.as_ref().and_then(|(_, r)| r.as_ref().ok()).map(collision_bands).unwrap_or_default();
     if what != Plotted::Nothing {
-        choice_row(ui, "Quantity", "ms_quantity", &mut a.quantity, &QUANTITIES);
+        choice_row(ui, "motion.plot_quantity", "ms_quantity", &mut a.quantity, &QUANTITIES);
         form_row(ui, "Duration", |ui| {
             let r = crate::ui_kit::cell_editor(ui, ui.id().with("duration"), &mut a.duration, "motion.duration_hint", false);
             crate::scenario::publish_handle("dialog:Duration", r.rect.center());
