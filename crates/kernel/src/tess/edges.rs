@@ -12,6 +12,10 @@ use crate::{KernelError, Result};
 pub(crate) const MAX_EDGE_NODES: usize = 20_000;
 /// Deepest bisection of one edge segment.
 const MAX_DEPTH: u32 = 24;
+/// The most of its curve's turn one segment may span (a quarter turn, with rounding room): the
+/// boundary of every face stays a polygon with the face's area, as a closed curve's first four
+/// segments keep it.
+const QUARTER_TURN: f64 = std::f64::consts::FRAC_PI_2 * (1.0 + 1e-9);
 
 /// An edge's nodes, from its start vertex (interval min) to its end vertex (interval max).
 pub(crate) struct Nodes {
@@ -23,9 +27,10 @@ pub(crate) struct Nodes {
 
 /// Nodes of edge `ei` of `b` from its start to its end: every chord within the tolerance of
 /// the curve (checked at the quarter points, so an S-bend in one segment is not missed), at
-/// most `h` long, and within the rules' facet angle. The end nodes are the vertices' own
-/// points, so edges meeting at a vertex meet exactly. A curve that does not evaluate somewhere
-/// on its interval is an error naming the edge.
+/// most `h` long, within the rules' facet angle and never spanning more than a quarter turn of
+/// the curve. The end nodes are the vertices' own points, so edges meeting at a vertex meet
+/// exactly. A curve that does not evaluate somewhere on its interval is an error naming the
+/// edge.
 pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> Result<Nodes> {
     let fail = |why: String| KernelError::Failed(format!("tessellation: edge {ei}: {why}"));
     let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
@@ -92,8 +97,13 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
             let sag = [q1, pm, q3].iter().map(|q| q.dist_to_segment(pa, pb)).fold(0.0, f64::max);
             let short = !(pa.dist(pb) > h * (1.0 + 1e-9));
             // The two half chords of an arc turning θ differ by θ/2.
-            let straight = rules.turn.is_none_or(|t| !t.exceeds(2.0 * turn(pm - pa, pb - pm), sag));
-            short && straight && sag <= tol
+            let bend = 2.0 * turn(pm - pa, pb - pm);
+            let straight = rules.turn.is_none_or(|t| !t.exceeds(bend, sag));
+            // Whatever the tolerance, no segment spans more than a quarter turn of its curve: a
+            // small circle split into two half arcs would otherwise be two chords on one line,
+            // a hole of no area (the 1 mm hole of a 990 mm plate at its 2 mm chord).
+            let quarter = bend <= QUARTER_TURN;
+            short && straight && quarter && sag <= tol
         };
         if !done && !fine() {
             stack.push(Seg { a: m, b, pa: pm, pb, mid: Some(q3), depth: sg.depth + 1 });
@@ -106,6 +116,50 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
         *p = (t1, back);
     }
     Ok(Nodes { points: out.iter().map(|p| p.1).collect(), params: out.iter().map(|p| p.0).collect() })
+}
+
+/// Edge `ei`'s nodes with each of its segments `segs` (counted from its start) halved at the
+/// middle of its curve parameters, the new node on the curve (on a line, halfway between the two,
+/// as [`sample_edge`] spaces a line's nodes). A segment too short to halve in floating point keeps
+/// its two nodes. More than [`MAX_EDGE_NODES`] nodes, or a curve that does not evaluate there, is
+/// an error naming the edge.
+pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs: &[u32]) -> Result<()> {
+    let fail = |why: String| KernelError::Failed(format!("tessellation: edge {ei}: {why}"));
+    let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
+    let mut segs = segs.to_vec();
+    segs.sort_unstable();
+    segs.dedup();
+    let n = nodes.points.len().min(nodes.params.len());
+    if n + segs.len() > MAX_EDGE_NODES {
+        return Err(fail(format!("more than {MAX_EDGE_NODES} nodes")));
+    }
+    let curve = match edge.curve {
+        Curve::Line { .. } => None,
+        _ => Some(CurveEval::new(edge.parameters()).map_err(|e| fail(e.to_string()))?),
+    };
+    let (mut points, mut params) = (Vec::with_capacity(n + segs.len()), Vec::with_capacity(n + segs.len()));
+    let mut next = segs.iter().copied().peekable();
+    for k in 0..n {
+        let (Some(&p), Some(&t)) = (nodes.points.get(k), nodes.params.get(k)) else { continue };
+        points.push(p);
+        params.push(t);
+        if next.next_if_eq(&(k as u32)).is_none() {
+            continue;
+        }
+        let (Some(&q), Some(&u)) = (nodes.points.get(k + 1), nodes.params.get(k + 1)) else { continue };
+        let m = 0.5 * (t + u);
+        if !(m > t.min(u) && m < t.max(u)) {
+            continue;
+        }
+        let pm = match &curve {
+            None => (p + q) * 0.5,
+            Some(c) => c.point(m).filter(|p| p.is_finite()).ok_or_else(|| fail(format!("the curve does not evaluate at t = {m}")))?,
+        };
+        points.push(pm);
+        params.push(m);
+    }
+    *nodes = Nodes { points, params };
+    Ok(())
 }
 
 /// Angle (radians) between two directions; zero when either is empty.

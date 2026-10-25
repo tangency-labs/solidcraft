@@ -588,3 +588,85 @@ fn thinned_grid_lines_stay_within_the_cap() {
         assert!(us.first() == Some(&0.0) && us.last() == Some(&1.0) && vs.first() == Some(&0.0) && vs.last() == Some(&1.0));
     }
 }
+
+/// Whatever the chord tolerance, no edge segment spans more than a quarter turn of its curve:
+/// a 1 mm hole through a 990 mm plate, at a 2 mm chord and no facet angle, keeps a polygon with
+/// area. Each half arc of the hole was one chord, two chords on one line: a hole of no area.
+#[test]
+fn a_hole_far_below_the_tolerance_keeps_its_area() {
+    let plate = ok(crate::box_solid(Vec3::ZERO, Vec3::new(990.0, 990.0, 10.0)));
+    let (axis, r) = (Vec3::new(495.0, 495.0, 0.0), 0.5);
+    let body = cut(&plate, &ok(crate::cylinder(axis - Vec3::Z, Vec3::Z, r, 12.0)));
+    let rec = record(&body);
+    let (p, _) = ok(plan(&rec, 2.0, None));
+    let mut rims = 0;
+    for (ei, e) in rec.edges.iter().enumerate() {
+        if matches!(e.curve, Curve::Line { .. }) {
+            continue;
+        }
+        let pts = &p.edges[ei];
+        // On the hole's rim: every chord at most a quarter turn's, r·√2.
+        let off = |q: &Vec3| (Vec3::new(q.x, q.y, 0.0).dist(axis) - r).abs();
+        assert!(pts.iter().all(|q| off(q) < 1e-6), "edge {ei} is not on the hole");
+        for w in pts.windows(2) {
+            assert!(w[0].dist(w[1]) <= r * 2f64.sqrt() * (1.0 + 1e-6), "edge {ei}: a chord of {} spans more than a quarter turn", w[0].dist(w[1]));
+        }
+        rims += 1;
+    }
+    assert!(rims >= 2, "{rims} rim edges");
+    let m = p.evaluate();
+    assert_watertight(&m, "plate with a small hole");
+    // The hole's wall: π · 1 · 10 less its chords' shortfall (a square: 2√2 · 0.5 · 10 at least).
+    let wall = m.measure().area - 2.0 * (990.0 * 990.0 + 2.0 * 990.0 * 10.0) + 2.0 * PI * r * r;
+    assert!(wall > 4.0 * 2f64.sqrt() * r * 10.0 * 0.99, "the hole's wall measures {wall}");
+}
+
+/// Boundary nodes at the very same (u, v) are one vertex to the triangulation: two holes that
+/// touch at a vertex they share (a ring standing on a perforated plate, tangent to the holes
+/// beside it) bound a face the triangles follow, though each hole has its own copy of the node.
+#[test]
+fn loops_touching_at_a_shared_vertex_bound_the_face() {
+    let outer = [[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
+    let left = [[1.0, 1.0], [1.0, 3.0], [2.0, 2.0]];
+    let right = [[2.0, 2.0], [3.0, 3.0], [3.0, 1.0]];
+    let uvs: Vec<[f64; 2]> = outer.iter().chain(&left).chain(&right).copied().collect();
+    let fixed: Vec<Vec3> = uvs.iter().map(|q| Vec3::new(q[0], q[1], 0.0)).collect();
+    let ranges = vec![0..4, 4..7, 7..10];
+    let fill = cdt::Fill { seeds: &[], refine: None, shape: false };
+    let Some((_, triangles)) = cdt::triangulate(&uvs, &ranges, fill) else { panic!("triangulates") };
+    assert!(closed_boundary(&ranges, &fixed, &uvs, &triangles), "the triangles follow both holes through their shared vertex");
+}
+
+/// A face whose loop is a thin lune meshes: a half disc of radius 2.5 less a circle through the
+/// same ends 0.03 mm inside it at the middle, its inner side split at 11.25°. Each edge is
+/// sampled to the 0.1 mm chord on its own: the outer arc's chords (every 22.5°) sag 0.048 mm,
+/// more than the curves are apart, so the one from 0° to 22.5° passes inside the inner side's
+/// node at 11.25° and crosses its chords; no triangulation follows a boundary that crosses
+/// itself (the sliver caps of a joined ring of cylinder segments). The crossing chords are
+/// halved on their edges until none cross.
+#[test]
+fn a_thin_lune_whose_chords_cross_meshes() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let (r, gap, h, tol) = (2.5, 0.03, 5.0, 0.1);
+    // The inner circle: centre (−d, 0) and radius r + d·…, through (0, ±r), its middle at r − gap.
+    let d = (r * r - (r - gap) * (r - gap)) / (2.0 * (r - gap));
+    let (centre, r2) = (Vec2::new(-d, 0.0), r - gap + d);
+    let top = r.atan2(d);
+    let split = 11.25f64.to_radians();
+    let segs = vec![
+        Seg2::Arc { center: Vec2::ZERO, radius: r, start: -0.5 * PI, sweep: PI },
+        Seg2::Arc { center: centre, radius: r2, start: top, sweep: split - top },
+        Seg2::Arc { center: centre, radius: r2, start: split, sweep: -top - split },
+    ];
+    let lune = Region2 { outer: Loop2 { segs }, holes: vec![] };
+    let Some(body) = ok(crate::extrude(&Plane::XY, &[lune], 0.0, h)).pop() else { panic!("one body") };
+    let rec = record(&body);
+    let (p, stats) = match plan(&rec, tol, None) {
+        Ok(r) => r,
+        Err(e) => panic!("lune: {e}"),
+    };
+    assert_eq!(stats.planar + stats.structured + stats.delaunay, body.face_count(), "every face planned");
+    let m = p.evaluate();
+    assert_watertight(&m, "lune");
+    assert!(m.measure().volume > 0.0, "inside out");
+}
