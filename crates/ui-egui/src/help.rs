@@ -40,12 +40,16 @@ pub fn diagnostics(app: &SolveApp) -> String {
     )
 }
 
-/// Run a Help menu item: `docs`, `about`, `shortcuts`, `messages`, `report`, `crashes`, `connect`, `install_cli` (macOS).
+/// Run a Help menu item: `docs`, `about`, `version` (the release notes), `shortcuts`, `messages`,
+/// `report`, `crashes`, `connect`, `install_cli` (macOS).
 pub fn run(app: &mut SolveApp, ctx: &egui::Context, item: &str) {
     app.help.menu = false;
     match item {
         "docs" => ctx.open_url(egui::OpenUrl::new_tab(DOCS_URL)),
         "about" => app.help.about = true,
+        "version" => {
+            ctx.open_url(egui::OpenUrl::new_tab(crate::update::release_notes_url(crate::update::current_version(), crate::update::release_build())))
+        }
         "shortcuts" => {
             app.keymap.open = true;
             app.keymap.read_only = true;
@@ -133,6 +137,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                     {
                         if crate::context_menu::list_row(ui, &crate::context_menu::Item::action(id, label, icon)).is_some() {
                             pick = Some(id);
+                        }
+                        // A layout without the version in the application bar lists it here.
+                        if id == "about" && app.header.version == crate::toolbar::VersionPlace::HelpMenu {
+                            let label = crate::i18n::format("help.version", &[("version", crate::update::current_version())]);
+                            if crate::context_menu::list_row(ui, &crate::context_menu::Item::action("version", &label, "update")).is_some() {
+                                pick = Some("version");
+                            }
                         }
                     }
                 })

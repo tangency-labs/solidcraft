@@ -572,6 +572,8 @@ pub struct SolveApp {
     pub integrated_titlebar: bool,
     /// The desktop host installed native menus alongside the application bar controls.
     pub native_file_menu: bool,
+    /// Where the application bar puts search, Report a bug and the version (set by the host).
+    pub header: toolbar::HeaderLayout,
     /// Build bodies' display meshes on the CPU even where the GPU could (safe mode). Read by
     /// [`SolveApp::set_wgpu`].
     pub cpu_meshing: bool,
@@ -727,6 +729,7 @@ impl SolveApp {
             native_resize_border: false,
             integrated_titlebar: false,
             native_file_menu: false,
+            header: toolbar::HeaderLayout::DESKTOP,
             cpu_meshing: false,
             frame_ms: 0.0,
             frame_rate: frame_rate::FrameRate::default(),
