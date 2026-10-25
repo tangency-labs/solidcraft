@@ -1,0 +1,5 @@
+{
+  "en": { "view.auto_ortho_faces": "Perspective while orbiting, ortho on faces" },
+  "ja": { "view.auto_ortho_faces": "回転中は透視投影、面を正面に見ると平行投影" },
+  "zh": { "view.auto_ortho_faces": "旋转时透视，正对表面时正交" }
+}

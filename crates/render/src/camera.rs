@@ -449,6 +449,37 @@ impl Camera {
         self.pitch = p.clamp(-lim, lim);
         self.roll = 0.0;
     }
+    /// The standard axis view this camera faces, if its view direction is within `tol` radians
+    /// of one of the six axis views (Front, Back, Left, Right, Top, Bottom). Iso is never
+    /// reported. At the poles (Top/Bottom) the yaw is degenerate, so any yaw counts as aligned.
+    /// Used by the "perspective while orbiting, orthographic on faces" view mode (#2682).
+    pub fn aligned_standard_view(&self, tol: f64) -> Option<StandardView> {
+        use std::f64::consts::FRAC_PI_2;
+        if !self.yaw.is_finite() || !self.pitch.is_finite() || !(tol > 0.0) {
+            return None;
+        }
+        // Top / Bottom: aligned when the elevation reaches the pole within the tolerance
+        // (`set_view` stops a hair short of pi/2, so the slack covers the exact views too).
+        if FRAC_PI_2 - self.pitch.abs() <= tol {
+            return Some(if self.pitch >= 0.0 { StandardView::Top } else { StandardView::Bottom });
+        }
+        // The four side views sit at pitch 0 with yaw on a multiple of pi/2.
+        if self.pitch.abs() > tol {
+            return None;
+        }
+        let quarter = (self.yaw / FRAC_PI_2).round().rem_euclid(4.0);
+        let off = (self.yaw / FRAC_PI_2).rem_euclid(1.0);
+        let off = off.min(1.0 - off) * FRAC_PI_2;
+        if off > tol {
+            return None;
+        }
+        Some(match quarter as i32 {
+            0 => StandardView::Front,
+            1 => StandardView::Left,
+            2 => StandardView::Back,
+            _ => StandardView::Right,
+        })
+    }
     /// Frame a bounding box.
     pub fn fit(&mut self, b: &Aabb3) {
         if b.is_empty() {
@@ -664,6 +695,49 @@ mod tests {
         let hit = o + d * (o.z / -d.z);
         let (sx, sy, _) = c.to_screen(hit, 800.0, 600.0, 20.0).unwrap();
         assert!((sx - 600.0).abs() < 1e-6 && (sy - 300.0).abs() < 1e-6);
+    }
+
+    /// The #2682 alignment policy: each axis view is detected, off-axis and iso are not, and
+    /// the tolerance admits near-aligned cameras (set_view's Top stops a hair short of pi/2).
+    #[test]
+    fn aligned_standard_view_detects_axis_views_within_tolerance() {
+        let tol = 1.0_f64.to_radians();
+        for v in [StandardView::Front, StandardView::Back, StandardView::Top, StandardView::Bottom, StandardView::Left, StandardView::Right] {
+            let mut cam = Camera::default();
+            cam.set_view(v);
+            assert_eq!(cam.aligned_standard_view(tol), Some(v), "{v:?}");
+        }
+        // Iso and off-axis orientations are never aligned.
+        let iso = Camera { yaw: StandardView::Iso.angles().0, pitch: StandardView::Iso.angles().1, ..Camera::default() };
+        assert_eq!(iso.aligned_standard_view(tol), None);
+        let off = Camera { yaw: 0.5, pitch: 0.3, ..Camera::default() };
+        assert_eq!(off.aligned_standard_view(tol), None);
+        // Within tolerance of Front (yaw and pitch each a half-degree off) it still counts.
+        let near = Camera { yaw: 0.5_f64.to_radians(), pitch: 0.5_f64.to_radians(), ..Camera::default() };
+        assert_eq!(near.aligned_standard_view(tol), Some(StandardView::Front));
+        // Just outside the tolerance it does not.
+        let past = Camera { yaw: 2.0_f64.to_radians(), pitch: 0.0, ..Camera::default() };
+        assert_eq!(past.aligned_standard_view(tol), None);
+        // Yaw wraps: 3*pi/2 is Right, negative yaw works, and at the poles any yaw counts.
+        assert_eq!(
+            Camera { yaw: 3.0 * std::f64::consts::FRAC_PI_2, pitch: 0.0, ..Camera::default() }.aligned_standard_view(tol),
+            Some(StandardView::Right)
+        );
+        assert_eq!(
+            Camera { yaw: -std::f64::consts::FRAC_PI_2, pitch: 0.0, ..Camera::default() }.aligned_standard_view(tol),
+            Some(StandardView::Right)
+        );
+        assert_eq!(
+            Camera { yaw: 2.0, pitch: std::f64::consts::FRAC_PI_2 - 1e-6, ..Camera::default() }.aligned_standard_view(tol),
+            Some(StandardView::Top)
+        );
+        assert_eq!(
+            Camera { yaw: 2.0, pitch: -std::f64::consts::FRAC_PI_2 + 1e-6, ..Camera::default() }.aligned_standard_view(tol),
+            Some(StandardView::Bottom)
+        );
+        // Non-finite angles and a zero tolerance never align.
+        assert_eq!(Camera { yaw: f64::NAN, pitch: 0.0, ..Camera::default() }.aligned_standard_view(tol), None);
+        assert_eq!(Camera::default().aligned_standard_view(0.0), None);
     }
 
     #[test]
