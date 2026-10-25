@@ -946,7 +946,7 @@ impl Dialog {
                     at: None,
                     refs: Default::default(),
                 },
-                vec![],
+                crate::hole_refs::cylinder_inputs(),
             ),
             "solid.sphere" => Dialog::new(
                 Kind::Primitive {
@@ -1107,10 +1107,6 @@ impl Dialog {
                 Sel::Vertex { point, .. } => Some((*point, None)),
                 _ => None,
             });
-        }
-        // A cylinder standing on a flat face takes reference edges of it (#6380).
-        if crate::hole_refs::takes(&d) && d.inputs.is_empty() {
-            d.inputs.extend(crate::hole_refs::inputs());
         }
         // With nothing pre-selected, a single profile in the sketch being used is taken (#684:
         // not one a feature already builds from).
@@ -5480,16 +5476,19 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("axis".into(), pt3(axis.0));
             // Standing on a flat face (a base of numbers there, square to it): placed there, so it
             // can take reference edges of that face (#6380), with its own picked again. Not the
-            // inputs a selection made when the window opened.
-            d.inputs.clear();
+            // picks a selection made when the window opened.
+            d.inputs = crate::hole_refs::cylinder_inputs();
             let [x, y, z] = base.clone().map(|c| c.parse::<f64>().ok());
             if let (Some(x), Some(y), Some(z)) = (x, y, z)
-                && let Some(Sel::Face { body, index, .. }) = face_sel(s, Vec3::new(x, y, z))
-                && planar_face(s, &body, index).is_some_and(|(_, n)| n.dot(axis.0) > 1.0 - 1e-9)
+                && let Some(face @ Sel::Face { .. }) = face_sel(s, Vec3::new(x, y, z))
+                && let Sel::Face { body, index, .. } = &face
+                && planar_face(s, body, *index).is_some_and(|(_, n)| n.dot(axis.0) > 1.0 - 1e-9)
                 && let Kind::Primitive { at, .. } = &mut d.kind
             {
                 *at = Some((Vec3::new(x, y, z), Some(axis.0)));
-                d.inputs.extend(crate::hole_refs::inputs());
+                if let Some(inp) = d.inputs.first_mut() {
+                    inp.items = vec![face];
+                }
                 crate::hole_refs::restore(s, &mut d, references, &f.edge_names);
             }
             d

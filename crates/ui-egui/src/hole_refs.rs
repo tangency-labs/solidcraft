@@ -5,8 +5,9 @@
 //! there; moving the hole (another pick, or dragging its handle) measures the distances again.
 //! The canvas shows each distance as a dimension from its edge to the hole's centre. OK sends the
 //! edges and distances as `solid.hole`'s `references`, so the hole follows its edges when the
-//! part changes; Edit Feature picks the edges again where they are now. A Cylinder standing on a
-//! flat face takes the same references for its base centre (#6380).
+//! part changes; Edit Feature picks the edges again where they are now. A Cylinder takes the same
+//! references for its base centre (#6380): its window picks the face it stands on (or takes the
+//! one selected before it opened), then the edges.
 
 use egui::{Color32, Pos2, Stroke, vec2};
 use serde_json::{Value, json};
@@ -18,7 +19,7 @@ use solidcraft_engine::{Sel, Session};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
-use crate::selection::{EDGES, SelInput};
+use crate::selection::{EDGES, FACES, PLANAR_FACES, SelInput, VERTICES};
 use crate::theme::Tokens;
 use crate::viewport::Proj;
 
@@ -56,19 +57,39 @@ struct Framed {
     frame: Option<(ReferenceFrame, Vec<usize>)>,
 }
 
-/// The reference edge inputs a Single hole's dialog has after its face input (a Cylinder's: its
-/// only inputs).
+/// The reference edge inputs a Single hole's dialog has after its face input.
 pub(crate) fn inputs() -> [SelInput; 2] {
     REFERENCES.map(|label| SelInput::new(label, EDGES, false))
 }
 
-/// Does `d` take reference edges: a Single hole's dialog, or a Cylinder's standing on a flat
-/// face?
+/// The Cylinder window's inputs: where it stands (a face, or a vertex), then the reference edges.
+pub(crate) fn cylinder_inputs() -> Vec<SelInput> {
+    let mut v = vec![SelInput::new("Face", PLANAR_FACES | FACES | VERTICES, false)];
+    v.extend(inputs());
+    v
+}
+
+/// Does `d` take reference edges: a Single hole's dialog, or a Cylinder's?
 pub(crate) fn takes(d: &Dialog) -> bool {
     match &d.kind {
         Kind::Hole { opts, .. } => !opts.multiple,
-        Kind::Primitive { cmd: "solid.cylinder", at: Some((_, Some(_))), .. } => true,
+        Kind::Primitive { cmd, .. } => *cmd == "solid.cylinder",
         _ => false,
+    }
+}
+
+/// A Cylinder stands where its Face input is picked: on a planar face, along its normal (as it
+/// stood when it is the place it already has); nowhere picked, at the origin.
+fn cylinder_place(s: &Session, d: &mut Dialog) {
+    let picked = d.inputs.first().and_then(|i| i.items.first()).cloned();
+    let Kind::Primitive { cmd: "solid.cylinder", at, .. } = &mut d.kind else { return };
+    let to = match picked {
+        Some(Sel::Face { body, index, point }) => Some((point, crate::dialogs::planar_face(s, &body, index).map(|(_, n)| n))),
+        Some(Sel::Vertex { point, .. }) => Some((point, None)),
+        _ => None,
+    };
+    if to.map(|(p, _)| p) != at.map(|(p, _)| p) {
+        *at = to;
     }
 }
 
@@ -100,11 +121,12 @@ fn place(d: &Dialog) -> Option<Vec3> {
     })
 }
 
-/// Move the place (see [`place`]) to `p`.
+/// Move the place (see [`place`]) to `p`: the face pick, and a cylinder's base with it.
 fn set_place(d: &mut Dialog, p: Vec3) {
     if let Kind::Primitive { at: Some((point, _)), .. } = &mut d.kind {
         *point = p;
-    } else if let Some(Sel::Face { point, .. }) = d.inputs.first_mut().and_then(|inp| inp.items.iter_mut().find(|x| matches!(x, Sel::Face { .. }))) {
+    }
+    if let Some(Sel::Face { point, .. }) = d.inputs.first_mut().and_then(|inp| inp.items.iter_mut().find(|x| matches!(x, Sel::Face { .. }))) {
         *point = p;
     }
 }
@@ -168,6 +190,7 @@ pub(crate) fn sync(s: &Session, d: &mut Dialog) {
     if !takes(d) {
         return;
     }
+    cylinder_place(s, d);
     let edges = edges(d);
     let Some(at) = place(d) else {
         if let Some(refs) = refs_mut(d) {

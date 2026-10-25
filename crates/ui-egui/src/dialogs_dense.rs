@@ -808,7 +808,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 form_row(ui, "Position", |ui| {
                     ui.horizontal(|ui| {
                         ui.label(format!("{:.2}, {:.2}, {:.2}", p.x, p.y, p.z));
-                        if ui_kit::button(ui, "×", ui_kit::Button::Small).on_hover_text(tr("Place at the origin instead")).clicked() {
+                        // A cylinder's place is its Face pick, cleared there.
+                        if *cmd != "solid.cylinder"
+                            && ui_kit::button(ui, "×", ui_kit::Button::Small).on_hover_text(tr("Place at the origin instead")).clicked()
+                        {
                             *at = None;
                         }
                     });

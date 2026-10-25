@@ -209,7 +209,7 @@ fn a_cylinder_is_placed_by_its_distances_from_two_edges() {
     h.step(&json!({"call": "ui.editFeature", "params": {"feature": f.id}})).unwrap();
     h.frames(4);
     let labels: Vec<&str> = h.app.dialog.as_ref().unwrap().inputs.iter().map(|i| i.label).collect();
-    assert_eq!(labels, ["Reference 1", "Reference 2"]);
+    assert_eq!(labels, ["Face", "Reference 1", "Reference 2"]);
     assert!(picked_edge(&h, "Reference 1").is_some_and(|p| p.x.abs() < 1e-6), "{:?}", picked_edge(&h, "Reference 1"));
     assert!(picked_edge(&h, "Reference 2").is_some_and(|p| p.y.abs() < 1e-6), "{:?}", picked_edge(&h, "Reference 2"));
     assert_eq!(cylinder_dialog(&h).0, measured);
@@ -221,12 +221,31 @@ fn a_cylinder_is_placed_by_its_distances_from_two_edges() {
     assert!(solid_at(&h, Vec3::new(10.0, 12.0, 12.0)) && !solid_at(&h, Vec3::new(picked.x, picked.y, 12.0)), "the edit moved it to (10, 12)");
 }
 
-/// A cylinder placed at the origin (nothing picked) has no reference edges to take.
+/// Started with nothing selected, the Cylinder stands at the origin until a face is clicked;
+/// then its edges are picked, all with the mouse.
 #[test]
-fn a_cylinder_off_a_face_takes_no_reference_edges() {
+fn a_cylinder_started_first_takes_its_face_then_its_edges() {
     let mut h = plate();
     h.step(&json!({"start": "solid.cylinder"})).unwrap();
     h.frames(2);
     let d = h.app.dialog.as_ref().unwrap();
-    assert!(d.inputs.is_empty() && !crate::hole_refs::takes(d));
+    let labels: Vec<&str> = d.inputs.iter().map(|i| i.label).collect();
+    assert_eq!(labels, ["Face", "Reference 1", "Reference 2"]);
+    assert!(matches!(d.kind, Kind::Primitive { at: None, .. }), "nothing picked: at the origin");
+    let at = screen(&mut h, Vec3::new(30.0, 25.0, 10.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.frames(2);
+    let (_, picked) = cylinder_dialog(&h);
+    assert!(picked.dist(Vec3::new(30.0, 25.0, 10.0)) < 0.5, "it stands where the face was clicked: {picked:?}");
+    let left = screen(&mut h, Vec3::new(0.0, 20.0, 10.0));
+    h.step(&json!({"click": left})).unwrap();
+    let front = screen(&mut h, Vec3::new(25.0, 0.0, 10.0));
+    h.step(&json!({"click": front})).unwrap();
+    h.frames(2);
+    assert!(picked_edge(&h, "Reference 1").is_some() && picked_edge(&h, "Reference 2").is_some());
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let f = h.app.session.doc.features.last().unwrap();
+    let FeatureKind::Cylinder { references, .. } = &f.kind else { panic!("the last feature is a cylinder") };
+    assert_eq!(references.len(), 2);
 }
