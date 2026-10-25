@@ -41,6 +41,8 @@
 //!   with a box but zero voxels in `Add`, an empty explicit bucket list, a zero
 //!   divisor in `MapVoxelIndexToIndices`) returns [`SolidError::InvalidInput`]
 //!   (or, for an empty bucket list, checks no bucket).
+//! * Voxel dimension products are checked before changing the model; overflow
+//!   returns `InvalidInput` instead of silently wrapping as upstream does.
 //! * Faithfully kept upstream quirks of `FindCoincidentPairs`: every bucket item
 //!   is compared against the bucket's *first* item (`pBegPointItem` is never
 //!   advanced), and `rEndPoint` is a reference, so each comparison overwrites the
@@ -503,7 +505,7 @@ impl<T: Copy + PartialEq> ObjsInVoxels<T> {
     ///
     /// # Errors
     ///
-    /// As [`HashTable::init_size`] (one bucket per voxel).
+    /// As [`ObjsInVoxels::set_size`] (one bucket per voxel).
     pub fn new(
         x_cnt: usize,
         y_cnt: usize,
@@ -533,7 +535,9 @@ impl<T: Copy + PartialEq> ObjsInVoxels<T> {
     ///
     /// # Errors
     ///
-    /// As [`HashTable::init_size`] (one bucket per voxel).
+    /// [`SolidError::InvalidInput`] when the voxel dimensions overflow, leaving
+    /// the model unchanged. Otherwise, as [`HashTable::init_size`] (one bucket
+    /// per voxel).
     pub fn set_size(
         &mut self,
         x_cnt: usize,
@@ -542,11 +546,25 @@ impl<T: Copy + PartialEq> ObjsInVoxels<T> {
         bbox: Option<&Extent3d>,
         item_estimate: usize,
     ) -> Result<()> {
+        // A zero factor makes the mathematical voxel product zero; preserve the
+        // pre-existing behaviour (upstream's wrapped product is also zero) instead of
+        // letting an intermediate overflow reject it.
+        let voxel_count = if x_cnt == 0 || y_cnt == 0 || z_cnt == 0 {
+            0
+        } else {
+            x_cnt
+                .checked_mul(y_cnt)
+                .and_then(|xy| xy.checked_mul(z_cnt))
+                .ok_or(SolidError::InvalidInput {
+                    operation: "geom::hash_table::ObjsInVoxels::set_size",
+                    reason: "voxel dimensions overflow",
+                })?
+        };
         self.x_cnt = x_cnt;
         self.y_cnt = y_cnt;
         self.z_cnt = z_cnt;
         self.bbox = bbox.copied().unwrap_or_default();
-        self.hash.init_size(item_estimate, self.voxel_count())?;
+        self.hash.init_size(item_estimate, voxel_count)?;
         self.point_items.clear();
         self.point_capacity = 0;
         if item_estimate > 0 {
@@ -935,6 +953,77 @@ mod tests {
 
     fn unit_box() -> Extent3d {
         Extent3d::from_bounds(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+    }
+
+    #[test]
+    fn new_rejects_voxel_dimension_overflow() {
+        assert!(matches!(
+            ObjsInVoxels::<usize>::new(usize::MAX, usize::MAX, 1, None, 0),
+            Err(SolidError::InvalidInput {
+                operation: "geom::hash_table::ObjsInVoxels::set_size",
+                reason: "voxel dimensions overflow",
+            })
+        ));
+    }
+
+    #[test]
+    fn new_keeps_zero_dimension_success_despite_intermediate_overflow() {
+        // pre-existing behaviour: a zero factor makes the product zero, so even
+        // MAX x MAX x 0 succeeds with zero buckets instead of rejecting
+        let v = ObjsInVoxels::<usize>::new(usize::MAX, usize::MAX, 0, None, 0).unwrap();
+        assert_eq!(v.counts(), (usize::MAX, usize::MAX, 0));
+        assert_eq!(v.hash_table().bucket_count(), 0);
+    }
+
+    #[test]
+    fn new_rejects_third_voxel_factor_overflow() {
+        assert!(matches!(
+            ObjsInVoxels::<usize>::new(1, usize::MAX, 2, None, 0),
+            Err(SolidError::InvalidInput {
+                operation: "geom::hash_table::ObjsInVoxels::set_size",
+                reason: "voxel dimensions overflow",
+            })
+        ));
+    }
+
+    #[test]
+    fn overflowing_set_size_preserves_model() {
+        let mut v = ObjsInVoxels::<usize>::new(2, 3, 4, Some(&unit_box()), 0).unwrap();
+        v.add(7, Vec3::new(0.2, 0.2, 0.2), 0.0, None).unwrap();
+        let before = v.clone();
+
+        assert!(matches!(
+            v.set_size(usize::MAX, usize::MAX, 1, None, 10),
+            Err(SolidError::InvalidInput {
+                operation: "geom::hash_table::ObjsInVoxels::set_size",
+                reason: "voxel dimensions overflow",
+            })
+        ));
+        assert_eq!(v.counts(), before.counts());
+        assert_eq!(v.bbox(), before.bbox());
+        assert_eq!(v.hash.bucket_count(), before.hash.bucket_count());
+        assert_eq!(v.hash.buckets, before.hash.buckets);
+        assert_eq!(v.hash.bucket_items, before.hash.bucket_items);
+        assert_eq!(v.hash.capacity, before.hash.capacity);
+        assert_eq!(v.hash.used_buckets, before.hash.used_buckets);
+        assert_eq!(v.hash.used_bucket_count, before.hash.used_bucket_count);
+        assert_eq!(
+            v.hash.removed_bucket_item_count,
+            before.hash.removed_bucket_item_count
+        );
+        assert_eq!(v.point_items(), before.point_items());
+        assert_eq!(v.point_capacity(), before.point_capacity());
+        assert_eq!(
+            v.removed_point_item_count(),
+            before.removed_point_item_count()
+        );
+    }
+
+    #[test]
+    fn voxel_dimensions_match_bucket_count() {
+        let v = ObjsInVoxels::<usize>::new(2, 3, 4, None, 0).unwrap();
+        assert_eq!(v.counts(), (2, 3, 4));
+        assert_eq!(v.hash_table().bucket_count(), 24);
     }
 
     #[test]
