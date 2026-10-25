@@ -38,6 +38,7 @@ nice -n 10 cargo test -p difftest --features cpp                     # harness s
 | `--seeds N` | generated cases per unit (default 16) |
 | `--filter S` | only cases whose name contains `S` |
 | `--perturb` | change one item of each case's Rust output (below); passes only if **every** perturbed case is caught. No report written. |
+| `--compare-reports R` | with `--baseline D` only: run no case, apply the same ratchet to the finished reports in `R` (CI's `difftest-compare` job; needs no C++) |
 | `--baseline D` | regression ratchet: compare each unit with its earlier report `D/<unit>.json` (see [Regression gate](#regression-gate---baseline-value-share)). CI passes the exact base revision's validated report artifact |
 | `--report-dir D` / `--no-report` | report location (default `reports/difftest/`) / skip writing |
 | `--fuzz N` | with `--unit`: probe the unit's FFI guard with N mutated cases, each run in a child process (below). No report written. |
@@ -294,6 +295,17 @@ have no earlier report. This avoids parsing the full corpus in every worker.
 The separate value-share floor remains 75% of a unit's passing cases and at
 least one value-bearing case. Both-error and vacuous passes stay in the
 denominator. Known mismatches are not passes and cannot waive new discrepancies.
+
+CI runs the gate as parallel jobs (`.github/workflows/ci.yml`): `difftest-baseline`
+fetches and validates the exact-base artifact (below) while `difftest-sweep` runs
+`--green --jobs 0` (status and value-share gates, reports uploaded within the run) and
+`difftest-perturb` runs `--green --perturb`, mandatory on every pull_request and
+merge_group run. `difftest-compare` needs both the validated base and the finished sweep and
+runs `--compare-reports <sweep reports> --baseline <validated base>`, which applies the
+`--baseline` ratchet (unit set, seeds, case identity, outcome and value retention, waivers)
+to the reports without re-running anything. The required check `difftest` is an aggregator
+(`needs` all four, `if: always()`): it succeeds only if every part succeeded, so a failed or
+skipped part, or a failed base validation, fails it. No base fallback and no second sweep.
 
 CI retrieves the exact base SHA's successful push/main CI artifact through
 `scripts/ci/difftest-baseline.sh`. PRs use `pull_request.base.sha` and main pushes

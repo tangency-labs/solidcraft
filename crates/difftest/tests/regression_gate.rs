@@ -239,3 +239,56 @@ fn child_case_and_value_gates_preserve_reports_and_output_digests() {
         }
     }
 }
+
+// `--compare-reports` applies the ratchet to finished reports (CI sweeps in another job).
+#[test]
+#[allow(clippy::unwrap_used)]
+fn compare_reports_ratchets_finished_reports() {
+    let scratch = Scratch::new();
+    let report = |cases: &[(&str, &str)]| {
+        let cases: Vec<Value> = cases
+            .iter()
+            .map(|(name, outcome)| {
+                json!({"name": name, "source": "inline", "pass": *outcome == "pass",
+                       "outcome": outcome, "values_compared": 0, "exact_compared": 1})
+            })
+            .collect();
+        json!({"schema_version": 1, "unit": "some.unit", "status": "green", "pass": true,
+               "seeds": 16, "cases_total": cases.len(), "cases_passed": cases.len(),
+               "cases_failed": 0, "cases_deferred": 0, "cases_vacuous": 0,
+               "cases_both_errored": 0, "cases": cases})
+    };
+    let write = |dir: &str, value: &Value| {
+        let dir = scratch.0.join(dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("some.unit.json"),
+            serde_json::to_vec(value).unwrap(),
+        )
+        .unwrap();
+        dir.display().to_string()
+    };
+    let base = write("base", &report(&[("a", "pass"), ("b", "pass")]));
+    let compare = |current: String| {
+        let mut args = strings(&["--compare-reports"]);
+        args.push(current);
+        args.push("--baseline".into());
+        args.push(base.clone());
+        run(&args, None)
+    };
+    let same = compare(write(
+        "same",
+        &report(&[("a", "pass"), ("b", "pass"), ("c", "pass")]),
+    ));
+    assert_eq!(same.status.code(), Some(0));
+    let lost = compare(write("lost", &report(&[("a", "pass")])));
+    assert_eq!(lost.status.code(), Some(1));
+    assert!(String::from_utf8(lost.stdout).unwrap().contains("case `b`"));
+    let empty = scratch.0.join("empty");
+    fs::create_dir(&empty).unwrap();
+    assert_eq!(compare(empty.display().to_string()).status.code(), Some(1));
+    // Without --baseline the mode refuses to run.
+    let mut args = strings(&["--compare-reports"]);
+    args.push(base.clone());
+    assert_eq!(run(&args, None).status.code(), Some(2));
+}

@@ -465,6 +465,98 @@ pub fn ratchet(base: &Baseline, res: &UnitResult) -> Vec<Violation> {
     out
 }
 
+/// Ratchet violations of a completed report `now` against the earlier report `base`
+/// (`--compare-reports`). The same rules as [`ratchet`], applied to two parsed reports
+/// instead of a live [`UnitResult`]: the sweep ran elsewhere and only its reports remain.
+pub fn ratchet_reports(base: &Baseline, now: &Baseline) -> Vec<Violation> {
+    let current: BTreeMap<&str, &BaselineCase> =
+        now.cases.iter().map(|c| (c.name.as_str(), c)).collect();
+    let mut out = Vec::new();
+    let mut push = |case: &str, detail: String| {
+        out.push(Violation {
+            unit: now.unit.clone(),
+            check: Check::Ratchet,
+            case: Some(case.to_string()),
+            detail,
+        });
+    };
+    if base.seeds != now.seeds {
+        push(
+            "<seeds>",
+            "baseline/current seeds differ; generated coverage cannot be ratcheted".into(),
+        );
+    }
+    for b in &base.cases {
+        if b.outcome == "rejected" {
+            continue;
+        }
+        let Some(c) = current.get(b.name.as_str()) else {
+            push(
+                &b.name,
+                format!("case `{}` ({} in the baseline) is gone", b.name, b.outcome),
+            );
+            continue;
+        };
+        if b.outcome == "known_mismatch" && !matches!(c.outcome.as_str(), "known_mismatch" | "pass")
+        {
+            push(
+                &b.name,
+                format!("case `{}` was a known mismatch, now {}", b.name, c.outcome),
+            );
+            continue;
+        }
+        if b.outcome == "pass" && c.outcome != "pass" {
+            if c.outcome == "fail" {
+                continue; // already fails the unit in the sweep
+            }
+            push(
+                &b.name,
+                format!(
+                    "case `{}` passed in the baseline, now {}",
+                    b.name, c.outcome
+                ),
+            );
+            continue;
+        }
+        if b.compared_values && !c.compared_values {
+            push(
+                &b.name,
+                format!(
+                    "case `{}` compared values in the baseline, now compares nothing",
+                    b.name
+                ),
+            );
+        }
+    }
+    out
+}
+
+/// Units that have a report (`<unit>.json`) in `dir`, sorted. Every report is parsed.
+pub fn report_units(dir: &Path) -> Result<Vec<String>, HarnessError> {
+    let entries =
+        fs::read_dir(dir).map_err(|e| HarnessError::new(format!("{}: {e}", dir.display())))?;
+    let mut out = Vec::new();
+    for e in entries {
+        let path = e
+            .map_err(|e| HarnessError::new(format!("{}: {e}", dir.display())))?
+            .path();
+        if path.extension().and_then(|x| x.to_str()) != Some("json") {
+            continue;
+        }
+        let unit = path
+            .file_stem()
+            .and_then(|x| x.to_str())
+            .ok_or_else(|| HarnessError::new("invalid report filename"))?
+            .to_string();
+        if load_baseline(dir, &unit)?.is_none() {
+            return Err(HarnessError::new(format!("{unit}: report disappeared")));
+        }
+        out.push(unit);
+    }
+    out.sort();
+    Ok(out)
+}
+
 /// Value-share violation of `res`, if any. Only meaningful for a unit that does not
 /// already fail.
 pub fn value_share(res: &UnitResult) -> Option<Violation> {
@@ -567,6 +659,59 @@ mod tests {
     use crate::compare::CaseDiff;
     use crate::output::Deferred;
     use crate::runner::CaseResult;
+
+    fn bcase(name: &str, outcome: &str, compared_values: bool) -> BaselineCase {
+        BaselineCase {
+            name: name.into(),
+            outcome: outcome.into(),
+            generated: false,
+            compared_values,
+        }
+    }
+
+    fn report(seeds: u64, cases: Vec<BaselineCase>) -> Baseline {
+        Baseline {
+            unit: "a.b".into(),
+            status: Some("green".into()),
+            seeds: Some(seeds),
+            cases,
+        }
+    }
+
+    #[test]
+    fn ratchet_reports_flags_regressions() {
+        let base = report(
+            16,
+            vec![
+                bcase("p", "pass", true),
+                bcase("q", "pass", true),
+                bcase("r", "known_mismatch", false),
+                bcase("s", "deferred", false),
+                bcase("x", "rejected", false),
+                bcase("f", "pass", false),
+            ],
+        );
+        assert!(ratchet_reports(&base, &base).is_empty());
+        let now = report(
+            16,
+            vec![
+                bcase("p", "deferred", false),
+                bcase("q", "pass", false),
+                bcase("r", "deferred", false),
+                bcase("f", "fail", false),
+            ],
+        );
+        let names: Vec<String> = ratchet_reports(&base, &now)
+            .into_iter()
+            .filter_map(|v| v.case)
+            .collect();
+        // `f` failing is left to the sweep; `x` (rejected) may vanish; `s` may not.
+        assert_eq!(names, ["p", "q", "r", "s"]);
+        assert_eq!(
+            ratchet_reports(&base, &report(8, base.cases.clone())).len(),
+            1
+        );
+    }
 
     fn case(name: &str, outcome: &str, values: usize) -> CaseResult {
         let mut c = CaseResult {

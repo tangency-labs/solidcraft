@@ -30,7 +30,7 @@ use difftest::{fuzz, plan, registry, report, run_unit, CaseContext, RunOptions, 
 
 const USAGE: &str = "usage: difftest [--unit <id>]... [--green] [--all] [--list]
        [--status-of <id>] [--seeds N] [--filter <substr>] [--perturb] [--report-dir <dir>] [--no-report] [--jobs N]
-       [--baseline <dir>] [--digest-dir <dir> [--digest-debug]]
+       [--baseline <dir>] [--compare-reports <dir>] [--digest-dir <dir> [--digest-debug]]
        difftest --unit <id>... --fuzz N [--fuzz-out <dir>] [--seeds N] [--filter <substr>]
        difftest --ssi-corpus [--tol 1e-6|default] [--jobs N] [--report-dir <dir>] [--no-report] [case-glob]
        difftest --solidcraft-cases [--report-dir <dir>] [--no-report] [case-glob]";
@@ -62,6 +62,7 @@ struct Args {
     report_dir: Option<PathBuf>,
     no_report: bool,
     baseline: Option<PathBuf>,
+    compare_reports: Option<PathBuf>,
     ssi_corpus: bool,
     solidcraft_cases: bool,
     tol: Option<String>,
@@ -94,6 +95,9 @@ fn parse_args() -> Result<Args, String> {
             "--report-dir" => a.report_dir = Some(PathBuf::from(val("--report-dir")?)),
             "--no-report" => a.no_report = true,
             "--baseline" => a.baseline = Some(PathBuf::from(val("--baseline")?)),
+            "--compare-reports" => {
+                a.compare_reports = Some(PathBuf::from(val("--compare-reports")?));
+            }
             "--ssi-corpus" => a.ssi_corpus = true,
             "--solidcraft-cases" => a.solidcraft_cases = true,
             "--tol" => a.tol = Some(val("--tol")?),
@@ -193,6 +197,17 @@ fn main() -> ExitCode {
             no_report: args.no_report,
         };
         return difftest::ssi::run_corpus(&root, &opts);
+    }
+
+    // Reports only: no C++ kernel needed.
+    if let Some(current) = &args.compare_reports {
+        return match Waivers::load(&root) {
+            Ok(waivers) => compare_reports_main(&args, current, &waivers),
+            Err(e) => {
+                eprintln!("difftest: {e}");
+                ExitCode::from(2)
+            }
+        };
     }
 
     if !solidcore_ffi::LINKED {
@@ -518,6 +533,81 @@ fn main() -> ExitCode {
 }
 
 /// Prints gate violations (waived ones with their reason); true if any is not waived.
+/// `--compare-reports DIR --baseline BASE`: the regression ratchet applied to the finished
+/// reports of a sweep run elsewhere (CI runs the sweep while the exact-base artifact is
+/// still being validated). Runs no case and needs no C++. The sweep itself already enforced
+/// per-unit status and the value-share floor; this adds exactly the `--baseline` checks:
+/// every green/partial baseline unit still has a report, seeds match, and no case is lost.
+fn compare_reports_main(args: &Args, current: &Path, waivers: &Waivers) -> ExitCode {
+    let Some(base_dir) = &args.baseline else {
+        eprintln!("difftest: --compare-reports requires --baseline");
+        return ExitCode::from(2);
+    };
+    if args.green
+        || args.all
+        || args.perturb
+        || args.filter.is_some()
+        || args.seeds.is_some()
+        || !args.units.is_empty()
+    {
+        eprintln!("difftest: --compare-reports takes only --baseline");
+        return ExitCode::from(2);
+    }
+    let setup = |e: difftest::HarnessError| {
+        eprintln!("difftest: {e}");
+        ExitCode::from(2)
+    };
+    let base_units = match baseline::baseline_units(base_dir) {
+        Ok(u) => u,
+        Err(e) => return setup(e),
+    };
+    let now_units = match baseline::report_units(current) {
+        Ok(u) => u,
+        Err(e) => return setup(e),
+    };
+    let mut failed = 0usize;
+    for u in base_units.iter().filter(|u| !now_units.contains(u)) {
+        let v = Violation {
+            unit: u.clone(),
+            check: Check::Ratchet,
+            case: None,
+            detail: format!("unit `{u}` passed in the baseline but the sweep produced no report"),
+        };
+        println!("{u}:");
+        if print_violations(&[v], waivers) {
+            failed += 1;
+        }
+    }
+    for unit in &now_units {
+        let (b, n) = match (
+            baseline::load_baseline(base_dir, unit),
+            baseline::load_baseline(current, unit),
+        ) {
+            (Ok(Some(b)), Ok(Some(n))) => (b, n),
+            (Ok(None), Ok(Some(_))) => {
+                println!("{unit}: no earlier report (new unit)");
+                continue;
+            }
+            (Err(e), _) | (_, Err(e)) => return setup(e),
+            (_, Ok(None)) => return setup(difftest::HarnessError::new("report disappeared")),
+        };
+        let violations = baseline::ratchet_reports(&b, &n);
+        if violations.is_empty() {
+            println!("OK {unit} ({} baseline cases retained)", b.cases.len());
+        } else {
+            println!("{unit}:");
+            if print_violations(&violations, waivers) {
+                failed += 1;
+            }
+        }
+    }
+    println!(
+        "difftest: compared {} reports against the baseline: {failed} unit(s) regressed",
+        now_units.len()
+    );
+    ExitCode::from(u8::from(failed > 0))
+}
+
 fn print_violations(violations: &[Violation], waivers: &Waivers) -> bool {
     let (waived, open): (Vec<&Violation>, Vec<&Violation>) = violations
         .iter()

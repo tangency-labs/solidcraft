@@ -530,4 +530,58 @@ class BaselineTests(unittest.TestCase):
 
 
 
+class WorkflowGateTests(unittest.TestCase):
+    """Structure of the split difftest gate in ci.yml (text checks; no YAML dependency)."""
+
+    @staticmethod
+    def jobs():
+        text = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
+        head, _, rest = text.partition("\njobs:\n")
+        blocks, name = {}, None
+        for line in rest.splitlines():
+            if line.startswith("  ") and not line.startswith("   ") and line.rstrip().endswith(":") and not line.strip().startswith("#"):
+                name = line.strip()[:-1]
+                blocks[name] = []
+            elif name:
+                blocks[name].append(line)
+        return {k: "\n".join(v) for k, v in blocks.items()}
+
+    def test_required_check_aggregates_every_part(self):
+        jobs = self.jobs()
+        gate = jobs["difftest"]
+        self.assertIn("if: always()", gate)
+        for part in ("difftest-baseline", "difftest-sweep", "difftest-perturb", "difftest-compare"):
+            self.assertIn(part, gate.split("steps:")[0])
+        self.assertIn("join(needs.*.result", gate)
+        self.assertIn('[ "$r" = success ]', gate)
+
+    def test_perturbation_is_unconditional_and_parallel(self):
+        perturb = self.jobs()["difftest-perturb"]
+        self.assertNotIn("needs:", perturb)
+        self.assertIn("--green --perturb", perturb)
+        # No event filter on the job or its run step: pull_request and merge_group both run it.
+        self.assertNotIn("github.event_name", perturb)
+
+    def test_sweep_does_not_wait_for_the_base(self):
+        sweep = self.jobs()["difftest-sweep"]
+        self.assertNotIn("needs:", sweep)
+        self.assertNotIn("difftest-baseline.sh", sweep)
+        self.assertNotIn("--baseline", sweep)
+
+    def test_compare_needs_validated_base_and_sweep_and_fails_closed(self):
+        compare = self.jobs()["difftest-compare"]
+        self.assertIn("needs: [difftest-baseline, difftest-sweep]", compare)
+        self.assertNotIn("always()", compare)
+        self.assertNotIn("continue-on-error", self.jobs()["difftest-baseline"])
+        self.assertIn("--compare-reports", compare)
+        self.assertIn("difftest-baseline/reports", compare)
+        base = self.jobs()["difftest-baseline"]
+        self.assertIn("scripts/ci/difftest-baseline.sh", base)
+        self.assertIn("--current-plan", base)
+
+    def test_no_job_uses_a_continue_on_error_escape(self):
+        for name, body in self.jobs().items():
+            self.assertNotIn("continue-on-error", body, name)
+
+
 if __name__ == "__main__": unittest.main()

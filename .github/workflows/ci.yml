@@ -143,16 +143,60 @@ jobs:
         with:
           command: check licenses bans sources
 
-  difftest:
-    # Starts with the other jobs (no `needs`): it is the critical path, and the merge queue
-    # requires every job anyway. Clippy with the cpp feature and the runner tests run in
-    # the clippy and test jobs, in parallel with this one.
+  # The difftest gate is split so its slow parts overlap (they used to run one after
+  # another: exact-base wait, sweep, perturbation). `difftest-baseline` fetches and
+  # validates the exact-base artifact while `difftest-sweep` runs the green sweep and
+  # `difftest-perturb` the (mandatory) perturbation check; `difftest-compare` then holds the
+  # sweep's finished reports to the validated base with the same ratchet as `--baseline`;
+  # `difftest` (the required check's name) fails unless every part succeeded.
+  difftest-baseline:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      actions: read  # reads the exact base revision's run and report artifact
+    outputs:
+      baseline: ${{ steps.validate.outputs.baseline }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail closed: any validation error fails this step (and so the job and `difftest`).
+      # Only a genuine bootstrap/diagnostic run, which the helper reports by printing
+      # nothing, continues without a base.
+      - name: Validate exact-base report artifact
+        id: validate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.baseline_sha }}
+        run: |
+          arg=$(scripts/ci/difftest-baseline.sh "$EVENT" "$BASE" "$RUNNER_TEMP/difftest-baseline" --current-plan "$GITHUB_WORKSPACE")
+          if [ -n "$arg" ]; then
+            echo "baseline=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "baseline=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Hand the validated reports and their provenance to difftest-compare.
+      - name: Upload validated baseline
+        if: steps.validate.outputs.baseline == 'yes'
+        uses: actions/upload-artifact@v4
+        with:
+          name: difftest-validated-baseline
+          path: ${{ runner.temp }}/difftest-baseline
+          if-no-files-found: error
+          retention-days: 1
+
+  difftest-sweep:
+    # Starts with the other jobs (no `needs`): it is the critical path. Clippy with the cpp
+    # feature and the runner tests run in the clippy and test jobs, in parallel with this one.
     runs-on: blacksmith-16vcpu-ubuntu-2404
     permissions:
       contents: read
       actions: read  # scripts/fetch-reports.sh reads main's report artifact
     env:
       SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
+    outputs:
+      any: ${{ steps.green.outputs.any }}
     steps:
       - uses: actions/checkout@v4
 
@@ -165,15 +209,6 @@ jobs:
             echo "any=false" >> "$GITHUB_OUTPUT"
             echo "No current green units; exact-base retention is still required."
           fi
-
-      - name: Validate exact-base report artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.baseline_sha }}
-        run: |
-          arg=$(scripts/ci/difftest-baseline.sh "$EVENT" "$BASE" "$RUNNER_TEMP/difftest-baseline" --current-plan "$GITHUB_WORKSPACE")
-          echo "DIFFTEST_BASELINE=$arg" >> "$GITHUB_ENV"
 
       - name: Upstream sources, sccache and the C++ reference
         if: steps.green.outputs.any == 'true'
@@ -198,22 +233,13 @@ jobs:
         if: steps.green.outputs.any == 'true'
         # Optimised profile (Cargo.toml [profile.difftest]): identical results, about 20x
         # faster than the debug build that used to take ~35 min here. --jobs 0: one child
-        # process per unit, one per vCPU (same output and reports as a serial run).
-        run: |
-          baseline=()
-          if [ -n "$DIFFTEST_BASELINE" ]; then
-            baseline=(--baseline "$RUNNER_TEMP/difftest-baseline/reports")
-          fi
-          cargo run --profile difftest -p difftest --features cpp -- --green --jobs 0 "${baseline[@]}"
+        # process per unit, one per vCPU (same output and reports as a serial run). The
+        # exact-base ratchet is applied afterwards by difftest-compare, to
+        # these reports; the per-unit status and value-share gates run here.
+        run: cargo run --profile difftest -p difftest --features cpp -- --green --jobs 0
 
-      - name: Difftest perturbation check
-        if: steps.green.outputs.any == 'true'
-        run: cargo run --profile difftest -p difftest --features cpp -- --green --perturb --jobs 0 --no-report
-
-      # main's reports are published from here (site, PROGRESS.md case counts,
-      # scripts/fetch-reports.sh), never committed.
       - name: Keep only reports of green/partial units
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.green.outputs.any == 'true' && !cancelled()
+        if: steps.green.outputs.any == 'true' && !cancelled()
         run: |
           python3 - <<'PY'
           import pathlib, sys
@@ -225,6 +251,18 @@ jobs:
                   p.unlink()
           PY
 
+      # Carries the finished reports to difftest-compare (run-internal, short-lived).
+      - name: Upload sweep reports
+        if: steps.green.outputs.any == 'true' && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: difftest-sweep-reports
+          path: reports/difftest/*.json
+          if-no-files-found: error
+          retention-days: 1
+
+      # main's reports are published from here (site, PROGRESS.md case counts,
+      # scripts/fetch-reports.sh), never committed.
       - name: Upload difftest reports
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.green.outputs.any == 'true' && !cancelled()
         uses: actions/upload-artifact@v4
@@ -239,3 +277,91 @@ jobs:
       - name: sccache stats
         if: always() && steps.green.outputs.any == 'true'
         run: sccache --show-stats || true
+
+  # Mandatory on every pull_request and merge_group run, in parallel with the sweep.
+  difftest-perturb:
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    env:
+      SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select optional native execution
+        id: green
+        run: |
+          if grep -Eqs '^\s*status\s*=\s*"(green|partial)"' plan/units/*.toml; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "No current green units; nothing to perturb."
+          fi
+
+      - name: Upstream sources, sccache and the C++ reference
+        if: steps.green.outputs.any == 'true'
+        uses: ./.github/actions/cpp-reference
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.green.outputs.any == 'true'
+        with:
+          workspaces: ". -> bin"
+          key: difftest
+
+      - name: Difftest perturbation check
+        if: steps.green.outputs.any == 'true'
+        run: cargo run --profile difftest -p difftest --features cpp -- --green --perturb --jobs 0 --no-report
+
+      - name: sccache stats
+        if: always() && steps.green.outputs.any == 'true'
+        run: sccache --show-stats || true
+
+  # The exact-base ratchet. Needs both the validated base and the finished sweep: if either
+  # job fails or is skipped, this job is skipped and `difftest` fails.
+  difftest-compare:
+    needs: [difftest-baseline, difftest-sweep]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        if: needs.difftest-baseline.outputs.baseline == 'yes' && needs.difftest-sweep.outputs.any == 'true'
+        with:
+          workspaces: ". -> bin"
+          key: difftest-compare
+
+      - name: Download validated baseline
+        if: needs.difftest-baseline.outputs.baseline == 'yes'
+        uses: actions/download-artifact@v4
+        with:
+          name: difftest-validated-baseline
+          path: ${{ runner.temp }}/difftest-baseline
+
+      - name: Download sweep reports
+        if: needs.difftest-sweep.outputs.any == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: difftest-sweep-reports
+          path: ${{ runner.temp }}/difftest-sweep
+
+      # No C++ and no cases: the same ratchet as --baseline, over the finished reports.
+      - name: Compare sweep reports with the exact base
+        if: needs.difftest-baseline.outputs.baseline == 'yes' && needs.difftest-sweep.outputs.any == 'true'
+        run: >-
+          cargo run -p difftest --
+          --compare-reports "$RUNNER_TEMP/difftest-sweep"
+          --baseline "$RUNNER_TEMP/difftest-baseline/reports"
+
+  # The required check ("difftest"). Runs even when a part failed or was skipped, and
+  # succeeds only if every part succeeded.
+  difftest:
+    needs: [difftest-baseline, difftest-sweep, difftest-perturb, difftest-compare]
+    if: always()
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Require every difftest part
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "difftest-baseline difftest-sweep difftest-perturb difftest-compare: $RESULTS"
+          for r in $RESULTS; do
+            [ "$r" = success ] || { echo "a difftest part did not succeed"; exit 1; }
+          done
