@@ -76,6 +76,9 @@
 //!   is wired (`topology.edgeuse_p3`, whose own deferred callees still return it).
 //!   `SmShell::GetRegion` is the co-port
 //!   [`eu1::shell_region`].
+//! - **Collections.** Ordered membership sets deduplicate edges and vertices
+//!   while the result vector preserves first occurrence and filter evaluation
+//!   order, avoiding quadratic `AddUnique` scans on long loops (#431).
 //! - **Prepared queries.** The shared UV-corner walk can also borrow prepared topology
 //!   without mutation. It reports [`SolidError::Unported`] only if a trim curve needs
 //!   creating at the point where the mutable walk would create it.
@@ -85,7 +88,7 @@
 //!   `IsEmbedded`, `ContainsUVPoint`, `RebuildFromEdgeCurves`, `AssertValid`, `Draw`
 //!   and `Dump` are not part of this unit.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 
 use crate::curve::curve::Curve;
@@ -503,6 +506,7 @@ pub fn edges(
         return Ok(Vec::new());
     };
     let mut out: Vec<Option<EdgeId>> = Vec::new();
+    let mut seen = BTreeSet::new();
     for eu in ccw_walk(b, start)? {
         let e = b.edgeuse(eu)?.edge;
         let ok = match (attribute, e) {
@@ -510,7 +514,7 @@ pub fn edges(
             (Some(f), Some(e)) => f(EntityRef::Edge(e)),
             (Some(_), None) => return Err(null("GetEdges: FindAttribute on a null edge")),
         };
-        if ok && !out.contains(&e) {
+        if ok && seen.insert(e) {
             out.push(e);
         }
     }
@@ -611,9 +615,10 @@ pub fn vertices(
         return Ok(if test(v)? { vec![v] } else { Vec::new() });
     };
     let mut out: Vec<Option<VertexId>> = Vec::new();
+    let mut seen = BTreeSet::new();
     for eu in ccw_walk(b, start)? {
         let v = vertex_of(b.edgeuse(eu)?.vertexuse)?;
-        if test(v)? && !out.contains(&v) {
+        if test(v)? && seen.insert(v) {
             out.push(v);
         }
     }

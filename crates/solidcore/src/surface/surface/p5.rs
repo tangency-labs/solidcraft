@@ -1075,6 +1075,33 @@ impl Surface {
         domain: &Extent2d,
         opts: &DropPointOptions,
     ) -> Result<DropPoint<O>> {
+        self.drop_point_from(k, pt_to_drop, domain, opts, None, None)
+    }
+
+    /// `DropPoint` with lazy cache preparation on the surface's owning face.
+    /// The context is consulted only at the original global-solve call; fast
+    /// and local drops use the same implementation and operation order.
+    pub(crate) fn drop_point_with_context<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        pt_to_drop: Point3,
+        domain: &Extent2d,
+        opts: &DropPointOptions,
+        handle: Option<O>,
+        context: &mut dyn SurfaceSolveContext<O>,
+    ) -> Result<DropPoint<O>> {
+        self.drop_point_from(k, pt_to_drop, domain, opts, handle, Some(context))
+    }
+
+    fn drop_point_from<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        pt_to_drop: Point3,
+        domain: &Extent2d,
+        opts: &DropPointOptions,
+        handle: Option<O>,
+        context: Option<&mut dyn SurfaceSolveContext<O>>,
+    ) -> Result<DropPoint<O>> {
         let op = opts.operation;
         let guess = opts.guess_uv;
 
@@ -1140,16 +1167,32 @@ impl Surface {
 
         if !success {
             // Haven't found it yet. Call GlobalPointSolve.
-            solutions = self.global_point_solve::<O>(
-                k,
-                None,
-                domain,
-                op,
-                pt_to_drop,
-                dist_tol,
-                None,
-                SolutionRequested::All,
-            )?;
+            if let Some(context) = context {
+                self.global_point_solve_into_with_context(
+                    k,
+                    handle,
+                    None,
+                    context,
+                    domain,
+                    op,
+                    pt_to_drop,
+                    dist_tol,
+                    None,
+                    SolutionRequested::All,
+                    &mut solutions,
+                )?;
+            } else {
+                solutions = self.global_point_solve::<O>(
+                    k,
+                    None,
+                    domain,
+                    op,
+                    pt_to_drop,
+                    dist_tol,
+                    None,
+                    SolutionRequested::All,
+                )?;
+            }
             if !solutions.is_empty() {
                 success = true;
                 answer_in_array = true;

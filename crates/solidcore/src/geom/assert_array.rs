@@ -41,10 +41,14 @@
 //!   as upstream deletes it.
 //! - `SM_DEBUG_CODE` members (`m_file_name`, `m_line_num`, the debug drawing in the
 //!   constructor) are not ported; the reference build does not define it.
+//! - Report membership uses a call-owned ordered index over exactly the fields
+//!   compared by `operator==`; the report vector retains insertion order. This
+//!   avoids quadratic duplicate searches when validating a large invalid B-rep.
 
 pub mod labels;
 
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 
 use crate::error::{Result, SolidError};
 use crate::geom::vector2d::Point2;
@@ -326,11 +330,34 @@ impl PartialEq for AssertReport {
 
 impl Eq for AssertReport {}
 
+type ReportIdentity = (
+    i64,
+    u64,
+    u64,
+    AssertType,
+    bool,
+    Option<ObjectKey>,
+    Option<ObjectKey>,
+);
+
+fn report_identity(report: &AssertReport) -> ReportIdentity {
+    (
+        report.reporting_type,
+        report.list_index,
+        report.test_index,
+        report.assert_type,
+        report.ok,
+        report.owner,
+        report.other,
+    )
+}
+
 /// The reports of an `AssertValid` run (`SmAssertArray`), without duplicates when
 /// filled through [`AssertArray::add_unique_delete_duplicate`].
 #[derive(Debug, Clone, Default)]
 pub struct AssertArray {
     reports: Vec<AssertReport>,
+    identities: BTreeSet<ReportIdentity>,
     last_add: bool,
 }
 
@@ -369,8 +396,7 @@ impl AssertArray {
     /// `PartialEq for AssertReport`) is already in the array.
     #[must_use]
     pub fn contains(&self, report: &AssertReport) -> bool {
-        // for every report, return true on the first hit
-        self.reports.iter().any(|r| r == report)
+        self.identities.contains(&report_identity(report))
     }
 
     /// `SmAssertArray::AddUniqueDeleteDuplicate`: appends `report` unless an equal
@@ -378,12 +404,12 @@ impl AssertArray {
     /// added and records the same flag for [`AssertArray::last_add`].
     pub fn add_unique_delete_duplicate(&mut self, report: AssertReport) -> bool {
         self.last_add = false;
-        if self.contains(&report) {
-            false
-        } else {
+        if self.identities.insert(report_identity(&report)) {
             self.reports.push(report);
             self.last_add = true;
             true
+        } else {
+            false
         }
     }
 

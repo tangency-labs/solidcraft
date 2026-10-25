@@ -775,6 +775,58 @@ fn classify_curve_on_face_cached(
     Ok(classification.intervals().to_vec())
 }
 
+/// Classifies an explicit edge interval for the B-rep coincidence validator.
+/// The existing curve-classification core keeps the caller's interval and its
+/// post-call trim/gap updates, including updates made before a failed status.
+pub(crate) fn classify_interval_on_face(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    curve: &Curve,
+    interval: Extent1d,
+    tol: f64,
+) -> Result<Vec<PointClassType>> {
+    let objects = FaceClassifyObjects { brep: b, curve };
+    let init = ClassificationInit {
+        curve: Some(ClassHandle::Curve),
+        interval,
+        uv_curve: None,
+        src_zone_tol_3d: zone_tol3d(k, tol),
+        opt_data_size: 0,
+        is_curve_owned: false,
+        is_curve_current: true,
+        surface1: None,
+        surface2: None,
+        uv_curve2: None,
+        ti: None,
+    };
+    let mut classification = CurveClassification::with_curve(k, &init)?;
+    let mut cache = CurveOnClassifyCache::default();
+    let result = curve_on_classify_cached(
+        k,
+        b,
+        f,
+        &objects,
+        true,
+        &mut classification,
+        false,
+        false,
+        true,
+        &mut cache,
+    );
+    cache.apply_uv_trim_updates(b)?;
+    if let Err(error) = result {
+        if error.is_unported() {
+            return Err(error);
+        }
+    }
+    Ok(classification
+        .intervals()
+        .iter()
+        .map(|i| i.mid.point_class())
+        .collect())
+}
+
 /// `SmFace::CalculateUVDomainFromUVTrimCurves(rTrimUVDomain)` (unit `topology.face_p1`),
 /// on the caller's B-rep: the UV trim curves the call makes (a cache upstream fills
 /// through a `const` method) stay on it.

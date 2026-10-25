@@ -1,0 +1,1099 @@
+//! Pointer checks in native report order.
+//!
+//! Upstream: `source/SMLib/src/SmBrep.cpp` (`ValidatePointers`,
+//! `sm_CheckEdgeuseGeometry`), `source/SMLib/src/SmEdge.cpp` (`ValidateGeometry`),
+//! `source/SMLib/src/NL_CrvBasic.cpp` (`N_CrvIsNotReversed`).
+//!
+//! | Rust | Upstream |
+//! |------|----------|
+//! | [`validate_pointers`] | `SmBrep::ValidatePointers` |
+//! | `fix_reversed` | `N_CrvIsNotReversed(Fixit=TRUE)` |
+//!
+//! Deviations: no recursion; CCW walks are bounded at the native 100000 steps.
+//! Native const geometry repairs use mutable curve access. Warning-only checks
+//! retain their evaluations and repairs; diagnostic log strings are omitted.
+use super::{invalid, required, Object, Reports, ERROR, SUCCESS};
+use crate::error::{EntityRef, Result};
+use crate::geom::assert_array::AssertArray;
+use crate::kernel::Kernel;
+use crate::math::{Point2, Vec3, EFF_ZERO, UNDEF_DOUBLE};
+use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::topology::brep::p1;
+use crate::topology::edge;
+use crate::topology::edgeuse::{p1 as eu1, p3 as eu3};
+use crate::topology::face::p2 as face2;
+use crate::topology::shell::{ShellMembers, ShellType};
+use crate::topology::{
+    Brep, BrepId, EdgeId, EdgeuseId, EdgeuseOwner, FaceuseId, LoopuseId, LoopuseStart, VertexuseId,
+    VertexuseOwner,
+};
+use std::collections::{BTreeMap, BTreeSet};
+
+const MAX_WALK: usize = 100_000;
+
+#[derive(Clone, Copy)]
+struct Links {
+    next: EdgeuseId,
+    last: EdgeuseId,
+}
+struct Lists {
+    links: BTreeMap<EdgeuseId, Links>,
+    shell_members: BTreeSet<(crate::topology::ShellId, FaceuseId)>,
+    walks: BTreeMap<LoopuseId, Vec<EdgeuseId>>,
+}
+impl Lists {
+    fn new(b: &Brep) -> Self {
+        let mut links = BTreeMap::new();
+        for (_, e) in b.edges().iter() {
+            for (i, &eu) in e.edgeuses.iter().enumerate() {
+                if let (Some(&next), Some(&last)) = (
+                    e.edgeuses.get((i + 1) % e.edgeuses.len()),
+                    e.edgeuses
+                        .get((i + e.edgeuses.len() - 1) % e.edgeuses.len()),
+                ) {
+                    // Membership is only valid when GetEdge points back to this list.
+                    links.entry(eu).or_insert(Links { next, last });
+                }
+            }
+        }
+        let mut shell_members = BTreeSet::new();
+        for (s, sh) in b.shells().iter() {
+            if let ShellMembers::Faceuses(fus) = &sh.members {
+                for &fu in fus {
+                    shell_members.insert((s, fu));
+                }
+            }
+        }
+        Self {
+            links,
+            shell_members,
+            walks: BTreeMap::new(),
+        }
+    }
+    fn mate(&self, b: &Brep, eu: EdgeuseId, radial: bool) -> Result<Option<EdgeuseId>> {
+        let Some(links) = self.links.get(&eu) else {
+            return Ok(None);
+        };
+        let data = b.edgeuse(eu)?;
+        if matches!(data.owner, EdgeuseOwner::Shell(_)) {
+            return Ok(Some(links.next));
+        }
+        let e = b.edge(required(data.edge)?)?;
+        let primary = b
+            .edgeuse(required(e.edgeuses.first().copied())?)?
+            .orientation;
+        let next = (primary == data.orientation) != radial;
+        Ok(Some(if next { links.next } else { links.last }))
+    }
+    fn walk(&mut self, b: &Brep, lu: LoopuseId) -> Result<Vec<EdgeuseId>> {
+        if let Some(cached) = self.walks.get(&lu) {
+            return Ok(cached.clone());
+        }
+        let mut out = Vec::new();
+        if let LoopuseStart::Edgeuse(Some(start)) = b.loopuse(lu)?.start {
+            let mut current = start;
+            loop {
+                if out.len() >= MAX_WALK {
+                    return Err(invalid("loop walk exceeds 100000 edge uses"));
+                }
+                out.push(current);
+                current = required(b.edgeuse(current)?.ccw)?;
+                if current == start {
+                    break;
+                }
+            }
+        }
+        self.walks.insert(lu, out.clone());
+        Ok(out)
+    }
+}
+
+fn req_fu(b: &Brep, r: &mut Reports<'_>, fu: FaceuseId) -> Result<bool> {
+    let f = b.faceuse(fu)?;
+    let owner = EntityRef::Faceuse(fu);
+    for (i, ok) in [
+        (123, f.face.is_some()),
+        (124, f.mate.is_some()),
+        (125, f.shell.is_some()),
+        (126, !f.loopuses.is_empty()),
+    ] {
+        if !r.check(b, i, ok, owner)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+fn req_vu(b: &Brep, r: &mut Reports<'_>, vu: VertexuseId) -> Result<bool> {
+    let v = b.vertexuse(vu)?;
+    if !r.check(b, 144, v.vertex.is_some(), EntityRef::Vertexuse(vu))? {
+        return Ok(false);
+    }
+    let linked = matches!(
+        v.owner,
+        VertexuseOwner::Edgeuse(Some(_))
+            | VertexuseOwner::Loopuse(Some(_))
+            | VertexuseOwner::Shell(Some(_))
+    );
+    r.check(b, 145, linked, EntityRef::Vertexuse(vu))
+}
+fn req_eu(b: &Brep, r: &mut Reports<'_>, cache: &Lists, eu: EdgeuseId) -> Result<bool> {
+    let e = b.edgeuse(eu)?;
+    let linked = matches!(
+        e.owner,
+        EdgeuseOwner::Loopuse(Some(_)) | EdgeuseOwner::Shell(Some(_))
+    );
+    for (i, ok) in [
+        (135, e.edge.is_some()),
+        (136, e.vertexuse.is_some()),
+        (137, linked),
+    ] {
+        if !r.check(b, i, ok, EntityRef::Edgeuse(eu))? {
+            return Ok(false);
+        }
+    }
+    if matches!(e.owner, EdgeuseOwner::Loopuse(_)) {
+        for (i, ok) in [(138, e.ccw.is_some()), (139, e.cw.is_some())] {
+            if !r.check(b, i, ok, EntityRef::Edgeuse(eu))? {
+                return Ok(false);
+            }
+        }
+    }
+    for i in [140, 141] {
+        if !r.check(b, i, cache.links.contains_key(&eu), EntityRef::Edgeuse(eu))? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+fn req_lu(b: &Brep, r: &mut Reports<'_>, cache: &mut Lists, lu: LoopuseId) -> Result<bool> {
+    let l = b.loopuse(lu)?;
+    let start = matches!(
+        l.start,
+        LoopuseStart::Edgeuse(Some(_)) | LoopuseStart::Vertexuse(Some(_))
+    );
+    for (i, ok) in [
+        (128, l.loop_.is_some()),
+        (129, l.mate.is_some()),
+        (130, l.faceuse.is_some()),
+        (131, start),
+    ] {
+        if !r.check(b, i, ok, EntityRef::Loopuse(lu))? {
+            return Ok(false);
+        }
+    }
+    match l.start {
+        LoopuseStart::Edgeuse(Some(first)) => {
+            let mut current = first;
+            let mut visited = Vec::new();
+            loop {
+                if !req_eu(b, r, cache, current)? {
+                    return Ok(false);
+                }
+                visited.push(current);
+                current = required(b.edgeuse(current)?.ccw)?;
+                if current == first || visited.len() >= MAX_WALK {
+                    break;
+                }
+            }
+            if !r.check(b, 146, current == first, EntityRef::Loopuse(lu))? {
+                return Ok(false);
+            }
+            cache.walks.insert(lu, visited);
+        }
+        LoopuseStart::Vertexuse(Some(vu)) if !req_vu(b, r, vu)? => {
+            return Ok(false);
+        }
+        _ => {}
+    }
+    Ok(true)
+}
+
+fn preflight(b: &Brep, r: &mut Reports<'_>, cache: &mut Lists) -> Result<bool> {
+    let Some(infinite) = b.infinite_region() else {
+        return r.check(b, 113, false, EntityRef::Brep(BrepId::from_index(0)));
+    };
+    if !r.check(
+        b,
+        117,
+        b.region(infinite)?.in_brep,
+        EntityRef::Region(infinite),
+    )? {
+        return Ok(false);
+    }
+    for region in p1::regions(b, None)? {
+        let data = b.region(region)?;
+        if region != infinite && !r.check(b, 117, data.in_brep, EntityRef::Region(region))? {
+            return Ok(false);
+        }
+        for &s in &data.shells {
+            let sh = b.shell(s)?;
+            if !r.check(b, 118, sh.region.is_some(), EntityRef::Shell(s))? {
+                return Ok(false);
+            }
+            if sh.shell_type != ShellType::Unknown
+                && !r.check(
+                    b,
+                    119,
+                    match &sh.members {
+                        ShellMembers::Empty => false,
+                        ShellMembers::Faceuses(fus) => !fus.is_empty(),
+                        _ => true,
+                    },
+                    EntityRef::Shell(s),
+                )?
+            {
+                return Ok(false);
+            }
+            match &sh.members {
+                ShellMembers::Faceuses(fus) if sh.shell_type == ShellType::Faceuse => {
+                    for &fu in fus {
+                        if !req_fu(b, r, fu)? {
+                            return Ok(false);
+                        }
+                    }
+                }
+                ShellMembers::Edgeuse(eu) if sh.shell_type == ShellType::Wire => {
+                    let e = b.edge(required(b.edgeuse(*eu)?.edge)?)?;
+                    for &eu in &e.edgeuses {
+                        if !req_eu(b, r, cache, eu)? {
+                            return Ok(false);
+                        }
+                    }
+                }
+                ShellMembers::Vertexuse(vu)
+                    if sh.shell_type == ShellType::Vertex && !req_vu(b, r, *vu)? =>
+                {
+                    return Ok(false);
+                }
+                _ => {}
+            }
+        }
+    }
+    for &f in b.face_list() {
+        let face = b.face(f)?;
+        // Arena list ownership is the native owner pointer.
+        for (i, ok) in [
+            (120, true),
+            (121, face.surface.is_some()),
+            (122, face.faceuse.is_some()),
+        ] {
+            if !r.check(b, i, ok, EntityRef::Face(f))? {
+                return Ok(false);
+            }
+        }
+        let fu = required(face.faceuse)?;
+        if !req_fu(b, r, fu)? {
+            return Ok(false);
+        }
+        let mate = required(b.faceuse(fu)?.mate)?;
+        if !req_fu(b, r, mate)? {
+            return Ok(false);
+        }
+        for fu in [fu, mate] {
+            for &lu in &b.faceuse(fu)?.loopuses {
+                if !req_lu(b, r, cache, lu)? {
+                    return Ok(false);
+                }
+                if let Some(l) = b.loopuse(lu)?.loop_ {
+                    if !r.check(b, 127, b.loop_(l)?.loopuse.is_some(), EntityRef::Loop(l))? {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+    }
+    for &e in b.edge_list() {
+        let edge = b.edge(e)?;
+        for (i, ok) in [
+            (132, true),
+            (133, edge.curve.is_some()),
+            (134, !edge.edgeuses.is_empty()),
+        ] {
+            if !r.check(b, i, ok, EntityRef::Edge(e))? {
+                return Ok(false);
+            }
+        }
+        for &eu in &edge.edgeuses {
+            if !req_eu(b, r, cache, eu)? {
+                return Ok(false);
+            }
+        }
+    }
+    for &v in b.vertex_list() {
+        let vertex = b.vertex(v)?;
+        for (i, ok) in [(142, true), (143, !vertex.vertexuses.is_empty())] {
+            if !r.check(b, i, ok, EntityRef::Vertex(v))? {
+                return Ok(false);
+            }
+        }
+        for &vu in &vertex.vertexuses {
+            if !req_vu(b, r, vu)? {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
+/// Runs `SmBrep::ValidatePointers`, appending its failed reports in native order.
+/// `walk` skips `CheckFace`'s loop checks, as `SM_WALK` does. The returned integer
+/// preserves native `SM_SUCCESS` (1000), required-pointer failure (1001), and the
+/// early boolean return (0). Ordinary failed checks are reports, not an error status.
+/// `keys` supplies the caller's topology identities used by curve-owner checks.
+/// `level` is the native `SM_LEVEL_0` through `SM_LEVEL_GIVEN` (0 through 4).
+pub fn validate_pointers(
+    k: &Kernel,
+    b: &mut Brep,
+    reports: Option<&mut AssertArray>,
+    level: u8,
+    walk: bool,
+    keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
+) -> Result<i32> {
+    if level > 4 {
+        return Err(invalid("invalid assert test level"));
+    }
+    let mut r = Reports {
+        array: reports,
+        level,
+    };
+    let mut cache = Lists::new(b);
+    if !preflight(b, &mut r, &mut cache)? {
+        return Ok(ERROR);
+    }
+    r.check(
+        b,
+        0,
+        b.tolerance() > EFF_ZERO,
+        EntityRef::Brep(BrepId::from_index(0)),
+    )?;
+    let mut live = BTreeSet::new();
+    for region in p1::regions(b, None)? {
+        for &s in &b.region(region)?.shells {
+            live.insert((16013, s.index()));
+            if let ShellMembers::Faceuses(fus) = &b.shell(s)?.members {
+                for &fu in fus {
+                    for &lu in &b.faceuse(fu)?.loopuses {
+                        live.insert((16004, lu.index()));
+                    }
+                }
+            }
+        }
+    }
+    for &e in b.edge_list() {
+        for &eu in &b.edge(e)?.edgeuses {
+            let ok = match b.edgeuse(eu)?.owner {
+                EdgeuseOwner::Shell(Some(s)) => live.contains(&(16013, s.index())),
+                EdgeuseOwner::Loopuse(Some(lu)) => {
+                    live.contains(&(16004, lu.index())) && eu1::shell(b, eu)?.is_some()
+                }
+                _ => false,
+            };
+            if !ok {
+                r.check(b, 98, false, EntityRef::Edgeuse(eu))?;
+                return Ok(ERROR);
+            }
+        }
+    }
+    for region in p1::regions(b, None)? {
+        for &s in &b.region(region)?.shells {
+            let sh = b.shell(s)?;
+            if sh.shell_type == ShellType::Wire {
+                if let Some(e) = sh.wire_edge(b)? {
+                    r.check(b, 2, !b.edge(e)?.edgeuses.is_empty(), EntityRef::Shell(s))?;
+                } else {
+                    r.check(b, 1, true, EntityRef::Shell(s))?;
+                }
+            }
+        }
+    }
+    let faces = p1::faces(b, None)?;
+    for &f in &faces {
+        let tol = b.face(f)?.tolerance;
+        let checked =
+            crate::topology::trimming_tools::check_face(k, b, f, tol, r.array.as_deref_mut(), walk);
+        if let Err(e) = checked {
+            if e.is_unported() {
+                return Err(e);
+            }
+        }
+        let face = b.face(f)?;
+        for (i, ok) in [
+            (4, true),
+            (5, face.tolerance < b.tolerance() * 1000.0),
+            (6, face.tolerance > b.tolerance() * 0.99),
+            (7, face.surface.is_some()),
+        ] {
+            r.check(b, i, ok, EntityRef::Face(f))?;
+        }
+        let surface = required(face.surface.as_ref())?;
+        r.check(b, 8, true, Object::Surface(f))?;
+        r.check(b, 9, surface.owner().is_some(), Object::Surface(f))?;
+        if !face
+            .uv_domain
+            .is_contained_by(&surface.natural_uv_domain(), EFF_ZERO)
+        {
+            r.check(b, 11, false, Object::Surface(f))?;
+        }
+        let Some(fu) = face.faceuse else {
+            r.check(b, 12, false, EntityRef::Face(f))?;
+            return Ok(0);
+        };
+        r.check(b, 13, true, EntityRef::Faceuse(fu))?;
+        r.check(
+            b,
+            14,
+            b.faceuse(fu)?.orientation == OrientType::Same,
+            EntityRef::Faceuse(fu),
+        )?;
+        let Some(fum) = b.faceuse(fu)?.mate else {
+            r.check(b, 15, false, EntityRef::Faceuse(fu))?;
+            return Ok(0);
+        };
+        for (i, ok, owner) in [
+            (16, true, EntityRef::Faceuse(fum)),
+            (
+                17,
+                b.faceuse(fu)?.orientation != b.faceuse(fum)?.orientation,
+                EntityRef::Faceuse(fu),
+            ),
+            (18, true, EntityRef::Face(f)),
+            (19, b.faceuse(fu)?.face == Some(f), EntityRef::Faceuse(fu)),
+            (20, b.faceuse(fum)?.face == Some(f), EntityRef::Faceuse(fum)),
+            (21, b.faceuse(fu)?.mate == Some(fum), EntityRef::Faceuse(fu)),
+            (
+                22,
+                b.faceuse(fum)?.mate == Some(fu),
+                EntityRef::Faceuse(fum),
+            ),
+        ] {
+            r.check(b, i, ok, owner)?;
+        }
+        let Some(s1) = b.faceuse(fu)?.shell else {
+            r.check(b, 23, false, EntityRef::Faceuse(fu))?;
+            return Ok(0);
+        };
+        let Some(s2) = b.faceuse(fum)?.shell else {
+            r.check(b, 24, false, EntityRef::Faceuse(fum))?;
+            return Ok(0);
+        };
+        for (i, ok, s) in [
+            (25, true, s1),
+            (26, true, s2),
+            (27, b.shell(s1)?.shell_type == ShellType::Faceuse, s1),
+            (28, b.shell(s2)?.shell_type == ShellType::Faceuse, s2),
+        ] {
+            r.check(b, i, ok, EntityRef::Shell(s))?;
+        }
+        let loops = face2::loops(b, f, false, None)?;
+        for (j, &l) in loops.iter().enumerate() {
+            r.check(b, 29, b.loop_(l)?.face == f, EntityRef::Loop(l))?;
+            let Some(lu) = b.loop_(l)?.loopuse else {
+                r.check(b, 30, false, EntityRef::Loop(l))?;
+                return Ok(0);
+            };
+            let Some(lum) = b.loopuse(lu)?.mate else {
+                r.check(b, 31, false, EntityRef::Loop(l))?;
+                return Ok(0);
+            };
+            for (i, owner) in [
+                (32, EntityRef::Loop(l)),
+                (33, EntityRef::Loopuse(lu)),
+                (34, EntityRef::Loopuse(lum)),
+            ] {
+                r.check(b, i, true, owner)?;
+            }
+            if j == 0 {
+                r.check(
+                    b,
+                    35,
+                    b.loopuse(lu)?.orientation == OrientType::Same,
+                    EntityRef::Loopuse(lu),
+                )?;
+                r.check(
+                    b,
+                    36,
+                    b.loopuse(lum)?.orientation == OrientType::Same,
+                    EntityRef::Loopuse(lum),
+                )?;
+                r.check(
+                    b,
+                    37,
+                    !matches!(b.loopuse(lu)?.start, LoopuseStart::Vertexuse(_)),
+                    EntityRef::Loopuse(lu),
+                )?;
+                r.check(
+                    b,
+                    38,
+                    !matches!(b.loopuse(lum)?.start, LoopuseStart::Vertexuse(_)),
+                    EntityRef::Loopuse(lum),
+                )?;
+            } else {
+                r.check(
+                    b,
+                    39,
+                    b.loopuse(lu)?.orientation == OrientType::Opposite,
+                    EntityRef::Loopuse(lu),
+                )?;
+                r.check(
+                    b,
+                    40,
+                    b.loopuse(lum)?.orientation == OrientType::Opposite,
+                    EntityRef::Loopuse(lum),
+                )?;
+            }
+            for (i, ok, owner) in [
+                (41, b.loopuse(lu)?.loop_ == Some(l), lu),
+                (42, b.loopuse(lum)?.loop_ == Some(l), lum),
+                (43, b.loopuse(lu)?.mate == Some(lum), lu),
+                (44, b.loopuse(lum)?.mate == Some(lu), lum),
+            ] {
+                r.check(b, i, ok, EntityRef::Loopuse(owner))?;
+            }
+            if matches!(b.loopuse(lu)?.start, LoopuseStart::Vertexuse(_)) {
+                continue;
+            }
+            for (this, offset, missing) in [(lu, 46, 45), (lum, 52, 51)] {
+                if matches!(b.loopuse(this)?.start, LoopuseStart::Vertexuse(_)) {
+                    break;
+                }
+                if !matches!(b.loopuse(this)?.start, LoopuseStart::Edgeuse(Some(_))) {
+                    r.check(b, missing, false, EntityRef::Loopuse(this))?;
+                    return Ok(0);
+                }
+                for eu in cache.walk(b, this)? {
+                    r.check(b, offset, true, EntityRef::Edgeuse(eu))?;
+                    let result = check_edgeuse_geometry(k, b, eu);
+                    let good = match result {
+                        Ok(()) => true,
+                        Err(e) if e.is_unported() => return Err(e),
+                        Err(_) => false,
+                    };
+                    r.check(b, offset + 1, good, EntityRef::Edgeuse(eu))?;
+                    r.check(
+                        b,
+                        offset + 2,
+                        matches!(b.edgeuse(eu)?.owner, EdgeuseOwner::Loopuse(_)),
+                        EntityRef::Edgeuse(eu),
+                    )?;
+                    r.check(
+                        b,
+                        offset + 3,
+                        b.edgeuse(eu)?.owner == EdgeuseOwner::Loopuse(Some(this)),
+                        EntityRef::Edgeuse(eu),
+                    )?;
+                    let next = required(b.edgeuse(eu)?.ccw)?;
+                    r.check(
+                        b,
+                        offset + 4,
+                        b.edgeuse(next)?.cw == Some(eu),
+                        EntityRef::Edgeuse(next),
+                    )?;
+                }
+            }
+            let uses = cache.walk(b, lu)?;
+            let mates = cache.walk(b, lum)?;
+            let mut mated = uses.len() == mates.len();
+            if mated {
+                for eu in uses {
+                    match cache.mate(b, eu, false)? {
+                        Some(m) if b.edgeuse(m)?.owner == EdgeuseOwner::Loopuse(Some(lum)) => {}
+                        _ => {
+                            mated = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            r.check(b, 111, mated, EntityRef::Loopuse(lu))?;
+        }
+    }
+    check_edges(k, b, &mut r, &cache, keys)?;
+    check_vertices(b, &mut r)?;
+    for region in p1::regions(b, None)? {
+        for &s in &b.region(region)?.shells {
+            r.check(
+                b,
+                94,
+                b.shell(s)?.region == Some(region),
+                EntityRef::Shell(s),
+            )?;
+            if b.shell(s)?.shell_type == ShellType::Faceuse {
+                for fu in b.shell(s)?.get_faceuses()? {
+                    r.check(
+                        b,
+                        95,
+                        b.faceuse(fu)?.shell == Some(s),
+                        EntityRef::Faceuse(fu),
+                    )?;
+                }
+            }
+        }
+    }
+    for &e in b.edge_list() {
+        let uses = &b.edge(e)?.edgeuses;
+        for j in (1..uses.len()).step_by(2) {
+            let eu0 = *uses.get(j - 1).ok_or_else(|| invalid("edge list"))?;
+            let eu1 = *uses.get(j).ok_or_else(|| invalid("edge list"))?;
+            let next = *uses
+                .get((j + 1) % uses.len())
+                .ok_or_else(|| invalid("edge list"))?;
+            r.check(
+                b,
+                97,
+                cache.mate(b, eu1, true)? == Some(next),
+                EntityRef::Edgeuse(eu1),
+            )?;
+            let s1 = required(eu1::shell(b, eu1)?)?;
+            let sn = required(eu1::shell(b, next)?)?;
+            if b.shell(s1)?.region != b.shell(sn)?.region {
+                r.check(b, 98, false, EntityRef::Edgeuse(eu1))?;
+            }
+            r.check(
+                b,
+                99,
+                b.edgeuse(eu0)?.orientation != b.edgeuse(eu1)?.orientation,
+                EntityRef::Edgeuse(eu0),
+            )?;
+            r.check(
+                b,
+                100,
+                b.edgeuse(eu0)?.orientation
+                    == b.edgeuse(required(uses.first().copied())?)?.orientation,
+                EntityRef::Edgeuse(eu0),
+            )?;
+            r.check(
+                b,
+                101,
+                b.edgeuse(eu1)?.orientation
+                    == b.edgeuse(required(uses.get(1).copied())?)?.orientation,
+                EntityRef::Edgeuse(eu1),
+            )?;
+        }
+    }
+    for f in faces {
+        let fu = required(b.face(f)?.faceuse)?;
+        let fm = required(b.faceuse(fu)?.mate)?;
+        for (this, outer, inner, missing) in [(fu, 102, 103, 109), (fm, 104, 105, 110)] {
+            let list = &b.faceuse(this)?.loopuses;
+            let Some(&first) = list.first() else {
+                r.check(b, missing, false, EntityRef::Faceuse(this))?;
+                return Ok(0);
+            };
+            r.check(
+                b,
+                outer,
+                b.loopuse(first)?.orientation == OrientType::Same,
+                EntityRef::Loopuse(first),
+            )?;
+            for &lu in list.iter().skip(1) {
+                r.check(
+                    b,
+                    inner,
+                    b.loopuse(lu)?.orientation == OrientType::Opposite,
+                    EntityRef::Loopuse(lu),
+                )?;
+            }
+        }
+        for l in face2::loops(b, f, false, None)? {
+            let lu = required(b.loop_(l)?.loopuse)?;
+            let lm = required(b.loopuse(lu)?.mate)?;
+            r.check(
+                b,
+                106,
+                b.loopuse(lu)?.faceuse == Some(fu),
+                EntityRef::Loopuse(lu),
+            )?;
+            r.check(
+                b,
+                106,
+                b.loopuse(lm)?.faceuse == Some(fm),
+                EntityRef::Loopuse(lm),
+            )?;
+        }
+        for (this, index) in [(fu, 107), (fm, 108)] {
+            let ok = b
+                .faceuse(this)?
+                .shell
+                .is_some_and(|s| cache.shell_members.contains(&(s, this)));
+            r.check(b, index, ok, EntityRef::Faceuse(this))?;
+        }
+    }
+    Ok(SUCCESS)
+}
+
+fn check_edges(
+    k: &Kernel,
+    b: &mut Brep,
+    r: &mut Reports<'_>,
+    cache: &Lists,
+    keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
+) -> Result<()> {
+    for e in p1::edges(b, None)? {
+        r.check(b, 57, true, EntityRef::Edge(e))?;
+        let primary = required(b.edge(e)?.edgeuses.first().copied())?;
+        let orientation = b.edgeuse(primary)?.orientation;
+        let v1 = required(edge::vertex(b, e)?)?;
+        let v2 = required(edge::other_vertex(b, e, Some(v1))?)?;
+        let start = edge::start_vertex(b, e)?;
+        let ok = (orientation == OrientType::Same && start == Some(v1))
+            || (orientation == OrientType::Opposite && start == Some(v2));
+        if !ok {
+            r.check(b, 58, false, EntityRef::Edge(e))?;
+        }
+        let tol = b.edge(e)?.tolerance;
+        r.value(
+            b,
+            59,
+            tol < b.tolerance() * 1000.0,
+            EntityRef::Edge(e),
+            b.tolerance() * 1000.0,
+            tol,
+        )?;
+        r.value(
+            b,
+            60,
+            tol > b.tolerance() * 0.99,
+            EntityRef::Edge(e),
+            b.tolerance() * 0.99,
+            tol,
+        )?;
+        let good = match check_edge_geometry(k, b, e, cache, keys) {
+            Ok(()) => true,
+            Err(err) if err.is_unported() => return Err(err),
+            Err(_) => false,
+        };
+        r.check(b, 61, good, EntityRef::Edge(e))?;
+        let uses = b.edge(e)?.edgeuses.clone();
+        r.check(b, 62, uses.len() % 2 == 0, EntityRef::Edge(e))?;
+        let mut last = b.edgeuse(required(uses.last().copied())?)?.orientation;
+        for eu in uses {
+            let data = b.edgeuse(eu)?;
+            r.check(b, 63, data.orientation != last, EntityRef::Edgeuse(eu))?;
+            last = data.orientation;
+            r.check(b, 64, data.edge == Some(e), EntityRef::Edgeuse(eu))?;
+            if let EdgeuseOwner::Shell(s) = data.owner {
+                let s = required(s)?;
+                r.check(
+                    b,
+                    65,
+                    b.shell(s)?.shell_type != ShellType::Vertex,
+                    EntityRef::Shell(s),
+                )?;
+            } else {
+                let ccw = required(data.ccw)?;
+                r.check(
+                    b,
+                    67,
+                    b.edgeuse(ccw)?.cw == Some(eu),
+                    EntityRef::Edgeuse(eu),
+                )?;
+                let cw = required(data.cw)?;
+                r.check(
+                    b,
+                    69,
+                    b.edgeuse(cw)?.ccw == Some(eu),
+                    EntityRef::Edgeuse(eu),
+                )?;
+                if let Some(trim) = eu1::uv_trim_curve(b, eu)?.0 {
+                    let f = required(eu1::face(b, eu)?)?;
+                    let domain = b.face(f)?.uv_domain;
+                    let ivl = b.edge(e)?.interval;
+                    let mut point = Vec3::UNDEF;
+                    for (index, t) in [
+                        (70, ivl.min()),
+                        (71, ivl.max()),
+                        (72, (ivl.min() + ivl.max()) / 2.0),
+                    ] {
+                        match trim.evaluate_point(k, t) {
+                            Ok(p) => point = p,
+                            Err(err) if err.is_unported() => return Err(err),
+                            Err(_) => {}
+                        }
+                        r.value(
+                            b,
+                            index,
+                            domain.contains_point(Point2::new(point.x, point.y), 0.0001),
+                            Object::Trim(eu),
+                            0.0001,
+                            UNDEF_DOUBLE,
+                        )?;
+                    }
+                }
+            }
+            let vu = required(b.edgeuse(eu)?.vertexuse)?;
+            r.check(
+                b,
+                74,
+                matches!(b.vertexuse(vu)?.owner, VertexuseOwner::Edgeuse(_)),
+                EntityRef::Vertexuse(vu),
+            )?;
+            r.check(
+                b,
+                75,
+                b.vertexuse(vu)?.owner == VertexuseOwner::Edgeuse(Some(eu)),
+                EntityRef::Edgeuse(eu),
+            )?;
+            let radial = cache.mate(b, eu, true)?;
+            let radial_back = match radial {
+                Some(x) => cache.mate(b, x, true)?,
+                None => None,
+            };
+            r.check(b, 76, radial_back == Some(eu), EntityRef::Edgeuse(eu))?;
+            let mate = cache.mate(b, eu, false)?;
+            let mate_back = match mate {
+                Some(x) => cache.mate(b, x, false)?,
+                None => None,
+            };
+            r.check(b, 77, mate_back == Some(eu), EntityRef::Edgeuse(eu))?;
+            if !edge::is_wire(b, e)? {
+                let m = required(mate)?;
+                let lu = required(eu1::loopuse(b, eu)?)?;
+                let lm = required(eu1::loopuse(b, m)?)?;
+                r.check(
+                    b,
+                    78,
+                    b.loopuse(lu)?.loop_ == b.loopuse(lm)?.loop_,
+                    EntityRef::Loopuse(lu),
+                )?;
+                let fu = required(b.loopuse(lu)?.faceuse)?;
+                let fm = required(b.loopuse(lm)?.faceuse)?;
+                r.check(
+                    b,
+                    81,
+                    b.faceuse(fu)?.face == b.faceuse(fm)?.face,
+                    EntityRef::Faceuse(fu),
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_vertices(b: &Brep, r: &mut Reports<'_>) -> Result<()> {
+    for &v in b.vertex_list() {
+        let data = b.vertex(v)?;
+        r.value(
+            b,
+            82,
+            data.tolerance < b.tolerance() * 1000.0,
+            EntityRef::Vertex(v),
+            b.tolerance() * 1000.0,
+            data.tolerance,
+        )?;
+        r.value(
+            b,
+            83,
+            data.tolerance > b.tolerance() * 0.99,
+            EntityRef::Vertex(v),
+            b.tolerance() * 0.99,
+            data.tolerance,
+        )?;
+        for &vu in &data.vertexuses {
+            let data = b.vertexuse(vu)?;
+            r.check(b, 84, data.vertex == Some(v), EntityRef::Vertexuse(vu))?;
+            match data.owner {
+                VertexuseOwner::Shell(s) => {
+                    let s = required(s)?;
+                    r.check(
+                        b,
+                        86,
+                        b.shell(s)?.shell_type == ShellType::Vertex,
+                        EntityRef::Shell(s),
+                    )?;
+                    r.check(
+                        b,
+                        87,
+                        b.shell(s)?.members == ShellMembers::Vertexuse(vu),
+                        EntityRef::Shell(s),
+                    )?;
+                }
+                VertexuseOwner::Loopuse(lu) => {
+                    let lu = required(lu)?;
+                    r.check(
+                        b,
+                        89,
+                        matches!(b.loopuse(lu)?.start, LoopuseStart::Vertexuse(_)),
+                        EntityRef::Loopuse(lu),
+                    )?;
+                    r.check(
+                        b,
+                        90,
+                        b.loopuse(lu)?.start == LoopuseStart::Vertexuse(Some(vu)),
+                        EntityRef::Loopuse(lu),
+                    )?;
+                }
+                VertexuseOwner::Edgeuse(eu) => {
+                    let eu = required(eu)?;
+                    r.check(
+                        b,
+                        92,
+                        b.edgeuse(eu)?.vertexuse == Some(vu),
+                        EntityRef::Edgeuse(eu),
+                    )?;
+                    r.check(b, 93, b.edgeuse(eu)?.edge.is_some(), EntityRef::Edgeuse(eu))?;
+                }
+                VertexuseOwner::Unknown => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_edgeuse_geometry(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<()> {
+    if eu1::uv_trim_curve(b, eu)?.0.is_none() {
+        return Ok(());
+    }
+    let lu = required(eu1::loopuse(b, eu)?)?;
+    let fu = required(b.loopuse(lu)?.faceuse)?;
+    let f = required(b.faceuse(fu)?.face)?;
+    let vu = required(b.edgeuse(eu)?.vertexuse)?;
+    let v = required(b.vertexuse(vu)?.vertex)?;
+    let cw = required(b.edgeuse(eu)?.cw)?;
+    let uv = eu3::normalized_evaluate(k, b, eu, 0.0, true, false, true)?.point;
+    // These evaluations can create UV curves or fail even though the following
+    // distance tests only issue warnings in the release reference.
+    eu3::normalized_evaluate(k, b, eu, 0.0, false, false, true)?;
+    eu3::normalized_evaluate(k, b, cw, 1.0, true, false, true)?;
+    eu3::normalized_evaluate(k, b, cw, 1.0, false, false, true)?;
+    let point =
+        required(b.face(f)?.surface.as_ref())?.evaluate_point(k, Point2::new(uv.x, uv.y))?;
+    let _distance = point.distance(b.vertex(v)?.point);
+    Ok(())
+}
+
+fn fix_reversed(k: &Kernel, c: &mut crate::curve::curve::Curve) -> Result<()> {
+    use crate::curve::curve::CurveKind;
+    let owner = c.owner();
+    let base = match c.kind_mut() {
+        CurveKind::BSpline(base) => base,
+        CurveKind::Line(line) => {
+            if line.base().gw_nurb().is_none() {
+                line.make_nurb()?;
+            }
+            line.base_mut()
+        }
+        CurveKind::Ellipse(ellipse) => {
+            if ellipse.base().gw_nurb().is_none() {
+                ellipse.make_nurb_owned(k, owner)?;
+            }
+            ellipse.base_mut()
+        }
+        CurveKind::Hyperbola(h) => {
+            if h.base().gw_nurb().is_none() {
+                h.make_nurb(owner)?;
+            }
+            h.base_mut()
+        }
+        CurveKind::Parabola(p) => {
+            if p.base().gw_nurb().is_none() {
+                p.make_nurb(owner)?;
+            }
+            p.base_mut()
+        }
+        _ => return Ok(()),
+    };
+    let points = base.get_or_create_gw_nurb()?.cpts_mut();
+    let n = points.len();
+    if n < 5 {
+        return Ok(());
+    }
+    for (a, m, z) in [(0, 1, 2), (n - 1, n - 2, n - 3)] {
+        let p0 = points
+            .get(a)
+            .copied()
+            .ok_or_else(|| invalid("control point"))?
+            .to_euclid();
+        let p1 = points
+            .get(m)
+            .copied()
+            .ok_or_else(|| invalid("control point"))?
+            .to_euclid();
+        let p2 = points
+            .get(z)
+            .copied()
+            .ok_or_else(|| invalid("control point"))?
+            .to_euclid();
+        let d1 = p1 - p0;
+        let d2 = p2 - p1;
+        let (d1, _) = crate::nurbs::geom::normalize(d1).unwrap_or((Vec3::new(0.0, 0.0, 0.0), 0.0));
+        let (d2, mag) =
+            crate::nurbs::geom::normalize(d2).unwrap_or((Vec3::new(0.0, 0.0, 0.0), 0.0));
+        if d1.dot(d2) < -0.95 && mag > crate::nurbs::math::MODEL_TOL {
+            let p = points.get_mut(m).ok_or_else(|| invalid("control point"))?;
+            p.x = (p0.x + p2.x) / 2.0;
+            p.y = (p0.y + p2.y) / 2.0;
+            if p.z != crate::nurbs::math::NOZ {
+                p.z = (p0.z + p2.z) / 2.0;
+            }
+            if p.w != crate::nurbs::math::NOW {
+                p.w = 1.0;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_edge_geometry(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    cache: &Lists,
+    keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
+) -> Result<()> {
+    let primary = required(b.edge(e)?.edgeuses.first().copied())?;
+    let eu = if b.edgeuse(primary)?.orientation == OrientType::Same {
+        primary
+    } else {
+        required(cache.mate(b, primary, false)?)?
+    };
+    let vu = required(b.edgeuse(eu)?.vertexuse)?;
+    let start = required(b.vertexuse(vu)?.vertex)?;
+    let end = required(edge::other_vertex(b, e, Some(start))?)?;
+    fix_reversed(k, required(b.edge_mut(e)?.curve.as_mut())?)?;
+    let curve = required(b.edge(e)?.curve.as_ref())?;
+    // The owner naming scheme belongs to the caller; the type and edge-owner
+    // identity resolved by that caller are kept by the curve itself.
+    if curve.owner() != Some(keys(EntityRef::Edge(e))) {
+        return Err(crate::SolidError::sm_err(super::OP));
+    }
+    let ivl = b.edge(e)?.interval;
+    let p0 = curve.evaluate_point(k, ivl.min())?;
+    let p1 = curve.evaluate_point(k, ivl.max())?;
+    for (point, v) in [(p0, start), (p1, end)] {
+        if point.distance(b.vertex(v)?.point) > b.vertex(v)?.tolerance + b.edge(e)?.tolerance {
+            return Err(crate::SolidError::sm_err(super::OP));
+        }
+    }
+    // Interval and UV-distance mismatches only log warnings; they do not change
+    // this function's status. Retain their actual evaluations and reversal edits.
+    for eu in b.edge(e)?.edgeuses.clone() {
+        if let Some(trim) = b.edgeuse(eu)?.uv_trim_curve.as_ref() {
+            let f = required(eu1::face(b, eu)?)?;
+            let s = required(b.face(f)?.surface.as_ref())?;
+            let domain = trim.natural_interval();
+            let on_surface = crate::curve::crv_on_surf::CrvOnSurf::new(
+                k,
+                trim.clone_for_evaluation()?,
+                s.clone_for_evaluation()?,
+                None,
+                0,
+            )?;
+            let on_surface = crate::curve::curve::Curve::from(on_surface);
+            if let Err(err) = required(b.edge(e)?.curve.as_ref())?.curve_max_distance_between(
+                k,
+                &ivl,
+                &on_surface,
+                domain.min(),
+                domain.max(),
+                51,
+                None,
+            ) {
+                if err.is_unported() {
+                    return Err(err);
+                }
+            }
+            fix_reversed(k, required(b.edgeuse_mut(eu)?.uv_trim_curve.as_mut())?)?;
+        }
+    }
+    Ok(())
+}
