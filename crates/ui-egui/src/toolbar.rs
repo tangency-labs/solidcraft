@@ -567,6 +567,7 @@ impl FileAction {
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
+            Self::Command("cloud.save") => app.services.cloud_host.is_some() && !app.session.cloud_save_pending(),
             _ => true,
         };
         !app.file_picker_busy() && !app.file_load.busy() && !behind_report && (!needs_design || design_shown(app)) && available
@@ -685,6 +686,12 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
                 if item_if(ui, &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown) {
                     FileAction::SaveAs.run(app);
+                    close = true;
+                }
+                if app.services.cloud_host.is_some()
+                    && item_if(ui, app.tr("cmd.cloud.save"), "", "save", FileAction::Command("cloud.save").enabled(app))
+                {
+                    FileAction::Command("cloud.save").run(app);
                     close = true;
                 }
                 if item(ui, "Save As JSON…", "", "save") {

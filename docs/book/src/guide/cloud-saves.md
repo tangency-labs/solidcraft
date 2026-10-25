@@ -40,6 +40,16 @@ trusted browser profile and device. Desktop reuses the same token for Git over H
 
 ## Save and synchronize
 
+### Save a local design to cloud
+
+Open your local design, then choose **File → Save to Cloud Project**. The same
+action is available in Start's navigation. Choose the repository, project and
+design name, then save. SolidCraft leaves the original local file unchanged and
+uses the cloud destination for subsequent saves. Use **Save As** to save a native
+file again.
+
+### Save in a cloud project
+
 1. On **Start → Cloud Saves**, choose **Save to Cloud Project**. For a new design,
    normal **Save** opens the same picker when a default cloud repository is connected.
 2. Choose a repository, enter a project folder (or choose an existing one), and name
