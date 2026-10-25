@@ -1432,6 +1432,36 @@ impl<O: ClassObject, G: ClassGeometry<O>> ClassGeometryMut<O> for WithMadeTrimCu
     }
 }
 
+/// The start of an `SmTemporaryChangeValue<SmObject*>(pSurface->m_pOwner, NULL)` scope
+/// on the snapshot's face `f`: its surface loses its owner (so `GetFace()` finds no face
+/// and the system zone tolerance applies), recorded on the B-rep
+/// ([`Brep::begin_surface_owner_cleared`]); [`restore_surface_owner`] ends it.
+fn clear_surface_owner(snapshot: &mut Brep, f: FaceId) -> Result<Option<fp2::RescueSurfaceOwner>> {
+    let rescue = snapshot
+        .face(f)?
+        .surface
+        .as_ref()
+        .map(fp2::RescueSurfaceOwner::new);
+    if let Some(s) = snapshot.face_mut(f)?.surface.as_mut() {
+        s.set_owner(None);
+    }
+    snapshot.begin_surface_owner_cleared(f);
+    Ok(rescue)
+}
+
+/// The end of a [`clear_surface_owner`] scope: the owner and face tolerance come back.
+fn restore_surface_owner(
+    snapshot: &mut Brep,
+    f: FaceId,
+    rescue: Option<fp2::RescueSurfaceOwner>,
+) -> Result<()> {
+    snapshot.end_surface_owner_cleared(f);
+    if let (Some(rescue), Some(s)) = (rescue, snapshot.face_mut(f)?.surface.as_mut()) {
+        rescue.restore(s);
+    }
+    snapshot.sync_face_surface_tolerance(f)
+}
+
 /// Build real ordered topology views; only handle identity is caller-specific.
 /// UV computation uses the existing vertexuse port on the private arena `snapshot`;
 /// the UV trim curves it makes (missing from `b`) are added to `made_trims`.
@@ -1613,7 +1643,7 @@ pub(crate) fn curve_on_classify_cached<O: ClassObject>(
                 // IntersectVertices reads them with the surface's owner cleared
                 // (SmTemporaryChangeValue on m_pOwner), so a surface cache made for
                 // them is a standalone one
-                snapshot.begin_surface_owner_cleared(f);
+                let rescue = clear_surface_owner(snapshot, f)?;
                 let gaps = vertices
                     .iter()
                     .map(|&v| {
@@ -1623,7 +1653,7 @@ pub(crate) fn curve_on_classify_cached<O: ClassObject>(
                         ))
                     })
                     .collect::<Result<Vec<_>>>();
-                snapshot.end_surface_owner_cleared(f);
+                restore_surface_owner(snapshot, f, rescue)?;
                 gaps?
             } else {
                 Vec::new()
@@ -1915,12 +1945,12 @@ fn intersect_edges<O: ClassObject>(
         .ok_or(SolidError::null_pointer(OP_CURVE))?;
     // IntersectEdges reads the edge/face gaps with the surface's owner cleared
     // (SmTemporaryChangeValue on m_pOwner)
-    snapshot.begin_surface_owner_cleared(face);
+    let rescue = clear_surface_owner(snapshot, face)?;
     let views = edges
         .iter()
         .map(|&edge| boundary_edge(k, snapshot, objects, face, edge, has_big_gaps))
         .collect::<Result<Vec<_>>>();
-    snapshot.end_surface_owner_cleared(face);
+    restore_surface_owner(snapshot, face, rescue)?;
     let views = views?;
     cc.intersect_edges(
         k,

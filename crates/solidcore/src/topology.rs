@@ -847,7 +847,10 @@ impl Brep {
     /// copy where upstream works on the B-rep): its face surfaces share the cache slots
     /// of this B-rep's ([`Surface::share_cache_slot_of`]), so that the surface caches the
     /// query makes or reuses on the copy are the B-rep's surfaces' own, as upstream's
-    /// are. A plain `clone` (the copy constructor) starts every surface without cache.
+    /// are. They also keep their owners (and the face tolerance cached on them), so
+    /// that `GetFace()` of the copy's surfaces finds the face as upstream's in-place
+    /// queries do (`SmTol::GetZoneTol3d(pSurface)` reads the face tolerance). A plain
+    /// `clone` (the copy constructor) starts every surface without cache or owner.
     #[must_use]
     pub fn clone_sharing_surface_caches(&self) -> Self {
         let mut copy = self.clone();
@@ -855,6 +858,7 @@ impl Brep {
             if let (Some(original), Ok(face_copy)) = (face.surface.as_ref(), copy.face_mut(id)) {
                 if let Some(surface) = face_copy.surface.as_mut() {
                     surface.share_cache_slot_of(original);
+                    face::p2::RescueSurfaceOwner::new(original).restore(surface);
                 }
             }
         }
