@@ -99,10 +99,14 @@ fn same_point(a: Option<&[f64; 4]>, b: Option<&[f64; 4]>, extent: f64) -> bool {
     }
 }
 
-/// Knots of degree `p` over `n` control points, clamped at both ends.
+/// Knots of degree `p` over `n` control points, clamped at both ends: the spline starts at its
+/// first control point and ends at its last, its interval `[k[p], k[n]]` ending on knots of
+/// multiplicity `p` within it. The outermost knots (`k[0]`, `k[n + p]`) take no part in the
+/// spline over its interval, so they need not repeat: a periodic quadratic circle written with
+/// knot multiplicities `1, 2, …, 2, 1` (as OpenCascade writes one) is clamped.
 fn clamped(p: usize, n: usize, k: &[f64]) -> bool {
     let ends = |r: std::ops::RangeInclusive<usize>| k.get(r).is_some_and(|s| s.windows(2).all(|w| w.first() == w.get(1)));
-    k.len() == n + p + 1 && ends(0..=p) && ends(n..=n + p)
+    p >= 1 && k.len() == n + p + 1 && ends(1..=p) && ends(n..=n + p - 1)
 }
 
 /// `x` moved by whole periods `b − a` into `[a, b]` when it lies outside.
@@ -411,6 +415,10 @@ mod tests {
         let dom = domain(&s);
         let Some(q) = project(&s, &dom, p, Some([0.98, 0.5]), 1e-9) else { panic!("projects") };
         assert!((unwrap(q[0], 0.98, dom.period[0]) - 1.02).abs() < 1e-9, "{q:?}");
+        // Knots whose outermost values do not repeat, as OpenCascade writes a periodic circle:
+        // the interval still ends on knots of multiplicity 2, so the spline is closed there.
+        let outer_once = ring([0.0; 4], vec![-0.25, 0.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 1.25]);
+        assert_eq!(domain(&outer_once).period, [Some(1.0), None]);
         // Ends that only come near each other, a weight that differs, or unclamped knots: open,
         // and evaluated past the interval as before (the end span continued).
         for (what, open) in [

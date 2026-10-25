@@ -81,7 +81,9 @@ fn classify(e: &EngineError) -> Outcome {
     let msg = e.to_string();
     match e {
         EngineError::Internal(..) => Outcome::new("panic", msg),
-        EngineError::BadParams { .. } | EngineError::Disabled(..) | EngineError::UnknownCommand(_) => Outcome::new("rejected", msg),
+        EngineError::BadParams { .. } | EngineError::Disabled(..) | EngineError::Refused { .. } | EngineError::UnknownCommand(_) => {
+            Outcome::new("rejected", msg)
+        }
         // A failed boolean is a failure even when it says "not supported": those are the cases
         // to fix. Features the kernel doesn't do yet are limitations.
         // Picks the generator got wrong (a centroid off its face).
