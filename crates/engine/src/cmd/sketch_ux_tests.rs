@@ -1492,6 +1492,29 @@ fn a_live_frame_stops_once_its_numerical_solves_are_spent() {
     assert!(reached > 0.0 && reached < 1.0 && r["retry"] == json!(true), "{r}");
 }
 
+/// A drag from a script (not live) past the arm's reach: the steps after a failed one are solved
+/// at once and those that fail in a row are taken as tried. The drag ends where solving every
+/// step one by one ends it, with the same held solves counted.
+#[test]
+fn a_scripted_drag_solves_the_steps_past_a_failure_at_once_and_ends_where_one_by_one_does() {
+    let start = hung_arm();
+    let h = pt(&start, "eh.end");
+    let far = hung_hand_target(&start, 2.0, 1.5);
+    let drag = |s: &mut Session| run(s, "sketch.drag", json!({"entity": "eh.end", "from": [h.x, h.y], "to": [far.x, far.y]}));
+    let points = |s: &Session| s.doc.sketch(s.active_sketch.unwrap()).unwrap().points.iter().map(|p| (p.id.clone(), p.pos)).collect::<Vec<_>>();
+    let mut one = hung_arm();
+    let r1 = super::drag::last_drag::one_by_one(|| drag(&mut one));
+    let solves1 = super::drag::last_drag::get();
+    super::drag::last_drag::skipped();
+    let mut ahead = hung_arm();
+    let r2 = drag(&mut ahead);
+    let solves2 = super::drag::last_drag::get();
+    assert!(super::drag::last_drag::skipped() > 0, "steps were solved ahead");
+    assert_eq!(r2, r1);
+    assert_eq!(points(&ahead), points(&one));
+    assert_eq!((solves2.count, solves2.work), (solves1.count, solves1.work));
+}
+
 /// All the held solves of one live frame, halvings included, share one decomposition budget:
 /// together they do at most a frame's work, and one solve's more.
 #[test]
