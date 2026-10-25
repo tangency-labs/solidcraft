@@ -12,12 +12,16 @@
 //!
 //! Surface overloads compare their parameterizations. Successful B-reps additionally
 //! compare reachable vertices, sampled curves/surfaces, tolerances and UV trim counts.
-//! A pyramid whose plane fit reaches UB-119 is rejected (see [`ub_119`]).
+//! `blend_primitive` builds a box, calls `SmApiCreateBlendPrimitive` on the box's
+//! edge/face list indices, and compares the API status, the mutated B-rep's record and
+//! the blend face's own surface record (see the ffi module). A pyramid whose plane fit
+//! reaches UB-119 is rejected (see [`ub_119`]).
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
 use solidcore::curve::curve::Curve as SmCurve;
+use solidcore::geom::assert_array::labels::FACE_TYPE;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
@@ -28,8 +32,10 @@ use solidcore::primitive::api_curves;
 use solidcore::primitive::api_primitives as api;
 use solidcore::surface::cone::Cone;
 use solidcore::surface::plane::Plane;
+use solidcore::surface::surface::SurfaceKind;
 use solidcore::surface::torus::Torus;
-use solidcore::topology::Brep;
+use solidcore::topology::brep::p1;
+use solidcore::topology::{Brep, EdgeId, FaceId};
 use solidcore::SolidError;
 use solidcore_ffi::units::primitive_api_primitives::{self as ffi, Arc, Op};
 
@@ -105,6 +111,7 @@ enum OpName {
     PartialCylinder,
     PartialTorus,
     Swung,
+    BlendPrimitive,
 }
 
 impl OpName {
@@ -130,6 +137,7 @@ impl OpName {
             Self::PartialCylinder => Op::PartialCylinder,
             Self::PartialTorus => Op::PartialTorus,
             Self::Swung => Op::Swung,
+            Self::BlendPrimitive => Op::BlendPrimitive,
         }
     }
 }
@@ -358,7 +366,6 @@ fn put_torus(o: &mut Vec<f64>, t: &Torus) {
 /// The face, edge and vertex counts of the B-rep's lists (`GetNumFaces`, `GetNumEdges`,
 /// `GetNumVertices`; arena records an edit unlinked are not in them).
 fn put_brep(o: &mut Vec<f64>, brep: &Brep) {
-    use solidcore::topology::brep::p1;
     let n = |r: solidcore::Result<usize>| r.map_or(-1.0, |n| n as f64);
     o.extend([
         n(p1::faces(brep, None).map(|v| v.len())),
@@ -406,6 +413,102 @@ fn brep_record(r: solidcore::Result<Brep>, rays: bool) -> Output {
 /// runs; the port's `InvalidInput` there would report `1007`.)
 fn pyramid_out(r: solidcore::Result<Brep>) -> Output {
     brep_record(r, true)
+}
+
+/// The status record of an error, then `trailing` (as much of the output as the C++
+/// shim has already written). An unported call defers the case instead.
+fn error_record(e: &SolidError, trailing: &[f64]) -> Output {
+    Output::unported(e).unwrap_or_else(|| {
+        let mut record = vec![status(e)];
+        record.extend_from_slice(trailing);
+        Output::new().values("rec", record)
+    })
+}
+
+/// The blend face's record, mirroring the shim's `put_face_detail`: its kind,
+/// tolerance, UV domain, loop count, then its surface (kind, NURB for a B-spline and a
+/// 5 x 5 evaluation grid over the face's UV domain).
+fn put_face_detail(o: &mut Vec<f64>, k: &Kernel, face: &solidcore::topology::Face) {
+    o.push(FACE_TYPE as f64);
+    o.push(face.tolerance);
+    put_dom(o, &face.uv_domain);
+    o.push(face.loops.len() as f64);
+    let Some(surface) = face.surface.as_ref() else {
+        o.push(0.0);
+        return;
+    };
+    o.push(1.0);
+    o.push(surface.type_code() as f64);
+    let nurb = match surface.kind() {
+        SurfaceKind::BSpline(s) => s.gw_nurb(),
+        _ => None,
+    };
+    put_surface_nurb(o, nurb);
+    put_grid(o, &face.uv_domain, |uv| surface.evaluate_point(k, uv));
+}
+
+/// A case's list index `n`, checked against the box's list (`ids`).
+fn pick<T: Copy>(i: &Inputs, n: usize, ids: &[T], what: &str) -> Result<T, HarnessError> {
+    let value = i.arg(n)?;
+    if value < 0.0 || !value.is_finite() || value.fract() != 0.0 {
+        return Err(HarnessError::new(format!("{what}: bad index")));
+    }
+    ids.get(value as usize)
+        .copied()
+        .ok_or_else(|| HarnessError::new(format!("{what}: index out of range")))
+}
+
+/// A `blend_primitive` case: build the box, then call `SmApiCreateBlendPrimitive` on the
+/// edge/face indices of its `GetEdges`/`GetFaces` lists. On success the record is the
+/// out face, the mutated B-rep (counts, geometry/trim record) and the blend face's own
+/// record; a failing box reports only its status, a failing API call its status and
+/// `has = 0`, as the shim writes them.
+fn blend_out(i: &Inputs) -> Result<Output, HarnessError> {
+    let mut k = Kernel::default();
+    let mut brep =
+        match api::create_box(&mut k, i.point(0)?, i.arg(3)?, i.arg(4)?, i.arg(5)?) {
+            Ok(brep) => brep,
+            Err(e) => return Ok(error_record(&e, &[])),
+        };
+    let edges = p1::edges(&brep, None)
+        .map_err(|e| HarnessError::new(format!("blend_primitive edges: {e}")))?;
+    let faces = p1::faces(&brep, None)
+        .map_err(|e| HarnessError::new(format!("blend_primitive faces: {e}")))?;
+    let edge1: EdgeId = pick(i, 6, &edges, "edge1")?;
+    let face1: FaceId = pick(i, 7, &faces, "face1")?;
+    let edge2: EdgeId = pick(i, 8, &edges, "edge2")?;
+    let face2: FaceId = pick(i, 9, &faces, "face2")?;
+    let same = match i.arg(10)? {
+        0.0 => false,
+        1.0 => true,
+        _ => return Err(HarnessError::new("blend_primitive: direction flag")),
+    };
+    let blend = match api::create_blend_primitive(
+        &mut k, &mut brep, edge1, face1, edge2, face2, same,
+    ) {
+        Ok(face) => face,
+        Err(e) => return Ok(error_record(&e, &[0.0])),
+    };
+    let built: solidcore::Result<Vec<f64>> = (|| {
+        let mut o = vec![if blend.is_some() { 1.0 } else { 0.0 }];
+        o.extend([
+            p1::faces(&brep, None)?.len() as f64,
+            p1::edges(&brep, None)?.len() as f64,
+            p1::vertices(&brep, None)?.len() as f64,
+        ]);
+        crate::util::primitive::append(&k, &brep, &mut o)?;
+        if let Some(blend) = blend {
+            put_face_detail(&mut o, &k, brep.face(blend)?);
+        }
+        Ok(o)
+    })();
+    Ok(match built {
+        Ok(mut record) => {
+            record.insert(0, 0.0);
+            Output::new().values("rec", record)
+        }
+        Err(e) => error_record(&e, &[]),
+    })
 }
 
 fn arcs(xs: &[ArcIn]) -> Result<Vec<SmCurve>, HarnessError> {
@@ -518,6 +621,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let xz = arcs(&i.xz)?;
             brep_out(api::create_swung_primitive(k, &xy, &xz, a(0)?))
         }
+        OpName::BlendPrimitive => blend_out(i)?,
     })
 }
 
@@ -606,6 +710,127 @@ fn with_origin(rng: &mut Rng, rest: &[f64]) -> Vec<f64> {
 /// exercises the C++).
 fn sane(rng: &mut Rng) -> (Vec<f64>, f64) {
     (rng.point3(-50.0, 50.0).to_vec(), rng.uniform(0.5, 20.0))
+}
+
+/// A `blend_primitive` case: a box and two boundary edge/face associations, given as
+/// indices into that box's `GetEdges`/`GetFaces` lists. A corner case picks two edges of
+/// one face; a cross case uses each edge's own face; the mixed case sometimes names a
+/// face the edge does not bound, which `SmApiCreatePrimitive` rejects with
+/// `SM_ERR_INVALID_INPUT` on both sides.
+fn blend_case(rng: &mut Rng) -> Inputs {
+    // The edges bounding each face, and each edge's two faces, of a box built at the
+    // origin by `SmApiCreateBox` (its list order, as the B-rep record reports it).
+    const ON_FACE: [[usize; 4]; 6] = [
+        [2, 4, 7, 11],
+        [0, 1, 3, 9],
+        [2, 3, 6, 10],
+        [0, 4, 5, 8],
+        [6, 7, 8, 9],
+        [1, 5, 10, 11],
+    ];
+    const INCIDENCE: [[usize; 2]; 12] = [
+        [1, 3],
+        [1, 5],
+        [2, 0],
+        [2, 1],
+        [3, 0],
+        [3, 5],
+        [4, 2],
+        [4, 0],
+        [4, 3],
+        [4, 1],
+        [5, 2],
+        [5, 0],
+    ];
+    let on_face = |f: usize, i: usize| {
+        ON_FACE
+            .get(f)
+            .and_then(|r| r.get(i))
+            .copied()
+            .unwrap_or(0)
+    };
+    let own_face = |e: usize, i: usize| {
+        INCIDENCE
+            .get(e)
+            .and_then(|r| r.get(i))
+            .copied()
+            .unwrap_or(0)
+    };
+    let other_face = |e: usize, k: usize| {
+        let mut left = k;
+        for f in 0..6 {
+            let own = INCIDENCE.get(e).is_some_and(|r| r.contains(&f));
+            if !own {
+                if left == 0 {
+                    return f;
+                }
+                left -= 1;
+            }
+        }
+        0
+    };
+    let (e1, f1, e2, f2) = match rng.below(4) {
+        0 => {
+            let f = rng.below(6) as usize;
+            let a = rng.below(4) as usize;
+            let mut b = rng.below(3) as usize;
+            if b >= a {
+                b += 1;
+            }
+            (on_face(f, a), f, on_face(f, b), f)
+        }
+        1 => {
+            let e1 = rng.below(12) as usize;
+            let e2 = rng.below(12) as usize;
+            (
+                e1,
+                own_face(e1, rng.below(2) as usize),
+                e2,
+                own_face(e2, rng.below(2) as usize),
+            )
+        }
+        _ => {
+            let e1 = rng.below(12) as usize;
+            let e2 = rng.below(12) as usize;
+            let f1 = if rng.chance(0.5) {
+                own_face(e1, rng.below(2) as usize)
+            } else {
+                other_face(e1, rng.below(4) as usize)
+            };
+            let f2 = if rng.chance(0.5) {
+                own_face(e2, rng.below(2) as usize)
+            } else {
+                other_face(e2, rng.below(4) as usize)
+            };
+            (e1, f1, e2, f2)
+        }
+    };
+    let (l, w, h) = match rng.below(10) {
+        0 => (1.0e-3, 1.0e-3, 1.0e-3),
+        1 => (1.0e3, 1.0e3, 1.0e3),
+        _ => (
+            rng.uniform(0.05, 50.0),
+            rng.uniform(0.05, 50.0),
+            rng.uniform(0.05, 50.0),
+        ),
+    };
+    let o = match rng.below(8) {
+        0 => [0.0, 0.0, 0.0],
+        1 => rng.point3(-1.0e3, 1.0e3),
+        _ => rng.point3(-10.0, 10.0),
+    };
+    let mut v = o.to_vec();
+    v.extend([
+        l,
+        w,
+        h,
+        e1 as f64,
+        f1 as f64,
+        e2 as f64,
+        f2 as f64,
+        if rng.chance(0.5) { 1.0 } else { 0.0 },
+    ]);
+    mk(OpName::BlendPrimitive, v)
 }
 
 fn gen_case(rng: &mut Rng) -> Inputs {
@@ -738,22 +963,21 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                 }
             }
         }
-        _ => {
-            if rng.chance(0.5) {
-                mk(
-                    OpName::ConeEllipticEnds,
-                    vec![
-                        rng.uniform(1.0, 10.0),
-                        rng.uniform(1.0, 10.0),
-                        rng.uniform(1.0, 20.0),
-                        rng.uniform(-30.0, 30.0),
-                        rng.uniform(-30.0, 30.0),
-                        rng.uniform(-30.0, 30.0),
-                        rng.uniform(-30.0, 30.0),
-                        b(rng.chance(0.5)),
-                    ],
-                )
-            } else {
+        _ => match rng.below(3) {
+            0 => mk(
+                OpName::ConeEllipticEnds,
+                vec![
+                    rng.uniform(1.0, 10.0),
+                    rng.uniform(1.0, 10.0),
+                    rng.uniform(1.0, 20.0),
+                    rng.uniform(-30.0, 30.0),
+                    rng.uniform(-30.0, 30.0),
+                    rng.uniform(-30.0, 30.0),
+                    rng.uniform(-30.0, 30.0),
+                    b(rng.chance(0.5)),
+                ],
+            ),
+            1 => {
                 let arc = |rng: &mut Rng| ArcIn {
                     center: [0.0, 0.0, 0.0],
                     radius: rng.uniform(1.0, 10.0),
@@ -767,7 +991,8 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                     xz: vec![arc(rng)],
                 }
             }
-        }
+            _ => blend_case(rng),
+        },
     }
 }
 

@@ -779,10 +779,14 @@ pub fn create_partial_torus(
 /// The blend face between the boundary edges `edge1` (of `face1`) and `edge2` (of
 /// `face2`) of `brep`, added to `brep` (`SmApiCreateBlendPrimitive`): from the start
 /// of `edge1`'s curve to the start (`same_dir_curves`) or end of `edge2`'s curve.
+/// Returns `None` on upstream success with a null output face: the face/edge
+/// overload ignores the inner blend-construction status. This is distinct from
+/// failure; `brep` retains any mutations in either successful outcome.
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] (`SmBrep::CreateFaceFromSurface`).
+/// Invalid edge/face associations and topology lookup/restoration errors;
+/// [`SolidError::Unported`] from dependencies the native caller requires.
 pub fn create_blend_primitive(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -791,7 +795,7 @@ pub fn create_blend_primitive(
     edge2: EdgeId,
     face2: FaceId,
     same_dir_curves: bool,
-) -> Result<FaceId> {
+) -> Result<Option<FaceId>> {
     let mut pc = PrimitiveCreation::new(brep.infinite_region(), 0, true);
     let mut model = PrimitiveModel::new(k, core::mem::take(brep));
     let mut blend_face = None;
@@ -806,9 +810,7 @@ pub fn create_blend_primitive(
     );
     *brep = model.into_brep()?;
     result?;
-    blend_face.ok_or_else(|| {
-        SolidError::null_pointer("primitive::api_primitives::create_blend_primitive")
-    })
+    Ok(blend_face)
 }
 
 /// The swung solid of the XY path curves and XZ profile curves scaled by `scale`
@@ -956,6 +958,51 @@ mod tests {
         let mut brep = Brep::new_with_infinite_region().unwrap();
         let (edge, face) = (EdgeId::from_index(0), FaceId::from_index(0));
         assert!(create_blend_primitive(k, &mut brep, edge, face, edge, face, true).is_err());
+    }
+
+    #[test]
+    fn blend_success_can_return_a_face_or_no_face() {
+        let mut k = Kernel::default();
+        for (edge2_index, face2_index, has_face) in [(3, 2, false), (2, 2, true), (1, 1, true)] {
+            let mut brep = create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0).unwrap();
+            let edges = crate::topology::brep::p1::edges(&brep, None).unwrap();
+            let faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
+            let blend = create_blend_primitive(
+                &mut k,
+                &mut brep,
+                edges[0],
+                faces[1],
+                edges[edge2_index],
+                faces[face2_index],
+                true,
+            )
+            .unwrap();
+            assert_eq!(blend.is_some(), has_face);
+            let after_faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
+            assert_eq!(after_faces.len(), faces.len() + usize::from(has_face));
+            if let Some(face) = blend {
+                assert!(after_faces.contains(&face));
+                assert!(brep.face(face).unwrap().surface.is_some());
+            } else {
+                assert_eq!(
+                    crate::topology::brep::p1::edges(&brep, None).unwrap(),
+                    edges
+                );
+            }
+        }
+
+        // Missing edge/face association remains an error, not success/None.
+        let mut brep = create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0).unwrap();
+        let edges = crate::topology::brep::p1::edges(&brep, None).unwrap();
+        let faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
+        assert!(create_blend_primitive(
+            &mut k, &mut brep, edges[0], faces[0], edges[1], faces[1], true,
+        )
+        .is_err());
+        assert_eq!(
+            crate::topology::brep::p1::faces(&brep, None).unwrap(),
+            faces
+        );
     }
 
     #[test]

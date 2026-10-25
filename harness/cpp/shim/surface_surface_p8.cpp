@@ -415,48 +415,10 @@ void run(int32_t op, Rd& rd, std::vector<double>& o)
             delete c2;
             break;
         }
-        // Upstream ignores the status of both GetSampleValues calls and goes on with the partly
-        // filled sample arrays (uninitialised parameters, zero vectors), which corrupts the heap in
-        // the skinning that follows (UB-157, plan/upstream-issues.md). Probe the same two calls with
-        // CreateBlendSurface's default definition and report SM_ERR, as the port does at the first
-        // failing sample, instead of running the undefined part.
+        // Ordinary GetSampleValues failures are defined: native continues with partial vector
+        // arrays and a shared parameter buffer. Only refuse the proven out-of-bounds rail-2
+        // reparameterization below (UB-157, plan/upstream-issues.md), not sampling failures.
         {
-            SmDerivSurfDefinition def;
-            def.m_lNumSamples = 100;
-            def.m_eTangencyType = SM_TT_DIR_TO_REFERENCE_CURVE;
-            def.m_dStartDerivDirAngleDeg = 0.0;
-            def.m_dEndDerivDirAngleDeg = 0.0;
-            def.m_dStartTanLength = 1.0;
-            def.m_dEndTanScale = 1.0;
-            def.m_dStartAngleDeg = 0.0;
-            def.m_dEndAngleDeg = 0.0;
-            def.m_vVector.Set(0, 0, 0);
-            def.m_eCurvatureType = SM_CT_G2_FROM_SURFACE;
-            def.m_eBlendEndType = SM_BE_NO_CUSP;
-            def.m_dStartRadius = 0.0;
-            def.m_dEndRadScale = 0.0;
-            def.m_pCurvatureReference = NULL;
-            def.m_bFlipCurvature = FALSE;
-            ULONG nd = def.GetNumDerivs();
-            SmTArray<double> params;
-            SmTArray<SmVector3d> p0, d0, p1, d1, s20, s30, s21, s31;
-            SmExtent1d i1 = ivl1;
-            SmExtent1d i2 = ivl2;
-            def.m_pTangentReference = c2;
-            SmStatus r1 = def.GetSampleValues(*s, *c1, i1, right ? TRUE : FALSE, TRUE, params, p0, d0,
-                                              nd >= 2 ? &s20 : NULL, nd >= 3 ? &s30 : NULL);
-            def.m_pTangentReference = c1;
-            SmStatus r2 = def.GetSampleValues(*s2, *c2, i2, left ? TRUE : FALSE, FALSE, params, p1, d1,
-                                              nd >= 2 ? &s21 : NULL, nd >= 3 ? &s31 : NULL);
-            if (r1 != SM_SUCCESS || r2 != SM_SUCCESS)
-            {
-                o.push_back(st(SM_ERR));
-                delete s2;
-                delete c1;
-                delete c2;
-                break;
-            }
-
             // CreateSkinnedSurface (SmBSplineSurfaceNLib.cpp:5305) copies the 101 rail parameters
             // CreateBlendSurface passes and, when SyncronizeKnotsOfCurves changes the natural
             // interval of rail 2, reads and writes sIntParams[numSections + ii]: past the end of the

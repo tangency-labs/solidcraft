@@ -23,6 +23,7 @@
 #include <SmCurve.h>
 #include <SmCylinder.h>
 #include <SmExtent2d.h>
+#include <SmLoop.h>
 #include <SmPlane.h>
 #include <SmSurface.h>
 #include <SmTArray.h>
@@ -59,6 +60,7 @@ enum : int32_t
     OP_PARTIAL_CYLINDER = 23,
     OP_PARTIAL_TORUS = 24,
     OP_SWUNG = 25,
+    OP_BLEND_PRIMITIVE = 26,
 };
 
 // Samples per STEP direction of the surface evaluation grid.
@@ -255,6 +257,29 @@ void put_brep(std::vector<double>& o, SmApiStatus s, SmBrep*& b, bool rays=false
     delete b;
 }
 
+// The blend face's own record: kind, tolerance, UV domain, loop count, then its surface
+// (kind, NURB for a B-spline and a 5 x 5 evaluation grid over the face's UV domain).
+void put_face_detail(std::vector<double>& o, SmFace* f)
+{
+    o.push_back((double)f->GetType());
+    o.push_back(f->GetTolerance());
+    SmExtent2d d = f->GetUVDomain();
+    put_dom(o, d);
+    SmTArray<SmLoop*> loops;
+    f->GetLoops(loops);
+    o.push_back((double)loops.GetSize());
+    SmSurface* s = f->GetSurface();
+    o.push_back(flg(s != NULL));
+    if (!s)
+        return;
+    o.push_back((double)s->GetType());
+    const gw_SURFACE* sur = NULL;
+    if (s->IsKindOf(SmBSplineSurface_TYPE))
+        sur = static_cast<SmBSplineSurface*>(s)->GetGwNurbPointer();
+    put_surface_nurb(o, sur);
+    put_grid(o, s, d, false);
+}
+
 // A curve list: `k`, then `k` arcs `C[3] r a0 a1` (SmApiCreateArc). A failing constructor is
 // a harness error.
 void read_arcs(Rd& rd, SmTArray<SmCurve*>& out)
@@ -285,7 +310,7 @@ void free_curves(SmTArray<SmCurve*>& cs)
 
 void run(Rd& rd, std::vector<double>& o)
 {
-    int32_t op = (int32_t)rd.idx(1, 25);
+    int32_t op = (int32_t)rd.idx(1, 26);
     SmBrep* b = NULL;
     switch (op)
     {
@@ -494,6 +519,54 @@ void run(Rd& rd, std::vector<double>& o)
         free_curves(xy);
         free_curves(xz);
         put_brep(o, s, b);
+        return;
+    }
+    case OP_BLEND_PRIMITIVE:
+    {
+        SmVector3d org = rd.vec();
+        double l = rd.num();
+        double w = rd.num();
+        double h = rd.num();
+        int64_t e1 = rd.idx(0, 64);
+        int64_t f1 = rd.idx(0, 64);
+        int64_t e2 = rd.idx(0, 64);
+        int64_t f2 = rd.idx(0, 64);
+        bool same = rd.idx(0, 1) != 0;
+        SmApiStatus s = SmApiCreateBox(org, l, w, h, b);
+        if (s != SM_SUCCESS)
+        {
+            o.push_back(st(s));
+            delete b;
+            return;
+        }
+        // Resolve the caller's indices against this B-rep's lists; an index outside them
+        // would make the API touch a foreign pointer, so it is a malformed program.
+        SmTArray<SmEdge*> edges;
+        SmTArray<SmFace*> faces;
+        b->GetEdges(edges);
+        b->GetFaces(faces);
+        if (e1 >= (int64_t)edges.GetSize() || e2 >= (int64_t)edges.GetSize() ||
+            f1 >= (int64_t)faces.GetSize() || f2 >= (int64_t)faces.GetSize())
+        {
+            delete b;
+            throw Bad();
+        }
+        SmFace* blend = NULL;
+        s = SmApiCreateBlendPrimitive(b, edges[(size_t)e1], faces[(size_t)f1], edges[(size_t)e2],
+                                      faces[(size_t)f2], same ? TRUE : FALSE, blend);
+        o.push_back(st(s));
+        o.push_back(flg(blend != NULL));
+        if (s == SM_SUCCESS)
+        {
+            o.push_back((double)b->GetNumFaces());
+            o.push_back((double)b->GetNumEdges());
+            o.push_back((double)b->GetNumVertices());
+            primitive_record::append(o, b);
+            if (blend)
+                put_face_detail(o, blend);
+        }
+        // `blend` is owned by the B-rep.
+        delete b;
         return;
     }
     default: throw Bad();

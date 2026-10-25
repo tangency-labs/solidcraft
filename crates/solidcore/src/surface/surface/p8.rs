@@ -38,10 +38,10 @@
 //! run when the solve fetches its cache (`smsurf_GetSurfaceCache`), so the tree is
 //! the face's and the coincident traces share it. The
 //! optional `SmDerivSurfDefinition` of `CreateBlendSurface` is copied, so its caller
-//! does not see the fields upstream overwrites. `CreateBlendSurface` returns `SM_ERR`
-//! as soon as one of the sample evaluations fails (upstream ignores the status, goes
-//! on with the partial arrays and fails later, except when both sets of samples fail
-//! at the same index). `CreateBlendSurface` of a curve that is not a B-spline kind
+//! does not see the fields upstream overwrites. `CreateBlendSurface` retains the
+//! sampler's partial, zero-filled arrays when ignoring an ordinary sampling error,
+//! as upstream does; `Unported` and count-safety failures still propagate.
+//! `CreateBlendSurface` of a curve that is not a B-spline kind
 //! returns `InvalidInput` (upstream signals the error and casts anyway).
 //! `SmSPGlobalSolver::LocalSolve` returns `InvalidInput` when the original surface of
 //! the leaf node is not the surface of the cache the solver was given (upstream reads
@@ -852,7 +852,7 @@ impl Surface {
     /// # Errors
     ///
     /// `InvalidInput` for a curve that is not a B-spline kind; `SM_ERR` for an invalid
-    /// definition, a failing sample evaluation or a failing skin;
+    /// definition or a failing skin; count-safety failures from the sampler;
     /// [`SolidError::Unported`] from the evaluations (`surface.surface_p5`,
     /// `DropPoint`).
     #[allow(clippy::too_many_arguments)]
@@ -914,7 +914,7 @@ impl Surface {
 
         // Get Sample Values from Face1/Edge1 using edge2 as tangentReference
         def.tangent_reference = Some(curve2);
-        let start = def.sample_values(
+        let (start, start_status) = def.sample_values_with_status(
             k,
             self,
             curve1,
@@ -925,10 +925,13 @@ impl Surface {
                 want_higher,
             },
         )?;
+        ignore_status(start_status)?;
 
         // Get Sample Values from Face2/Edge2 using edge1 as tangentReference
         def.tangent_reference = Some(curve1);
-        let end = def.sample_values(
+        // Native reuses sParams, but GetSampleValues first calls ReSet, which
+        // zeroes its previous contents. The independent end.params matches that.
+        let (end, end_status) = def.sample_values_with_status(
             k,
             surface2,
             curve2,
@@ -939,6 +942,7 @@ impl Surface {
                 want_higher,
             },
         )?;
+        ignore_status(end_status)?;
 
         // use samples to build cross-section curves that capture the G1/G2/G3 shapes
         // (the status is not checked upstream; the curves built before a failure stay in

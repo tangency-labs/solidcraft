@@ -1009,42 +1009,12 @@ static bool corner_blend_refused(SmBrep* brep, const SmContext& ctx, const SmTAr
     return false;
 }
 
-// UB-157 (plan/upstream-issues.md): SmSurface::CreateBlendSurface ignores the statuses of its
-// two GetSampleValues calls, and CreateSkinnedSurface reads and writes sIntParams[numSections + ii]
+// UB-157 (plan/upstream-issues.md): CreateSkinnedSurface reads and writes sIntParams[numSections + ii]
 // past the array when SyncronizeKnotsOfCurves moves rail 2's natural interval. The probe of the
-// surface.surface_p8 shim (OP_BLEND), for CreateBlendSurface's default definition: SM_ERR for a
-// failing sample (the port fails at the first failing sample), 1007 for a moving rail 2 (the port's
-// InvalidInput "too few intersection parameters"), 0 when the blend is defined.
-static double blend_surface_ub157(const SmContext& ctx, const SmSurface& s1, const SmCurve& c1, SmExtent1d ivl1,
-                                  bool right, const SmSurface& s2, const SmCurve& c2, SmExtent1d ivl2, bool left)
+// surface.surface_p8 shim (OP_BLEND): 1007 for a moving rail 2 (the port's InvalidInput "too few
+// intersection parameters"), otherwise 0 so native runs, including ordinary sampling failures.
+static double blend_surface_ub157(const SmContext& ctx, const SmCurve& c1, const SmCurve& c2)
 {
-    SmDerivSurfDefinition def;
-    def.m_lNumSamples = 100;
-    def.m_eTangencyType = SM_TT_DIR_TO_REFERENCE_CURVE;
-    def.m_dStartDerivDirAngleDeg = 0.0;
-    def.m_dEndDerivDirAngleDeg = 0.0;
-    def.m_dStartTanLength = 1.0;
-    def.m_dEndTanScale = 1.0;
-    def.m_dStartAngleDeg = 0.0;
-    def.m_dEndAngleDeg = 0.0;
-    def.m_vVector.Set(0, 0, 0);
-    def.m_eCurvatureType = SM_CT_G2_FROM_SURFACE;
-    def.m_eBlendEndType = SM_BE_NO_CUSP;
-    def.m_dStartRadius = 0.0;
-    def.m_dEndRadScale = 0.0;
-    def.m_pCurvatureReference = NULL;
-    def.m_bFlipCurvature = FALSE;
-    ULONG nd = def.GetNumDerivs();
-    SmTArray<double> params;
-    SmTArray<SmVector3d> p0, d0, p1, d1, s20, s30, s21, s31;
-    def.m_pTangentReference = &c2;
-    SmStatus r1 = def.GetSampleValues(s1, c1, ivl1, right ? TRUE : FALSE, TRUE, params, p0, d0,
-                                      nd >= 2 ? &s20 : NULL, nd >= 3 ? &s30 : NULL);
-    def.m_pTangentReference = &c1;
-    SmStatus r2 = def.GetSampleValues(s2, c2, ivl2, left ? TRUE : FALSE, FALSE, params, p1, d1,
-                                      nd >= 2 ? &s21 : NULL, nd >= 3 ? &s31 : NULL);
-    if (r1 != SM_SUCCESS || r2 != SM_SUCCESS)
-        return st(SM_ERR);
     SmCurve* k1 = NULL;
     SmCurve* k2 = NULL;
     bool moves = false;
@@ -1071,9 +1041,7 @@ static double blend_surface_ub157(const SmContext& ctx, const SmSurface& s1, con
 // SmBrep::CreateEdgeEdgeBlend (SmBrep.cpp:2850-3020) for a blend flag != 0 and no definition,
 // replayed up to its CreateBlendSurface call on its own fresh rails (the edge uses are only read):
 // the UB-157 probe of that call, 0 when upstream returns before it or the blend is defined.
-// The probe's GetSampleValues may build and keep the face surfaces' caches before the real
-// call; the real CreateBlendSurface builds the same caches from the same surfaces at that
-// point, so the reference results are unchanged. A refusal is a status the shim decides (the
+// A refusal is a status the shim decides (the
 // port's code for the same input): once the Rust side stops deferring, such a case is a guard
 // agreement, not a compared C++ run.
 static double edge_edge_blend_ub157(const SmContext& ctx, SmEdgeuse* e1, SmEdgeuse* e2, ULONG dir)
@@ -1119,21 +1087,6 @@ static double edge_edge_blend_ub157(const SmContext& ctx, SmEdgeuse* e1, SmEdgeu
     SmSurface* surf2 = e2->GetFace()->GetSurface();
     if (surf1 == NULL || surf2 == NULL)
         return 0.0;
-    SmVector3d pos_1, pos_2, tan1, tan2, bin1, bin2, nrm1, nrm2;
-    e1->EvaluateBinormal(ivl1.Evaluate(.5), TRUE, pos_1, bin1, &tan1, &nrm1);
-    e2->EvaluateBinormal(ivl2.Evaluate(.5), TRUE, pos_2, bin2, &tan2, &nrm2);
-    if (e1->GetOrientation() == SM_OT_OPPOSITE)
-        tan1 = -tan1;
-    if (e2->GetOrientation() == SM_OT_OPPOSITE)
-        tan2 = -tan2;
-    if (e1->GetFaceuse()->GetOrientation() == SM_OT_OPPOSITE)
-        nrm1 = -nrm1;
-    if (e2->GetFaceuse()->GetOrientation() == SM_OT_OPPOSITE)
-        nrm2 = -nrm2;
-    SmVector3d left1 = nrm1 * tan1;
-    SmVector3d left2 = nrm2 * tan2;
-    SmBoolean right = bin1.Dot(left1) >= 0.0 ? TRUE : FALSE;
-    SmBoolean left = bin2.Dot(left2) >= 0.0 ? FALSE : TRUE;
     auto rescale = [&]() {
         if (!ivl1.AreEqual(ivl2))
         {
@@ -1149,13 +1102,12 @@ static double edge_edge_blend_ub157(const SmContext& ctx, SmEdgeuse* e1, SmEdgeu
     if (same == FALSE)
     {
         rail2->ReverseParameterization(ivl2, ivl2);
-        left = (left == TRUE) ? FALSE : TRUE;
     }
     rescale();
     if (same == FALSE)
         rail2->ReverseParameterization(ivl2, ivl2);
     rescale();
-    return blend_surface_ub157(ctx, *surf1, *rail1, ivl1, right == TRUE, *surf2, *rail2, ivl2, left == TRUE);
+    return blend_surface_ub157(ctx, *rail1, *rail2);
 }
 
 // The healed B-rep (OP_HEAL): a fresh walk, the extras of OP_EXPORT, then the fields the
