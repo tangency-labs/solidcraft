@@ -87,6 +87,7 @@ use crate::geom::solution_array::Solution;
 use crate::geom::tol::{zone_tol3d, ZONE_TOL_3D};
 use crate::geom::tree::NodeGeomType;
 use crate::intersect::curve_class::p1::{CurveClassification, IntervalPosition};
+use crate::intersect::curve_class::p6::MergeIntervalBrep;
 use crate::intersect::curve_class::p7::CoincidentMaybe;
 use crate::intersect::curve_class::ClassificationInit;
 use crate::intersect::point_class::{
@@ -1933,8 +1934,14 @@ fn shell_transfer_children(k: &mut Kernel, b: &mut Brep, from: ShellId, to: Shel
 // ---- merging curves into faces ------------------------------------------------------------
 
 /// What [`merge_curves_on_surface`] needs of the caller's classification handles, on
-/// top of [`CurveOnClassifyObjects`] (which includes [`ClassGeometry`]).
-pub trait MergeCurvesObjects<O: ClassObject>: CurveOnClassifyObjects<O> {
+/// top of [`CurveOnClassifyObjects`] (which includes [`ClassGeometry`]) and
+/// [`MergeIntervalBrep`]: the adapter holds the B-rep the curves merge into, which
+/// upstream's `MergeIntervals` edits through the classification's topology pointers.
+pub trait MergeCurvesObjects<O: ClassObject>:
+    CurveOnClassifyObjects<O> + MergeIntervalBrep<O>
+{
+    /// The B-rep the curves merge into (`this`).
+    fn brep(&self) -> &Brep;
     /// The edge behind an edge handle (an interval's `m_vMid.GetObject()`).
     fn edge_of(&self, object: O) -> Option<EdgeId>;
     /// The face behind a face handle (a new face of `MergeIntervals`).
@@ -1979,7 +1986,8 @@ pub struct MergedCurves {
 /// face, splitting it (and the faces split off it) into new faces. Curves shorter than
 /// `tolerance` are skipped. Each curve is classified against each face
 /// ([`curve_on_classify`]), coincident-maybe intervals are squeezed, the intervals are
-/// merged into the B-rep (a failed merge is ignored, as upstream \[B674\]) and the edges
+/// merged into the B-rep `objects` holds ([`MergeCurvesObjects::brep`], edited through
+/// [`MergeIntervalBrep`]; a failed merge is ignored, as upstream \[B674\]) and the edges
 /// the curve classifies to are collected. The context's `DoingBoolean` flag is set for
 /// the duration.
 ///
@@ -1994,8 +2002,7 @@ pub struct MergedCurves {
 #[allow(clippy::too_many_arguments)]
 pub fn merge_curves_on_surface<O: ClassObject + Copy>(
     k: &mut Kernel,
-    b: &mut Brep,
-    objects: &impl MergeCurvesObjects<O>,
+    objects: &mut impl MergeCurvesObjects<O>,
     face: FaceId,
     tolerance: f64,
     curves: &[O],
@@ -2003,22 +2010,21 @@ pub fn merge_curves_on_surface<O: ClassObject + Copy>(
     options: MergeCurvesOptions<O>,
 ) -> Result<MergedCurves> {
     // check state - m_bEditingEnabled must be on
-    if !b.editing_enabled() {
+    if !objects.brep().editing_enabled() {
         return Err(SolidError::sm_err(OP));
     }
 
     let saved = k.context.doing_boolean();
     k.context.set_doing_boolean(true);
-    let res = merge_curves_body(k, b, objects, face, tolerance, curves, uv_curves, options);
+    let res = merge_curves_body(k, objects, face, tolerance, curves, uv_curves, options);
     k.context.set_doing_boolean(saved);
     res
 }
 
 #[allow(clippy::too_many_arguments)]
 fn merge_curves_body<O: ClassObject + Copy>(
-    k: &Kernel,
-    b: &mut Brep,
-    objects: &impl MergeCurvesObjects<O>,
+    k: &mut Kernel,
+    objects: &mut impl MergeCurvesObjects<O>,
     face: FaceId,
     tolerance: f64,
     curves: &[O],
@@ -2034,8 +2040,8 @@ fn merge_curves_body<O: ClassObject + Copy>(
 
     // iter every input curve - check to see if the curves need to be split
     for (ii, &curve_h) in curves.iter().enumerate() {
-        let curve =
-            ClassGeometry::curve(objects, curve_h).ok_or(null_deref("unresolved curve handle"))?;
+        let curve = ClassGeometry::curve(&*objects, curve_h)
+            .ok_or(null_deref("unresolved curve handle"))?;
 
         // skip very short curves (gwc:this is tolerance bug waiting to happen)
         let natural = curve.natural_interval();
@@ -2061,11 +2067,12 @@ fn merge_curves_body<O: ClassObject + Copy>(
             cc.set_intersect_data(surface, options.intersection_surface, None, true, None);
 
             // classify the curve against the surface->Face
+            let objs = &*objects;
             let _modified = curve_on_classify(
                 k,
-                b,
+                objs.brep(),
                 f,
-                objects,
+                objs,
                 true,
                 &mut cc,
                 options.use_projection,
@@ -2077,7 +2084,7 @@ fn merge_curves_body<O: ClassObject + Copy>(
             let mut kk = 0;
             while kk < cc.size() {
                 // squeeze coincident maybe intervals
-                let (coin, pos) = cc.are_coincident_maybe(k, objects, &cc, kk, false)?;
+                let (coin, pos) = cc.are_coincident_maybe(k, &*objects, &cc, kk, false)?;
                 if coin == CoincidentMaybe::Unsure {
                     // This signals an unrecoverable error.
                     return Err(SolidError::sm_err(OP));
@@ -2168,11 +2175,11 @@ fn connect_intervals<O: ClassObject>(
 /// faces, also those made before a failure (upstream's list is filled as faces are
 /// made), with its status.
 fn merge_intervals<O: ClassObject + Copy>(
-    k: &Kernel,
-    objects: &impl MergeCurvesObjects<O>,
+    k: &mut Kernel,
+    objects: &mut impl MergeCurvesObjects<O>,
     cc: &mut CurveClassification<O>,
 ) -> Result<(Vec<FaceId>, Result<()>)> {
-    let (merged, r) = match cc.merge_intervals_with_partial(k, objects, false) {
+    let (merged, r) = match cc.merge_intervals_mut_with_partial(k, objects, false) {
         Ok(m) => (m, Ok(())),
         Err(e) => (*e.merged, Err(e.error)),
     };

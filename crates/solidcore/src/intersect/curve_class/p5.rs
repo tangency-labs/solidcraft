@@ -1256,11 +1256,22 @@ impl<O: ClassObject> CurveClassification<O> {
         geometry: &mut impl MergeIntervalBrep<O>,
         vertices_only: bool,
     ) -> Result<MergedTopology<O>> {
+        self.merge_intervals_mut_with_partial(k, geometry, vertices_only)
+            .map_err(|e| e.error)
+    }
+
+    /// [`CurveClassification::merge_intervals_mut`] with the completed-interval output
+    /// also on failure (upstream fills its output lists as the intervals merge).
+    pub(crate) fn merge_intervals_mut_with_partial(
+        &mut self,
+        k: &mut Kernel,
+        geometry: &mut impl MergeIntervalBrep<O>,
+        vertices_only: bool,
+    ) -> Result<MergedTopology<O>, PartialMergeError<O>> {
         let mut a = MutableImprint { k, g: geometry };
         self.merge_intervals_using(vertices_only, |c, j, v| {
             Self::p5_merge_interval_in(c, &mut a, j, v, None)
         })
-        .map_err(|e| e.error)
     }
 
     fn merge_intervals_using(

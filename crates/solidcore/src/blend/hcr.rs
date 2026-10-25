@@ -303,7 +303,9 @@ fn add_deleted_surface(brep: &mut Brep, surface: &Surface) {
 
 /// `MergeCurvesOnSurface(*pSurface, m_dThisApproxTol3d, s3DCurves, &sUVBSCurves,
 /// sNewFaces, sEdges, TRUE)` (`SmHCR.cpp:1229`): the edges of the curves, through the
-/// B-rep cache's classification world (`query.brep`) as in `topology.brep_p10`.
+/// scene's own objects as in `topology.brep_p10`. `ComputeSilhouettes` holds no
+/// notification stores, so the scene's edits notify default records under its arena
+/// identities ([`crate::topology::brep::p2::ArenaNotifyState`]).
 fn merge_curves_on_surface(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -312,13 +314,19 @@ fn merge_curves_on_surface(
     curves: &[Curve],
     uv_curves: &[Curve],
 ) -> Result<Vec<EdgeId>> {
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::new(brep);
+    let mut env = state.env(None);
+    let curve_ref =
+        |e: EdgeId, _type_code: i64| crate::topology::loopuse::notify_ref(EntityRef::Edge(e));
     let (_, edges) = crate::topology::brep::p10::merge_curves_on_surface(
         k,
         brep,
+        &mut env,
+        &curve_ref,
         face,
         approx_tol_3d,
         curves,
-        uv_curves,
+        Some(uv_curves),
         true,
     )?;
     Ok(edges)

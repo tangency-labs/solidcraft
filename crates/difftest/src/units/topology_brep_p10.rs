@@ -654,10 +654,19 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
                 angle_tol_radians: angle_tol,
                 subset_faces: None,
             };
+            // the merges' edits notify the build's records and attribute store under
+            // the build's names
+            let mut notify = NotifyEnv {
+                records: &mut records,
+                attributes: &mut store,
+                context: None,
+                key_of: &key_of,
+            };
             match project_and_trim(
                 &mut k,
                 &mut b,
                 &penv,
+                &mut notify,
                 &curve,
                 v(dir),
                 v(reference),

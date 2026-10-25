@@ -945,9 +945,11 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     }
 }
 
-/// `MergeCurvesOnSurface` with editing enabled: every curve shorter than `tol` is
-/// skipped (no new faces or edges); a longer one reaches the unported curve
-/// classification constructor.
+/// `MergeCurvesOnSurface` with editing enabled over the case's B-rep
+/// (`topology::brep::p10::merge_curves_on_surface`, no UV curves): every curve shorter
+/// than `tol` is skipped (no new faces or edges); a longer one is classified against the
+/// face and merged into it, its edits notified to default records under the arena
+/// identities.
 fn merge_rust(
     k: &mut Kernel,
     b: &mut Brep,
@@ -959,22 +961,17 @@ fn merge_rust(
         .iter()
         .map(|c| rust_curve(c).map(SmCurve::from))
         .collect::<Result<_, _>>()?;
-    let objects = MergeObjects { curves: &crvs };
-    let handles: Vec<H> = (0..crvs.len()).map(H).collect();
-    let r = bp2::merge_curves_on_surface(
-        k,
-        b,
-        &objects,
-        face,
-        tol,
-        &handles,
-        None,
-        bp2::MergeCurvesOptions::default(),
+    let mut state = bp2::ArenaNotifyState::new(b);
+    let mut env = state.env(None);
+    let key_of = env.key_of;
+    let curve_ref = |e: EdgeId, _type_code: i64| key_of(EntityRef::Edge(e));
+    let r = solidcore::topology::brep::p10::merge_curves_on_surface(
+        k, b, &mut env, &curve_ref, face, tol, &crvs, None, false,
     );
     match r {
-        Ok(m) => Ok(Output::new().values(
+        Ok((new_faces, edges)) => Ok(Output::new().values(
             "out",
-            vec![0.0, 0.0, m.new_faces.len() as f64, m.edges.len() as f64],
+            vec![0.0, 0.0, new_faces.len() as f64, edges.len() as f64],
         )),
         Err(e) => match Output::unported(&e) {
             Some(o) => Ok(o),
@@ -982,90 +979,9 @@ fn merge_rust(
                 SolidError::Upstream { code, .. } => {
                     Ok(Output::new().values("out", vec![0.0, f64::from(code), 0.0, 0.0]))
                 }
-                // CurveOnClassify reached the face's topology through `MergeObjects`, which
-                // resolves only the case's curves: `merge_curves_on_surface` holds the
-                // B-rep mutably, so no adapter can hand the classification its topology
-                // (ClassGeometry::topology_entity) yet
-                SolidError::InvalidInput { operation, .. }
-                    if operation.starts_with("intersect::point_class") =>
-                {
-                    Ok(Output::deferred(
-                        "topology.brep_p2",
-                        "MergeCurvesOnSurface: topology handles of the merged B-rep",
-                    ))
-                }
                 other => Err(harness(format!("rust: {other}"))),
             },
         },
-    }
-}
-
-/// Classification handles of a `Merge` case: curve `i` is handle `i`.
-struct MergeObjects<'a> {
-    curves: &'a [SmCurve],
-}
-
-/// A classification handle: curve `i` of the case (`usize::MAX` the face).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct H(usize);
-
-impl solidcore::intersect::point_class::ClassObject for H {
-    fn class_kind(&self) -> solidcore::intersect::point_class::ClassObjectKind {
-        solidcore::intersect::point_class::ClassObjectKind::Curve
-    }
-}
-
-impl solidcore::query::face::p2::CurveOnClassifyObjects<H> for MergeObjects<'_> {
-    fn face(&self, _f: FaceId) -> H {
-        H(usize::MAX)
-    }
-    fn vertex(&self, _v: VertexId) -> H {
-        H(usize::MAX)
-    }
-    fn edge(&self, _e: EdgeId) -> H {
-        H(usize::MAX)
-    }
-    fn vertexuse(&self, _vu: VertexuseId) -> H {
-        H(usize::MAX)
-    }
-    fn edgeuse(&self, _eu: EdgeuseId) -> H {
-        H(usize::MAX)
-    }
-    fn edge_curve(&self, _e: EdgeId) -> H {
-        H(usize::MAX)
-    }
-    fn trim_curve(&self, _eu: EdgeuseId) -> H {
-        H(usize::MAX)
-    }
-    fn face_surface(&self, _f: FaceId) -> Option<H> {
-        None
-    }
-    fn loop_id(&self, _tgt_loop: H) -> Option<LoopId> {
-        None
-    }
-}
-
-impl solidcore::intersect::point_class::ClassGeometry<H> for MergeObjects<'_> {
-    fn curve(&self, o: H) -> Option<&SmCurve> {
-        self.curves.get(o.0)
-    }
-    fn surface(&self, _o: H) -> Option<&Surface> {
-        None
-    }
-    fn volume(&self, _o: H) -> Option<&solidcore::surface::volume::Volume> {
-        None
-    }
-    fn point(&self, _o: H) -> Option<solidcore::geom::vector3d::Point3> {
-        None
-    }
-}
-
-impl bp2::MergeCurvesObjects<H> for MergeObjects<'_> {
-    fn edge_of(&self, _object: H) -> Option<EdgeId> {
-        None
-    }
-    fn face_of(&self, _object: H) -> Option<FaceId> {
-        None
     }
 }
 

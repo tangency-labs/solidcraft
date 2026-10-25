@@ -547,10 +547,14 @@ impl PrimitiveCreationAccess for PrimitiveModel<'_> {
             .get_mut(brep.index() as usize)
             .and_then(Option::as_mut)
             .ok_or_else(|| SolidError::null_pointer(OP))?;
+        // the merges' edits notify the B-rep's records under the same identities
+        let mut state = ArenaNotifyState::new(b);
+        let mut notify = state.env(None);
         crate::topology::brep::p10::project_and_trim(
             self.k,
             b,
             &env,
+            &mut notify,
             curve,
             direction,
             reference,
