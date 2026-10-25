@@ -5828,3 +5828,85 @@ mod shell_thickness_tests {
         assert_eq!(dialog_commands(&h.app, d).err().as_deref(), Some("enter the thickness"));
     }
 }
+
+#[cfg(test)]
+mod construct_ask_tests {
+    //! The toolbar CONSTRUCT commands ask for their picks (#204): none runs with empty
+    //! params, and a pre-selected face fills the pick so Create just works.
+
+    use super::*;
+    use crate::scenario::Harness;
+
+    const CONSTRUCT_PICK_COMMANDS: [&str; 15] = [
+        "construct.axis.through_cylinder",
+        "construct.axis.normal_to_face",
+        "construct.axis.two_planes",
+        "construct.axis.two_points",
+        "construct.axis.edge",
+        "construct.point.vertex",
+        "construct.point.two_edges",
+        "construct.point.three_planes",
+        "construct.point.center",
+        "construct.point.edge_plane",
+        "construct.point.along_path",
+        "construct.plane.two_edges",
+        "construct.plane.three_points",
+        "construct.plane.tangent",
+        "construct.plane.perpendicular",
+    ];
+
+    /// A 20 mm cylinder, 20 mm tall, at the origin: the #204 repro design.
+    fn cylinder(h: &mut Harness) {
+        h.step(&json!({"call": "engine.execute", "params": {"command": "solid.cylinder", "params": {"diameter": 20, "height": 20}}})).unwrap();
+        h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
+    }
+
+    fn status_error(app: &SolveApp) -> Option<String> {
+        app.status.as_ref().filter(|(_, _, error)| *error).map(|(message, ..)| message.clone())
+    }
+
+    #[test]
+    fn every_construct_command_opens_a_dialog_instead_of_running_empty() {
+        for id in CONSTRUCT_PICK_COMMANDS {
+            let mut h = Harness::new();
+            cylinder(&mut h);
+            h.step(&json!({"start": id})).unwrap();
+            h.frames(2);
+            assert!(h.app.dialog.is_some(), "{id} must open a dialog, not run with empty params");
+            assert!(status_error(&h.app).is_none(), "{id}: {:?}", status_error(&h.app));
+        }
+    }
+
+    #[test]
+    fn axis_through_cylinder_uses_the_preselected_face() {
+        let mut h = Harness::new();
+        cylinder(&mut h);
+        h.step(&json!({"click": {"world": [10, 0, 10]}})).unwrap(); // the outer cylindrical face
+        h.step(&json!({"start": "construct.axis.through_cylinder"})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().expect("the dialog opens");
+        assert_eq!(d.inputs[0].items.len(), 1, "the pre-selected face fills the Face input");
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(h.app.dialog.is_none(), "Create closes the dialog: {:?}", status_error(&h.app));
+        assert!(status_error(&h.app).is_none(), "{:?}", status_error(&h.app));
+        let axes = solidcraft_engine::view::construction_axes(&h.app.session);
+        assert!(axes.iter().any(|(_, _, _, dir)| dir.z.abs() > 1.0 - 1e-6), "an axis along the cylinder: {axes:?}");
+    }
+
+    #[test]
+    fn tangent_plane_uses_the_preselected_face() {
+        let mut h = Harness::new();
+        cylinder(&mut h);
+        h.step(&json!({"click": {"world": [10, 0, 10]}})).unwrap(); // the outer cylindrical face
+        h.step(&json!({"start": "construct.plane.tangent"})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().expect("the dialog opens");
+        assert_eq!(d.inputs[0].items.len(), 1, "the pre-selected face fills the Face input");
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(h.app.dialog.is_none(), "Create closes the dialog: {:?}", status_error(&h.app));
+        assert!(status_error(&h.app).is_none(), "{:?}", status_error(&h.app));
+        assert!(!solidcraft_engine::view::construction_planes(&h.app.session).is_empty(), "the tangent plane is created");
+    }
+}
