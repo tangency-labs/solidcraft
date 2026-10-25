@@ -5,7 +5,8 @@
 //! surfaces meet the way the old ones did (prismatic parts, bosses, fillets between walls).
 //! A corner where more than three planes meet, whose moved planes miss a common point (a
 //! floor falling to a drain, a pyramid's apex), becomes several corners joined by short edges.
-//! Anything else is refused, so callers can fall back.
+//! For offset faces, a round (fillet) between faces that move differently keeps its radius and
+//! moves with them, staying tangent to both. Anything else is refused, so callers can fall back.
 
 use std::collections::HashMap;
 
@@ -99,6 +100,21 @@ impl Surf {
             }
         }
     }
+    /// A round's radius: a cylinder's, or a torus's tube.
+    fn radius(&self) -> Option<f64> {
+        match *self {
+            Surf::Cylinder { r, .. } | Surf::Torus { r, .. } => Some(r),
+            _ => None,
+        }
+    }
+    /// The point of a round's spine (a cylinder's axis, a torus's tube centre) nearest `p`.
+    fn spine(&self, p: Vec3) -> Option<Vec3> {
+        match *self {
+            Surf::Cylinder { o, a, .. } => Some(o + a * (p - o).dot(a)),
+            Surf::Torus { o, a, big, h, .. } => tube_centre(o, a, big, h, p),
+            _ => None,
+        }
+    }
     fn dist(&self, p: Vec3) -> f64 {
         match *self {
             Surf::Plane { n, d } => n.dot(p) - d,
@@ -131,16 +147,18 @@ impl Surf {
                 let t = n * (d2 - d);
                 Some(mt::Matrix4::from_translation(mt::Vector3::new(t.x, t.y, t.z)))
             }
-            (Surf::Cylinder { o, a, r, .. }, Surf::Cylinder { r: r2, .. }) => {
-                // Scale by k across the axis: x ↦ o + k (x − o) + (1 − k) a a·(x − o).
+            (Surf::Cylinder { o, a, r, .. }, Surf::Cylinder { o: o2, r: r2, .. }) => {
+                // Scale by k across the axis: x ↦ o + k (x − o) + (1 − k) a a·(x − o), then
+                // across to the new axis (a round that moved with its faces).
                 let k = r2 / r;
+                let shift = o2 - o - a * (o2 - o).dot(a);
                 let m = |i: usize, j: usize| {
                     let (ai, aj) = ([a.x, a.y, a.z][i], [a.x, a.y, a.z][j]);
                     (if i == j { k } else { 0.0 }) + (1.0 - k) * ai * aj
                 };
                 let lin = [[m(0, 0), m(0, 1), m(0, 2)], [m(1, 0), m(1, 1), m(1, 2)], [m(2, 0), m(2, 1), m(2, 2)]];
-                let ov = [o.x, o.y, o.z];
-                let t: Vec<f64> = (0..3).map(|i| ov[i] - (0..3).map(|j| lin[i][j] * ov[j]).sum::<f64>()).collect();
+                let (ov, sv) = ([o.x, o.y, o.z], [shift.x, shift.y, shift.z]);
+                let t: Vec<f64> = (0..3).map(|i| ov[i] + sv[i] - (0..3).map(|j| lin[i][j] * ov[j]).sum::<f64>()).collect();
                 // Column-major.
                 Some(mt::Matrix4::new(
                     lin[0][0],
@@ -373,11 +391,17 @@ fn sphere_or_cone(s: &[(Vec3, Vec3)], tol: f64) -> Option<Surf> {
 /// n_i · δ = s_i for each face's normal n_i at p, then checked against the moved surfaces.
 fn move_point(p: Vec3, old: &[Surf], shifts: &[f64], new: &[Surf], tol: f64) -> Option<Vec3> {
     let ns: Vec<Vec3> = old.iter().map(|sf| sf.normal(p)).collect::<Option<_>>()?;
-    let mut q = p + span_step(&ns, shifts)?;
-    // The step is exact for planes; a curved face meeting another at an angle needs a few
-    // Newton steps onto the moved surfaces.
+    let targets = vec![0.0; new.len()];
+    settle(p + span_step(&ns, shifts)?, new, &targets, tol)
+}
+
+/// `q` moved (Newton steps, each the smallest) until its distance to each surface of `new` is
+/// that surface's target. The first step is exact for planes; a curved face meeting another at
+/// an angle needs a few more.
+fn settle(mut q: Vec3, new: &[Surf], targets: &[f64], tol: f64) -> Option<Vec3> {
+    let off = |q: Vec3| -> Vec<f64> { new.iter().zip(targets).map(|(sf, t)| sf.dist(q) - t).collect() };
     for _ in 0..30 {
-        let d: Vec<f64> = new.iter().map(|sf| sf.dist(q)).collect();
+        let d = off(q);
         if d.iter().all(|x| x.abs() < tol) {
             return Some(q);
         }
@@ -385,7 +409,34 @@ fn move_point(p: Vec3, old: &[Surf], shifts: &[f64], new: &[Surf], tol: f64) -> 
         let rhs: Vec<f64> = d.iter().map(|x| -x).collect();
         q += span_step(&gs, &rhs)?;
     }
-    new.iter().all(|sf| sf.dist(q).abs() < tol).then_some(q)
+    off(q).iter().all(|x| x.abs() < tol).then_some(q)
+}
+
+/// A round (a fillet: a cylinder or torus) between two faces that move differently from it,
+/// moved so that it stays tangent to both: its spine goes to where it is its new radius from
+/// both moved faces, on the same sides. `None` when the moved faces have no such spine (two
+/// parallel walls moved apart, say).
+fn placed_round(round: &Surf, moved: &Surf, at: Vec3, supports: [(&Surf, &Surf); 2], tol: f64) -> Option<Surf> {
+    let (r, r2) = (round.radius()?, moved.radius()?);
+    let c = round.spine(at)?;
+    let (ns, ts): (Vec<Surf>, Vec<f64>) = supports.iter().map(|(old, new)| (**new, old.dist(c) * r2 / r)).unzip();
+    let c2 = settle(c, &ns, &ts, tol)?;
+    match *moved {
+        Surf::Cylinder { o, a, r, convex } => {
+            let t = c2 - c;
+            Some(Surf::Cylinder { o: o + t - a * t.dot(a), a, r, convex })
+        }
+        Surf::Torus { o, a, r, convex, .. } => {
+            // The spine circle stays round the axis: c2 in the meridian plane through `at` (on
+            // the axis's far side for a spindle torus's inner sheet).
+            let w = c2 - o;
+            let h = w.dot(a);
+            let u = (at - o - a * (at - o).dot(a)).normalized()?;
+            let radial = w - a * h;
+            ((radial - u * radial.dot(u)).len() < tol).then_some(Surf::Torus { o, a, big: radial.dot(u), h, r, convex })
+        }
+        _ => None,
+    }
 }
 
 /// The smallest move `v` (in the span of `ns`) with `n_i · v = s_i` (least squares).
@@ -706,11 +757,104 @@ pub(crate) fn arc_mid(e: &mt::Edge, tol: f64) -> Option<Option<Vec3>> {
     pts.iter().all(|p| (p.dist(centre) - r).abs() < tol && (*p - centre).dot(w.normalized().unwrap_or(Vec3::Z)).abs() < tol).then_some(Some(m))
 }
 
+/// Where a point `p` of a round (on `old`) goes on the round moved with its faces (`new`): the
+/// same way from the spine, as far as before scaled with the radius.
+fn on_moved_round(p: Vec3, old: &Surf, new: &Surf) -> Option<Vec3> {
+    let (c, c2) = (old.spine(p)?, new.spine(p)?);
+    Some(c2 + (p - c) * (new.radius()? / old.radius()?))
+}
+
+/// Rounds (cylinders and tori tangent along their edges to two other surfaces: fillets) whose
+/// faces either side move differently from them, moved with those faces (`placed_round`) in
+/// `new`; the result marks them. Other rounds keep their moved surface (a shell's rounds,
+/// offset with their faces, stay tangent to them).
+fn place_rounds(
+    faces: &[mt::Face],
+    efaces: &HashMap<mt::EdgeID, Vec<usize>>,
+    old: &[Surf],
+    new: &mut [Surf],
+    shifts: &[f64],
+    collapsed: &[bool],
+    tol: f64,
+) -> Vec<bool> {
+    use mt::{BoundedCurve, ParametricCurve};
+    let mut placed = vec![false; faces.len()];
+    for (i, f) in faces.iter().enumerate() {
+        let (Some(sf), Some(&si), Some(false)) = (old.get(i), shifts.get(i), collapsed.get(i).copied()) else { continue };
+        if sf.radius().is_none() {
+            continue;
+        }
+        // The faces tangent to it, one per surface, each with a point where they touch; a
+        // collapsed one, or two on one surface moving differently, and it is left alone.
+        let mut sides: Vec<(usize, Vec3)> = Vec::new();
+        let mut ok = true;
+        for e in f.edge_iter() {
+            let c = e.curve();
+            let (t0, t1) = c.range_tuple();
+            let m = from_p3(c.subs((t0 + t1) / 2.0));
+            for j in efaces.get(&e.id()).into_iter().flatten().copied() {
+                let Some(sj) = old.get(j).filter(|sj| j != i && !same_surf(sf, sj, tol * 100.0)) else { continue };
+                if !sf.normal(m).zip(sj.normal(m)).is_some_and(|(a, b)| a.dot(b) > 1.0 - 1e-6) {
+                    continue;
+                }
+                ok &= !collapsed.get(j).copied().unwrap_or(true);
+                match sides.iter().find(|(k, _)| old.get(*k).is_some_and(|sk| same_surf(sk, sj, tol * 100.0))) {
+                    Some((k, _)) => ok &= shifts.get(*k) == shifts.get(j),
+                    None => sides.push((j, m)),
+                }
+            }
+        }
+        let (true, [(ja, at), (jb, _)]) = (ok, sides.as_slice()) else { continue };
+        if shifts.get(*ja) == Some(&si) && shifts.get(*jb) == Some(&si) {
+            continue;
+        }
+        let (Some(moved), Some(oa), Some(na), Some(ob), Some(nb)) = (new.get(i), old.get(*ja), new.get(*ja), old.get(*jb), new.get(*jb)) else {
+            continue;
+        };
+        if let Some(round) = placed_round(sf, moved, *at, [(oa, na), (ob, nb)], tol)
+            && let (Some(x), Some(p)) = (new.get_mut(i), placed.get_mut(i))
+        {
+            *x = round;
+            *p = true;
+        }
+    }
+    placed
+}
+
+/// Whether two surfaces are the same (within `tol`).
+fn same_surf(x: &Surf, y: &Surf, tol: f64) -> bool {
+    match (*x, *y) {
+        (Surf::Plane { n, d }, Surf::Plane { n: m, d: e }) => n.dot(m) > 1.0 - 1e-9 && (d - e).abs() < tol,
+        (Surf::Cylinder { o, a, r, convex }, Surf::Cylinder { o: o2, a: a2, r: r2, convex: c2 }) => {
+            a.dot(a2).abs() > 1.0 - 1e-9 && (r - r2).abs() < tol && convex == c2 && { (o2 - o - a * (o2 - o).dot(a)).len() < tol }
+        }
+        (Surf::Sphere { c, r, convex }, Surf::Sphere { c: c2, r: r2, convex: k2 }) => c.dist(c2) < tol && (r - r2).abs() < tol && convex == k2,
+        (Surf::Cone { v, a, half, convex }, Surf::Cone { v: v2, a: a2, half: h2, convex: k2 }) => {
+            v.dist(v2) < tol && a.dot(a2) > 1.0 - 1e-9 && (half - h2).abs() < 1e-9 && convex == k2
+        }
+        (Surf::Torus { o, a, big, h, r, convex }, Surf::Torus { o: o2, a: a2, big: b2, h: h2, r: r2, convex: k2 }) => {
+            (o + a * h).dist(o2 + a2 * h2) < tol && a.dot(a2).abs() > 1.0 - 1e-9 && (big - b2).abs() < tol && (r - r2).abs() < tol && convex == k2
+        }
+        _ => false,
+    }
+}
+
 /// The body with each face moved along its outward normal by `shift(face index, normal at a
 /// face point)`, keeping the topology. Faces must be planes or cylinders. The result's history
 /// is over `[b]`: each face is the face it was moved from, each edge the edge it was moved from;
-/// faces moved to nothing are gone, and their neighbours meet along new edges.
+/// faces moved to nothing are gone, and their neighbours meet along new edges. A round between
+/// faces that move differently is refused (a shell falls back to moving every face in).
 pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Result<Body> {
+    offset_with(b, shift, false)
+}
+
+/// [`offset_body`], with each round between faces that move differently moved with them (same
+/// radius, still tangent to both): a face offset next to a fillet (#3468).
+pub(crate) fn offset_body_moving_rounds(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Result<Body> {
+    offset_with(b, shift, true)
+}
+
+fn offset_with(b: &Body, shift: impl Fn(usize, Vec3) -> f64, rounds: bool) -> Result<Body> {
     let faces: Vec<mt::Face> = b.solid.face_iter().cloned().collect();
     let size = b.size();
     let tol = (size * 1e-7).max(1e-9);
@@ -743,13 +887,6 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
         }
         shifts.push(s);
     }
-    let pick = |ids: &[usize]| -> (Vec<Surf>, Vec<f64>, Vec<Surf>) {
-        (
-            ids.iter().filter_map(|i| old.get(*i).copied()).collect(),
-            ids.iter().filter_map(|i| shifts.get(*i).copied()).collect(),
-            ids.iter().filter_map(|i| new.get(*i).copied()).collect(),
-        )
-    };
     // Vertex → its faces; edge → its faces.
     let mut vfaces: HashMap<mt::VertexID, Vec<usize>> = HashMap::new();
     let mut efaces: HashMap<mt::EdgeID, Vec<usize>> = HashMap::new();
@@ -767,6 +904,27 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
             }
         }
     }
+    let placed = if rounds { place_rounds(&faces, &efaces, &old, &mut new, &shifts, &collapsed, tol) } else { vec![false; faces.len()] };
+    let pick = |ids: &[usize]| -> (Vec<Surf>, Vec<f64>, Vec<Surf>) {
+        (
+            ids.iter().filter_map(|i| old.get(*i).copied()).collect(),
+            ids.iter().filter_map(|i| shifts.get(*i).copied()).collect(),
+            ids.iter().filter_map(|i| new.get(*i).copied()).collect(),
+        )
+    };
+    // Where a point on the faces `fs` goes: onto their moved surfaces, or, on a round moved
+    // with its faces (`place_rounds`), as far from its new spine as from its old one.
+    let place = |p: Vec3, fs: &[usize]| -> Option<Vec3> {
+        let (o, s, n) = pick(fs);
+        let on_round = |i: usize| placed.get(i).copied().unwrap_or(false) && old.get(i).is_some_and(|sf| sf.dist(p).abs() < size * 1e-6);
+        match fs.iter().find(|i| on_round(**i)) {
+            Some(i) => {
+                let q = on_moved_round(p, old.get(*i)?, new.get(*i)?)?;
+                settle(q, &n, &vec![0.0; n.len()], size * 1e-6)
+            }
+            None => move_point(p, &o, &s, &n, size * 1e-6),
+        }
+    };
     let is_collapsed = |i: usize| collapsed.get(i).copied().unwrap_or(false);
     let any_collapsed = collapsed.iter().any(|c| *c);
     // A collapsed face's place is taken by the faces around it (through other collapsed ones).
@@ -899,7 +1057,7 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
         } else {
             at.clone()
         };
-        let (o, s, n) = pick(&fs);
+        let (o, _, n) = pick(&fs);
         // A cone's apex goes with the cone (its normal is not defined there).
         let apex = o.iter().zip(&n).find_map(|(a, b)| match (a, b) {
             (Surf::Cone { v: va, .. }, Surf::Cone { v: vb, .. }) if va.dist(p) < size * 1e-6 => Some(*vb),
@@ -907,7 +1065,7 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
         });
         let q = match apex {
             Some(q) if n.iter().all(|sf| sf.dist(q).abs() < size * 1e-6) => q,
-            _ => match move_point(p, &o, &s, &n, size * 1e-6) {
+            _ => match place(p, &fs) {
                 Some(q) => q,
                 None => {
                     let nodes = (fs == *at)
@@ -1065,16 +1223,13 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
                 // faces, through a smooth curve.
                 use mt::{BoundedCurve, ParametricCurve};
                 let fs = efaces.get(&e.id()).ok_or_else(|| fail("edge faces"))?;
-                let (o, s, n) = pick(fs);
                 let cv = e.curve();
                 let (t0, t1) = cv.range_tuple();
                 let k = 16;
                 let mut pts = vec![from_p3(a.point())];
                 for j in 1..k {
                     let p = from_p3(cv.subs(t0 + (t1 - t0) * j as f64 / k as f64));
-                    pts.push(
-                        move_point(p, &o, &s, &n, size * 1e-6).ok_or_else(|| fail("an edge whose faces don't meet the same way after the move"))?,
-                    );
+                    pts.push(place(p, fs).ok_or_else(|| fail("an edge whose faces don't meet the same way after the move"))?);
                 }
                 pts.push(from_p3(c.point()));
                 let curve = crate::build::interpolate_cubic(&pts).ok_or_else(|| fail("edge curve"))?;
@@ -1087,9 +1242,7 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
                 None => builder::line(a, c),
                 Some(m) => {
                     let fs = efaces.get(&e.id()).ok_or_else(|| fail("edge faces"))?;
-                    let (o, s, n) = pick(fs);
-                    let m2 =
-                        move_point(m, &o, &s, &n, size * 1e-6).ok_or_else(|| fail("an edge whose faces don't meet the same way after the move"))?;
+                    let m2 = place(m, fs).ok_or_else(|| fail("an edge whose faces don't meet the same way after the move"))?;
                     // An arc turned round: its ends moved past its middle (next to a face it meets
                     // tangentially), so the arc through them goes the long way round its circle.
                     let (a0, c0, a1, c1) =
@@ -1142,16 +1295,18 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
             let (Some(o), Some(n)) = (old.get(i), new.get(i)) else { return Err(fail("face")) };
             let surface = match (o.map_to(n), *o, *n) {
                 (Some(mat), _, _) => mt::Transformed::transformed(&f.surface(), mat),
-                // A torus: its tube's circle scaled about the tube's centre, revolved again.
-                (None, Surf::Torus { o: to, a, big, h, r, .. }, Surf::Torus { r: r2, .. }) => {
+                // A torus: its tube's circle scaled about the tube's centre (and moved with it,
+                // for a round that moved with its faces), revolved again.
+                (None, Surf::Torus { o: to, a, big, h, r, .. }, Surf::Torus { o: to2, a: a2, big: big2, h: h2, r: r2, .. }) => {
                     use mt::{BoundedCurve, ParametricCurve};
                     let mt::Surface::RevolutedCurve(rc) = f.surface() else { return Err(fail("torus surface")) };
                     let curve = rc.entity().entity_curve().clone();
                     let (t0, t1) = curve.range_tuple();
                     let q = from_p3(curve.subs((t0 + t1) / 2.0));
                     let c = tube_centre(to, a, big, h, q).ok_or_else(|| fail("torus"))?;
+                    let c2 = tube_centre(to2, a2, big2, h2, q).ok_or_else(|| fail("torus"))?;
                     let k = r2 / r;
-                    let t = c * (1.0 - k);
+                    let t = c2 - c * k;
                     let mat = mt::Matrix4::from_translation(mt::Vector3::new(t.x, t.y, t.z)) * mt::Matrix4::from_scale(k);
                     let moved = mt::Transformed::transformed(&curve, mat);
                     let mut p = mt::Processor::new(mt::RevolutedCurve::by_revolution(moved, rc.entity().origin(), rc.entity().axis()));
@@ -1412,20 +1567,7 @@ pub fn with_same_surface(b: &Body, chosen: &[usize]) -> Vec<usize> {
     let size = b.size();
     let tol = (size * 1e-7).max(1e-9) * 100.0;
     let surfs: Vec<Option<Surf>> = faces.iter().map(|f| surf_of(f, tol)).collect();
-    let same = |x: &Surf, y: &Surf| match (*x, *y) {
-        (Surf::Plane { n, d }, Surf::Plane { n: m, d: e }) => n.dot(m) > 1.0 - 1e-9 && (d - e).abs() < tol,
-        (Surf::Cylinder { o, a, r, convex }, Surf::Cylinder { o: o2, a: a2, r: r2, convex: c2 }) => {
-            a.dot(a2).abs() > 1.0 - 1e-9 && (r - r2).abs() < tol && convex == c2 && { (o2 - o - a * (o2 - o).dot(a)).len() < tol }
-        }
-        (Surf::Sphere { c, r, convex }, Surf::Sphere { c: c2, r: r2, convex: k2 }) => c.dist(c2) < tol && (r - r2).abs() < tol && convex == k2,
-        (Surf::Cone { v, a, half, convex }, Surf::Cone { v: v2, a: a2, half: h2, convex: k2 }) => {
-            v.dist(v2) < tol && a.dot(a2) > 1.0 - 1e-9 && (half - h2).abs() < 1e-9 && convex == k2
-        }
-        (Surf::Torus { o, a, big, h, r, convex }, Surf::Torus { o: o2, a: a2, big: b2, h: h2, r: r2, convex: k2 }) => {
-            (o + a * h).dist(o2 + a2 * h2) < tol && a.dot(a2).abs() > 1.0 - 1e-9 && (big - b2).abs() < tol && (r - r2).abs() < tol && convex == k2
-        }
-        _ => false,
-    };
+    let same = |x: &Surf, y: &Surf| same_surf(x, y, tol);
     let keep = b.split_keep();
     let mut out: Vec<usize> = chosen.to_vec();
     let mut grew = true;

@@ -197,7 +197,7 @@ pub use ops::{
     place_matrix, split_by_plane, transform, transform_matrix, union_apart, with_attempt_budget,
 };
 pub use polybool::{faceted_boolean, planar_boolean};
-pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};
+pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, offset_walls, shell};
 pub use prism::{PLANAR_FIT_TOL, extrude_planar_regions, planar_regions_boolean};
 pub use prism_measure::certified_prism_equivalent;
 pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
