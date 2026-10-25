@@ -16,7 +16,7 @@
 //! solidcraft-cli recipe <recipe.json>                         translate an oracle recipe to a script
 //! solidcraft-cli oracle <case-dir>...                         replay recipes and compare with expected.json
 //! solidcraft-cli mcp [--headless] [--in design|script] [--connect HOST:PORT [--token T]] [--allow-path DIR]... [--allow-any-path]
-//!                    [--param-check off|warn|strict]
+//!                    [--param-check off|warn|strict] [--compact]
 //!                                                             MCP server on stdio (docs/mcp.md)
 //! solidcraft-cli licences                                     SolidCraft's licence and the third-party licences
 //! solidcraft-cli icon --out F.png|F.ico [--size N]             the app icon (packaging; drawn, not a file)
@@ -82,7 +82,7 @@ const USAGE_ORACLE: &str = "  solidcraft-cli oracle <case-dir>... [--json]\n";
 const USAGE_FUZZ: &str =
     "  solidcraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]\n";
 /// `mcp`'s lines in the usage.
-const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.solidcraft|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path]\n                     [--param-check off|warn|strict] [--render-gpu]\n";
+const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.solidcraft|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path]\n                     [--param-check off|warn|strict] [--render-gpu] [--compact]\n      (--compact, SOLIDCRAFT_MCP_COMPACT=1 or the app's Preferences › AI (with --connect): compact tool output for\n       agents: inspect_design summarises sketches and takes `sketches` by name and a `bodies` filter, and tool JSON\n       is not pretty-printed; off by default)\n";
 /// `crashes`'s lines in the usage.
 const USAGE_CRASHES: &str = "  solidcraft-cli crashes [list [--json] | show <id> | replay <id> | dir | clear [<id>]]\n";
 /// `licences`'s lines in the usage.
@@ -634,6 +634,10 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
         return Err("mcp: --render-gpu installs a headless image host; a connected application owns its own device".into());
     }
     install_renderer();
+    let options = solidcraft_mcp::Options::from_args_and_env(args).map_err(|e| format!("mcp: {e}"))?;
+    if options.compact {
+        eprintln!("solidcraft mcp: compact output (inspect_design summarises sketches; tool JSON is not pretty-printed)");
+    }
     let scope = (!args.iter().any(|a| a == "--allow-any-path"))
         .then(|| solidcraft_mcp::agent_scope(flags(args, "--allow-path").into_iter().map(std::path::PathBuf::from)));
     if let Some(s) = &scope {
@@ -688,7 +692,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
                 && let Some(port) = discover_app()
             {
                 eprintln!("solidcraft mcp: bridged to the running app at 127.0.0.1:{port} (--headless starts a session of its own)");
-                return serve_mcp(Box::new(solidcraft_mcp::Remote::new(&format!("127.0.0.1:{port}"), flag(args, "--token"))), scope);
+                return serve_mcp(Box::new(solidcraft_mcp::Remote::new(&format!("127.0.0.1:{port}"), flag(args, "--token"))), scope, options);
             }
             let mut headless = solidcraft_mcp::Headless::default();
             headless.session.param_check = param_check;
@@ -698,13 +702,17 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
             Box::new(headless)
         }
     };
-    serve_mcp(backend, scope)
+    serve_mcp(backend, scope, options)
 }
 
-fn serve_mcp(backend: Box<dyn solidcraft_mcp::Backend>, scope: Option<solidcraft_engine::io::vfs::PathScope>) -> Result<(), String> {
+fn serve_mcp(
+    backend: Box<dyn solidcraft_mcp::Backend>,
+    scope: Option<solidcraft_engine::io::vfs::PathScope>,
+    options: solidcraft_mcp::Options,
+) -> Result<(), String> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    solidcraft_mcp::Server::new(backend).with_path_scope(scope).serve(stdin.lock(), stdout.lock()).map_err(|e| e.to_string())
+    solidcraft_mcp::Server::new(backend).with_path_scope(scope).with_options(options).serve(stdin.lock(), stdout.lock()).map_err(|e| e.to_string())
 }
 
 /// The port of the running desktop app: the one its discovery file names, if something listens

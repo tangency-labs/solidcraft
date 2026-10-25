@@ -14,7 +14,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("I")
         .noundo()
         .params("bodies?: [names] (default all); or items: [1-2 selections] (face/edge: type, body, point; index optional) → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
-    CommandSpec::new("document.inspect", "Inspect Design", inspect).icon("inspect").noundo().params("measure?: bool (include body measurements)"),
+    CommandSpec::new("document.inspect", "Inspect Design", inspect).icon("inspect").noundo().params("measure?: bool (include body measurements); sketch_counts?: bool (each sketch also gives its plane and its number of points and constraints)"),
     CommandSpec::new("sketch.inspect", "Inspect Sketch", sketch_inspect).icon("inspect").noundo().params("sketch?: id|name (default active)"),
     CommandSpec::new("model.edges", "List Edges", model_edges).icon("inspect").noundo().params("body: name"),
     CommandSpec::new("model.faces", "List Faces", model_faces).icon("inspect").noundo().params(
@@ -248,6 +248,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     let with_measure = bool_(p, "measure").unwrap_or(false);
+    let with_counts = bool_(p, "sketch_counts").unwrap_or(false);
     let bodies: Vec<Value> = st
         .bodies
         .iter()
@@ -266,7 +267,16 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let sketches: Vec<Value> = st
         .sketches
         .iter()
-        .map(|ss| json!({"id": ss.feature, "name": ss.name, "dof": ss.report.dof, "status": ss.report.status, "curves": ss.sketch.curves.len(), "profiles": ss.profiles.len(), "visible": crate::view::sketch_shown(s, ss.feature)}))
+        .map(|ss| {
+            let mut v = json!({"id": ss.feature, "name": ss.name, "dof": ss.report.dof, "status": ss.report.status, "curves": ss.sketch.curves.len(), "profiles": ss.profiles.len(), "visible": crate::view::sketch_shown(s, ss.feature)});
+            // A summary that stands in for the sketch's contents (the compact MCP inspect_design).
+            if with_counts && let Some(o) = v.as_object_mut() {
+                o.insert("plane".into(), json!(ss.plane));
+                o.insert("points".into(), json!(ss.sketch.points.len()));
+                o.insert("constraints".into(), json!(ss.sketch.constraints.len()));
+            }
+            v
+        })
         .collect();
     Ok(json!({
         "name": s.doc.name, "units": s.doc.units, "metadata": s.doc.metadata, "path": s.path, "dirty": s.is_dirty(), "revision": s.revision,

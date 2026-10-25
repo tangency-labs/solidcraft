@@ -336,6 +336,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "engine.commands" => wrap(app.session.execute("engine.commands", &json!({})).map_err(|e| e.to_string())),
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
+        // What the MCP server bridged to this app shapes its output with (Preferences › AI).
+        "mcp.options" => ok(json!({"compact": app.preferences.mcp_compact})),
         "ui.messages" => ok(crate::messages::control(app, p)),
         "ui.inspect" => ok(json!({
             "render": crate::render_workspace::inspect_state(app),

@@ -25,7 +25,8 @@ pub enum Verdict {
 
 /// Methods the bridged MCP server uses; nothing else (clicks, preferences, quitting, the chat
 /// itself) is the agent's.
-const METHODS: &[&str] = &["engine.commands", "document.inspect", "engine.execute", "engine.batch", "ui.view", "ui.render", "ui.screenshot"];
+const METHODS: &[&str] =
+    &["engine.commands", "document.inspect", "engine.execute", "engine.batch", "ui.view", "ui.render", "ui.screenshot", "mcp.options"];
 
 /// Parameter names that hold a file or folder and nothing else.
 const FILE_KEYS: &[&str] = &["file", "files", "dir", "folder", "out", "output", "filename", "target_path"];
@@ -321,6 +322,11 @@ mod tests {
         assert!(matches!(request("engine.execute", &json!({"command": "edit.undo"}), 0), Verdict::Ask(_)));
         let batch = json!({"commands": [{"command": "solid.box"}, {"command": "edit.undo"}, {"command": "edit.undo"}]});
         assert!(matches!(request("engine.batch", &batch, 0), Verdict::Ask(_)));
+    }
+
+    #[test]
+    fn the_mcp_server_may_read_its_output_options() {
+        assert_eq!(request("mcp.options", &json!({}), 0), Verdict::Run { change: false });
     }
 
     #[test]
