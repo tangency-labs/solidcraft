@@ -1,7 +1,8 @@
 //! Runner-local SMS decoding, also included by non-C++ regression tests.
 //!
-//! Deviations: validate counts, check arithmetic and available numeric tokens
+//! Deviations: validate counts, check arithmetic and available whitespace tokens
 //! before constructing the net, and grow storage only as points/knots are read.
+//! Preserve the original runner's consumed-only float parsing; ignore trailing text.
 
 use solidcore::nurbs::math::NOW;
 
@@ -19,15 +20,16 @@ pub(super) struct ParsedSrf {
 /// Decodes `n m p q`, a rational flag, points, and u/v knots.
 pub(super) fn parse_sms(text: &str, path: &str) -> Result<ParsedSrf, HarnessError> {
     let error = |message: &str| HarnessError::new(format!("{path}: {message}"));
-    // Preserve eager float parsing, including trailing tokens. This allocation
-    // depends only on actual input, never on header-declared dimensions.
-    let all = text
-        .split_whitespace()
-        .map(|t| t.parse::<f64>().map_err(|e| error(&e.to_string())))
-        .collect::<Result<Vec<_>, _>>()?;
-    let available = all.len().saturating_sub(5);
-    let mut it = all.into_iter();
-    let mut num = || it.next().ok_or_else(|| error("truncated"));
+    let mut it = text.split_whitespace();
+    // Count actual tokens without parsing or allocating: trailing text was never
+    // consumed by the original runner and must not become a float error here.
+    let available = it.clone().count().saturating_sub(5);
+    let mut num = || {
+        it.next()
+            .ok_or_else(|| error("truncated"))?
+            .parse::<f64>()
+            .map_err(|e| error(&e.to_string()))
+    };
     let int = |value: f64, name: &str| -> Result<usize, HarnessError> {
         // usize::MAX rounds up on 64-bit hosts; use the exclusive power-of-two bound.
         let upper = 2.0_f64.powi(usize::BITS as i32);
@@ -62,6 +64,11 @@ pub(super) fn parse_sms(text: &str, path: &str) -> Result<ParsedSrf, HarnessErro
         .and_then(|v| v.checked_add(v_count))
         .ok_or_else(|| error("required token count overflow"))?;
     if required > available {
+        // These tokens would all be consumed before the original reader reached
+        // EOF. Preserve float-error precedence without constructing any storage.
+        for _ in 0..available {
+            num()?;
+        }
         return Err(error(&format!(
             "truncated: need {required} data tokens, have {available}"
         )));

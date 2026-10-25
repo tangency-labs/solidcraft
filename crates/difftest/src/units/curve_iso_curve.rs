@@ -23,8 +23,8 @@
 //! negative and unrepresentable counts (the exclusive `2^usize::BITS` bound),
 //! checks dimension and payload arithmetic and available tokens before
 //! constructing the net, and grows storage incrementally instead of from
-//! header-declared dimensions. Valid point order, weights, knots and eager float
-//! parsing are unchanged.
+//! header-declared dimensions. Valid point order, weights, knots and consumed-only
+//! float parsing are unchanged; unconsumed trailing text is ignored.
 
 #[path = "fixtures/iso_curve_sms.rs"]
 mod sms;

@@ -167,12 +167,43 @@ fn nonsquare_surface_preserves_order_degrees_knots_and_numeric_tail() -> Result<
 }
 
 #[test]
-fn invalid_numeric_tokens_including_trailing_tokens_still_error() {
+fn malformed_short_payload_errors_before_truncation() {
     for text in [
-        "bad 0 0 0 0",
-        "0 0 0 0 0 bad 2 3 0 1 0 1",
-        "0 0 0 0 0 1 2 3 0 1 0 1 bad",
+        "0 0 0 0 0 bad",
+        "0 0 0 0 0 1 2 3 0 1 bad",
+        "0 0 0 0 1 1 2 3 bad",
     ] {
         assert_rejected(text, "invalid float literal");
     }
+    for text in ["0 0 0 0 0 1", "0 0 0 0 0 1 2 3 0 1 0", "0 0 0 0 1 1 2 3 4"] {
+        assert_rejected(text, "truncated");
+    }
+}
+
+#[test]
+fn invalid_consumed_numeric_tokens_still_error() {
+    for text in ["0 0 0 0 0 1 2 3 0 1 0 1", "0 0 0 0 1 1 2 3 4 0 1 0 1"] {
+        let tokens: Vec<_> = text.split_whitespace().collect();
+        // Cover every consumed header, coordinate, weight and knot position.
+        for index in 0..tokens.len() {
+            let mut malformed = tokens.clone();
+            malformed[index] = "bad";
+            assert_rejected(&malformed.join(" "), "invalid float literal");
+        }
+    }
+}
+
+#[test]
+fn unconsumed_trailing_text_preserves_valid_outputs() -> Result<(), HarnessError> {
+    for text in ["0 0 0 0 0 1 2 3 0 1 0 1", "0 0 0 0 1 1 2 3 4 0 1 0 1"] {
+        let expected = sms::parse_sms(text, "valid.sms")?;
+        for tail in ["bad", "99 bad more trailing text"] {
+            let actual = sms::parse_sms(&format!("{text} {tail}"), "valid.sms")?;
+            assert_eq!(actual.net, expected.net);
+            assert_eq!((actual.p, actual.q), (expected.p, expected.q));
+            assert_eq!(actual.u, expected.u);
+            assert_eq!(actual.v, expected.v);
+        }
+    }
+    Ok(())
 }
