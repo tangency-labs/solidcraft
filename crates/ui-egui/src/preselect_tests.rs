@@ -2175,7 +2175,6 @@ fn plane_at_angle_previews_the_tilted_plane_when_edited() {
     wait_feature_preview(&mut h);
     assert_ne!(h.app.preview.key, first, "a new angle redraws the preview");
 }
-}
 
 /// #2474, #2494: every construct tool asks for what it needs. Started from the toolbar with
 /// nothing selected, none of them runs its command and reports that `a` (or `face`, `edge`…)
