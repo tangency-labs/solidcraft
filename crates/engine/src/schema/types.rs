@@ -379,7 +379,7 @@ impl JsonSchema for OperationParam {
     }
 }
 
-/// What a join makes of solids that only touch or don't touch, as `Touching::parse` reads it.
+/// What a join makes of pieces that share no face, as `Touching::parse` reads it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TouchingParam(pub Touching);
 
@@ -402,7 +402,7 @@ impl JsonSchema for TouchingParam {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         enum_schema(
             &["separate", "one_body"],
-            "What a join makes of solids that only touch, along an edge or at a point, or don't touch: separate bodies (separate, the default) or one body of several pieces (one_body).",
+            "What a join makes of pieces that share no face: separate (the default) makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body.",
         )
     }
 }

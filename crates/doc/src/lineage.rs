@@ -96,6 +96,24 @@ impl Lineage {
         Lineage { history: self.history.clone(), operands }
     }
 
+    /// Whether each face of the body this is the lineage of came, in whole or in part, from a
+    /// face or edge of `name`, a body of the model before the feature.
+    pub(crate) fn faces_from_body(&self, name: &str) -> Vec<bool> {
+        let from: Vec<bool> = self.operands.iter().map(|op| matches!(op.as_ref(), Operand::Body(n) if n == name)).collect();
+        self.history
+            .faces
+            .iter()
+            .map(|face| {
+                face.origins.iter().any(|origin| match *origin {
+                    FaceOrigin::Face { operand, .. } | FaceOrigin::Edge { operand, .. } | FaceOrigin::Offset { operand, .. } => {
+                        from.get(operand) == Some(&true)
+                    }
+                    FaceOrigin::Profile { .. } | FaceOrigin::Cap { .. } => false,
+                })
+            })
+            .collect()
+    }
+
     /// A tool of `faces` faces and no edges (a mesh's triangles) whose faces have no role.
     pub(crate) fn unnamed_faces(faces: usize) -> Lineage {
         let faces = (0..faces).map(|face| FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face }], change: Change::Kept }).collect();

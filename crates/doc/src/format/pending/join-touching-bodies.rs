@@ -1,9 +1,10 @@
-//! A feature that joins saves what it makes of solids that only touch, along an edge or at a
-//! point, or don't touch at all: `touching`, `separate` (each becomes a body of its own, the
-//! default, not saved) or `one_body` (one body of several pieces). Older builds kept every join's
-//! pieces in one body, so this step gives each feature of an older design that can join
-//! `one_body`, which keeps its bodies as they were. The last release refuses a design with this
-//! change (the newer format number).
+//! A feature that joins saves what it makes of pieces that share no face: `touching`,
+//! `separate` (the default, not saved: a piece that touches another only along an edge or at a
+//! point becomes a body of its own, pieces that touch nothing stay one body) or `one_body` (every
+//! piece in one body). Older builds kept every join's pieces in one body, also those touching
+//! along an edge or at a point, so this step gives each feature of an older design that can join
+//! `one_body`, which keeps its bodies as they were (only a join with such a contact would
+//! change). The last release refuses a design with this change (the newer format number).
 use serde_json::Value;
 
 /// Feature types that join without an `operation` saying so: a combine (whose `new` joins too),

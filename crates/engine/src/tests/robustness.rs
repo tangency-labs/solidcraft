@@ -141,8 +141,7 @@ fn fillet_that_would_open_the_surface_is_refused() {
     }
 }
 
-/// Shell of a body in two pieces (a cylinder joined clear of a ring, kept one body with
-/// `touching: one_body`): each piece is shelled.
+/// Shell of a body in two pieces (a cylinder joined clear of a ring): each piece is shelled.
 #[test]
 fn shell_of_a_body_in_two_pieces() {
     script(json!([
@@ -150,7 +149,7 @@ fn shell_of_a_body_in_two_pieces() {
         {"command": "sketch.rectangle.two_point", "params": {"p0": [2.5, 0], "p1": [22.5, 17.5]}},
         {"command": "sketch.finish", "params": {}},
         {"command": "solid.revolve", "params": {"angle": "360 deg", "axis": "Z"}},
-        {"command": "solid.cylinder", "params": {"axis": [0.0, 1.0, 0.0], "base": [-22.5, 22.5, 0.0], "height": 30.0, "operation": "join", "radius": 10.0, "touching": "one_body"}},
+        {"command": "solid.cylinder", "params": {"axis": [0.0, 1.0, 0.0], "base": [-22.5, 22.5, 0.0], "height": 30.0, "operation": "join", "radius": 10.0}},
         {"command": "solid.shell", "params": {"faces": [[-22.5, 22.5, 0.0]], "thickness": 2.0}}
     ]));
 }

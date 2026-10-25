@@ -38,7 +38,7 @@ pub struct BoxParams {
     /// The bodies a join, cut or intersect works on. Default: the bodies the box meets.
     #[serde(default)]
     pub targets: Option<StringList>,
-    /// What a join makes of solids that only touch or don't touch. Default: separate.
+    /// What a join makes of pieces that share no face. Default: separate.
     #[serde(default)]
     pub touching: Option<TouchingParam>,
     /// The bodies taking part (the same as `targets` for a primitive).
@@ -138,7 +138,7 @@ pub struct ExtrudeParams {
     /// that body.
     #[serde(default)]
     pub targets: Option<StringList>,
-    /// What a join makes of solids that only touch or don't touch. Default: separate.
+    /// What a join makes of pieces that share no face. Default: separate.
     #[serde(default)]
     pub touching: Option<TouchingParam>,
     /// The bodies taking part; overrides the default scope.
@@ -177,7 +177,8 @@ pub struct ExtrudeParams {
 pub struct FeatureNotice {
     /// The text to show.
     pub message: String,
-    /// How the solids kept apart met: `along_edge`, `at_point` or `apart`.
+    /// How the bodies split off touched the others: `along_edge`, `at_point` or `touching` (along
+    /// a line or at a point their boundaries don't hold).
     pub contact: String,
     /// The command that changes the feature as the notice offers.
     pub action: NoticeAction,
@@ -212,9 +213,10 @@ pub struct FeatureResult {
     /// A warning from the evaluation (a Boolean that needed a retry, a reference found again
     /// elsewhere), or `null`.
     pub warning: Option<String>,
-    /// A join that kept solids as separate bodies because they only touch along an edge or at a
-    /// point, or don't touch (its `touching: separate`): what to tell the user, and the edit that
-    /// makes them one body instead. Left out otherwise.
+    /// A join that split pieces into bodies of their own because they touch the others only along
+    /// an edge or at a point (its `touching: separate`): what to tell the user, and the edit that
+    /// makes them one body instead. Left out otherwise, also when the join kept pieces that touch
+    /// nothing in one body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notice: Option<FeatureNotice>,
     /// How long the feature took to evaluate, in milliseconds.

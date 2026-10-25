@@ -486,13 +486,19 @@ mod smlib {
 
     /// Cubes sharing an edge, and cubes sharing a vertex: SMLib's union touches itself there;
     /// it comes back as two closed shells, the shared edge and vertices split into one copy per
-    /// cube, each copy with its edge's history (verified against the geometry).
+    /// cube, each copy with its edge's history (verified against the geometry). The copies say
+    /// how the two meet.
     #[test]
     fn cubes_touching_along_an_edge_or_at_a_vertex_unite_into_two_solids() {
+        use solidcraft_geom::brep::part::{Contact, RegionContact};
         let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-        for (name, b) in [("edge", boxed(10.0, 10.0, 0.0, 20.0, 20.0, 10.0)), ("vertex", boxed(10.0, 10.0, 10.0, 20.0, 20.0, 20.0))] {
+        for (name, b, contact) in [
+            ("edge", boxed(10.0, 10.0, 0.0, 20.0, 20.0, 10.0), Contact::Edge),
+            ("vertex", boxed(10.0, 10.0, 10.0, 20.0, 20.0, 20.0), Contact::Vertex),
+        ] {
             let r = through_smlib(&a, &b, BoolOp::Union);
             assert_eq!(r.shell_count(), 2, "{name}");
+            assert_eq!(r.region_contacts().unwrap(), vec![RegionContact { regions: [0, 1], contact }], "{name}");
             assert_eq!((r.face_count(), r.edge_count()), (12, 24), "{name}");
             let v = crate::measure(&r).unwrap().volume;
             assert!((v - 2000.0).abs() < 1e-6 * 2000.0, "{name}: {v}");

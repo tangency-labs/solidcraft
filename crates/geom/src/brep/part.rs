@@ -5,7 +5,7 @@
 //! of bodies apart from each other join into one by [`Brep::compound`].
 use serde::{Deserialize, Serialize};
 
-use super::{Brep, EdgeUseRef, Invalid, Loop, OrientedFace, Region, Result, Shell, require};
+use super::{Brep, Edge, EdgeUseRef, Invalid, Loop, OrientedFace, Region, Result, Shell, require};
 
 /// A record cut from a larger one, and the source index of each of its items.
 #[derive(Clone, Debug, PartialEq)]
@@ -70,8 +70,10 @@ impl Brep {
     /// How the material regions meet, read from the record: each pair of regions that shares a
     /// face, an edge or a vertex, with the most they share. `regions` index
     /// [`Brep::material_regions`] (so a body's lumps); pairs not listed are apart. Regions share
-    /// an edge where it is used by faces of both (more than two faces), a vertex where edges or
-    /// vertex loops of both end at it. Sorted by pair.
+    /// an edge where it is used by faces of both (more than two faces) or each has a copy of it
+    /// (an edge of the same curve and interval between vertices at the same points), a vertex
+    /// where edges or vertex loops of both end at it or at a copy of it (a vertex at the same
+    /// point). Sorted by pair.
     pub fn region_contacts(&self) -> Result<Vec<RegionContact>> {
         let material = self.material_regions();
         // The material regions (positions in `material`) each face, edge and vertex belongs to.
@@ -126,8 +128,45 @@ impl Brep {
                 }
             }
         }
+        // A producer that keeps each solid's boundary closed on its own gives solids that touch a
+        // copy each of the edge or vertex they share (SMLib's export splits them so): the same
+        // curve over the same interval between vertices at the same points, a vertex at the same
+        // point. Copies are one edge or vertex here; their owners are listed together.
+        let point = |v: u32| self.vertices.get(v as usize).map(|x| x.point.map(f64::to_bits)).ok_or(Invalid("vertex reference"));
+        let mut at_point = std::collections::BTreeMap::<[u64; 3], Vec<usize>>::new();
+        for (v, owners) in on_vertex.iter().enumerate().filter(|(_, o)| !o.is_empty()) {
+            at_point.entry(point(u32::try_from(v).map_err(|_| Invalid("vertex index"))?)?).or_default().extend(owners);
+        }
+        let mut edge_copies = std::collections::BTreeMap::<([[u64; 3]; 2], [u64; 2]), Vec<(&Edge, Vec<usize>)>>::new();
+        for (e, owners) in on_edge.iter().enumerate().filter(|(_, o)| !o.is_empty()) {
+            let edge = self.edges.get(e).ok_or(Invalid("edge reference"))?;
+            let key = ([point(edge.vertices[0])?, point(edge.vertices[1])?], edge.interval.map(f64::to_bits));
+            let same = edge_copies.entry(key).or_default();
+            match same.iter_mut().find(|(other, _)| other.curve == edge.curve && other.nurbs == edge.nurbs) {
+                Some((_, all)) => all.extend(owners),
+                None => same.push((edge, owners.clone())),
+            }
+        }
+        let copied = |lists: Vec<Vec<usize>>| -> Vec<Vec<usize>> {
+            lists
+                .into_iter()
+                .map(|mut l| {
+                    l.sort_unstable();
+                    l.dedup();
+                    l
+                })
+                .collect()
+        };
+        let edge_copies = copied(edge_copies.into_values().flatten().map(|(_, owners)| owners).collect());
+        let vertex_copies = copied(at_point.into_values().collect());
         let mut pairs = std::collections::BTreeMap::<[usize; 2], Contact>::new();
-        for (owners, contact) in [(&on_face, Contact::Face), (&on_edge, Contact::Edge), (&on_vertex, Contact::Vertex)] {
+        for (owners, contact) in [
+            (&on_face, Contact::Face),
+            (&on_edge, Contact::Edge),
+            (&edge_copies, Contact::Edge),
+            (&on_vertex, Contact::Vertex),
+            (&vertex_copies, Contact::Vertex),
+        ] {
             for list in owners.iter().filter(|l| l.len() > 1) {
                 for (i, &a) in list.iter().enumerate() {
                     for &b in list.iter().skip(i + 1) {

@@ -196,15 +196,16 @@ impl Operation {
     }
 }
 
-/// What a join makes of solids that only touch, along an edge or at a point, or don't touch at
-/// all: they share no volume and no area, so nothing fuses them.
+/// What a join makes of pieces that share no face: they share no volume and no area, so nothing
+/// fuses them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Touching {
-    /// Each becomes a body of its own.
+    /// A piece that touches another only along an edge or at a point cannot be one solid with it
+    /// and becomes a body of its own; pieces that touch nothing stay one body of several pieces.
     #[default]
     Separate,
-    /// They stay one body of several pieces.
+    /// Every piece stays in one body, also those that touch along an edge or at a point.
     OneBody,
 }
 
@@ -2585,8 +2586,9 @@ pub struct Feature {
     /// its faces are named after them and references follow them through Update Links (#3330).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_faces: Vec<Vec<String>>,
-    /// What a join of this feature makes of solids that only touch or don't touch: separate
-    /// bodies (the default) or one body of several pieces.
+    /// What a join of this feature makes of pieces that share no face: those that touch along an
+    /// edge or at a point become separate bodies and those that touch nothing stay one body (the
+    /// default), or every piece stays one body.
     #[serde(default, skip_serializing_if = "Touching::is_separate")]
     pub touching: Touching,
     #[serde(flatten)]

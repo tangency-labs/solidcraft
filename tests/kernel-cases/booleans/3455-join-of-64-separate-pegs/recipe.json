@@ -12889,8 +12889,7 @@
      "Peg (63)",
      "Peg (64)"
     ],
-    "operation": "join",
-    "touching": "one_body"
+    "operation": "join"
    }
   }
  ]

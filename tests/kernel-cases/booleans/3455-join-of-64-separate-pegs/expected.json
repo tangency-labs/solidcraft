@@ -4,7 +4,7 @@
   ],
   "what": "one combine of 64 separate pegs that do not touch: 36 s on truck, growing 4-9x per doubling; must finish in seconds",
   "source": "analytic",
-  "method": "64 non-touching 48-gon pegs of circumradius 2, 1 mm tall, 6 mm apart: each area 0.5*48*2^2*sin(2pi/48) = 12.5305, V = 64 * 12.5305 * 1. The join keeps them in one body (several lumps). A hang is a failure: time should grow with the number of bodies. One body with 64 shells. The combine joins with touching: one_body, which keeps the pegs one body (by default a join keeps solids that share no volume as separate bodies, owner decision 2026-10-22).",
+  "method": "64 non-touching 48-gon pegs of circumradius 2, 1 mm tall, 6 mm apart: each area 0.5*48*2^2*sin(2pi/48) = 12.5305, V = 64 * 12.5305 * 1. The join keeps them in one body (several lumps). A hang is a failure: time should grow with the number of bodies. One body with 64 shells",
   "body_count": 1,
   "shells": 64,
   "volume_mm3": 801.9529
