@@ -1,0 +1,16 @@
+{
+  "en": {
+    "web.server.place": "Server folder",
+    "web.server.browser": "Browser storage",
+    "web.server.computer": "Computer",
+    "web.server.open": "Open design",
+    "web.server.save": "Save design",
+    "web.server.choose_computer": "Choose file on computer…",
+    "web.server.new_folder": "New folder",
+    "web.server.name": "Design name",
+    "web.server.refresh": "Refresh",
+    "web.server.up": "Up",
+    "web.server.open_folder": "Server folder…",
+    "web.server.location": "Server folder /{path}"
+  }
+}

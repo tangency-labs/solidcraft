@@ -56,6 +56,7 @@ pub struct Entry {
 /// State shared between the async browser calls and the app's frames.
 #[derive(Default)]
 pub struct Files {
+    pub server: crate::server::State,
     pub entries: RefCell<Vec<Entry>>,
     /// Files read from the computer: (name, bytes, what to do).
     pub incoming: RefCell<Vec<(String, Vec<u8>, Intent)>>,
@@ -340,6 +341,7 @@ pub fn flush(files: &Rc<Files>) {
                     }
                 });
             }
+            disk::WriteTo::Server => crate::server::enqueue(files, &path, bytes),
             disk::WriteTo::Disk => disk::enqueue(files, &path, bytes),
             disk::WriteTo::Download => {
                 let name = path.strip_prefix(DOWNLOADS).unwrap_or(&path);

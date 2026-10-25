@@ -19,6 +19,8 @@ mod install;
 #[cfg(target_arch = "wasm32")]
 mod linked;
 #[cfg(any(target_arch = "wasm32", test))]
+mod server;
+#[cfg(any(target_arch = "wasm32", test))]
 mod space_mouse;
 
 /// The browser switches tabs with Ctrl+Tab and Ctrl+Shift+Tab, so the page leaves those keys to
@@ -361,17 +363,18 @@ mod web {
             }
             // A ready picker answer is consumed in app.logic later in this frame. Keep
             // incoming files queued until then so they cannot replace its target design.
-            if self.app.file_picker_busy() {
-                ctx.request_repaint();
-                return;
-            }
-            files::flush(&self.files);
             // A write to the computer's disk that failed: the design is not saved after all.
             for path in self.files.unsaved.borrow_mut().drain(..) {
                 if self.app.session.path.as_deref() == Some(path.as_str()) {
                     self.app.session.mark_unsaved();
                 }
             }
+            crate::server::conflict_prompt(&self.files, &mut self.app);
+            if self.app.file_picker_busy() {
+                ctx.request_repaint();
+                return;
+            }
+            files::flush(&self.files);
             // Designs opened from the computer's disk (the files window): open them.
             let opened: Vec<_> = self.files.opened.borrow_mut().drain(..).collect();
             for path in opened {
@@ -458,7 +461,7 @@ mod web {
             let recent = &mut self.app.home.recent;
             let known = self.files.disk_known.borrow().clone();
             // A design on the computer's disk stays listed while its file is remembered.
-            recent.retain(|p| vfs::exists(p) || disk::parse(p).is_some_and(|(id, _)| known.contains(id)));
+            recent.retain(|p| crate::server::parse(p).is_some() || vfs::exists(p) || disk::parse(p).is_some_and(|(id, _)| known.contains(id)));
             for e in entries.iter().filter(|e| solidcraft_engine::io::is_design_path(&e.name)) {
                 let p = format!("{}{}", files::OPFS, e.name);
                 // A design the user removed from the list is not added back while it is stored.
@@ -479,6 +482,8 @@ mod web {
 
         /// The stored designs: open, insert, rename, delete, download; open from the computer.
         fn file_panel(&mut self, ctx: &egui::Context) {
+            let _language = solidcraft_ui_egui::i18n::scope(&self.app.preferences.language);
+            crate::server::show(&self.files, ctx);
             if !self.files.panel.get() {
                 return;
             }
@@ -488,6 +493,19 @@ mod web {
                 .cards(4.0)
                 .show_body(ctx, |ui| {
                     ui.horizontal(|ui| {
+                        if self.files.server.enabled.get()
+                            && ui_kit::button(ui, solidcraft_ui_egui::i18n::tr("web.server.open_folder"), ui_kit::Button::Normal).clicked()
+                        {
+                            let future = crate::server::pick(&self.files, None);
+                            let files = self.files.clone();
+                            wasm_bindgen_futures::spawn_local(async move {
+                                if let Some(path) = future.await {
+                                    files.opened.borrow_mut().push(path);
+                                    files.wake();
+                                }
+                            });
+                            self.files.panel.set(false);
+                        }
                         if ui_kit::button(ui, "Open from computer…", ui_kit::Button::Normal).clicked() {
                             files::pick_from_disk(&self.files, Intent::Open);
                         }
@@ -915,27 +933,35 @@ mod web {
                         let files = Rc::new(Files::default());
                         if launch.persists() {
                             files::start(&files);
+                            crate::server::probe(&files);
                         }
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
                         let (restorable, restorer) = (files.clone(), files.clone());
+                        let (persisted, conflict) = (files.clone(), files.clone());
                         let services = if launch.embed { Services::default() } else { Services {
                             // Open shows the browser's open dialog for a design where it has one
                             // (the file keeps its handle, so Save writes back to it), else the
                             // browser's files window. A command that reads another kind of file
                             // (Insert DXF or SVG, an image, a mesh, settings) gets a file dialog
                             // offering that kind, and runs on the picked file.
-                            pick_open: Some(Box::new(move |exts: &[&str]| match disk::open_route(disk::supported(), exts) {
+                            pick_open: Some(Box::new(move |exts: &[&str]| {
+                                if opener.server.enabled.get() && disk::opens_design(exts) {
+                                    return crate::server::pick(&opener, None);
+                                }
+                                match disk::open_route(disk::supported(), exts) {
                                 disk::OpenRoute::Disk => Box::pin(disk::pick_open(&opener)),
                                 disk::OpenRoute::Upload => Box::pin(files::pick_upload(&opener, exts)),
                                 disk::OpenRoute::Panel => {
                                     panel.panel.set(true);
                                     Box::pin(std::future::ready(None))
                                 }
+                                }
                             })),
                             // A design is saved to a file the user picks, or kept in the browser
                             // where the browser can't pick one; everything else is downloaded.
                             pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {
                                 let design = exts.contains(&solidcraft_engine::io::DESIGN_EXT);
+                                if design && saver.server.enabled.get() { return crate::server::pick(&saver, Some(name)); }
                                 match disk::save_target(disk::supported(), design) {
                                     SaveTarget::Disk => Box::pin(disk::pick_save(&saver, name)),
                                     SaveTarget::Browser => {
@@ -948,9 +974,13 @@ mod web {
                             // A recent design on the disk, from an earlier session, opens by asking
                             // the browser for its remembered file.
                             can_restore: Some(Box::new(move |path: &str| {
-                                disk::parse(path).is_some_and(|(id, _)| restorable.disk_known.borrow().contains(id))
+                                (restorable.server.enabled.get() && crate::server::parse(path).is_some()) || disk::parse(path).is_some_and(|(id, _)| restorable.disk_known.borrow().contains(id))
                             })),
-                            restore_file: Some(Box::new(move |path: &str| disk::restore(&restorer, path))),
+                            restore_file: Some(Box::new(move |path: &str| {
+                                if crate::server::parse(path).is_some() { crate::server::restore(&restorer, path); } else { disk::restore(&restorer, path); }
+                            })),
+                            persist_save: Some(Box::new(move |path| crate::server::persist(&persisted, path))),
+                            save_conflict_answer: Some(Box::new(move |answer| crate::server::answer_conflict(&conflict, answer))),
                             download_design: Some(Box::new(files::download)),
                             easyprint_upload: Some(std::sync::Arc::new(crate::easyprint::upload)),
                             browser_files: Some(Box::new(move || shown.panel.set(true))),
@@ -991,7 +1021,7 @@ mod web {
                         }
                         let api = Api::install(sender, cc.egui_ctx.clone()).map_err(|e| format!("SolidCraft browser API: {e:?}"))?;
                         let font_language = app.preferences.language.clone();
-                        let linked = crate::linked::Download::start(launch.open.as_deref(), &cc.egui_ctx);
+                        let linked = crate::linked::Download::start(launch.open.as_deref(), &cc.egui_ctx, &files);
                         let full_url = window.location().href().ok().and_then(|value| url::Url::parse(&value).ok()).map(|url| launch.full_app_url(url));
                         Ok(Box::new(Shell {
                             app,
@@ -1045,6 +1075,48 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_paths_are_bounded_and_keep_their_storage_identity() {
+        let path = "Converted/part 1.solidcraft";
+        let engine = server::engine_path(path).unwrap();
+        assert_eq!(disk::route(&engine), disk::WriteTo::Server);
+        assert_eq!(server::parse(&engine), Some(path));
+        let endpoint = server::endpoint(path).unwrap();
+        assert_eq!(endpoint, "/designs/Converted/part%201.solidcraft");
+        assert_eq!(server::from_endpoint(&endpoint).as_deref(), Some(path));
+        assert_eq!(server::link_path("https://solidcraft.io/designs/a.solidcraft", "https://solidcraft.io").as_deref(), Some("a.solidcraft"));
+        assert!(server::link_path("https://other.solidcraft.io/designs/a.solidcraft", "https://solidcraft.io").is_none());
+        assert!(server::link_path("https://solidcraft.io@other.solidcraft.io/designs/a.solidcraft", "https://solidcraft.io").is_none());
+        let launch = Launch::parse("?open=%2Fdesigns%2FConverted%2Fpart%25201.solidcraft");
+        assert_eq!(server::from_endpoint(launch.open.as_deref().unwrap()).as_deref(), Some(path));
+        for bad in ["../x", "/x", "a/../x", "a\\x", "a//x", "a/%2e%2e/x", "a?x", "a#x", "a:x", ".hidden", "a/.", "a/", "a/\0x"] {
+            assert!(!server::valid(bad), "{bad:?}");
+            assert!(server::engine_path(bad).is_none());
+        }
+        for bad in ["/designs/%2e%2e/x", "/designs/a%2Fx", "/designs/%252e%252e/x", "/designs/a%5Cx", "//designs/x", "/designs/a?x"] {
+            assert!(server::from_endpoint(bad).is_none(), "{bad}");
+        }
+        assert!(!server::valid(&"x".repeat(256)));
+        assert!(!server::valid(&["a"; 33].join("/")));
+        assert_eq!(disk::route("/opfs/part.solidcraft"), disk::WriteTo::Opfs);
+        assert_eq!(disk::route("/disk/id/part.solidcraft"), disk::WriteTo::Disk);
+        assert_eq!(disk::route("/downloads/part.step"), disk::WriteTo::Download);
+        assert!(design_url("/elsewhere/part.solidcraft").is_err());
+    }
+
+    #[test]
+    fn server_saves_require_the_opened_version_or_an_explicit_overwrite() {
+        assert_eq!(server::save_condition(None, false), Some(("If-None-Match", "*")));
+        assert_eq!(server::save_condition(Some("\"first\""), false), Some(("If-Match", "\"first\"")));
+        assert_eq!(server::save_condition(Some("\"first\""), true), None);
+        assert_eq!(server::save_condition(None, true), None);
+        assert!(server::save_conflict(412, true));
+        assert!(!server::save_conflict(412, false), "programmatic saves never open a prompt");
+        for status in [200, 201, 204, 401, 403, 404, 409, 413, 500] {
+            assert!(!server::save_conflict(status, true));
+        }
+    }
 
     #[test]
     fn link_query_decodes_once_and_embed_disables_persistence() {
