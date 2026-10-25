@@ -27,11 +27,18 @@
 //! **Deferred.** Fresh props of a closed surface need `SmFace::HasSeamProblem`
 //! (`topology.face_p4`), which reaches its unported callees.
 //!
-//! **Inexact geometry.** The importer approximates the edge curves of most built faces
-//! (unit `topology.face_p2`'s `Exact`); the cases are still compared, since the loop
-//! classification is integer-valued. Two scale-`1e-3` cylinder cases where the
-//! approximation moves the bisector across a loop are known mismatches
-//! (`crates/difftest/known_mismatches/query.face_p4.toml`).
+//! **Exact geometry.** The shim exports an analytic face surface (`SmCylinder`,
+//! `SmSphere`, `SmTorus`, `SmCone`, ...) and an ellipse or circle edge curve with its
+//! exact database record when that record is lossless (`sc_analytic_export.h`,
+//! `sc_exact_curve_export.h`), and the importer rebuilds them with the ported readers.
+//! Before, it imported their B-spline parts only: the loop bisector then ran on
+//! approximated geometry and flipped a loop classification in three cylinder cases (two
+//! at scale `1e-3`, and `gen0360` on macOS), now the named regressions `cyl_*` in
+//! `cases.json`. Geometry still imported as a B-spline part (unit `topology.face_p2`'s
+//! `Exact`) stays compared, since the loop classification is integer-valued. The export marks the gap caches the shim's props
+//! build filled but carries no values; the import refills them
+//! (`topology_vertexuse::refill_gaps`), since the bisector's `CurveOnClassify` reads the
+//! edge/face gaps (plan/findings/query.face_p4--gen0360-macos-exact-records.md).
 //!
 //! **Rejected** (both sides report `rejected`): the inputs the FFI wrapper documents,
 //! where `ClassifyLoops` would read outside its arrays.
@@ -606,7 +613,11 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     if rd.num()? != 0.0 {
         return Ok(Output::err("rejected"));
     }
-    let (b, _exact) = import(graph)?;
+    let (mut b, _exact) = import(graph)?;
+    // ClassifyLoops reads the cached gaps the export only marks as set (the bisector's
+    // CurveOnClassify with bHasBigGaps): recompute their values, as the refilling
+    // importers do
+    super::topology_vertexuse::refill_gaps(&mut b);
     let face_index = rd.int()?;
     let face = FaceId::from_index(u32::try_from(face_index).map_err(|_| harness("bad face"))?);
 

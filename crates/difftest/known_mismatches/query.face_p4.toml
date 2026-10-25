@@ -1,9 +1,0 @@
-[[mismatch]]
-unit = "query.face_p4"
-case = "gen0157"
-why = "the importer's approximation of the analytic edge curves moves the loop bisector's UV line (rel 1.6e-8) across a loop at scale 1e-3 (plan/findings.md: query.face_p4: two scale-1e-3 cylinder cases move with the importer's curve approximation) [ints.classify_loop_ios[4] cpp 1 rust 0]"
-
-[[mismatch]]
-unit = "query.face_p4"
-case = "gen0300"
-why = "the importer's approximation of the analytic edge curves moves the loop bisector's UV line (rel 1.6e-8) across a loop at scale 1e-3 (plan/findings.md: query.face_p4: two scale-1e-3 cylinder cases move with the importer's curve approximation) [ints.classify_loop_ios[2] cpp 2 rust 1]"

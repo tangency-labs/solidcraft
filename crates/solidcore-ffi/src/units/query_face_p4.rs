@@ -33,7 +33,7 @@
 //!
 //! | [`Op`]     | outputs (after a leading `0`; `-1 status` when the B-rep could not be built) |
 //! |------------|---------|
-//! | `Export`   | the graph of [`super::topology_face_p2`], the case block `rejected [face props loops]`, the case block's length |
+//! | `Export`   | the graph of [`super::topology_face_p2`] (an analytic face surface or an ellipse edge curve preceded by its exact record, `harness/cpp/shim/sc_analytic_export.h` / `sc_exact_curve_export.h`), the case block `rejected [face props loops]`, the case block's length |
 //! | `Classify` | `rejected [status loops classifiable not_yet n_io (loop type orient degen area containment)* start stop n_no_area idx* tree scratch_size]` |
 //!
 //! `props` is `stage face_index closed_u closed_v poles not_yet n_lp (cross_u wind_u

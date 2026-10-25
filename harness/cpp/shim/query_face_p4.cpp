@@ -17,7 +17,10 @@
 //      surface's natural domain (prog_test my_test_closed_sphere_properties)
 // The B-rep traversal and export (Rd .. export_graph) are copies of the harness code of
 // harness/cpp/shim/topology_face_p2.cpp (via query_face_p2.cpp), so the export has that
-// unit's layout and traversal order (the Rust side imports it with that unit's importer).
+// unit's layout and traversal order (the Rust side imports it with that unit's importer),
+// except that a face's analytic surface (sc_analytic_export.h) and an edge's ellipse or
+// circle (sc_exact_curve_export.h) are preceded by their exact database record, which the
+// importer rebuilds instead of the B-spline part when the record is lossless.
 //
 // The face props ClassifyLoops reads are built here as upstream's only caller,
 // SmFaceProps::SetProps_Stage3, builds them before its call (props_mode 1): SetProps_Stage2,
@@ -26,6 +29,8 @@
 // blocks). props_mode 0 passes fresh props (ClassifyLoops runs SetProps_Stage2 itself).
 // Op 0 exports the graph, the props (their values ClassifyLoops reads) and the target loops;
 // op 1 runs ClassifyLoops and exports its results.
+#include "sc_analytic_export.h"
+#include "sc_exact_curve_export.h"
 #include "sc_shim.h"
 #include "support/topology_fixture.h"
 
@@ -537,6 +542,7 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
     for (SmFace* p : g.faces)
     {
         SmSurface* s = p->*FPeek::srf();
+        sc_analytic_export::put_exact_head(o, s, the_context());
         put_surface(o, s);
         o.push_back((double)g.find(2, p->*FPeek::fu()));
         SmExtent2d d = p->*FPeek::dom();
@@ -592,7 +598,7 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
         for (SmTopology* t : list_of(p->GetList()))
             v.push_back(g.find(6, t));
         put_list(o, v);
-        put_curve(o, p->GetCurve());
+        sc_exact_curve_export::put_export_curve(o, p->GetCurve(), the_context(), put_curve);
     }
     for (SmVertexuse* p : g.vertexuses)
     {
